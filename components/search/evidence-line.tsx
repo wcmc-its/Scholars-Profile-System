@@ -10,6 +10,7 @@ import type {
   EvidencePub,
   ResultEvidence as ResultEvidenceT,
 } from "@/lib/api/result-evidence";
+import type { AuthorRole } from "@/lib/search-index-docs";
 import type { KeyPaperConfig } from "@/components/search/people-result-card";
 
 /**
@@ -168,6 +169,14 @@ function ArtifactLead({
   );
 }
 
+/** The index stores the facet's vocabulary ("senior"); a person says "last author". */
+const ROLE_LABEL: Record<AuthorRole, string> = {
+  sole: "sole author",
+  first: "first author",
+  last: "last author",
+  middle: "middle author",
+};
+
 function ArtifactRow({ pub }: { pub: EvidencePub }) {
   return (
     <div className="mt-1.5 flex gap-2.5">
@@ -186,11 +195,21 @@ function ArtifactRow({ pub }: { pub: EvidencePub }) {
         >
           <PubTitle value={pub.titleHtml ?? pub.title} />
         </a>
-        {pub.journal || pub.year != null ? (
+        {pub.journal || pub.year != null || pub.role ? (
           <div className="text-muted-foreground mt-0.5 text-xs">
-            {pub.journal ? <PubJournal className="not-italic" value={pub.journal} /> : null}
-            {pub.journal && pub.year != null ? " · " : null}
-            {pub.year ?? null}
+            {[
+              pub.journal ? <PubJournal key="j" className="not-italic" value={pub.journal} /> : null,
+              pub.year ?? null,
+              // ABSENT ROLE RENDERS NOTHING — it is not "middle author". A document indexed before
+              // the `wcmAuthors.role` reindex carries no role, and printing the weakest role on a
+              // missing field would quietly demote every senior author on every stale document.
+              pub.role ? ROLE_LABEL[pub.role] : null,
+            ]
+              .filter(Boolean)
+              .flatMap((part, i) => (i === 0 ? [part] : [" · ", part]))
+              .map((part, i) => (
+                <span key={i}>{part}</span>
+              ))}
           </div>
         ) : null}
       </div>

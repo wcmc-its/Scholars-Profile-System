@@ -41,7 +41,7 @@ vi.mock("@/lib/search", () => ({
   }),
 }));
 
-import { fetchKeyPaper, rankKeyPaperHitsByBlend } from "@/lib/api/search";
+import { fetchKeyPaper, parseReasonTopHits, rankKeyPaperHitsByBlend } from "@/lib/api/search";
 import {
   reasonWantsKeyPaper,
   patchKeyPaper,
@@ -55,6 +55,88 @@ const boolOf = (q: unknown): BoolQuery["bool"] => {
   const wrapped = q as { function_score?: { query: BoolQuery } } & Partial<BoolQuery>;
   return wrapped.function_score ? wrapped.function_score.query.bool : (q as BoolQuery).bool;
 };
+
+describe("parseReasonTopHits — per-person authorship role", () => {
+  /** One paper, TWO WCM authors with different roles. This is the case the paper-level
+   *  `wcmAuthorPositions` union cannot represent: it holds ["first","middle"] and cannot say which
+   *  author is which. Attribute by cwid or do not attribute at all. */
+  const collaboration = {
+    top: {
+      hits: {
+        hits: [
+          {
+            _source: {
+              pmid: "1",
+              title: "A collaboration",
+              year: 2024,
+              journal: "Nature",
+              wcmAuthors: [
+                { cwid: "sen0001", role: "last" },
+                { cwid: "mid0001", role: "middle" },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  };
+
+  it("gives each scholar THEIR role on the same paper — not the paper's", () => {
+    expect(parseReasonTopHits(collaboration, 3, "sen0001")[0].role).toBe("last");
+    expect(parseReasonTopHits(collaboration, 3, "mid0001")[0].role).toBe("middle");
+  });
+
+  it("omits the role entirely when the scholar is not on the paper's WCM author list", () => {
+    // Under-claim rather than mislabel. Returning "middle" here would be inventing an authorship.
+    expect(parseReasonTopHits(collaboration, 3, "nobody")[0]).not.toHaveProperty("role");
+  });
+
+  it("omits the role with no `forCwid` — the inline reason-agg path, which selects no wcmAuthors", () => {
+    expect(parseReasonTopHits(collaboration, 3)[0]).not.toHaveProperty("role");
+  });
+
+  it("omits the role on a PRE-REINDEX document — absent is unknown, not 'middle'", () => {
+    // Every document indexed before `wcmAuthors.role` exists carries a wcmAuthors entry with no
+    // role. Rendering the weakest role on a missing field would silently demote every senior author
+    // on every stale document in the index — a wrong answer that looks exactly like a right one.
+    const stale = {
+      top: {
+        hits: {
+          hits: [
+            {
+              _source: {
+                pmid: "2",
+                title: "Indexed last year",
+                wcmAuthors: [{ cwid: "sen0001" }],
+              },
+            },
+          ],
+        },
+      },
+    };
+    expect(parseReasonTopHits(stale, 3, "sen0001")[0]).not.toHaveProperty("role");
+  });
+
+  it("rejects a role the index should never have held", () => {
+    // `_source` is a trust boundary: a half-run reindex or a hand-patched doc can hold anything.
+    const junk = {
+      top: {
+        hits: {
+          hits: [
+            {
+              _source: {
+                pmid: "3",
+                title: "Junk role",
+                wcmAuthors: [{ cwid: "x", role: "senior" }], // the FACET's vocabulary, not ours
+              },
+            },
+          ],
+        },
+      },
+    };
+    expect(parseReasonTopHits(junk, 3, "x")[0]).not.toHaveProperty("role");
+  });
+});
 
 describe("fetchKeyPaper (lazy key paper)", () => {
   it("returns up to 3 RepresentativePubs with highlighted titles", async () => {
