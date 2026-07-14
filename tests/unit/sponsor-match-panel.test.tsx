@@ -1081,6 +1081,9 @@ describe("SponsorMatchPanel", () => {
                 startYear: 2023,
                 endYear: 2028,
                 isActive: true,
+                // Admitted by the CONCEPT axis — the only kind a concept-captioned block may lead
+                // with. The sibling test below supplies the text-only kind and asserts it is DROPPED.
+                matchedConcept: true,
               },
             ],
             total: 1,
@@ -1125,6 +1128,83 @@ describe("SponsorMatchPanel", () => {
     // The grant leads: it renders BEFORE the paper in the block.
     const block = evidenceBlocks()[0][1];
     expect(block.indexOf("Resistance mechanisms")).toBeLessThan(block.indexOf("CAR T persistence"));
+  });
+
+  it("DROPS a grant the concept axis never admitted — a text hit is not evidence for the concept", async () => {
+    // The funding query is an OR: literal text OR concept tag. So a grant can surface having
+    // matched nothing but a stray word of the ask, and the block's caption would then assert it as
+    // evidence for a concept it was never tagged with. Found on STAGING, not here: for cwid
+    // stt2007 asked "HER2-low breast cancer" (D001943) the concept axis admits ZERO grants, while
+    // the text arm returns three — led by "WCM SPORE in Prostate Cancer". A prostate SPORE is not
+    // evidence of HER2-low breast cancer work, however plausibly it renders.
+    //
+    // The page-level `strength` cannot express this: on a MIXED page it reads "tagged" while
+    // individual rows are literal-text hits. Hence the per-row `matchedConcept`, asserted here on
+    // exactly such a mixed page.
+    const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
+      const u = String(url);
+      if (u.startsWith("/api/scholar/") && u.includes("/grants")) {
+        return {
+          ok: true,
+          json: async () => ({
+            grants: [
+              {
+                projectId: "R01 REAL",
+                title: "Concept-tagged award",
+                sponsor: "NCI",
+                isActive: true,
+                matchedConcept: true,
+              },
+              {
+                projectId: "P50 TEXTONLY",
+                title: "WCM SPORE in Prostate Cancer",
+                sponsor: "NCI",
+                isActive: true,
+                matchedConcept: false,
+              },
+            ],
+            // The page reads "tagged" because ONE row was admitted by concept. Gating on this
+            // would let the prostate SPORE through — the bug this test exists to hold shut.
+            strength: "tagged",
+            total: 2,
+          }),
+        };
+      }
+      if (u.startsWith("/api/search/key-paper"))
+        return {
+          ok: true,
+          json: async () => ({ pubs: [{ pmid: "111", title: "CAR T persistence", year: 2024 }] }),
+        };
+      if ((init?.method ?? "GET") === "GET")
+        return { ok: true, json: async () => ({ ok: true, submissions: [] }) };
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          concepts: CONCEPTS,
+          candidates: [
+            candidate({
+              cwid: "a",
+              name: "Alice Alpha",
+              fusedScore: 0.9,
+              contributions: [{ term: "Immuno-oncology", rank: 1 }],
+              searchEvidence: [searchEvidence("Immuno-oncology", 142)],
+            }),
+          ],
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    // The concept-admitted grant renders...
+    await screen.findByText("Concept-tagged award");
+    // ...and the text-only one NEVER does, on a page the server called "tagged".
+    expect(screen.queryByText("WCM SPORE in Prostate Cancer")).toBeNull();
   });
 
   it("the coverage line ADDS UP — evidence, also-ranked, and gaps account for every concept", async () => {

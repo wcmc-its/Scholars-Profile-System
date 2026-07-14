@@ -329,9 +329,19 @@ export function EvidenceLine({
   //
   // The route is gated on SEARCH_EVIDENCE_ROWS, which is already on in prod, so this needs no flag
   // flip and changes nothing on the public card (which fetches its own funding row independently).
-  // What IS flag-dependent is RECALL: without SEARCH_FUNDING_CONCEPT_GRANTS (staging on, prod off)
-  // grants match by TEXT rather than by concept tag, so a grant tagged with the sponsor's MeSH
-  // descriptor but not naming it in prose will not surface in prod. Fewer grants, never wrong ones.
+  //
+  // ONLY CONCEPT-ADMITTED GRANTS MAY LEAD A CONCEPT-CAPTIONED BLOCK. The funding query is an OR —
+  // literal text OR concept tag — so an untagged grant can surface having matched nothing but a
+  // stray word of the ask. Verified on staging (cwid stt2007, "HER2-low breast cancer" / D001943):
+  // the concept axis admits ZERO grants, yet the text arm returns three, led by "WCM SPORE in
+  // PROSTATE Cancer". Rendering that under a HER2-low caption asserts evidence that does not
+  // exist. An earlier comment here claimed the text path gave "fewer grants, never wrong ones";
+  // it gives wrong ones. So filter on the ROW's `matchedConcept` — absent ⇒ unknown, never "yes".
+  //
+  // Consequence, deliberately: with SEARCH_FUNDING_CONCEPT_GRANTS off there is no concept axis, so
+  // nothing is admitted and the block shows no grant at all. That is the honest answer — with the
+  // flag off we cannot prove ANY grant is evidence for this concept. (Moot in prod today: this path
+  // is artifact-lead, i.e. the sponsor card, which is behind SPONSOR_MATCH.)
   //
   // It does NOT participate in `claimedPmids`: grants have no pmid and cannot collide with papers.
   const [grants, setGrants] = useState<EvidenceGrant[]>([]);
@@ -389,7 +399,9 @@ export function EvidenceLine({
     });
     fetch(`/api/scholar/${encodeURIComponent(cwid)}/grants?${params.toString()}`)
       .then((r) => (r.ok ? r.json() : { grants: [] }))
-      .then((d: { grants?: EvidenceGrant[] }) => setGrants(d?.grants ?? []))
+      .then((d: { grants?: EvidenceGrant[] }) =>
+        setGrants((d?.grants ?? []).filter((g) => g.matchedConcept === true)),
+      )
       .catch(() => setGrants([]));
   }, [artifactLead, keyPaperConfig, cwid]);
 
