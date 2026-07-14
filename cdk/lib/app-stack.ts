@@ -1682,16 +1682,25 @@ export class AppStack extends Stack {
         // Relies on the same fundedPubMeshUi reindex as the gate above, which prod
         // already runs (SEARCH_FUNDING_MESH_GATE is unconditional).
         //
-        // PROD ON 2026-07-14. It had been staging-only "until the precision spot-check
-        // passes"; the A/B has soaked on staging since #1359 with no precision
-        // complaint, and the same concept axis already serves the prod Funding TAB
-        // (SEARCH_FUNDING_TAB_CONCEPT, unconditional above) -- so prod was already
-        // trusting this admission set everywhere EXCEPT the People-card row it gates.
-        // Note the stale claim in the sentence this replaces: it said
-        // SEARCH_EVIDENCE_ROWS was "also staging-only today". It is unconditionally
-        // "on" (flipped 2026-07-04, ~40 lines above). resolveFundingConceptGrants
-        // reads === "on".
-        SEARCH_FUNDING_CONCEPT_GRANTS: "on",
+        // PROD-OFF AGAIN 2026-07-14, SAME DAY, AFTER A LIVE PROD PROBE. It was flipped
+        // prod-on earlier today on the argument that "the A/B has soaked on staging with
+        // no precision complaint". The precision spot-check this flag was explicitly held
+        // for HAD NEVER ACTUALLY BEEN RUN, and it fails:
+        //
+        //   The funding query is an OR -- literal text OR concept tag. `grantMatchCount`
+        //   counts the OR. But when `grantMatchTagged` is true the card captions that
+        //   count "N of M grants tagged <Concept>". Measured in prod (cwid stt2007,
+        //   "antibody-drug conjugate" -> Immunoconjugates): the card rendered
+        //   "5 of 24 grants tagged Immunoconjugates" while exactly ONE grant carried the
+        //   tag. The other four were text mentions, and the two ranked above the tagged
+        //   one were PROSTATE cancer awards. A false count, on the public People card.
+        //
+        // The recall gain is real and wanted -- the concept axis does admit grants the
+        // text axis misses. It is only the COUNT and its caption that lie. Do not re-flip
+        // this until `searchFunding` returns a concept-tagged count and the "tagged" label
+        // is fed by THAT, not by the OR total (the upgrade the grants route's own comment
+        // already anticipates). Then re-run this probe before flipping.
+        SEARCH_FUNDING_CONCEPT_GRANTS: env === "staging" ? "on" : "off",
         // #861 -- streams the /search shell so the header/tabs paint before the
         // cold MeSH precompute + the three badge-count searches resolve (the
         // 6-10s first-byte block). resolveSearchShellStreaming reads === "on".
