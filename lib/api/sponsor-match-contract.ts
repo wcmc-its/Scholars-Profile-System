@@ -371,6 +371,25 @@ export type SponsorCandidate = {
   contributions: SponsorContribution[];
   /** Licensable CTL technologies this researcher already holds. 0 when none. */
   technologyCount: number;
+  /**
+   * The scholar's headshot URL, for `HeadshotAvatar`. Same field, same producer
+   * (`identityImageEndpoint(cwid)`) and same fallback as every other person surface.
+   *
+   * SERVER-DERIVED, and it has to be. `identityImageEndpoint` reads
+   * `process.env.SCHOLARS_HEADSHOT_BASE` — an allowlisted override
+   * (`scripts/release/flag-parity-allowlist.txt`) — and the panel is a `"use client"` component,
+   * where a non-`NEXT_PUBLIC_` env var is `undefined`. Deriving the URL in the browser would
+   * therefore silently ignore the override and hard-code the default base: the local-on /
+   * deployed-off flag-parity bug, wearing a URL. So it rides the payload, computed once where
+   * the env actually exists.
+   *
+   * OPTIONAL because absence is a real, correct state, not an unfinished one: a scholar with no
+   * directory photo already renders the name-gradient fallback (the endpoint is requested with
+   * `returnGenericOn404=false`), so an absent field and a 404 land in exactly the same place. A
+   * test asserts both producers emit it — that, not the type, is what stops it rotting into
+   * another declared-but-never-connected field.
+   */
+  identityImageEndpoint?: string;
   measures?: SponsorMeasures;
   evidence?: SponsorEvidence;
   /**

@@ -64,6 +64,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download } from "lucide-react";
 
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
+import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { EvidenceLine } from "@/components/search/evidence-line";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -87,7 +88,6 @@ import { buildSponsorMatchCsv } from "@/lib/edit/sponsor-match-export";
 import { careerStageLabel, roleCategoryLabel } from "@/lib/match-display";
 import { profilePath } from "@/lib/profile-url";
 import { markPaste, markedConceptCount } from "@/lib/sponsor-paste-highlight";
-import { initials } from "@/lib/utils";
 
 type Status =
   | { kind: "idle" }
@@ -1141,12 +1141,17 @@ function ResearcherRow({
   return (
     <div className="border-t border-border flex gap-3 py-4 first:border-t-0">
       <div className="text-muted-foreground w-5 pt-1 text-right text-sm tabular-nums">{rank}</div>
-      <div
-        aria-hidden
-        className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-slate)]/15 text-sm font-medium text-[var(--color-accent-slate)]"
-      >
-        {initials(name)}
-      </div>
+      {/* The shared headshot, not a bespoke initials circle — this is a list of PEOPLE, and the
+          public People card has rendered their faces all along. `HeadshotAvatar` degrades to a
+          name-gradient with initials when the directory has no photo (the endpoint is requested
+          with `returnGenericOn404=false`), so the no-photo case still looks like what this card
+          rendered before, and an absent `identityImageEndpoint` lands in the same place. */}
+      <HeadshotAvatar
+        size="md"
+        cwid={candidate.cwid}
+        preferredName={name}
+        identityImageEndpoint={candidate.identityImageEndpoint ?? ""}
+      />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
           {/* `profilePath`, not a hand-built path — the CSV export builds its URL column from
