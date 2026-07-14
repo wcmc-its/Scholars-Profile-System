@@ -1268,9 +1268,10 @@ export class AppStack extends Stack {
         CLINICAL_TRIALS_SECTION: "on", // Prod flipped 2026-07-07 (presence-gated, hidden when empty).
         // AVAILABLE_TECHNOLOGIES_SECTION — the profile "Available technologies"
         // section, sourced from the CTL portfolio via `npm run etl:technologies`.
-        // Staging-on for soak; prod-off until CTL signs off on the attributions.
-        // The profile payload returns [] when off, so the seed can land first.
-        AVAILABLE_TECHNOLOGIES_SECTION: env === "staging" ? "on" : "off",
+        // The profile payload returns [] when off, and the section is
+        // presence-gated (hidden when a scholar holds nothing), so a scholar with
+        // no technologies is unaffected either way.
+        AVAILABLE_TECHNOLOGIES_SECTION: "on", // Prod flipped 2026-07-14 (#1631); takes effect on the next `cdk deploy Sps-App-prod`.
         // SPONSOR_MATCH — the /edit/sponsor-match CTL surface (paste a sponsor's
         // description → researchers ranked on topical fit alone).
         //

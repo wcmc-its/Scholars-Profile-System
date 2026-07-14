@@ -19,7 +19,11 @@ export function DisclosureInfoTooltip() {
           <button
             type="button"
             aria-label="About external relationships"
-            className="inline-flex h-5 w-5 items-center justify-center self-center rounded-full text-muted-foreground hover:text-foreground"
+            // #1717 — see technologies-info-button.tsx: `self-center` in the
+            // heading's `items-baseline` row leaves the icon ~5px above the
+            // optical centre of the adjacent count text. Same nudge, same 24px
+            // headingLg row.
+            className="inline-flex h-5 w-5 translate-y-[5px] items-center justify-center self-center rounded-full text-muted-foreground hover:text-foreground"
           >
             <HelpCircle className="size-4" />
           </button>

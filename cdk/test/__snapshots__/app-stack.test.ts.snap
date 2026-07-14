@@ -416,7 +416,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "AVAILABLE_TECHNOLOGIES_SECTION",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SPONSOR_MATCH",
