@@ -37,7 +37,6 @@ import {
   groupProfileAppointments,
   type ProfileAppointmentEntry,
 } from "@/lib/profile/profile-appointments";
-import { groupPublicationsByYear } from "@/lib/profile-pub-grouping";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import {
   isMethodPagesEnabled,
@@ -161,17 +160,10 @@ export async function ProfileView({ slug }: { slug: string }) {
     hiddenMenteeCwids(profile.cwid, menteeSuppressions),
   );
 
-  const pubGroups = groupPublicationsByYear(profile.publications);
-  const pubMinYear = pubGroups
-    .flatMap((g) => g.pubs.map((p) => p.year ?? 0))
-    .filter((y) => y > 0)
-    .reduce<number | null>((acc, y) => (acc === null ? y : Math.min(acc, y)), null);
-  const pubMaxYear = pubGroups
-    .flatMap((g) => g.pubs.map((p) => p.year ?? 0))
-    .reduce((acc, y) => Math.max(acc, y), 0);
-
-  const activeGrantCount = profile.grants.filter((g) => g.isActive).length;
-  const activeTrialCount = profile.clinicalTrials.filter((t) => t.isActive).length;
+  // The rail carries one scalar per section, so the year range, the active-grant
+  // count and the active-trial count are all gone from here — each was already
+  // stated by its own section body (year groups; an "Active" grants heading;
+  // an "Active" trials group). Nothing was lost, only de-duplicated.
 
   return (
     <>
@@ -524,14 +516,12 @@ export async function ProfileView({ slug }: { slug: string }) {
             <Section
               title="Publications"
               headingLg
-              count={
-                <>
-                  {profile.publications.length} total
-                  {pubMaxYear > 0 && pubMinYear !== null
-                    ? ` · ${pubMinYear}–${pubMaxYear}`
-                    : ""}
-                </>
-              }
+              // The year range moved out of the rail: PublicationsSection groups by
+              // year, so the first and last year-groups already ARE the range.
+              count={{
+                value: profile.publications.length,
+                unit: profile.publications.length === 1 ? "publication" : "publications",
+              }}
             >
               <Suspense
                 fallback={
@@ -562,12 +552,12 @@ export async function ProfileView({ slug }: { slug: string }) {
             <Section
               title="Funding"
               headingLg
-              count={
-                <>
-                  {profile.grants.length} total
-                  {activeGrantCount > 0 ? ` · ${activeGrantCount} active` : ""}
-                </>
-              }
+              // "N active" left the rail and became a real filter chip inside
+              // GrantsSection — a number you can act on beats one you can only read.
+              count={{
+                value: profile.grants.length,
+                unit: profile.grants.length === 1 ? "grant" : "grants",
+              }}
               headerAction={
                 profile.nihReporterProfileId !== null ? (
                   <a
@@ -590,12 +580,12 @@ export async function ProfileView({ slug }: { slug: string }) {
             <Section
               title="Clinical trials"
               headingLg
-              count={
-                <>
-                  {profile.clinicalTrials.length} total
-                  {activeTrialCount > 0 ? ` · ${activeTrialCount} active` : ""}
-                </>
-              }
+              // "N active" left the rail: ClinicalTrialsSection already renders an
+              // explicit "Active" group, so the rail was restating the body.
+              count={{
+                value: profile.clinicalTrials.length,
+                unit: profile.clinicalTrials.length === 1 ? "clinical trial" : "clinical trials",
+              }}
             >
               <ClinicalTrialsSection trials={profile.clinicalTrials} />
             </Section>
@@ -610,12 +600,10 @@ export async function ProfileView({ slug }: { slug: string }) {
                 </>
               }
               headingLg
-              count={
-                <>
-                  {profile.technologies.length}{" "}
-                  {profile.technologies.length === 1 ? "technology" : "technologies"}
-                </>
-              }
+              count={{
+                value: profile.technologies.length,
+                unit: profile.technologies.length === 1 ? "technology" : "technologies",
+              }}
               headerAction={
                 <a
                   href="https://innovation.weill.cornell.edu/technology-portfolio"
@@ -665,7 +653,10 @@ export async function ProfileView({ slug }: { slug: string }) {
                   </>
                 }
                 headingLg
-                count={`${mentees.length} ${mentees.length === 1 ? "mentee" : "mentees"}`}
+                count={{
+                  value: mentees.length,
+                  unit: mentees.length === 1 ? "mentee" : "mentees",
+                }}
                 subtitle={distribution}
                 headerAction={
                   !copubSourceAvailable ? (
@@ -740,7 +731,29 @@ export async function ProfileView({ slug }: { slug: string }) {
   );
 }
 
-function Section({
+/**
+ * The section-header rail contract: the heading owns the left, and the right
+ * carries AT MOST one scalar and AT MOST one action.
+ *
+ * `count` is typed as `{ value, unit }` — a number and its noun — and NOT as
+ * `ReactNode`. That type IS the contract. It is what stops a compound fact like
+ * `92 total · 20 active` or `923 total · 1969–2026` from being expressed here at
+ * all, so the rail cannot silently re-acquire a second fact later. Compound facts
+ * belong in the section body, where they can be read (or filtered) rather than
+ * merely counted:
+ *
+ *   - Clinical trials' "· N active" was already redundant — the body renders an
+ *     `Active` group.
+ *   - Publications' "· 1969–2026" was already redundant — the body groups by year,
+ *     so the first and last groups ARE the range.
+ *   - Funding's "· N active" became a real filter chip in the grants body, which
+ *     is strictly more useful than a stat you cannot act on.
+ *
+ * a11y: the scalar renders bare ("923"), so it carries a visually-hidden unit.
+ * A naked numeral is announced as a naked numeral. The unit also stays OUT of the
+ * `<h2>`, so headings no longer announce as "Mentoring 26 mentees".
+ */
+export function Section({
   title,
   children,
   headingLg = false,
@@ -751,7 +764,8 @@ function Section({
   title: React.ReactNode;
   children: React.ReactNode;
   headingLg?: boolean;
-  count?: React.ReactNode;
+  /** One scalar and its (already-pluralised) noun. Deliberately not a ReactNode. */
+  count?: { value: number; unit: string };
   /** Optional second-row subhead beneath the title row. Issue #201 —
    *  Mentoring section uses this for the degree-bucket distribution so
    *  it gets its own line rather than appending onto `count`. Renders
@@ -765,16 +779,23 @@ function Section({
     <section className="pt-12 first:pt-0">
       {headingLg ? (
         <div className="mb-5">
-          <div className="flex items-baseline justify-between gap-3">
+          {/* flex-wrap + gap-y: below ~480px the rail drops under the heading
+              rather than crushing the title. */}
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
             <h2 className="flex items-baseline gap-3 text-2xl font-bold tracking-tight">
               {title}
-              {count ? (
-                <span className="text-muted-foreground text-sm font-normal tracking-normal">
-                  {count}
-                </span>
-              ) : null}
             </h2>
-            {headerAction}
+            {count || headerAction ? (
+              <div className="flex items-baseline gap-4 text-sm">
+                {count ? (
+                  <span className="text-muted-foreground tabular-nums">
+                    {count.value.toLocaleString()}
+                    <span className="sr-only"> {count.unit}</span>
+                  </span>
+                ) : null}
+                {headerAction}
+              </div>
+            ) : null}
           </div>
           {subtitle ? (
             <div className="text-muted-foreground mt-1 text-sm">
