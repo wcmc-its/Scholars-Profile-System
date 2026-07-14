@@ -427,7 +427,7 @@ describe("POST /api/edit/sponsor-match (route)", () => {
         concepts,
         candidates,
         preferences: [],
-        ask: { title: "cancer metabolism", quote: "" },
+        ask: { title: "cancer metabolism" },
       });
     });
   });

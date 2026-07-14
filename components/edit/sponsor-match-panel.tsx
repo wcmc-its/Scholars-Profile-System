@@ -1006,6 +1006,67 @@ function FacetGroup({
   );
 }
 
+/**
+ * ONE scholar's email, resolved on click.
+ *
+ * SCOPE, and it is the whole design: this is the per-card `Contact` of the mockup and NOTHING
+ * else. The mockup also draws `Contact selected` + a compose modal — bulk email over the result
+ * set — and that is a standing policy no-go, not a deferral: `docs/email-visibility-spec.md`
+ * forbids bulk email download "even for internal users" at a cap of 50, and a sponsor pool runs
+ * to 800. Per-person is a different act with a different consent story, and it is the one the
+ * route below is built for.
+ *
+ * NO ADDRESS EVER ENTERS THE MATCH PAYLOAD. `/api/profile/[cwid]/contact-email` is a separate,
+ * `no-store`, per-person directory lookup that fails CLOSED — release gate off, external viewer,
+ * or an unreleased `email_visibility` all return `{ email: null }`. So the officer's own session
+ * is what authorises the reveal, one colleague at a time, and the ranking contract stays free of
+ * PII (`sponsor-match-contract.ts` keeps it out on purpose).
+ *
+ * FETCH ON CLICK, NOT ON RENDER, and this is load-bearing rather than tidy: a paste ranks up to
+ * ~341 candidates, so resolving eagerly would fire ~341 uncached directory lookups per search to
+ * populate a button almost none of them will press. The `tests/unit/sponsor-match-contact.test.tsx`
+ * case that asserts ZERO fetches at render is guarding exactly that, and it fails if anyone moves
+ * this into a `useEffect`.
+ *
+ * ponytail: `mailto:` — the officer's own mail client composes, which is why there is no compose
+ * modal to build, no Cc/Bcc/Send to get wrong, and no address for us to store.
+ */
+function ContactButton({ cwid }: { cwid: string }) {
+  const [state, setState] = useState<"idle" | "loading" | "none">("idle");
+
+  // Absent ≠ zero, applied to an address: "we could not release an email" is not "this person has
+  // none", so the copy says what actually happened rather than asserting a fact about the scholar.
+  if (state === "none") {
+    return (
+      <span className="text-muted-foreground shrink-0 text-xs">No email released</span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={state === "loading"}
+      onClick={() => {
+        setState("loading");
+        fetch(`/api/profile/${encodeURIComponent(cwid)}/contact-email`)
+          .then((r) => (r.ok ? r.json() : { email: null }))
+          .then((d: { email?: string | null }) => {
+            if (d?.email) {
+              window.location.href = `mailto:${d.email}`;
+              setState("idle");
+            } else {
+              setState("none");
+            }
+          })
+          .catch(() => setState("none"));
+      }}
+      className="border-border text-foreground/80 shrink-0 rounded-full border px-2.5 py-0.5 text-xs transition-colors hover:border-[var(--color-accent-slate)] disabled:opacity-50"
+    >
+      {state === "loading" ? "Resolving…" : "Contact"}
+    </button>
+  );
+}
+
 function ResearcherRow({
   candidate,
   rank,
@@ -1107,6 +1168,7 @@ function ResearcherRow({
           >
             {TIER_LABEL[tier]}
           </span>
+          <ContactButton cwid={candidate.cwid} />
         </div>
         {candidate.department ? (
           <div className="text-muted-foreground text-sm">{candidate.department}</div>
