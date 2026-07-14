@@ -16,8 +16,16 @@ import { canonicalProfilePath, isRootCanonical } from "@/lib/profile-url";
 import { buildProfileMetadata } from "@/lib/profile-metadata";
 import { ProfileView } from "@/components/profile/profile-view";
 
-// Dynamic render — see ProfileView / #640. CloudFront caches the public
-// response by path at the edge.
+// Dynamic render — see ProfileView / #640.
+//
+// This route does NOT get edge-cached today: with `PROFILE_CANONICAL=root`
+// (#671, live in both envs) it only permanently redirects to `/{slug}`, and the
+// canonical route is force-dynamic too — so neither path holds an ISR entry and
+// the origin sends `max-age=0, must-revalidate`. Verified against prod: repeat
+// requests to a profile return `x-cache: Miss from cloudfront`. (The earlier
+// "CloudFront caches the public response by path at the edge" note here predated
+// the canonical flip and was no longer true.) See docs/cloudfront-cache-spec.md
+// §"Profile pages are not edge-cached".
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
