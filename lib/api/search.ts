@@ -19,6 +19,7 @@
  * page and /api/search) leave it unset.
  */
 import { identityImageEndpoint } from "@/lib/headshot";
+import type { AuthorRole } from "@/lib/search-index-docs";
 import { prisma } from "@/lib/db";
 import { profilePath } from "@/lib/profile-url";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
@@ -361,6 +362,14 @@ export type RepresentativePub = {
    *  not placed. OPTIONAL and omitted-when-absent, not `?? null`: an always-present key would break
    *  `search-fetch-key-paper.test.ts`'s `toEqual`, which fails on an extra defined property. */
   journal?: string;
+  /** THIS SCHOLAR's authorship role on this paper — not the paper's. Resolved from the nested
+   *  `wcmAuthors` entry whose `cwid` is the person we fetched for, which is the only way to say
+   *  "last author" about a person rather than about a paper.
+   *
+   *  ABSENT means unknown, and absent is the honest answer for every document indexed before the
+   *  reindex that adds `wcmAuthors.role`. Never render absent as "middle author" — that would turn
+   *  "we do not know" into a claim, on the strength of a stale document. */
+  role?: AuthorRole;
 };
 
 /** The shape of a reason filter's optional `top` (top_hits) sub-agg. */
@@ -373,6 +382,9 @@ type ReasonTopHitsAgg = {
           title?: string;
           year?: number | null;
           journal?: string | null;
+          /** Only selected by `fetchKeyPaper`. The inline reason-agg's `top_hits` does not ask for
+           *  it, so on that path it is absent and `role` is simply never emitted. */
+          wcmAuthors?: Array<{ cwid?: string; role?: string } | null> | null;
         };
         highlight?: { title?: string[] };
       }>;
@@ -410,9 +422,22 @@ export function parseReasonTopHit(
  * model (the disclosure shows up to 3 representative papers); `parseReasonTopHit`
  * stays for the legacy `composeMatchReason` single-pub path.
  */
+const AUTHOR_ROLES: readonly string[] = ["sole", "first", "last", "middle"];
+
+/** `_source` is whatever the index happens to hold, which is a trust boundary: an old document, a
+ *  half-finished reindex, or a hand-patched doc can carry anything. Unrecognised ⇒ undefined ⇒
+ *  "unknown", which renders as nothing. Never coerce it into a role. */
+function toAuthorRole(v: unknown): AuthorRole | undefined {
+  return typeof v === "string" && AUTHOR_ROLES.includes(v) ? (v as AuthorRole) : undefined;
+}
+
+/** `forCwid` — resolve each paper's authorship role FOR THAT PERSON from the nested `wcmAuthors`.
+ *  Omitted (the inline reason-agg path) ⇒ no `role`, because that agg does not select the field and
+ *  guessing from a paper-level signal is the mis-attribution this whole change exists to avoid. */
 export function parseReasonTopHits(
   agg: ReasonTopHitsAgg | undefined,
   limit = 3,
+  forCwid?: string,
 ): RepresentativePub[] {
   const hits = agg?.top?.hits?.hits ?? [];
   const out: RepresentativePub[] = [];
@@ -420,6 +445,9 @@ export function parseReasonTopHits(
     const src = hit?._source;
     if (!src || src.pmid == null || !src.title) continue;
     const titleHtml = hit?.highlight?.title?.[0];
+    const role = forCwid
+      ? toAuthorRole((src.wcmAuthors ?? []).find((a) => a?.cwid === forCwid)?.role)
+      : undefined;
     out.push({
       pmid: String(src.pmid),
       title: src.title,
@@ -429,6 +457,9 @@ export function parseReasonTopHits(
       // inline reason-agg's `top_hits` selects no `journal`, so on that path the key must simply
       // not exist rather than be a present-but-null.
       ...(src.journal ? { journal: src.journal } : {}),
+      // Absent when: no `forCwid`, the field was not selected, or the document predates the
+      // reindex. All three mean UNKNOWN, and unknown must not be rendered as "middle author".
+      ...(role ? { role } : {}),
     });
     if (out.length >= limit) break;
   }
@@ -652,7 +683,7 @@ export async function fetchKeyPaper(args: {
         // so the BM25 `_score` is returned for the blend even though we sort.
         size: KEY_PAPER_CANDIDATE_POOL,
         track_scores: true,
-        _source: ["pmid", "title", "year", "citationCount", "journal"],
+        _source: ["pmid", "title", "year", "citationCount", "journal", "wcmAuthors"],
         query: boolQuery,
         sort: [
           { _score: { order: "desc" } },
@@ -691,7 +722,8 @@ export async function fetchKeyPaper(args: {
     // 0.4·recency + a small >50-citation nudge — then shape the top 3 via the
     // shared parser (it preserves order).
     const ranked = rankKeyPaperHitsByBlend(hits as KeyPaperHit[], new Date().getUTCFullYear());
-    return parseReasonTopHits({ top: { hits: { hits: ranked as never } } }, 3);
+    // `cwid` — the person we fetched FOR. Their role on the paper, not the paper's roles.
+    return parseReasonTopHits({ top: { hits: { hits: ranked as never } } }, 3, cwid);
   });
 }
 

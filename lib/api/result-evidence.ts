@@ -1,3 +1,5 @@
+import type { AuthorRole } from "@/lib/search-index-docs";
+
 /**
  * #824 follow-up — the coherent search-result "evidence" model (Phase 1 of the
  * `docs/search-snippet-handoff.md` §4 redesign). Replaces the layered priority
@@ -43,6 +45,9 @@ export type EvidencePub = {
   /** The venue. Same wire shape as `RepresentativePub` (`lib/api/search.ts`) — these two types
    *  describe ONE payload, so they widen together or they lie about it. */
   journal?: string;
+  /** THIS scholar's authorship role on this paper. Absent = unknown (pre-reindex document, or a
+   *  path that does not resolve it) and must never be rendered as "middle author". */
+  role?: AuthorRole;
 };
 
 /** A bounded representative grant for the "Key funding" disclosure — the funding

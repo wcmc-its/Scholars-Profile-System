@@ -69,6 +69,30 @@ export function classifyAuthorship(a: {
   return "middle";
 }
 
+/** A WCM author's role on ONE paper, as the person would state it on a CV.
+ *
+ *  `sole` is its own value rather than "first", because sole authorship is the strongest possible
+ *  authorship signal and collapsing it into either end throws that away. The Publications facet's
+ *  paper-level union has always counted a sole author as BOTH first and senior (promotion-committee
+ *  convention); this keeps that behavior by mapping `sole` back to both, from one classifier, so the
+ *  per-person field and the facet cannot come to disagree.
+ *
+ *  The source is `PublicationAuthor.isFirst/isLast/totalAuthors` — already in Aurora, already
+ *  written by the ReCiter ETL from `analysis_summary_author.authorPosition`. Nothing is imported for
+ *  this; it was simply never carried onto the search document. */
+export type AuthorRole = "sole" | "first" | "last" | "middle";
+
+export function authorRole(a: {
+  isFirst: boolean;
+  isLast: boolean;
+  totalAuthors: number;
+}): AuthorRole {
+  if (a.totalAuthors === 1) return "sole";
+  if (a.isFirst) return "first";
+  if (a.isLast) return "last";
+  return "middle";
+}
+
 // ---------------------------------------------------------------------------
 // Pure helpers — MeSH extraction.
 // ---------------------------------------------------------------------------
@@ -549,6 +573,12 @@ export function buildPublicationDoc(
     slug: a.scholar!.slug,
     preferredName: a.scholar!.preferredName,
     position: a.position,
+    // The author's role ON THIS PAPER, per person. `wcmAuthorPositions` below is a paper-level
+    // UNION across every WCM author, so on a paper with a WCM first-author and a WCM middle-author
+    // it holds ["first","middle"] and cannot say which is which — right on single-author papers and
+    // silently wrong on collaborations, which is the worst shape a bug can take. This field is the
+    // per-person fact, and both are now derived from ONE classifier so they cannot drift.
+    role: authorRole(a),
   }));
 
   // #718 — exclude the publication when no WCM author is publicly displayable
@@ -579,14 +609,15 @@ export function buildPublicationDoc(
   // convention (sole authorship = highest possible authorship signal).
   const wcmAuthorPositions = new Set<string>();
   for (const a of wcmAuthorRows) {
-    if (a.totalAuthors === 1) {
+    // Same classifier as the per-author `role` above — the facet's "senior" is this vocabulary's
+    // "last", and a sole author counts as BOTH, which is the convention the union already encoded.
+    const role = authorRole(a);
+    if (role === "sole") {
       wcmAuthorPositions.add("first");
       wcmAuthorPositions.add("senior");
       continue;
     }
-    if (a.isFirst) wcmAuthorPositions.add("first");
-    if (a.isLast) wcmAuthorPositions.add("senior");
-    if (!a.isFirst && !a.isLast) wcmAuthorPositions.add("middle");
+    wcmAuthorPositions.add(role === "last" ? "senior" : role);
   }
 
   // #837 — union of the departments of this pub's displayable WCM authors.

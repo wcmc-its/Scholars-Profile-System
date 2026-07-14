@@ -460,6 +460,11 @@ export const publicationsIndexMapping = {
           slug: { type: "keyword" },
           preferredName: { type: "text" },
           position: { type: "integer" },
+          // Per-person authorship role: sole | first | last | middle. `wcmAuthorPositions` above is
+          // a paper-level UNION and cannot attribute a role to a person; this can. Adding it needs
+          // a full publications reindex — it is a new field on an existing mapping, so documents
+          // written before the reindex simply lack it, and every reader treats absent as unknown.
+          role: { type: "keyword" },
         },
       },
     },

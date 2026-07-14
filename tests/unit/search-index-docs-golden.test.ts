@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { PublicationSuppressions } from "@/lib/api/manual-layer";
 import {
+  authorRole,
   buildPeopleDoc,
   buildPublicationDoc,
   type PublicationForIndex,
@@ -526,5 +527,26 @@ describe("buildPeopleDoc — golden snapshots", () => {
     expect(doc).not.toHaveProperty("publicationMeshUi");
     expect(doc.overviewLength).toBe(0);
     expect(doc.aoiTermCount).toBe(0);
+  });
+});
+
+describe("authorRole — the per-person fact the facet union cannot express", () => {
+  // `wcmAuthorPositions` is a paper-level UNION: on a paper with a WCM first-author and a WCM
+  // middle-author it holds ["first","middle"] and cannot say WHICH author is which. Using it to
+  // label a person would be right on single-author papers and silently wrong on collaborations —
+  // the worst shape a bug can take, because it looks correct wherever you spot-check it.
+  it("classifies each end, and the middle", () => {
+    expect(authorRole({ isFirst: true, isLast: false, totalAuthors: 9 })).toBe("first");
+    expect(authorRole({ isFirst: false, isLast: true, totalAuthors: 9 })).toBe("last");
+    expect(authorRole({ isFirst: false, isLast: false, totalAuthors: 9 })).toBe("middle");
+  });
+
+  it("calls a sole author SOLE, not 'first'", () => {
+    // Sole authorship is the strongest authorship signal there is; collapsing it into either end
+    // throws that away. The facet's union has always counted it as BOTH first and senior, and this
+    // keeps that — from one classifier, so the field and the facet cannot drift apart.
+    expect(authorRole({ isFirst: true, isLast: true, totalAuthors: 1 })).toBe("sole");
+    // …even when the ETL left both flags false on a single-author paper.
+    expect(authorRole({ isFirst: false, isLast: false, totalAuthors: 1 })).toBe("sole");
   });
 });
