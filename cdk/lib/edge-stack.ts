@@ -252,7 +252,16 @@ export class EdgeStack extends Stack {
     // (the ALB DNS name can't carry a public cert). Otherwise it stays HTTP_ONLY
     // on the ALB DNS name (today's behavior). The X-Origin-Verify shared-secret
     // origin-protection contract is unchanged on both paths.
-    const originHttps = envConfig.edgeOriginCertArn.length > 0;
+    //
+    // The cert alone is NOT enough to flip this leg: it also needs the origin
+    // hostname to resolve to the ALB in DNS, and synth cannot see DNS. So the
+    // flip is gated on BOTH -- the cert (AppStack adds the :443 listener) and a
+    // non-empty hostname (the operator's assertion that the record is cut). That
+    // lets the ALB :443 listener land for a NetScaler front, which dials the ALB
+    // directly, without dragging CloudFront's origin onto a hostname that does
+    // not yet resolve. Seeding only the cert keeps this leg byte-identical.
+    const originHttps =
+      envConfig.edgeOriginCertArn.length > 0 && envConfig.edgeOriginHostname.length > 0;
     const origin = originHttps
       ? new origins.HttpOrigin(envConfig.edgeOriginHostname, {
           protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
