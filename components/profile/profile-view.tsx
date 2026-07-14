@@ -615,10 +615,10 @@ export async function ProfileView({ slug }: { slug: string }) {
                   href="https://innovation.weill.cornell.edu/technology-portfolio"
                   target="_blank"
                   rel="noopener noreferrer"
-                  title="Opens the WCM Center for Technology Licensing portfolio"
+                  title="Opens the full WCM technology portfolio — not this scholar's inventions"
                   className="text-sm whitespace-nowrap text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
                 >
-                  View full portfolio ↗
+                  View full WCM portfolio ↗
                 </a>
               }
             >

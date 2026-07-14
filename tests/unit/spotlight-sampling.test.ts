@@ -18,6 +18,8 @@ import {
   cardPaperOverlap,
   hasNearDuplicateCardPair,
   sampleDistinctCards,
+  selectSpotlightsForRender,
+  DISPLAY_LIMIT_SPOTLIGHTS,
 } from "@/lib/spotlight-sampling";
 
 /** Minimal paper fixture: a pmid and a byline-ordered list of WCM author cwids. */
@@ -379,5 +381,48 @@ describe("sampleDistinctCards", () => {
     expect(out).toHaveLength(2);
     expect(new Set(out.map((c) => c.subtopicId)).size).toBe(2);
     expect(hasNearDuplicateCardPair(out)).toBe(true); // cap reached — collision accepted
+  });
+});
+
+describe("selectSpotlightsForRender (#1709 — server-side draw)", () => {
+  const pool = Array.from({ length: 25 }, (_, i) => card(`s${i}`, [`p${i}a`, `p${i}b`]));
+
+  it("draws DISPLAY_LIMIT_SPOTLIGHTS cards with an in-range starting index", () => {
+    // The invariant the component depends on: `display[startIdx]` must exist,
+    // otherwise the server-rendered active card and the hydrated one disagree.
+    for (let i = 0; i < 50; i++) {
+      const { display, startIdx } = selectSpotlightsForRender(pool);
+      expect(display).toHaveLength(DISPLAY_LIMIT_SPOTLIGHTS);
+      expect(startIdx).toBeGreaterThanOrEqual(0);
+      expect(startIdx).toBeLessThan(display.length);
+      expect(display[startIdx]).toBeDefined();
+    }
+  });
+
+  it("never over-draws a pool smaller than the display limit", () => {
+    const { display, startIdx } = selectSpotlightsForRender(pool.slice(0, 3));
+    expect(display).toHaveLength(3);
+    expect(display[startIdx]).toBeDefined();
+  });
+
+  it("returns startIdx 0 for an empty pool rather than NaN", () => {
+    // Math.floor(Math.random() * 0) is 0, but guard the intent explicitly:
+    // the section renders null on an empty pool and must not index into it.
+    const { display, startIdx } = selectSpotlightsForRender([]);
+    expect(display).toEqual([]);
+    expect(startIdx).toBe(0);
+  });
+
+  it("rotates the draw across calls (the ISR-regeneration re-roll)", () => {
+    const draws = new Set(
+      Array.from({ length: 30 }, () =>
+        selectSpotlightsForRender(pool)
+          .display.map((c) => c.subtopicId)
+          .join(","),
+      ),
+    );
+    // Unseeded shuffle over a 25-card pool — 30 draws landing on one identical
+    // 8-card ordering would mean the rotation is dead.
+    expect(draws.size).toBeGreaterThan(1);
   });
 });
