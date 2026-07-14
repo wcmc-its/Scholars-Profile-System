@@ -620,7 +620,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_FUNDING_CONCEPT_GRANTS",
-                "Value": "on",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_SHELL_STREAMING",
