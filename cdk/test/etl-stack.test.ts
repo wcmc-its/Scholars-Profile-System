@@ -1443,7 +1443,7 @@ describe("EtlStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("excludes etl:infoed from the staging nightly cadence (10.20.91.8 CIDR overlap; docs/etl-vpc-migration-handoff.md), while prod keeps it", () => {
+    it("excludes etl:infoed from the staging nightly cadence (on-prem CIDR overlap; docs/etl-vpc-migration-handoff.md), while prod keeps it", () => {
       const stagingNightly = getStateMachineDefinitionText(
         template,
         "scholars-nightly-staging",

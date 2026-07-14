@@ -5,7 +5,13 @@
  * Strategy:
  *   1. Run consolidated query once (no CWID filter) — returns all
  *      (cwid, Account_Number) pairs across all WCM faculty for active /
- *      expired / in-process awards.
+ *      expired / in-process awards, excluding those InfoEd flags Confidential.
+ *
+ * "In Process" is kept deliberately: those rows are real awards mid-setup, not
+ * unfunded proposals. Verified 2026-07-14 against the funders' own records —
+ * e.g. R35 GM152228 (NIGMS, active at WCM through 2028) and NSF 1817331 are
+ * both In Process in InfoEd. Dropping them would delete live funding. The rows
+ * that never arrive are filtered by step 2's null-date test, not by status.
  *   2. Filter result set to currently-active scholars in our local DB and
  *      drop rows with null start/end dates (per spec line 125).
  *   3. Reconcile the Grant table by externalId (create new / update
@@ -45,7 +51,6 @@ type GrantRow = {
   Subward_Sponsor: string | null;
   spon_code: string | null;
   Role: string;
-  Project_Status: string | null;
 };
 
 const INSERT_BATCH = 1000;
@@ -72,7 +77,6 @@ WITH infoed_all AS (
     ct.code_desc        AS Submission_Status,
     ct.code_desc        AS Program_Type,
     p_udf.p_sin_5       AS intake_type,
-    CASE WHEN p_udf.p_log_50 = 1 THEN 'Y' ELSE 'N' END AS Confidential,
     ct2.code_desc       AS Proposal_Type,
     cdp.code_desc       AS Project_Status,
     cdp2.code_desc      AS Proposal_Status,
@@ -121,21 +125,12 @@ WITH infoed_all AS (
     AND  prop.inst_code = 'WCORNELLMC'
     AND  subp.child IS NULL
     AND  cdp.code_desc IN ('Active Award', 'Expired Award', 'In Process')
-),
-DistinctStatuses AS (
-  SELECT DISTINCT cwid, Account_Number, Project_Status FROM infoed_all
-),
-StatusAgg AS (
-  SELECT cwid, Account_Number,
-    STRING_AGG(Project_Status, ' > ') WITHIN GROUP (ORDER BY
-      CASE Project_Status
-        WHEN 'Active Award' THEN 1 WHEN 'Award Under Review' THEN 2
-        WHEN 'Not Funded' THEN 3 WHEN 'Pending Sponsor Determination' THEN 4
-        WHEN 'Pending' THEN 5 WHEN 'In Process' THEN 6
-        WHEN 'Expired Award' THEN 7 WHEN 'Canceled' THEN 8
-        WHEN 'Status Assigned in Error' THEN 9 ELSE 10
-      END) AS Project_Status
-  FROM DistinctStatuses GROUP BY cwid, Account_Number
+    -- Confidential (prop_u.p_log_50, surfaced as "Confidential" in InfoEd's own
+    -- dbo.VIVO integration view) means do-not-publish. Excluded here at the
+    -- source, so a flagged award cannot reach a public profile via any later
+    -- code path. Was computed and then ignored: 18 accounts were being
+    -- published, one as active funding.
+    AND  ISNULL(p_udf.p_log_50, 0) <> 1
 )
 SELECT DISTINCT
   v.CWID, v.Account_Number, x.Award_Number, y.begin_date, z.end_date,
@@ -149,8 +144,7 @@ SELECT DISTINCT
     WHEN z.Sponsor <> z.Orig_Sponsor AND z.Role_Category LIKE '%PI' THEN 'CoPrincipalInvestigatorRole'
     WHEN z.Role_Category LIKE '%Co-investigator' THEN 'CoInvestigatorRole'
     ELSE 'KeyPersonnelRole'
-  END AS Role,
-  sa.Project_Status
+  END AS Role
 FROM infoed_all AS v
 LEFT JOIN (SELECT cwid, Account_Number, MAX(Award_Number) AS Award_Number FROM infoed_all GROUP BY cwid, Account_Number) AS x
   ON x.cwid = v.cwid AND x.Account_Number = v.Account_Number
@@ -159,14 +153,18 @@ LEFT JOIN (SELECT cwid, Account_Number, MIN(Project_Period_Start) AS begin_date 
 LEFT JOIN (
   SELECT cwid, Account_Number,
     MAX(Project_Period_End) AS end_date, MAX(Sponsor) AS Sponsor, MAX(Orig_Sponsor) AS Orig_Sponsor,
-    MAX(spon_code) AS spon_code, MAX(proj_title) AS proj_title, MIN(program_type) AS program_type,
+    MAX(spon_code) AS spon_code, MAX(proj_title) AS proj_title,
+    -- The outer WHERE drops 'Contract without funding' row-by-row (on v), but
+    -- this aggregate ran over EVERY row of the account — so on an account that
+    -- mixes program types, MIN() returned 'Contract without funding' ('C' sorts
+    -- before 'G') and wrote it to Grant.programType anyway, defeating the
+    -- exclusion the schema documents. Aggregate only over the types we keep.
+    MIN(CASE WHEN program_type <> 'Contract without funding' THEN program_type END) AS program_type,
     MIN(unit_name) AS unit_name, MIN(int_unit_code) AS int_unit_code,
     MAX(Primary_PI_Flag) AS Primary_PI_Flag, MIN(role_category) AS Role_Category
   FROM infoed_all GROUP BY cwid, Account_Number
 ) AS z
   ON z.cwid = v.cwid AND z.Account_Number = v.Account_Number
-LEFT JOIN StatusAgg AS sa
-  ON sa.cwid = v.cwid AND sa.Account_Number = v.Account_Number
 WHERE v.unit_name IS NOT NULL
   AND v.program_type <> 'Contract without funding'
 ORDER BY v.CWID, v.Account_Number;

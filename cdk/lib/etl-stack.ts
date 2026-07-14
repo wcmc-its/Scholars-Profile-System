@@ -1032,13 +1032,14 @@ export class EtlStack extends Stack {
       },
       { id: "Asms", npmScript: "etl:asms", external: true, tier: "continue" },
       // etl:infoed is EXCLUDED from the STAGING cadence (Paul, 2026-06-22).
-      // InfoEd is at 10.20.91.8, which overlaps the Sps VPC's own 10.20/16
-      // CIDR, so once the cadence relocates + peers, scholars-dev routes
-      // 10.20.91.8 into the Sps VPC (where InfoEd isn't) and blackholes it; its
-      // Catch→Fail would then abort the whole nightly. The Sps VPC can't reach
-      // it today either (on-prem, not TGW-attached), so dropping it on staging
-      // is safe now and necessary post-relocation. Prod keeps the step. Re-add
-      // once WCM re-IPs / NATs InfoEd off 10.20 (docs/etl-vpc-migration-handoff.md).
+      // InfoEd's on-prem address sits in a range that overlaps the Sps VPC's
+      // own CIDR, so once the cadence relocates + peers, scholars-dev routes
+      // that address into the Sps VPC (where InfoEd isn't) and blackholes it;
+      // its Catch→Fail would then abort the whole nightly. The Sps VPC can't
+      // reach it today either (on-prem, not TGW-attached), so dropping it on
+      // staging is safe now and necessary post-relocation. Prod keeps the step.
+      // Re-add once WCM re-IPs / NATs InfoEd out of the overlapping range
+      // (addresses + ranges in docs/etl-vpc-migration-handoff.md).
       ...(env === "staging"
         ? []
         : [

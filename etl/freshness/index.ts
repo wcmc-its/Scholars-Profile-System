@@ -72,8 +72,9 @@ const TRACKED: Readonly<
   // PubMed competing-interest statements backfill — runs right after ReCiter.
   "ReCiter-COI-Statements": { cadence: "nightly" },
   ASMS: { cadence: "nightly" },
-  // Excluded from the STAGING cadence (10.20.91.8 overlaps the Sps VPC CIDR —
-  // see the nightlySteps comment in cdk/lib/etl-stack.ts); prod keeps the step.
+  // Excluded from the STAGING cadence (InfoEd's on-prem range overlaps the Sps
+  // VPC CIDR — see the nightlySteps comment in cdk/lib/etl-stack.ts); prod
+  // keeps the step.
   InfoEd: { cadence: "nightly", envs: ["prod"] },
   COI: { cadence: "nightly" },
   "COI-Gap": { cadence: "nightly" },
