@@ -36,7 +36,7 @@ CloudFront evaluates path patterns in order. Specific patterns must precede the 
 | 17 | `/about/feedback` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. `force-dynamic` page; reads `?from=` for contextual mode **and** the session cookie to prefill. |
 | 18 | `/scholars/*/co-pubs/export` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. `no-store` download; reads `?format=`. **Must precede #20** (`/scholars/*` would otherwise swallow it). |
 | 19 | `/scholars/*/co-pubs/*/export` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. Per-mentee variant of #18. |
-| 20 | `/scholars/*` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. Profile page (highest traffic); reads `mentees-sort`. |
+| 20 | `/scholars/*` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. ⚠ **STALE since #671.** Written when the profile lived at `/scholars/{slug}`. With `PROFILE_CANONICAL=root` (live in **both** envs) that path is now a **permanent redirect**; the profile renders at `/{slug}` and therefore falls through to the default behavior (#24). This behavior keys `mentees-sort` for a route that no longer reads it, and the highest-traffic page no longer gets the policy written for it. The co-pubs sub-pages (#18/#19) DO still live under this prefix, so the behavior is not dead — it is just mislabeled. See §"Profile pages are not edge-cached" below. |
 | 21 | `/departments/*` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. Dept + `…/divisions/*` listings; read `page`/`tab`/`sort`. |
 | 22 | `/centers/*` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. Center listings; read `page`/`tab`/`sort`. |
 | 23 | `/topics/*/scholars` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. ISR page; reads `q`/`role`/`page`. Stays cacheable, keyed per query. |
@@ -133,6 +133,27 @@ Two invariants, both enforced by the synth guard in `cdk/test/edge-stack.test.ts
 
 1. **No soft-404.** The 404 entry sets neither `responseHttpStatus` nor `responsePagePath`, so CloudFront passes the origin's branded 404 body **and** its 404 status through unchanged. A cached 404 stays a real 404 — never rewritten to 200. (The branded body is rendered by `app/not-found.tsx` / `app/(public)/not-found.tsx`, not by CloudFront.)
 2. **Never-cache-5xx (ratcheted).** Every 5xx `CustomErrorResponse` must carry `ErrorCachingMinTTL: 0`; the test fails if any 5xx is ever given a non-zero TTL.
+
+## Profile pages are not edge-cached
+
+Behavior #20 (`/scholars/*`) was written when the profile lived at that path. It no longer does. Since **#671** the `PROFILE_CANONICAL=root` flag is live in **both** envs: the profile renders at **`/{slug}`** (`app/(public)/[slug]/page.tsx`) and `/scholars/{slug}` permanently redirects to it.
+
+Two consequences, both currently true in prod:
+
+1. **The canonical profile route is `export const dynamic = "force-dynamic"`.** It re-renders from Aurora on every request. It holds no ISR entry, and the origin sends `Cache-Control: max-age=0, must-revalidate`, so CloudFront does not cache it either. Measured 2026-07-14 against prod — two consecutive requests to a profile from the same PoP:
+
+   ```
+   req1: 200  cache-control: public, max-age=0, must-revalidate  x-cache: Miss from cloudfront
+   req2: 200  cache-control: public, max-age=0, must-revalidate  x-cache: Miss from cloudfront
+   ```
+
+   (A department page, ISR at `revalidate=21600`, returns `Hit from cloudfront` on `req2` — so the edge *is* caching, just not profiles.)
+
+2. **The highest-traffic page falls through to the default behavior (#24)**, not the `sps-query-keyed` policy written for it.
+
+**Operational consequence.** A stale profile is **never** a cache problem — there is no cache. It is stale *data*: look at the source ETL. Do not reach for `POST /api/revalidate` (which only accepts the legacy `/scholars/{slug}` redirect path, and only busts ISR, never the CDN) or `create-invalidation`; neither can change what a force-dynamic page renders.
+
+**Performance consequence (open, not addressed here).** Every profile view is an origin round-trip plus a DB render. If profiles are made static/ISR to fix that, then per-scholar revalidation becomes mandatory *at the same time* — no ETL emits it today (see `etl/revalidate/index.ts`), and the allow-list would need the canonical `/{slug}` pattern added.
 
 ## Verification
 

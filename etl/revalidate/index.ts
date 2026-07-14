@@ -108,11 +108,26 @@ async function requestRevalidate(p: string): Promise<void> {
 /**
  * Walk the corpus and revalidate every cached surface a cadence run could have
  * dirtied: the home page, every topic page, the browse hub, every department
- * page, and the dynamic sitemap. Per-scholar `/scholars/{slug}` revalidations
- * are still emitted by the source-system ETLs that touch individual scholar
- * records — blanket per-CWID HTTP calls (8,900+ profiles) are wasteful when
- * most are unchanged. The shared Prisma read client is disconnected on every
- * exit path so the process can terminate cleanly.
+ * page, and the dynamic sitemap.
+ *
+ * Profile pages are deliberately absent, and no source-system ETL emits a
+ * per-scholar revalidation either (grep `revalidat` under etl/ — only this
+ * script, freshness, integrity, and orchestrate mention it). That is correct,
+ * not a gap: the canonical profile route is `app/(public)/[slug]/page.tsx`,
+ * which is `export const dynamic = "force-dynamic"` — it re-renders from the
+ * DB on every request, so there is no ISR entry to bust. An ETL data change is
+ * visible on the next page view with no revalidation at all.
+ *
+ * This ONLY holds while profiles stay force-dynamic. If a profile route is ever
+ * made static/ISR (for latency — see the cold-start work), an ETL-driven change
+ * would go stale with nothing to refresh it, and per-scholar revalidation must
+ * be added at the same time. Note it would need the CANONICAL path: since #671
+ * (`PROFILE_CANONICAL=root`, live in both envs) the profile is `/{slug}` and
+ * `/scholars/{slug}` is a permanent redirect — revalidating the latter busts a
+ * redirect, not a page.
+ *
+ * The shared Prisma read client is disconnected on every exit path so the
+ * process can terminate cleanly.
  */
 export async function runRevalidate(): Promise<void> {
   console.log("\n=== Revalidate ISR caches ===");

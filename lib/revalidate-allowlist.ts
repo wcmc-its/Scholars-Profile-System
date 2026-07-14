@@ -36,6 +36,13 @@ export const ALLOWED_EXACT: ReadonlySet<string> = new Set([
 
 /** Dynamic-path patterns eligible for revalidation. */
 export const ALLOWED_PATTERNS: readonly RegExp[] = [
+  // NOTE: since #671 (`PROFILE_CANONICAL=root`, live in both envs) this is the
+  // LEGACY path — `/scholars/{slug}` permanently redirects to the canonical
+  // `/{slug}`. Revalidating it busts a redirect, not a profile. Kept because
+  // the flag can be flipped back, and it is harmless either way: the canonical
+  // profile route is force-dynamic, so it holds no ISR entry to bust. Anything
+  // that needs to refresh a profile should re-render it, not revalidate it.
+  // Add `^/${SLUG_RE_SOURCE}$` here only alongside making profiles static/ISR.
   new RegExp(`^/scholars/${SLUG_RE_SOURCE}$`),
   new RegExp(`^/topics/${TOPIC_SLUG_RE_SOURCE}$`),
   new RegExp(`^/departments/${SLUG_RE_SOURCE}$`),
