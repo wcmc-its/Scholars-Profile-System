@@ -63,8 +63,15 @@
  *
  * The spine now asks (#1689), and carries the search's own `ResultEvidence` on
  * `searchEvidence` — see `SponsorSearchEvidence`. `evidence` (the bespoke shape) remains for
- * the bespoke engine. `caveat` is still absent. These stay OPTIONAL so the route never has to
- * fabricate a value to satisfy the type. Absent ≠ zero.
+ * the bespoke engine. These stay OPTIONAL so the route never has to fabricate a value to
+ * satisfy the type. Absent ≠ zero.
+ *
+ * `caveat` USED to sit here — a near-miss reason, declared, never written, never read. It is
+ * gone rather than left "for later": a demoted-card treatment can be built against it, will
+ * typecheck, will pass its tests, and will never fire in production. That is this codebase's
+ * most-repeated bug (`abstain`, `measures`, `prefBoost` all shipped inert). "Show anyway"
+ * needs a producer FIRST — someone deciding what a near-miss IS and what reason to emit —
+ * and the field comes back with it, in that PR.
  *
  * #1696 widened `searchEvidence` from ONE evidence to one PER CONCEPT. The spine fans out a
  * `searchPeople` call per concept and already had every result in hand; shipping only the
@@ -406,8 +413,6 @@ export type SponsorCandidate = {
    * which trades payload size for it; that trade has not been made.)
    */
   searchEvidence?: SponsorSearchEvidence[];
-  /** Near-miss reason. Present ⇒ the card takes the demoted treatment + amber caveat. */
-  caveat?: string;
 };
 
 /**
@@ -499,7 +504,7 @@ export type SponsorMatchResponse = {
   candidates: SponsorCandidate[];
   /** A short handle for this search — see `sponsorAskFrom`. Absent when the paste yielded
    *  no concepts (⇒ nothing to name it after). */
-  ask?: { title: string; quote: string };
+  ask?: { title: string };
   preferences?: SponsorPreference[];
 };
 
@@ -517,18 +522,20 @@ export type SponsorMatchResponse = {
  * it costs nothing, cannot fail, cannot time out, and cannot perturb the eval-tuned
  * extraction prompt.
  *
- * `quote` is the preference's own paste provenance when there is one — it is already a
- * verbatim snippet (`SponsorPreference.evidence`), so there is nothing to generate.
+ * It used to also return `quote` — `preferences[0].evidence`, the paste snippet a preference was
+ * read from. Nothing ever rendered it, and nothing needed to: the Preferences rail already shows
+ * each preference's own provenance inline (`from paste: "…"`), per preference rather than only
+ * the first. A produced-but-unread field is the same latent bug as a declared-but-unwritten one
+ * wearing a disguise — it survives review because `git grep` finds an assignment.
  */
 export function sponsorAskFrom(
   concepts: readonly SponsorConcept[],
   preferences: readonly SponsorPreference[] = [],
-): { title: string; quote: string } | undefined {
+): { title: string } | undefined {
   const top = concepts.slice(0, ASK_TITLE_CONCEPTS).map((c) => c.term);
   if (top.length === 0) return undefined;
   const prefs = preferences.map((p) => p.label);
-  const title = [top.join(", "), ...prefs].join(" · ");
-  return { title, quote: preferences[0]?.evidence ?? "" };
+  return { title: [top.join(", "), ...prefs].join(" · ") };
 }
 
 /** Two concepts name a search; five are a list, not a handle. */

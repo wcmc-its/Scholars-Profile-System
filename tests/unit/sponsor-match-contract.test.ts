@@ -385,11 +385,6 @@ describe("sponsorAskFrom", () => {
     expect(ask?.title).toBe("cardiac fibrosis · Early career");
   });
 
-  it("quotes the preference's OWN paste provenance rather than generating one", () => {
-    const ask = sponsorAskFrom([concept("cardiac fibrosis", 0.9, 1)], prefs);
-    expect(ask?.quote).toBe(prefs[0].evidence);
-  });
-
   it("is ABSENT when there are no concepts — never an empty-string title", () => {
     // Absent ≠ empty, the contract's rule. The bespoke engine returns `concepts: []`, so this
     // is the live path, not a hypothetical: it must yield no header at all.
