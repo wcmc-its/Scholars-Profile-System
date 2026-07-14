@@ -23,13 +23,14 @@
  * fetch is stubbed — no route/engine involvement.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { SponsorMatchPanel } from "@/components/edit/sponsor-match-panel";
 import type {
   SponsorCandidate,
   SponsorConcept,
   SponsorPreference,
+  SponsorSearchEvidence,
 } from "@/lib/api/sponsor-match-contract";
 
 // K = 60. Scores below are the RRF sums the server would have sent; the panel recomputes
@@ -520,7 +521,42 @@ describe("SponsorMatchPanel", () => {
   });
 
 
-  // ── Evidence, via the SEARCH's own renderer (#1689) ─────────────────────────
+  // ── Evidence, via the SEARCH's own renderer (#1689/#1696) ───────────────────
+  /**
+   * The rendered evidence blocks, in DOM order: `[concept caption, reason line]` each.
+   *
+   * Queried by `data-slot` and not by text, because a concept's term legitimately appears four
+   * times on the page (the rail slider, the facet, the row's chip, and this caption) — a text
+   * query cannot tell which one it found, and would pass on a card that rendered no block at all.
+   */
+  function evidenceBlocks(): [string, string][] {
+    return [...document.querySelectorAll('[data-slot="sponsor-match-evidence"]')].map((el) => {
+      const caption = el.firstElementChild?.textContent ?? "";
+      const line = (el.textContent ?? "").slice(caption.length);
+      return [caption, line.replace(/\s+/g, " ").trim()];
+    });
+  }
+
+  /** The spine's per-concept evidence, in the shape the wire carries it (#1696). */
+  function searchEvidence(term: string, count: number): SponsorSearchEvidence {
+    return {
+      term,
+      evidence: {
+        kind: "publications",
+        strength: "tagged",
+        text: `${count} of 210 publications tagged`,
+        term: `MeSH:${term}`, // the DESCRIPTOR name — often not the sponsor's word for it
+        count,
+      },
+      pubCount: 210,
+      keyPaper: {
+        descriptorUis: [`D-${term}`],
+        contentQuery: term.toLowerCase(),
+        conceptLabel: `MeSH:${term}`,
+      },
+    };
+  }
+
   it("renders the spine's evidence with the public search's EvidenceLine", async () => {
     // The console's "why this match" block was EMPTY in prod: the panel read `evidence`
     // (bespoke-only) while the spine — the prod default — produced none. It now carries the
@@ -533,21 +569,8 @@ describe("SponsorMatchPanel", () => {
           cwid: "a",
           name: "Alice Alpha",
           fusedScore: 0.9,
-          searchEvidence: {
-            evidence: {
-              kind: "publications",
-              strength: "tagged",
-              text: "142 of 210 publications tagged",
-              term: "Immuno-oncology",
-              count: 142,
-            },
-            pubCount: 210,
-            keyPaper: {
-              descriptorUis: ["D000074322"],
-              contentQuery: "immuno-oncology",
-              conceptLabel: "Immunotherapy",
-            },
-          },
+          contributions: [{ term: "Immuno-oncology", rank: 1 }],
+          searchEvidence: [searchEvidence("Immuno-oncology", 142)],
         }),
       ],
     });
@@ -563,7 +586,119 @@ describe("SponsorMatchPanel", () => {
       .getAllByText((_t, el) => /142 of 210 publications tagged/.test(el?.textContent ?? ""))
       .pop();
     expect(line).toBeTruthy();
-    expect(line!.textContent).toContain("Immuno-oncology");
+    expect(line!.textContent).toContain("MeSH:Immuno-oncology");
+  });
+
+  it("renders ONE block per matched concept, captioned with the concept it answers for", async () => {
+    // #1696 — the spine already fetched a reason for every concept the candidate ranked under;
+    // only the best one used to survive. Alice matched two, so she gets two blocks — and each
+    // is captioned with the SLIDER's term, because the reason line names the MeSH descriptor
+    // ("MeSH:…"), which is routinely not the sponsor's word for the concept.
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          contributions: [
+            { term: "Immuno-oncology", rank: 2 },
+            { term: "Cancer Metabolism", rank: 1 },
+          ],
+          searchEvidence: [
+            searchEvidence("Cancer Metabolism", 30), // best RANK — the wire order
+            searchEvidence("Immuno-oncology", 142),
+          ],
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    const blocks = evidenceBlocks();
+    // TWO blocks — the second is the whole issue: it was fetched, then discarded.
+    // Blocks follow the LIVE weighting, like the chips: Immuno-oncology (centrality .9 ×
+    // weightFactor 3, rank 2) contributes more than Cancer Metabolism (.5 × 1, rank 1), so it
+    // leads — even though the wire shipped Metabolism first on rank.
+    expect(blocks.map(([caption]) => caption)).toEqual(["Immuno-oncology", "Cancer Metabolism"]);
+    // And each caption sits over ITS OWN reason. A join that crossed the two would still render
+    // two blocks and two counts, and be wrong about both.
+    expect(blocks[0][1]).toContain("142 of 210 publications tagged");
+    expect(blocks[1][1]).toContain("30 of 210 publications tagged");
+  });
+
+  it("drops a muted concept's evidence block along with its chip", async () => {
+    // Slide a concept to zero and it stops being a reason this person ranked. A block still
+    // captioned with it would have the card contradicting the ranking beside it.
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          contributions: [
+            { term: "Immuno-oncology", rank: 2 },
+            { term: "Cancer Metabolism", rank: 1 },
+          ],
+          searchEvidence: [
+            searchEvidence("Cancer Metabolism", 30),
+            searchEvidence("Immuno-oncology", 142),
+          ],
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+    expect(evidenceBlocks().map(([caption]) => caption)).toEqual([
+      "Immuno-oncology",
+      "Cancer Metabolism",
+    ]);
+
+    fireEvent.change(screen.getByLabelText("Immuno-oncology centrality"), {
+      target: { value: "0" },
+    });
+
+    // The muted concept's block is gone — and the concept she still ranks under survives, so
+    // muting one does not blank the card.
+    expect(evidenceBlocks().map(([caption]) => caption)).toEqual(["Cancer Metabolism"]);
+    expect(document.body.textContent).not.toContain("142 of 210 publications tagged");
+    expect(document.body.textContent).toContain("30 of 210 publications tagged");
+  });
+
+  it("renders no block for a concept the spine gave no evidence for", async () => {
+    // Absent ≠ an empty block. The candidate ranked under both concepts (both chips show), but
+    // only one produced a tagged count — the other resolved to no MeSH descriptor, so there is
+    // nothing to count and nothing to say. Say nothing.
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          contributions: [
+            { term: "Immuno-oncology", rank: 1 },
+            { term: "Cancer Metabolism", rank: 2 },
+          ],
+          searchEvidence: [searchEvidence("Immuno-oncology", 142)],
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    // Exactly one block — not two, and certainly not one padded with a zero count.
+    expect(evidenceBlocks()).toHaveLength(1);
+    expect(evidenceBlocks()[0][0]).toBe("Immuno-oncology");
+    expect(evidenceBlocks()[0][1]).toContain("142 of 210 publications tagged");
+    // The chip for the evidence-less concept still shows: she DID rank under it. Only the
+    // claim about WHY is withheld, because there is none to make.
+    expect(screen.getAllByText("Cancer Metabolism").length).toBeGreaterThan(0);
+    expect(document.body.textContent).not.toContain("0 of 210");
   });
 
   it("renders no evidence line when the candidate carries none", async () => {
@@ -571,6 +706,168 @@ describe("SponsorMatchPanel", () => {
     // Absent is not zero: an empty disclosure reads as "this match has no evidence", which is
     // a claim we never made. Render nothing instead.
     expect(screen.queryByText(/publications tagged/)).toBeNull();
+  });
+
+  /**
+   * A fetch stub whose key-paper endpoint always resolves the SAME pmid (111), so a stale claim
+   * is visible as an `exclude=111` on a later URL. Ranking POSTs return Alice with `over`'s
+   * contributions/evidence.
+   */
+  function stubWithKeyPaper(over: Partial<SponsorCandidate>) {
+    const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
+      if (typeof url === "string" && url.startsWith("/api/search/key-paper")) {
+        return {
+          ok: true,
+          json: async () => ({ pubs: [{ pmid: "111", title: "CAR T persistence", year: 2024 }] }),
+        };
+      }
+      const method = init?.method ?? "GET";
+      if (method === "GET") return { ok: true, json: async () => ({ ok: true, submissions: [] }) };
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          concepts: CONCEPTS,
+          candidates: [
+            candidate({ cwid: "a", name: "Alice Alpha", fusedScore: 0.9, ...over }),
+          ],
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const keyPaperCalls = () =>
+      fetchMock.mock.calls
+        .map((c) => String(c[0]))
+        .filter((u) => u.startsWith("/api/search/key-paper"));
+    return { fetchMock, keyPaperCalls };
+  }
+
+  it("an unmuted concept's block re-fetches CLEAN — it never excludes its OWN paper (#1696)", async () => {
+    // THE claimedPmids LIFETIME BUG, and it is REPRODUCIBLE — this test fails against the
+    // `useMemo(() => new Set(), [])` it replaces.
+    //
+    // `claimedPmids` de-dups representative papers across a card's blocks: whoever's lazy
+    // `/api/search/key-paper` fetch resolves first claims the paper, and the others send it as
+    // `exclude=` so they surface a DIFFERENT one. But `EvidenceLine` only ever ADDS to that set —
+    // it has no release-on-unmount — so a claim OUTLIVES the block that made it.
+    //
+    // Mute a concept: its block unmounts, pmid still claimed. Unmute it: the block remounts, and
+    // because it is a fresh line its one-shot `keyPaperFetched` guard is clean, so it fetches
+    // again — and excludes the very paper it displayed thirty seconds ago. The officer watches
+    // the disclosure come back with a worse paper, or with NOTHING (the chevron then vanishes)
+    // while the count line beside it still reads "142 of 210 publications tagged".
+    //
+    // Note this path has NO loading state — a slider is not a fetch — so unlike a re-run it is
+    // not saved by the results tree unmounting. It is the case that actually fires.
+    const { keyPaperCalls } = stubWithKeyPaper({
+      contributions: [
+        { term: "Immuno-oncology", rank: 1 },
+        { term: "Cancer Metabolism", rank: 1 },
+      ],
+      searchEvidence: [
+        searchEvidence("Immuno-oncology", 142),
+        searchEvidence("Cancer Metabolism", 30),
+      ],
+    });
+
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    // Expand the Immuno-oncology block → it fetches clean and CLAIMS pmid 111.
+    fireEvent.click(screen.getAllByRole("button", { name: /key papers/i })[0]);
+    await waitFor(() => expect(keyPaperCalls()).toHaveLength(1));
+    expect(keyPaperCalls()[0]).not.toContain("exclude"); // nothing claimed yet
+    await screen.findByText(/CAR T persistence/);
+
+    // Mute it — the block unmounts, and its claim on 111 would outlive it.
+    fireEvent.change(screen.getByLabelText("Immuno-oncology centrality"), {
+      target: { value: "0" },
+    });
+    expect(evidenceBlocks().map(([caption]) => caption)).toEqual(["Cancer Metabolism"]);
+
+    // Unmute — the block comes back and re-fetches.
+    fireEvent.change(screen.getByLabelText("Immuno-oncology centrality"), {
+      target: { value: "0.9" },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: /key papers/i })[0]);
+    await waitFor(() => expect(keyPaperCalls()).toHaveLength(2));
+
+    // AND IT FETCHES CLEAN. With the set memoised on `[]` this URL carried `exclude=111` — the
+    // block suppressing the one paper it had just told the officer was Alice's best.
+    expect(keyPaperCalls()[1]).not.toContain("exclude");
+    expect(keyPaperCalls()[1]).toContain("cwid=a");
+    // And the paper is actually back on screen, not silently dropped.
+    await screen.findByText(/CAR T persistence/);
+  });
+
+  it("a slider drag that does NOT mute keeps the claimed set — no gratuitous re-fetch", async () => {
+    // The other side of the reset, and the reason the key is the BLOCK LIST rather than the
+    // concepts' values. Dragging centrality 0.9 → 0.5 re-ranks and re-renders every row, but it
+    // does not change WHICH concepts matched — so the block list is unchanged, the set survives,
+    // and the lines must not re-fetch papers they have already claimed. A set minted on every
+    // render (the naive "fix") would re-fetch the whole visible list on every drag frame.
+    const { keyPaperCalls } = stubWithKeyPaper({
+      contributions: [{ term: "Immuno-oncology", rank: 1 }],
+      searchEvidence: [searchEvidence("Immuno-oncology", 142)],
+    });
+
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    fireEvent.click(screen.getByRole("button", { name: /key papers/i }));
+    await waitFor(() => expect(keyPaperCalls()).toHaveLength(1));
+
+    // Drag, but not to zero — the concept still matches, so its block stays.
+    fireEvent.change(screen.getByLabelText("Immuno-oncology centrality"), {
+      target: { value: "0.5" },
+    });
+    expect(evidenceBlocks().map(([caption]) => caption)).toEqual(["Immuno-oncology"]);
+    // No remount, no re-fetch: still exactly the one call.
+    expect(keyPaperCalls()).toHaveLength(1);
+  });
+
+  it("a fresh ranking run starts every row's claimed set empty (#1696)", async () => {
+    // An INVARIANT GUARD, and — unlike the mute/unmute test above — it does NOT discriminate the
+    // `runId` key today, because the panel already swaps the whole results tree for skeletons
+    // while `status.kind === "loading"`. That unmounts these rows between runs and rebuilds the
+    // set regardless of how it is keyed. Verified, not assumed: with the pre-fix `[]` deps AND
+    // the pre-fix `key={concept.term}` both restored, this test still passed.
+    //
+    // It is kept because that unmount is INCIDENTAL to the reset, not a statement of it. A
+    // perfectly reasonable future change — keep the current results on screen while a re-rank is
+    // in flight, rather than flashing skeletons — would delete the unmount and silently
+    // reintroduce a cross-run leak. This pins the behaviour that must survive it, and `runId`
+    // makes the row own the guarantee instead of inheriting it from a conditional far away.
+    const { keyPaperCalls } = stubWithKeyPaper({
+      contributions: [{ term: "Immuno-oncology", rank: 1 }],
+      searchEvidence: [searchEvidence("Immuno-oncology", 142)],
+    });
+
+    render(<SponsorMatchPanel />);
+    const paste = screen.getByLabelText(/description/i);
+    const rank = screen.getByRole("button", { name: "Rank researchers" });
+
+    fireEvent.change(paste, { target: { value: "CAR T" } });
+    fireEvent.click(rank);
+    await screen.findByText("Alice Alpha");
+    fireEvent.click(screen.getByRole("button", { name: /key papers/i }));
+    await waitFor(() => expect(keyPaperCalls()).toHaveLength(1));
+    await screen.findByText(/CAR T persistence/);
+
+    // Re-run with an edited paste. Alice returns under the SAME cwid.
+    fireEvent.change(paste, { target: { value: "CAR T and solid tumors" } });
+    fireEvent.click(rank);
+    await screen.findByText("Alice Alpha");
+    fireEvent.click(screen.getByRole("button", { name: /key papers/i }));
+
+    // The disclosure works at all (a stale one-shot fetch guard would leave it dead)…
+    await waitFor(() => expect(keyPaperCalls()).toHaveLength(2));
+    // …and it fetches clean: no pmid claimed under the PREVIOUS paste is excluded under this one.
+    expect(keyPaperCalls()[1]).not.toContain("exclude");
   });
 
   // ── Sponsor preferences (#1654) ────────────────────────────────────────────

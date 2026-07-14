@@ -48,11 +48,13 @@ import {
 import {
   conceptWeight,
   sponsorMeasuresFrom,
+  DEFAULT_K,
+  MAX_EVIDENCE_CONCEPTS,
   type SponsorCandidate,
   type SponsorConcept,
-  type SponsorContribution,
   type SponsorSearchEvidence,
 } from "@/lib/api/sponsor-match-contract";
+import { isResearchMatchEvidence } from "@/lib/api/result-evidence";
 import { searchPeople, type PeopleHit } from "@/lib/api/search";
 import { meshMatchTier } from "@/lib/search";
 import { matchQueryToTaxonomy, type MeshResolution } from "@/lib/api/search-taxonomy";
@@ -453,11 +455,11 @@ export async function rankResearchersForDescriptionSpine(
       rep,
     );
     for (const h of hits) if (!hitByCwid.has(h.cwid)) hitByCwid.set(h.cwid, h);
-    // #1689 — evidence is CONCEPT-SCOPED, so it must be stored per (concept, cwid) and chosen
-    // later, once the fusion knows which concept the candidate actually ranked best under.
+    // #1689 — evidence is CONCEPT-SCOPED, so it is stored per (concept, cwid) and read back
+    // below, once the fusion knows every concept the candidate actually ranked under.
     // `hitByCwid` above is first-wins, which is fine for display fields (a name is a name in
     // any cluster) but WRONG for evidence: it would tell an officer that a candidate matched
-    // on whichever concept happened to be retrieved first, not on the one that carried them.
+    // on whichever concept happened to be retrieved first, and say nothing about the others.
     for (const h of hits) {
       // #1689 follow-up — READ BOTH SHAPES, and prefer `evidenceLines`.
       //
@@ -473,13 +475,46 @@ export async function rankResearchersForDescriptionSpine(
       // `evidenceLines[0]` is the PRIMARY lead — the strongest reason, by the search's own
       // precedence ladder. That is the one the People card renders large, and the one the
       // officer should see here.
+      //
+      // STILL only [0], deliberately, now that #1696 keeps every CONCEPT rather than only the
+      // best one. The card gains breadth ACROSS concepts; widening depth WITHIN one at the same
+      // time would multiply the two (up to MAX_EVIDENCE_CONCEPTS × every tiered line) and bury
+      // the thing this change exists to surface. `evidenceLines[1..]` are the search's "Also
+      // matched" rows for the SAME concept query — a weaker restatement of a reason the officer
+      // already has. A second concept's primary lead is a genuinely new reason; that is the axis
+      // worth spending the card's vertical space on.
       const hitEvidence = h.evidenceLines?.[0] ?? h.evidence;
-      if (!hitEvidence) continue;
+      // TWO guards, and the first one alone is a LIE IN BOTH DEPLOYED ENVIRONMENTS.
+      //
+      // `!hitEvidence` only fires with SEARCH_RESULT_EVIDENCE off, when `searchPeople` emits
+      // NEITHER field. That flag is ON in staging and prod, and with it on the emitter cannot
+      // produce an evidence-less hit: `selectEvidenceLines` ends with
+      // `if (lines.length === 0) lines.push(selectEvidence(input))`, and `selectEvidence`
+      // terminates in `return { kind: "none" }`. So every (concept, cwid) pair in the fan-out
+      // comes back carrying SOMETHING — including the pairs that matched on nothing.
+      //
+      // `isResearchMatchEvidence` is the guard that actually fires. An UNRESOLVED cluster (no MeSH
+      // descriptor ⇒ no tagged count ⇒ no first-class reason) falls down the ladder to the
+      // identity tail — `areas` / `concepts` / `none` — which answers "who is this person",
+      // not "why did they match this concept". Shipping that as a block captioned with the
+      // sponsor's concept renders the scholar's SELF-REPORTED research areas as evidence FOR a
+      // concept nothing connected them to. Most scholars have `areasOfInterest`, so that was
+      // the COMMON case, not the corner one: a fabricated relevance claim, up to
+      // MAX_EVIDENCE_CONCEPTS times per card, on the surface an officer picks names off.
+      //
+      // Absent ≠ none: a concept with no MATCH evidence contributes no entry at all, and the
+      // candidate's `searchEvidence` stays absent if none of them did. We render nothing rather
+      // than guess.
+      if (!hitEvidence || !isResearchMatchEvidence(hitEvidence)) continue;
       evidenceByTermCwid.set(evidenceKey(term, h.cwid), {
+        // The join key back to `contributions[].term` / `concepts[].term` — the cluster's
+        // representative, the same string that keys the ranking and the wire concept.
+        term,
         evidence: hitEvidence,
         pubCount: h.pubCount,
         // What the lazy key-paper fetch needs to find this candidate's papers FOR THIS
-        // CONCEPT — the same three inputs the public People card passes.
+        // CONCEPT — the same three inputs the public People card passes. Per-concept, which is
+        // what lets each of a card's blocks reveal papers about ITS OWN concept.
         keyPaper: {
           descriptorUis: cluster.descendantUis,
           contentQuery: cluster.members.join(" "),
@@ -537,20 +572,69 @@ export async function rankResearchersForDescriptionSpine(
   // to the search's own `<EvidenceLine>`, so the two surfaces cannot drift into telling an
   // officer two different stories about why one scholar matched.
   //
-  // CHOSEN BY BEST RANK, not by which cluster happened to retrieve them first. A candidate the
-  // fusion lifted for their #2 finish on "cardiac fibrosis" must not be captioned with their
-  // #97 finish on a peripheral concept — the caption would be true and useless. `contributions`
-  // already carries every (concept, rank) pair, so the best one is a min, not a new query.
-  //
   // `measures` stays absent for a cwid with no Scholar row rather than defaulting to a bucket;
   // `searchEvidence` likewise stays ABSENT when no cluster produced evidence for the candidate
   // (a cluster with no resolved MeSH descriptor cannot yield a tagged count). Absent ≠ none.
+  // The wire concepts, by their join key — so the cap below can weigh a contribution the same
+  // way every consumer of the payload weighs it.
+  const conceptByTerm = new Map(concepts.map((c) => [c.term, c]));
+
   const candidates: SponsorCandidate[] = fused.map((f) => {
     const hit = hitByCwid.get(f.cwid);
-    const best = f.contributions.reduce<SponsorContribution | null>(
-      (b, c) => (b == null || c.rank < b.rank ? c : b),
-      null,
-    );
+
+    // #1696 — evidence for EVERY concept the candidate ranked under, not just their best one.
+    //
+    // IT COSTS NOTHING, AND THAT IS THE POINT. Every entry read here was already retrieved by
+    // the per-concept fan-out above and was then thrown away: the old code looked up the single
+    // best-ranked concept and dropped the others on the floor. This is a Map read per
+    // contribution, and no OpenSearch traffic whatsoever. That distinction is load-bearing on
+    // this route: the fan-out (MAX_TERMS × MAX_PAGES sequential `searchPeople` calls) is
+    // EXACTLY the budget the OpenSearch parent circuit breaker polices, and it is why
+    // `skipFacetAggs` and the 12→8 MAX_TERMS cut exist. A richer card that spent more of that
+    // budget would be a bad trade; this one spends none of it.
+    //
+    // ORDERED AND CAPPED BY STRENGTH — `conceptWeight(concept) / (DEFAULT_K + rank)`, the exact
+    // term the fusion sums for this (candidate, concept) pair, and the exact quantity
+    // `matchedConcepts` ranks the card's chips by. NOT by raw rank, which is what the first cut
+    // of this did and which inverts the cap in the common case:
+    //
+    //   γ=3 means centrality DOMINATES rank, and the anti-correlation runs the wrong way. A
+    //   sponsor's PRIMARY concept is its broadest, most competitive query, so a specialist
+    //   ranks WORSE on it than on some narrow peripheral mechanism. With the real constants
+    //   (K=30, aligned 1.25, off-target 0.8):
+    //
+    //     target    (centrality 1.0, aligned)     weight 1.25 → 1.25/(30+25) = 0.0227
+    //     mechanism (centrality 0.5, off-target)  weight 0.10 → 0.10/(30+1)  = 0.0032
+    //
+    //   A rank cap keeps the mechanism at rank 1 and DROPS the target at rank 25 — slicing off
+    //   the concept the card leads with as its first chip. The blocks would then contradict the
+    //   chips beside them, which is precisely the failure the derived-not-wired chips exist to
+    //   prevent.
+    //
+    // DEFAULT_K and default weights, because the server can only cap at the weights it knows.
+    // See `SponsorCandidate.searchEvidence` for the residual this leaves, which is real and is
+    // documented rather than papered over.
+    //
+    // ABSENT ≠ NONE, per concept and per candidate. A concept whose evidence is not MATCH
+    // evidence (the identity tail — see the `isResearchMatchEvidence` guard above) contributes NO entry,
+    // and neither does one that produced no evidence at all — never a placeholder, never a
+    // zeroed count. If none of them did, the field stays absent entirely rather than becoming
+    // `[]`. Dropping those BEFORE the slice is load-bearing, not incidental: a cap applied first
+    // would spend its three slots on concepts that ship nothing and leave the card blank while
+    // real evidence sat unused in the map. (It also repairs a narrower loss in the old best-only
+    // read, where a candidate whose best-ranked concept was an unresolved cluster shipped NO
+    // evidence at all, even though the concepts below it had some.)
+    const searchEvidence = f.contributions
+      .flatMap((c) => {
+        const concept = conceptByTerm.get(c.term);
+        const ev = evidenceByTermCwid.get(evidenceKey(c.term, f.cwid));
+        if (!concept || !ev) return [];
+        return [{ ev, strength: conceptWeight(concept) / (DEFAULT_K + c.rank) }];
+      })
+      .sort((a, b) => b.strength - a.strength)
+      .slice(0, MAX_EVIDENCE_CONCEPTS)
+      .map(({ ev }) => ev);
+
     return {
       cwid: f.cwid,
       name: hit?.preferredName ?? f.cwid,
@@ -561,9 +645,7 @@ export async function rankResearchersForDescriptionSpine(
       contributions: f.contributions,
       technologyCount: techByCwid.get(f.cwid) ?? 0,
       measures: measuresByCwid.get(f.cwid),
-      searchEvidence: best
-        ? evidenceByTermCwid.get(evidenceKey(best.term, f.cwid))
-        : undefined,
+      ...(searchEvidence.length > 0 ? { searchEvidence } : {}),
     };
   });
   return { concepts, candidates };

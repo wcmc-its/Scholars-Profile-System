@@ -29,7 +29,12 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { conceptWeight, rerankCandidates } from "@/lib/api/sponsor-match-contract";
+import {
+  conceptWeight,
+  matchedConcepts,
+  MAX_EVIDENCE_CONCEPTS,
+  rerankCandidates,
+} from "@/lib/api/sponsor-match-contract";
 
 const {
   mockTopicFindMany,
@@ -98,14 +103,45 @@ function meshRes(descriptorUi: string, descendantUis: string[]) {
   };
 }
 
-/** A `searchPeople` hit — only the display fields spine-run reads. */
-function hit(cwid: string) {
+/** The display fields every `searchPeople` hit carries, whatever the evidence flags say. */
+function displayFields(cwid: string) {
   return {
     cwid,
     slug: `s-${cwid}`,
     preferredName: `${cwid} Name`,
     primaryTitle: `T-${cwid}`,
     primaryDepartment: `Dept-${cwid}`,
+  };
+}
+
+/** Every hit carries the scholar's total pub count — the `M` in "N of M publications". */
+const PUB_COUNT = 40;
+
+/**
+ * THE DEFAULT HIT — what `searchPeople({ matchExplain: true })` ACTUALLY EMITS, which is what
+ * the spine actually reads, and which is NOT what this helper used to return.
+ *
+ * It used to be display fields and nothing else: no `pubCount`, no `evidence`, no
+ * `evidenceLines`. THE REAL EMITTER CANNOT PRODUCE THAT SHAPE with the deployed flags on, and a
+ * suite built on it was blind by construction — 7172 tests passed while the spine shipped
+ * fabricated evidence to prod.
+ *
+ * `searchPeople` with SEARCH_RESULT_EVIDENCE + SEARCH_EVIDENCE_REASON_COUNTS (both ON in staging
+ * and prod) returns `{ evidenceLines: selectEvidenceLines(evInput) }`, and `selectEvidenceLines`
+ * ENDS with `if (lines.length === 0) lines.push(selectEvidence(input))`, whose own last line is
+ * `return { kind: "none" }`. So `evidenceLines` is NEVER empty and never absent — a hit that
+ * matched nothing still comes back carrying the IDENTITY TAIL. `areas` is the realistic default
+ * (most scholars have `areasOfInterest`), so that is what this returns: a hit that ranked under
+ * the concept but has NOTHING to say about WHY.
+ *
+ * Tests that need a hit whose concept genuinely matched use `hitWithEvidenceLines`; the
+ * genuinely-evidence-less flag-off shape is `hitNoEvidence`.
+ */
+function hit(cwid: string) {
+  return {
+    ...displayFields(cwid),
+    pubCount: PUB_COUNT,
+    evidenceLines: [{ kind: "areas" as const, labels: [`Area of ${cwid}`], total: 1 }],
   };
 }
 
@@ -677,23 +713,72 @@ describe("rankResearchersForDescriptionSpine", () => {
  * staging. This factory exists so the suite tests the shape production actually sends.
  */
 function hitWithEvidenceLines(cwid: string, term: string, count: number, pubCount: number) {
-  const { evidence, ...rest } = hitWithEvidence(cwid, term, count, pubCount);
-  return { ...rest, evidenceLines: [evidence] };
+  return {
+    ...displayFields(cwid),
+    pubCount,
+    evidenceLines: [taggedEvidence(term, count, pubCount)],
+  };
 }
 
-/** The LEGACY single-object shape (emitted only with the reason-counts flag off). */
+/** The first-class `publications:tagged` reason — a real claim about the QUERY's concept, and
+ *  the thing an officer is entitled to read as "this is why they matched". */
+function taggedEvidence(term: string, count: number, pubCount: number) {
+  return {
+    kind: "publications" as const,
+    strength: "tagged" as const,
+    text: `${count} of ${pubCount} publications tagged`,
+    term,
+    count,
+  };
+}
+
+/** The LEGACY single-object shape (emitted only with the reason-counts flag off). Built from
+ *  `displayFields`, NOT from `hit()`: a hit carrying BOTH `evidenceLines` and `evidence` is a
+ *  shape no flag combination produces, and the spine prefers `evidenceLines`, so inheriting the
+ *  default hit's identity tail here would silently test the wrong branch. */
 function hitWithEvidence(cwid: string, term: string, count: number, pubCount: number) {
   return {
-    ...hit(cwid),
+    ...displayFields(cwid),
     pubCount,
-    evidence: {
-      kind: "publications" as const,
-      strength: "tagged" as const,
-      text: `${count} of ${pubCount} publications tagged`,
-      term,
-      count,
-    },
+    evidence: taggedEvidence(term, count, pubCount),
   };
+}
+
+/** A hit carrying an explicit identity-tail line — the `kind` is the parameter, because the
+ *  ladder's tail has three termini and all three must be dropped. `areas` is `hit()`'s default
+ *  (the realistic one); `none` and `concepts` fire for a scholar with no self-reported areas. */
+/**
+ * A hit whose ONLY evidence is a non-research kind — everything `isResearchMatchEvidence` denies.
+ *
+ * `affiliation` and `name` are the subtle two, and they are why the first fix of #1696 was still
+ * wrong. Both ARE query-derived — the `<mark>` is the query's own — so a predicate that asked
+ * "did the query produce this?" let them through. Neither says the person's WORK matches:
+ * `affiliation` is the org segment of `preferredName` (the group they sit in — the emitter itself
+ * ranks it "9, weak/organizational, just above empty", i.e. it fires precisely when nothing about
+ * their research matched), and `name` is their surname.
+ */
+function hitWithTailEvidence(
+  cwid: string,
+  tail: "areas" | "concepts" | "none" | "affiliation" | "name",
+) {
+  const line =
+    tail === "areas"
+      ? { kind: "areas" as const, labels: [`Area of ${cwid}`], total: 1 }
+      : tail === "concepts"
+        ? { kind: "concepts" as const, items: [{ label: "Neoplasms", ui: "D009369" }], total: 1 }
+        : tail === "affiliation"
+          ? // the org segment carries the query's mark — a GROUP name, not this person's work
+            { kind: "affiliation" as const, html: `Ann Doe - Institute for <mark>Cancer</mark> Care` }
+          : tail === "name"
+            ? { kind: "name" as const, html: `Ann <mark>Cancer</mark>ella` }
+            : { kind: "none" as const };
+  return { ...displayFields(cwid), pubCount: PUB_COUNT, evidenceLines: [line] };
+}
+
+/** The GENUINELY evidence-less hit — neither field. Only `SEARCH_RESULT_EVIDENCE` OFF produces
+ *  this, which no deployed environment does; the spine's `!hitEvidence` guard is for it alone. */
+function hitNoEvidence(cwid: string) {
+  return { ...displayFields(cwid), pubCount: PUB_COUNT };
 }
 
 describe("rankResearchersForDescriptionSpine — evidence (#1689)", () => {
@@ -725,7 +810,7 @@ describe("rankResearchersForDescriptionSpine — evidence (#1689)", () => {
     }
   });
 
-  it("carries the search's own evidence onto the candidate", async () => {
+  it("carries the search's own evidence onto the candidate, keyed to the concept it is FOR", async () => {
     mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
     mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
     mockSearchPeople.mockResolvedValue({
@@ -737,20 +822,35 @@ describe("rankResearchersForDescriptionSpine — evidence (#1689)", () => {
     const { candidates } = await rankResearchersForDescriptionSpine("cancer work");
 
     const a = candidates.find((c) => c.cwid === "a")!;
-    expect(a.searchEvidence?.evidence).toMatchObject({ kind: "publications", term: "Cancer" });
-    expect(a.searchEvidence?.pubCount).toBe(40);
+    expect(a.searchEvidence).toHaveLength(1);
+    // `term` is the JOIN KEY — it is the cluster's representative, the same string
+    // `contributions[].term` and `concepts[].term` carry, so a client can put the block under
+    // the right slider.
+    expect(a.searchEvidence?.[0].term).toBe("cancer");
+    expect(a.contributions.map((c) => c.term)).toContain("cancer");
+    expect(a.searchEvidence?.[0].evidence).toMatchObject({ kind: "publications", term: "Cancer" });
+    expect(a.searchEvidence?.[0].pubCount).toBe(40);
     // What the lazy `/api/search/key-paper` fetch needs, scoped to the matching concept.
-    expect(a.searchEvidence?.keyPaper).toEqual({
+    expect(a.searchEvidence?.[0].keyPaper).toEqual({
       descriptorUis: ["D_CANCER"],
       contentQuery: "cancer",
       conceptLabel: "D_CANCER",
     });
   });
 
-  it("takes evidence from the concept the candidate ranked BEST under, not the first one retrieved", async () => {
+  it("LEADS with the concept that carried the candidate — and still ships the other one", async () => {
     // Two concepts. "cancer" is extracted first and retrieves `a` at rank 3; "munchausen
-    // syndrome" retrieves `a` at rank 1. First-wins would caption `a` with the cancer line —
-    // true, but not why the fusion lifted them. The caption must follow the best rank.
+    // syndrome" retrieves `a` at rank 1. First-wins would LEAD `a` with the cancer line — true,
+    // but not why the fusion lifted them. The lead must follow the STRENGTH.
+    //
+    // Both come from the DICTIONARY fallback, so both carry UNIFORM_CENTRALITY and the same kind
+    // prior ⇒ identical weights. At equal weights strength `w/(K+rank)` is monotone in rank
+    // alone, so here — and ONLY here — strength ordering coincides with rank ordering. The tests
+    // above pull the two apart with real (differentiated) centralities, which is what production
+    // actually sends.
+    //
+    // #1696: and the cancer line, which was already fetched and then discarded, now ships too.
+    // The card answers "why did this scholar match?" with every reason it paid for.
     mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
     mockSubtopicFindMany.mockResolvedValue([{ label: "munchausen syndrome" }]);
     mockMatchQueryToTaxonomy.mockImplementation(async (q: string) =>
@@ -782,10 +882,254 @@ describe("rankResearchersForDescriptionSpine — evidence (#1689)", () => {
 
     const a = candidates.find((c) => c.cwid === "a")!;
     expect(a.contributions.length).toBe(2); // ranked under both
-    expect(a.searchEvidence?.evidence).toMatchObject({ term: "Munchausen" });
-    expect(a.searchEvidence?.keyPaper.descriptorUis).toEqual(["D_MUNCH"]);
+    expect(a.searchEvidence?.map((e) => e.term)).toEqual(["munchausen syndrome", "cancer"]);
+    expect(a.searchEvidence?.map((e) => e.evidence)).toMatchObject([
+      { term: "Munchausen" },
+      { term: "Cancer" },
+    ]);
+    // Each block's key-paper config is scoped to ITS OWN concept, which is what lets a block's
+    // disclosure reveal papers about that concept rather than about the paste in general.
+    expect(a.searchEvidence?.map((e) => e.keyPaper.descriptorUis)).toEqual([
+      ["D_MUNCH"],
+      ["D_CANCER"],
+    ]);
+    // The wire order is a re-ordering of the evidence ONLY. `contributions` — the re-rank inputs
+    // the client sums — must not have been sorted underneath it.
+    expect(a.contributions.map((c) => c.term)).toEqual(["cancer", "munchausen syndrome"]);
   });
 
+  it("ships one block per matched concept, ordered by STRENGTH — not by raw rank (#1696)", async () => {
+    // `a` ranks under all three concepts: #3 on alpha, #1 on beta, #2 on gamma. All three
+    // `searchPeople` calls ALREADY returned evidence for them — the fan-out is the same either
+    // way — and the old best-only read kept beta's and dropped the two it had paid for.
+    //
+    // ORDER IS BY STRENGTH, `conceptWeight(c)/(K + rank)` — the term the fusion sums, and the
+    // one `matchedConcepts` orders the chips by. With γ=3, centrality dominates rank, so the
+    // two orderings DISAGREE here and the test can tell them apart:
+    //
+    //   alpha  centrality 1.0 → weight 1.25    rank 3 → 1.25   /33 = .0379   ← strongest
+    //   beta   centrality 0.9 → weight 0.91125 rank 1 → .91125 /31 = .0294
+    //   gamma  centrality 0.8 → weight 0.64    rank 2 → .64    /32 = .0200
+    //
+    // By RANK it would be [beta, gamma, alpha] — leading the card with beta while the chips
+    // lead with alpha. The blocks would contradict the chips beside them.
+    mockExtractSponsorConcepts.mockResolvedValue([
+      { term: "alpha", kind: "concept", centrality: 1.0 },
+      { term: "beta", kind: "concept", centrality: 0.9 },
+      { term: "gamma", kind: "concept", centrality: 0.8 },
+    ]);
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) => meshRes(`D_${q}`, [`D_${q}`]));
+    const ranked: Record<string, string[]> = {
+      alpha: ["x", "y", "a"], // a at rank 3
+      beta: ["a"], // a at rank 1
+      gamma: ["z", "a"], // a at rank 2
+    };
+    mockSearchPeople.mockImplementation(async ({ q }: { q: string }) => ({
+      hits: ranked[q].map((c) => hitWithEvidenceLines(c, `T-${q}`, 5, 40)),
+      total: ranked[q].length,
+      pageSize: 20,
+    }));
+
+    const { concepts, candidates } = await rankResearchersForDescriptionSpine("alpha beta gamma");
+
+    const a = candidates.find((c) => c.cwid === "a")!;
+    expect(a.contributions).toHaveLength(3);
+    expect(a.searchEvidence?.map((e) => e.term)).toEqual(["alpha", "beta", "gamma"]);
+    expect(a.searchEvidence?.map((e) => e.evidence)).toMatchObject([
+      { term: "T-alpha" },
+      { term: "T-beta" },
+      { term: "T-gamma" },
+    ]);
+    // A rank sort would have shipped THIS instead. Naming the wrong answer explicitly is what
+    // makes the test a discriminator rather than a snapshot: a regression to `.sort(by rank)`
+    // produces exactly this list, and the assertion above rejects it.
+    const byRank = [...a.contributions].sort((x, y) => x.rank - y.rank).map((c) => c.term);
+    expect(byRank).toEqual(["beta", "gamma", "alpha"]);
+    expect(a.searchEvidence?.map((e) => e.term)).not.toEqual(byRank);
+    // THE JOIN THE CARD MAKES: the blocks lead with the same concept the CHIPS lead with,
+    // because both are ordered by the same quantity. That is the property, not the literal list.
+    expect(matchedConcepts(a, concepts).map((m) => m.concept.term)).toEqual([
+      "alpha",
+      "beta",
+      "gamma",
+    ]);
+    // The fan-out is unchanged: three concepts, one `searchPeople` page each. The widening reads
+    // a Map — it buys no extra OpenSearch traffic, which is the budget the breaker polices.
+    expect(mockSearchPeople).toHaveBeenCalledTimes(3);
+  });
+
+  it("emits NO block for a concept whose evidence is the IDENTITY TAIL — even when it is the STRONGEST", async () => {
+    // THE FABRICATION-OF-RELEVANCE GUARD, and the reason `isResearchMatchEvidence` exists.
+    //
+    // `unresolved` retrieves `a` at rank 1 and resolves to NO MeSH descriptor, so there is no
+    // tagged count and nothing first-class to say. But `searchPeople` STILL returns evidence for
+    // that hit — it always does; the ladder terminates in `{ kind: "none" }` and falls back to
+    // the scholar's self-reported `areas` when they have any, which most do. The spine's old
+    // `if (!hitEvidence) continue` guard could not fire, so the card rendered Alice's
+    // areasOfInterest under a bold caption naming a concept nothing connected her to.
+    //
+    // It is also the STRONGEST contribution here (centrality 1.0, rank 1), so this pins that the
+    // drop is by KIND, not a side effect of the cap — and that it does not take the real reason
+    // below it down with it.
+    mockExtractSponsorConcepts.mockResolvedValue([
+      { term: "unresolved", kind: "concept", centrality: 1.0 },
+      { term: "tagged", kind: "concept", centrality: 0.9 },
+    ]);
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) =>
+      q === "tagged"
+        ? meshRes("D_TAG", ["D_TAG"])
+        : { state: "none" as const, meshResolution: null },
+    );
+    mockSearchPeople.mockImplementation(async ({ q }: { q: string }) =>
+      q === "tagged"
+        ? {
+            hits: [hitWithEvidenceLines("z", "Tagged", 9, 40), hitWithEvidenceLines("a", "Tagged", 7, 40)],
+            total: 2,
+            pageSize: 20,
+          }
+        : people(["a"]), // rank 1 — and the hit carries the `areas` identity tail, as prod does
+    );
+
+    const { candidates } = await rankResearchersForDescriptionSpine("unresolved tagged");
+
+    const a = candidates.find((c) => c.cwid === "a")!;
+    // The CHIP survives — `a` really did rank under `unresolved`, and that is a fact about the
+    // retrieval. Only the claim about WHY is withheld, because there is none to make.
+    expect(a.contributions.map((c) => c.term).sort()).toEqual(["tagged", "unresolved"]);
+    expect(a.searchEvidence).toHaveLength(1);
+    expect(a.searchEvidence?.[0].term).toBe("tagged");
+    // Nothing anywhere on the wire captions a concept with the scholar's own research areas.
+    expect(a.searchEvidence?.map((e) => e.evidence.kind)).toEqual(["publications"]);
+  });
+
+  it.each(["areas", "concepts", "none", "affiliation", "name"] as const)(
+    "ships NO evidence at all when every concept's evidence is the `%s` tail",
+    async (tail) => {
+      // Every kind the ranker refuses to caption a concept with, one test each. The candidate
+      // ranked #1 and the search returned evidence — it always does — but none of it is a claim
+      // about their RESEARCH. `searchEvidence` must be ABSENT, not `[]` and certainly not a block:
+      // an officer reading a bold "Fibrosis" caption over "— no specific match for this query —",
+      // over the scholar's self-reported areas, or over the name of the institute they happen to
+      // work in, has been told something untrue.
+      //
+      // `affiliation` and `name` are the two that a "is it query-derived?" test would WAVE THROUGH,
+      // and they are exactly how the first fix of #1696 still shipped a fabrication.
+      mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
+      mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
+      mockSearchPeople.mockResolvedValue({
+        hits: [hitWithTailEvidence("a", tail)],
+        total: 1,
+        pageSize: 20,
+      });
+
+      const { candidates } = await rankResearchersForDescriptionSpine("cancer work");
+
+      const a = candidates.find((c) => c.cwid === "a")!;
+      expect(a.contributions.map((c) => c.term)).toEqual(["cancer"]); // ranked, and kept
+      expect(a.searchEvidence).toBeUndefined();
+      expect("searchEvidence" in a).toBe(false);
+    },
+  );
+
+  it("caps the card at MAX_EVIDENCE_CONCEPTS — keeping the STRONGEST concepts, not the best-RANKED", async () => {
+    // THE CAP-INVERSION GUARD. Five concepts, all with real evidence, `a` ranked 5/4/3/2/1
+    // across them — i.e. rank runs OPPOSITE to centrality, which is the realistic shape, not a
+    // contrived one: a sponsor's PRIMARY concept is its broadest, most competitive query, so a
+    // specialist places WORSE on it than on a narrow peripheral mechanism.
+    //
+    // With the real constants (γ=3, K=30, kind prior 1.25 — all five are the target kind):
+    //
+    //   term  centrality  weight = c³×1.25   rank   strength = weight/(30+rank)
+    //   c1       1.0          1.25            5        .0357   ← STRONGEST
+    //   c2       0.9           .911           4        .0268
+    //   c3       0.8           .640           3        .0194
+    //   c4       0.7           .429           2        .0134
+    //   c5       0.6           .270           1        .0087   ← weakest
+    //
+    // The cap must keep [c1, c2, c3]. A RANK cap keeps [c5, c4, c3] — the three WEAKEST — and
+    // slices off c1, the sponsor's actual target and the card's leading chip. That is not a
+    // rounding difference between two defensible orders; it is the exact inversion, and it is
+    // what the first cut of #1696 shipped.
+    const terms = ["c1", "c2", "c3", "c4", "c5"];
+    mockExtractSponsorConcepts.mockResolvedValue(
+      terms.map((term, i) => ({ term, kind: "concept" as const, centrality: 1 - i * 0.1 })),
+    );
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) => meshRes(`D_${q}`, [`D_${q}`]));
+    // `a` sits at rank (5 - i) under cN: rank 5 under c1 … rank 1 under c5.
+    mockSearchPeople.mockImplementation(async ({ q }: { q: string }) => {
+      const depth = 5 - terms.indexOf(q); // c1 → 5 hits (a last), c5 → 1 hit (a first)
+      const cwids = [...Array(depth - 1).keys()].map((n) => `pad${q}${n}`).concat("a");
+      return {
+        hits: cwids.map((c) => hitWithEvidenceLines(c, `T-${q}`, 5, 40)),
+        total: cwids.length,
+        pageSize: 20,
+      };
+    });
+
+    const { concepts, candidates } = await rankResearchersForDescriptionSpine("c1 c2 c3 c4 c5");
+
+    const a = candidates.find((c) => c.cwid === "a")!;
+    expect(a.contributions).toHaveLength(5); // every one is still a re-rank input
+    expect(MAX_EVIDENCE_CONCEPTS).toBeLessThan(a.contributions.length); // the cap really binds
+    expect(a.searchEvidence).toHaveLength(MAX_EVIDENCE_CONCEPTS);
+    expect(a.searchEvidence?.map((e) => e.term)).toEqual(["c1", "c2", "c3"]);
+
+    // Name the wrong answer, so a regression to a rank sort is REJECTED rather than merely
+    // un-asserted. These two lists are disjoint on their first two entries.
+    const byRank = [...a.contributions].sort((x, y) => x.rank - y.rank).map((c) => c.term);
+    expect(byRank.slice(0, MAX_EVIDENCE_CONCEPTS)).toEqual(["c5", "c4", "c3"]);
+    expect(a.searchEvidence?.map((e) => e.term)).not.toEqual(byRank.slice(0, MAX_EVIDENCE_CONCEPTS));
+
+    // AND THE CAP AGREES WITH THE CARD. `matchedConcepts` is what orders the chips; the blocks
+    // the server kept are the first MAX_EVIDENCE_CONCEPTS chips, in chip order. If these two
+    // ever diverge the officer sees a card whose top chip has no block under it.
+    expect(matchedConcepts(a, concepts).map((m) => m.concept.term)).toEqual([
+      "c1",
+      "c2",
+      "c3",
+      "c4",
+      "c5",
+    ]);
+  });
+
+  it("drops the evidence-less concepts BEFORE the cap — a full card, not a short one", async () => {
+    // FILTER-BEFORE-SLICE, pinned. Five concepts, `a` ranked #1 under every one of them, so
+    // strength order is just centrality order: c1 > c2 > c3 > c4 > c5. But the two STRONGEST —
+    // c1 and c2 — resolved to nothing and come back carrying the identity tail, so they ship no
+    // block.
+    //
+    // Correct: filter first, then slice ⇒ [c3, c4, c5], a FULL card of MAX_EVIDENCE_CONCEPTS.
+    // A cap-before-filter implementation slices [c1, c2, c3] first and then drops c1/c2, leaving
+    // ONE block — spending two of its three slots on concepts that had nothing to say while real
+    // evidence sat unused in the map. That mutant passes every other test in this file.
+    const terms = ["c1", "c2", "c3", "c4", "c5"];
+    mockExtractSponsorConcepts.mockResolvedValue(
+      terms.map((term, i) => ({ term, kind: "concept" as const, centrality: 1 - i * 0.1 })),
+    );
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) => meshRes(`D_${q}`, [`D_${q}`]));
+    mockSearchPeople.mockImplementation(async ({ q }: { q: string }) => ({
+      // `a` is rank 1 everywhere. c1/c2 → identity tail (no match evidence); c3/c4/c5 → tagged.
+      hits: [
+        q === "c1" || q === "c2"
+          ? hitWithTailEvidence("a", "areas")
+          : hitWithEvidenceLines("a", `T-${q}`, 5, 40),
+      ],
+      total: 1,
+      pageSize: 20,
+    }));
+
+    const { candidates } = await rankResearchersForDescriptionSpine("c1 c2 c3 c4 c5");
+
+    const a = candidates.find((c) => c.cwid === "a")!;
+    expect(a.contributions).toHaveLength(5);
+    // A FULL card. Not one block, not two.
+    expect(a.searchEvidence).toHaveLength(MAX_EVIDENCE_CONCEPTS);
+    expect(a.searchEvidence?.map((e) => e.term)).toEqual(["c3", "c4", "c5"]);
+    // And the two strongest concepts — which a cap-before-filter would have spent slots on —
+    // contribute nothing at all.
+    expect(a.searchEvidence?.map((e) => e.term)).not.toContain("c1");
+    expect(a.searchEvidence?.map((e) => e.term)).not.toContain("c2");
+  });
 
   it("reads the TIERED `evidenceLines` shape production actually emits, not just `evidence`", async () => {
     // THE REGRESSION THIS FILE EXISTS FOR. `searchPeople` emits `evidenceLines[]` whenever
@@ -802,39 +1146,58 @@ describe("rankResearchersForDescriptionSpine — evidence (#1689)", () => {
 
     const { candidates } = await rankResearchersForDescriptionSpine("cancer work");
 
-    expect(candidates[0].searchEvidence?.evidence).toMatchObject({
+    expect(candidates[0].searchEvidence?.[0].evidence).toMatchObject({
       kind: "publications",
       term: "Cancer",
       count: 12,
     });
-    expect(candidates[0].searchEvidence?.pubCount).toBe(40);
+    expect(candidates[0].searchEvidence?.[0].pubCount).toBe(40);
   });
 
-  it("takes the PRIMARY lead when several evidence lines are tiered", async () => {
+  it("takes the PRIMARY lead when several evidence lines are tiered — and only that one", async () => {
     // `evidenceLines[0]` is the strongest reason by the search's own precedence ladder — the
     // one the People card renders large. A lesser "Also matched" row must not caption the card.
+    //
+    // #1696 widened the card ACROSS concepts, deliberately NOT within one. `evidenceLines[1..]`
+    // restate the same concept's match more weakly; a second CONCEPT's lead is a new reason.
+    // One block per concept — not one per tiered line per concept.
     mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
     mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
-    const primary = hitWithEvidence("a", "Cancer", 30, 40).evidence;
-    const lesser = hitWithEvidence("a", "Something Weaker", 1, 40).evidence;
+    const primary = taggedEvidence("Cancer", 30, 40);
+    const lesser = taggedEvidence("Something Weaker", 1, 40);
     mockSearchPeople.mockResolvedValue({
-      hits: [{ ...hit("a"), pubCount: 40, evidenceLines: [primary, lesser] }],
+      hits: [{ ...displayFields("a"), pubCount: 40, evidenceLines: [primary, lesser] }],
       total: 1,
       pageSize: 20,
     });
 
     const { candidates } = await rankResearchersForDescriptionSpine("cancer work");
-    expect(candidates[0].searchEvidence?.evidence).toMatchObject({ term: "Cancer", count: 30 });
+    expect(candidates[0].searchEvidence).toHaveLength(1);
+    expect(candidates[0].searchEvidence?.[0].evidence).toMatchObject({
+      term: "Cancer",
+      count: 30,
+    });
   });
 
-  it("leaves evidence ABSENT when the hit carries none — never a zeroed count", async () => {
-    // A cluster that resolves to no MeSH descriptor cannot produce a tagged count. Absent
-    // means "not computed"; a `{ count: 0 }` would assert the scholar has no matching papers.
+  it("leaves evidence ABSENT when the hit carries NEITHER field — never a zeroed count, never an empty array", async () => {
+    // The `!hitEvidence` half of the guard, which only `SEARCH_RESULT_EVIDENCE` OFF can trigger
+    // (no deployed environment does — hence `hitNoEvidence`, a shape prod cannot emit). Absent
+    // means "not computed"; a `{ count: 0 }` would assert the scholar has no matching papers,
+    // and an empty `[]` is the same lie in list form. The field is omitted outright.
+    //
+    // The case that ACTUALLY fires in prod — a hit carrying the identity tail — is the `it.each`
+    // above. Both land here; only one of them was reachable, and the suite used to test only the
+    // unreachable one.
     mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
     mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
-    mockSearchPeople.mockResolvedValue(people(["a"])); // plain hit — no `evidence`
+    mockSearchPeople.mockResolvedValue({
+      hits: [hitNoEvidence("a")],
+      total: 1,
+      pageSize: 20,
+    });
 
     const { candidates } = await rankResearchersForDescriptionSpine("cancer work");
     expect(candidates[0].searchEvidence).toBeUndefined();
+    expect("searchEvidence" in candidates[0]).toBe(false);
   });
 });

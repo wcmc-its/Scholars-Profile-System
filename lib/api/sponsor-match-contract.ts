@@ -65,6 +65,19 @@
  * `searchEvidence` — see `SponsorSearchEvidence`. `evidence` (the bespoke shape) remains for
  * the bespoke engine. `caveat` is still absent. These stay OPTIONAL so the route never has to
  * fabricate a value to satisfy the type. Absent ≠ zero.
+ *
+ * #1696 widened `searchEvidence` from ONE evidence to one PER CONCEPT. The spine fans out a
+ * `searchPeople` call per concept and already had every result in hand; shipping only the
+ * candidate's best concept threw the rest away after paying for it. A candidate typically
+ * matches several concepts, and "why did this scholar match?" is answered badly by one of them.
+ * The widening costs ZERO additional retrieval — see the note in `sponsor-match-spine-run.ts`,
+ * where that is load-bearing.
+ *
+ * Note what "came back carrying evidence" does NOT mean, since the phrasing is a trap the first
+ * cut of #1696 fell into: `searchPeople`'s ladder ALWAYS returns something (it terminates in
+ * `{ kind: "none" }`), so "the call returned evidence" is not the same claim as "the scholar
+ * matched this concept". Only entries passing `isResearchMatchEvidence` reach the wire — see
+ * `SponsorCandidate.searchEvidence`.
  */
 import type { ResultEvidence } from "@/lib/api/result-evidence";
 import { careerStageBucket, type CareerStage } from "@/lib/career-stage";
@@ -132,6 +145,37 @@ export const CENTRALITY_GAMMA = 3;
  */
 export const TIER_STRONG = 0.66;
 export const TIER_GOOD = 0.33;
+
+/**
+ * How many concepts' worth of evidence one candidate card carries (#1696) — the top-K
+ * contributions BY STRENGTH at DEFAULT weights, strongest first.
+ *
+ * A cap is needed because the payload has no natural one: a paste decomposes into up to
+ * MAX_TERMS (8) concepts and a strong candidate can rank under all of them, so an uncapped card
+ * would stack 8 reason lines — each with its own expandable representative-papers disclosure —
+ * on each of 100 rows. That is not "more evidence", it is a wall.
+ *
+ * 3, and it is a PROPOSED value, not a measured one (like TIER_STRONG / TIER_GOOD above — say
+ * so rather than dress it up). The reasoning is the decomposition's own shape (FINDING §8.4): a
+ * sponsor's paste is ONE primary target plus supporting mechanisms, so three lines are enough
+ * to show an officer that a candidate matched the target AND that the match is not a fluke of
+ * one concept — which is the entire point of widening this. Retune it here, in one place, once
+ * officers have used the console.
+ *
+ * STRENGTH, NOT RANK, and the distinction is not academic — it inverts the cap. Strength is
+ * `conceptWeight(concept) / (K + rank)`: the term the fusion sums and the quantity
+ * `matchedConcepts` orders the chips by. With CENTRALITY_GAMMA = 3, centrality dominates rank,
+ * and rank anti-correlates with importance in exactly the wrong direction: a sponsor's PRIMARY
+ * concept is its broadest, most competitive query, so a specialist places WORSE on it than on a
+ * narrow peripheral mechanism. A rank cap therefore keeps three peripheral mechanisms and slices
+ * off the sponsor's actual target — the concept the card leads with as its first chip. Sorting by
+ * the score's own term makes the cap keep what the ranking already says matters.
+ *
+ * The cap counts BLOCKS, not contributions: concepts with no MATCH evidence are dropped BEFORE
+ * the slice (see `SponsorCandidate.searchEvidence`), so a candidate whose two strongest concepts
+ * are unresolved clusters still ships the three below them rather than a short list.
+ */
+export const MAX_EVIDENCE_CONCEPTS = 3;
 
 export type SponsorFitTier = "strong" | "good" | "weak";
 
@@ -257,18 +301,27 @@ export function sponsorMeasuresFrom(row: SponsorMeasuresRow, now: Date = new Dat
 
 /**
  * #1689 — the SAME evidence the public People card renders, carried straight through from the
- * `searchPeople` hit that retrieved this candidate.
+ * `searchPeople` hit that retrieved this candidate. ONE of these per CONCEPT the candidate
+ * matched (#1696), not one per candidate.
  *
  * Deliberately the search's own `ResultEvidence`, not a sponsor-shaped copy of it. The sponsor
  * console and the public search answer the same question — *why did this scholar match?* — and
  * two independent answers to one question is how they come to disagree. The panel renders it
  * with the search's own `<EvidenceLine>`, so there is one renderer and one selection ladder.
+ * Widening to per-concept keeps that property: it is the SAME payload, N times, not a second
+ * shape that would need a second renderer.
  *
  * `keyPaper` carries what the LAZY representative-papers fetch needs (`/api/search/key-paper`),
- * scoped to the concept this candidate actually ranked best under — so the papers a disclosure
- * reveals are papers about THAT concept, not about the paste in general.
+ * scoped to THIS concept — so the papers a disclosure reveals are papers about the concept the
+ * block is captioned with, not about the paste in general. That scoping is why the evidence has
+ * to be per-concept in the first place: `keyPaper` is meaningless without knowing which concept
+ * it belongs to.
  */
 export type SponsorSearchEvidence = {
+  /** The concept this evidence is FOR. Joins to `SponsorContribution.term` and
+   *  `SponsorConcept.term` — the same representative-term key everything else in this
+   *  contract joins on, so a caller can put a block under its slider. */
+  term: string;
   evidence: ResultEvidence;
   /** The scholar's total publication count — the `M` in "N of M publications". */
   pubCount: number;
@@ -313,10 +366,46 @@ export type SponsorCandidate = {
   technologyCount: number;
   measures?: SponsorMeasures;
   evidence?: SponsorEvidence;
-  /** #1689 — the search's own evidence for this candidate. Produced by the SPINE. Absent when
-   *  the retrieving concept resolved to no MeSH descriptor (nothing to count against), never
-   *  zeroed. */
-  searchEvidence?: SponsorSearchEvidence;
+  /**
+   * #1689/#1696 — the search's own evidence, ONE ENTRY PER CONCEPT this candidate matched.
+   * Produced by the SPINE.
+   *
+   * An ARRAY, not a `Record<term, …>`, for three reasons. It preserves ORDER, and the order is
+   * information: the spine ships the concepts STRONGEST-FIRST at default weights, so a consumer
+   * that renders the list in order leads with the strongest reason without recomputing anything.
+   * A `term` key is free text from an LLM, and JS object keys reorder integer-like strings to
+   * the front — a concept literally named "1p19q" would silently jump the queue. And the join it
+   * needs is to `contributions[]`, which is itself an array keyed by `term`; two arrays joined
+   * on the same key is simpler than one array and one map.
+   *
+   * TWO FILTERS, both applied BEFORE the `MAX_EVIDENCE_CONCEPTS` cap:
+   *   1. MATCH EVIDENCE ONLY (`isResearchMatchEvidence`). `searchPeople`'s ladder always returns
+   *      something — it terminates in `{ kind: "none" }` — so an unresolved cluster comes back
+   *      carrying the IDENTITY TAIL (`areas` / `concepts` / `none`), which answers "who is this
+   *      person", not "why did they match". Shipping that as a block captioned with a sponsor's
+   *      concept renders self-reported research areas as evidence FOR a concept nothing
+   *      connected them to. Those entries are dropped, not rendered.
+   *   2. STRENGTH CAP. The top `MAX_EVIDENCE_CONCEPTS` by `conceptWeight(c)/(K + rank)`.
+   *
+   * ABSENT — never `[]` — when nothing survives. A concept that produced no match evidence
+   * contributes NO entry; it is never padded with a zero count. Absent ≠ zero.
+   *
+   * THE RESIDUAL, stated plainly because it does not go away: the cap is applied SERVER-SIDE at
+   * DEFAULT weights, and the client re-ranks at EDITED ones. So the chips (`matchedConcepts`,
+   * derived live from `contributions`) and the blocks (`matchedEvidence`, joined to what the
+   * server shipped) CAN disagree once a candidate's contributions exceed the cap: slide a
+   * concept up from OUTSIDE the top-3-at-default and its chip will lead the card with no block
+   * beneath it, and none can be recovered client-side — the evidence was never sent.
+   *
+   * That is a real limit, not a bug to be argued away, and the invariant is the honest one:
+   *   a chip with no block means "no block was shipped for this concept" — either it had no
+   *   match evidence, or it fell below the cap at default weights — and in BOTH cases we render
+   *   NOTHING rather than guess. The card under-claims; it never fabricates.
+   * (An earlier draft of this doc claimed the two surfaces "cannot come to disagree". They can.
+   * Fixing it for real means shipping evidence for every contribution and capping in the client,
+   * which trades payload size for it; that trade has not been made.)
+   */
+  searchEvidence?: SponsorSearchEvidence[];
   /** Near-miss reason. Present ⇒ the card takes the demoted treatment + amber caveat. */
   caveat?: string;
 };
@@ -579,6 +668,42 @@ export function matchedConcepts(
       return strength > 0 ? [{ concept, strength }] : [];
     })
     .sort((a, b) => b.strength - a.strength);
+}
+
+/**
+ * The evidence blocks to render on a candidate's card (#1696) — the per-concept evidence the
+ * spine shipped, joined to the concepts the candidate ACTUALLY matched under the CURRENT
+ * weights, and in the order those concepts currently rank.
+ *
+ * Derived from `matchedConcepts` rather than from the wire order, so the blocks track the live
+ * weighting exactly as the chips do. Mute a concept and it stops being a reason this person
+ * ranked — so its chip goes, and its evidence block goes with it. A block still captioned
+ * "Fibrosis" under a slider dragged to zero would be the card contradicting the ranking beside
+ * it, which is the failure `matchedConcepts` was derived-not-wired to avoid.
+ *
+ * The blocks are therefore a SUBSET of the chips, and can be a strict one. The server decides
+ * WHICH concepts have evidence here at all: it drops the identity tail and caps at
+ * `MAX_EVIDENCE_CONCEPTS` by strength at DEFAULT weights (see `SponsorCandidate.searchEvidence`
+ * for both, and for the residual this leaves). This function only decides which of what it was
+ * SENT a given weighting still stands behind, and in what order — it cannot conjure a block the
+ * server did not ship, and does not try to.
+ *
+ * So: chip without block is EXPECTED and means "nothing was shipped for this concept" (no match
+ * evidence, or below the cap at default weights). Block without chip is impossible — a block
+ * requires a matched concept. A concept with no shipped evidence yields NO entry (absent ≠ an
+ * empty block), and a candidate with no `searchEvidence` yields []. Neither is padded.
+ */
+export function matchedEvidence(
+  candidate: SponsorCandidate,
+  concepts: readonly SponsorConcept[],
+  opts: RerankOptions = {},
+): { concept: SponsorConcept; evidence: SponsorSearchEvidence }[] {
+  if (!candidate.searchEvidence || candidate.searchEvidence.length === 0) return [];
+  const byTerm = new Map(candidate.searchEvidence.map((e) => [e.term, e]));
+  return matchedConcepts(candidate, concepts, opts).flatMap(({ concept }) => {
+    const evidence = byTerm.get(concept.term);
+    return evidence ? [{ concept, evidence }] : [];
+  });
 }
 
 /**

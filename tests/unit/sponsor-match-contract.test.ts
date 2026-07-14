@@ -16,12 +16,14 @@ import {
   fitTier,
   fusedScore,
   matchedConcepts,
+  matchedEvidence,
   rareTerms,
   rerankCandidates,
   sponsorAskFrom,
   type SponsorCandidate,
   type SponsorConcept,
   type SponsorPreference,
+  type SponsorSearchEvidence,
 } from "@/lib/api/sponsor-match-contract";
 import { rrfFuse, type TermRanking } from "@/lib/api/sponsor-match-spine";
 
@@ -188,6 +190,90 @@ describe("matchedConcepts", () => {
       { term: "zeroed", rank: 1 },
     ]);
     expect(matchedConcepts(c, concepts).map((m) => m.concept.term)).toEqual(["live"]);
+  });
+});
+
+describe("matchedEvidence (#1696)", () => {
+  /** The spine's per-concept evidence, reduced to what this join cares about. */
+  function ev(term: string): SponsorSearchEvidence {
+    return {
+      term,
+      evidence: {
+        kind: "publications",
+        strength: "tagged",
+        text: `n of m publications tagged ${term}`,
+        term,
+        count: 1,
+      },
+      pubCount: 10,
+      keyPaper: { descriptorUis: [`D_${term}`], contentQuery: term },
+    };
+  }
+
+  const THREE = [concept("target", 1, 1), concept("mech", 0.5, 1), concept("aside", 0.2, 1)];
+
+  it("renders one block per matched concept, ordered like the chips", () => {
+    const c: SponsorCandidate = {
+      ...candidate("a", [
+        { term: "aside", rank: 1 },
+        { term: "target", rank: 4 },
+        { term: "mech", rank: 2 },
+      ]),
+      // Wire order is best-rank-first, as the spine ships it.
+      searchEvidence: [ev("aside"), ev("mech"), ev("target")],
+    };
+    // …but the BLOCKS follow the live weighting, exactly as the chips do: "aside" is ranked #1
+    // and still comes last, because at centrality 0.2 it is not why this person is here.
+    expect(matchedEvidence(c, THREE).map((m) => m.concept.term)).toEqual([
+      "target",
+      "mech",
+      "aside",
+    ]);
+    expect(matchedConcepts(c, THREE).map((m) => m.concept.term)).toEqual([
+      "target",
+      "mech",
+      "aside",
+    ]);
+    // The evidence travels with its own concept — a block captioned "target" must not carry
+    // "mech"'s key-paper config, or its disclosure would reveal papers about the wrong thing.
+    expect(matchedEvidence(c, THREE)[0].evidence.keyPaper.descriptorUis).toEqual(["D_target"]);
+  });
+
+  it("emits NO block for a concept with no evidence — absent is not an empty block", () => {
+    const c: SponsorCandidate = {
+      ...candidate("a", [
+        { term: "target", rank: 1 },
+        { term: "mech", rank: 2 },
+      ]),
+      searchEvidence: [ev("target")], // "mech" produced none — no tagged count to read
+    };
+    expect(matchedEvidence(c, THREE).map((m) => m.concept.term)).toEqual(["target"]);
+    // The CHIP survives (the candidate did rank under "mech" — that is a fact about the
+    // retrieval); only the evidence BLOCK is absent. The two lists are allowed to differ in
+    // exactly this direction, and never the other.
+    expect(matchedConcepts(c, THREE).map((m) => m.concept.term)).toEqual(["target", "mech"]);
+  });
+
+  it("drops a muted concept's block along with its chip", () => {
+    // The card must not go on captioning "mech" as a reason after the officer has said the
+    // sponsor does not care about it — the block would contradict the ranking beside it.
+    const muted = [concept("target", 1, 1), concept("mech", 0, 1)];
+    const c: SponsorCandidate = {
+      ...candidate("a", [
+        { term: "target", rank: 1 },
+        { term: "mech", rank: 2 },
+      ]),
+      searchEvidence: [ev("target"), ev("mech")],
+    };
+    expect(matchedEvidence(c, muted).map((m) => m.concept.term)).toEqual(["target"]);
+  });
+
+  it("is [] for a candidate the spine gave no evidence at all", () => {
+    // Absent, not an empty block: the panel renders nothing rather than an empty disclosure,
+    // which would read as "this match has no evidence" — a claim nobody made.
+    const c = candidate("a", [{ term: "target", rank: 1 }]);
+    expect(c.searchEvidence).toBeUndefined();
+    expect(matchedEvidence(c, THREE)).toEqual([]);
   });
 });
 

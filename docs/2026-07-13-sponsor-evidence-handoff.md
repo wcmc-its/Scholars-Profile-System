@@ -21,9 +21,15 @@ real staging OpenSearch:
 - **The §3 probe below re-implements the read (`evidenceLines?.[0] ?? h.evidence`) inline, so it
   only tests the EMITTER, not the shipped consumer.** It would go green even if the spine still
   read the wrong field. To actually test the fix, drive the real entry point
-  (`rankResearchersForDescriptionSpine`) and count `candidates[].searchEvidence.evidence`. A probe
-  that re-implements the read under test is just a mock you wrote in bash — the same trap as §2b,
-  one level out.
+  (`rankResearchersForDescriptionSpine`) and count
+  `candidates.flatMap(c => c.searchEvidence ?? []).length`. A probe that re-implements the read
+  under test is just a mock you wrote in bash — the same trap as §2b, one level out.
+  **#1696 CHANGED THE SHAPE:** `searchEvidence` is now an ARRAY (one entry per matched concept),
+  so the old `candidates[].searchEvidence.evidence` is `undefined` on an array and would count
+  **0/324** — a false "the fix regressed", which is exactly the trap this section warns about.
+  Read `candidates[].searchEvidence?.[0]?.evidence` for one candidate, and the `flatMap` above for
+  a total. Note the count is now blocks, not candidates: a candidate can carry up to
+  `MAX_EVIDENCE_CONCEPTS` (3).
 - **A zero can mean "never ran".** In-VPC the ETL task role gets Bedrock **403**, so the spine falls
   back to its dictionary extractor, which matches **only taxonomy labels** (`Topic.label` +
   `Subtopic.label`). A hand-written sponsor paste extracts *nothing*, the spine short-circuits at
@@ -115,7 +121,14 @@ staging OpenSearch. Bedrock is unreachable from the ETL role, so concepts are su
 **Note what this does and does not prove:** it exercises the EMITTER (`searchPeople`), and it
 re-reads `evidenceLines?.[0] ?? h.evidence` inline — so it passes even if the shipped consumer reads
 the wrong field. To test the fix itself, drive `rankResearchersForDescriptionSpine` and count
-`candidates[].searchEvidence.evidence` (see §0).
+`candidates.flatMap(c => c.searchEvidence ?? []).length` (see §0).
+
+**#1696 changed the shape** — `searchEvidence` is an ARRAY now (one entry per matched concept, capped
+at `MAX_EVIDENCE_CONCEPTS`), so `candidates[].searchEvidence.evidence` reads `undefined` off an array
+and reports 0/324. Use `candidates[].searchEvidence?.[0]?.evidence` for a single candidate.
+And expect the total to be LOWER than "one per candidate that has any": #1696 also drops the
+identity-tail evidence (`areas` / `concepts` / `none`) that the ladder returns when nothing actually
+matched, so a candidate retrieved only by an unresolved cluster now correctly carries none.
 
 The script is in the session scratchpad; recreate it as `probe.sh`:
 
