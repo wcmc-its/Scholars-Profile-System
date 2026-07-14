@@ -23,6 +23,7 @@ import {
   getHomeMethodCategories,
 } from "@/lib/api/home";
 import { SpotlightSection } from "@/components/home/spotlight-section";
+import { selectSpotlightsForRender } from "@/lib/spotlight-sampling";
 import { PublicationModalProvider } from "@/components/publication/publication-modal";
 import { BrowseAllResearchAreasGrid } from "@/components/home/browse-all-research-areas-grid";
 import { BrowseByMethodSection } from "@/components/home/browse-by-method-section";
@@ -149,6 +150,11 @@ async function HomeStatsStrip() {
 async function HomeSpotlights() {
   const spotlights = await getSpotlights().catch(() => null);
   if (!spotlights) return null;
+  // #1709 — draw the 8 displayed spotlights (and the starting card) HERE, not in
+  // a client useEffect. Re-picking after mount threw away this very render and
+  // rebuilt the section, which read as the Spotlight being slow to appear. The
+  // draw re-rolls on each ISR regeneration; see selectSpotlightsForRender.
+  const { display, startIdx } = selectSpotlightsForRender(spotlights);
   // Home lives outside the (public) route group, so the modal provider mounted
   // in app/(public)/layout.tsx is not in scope. Wrap just the spotlight — the
   // only home surface with pub-title triggers — so its representative-paper
@@ -156,7 +162,7 @@ async function HomeSpotlights() {
   // so scope here is purely about context availability.
   return (
     <PublicationModalProvider>
-      <SpotlightSection items={spotlights} />
+      <SpotlightSection items={display} startIdx={startIdx} />
     </PublicationModalProvider>
   );
 }

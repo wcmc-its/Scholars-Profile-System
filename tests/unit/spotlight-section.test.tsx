@@ -42,8 +42,9 @@ const card: SpotlightCard = {
 };
 
 function renderHome() {
-  // Single card → SpotlightSection's on-mount randomSample is deterministic
-  // (one item, activeIdx 0), so the paper row always renders.
+  // The draw now happens on the server (#1709); the component renders exactly
+  // the `items` it is handed, starting at `startIdx` (default 0). One card in →
+  // that card is active, so the paper row always renders.
   return render(
     <PublicationModalProvider>
       <SpotlightSection items={[card]} />

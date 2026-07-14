@@ -204,8 +204,8 @@ export function hasNearDuplicateCardPair(
  * final draw is accepted unconditionally, so the work is bounded when the pool
  * is small or genuinely dup-dense.
  *
- * `shuffle` is injected — the home component passes an unseeded Math.random
- * shuffle so the selection re-rotates per page load; passing a seeded shuffle
+ * `shuffle` is injected — the home page passes the unseeded `shuffle` below, so
+ * the selection re-rotates on each ISR regeneration; passing a seeded shuffle
  * makes the guard deterministically testable.
  */
 export function sampleDistinctCards<T extends PaperedCard>(
@@ -219,4 +219,49 @@ export function sampleDistinctCards<T extends PaperedCard>(
     if (!hasNearDuplicateCardPair(draw)) break;
   }
   return draw;
+}
+
+// ---------------------------------------------------------------------------
+// Server-side render selection (#1709)
+// ---------------------------------------------------------------------------
+
+/** Spotlights the home section displays, out of the ~25 the artifact ships. */
+export const DISPLAY_LIMIT_SPOTLIGHTS = 8;
+
+/** Unseeded Fisher–Yates. Lives here rather than in the client component
+ *  because the draw now happens on the server (#1709). */
+export function shuffle<T>(arr: readonly T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/**
+ * Pick the spotlights the home page renders, and which one starts active.
+ *
+ * #1709 — this used to run in a `useEffect` on the client, which meant the
+ * server-rendered section was discarded and rebuilt the moment hydration landed:
+ * the left pane remounted (replaying its fade-in) and ~12 in-flight author
+ * headshots were dropped for a fresh wave. That rebuild — not a slow query — was
+ * the "Spotlight takes a beat to render" report. Deciding here bakes the choice
+ * into the HTML, so what the server paints is final.
+ *
+ * ponytail: `Math.random()` at render is deliberate. The home route is ISR
+ * (`revalidate = 7200`), so the draw re-rolls on each regeneration (~2h) and on
+ * each weekly ETL publish, and the carousel still auto-advances every 10s within
+ * a visit. Ceiling: two reloads inside the same ISR window see the same 8 cards.
+ * Upgrade path if per-load variety is ever wanted back: make this boundary
+ * dynamic (`connection()`), which costs a per-request origin render.
+ */
+export function selectSpotlightsForRender<T extends PaperedCard>(
+  spotlights: readonly T[],
+): { display: T[]; startIdx: number } {
+  const display = sampleDistinctCards(spotlights, DISPLAY_LIMIT_SPOTLIGHTS, shuffle);
+  return {
+    display,
+    startIdx: display.length > 0 ? Math.floor(Math.random() * display.length) : 0,
+  };
 }

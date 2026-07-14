@@ -36,68 +36,42 @@ import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { sanitizePubmedHtml } from "@/lib/utils";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { profilePath } from "@/lib/profile-url";
-import { sampleDistinctCards } from "@/lib/spotlight-sampling";
 import type { SpotlightAuthor, SpotlightCard } from "@/lib/api/home";
 
 const AUTO_ADVANCE_MS = 10_000;
 const AUTHOR_DISPLAY_CAP = 4;
-const DISPLAY_LIMIT_SPOTLIGHTS = 8; // surface 8 of however many DAL returned
-
-function shuffle<T>(arr: readonly T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
 
 /**
- * Stable, deterministic SSR slice — first DISPLAY_LIMIT_SPOTLIGHTS spotlights.
- * Papers within each spotlight arrive already seeded-sampled to 3 from
- * `getSpotlights()` (#286), so this slices only at the spotlight level.
- * Picked at server render to avoid a hydration mismatch; replaced on mount with
- * `randomSample`, which is where the near-duplicate-card guard runs.
+ * `items` is already the final draw — which spotlights to show, and which one
+ * starts active, are decided on the server (`selectSpotlightsForRender`, #1709).
+ * This component no longer re-picks on mount: doing so discarded the whole
+ * server-rendered section at hydration, remounting the left pane and re-firing
+ * its author-headshot loads, which is what made the Spotlight look slow to
+ * render. The only thing that moves after mount is the auto-advance.
  */
-function ssrSlice(items: SpotlightCard[]): SpotlightCard[] {
-  return items.slice(0, DISPLAY_LIMIT_SPOTLIGHTS);
-}
-
-/**
- * Per-page-load selection of DISPLAY_LIMIT_SPOTLIGHTS spotlights. The artifact
- * now ships up to ~25 cards (ReciterAI 25-card bump), so this shuffles the full
- * set and draws 8, re-rolling when two drawn cards are paper-level
- * near-duplicates — a single page never shows the same work under two
- * near-identical topics (see `lib/spotlight-sampling.ts`). Runs only after
- * mount (SSR uses the deterministic `ssrSlice`), so the unseeded shuffle is safe.
- */
-function randomSample(items: SpotlightCard[]): SpotlightCard[] {
-  return sampleDistinctCards(items, DISPLAY_LIMIT_SPOTLIGHTS, shuffle);
-}
-
-export function SpotlightSection({ items }: { items: SpotlightCard[] }) {
-  // Stable SSR slice on first paint; randomSample takes over after mount so
-  // each pageload sees a fresh selection of spotlights. Papers within each
-  // spotlight are seeded-sampled server-side per publish cycle (#286).
-  const [display, setDisplay] = useState<SpotlightCard[]>(() => ssrSlice(items));
-  const [activeIdx, setActiveIdx] = useState(0);
+export function SpotlightSection({
+  items,
+  startIdx = 0,
+}: {
+  items: SpotlightCard[];
+  startIdx?: number;
+}) {
+  const [activeIdx, setActiveIdx] = useState(startIdx);
   const [paused, setPaused] = useState(false);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
 
   useEffect(() => {
     if (items.length === 0) return;
-    const sample = randomSample(items);
-    setDisplay(sample);
-    setActiveIdx(Math.floor(Math.random() * sample.length));
     const interval = setInterval(() => {
       if (pausedRef.current) return;
-      setActiveIdx((i) => (i + 1) % sample.length);
+      setActiveIdx((i) => (i + 1) % items.length);
     }, AUTO_ADVANCE_MS);
     return () => clearInterval(interval);
   }, [items]);
 
-  if (display.length === 0) return null;
+  if (items.length === 0) return null;
+  const display = items;
   const active = display[activeIdx] ?? display[0];
 
   return (
