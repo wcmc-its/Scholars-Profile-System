@@ -45,12 +45,26 @@ export function TechnologiesInfoButton() {
           // 24px Inter inks 18.4px above the baseline and 5.2px below it (the g/y
           // descenders), so the word's optical centre is (18.4-5.2)/2 = 6.6px above
           // the baseline. `self-center` in this `items-baseline` row leaves the icon
-          // at 8.4px — 1.8px high. Hence 2px. Every heading using this pattern has a
-          // descender (technoloGies / MentorinG / relationshiPs), so one value fits.
+          // at 8.4px — 1.8px high. Hence 2px.
           //
-          // ponytail: a fixed nudge, not a measured one. Tied to the 24px headingLg
-          // row; this trigger renders in no other context. Re-derive if the heading
-          // size or typeface changes.
+          // ⚠ THE NUDGE IS NOT A CONSTANT — IT DEPENDS ON THE HEADING'S DESCENDER.
+          // A word with a descender inks BELOW the baseline, which pulls its optical
+          // centre down to ~6.6px and needs the 2px. A word WITHOUT one inks almost
+          // entirely above the baseline (centre ~9.1px) and needs NO nudge — 2px would
+          // drag the icon ~2.6px below the word. This comment used to claim "every
+          // heading has a descender, so one value fits"; then Clinical trials (no
+          // g/j/p/q/y) got a button in #1730, inherited the 2px, and shipped visibly
+          // low to prod. Do not copy this class without checking the heading.
+          //
+          //   descender    (technoloGies / MentorinG / relationshiPs) → translate-y-[2px]
+          //   no descender (Clinical trials)                          → no nudge
+          //
+          // ponytail: a fixed nudge, not a measured one — the alternative is measuring
+          // font metrics at runtime, which is far more machinery than a 2px class.
+          // Tied to the 24px headingLg row. Re-derive if the heading size or typeface
+          // changes: `ctx.measureText(word)` → (actualBoundingBoxAscent -
+          // actualBoundingBoxDescent) / 2 is the target; jsdom cannot check this, so
+          // verify in a real browser.
           className="inline-flex h-5 w-5 translate-y-[2px] items-center justify-center self-center rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-slate)]"
         >
           <HelpCircle className="size-4" aria-hidden="true" />
