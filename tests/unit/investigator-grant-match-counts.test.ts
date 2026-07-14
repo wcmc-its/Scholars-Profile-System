@@ -97,8 +97,9 @@ describe("investigatorGrantMatchCounts", () => {
     });
     expect(body.aggs.byInvestigator.aggs).toBeUndefined();
 
-    expect(out.get("aaa1111")).toEqual({ count: 3, tagged: false });
-    expect(out.get("bbb2222")).toEqual({ count: 1, tagged: false });
+    // Concept axis off ⇒ no sub-agg ⇒ nothing is tagged, so the card can only say "mention".
+    expect(out.get("aaa1111")).toEqual({ count: 3, taggedCount: 0 });
+    expect(out.get("bbb2222")).toEqual({ count: 1, taggedCount: 0 });
   });
 
   it("concept flag on: admission becomes text OR descriptor-tagged, with a per-cwid tagged sub-agg", async () => {
@@ -133,8 +134,16 @@ describe("investigatorGrantMatchCounts", () => {
       terms: { meshDescriptorUi: ["D006323", "D006324"] },
     });
 
-    expect(out.get("aaa1111")).toEqual({ count: 2, tagged: true });
-    expect(out.get("bbb2222")).toEqual({ count: 1, tagged: false });
+    // #1732 — the tagged sub-agg is returned as a COUNT, not collapsed to `> 0`.
+    // aaa1111 is the MIXED case this fixture always described and the old assertion threw
+    // away: 2 grants matched the OR, but only ONE carries the concept tag. `tagged: true`
+    // was true and useless — it let the card caption the OR total (2) as "tagged", which
+    // in prod rendered "5 of 24 grants tagged Immunoconjugates" over a single tagged grant.
+    expect(out.get("aaa1111")).toEqual({ count: 2, taggedCount: 1 });
+    expect(out.get("bbb2222")).toEqual({ count: 1, taggedCount: 0 });
+    // The partition the card renders: tagged + mention-only = the matched set.
+    const mixed = out.get("aaa1111")!;
+    expect(mixed.taggedCount + (mixed.count - mixed.taggedCount)).toBe(mixed.count);
   });
 
   it("de-dupes cwids and drops falsy ids before the agg", async () => {

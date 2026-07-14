@@ -3,7 +3,7 @@
  * gated by `evidenceRows` (server-resolved SEARCH_EVIDENCE_ROWS).
  *
  * #1412 — the row's presence + `N of M` count + tagged/mention strength are EAGER, read
- * off the hit (`grantMatchCount` / `grantMatchTagged`) which a single page-level funding
+ * off the hit (`grantMatchCount` / `grantMatchTaggedCount`) which a single page-level funding
  * agg precomputes; there is NO per-card mount fetch. The top-N grant RECORDS stay lazy —
  * `/grants` is called only when the disclosure opens (chevron for the full badge, the
  * "Also matched" umbrella for a demoted row). So:
@@ -181,7 +181,9 @@ describe("PeopleResultCard — Funding evidence row (eager count, lazy records)"
           contentQuery: "cardiac arrest",
           conceptLabel: "Heart Arrest",
         }}
-        hit={makeHit({ grantMatchCount: 2, grantMatchTagged: true, evidence: pubEvidence() })}
+        // ALL matched grants are tagged (2 of 2) — the unmixed case, whose rendering #1732
+        // deliberately leaves byte-identical.
+        hit={makeHit({ grantMatchCount: 2, grantMatchTaggedCount: 2, evidence: pubEvidence() })}
       />,
     );
     // #1381 count-first: emphasized count + muted "of 3 grants tagged" + the underlined
@@ -199,6 +201,78 @@ describe("PeopleResultCard — Funding evidence row (eager count, lazy records)"
         (c) => String(c[0]).includes("descriptorUis=D006323") && String(c[0]).includes("label=Heart"),
       ),
     ).toBe(true);
+  });
+
+  it("#1732 — a MIXED set states BOTH clauses, and they add up; the tagged count NEVER captions the OR total", async () => {
+    // THE BUG THIS REPLACES, reproduced from prod. The funding query is an OR — literal
+    // text OR concept tag — so `grantMatchCount` counts BOTH kinds. The card captioned
+    // that OR total "tagged <Concept>" whenever ANY grant carried the tag, and rendered:
+    //
+    //     "5 of 24 grants tagged Immunoconjugates"     <- for ONE tagged grant
+    //
+    // The other four were text mentions, and the two ranked ABOVE the tagged one were
+    // PROSTATE cancer awards. A false count, on the public People card.
+    //
+    // 5 matched, 1 tagged ⇒ the line must lead with 1, and account for the other 4.
+    mockFetch({ grants: [] });
+    render(
+      <PeopleResultCard
+        {...base}
+        q="antibody-drug conjugate"
+        evidenceRows
+        keyPaperConfig={{
+          descriptorUis: ["D018796"],
+          contentQuery: "antibody-drug conjugate",
+          conceptLabel: "Immunoconjugates",
+        }}
+        hit={makeHit({
+          grantMatchCount: 5,
+          grantMatchTaggedCount: 1,
+          grantCount: 24,
+          evidence: pubEvidence(),
+        })}
+      />,
+    );
+    const text = document.body.textContent ?? "";
+
+    // The lead number is the TAGGED count, under the "tagged" relation.
+    expect(text).toMatch(/1 of 24 grants tagged/);
+    // The remainder is stated, not silently dropped.
+    expect(text).toMatch(/4 mention/);
+    // And the false claim is gone: the OR total is never captioned "tagged".
+    expect(text).not.toMatch(/5 of 24 grants tagged/);
+
+    // The clauses PARTITION the matched set: 1 tagged + 4 mention-only = 5 matched.
+    const tagged = Number(text.match(/(\d+) of 24 grants tagged/)![1]);
+    const mention = Number(text.match(/(\d+) mention/)![1]);
+    expect(tagged + mention).toBe(5);
+  });
+
+  it("#1732 — an all-mention set is unchanged: no tagged clause, the OR total leads", async () => {
+    mockFetch({ grants: [] });
+    render(
+      <PeopleResultCard
+        {...base}
+        q="antibody-drug conjugate"
+        evidenceRows
+        keyPaperConfig={{
+          descriptorUis: ["D018796"],
+          contentQuery: "antibody-drug conjugate",
+          conceptLabel: "Immunoconjugates",
+        }}
+        hit={makeHit({
+          grantMatchCount: 5,
+          grantMatchTaggedCount: 0,
+          grantCount: 24,
+          evidence: pubEvidence(),
+        })}
+      />,
+    );
+    const text = document.body.textContent ?? "";
+    expect(text).toMatch(/5 of 24 grants mention/);
+    // Nothing is claimed as tagged, and no orphan "N mention" clause is appended.
+    expect(text).not.toMatch(/grants tagged/);
+    expect(text).not.toMatch(/· \d+ mention/);
   });
 
   it("hides the Funding row entirely when no grant matched (no grantMatchCount, no fetch)", async () => {

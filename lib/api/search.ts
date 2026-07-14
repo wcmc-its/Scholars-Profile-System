@@ -257,9 +257,21 @@ export type PeopleHit = {
    *  gates the card's Funding evidence row + supplies its `N of M` summary. The top-N
    *  records stay lazy (fetched from `/grants` on expand). Absent ⇒ no Funding row. */
   grantMatchCount?: number;
-  /** #1412 — the matched grants were admitted by the concept axis (drives the
-   *  "tagged <Concept>" vs "mention" label). Only meaningful with `grantMatchCount`. */
-  grantMatchTagged?: boolean;
+  /** #1732 — HOW MANY of `grantMatchCount` were admitted by the CONCEPT axis (tagged with
+   *  the resolved descriptor) rather than by a literal text hit. Only meaningful with
+   *  `grantMatchCount`, and `0` whenever the concept axis is off or nothing resolved.
+   *
+   *  A COUNT, not a boolean, and deliberately so. The funding query is an OR — text OR
+   *  concept — so `grantMatchCount` alone can never caption "tagged <Concept>": it counts
+   *  grants that merely mention the query. This field's predecessor was
+   *  `grantMatchTagged: boolean` (`taggedCount > 0`), and the card captioned the OR total
+   *  with it, rendering "5 of 24 grants tagged Immunoconjugates" for a scholar with ONE
+   *  tagged grant — the other four were text mentions, and two PROSTATE awards outranked
+   *  the tagged one. See #1732.
+   *
+   *  `grantMatchTaggedCount` and `grantMatchCount - grantMatchTaggedCount` PARTITION the
+   *  matched set (tagged vs mention-only). The card renders both clauses, and they add up. */
+  grantMatchTaggedCount?: number;
   identityImageEndpoint: string;
   /** Highlight fragments from the scholar's self-reported fields
    *  (`preferredName` / `areasOfInterest` / `overview`). The card renders the
@@ -3281,7 +3293,7 @@ export async function searchPeople(opts: {
                 }
               : null,
         })
-      : new Map<string, { count: number; tagged: boolean }>();
+      : new Map<string, { count: number; taggedCount: number }>();
 
   return {
     hits: r.hits.hits.map((h) => {
@@ -3323,7 +3335,7 @@ export async function searchPeople(opts: {
         ...(() => {
           const gm = grantMatchByCwid.get(h._source.cwid);
           return gm && gm.count > 0
-            ? { grantMatchCount: gm.count, grantMatchTagged: gm.tagged }
+            ? { grantMatchCount: gm.count, grantMatchTaggedCount: gm.taggedCount }
             : {};
         })(),
         identityImageEndpoint: identityImageEndpoint(h._source.cwid),

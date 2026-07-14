@@ -155,14 +155,21 @@ export function PeopleResultCard({
   const alsoPanelId = useId();
 
   // Funding evidence row (SEARCH_EVIDENCE_ROWS) — a scholar's TOPIC-matching grants.
-  // #1412 — count + strength are EAGER, precomputed once per page by a single funding
-  // agg (`grantMatchCount`/`grantMatchTagged` on the hit) that replaced the old per-card
+  // #1412 — counts are EAGER, precomputed once per page by a single funding agg
+  // (`grantMatchCount`/`grantMatchTaggedCount` on the hit) that replaced the old per-card
   // /grants fan-out. The row is presence-gated (hide-when-empty, §4.1/§5) on the eager
-  // count, so it renders immediately with no mount fetch. The strength is "tagged"
-  // (concept axis) vs "mention" (literal text); absent ⇒ "mention", so the flag-off /
-  // text-only payload reads exactly as before.
+  // count, so it renders immediately with no mount fetch.
+  //
+  // #1732 — THE MATCHED SET IS MIXED, AND THE LINE MUST SAY SO. The funding query is an
+  // OR (literal text OR concept tag), so `grantsTotal` counts both kinds. It therefore
+  // cannot be captioned "tagged <Concept>" — that claims a tag for grants that merely
+  // mention the query. This previously rendered "5 of 24 grants tagged Immunoconjugates"
+  // for a scholar with ONE tagged grant, two PROSTATE awards outranking it.
+  //
+  // These two PARTITION `grantsTotal` and are rendered as separate clauses that add up.
   const grantsTotal = hit.grantMatchCount ?? 0;
-  const grantsStrength: "tagged" | "mention" = hit.grantMatchTagged ? "tagged" : "mention";
+  const grantsTagged = hit.grantMatchTaggedCount ?? 0;
+  const grantsMentionOnly = Math.max(0, grantsTotal - grantsTagged);
   const hasFunding = grantsTotal > 0;
   // The top-N record LIST stays lazy — fetched from /grants only when the disclosure
   // opens (see the records effect below), so a page of grant-heavy PIs fires 0 grant
@@ -365,12 +372,21 @@ export function PeopleResultCard({
   // concept-tagged grants read "tagged <Concept>" (underlined term); a literal text
   // match reads "mention '<query>'" (the honesty note). The dot is always FILLED green
   // (Part C); strength is carried by the muted/italic text, not the dot fill.
-  const fundingTagged = grantsStrength === "tagged" && grantConceptLabel.length > 0;
+  const fundingTagged = grantsTagged > 0 && grantConceptLabel.length > 0;
   // Full badge unless we're in the tiered (stacked) context and funding isn't promoted —
   // then it's a compact "Also matched" dot. The single-evidence / legacy paths (not
   // stacked) keep the full Funding row exactly as before.
   const fundingFull = promoteFunding || !stacked;
-  const fundingCount = `${Math.min(grantsTotal, hit.grantCount)} of ${hit.grantCount} grants`;
+  // #1732 — the LEAD number is whatever the lead relation actually counts: the tagged
+  // count under "tagged <Concept>", the OR total under "mention". `fundingMentionSuffix`
+  // carries the remainder, so a mixed set states both and they sum to `grantsTotal`.
+  // Both degenerate to today's exact strings when the set is all-tagged or all-mention.
+  const fundingLead = fundingTagged ? grantsTagged : grantsTotal;
+  const fundingCount = `${Math.min(fundingLead, hit.grantCount)} of ${hit.grantCount} grants`;
+  const fundingMentionSuffix =
+    fundingTagged && grantsMentionOnly > 0
+      ? `${grantsMentionOnly} mention “${qParam}”`
+      : null;
   // #1381 follow-up — a lone demoted Funding secondary is the sole "Also matched" row:
   // the umbrella toggle is its only control (no inner chevron) and the grant records
   // render as soon as the group expands, so one click reveals funding.
@@ -421,13 +437,19 @@ export function PeopleResultCard({
             panelId={fundingPanelId}
           >
             <CountFirst
-              n={Math.min(grantsTotal, hit.grantCount)}
+              n={Math.min(fundingLead, hit.grantCount)}
               m={hit.grantCount}
               thing="grants"
               relation={fundingTagged ? "tagged" : "mention"}
               entity={fundingTagged ? grantConceptLabel : `“${qParam}”`}
               underline={fundingTagged}
             />
+            {/* #1732 — the mention-only remainder. Without it the tagged count would
+                silently drop the other matched grants, and the row's number would no
+                longer account for the records the disclosure lists. */}
+            {fundingMentionSuffix ? (
+              <span className="text-[#8c8c8c]"> · {fundingMentionSuffix}</span>
+            ) : null}
           </MatchAwareReason>
         ) : (
           <LesserReason
@@ -451,6 +473,8 @@ export function PeopleResultCard({
                 <span className="font-[450] text-[#3a3a3a] underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]">
                   {grantConceptLabel}
                 </span>
+                {/* #1732 — same partition on the compact row. */}
+                {fundingMentionSuffix ? <> · {fundingMentionSuffix}</> : null}
               </>
             ) : (
               <>mentions “{qParam}”</>
