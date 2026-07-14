@@ -50,7 +50,7 @@ those sizes at on-demand `us-east-1` rates and are **directional, not invoice-ac
 | **NAT gateway** | 1 | 1 | hourly + per-GB processed | Single NAT per env (EIP-cap trade-off). VPC endpoints (Secrets Mgr, S3) keep AWS-service traffic *off* the NAT to limit per-GB charges. |
 | **ALBs** | 2 (public + internal) | 2 | LCU-hours (~$16/mo each `est.`) | Two-ALB split is a deliberate ~$16/mo cost for a clean SG boundary ([`PRODUCTION_ADDENDUM.md § Two-ALB topology`](./PRODUCTION_ADDENDUM.md)). |
 | **X-Ray (tracing)** | 5% sample + 100% errors/slow | same | per-trace recorded ($5/1M) | **< $2/mo** `est.` ([`tracing.md`](./tracing.md)). Sidecar adds ~0.25 vCPU + 256 MB/task. |
-| **Bedrock (LLM generators)** | Opus 4.8, on-demand | same | per-token (in/out) per draft | Overview + biosketch *generate* calls (`lib/edit/overview-generator.ts`, `lib/edit/biosketch-generator.ts`). Self-service, rate-limited 10/hr/scholar, **no bulk path**; outputs persisted (re-render never re-calls). ~$0.03–0.40/draft → **tens of $/mo** `est.` (see *Runtime LLM spend* below). |
+| **Bedrock (LLM callers)** | Opus 4.8 + Sonnet 4.5, on-demand | same | per-token (in/out) per call | **Three** callers: overview + biosketch *generate* (Opus, `lib/edit/overview-generator.ts`, `lib/edit/biosketch-generator.ts`) and sponsor-match concept extraction (Sonnet, `lib/api/sponsor-match-extract.ts`). The two generators are rate-limited 10/hr/scholar with **no bulk path** and persist their output; **sponsor-match is not rate-limited** (30-min result cache only). ~$0.03–0.40/draft, ~$0.01/paste → **tens of $/mo** `est.` (see *Runtime LLM spend* below). |
 | **On-call relay Lambda** | 256 MB, per-alarm | same | per-invocation | Negligible (one POST per alarm). |
 | **Secrets Manager** | ~11 secrets/env | ~11 | per-secret-month + API calls | Small, flat. |
 | **S3** | CloudFront logs (90 d), backups | logs | storage + requests | Small; access-log bucket has a 90-day lifecycle. |
@@ -68,11 +68,13 @@ compute — watch both lines together at the post-EdgeStack budget review.
 
 ## Runtime LLM (Bedrock) spend
 
-The app calls **Claude Opus 4.8 on Bedrock** for two self-service generators — the
-overview/research-summary and the NIH biosketch (`lib/edit/overview-generator.ts`,
-`lib/edit/biosketch-generator.ts`). On-demand, per-scholar, **rate-limited to 10
-generations/hour per target** with **no app-side bulk path**; drafts are persisted, so a
-re-render never re-calls the model. The app computes its own per-draft estimate
+The app calls Bedrock from **three** places, on two models.
+
+Two are the self-service generators — the overview/research-summary and the NIH biosketch
+(`lib/edit/overview-generator.ts`, `lib/edit/biosketch-generator.ts`), both on **Claude Opus
+4.8**. On-demand, per-scholar, **rate-limited to 10 generations/hour per target** (`lib/edit/
+rate-limit.ts`) with **no app-side bulk path**; drafts are persisted, so a re-render never
+re-calls the model. The app computes its own per-draft estimate
 (`lib/edit/overview-prompt-versions.ts`, surfaced to superusers) at the Opus $5/$25-per-Mtok
 rate:
 
@@ -80,9 +82,26 @@ rate:
 - **Biosketch** — faithfulness pass on → up to ~18 calls/generation → **~$0.40/draft** `est.`,
   but **prod-dark today** (staging only), so it adds **$0 to the prod bill** until it rolls out.
 
-At realistic adoption this is **tens of dollars/month** `est.` — small next to Aurora/OpenSearch,
-but it scales with *generate* volume, not page views, so a bulk backfill over the faculty would be
-a one-time spike (~$0.10 × N overviews) to plan for.
+The third is **sponsor-match concept extraction** (`lib/api/sponsor-match-extract.ts`) — one
+**Claude Sonnet 4.5** call per pasted sponsor description, at the Sonnet $3/$15-per-Mtok rate.
+`SPONSOR_MATCH_EXTRACT_MODEL` repoints it at runtime; the IAM policy scopes both the Opus 4.8
+and Sonnet 4.x families, so an intra- or cross-family repoint needs no cdk change.
+
+- **Sponsor match** — 1 call (~1.0–2.0k in / ≤1k out) → **~$0.01/paste** `est.` The ~815-token
+  system prompt dominates, so a 40-word note and a 600-word FOA cost within ~40% of each other.
+  The route caches on a sha256 of the input (30-min TTL), so a re-submitted paste costs **$0**.
+  The post-extraction fan-out is OpenSearch only — no further LLM spend.
+
+At realistic adoption this is **tens of dollars/month** `est.` — small next to Aurora/OpenSearch.
+The two generators scale with *generate* volume, not page views, so a bulk backfill over the
+faculty would be a one-time spike (~$0.10 × N overviews) to plan for.
+
+**Sponsor match is the one uncapped Bedrock path.** It is not wired to `lib/edit/rate-limit.ts`,
+so unlike the generators it has no per-user ceiling and no bulk-path block — the only brakes are
+the 30-minute result cache and the account budget alarm. The per-call price makes this a slow
+leak rather than a cliff (~100k pastes to reach $1k), but the guardrail here is the budget alarm,
+not a rate limiter. Revisit if the console is ever opened past a handful of research-development
+staff, or if a batch/scripted caller is ever put in front of it.
 
 ## Compared to VIVO (the system Scholars replaces)
 
