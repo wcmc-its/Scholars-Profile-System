@@ -19,15 +19,26 @@ if [[ "${1:-}" == "--selftest" ]]; then
   res="$(printf '["A","C","B","X"]' | jq -f "$DIR/sponsor-score.jq" \
         --argjson ideal '[{"cwid":"A","grade":3},{"cwid":"B","grade":2},{"cwid":"C","grade":1}]' \
         --argjson k 4 --arg id selftest)"
-  if jq -e '(.ndcg_at_k - 0.97212 | fabs) < 1e-4
-            and (.spearman - 0.5 | fabs) < 1e-9
-            and .coverage == 1 and .found == 3' >/dev/null <<<"$res"; then
-    echo "selftest PASS  $(jq -c '{ndcg_at_k, spearman, coverage}' <<<"$res")"
-    exit 0
-  else
-    echo "selftest FAIL: $res" >&2
+  if ! jq -e '(.ndcg_at_k - 0.97212 | fabs) < 1e-4
+              and (.spearman - 0.5 | fabs) < 1e-9
+              and .coverage == 1 and .found == 3' >/dev/null <<<"$res"; then
+    echo "selftest FAIL (scoring): $res" >&2
     exit 1
   fi
+  # An UNMEASURED fixture must not be averaged in as a zero. Two fixtures, one scored 0.5 and one
+  # the route never answered: the mean is 0.5, NOT 0.25 — and its gold pool must not be charged to
+  # coverage. This is the whole point of #1700; without it, a busy box reads as a ranking collapse.
+  agg="$(jq -f "$DIR/sponsor-summary.jq" <<<'[
+    {"id":"a","ndcg_at_k":0.5,"spearman":0.5,"found":2,"n_ideal":2},
+    {"id":"b","ndcg_at_k":null,"spearman":null,"found":0,"n_ideal":8,"unmeasured":true}
+  ]')"
+  if ! jq -e '(.mean_ndcg - 0.5 | fabs) < 1e-9 and .unmeasured == 1 and .scored == 1
+              and .found == 2 and .n_ideal == 2' >/dev/null <<<"$agg"; then
+    echo "selftest FAIL (unmeasured leaked into the aggregate): $agg" >&2
+    exit 1
+  fi
+  echo "selftest PASS  $(jq -c '{ndcg_at_k, spearman, coverage}' <<<"$res")  +unmeasured-exclusion"
+  exit 0
 fi
 
 MODE="file"
@@ -49,8 +60,12 @@ if [[ "$MODE" == "fetch" ]]; then
   # `[]` scores nDCG 0.000, and a run where the box was merely busy reads as a catastrophic
   # ranking regression. A first local baseline scored 0.161 that way — 11 of 15 fixtures had
   # simply 502'd. Never let infrastructure noise enter the scorecard as a ranking number.
+  #
+  # So the two outcomes are kept DISTINGUISHABLE, and the difference is the whole point:
+  #   []    the route answered and ranked nobody      → a legitimate nDCG of 0
+  #   null  the route never answered                  → UNMEASURED; excluded from the mean
   RETRIES="${RETRIES:-4}"
-  fetch_actual() {  # $1 = paste → JSON array of ranked cwids; ALWAYS valid JSON ([] on any failure)
+  fetch_actual() {  # $1 = paste → JSON array of ranked cwids, or `null` if unmeasurable
     local resp code body attempt
     for ((attempt = 1; attempt <= RETRIES; attempt++)); do
       # /api/edit/* enforces a same-origin guard (lib/edit/authz.ts verifyRequestOrigin):
@@ -66,19 +81,19 @@ if [[ "$MODE" == "fetch" ]]; then
       [[ "$code" == "200" ]] && break
       # 401/403 are terminal (bad cookie / CSRF) — retrying cannot help. 5xx is the breaker.
       if [[ "$code" == "401" || "$code" == "403" ]]; then
-        echo "  ⚠ HTTP $code — 401=cookie missing/stale, 403=forbidden/CSRF (terminal)" >&2
-        echo '[]'; return
+        echo "  ⚠ HTTP $code — 401=cookie missing/stale, 403=forbidden/CSRF (terminal). UNMEASURED." >&2
+        echo 'null'; return
       fi
       echo "  ⚠ HTTP $code (attempt $attempt/$RETRIES) — likely the OpenSearch parent breaker; backing off" >&2
       sleep $((attempt * 8))
     done
     if [[ "$code" != "200" ]]; then
       echo "  ⚠ GAVE UP after $RETRIES attempts (HTTP $code). This fixture is UNMEASURED, not zero." >&2
-      echo '[]'; return
+      echo 'null'; return
     fi
     if ! jq -e . >/dev/null 2>&1 <<<"$body"; then
-      echo "  ⚠ non-JSON response (first 100 chars: ${body:0:100})" >&2
-      echo '[]'; return
+      echo "  ⚠ non-JSON response (first 100 chars: ${body:0:100}). UNMEASURED." >&2
+      echo 'null'; return
     fi
     # Tolerate every ranked-list shape this route has ever returned; [] if none present.
     # `candidates` is the CURRENT one (the UI ⇄ ranker contract, `lib/api/sponsor-match-contract.ts`);
@@ -106,21 +121,37 @@ while read -r prompt; do
   if [[ "$MODE" == "fetch" ]]; then
     actual="$(fetch_actual "$(jq -r '.paste' <<<"$prompt")")"
   else
-    actual="$(jq -c --arg id "$id" '.[$id] // []' "$ACTUAL")"
+    # `null` (an unmeasured fixture, round-tripped through a FETCH_OUT run.json) must stay null.
+    # A MISSING key is different — the run simply never covered this id — and scores as [].
+    actual="$(jq -c --arg id "$id" 'if has($id) then .[$id] else [] end' "$ACTUAL")"
   fi
   [[ -z "$actual" ]] && actual='[]'
   [[ -n "${FETCH_OUT:-}" ]] && fetched="$(jq -n --argjson f "$fetched" --arg id "$id" --argjson a "$actual" '$f + {($id): $a}')"
-  s="$(jq -f "$DIR/sponsor-score.jq" --argjson ideal "$ideal" --argjson k "$K" --arg id "$id" <<<"$actual")"
-  jq -r '"── \(.id)   nDCG@\(.k)=\(if .ndcg_at_k == null then "n/a" else (.ndcg_at_k*1000|floor)/1000 end)   ρ=\(if .spearman == null then "n/a" else (.spearman*1000|floor)/1000 end)   coverage=\(.found)/\(.n_ideal)\(if (.missing|length)>0 then "   missing=\(.missing|join(","))" else "" end)"' <<<"$s"
+  if [[ "$actual" == "null" ]]; then
+    s="$(jq -n --arg id "$id" --argjson ideal "$ideal" --argjson k "$K" \
+      '{id:$id, n_ideal:($ideal|length), found:0, coverage:null, k:$k,
+        ndcg_at_k:null, spearman:null, missing:($ideal|map(.cwid)), unmeasured:true}')"
+  else
+    s="$(jq -f "$DIR/sponsor-score.jq" --argjson ideal "$ideal" --argjson k "$K" --arg id "$id" <<<"$actual")"
+  fi
+  jq -r 'if .unmeasured == true then "── \(.id)   UNMEASURED (the route never answered — not a zero)"
+         else "── \(.id)   nDCG@\(.k)=\(if .ndcg_at_k == null then "n/a" else (.ndcg_at_k*1000|floor)/1000 end)   ρ=\(if .spearman == null then "n/a" else (.spearman*1000|floor)/1000 end)   coverage=\(.found)/\(.n_ideal)\(if (.missing|length)>0 then "   missing=\(.missing|join(","))" else "" end)" end' <<<"$s"
   acc="$(jq -n --argjson a "$acc" --argjson s "$s" '$a + [$s]')"
 done < <(jq -c '.prompts[]' "$FIX")
 
+sum="$(jq -f "$DIR/sponsor-summary.jq" <<<"$acc")"
 echo
 echo "════════════════════════════════════════"
-jq -r '
-  [ .[] | select(.ndcg_at_k != null) ] as $nd
-  | [ .[] | select(.spearman != null) ] as $sp
-  | "OVERALL   meanNDCG=\(if ($nd|length)==0 then "n/a" else (([ $nd[].ndcg_at_k ]|add/($nd|length))*1000|floor)/1000 end)   meanρ=\(if ($sp|length)==0 then "n/a" else (([ $sp[].spearman ]|add/($sp|length))*1000|floor)/1000 end)   coverage=\([.[].found]|add)/\([.[].n_ideal]|add)"
-' <<<"$acc"
+jq -r '"OVERALL   meanNDCG=\(if .mean_ndcg == null then "n/a" else (.mean_ndcg*1000|floor)/1000 end)   meanρ=\(if .mean_rho == null then "n/a" else (.mean_rho*1000|floor)/1000 end)   coverage=\(.found)/\(.n_ideal)   scored=\(.scored)/\(.total)"' <<<"$sum"
 if [[ -n "${JSON_OUT:-}" ]]; then echo "$acc" > "$JSON_OUT"; echo "wrote $JSON_OUT"; fi
 if [[ -n "${FETCH_OUT:-}" ]]; then echo "$fetched" > "$FETCH_OUT"; echo "wrote $FETCH_OUT (full ranker output — reusable run.json; carries cwids, keep local)"; fi
+
+# A half-measured run is not comparable to a full one. Fail loudly so a bake-off arm cannot be
+# quietly graded against fewer fixtures than the arm it is being compared to. UNMEASURED=allow
+# to score anyway (a degraded run is still worth eyeballing).
+unmeasured="$(jq -r '.unmeasured' <<<"$sum")"
+if [[ "$unmeasured" != "0" ]]; then
+  echo "⚠ UNMEASURED=$unmeasured/$(jq -r '.total' <<<"$sum") — these fixtures were NOT ranked and are EXCLUDED from the mean above."
+  echo "  The mean is therefore over a different fixture set than a clean run. Do not compare it to one."
+  [[ "${UNMEASURED:-}" == "allow" ]] || exit 2
+fi
