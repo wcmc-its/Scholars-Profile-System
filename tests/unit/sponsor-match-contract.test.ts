@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_K,
+  conceptCoverage,
   conceptWeight,
   fitTier,
   fusedScore,
@@ -274,6 +275,87 @@ describe("matchedEvidence (#1696)", () => {
     const c = candidate("a", [{ term: "target", rank: 1 }]);
     expect(c.searchEvidence).toBeUndefined();
     expect(matchedEvidence(c, THREE)).toEqual([]);
+  });
+});
+
+describe("conceptCoverage", () => {
+  function ev(term: string): SponsorSearchEvidence {
+    return {
+      term,
+      evidence: { kind: "publications", strength: "tagged", text: "t", term, count: 1 },
+      pubCount: 10,
+      keyPaper: { descriptorUis: [`D_${term}`], contentQuery: term },
+    };
+  }
+
+  const ASK = [concept("target", 1, 1), concept("mech", 0.8, 1), concept("gap", 0.5, 1)];
+
+  it("reports the GAP — an asked concept the candidate never ranked under", () => {
+    const c: SponsorCandidate = {
+      ...candidate("a", [{ term: "target", rank: 1 }]),
+      searchEvidence: [ev("target")],
+    };
+    // The whole point: three concepts asked, one answered. `matchedConcepts` can only ever
+    // return the one, so nothing on the card could say the other two are missing.
+    expect(conceptCoverage(c, ASK).map((s) => [s.concept.term, s.state])).toEqual([
+      ["target", "evidence"],
+      ["mech", "none"],
+      ["gap", "none"],
+    ]);
+  });
+
+  it("distinguishes 'ranked, no block shipped' from 'no evidence' — they are NOT a ramp", () => {
+    // `mech` ranked but the spine shipped no block for it (it caps at MAX_EVIDENCE_CONCEPTS by
+    // strength at DEFAULT weights). That is reachable by dragging a slider, and it must never
+    // collapse into the same state as `gap`, which the candidate simply does not have.
+    const c: SponsorCandidate = {
+      ...candidate("a", [
+        { term: "target", rank: 1 },
+        { term: "mech", rank: 2 },
+      ]),
+      searchEvidence: [ev("target")],
+    };
+    const byTerm = new Map(conceptCoverage(c, ASK).map((s) => [s.concept.term, s.state]));
+    expect(byTerm.get("target")).toBe("evidence");
+    expect(byTerm.get("mech")).toBe("ranked");
+    expect(byTerm.get("gap")).toBe("none");
+  });
+
+  it("`evidence` means a block RENDERS — evidence for a concept never ranked under is not one", () => {
+    // Guards the strip against promising a block that `matchedEvidence` will not produce: it
+    // derives from `matchedConcepts` (contributions), so wire evidence alone is not enough.
+    const c: SponsorCandidate = {
+      ...candidate("a", [{ term: "target", rank: 1 }]),
+      searchEvidence: [ev("target"), ev("gap")],
+    };
+    expect(matchedEvidence(c, ASK).map((b) => b.concept.term)).toEqual(["target"]);
+    const byTerm = new Map(conceptCoverage(c, ASK).map((s) => [s.concept.term, s.state]));
+    expect(byTerm.get("gap")).toBe("none");
+  });
+
+  it("drops muted concepts entirely — absent, not a gap", () => {
+    // An officer who slid a concept to zero has said they do not care about it. Reporting that
+    // this person lacks it would be the card arguing with the rail.
+    const c = candidate("a", [{ term: "target", rank: 1 }]);
+    const muted = [concept("target", 1, 1), concept("gap", 0, 1)];
+    expect(conceptCoverage(c, muted).map((s) => s.concept.term)).toEqual(["target"]);
+  });
+
+  it("orders by ask weight, so the strip re-draws as the sliders move", () => {
+    const c = candidate("a", []);
+    const before = conceptCoverage(c, ASK).map((s) => s.concept.term);
+    expect(before).toEqual(["target", "mech", "gap"]);
+
+    // Slide `gap` to the top of the ask; the segment order must follow it.
+    const after = conceptCoverage(c, [ASK[0], ASK[1], concept("gap", 1, 3)]);
+    expect(after[0].concept.term).toBe("gap");
+    expect(after[0].weight).toBeCloseTo(conceptWeight(concept("gap", 1, 3)));
+  });
+
+  it("a candidate with no searchEvidence at all yields no `evidence` state", () => {
+    // `searchEvidence` is ABSENT, never []. Gate on the term's presence, not the array's.
+    const c = candidate("a", [{ term: "target", rank: 1 }]);
+    expect(conceptCoverage(c, ASK)[0]).toMatchObject({ state: "ranked" });
   });
 });
 

@@ -1,10 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { RepresentativePapers, type ExemplarFetchStatus } from "@/components/search/match-reason";
 import { ResultEvidence } from "@/components/search/result-evidence";
 import { profilePath } from "@/lib/profile-url";
-import type { EvidencePub, ResultEvidence as ResultEvidenceT } from "@/lib/api/result-evidence";
+import type {
+  EvidenceGrant,
+  EvidencePub,
+  ResultEvidence as ResultEvidenceT,
+} from "@/lib/api/result-evidence";
 import type { KeyPaperConfig } from "@/components/search/people-result-card";
 
 /**
@@ -24,6 +29,175 @@ import type { KeyPaperConfig } from "@/components/search/people-result-card";
  * resolve, not on click. Accepted; users open one disclosure at a time. Upgrade
  * path if it ever matters: claim optimistically by reserving the line's slot.
  */
+/**
+ * The match, as one plain sentence — no kind word, no dot, no chevron.
+ *
+ * `ResultEvidence` renders this same fact with a fixed-width KIND column ("Concept", "Method", …),
+ * which earns its place on the public People card, where the kind is the only thing distinguishing
+ * one row from the next. On a sponsor card the caption directly above already names the concept, so
+ * the kind word is a label on a labelled thing. Reusing the component here was the lazy call and
+ * the wrong one.
+ *
+ * For `publications`, `text` is deliberately only the PREFIX ("3 of 301 publications tagged") and
+ * `term` is the descriptor it was tagged with — which is often not the sponsor's word for it, and
+ * is exactly the fact worth surfacing.
+ */
+function evidenceSummary(evidence: ResultEvidenceT, pubCount: number): string {
+  switch (evidence.kind) {
+    case "publications": {
+      const term = evidence.term ? ` ${evidence.term}` : "";
+      const desc = evidence.descendantTerms?.length
+        ? ` (matched ${evidence.descendantTerms.join(", ")})`
+        : "";
+      return `${evidence.text}${term}${desc}`;
+    }
+    case "method":
+      return `${evidence.count ?? 0} of ${pubCount} publications used ${evidence.family}`;
+    case "topic":
+      return `${evidence.count ?? 0} of ${pubCount} publications in ${evidence.label}`;
+    case "clinical":
+      return evidence.boardCertified
+        ? `Board certified in ${evidence.specialty}`
+        : `Clinical specialty: ${evidence.specialty}`;
+    // Identity kinds are filtered out server-side and cannot reach a sponsor card.
+    default:
+      return "";
+  }
+}
+
+function GrantRow({ grant }: { grant: EvidenceGrant }) {
+  const period = grant.isActive
+    ? grant.endYear
+      ? `active to ${grant.endYear}`
+      : "active"
+    : [grant.startYear, grant.endYear].filter(Boolean).join("–");
+  const meta = [grant.projectId, period, grant.sponsor].filter(Boolean).join(" · ");
+  return (
+    <div className="mt-1.5 flex gap-2.5">
+      <span className="h-fit shrink-0 rounded bg-[var(--color-accent-slate)]/10 px-1.5 py-0.5 text-[10px] tracking-[0.04em] text-[var(--color-accent-slate)]">
+        GRANT
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-foreground text-sm leading-snug">
+          <PubTitle value={grant.titleHighlight ?? grant.title} />
+        </div>
+        {meta ? (
+          <div className="text-muted-foreground mt-0.5 text-xs">
+            {/* "active to 2028" is the one fact a sponsor reads first, so it is the one that gets
+                colour. Everything else on this line is grey. */}
+            {grant.isActive ? (
+              <>
+                {grant.projectId ? `${grant.projectId} · ` : null}
+                <span className="text-[var(--apollo-green)]">{period}</span>
+                {grant.sponsor ? ` · ${grant.sponsor}` : null}
+              </>
+            ) : (
+              meta
+            )}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The artifact on the card face: a titled paper with its venue and year, badged by kind.
+ *
+ * Renders NOTHING until a paper resolves — no skeleton, no "loading…" row. The count line beneath
+ * already states what was matched, so an empty lead is a card that has not finished rather than a
+ * card that is broken, and a spinner per concept per card would be the noisiest thing on the page.
+ *
+ * `+N more pubs (2023, 2021)` names the years of the papers it can ACTUALLY show — the fetch caps
+ * at 3 — and never the scholar's full tagged count. The card's count line says "15 of 347
+ * publications tagged"; if this button also said "+14 more" it would be promising 14 papers the
+ * response does not contain and the click could not produce. It offers the two it has.
+ */
+function ArtifactLead({
+  papers,
+  grants,
+  summary,
+  expanded,
+  onToggle,
+  panelId,
+}: {
+  papers: EvidencePub[];
+  grants: EvidenceGrant[];
+  summary: string;
+  expanded: boolean;
+  onToggle: () => void;
+  panelId: string;
+}) {
+  // Grants lead. A funded award is the strongest thing a sponsor can be told about a concept, and
+  // it is the one artifact that carries a FORWARD date — a paper says what someone did, an active
+  // R01 says what they are doing.
+  const [leadPub, ...restPubs] = papers;
+  const hasArtifact = grants.length > 0 || papers.length > 0;
+  const years = restPubs.map((p) => p.year).filter((y): y is number => y != null);
+  return (
+    <div className="mt-1.5" data-slot="evidence-artifact">
+      {grants.map((g) => (
+        <GrantRow key={g.projectId} grant={g} />
+      ))}
+      {leadPub ? <ArtifactRow pub={leadPub} /> : null}
+      {expanded ? restPubs.map((p) => <ArtifactRow key={p.pmid} pub={p} />) : null}
+      {restPubs.length > 0 ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          className="text-muted-foreground mt-1 ml-[46px] text-xs underline-offset-4 hover:underline"
+        >
+          {expanded
+            ? "− collapse"
+            : `+ ${restPubs.length} more pub${restPubs.length === 1 ? "" : "s"}${
+                years.length > 0 ? ` (${years.join(", ")})` : ""
+              }`}
+        </button>
+      ) : null}
+      {/* The count, and ONLY where the spec puts it: inside the expanded detail, or standing in for
+          the artifacts when none resolved. On the face it was the thing the design brief objected
+          to — a card that answers "why did this person match?" with a statistic instead of a paper.
+          The fallback is not optional: a block whose fetch returns nothing must still say what was
+          matched, or it renders as a scholar with nothing to show. */}
+      {summary && (expanded || !hasArtifact) ? (
+        <p className="text-muted-foreground mt-1.5 text-xs">{summary}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function ArtifactRow({ pub }: { pub: EvidencePub }) {
+  return (
+    <div className="mt-1.5 flex gap-2.5">
+      {/* PUB, and only PUB. A GRANT badge needs the funding route, which is uncached and heavy
+          (one call per card), and the CONCEPT-tagged grants a sponsor ask actually wants are
+          behind a prod-off flag whose flip changes the PUBLIC People card. Separate change. */}
+      <span className="text-muted-foreground bg-muted h-fit shrink-0 rounded px-1.5 py-0.5 text-[10px] tracking-[0.04em]">
+        PUB
+      </span>
+      <div className="min-w-0 flex-1">
+        <a
+          href={`https://pubmed.ncbi.nlm.nih.gov/${pub.pmid}/`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-foreground text-sm leading-snug underline-offset-4 hover:underline"
+        >
+          <PubTitle value={pub.titleHtml ?? pub.title} />
+        </a>
+        {pub.journal || pub.year != null ? (
+          <div className="text-muted-foreground mt-0.5 text-xs">
+            {pub.journal ? <PubJournal className="not-italic" value={pub.journal} /> : null}
+            {pub.journal && pub.year != null ? " · " : null}
+            {pub.year ?? null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function EvidenceLine({
   evidence,
   cwid,
@@ -37,6 +211,9 @@ export function EvidenceLine({
   stacked,
   tier = "primary",
   defaultExpanded = false,
+  autoResolve = false,
+  artifactLead = false,
+  onResolved,
 }: {
   evidence: ResultEvidenceT;
   cwid: string;
@@ -48,6 +225,28 @@ export function EvidenceLine({
   badged: boolean;
   /** Shared across a card's stacked lines for exemplar de-dup. */
   claimedPmids: Set<string>;
+  /** Resolve the representative papers WITHOUT a click, when the caller says this line is worth
+   *  paying for (the sponsor console passes its card's in-view state). Default false ⇒ the public
+   *  People card is untouched, and the ~700 candidates nobody scrolls to still cost nothing.
+   *
+   *  This is not a new fetch path: `ensureExemplar`/`ensureKeyPaper` are already standalone and
+   *  ref-guarded, and `defaultExpanded` has kicked them outside a click since #1381. This only adds
+   *  a second reason to call them, and calling twice is a no-op. */
+  autoResolve?: boolean;
+  /** Lead with the ARTIFACT, not the count — a titled paper on the card face with its venue and
+   *  year, and the "N of M publications tagged" line demoted beneath it. The sponsor console's
+   *  design spec; the public People card leads with the count and keeps its chevron. Implies
+   *  nothing about fetching: pair it with `autoResolve`, or the lead has nothing to show. */
+  artifactLead?: boolean;
+  /** Fired once this line's lazy fetch has SETTLED (resolved or failed) and it has therefore
+   *  finished claiming its pmids. It exists to let a caller that auto-resolves several lines run
+   *  them in ORDER instead of all at once — see the sponsor panel. Without that, every line on a
+   *  card fires in the same commit, every one of them reads an empty `claimedPmids`, and the
+   *  cross-concept de-dup this whole file is built around silently stops working: the same paper
+   *  is offered as the evidence for two different concepts. On the click path this could only
+   *  happen if a user opened two collapsed lines in the same instant; under `autoResolve` it is
+   *  the DEFAULT, which is why the callback is not optional machinery. */
+  onResolved?: () => void;
   /** #1381 follow-up — mount this line already expanded (and kick its lazy fetch on
    *  mount), so a LONE "Also matched" secondary reveals its records in one click on
    *  the umbrella toggle rather than two. Default false ⇒ unchanged. */
@@ -64,6 +263,9 @@ export function EvidenceLine({
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const panelId = useId();
+  // Held in a ref so a caller passing an inline arrow cannot re-trigger the fetch effects.
+  const onResolvedRef = useRef(onResolved);
+  onResolvedRef.current = onResolved;
 
   // method/topic resolve their representative papers LAZILY (on first expand). The
   // query string selects the loader: `?family=` / `?topic=`.
@@ -104,6 +306,18 @@ export function EvidenceLine({
   const [keyPaperStatus, setKeyPaperStatus] = useState<ExemplarFetchStatus>("idle");
   const keyPaperFetched = useRef(false);
 
+  // Concept-matched GRANTS, artifact-lead only. Same params as the key-paper route by design.
+  //
+  // The route is gated on SEARCH_EVIDENCE_ROWS, which is already on in prod, so this needs no flag
+  // flip and changes nothing on the public card (which fetches its own funding row independently).
+  // What IS flag-dependent is RECALL: without SEARCH_FUNDING_CONCEPT_GRANTS (staging on, prod off)
+  // grants match by TEXT rather than by concept tag, so a grant tagged with the sponsor's MeSH
+  // descriptor but not naming it in prose will not surface in prod. Fewer grants, never wrong ones.
+  //
+  // It does NOT participate in `claimedPmids`: grants have no pmid and cannot collide with papers.
+  const [grants, setGrants] = useState<EvidenceGrant[]>([]);
+  const grantsFetched = useRef(false);
+
   // #1366 — the pmids already shown on a sibling line drive `exclude` so this
   // line's fetch stays disjoint (cumulative; whoever resolves first owns a shared
   // paper). `claimedPmids` is a Set shared across this card's lines, stable for a
@@ -138,8 +352,27 @@ export function EvidenceLine({
         setKeyPapers(pubs);
       })
       .catch(() => setKeyPapers([]))
-      .finally(() => setKeyPaperStatus("done"));
+      .finally(() => {
+        setKeyPaperStatus("done");
+        // SETTLED, not "succeeded" — a failed fetch claims nothing, but a caller chaining its
+        // lines in order must still be released or the rest of the card never resolves.
+        onResolvedRef.current?.();
+      });
   }, [wantsLazyKeyPaper, cwid, keyPaperConfig, keyPaperMentionOnly, claimedPmids]);
+
+  const ensureGrants = useCallback(() => {
+    if (!artifactLead || !keyPaperConfig || grantsFetched.current) return;
+    grantsFetched.current = true;
+    const params = new URLSearchParams({
+      q: keyPaperConfig.contentQuery,
+      descriptorUis: keyPaperConfig.descriptorUis.join(","),
+      label: keyPaperConfig.conceptLabel ?? "",
+    });
+    fetch(`/api/scholar/${encodeURIComponent(cwid)}/grants?${params.toString()}`)
+      .then((r) => (r.ok ? r.json() : { grants: [] }))
+      .then((d: { grants?: EvidenceGrant[] }) => setGrants(d?.grants ?? []))
+      .catch(() => setGrants([]));
+  }, [artifactLead, keyPaperConfig, cwid]);
 
   const ensureExemplar = useCallback(() => {
     if (!exemplarQuery || exemplarFetched.current) return;
@@ -201,6 +434,28 @@ export function EvidenceLine({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Resolve without a click, when the caller asks. Both `ensure*` are one-shot ref-guarded, so
+  // this racing the click path (or a re-render flipping `autoResolve` back and forth) is a no-op
+  // rather than a double fetch.
+  useEffect(() => {
+    if (!autoResolve) return;
+    // Grants ride the same in-view gate but NOT the ordered chain — they claim no pmids, so nothing
+    // downstream depends on them having settled.
+    ensureGrants();
+    if (isLazyExemplar) ensureExemplar();
+    else if (wantsLazyKeyPaper) ensureKeyPaper();
+    // Nothing to fetch — release the caller's chain immediately, or a line with no lazy loader
+    // would stall every line queued behind it and the rest of the card would never resolve.
+    else onResolvedRef.current?.();
+  }, [
+    autoResolve,
+    isLazyExemplar,
+    ensureExemplar,
+    wantsLazyKeyPaper,
+    ensureKeyPaper,
+    ensureGrants,
+  ]);
+
   const profileHref = `${profilePath(slug)}#publications`;
   const exemplarFallback =
     evidence.kind === "method"
@@ -238,6 +493,23 @@ export function EvidenceLine({
               ? "border-l-2 border-[#64748b] pl-[14px]"
               : "border-l-2 border-[#7c3aed] pl-[14px]"
             : undefined;
+
+  // ARTIFACT-LEAD. Just the artifacts: the grants and the papers. `ResultEvidence` is NOT rendered
+  // here — its fixed KIND column ("Concept ·") is a label on a thing the caption above already
+  // labelled, and it put a statistic where the design brief wants a paper. Its fact survives as
+  // `evidenceSummary`, which the disclosure shows on expand and the empty case shows on its own.
+  if (artifactLead) {
+    return (
+      <ArtifactLead
+        papers={repPapers}
+        grants={grants}
+        summary={evidenceSummary(evidence, pubCount)}
+        expanded={expanded}
+        onToggle={() => setExpanded((v) => !v)}
+        panelId={panelId}
+      />
+    );
+  }
 
   return (
     <>

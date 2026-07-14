@@ -733,6 +733,55 @@ export function matchedEvidence(
 }
 
 /**
+ * What the sponsor asked for, against what this candidate has — EVERY asked concept, including
+ * the ones they have nothing for. That complement is the point: `matchedConcepts` can only tell
+ * you what a person matched, so nothing on the card has ever been able to say what they LACK,
+ * and a reader cannot tell "covered 4 of 4" from "covered 4 of 8" by looking at four chips.
+ *
+ * Three states, and the middle one is the one to be careful about:
+ *   - `evidence` — the candidate ranked under this concept AND the server shipped an evidence
+ *                  block for it, so `matchedEvidence` renders one. Defined as the conjunction on
+ *                  purpose: this state means "there is a block below", and it stays true by
+ *                  construction rather than by a comment claiming it.
+ *   - `ranked`   — the candidate ranked under it, but NO block was shipped. This is NOT "partial
+ *                  evidence" and must never be rendered as a weaker shade of found. The spine
+ *                  caps evidence at `MAX_EVIDENCE_CONCEPTS` by strength AT DEFAULT WEIGHTS, so an
+ *                  officer who slides the 4th concept to the top produces exactly this: a chip, a
+ *                  segment, and no block — and no client can conjure one (see `searchEvidence`).
+ *   - `none`     — the candidate did not rank under it at all. The gap. Nothing rendered this.
+ *
+ * Zero-weight concepts are ABSENT, not `none`: an officer who muted a concept has said they do
+ * not care about it, and is not owed a report that this person lacks it. Ordered by weight, so
+ * the strip reads as the ask itself — widest first — and re-orders live as the sliders move.
+ */
+export type ConceptCoverage = {
+  concept: SponsorConcept;
+  weight: number;
+  state: "evidence" | "ranked" | "none";
+};
+
+export function conceptCoverage(
+  candidate: SponsorCandidate,
+  concepts: readonly SponsorConcept[],
+): ConceptCoverage[] {
+  // Absent, never `[]` — gate on the term's PRESENCE, not on the array's truthiness.
+  const withEvidence = new Set((candidate.searchEvidence ?? []).map((e) => e.term));
+  const ranked = new Set(candidate.contributions.map((c) => c.term));
+  return concepts
+    .map((concept) => ({
+      concept,
+      weight: conceptWeight(concept),
+      state: !ranked.has(concept.term)
+        ? ("none" as const)
+        : withEvidence.has(concept.term)
+          ? ("evidence" as const)
+          : ("ranked" as const),
+    }))
+    .filter((s) => s.weight > 0)
+    .sort((a, b) => b.weight - a.weight);
+}
+
+/**
  * Bucket a candidate's fused score into a fit tier, RELATIVE to the top candidate's — the
  * raw fused number is never rendered (it is a query-scaled RRF sum and means nothing to a
  * reader on its own). A non-positive top score means nothing matched: everything is weak.
@@ -764,6 +813,19 @@ export const RARE_COVERAGE_RATIO = 0.1;
  *
  * This reads `corpusCoverage` and nothing else. It has no access to `weightFactor`, which is
  * the structural guarantee that the badge cannot drift back into being a claim about ranking.
+ *
+ * DECIDED 2026-07-14 — KEEP IT AS IS. It fires on 6 of 8 concepts of the ADC ask, which was
+ * raised as a defect: a badge on three-quarters of the rail is said to carry no information.
+ * The badge is nonetheless ACCURATE, the reading was reviewed, and the answer is that it stays.
+ * Do not "fix" this by tightening `RARE_COVERAGE_RATIO` on the evidence of a single paste, and
+ * do not invert it to badge the COMMON terms — "common" is unsayable here, because ~40% of
+ * descriptors have no coverage row and absent ≠ zero, so "not rare" cannot be rendered as
+ * "common" without lying about the unknowns. Tightening the ratio at all requires sampling
+ * several real asks first, not one.
+ *
+ * Nor is the badge "already gone" — a prior handoff asserted that, and it was wrong. Rarity was
+ * deleted from the FUSION (#1698); this badge is display-only and has been rendering all along.
+ * `git grep rareTerms` before you believe otherwise.
  */
 export function rareTerms(concepts: readonly SponsorConcept[]): Set<string> {
   const known = concepts.filter(

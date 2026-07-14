@@ -60,7 +60,7 @@
  * be unchecked, because an extractor that reads an ask the sponsor never made must not be able
  * to skew a ranking with no way for the officer to say so.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download } from "lucide-react";
 
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
@@ -69,6 +69,7 @@ import { EvidenceLine } from "@/components/search/evidence-line";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  conceptCoverage,
   fitTier,
   matchedConcepts,
   matchedEvidence,
@@ -77,6 +78,7 @@ import {
   rareTerms,
   rerankCandidates,
   sponsorAskFrom,
+  type ConceptCoverage,
   type SponsorCandidate,
   type SponsorConcept,
   type SponsorFitTier,
@@ -113,10 +115,24 @@ type Submission = {
 const CONCEPT_FACET_MAX = 12;
 const DEPT_FACET_MAX = 12;
 
-/** Rows rendered from the re-ranked pool. The RESPONSE carries the whole fused pool so the
- *  sliders have something to re-rank over (see the `ranked` memo); this is only how much of
- *  the current ranking we put on screen, and it matches what the console showed before. */
+/** A RENDER cap, and nothing else. It is applied to the FILTERED rows (see `visible`), so it
+ *  bounds how many rows we mount — never which candidates a filter or a facet can see.
+ *
+ *  It used to sit inside `ranked`, which silently made it all three: every facet counted, and
+ *  every filter searched, only the top 100 of a pool that runs to ~800. "Holds CTL technology:
+ *  9" meant 9 of the top 100, not 9 of the pool, and a CTL holder at rank 101 was unreachable
+ *  by the one filter this console exists for. Facet over the pool; cap what you paint. */
 const RESULT_MAX = 100;
+
+/** Three numbers, and they are three DIFFERENT things: how many rows we painted, how many the
+ *  filters matched, how many are in the pool. The old header printed two of them as if they
+ *  were one ("100 of 100 researchers", while the history row beside it said 430). Say all
+ *  three, or say the one that is true. */
+export function resultsSummary(shown: number, matched: number, pool: number): string {
+  const head = shown < matched ? `Top ${shown} of ${matched}` : `${matched}`;
+  if (matched < pool) return `${head} matching · ${pool} ranked`;
+  return `${head} researcher${matched === 1 ? "" : "s"}`;
+}
 
 /** Coverage 7.17e-4 → "about 1 in 1,400 papers". Reads better than a fraction in a tooltip. */
 function oneInN(coverage: number): string {
@@ -330,7 +346,7 @@ export function SponsorMatchPanel() {
               lambda: PREFERENCE_LAMBDA,
             }
           : {},
-      ).slice(0, RESULT_MAX),
+      ),
     [candidates, concepts, activePreferences],
   );
 
@@ -368,7 +384,8 @@ export function SponsorMatchPanel() {
 
   // Facet over the concepts people actually MATCHED (their contributions), not the whole
   // rail — a concept nobody ranked under is not a useful filter. Counts are over the full
-  // candidate set, pre-filter.
+  // re-ranked pool, pre-filter — `ranked` is the whole pool now, which is what makes that
+  // sentence true. It was written when it was not.
   const conceptFacet = useMemo(() => {
     const label = new Map(concepts.map((c) => [c.term, c]));
     const counts = new Map<string, number>();
@@ -423,38 +440,52 @@ export function SponsorMatchPanel() {
     roleSel.size > 0;
 
   // Live rank travels with the row, so a filtered view still reads "this person is #7 overall",
-  // not "#1 of the filtered three". It re-derives as sliders move.
+  // not "#1 of the filtered three". It re-derives as sliders move. Ranks are POOL ranks — a
+  // CTL-filtered view can legitimately read #137, because the filter now searches the pool.
   //
   // The rank is stamped from the FIT order and then carried, never recomputed — so sorting by
   // Name reorders the rows while each row keeps the rank it holds in the ranking. A sort that
   // renumbered rows would be claiming Alice is the best match because her name comes first.
+  //
+  // Uncapped, and deliberately: this is every candidate that matches the filters, and it is
+  // what the CSV exports. `visible` below is the same list with the render cap applied.
+  const filtered = useMemo(
+    () =>
+      ranked
+        .map((c, i) => ({ c, rank: i + 1 }))
+        .filter(
+          ({ c }) =>
+            (deptSel.size === 0 || (c.department != null && deptSel.has(c.department))) &&
+            (conceptSel.size === 0 || c.contributions.some((x) => conceptSel.has(x.term))) &&
+            (!ctlOnly || c.technologyCount > 0) &&
+            // A row with no measure fails a measure filter — it cannot be shown to satisfy a
+            // constraint we have no evidence it meets.
+            (stageSel.size === 0 ||
+              (c.measures?.careerStage != null &&
+                stageSel.has(careerStageLabel(c.measures.careerStage)))) &&
+            (!clinicianOnly || c.measures?.isClinician === true) &&
+            (roleSel.size === 0 || roleSel.has(roleCategoryLabel(c.measures?.roleCategory))),
+        ),
+    [ranked, deptSel, conceptSel, ctlOnly, stageSel, clinicianOnly, roleSel],
+  );
+
+  // The cap lands on the FIT-ordered rows, then Name reorders that hundred. Slicing after the
+  // name sort would paint the alphabetically-first 100 and call them the best matches.
   const visible = useMemo(() => {
-    const rows = ranked
-      .map((c, i) => ({ c, rank: i + 1 }))
-      .filter(
-        ({ c }) =>
-          (deptSel.size === 0 || (c.department != null && deptSel.has(c.department))) &&
-          (conceptSel.size === 0 || c.contributions.some((x) => conceptSel.has(x.term))) &&
-          (!ctlOnly || c.technologyCount > 0) &&
-          // A row with no measure fails a measure filter — it cannot be shown to satisfy a
-          // constraint we have no evidence it meets.
-          (stageSel.size === 0 ||
-            (c.measures?.careerStage != null &&
-              stageSel.has(careerStageLabel(c.measures.careerStage)))) &&
-          (!clinicianOnly || c.measures?.isClinician === true) &&
-          (roleSel.size === 0 || roleSel.has(roleCategoryLabel(c.measures?.roleCategory))),
-      );
+    const rows = filtered.slice(0, RESULT_MAX);
     return sort === "name"
       ? [...rows].sort((a, b) => a.c.name.localeCompare(b.c.name))
       : rows;
-  }, [ranked, deptSel, conceptSel, ctlOnly, stageSel, clinicianOnly, roleSel, sort]);
+  }, [filtered, sort]);
 
-  /** Exports exactly what is on screen — current sliders, current filters, current sort. A
-   *  server route could not do this: it would re-run the match and emit the DEFAULT ranking,
-   *  not the one the officer re-weighted. */
-  function exportVisible() {
+  /** Exports every row the filters matched — current sliders, current filters — NOT just the
+   *  hundred we painted. An officer who filters to the CTL portfolio and gets 180 hits must
+   *  download 180, not the first 100 with no warning that the rest exist. A server route could
+   *  not do this at all: it would re-run the match and emit the DEFAULT ranking, not the one
+   *  the officer re-weighted. */
+  function exportFiltered() {
     const csv = buildSponsorMatchCsv(
-      visible.map(({ c, rank }) => ({
+      filtered.map(({ c, rank }) => ({
         rank,
         cwid: c.cwid,
         name: c.name,
@@ -667,7 +698,7 @@ export function SponsorMatchPanel() {
                   <div className="flex items-baseline justify-between gap-2">
                     <h2 className="text-base font-semibold">Filter</h2>
                     <span className="text-muted-foreground text-xs tabular-nums">
-                      {ranked.length} → {visible.length}
+                      {ranked.length} → {filtered.length}
                     </span>
                   </div>
 
@@ -741,7 +772,7 @@ export function SponsorMatchPanel() {
               <main className="min-w-0 flex-1">
                 <div className="mb-3 flex flex-wrap items-center gap-3">
                   <h2 className="text-base font-semibold">
-                    {visible.length} of {ranked.length} researchers
+                    {resultsSummary(visible.length, filtered.length, ranked.length)}
                   </h2>
                   <div className="ml-auto flex items-center gap-2">
                     <div
@@ -769,11 +800,11 @@ export function SponsorMatchPanel() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={exportVisible}
-                      disabled={visible.length === 0}
+                      onClick={exportFiltered}
+                      disabled={filtered.length === 0}
                     >
                       <Download className="size-3.5" />
-                      Export ({visible.length})
+                      Export ({filtered.length})
                     </Button>
                   </div>
                 </div>
@@ -1067,6 +1098,112 @@ function ContactButton({ cwid }: { cwid: string }) {
   );
 }
 
+/**
+ * True once the node has been on screen, and true forever after — the papers it triggers do not
+ * become unfetched when you scroll past. Same shape as the observer in
+ * `people-result-card-streamed.tsx`, which arms the same endpoint on the same signal.
+ *
+ * With no `IntersectionObserver` (jsdom, and any browser old enough to lack it) it reports IN view
+ * rather than out. Degrade toward FETCHING: the failure mode of guessing "visible" is some extra
+ * requests, and the failure mode of guessing "hidden" is a card that never shows its evidence and
+ * looks, silently, like a scholar with nothing to say.
+ */
+function useInViewOnce<T extends HTMLElement>(): [React.RefObject<T | null>, boolean] {
+  const ref = useRef<T>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || inView) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setInView(true);
+      return;
+    }
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setInView(true);
+          obs.disconnect();
+        }
+      },
+      // Resolve just before the row arrives, so the artifact is there when the eye is.
+      { rootMargin: "200px" },
+    );
+    obs.observe(node);
+    return () => obs.disconnect();
+  }, [inView]);
+  return [ref, inView];
+}
+
+/** The three fills. `ranked` is the same hue as `evidence` because the person genuinely ranked
+ *  under that concept — but it is a SEPARATE state, not a lighter grade of found, and its title
+ *  says so. The distinction the officer needs is "we have nothing for this" (`none`) versus
+ *  "we have something and are not showing it here" (`ranked`), and a ramp would erase it. */
+const COVERAGE_CLASS: Record<ConceptCoverage["state"], string> = {
+  evidence: "bg-[var(--color-accent-slate)]",
+  ranked: "bg-[var(--color-accent-slate)]/30",
+  none: "bg-muted",
+};
+
+const COVERAGE_TITLE: Record<ConceptCoverage["state"], string> = {
+  evidence: "evidence below",
+  // Deliberately not "partial evidence" — see `conceptCoverage`. The cap is at default weights,
+  // so this state is reachable by dragging a slider, and it must not read as a weaker match.
+  ranked: "ranked under this, evidence not shown",
+  none: "no evidence",
+};
+
+/**
+ * The ask, drawn as a bar: one segment per concept the sponsor asked for, width = how much they
+ * asked for it. The width IS `conceptWeight` — the very number the fusion ranks on — so the bar
+ * cannot drift from the ranking, and it re-draws live as the sliders move, exactly like the chips.
+ *
+ * The mockup's hover-to-trace (segment lights up its term row) is skipped: `title` is a native
+ * tooltip for free, and cross-highlighting needs hover state threaded through every block for a
+ * cue the tooltip already gives. Add it when someone asks for it.
+ *
+ * The strip is `aria-hidden` and the line beneath it carries the same facts as text — a bar of
+ * eight divs is not a thing a screen reader can be made to say usefully, and the coverage
+ * sentence is what a reader would want read out anyway.
+ */
+function CoverageStrip({ coverage }: { coverage: ConceptCoverage[] }) {
+  if (coverage.length === 0) return null;
+  const withEvidence = coverage.filter((c) => c.state === "evidence");
+  const rankedOnly = coverage.filter((c) => c.state === "ranked");
+  const gaps = coverage.filter((c) => c.state === "none");
+  return (
+    <div className="mt-2" data-slot="sponsor-match-coverage">
+      <div className="flex gap-0.5" aria-hidden="true">
+        {coverage.map(({ concept, weight, state }) => (
+          <div
+            key={concept.term}
+            title={`${concept.term} — ${COVERAGE_TITLE[state]}`}
+            // `flexBasis: 0` so the widths are the weights and nothing else; the min-width keeps a
+            // near-muted concept from collapsing to an invisible sliver you cannot hover.
+            style={{ flexGrow: weight, flexBasis: 0 }}
+            className={`h-2 min-w-[3px] rounded-[2px] ${COVERAGE_CLASS[state]}`}
+          />
+        ))}
+      </div>
+      {/* Three states, three clauses — and they must ADD UP to the number of concepts asked.
+          The first version of this line said "Covers 8 of 8 concepts asked" over a card that also
+          said "ranked, no evidence shown" twice, because `covered` counted every concept the person
+          ranked under while the blocks below could only ever show MAX_EVIDENCE_CONCEPTS (3) of
+          them. Both statements were true and together they read as a contradiction. Say which
+          concepts we can SHOW evidence for, which ones they also ranked under, and which ones they
+          have nothing for. */}
+      <p className="text-muted-foreground mt-1.5 text-xs">
+        Evidence for {withEvidence.length} of {coverage.length} concepts asked
+        {rankedOnly.length > 0 ? (
+          <> · also ranked under {rankedOnly.map((c) => c.concept.term).join(", ")}</>
+        ) : null}
+        {gaps.length > 0 ? (
+          <> · no evidence for {gaps.map((g) => g.concept.term).join(", ")}</>
+        ) : null}
+      </p>
+    </div>
+  );
+}
+
 function ResearcherRow({
   candidate,
   rank,
@@ -1084,7 +1221,9 @@ function ResearcherRow({
   const name = candidate.name;
   // Chips + tier are DERIVED, never wired — so both stay live under the sliders. The raw
   // fused score is never rendered: it is an RRF sum and means nothing on its own.
-  const matched = matchedConcepts(candidate, concepts);
+  // The whole ask, not just the part this person answered — the only thing on the card that can
+  // say what they DON'T have. Live under the sliders, like everything else derived here.
+  const coverage = conceptCoverage(candidate, concepts);
   const tier = fitTier(candidate.fusedScore, topScore);
   const papers = candidate.evidence?.papers ?? [];
   const topics = candidate.evidence?.topics ?? [];
@@ -1138,8 +1277,23 @@ function ResearcherRow({
   const blockTerms = JSON.stringify(evidenceBlocks.map((b) => b.concept.term));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const claimedPmids = useMemo(() => new Set<string>(), [runId, blockTerms]);
+  const [rowRef, inView] = useInViewOnce<HTMLDivElement>();
+
+  // AUTO-RESOLVE IN ORDER, ONE BLOCK AT A TIME — the de-dup depends on it.
+  //
+  // `claimedPmids` makes a card's blocks show DIFFERENT papers: whoever resolves first claims the
+  // paper, and the others send it as `exclude=`. That works on the click path because a human opens
+  // one disclosure at a time. Auto-resolving fires every block in the SAME commit, so every one of
+  // them reads an empty claimed set, and a paper that is the best evidence for two of the sponsor's
+  // concepts gets offered as the representative for both — the exact duplicate #1696 removed.
+  //
+  // So block i waits for block i-1 to settle. `resolvedCount` is keyed to the block list (same key
+  // as the claimed set itself), so a mute/unmute restarts the chain along with the Set it protects.
+  const [resolvedCount, setResolvedCount] = useState(0);
+  useEffect(() => setResolvedCount(0), [runId, blockTerms]);
+
   return (
-    <div className="border-t border-border flex gap-3 py-4 first:border-t-0">
+    <div ref={rowRef} className="border-t border-border flex gap-3 py-4 first:border-t-0">
       <div className="text-muted-foreground w-5 pt-1 text-right text-sm tabular-nums">{rank}</div>
       {/* The shared headshot, not a bespoke initials circle — this is a list of PEOPLE, and the
           public People card has rendered their faces all along. `HeadshotAvatar` degrades to a
@@ -1178,19 +1332,11 @@ function ResearcherRow({
         {candidate.department ? (
           <div className="text-muted-foreground text-sm">{candidate.department}</div>
         ) : null}
-        {matched.length > 0 ? (
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {matched.map(({ concept }) => (
-              <span
-                key={concept.term}
-                title={`Ranked under "${concept.term}" for this description.`}
-                className="border-border text-muted-foreground rounded-full border px-2 py-0.5 text-xs"
-              >
-                {concept.term}
-              </span>
-            ))}
-          </div>
-        ) : null}
+        <CoverageStrip coverage={coverage} />
+        {/* The matched-concept CHIPS used to live here. Deleted: every concept they named is now
+            named by something that also says something — the strip (with its weight), the block
+            captions (with their evidence), and the coverage line (with the gaps). A row of pills
+            repeating those names was the third listing of the same set. */}
         {/* #1689 — the SPINE's evidence, rendered by the PUBLIC SEARCH'S OWN component.
             Not a lookalike built for this console: the same `<EvidenceLine>` the People card
             uses, fed the same `ResultEvidence` the server selected. It brings the reason line
@@ -1210,7 +1356,7 @@ function ResearcherRow({
             sets disjoint across the stack. */}
         {evidenceBlocks.length > 0 ? (
           <div className="mt-1.5 space-y-2">
-            {evidenceBlocks.map(({ concept, evidence }) => (
+            {evidenceBlocks.map(({ concept, evidence }, i) => (
               // `runId` in the key is the OTHER HALF of the claimedPmids reset above, and it is
               // required: a fresh Set is useless if the `EvidenceLine` beneath keeps its one-shot
               // `keyPaperFetched` ref from the last run and never fetches again. Baking the run
@@ -1219,10 +1365,14 @@ function ResearcherRow({
               // `people-result-card.tsx`, which bakes `qParam` into both.) `term` alone keeps a
               // card's sibling blocks distinct WITHIN a run.
               <div key={`${runId}:${concept.term}`} data-slot="sponsor-match-evidence">
-                {/* The rail's own facet-heading idiom, reused — no new token, and it reads as
-                    what it is: a group header over the lines beneath it. */}
-                <div className="text-muted-foreground text-[11px] font-semibold tracking-[0.08em] uppercase">
-                  {concept.term}
+                {/* The concept, and what the sponsor asked for it — the two facts the block is an
+                    answer to, on one line. `centrality` is the slider's own value, so the number
+                    here is the number the officer set, not a derived weight they cannot locate. */}
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-foreground text-sm font-medium">{concept.term}</span>
+                  <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
+                    ask {concept.centrality.toFixed(2)}
+                  </span>
                 </div>
                 <EvidenceLine
                   evidence={evidence.evidence}
@@ -1235,11 +1385,21 @@ function ResearcherRow({
                   badged={false}
                   claimedPmids={claimedPmids}
                   stacked={false}
+                  // The artifact on the face, resolved when the card is on screen. `inView` is the
+                  // whole reason this is affordable: the pool runs to ~800 and we render 100, so
+                  // fetching a paper per concept per RENDERED card would be ~300 requests for a
+                  // page the officer sees five rows of. The observer buys the design spec back.
+                  artifactLead
+                  autoResolve={inView && i <= resolvedCount}
+                  onResolved={() => setResolvedCount((n) => Math.max(n, i + 1))}
                 />
               </div>
             ))}
           </div>
         ) : null}
+        {/* The "ranked, no evidence shown" rows used to live here, one per concept. Deleted: they
+            said the same thing the coverage line's "also ranked under …" clause now says once, and
+            said it in a way that read as a contradiction of the count beside it. */}
         {topics.length > 0 ? (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {topics.map((t) => (

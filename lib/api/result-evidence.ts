@@ -40,6 +40,9 @@ export type EvidencePub = {
   /** Title with the literal query wrapped in `<mark>` when it appeared there. */
   titleHtml?: string;
   year?: number | null;
+  /** The venue. Same wire shape as `RepresentativePub` (`lib/api/search.ts`) — these two types
+   *  describe ONE payload, so they widen together or they lie about it. */
+  journal?: string;
 };
 
 /** A bounded representative grant for the "Key funding" disclosure — the funding

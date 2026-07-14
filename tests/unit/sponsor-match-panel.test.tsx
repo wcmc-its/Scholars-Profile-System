@@ -106,6 +106,28 @@ const THREE: SponsorCandidate[] = [
   }),
 ];
 
+/**
+ * A pool BIGGER than the render cap (RESULT_MAX = 100), with the only CTL-technology holder
+ * buried at rank 105 — below the cap, inside the pool. A staging run ranked 430 candidates; the
+ * fixtures here ranked 3, which is exactly why the cap could sit inside `ranked` (making every
+ * facet count and every filter search only the top 100) with a green suite over it.
+ *
+ * Ranks drive the ordering, not `fusedScore`: the panel re-ranks from `contributions` and
+ * `concepts` in the browser (that is the whole contract), so `fusedScore` only feeds the tier.
+ */
+const POOL: SponsorCandidate[] = Array.from({ length: 120 }, (_, i) => {
+  const rank = i + 1;
+  const deep = rank === 105;
+  return candidate({
+    cwid: deep ? "deep" : `p${rank}`,
+    name: deep ? "Zed Deepcut" : `Person ${String(rank).padStart(3, "0")}`,
+    department: deep ? "Pathology" : "Medicine",
+    technologyCount: deep ? 1 : 0,
+    fusedScore: (0.9 ** 3 * 3.0) / (60 + rank),
+    contributions: [{ term: "Immuno-oncology", rank }],
+  });
+});
+
 /** Exactly what the route's `bespokeToCandidate` emits: a real score, and NO contributions
  *  (that engine does no concept decomposition, so there is nothing to re-rank by). */
 const BESPOKE: SponsorCandidate[] = [
@@ -165,6 +187,16 @@ async function renderAndSearch() {
   });
   fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
   await screen.findByText("Alice Alpha");
+}
+
+async function renderAndSearchPool() {
+  stubFetch({ concepts: CONCEPTS, candidates: POOL });
+  render(<SponsorMatchPanel />);
+  fireEvent.change(screen.getByLabelText(/description/i), {
+    target: { value: "CAR T collaborators" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+  await screen.findByText("Person 001");
 }
 
 /** Names of the result rows, in RENDERED (DOM) order — each row links to a profile, so the
@@ -309,7 +341,10 @@ describe("SponsorMatchPanel", () => {
     expect(screen.queryByText("Bob Beta")).toBeNull();
     const row = screen.getByText("Cara Gamma").closest("li")!;
     expect(row.textContent).toMatch(/^3/); // still #3 overall, not #1-of-filtered
-    expect(screen.getByText(/1 of 3/)).toBeTruthy();
+    // Three numbers, three meanings: 1 painted, 1 matched, 3 in the pool. The old header said
+    // "1 of 3" and meant painted-of-POOL, which collapses to the same string as painted-of-
+    // MATCHED and is what let the top-100 cap hide (see `resultsSummary`).
+    expect(screen.getByText(/1 matching · 3 ranked/)).toBeTruthy();
   });
 
   it("CTL-IP facet keeps only technology holders; Clear filters restores all", async () => {
@@ -321,6 +356,44 @@ describe("SponsorMatchPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(screen.getByText("Alice Alpha")).toBeTruthy();
     expect(screen.getByText("Cara Gamma")).toBeTruthy();
+  });
+
+  // ── The cap is a RENDER cap (the top-100 bug) ──────────────────────────────
+  // Every test above this line runs on a 3-candidate pool, which is why the old
+  // `.slice(0, RESULT_MAX)` inside `ranked` was a no-op in all of them: the whole suite was
+  // green while every facet and every filter saw only the first 100 of a pool that runs to
+  // ~800. These three run on a pool of 120 with the only CTL holder buried at rank 105 —
+  // put the slice back into `ranked` and all three fail.
+  it("the CTL facet counts the WHOLE pool, and can surface a holder below the render cap", async () => {
+    await renderAndSearchPool();
+
+    // 9-of-the-top-100 was the bug on staging. The holder is at 105; the count must see him.
+    const ctl = screen.getByRole("checkbox", { name: /Holds CTL technology/ });
+    expect(ctl.closest("label")!.textContent).toMatch(/1\s*$/);
+
+    fireEvent.click(ctl);
+    const row = screen.getByText("Zed Deepcut").closest("li")!;
+    expect(row.textContent).toMatch(/^105/); // his POOL rank, not "#1 of the filtered one"
+    expect(screen.queryByText("Person 001")).toBeNull();
+  });
+
+  it("paints at most RESULT_MAX rows, and says so without claiming a filter did it", async () => {
+    await renderAndSearchPool();
+
+    expect(rowOrder()).toHaveLength(100); // the cap still bounds what we mount
+    expect(rowOrder()[0]).toBe("Person 001");
+    // NOT "100 of 120 researchers" — nothing was filtered out; 20 were simply not painted.
+    expect(screen.getByText(/Top 100 of 120 researchers/)).toBeTruthy();
+  });
+
+  it("exports every row the filters matched, not just the hundred on screen", async () => {
+    await renderAndSearchPool();
+
+    // The officer sees 100 rows and downloads 120 — the cap must not silently truncate a
+    // portfolio download. With the CTL filter on, the export narrows to the real match count.
+    expect(screen.getByRole("button", { name: /Export \(120\)/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Holds CTL technology/ }));
+    expect(screen.getByRole("button", { name: /Export \(1\)/ })).toBeTruthy();
   });
 
   it("concept facet matches rows that ranked under the selected concept", async () => {
@@ -531,10 +604,20 @@ describe("SponsorMatchPanel", () => {
    */
   function evidenceBlocks(): [string, string][] {
     return [...document.querySelectorAll('[data-slot="sponsor-match-evidence"]')].map((el) => {
-      const caption = el.firstElementChild?.textContent ?? "";
-      const line = (el.textContent ?? "").slice(caption.length);
-      return [caption, line.replace(/\s+/g, " ").trim()];
+      const caption = el.firstElementChild!;
+      // The caption is now `[concept] [ask N.NN]` — take the concept span, so these assertions
+      // keep saying what they were written to say. The ask is asserted on its own below.
+      const term = caption.firstElementChild?.textContent ?? "";
+      const line = (el.textContent ?? "").slice((caption.textContent ?? "").length);
+      return [term, line.replace(/\s+/g, " ").trim()];
     });
+  }
+
+  /** The `ask N.NN` each block reports, in DOM order. */
+  function evidenceAsks(): string[] {
+    return [...document.querySelectorAll('[data-slot="sponsor-match-evidence"]')].map(
+      (el) => el.firstElementChild?.lastElementChild?.textContent ?? "",
+    );
   }
 
   /** The spine's per-concept evidence, in the shape the wire carries it (#1696). */
@@ -716,9 +799,16 @@ describe("SponsorMatchPanel", () => {
   function stubWithKeyPaper(over: Partial<SponsorCandidate>) {
     const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
       if (typeof url === "string" && url.startsWith("/api/search/key-paper")) {
+        // HONOR `exclude`, as the real route does. A stub that returns pmid 111 no matter what
+        // cannot observe the de-dup at all — both blocks would render the same paper and the test
+        // would pass against a build in which the de-dup had been deleted.
+        const excluded = new URLSearchParams(url.split("?")[1] ?? "").get("exclude") ?? "";
         return {
           ok: true,
-          json: async () => ({ pubs: [{ pmid: "111", title: "CAR T persistence", year: 2024 }] }),
+          json: async () =>
+            excluded.includes("111")
+              ? { pubs: [{ pmid: "222", title: "Metabolic rewiring", year: 2023 }] }
+              : { pubs: [{ pmid: "111", title: "CAR T persistence", year: 2024 }] },
         };
       }
       const method = init?.method ?? "GET";
@@ -775,11 +865,16 @@ describe("SponsorMatchPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
-    // Expand the Immuno-oncology block → it fetches clean and CLAIMS pmid 111.
-    fireEvent.click(screen.getAllByRole("button", { name: /key papers/i })[0]);
-    await waitFor(() => expect(keyPaperCalls()).toHaveLength(1));
-    expect(keyPaperCalls()[0]).not.toContain("exclude"); // nothing claimed yet
+    // The blocks now resolve WITHOUT a click (the card leads with the artifact), and they resolve
+    // IN ORDER — which is the only reason the de-dup below still holds. Fired in one commit they
+    // would both read an empty claimed set and both show pmid 111.
+    await waitFor(() => expect(keyPaperCalls()).toHaveLength(2));
+    expect(keyPaperCalls()[0]).not.toContain("exclude"); // first block: nothing claimed yet
+    expect(keyPaperCalls()[1]).toContain("exclude=111"); // second block: EXCLUDES the claim
+    // …and therefore the two concepts lead with DIFFERENT papers. This is the assertion that
+    // fails if the blocks auto-resolve in one commit instead of in order.
     await screen.findByText(/CAR T persistence/);
+    await screen.findByText(/Metabolic rewiring/);
 
     // Mute it — the block unmounts, and its claim on 111 would outlive it.
     fireEvent.change(screen.getByLabelText("Immuno-oncology centrality"), {
@@ -787,17 +882,16 @@ describe("SponsorMatchPanel", () => {
     });
     expect(evidenceBlocks().map(([caption]) => caption)).toEqual(["Cancer Metabolism"]);
 
-    // Unmute — the block comes back and re-fetches.
+    // Unmute — the block comes back and re-fetches, on its own.
     fireEvent.change(screen.getByLabelText("Immuno-oncology centrality"), {
       target: { value: "0.9" },
     });
-    fireEvent.click(screen.getAllByRole("button", { name: /key papers/i })[0]);
-    await waitFor(() => expect(keyPaperCalls()).toHaveLength(2));
+    await waitFor(() => expect(keyPaperCalls()).toHaveLength(3));
 
     // AND IT FETCHES CLEAN. With the set memoised on `[]` this URL carried `exclude=111` — the
     // block suppressing the one paper it had just told the officer was Alice's best.
-    expect(keyPaperCalls()[1]).not.toContain("exclude");
-    expect(keyPaperCalls()[1]).toContain("cwid=a");
+    expect(keyPaperCalls()[2]).not.toContain("exclude");
+    expect(keyPaperCalls()[2]).toContain("cwid=a");
     // And the paper is actually back on screen, not silently dropped.
     await screen.findByText(/CAR T persistence/);
   });
@@ -818,7 +912,6 @@ describe("SponsorMatchPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
-    fireEvent.click(screen.getByRole("button", { name: /key papers/i }));
     await waitFor(() => expect(keyPaperCalls()).toHaveLength(1));
 
     // Drag, but not to zero — the concept still matches, so its block stays.
@@ -826,7 +919,9 @@ describe("SponsorMatchPanel", () => {
       target: { value: "0.5" },
     });
     expect(evidenceBlocks().map(([caption]) => caption)).toEqual(["Immuno-oncology"]);
-    // No remount, no re-fetch: still exactly the one call.
+    // No remount, no re-fetch: still exactly the one call. Note this is the assertion that would
+    // catch an `autoResolve` wired to something that changes on every drag frame — it would
+    // re-fetch the whole visible list on every pixel of slider travel.
     expect(keyPaperCalls()).toHaveLength(1);
   });
 
@@ -854,7 +949,6 @@ describe("SponsorMatchPanel", () => {
     fireEvent.change(paste, { target: { value: "CAR T" } });
     fireEvent.click(rank);
     await screen.findByText("Alice Alpha");
-    fireEvent.click(screen.getByRole("button", { name: /key papers/i }));
     await waitFor(() => expect(keyPaperCalls()).toHaveLength(1));
     await screen.findByText(/CAR T persistence/);
 
@@ -862,12 +956,213 @@ describe("SponsorMatchPanel", () => {
     fireEvent.change(paste, { target: { value: "CAR T and solid tumors" } });
     fireEvent.click(rank);
     await screen.findByText("Alice Alpha");
-    fireEvent.click(screen.getByRole("button", { name: /key papers/i }));
 
-    // The disclosure works at all (a stale one-shot fetch guard would leave it dead)…
+    // The evidence resolves at all (a stale one-shot fetch guard would leave it dead)…
     await waitFor(() => expect(keyPaperCalls()).toHaveLength(2));
     // …and it fetches clean: no pmid claimed under the PREVIOUS paste is excluded under this one.
     expect(keyPaperCalls()[1]).not.toContain("exclude");
+  });
+
+  // ── Artifact-lead evidence (the design spec) ───────────────────────────────
+  it("leads with the ARTIFACT — a titled paper, venue and year, with no click", async () => {
+    // The spec puts a paper on the card face. The app used to put a COUNT there and hide the paper
+    // behind a chevron, which is the gap this closes. `venue` is the field that had to be added to
+    // the shared key-paper `_source` to make it sayable at all.
+    const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
+      if (String(url).startsWith("/api/search/key-paper")) {
+        return {
+          ok: true,
+          json: async () => ({
+            pubs: [
+              { pmid: "111", title: "CAR T persistence", year: 2025, journal: "Blood" },
+              { pmid: "222", title: "Second paper", year: 2023 },
+              { pmid: "333", title: "Third paper", year: 2021 },
+            ],
+          }),
+        };
+      }
+      if ((init?.method ?? "GET") === "GET")
+        return { ok: true, json: async () => ({ ok: true, submissions: [] }) };
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          concepts: CONCEPTS,
+          candidates: [
+            candidate({
+              cwid: "a",
+              name: "Alice Alpha",
+              fusedScore: 0.9,
+              contributions: [{ term: "Immuno-oncology", rank: 1 }],
+              searchEvidence: [searchEvidence("Immuno-oncology", 142)],
+            }),
+          ],
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    // No click anywhere in this test — the artifact resolves because the card is on screen.
+    const lead = await screen.findByText("CAR T persistence");
+    expect(lead.closest("a")?.getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/111/");
+    expect(screen.getByText(/Blood/)).toBeTruthy();
+    expect(screen.getByText(/2025/)).toBeTruthy();
+
+    // The caption carries what the SPONSOR asked for this concept — the slider's own value.
+    expect(evidenceAsks()).toEqual(["ask 0.90"]);
+
+    // The COUNT IS NOT ON THE FACE. That was the design objection: a card answering "why did this
+    // person match?" with a statistic instead of a paper. It is not deleted — it moves into the
+    // disclosure, where the spec puts it, and it keeps the word "tagged" (a real MeSH tag, not a
+    // literal text mention). And there is no "Concept ·" kind word anywhere: the caption above
+    // already named the concept.
+    expect(evidenceBlocks()[0][1]).not.toContain("142 of 210 publications tagged");
+    expect(evidenceBlocks()[0][1]).not.toContain("Concept");
+
+    // "+ 2 more pubs (2023, 2021)" — the years of the papers it can ACTUALLY show. It must not
+    // offer "+140 more" off the tagged count: the response holds three papers, and a click that
+    // promised 140 could produce only two.
+    const more = screen.getByRole("button", { name: /2 more pubs/ });
+    expect(more.textContent).toBe("+ 2 more pubs (2023, 2021)");
+    expect(screen.queryByText("Second paper")).toBeNull();
+    fireEvent.click(more);
+    expect(screen.getByText("Second paper")).toBeTruthy();
+    expect(screen.getByText("Third paper")).toBeTruthy();
+    // …and NOW the count is said, in the disclosure.
+    expect(evidenceBlocks()[0][1]).toContain("142 of 210 publications tagged");
+  });
+
+  it("falls back to the count when NOTHING resolves — a block is never silently empty", async () => {
+    // The one case that makes the count line non-optional. If the key-paper fetch returns nothing
+    // (all its papers claimed by a sibling, or the index is having a bad day), a card that only
+    // knows how to render artifacts renders an empty block — and a scholar with 142 tagged
+    // publications reads as a scholar with nothing to say.
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          fusedScore: 0.9,
+          contributions: [{ term: "Immuno-oncology", rank: 1 }],
+          searchEvidence: [searchEvidence("Immuno-oncology", 142)],
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    await waitFor(() =>
+      expect(evidenceBlocks()[0][1]).toContain("142 of 210 publications tagged"),
+    );
+  });
+
+  it("lists concept-matched GRANTS, and leads with them", async () => {
+    // A funded award is the strongest thing a sponsor can be told, and the only artifact carrying a
+    // FORWARD date — a paper says what someone did; an active R01 says what they are doing.
+    const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
+      const u = String(url);
+      if (u.startsWith("/api/scholar/") && u.includes("/grants")) {
+        return {
+          ok: true,
+          json: async () => ({
+            grants: [
+              {
+                projectId: "R01 CA-2xxxxx",
+                title: "Resistance mechanisms in HER2-low disease",
+                sponsor: "NCI",
+                startYear: 2023,
+                endYear: 2028,
+                isActive: true,
+              },
+            ],
+            total: 1,
+          }),
+        };
+      }
+      if (u.startsWith("/api/search/key-paper"))
+        return {
+          ok: true,
+          json: async () => ({ pubs: [{ pmid: "111", title: "CAR T persistence", year: 2024 }] }),
+        };
+      if ((init?.method ?? "GET") === "GET")
+        return { ok: true, json: async () => ({ ok: true, submissions: [] }) };
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          concepts: CONCEPTS,
+          candidates: [
+            candidate({
+              cwid: "a",
+              name: "Alice Alpha",
+              fusedScore: 0.9,
+              contributions: [{ term: "Immuno-oncology", rank: 1 }],
+              searchEvidence: [searchEvidence("Immuno-oncology", 142)],
+            }),
+          ],
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    await screen.findByText("Resistance mechanisms in HER2-low disease");
+    expect(screen.getByText("GRANT")).toBeTruthy();
+    expect(screen.getByText(/active to 2028/)).toBeTruthy();
+
+    // The grant leads: it renders BEFORE the paper in the block.
+    const block = evidenceBlocks()[0][1];
+    expect(block.indexOf("Resistance mechanisms")).toBeLessThan(block.indexOf("CAR T persistence"));
+  });
+
+  it("the coverage line ADDS UP — evidence, also-ranked, and gaps account for every concept", async () => {
+    // THE CONTRADICTION THIS REPLACES. The line used to read "Covers 2 of 3 concepts asked" while
+    // the card below also said "ranked, no evidence shown" — both true, and together nonsense:
+    // `covered` counted every concept the person RANKED under, but the server ships evidence blocks
+    // for at most MAX_EVIDENCE_CONCEPTS of them. Anyone matching more concepts than that hit it.
+    //
+    // Three clauses now, and they must partition the ask: evidence for / also ranked under / no
+    // evidence for. Alice ranks under 2 of the 3 concepts and has a block for only ONE.
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          fusedScore: 0.9,
+          contributions: [
+            { term: "Immuno-oncology", rank: 1 },
+            { term: "Cancer Metabolism", rank: 2 },
+          ],
+          searchEvidence: [searchEvidence("Immuno-oncology", 142)], // none for Cancer Metabolism
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    const line = document.querySelector('[data-slot="sponsor-match-coverage"] p')!.textContent!;
+    expect(line).toContain("Evidence for 1 of 3 concepts asked");
+    // Ranked, but capped out of an evidence block — NOT a gap, and no longer claimed as "covered".
+    expect(line).toContain("also ranked under Cancer Metabolism");
+    // A genuine gap: she never ranked under it at all.
+    expect(line).toContain("no evidence for CRISPR screening");
+    // 1 + 1 + 1 = the 3 concepts asked. The old line could not make that claim.
+    expect(screen.queryByText(/ranked, no evidence shown/)).toBeNull();
   });
 
   // ── Sponsor preferences (#1654) ────────────────────────────────────────────
