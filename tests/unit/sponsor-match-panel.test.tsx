@@ -604,10 +604,20 @@ describe("SponsorMatchPanel", () => {
    */
   function evidenceBlocks(): [string, string][] {
     return [...document.querySelectorAll('[data-slot="sponsor-match-evidence"]')].map((el) => {
-      const caption = el.firstElementChild?.textContent ?? "";
-      const line = (el.textContent ?? "").slice(caption.length);
-      return [caption, line.replace(/\s+/g, " ").trim()];
+      const caption = el.firstElementChild!;
+      // The caption is now `[concept] [ask N.NN]` — take the concept span, so these assertions
+      // keep saying what they were written to say. The ask is asserted on its own below.
+      const term = caption.firstElementChild?.textContent ?? "";
+      const line = (el.textContent ?? "").slice((caption.textContent ?? "").length);
+      return [term, line.replace(/\s+/g, " ").trim()];
     });
+  }
+
+  /** The `ask N.NN` each block reports, in DOM order. */
+  function evidenceAsks(): string[] {
+    return [...document.querySelectorAll('[data-slot="sponsor-match-evidence"]')].map(
+      (el) => el.firstElementChild?.lastElementChild?.textContent ?? "",
+    );
   }
 
   /** The spine's per-concept evidence, in the shape the wire carries it (#1696). */
@@ -789,9 +799,16 @@ describe("SponsorMatchPanel", () => {
   function stubWithKeyPaper(over: Partial<SponsorCandidate>) {
     const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
       if (typeof url === "string" && url.startsWith("/api/search/key-paper")) {
+        // HONOR `exclude`, as the real route does. A stub that returns pmid 111 no matter what
+        // cannot observe the de-dup at all — both blocks would render the same paper and the test
+        // would pass against a build in which the de-dup had been deleted.
+        const excluded = new URLSearchParams(url.split("?")[1] ?? "").get("exclude") ?? "";
         return {
           ok: true,
-          json: async () => ({ pubs: [{ pmid: "111", title: "CAR T persistence", year: 2024 }] }),
+          json: async () =>
+            excluded.includes("111")
+              ? { pubs: [{ pmid: "222", title: "Metabolic rewiring", year: 2023 }] }
+              : { pubs: [{ pmid: "111", title: "CAR T persistence", year: 2024 }] },
         };
       }
       const method = init?.method ?? "GET";
@@ -848,11 +865,16 @@ describe("SponsorMatchPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
-    // Expand the Immuno-oncology block → it fetches clean and CLAIMS pmid 111.
-    fireEvent.click(screen.getAllByRole("button", { name: /key papers/i })[0]);
-    await waitFor(() => expect(keyPaperCalls()).toHaveLength(1));
-    expect(keyPaperCalls()[0]).not.toContain("exclude"); // nothing claimed yet
+    // The blocks now resolve WITHOUT a click (the card leads with the artifact), and they resolve
+    // IN ORDER — which is the only reason the de-dup below still holds. Fired in one commit they
+    // would both read an empty claimed set and both show pmid 111.
+    await waitFor(() => expect(keyPaperCalls()).toHaveLength(2));
+    expect(keyPaperCalls()[0]).not.toContain("exclude"); // first block: nothing claimed yet
+    expect(keyPaperCalls()[1]).toContain("exclude=111"); // second block: EXCLUDES the claim
+    // …and therefore the two concepts lead with DIFFERENT papers. This is the assertion that
+    // fails if the blocks auto-resolve in one commit instead of in order.
     await screen.findByText(/CAR T persistence/);
+    await screen.findByText(/Metabolic rewiring/);
 
     // Mute it — the block unmounts, and its claim on 111 would outlive it.
     fireEvent.change(screen.getByLabelText("Immuno-oncology centrality"), {
@@ -860,17 +882,16 @@ describe("SponsorMatchPanel", () => {
     });
     expect(evidenceBlocks().map(([caption]) => caption)).toEqual(["Cancer Metabolism"]);
 
-    // Unmute — the block comes back and re-fetches.
+    // Unmute — the block comes back and re-fetches, on its own.
     fireEvent.change(screen.getByLabelText("Immuno-oncology centrality"), {
       target: { value: "0.9" },
     });
-    fireEvent.click(screen.getAllByRole("button", { name: /key papers/i })[0]);
-    await waitFor(() => expect(keyPaperCalls()).toHaveLength(2));
+    await waitFor(() => expect(keyPaperCalls()).toHaveLength(3));
 
     // AND IT FETCHES CLEAN. With the set memoised on `[]` this URL carried `exclude=111` — the
     // block suppressing the one paper it had just told the officer was Alice's best.
-    expect(keyPaperCalls()[1]).not.toContain("exclude");
-    expect(keyPaperCalls()[1]).toContain("cwid=a");
+    expect(keyPaperCalls()[2]).not.toContain("exclude");
+    expect(keyPaperCalls()[2]).toContain("cwid=a");
     // And the paper is actually back on screen, not silently dropped.
     await screen.findByText(/CAR T persistence/);
   });
@@ -891,7 +912,6 @@ describe("SponsorMatchPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
-    fireEvent.click(screen.getByRole("button", { name: /key papers/i }));
     await waitFor(() => expect(keyPaperCalls()).toHaveLength(1));
 
     // Drag, but not to zero — the concept still matches, so its block stays.
@@ -899,7 +919,9 @@ describe("SponsorMatchPanel", () => {
       target: { value: "0.5" },
     });
     expect(evidenceBlocks().map(([caption]) => caption)).toEqual(["Immuno-oncology"]);
-    // No remount, no re-fetch: still exactly the one call.
+    // No remount, no re-fetch: still exactly the one call. Note this is the assertion that would
+    // catch an `autoResolve` wired to something that changes on every drag frame — it would
+    // re-fetch the whole visible list on every pixel of slider travel.
     expect(keyPaperCalls()).toHaveLength(1);
   });
 
@@ -927,7 +949,6 @@ describe("SponsorMatchPanel", () => {
     fireEvent.change(paste, { target: { value: "CAR T" } });
     fireEvent.click(rank);
     await screen.findByText("Alice Alpha");
-    fireEvent.click(screen.getByRole("button", { name: /key papers/i }));
     await waitFor(() => expect(keyPaperCalls()).toHaveLength(1));
     await screen.findByText(/CAR T persistence/);
 
@@ -935,12 +956,110 @@ describe("SponsorMatchPanel", () => {
     fireEvent.change(paste, { target: { value: "CAR T and solid tumors" } });
     fireEvent.click(rank);
     await screen.findByText("Alice Alpha");
-    fireEvent.click(screen.getByRole("button", { name: /key papers/i }));
 
-    // The disclosure works at all (a stale one-shot fetch guard would leave it dead)…
+    // The evidence resolves at all (a stale one-shot fetch guard would leave it dead)…
     await waitFor(() => expect(keyPaperCalls()).toHaveLength(2));
     // …and it fetches clean: no pmid claimed under the PREVIOUS paste is excluded under this one.
     expect(keyPaperCalls()[1]).not.toContain("exclude");
+  });
+
+  // ── Artifact-lead evidence (the design spec) ───────────────────────────────
+  it("leads with the ARTIFACT — a titled paper, venue and year, with no click", async () => {
+    // The spec puts a paper on the card face. The app used to put a COUNT there and hide the paper
+    // behind a chevron, which is the gap this closes. `venue` is the field that had to be added to
+    // the shared key-paper `_source` to make it sayable at all.
+    const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
+      if (String(url).startsWith("/api/search/key-paper")) {
+        return {
+          ok: true,
+          json: async () => ({
+            pubs: [
+              { pmid: "111", title: "CAR T persistence", year: 2025, journal: "Blood" },
+              { pmid: "222", title: "Second paper", year: 2023 },
+              { pmid: "333", title: "Third paper", year: 2021 },
+            ],
+          }),
+        };
+      }
+      if ((init?.method ?? "GET") === "GET")
+        return { ok: true, json: async () => ({ ok: true, submissions: [] }) };
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          concepts: CONCEPTS,
+          candidates: [
+            candidate({
+              cwid: "a",
+              name: "Alice Alpha",
+              fusedScore: 0.9,
+              contributions: [{ term: "Immuno-oncology", rank: 1 }],
+              searchEvidence: [searchEvidence("Immuno-oncology", 142)],
+            }),
+          ],
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    // No click anywhere in this test — the artifact resolves because the card is on screen.
+    const lead = await screen.findByText("CAR T persistence");
+    expect(lead.closest("a")?.getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/111/");
+    expect(screen.getByText(/Blood/)).toBeTruthy();
+    expect(screen.getByText(/2025/)).toBeTruthy();
+
+    // The caption carries what the SPONSOR asked for this concept — the slider's own value.
+    expect(evidenceAsks()).toEqual(["ask 0.90"]);
+
+    // The count is still said, beneath the paper rather than standing in for it — and it keeps the
+    // word "tagged", which is what separates a real MeSH tag from a literal text mention.
+    expect(evidenceBlocks()[0][1]).toContain("142 of 210 publications tagged");
+
+    // "+ 2 more pubs (2023, 2021)" — the years of the papers it can ACTUALLY show. It must not
+    // offer "+140 more" off the tagged count: the response holds three papers, and a click that
+    // promised 140 could produce only two.
+    const more = screen.getByRole("button", { name: /2 more pubs/ });
+    expect(more.textContent).toBe("+ 2 more pubs (2023, 2021)");
+    expect(screen.queryByText("Second paper")).toBeNull();
+    fireEvent.click(more);
+    expect(screen.getByText("Second paper")).toBeTruthy();
+    expect(screen.getByText("Third paper")).toBeTruthy();
+  });
+
+  it("names the concepts that RANKED but shipped no evidence — without inventing a citation", async () => {
+    // The spine caps evidence at MAX_EVIDENCE_CONCEPTS. A concept can therefore be a real reason
+    // this person ranked and still have no block. The mockup's compact row cites a paper for these
+    // ("1 pub · Cancer Cell 2022"); we have none, BECAUSE no block shipped. Say that instead.
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          fusedScore: 0.9,
+          contributions: [
+            { term: "Immuno-oncology", rank: 1 },
+            { term: "Cancer Metabolism", rank: 2 },
+          ],
+          searchEvidence: [searchEvidence("Immuno-oncology", 142)], // none for Cancer Metabolism
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    const row = document.querySelector('[data-slot="sponsor-match-ranked-no-block"]')!;
+    expect(row.textContent).toContain("Cancer Metabolism");
+    expect(row.textContent).toContain("ranked, no evidence shown");
+    // And it is NOT reported as a gap — she genuinely ranked under it.
+    expect(screen.queryByText(/no evidence for Cancer Metabolism/)).toBeNull();
   });
 
   // ── Sponsor preferences (#1654) ────────────────────────────────────────────

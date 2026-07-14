@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { RepresentativePapers, type ExemplarFetchStatus } from "@/components/search/match-reason";
 import { ResultEvidence } from "@/components/search/result-evidence";
 import { profilePath } from "@/lib/profile-url";
@@ -24,6 +25,90 @@ import type { KeyPaperConfig } from "@/components/search/people-result-card";
  * resolve, not on click. Accepted; users open one disclosure at a time. Upgrade
  * path if it ever matters: claim optimistically by reserving the line's slot.
  */
+/**
+ * The artifact on the card face: a titled paper with its venue and year, badged by kind.
+ *
+ * Renders NOTHING until a paper resolves — no skeleton, no "loading…" row. The count line beneath
+ * already states what was matched, so an empty lead is a card that has not finished rather than a
+ * card that is broken, and a spinner per concept per card would be the noisiest thing on the page.
+ *
+ * `+N more pubs (2023, 2021)` names the years of the papers it can ACTUALLY show — the fetch caps
+ * at 3 — and never the scholar's full tagged count. The card's count line says "15 of 347
+ * publications tagged"; if this button also said "+14 more" it would be promising 14 papers the
+ * response does not contain and the click could not produce. It offers the two it has.
+ */
+function ArtifactLead({
+  papers,
+  status,
+  expanded,
+  onToggle,
+  panelId,
+}: {
+  papers: EvidencePub[];
+  status: ExemplarFetchStatus;
+  expanded: boolean;
+  onToggle: () => void;
+  panelId: string;
+}) {
+  if (papers.length === 0) return null;
+  const [lead, ...rest] = papers;
+  const years = rest.map((p) => p.year).filter((y): y is number => y != null);
+  return (
+    <div className="mt-1.5" data-slot="evidence-artifact">
+      <ArtifactRow pub={lead} />
+      {expanded ? rest.map((p) => <ArtifactRow key={p.pmid} pub={p} />) : null}
+      {rest.length > 0 ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          className="text-muted-foreground mt-1 ml-[46px] text-xs underline-offset-4 hover:underline"
+        >
+          {expanded
+            ? "− collapse"
+            : `+ ${rest.length} more pub${rest.length === 1 ? "" : "s"}${
+                years.length > 0 ? ` (${years.join(", ")})` : ""
+              }`}
+        </button>
+      ) : null}
+      {/* `status` is read only to keep an in-flight fetch from rendering a premature "no papers"
+          state; there is nothing to show while it runs. */}
+      <span className="sr-only">{status === "loading" ? "Resolving publications" : ""}</span>
+    </div>
+  );
+}
+
+function ArtifactRow({ pub }: { pub: EvidencePub }) {
+  return (
+    <div className="mt-1.5 flex gap-2.5">
+      {/* PUB, and only PUB. A GRANT badge needs the funding route, which is uncached and heavy
+          (one call per card), and the CONCEPT-tagged grants a sponsor ask actually wants are
+          behind a prod-off flag whose flip changes the PUBLIC People card. Separate change. */}
+      <span className="text-muted-foreground bg-muted h-fit shrink-0 rounded px-1.5 py-0.5 text-[10px] tracking-[0.04em]">
+        PUB
+      </span>
+      <div className="min-w-0 flex-1">
+        <a
+          href={`https://pubmed.ncbi.nlm.nih.gov/${pub.pmid}/`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-foreground text-sm leading-snug underline-offset-4 hover:underline"
+        >
+          <PubTitle value={pub.titleHtml ?? pub.title} />
+        </a>
+        {pub.journal || pub.year != null ? (
+          <div className="text-muted-foreground mt-0.5 text-xs">
+            {pub.journal ? <PubJournal className="not-italic" value={pub.journal} /> : null}
+            {pub.journal && pub.year != null ? " · " : null}
+            {pub.year ?? null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function EvidenceLine({
   evidence,
   cwid,
@@ -37,6 +122,9 @@ export function EvidenceLine({
   stacked,
   tier = "primary",
   defaultExpanded = false,
+  autoResolve = false,
+  artifactLead = false,
+  onResolved,
 }: {
   evidence: ResultEvidenceT;
   cwid: string;
@@ -48,6 +136,28 @@ export function EvidenceLine({
   badged: boolean;
   /** Shared across a card's stacked lines for exemplar de-dup. */
   claimedPmids: Set<string>;
+  /** Resolve the representative papers WITHOUT a click, when the caller says this line is worth
+   *  paying for (the sponsor console passes its card's in-view state). Default false ⇒ the public
+   *  People card is untouched, and the ~700 candidates nobody scrolls to still cost nothing.
+   *
+   *  This is not a new fetch path: `ensureExemplar`/`ensureKeyPaper` are already standalone and
+   *  ref-guarded, and `defaultExpanded` has kicked them outside a click since #1381. This only adds
+   *  a second reason to call them, and calling twice is a no-op. */
+  autoResolve?: boolean;
+  /** Lead with the ARTIFACT, not the count — a titled paper on the card face with its venue and
+   *  year, and the "N of M publications tagged" line demoted beneath it. The sponsor console's
+   *  design spec; the public People card leads with the count and keeps its chevron. Implies
+   *  nothing about fetching: pair it with `autoResolve`, or the lead has nothing to show. */
+  artifactLead?: boolean;
+  /** Fired once this line's lazy fetch has SETTLED (resolved or failed) and it has therefore
+   *  finished claiming its pmids. It exists to let a caller that auto-resolves several lines run
+   *  them in ORDER instead of all at once — see the sponsor panel. Without that, every line on a
+   *  card fires in the same commit, every one of them reads an empty `claimedPmids`, and the
+   *  cross-concept de-dup this whole file is built around silently stops working: the same paper
+   *  is offered as the evidence for two different concepts. On the click path this could only
+   *  happen if a user opened two collapsed lines in the same instant; under `autoResolve` it is
+   *  the DEFAULT, which is why the callback is not optional machinery. */
+  onResolved?: () => void;
   /** #1381 follow-up — mount this line already expanded (and kick its lazy fetch on
    *  mount), so a LONE "Also matched" secondary reveals its records in one click on
    *  the umbrella toggle rather than two. Default false ⇒ unchanged. */
@@ -64,6 +174,9 @@ export function EvidenceLine({
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const panelId = useId();
+  // Held in a ref so a caller passing an inline arrow cannot re-trigger the fetch effects.
+  const onResolvedRef = useRef(onResolved);
+  onResolvedRef.current = onResolved;
 
   // method/topic resolve their representative papers LAZILY (on first expand). The
   // query string selects the loader: `?family=` / `?topic=`.
@@ -138,7 +251,12 @@ export function EvidenceLine({
         setKeyPapers(pubs);
       })
       .catch(() => setKeyPapers([]))
-      .finally(() => setKeyPaperStatus("done"));
+      .finally(() => {
+        setKeyPaperStatus("done");
+        // SETTLED, not "succeeded" — a failed fetch claims nothing, but a caller chaining its
+        // lines in order must still be released or the rest of the card never resolves.
+        onResolvedRef.current?.();
+      });
   }, [wantsLazyKeyPaper, cwid, keyPaperConfig, keyPaperMentionOnly, claimedPmids]);
 
   const ensureExemplar = useCallback(() => {
@@ -201,6 +319,18 @@ export function EvidenceLine({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Resolve without a click, when the caller asks. Both `ensure*` are one-shot ref-guarded, so
+  // this racing the click path (or a re-render flipping `autoResolve` back and forth) is a no-op
+  // rather than a double fetch.
+  useEffect(() => {
+    if (!autoResolve) return;
+    if (isLazyExemplar) ensureExemplar();
+    else if (wantsLazyKeyPaper) ensureKeyPaper();
+    // Nothing to fetch — release the caller's chain immediately, or a line with no lazy loader
+    // would stall every line queued behind it and the rest of the card would never resolve.
+    else onResolvedRef.current?.();
+  }, [autoResolve, isLazyExemplar, ensureExemplar, wantsLazyKeyPaper, ensureKeyPaper]);
+
   const profileHref = `${profilePath(slug)}#publications`;
   const exemplarFallback =
     evidence.kind === "method"
@@ -238,6 +368,40 @@ export function EvidenceLine({
               ? "border-l-2 border-[#64748b] pl-[14px]"
               : "border-l-2 border-[#7c3aed] pl-[14px]"
             : undefined;
+
+  // ARTIFACT-LEAD. The papers ARE the disclosure here — they sit on the card face — so the count
+  // line below keeps no chevron of its own (`canExpand={false}`), and the "+N more" affordance
+  // lives on the artifact list where the papers are. Two chevrons for one panel would be a bug.
+  if (artifactLead) {
+    return (
+      <>
+        <ArtifactLead
+          papers={repPapers}
+          status={wantsLazyKeyPaper ? keyPaperStatus : isLazyExemplar ? exemplarStatus : "done"}
+          expanded={expanded}
+          onToggle={() => setExpanded((v) => !v)}
+          panelId={panelId}
+        />
+        <ResultEvidence
+          evidence={evidence}
+          canExpand={false}
+          expanded={false}
+          onToggle={onToggle}
+          panelId={panelId}
+          hasQuery={hasQuery}
+          slug={slug}
+          badged={badged}
+          pubCount={pubCount}
+          stacked={stacked}
+          // The caller's tier, NOT a forced "lesser". Demoting it here looked tidier and quietly
+          // cost an honesty guarantee: the compact tier carries the literal-mention caveat in the
+          // papers panel (`mentionNote`), which artifact-lead does not render — so a "mention"
+          // match would have lost the one line that says it is only a mention.
+          tier={tier}
+        />
+      </>
+    );
+  }
 
   return (
     <>

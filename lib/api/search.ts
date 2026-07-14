@@ -356,6 +356,11 @@ export type RepresentativePub = {
   title: string;
   titleHtml?: string;
   year?: number | null;
+  /** The venue. Indexed and read by the Publications tab all along (`lib/search.ts`), just never
+   *  selected into this path's `_source` — so a representative paper could be named and dated but
+   *  not placed. OPTIONAL and omitted-when-absent, not `?? null`: an always-present key would break
+   *  `search-fetch-key-paper.test.ts`'s `toEqual`, which fails on an extra defined property. */
+  journal?: string;
 };
 
 /** The shape of a reason filter's optional `top` (top_hits) sub-agg. */
@@ -363,7 +368,12 @@ type ReasonTopHitsAgg = {
   top?: {
     hits?: {
       hits?: Array<{
-        _source?: { pmid?: string | number; title?: string; year?: number | null };
+        _source?: {
+          pmid?: string | number;
+          title?: string;
+          year?: number | null;
+          journal?: string | null;
+        };
         highlight?: { title?: string[] };
       }>;
     };
@@ -415,6 +425,10 @@ export function parseReasonTopHits(
       title: src.title,
       ...(titleHtml ? { titleHtml } : {}),
       ...(src.year != null ? { year: src.year } : {}),
+      // Same omit-when-absent idiom as `year`/`titleHtml` above, and for a concrete reason: the
+      // inline reason-agg's `top_hits` selects no `journal`, so on that path the key must simply
+      // not exist rather than be a present-but-null.
+      ...(src.journal ? { journal: src.journal } : {}),
     });
     if (out.length >= limit) break;
   }
@@ -638,7 +652,7 @@ export async function fetchKeyPaper(args: {
         // so the BM25 `_score` is returned for the blend even though we sort.
         size: KEY_PAPER_CANDIDATE_POOL,
         track_scores: true,
-        _source: ["pmid", "title", "year", "citationCount"],
+        _source: ["pmid", "title", "year", "citationCount", "journal"],
         query: boolQuery,
         sort: [
           { _score: { order: "desc" } },

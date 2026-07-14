@@ -60,7 +60,7 @@
  * be unchecked, because an extractor that reads an ask the sponsor never made must not be able
  * to skew a ranking with no way for the officer to say so.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download } from "lucide-react";
 
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
@@ -1098,6 +1098,42 @@ function ContactButton({ cwid }: { cwid: string }) {
   );
 }
 
+/**
+ * True once the node has been on screen, and true forever after — the papers it triggers do not
+ * become unfetched when you scroll past. Same shape as the observer in
+ * `people-result-card-streamed.tsx`, which arms the same endpoint on the same signal.
+ *
+ * With no `IntersectionObserver` (jsdom, and any browser old enough to lack it) it reports IN view
+ * rather than out. Degrade toward FETCHING: the failure mode of guessing "visible" is some extra
+ * requests, and the failure mode of guessing "hidden" is a card that never shows its evidence and
+ * looks, silently, like a scholar with nothing to say.
+ */
+function useInViewOnce<T extends HTMLElement>(): [React.RefObject<T | null>, boolean] {
+  const ref = useRef<T>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || inView) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setInView(true);
+      return;
+    }
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setInView(true);
+          obs.disconnect();
+        }
+      },
+      // Resolve just before the row arrives, so the artifact is there when the eye is.
+      { rootMargin: "200px" },
+    );
+    obs.observe(node);
+    return () => obs.disconnect();
+  }, [inView]);
+  return [ref, inView];
+}
+
 /** The three fills. `ranked` is the same hue as `evidence` because the person genuinely ranked
  *  under that concept — but it is a SEPARATE state, not a lighter grade of found, and its title
  *  says so. The distinction the officer needs is "we have nothing for this" (`none`) versus
@@ -1231,8 +1267,31 @@ function ResearcherRow({
   const blockTerms = JSON.stringify(evidenceBlocks.map((b) => b.concept.term));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const claimedPmids = useMemo(() => new Set<string>(), [runId, blockTerms]);
+  const [rowRef, inView] = useInViewOnce<HTMLDivElement>();
+
+  // AUTO-RESOLVE IN ORDER, ONE BLOCK AT A TIME — the de-dup depends on it.
+  //
+  // `claimedPmids` makes a card's blocks show DIFFERENT papers: whoever resolves first claims the
+  // paper, and the others send it as `exclude=`. That works on the click path because a human opens
+  // one disclosure at a time. Auto-resolving fires every block in the SAME commit, so every one of
+  // them reads an empty claimed set, and a paper that is the best evidence for two of the sponsor's
+  // concepts gets offered as the representative for both — the exact duplicate #1696 removed.
+  //
+  // So block i waits for block i-1 to settle. `resolvedCount` is keyed to the block list (same key
+  // as the claimed set itself), so a mute/unmute restarts the chain along with the Set it protects.
+  const [resolvedCount, setResolvedCount] = useState(0);
+  useEffect(() => setResolvedCount(0), [runId, blockTerms]);
+
+  // The concepts this candidate RANKED under but for which the server shipped no evidence block —
+  // `coverage`'s middle state, named. They have a chip and a strip segment and nothing else, and
+  // without a line here the officer is left to infer their absence from a gap in a bar.
+  //
+  // What this row does NOT do is cite a paper. The mockup's compact row reads "1 pub · Cancer Cell
+  // 2022, middle author"; we have no paper for these concepts precisely BECAUSE no block shipped,
+  // so any citation here would be invented. It says what is true instead.
+  const rankedNoBlock = coverage.filter((c) => c.state === "ranked");
   return (
-    <div className="border-t border-border flex gap-3 py-4 first:border-t-0">
+    <div ref={rowRef} className="border-t border-border flex gap-3 py-4 first:border-t-0">
       <div className="text-muted-foreground w-5 pt-1 text-right text-sm tabular-nums">{rank}</div>
       {/* The shared headshot, not a bespoke initials circle — this is a list of PEOPLE, and the
           public People card has rendered their faces all along. `HeadshotAvatar` degrades to a
@@ -1304,7 +1363,7 @@ function ResearcherRow({
             sets disjoint across the stack. */}
         {evidenceBlocks.length > 0 ? (
           <div className="mt-1.5 space-y-2">
-            {evidenceBlocks.map(({ concept, evidence }) => (
+            {evidenceBlocks.map(({ concept, evidence }, i) => (
               // `runId` in the key is the OTHER HALF of the claimedPmids reset above, and it is
               // required: a fresh Set is useless if the `EvidenceLine` beneath keeps its one-shot
               // `keyPaperFetched` ref from the last run and never fetches again. Baking the run
@@ -1313,10 +1372,14 @@ function ResearcherRow({
               // `people-result-card.tsx`, which bakes `qParam` into both.) `term` alone keeps a
               // card's sibling blocks distinct WITHIN a run.
               <div key={`${runId}:${concept.term}`} data-slot="sponsor-match-evidence">
-                {/* The rail's own facet-heading idiom, reused — no new token, and it reads as
-                    what it is: a group header over the lines beneath it. */}
-                <div className="text-muted-foreground text-[11px] font-semibold tracking-[0.08em] uppercase">
-                  {concept.term}
+                {/* The concept, and what the sponsor asked for it — the two facts the block is an
+                    answer to, on one line. `centrality` is the slider's own value, so the number
+                    here is the number the officer set, not a derived weight they cannot locate. */}
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-foreground text-sm font-medium">{concept.term}</span>
+                  <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
+                    ask {concept.centrality.toFixed(2)}
+                  </span>
                 </div>
                 <EvidenceLine
                   evidence={evidence.evidence}
@@ -1329,7 +1392,33 @@ function ResearcherRow({
                   badged={false}
                   claimedPmids={claimedPmids}
                   stacked={false}
+                  // The artifact on the face, resolved when the card is on screen. `inView` is the
+                  // whole reason this is affordable: the pool runs to ~800 and we render 100, so
+                  // fetching a paper per concept per RENDERED card would be ~300 requests for a
+                  // page the officer sees five rows of. The observer buys the design spec back.
+                  artifactLead
+                  autoResolve={inView && i <= resolvedCount}
+                  onResolved={() => setResolvedCount((n) => Math.max(n, i + 1))}
                 />
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {rankedNoBlock.length > 0 ? (
+          <div
+            className="border-border mt-2 space-y-1 border-t pt-2"
+            data-slot="sponsor-match-ranked-no-block"
+          >
+            {rankedNoBlock.map(({ concept }) => (
+              <div
+                key={concept.term}
+                className="text-muted-foreground flex items-baseline justify-between gap-2 text-xs"
+              >
+                <span>
+                  {concept.term}{" "}
+                  <span className="tabular-nums">{concept.centrality.toFixed(2)}</span>
+                </span>
+                <span className="shrink-0">ranked, no evidence shown</span>
               </div>
             ))}
           </div>
