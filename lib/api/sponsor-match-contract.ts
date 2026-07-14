@@ -813,6 +813,19 @@ export const RARE_COVERAGE_RATIO = 0.1;
  *
  * This reads `corpusCoverage` and nothing else. It has no access to `weightFactor`, which is
  * the structural guarantee that the badge cannot drift back into being a claim about ranking.
+ *
+ * DECIDED 2026-07-14 — KEEP IT AS IS. It fires on 6 of 8 concepts of the ADC ask, which was
+ * raised as a defect: a badge on three-quarters of the rail is said to carry no information.
+ * The badge is nonetheless ACCURATE, the reading was reviewed, and the answer is that it stays.
+ * Do not "fix" this by tightening `RARE_COVERAGE_RATIO` on the evidence of a single paste, and
+ * do not invert it to badge the COMMON terms — "common" is unsayable here, because ~40% of
+ * descriptors have no coverage row and absent ≠ zero, so "not rare" cannot be rendered as
+ * "common" without lying about the unknowns. Tightening the ratio at all requires sampling
+ * several real asks first, not one.
+ *
+ * Nor is the badge "already gone" — a prior handoff asserted that, and it was wrong. Rarity was
+ * deleted from the FUSION (#1698); this badge is display-only and has been rendering all along.
+ * `git grep rareTerms` before you believe otherwise.
  */
 export function rareTerms(concepts: readonly SponsorConcept[]): Set<string> {
   const known = concepts.filter(
