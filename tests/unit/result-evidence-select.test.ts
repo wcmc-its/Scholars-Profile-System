@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   selectEvidence,
   selectEvidenceLines,
+  isResearchMatchEvidence,
   clinicalExactMatch,
   bioCoversQuery,
   refineExemplarTools,
@@ -15,6 +16,8 @@ import {
   clampAroundMarks,
   classifyNameHighlight,
   AREAS_CAP,
+  type ResultEvidence,
+  type ResultEvidenceKind,
   type SelectEvidenceInput,
 } from "@/lib/api/result-evidence";
 
@@ -674,6 +677,158 @@ describe("INVARIANT guardrails (handoff §4 principle 5 — would have caught #1
     const ev = selectEvidence({ areas: { labels: capped, total: 12 } });
     if (ev.kind !== "areas") throw new Error("expected areas");
     expect(ev.labels.length).toBeLessThanOrEqual(AREAS_CAP);
+  });
+});
+
+describe("isResearchMatchEvidence (#1696) — a claim about the QUERY vs a hint about WHO", () => {
+  /**
+   * A `Record` OVER THE KIND UNION, so this table is exhaustive BY COMPILE ERROR: add a kind to
+   * `ResultEvidence` and this test stops compiling until the kind is classified here — the same
+   * guarantee `isResearchMatchEvidence`'s own `default`-less switch gives the implementation. Both halves
+   * matter. A test that only listed the kinds it happened to think of would go green on a new
+   * kind and let the next permissive fallback through, which is exactly how #1696 shipped.
+   */
+  const CASES: Record<ResultEvidenceKind, { evidence: ResultEvidence; match: boolean; why: string }> = {
+    // ── A claim about the person's WORK ────────────────────────────────────────
+    method: {
+      evidence: { kind: "method", family: "Single-cell RNA sequencing", tools: ["scRNA-seq"] },
+      match: true,
+      why: "the method family the query resolved to",
+    },
+    clinical: {
+      evidence: { kind: "clinical", specialty: "Cardiology", boardCertified: true },
+      match: true,
+      why: "a specialty the query literally names (clinicalExactMatch)",
+    },
+    topic: {
+      evidence: { kind: "topic", label: "Immunology", id: "immunology" },
+      match: true,
+      why: "the research area the query matched",
+    },
+    publications: {
+      evidence: {
+        kind: "publications",
+        strength: "tagged",
+        text: "5 of 41 publications tagged",
+        term: "Obesity",
+        count: 5,
+      },
+      match: true,
+      why: "a count of the scholar's pubs against the QUERY's concept",
+    },
+    selfDescription: {
+      evidence: { kind: "selfDescription", html: BIO_HL },
+      match: true,
+      why: "an overview sentence containing the query — self-reported, but about their research",
+    },
+    // ── Identity / position / empty: query-derived is NOT enough ────────────────
+    name: {
+      evidence: { kind: "name", html: NAME_HL },
+      match: false,
+      why: "the query hit their NAME. A researcher surnamed Parkinson is not an expert on Parkinson disease — that is the false-positive class the sponsor gold grades 0",
+    },
+    affiliation: {
+      evidence: { kind: "affiliation", html: AFFIL_HL },
+      match: false,
+      why: "the ORG segment of the name highlight — the group they sit in, not their work. Query-derived and still not a research claim; fires at rank 9, i.e. when nothing about their work matched",
+    },
+    fundingRole: {
+      evidence: { kind: "fundingRole", role: "pi", text: "Principal Investigator" },
+      match: false,
+      why: "Phase-2 stub: no People selector emits it AND result-evidence.tsx renders it as null — a caption over one would be a labelled void",
+    },
+    awardAmount: {
+      evidence: { kind: "awardAmount", text: "$2.4M" },
+      match: false,
+      why: "as fundingRole — the renderer draws nothing for it",
+    },
+    // ── The identity/empty tail: what the ladder says when NOTHING matched ──────
+    areas: {
+      evidence: { kind: "areas", labels: ["Cardiology", "Heart Failure"], total: 7 },
+      match: false,
+      why: "self-reported research areas — the card's own doc calls this a who-is-this hint",
+    },
+    concepts: {
+      evidence: {
+        kind: "concepts",
+        items: [{ label: "Neoplasms", ui: "D009369" }],
+        total: 1,
+      },
+      match: false,
+      why: "top MeSH descriptors by pub frequency — same hint, denser source",
+    },
+    none: {
+      evidence: { kind: "none" },
+      match: false,
+      why: "the honest empty — the ladder's terminus, and a claim about nothing",
+    },
+  };
+
+  for (const [kind, { evidence, match, why }] of Object.entries(CASES)) {
+    it(`${kind} → ${match ? "MATCH evidence" : "identity hint"}: ${why}`, () => {
+      expect(isResearchMatchEvidence(evidence)).toBe(match);
+    });
+  }
+
+  /**
+   * The deny side is BROADER than the ladder's identity tail, and that gap is the whole lesson of
+   * #1696. `affiliation` and `name` ARE query-derived — the mark is the query's own — and they are
+   * still not claims about the person's research. Asking "was this derived from the query?" lets
+   * both through; asking "does this say their WORK matches?" does not. Pinned as a list so that
+   * moving a kind across the line has to be done on purpose.
+   */
+  it("the deny side is EXACTLY name / affiliation / areas / concepts / none / the two stubs", () => {
+    const denied = Object.entries(CASES)
+      .filter(([, c]) => !c.match)
+      .map(([kind]) => kind)
+      .sort();
+    expect(denied).toEqual([
+      "affiliation",
+      "areas",
+      "awardAmount",
+      "concepts",
+      "fundingRole",
+      "name",
+      "none",
+    ]);
+  });
+
+  /**
+   * THE POINT OF THE PREDICATE, and the bug it exists to kill.
+   *
+   * `selectEvidence` ALWAYS returns something — it terminates in `{ kind: "none" }` — and
+   * `selectEvidenceLines` never returns `[]`, because it falls back to `selectEvidence`. So a
+   * consumer that fans out one search per concept and guards with `if (!evidence) continue`
+   * has a guard that CANNOT FIRE, and every concept looks like a match. These three assertions
+   * are the ones a sponsor-console-shaped caller has to be able to make.
+   */
+  it("the ladder's fallbacks — which fire when nothing matched — are NOT match evidence", () => {
+    // Nothing at all matched.
+    expect(selectEvidence({}).kind).toBe("none");
+    expect(isResearchMatchEvidence(selectEvidence({}))).toBe(false);
+
+    // The COMMON case in prod: the scholar has self-reported areas, and the query hit nothing.
+    // The ladder happily returns those areas — a fact about the person, not about the query.
+    const areasOnly: SelectEvidenceInput = { areas: { labels: ["Cardiology"], total: 3 } };
+    expect(selectEvidence(areasOnly).kind).toBe("areas");
+    expect(isResearchMatchEvidence(selectEvidence(areasOnly))).toBe(false);
+
+    // And the stacked emitter is no different: NEVER empty, so its [0] is the same tail.
+    const lines = selectEvidenceLines(areasOnly);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].kind).toBe("areas");
+    expect(isResearchMatchEvidence(lines[0])).toBe(false);
+  });
+
+  it("a real first-class match IS match evidence, through the same emitter", () => {
+    // The other side of the guard: the predicate must not be so conservative it drops the
+    // reasons the console exists to show. Same input shape, one genuine signal added.
+    const withTagged = selectEvidenceLines({
+      areas: { labels: ["Cardiology"], total: 3 },
+      pub: { tagged: { text: "12 of 40 publications tagged", term: "Fibrosis", count: 12 } },
+    });
+    expect(withTagged[0]).toMatchObject({ kind: "publications", strength: "tagged" });
+    expect(isResearchMatchEvidence(withTagged[0])).toBe(true);
   });
 });
 

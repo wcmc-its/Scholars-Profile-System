@@ -640,3 +640,82 @@ export function selectEvidenceLines(input: SelectEvidenceInput): ResultEvidence[
   if (lines.length === 0) lines.push(selectEvidence(input));
   return lines;
 }
+
+/**
+ * Does this evidence claim the person's RESEARCH matches the query, or does it merely say who and
+ * where they are?
+ *
+ * The ladders above ALWAYS return something: `selectEvidence` terminates in `{ kind: "none" }`
+ * and `selectEvidenceLines` falls back to it, so "no evidence" is not a thing either function
+ * can express. That is correct for the People card, which renders the identity tail OUTSIDE its
+ * match slot (see the `areas` doc: "E2 renders it OUTSIDE the match slot") and so never presents
+ * it as a reason. It is NOT correct for any consumer that treats a returned evidence as "this is
+ * why they matched" — such a consumer needs to know which side of the ladder it landed on, and
+ * before this predicate existed it had no way to ask.
+ *
+ * #1696 — the sponsor console was that consumer. It fanned out one `searchPeople` per concept,
+ * took `evidenceLines[0]`, and guarded with `if (!hitEvidence) continue` — a guard that CANNOT
+ * fire against the real emitter. So an UNRESOLVED cluster (no MeSH descriptor ⇒ no tagged
+ * reason) fell down the ladder to `areas`, and the card captioned the scholar's SELF-REPORTED
+ * research areas with the sponsor's concept — rendering "who is this" as "why they matched".
+ * That is a fabrication of relevance on a surface a fundraising officer acts on.
+ *
+ * ⚠ ASK THE RIGHT QUESTION. The obvious predicate — "was this derived from the query?" — is WRONG,
+ * and it is wrong in a way that reads as correct. `affiliation` is query-derived (the mark landed in
+ * the org segment of `preferredName`) and is still not evidence that this person WORKS on the
+ * concept: it is the name of the group they sit in. Ship it and "Roel van Herten - AI In Medical
+ * <mark>Imaging</mark>" appears captioned under the sponsor's "Diagnostic Imaging", asserting a
+ * research match that nobody has claimed. It fires at rank 9 — i.e. precisely when NOTHING about
+ * their work matched — so the person least connected to the concept is the one who gets the block.
+ *
+ * The question is therefore: **does this assert that their RESEARCH matches the query, as opposed to
+ * who or where they are?**
+ *
+ * TRUE — a claim about the person's work:
+ *   `method`          — the method family the query resolved to
+ *   `topic`           — the research area the query matched
+ *   `publications`    — a tagged/concept/mention count against the query's concept
+ *   `clinical`        — a specialty the query literally names
+ *   `selfDescription` — a sentence from their own bio containing the query. The weakest one allowed,
+ *                       and self-reported — but it is a statement about their research, which is the
+ *                       line being drawn. The emitter ranks it 8b, above affiliation, for the same reason.
+ *
+ * FALSE — identity, position, or the empty tail. None of these says anything about their work:
+ *   `affiliation` — the ORG segment of the name highlight. The emitter's own comment: "9 —
+ *                   affiliation (weak/organizational, just above empty)". Query-derived, not work.
+ *   `name`        — the query hit their NAME. A researcher surnamed Parkinson is not thereby an
+ *                   expert on Parkinson disease; that is the false-positive class the sponsor gold
+ *                   grades 0. (Unreachable today — `selectEvidence` rank 1 deliberately never emits
+ *                   it, #1267 — but the union permits it, so the answer must be recorded here.)
+ *   `areas`       — self-reported research areas; the card's own doc calls this a who-is-this hint
+ *                   and renders it OUTSIDE the match slot
+ *   `concepts`    — top MeSH descriptors by pub frequency; same hint, denser source
+ *   `none`        — the honest empty
+ *   `fundingRole`, `awardAmount` — Phase-2 stubs. No People selector emits them AND
+ *                   `components/search/result-evidence.tsx` renders them as `null`, so a caption
+ *                   over one would be a labelled void — a concept asserted with visibly nothing
+ *                   under it. If a selector ever emits them, decide then, with a renderer that draws.
+ *
+ * EXHAUSTIVE SWITCH, and deliberately NO `default`. A new `ResultEvidence` kind must fail to
+ * compile here until someone decides which side it is on. That is the entire point: this bug
+ * existed because a fallback was silently permissive, and a permissive default would recreate it
+ * the next time the union grows.
+ */
+export function isResearchMatchEvidence(evidence: ResultEvidence): boolean {
+  switch (evidence.kind) {
+    case "method":
+    case "clinical":
+    case "topic":
+    case "publications":
+    case "selfDescription":
+      return true;
+    case "name":
+    case "affiliation":
+    case "areas":
+    case "concepts":
+    case "none":
+    case "fundingRole":
+    case "awardAmount":
+      return false;
+  }
+}

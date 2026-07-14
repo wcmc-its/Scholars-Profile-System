@@ -70,6 +70,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   fitTier,
   matchedConcepts,
+  matchedEvidence,
   preferenceBoost,
   PREFERENCE_LAMBDA,
   rareTerms,
@@ -199,6 +200,15 @@ export function SponsorMatchPanel() {
   // would mark words that never produced these concepts (and, after a history replay, a
   // different paste entirely).
   const [matchedText, setMatchedText] = useState("");
+  // #1696 — THE RANKING RUN'S IDENTITY. Bumped once per successful search, and threaded down to
+  // each row as the reset key for its per-card `claimedPmids` set + its evidence-block keys.
+  //
+  // A COUNTER, not `matchedText`. The rows are keyed by cwid (`<li key={c.cwid}>`), so a scholar
+  // who appears in two consecutive runs keeps the SAME mounted `ResearcherRow` — the run key is
+  // the only thing that tells that row a new run happened. Re-running the IDENTICAL paste (the
+  // history list's replay button does exactly this) is still a new run whose blocks must re-fetch
+  // from a clean slate, and `matchedText` cannot see that: it would be unchanged.
+  const [runId, setRunId] = useState(0);
   const pending = status.kind === "loading";
 
   // #6d — the retained searches, from the SERVER. This REPLACES the old localStorage history
@@ -265,6 +275,7 @@ export function SponsorMatchPanel() {
         setCandidates(data.candidates ?? []);
         setConcepts(data.concepts ?? []);
         setMatchedText(text);
+        setRunId((n) => n + 1); // #1696 — a new run: every row's claimed-pmid set starts empty
         // #1654 — detected preferences arrive ACTIVE. The sponsor said it; the default is to
         // honour it. Deselecting is the officer's override, not their opt-in.
         const prefs = data.preferences ?? [];
@@ -780,6 +791,7 @@ export function SponsorMatchPanel() {
                           rank={rank}
                           concepts={concepts}
                           topScore={topScore}
+                          runId={runId}
                         />
                       </li>
                     ))}
@@ -999,11 +1011,14 @@ function ResearcherRow({
   rank,
   concepts,
   topScore,
+  runId,
 }: {
   candidate: SponsorCandidate;
   rank: number;
   concepts: SponsorConcept[];
   topScore: number;
+  /** #1696 — the current ranking run. See `claimedPmids` below: this row can OUTLIVE a run. */
+  runId: number;
 }) {
   const name = candidate.name;
   // Chips + tier are DERIVED, never wired — so both stay live under the sliders. The raw
@@ -1012,13 +1027,56 @@ function ResearcherRow({
   const tier = fitTier(candidate.fusedScore, topScore);
   const papers = candidate.evidence?.papers ?? [];
   const topics = candidate.evidence?.topics ?? [];
-  // #1689 — `EvidenceLine` de-dups representative papers across a card's lines through this
-  // shared set. The sponsor card renders ONE line, so it can never collide with a sibling; the
-  // Set exists because the component's contract requires it. Memoised with NO deps because the
-  // row is keyed by cwid and so remounts per candidate anyway — the point is only that a slider
-  // drag (which re-renders every row) must not hand the line a fresh set and make it re-fetch
-  // papers it has already claimed.
-  const claimedPmids = useMemo(() => new Set<string>(), []);
+  // #1696 — one evidence block per concept this candidate matched, joined to the chips above by
+  // `term` and ordered the same way, because it IS the same list: `matchedEvidence` derives from
+  // `matchedConcepts`. Mute a concept and its chip and its evidence block disappear together —
+  // a block still captioned "Fibrosis" under a slider dragged to zero would be the card
+  // contradicting the ranking beside it.
+  const evidenceBlocks = matchedEvidence(candidate, concepts);
+  /**
+   * #1689 — `EvidenceLine` de-dups representative papers across a card's lines through this
+   * shared set, and since #1696 that de-dup is doing real work: the card now renders one line PER
+   * CONCEPT, and a paper a scholar wrote about two of them would otherwise be offered as the
+   * representative for both. Whichever line's lazy fetch resolves first claims it; the loser sends
+   * the claimed pmids as `exclude=` and surfaces its own next-best paper instead.
+   *
+   * THE SET'S LIFETIME IS THE PROBLEM, and `[]` was the wrong answer. `EvidenceLine` only ever
+   * ADDS to this set — it has no release-on-unmount — so a claim outlives the line that made it.
+   * Mute a concept and its block unmounts with its pmids still claimed; unmute it and the block
+   * remounts, re-fetches (a fresh line, so its one-shot `keyPaperFetched` ref is clean) and
+   * EXCLUDES THE VERY PAPER IT ITSELF SHOWED A MOMENT AGO. The officer sees the disclosure come
+   * back with a worse paper — or empty, so the chevron silently vanishes while the count line
+   * beside it still reads "142 of 210 publications tagged". Reproduced, not theorised.
+   *
+   * So the set is keyed to WHAT IS ACTUALLY ON SCREEN: the current run, and the current block
+   * list. Both are needed and neither is redundant:
+   *   - `runId` — a new ranking run. (Belt-and-braces today: the panel swaps the whole results
+   *     tree for skeletons while `status.kind === "loading"`, so these rows already unmount
+   *     between runs and the set is rebuilt regardless. That unmount is INCIDENTAL — a future
+   *     "don't flash skeletons on re-rank" change would remove it and silently reintroduce the
+   *     leak across runs. Keying on the run makes the reset a property of this component instead
+   *     of a side effect of a conditional 500 lines away.)
+   *   - `blockTerms` — the set of blocks currently rendered. THIS is the one that fires today: it
+   *     changes on exactly the mute/unmute above, and on nothing else. A slider dragged 0.9 → 0.5
+   *     does not change WHICH concepts matched, so the key holds, the set survives, and the lines
+   *     do not re-fetch papers they already claimed — which is what the old `[]` was protecting.
+   *
+   * `useMemo`-as-reset, not a computed value (the factory reads neither dep) — minting the set
+   * during render is pure, unlike clearing a ref's contents, which persists across React's
+   * discarded/StrictMode renders. Same idiom, for the same reason, as
+   * `components/search/people-result-card.tsx`'s `useMemo(() => new Set<string>(), [qParam])`.
+   *
+   * RESIDUAL, and it is the honest trade: re-minting the set on a mute also forgets the claims of
+   * the SIBLING blocks that stayed mounted, so after a mute/unmute cycle two blocks can briefly
+   * offer the same paper. That is a cosmetic duplicate; the bug it replaces is a block that hides
+   * its own best paper or renders an empty disclosure. The real fix is release-on-unmount inside
+   * `EvidenceLine` (the set would then be exactly "claims by mounted lines", with no reset needed
+   * at all) — but that is a shared component the public People card renders too, so it belongs in
+   * its own change rather than riding along here.
+   */
+  const blockTerms = JSON.stringify(evidenceBlocks.map((b) => b.concept.term));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const claimedPmids = useMemo(() => new Set<string>(), [runId, blockTerms]);
   return (
     <div className="border-t border-border flex gap-3 py-4 first:border-t-0">
       <div className="text-muted-foreground w-5 pt-1 text-right text-sm tabular-nums">{rank}</div>
@@ -1073,20 +1131,47 @@ function ResearcherRow({
             representative-papers disclosure — which costs nothing for the ~700 candidates
             nobody opens, because it fetches on click, not on render.
             Two surfaces answering "why did this scholar match?" with one renderer is the point:
-            it is the only way they cannot come to disagree. */}
-        {candidate.searchEvidence ? (
-          <EvidenceLine
-            evidence={candidate.searchEvidence.evidence}
-            cwid={candidate.cwid}
-            slug={candidate.profileSlug}
-            pubCount={candidate.searchEvidence.pubCount}
-            q={candidate.searchEvidence.keyPaper.contentQuery}
-            keyPaperConfig={candidate.searchEvidence.keyPaper}
-            hasQuery
-            badged={false}
-            claimedPmids={claimedPmids}
-            stacked={false}
-          />
+            it is the only way they cannot come to disagree.
+
+            #1696 — one block PER MATCHED CONCEPT, each captioned with the concept it answers
+            for. The caption is not decoration: the reason line names the MeSH descriptor the
+            search matched ("Receptors, Chimeric Antigen"), which is often not the word the
+            sponsor used and not the label on the slider ("CAR-T"). Without the caption an
+            officer cannot tell which concept a block belongs to — and with several blocks, that
+            is the only question the stack raises. Each block carries its OWN `keyPaper`, so its
+            disclosure reveals papers about ITS concept; the shared `claimedPmids` keeps those
+            sets disjoint across the stack. */}
+        {evidenceBlocks.length > 0 ? (
+          <div className="mt-1.5 space-y-2">
+            {evidenceBlocks.map(({ concept, evidence }) => (
+              // `runId` in the key is the OTHER HALF of the claimedPmids reset above, and it is
+              // required: a fresh Set is useless if the `EvidenceLine` beneath keeps its one-shot
+              // `keyPaperFetched` ref from the last run and never fetches again. Baking the run
+              // into the key remounts the line, dropping that guard along with its expand state
+              // and any papers it resolved for the PREVIOUS paste. (Same two-part idiom as
+              // `people-result-card.tsx`, which bakes `qParam` into both.) `term` alone keeps a
+              // card's sibling blocks distinct WITHIN a run.
+              <div key={`${runId}:${concept.term}`} data-slot="sponsor-match-evidence">
+                {/* The rail's own facet-heading idiom, reused — no new token, and it reads as
+                    what it is: a group header over the lines beneath it. */}
+                <div className="text-muted-foreground text-[11px] font-semibold tracking-[0.08em] uppercase">
+                  {concept.term}
+                </div>
+                <EvidenceLine
+                  evidence={evidence.evidence}
+                  cwid={candidate.cwid}
+                  slug={candidate.profileSlug}
+                  pubCount={evidence.pubCount}
+                  q={evidence.keyPaper.contentQuery}
+                  keyPaperConfig={evidence.keyPaper}
+                  hasQuery
+                  badged={false}
+                  claimedPmids={claimedPmids}
+                  stacked={false}
+                />
+              </div>
+            ))}
+          </div>
         ) : null}
         {topics.length > 0 ? (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
