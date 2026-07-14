@@ -37,13 +37,21 @@ export function TechnologiesInfoButton() {
         <button
           type="button"
           aria-label="About Available technologies"
-          // ponytail: `self-center` in the heading's `items-baseline` flex row
-          // centres the icon on the 24px heading's cap-height, which puts it ~5px
-          // ABOVE the optical centre of the small count text sitting right beside
-          // it ("12 technologies") — the two read as misaligned (#1717). Nudge the
-          // icon down onto the count's optical centre. Tied to the headingLg
-          // (24px) row: this trigger renders in no other context.
-          className="inline-flex h-5 w-5 translate-y-[5px] items-center justify-center self-center rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-slate)]"
+          // Optically centre the icon on the HEADING WORD, not on the line box and
+          // not on the small count chip beside it (#1723 — anchoring to the 13px
+          // count is what made #1717 overshoot 3px too low).
+          //
+          // Measured from the font, not guessed: "Available technologies" in bold
+          // 24px Inter inks 18.4px above the baseline and 5.2px below it (the g/y
+          // descenders), so the word's optical centre is (18.4-5.2)/2 = 6.6px above
+          // the baseline. `self-center` in this `items-baseline` row leaves the icon
+          // at 8.4px — 1.8px high. Hence 2px. Every heading using this pattern has a
+          // descender (technoloGies / MentorinG / relationshiPs), so one value fits.
+          //
+          // ponytail: a fixed nudge, not a measured one. Tied to the 24px headingLg
+          // row; this trigger renders in no other context. Re-derive if the heading
+          // size or typeface changes.
+          className="inline-flex h-5 w-5 translate-y-[2px] items-center justify-center self-center rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-slate)]"
         >
           <HelpCircle className="size-4" aria-hidden="true" />
         </button>
