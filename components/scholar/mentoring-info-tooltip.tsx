@@ -19,11 +19,10 @@ export function MentoringInfoTooltip() {
           <button
             type="button"
             aria-label="About Mentoring"
-            // #1717 — see technologies-info-button.tsx: `self-center` in the
-            // heading's `items-baseline` row leaves the icon ~5px above the
-            // optical centre of the adjacent count text. Same nudge, same 24px
-            // headingLg row.
-            className="inline-flex h-5 w-5 translate-y-[5px] items-center justify-center self-center rounded-full text-muted-foreground hover:text-foreground"
+            // #1723 — see technologies-info-button.tsx: `self-center` in this
+            // `items-baseline` row leaves the icon 1.8px above the optical centre
+            // of the heading WORD. Same 2px nudge, same 24px headingLg row.
+            className="inline-flex h-5 w-5 translate-y-[2px] items-center justify-center self-center rounded-full text-muted-foreground hover:text-foreground"
           >
             <HelpCircle className="size-4" />
           </button>
