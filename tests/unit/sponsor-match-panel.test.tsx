@@ -106,6 +106,28 @@ const THREE: SponsorCandidate[] = [
   }),
 ];
 
+/**
+ * A pool BIGGER than the render cap (RESULT_MAX = 100), with the only CTL-technology holder
+ * buried at rank 105 — below the cap, inside the pool. A staging run ranked 430 candidates; the
+ * fixtures here ranked 3, which is exactly why the cap could sit inside `ranked` (making every
+ * facet count and every filter search only the top 100) with a green suite over it.
+ *
+ * Ranks drive the ordering, not `fusedScore`: the panel re-ranks from `contributions` and
+ * `concepts` in the browser (that is the whole contract), so `fusedScore` only feeds the tier.
+ */
+const POOL: SponsorCandidate[] = Array.from({ length: 120 }, (_, i) => {
+  const rank = i + 1;
+  const deep = rank === 105;
+  return candidate({
+    cwid: deep ? "deep" : `p${rank}`,
+    name: deep ? "Zed Deepcut" : `Person ${String(rank).padStart(3, "0")}`,
+    department: deep ? "Pathology" : "Medicine",
+    technologyCount: deep ? 1 : 0,
+    fusedScore: (0.9 ** 3 * 3.0) / (60 + rank),
+    contributions: [{ term: "Immuno-oncology", rank }],
+  });
+});
+
 /** Exactly what the route's `bespokeToCandidate` emits: a real score, and NO contributions
  *  (that engine does no concept decomposition, so there is nothing to re-rank by). */
 const BESPOKE: SponsorCandidate[] = [
@@ -165,6 +187,16 @@ async function renderAndSearch() {
   });
   fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
   await screen.findByText("Alice Alpha");
+}
+
+async function renderAndSearchPool() {
+  stubFetch({ concepts: CONCEPTS, candidates: POOL });
+  render(<SponsorMatchPanel />);
+  fireEvent.change(screen.getByLabelText(/description/i), {
+    target: { value: "CAR T collaborators" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+  await screen.findByText("Person 001");
 }
 
 /** Names of the result rows, in RENDERED (DOM) order — each row links to a profile, so the
@@ -309,7 +341,10 @@ describe("SponsorMatchPanel", () => {
     expect(screen.queryByText("Bob Beta")).toBeNull();
     const row = screen.getByText("Cara Gamma").closest("li")!;
     expect(row.textContent).toMatch(/^3/); // still #3 overall, not #1-of-filtered
-    expect(screen.getByText(/1 of 3/)).toBeTruthy();
+    // Three numbers, three meanings: 1 painted, 1 matched, 3 in the pool. The old header said
+    // "1 of 3" and meant painted-of-POOL, which collapses to the same string as painted-of-
+    // MATCHED and is what let the top-100 cap hide (see `resultsSummary`).
+    expect(screen.getByText(/1 matching · 3 ranked/)).toBeTruthy();
   });
 
   it("CTL-IP facet keeps only technology holders; Clear filters restores all", async () => {
@@ -321,6 +356,44 @@ describe("SponsorMatchPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(screen.getByText("Alice Alpha")).toBeTruthy();
     expect(screen.getByText("Cara Gamma")).toBeTruthy();
+  });
+
+  // ── The cap is a RENDER cap (the top-100 bug) ──────────────────────────────
+  // Every test above this line runs on a 3-candidate pool, which is why the old
+  // `.slice(0, RESULT_MAX)` inside `ranked` was a no-op in all of them: the whole suite was
+  // green while every facet and every filter saw only the first 100 of a pool that runs to
+  // ~800. These three run on a pool of 120 with the only CTL holder buried at rank 105 —
+  // put the slice back into `ranked` and all three fail.
+  it("the CTL facet counts the WHOLE pool, and can surface a holder below the render cap", async () => {
+    await renderAndSearchPool();
+
+    // 9-of-the-top-100 was the bug on staging. The holder is at 105; the count must see him.
+    const ctl = screen.getByRole("checkbox", { name: /Holds CTL technology/ });
+    expect(ctl.closest("label")!.textContent).toMatch(/1\s*$/);
+
+    fireEvent.click(ctl);
+    const row = screen.getByText("Zed Deepcut").closest("li")!;
+    expect(row.textContent).toMatch(/^105/); // his POOL rank, not "#1 of the filtered one"
+    expect(screen.queryByText("Person 001")).toBeNull();
+  });
+
+  it("paints at most RESULT_MAX rows, and says so without claiming a filter did it", async () => {
+    await renderAndSearchPool();
+
+    expect(rowOrder()).toHaveLength(100); // the cap still bounds what we mount
+    expect(rowOrder()[0]).toBe("Person 001");
+    // NOT "100 of 120 researchers" — nothing was filtered out; 20 were simply not painted.
+    expect(screen.getByText(/Top 100 of 120 researchers/)).toBeTruthy();
+  });
+
+  it("exports every row the filters matched, not just the hundred on screen", async () => {
+    await renderAndSearchPool();
+
+    // The officer sees 100 rows and downloads 120 — the cap must not silently truncate a
+    // portfolio download. With the CTL filter on, the export narrows to the real match count.
+    expect(screen.getByRole("button", { name: /Export \(120\)/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Holds CTL technology/ }));
+    expect(screen.getByRole("button", { name: /Export \(1\)/ })).toBeTruthy();
   });
 
   it("concept facet matches rows that ranked under the selected concept", async () => {
