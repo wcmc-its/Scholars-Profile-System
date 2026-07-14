@@ -1,21 +1,16 @@
 /**
- * Spine-agnostic scoring helpers for the sponsor-match Stage-2 axes (design
- * `docs/2026-07-10-sponsor-match-phase2-3-design.md` §5a, §6). PURE — no db, no
- * network. Consumed by the Phase-2 LLM front-end, which supplies the extracted
- * terms + their resolved MeSH descendant-UI sets; built ahead so the bake-off and
- * Phase 2 compose them. Not yet wired (no term inputs until the Bedrock front-end).
+ * Spine-agnostic term clustering for the sponsor-match spine (design
+ * `docs/2026-07-10-sponsor-match-phase2-3-design.md` §5a). PURE — no db, no network.
+ * Wired: `sponsor-match-spine-run.ts` clusters the LLM-extracted concepts here before
+ * the per-cluster fan-out.
+ *
+ * This module used to also export `dampedIdf`, the §6 expertise-rarity axis. It is GONE,
+ * not merely unwired: corpus rarity anti-correlates with topical centrality, so it ranked
+ * a disease's own mechanisms above the disease. The fusion weight is a topicality claim
+ * and rarity is not a topicality signal. See `sponsor-match-contract.ts` (`weightFactor`)
+ * for the full argument, and `corpusCoverage` for where rarity legitimately survives
+ * (display only). Do not reintroduce it without re-reading that comment.
  */
-
-/** Expertise IDF (§6). `coverage` ∈ (0,1] = fraction of the corpus carrying the
- *  concept (topics: `mesh_descriptor.local_pub_coverage`; tools: scholars_using/N).
- *  idf = -ln(coverage), damped to `cap` so a 1-in-corpus concept can't dominate the
- *  fusion. coverage ≥ 1 ⇒ 0 (ubiquitous, no signal); coverage ≤ 0 / NaN ⇒ cap
- *  (treat as maximally rare). */
-export function dampedIdf(coverage: number, cap: number): number {
-  if (!Number.isFinite(coverage) || coverage <= 0) return cap;
-  if (coverage >= 1) return 0;
-  return Math.min(-Math.log(coverage), cap);
-}
 
 export type ConceptKind = "concept" | "method";
 

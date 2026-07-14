@@ -1,33 +1,12 @@
 /**
- * Pure Stage-2 axis helpers (design §5a rarity + §6 cluster dedup). No db/network.
+ * Pure Stage-2 term clustering (design §5a). No db/network.
+ *
+ * The `dampedIdf` suite that used to sit here is gone with the function. It was a green
+ * suite for a rarity axis nothing called — which is exactly what made the dead code
+ * survive review. See `sponsor-match-contract.ts` (`weightFactor`).
  */
 import { describe, expect, it } from "vitest";
-import {
-  dampedIdf,
-  mergeTermClusters,
-  type ClusterTerm,
-} from "@/lib/api/sponsor-match-axes";
-
-describe("dampedIdf (§6 rarity)", () => {
-  it("rewards rarity — a rarer concept scores higher (Munchausen > Cancer)", () => {
-    expect(dampedIdf(0.0005, 10)).toBeGreaterThan(dampedIdf(0.4, 10)); // Munchausen vs Cancer
-  });
-
-  it("caps so a 1-in-corpus concept can't dominate", () => {
-    expect(dampedIdf(1e-9, 2)).toBe(2); // -ln(1e-9)=20.7 → capped to 2
-  });
-
-  it("ubiquitous concept (coverage ≥ 1) contributes no rarity", () => {
-    expect(dampedIdf(1, 10)).toBe(0);
-    expect(dampedIdf(1.5, 10)).toBe(0);
-  });
-
-  it("missing / non-positive coverage ⇒ maximally rare (cap), never NaN", () => {
-    expect(dampedIdf(0, 5)).toBe(5);
-    expect(dampedIdf(-1, 5)).toBe(5);
-    expect(dampedIdf(Number.NaN, 5)).toBe(5);
-  });
-});
+import { mergeTermClusters, type ClusterTerm } from "@/lib/api/sponsor-match-axes";
 
 describe("mergeTermClusters (§5a redundant-phrasing dedup)", () => {
   // "cancer, oncology, leukemia" — oncology ≈ cancer (same set), leukemia ⊂ cancer.
