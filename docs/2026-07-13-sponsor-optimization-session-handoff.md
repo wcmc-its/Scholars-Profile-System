@@ -2,6 +2,24 @@
 
 Written against `origin/master` @ `e4995731`. Every code claim below was re-grounded at that commit.
 
+## STATUS — what landed after this doc was written (2026-07-13, later the same day)
+
+This document warns that **stale notes are the hazard in this subsystem**. It would be a poor joke to
+merge it and let it become one. Three of the five issues moved before it reached `master`:
+
+| Issue | Then | Now |
+|---|---|---|
+| **#1700** eval scores a give-up as nDCG 0 | open, blocking #1697 | **CLOSED** — PR #1702. A give-up now emits `null` and is excluded from the mean; `[]` (the route ranked nobody) is still a real 0. A run with any unmeasured fixture **exits 2**, so a bake-off arm cannot be graded on fewer fixtures than the arm it is compared against. |
+| **#1698** dead `dampedIdf` + four lying comments | open | **CLOSED** — PR #1703. The function and its green-but-pointless suite are deleted; the four comments now state `centrality^3 × kindPrior` and point at the one comment that explains the removal. The eval assets no longer instruct the fixture author to grade a rarity preference the ranker does not have. |
+| **#1694** cost-model + demo inputs | open, unmerged | **MERGED.** |
+| **#1696** evidence for every matched concept | open | in progress |
+| **#1697** Opus bake-off | blocked on #1700 | **unblocked** — still not run. Nothing below about the Opus trap has changed. |
+
+**§0a below is therefore now history, not a live landmine — but read it anyway.** The *lesson* is the
+durable part, and it is the reason this document leads the way it does: a green unit suite and four
+confident comments kept a disconnected knob looking alive for weeks. Everything §0 says about treating
+mechanism claims as hypotheses — including the ones in this file — still stands.
+
 ## TL;DR
 
 The sponsor-match ranker works and is shipped. The next round of work is **five filed issues**
@@ -15,7 +33,10 @@ This subsystem has a track record of **confidently-worded comments that are wron
 caused damage. Treat every mechanism claim you read — including this document — as a hypothesis, and
 grep the assignment before you act on it.
 
-### 0a. Four comments say corpus rarity is the fusion weight. It is dead code.
+### 0a. Four comments say corpus rarity is the fusion weight. It is dead code. [FIXED — #1698 / PR #1703]
+
+> Kept as written, because the *shape* of this bug is the thing to internalise, not the bug. The
+> function and the comments are gone now; what survives is the reason they lasted so long.
 
 `dampedIdf` (`lib/api/sponsor-match-axes.ts`) has **zero call sites**. `git grep dampedIdf` returns
 its definition, its unit suite, and comments. Nothing else.
@@ -88,19 +109,26 @@ it. Read that document for the eval recipe and the mockup pointer; do not trust 
   Widening it costs **zero** additional OpenSearch queries — contract + UI only, so it does not spend
   the fan-out budget the breaker protects.
 - **#1697 — evaluate Opus 4.8 for concept extraction.** See §3 before running anything.
-- **#1698 — delete dead `dampedIdf`, fix the four lying comments, reconcile the rarity fixtures.**
-  The fixtures (`sponsor-topics.json` rarity probes; the template's "rare expert = 3") currently grade
-  a signal the ranker deliberately does not have — i.e. they score the system down for working as
-  designed. Either re-grade against topicality or label the loss as known-and-accepted.
+- ~~**#1698 — delete dead `dampedIdf`, fix the four lying comments, reconcile the rarity fixtures.**~~
+  **DONE — PR #1703.** The fixtures were the interesting half: `sponsor-topics.json`'s rarity probes and
+  the template's "rare expert = 3" graded a signal the ranker deliberately does not have, i.e. they
+  scored the system down for working as designed. Resolved by **labelling the loss, not re-grading the
+  gold** — re-grading would have moved the published baselines (0.636 / ~0.72) and the gold is untracked
+  anyway. The rare-disease prompts stay as **thin-corpus coverage** probes; the grading instruction is
+  now topicality alone.
 - **#1699 — Scholars reskin.** Target mockup is `sponsor-match-scholars.html` (repo root, untracked,
   approved). *Not* `sponsor-match-mockup.html`, which no longer exists. Get design sign-off before
   touching pixels; the console is auth-gated, so verify on **staging** with a session cookie, not
   locally.
-- **#1700 — the eval scores an unmeasured fixture as nDCG 0.000.** Prerequisite for #1697.
+- ~~**#1700 — the eval scores an unmeasured fixture as nDCG 0.000.**~~ **DONE — PR #1702.** #1697 is
+  unblocked. Note the new failure mode this introduces, and it is a deliberate one: a run with any
+  unmeasured fixture now **exits 2** instead of quietly reporting a mean over a smaller fixture set.
+  `UNMEASURED=allow` scores anyway. If the eval starts hard-failing on you, that is the harness telling
+  you the box is degraded — almost certainly the local OpenSearch heap (§4).
 
 ### PR
 
-- **#1694** — cost-model correction + 30 sponsor-match demo inputs. CI green, open, unmerged.
+- ~~**#1694** — cost-model correction + 30 sponsor-match demo inputs.~~ **MERGED.**
 
 ### Operator task, not merged-and-done
 
@@ -129,10 +157,13 @@ Centrality is the product. Everything downstream is arithmetic on it.
 
 Baselines to beat, so a "win" is real: **live eval 0.636**, **union gold ~0.72**.
 
-1. **Fix #1700 first.** A give-up (502 / 401 / non-JSON) currently emits `[]`, which scores nDCG
-   **0.000**, not null. The script prints *"UNMEASURED, not zero"* to stderr and then does exactly
-   that. A breaker-heavy arm will read as a worse *ranker*. The script's own history proves the point:
-   a first local baseline scored 0.161 purely because 11 of 15 fixtures had 502'd.
+1. ~~**Fix #1700 first.**~~ **Done (PR #1702) — but understand what it now does.** A give-up
+   (502 / 401 / non-JSON) used to emit `[]`, which scored nDCG **0.000**, not null: the script printed
+   *"UNMEASURED, not zero"* to stderr and then did exactly that. A breaker-heavy arm read as a worse
+   *ranker*. Its own history proves the point — a first local baseline scored 0.161 purely because 11 of
+   15 fixtures had 502'd. Now a give-up emits `null`, is excluded from the mean and from coverage, and
+   the run **exits 2**. `[]` still means "the route answered and ranked nobody", which is a legitimate 0.
+   **Check `scored=N/15` on the summary line before quoting any number.**
 2. **Fetch once, re-fuse offline.** A per-arm refetch scores a *different* Bedrock extraction (both
    `term` and `kind` vary run to run), so the deltas are noise, not signal.
 3. **N samples per arm; compare distributions.** Especially for #1697 — see below.
@@ -179,11 +210,12 @@ quality, not price.**
 
 **Verified** at `e4995731`, by grep/read of the code itself:
 
-- `dampedIdf` has no call site; the live fusion is `centrality**3 × kindPrior`.
+- ~~`dampedIdf` has no call site;~~ (it is now deleted outright — PR #1703) the live fusion is
+  `centrality**3 × kindPrior`. **That part is unchanged and is still the thing to know.**
 - The per-`(concept, cwid)` evidence map is written for every fan-out hit and read once, for
-  `best.term` only.
+  `best.term` only. *(This is what #1696 widens.)*
 - `careerStage`, `isClinician`, and `preferences[]` all have live producers; `caveat` and `ask` do not.
-- The eval's terminal give-up path emits `[]`.
+- ~~The eval's terminal give-up path emits `[]`.~~ It now emits `null` — PR #1702.
 - IAM grants both the Opus 4.8 and Sonnet 4.x families to the app task role.
 
 **NOT verified — do not treat as established:**
