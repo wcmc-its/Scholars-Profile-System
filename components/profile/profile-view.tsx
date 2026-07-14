@@ -6,6 +6,7 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
 import { MentoringInfoTooltip } from "@/components/scholar/mentoring-info-tooltip";
 import { TechnologiesInfoButton } from "@/components/scholar/technologies-info-button";
+import { ClinicalTrialsInfoTooltip } from "@/components/scholar/clinical-trials-info-tooltip";
 import { DisclosureGroupInfoTooltip } from "@/components/scholar/disclosure-group-info-tooltip";
 import { MentoringSection } from "@/components/scholar/mentoring-section";
 import { getMenteesForMentor } from "@/lib/api/mentoring";
@@ -578,7 +579,12 @@ export async function ProfileView({ slug }: { slug: string }) {
 
           {profile.clinicalTrials.length > 0 ? (
             <Section
-              title="Clinical trials"
+              title={
+                <>
+                  Clinical trials
+                  <ClinicalTrialsInfoTooltip />
+                </>
+              }
               headingLg
               // "N active" left the rail: ClinicalTrialsSection already renders an
               // explicit "Active" group, so the rail was restating the body.

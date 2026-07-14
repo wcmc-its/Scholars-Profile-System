@@ -65,11 +65,6 @@ export function ClinicalTrialsSection({ trials }: { trials: Trial[] }) {
           </ul>
         </details>
       ) : null}
-
-      <p className="text-muted-foreground border-border mt-6 border-t pt-4 text-sm">
-        Trial details are drawn from institutional records and, where an NCT registration exists,
-        ClinicalTrials.gov. Status reflects the most recent available update.
-      </p>
     </>
   );
 }
