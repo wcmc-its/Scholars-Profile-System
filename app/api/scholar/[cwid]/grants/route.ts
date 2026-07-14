@@ -118,6 +118,10 @@ export async function GET(
       startYear: year(h.startDate),
       endYear: year(h.endDate),
       isActive: h.isActive,
+      // Per-ROW concept admission. The page-level `strength` below cannot answer this:
+      // on a mixed page it reads "tagged" while individual rows are literal-text hits.
+      // A concept-captioned card block needs the row fact, not the page's.
+      matchedConcept: h.matchedConcept,
     }));
     // Row-level reason strength: "tagged" when the concept axis admitted ≥1 surfaced
     // grant (mirrors composeMatchReason's tagged>mention precedence), else "mention".

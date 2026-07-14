@@ -66,6 +66,12 @@ export type EvidenceGrant = {
   startYear?: number | null;
   endYear?: number | null;
   isActive?: boolean;
+  /** The grant was admitted via the resolved MeSH concept, not merely by a literal
+   *  text hit (`FundingHit.matchedConcept`). The funding query is an OR — text OR
+   *  concept — so a grant can surface having matched nothing but a stray word of the
+   *  ask. A concept-captioned block may only lead with a grant this is true for;
+   *  see `evidence-line.tsx`. Absent ⇒ unknown, never "yes". */
+  matchedConcept?: boolean;
 };
 
 /**
