@@ -45,7 +45,8 @@ export type TermRanking = {
   /** The cluster's representative term. Joins to `SponsorConcept.term` on the wire, so
    *  the client can attribute each contribution back to the slider that drives it. */
   term: string;
-  /** fusion weight for this cluster/term = centrality × dampedIdf (≥ 0). */
+  /** fusion weight for this cluster/term = centrality^γ × kindPrior (≥ 0). Corpus rarity is
+   *  NOT a factor — see `sponsor-match-contract.ts` (`weightFactor`). */
   weight: number;
   /** scholar cwids in `searchPeople` rank order (rank = index + 1). */
   ranked: string[];

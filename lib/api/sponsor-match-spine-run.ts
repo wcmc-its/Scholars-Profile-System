@@ -2,7 +2,7 @@
  * Sponsor-match searchPeople SPINE — impure per-term composition
  * (pivot handoff `docs/2026-07-11-sponsor-match-searchpeople-pivot-handoff.md`
  * §4/§6). The pure helpers stay in `sponsor-match-spine.ts` (extraction, RRF)
- * and `sponsor-match-axes.ts` (dampedIdf, clustering); THIS module owns the
+ * and `sponsor-match-axes.ts` (clustering); THIS module owns the
  * side-effecting glue the bake-off runs behind `SPONSOR_MATCH_SPINE`:
  *
  *   paste ─▶ extractSponsorConcepts (Bedrock LLM: concepts + centrality; dictionary
@@ -200,8 +200,8 @@ type ResolvedTerm = {
  *
  * `concepts` are the MERGED CLUSTERS actually fused (not the raw extracted terms), each
  * carrying BOTH halves of its fusion weight: the editable `centrality` and the fixed
- * `weightFactor` (today: dampedIdf). `candidates` carry `contributions[]` — every (concept, rank) pair
- * the fusion summed over. Together those are the complete, decomposed score inputs, which
+ * `weightFactor` (today: `kindPrior` alone). `candidates` carry `contributions[]` — every
+ * (concept, rank) pair the fusion summed over. Together those are the complete, decomposed score inputs, which
  * is what lets the console re-rank live in the browser as sliders move instead of
  * re-querying the server on every drag. `concepts` is [] only when nothing was extracted.
  */

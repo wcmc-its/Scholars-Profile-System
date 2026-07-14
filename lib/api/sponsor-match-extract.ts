@@ -11,9 +11,14 @@
  * ("systemic sclerosis", "cystic fibrosis") carries no exact label, so the spine
  * short-circuited to []. The dictionary was a functional blocker, not a recall bump.
  * Separately, the v1 uniform centrality (1.0) left the fusion weight idf-only — a dead
- * signal for both ranking and the mockup's editable-centrality UI. The LLM supplies
- * differentiated centrality, the LIVE left factor of `weight = centrality × dampedIdf`
- * (see `sponsor-match-spine-run.ts`).
+ * signal for both ranking and the mockup's editable-centrality UI.
+ *
+ * ⚠ CENTRALITY IS NOW VERY NEARLY THE ENTIRE RANKER. The fusion weight is
+ * `centrality^γ × kindPrior` with γ = 3 (`sponsor-match-contract.ts`), so a concept at 1.0
+ * outweighs one at 0.3 by 125×, while the kind prior spans only 1.56× (1.25/0.8). Corpus
+ * rarity is NOT in the weight — it was removed, deliberately. Everything this function's
+ * rubric does to separate a funder's primary target from its own supporting detail is
+ * therefore the product. Treat a change to that rubric as a change to the ranking.
  *
  * FAILURE POSTURE: any Bedrock error, timeout, or unusable output logs and returns []
  * — this function NEVER throws. The caller degrades to the v1 dictionary extractor on
