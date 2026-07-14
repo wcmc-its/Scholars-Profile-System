@@ -85,11 +85,22 @@ import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
+import { identityImageEndpoint } from "@/lib/headshot";
 
 const PATH = "/api/edit/sponsor-match";
 
-/** The list is a working memory, not an archive to page through. Newest first. */
+/** The list is a working memory, not an archive to page through. Newest first, one row per
+ *  DISTINCT paste (see GET). */
 const SUBMISSION_LIST_MAX = 100;
+
+/** Rows scanned to fill those 100 distinct pastes. The table keeps every RUN, so the newest
+ *  100 rows can be far fewer than 100 pastes — a paste re-run four times in a row (which is
+ *  what staging actually looks like) burns four rows to yield one.
+ *
+ *  ponytail: a 5x window and a JS dedup, not a SQL GROUP BY. The ceiling is explicit — a single
+ *  paste re-run >500 times consecutively could push an older paste off the list — and at that
+ *  point the officer has bigger problems than a truncated history. Group in SQL if it bites. */
+const SUBMISSION_SCAN_MAX = SUBMISSION_LIST_MAX * 5;
 
 export const dynamic = "force-dynamic";
 
@@ -169,6 +180,7 @@ function bespokeToCandidate(r: SponsorRankedScholar): SponsorCandidate {
     fusedScore: r.defaultScore,
     contributions: [],
     technologyCount: r.technologyCount ?? 0,
+    identityImageEndpoint: identityImageEndpoint(r.cwid),
     measures: {
       careerStage: r.careerStage,
       isClinician: r.isClinician,
@@ -272,7 +284,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 /**
- * GET — the retained searches, newest first, ACROSS OFFICERS.
+ * GET — the retained searches, newest first, ACROSS OFFICERS, ONE ROW PER PASTE.
  *
  * Cross-officer is the point. The console already kept a private history in each officer's
  * localStorage; a second private list would have been a reimplementation. What nobody could see
@@ -281,6 +293,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
  *
  * The paste itself rides along, because the officer must be able to read back what was searched
  * (and re-run it). It is the same text they pasted, returned to the same authorised surface.
+ *
+ * DEDUPED ON `descriptionHash`, and the two halves of that sentence live in different places.
+ * The TABLE keeps every run on purpose — `descriptionHash` is deliberately non-unique, because
+ * the same paste re-run after a nightly reindex is a genuinely different search and squashing
+ * them would destroy the record of WHEN a result changed (staging has one paste at 438
+ * candidates on 7/13 and 430 on 7/14; that delta is the point of retaining rows at all). That
+ * record is for MEASUREMENT, and it survives untouched in the DB.
+ *
+ * The LIST is not measurement. It answers three questions — has a colleague run this sponsor,
+ * can I re-run it, can I erase it — and all three are per-PASTE, not per-run. Four identical
+ * rows answer them four times and read as a bug, which is exactly how this was reported.
+ *
+ * ponytail: dedup in JS over a bounded scan window, not `distinct` + `take` — Prisma applies
+ * `distinct` in memory AFTER `take` on MySQL, so the two together silently return fewer rows
+ * than asked for. The window is the known ceiling: a paste run more than SCAN/LIST times in a
+ * row could push an older distinct paste off the end. Raise SCAN, or group in SQL, if that ever
+ * bites.
  */
 export async function GET(): Promise<NextResponse> {
   if (!isSponsorMatchEnabled()) return new NextResponse(null, { status: 404 });
@@ -289,12 +318,13 @@ export async function GET(): Promise<NextResponse> {
     return new NextResponse(null, { status: 403 });
   }
   try {
-    const submissions = await db.read.sponsorMatchSubmission.findMany({
+    const rows = await db.read.sponsorMatchSubmission.findMany({
       orderBy: { createdAt: "desc" },
-      take: SUBMISSION_LIST_MAX,
+      take: SUBMISSION_SCAN_MAX,
       select: {
         id: true,
         description: true,
+        descriptionHash: true,
         title: true,
         engine: true,
         candidateCount: true,
@@ -302,6 +332,28 @@ export async function GET(): Promise<NextResponse> {
         createdAt: true,
       },
     });
+
+    // Rows arrive newest-first, so the FIRST row seen for a hash IS the newest run of that
+    // paste — the one whose id the Delete button should carry and whose count is current.
+    const newestPerPaste = new Map<string, (typeof rows)[number]>();
+    for (const row of rows) {
+      if (!newestPerPaste.has(row.descriptionHash)) newestPerPaste.set(row.descriptionHash, row);
+    }
+    // An explicit ALLOWLIST, not a `...rest` omit of `descriptionHash`: the hash is an internal
+    // join key the console has no use for, and spreading the row would put every column added to
+    // this model in future on the wire by default. Naming the fields makes leaking one a choice.
+    const submissions = Array.from(newestPerPaste.values())
+      .slice(0, SUBMISSION_LIST_MAX)
+      .map((row) => ({
+        id: row.id,
+        description: row.description,
+        title: row.title,
+        engine: row.engine,
+        candidateCount: row.candidateCount,
+        submittedBy: row.submittedBy,
+        createdAt: row.createdAt,
+      }));
+
     return editOk({ submissions });
   } catch (err) {
     logEditFailure(`${PATH}#list`, err);
@@ -318,8 +370,22 @@ export async function GET(): Promise<NextResponse> {
  * committed to honouring. Everyone here already holds superuser or developer, and every
  * deletion is logged.
  *
- * The erasure is real: the row is removed and the result cache holds no verbatim paste text by
- * construction (see the module doc), so nothing of the sponsor's prose survives this call.
+ * ERASES EVERY RUN OF THAT PASTE, not the one row whose id was clicked — and that is a FIX, not
+ * a widening of scope.
+ *
+ * The console promises, in as many words: "Delete any search to remove its text for good." It
+ * was not true. `descriptionHash` is deliberately non-unique (every re-run is its own row), so
+ * a paste an officer had run three times had THREE rows carrying the sponsor's prose verbatim,
+ * and deleting by `id` erased one of them and left the text sitting in the other two. The
+ * doc-comment here previously asserted "nothing of the sponsor's prose survives this call",
+ * which was false in the normal case — the paste that has been run more than once.
+ *
+ * A retention promise that holds only for pastes run exactly once is not a retention promise.
+ * The unit of erasure is therefore the PASTE (`descriptionHash`), which is the unit the promise
+ * is made about. The id still identifies WHICH paste; it no longer bounds what is erased.
+ *
+ * The result cache holds no verbatim paste text by construction (see the module doc), so with
+ * every row gone, nothing of the sponsor's prose survives this call. Now the sentence is true.
  */
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
   if (!isSponsorMatchEnabled()) return new NextResponse(null, { status: 404 });
@@ -343,13 +409,21 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    // deleteMany, not delete: deleting an already-deleted row is the SUCCESS case here (two
-    // officers clicking the same button, or a retry), not a 500. `count` distinguishes them.
-    const { count } = await db.write.sponsorMatchSubmission.deleteMany({
+    // The clicked row names the PASTE; every run of it is what gets erased.
+    const row = await db.read.sponsorMatchSubmission.findUnique({
       where: { id: submissionId },
+      select: { descriptionHash: true },
+    });
+    // Already gone is the SUCCESS case for the caller's intent but the 404 the client expects
+    // (two officers clicking the same button, or a retry) — unchanged behaviour, not a 500.
+    if (!row) return editError(404, "not_found");
+
+    // deleteMany, not delete: `where` is the hash, which matches one row or many.
+    const { count } = await db.write.sponsorMatchSubmission.deleteMany({
+      where: { descriptionHash: row.descriptionHash },
     });
     if (count === 0) return editError(404, "not_found");
-    return editOk({ deleted: submissionId });
+    return editOk({ deleted: submissionId, count });
   } catch (err) {
     logEditFailure(`${PATH}#delete`, err);
     return editError(502, "submissions_unavailable");

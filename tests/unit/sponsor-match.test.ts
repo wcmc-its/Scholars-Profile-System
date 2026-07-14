@@ -31,6 +31,8 @@ const {
   mockSubmissionCreate,
   mockSubmissionDeleteMany,
   mockSubmissionFindMany,
+  mockSubmissionFindUnique,
+  mockGetEffectiveEditSession,
 } = vi.hoisted(() => ({
   mockRelevanceScoresForQuery: vi.fn(),
   mockPublicationTopicFindMany: vi.fn(),
@@ -45,6 +47,8 @@ const {
   mockSubmissionCreate: vi.fn(),
   mockSubmissionDeleteMany: vi.fn(),
   mockSubmissionFindMany: vi.fn(),
+  mockSubmissionFindUnique: vi.fn(),
+  mockGetEffectiveEditSession: vi.fn(),
 }));
 
 vi.mock("@/lib/api/search", () => ({
@@ -58,7 +62,10 @@ vi.mock("@/lib/db", () => ({
       scholarTechnology: { groupBy: mockTechnologyGroupBy },
       publication: { findMany: mockPublicationFindMany },
       topic: { findMany: mockTopicFindMany },
-      sponsorMatchSubmission: { findMany: mockSubmissionFindMany },
+      sponsorMatchSubmission: {
+        findMany: mockSubmissionFindMany,
+        findUnique: mockSubmissionFindUnique,
+      },
     },
     write: {
       sponsorMatchSubmission: {
@@ -73,6 +80,9 @@ vi.mock("@/lib/edit/request", async (importOriginal) => ({
   readEditRequest: mockReadEditRequest,
 }));
 vi.mock("@/lib/edit/authz", () => ({ logEditDenial: mockLogEditDenial }));
+vi.mock("@/lib/auth/effective-identity", () => ({
+  getEffectiveEditSession: mockGetEffectiveEditSession,
+}));
 // The route consumes the mocked engine; the engine tests reach the real one
 // via `vi.importActual` below (its db/search imports stay mocked either way).
 vi.mock("@/lib/api/sponsor-match", async (importOriginal) => ({
@@ -85,7 +95,7 @@ vi.mock("@/lib/api/sponsor-match-spine-run", () => ({
   rankResearchersForDescriptionSpine: mockRankSpine,
 }));
 
-import { DELETE, POST } from "@/app/api/edit/sponsor-match/route";
+import { DELETE, GET, POST } from "@/app/api/edit/sponsor-match/route";
 
 const { rankResearchersForDescription } =
   await vi.importActual<typeof import("@/lib/api/sponsor-match")>("@/lib/api/sponsor-match");
@@ -313,6 +323,14 @@ describe("POST /api/edit/sponsor-match (route)", () => {
           fusedScore: 4.2,
           contributions: [],
           technologyCount: 1,
+          // Producer #2 of the headshot (the spine is producer #1, asserted in
+          // `sponsor-match-spine-run.test.ts`). Derived SERVER-SIDE from the cwid: the field is
+          // OPTIONAL on the contract, so only a test stops a producer quietly dropping it — and
+          // a card that silently falls back to initials is indistinguishable from a scholar who
+          // has no photo. It cannot be derived in the panel: `identityImageEndpoint` reads
+          // `process.env.SCHOLARS_HEADSHOT_BASE`, which does not exist in a client component.
+          identityImageEndpoint:
+            "https://directory.weill.cornell.edu/api/v1/person/profile/a.png?returnGenericOn404=false",
           measures: { careerStage: "senior" },
           evidence: {
             topics: [{ label: "Oncology", pubCount: 7 }],
@@ -513,18 +531,39 @@ describe("POST /api/edit/sponsor-match (route)", () => {
       expect(await resp.json()).toMatchObject({ ok: true });
     });
 
-    it("DELETE erases a row and reports what it erased", async () => {
-      mockSubmissionDeleteMany.mockResolvedValue({ count: 1 });
+    it("DELETE erases EVERY RUN of that paste — the console's promise, made true", async () => {
+      // THE BUG THIS REPLACES, and the test that used to enshrine it:
+      //   expect(mockSubmissionDeleteMany).toHaveBeenCalledWith({ where: { id: "s1" } })
+      //
+      // The console says, verbatim: "Delete any search to remove its text for good." It was not
+      // true. `descriptionHash` is deliberately NON-UNIQUE — every re-run of a paste is its own
+      // row, because the record of WHEN a result changed is the reason the table exists. So a
+      // paste run three times had THREE rows carrying the sponsor's prose in full, and deleting
+      // by `id` erased one and left the text sitting in the other two.
+      //
+      // Staging had exactly this: one paste, four rows. A retention promise that holds only for
+      // pastes run exactly once is not a retention promise. The unit of erasure is the PASTE.
+      mockSubmissionFindUnique.mockResolvedValue({ descriptionHash: "h-abc" });
+      mockSubmissionDeleteMany.mockResolvedValue({ count: 3 }); // three runs of the same paste
+
       const resp = await DELETE(postRequest(developerCtx, { submissionId: "s1" }));
+
       expect(resp.status).toBe(200);
-      expect(await resp.json()).toEqual({ ok: true, deleted: "s1" });
-      expect(mockSubmissionDeleteMany).toHaveBeenCalledWith({ where: { id: "s1" } });
+      expect(await resp.json()).toEqual({ ok: true, deleted: "s1", count: 3 });
+      // BY HASH, NOT BY ID. Revert this to `{ where: { id: "s1" } }` and the sponsor's words
+      // survive their own deletion.
+      expect(mockSubmissionDeleteMany).toHaveBeenCalledWith({
+        where: { descriptionHash: "h-abc" },
+      });
     });
 
     it("DELETE 404s when the row is already gone", async () => {
-      mockSubmissionDeleteMany.mockResolvedValue({ count: 0 });
+      // Unchanged behaviour: two officers clicking the same button, or a retry. The lookup finds
+      // nothing, so there is no hash to erase by — 404, not a 500.
+      mockSubmissionFindUnique.mockResolvedValue(null);
       const resp = await DELETE(postRequest(developerCtx, { submissionId: "nope" }));
       expect(resp.status).toBe(404);
+      expect(mockSubmissionDeleteMany).not.toHaveBeenCalled();
     });
 
     it("DELETE 403s for a non-developer, with a denial log", async () => {
@@ -536,12 +575,48 @@ describe("POST /api/edit/sponsor-match (route)", () => {
       expect(resp.status).toBe(403);
       expect(mockLogEditDenial).toHaveBeenCalled();
       expect(mockSubmissionDeleteMany).not.toHaveBeenCalled();
+      // Authorisation precedes the lookup — a denied caller learns nothing, not even whether
+      // the row exists.
+      expect(mockSubmissionFindUnique).not.toHaveBeenCalled();
     });
 
     it("DELETE 400s on a missing submissionId", async () => {
       const resp = await DELETE(postRequest(developerCtx, {}));
       expect(resp.status).toBe(400);
       expect(mockSubmissionDeleteMany).not.toHaveBeenCalled();
+    });
+
+    it("GET lists ONE ROW PER PASTE — four runs of the same paste are not four searches", async () => {
+      // Reported from staging as "the search history is a duplicate": one paste, run four times,
+      // rendered as four identical rows. They are not a bug in the TABLE — `descriptionHash` is
+      // deliberately non-unique so a re-run after a nightly reindex stays its own record (the
+      // real rows read 438 candidates on 7/13 and 430 on 7/14; that delta is why runs are kept).
+      //
+      // But the LIST answers three per-PASTE questions — has a colleague run this sponsor, can I
+      // re-run it, can I erase it — and answering them four times reads as breakage. The rows
+      // stay in the DB for measurement; the console shows the newest run of each paste.
+      mockGetEffectiveEditSession.mockResolvedValue({
+        cwid: "dev1",
+        isSuperuser: false,
+        isDeveloper: true,
+      });
+      mockSubmissionFindMany.mockResolvedValue([
+        { id: "r4", descriptionHash: "h-adc", candidateCount: 430, description: "ADC" },
+        { id: "r3", descriptionHash: "h-adc", candidateCount: 430, description: "ADC" },
+        { id: "r2", descriptionHash: "h-adc", candidateCount: 438, description: "ADC" },
+        { id: "r1", descriptionHash: "h-other", candidateCount: 12, description: "other" },
+      ]);
+
+      const body = await (await GET()).json();
+
+      // Two PASTES, not four runs — and the ADC row is the NEWEST run (r4/430), because that is
+      // the one whose id the Delete button carries and whose count is current.
+      expect(body.submissions.map((x: { id: string }) => x.id)).toEqual(["r4", "r1"]);
+      expect(body.submissions[0].candidateCount).toBe(430);
+      // The join key is internal — it must not reach the client, or something will depend on it.
+      expect(body.submissions[0]).not.toHaveProperty("descriptionHash");
+      // The scan window must exceed the page size, or a heavily re-run paste starves the list.
+      expect(mockSubmissionFindMany.mock.calls[0][0].take).toBe(500);
     });
   });
 });

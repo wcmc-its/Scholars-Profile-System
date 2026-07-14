@@ -34,6 +34,7 @@
  * signal to edit.
  */
 import { db } from "@/lib/db";
+import { identityImageEndpoint } from "@/lib/headshot";
 import { extractTerms, rrfFuse, type TermRanking } from "@/lib/api/sponsor-match-spine";
 import {
   extractSponsorConcepts,
@@ -644,6 +645,7 @@ export async function rankResearchersForDescriptionSpine(
       fusedScore: f.score,
       contributions: f.contributions,
       technologyCount: techByCwid.get(f.cwid) ?? 0,
+      identityImageEndpoint: identityImageEndpoint(f.cwid),
       measures: measuresByCwid.get(f.cwid),
       ...(searchEvidence.length > 0 ? { searchEvidence } : {}),
     };

@@ -216,6 +216,13 @@ describe("rankResearchersForDescriptionSpine", () => {
       title: "T-y",
       department: "Dept-y",
       technologyCount: 2,
+      // The headshot, DERIVED SERVER-SIDE from the cwid. It is asserted here (and on the
+      // bespoke engine in `sponsor-match.test.ts`) because the field is OPTIONAL on the
+      // contract, so nothing but a test stops a producer quietly dropping it — and a card
+      // that silently falls back to initials looks exactly like a scholar with no photo.
+      // `identityImageEndpoint` reads `process.env.SCHOLARS_HEADSHOT_BASE`, which does not
+      // exist in the browser, which is why it cannot be derived in the client panel.
+      identityImageEndpoint: "https://directory.weill.cornell.edu/api/v1/person/profile/y.png?returnGenericOn404=false",
     });
     // The spine has no producer for these — they must be ABSENT, not zeroed. Fabricating a
     // count or a null stage would be a lie the UI cannot distinguish from a real one.
