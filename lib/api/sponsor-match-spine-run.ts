@@ -211,6 +211,10 @@ type ResolvedTerm = {
 export type SpineRankResult = {
   concepts: SponsorConcept[];
   candidates: SponsorCandidate[];
+  /** The extractor's short search title (essence + org, written in the SAME extraction call).
+   *  Rides through to the route, which prefers it over the derived concept-list title. Absent
+   *  on the dictionary-fallback path (no LLM ⇒ no title) and on the empty short-circuits. */
+  titleSummary?: string;
 };
 
 /**
@@ -336,7 +340,9 @@ export async function rankResearchersForDescriptionSpine(
   // The dictionary cannot tell a method from a disease, so it tags everything
   // "concept" (the rail then shows one panel). Both empty ⇒ the same [] short-circuit
   // as before. MAX_TERMS caps either source.
-  let extracted: ExtractedConcept[] = (await extractSponsorConcepts(text)).slice(0, MAX_TERMS);
+  const extraction = await extractSponsorConcepts(text);
+  const titleSummary = extraction.titleSummary; // survives the dictionary fallback below (undefined there)
+  let extracted: ExtractedConcept[] = extraction.concepts.slice(0, MAX_TERMS);
   if (extracted.length === 0) {
     const vocab = await loadTaxonomyVocab();
     extracted = extractTerms(text, vocab)
@@ -532,7 +538,7 @@ export async function rankResearchersForDescriptionSpine(
 
   const allFused = rrfFuse(rankings);
   const fused = opts.limit != null ? allFused.slice(0, opts.limit) : allFused;
-  if (fused.length === 0) return { concepts, candidates: [] };
+  if (fused.length === 0) return { concepts, candidates: [], titleSummary };
 
   // technologyCount — CTL officers care whether the researcher already holds CTL IP.
   // Same inline groupBy the bespoke engine and `rankResearchersForOpportunity` use
@@ -650,5 +656,5 @@ export async function rankResearchersForDescriptionSpine(
       ...(searchEvidence.length > 0 ? { searchEvidence } : {}),
     };
   });
-  return { concepts, candidates };
+  return { concepts, candidates, titleSummary };
 }

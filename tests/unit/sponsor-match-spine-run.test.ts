@@ -78,8 +78,14 @@ vi.mock("@/lib/api/search-taxonomy", () => ({
 vi.mock("@/lib/search", () => ({ meshMatchTier: vi.fn(() => "exact") }));
 // LLM extractor mocked at the module seam — NEVER invokes Bedrock. The default below
 // returns [] so the existing dictionary-path assertions exercise the fallback.
+// The real extractor returns { concepts, titleSummary }. The existing tests resolve this mock
+// with a bare concepts ARRAY, so wrap that shape here — a test that cares about the title can
+// resolve the full { concepts, titleSummary } object instead. The spy still records the paste.
 vi.mock("@/lib/api/sponsor-match-extract", () => ({
-  extractSponsorConcepts: mockExtractSponsorConcepts,
+  extractSponsorConcepts: (paste: string) =>
+    Promise.resolve(mockExtractSponsorConcepts(paste)).then((r) =>
+      Array.isArray(r) ? { concepts: r } : r,
+    ),
 }));
 
 import { rankResearchersForDescriptionSpine } from "@/lib/api/sponsor-match-spine-run";

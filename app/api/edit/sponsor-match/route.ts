@@ -142,7 +142,13 @@ function sponsorCacheKey(inputHash: string, engine: "spine" | "bespoke"): string
 
 /** What is safe to memoise: the expensive, derived half of the answer. NOT `preferences` —
  *  those carry verbatim paste quotes. See the module doc. */
-type SponsorEngineResult = { concepts: SponsorConcept[]; candidates: SponsorCandidate[] };
+type SponsorEngineResult = {
+  concepts: SponsorConcept[];
+  candidates: SponsorCandidate[];
+  /** The spine's LLM-written search title (absent for the bespoke engine, which has no
+   *  extraction). Cached with the rest of the result; prefers over a concept-list title. */
+  titleSummary?: string;
+};
 
 /**
  * NEVER CACHE AN EMPTY RESULT — the difference between a memo and a stuck failure.
@@ -241,7 +247,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const engine = useSpine ? "spine" : "bespoke";
     const engineInputHash = sponsorInputHash(normalizeDescription(description));
-    const { concepts, candidates } = await cachedReasonAgg<SponsorEngineResult>(
+    const { concepts, candidates, titleSummary } = await cachedReasonAgg<SponsorEngineResult>(
       sponsorCacheKey(engineInputHash, engine),
       async () => {
         if (useSpine) return rankResearchersForDescriptionSpine(description);
@@ -251,8 +257,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       isCacheableResult,
     );
 
-    // The search's handle, derived — not generated. See `sponsorAskFrom`.
-    const ask = sponsorAskFrom(concepts, preferences);
+    // The search's handle. The essence + org come from the extractor's `titleSummary` (written
+    // in the SAME extraction call, not a second one); `sponsorAskFrom` prefers it and falls
+    // back to a derived concept list, then appends the active preference chips.
+    const ask = sponsorAskFrom(concepts, preferences, titleSummary);
 
     // #6d — retain the search. Recorded even on a CACHE HIT: the row is a record of what an
     // officer asked, not of what the engine computed, and two officers running the same paste
@@ -276,7 +284,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       logEditFailure(`${PATH}#retain`, err);
     }
 
-    return editOk({ concepts, candidates, preferences, ask });
+    return editOk({ concepts, candidates, preferences, ask, titleSummary });
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(502, "match_unavailable");

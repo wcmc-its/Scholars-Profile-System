@@ -77,7 +77,7 @@ describe("extractSponsorConcepts", () => {
 
     const out = await extractSponsorConcepts("some sponsor prose");
 
-    expect(out).toEqual([
+    expect(out.concepts).toEqual([
       { term: "systemic sclerosis", kind: "concept", centrality: 1.0 },
       { term: "Raynaud phenomenon", kind: "concept", centrality: 0.5 },
       { term: "pulmonary fibrosis", kind: "concept", centrality: 1 },
@@ -104,7 +104,7 @@ describe("extractSponsorConcepts", () => {
 
     const out = await extractSponsorConcepts("some sponsor prose");
 
-    expect(out.map((c) => c.kind)).toEqual(["method", "concept", "concept", "concept"]);
+    expect(out.concepts.map((c) => c.kind)).toEqual(["method", "concept", "concept", "concept"]);
   });
 
   it("caps the returned concepts at 12", async () => {
@@ -114,8 +114,8 @@ describe("extractSponsorConcepts", () => {
 
     const out = await extractSponsorConcepts("a long call touching many topics");
 
-    expect(out).toHaveLength(12);
-    expect(out[0].term).toBe("concept-0"); // order preserved (most-central-first from the model)
+    expect(out.concepts).toHaveLength(12);
+    expect(out.concepts[0].term).toBe("concept-0"); // order preserved (most-central-first from the model)
   });
 
   it("sends a deterministic config — temperature 0, a schema, and a bounded output budget", async () => {
@@ -148,20 +148,46 @@ describe("extractSponsorConcepts", () => {
   });
 
   it("short-circuits an empty/whitespace paste WITHOUT calling the model", async () => {
-    expect(await extractSponsorConcepts("")).toEqual([]);
-    expect(await extractSponsorConcepts("   \n\t ")).toEqual([]);
+    expect(await extractSponsorConcepts("")).toEqual({ concepts: [] });
+    expect(await extractSponsorConcepts("   \n\t ")).toEqual({ concepts: [] });
     expect(mockGenerateObject).not.toHaveBeenCalled();
   });
 
-  it("returns [] when Bedrock errors — never throws", async () => {
+  it("returns no concepts when Bedrock errors — never throws", async () => {
     mockGenerateObject.mockRejectedValue(new Error("bedrock 500"));
-    await expect(extractSponsorConcepts("cancer immunotherapy")).resolves.toEqual([]);
+    await expect(extractSponsorConcepts("cancer immunotherapy")).resolves.toEqual({ concepts: [] });
   });
 
-  it("returns [] when the model produces no valid object (unparseable output)", async () => {
+  it("returns no concepts when the model produces no valid object (unparseable output)", async () => {
     const err = new Error("no object generated");
     err.name = "AI_NoObjectGeneratedError";
     mockGenerateObject.mockRejectedValue(err);
-    await expect(extractSponsorConcepts("cancer immunotherapy")).resolves.toEqual([]);
+    await expect(extractSponsorConcepts("cancer immunotherapy")).resolves.toEqual({ concepts: [] });
+  });
+
+  it("carries a titleSummary through, cleaned — trims, collapses whitespace, drops a trailing period", async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        concepts: [{ term: "cystic fibrosis", kind: "concept", centrality: 1 }],
+        titleSummary: "  Vertex —  gene editing\nfor cystic fibrosis.  ",
+      },
+    });
+
+    const out = await extractSponsorConcepts("some sponsor prose");
+
+    expect(out.titleSummary).toBe("Vertex — gene editing for cystic fibrosis");
+  });
+
+  it("drops a titleSummary that is absent or runs to prose (never becomes a header)", async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        concepts: [{ term: "cystic fibrosis", kind: "concept", centrality: 1 }],
+        titleSummary: "x".repeat(200), // over the length cap → rejected
+      },
+    });
+    expect((await extractSponsorConcepts("prose")).titleSummary).toBeUndefined();
+
+    mockGenerateObject.mockResolvedValue(objectWith([{ term: "cystic fibrosis", centrality: 1 }]));
+    expect((await extractSponsorConcepts("prose")).titleSummary).toBeUndefined(); // omitted by model
   });
 });

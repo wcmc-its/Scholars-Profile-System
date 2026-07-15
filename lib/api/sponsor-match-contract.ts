@@ -524,6 +524,10 @@ export type SponsorMatchResponse = {
   /** A short handle for this search — see `sponsorAskFrom`. Absent when the paste yielded
    *  no concepts (⇒ nothing to name it after). */
   ask?: { title: string };
+  /** The extractor's raw title (essence + org, no preference chips), shipped so the console
+   *  can re-derive `ask` live as preferences toggle without re-fetching. Absent ⇒ the console
+   *  falls back to a concept-list title. See `sponsorAskFrom`. */
+  titleSummary?: string;
   preferences?: SponsorPreference[];
 };
 
@@ -531,15 +535,15 @@ export type SponsorMatchResponse = {
  * The funder's ask, as a short handle for the results header ("Cardiac fibrosis,
  * myofibroblast differentiation · early career").
  *
- * DETERMINISTIC, AND DELIBERATELY NOT AN LLM CALL. The obvious design is a second Bedrock
- * call that reads the paste and writes a title, and it was specced that way — but the task
- * role's IAM grant (cdk/lib/app-stack.ts, "TaskRoleBedrockPolicy") admits only Opus and
- * Sonnet; Haiku is excluded on purpose. So the "cheap title call" is a SECOND SONNET CALL —
- * roughly doubling per-request LLM spend, on a route with no rate limit, to name something
- * we can already name for free: the extractor has ALREADY read the paste and told us what it
- * is about. A title is the top concepts plus whatever non-topical ask was detected. Deriving
- * it costs nothing, cannot fail, cannot time out, and cannot perturb the eval-tuned
- * extraction prompt.
+ * THIS FUNCTION MAKES NO LLM CALL — it consumes one. `titleSummary` is the essence handle the
+ * extractor wrote in the SAME call that read the concepts (a richer output schema, NOT a second
+ * request); the thing the contract forbids is a SEPARATE title call, which — since the task
+ * role's IAM grant (cdk/lib/app-stack.ts, "TaskRoleBedrockPolicy") admits only Opus and Sonnet,
+ * Haiku excluded on purpose — would be a SECOND SONNET CALL, roughly doubling per-request LLM
+ * spend on a route with no rate limit. When `titleSummary` is absent (dictionary fallback, a
+ * paste with no org, or a failed format guard) the handle falls back to the top concepts,
+ * DERIVED — costs nothing, cannot fail, cannot time out. Either way the ASSEMBLY here (the
+ * preference chips, the ` · ` joins) is deterministic; only the essence rode in on the LLM.
  *
  * It used to also return `quote` — `preferences[0].evidence`, the paste snippet a preference was
  * read from. Nothing ever rendered it, and nothing needed to: the Preferences rail already shows
@@ -550,11 +554,14 @@ export type SponsorMatchResponse = {
 export function sponsorAskFrom(
   concepts: readonly SponsorConcept[],
   preferences: readonly SponsorPreference[] = [],
+  titleSummary?: string,
 ): { title: string } | undefined {
-  const top = concepts.slice(0, ASK_TITLE_CONCEPTS).map((c) => c.term);
-  if (top.length === 0) return undefined;
+  // Prefer the extractor's essence handle; fall back to the top concept terms, joined.
+  const base =
+    titleSummary?.trim() || concepts.slice(0, ASK_TITLE_CONCEPTS).map((c) => c.term).join(", ");
+  if (base.length === 0) return undefined;
   const prefs = preferences.map((p) => p.label);
-  return { title: [top.join(", "), ...prefs].join(" · ") };
+  return { title: [base, ...prefs].join(" · ") };
 }
 
 /** Two concepts name a search; five are a list, not a handle. */
