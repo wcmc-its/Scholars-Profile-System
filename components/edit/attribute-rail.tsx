@@ -117,9 +117,8 @@ export function AttributeRail({ items, active, basePath, groupMeta }: AttributeR
           // Hairline rule between sections — restructured rail only (groupMeta is
           // present only there); skipped before the first (floating Home) group.
           const showDivider = groupMeta != null && groupIndex > 0;
-          // De-grey: colour the group by tier (maroon = your content/actions,
-          // slate = WCM reference) via the header text, a leading dot, and a
-          // left spine down the group.
+          // Colour the group by provenance: green = your content/actions,
+          // neutral = WCM reference (quiet — the lock cue lives on the panel).
           const accent = groupAccent(g.items);
           return (
             <div
@@ -131,10 +130,12 @@ export function AttributeRail({ items, active, basePath, groupMeta }: AttributeR
               )}
               {!isFloating && (
                 <div className="flex items-center gap-1.5 px-2 py-1">
-                  <span
-                    className={cn("inline-block size-1.5 shrink-0 rounded-full", accent.dot)}
-                    aria-hidden
-                  />
+                  {accent.dot && (
+                    <span
+                      className={cn("inline-block size-1.5 shrink-0 rounded-full", accent.dot)}
+                      aria-hidden
+                    />
+                  )}
                   <p
                     className={cn(
                       "text-xs font-semibold tracking-wide uppercase",
@@ -170,15 +171,11 @@ export function AttributeRail({ items, active, basePath, groupMeta }: AttributeR
           );
         })
       ) : (
-        // Flat rail (superuser scholar rail, unit rails): no owned/sourced
-        // split, so one neutral slate accent — still colour, not grey.
-        <div className="border-apollo-slate/50 border-l-2 pl-1">
+        // Flat rail (superuser scholar rail, unit rails): undifferentiated, so
+        // neutral — provenance is carried by the panel badges, not the nav.
+        <div className="border-apollo-rail-border border-l-2 pl-1">
           <div className="flex items-center gap-1.5 px-2 py-1">
-            <span
-              className="bg-apollo-slate inline-block size-1.5 shrink-0 rounded-full"
-              aria-hidden
-            />
-            <p className="text-apollo-slate text-xs font-semibold tracking-wide uppercase">
+            <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
               Attributes
             </p>
           </div>
@@ -258,11 +255,13 @@ function railTier(item: RailItem): RailKind {
 }
 
 /**
- * Per-group accent for the de-grey pass. Two accents carry the whole rail:
- *   maroon = the scholar's own content & actions (kind owned / service) — "yours";
- *   slate  = reference sourced from WCM (kind sourced / readonly) — "from WCM".
- * Applied to the group's header text, its leading dot, and a left spine down the
- * group. See the "APOLLO EDITOR COLOUR LANGUAGE" note in globals.css.
+ * Per-group accent. Provenance colour follows the token language (globals.css
+ * "APOLLO EDITOR COLOUR LANGUAGE"):
+ *   green   = the scholar's own content & actions (kind owned / service) — "yours";
+ *   neutral = reference sourced from WCM (kind sourced / readonly) — quiet, its
+ *             lock cue lives on the panel, not the nav (no hue, no dot).
+ * Applied to the group's header text, a leading dot (yours only), and a left
+ * spine. Maroon is reserved for brand (the active item) — never a group accent.
  */
 function groupAccent(items: ReadonlyArray<RailItem>): {
   text: string;
@@ -274,8 +273,12 @@ function groupAccent(items: ReadonlyArray<RailItem>): {
     return k === "owned" || k === "service";
   });
   return yours
-    ? { text: "text-apollo-maroon", dot: "bg-apollo-maroon", spine: "border-apollo-maroon/50" }
-    : { text: "text-apollo-slate", dot: "bg-apollo-slate", spine: "border-apollo-slate/50" };
+    ? {
+        text: "text-apollo-green-foreground",
+        dot: "bg-apollo-green",
+        spine: "border-apollo-green/50",
+      }
+    : { text: "text-muted-foreground", dot: "", spine: "border-apollo-rail-border" };
 }
 
 function RailLink({
