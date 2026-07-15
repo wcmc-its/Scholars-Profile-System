@@ -567,10 +567,10 @@ describe("SponsorMatchPanel", () => {
   // ── Paste read-back (§6a) ──────────────────────────────────────────────────
   it("marks the extracted terms in the paste, and says how many it could not point at", async () => {
     await renderAndSearch(); // searches for "CAR T"; CONCEPTS has 2 concepts
-    // The readback quotes the text that was SEARCHED. None of the three concept terms occurs
+    // The read-only ask quotes the text that was SEARCHED. None of the three concept terms occurs
     // in "CAR T collaborators", so nothing marks — and the panel must SAY so, rather than let
     // an unmarked paste read as "the matcher ignored all of this".
-    expect(screen.getByText(/What we read from the description/)).toBeTruthy();
+    expect(screen.getByText(/What we read from the sponsor/)).toBeTruthy();
     expect(screen.getByText(/0 of 3 concepts are highlighted/)).toBeTruthy();
   });
 
@@ -591,6 +591,20 @@ describe("SponsorMatchPanel", () => {
     // The mark points back at the CONCEPT, not at itself — that is the audit trail.
     expect(mark.getAttribute("title")).toBe("Immuno-oncology");
     expect(screen.getByText(/1 of 3 concepts are highlighted/)).toBeTruthy();
+  });
+
+  it("replaces the textarea with a read-only ask once a search commits, and Edit paste brings it back", async () => {
+    await renderAndSearch(); // pastes "CAR T collaborators"
+    // The committed search is now the read-only ask — the textarea is gone, Re-run is offered.
+    expect(screen.queryByLabelText(/description/i)).toBeNull();
+    expect(screen.getByText(/What we read from the sponsor/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Re-run match" })).toBeTruthy();
+
+    // Edit paste restores the textarea, pre-filled with the text that was searched.
+    fireEvent.click(screen.getByRole("button", { name: "Edit paste" }));
+    const paste = screen.getByLabelText(/description/i) as HTMLTextAreaElement;
+    expect(paste.value).toBe("CAR T collaborators");
+    expect(screen.getByRole("button", { name: "Rank researchers" })).toBeTruthy();
   });
 
 
@@ -943,18 +957,19 @@ describe("SponsorMatchPanel", () => {
     });
 
     render(<SponsorMatchPanel />);
-    const paste = screen.getByLabelText(/description/i);
-    const rank = screen.getByRole("button", { name: "Rank researchers" });
-
-    fireEvent.change(paste, { target: { value: "CAR T" } });
-    fireEvent.click(rank);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
     await waitFor(() => expect(keyPaperCalls()).toHaveLength(1));
     await screen.findByText(/CAR T persistence/);
 
-    // Re-run with an edited paste. Alice returns under the SAME cwid.
-    fireEvent.change(paste, { target: { value: "CAR T and solid tumors" } });
-    fireEvent.click(rank);
+    // Re-run with an edited paste. The committed search replaced the textarea with the read-only
+    // ask, so "Edit paste" reveals it again; Alice returns under the SAME cwid.
+    fireEvent.click(screen.getByRole("button", { name: "Edit paste" }));
+    fireEvent.change(screen.getByLabelText(/description/i), {
+      target: { value: "CAR T and solid tumors" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
     // The evidence resolves at all (a stale one-shot fetch guard would leave it dead)…

@@ -208,6 +208,10 @@ function downloadCsv(filename: string, csv: string) {
 export function SponsorMatchPanel() {
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState<Status>({ kind: "idle" });
+  // The paste is EDITABLE until a search commits, then the ask (title + read-only, highlighted
+  // request + Edit/Re-run) takes its place — the mockup's "THE ASK" section. "Edit paste"
+  // flips this back to the textarea. Starts true (nothing searched yet).
+  const [editing, setEditing] = useState(true);
   const [history, setHistory] = useState<Submission[]>([]);
   const [deptSel, setDeptSel] = useState<ReadonlySet<string>>(new Set());
   const [conceptSel, setConceptSel] = useState<ReadonlySet<string>>(new Set());
@@ -311,6 +315,7 @@ export function SponsorMatchPanel() {
         setConcepts(data.concepts ?? []);
         setTitleSummary(data.titleSummary);
         setMatchedText(text);
+        setEditing(false); // a committed search → show the read-only ask, not the textarea
         setRunId((n) => n + 1); // #1696 — a new run: every row's claimed-pmid set starts empty
         // #1654 — detected preferences arrive ACTIVE. The sponsor said it; the default is to
         // honour it. Deselecting is the officer's override, not their opt-in.
@@ -399,6 +404,13 @@ export function SponsorMatchPanel() {
       ),
     [concepts, preferences, activePrefs, titleSummary],
   );
+
+  // The committed request, with the pulled-out terms marked — the mockup's read-only ask quote.
+  // `matchedText` (not `description`) so an in-progress textarea edit can't desync the marks.
+  const askSegments = useMemo(() => markPaste(matchedText, concepts), [matchedText, concepts]);
+  const askMarked = useMemo(() => markedConceptCount(askSegments), [askSegments]);
+  // Show the read-only ask once a search has committed and the officer is not editing the paste.
+  const showAskCard = !editing && matchedText.length > 0;
 
   const deptFacet = useMemo(() => {
     const counts = new Map<string, number>();
@@ -565,6 +577,68 @@ export function SponsorMatchPanel() {
     downloadCsv("sponsor-match-researchers.csv", csv);
   }
 
+  // #6d retained searches, in a right-side drawer (reused shadcn Sheet — no hand-rolled
+  // overlay/focus-trap). Declared once and rendered beside the search action in BOTH the edit
+  // form and the read-only ask, so history stays reachable in either state. The retention notice
+  // lives in the drawer header, where #6d requires it be said.
+  const historyDrawer =
+    history.length > 0 ? (
+      <Sheet>
+        <SheetTrigger asChild>
+          <Button type="button" variant="outline">
+            Recent ({history.length})
+          </Button>
+        </SheetTrigger>
+        <SheetContent data-slot="sponsor-match-history">
+          <SheetHeader>
+            <SheetTitle>Recent searches ({history.length})</SheetTitle>
+            <SheetDescription>
+              Searches are saved — including the description you pasted — so we can measure and
+              improve match quality against real sponsor text. Everyone with access to this
+              console can see them. Delete any search to remove its text for good.
+            </SheetDescription>
+          </SheetHeader>
+          <ul className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+            {history.map((h) => (
+              <li key={h.id} className="border-border border-b pb-4 last:border-b-0 last:pb-0">
+                <div className="text-muted-foreground flex items-baseline gap-2 text-xs">
+                  <span className="shrink-0 tabular-nums">
+                    {new Date(h.createdAt).toLocaleDateString()}
+                  </span>
+                  <span className="min-w-0 truncate">{h.submittedBy}</span>
+                  <span className="ml-auto shrink-0 tabular-nums">{h.candidateCount} matched</span>
+                </div>
+                {/* Replaying closes the drawer so the results are visible — SheetClose composes
+                    with the button's own onClick. The replayed request re-renders as the read-only
+                    ask above, so the row itself needs no request preview (that was the duplicative
+                    §2c compact preview, removed). */}
+                <SheetClose asChild>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDescription(h.description);
+                      void runSearch(h.description);
+                    }}
+                    className="text-foreground/90 mt-1 block w-full text-left text-sm font-medium underline-offset-4 hover:underline"
+                  >
+                    {h.title ?? "Untitled search"}
+                  </button>
+                </SheetClose>
+                <button
+                  type="button"
+                  aria-label={`Delete search: ${h.title ?? h.description.slice(0, 60)}`}
+                  onClick={() => void deleteSubmission(h.id)}
+                  className="text-muted-foreground mt-1 text-xs underline-offset-4 hover:underline"
+                >
+                  Delete
+                </button>
+              </li>
+            ))}
+          </ul>
+        </SheetContent>
+      </Sheet>
+    ) : null;
+
   return (
     <div data-slot="sponsor-match-panel">
       <div className="mb-5">
@@ -576,119 +650,112 @@ export function SponsorMatchPanel() {
         </p>
       </div>
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void runSearch(description);
-        }}
-        className="mb-4"
-      >
-        <label htmlFor="sponsor-description" className="mb-1.5 block text-sm font-medium">
-          Sponsor&rsquo;s description
-        </label>
-        <textarea
-          id="sponsor-description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={6}
-          placeholder="Paste the sponsor's description of their interest…"
-          className="border-border w-full rounded-md border bg-background px-3 py-2 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]"
-          spellCheck={false}
-        />
-        {/* Slate, not `variant="apollo"` (maroon) — the whole matcher family (find-researchers,
-            opportunity intake, and the mockup) is slate. */}
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <Button
-            type="submit"
-            disabled={pending || description.trim().length === 0}
-            className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
-          >
-            {pending ? "Ranking…" : "Rank researchers"}
-          </Button>
-
-          {/* #6d history lives in a right-side drawer now (nit 2 — the inline <details> ate the
-              vertical space above the ranking). Reuses the shadcn Sheet, so no hand-rolled
-              overlay/focus-trap/scroll-lock. The retention notice moves into the drawer header
-              because #6d requires it be said WHERE the searches are listed. */}
-          {history.length > 0 ? (
-            <Sheet>
-              <SheetTrigger asChild>
-                <Button type="button" variant="outline">
-                  Recent ({history.length})
-                </Button>
-              </SheetTrigger>
-              <SheetContent data-slot="sponsor-match-history">
-                <SheetHeader>
-                  <SheetTitle>Recent searches ({history.length})</SheetTitle>
-                  <SheetDescription>
-                    Searches are saved — including the description you pasted — so we can measure
-                    and improve match quality against real sponsor text. Everyone with access to
-                    this console can see them. Delete any search to remove its text for good.
-                  </SheetDescription>
-                </SheetHeader>
-                <ul className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-                  {history.map((h) => (
-                    <li
-                      key={h.id}
-                      className="border-border border-b pb-4 last:border-b-0 last:pb-0"
+      {showAskCard ? (
+        /* The mockup's "THE ASK": once a search commits, the textarea is replaced by the request
+           shown READ-ONLY with its pulled-out terms highlighted, titled by the extractor's essence
+           handle, with Edit paste / Re-run. (Title stays the console's sans, not the mockup's
+           serif chrome — the panel deliberately keeps console chrome; see the file header.) */
+        <section
+          data-slot="sponsor-match-ask-card"
+          className="border-border bg-background mb-4 rounded-lg border"
+        >
+          <div className="border-border border-b px-5 py-4">
+            <span className="text-muted-foreground block text-[11px] font-semibold tracking-[0.09em] uppercase">
+              What we read from the sponsor
+            </span>
+            {ask ? (
+              <h2
+                data-slot="sponsor-match-ask"
+                className="mt-1.5 text-lg font-semibold tracking-tight"
+              >
+                {ask.title}
+              </h2>
+            ) : null}
+          </div>
+          <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-start">
+            <div className="min-w-0 flex-1">
+              {/* The pasted request, read-only, each pulled-out term marked. `break-words` for the
+                  300-char Outlook SafeLinks URL that carries no break opportunity. */}
+              <p
+                data-slot="sponsor-match-ask-quote"
+                className="text-muted-foreground text-sm leading-relaxed break-words whitespace-pre-wrap"
+              >
+                {askSegments.map((s, i) =>
+                  s.term ? (
+                    <mark
+                      key={i}
+                      title={s.term}
+                      className="text-foreground rounded bg-[var(--color-accent-slate)]/15 px-0.5"
                     >
-                      <div className="text-muted-foreground flex items-baseline gap-2 text-xs">
-                        <span className="shrink-0 tabular-nums">
-                          {new Date(h.createdAt).toLocaleDateString()}
-                        </span>
-                        <span className="min-w-0 truncate">{h.submittedBy}</span>
-                        <span className="ml-auto shrink-0 tabular-nums">
-                          {h.candidateCount} matched
-                        </span>
-                      </div>
-                      {/* Replaying closes the drawer so the results are visible — SheetClose
-                          composes with the button's own onClick. */}
-                      <SheetClose asChild>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDescription(h.description);
-                            void runSearch(h.description);
-                          }}
-                          className="text-foreground/90 mt-1 block w-full text-left text-sm font-medium underline-offset-4 hover:underline"
-                        >
-                          {h.title ?? "Untitled search"}
-                        </button>
-                      </SheetClose>
-                      {/* §2c — the original request, compacted: the officer sees the gist without a
-                          400-line forwarded email dominating. `break-words` for the 300-char
-                          Outlook SafeLinks URL with no break opportunity; line-clamp-2 is the
-                          ~2-line preview. Full text (with its verbatim line breaks) under the
-                          expander only when there is meaningfully more than the clamp shows. */}
-                      <p className="text-muted-foreground mt-1 line-clamp-2 text-xs leading-relaxed break-words">
-                        {h.description}
-                      </p>
-                      {h.description.length > 200 ? (
-                        <details className="mt-1">
-                          <summary className="text-muted-foreground cursor-pointer text-xs underline-offset-4 select-none hover:underline">
-                            Show full request
-                          </summary>
-                          <p className="text-muted-foreground mt-1 text-xs leading-relaxed break-words whitespace-pre-wrap">
-                            {h.description}
-                          </p>
-                        </details>
-                      ) : null}
-                      <button
-                        type="button"
-                        aria-label={`Delete search: ${h.title ?? h.description.slice(0, 60)}`}
-                        onClick={() => void deleteSubmission(h.id)}
-                        className="text-muted-foreground mt-1 text-xs underline-offset-4 hover:underline"
-                      >
-                        Delete
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </SheetContent>
-            </Sheet>
-          ) : null}
-        </div>
-      </form>
+                      {s.text}
+                    </mark>
+                  ) : (
+                    <span key={i}>{s.text}</span>
+                  ),
+                )}
+              </p>
+              {/* Honest lower bound (kept from the old readback): a concept goes unmarked when the
+                  matcher canonicalised it to a form not verbatim in the paste — never because it
+                  was ignored. Shown only when something is actually unmarked. */}
+              {concepts.length > 0 && askMarked < concepts.length ? (
+                <p className="text-muted-foreground mt-2 text-xs leading-relaxed">
+                  {askMarked} of {concepts.length} concepts are highlighted — a concept goes
+                  unmarked when the matcher wrote it in standard terms that do not appear here (an
+                  abbreviation expanded, a brand name resolved). Unmarked never means ignored:
+                  every concept below ranks.
+                </p>
+              ) : null}
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={() => setEditing(true)}>
+                Edit paste
+              </Button>
+              <Button
+                type="button"
+                disabled={pending}
+                onClick={() => void runSearch(matchedText)}
+                className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
+              >
+                {pending ? "Ranking…" : "Re-run match"}
+              </Button>
+              {historyDrawer}
+            </div>
+          </div>
+        </section>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void runSearch(description);
+          }}
+          className="mb-4"
+        >
+          <label htmlFor="sponsor-description" className="mb-1.5 block text-sm font-medium">
+            Sponsor&rsquo;s description
+          </label>
+          <textarea
+            id="sponsor-description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={6}
+            placeholder="Paste the sponsor's description of their interest…"
+            className="border-border w-full rounded-md border bg-background px-3 py-2 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]"
+            spellCheck={false}
+          />
+          {/* Slate, not `variant="apollo"` (maroon) — the whole matcher family (find-researchers,
+              opportunity intake, and the mockup) is slate. */}
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <Button
+              type="submit"
+              disabled={pending || description.trim().length === 0}
+              className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
+            >
+              {pending ? "Ranking…" : "Rank researchers"}
+            </Button>
+            {historyDrawer}
+          </div>
+        </form>
+      )}
 
       {status.kind === "loading" ? (
         <div aria-busy="true">
@@ -708,14 +775,8 @@ export function SponsorMatchPanel() {
         </p>
       ) : status.kind === "ok" ? (
         <>
-          {ask ? (
-            <h2 data-slot="sponsor-match-ask" className="pt-4 text-base font-semibold">
-              {ask.title}
-            </h2>
-          ) : null}
-          {concepts.length > 0 && matchedText.length > 0 ? (
-            <PasteReadback text={matchedText} concepts={concepts} />
-          ) : null}
+          {/* The ask (title + read-only, highlighted request) renders in the ask card above,
+              in place of the textarea — see `showAskCard`. */}
           {ranked.length === 0 ? (
             <p className="text-muted-foreground py-4 text-sm">
               No researchers matched this description.
@@ -1066,60 +1127,6 @@ function ConceptRail({
  * will leave you with — not a number from a pool you cannot see. They move as sliders move,
  * which is correct: the ranking moved.
  */
-/**
- * #6a — the paste, read back with each extracted concept marked where it literally occurs.
- *
- * This is the decomposition's audit trail: it lets an officer see that the matcher read
- * "our CAR-T program" as *chimeric antigen receptor T-cell therapy* — and, more usefully,
- * catch it when it read something as a concept that was never the point.
- *
- * IT IS A LOWER BOUND, AND IT SAYS SO. The extractor canonicalises ("CF" → "cystic fibrosis"),
- * so a concept whose canonical form never appears in the paste cannot be anchored to any span
- * (`lib/sponsor-paste-highlight.ts` documents why). Rather than let the officer read an unmarked
- * paragraph as "the matcher ignored this", the count is stated plainly. Absent ≠ ignored — the
- * same rule the rest of this contract keeps.
- *
- * Collapsed by default: it repeats text the officer just pasted, and the results are the point.
- * It is a <details> over a <div>, not the <textarea> — a textarea cannot contain a <mark>.
- */
-function PasteReadback({ text, concepts }: { text: string; concepts: SponsorConcept[] }) {
-  const segments = useMemo(() => markPaste(text, concepts), [text, concepts]);
-  const marked = useMemo(() => markedConceptCount(segments), [segments]);
-
-  return (
-    <details data-slot="sponsor-match-readback" className="mt-3">
-      <summary className="text-muted-foreground cursor-pointer text-xs underline-offset-4 hover:underline">
-        What we read from the description
-      </summary>
-      <div className="border-border mt-2 rounded-lg border p-3">
-        {/* `break-words`: a sponsor email routinely carries an Outlook SafeLinks URL — 300+
-            characters with no break opportunity in it. `pre-wrap` alone honours existing break
-            points but introduces none, so such a token would run straight out of the column. */}
-        <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">
-          {segments.map((s, i) =>
-            s.term ? (
-              <mark
-                key={i}
-                title={s.term}
-                className="rounded bg-[var(--color-accent-slate)]/15 px-0.5 text-inherit"
-              >
-                {s.text}
-              </mark>
-            ) : (
-              <span key={i}>{s.text}</span>
-            ),
-          )}
-        </p>
-        <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
-          {`${marked} of ${concepts.length} ${
-            concepts.length === 1 ? "concept is" : "concepts are"
-          } highlighted above. A concept goes unhighlighted when it could not be pointed at a span — most often because the matcher wrote it in standard terms that do not appear verbatim here (an abbreviation expanded, a brand name resolved), and sometimes because a longer concept already claimed the same words. Unhighlighted never means ignored: every concept below was extracted and every one of them ranks.`}
-        </p>
-      </div>
-    </details>
-  );
-}
-
 function FacetGroup({
   label,
   options,
