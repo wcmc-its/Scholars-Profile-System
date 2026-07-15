@@ -528,6 +528,28 @@ describe("EdgeStack", () => {
         expect(headers.map((h) => h.HeaderName)).toContain("X-Origin-Verify");
       });
 
+      it("with the cert seeded but NO origin hostname, CloudFront stays HTTP_ONLY on the ALB DNS name (NetScaler :443 without an edge flip)", () => {
+        // The ALB :443 listener (AppStack) is gated on the cert alone, so a
+        // NetScaler front can be served by seeding ONLY edgeOriginCertArn. This
+        // leg must NOT move with it -- the origin hostname does not resolve yet,
+        // and an HTTPS_ONLY origin pointed at an unresolvable name is an outage.
+        const { template: certOnlyTemplate } = buildEdgeStack("prod", undefined, {
+          edgeOriginCertArn:
+            "arn:aws:acm:us-east-1:123456789012:certificate/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          edgeOriginHostname: "",
+        });
+        const dc = (
+          Object.values(
+            certOnlyTemplate.findResources("AWS::CloudFront::Distribution"),
+          )[0].Properties as Record<string, unknown>
+        ).DistributionConfig as Record<string, unknown>;
+        const ods = dc.Origins as Array<Record<string, unknown>>;
+        const albOrigin = ods.find((o) => o.CustomOriginConfig !== undefined);
+        const config = albOrigin?.CustomOriginConfig as Record<string, unknown>;
+        expect(config.OriginProtocolPolicy).toBe("http-only");
+        expect(config.HTTPPort).toBe(80);
+      });
+
       it("origin sends an X-Origin-Verify custom header (acceptance #7)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;

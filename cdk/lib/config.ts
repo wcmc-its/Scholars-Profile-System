@@ -452,18 +452,30 @@ export interface SpsEnvConfig {
    * (#1507). The public ALB's AWS-assigned `*.elb.amazonaws.com` DNS name cannot
    * carry a public ACM cert, so an HTTPS origin needs a hostname we control that
    * DNS-resolves to the ALB and whose cert the ALB's :443 listener presents.
-   * Committed (public URL) but INERT until {@link edgeOriginCertArn} is set.
+   *
+   * Empty = the operator has NOT cut the DNS record yet, so CloudFront keeps its
+   * HTTP_ONLY origin on the ALB DNS name even if {@link edgeOriginCertArn} is set.
+   * Synth cannot see DNS, so a non-empty value here IS the operator's assertion
+   * that the record resolves to the ALB. Set it only once that is true.
    */
   readonly edgeOriginHostname: string;
   /**
-   * ACM certificate ARN (ALB region, us-east-1) for {@link edgeOriginHostname},
-   * presented by the public ALB's :443 listener (#1507). This is the *regional*
-   * ALB cert -- distinct from the us-east-1 CloudFront *viewer* cert. Empty =
-   * feature OFF: the ALB stays HTTP-:80-only and CloudFront talks HTTP_ONLY to
-   * the origin (today's behavior). Set it (operator, after issuing the cert +
-   * pointing DNS at the ALB) to add the :443 listener and flip the CloudFront
-   * origin to HTTPS_ONLY. Ships dark. Deploy Sps-App-<env> (adds :443) and
-   * verify :443 serves BEFORE Sps-Edge-<env> (flips the origin).
+   * ACM certificate ARN (ALB region, us-east-1) presented by the public ALB's
+   * :443 listener (#1507). The *regional* ALB cert -- distinct from the us-east-1
+   * CloudFront *viewer* cert. A wildcard (`*.weill.cornell.edu`) covers every env
+   * and every origin hostname, so both envs may share one ARN.
+   *
+   * Empty = the ALB stays HTTP-:80-only. Set it to add the :443 listener, its
+   * X-Origin-Verify forward rule, and the :443 SG ingress -- which is all a
+   * NetScaler front needs, since it dials the ALB directly.
+   *
+   * This ARN alone does NOT move CloudFront: the origin leg flips to HTTPS_ONLY
+   * only when {@link edgeOriginHostname} is ALSO set (see edge-stack.ts). The two
+   * gates are separate because the ALB listener needs a cert while CloudFront
+   * needs a cert *and* a resolvable hostname.
+   *
+   * Ships dark. Deploy Sps-App-<env> (adds :443) and verify :443 serves BEFORE
+   * seeding the hostname + deploying Sps-Edge-<env> (flips the origin).
    */
   readonly edgeOriginCertArn: string;
 
@@ -685,10 +697,13 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     edgeCertArn:
       "arn:aws:acm:us-east-1:665083158573:certificate/f50f0b04-dc62-4d8e-97b8-2761d1efdd0f",
     cloudFrontLogsBucketName: "sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz",
-    // #1507 -- HTTPS origin leg. INERT until edgeOriginCertArn is seeded
-    // (operator issues the ALB-region cert for this hostname + points DNS at
-    // the public ALB). Confirm the exact hostname before issuing the cert.
-    edgeOriginHostname: "scholars-staging-origin.weill.cornell.edu",
+    // #1507 -- HTTPS origin leg, two gates.
+    // edgeOriginCertArn: seed with the wildcard ARN to add the ALB :443 listener
+    //   (+ X-Origin-Verify rule, + :443 SG ingress). That alone serves NetScaler.
+    // edgeOriginHostname: seed ONLY once the record resolves to the public ALB --
+    //   it is what flips CloudFront's origin to HTTPS_ONLY against that name.
+    //   Intended value: "scholars-staging-origin.weill.cornell.edu".
+    edgeOriginHostname: "",
     edgeOriginCertArn: "",
     // Observability metric-by-name decouple (cutover, item-3 Phase B2): ON.
     // Severs the Data->Observability (Aurora/OS) + App->Observability (ALB) cross-
@@ -840,10 +855,13 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     edgeCertArn:
       "arn:aws:acm:us-east-1:665083158573:certificate/95f77e69-4abc-4d2c-b081-b8b5b8572fd6",
     cloudFrontLogsBucketName: "sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
-    // #1507 -- HTTPS origin leg. INERT until edgeOriginCertArn is seeded
-    // (operator issues the ALB-region cert for this hostname + points DNS at
-    // the public ALB). Confirm the exact hostname before issuing the cert.
-    edgeOriginHostname: "scholars-origin.weill.cornell.edu",
+    // #1507 -- HTTPS origin leg, two gates.
+    // edgeOriginCertArn: seed with the wildcard ARN to add the ALB :443 listener
+    //   (+ X-Origin-Verify rule, + :443 SG ingress). That alone serves NetScaler.
+    // edgeOriginHostname: seed ONLY once the record resolves to the public ALB --
+    //   it is what flips CloudFront's origin to HTTPS_ONLY against that name.
+    //   Intended value: "scholars-origin.weill.cornell.edu".
+    edgeOriginHostname: "",
     edgeOriginCertArn: "",
     // Observability metric-by-name decouple (cutover, item-3 prod window): ON.
     // Severs the Data->Observability (Aurora/OS) + App->Observability (ALB) cross-
