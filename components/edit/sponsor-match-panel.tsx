@@ -1456,9 +1456,10 @@ const PROVENANCE_META: Record<
   },
 };
 
-/** How an evidence block landed — a structured tag vs a bare-keyword hit — as a small coloured chip.
- *  The honest, cheap half of the context-vs-keyword distinction: it says HOW the hit matched, never
- *  that it matched the sponsor's SENSE (a MeSH-tagged off-topic paper still reads `subject-tagged`).
+/** How an evidence block landed — a structured tag vs a bare-keyword hit — as a small coloured chip
+ *  that LEADS the block beside its concept, so the colour reads before the paper does. The honest,
+ *  cheap half of the context-vs-keyword distinction: it says HOW the hit matched, never that it
+ *  matched the sponsor's SENSE (a MeSH-tagged off-topic paper still reads `subject-tagged`).
  *  Renders nothing for evidence that carries no such signal. */
 function ProvenanceChip({ evidence }: { evidence: ResultEvidence }) {
   const provenance = evidenceProvenance(evidence);
@@ -1467,7 +1468,7 @@ function ProvenanceChip({ evidence }: { evidence: ResultEvidence }) {
   return (
     <span
       title={title}
-      className={`mt-1 inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${className}`}
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-[0.02em] ${className}`}
     >
       <span aria-hidden="true">{mark}</span>
       {label}
@@ -1650,16 +1651,16 @@ function ResearcherRow({
               // and any papers it resolved for the PREVIOUS paste. (Same two-part idiom as
               // `people-result-card.tsx`, which bakes `qParam` into both.) `term` alone keeps a
               // card's sibling blocks distinct WITHIN a run.
-              <div
-                key={`${runId}:${concept.term}`}
-                data-slot="sponsor-match-evidence"
-                className="flex flex-col"
-              >
-                {/* The concept, and what the sponsor asked for it — the two facts the block is an
-                    answer to, on one line. `centrality` is the slider's own value, so the number
-                    here is the number the officer set, not a derived weight they cannot locate. */}
+              <div key={`${runId}:${concept.term}`} data-slot="sponsor-match-evidence">
+                {/* The concept, its provenance, and what the sponsor asked for it — the facts the
+                    block answers, on one line. The provenance chip LEADS the block (colour first),
+                    so an officer sees whether a hit is structured or keyword-only before reading the
+                    paper. `centrality` is the slider's own value — the number the officer set. */}
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-foreground text-sm font-medium">{concept.term}</span>
+                  <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-foreground text-sm font-semibold">{concept.term}</span>
+                    <ProvenanceChip evidence={evidence.evidence} />
+                  </span>
                   <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
                     ask {concept.centrality.toFixed(2)}
                   </span>
@@ -1683,10 +1684,6 @@ function ResearcherRow({
                   autoResolve={inView && i <= resolvedCount}
                   onResolved={() => setResolvedCount((n) => Math.max(n, i + 1))}
                 />
-                {/* Provenance: did this block land via a structured tag or a bare keyword? The chip
-                    that lets an officer spot a keyword-only false positive in a card that still
-                    surfaced above the floor. */}
-                <ProvenanceChip evidence={evidence.evidence} />
               </div>
             ))}
             {/* SUPPORTING register — the weaker matched concepts demote to a one-line row: the
@@ -1779,7 +1776,9 @@ function ResearcherRow({
             data-slot="sponsor-match-gaps"
             className="border-border mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-t pt-2.5"
           >
-            <span className="text-muted-foreground text-[11px]">No evidence</span>
+            <span className="rounded bg-[var(--color-facet-position-fill)] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.02em] text-[var(--color-facet-position-text)]">
+              No evidence
+            </span>
             <span className="text-muted-foreground text-xs">
               {gaps.map((g) => g.concept.term).join(" · ")}
             </span>
