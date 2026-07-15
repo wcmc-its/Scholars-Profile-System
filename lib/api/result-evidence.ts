@@ -66,6 +66,13 @@ export type EvidenceGrant = {
   startYear?: number | null;
   endYear?: number | null;
   isActive?: boolean;
+  /** THIS scholar's investigator role on the grant, from the funding index's per-person
+   *  `FundingPersonChip.role` (`PI | Multi-PI | Co-I | Sub-PI | KP`), picked for the querying
+   *  cwid. Absent ⇒ unknown (the scholar is on the grant but the index carries no role for
+   *  them) and must render nothing, never a default. "Is this scholar the PI, and is the award
+   *  still alive" are the two questions a sponsor asks of a grant; `isActive`/`endYear` answer
+   *  the second, this answers the first. */
+  role?: string | null;
   /** The grant was admitted via the resolved MeSH concept, not merely by a literal
    *  text hit (`FundingHit.matchedConcept`). The funding query is an OR — text OR
    *  concept — so a grant can surface having matched nothing but a stray word of the

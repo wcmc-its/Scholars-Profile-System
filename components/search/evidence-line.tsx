@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { RepresentativePapers, type ExemplarFetchStatus } from "@/components/search/match-reason";
 import { ResultEvidence } from "@/components/search/result-evidence";
@@ -66,13 +66,46 @@ function evidenceSummary(evidence: ResultEvidenceT, pubCount: number): string {
   }
 }
 
+/** The funding index's per-person role vocabulary (`FundingPersonChip.role`) → the sponsor
+ *  card's brevity. `Multi-PI → MPI` mirrors the rebuild; unknown roles fall back to raw. */
+const FUNDING_ROLE_LABEL: Record<string, string> = {
+  PI: "PI",
+  "Multi-PI": "MPI",
+  "Co-I": "Co-I",
+  "Sub-PI": "Sub-PI",
+  KP: "KP",
+};
+
 function GrantRow({ grant }: { grant: EvidenceGrant }) {
-  const period = grant.isActive
-    ? grant.endYear
-      ? `active to ${grant.endYear}`
-      : "active"
-    : [grant.startYear, grant.endYear].filter(Boolean).join("–");
-  const meta = [grant.projectId, period, grant.sponsor].filter(Boolean).join(" · ");
+  // Absent role renders NOTHING — the scholar is on the grant but the index carries no role for
+  // them; a default here would assert a rank in the award we cannot stand behind. (Same rule as
+  // an absent authorship role below.)
+  const roleLabel = grant.role ? (FUNDING_ROLE_LABEL[grant.role] ?? grant.role) : null;
+  // Status closes the line, and it is the fact a sponsor reads first: an active award is a live
+  // pitch (green); an expired one is a materially different conversation and says so plainly
+  // (muted). "expired 2020" over a bare "2014–2020" — the end date is the only date that changes
+  // the read.
+  const status: ReactNode = grant.isActive ? (
+    <span className="text-[var(--apollo-green)]">
+      {grant.endYear ? `active to ${grant.endYear}` : "active"}
+    </span>
+  ) : grant.endYear ? (
+    `expired ${grant.endYear}`
+  ) : (
+    [grant.startYear, grant.endYear].filter(Boolean).join("–") || null
+  );
+  const parts = [
+    grant.projectId || null,
+    grant.sponsor || null,
+    // Is this scholar the PI? is the first question asked of a grant, so the role carries weight
+    // rather than the muted tone the rest of the line takes.
+    roleLabel ? (
+      <span key="role" className="text-foreground/90">
+        {roleLabel}
+      </span>
+    ) : null,
+    status,
+  ].filter(Boolean);
   return (
     <div className="mt-1.5 flex gap-2.5">
       <span className="h-fit shrink-0 rounded bg-[var(--color-accent-slate)]/10 px-1.5 py-0.5 text-[10px] tracking-[0.04em] text-[var(--color-accent-slate)]">
@@ -82,19 +115,13 @@ function GrantRow({ grant }: { grant: EvidenceGrant }) {
         <div className="text-foreground text-sm leading-snug">
           <PubTitle value={grant.titleHighlight ?? grant.title} />
         </div>
-        {meta ? (
+        {parts.length > 0 ? (
           <div className="text-muted-foreground mt-0.5 text-xs">
-            {/* "active to 2028" is the one fact a sponsor reads first, so it is the one that gets
-                colour. Everything else on this line is grey. */}
-            {grant.isActive ? (
-              <>
-                {grant.projectId ? `${grant.projectId} · ` : null}
-                <span className="text-[var(--apollo-green)]">{period}</span>
-                {grant.sponsor ? ` · ${grant.sponsor}` : null}
-              </>
-            ) : (
-              meta
-            )}
+            {parts
+              .flatMap((part, i) => (i === 0 ? [part] : [" · ", part]))
+              .map((part, i) => (
+                <span key={i}>{part}</span>
+              ))}
           </div>
         ) : null}
       </div>
@@ -169,13 +196,25 @@ function ArtifactLead({
   );
 }
 
-/** The index stores the facet's vocabulary ("senior"); a person says "last author". */
+/** The index stores the facet's vocabulary ("senior"); a person says "last author". `middle`
+ *  reads as "contributing author" here (sponsor console only — this map is not shared): the
+ *  honest word for a scholar who was neither lead nor senior on the paper, which is exactly the
+ *  read an officer needs when it is the ONLY evidence for the sponsor's top ask. */
 const ROLE_LABEL: Record<AuthorRole, string> = {
   sole: "sole author",
   first: "first author",
   last: "last author",
-  middle: "middle author",
+  middle: "contributing author",
 };
+
+/** A lead artifact older than this reads as stale: its year takes the warning tone so a
+ *  decades-old headline cannot be skimmed past. The cutoff is a DISPLAY heuristic — recency is
+ *  not (yet) a ranking input (see issue #1736); the display can only stop laundering the year. */
+const STALE_AFTER_YEARS = 10;
+
+function isStaleYear(year: number | null | undefined): boolean {
+  return year != null && new Date().getFullYear() - year >= STALE_AFTER_YEARS;
+}
 
 function ArtifactRow({ pub }: { pub: EvidencePub }) {
   return (
@@ -199,7 +238,15 @@ function ArtifactRow({ pub }: { pub: EvidencePub }) {
           <div className="text-muted-foreground mt-0.5 text-xs">
             {[
               pub.journal ? <PubJournal key="j" className="not-italic" value={pub.journal} /> : null,
-              pub.year ?? null,
+              // A stale year takes the warning tone; a current one stays grey. Same fact the line
+              // always carried — now impossible to skim past when it is the whole case for a match.
+              pub.year != null ? (
+                isStaleYear(pub.year) ? (
+                  <span key="y" className="text-[var(--color-facet-position-count)]">{pub.year}</span>
+                ) : (
+                  pub.year
+                )
+              ) : null,
               // ABSENT ROLE RENDERS NOTHING — it is not "middle author". A document indexed before
               // the `wcmAuthors.role` reindex carries no role, and printing the weakest role on a
               // missing field would quietly demote every senior author on every stale document.
