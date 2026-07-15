@@ -395,7 +395,7 @@ function EntityRowView({
         <div className="min-w-0 flex-1">
           <p
             className={cn(
-              "text-foreground font-medium",
+              "text-foreground font-normal",
               isHidden && "text-muted-foreground line-through decoration-muted-foreground",
             )}
           >

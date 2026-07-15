@@ -178,6 +178,7 @@ export function ProfileAppointmentsCard({ cwid, mode, scholarName }: ProfileAppo
       slot="profile-appointments-card"
       heading="Additional appointments"
       owned
+      subsection
       description={`Add roles and appointments the WCM directory feeds don't carry — internal WCM leadership and positions at other institutions. These appear only on ${possessive} public profile, never on center, department, division, or search pages.`}
     >
       {loadError ? (
@@ -217,7 +218,7 @@ export function ProfileAppointmentsCard({ cwid, mode, scholarName }: ProfileAppo
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-2">
-                    <span className="font-medium">{row.title}</span>
+                    <span className="font-normal">{row.title}</span>
                     <span className="text-muted-foreground text-xs">{CATEGORY_CHIP[row.category]}</span>
                     {!row.showOnProfile ? (
                       <span className="text-muted-foreground text-xs">· Hidden</span>
@@ -273,7 +274,7 @@ export function ProfileAppointmentsCard({ cwid, mode, scholarName }: ProfileAppo
         <div>
           <Button
             type="button"
-            variant="outline"
+            variant="default"
             disabled={busy}
             onClick={() => {
               setAdding(true);

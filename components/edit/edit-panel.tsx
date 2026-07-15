@@ -46,6 +46,14 @@ export type EditPanelProps = {
    *  canonical source when omitted. */
   sourceLabel?: string;
   owned?: boolean;
+  /**
+   * Render as a SUBSECTION under a sibling panel's h2 — an eyebrow `<h3>` label
+   * (rhyming with the rail's "FROM WCM RECORDS") instead of the dominant h2 +
+   * brand rule. Gets its own heading id (default `${slot}-heading`) so a tab
+   * that stacks several panels (Appointments) doesn't emit duplicate
+   * `panel-heading` ids. The provenance cue (owned badge / Source line) stays.
+   */
+  subsection?: boolean;
   /** Explanatory line under the provenance cue. */
   description?: React.ReactNode;
   /** Optional element pinned to the top-right of the header (e.g. a status badge). */
@@ -58,10 +66,11 @@ export type EditPanelProps = {
 
 export function EditPanel({
   heading,
-  headingId = EDIT_PANEL_HEADING_ID,
+  headingId,
   attribute,
   sourceLabel,
   owned = false,
+  subsection = false,
   description,
   headerAction,
   slot = "edit-panel",
@@ -69,19 +78,33 @@ export function EditPanel({
   children,
   ...rest
 }: EditPanelProps) {
+  // A subsection gets its own id so a tab stacking several panels doesn't emit
+  // duplicate `panel-heading` ids — only the dominant panel keeps that id, which
+  // `<main aria-labelledby="panel-heading">` points at.
+  const resolvedHeadingId =
+    headingId ?? (subsection ? `${slot}-heading` : EDIT_PANEL_HEADING_ID);
   return (
     <section data-slot={slot} className={cn("flex flex-col gap-4", className)} {...rest}>
       <header className="flex flex-col gap-1.5">
         <div className="flex items-start justify-between gap-3">
-          <h2 id={headingId} className="text-xl font-semibold">
-            {heading}
-          </h2>
+          {subsection ? (
+            <h3
+              id={resolvedHeadingId}
+              className="text-muted-foreground text-xs font-semibold tracking-wide uppercase"
+            >
+              {heading}
+            </h3>
+          ) : (
+            <h2 id={resolvedHeadingId} className="text-xl font-semibold">
+              {heading}
+            </h2>
+          )}
           {headerAction}
         </div>
-        {/* Brand rule under the heading — always maroon. Provenance is carried by
-            the badge below (green "Yours to edit", or the locked / "Source:" cue),
-            not by this rule; maroon is now brand-only. */}
-        <span aria-hidden className="bg-apollo-maroon h-1 w-10 rounded-full" />
+        {/* Brand rule under the heading — the dominant panel only. Maroon is
+            brand, so subsection eyebrows don't repeat it; provenance is carried
+            by the badge below, not this rule. */}
+        {!subsection && <span aria-hidden className="bg-apollo-maroon h-1 w-10 rounded-full" />}
         {attribute ? (
           <FieldSourceLine attribute={attribute} label={sourceLabel} />
         ) : owned ? (
