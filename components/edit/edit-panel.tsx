@@ -68,6 +68,10 @@ export function EditPanel({
   children,
   ...rest
 }: EditPanelProps) {
+  // De-grey: a short tier accent bar under the heading — maroon for a
+  // scholar-owned panel, slate for a WCM-sourced one — matching the rail's
+  // per-group colour so a panel and its rail item read as the same tier.
+  const accent = owned ? "bg-apollo-maroon" : attribute ? "bg-apollo-slate" : null;
   return (
     <section data-slot={slot} className={cn("flex flex-col gap-4", className)} {...rest}>
       <header className="flex flex-col gap-1.5">
@@ -77,6 +81,7 @@ export function EditPanel({
           </h2>
           {headerAction}
         </div>
+        {accent && <span aria-hidden className={cn("h-1 w-10 rounded-full", accent)} />}
         {attribute ? (
           <FieldSourceLine attribute={attribute} label={sourceLabel} />
         ) : owned ? (

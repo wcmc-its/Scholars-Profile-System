@@ -1,6 +1,16 @@
 # Self-edit — v1 UI-SPEC (`/edit/*` surfaces)
 
-**Status:** Draft
+> **⚠️ HISTORICAL — do not treat as current.** This document describes the
+> *original* v1 self-edit design (Cornell-red / navy palette, a single 720px
+> column, a stacked `Card` layout). The shipped `/edit/*` surface is the later
+> **Apollo console** redesign (#160): a warm near-black top bar, a two-region
+> ATTRIBUTES-rail + detail layout, and the warm-neutral maroon/slate palette.
+> The live source of truth for tokens and the editor colour language is
+> **`app/globals.css`** (see the "APOLLO EDITOR COLOUR LANGUAGE" note);
+> component structure lives in **`components/edit/*`**. Kept for the
+> requirement/decision provenance only — not the current visual spec.
+
+**Status:** Historical (superseded by the Apollo console redesign, #160)
 **Date:** 2026-05-17
 **Authors:** Scholars Profile System development team
 **Builds on:** [self-edit-spec.md](./self-edit-spec.md) § Surfaces and § Suppression UX and behavior — the routes, sections, and behavior this SPEC gives a visual and interaction design.
