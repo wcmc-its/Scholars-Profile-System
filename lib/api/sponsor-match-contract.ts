@@ -847,3 +847,52 @@ export function rareTerms(concepts: readonly SponsorConcept[]): Set<string> {
       .map((c) => c.term),
   );
 }
+
+/**
+ * A candidate is a RESULT only if the spine shipped at least one research-match evidence block
+ * for it. `searchEvidence` is ALREADY filtered to match evidence (`isResearchMatchEvidence` drops
+ * the identity tail — self-reported areas, concept hints, `none`), so an empty/absent array means
+ * the scholar ranked into some concept's `searchPeople` top-100 on an identity-tail hit and matched
+ * NOTHING real. A card with an empty evidence strip and a full "no evidence" list is noise, not a
+ * result; the console excludes these entirely rather than collapsing them under the floor.
+ */
+export function hasMatchEvidence(candidate: SponsorCandidate): boolean {
+  return (candidate.searchEvidence?.length ?? 0) > 0;
+}
+
+/** How one evidence block landed: a STRUCTURED signal or a BARE free-text hit. */
+export type EvidenceProvenance = "tagged" | "keyword";
+
+/**
+ * The provenance of a per-concept evidence block — the honest, cheap distinction the display can
+ * draw TODAY: did the hit land via a structured signal (a MeSH subject tag, a curated method /
+ * clinical / topic match) or via bare free text (a publication `mention`, a bio sentence)?
+ *
+ * `keyword` is the false-positive risk an officer must be able to see — a concept's bare token
+ * matching a paper that has nothing to do with the sponsor's sense ("patient-derived xenografts"
+ * matched, the sense did not). It marks HOW the hit landed, NOT that it landed in the sponsor's
+ * SENSE: a paper MeSH-tagged `Lysosomes` reads `tagged` even when it is an aluminum-ion probe that
+ * merely labels lysosomes. Separating that from lysosomal-ADC processing needs the concept's gloss
+ * and a semantic match, not this flag — so the chip never claims "matched in context".
+ *
+ * `null` for kinds that carry no such signal. The spine already filters the identity tail via
+ * `isResearchMatchEvidence`, so a `null` here is a total-function backstop, not a live path.
+ */
+export function evidenceProvenance(evidence: ResultEvidence): EvidenceProvenance | null {
+  switch (evidence.kind) {
+    case "publications":
+      // `tagged` = subject heading, `concept` = MeSH-expansion variant — both structured.
+      // `mention` = the literal query hit free text — the bare-keyword signal.
+      return evidence.strength === "mention" ? "keyword" : "tagged";
+    case "method":
+    case "clinical":
+    case "topic":
+      return "tagged";
+    case "selfDescription":
+      // A sentence from the scholar's own overview — a real hit, but self-reported prose, not a
+      // subject tag. Honest to group it with the bare-text signal rather than the structured one.
+      return "keyword";
+    default:
+      return null;
+  }
+}

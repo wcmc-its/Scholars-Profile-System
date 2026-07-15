@@ -66,6 +66,7 @@ import { Download } from "lucide-react";
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { EvidenceLine } from "@/components/search/evidence-line";
+import type { ResultEvidence } from "@/lib/api/result-evidence";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -79,15 +80,19 @@ import {
 } from "@/components/ui/sheet";
 import {
   conceptCoverage,
+  evidenceProvenance,
   fitTier,
+  hasMatchEvidence,
   matchedConcepts,
   matchedEvidence,
   preferenceBoost,
   PREFERENCE_LAMBDA,
   rareTerms,
+  TIER_GOOD,
   rerankCandidates,
   sponsorAskFrom,
   type ConceptCoverage,
+  type EvidenceProvenance,
   type SponsorCandidate,
   type SponsorConcept,
   type SponsorFitTier,
@@ -165,7 +170,7 @@ const TIER_LABEL: Record<SponsorFitTier, string> = {
  *  Every hex already exists as a house token — nothing new is introduced. */
 const TIER_CLASS: Record<SponsorFitTier, string> = {
   strong:
-    "border-[var(--apollo-green)]/25 bg-[var(--apollo-green)]/10 text-[var(--apollo-green)]",
+    "border-[var(--apollo-green-tint-border)] bg-[var(--apollo-green-tint)] text-[var(--apollo-green-foreground)]",
   good: "border-[var(--color-facet-position-count)]/25 bg-[var(--color-facet-position-fill)] text-[var(--color-facet-position-count)]",
   weak: "border-border text-muted-foreground bg-transparent",
 };
@@ -360,10 +365,18 @@ export function SponsorMatchPanel() {
     [preferences, activePrefs],
   );
 
+  // Zero-evidence candidates are excluded from the RESULT set entirely — not collapsed under the
+  // floor. `hasMatchEvidence` keeps only the scholars the spine shipped a research-match block for;
+  // the rest ranked into a concept's top-100 on an identity-tail hit and answer "who is this", not
+  // "why did they match". A card with an empty strip is noise. We keep the raw pool count for an
+  // honest "N with no evidence hidden" note, but everything downstream ranks over `results`.
+  const results = useMemo(() => candidates.filter(hasMatchEvidence), [candidates]);
+  const excludedCount = candidates.length - results.length;
+
   const ranked = useMemo(
     () =>
       rerankCandidates(
-        candidates,
+        results,
         concepts,
         activePreferences.length > 0
           ? {
@@ -372,7 +385,7 @@ export function SponsorMatchPanel() {
             }
           : {},
       ),
-    [candidates, concepts, activePreferences],
+    [results, concepts, activePreferences],
   );
 
   const topScore = ranked[0]?.fusedScore ?? 0;
@@ -546,6 +559,31 @@ export function SponsorMatchPanel() {
       ? [...rows].sort((a, b) => a.c.name.localeCompare(b.c.name))
       : rows;
   }, [filtered, sort]);
+
+  // The relevance floor. Full cards for strong/good; the weak tier collapses under one bar the
+  // officer can expand. Relative BY CONSTRUCTION — `fitTier` buckets each row against the TOP hit
+  // (the #1 always scores share 1.0 → "strong", so this never collapses everything), so the floor
+  // tracks the result set's own distribution rather than an absolute cutoff. Only meaningful in fit
+  // order: a name sort mixes tiers alphabetically, so it stays a flat list with no floor.
+  const [showWeak, setShowWeak] = useState(false);
+  const aboveFloor = useMemo(
+    () =>
+      sort === "fit"
+        ? visible.filter((r) => fitTier(r.c.fusedScore, topScore) !== "weak")
+        : visible,
+    [visible, sort, topScore],
+  );
+  const belowFloor = useMemo(
+    () =>
+      sort === "fit" ? visible.filter((r) => fitTier(r.c.fusedScore, topScore) === "weak") : [],
+    [visible, sort, topScore],
+  );
+
+  // Never strand a collapse bar over an empty list. If nothing cleared the floor — a facet that
+  // isolated only weak matches, or a weak top hit — there is no floor to draw, so show what we
+  // have as flat cards. The bar appears only when there is genuinely a head above a tail.
+  const primaryRows = aboveFloor.length > 0 ? aboveFloor : belowFloor;
+  const collapsedWeak = aboveFloor.length > 0 ? belowFloor : [];
 
   /** Exports every row the filters matched — current sliders, current filters — NOT just the
    *  hundred we painted. An officer who filters to the CTL portfolio and gets 180 hits must
@@ -999,19 +1037,73 @@ export function SponsorMatchPanel() {
                     No researchers match the selected filters.
                   </p>
                 ) : (
-                  <ul>
-                    {visible.map(({ c, rank }) => (
-                      <li key={c.cwid}>
-                        <ResearcherRow
-                          candidate={c}
-                          rank={rank}
-                          concepts={concepts}
-                          topScore={topScore}
-                          runId={runId}
-                        />
-                      </li>
-                    ))}
-                  </ul>
+                  <>
+                    <ul>
+                      {primaryRows.map(({ c, rank }) => (
+                        <li key={c.cwid}>
+                          <ResearcherRow
+                            candidate={c}
+                            rank={rank}
+                            concepts={concepts}
+                            topScore={topScore}
+                            runId={runId}
+                          />
+                        </li>
+                      ))}
+                    </ul>
+
+                    {/* The relevance floor: everything in the weak tier collapses into one bar the
+                        officer can open — a toggle, never a silent cut. The divider names the line. */}
+                    {collapsedWeak.length > 0 ? (
+                      <div data-slot="sponsor-match-floor">
+                        <div className="my-4 flex items-center gap-3" aria-hidden="true">
+                          <div className="border-border h-0 flex-1 border-t border-dashed" />
+                          <span className="text-muted-foreground text-[11px] tracking-[0.04em]">
+                            RELEVANCE FLOOR
+                          </span>
+                          <div className="border-border h-0 flex-1 border-t border-dashed" />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowWeak((v) => !v)}
+                          aria-expanded={showWeak}
+                          className="bg-muted/40 hover:bg-muted/60 flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors"
+                        >
+                          <span className="text-muted-foreground">
+                            {collapsedWeak.length} weaker match{collapsedWeak.length === 1 ? "" : "es"}{" "}
+                            — below {Math.round(TIER_GOOD * 100)}% of the top result
+                          </span>
+                          <span className="shrink-0 font-medium text-[var(--color-accent-slate)]">
+                            {showWeak ? "Hide ↑" : "Show ↓"}
+                          </span>
+                        </button>
+                        {showWeak ? (
+                          <ul className="mt-4">
+                            {collapsedWeak.map(({ c, rank }) => (
+                              <li key={c.cwid}>
+                                <ResearcherRow
+                                  candidate={c}
+                                  rank={rank}
+                                  concepts={concepts}
+                                  topScore={topScore}
+                                  runId={runId}
+                                />
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {/* Excluded entirely (not collapsed): scholars the spine ranked but shipped no
+                        research-match evidence for. A count, not names — a results view names people
+                        it is FOR, not the ones it rejected. */}
+                    {excludedCount > 0 ? (
+                      <p className="text-muted-foreground mt-4 text-[11px]">
+                        {excludedCount} with no evidence hidden
+                      </p>
+                    ) : null}
+                  </>
                 )}
               </main>
             </div>
@@ -1331,6 +1423,50 @@ function CoverageStrip({ coverage }: { coverage: ConceptCoverage[] }) {
   );
 }
 
+/** The provenance palette — the house green/amber tints (solid, not alpha) so the chips carry
+ *  colour, not just a border. `tagged` reuses the strong-tier hue, `keyword` the position/warning
+ *  hue; both already ship in `globals.css`. */
+const PROVENANCE_META: Record<
+  EvidenceProvenance,
+  { mark: string; label: string; title: string; className: string }
+> = {
+  tagged: {
+    mark: "✓",
+    label: "subject-tagged",
+    title:
+      "Matched via a MeSH subject tag or a curated method/clinical/topic signal — structured, but not proof of the sponsor's specific sense.",
+    className:
+      "border-[var(--apollo-green-tint-border)] bg-[var(--apollo-green-tint)] text-[var(--apollo-green-foreground)]",
+  },
+  keyword: {
+    mark: "⚠",
+    label: "keyword only",
+    title:
+      "Matched on free text only — the concept's bare keyword, which can hit a paper unrelated to what the sponsor asked for.",
+    className:
+      "border-[var(--color-facet-position-border)] bg-[var(--color-facet-position-fill)] text-[var(--color-facet-position-text)]",
+  },
+};
+
+/** How an evidence block landed — a structured tag vs a bare-keyword hit — as a small coloured chip.
+ *  The honest, cheap half of the context-vs-keyword distinction: it says HOW the hit matched, never
+ *  that it matched the sponsor's SENSE (a MeSH-tagged off-topic paper still reads `subject-tagged`).
+ *  Renders nothing for evidence that carries no such signal. */
+function ProvenanceChip({ evidence }: { evidence: ResultEvidence }) {
+  const provenance = evidenceProvenance(evidence);
+  if (!provenance) return null;
+  const { mark, label, title, className } = PROVENANCE_META[provenance];
+  return (
+    <span
+      title={title}
+      className={`mt-1 inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${className}`}
+    >
+      <span aria-hidden="true">{mark}</span>
+      {label}
+    </span>
+  );
+}
+
 function ResearcherRow({
   candidate,
   rank,
@@ -1506,7 +1642,11 @@ function ResearcherRow({
               // and any papers it resolved for the PREVIOUS paste. (Same two-part idiom as
               // `people-result-card.tsx`, which bakes `qParam` into both.) `term` alone keeps a
               // card's sibling blocks distinct WITHIN a run.
-              <div key={`${runId}:${concept.term}`} data-slot="sponsor-match-evidence">
+              <div
+                key={`${runId}:${concept.term}`}
+                data-slot="sponsor-match-evidence"
+                className="flex flex-col"
+              >
                 {/* The concept, and what the sponsor asked for it — the two facts the block is an
                     answer to, on one line. `centrality` is the slider's own value, so the number
                     here is the number the officer set, not a derived weight they cannot locate. */}
@@ -1535,6 +1675,10 @@ function ResearcherRow({
                   autoResolve={inView && i <= resolvedCount}
                   onResolved={() => setResolvedCount((n) => Math.max(n, i + 1))}
                 />
+                {/* Provenance: did this block land via a structured tag or a bare keyword? The chip
+                    that lets an officer spot a keyword-only false positive in a card that still
+                    surfaced above the floor. */}
+                <ProvenanceChip evidence={evidence.evidence} />
               </div>
             ))}
             {/* SUPPORTING register — the weaker matched concepts demote to a one-line row: the
