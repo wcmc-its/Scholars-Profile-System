@@ -86,29 +86,28 @@
   --apollo-rail-hover: #ece7e1; /* nav-item hover fill */
   --apollo-ring: #8a1f2b;
   --apollo-lock-bg: #f2efeb; /* locked chip / locked actions */
-  /* Secondary slate accent — badges, topic pills, links.
+  /* Secondary slate accent — badges, topic pills, links, the "Source:" link.
    *
    * APOLLO EDITOR COLOUR LANGUAGE (the /edit house style). The chrome is warm
-   * near-neutral on purpose so colour stays meaningful; exactly two accents
-   * carry the editability TIER, and they read the same on every surface:
+   * near-neutral so colour stays meaningful. Each job has ONE treatment, and
+   * they read the same on every surface:
    *
-   *   maroon (--apollo-maroon) = your content & actions  (kind owned / service)
-   *   slate  (--apollo-slate)  = reference from WCM       (kind sourced / readonly)
+   *   BRAND    maroon (--apollo-maroon)  — the h2 rule + the active rail item.
+   *                                        Brand only; never a provenance cue.
+   *   YOURS    green  (--apollo-green*)  + pencil — the "Yours to edit" badge
+   *                                        and the rail's owned/service groups.
+   *                                        "You can change it here."
+   *   LOCKED   neutral (--apollo-lock-bg) + lock icon + TEXT — LockedBadge and
+   *                                        the rail's WCM groups. Not a hue
+   *                                        (survives colourblindness); the WCM
+   *                                        rail group is deliberately quiet.
+   *   DANGER   --destructive             — Hide / destructive actions, warning banner.
+   *   INFO     slate tint               — the "Primary" badge and similar pills.
    *
-   * Where each appears (added in the de-grey pass — attribute-rail.tsx,
-   * edit-panel.tsx, field-source-line.tsx, and .apollo-card below):
-   *   - Attribute rail: each group's header text + leading dot + left spine take
-   *     that group's tier colour; the flat superuser/unit rail uses one neutral
-   *     slate accent. The active item keeps its solid maroon fill.
-   *   - Panel header (edit-panel.tsx): a short accent bar under the <h2> —
-   *     maroon for an owned panel, slate for a sourced one — alongside the
-   *     maroon "Yours to edit" chip / the slate "Source: <system>" line.
-   *   - Detail card (.apollo-card): a 3px slate inset spine — container chrome,
-   *     NOT a tier signal (the header already carries the tier).
-   *
-   * The green / amber / red tints below stay reserved for STATE (success /
-   * needs-you / danger), never for tier. Introduce a third tier colour only by
-   * editing here first. */
+   * Green pulls double duty (YOURS badge + success banner) — disambiguated by
+   * icon + context (pencil vs check), never by hue alone, same as LOCKED.
+   * Files: attribute-rail.tsx (rail groups), edit-panel.tsx (h2 rule + badge),
+   * locked-badge.tsx. Introduce a new accent only by editing here first. */
   --apollo-slate: #34506e;
   --apollo-slate-tint: #ecf1f6;
   --apollo-slate-tint-border: #d5e0ec;

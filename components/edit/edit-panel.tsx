@@ -21,6 +21,7 @@
  * stable and unique (only one panel renders per `?attr=` selection).
  */
 import * as React from "react";
+import { Pencil } from "lucide-react";
 
 import { FieldSourceLine } from "@/components/edit/field-source-line";
 import { cn } from "@/lib/utils";
@@ -68,10 +69,6 @@ export function EditPanel({
   children,
   ...rest
 }: EditPanelProps) {
-  // De-grey: a short tier accent bar under the heading — maroon for a
-  // scholar-owned panel, slate for a WCM-sourced one — matching the rail's
-  // per-group colour so a panel and its rail item read as the same tier.
-  const accent = owned ? "bg-apollo-maroon" : attribute ? "bg-apollo-slate" : null;
   return (
     <section data-slot={slot} className={cn("flex flex-col gap-4", className)} {...rest}>
       <header className="flex flex-col gap-1.5">
@@ -81,14 +78,18 @@ export function EditPanel({
           </h2>
           {headerAction}
         </div>
-        {accent && <span aria-hidden className={cn("h-1 w-10 rounded-full", accent)} />}
+        {/* Brand rule under the heading — always maroon. Provenance is carried by
+            the badge below (green "Yours to edit", or the locked / "Source:" cue),
+            not by this rule; maroon is now brand-only. */}
+        <span aria-hidden className="bg-apollo-maroon h-1 w-10 rounded-full" />
         {attribute ? (
           <FieldSourceLine attribute={attribute} label={sourceLabel} />
         ) : owned ? (
           <span
             data-slot="ownership-cue"
-            className="bg-apollo-maroon/10 text-apollo-maroon inline-flex w-fit items-center rounded-sm px-1.5 py-0.5 text-xs font-medium"
+            className="bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green-foreground inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium"
           >
+            <Pencil className="size-3" aria-hidden />
             Yours to edit
           </span>
         ) : null}
