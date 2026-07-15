@@ -1296,6 +1296,13 @@ export class AppStack extends Stack {
         // aggs the spine skips (`skipFacetAggs: true`, #1671), so a spine query is strictly
         // lighter than a query prod already serves ~15×/second.
         SPONSOR_MATCH_SPINE: "on", // Prod flipped 2026-07-13, TOGETHER with SPONSOR_MATCH above.
+        // SPONSOR_MATCH_GLOSS_QUERY — the RETRIEVAL half of the concept gloss: search the sponsor's
+        // qualifying phrase ("lysosomal processing of ADC linkers") as the free-text query instead
+        // of the bare token ("lysosomes"). The DISPLAY half (the rail's "sponsor's words" line, the
+        // provenance chips) is unconditional; this flag ONLY moves the ranking, so it is eval-gated.
+        // STAGING-on to A/B it; PROD-off until a clean gloss-off vs gloss-on run clears the sponsor
+        // eval's ~0.0074 nDCG noise floor. A one-sided staging run (no gloss-off arm) cannot prove it.
+        SPONSOR_MATCH_GLOSS_QUERY: env === "staging" ? "on" : "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
