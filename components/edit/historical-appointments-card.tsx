@@ -69,6 +69,7 @@ export function HistoricalAppointmentsCard({
     <EditPanel
       slot="historical-appointments-panel"
       heading="Historical appointments"
+      subsection
       description={`Past appointments from the Weill Cornell directory. They are hidden from ${scholarName}'s public profile until you show one. Showing or hiding here is display-only — it doesn't change the record, and the CV export always includes them.`}
     >
       {appointments.length === 0 ? (
@@ -82,7 +83,7 @@ export function HistoricalAppointmentsCard({
               data-testid={`historical-appointment-row-${a.externalId}`}
             >
               <div className="min-w-0">
-                <p className="font-semibold">{a.title}</p>
+                <p className="font-normal">{a.title}</p>
                 <p className="text-muted-foreground text-xs">
                   {a.organization}
                   {yearRange(a.startDate, a.endDate) && (
@@ -94,7 +95,7 @@ export function HistoricalAppointmentsCard({
                 </p>
               </div>
               <Button
-                variant={a.showOnProfile ? "outline" : "default"}
+                variant="outline"
                 size="sm"
                 disabled={pending && busyId === a.externalId}
                 onClick={() => setVisibility(a.externalId, !a.showOnProfile)}
