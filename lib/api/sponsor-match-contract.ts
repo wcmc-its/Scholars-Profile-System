@@ -248,6 +248,18 @@ export type SponsorConcept = {
    * render no badge rather than claim "common".
    */
   corpusCoverage?: number;
+  /**
+   * The funder's QUALIFYING CONTEXT for this concept — their own words for what they mean by it
+   * ("lysosomal processing of ADC linkers", not the bare token "lysosomes"). The canonical `term`
+   * is stripped to a MeSH-resolvable noun phrase; this keeps the sense that strip discards.
+   *
+   * It does BOTH jobs, deliberately: the spine searches it as the free-text (BM25) query so the
+   * ranking favours the sponsor's sense over everything the bare token can literally hit, and the
+   * rail renders it as the "sponsor's words" line. ABSENT when the concept stood alone in the paste
+   * or on the dictionary-fallback path (no LLM) — never fabricated, so the rail shows nothing rather
+   * than invent a gloss. DISPLAY value only on the wire; the retrieval use happens server-side.
+   */
+  gloss?: string;
 };
 
 /** Per-candidate, per-concept retrieval rank (1-based) — `rank_{s,c}` in the formula.

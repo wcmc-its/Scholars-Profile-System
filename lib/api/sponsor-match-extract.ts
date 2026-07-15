@@ -46,6 +46,13 @@ export type ExtractedConcept = {
    *  which); the dictionary fallback has no way to tell, so it defaults to "concept". */
   kind: "concept" | "method";
   centrality: number;
+  /** The funder's QUALIFYING CONTEXT for this concept — their own words for what they mean by it
+   *  ("lysosomal processing of ADC linkers", not the bare token "lysosomes"). It exists to keep the
+   *  sponsor's SENSE that a canonical MeSH noun phrase strips: the spine searches the gloss as the
+   *  free-text query so a generic organelle/method word ranks the sense, not everything it can
+   *  literally hit. Absent when the concept stands alone in the paste (no qualifying context) or on
+   *  the dictionary-fallback path (no LLM). NEVER fabricated — absent stays absent. */
+  gloss?: string;
 };
 
 /** What ONE extraction call yields: the concepts plus the LLM's short search title, written
@@ -124,6 +131,10 @@ const ConceptsSchema = z.object({
       term: z.string(),
       kind: z.enum(["concept", "method"]),
       centrality: z.number(),
+      // `nullish`, like titleSummary: a concept that stands alone has no gloss, and a model that
+      // omits it must clean to undefined rather than fail the whole extraction. `sanitizeConcepts`
+      // enforces the length cap and drops empties.
+      gloss: z.string().nullish(),
     }),
   ),
   /** A short search handle written in the SAME call as the concepts — the essence of the
@@ -165,6 +176,15 @@ const EXTRACT_SYSTEM_PROMPT = [
   "though the call spends more words on them than on the disease itself.",
   "",
   "Deduplicate near-identical concepts (keep the most canonical phrasing).",
+  "",
+  "For each concept, also return a GLOSS: the funder's QUALIFYING CONTEXT for it — what they",
+  "specifically mean by the concept, quoting or closely paraphrasing the description, in AT MOST",
+  "15 words. The canonical `term` is for a taxonomy lookup and deliberately strips this context;",
+  "the gloss keeps it. For a call about antibody-drug conjugates that mentions lysosomes, the",
+  'concept term is "lysosomes" and the gloss is "lysosomal processing of ADC linkers", NOT the',
+  "bare organelle. OMIT the gloss for a concept that stands on its own with no qualifying context",
+  "in the description. NEVER invent context the description does not give — an absent gloss is",
+  "correct when the paste supplies none.",
   "",
   'Tag each concept with a KIND: "method" for an assay, technique, platform, instrument',
   'or therapeutic modality (how the work is done); "concept" for a disease, mechanism,',
@@ -226,7 +246,7 @@ function buildExtractPrompt(paste: string): string {
  *  console now re-ranks client-side over the already-fetched candidates (the contract's
  *  hinge) instead of re-POSTing edited concepts for the server to re-score. */
 export function sanitizeConcepts(
-  raw: readonly { term: string; kind?: string; centrality: number }[],
+  raw: readonly { term: string; kind?: string; centrality: number; gloss?: unknown }[],
 ): ExtractedConcept[] {
   const seen = new Set<string>();
   const out: ExtractedConcept[] = [];
@@ -239,11 +259,30 @@ export function sanitizeConcepts(
     // Finite & >0 ⇒ clamp high to 1; a non-finite (NaN/±Infinity) OR non-positive
     // score floors to the incidental 0.3 (never 0 — see the fusion-weight note above).
     const centrality = Number.isFinite(n) && n > 0 ? Math.min(1, n) : 0.3;
+    const gloss = sanitizeGloss(c.gloss);
     seen.add(key);
-    out.push({ term, kind: c.kind === "method" ? "method" : "concept", centrality });
+    out.push({
+      term,
+      kind: c.kind === "method" ? "method" : "concept",
+      centrality,
+      // Omit the key entirely when absent — absent ≠ empty string, and the wire type is optional.
+      ...(gloss ? { gloss } : {}),
+    });
     if (out.length >= MAX_CONCEPTS) break;
   }
   return out;
+}
+
+/** A gloss is a phrase, not a paragraph — the prompt asks for ≤15 words. Trim, collapse internal
+ *  whitespace, drop a trailing period; reject empty or over-long (a model that dumped prose here
+ *  would otherwise flood the free-text query) → `undefined`, so an absent/unusable gloss cleanly
+ *  falls back to the bare term. Output hygiene on already-LLM-written text, never fabrication. */
+const MAX_GLOSS_CHARS = 140;
+export function sanitizeGloss(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const s = raw.replace(/\s+/g, " ").trim().replace(/\.$/, "").trim();
+  if (s.length === 0 || s.length > MAX_GLOSS_CHARS) return undefined;
+  return s;
 }
 
 /** A title is a HANDLE, not a paragraph. Cap it so a model that returns prose here cannot

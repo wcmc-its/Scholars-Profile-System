@@ -1176,6 +1176,14 @@ function ConceptRail({
                 {c.centrality.toFixed(2)}
               </span>
             </div>
+            {/* The funder's own words for this concept — the qualifying context the canonical term
+                strips. Shown once here, next to the concept it defines; the spine also SEARCHES it,
+                so the ranking and this line are the same signal. Absent ⇒ nothing rendered. */}
+            {c.gloss ? (
+              <p className="text-muted-foreground text-xs italic leading-snug">
+                sponsor&rsquo;s words: &ldquo;{c.gloss}&rdquo;
+              </p>
+            ) : null}
             {/* The merged forms that collapsed into this concept — so an officer can see
                 that "cancer" and "oncology" are one slider, not two. */}
             {c.members.length > 1 ? (

@@ -351,6 +351,14 @@ export async function rankResearchersForDescriptionSpine(
   }
   if (extracted.length === 0) return empty;
 
+  // The funder's qualifying context per term (the LLM extractor's `gloss`; empty on the dictionary
+  // fallback). The spine searches this — the sponsor's SENSE — as the free-text query instead of the
+  // bare canonical token, so a generic organelle/method word ranks the sense rather than everything
+  // it can literally hit. The MeSH resolution below still keys on `term`, so only the BM25 axis moves.
+  const glossByTerm = new Map(
+    extracted.flatMap((c) => (c.gloss ? [[c.term, c.gloss] as const] : [])),
+  );
+
   // Resolve each concept to its MeSH descendant-UI set + representative descriptor
   // (one taxonomy round-trip per concept; the list is short by construction). The
   // centrality rides through so the ClusterTerm carries a real fusion multiplicand.
@@ -441,6 +449,8 @@ export async function rankResearchersForDescriptionSpine(
     // on the wire and the join key `contributions[].term` points back to — so the SAME
     // string must key the ranking, the concept, and every contribution.
     const term = cluster.members[0];
+    // The representative member's gloss — the sponsor's words for this concept, shown on the rail.
+    const clusterGloss = glossByTerm.get(term);
     const concept: SponsorConcept = {
       term,
       kind: cluster.kind,
@@ -451,16 +461,20 @@ export async function rankResearchersForDescriptionSpine(
       // locally-tagged pubs for this descriptor" — which is 40% of descriptors and is not
       // evidence of rarity — so it must not reach the UI as a rarity claim. Absent ≠ zero.
       ...(maxCoverage > 0 ? { corpusCoverage: maxCoverage } : {}),
+      // The funder's qualifying context, when the extractor gave one. Absent otherwise (never "").
+      ...(clusterGloss ? { gloss: clusterGloss } : {}),
     };
     concepts.push(concept);
 
+    // The free-text query: each member's gloss (the sponsor's sense) where we have one, else the
+    // bare member token. Only the BM25 axis moves — `descendantUis` still comes from the term's MeSH
+    // resolution, so the structured signal is unchanged and a member with no gloss degrades to its
+    // token rather than dropping out of the cluster query.
+    const clusterQuery = cluster.members.map((m) => glossByTerm.get(m) ?? m).join(" ");
+
     // Representative resolution = the first member's (drives name/tier only).
     const rep = repByTerm.get(term) ?? null;
-    const { ranked, hits } = await retrieveCluster(
-      cluster.members.join(" "),
-      cluster.descendantUis,
-      rep,
-    );
+    const { ranked, hits } = await retrieveCluster(clusterQuery, cluster.descendantUis, rep);
     for (const h of hits) if (!hitByCwid.has(h.cwid)) hitByCwid.set(h.cwid, h);
     // #1689 — evidence is CONCEPT-SCOPED, so it is stored per (concept, cwid) and read back
     // below, once the fusion knows every concept the candidate actually ranked under.
@@ -523,8 +537,10 @@ export async function rankResearchersForDescriptionSpine(
         // CONCEPT — the same three inputs the public People card passes. Per-concept, which is
         // what lets each of a card's blocks reveal papers about ITS OWN concept.
         keyPaper: {
+          // Same gloss-biased free-text query the retrieval used, so the representative paper a
+          // disclosure reveals is chosen for the sponsor's sense, not the bare token.
           descriptorUis: cluster.descendantUis,
-          contentQuery: cluster.members.join(" "),
+          contentQuery: clusterQuery,
           conceptLabel: rep?.name,
         },
       });

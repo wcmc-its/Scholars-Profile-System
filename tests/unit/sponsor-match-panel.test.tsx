@@ -320,6 +320,20 @@ describe("SponsorMatchPanel", () => {
     expect(screen.queryByText("·rare")).toBeNull();
   });
 
+  it("shows the funder's gloss as the concept's 'sponsor's words' line", async () => {
+    stubFetch({
+      concepts: [
+        { ...CONCEPTS[0], gloss: "lysosomal processing of ADC linkers" },
+        CONCEPTS[1], // no gloss ⇒ no such line
+        CONCEPTS[2],
+      ],
+      candidates: THREE,
+    });
+    await renderAndSearch();
+    expect(document.body.textContent).toContain("lysosomal processing of ADC linkers");
+    expect(document.body.textContent).toContain("sponsor");
+  });
+
   it("shows NO rail on the bespoke shape (empty concepts)", async () => {
     stubFetch({ concepts: [], candidates: BESPOKE });
     await renderAndSearch();
