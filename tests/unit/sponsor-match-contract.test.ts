@@ -14,6 +14,7 @@ import {
   DEFAULT_K,
   conceptCoverage,
   conceptWeight,
+  evidenceMatchCount,
   evidenceProvenance,
   fitTier,
   fusedScore,
@@ -548,5 +549,21 @@ describe("evidenceProvenance — structured tag vs bare keyword", () => {
     expect(evidenceProvenance({ kind: "none" })).toBeNull();
     expect(evidenceProvenance({ kind: "areas", labels: [], total: 0 })).toBeNull();
     expect(evidenceProvenance({ kind: "name", html: "…" })).toBeNull();
+  });
+});
+
+describe("evidenceMatchCount — the matched N, never the total M", () => {
+  it("reads the count-bearing kinds' own count", () => {
+    expect(
+      evidenceMatchCount({ kind: "publications", strength: "tagged", text: "11 of 480", count: 11 }),
+    ).toBe(11);
+    expect(evidenceMatchCount({ kind: "method", family: "x", tools: [], count: 4 })).toBe(4);
+    expect(evidenceMatchCount({ kind: "topic", label: "x", id: "x", count: 7 })).toBe(7);
+  });
+
+  it("is null when the kind carries no count — the caller renders nothing, never the total", () => {
+    expect(evidenceMatchCount({ kind: "publications", strength: "mention", text: "x" })).toBeNull();
+    expect(evidenceMatchCount({ kind: "clinical", specialty: "Cardiology", boardCertified: false })).toBeNull();
+    expect(evidenceMatchCount({ kind: "selfDescription", html: "…" })).toBeNull();
   });
 });
