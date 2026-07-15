@@ -195,6 +195,7 @@ async function getDeptGrantsListUncached(
       endDate: true,
       externalId: true,
       awardNumber: true,
+      applId: true,
     },
   })) as Array<{
     cwid: string;
@@ -205,6 +206,7 @@ async function getDeptGrantsListUncached(
     endDate: Date;
     externalId: string | null;
     awardNumber: string | null;
+    applId: number | null;
   }>;
 
   type Group = {
@@ -214,6 +216,7 @@ async function getDeptGrantsListUncached(
     endDate: Date;
     externalId: string | null;
     awardNumber: string | null;
+    applId: number | null;
     cwids: string[];
     piCwids: string[];
     sortKey: number;
@@ -238,6 +241,7 @@ async function getDeptGrantsListUncached(
         endDate: r.endDate,
         externalId: r.externalId,
         awardNumber: r.awardNumber,
+        applId: r.applId,
         cwids: [r.cwid],
         piCwids: isPiRole(r.role) ? [r.cwid] : [],
         sortKey,
@@ -246,6 +250,7 @@ async function getDeptGrantsListUncached(
       if (!existing.cwids.includes(r.cwid)) existing.cwids.push(r.cwid);
       if (isPiRole(r.role) && !existing.piCwids.includes(r.cwid))
         existing.piCwids.push(r.cwid);
+      if (existing.applId === null && r.applId !== null) existing.applId = r.applId;
       if (sortKey > existing.sortKey) existing.sortKey = sortKey;
     }
   }
@@ -297,6 +302,7 @@ async function getDeptGrantsListUncached(
       isRecentlyCompleted: false,
       pis,
       isMultiPi: g.piCwids.length >= 2,
+      applId: g.applId,
     };
   });
 

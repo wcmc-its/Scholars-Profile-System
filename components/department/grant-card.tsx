@@ -13,12 +13,28 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { profilePath } from "@/lib/profile-url";
 
-export function GrantCard({ grant }: { grant: DeptGrantCard }) {
+export function GrantCard({
+  grant,
+  applIdFallback,
+}: {
+  grant: DeptGrantCard;
+  /** Client-resolved NIH applId for grant.awardNumber, when the ETL column is
+   *  null (the usual case for InfoEd grants). Supplied by DeptGrantsList. */
+  applIdFallback?: number;
+}) {
   const eyebrow = parseFunderEyebrow(grant.funder, grant.awardNumber);
   // Grant titles carry the same inline markup as PubMed pub titles
   // (chemical formulae like [<sup>68</sup>Ga]-DOTATATE, gene names, etc.)
   // Reuse the same allowlist sanitizer.
   const titleHtml = sanitizePubTitle(grant.title);
+  // Link the title to the grant's NIH RePORTER project page, same target the
+  // scholar profile uses for the award number. NIH grants only — non-NIH
+  // (InfoEd industry/foundation) awards have no applId, so their titles stay
+  // plain text (graceful degradation, matching the profile).
+  const applId = grant.applId ?? applIdFallback;
+  const reporterUrl = applId
+    ? `https://reporter.nih.gov/project-details/${applId}`
+    : null;
   const startYear = grant.startDate?.getFullYear();
   const endYear = grant.endDate?.getFullYear();
   const period =
@@ -38,10 +54,21 @@ export function GrantCard({ grant }: { grant: DeptGrantCard }) {
           {eyebrow}
         </div>
       )}
-      <div
-        className="mt-1 text-[13px] font-medium leading-[1.4] text-[var(--color-text-primary)]"
-        dangerouslySetInnerHTML={{ __html: titleHtml }}
-      />
+      {reporterUrl ? (
+        <a
+          href={reporterUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="View on NIH RePORTER"
+          className="mt-1 text-[13px] font-medium leading-[1.4] text-[var(--color-text-primary)] underline-offset-2 hover:underline"
+          dangerouslySetInnerHTML={{ __html: titleHtml }}
+        />
+      ) : (
+        <div
+          className="mt-1 text-[13px] font-medium leading-[1.4] text-[var(--color-text-primary)]"
+          dangerouslySetInnerHTML={{ __html: titleHtml }}
+        />
+      )}
       {grant.pis.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {grant.pis.map((p) => (

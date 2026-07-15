@@ -50,6 +50,11 @@ export type DeptGrantCard = {
   pis: AuthorChip[];
   /** True when ≥2 PIs across the same externalId (multi-PI grant). */
   isMultiPi: boolean;
+  /** NIH RePORTER applId from ETL, when present. Optional: only the Grants-tab
+   *  loader (dept-lists.ts) fills it, to link the title to RePORTER like the
+   *  profile does; other card producers omit it. Usually null for InfoEd rows,
+   *  so the client resolver in DeptGrantsList backfills it (see grant-card). */
+  applId?: number | null;
 };
 
 export type DeptHighlights = {
