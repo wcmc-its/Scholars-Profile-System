@@ -124,6 +124,13 @@ const DEPT_FACET_MAX = 12;
  *  by the one filter this console exists for. Facet over the pool; cap what you paint. */
 const RESULT_MAX = 100;
 
+/** Three-register hierarchy (mockup): the first N matched concepts render as FULL evidence blocks
+ *  (badge, artifact, role, recency); the rest demote to a one-line supporting row. `matchedEvidence`
+ *  hands blocks back strongest-first, so the primary N are the strongest N. A demoted row does NOT
+ *  fetch its artifact — that is what makes demoting it cheaper, and why it shows only the tagged
+ *  count, never a role or year it never fetched. */
+const PRIMARY_BLOCKS = 2;
+
 /** Three numbers, and they are three DIFFERENT things: how many rows we painted, how many the
  *  filters matched, how many are in the pool. The old header printed two of them as if they
  *  were one ("100 of 100 researchers", while the history row beside it said 430). Say all
@@ -438,6 +445,38 @@ export function SponsorMatchPanel() {
     stageSel.size > 0 ||
     clinicianOnly ||
     roleSel.size > 0;
+
+  // Active filters, as removable chips above the results (mockup) — the rail's checkboxes are how
+  // you SET a filter; the chips are what is currently ON, one click to drop. Keyed and labelled by
+  // the same display value the facet toggles, so a chip's ✕ is exactly the checkbox's toggle.
+  const filterChips: { key: string; label: string; onRemove: () => void }[] = [
+    ...[...deptSel].map((v) => ({
+      key: `dept:${v}`,
+      label: v,
+      onRemove: () => setDeptSel(toggled(deptSel, v)),
+    })),
+    ...[...conceptSel].map((v) => ({
+      key: `concept:${v}`,
+      label: v,
+      onRemove: () => setConceptSel(toggled(conceptSel, v)),
+    })),
+    ...[...stageSel].map((v) => ({
+      key: `stage:${v}`,
+      label: v,
+      onRemove: () => setStageSel(toggled(stageSel, v)),
+    })),
+    ...[...roleSel].map((v) => ({
+      key: `role:${v}`,
+      label: v,
+      onRemove: () => setRoleSel(toggled(roleSel, v)),
+    })),
+    ...(clinicianOnly
+      ? [{ key: "clinician", label: "Practicing clinician", onRemove: () => setClinicianOnly(false) }]
+      : []),
+    ...(ctlOnly
+      ? [{ key: "ctl", label: "Holds CTL technology", onRemove: () => setCtlOnly(false) }]
+      : []),
+  ];
 
   // Live rank travels with the row, so a filtered view still reads "this person is #7 overall",
   // not "#1 of the filtered three". It re-derives as sliders move. Ranks are POOL ranks — a
@@ -809,6 +848,37 @@ export function SponsorMatchPanel() {
                   </div>
                 </div>
 
+                {filterChips.length > 0 ? (
+                  <div
+                    data-slot="sponsor-match-active-filters"
+                    className="mb-3 flex flex-wrap items-center gap-1.5"
+                  >
+                    {filterChips.map((chip) => (
+                      <span
+                        key={chip.key}
+                        className="border-border bg-muted/40 inline-flex items-center gap-1 rounded-full border py-0.5 pr-1 pl-2 text-xs"
+                      >
+                        <span className="max-w-[16rem] truncate">{chip.label}</span>
+                        <button
+                          type="button"
+                          aria-label={`Remove ${chip.label} filter`}
+                          onClick={chip.onRemove}
+                          className="text-muted-foreground hover:text-foreground leading-none"
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={clearFilters}
+                      className="text-muted-foreground ml-1 text-xs underline-offset-4 hover:underline"
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                ) : null}
+
                 {visible.length === 0 ? (
                   <p className="text-muted-foreground py-4 text-sm">
                     No researchers match the selected filters.
@@ -1169,7 +1239,6 @@ function CoverageStrip({ coverage }: { coverage: ConceptCoverage[] }) {
   if (coverage.length === 0) return null;
   const withEvidence = coverage.filter((c) => c.state === "evidence");
   const rankedOnly = coverage.filter((c) => c.state === "ranked");
-  const gaps = coverage.filter((c) => c.state === "none");
   return (
     <div className="mt-2" data-slot="sponsor-match-coverage">
       <div className="flex gap-0.5" aria-hidden="true">
@@ -1196,9 +1265,6 @@ function CoverageStrip({ coverage }: { coverage: ConceptCoverage[] }) {
         {rankedOnly.length > 0 ? (
           <> · also ranked under {rankedOnly.map((c) => c.concept.term).join(", ")}</>
         ) : null}
-        {gaps.length > 0 ? (
-          <> · no evidence for {gaps.map((g) => g.concept.term).join(", ")}</>
-        ) : null}
       </p>
     </div>
   );
@@ -1224,6 +1290,10 @@ function ResearcherRow({
   // The whole ask, not just the part this person answered — the only thing on the card that can
   // say what they DON'T have. Live under the sliders, like everything else derived here.
   const coverage = conceptCoverage(candidate, concepts);
+  // The concepts the sponsor asked for that this scholar has NOTHING for — moved off the coverage
+  // strip's caption to a single muted line at the card's foot (mockup), where a gap belongs: after
+  // the evidence, not ahead of it.
+  const gaps = coverage.filter((c) => c.state === "none");
   const tier = fitTier(candidate.fusedScore, topScore);
   const papers = candidate.evidence?.papers ?? [];
   const topics = candidate.evidence?.topics ?? [];
@@ -1293,8 +1363,18 @@ function ResearcherRow({
   useEffect(() => setResolvedCount(0), [runId, blockTerms]);
 
   return (
-    <div ref={rowRef} className="border-t border-border flex gap-3 py-4 first:border-t-0">
-      <div className="text-muted-foreground w-5 pt-1 text-right text-sm tabular-nums">{rank}</div>
+    // Each candidate is its own bordered card (mockup): a full border + radius replacing the old
+    // top-rule divider, so a card's variable-height evidence stack reads as one unit. The pool rank
+    // keeps its own left column (mockup nit) — first in the row, aligned down the margin — so a
+    // filter/sort that reorders cards still shows each one its POOL rank ("#30 overall").
+    <div
+      ref={rowRef}
+      data-slot="sponsor-match-row"
+      className="border-border mb-4 flex gap-3 rounded-xl border p-5"
+    >
+      <div className="text-muted-foreground w-6 shrink-0 pt-1 text-right text-sm tabular-nums">
+        {rank}
+      </div>
       {/* The shared headshot, not a bespoke initials circle — this is a list of PEOPLE, and the
           public People card has rendered their faces all along. `HeadshotAvatar` degrades to a
           name-gradient with initials when the directory has no photo (the endpoint is requested
@@ -1355,8 +1435,9 @@ function ResearcherRow({
             disclosure reveals papers about ITS concept; the shared `claimedPmids` keeps those
             sets disjoint across the stack. */}
         {evidenceBlocks.length > 0 ? (
-          <div className="mt-1.5 space-y-2">
-            {evidenceBlocks.map(({ concept, evidence }, i) => (
+          <div className="mt-2 space-y-2.5">
+            {/* PRIMARY register — the strongest concepts carry the full artifact. */}
+            {evidenceBlocks.slice(0, PRIMARY_BLOCKS).map(({ concept, evidence }, i) => (
               // `runId` in the key is the OTHER HALF of the claimedPmids reset above, and it is
               // required: a fresh Set is useless if the `EvidenceLine` beneath keeps its one-shot
               // `keyPaperFetched` ref from the last run and never fetches again. Baking the run
@@ -1393,6 +1474,26 @@ function ResearcherRow({
                   autoResolve={inView && i <= resolvedCount}
                   onResolved={() => setResolvedCount((n) => Math.max(n, i + 1))}
                 />
+              </div>
+            ))}
+            {/* SUPPORTING register — the weaker matched concepts demote to a one-line row: the
+                concept, its ask weight, and the tagged paper count. It does NOT mount an
+                `EvidenceLine`, so it fires no key-paper fetch (fewer requests per card) — which
+                is also why it carries no role or year: those live in the artifact it never
+                fetched. Absent ≠ hidden: the concept and its count are the honest supporting fact. */}
+            {evidenceBlocks.slice(PRIMARY_BLOCKS).map(({ concept, evidence }) => (
+              <div
+                key={`${runId}:${concept.term}`}
+                data-slot="sponsor-match-evidence-supporting"
+                className="border-border flex items-baseline justify-between gap-2 border-t pt-2.5 text-sm"
+              >
+                <span className="text-muted-foreground">
+                  {concept.term}{" "}
+                  <span className="text-[11px] tabular-nums">{concept.centrality.toFixed(2)}</span>
+                </span>
+                <span className="text-muted-foreground shrink-0 text-xs">
+                  {evidence.pubCount} pub{evidence.pubCount === 1 ? "" : "s"}
+                </span>
               </div>
             ))}
           </div>
@@ -1456,6 +1557,20 @@ function ResearcherRow({
             {candidate.technologyCount} CTL technolog
             {candidate.technologyCount === 1 ? "y" : "ies"}
           </span>
+        ) : null}
+        {/* Gaps at the foot of the card (mockup): the sponsor asks this scholar answers with
+            nothing. A single muted line, not a per-concept row — it is the last thing read, and it
+            is context for the evidence above it, not a headline. */}
+        {gaps.length > 0 ? (
+          <div
+            data-slot="sponsor-match-gaps"
+            className="border-border mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-t pt-2.5"
+          >
+            <span className="text-muted-foreground text-[11px]">No evidence</span>
+            <span className="text-muted-foreground text-xs">
+              {gaps.map((g) => g.concept.term).join(" · ")}
+            </span>
+          </div>
         ) : null}
       </div>
     </div>

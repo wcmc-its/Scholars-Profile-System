@@ -1081,6 +1081,7 @@ describe("SponsorMatchPanel", () => {
                 startYear: 2023,
                 endYear: 2028,
                 isActive: true,
+                role: "Multi-PI",
                 // Admitted by the CONCEPT axis — the only kind a concept-captioned block may lead
                 // with. The sibling test below supplies the text-only kind and asserts it is DROPPED.
                 matchedConcept: true,
@@ -1124,10 +1125,155 @@ describe("SponsorMatchPanel", () => {
     await screen.findByText("Resistance mechanisms in HER2-low disease");
     expect(screen.getByText("GRANT")).toBeTruthy();
     expect(screen.getByText(/active to 2028/)).toBeTruthy();
+    // Multi-PI reads as "MPI" (mockup brevity) — and it is THIS scholar's role, threaded from the
+    // route's per-person pick, not the grant's lead PI.
+    expect(screen.getByText("MPI")).toBeTruthy();
 
     // The grant leads: it renders BEFORE the paper in the block.
     const block = evidenceBlocks()[0][1];
     expect(block.indexOf("Resistance mechanisms")).toBeLessThan(block.indexOf("CAR T persistence"));
+  });
+
+  it("an expired grant reads 'expired <year>' + the scholar's role, never an active date", async () => {
+    // The two questions a sponsor asks of a grant: is this scholar the PI, and is it still funded.
+    // A dead award is a materially different pitch, so the line says so plainly instead of a bare
+    // 2014–2020 range.
+    const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
+      const u = String(url);
+      if (u.startsWith("/api/scholar/") && u.includes("/grants")) {
+        return {
+          ok: true,
+          json: async () => ({
+            grants: [
+              {
+                projectId: "R01 CA-1xxxxx",
+                title: "ERG-induced taxane resistance",
+                sponsor: "NCI",
+                startYear: 2014,
+                endYear: 2020,
+                isActive: false,
+                role: "PI",
+                matchedConcept: true,
+              },
+            ],
+            total: 1,
+          }),
+        };
+      }
+      if (u.startsWith("/api/search/key-paper")) return { ok: true, json: async () => ({ pubs: [] }) };
+      if ((init?.method ?? "GET") === "GET")
+        return { ok: true, json: async () => ({ ok: true, submissions: [] }) };
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          concepts: CONCEPTS,
+          candidates: [
+            candidate({
+              cwid: "a",
+              name: "Alice Alpha",
+              fusedScore: 0.9,
+              contributions: [{ term: "Immuno-oncology", rank: 1 }],
+              searchEvidence: [searchEvidence("Immuno-oncology", 142)],
+            }),
+          ],
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    await screen.findByText("ERG-induced taxane resistance");
+    expect(screen.getByText(/expired 2020/)).toBeTruthy();
+    expect(screen.getByText("PI")).toBeTruthy();
+    expect(screen.queryByText(/active to/)).toBeNull();
+  });
+
+  it("demotes the weakest matched concepts to one-line supporting rows (three-register hierarchy)", async () => {
+    // The strongest PRIMARY_BLOCKS concepts carry the full artifact; the rest demote to a row that
+    // does not fetch — the concept, its ask weight, and the tagged count, and nothing it never
+    // fetched (no role, no year).
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          fusedScore: 0.9,
+          contributions: [
+            { term: "Immuno-oncology", rank: 1 }, // centrality 0.9 — strongest
+            { term: "Cancer Metabolism", rank: 1 }, // 0.5
+            { term: "CRISPR screening", rank: 1 }, // 0.4 — weakest ⇒ demoted
+          ],
+          searchEvidence: [
+            searchEvidence("Immuno-oncology", 142),
+            searchEvidence("Cancer Metabolism", 88),
+            searchEvidence("CRISPR screening", 12),
+          ],
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    const full = document.querySelectorAll('[data-slot="sponsor-match-evidence"]');
+    const supporting = document.querySelectorAll('[data-slot="sponsor-match-evidence-supporting"]');
+    expect(full).toHaveLength(2); // PRIMARY_BLOCKS
+    expect(supporting).toHaveLength(1);
+    // The weakest concept demotes, and shows only what the payload carries (the tagged count).
+    expect(supporting[0].textContent).toContain("CRISPR screening");
+    expect(supporting[0].textContent).toMatch(/210 pubs/);
+  });
+
+  it("relabels a middle author as 'contributing author', never 'middle author' (sponsor console)", async () => {
+    // The honest word when a scholar was neither lead nor senior — the read an officer needs when
+    // it is the only evidence for the sponsor's top ask.
+    const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
+      const u = String(url);
+      if (u.startsWith("/api/scholar/") && u.includes("/grants"))
+        return { ok: true, json: async () => ({ grants: [], total: 0 }) };
+      if (u.startsWith("/api/search/key-paper"))
+        return {
+          ok: true,
+          json: async () => ({
+            pubs: [{ pmid: "111", title: "A contributing-author paper", year: 2024, role: "middle" }],
+          }),
+        };
+      if ((init?.method ?? "GET") === "GET")
+        return { ok: true, json: async () => ({ ok: true, submissions: [] }) };
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          concepts: CONCEPTS,
+          candidates: [
+            candidate({
+              cwid: "a",
+              name: "Alice Alpha",
+              fusedScore: 0.9,
+              contributions: [{ term: "Immuno-oncology", rank: 1 }],
+              searchEvidence: [searchEvidence("Immuno-oncology", 142)],
+            }),
+          ],
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    await screen.findByText("A contributing-author paper");
+    expect(screen.getByText(/contributing author/)).toBeTruthy();
+    expect(screen.queryByText(/middle author/)).toBeNull();
   });
 
   it("DROPS a grant the concept axis never admitted — a text hit is not evidence for the concept", async () => {
@@ -1239,8 +1385,12 @@ describe("SponsorMatchPanel", () => {
     expect(line).toContain("Evidence for 1 of 3 concepts asked");
     // Ranked, but capped out of an evidence block — NOT a gap, and no longer claimed as "covered".
     expect(line).toContain("also ranked under Cancer Metabolism");
-    // A genuine gap: she never ranked under it at all.
-    expect(line).toContain("no evidence for CRISPR screening");
+    // A genuine gap: she never ranked under it at all. It moved OFF the coverage line to a single
+    // muted line at the card's foot (mockup), so the strip caption no longer carries it.
+    expect(line).not.toContain("no evidence for");
+    const gaps = document.querySelector('[data-slot="sponsor-match-gaps"]')!.textContent!;
+    expect(gaps).toContain("No evidence");
+    expect(gaps).toContain("CRISPR screening");
     // 1 + 1 + 1 = the 3 concepts asked. The old line could not make that claim.
     expect(screen.queryByText(/ranked, no evidence shown/)).toBeNull();
   });

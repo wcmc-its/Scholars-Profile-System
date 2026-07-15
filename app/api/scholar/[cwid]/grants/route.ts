@@ -118,6 +118,11 @@ export async function GET(
       startYear: year(h.startDate),
       endYear: year(h.endDate),
       isActive: h.isActive,
+      // THIS scholar's role on the grant — the hit carries every WCM investigator with their
+      // per-person role (`FundingPersonChip`), so pick the one for the cwid we filtered on.
+      // Absent when the index has no role for them: undefined, so the card renders nothing
+      // rather than defaulting a role we cannot stand behind.
+      role: h.people.find((p) => p.cwid === cwid)?.role,
       // Per-ROW concept admission. The page-level `strength` below cannot answer this:
       // on a mixed page it reads "tagged" while individual rows are literal-text hits.
       // A concept-captioned card block needs the row fact, not the page's.

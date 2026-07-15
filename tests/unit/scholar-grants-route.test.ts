@@ -40,6 +40,9 @@ function hit(over: Record<string, unknown>) {
     startDate: "2021-03-01",
     endDate: "2025-02-28",
     isActive: true,
+    // The route picks THIS scholar's role out of `people`; default empty ⇒ no role for the cwid
+    // ⇒ `role` omitted from the mapped grant (the role-mapping case has its own test below).
+    people: [],
     ...over,
   };
 }
@@ -93,6 +96,35 @@ describe("GET /api/scholar/[cwid]/grants", () => {
       q: "diabetes",
       filters: { investigator: ["abc1234"] },
     });
+  });
+
+  it("maps THIS scholar's investigator role from the hit's people list", async () => {
+    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
+    vi.mocked(searchFunding).mockResolvedValue({
+      hits: [
+        hit({
+          projectId: "p1",
+          people: [
+            { cwid: "lead999", role: "PI" },
+            { cwid: "abc1234", role: "Multi-PI" }, // the querying scholar
+          ],
+        }),
+      ],
+      total: 1,
+    } as never);
+    const body = await (await call("abc1234", "diabetes")).json();
+    // The querying cwid's role, not the lead PI's — the card is about THIS scholar's stake.
+    expect(body.grants[0].role).toBe("Multi-PI");
+  });
+
+  it("omits role when the hit carries none for this scholar (absent ≠ a default role)", async () => {
+    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
+    vi.mocked(searchFunding).mockResolvedValue({
+      hits: [hit({ projectId: "p1", people: [{ cwid: "someone-else", role: "PI" }] })],
+      total: 1,
+    } as never);
+    const body = await (await call("abc1234", "diabetes")).json();
+    expect(body.grants[0].role).toBeUndefined();
   });
 
   it("#1339: matches on the generic-stripped significant query, not raw q", async () => {
