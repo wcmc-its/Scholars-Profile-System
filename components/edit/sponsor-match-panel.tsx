@@ -69,6 +69,15 @@ import { EvidenceLine } from "@/components/search/evidence-line";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import {
   conceptCoverage,
   fitTier,
   matchedConcepts,
@@ -579,62 +588,98 @@ export function SponsorMatchPanel() {
         />
         {/* Slate, not `variant="apollo"` (maroon) — the whole matcher family (find-researchers,
             opportunity intake, and the mockup) is slate. */}
-        <Button
-          type="submit"
-          disabled={pending || description.trim().length === 0}
-          className="mt-2 bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
-        >
-          {pending ? "Ranking…" : "Rank researchers"}
-        </Button>
-      </form>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <Button
+            type="submit"
+            disabled={pending || description.trim().length === 0}
+            className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
+          >
+            {pending ? "Ranking…" : "Rank researchers"}
+          </Button>
 
-      {history.length > 0 ? (
-        <details data-slot="sponsor-match-history" className="mb-6">
-          <summary className="text-muted-foreground cursor-pointer text-sm select-none">
-            Recent searches ({history.length})
-          </summary>
-          {/* Say it plainly, on the surface where it happens. Searches are kept, they are kept
-              for a stated reason, everyone here can see them, and anyone here can erase one.
-              A retention notice buried in a policy page nobody opens is not a notice. */}
-          <p className="text-muted-foreground mt-2 text-xs leading-relaxed">
-            Searches are saved — including the description you pasted — so we can measure and
-            improve match quality against real sponsor text. Everyone with access to this console
-            can see them. Delete any search to remove its text for good.
-          </p>
-          <ul className="mt-3 space-y-1">
-            {history.map((h) => (
-              <li key={h.id} className="flex items-baseline gap-2">
-                <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                  {new Date(h.createdAt).toLocaleDateString()}
-                </span>
-                <span className="text-muted-foreground shrink-0 text-xs">{h.submittedBy}</span>
-                <button
-                  type="button"
-                  title={h.description}
-                  onClick={() => {
-                    setDescription(h.description);
-                    void runSearch(h.description);
-                  }}
-                  className="min-w-0 flex-1 truncate text-left text-sm text-foreground/90 underline-offset-4 hover:underline"
-                >
-                  {h.title ?? h.description}
-                </button>
-                <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                  {h.candidateCount}
-                </span>
-                <button
-                  type="button"
-                  aria-label={`Delete search: ${h.title ?? h.description.slice(0, 60)}`}
-                  onClick={() => void deleteSubmission(h.id)}
-                  className="text-muted-foreground shrink-0 text-xs underline-offset-4 hover:underline"
-                >
-                  Delete
-                </button>
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
+          {/* #6d history lives in a right-side drawer now (nit 2 — the inline <details> ate the
+              vertical space above the ranking). Reuses the shadcn Sheet, so no hand-rolled
+              overlay/focus-trap/scroll-lock. The retention notice moves into the drawer header
+              because #6d requires it be said WHERE the searches are listed. */}
+          {history.length > 0 ? (
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button type="button" variant="outline">
+                  Recent ({history.length})
+                </Button>
+              </SheetTrigger>
+              <SheetContent data-slot="sponsor-match-history">
+                <SheetHeader>
+                  <SheetTitle>Recent searches ({history.length})</SheetTitle>
+                  <SheetDescription>
+                    Searches are saved — including the description you pasted — so we can measure
+                    and improve match quality against real sponsor text. Everyone with access to
+                    this console can see them. Delete any search to remove its text for good.
+                  </SheetDescription>
+                </SheetHeader>
+                <ul className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+                  {history.map((h) => (
+                    <li
+                      key={h.id}
+                      className="border-border border-b pb-4 last:border-b-0 last:pb-0"
+                    >
+                      <div className="text-muted-foreground flex items-baseline gap-2 text-xs">
+                        <span className="shrink-0 tabular-nums">
+                          {new Date(h.createdAt).toLocaleDateString()}
+                        </span>
+                        <span className="min-w-0 truncate">{h.submittedBy}</span>
+                        <span className="ml-auto shrink-0 tabular-nums">
+                          {h.candidateCount} matched
+                        </span>
+                      </div>
+                      {/* Replaying closes the drawer so the results are visible — SheetClose
+                          composes with the button's own onClick. */}
+                      <SheetClose asChild>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDescription(h.description);
+                            void runSearch(h.description);
+                          }}
+                          className="text-foreground/90 mt-1 block w-full text-left text-sm font-medium underline-offset-4 hover:underline"
+                        >
+                          {h.title ?? "Untitled search"}
+                        </button>
+                      </SheetClose>
+                      {/* §2c — the original request, compacted: the officer sees the gist without a
+                          400-line forwarded email dominating. `break-words` for the 300-char
+                          Outlook SafeLinks URL with no break opportunity; line-clamp-2 is the
+                          ~2-line preview. Full text (with its verbatim line breaks) under the
+                          expander only when there is meaningfully more than the clamp shows. */}
+                      <p className="text-muted-foreground mt-1 line-clamp-2 text-xs leading-relaxed break-words">
+                        {h.description}
+                      </p>
+                      {h.description.length > 200 ? (
+                        <details className="mt-1">
+                          <summary className="text-muted-foreground cursor-pointer text-xs underline-offset-4 select-none hover:underline">
+                            Show full request
+                          </summary>
+                          <p className="text-muted-foreground mt-1 text-xs leading-relaxed break-words whitespace-pre-wrap">
+                            {h.description}
+                          </p>
+                        </details>
+                      ) : null}
+                      <button
+                        type="button"
+                        aria-label={`Delete search: ${h.title ?? h.description.slice(0, 60)}`}
+                        onClick={() => void deleteSubmission(h.id)}
+                        className="text-muted-foreground mt-1 text-xs underline-offset-4 hover:underline"
+                      >
+                        Delete
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </SheetContent>
+            </Sheet>
+          ) : null}
+        </div>
+      </form>
 
       {status.kind === "loading" ? (
         <div aria-busy="true">

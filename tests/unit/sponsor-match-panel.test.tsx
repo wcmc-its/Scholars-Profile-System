@@ -1543,6 +1543,8 @@ describe("SponsorMatchPanel", () => {
       ],
     });
     render(<SponsorMatchPanel />);
+    // The count rides the drawer trigger; opening it reveals the list + the retention notice.
+    fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
     expect(await screen.findByText(/Recent searches \(1\)/)).toBeTruthy();
     expect(screen.getByText("zzz9001")).toBeTruthy();
     expect(screen.getByText("cardiac fibrosis")).toBeTruthy();
@@ -1568,10 +1570,12 @@ describe("SponsorMatchPanel", () => {
       ],
     });
     render(<SponsorMatchPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
     await screen.findByText(/Recent searches \(1\)/);
 
     fireEvent.click(screen.getByRole("button", { name: /Delete search: cardiac fibrosis/ }));
-    await screen.findByText(/Recent searches \(0\)/).catch(() => null);
+    // Last search deleted ⇒ the trigger (and the drawer) unmount; the row is gone.
+    await waitFor(() => expect(screen.queryByText("cardiac fibrosis")).toBeNull());
 
     // The row is gone from the list, and a DELETE actually went to the server — a client-only
     // hide would leave the sponsor's text sitting in the database.
