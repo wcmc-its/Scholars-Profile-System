@@ -48,6 +48,16 @@ export type ExtractedConcept = {
   centrality: number;
 };
 
+/** What ONE extraction call yields: the concepts plus the LLM's short search title, written
+ *  in the SAME call (not a second one — the contract forbids a separate title call; see
+ *  `sponsorAskFrom`). `titleSummary` is absent when the paste named no concept, the model
+ *  omitted it, or it failed the format guard — the caller then derives a concept-list title.
+ *  NEVER a guessed sponsor. */
+export type SponsorExtraction = {
+  concepts: ExtractedConcept[];
+  titleSummary?: string;
+};
+
 /** MODEL — the Claude Sonnet 4.5 cross-region inference profile on Amazon Bedrock.
  *  WITHIN the TaskRoleBedrockPolicy IAM scope (cdk `app-stack.ts`): the task role
  *  grants `inference-profile/us.anthropic.claude-sonnet-4-*` +
@@ -116,6 +126,11 @@ const ConceptsSchema = z.object({
       centrality: z.number(),
     }),
   ),
+  /** A short search handle written in the SAME call as the concepts — the essence of the
+   *  funder's ask, org-prefixed when the paste names one. `nullish` (not required) so a model
+   *  that omits it, or a description that names no concept, cleans to `undefined` rather than
+   *  failing the whole extraction; `sanitizeTitleSummary` enforces the length/format contract. */
+  titleSummary: z.string().nullish(),
 });
 
 const EXTRACT_SYSTEM_PROMPT = [
@@ -155,9 +170,30 @@ const EXTRACT_SYSTEM_PROMPT = [
   'or therapeutic modality (how the work is done); "concept" for a disease, mechanism,',
   'biological process or population (what is studied). When in doubt, use "concept".',
   "",
+  "Also write a TITLE for this search as `titleSummary` — a short handle naming what the",
+  "funder is after. Follow these rules exactly, so titles read consistently across searches:",
+  "  - Name the PRIMARY target (the concept you scored 1.0). Optionally sharpen it with its",
+  '    single strongest means as "X for Y" or "X in Y" — but only when that reads more',
+  "    precisely than the target alone.",
+  "  - If the description names the funding ORGANIZATION (a company, foundation, institute",
+  '    or agency), prefix it VERBATIM and join with " — " (space, em dash, space):',
+  '    "{Organization} — {focus}". If none is named, omit the prefix and the dash. NEVER',
+  "    invent or guess an organization.",
+  "  - At most 8 words in the focus; a noun phrase, no trailing period.",
+  "  - Lowercase, EXCEPT proper nouns and standard acronyms, which keep their case (HER2,",
+  "    CAR-T, mRNA, and any organization name).",
+  "  - Do NOT include award mechanics, dollar amounts, career-stage or eligibility asks, or",
+  "    deadlines — those are handled separately.",
+  "  Examples (format only — do not reuse their content):",
+  "    Northlake Therapeutics — antibody-drug conjugates for HER2-low breast cancer",
+  "    Vertex — gene editing for cystic fibrosis",
+  "    St. Baldrick's Foundation — pediatric acute myeloid leukemia",
+  "    CAR-T persistence in solid tumors",
+  "    remyelination in multiple sclerosis",
+  "",
   "Return at most 12 concepts, most central first. If the description names no",
-  "fundable research concept, return an empty list. Output only the structured list —",
-  "no commentary.",
+  "fundable research concept, return an empty list and omit titleSummary. Output only the",
+  "structured object — no commentary.",
 ].join("\n");
 
 /** The paste is DATA to analyze, never instructions (injection guard — mirrors the
@@ -210,15 +246,31 @@ export function sanitizeConcepts(
   return out;
 }
 
+/** A title is a HANDLE, not a paragraph. Cap it so a model that returns prose here cannot
+ *  become the results header — "{org} — {≤8-word focus}" fits comfortably under 90 chars. */
+const MAX_TITLE_CHARS = 90;
+
+/** Clean the LLM's `titleSummary`: trim, collapse internal whitespace/newlines to single
+ *  spaces, drop a trailing period. Reject an empty or over-long string → `undefined`, so the
+ *  caller falls back to the derived concept-list title. Whitespace collapse is output HYGIENE
+ *  on an already-LLM-written string (the same posture as `sanitizeConcepts` trimming terms) —
+ *  it is not extracting the title with a regex. NEVER fabricates: absent stays absent. */
+export function sanitizeTitleSummary(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const s = raw.replace(/\s+/g, " ").trim().replace(/\.$/, "").trim();
+  if (s.length === 0 || s.length > MAX_TITLE_CHARS) return undefined;
+  return s;
+}
+
 /**
  * Extract the funder's research concepts (+ centrality) from a sponsor paste via
  * Bedrock. Returns [] for an empty paste or on ANY failure (Bedrock error, timeout,
  * malformed output) — the caller falls back to the v1 dictionary extractor on [], so
  * this must never throw.
  */
-export async function extractSponsorConcepts(paste: string): Promise<ExtractedConcept[]> {
+export async function extractSponsorConcepts(paste: string): Promise<SponsorExtraction> {
   const text = paste.trim();
-  if (text.length === 0) return [];
+  if (text.length === 0) return { concepts: [] };
 
   // Operator override first, else the pinned default (parity with the overview
   // generator's `OVERVIEW_GENERATE_MODEL` lever; the IAM policy scopes the whole
@@ -235,11 +287,14 @@ export async function extractSponsorConcepts(paste: string): Promise<ExtractedCo
       abortSignal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
       ...(modelAcceptsTemperature(modelId) ? { temperature: EXTRACT_TEMPERATURE } : {}),
     });
-    return sanitizeConcepts(object.concepts);
+    return {
+      concepts: sanitizeConcepts(object.concepts),
+      titleSummary: sanitizeTitleSummary(object.titleSummary),
+    };
   } catch (err) {
     // NEVER throw — degrade to the v1 dictionary extractor (see caller). A Bedrock
     // outage must cost recall, not return a 502.
     console.warn("[sponsor-match] concept extraction failed; falling back to dictionary", err);
-    return [];
+    return { concepts: [] };
   }
 }

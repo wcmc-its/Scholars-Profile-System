@@ -223,6 +223,9 @@ export function SponsorMatchPanel() {
   // derived from them.
   const [candidates, setCandidates] = useState<SponsorCandidate[]>([]);
   const [concepts, setConcepts] = useState<SponsorConcept[]>([]);
+  // The extractor's essence title (org + focus). Stable across slider/preference edits — only
+  // a new search replaces it — so the header does not churn as the officer tunes the ranking.
+  const [titleSummary, setTitleSummary] = useState<string | undefined>(undefined);
   // #1654 — the sponsor's non-topical asks, and which of them the officer is honouring.
   // Keyed by label: an extractor that fires twice on the same ask would emit one entry.
   const [preferences, setPreferences] = useState<SponsorPreference[]>([]);
@@ -306,6 +309,7 @@ export function SponsorMatchPanel() {
         void loadHistory(); // the row the server just retained
         setCandidates(data.candidates ?? []);
         setConcepts(data.concepts ?? []);
+        setTitleSummary(data.titleSummary);
         setMatchedText(text);
         setRunId((n) => n + 1); // #1696 — a new run: every row's claimed-pmid set starts empty
         // #1654 — detected preferences arrive ACTIVE. The sponsor said it; the default is to
@@ -387,8 +391,13 @@ export function SponsorMatchPanel() {
   // server still ships `ask` (it is the canonical handle for a caller that does not re-rank),
   // but the console owns what it displays, exactly as it owns the preference predicate.
   const ask = useMemo(
-    () => sponsorAskFrom(concepts, preferences.filter((p) => activePrefs.has(p.label))),
-    [concepts, preferences, activePrefs],
+    () =>
+      sponsorAskFrom(
+        concepts,
+        preferences.filter((p) => activePrefs.has(p.label)),
+        titleSummary,
+      ),
+    [concepts, preferences, activePrefs, titleSummary],
   );
 
   const deptFacet = useMemo(() => {
