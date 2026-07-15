@@ -76,7 +76,7 @@ export function EditPanel({
     <section data-slot={slot} className={cn("flex flex-col gap-4", className)} {...rest}>
       <header className="flex flex-col gap-1.5">
         <div className="flex items-start justify-between gap-3">
-          <h2 id={headingId} className="text-lg font-semibold">
+          <h2 id={headingId} className="text-xl font-semibold">
             {heading}
           </h2>
           {headerAction}

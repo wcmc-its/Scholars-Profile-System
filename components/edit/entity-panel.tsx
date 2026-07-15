@@ -240,7 +240,13 @@ export function EntityPanel<T extends EntityRow>({
   const targetById = (id: string | null) => (id === null ? null : list.find((e) => e.externalId === id) ?? null);
 
   const listBody = (
-    <ul className="divide-apollo-border divide-y" data-slot={`${slot}-list`}>
+    // A stronger top rule (border-strong) closes the header block and opens the
+    // entry list, so the list reads as clearly subordinate to the panel <h2>;
+    // the lighter divide-y between rows keeps individual entries distinct.
+    <ul
+      className="divide-apollo-border border-apollo-border-strong divide-y border-t"
+      data-slot={`${slot}-list`}
+    >
       {rows.map((e) => (
         <EntityRowView
           key={e.externalId}
