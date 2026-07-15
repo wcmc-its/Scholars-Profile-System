@@ -19,6 +19,7 @@ import {
   PaginationEllipsis,
 } from "@/components/ui/pagination";
 import { GrantCard } from "@/components/department/grant-card";
+import { useNihApplIdMap } from "@/lib/use-nih-resolve";
 import type { DeptGrantCard } from "@/lib/api/dept-highlights";
 import type { GrantSort } from "@/lib/api/dept-lists";
 
@@ -51,6 +52,11 @@ function DeptGrantsListInner({
 }: DeptGrantsListProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  // Resolve NIH applIds for this page's awards in one batched POST (fired
+  // after paint), so the grant titles can link to NIH RePORTER like the
+  // scholar profile does. InfoEd rows carry no applId, so this backfills them.
+  const applIdByAward = useNihApplIdMap(hits.map((h) => h.awardNumber));
 
   function setSort(next: GrantSort) {
     const params = new URLSearchParams(Array.from(searchParams.entries()));
@@ -103,7 +109,12 @@ function DeptGrantsListInner({
       <ul className="flex flex-col divide-y divide-[var(--color-border)]">
         {hits.map((g, i) => (
           <li key={g.externalId ?? `g-${i}`} className="py-4">
-            <GrantCard grant={g} />
+            <GrantCard
+              grant={g}
+              applIdFallback={
+                g.awardNumber ? applIdByAward[g.awardNumber] : undefined
+              }
+            />
           </li>
         ))}
       </ul>
