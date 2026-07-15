@@ -222,7 +222,9 @@ function ArtifactRow({ pub }: { pub: EvidencePub }) {
       {/* PUB, and only PUB. A GRANT badge needs the funding route, which is uncached and heavy
           (one call per card), and the CONCEPT-tagged grants a sponsor ask actually wants are
           behind a prod-off flag whose flip changes the PUBLIC People card. Separate change. */}
-      <span className="text-muted-foreground bg-muted h-fit shrink-0 rounded px-1.5 py-0.5 text-[10px] tracking-[0.04em]">
+      {/* `mt-0.5` drops the badge off the line-box top onto the title's first text line — without
+          it the badge floats a couple of pixels high against `leading-snug` title text. */}
+      <span className="text-muted-foreground bg-muted mt-0.5 h-fit shrink-0 rounded px-1.5 py-0.5 text-[10px] tracking-[0.04em]">
         PUB
       </span>
       <div className="min-w-0 flex-1">

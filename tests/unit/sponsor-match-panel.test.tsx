@@ -652,9 +652,11 @@ describe("SponsorMatchPanel", () => {
   function evidenceBlocks(): [string, string][] {
     return [...document.querySelectorAll('[data-slot="sponsor-match-evidence"]')].map((el) => {
       const caption = el.firstElementChild!;
-      // The caption is now `[concept] [ask N.NN]` — take the concept span, so these assertions
-      // keep saying what they were written to say. The ask is asserted on its own below.
-      const term = caption.firstElementChild?.textContent ?? "";
+      // The caption is `[[concept][provenance chip]] [ask N.NN]` — the concept + its chip share a
+      // wrapper on the left, the ask sits on the right. Take the concept span (the wrapper's first
+      // child), so these assertions keep saying what they were written to say. The ask is asserted
+      // on its own below, and the chip via `document.body.textContent`.
+      const term = caption.firstElementChild?.firstElementChild?.textContent ?? "";
       const line = (el.textContent ?? "").slice((caption.textContent ?? "").length);
       return [term, line.replace(/\s+/g, " ").trim()];
     });
