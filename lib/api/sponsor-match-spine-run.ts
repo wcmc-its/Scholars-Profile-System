@@ -419,6 +419,12 @@ export async function rankResearchersForDescriptionSpine(
   const evidenceByTermCwid = new Map<string, SponsorSearchEvidence>();
   // Which kind this paste is buying — read once, applied per cluster below.
   const targetKind = targetKindOf(clusters);
+  // GATE on the RETRIEVAL half of the gloss (the ranking change), not the display half. The
+  // concept's `gloss` still rides the wire and the rail always shows the sponsor's words; this flag
+  // only decides whether the free-text QUERY searches the gloss ("lysosomal processing of ADC
+  // linkers") or the bare token ("lysosomes"). It changes who ranks where, so it is eval-gated:
+  // staging-on to measure, prod-off until a clean A/B proves it. STATIC literal for flag-parity.
+  const glossQuery = process.env.SPONSOR_MATCH_GLOSS_QUERY === "on";
   for (const cluster of clusters) {
     // MAX member coverage ≈ the broadest merged synonym = a lower bound on the cluster's true
     // union corpus coverage (the exact union-coverage is an ETL upgrade). Display-only: 0 here
@@ -466,11 +472,13 @@ export async function rankResearchersForDescriptionSpine(
     };
     concepts.push(concept);
 
-    // The free-text query: each member's gloss (the sponsor's sense) where we have one, else the
-    // bare member token. Only the BM25 axis moves — `descendantUis` still comes from the term's MeSH
-    // resolution, so the structured signal is unchanged and a member with no gloss degrades to its
-    // token rather than dropping out of the cluster query.
-    const clusterQuery = cluster.members.map((m) => glossByTerm.get(m) ?? m).join(" ");
+    // The free-text query. With the flag ON: each member's gloss (the sponsor's sense) where we have
+    // one, else the bare member token — only the BM25 axis moves (`descendantUis` still comes from
+    // the term's MeSH resolution, so the structured signal is unchanged). With it OFF: the original
+    // bare-token query, so retrieval ranks exactly as it did before the gloss landed.
+    const clusterQuery = glossQuery
+      ? cluster.members.map((m) => glossByTerm.get(m) ?? m).join(" ")
+      : cluster.members.join(" ");
 
     // Representative resolution = the first member's (drives name/tier only).
     const rep = repByTerm.get(term) ?? null;
