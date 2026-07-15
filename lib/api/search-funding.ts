@@ -326,7 +326,7 @@ export async function investigatorGrantMatchCounts(opts: {
   q: string;
   cwids: string[];
   meshResolution?: MeshResolution | null;
-}): Promise<Map<string, { count: number; tagged: boolean }>> {
+}): Promise<Map<string, { count: number; taggedCount: number }>> {
   const cwids = Array.from(new Set(opts.cwids.filter(Boolean)));
   const trimmed = opts.q.trim();
   if (cwids.length === 0 || trimmed.length === 0) return new Map();
@@ -388,9 +388,17 @@ export async function investigatorGrantMatchCounts(opts: {
         };
       }
     ).aggregations?.byInvestigator?.buckets ?? [];
-  const out = new Map<string, { count: number; tagged: boolean }>();
+  // #1732 — the concept-tagged COUNT, not a boolean. `count` is the OR total (text OR
+  // concept), so it can never caption "tagged <Concept>": it counts grants that merely
+  // mention the query. Collapsing this sub-agg to `> 0` was what let the People card
+  // render "5 of 24 grants tagged Immunoconjugates" when exactly ONE grant carried the
+  // tag. The number OpenSearch already computes is the one the card needs, so keep it.
+  //
+  // `taggedCount` and `count - taggedCount` PARTITION the matched set: tagged vs
+  // mention-only. Both clauses are rendered, and they add up.
+  const out = new Map<string, { count: number; taggedCount: number }>();
   for (const b of buckets) {
-    out.set(b.key, { count: b.doc_count, tagged: (b.tagged?.doc_count ?? 0) > 0 });
+    out.set(b.key, { count: b.doc_count, taggedCount: b.tagged?.doc_count ?? 0 });
   }
   return out;
 }
