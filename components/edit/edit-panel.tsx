@@ -95,7 +95,7 @@ export function EditPanel({
               {heading}
             </h3>
           ) : (
-            <h2 id={resolvedHeadingId} className="text-xl font-semibold">
+            <h2 id={resolvedHeadingId} className="text-lg font-medium">
               {heading}
             </h2>
           )}
