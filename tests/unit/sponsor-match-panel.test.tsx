@@ -1276,9 +1276,10 @@ describe("SponsorMatchPanel", () => {
     const supporting = document.querySelectorAll('[data-slot="sponsor-match-evidence-supporting"]');
     expect(full).toHaveLength(2); // PRIMARY_BLOCKS
     expect(supporting).toHaveLength(1);
-    // The weakest concept demotes, and shows only what the payload carries (the tagged count).
+    // The weakest concept demotes, and shows the MATCHED count for THIS concept (12) over the total
+    // (210) — NOT the bare total, which is the same for every concept and read as wrong.
     expect(supporting[0].textContent).toContain("CRISPR screening");
-    expect(supporting[0].textContent).toMatch(/210 pubs/);
+    expect(supporting[0].textContent).toMatch(/12 of 210 pubs/);
   });
 
   it("relabels a middle author as 'contributing author', never 'middle author' (sponsor console)", async () => {

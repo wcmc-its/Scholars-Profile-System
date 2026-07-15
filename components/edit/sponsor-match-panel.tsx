@@ -80,6 +80,7 @@ import {
 } from "@/components/ui/sheet";
 import {
   conceptCoverage,
+  evidenceMatchCount,
   evidenceProvenance,
   fitTier,
   hasMatchEvidence,
@@ -1691,21 +1692,30 @@ function ResearcherRow({
                 `EvidenceLine`, so it fires no key-paper fetch (fewer requests per card) — which
                 is also why it carries no role or year: those live in the artifact it never
                 fetched. Absent ≠ hidden: the concept and its count are the honest supporting fact. */}
-            {evidenceBlocks.slice(PRIMARY_BLOCKS).map(({ concept, evidence }) => (
-              <div
-                key={`${runId}:${concept.term}`}
-                data-slot="sponsor-match-evidence-supporting"
-                className="border-border flex items-baseline justify-between gap-2 border-t pt-2.5 text-sm"
-              >
-                <span className="text-muted-foreground">
-                  {concept.term}{" "}
-                  <span className="text-[11px] tabular-nums">{concept.centrality.toFixed(2)}</span>
-                </span>
-                <span className="text-muted-foreground shrink-0 text-xs">
-                  {evidence.pubCount} pub{evidence.pubCount === 1 ? "" : "s"}
-                </span>
-              </div>
-            ))}
+            {evidenceBlocks.slice(PRIMARY_BLOCKS).map(({ concept, evidence }) => {
+              // The MATCHED count for THIS concept — not `pubCount`, which is the scholar's total and
+              // is identical for every concept on the card (the count "seemed off" because it was the
+              // same big number everywhere). Absent for a countless kind ⇒ render no count, never the
+              // total.
+              const matched = evidenceMatchCount(evidence.evidence);
+              return (
+                <div
+                  key={`${runId}:${concept.term}`}
+                  data-slot="sponsor-match-evidence-supporting"
+                  className="border-border flex items-baseline justify-between gap-2 border-t pt-2.5 text-sm"
+                >
+                  <span className="text-muted-foreground">
+                    {concept.term}{" "}
+                    <span className="text-[11px] tabular-nums">{concept.centrality.toFixed(2)}</span>
+                  </span>
+                  {matched != null ? (
+                    <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                      {matched} of {evidence.pubCount} pub{evidence.pubCount === 1 ? "" : "s"}
+                    </span>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         ) : null}
         {/* The "ranked, no evidence shown" rows used to live here, one per concept. Deleted: they

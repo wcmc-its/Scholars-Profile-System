@@ -908,3 +908,25 @@ export function evidenceProvenance(evidence: ResultEvidence): EvidenceProvenance
       return null;
   }
 }
+
+/**
+ * The per-concept MATCHED publication count — the "N" in "N of M publications" — for a demoted
+ * supporting row that does not mount an `EvidenceLine`.
+ *
+ * NOT `SponsorSearchEvidence.pubCount`, which is the scholar's TOTAL (the "M") and is therefore the
+ * SAME for every concept on the card. Rendering that as a per-concept count is a lie a reader spots
+ * immediately: "drug resistance · 480 pubs" beside "480" everywhere else. The matched count lives on
+ * the evidence's own `count` (the count-bearing kinds set it). `null` for kinds that carry no such
+ * number (clinical / selfDescription) — the caller renders nothing rather than fall back to the
+ * total, which is the very number that was wrong.
+ */
+export function evidenceMatchCount(evidence: ResultEvidence): number | null {
+  switch (evidence.kind) {
+    case "publications":
+    case "method":
+    case "topic":
+      return typeof evidence.count === "number" ? evidence.count : null;
+    default:
+      return null;
+  }
+}
