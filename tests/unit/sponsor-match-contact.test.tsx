@@ -43,6 +43,17 @@ const CANDIDATES: SponsorCandidate[] = [
     fusedScore: 0.05,
     contributions: [{ term: "Immuno-oncology", rank: 1 }],
     technologyCount: 0,
+    // A research-match block so the card is a RESULT (not dropped by the zero-evidence exclusion).
+    // The term joins to no concept, so no evidence block / key-paper fetch renders — the card stays
+    // as minimal as this test needs and the render-time fetch guard is preserved.
+    searchEvidence: [
+      {
+        term: "__match__",
+        evidence: { kind: "publications", strength: "tagged", text: "1 of 10 tagged", count: 1 },
+        pubCount: 10,
+        keyPaper: { descriptorUis: ["D_x"], contentQuery: "__match__" },
+      },
+    ],
   },
   {
     cwid: "bbb1002",
@@ -53,6 +64,17 @@ const CANDIDATES: SponsorCandidate[] = [
     fusedScore: 0.02,
     contributions: [{ term: "Immuno-oncology", rank: 2 }],
     technologyCount: 0,
+    // A research-match block so the card is a RESULT (not dropped by the zero-evidence exclusion).
+    // The term joins to no concept, so no evidence block / key-paper fetch renders — the card stays
+    // as minimal as this test needs and the render-time fetch guard is preserved.
+    searchEvidence: [
+      {
+        term: "__match__",
+        evidence: { kind: "publications", strength: "tagged", text: "1 of 10 tagged", count: 1 },
+        pubCount: 10,
+        keyPaper: { descriptorUis: ["D_x"], contentQuery: "__match__" },
+      },
+    ],
   },
 ];
 

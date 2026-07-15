@@ -14,8 +14,10 @@ import {
   DEFAULT_K,
   conceptCoverage,
   conceptWeight,
+  evidenceProvenance,
   fitTier,
   fusedScore,
+  hasMatchEvidence,
   matchedConcepts,
   matchedEvidence,
   rareTerms,
@@ -26,6 +28,7 @@ import {
   type SponsorPreference,
   type SponsorSearchEvidence,
 } from "@/lib/api/sponsor-match-contract";
+import type { ResultEvidence } from "@/lib/api/result-evidence";
 import { rrfFuse, type TermRanking } from "@/lib/api/sponsor-match-spine";
 
 function concept(term: string, centrality: number, weightFactor: number): SponsorConcept {
@@ -495,5 +498,55 @@ describe("sponsorAskFrom", () => {
     );
     // The bespoke path has no title; but if a summary is present with no concepts, name it.
     expect(sponsorAskFrom([], [], "Acme Bio — rare disease")?.title).toBe("Acme Bio — rare disease");
+  });
+});
+
+describe("hasMatchEvidence — the zero-evidence exclusion", () => {
+  const ev: SponsorSearchEvidence = {
+    term: "t",
+    evidence: { kind: "publications", strength: "tagged", text: "1 of 10 tagged t", term: "t", count: 1 },
+    pubCount: 10,
+    keyPaper: { descriptorUis: ["D_t"], contentQuery: "t" },
+  };
+
+  it("keeps a candidate the spine shipped a research-match block for", () => {
+    expect(hasMatchEvidence({ ...candidate("a", []), searchEvidence: [ev] })).toBe(true);
+  });
+
+  it("excludes an empty searchEvidence array (matched nothing real)", () => {
+    expect(hasMatchEvidence({ ...candidate("a", []), searchEvidence: [] })).toBe(false);
+  });
+
+  it("excludes an absent searchEvidence — absent is not zero, but it is not a match either", () => {
+    // Pugh: ranked into a concept's top-100 on an identity-tail hit, no research evidence.
+    expect(hasMatchEvidence(candidate("pugh", [{ term: "topo", rank: 231 }]))).toBe(false);
+  });
+});
+
+describe("evidenceProvenance — structured tag vs bare keyword", () => {
+  it("publications: mention is keyword-only, tagged/concept are structured", () => {
+    const pub = (strength: "tagged" | "mention" | "concept"): ResultEvidence => ({
+      kind: "publications",
+      strength,
+      text: "x",
+    });
+    expect(evidenceProvenance(pub("mention"))).toBe("keyword");
+    expect(evidenceProvenance(pub("tagged"))).toBe("tagged");
+    expect(evidenceProvenance(pub("concept"))).toBe("tagged");
+  });
+
+  it("curated method/clinical/topic are structured; a bio sentence is bare text", () => {
+    expect(evidenceProvenance({ kind: "method", family: "scRNA-seq", tools: [] })).toBe("tagged");
+    expect(evidenceProvenance({ kind: "clinical", specialty: "Cardiology", boardCertified: true })).toBe(
+      "tagged",
+    );
+    expect(evidenceProvenance({ kind: "topic", label: "Immunology", id: "immuno" })).toBe("tagged");
+    expect(evidenceProvenance({ kind: "selfDescription", html: "…" })).toBe("keyword");
+  });
+
+  it("no chip for the identity tail (backstop — the spine already filters these out)", () => {
+    expect(evidenceProvenance({ kind: "none" })).toBeNull();
+    expect(evidenceProvenance({ kind: "areas", labels: [], total: 0 })).toBeNull();
+    expect(evidenceProvenance({ kind: "name", html: "…" })).toBeNull();
   });
 });

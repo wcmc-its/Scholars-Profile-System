@@ -47,7 +47,9 @@ import { extractSponsorConcepts } from "@/lib/api/sponsor-match-extract";
 /** `kind` is optional here on purpose: the LLM's zod schema requires it, but
  *  `sanitizeConcepts` also cleans the dictionary-fallback path, which supplies none — so
  *  the tests must be able to hand it a concept with an absent or garbage kind. */
-function objectWith(concepts: { term: string; kind?: string; centrality: number }[]) {
+function objectWith(
+  concepts: { term: string; kind?: string; centrality: number; gloss?: unknown }[],
+) {
   return { object: { concepts } };
 }
 
@@ -105,6 +107,37 @@ describe("extractSponsorConcepts", () => {
     const out = await extractSponsorConcepts("some sponsor prose");
 
     expect(out.concepts.map((c) => c.kind)).toEqual(["method", "concept", "concept", "concept"]);
+  });
+
+  it("carries a GLOSS through, cleaned — trims/collapses whitespace, drops a trailing period; omits absent/empty/over-long", async () => {
+    mockGenerateObject.mockResolvedValue(
+      objectWith([
+        {
+          term: "lysosomes",
+          kind: "concept",
+          centrality: 0.4,
+          gloss: "  lysosomal processing of ADC\n linkers. ",
+        },
+        { term: "HER2-low breast cancer", kind: "concept", centrality: 1.0 }, // no gloss ⇒ key omitted
+        { term: "systemic sclerosis", kind: "concept", centrality: 0.8, gloss: "   " }, // empty ⇒ omitted
+        { term: "prose dump", kind: "concept", centrality: 0.3, gloss: "x".repeat(200) }, // over-long ⇒ omitted
+      ]),
+    );
+
+    const out = await extractSponsorConcepts("some sponsor prose");
+
+    // Absent stays absent (no `gloss` key), so a concept that stood alone never invents context.
+    expect(out.concepts).toEqual([
+      {
+        term: "lysosomes",
+        kind: "concept",
+        centrality: 0.4,
+        gloss: "lysosomal processing of ADC linkers",
+      },
+      { term: "HER2-low breast cancer", kind: "concept", centrality: 1.0 },
+      { term: "systemic sclerosis", kind: "concept", centrality: 0.8 },
+      { term: "prose dump", kind: "concept", centrality: 0.3 },
+    ]);
   });
 
   it("caps the returned concepts at 12", async () => {

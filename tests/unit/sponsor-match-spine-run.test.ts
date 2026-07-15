@@ -316,6 +316,39 @@ describe("rankResearchersForDescriptionSpine", () => {
     expect(weightOf(ml, "machine learning")).toBeGreaterThan(weightOf(ml, "disease progression"));
   });
 
+  it("searches the funder's GLOSS as the free-text query, not the bare token — and wires it for display", async () => {
+    // "lysosomes" the token matches any lysosome paper; "lysosomal processing of ADC linkers" the
+    // gloss ranks the sponsor's SENSE. The MeSH axis still resolves the TERM, so only the BM25
+    // query moves. A concept with no gloss falls back to its token — a mixed ask degrades cleanly.
+    mockExtractSponsorConcepts.mockResolvedValue([
+      {
+        term: "lysosomes",
+        kind: "concept",
+        centrality: 1.0,
+        gloss: "lysosomal processing of ADC linkers",
+      },
+      { term: "HER2-low breast cancer", kind: "concept", centrality: 0.8 }, // no gloss
+    ]);
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) => meshRes(`D_${q}`, [`D_${q}`]));
+    mockSearchPeople.mockImplementation(async () => people(["p"]));
+
+    const { concepts } = await rankResearchersForDescriptionSpine("adc paste");
+
+    // The gloss concept searched its gloss; the term's MeSH descendants still drove the structured axis.
+    const glossCall = mockSearchPeople.mock.calls.find(
+      (c) => c[0].q === "lysosomal processing of ADC linkers",
+    )![0];
+    expect(glossCall.meshDescendantUis).toEqual(["D_lysosomes"]);
+    // The unglossed concept queried its bare token — never the term for the OTHER concept.
+    expect(mockSearchPeople.mock.calls.some((c) => c[0].q === "HER2-low breast cancer")).toBe(true);
+    expect(mockSearchPeople.mock.calls.some((c) => c[0].q === "lysosomes")).toBe(false);
+    // And the gloss rides the wire for the rail's "sponsor's words" line; absent stays absent.
+    expect(concepts.find((c) => c.term === "lysosomes")!.gloss).toBe(
+      "lysosomal processing of ADC linkers",
+    );
+    expect(concepts.find((c) => c.term === "HER2-low breast cancer")!.gloss).toBeUndefined();
+  });
+
   it("coverage NEVER reaches the fusion weight — rare, zero and absent all weigh the same", async () => {
     mockTopicFindMany.mockResolvedValue([
       { label: "rare" },

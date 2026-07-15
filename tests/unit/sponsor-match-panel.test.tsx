@@ -73,6 +73,19 @@ function candidate(over: Partial<SponsorCandidate> & { cwid: string }): SponsorC
     fusedScore: 0,
     contributions: [],
     technologyCount: 0,
+    // A default research-match block so a fixture candidate is a RESULT (the common case) and is
+    // not dropped by the zero-evidence exclusion. Its term is deliberately one no concept in these
+    // fixtures uses, so it satisfies `hasMatchEvidence` WITHOUT joining to a concept — the coverage
+    // strip and evidence blocks render exactly as before. Tests exercising the exclusion or the
+    // coverage states override `searchEvidence` explicitly.
+    searchEvidence: [
+      {
+        term: "__match__",
+        evidence: { kind: "publications", strength: "tagged", text: "1 of 10 tagged", count: 1 },
+        pubCount: 10,
+        keyPaper: { descriptorUis: ["D_x"], contentQuery: "__match__" },
+      },
+    ],
     ...over,
   };
 }
@@ -200,8 +213,13 @@ async function renderAndSearchPool() {
 }
 
 /** Names of the result rows, in RENDERED (DOM) order — each row links to a profile, so the
- *  profile links in document order are the ranking the user actually sees. */
+ *  profile links in document order are the ranking the user actually sees. Expands the relevance
+ *  floor first (weak-tier rows collapse behind a "Show" toggle), so an order assertion sees the
+ *  WHOLE ranking, not just the head above the floor. Idempotent: the toggle reads "Hide ↑" once
+ *  open, so a second call finds no "Show ↓" and does not re-collapse it. */
 function rowOrder(): string[] {
+  const show = screen.queryByRole("button", { name: /Show ↓/ });
+  if (show) fireEvent.click(show);
   return screen
     .getAllByRole("link")
     .filter((a) => a.getAttribute("href")?.startsWith("/slug-"))
@@ -302,6 +320,20 @@ describe("SponsorMatchPanel", () => {
     expect(screen.queryByText("·rare")).toBeNull();
   });
 
+  it("shows the funder's gloss as the concept's 'sponsor's words' line", async () => {
+    stubFetch({
+      concepts: [
+        { ...CONCEPTS[0], gloss: "lysosomal processing of ADC linkers" },
+        CONCEPTS[1], // no gloss ⇒ no such line
+        CONCEPTS[2],
+      ],
+      candidates: THREE,
+    });
+    await renderAndSearch();
+    expect(document.body.textContent).toContain("lysosomal processing of ADC linkers");
+    expect(document.body.textContent).toContain("sponsor");
+  });
+
   it("shows NO rail on the bespoke shape (empty concepts)", async () => {
     stubFetch({ concepts: [], candidates: BESPOKE });
     await renderAndSearch();
@@ -354,8 +386,9 @@ describe("SponsorMatchPanel", () => {
     expect(screen.getByText("Bob Beta")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(screen.getByText("Alice Alpha")).toBeTruthy();
-    expect(screen.getByText("Cara Gamma")).toBeTruthy();
+    // Restored: all three are back. `rowOrder` expands the floor, so weak-tier Cara — who now sits
+    // below the relevance floor with no filter narrowing to her — is counted too.
+    expect(rowOrder()).toEqual(["Alice Alpha", "Bob Beta", "Cara Gamma"]);
   });
 
   // ── The cap is a RENDER cap (the top-100 bug) ──────────────────────────────
@@ -1524,6 +1557,9 @@ describe("SponsorMatchPanel", () => {
   // ── Rows ───────────────────────────────────────────────────────────────────
   it("renders a fit tier relative to the top candidate, never the raw score", async () => {
     await renderAndSearch();
+    // Cara (~19% of Alice) is weak, which now puts her below the relevance floor — expand it so her
+    // badge is in the DOM. The point of this test is the tier COMPUTATION, not the floor.
+    fireEvent.click(screen.getByRole("button", { name: /Show ↓/ }));
     // Bob is ~98% of Alice's score ⇒ both strong; Cara is ~19% ⇒ weak.
     expect(screen.getAllByText("Strong fit")).toHaveLength(2);
     expect(screen.getByText("Weak fit")).toBeTruthy();
@@ -1536,6 +1572,84 @@ describe("SponsorMatchPanel", () => {
     const link = screen.getByRole("link", { name: "CAR T persistence" });
     expect(link.getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/111/");
     expect(screen.getByText(/90% match/)).toBeTruthy();
+  });
+
+  // ── The relevance floor + zero-evidence exclusion ──────────────────────────
+  it("collapses the weak tier below a floor bar, and Show reveals it — a toggle, not a cut", async () => {
+    await renderAndSearch(); // THREE: Alice + Bob strong, Cara ~19% ⇒ weak
+    // Cara is below the floor: not painted, but not lost. The bar counts her and offers her.
+    expect(screen.queryByText("Cara Gamma")).toBeNull();
+    const bar = screen.getByRole("button", { name: /weaker match/ });
+    expect(bar.textContent).toMatch(/1 weaker match/);
+    fireEvent.click(bar);
+    expect(screen.getByText("Cara Gamma")).toBeTruthy();
+  });
+
+  it("excludes a candidate the spine shipped no evidence for, and says how many are hidden", async () => {
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          fusedScore: 0.9,
+          contributions: [{ term: "Immuno-oncology", rank: 1 }],
+        }),
+        // Pugh ranked into a concept's top-100 on an identity-tail hit — NO research evidence.
+        candidate({
+          cwid: "pugh",
+          name: "Pugh Nomatch",
+          searchEvidence: undefined,
+          contributions: [{ term: "Immuno-oncology", rank: 8 }],
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    // Excluded entirely — not collapsed under the floor, GONE — and the count is stated.
+    expect(screen.queryByText("Pugh Nomatch")).toBeNull();
+    expect(screen.queryByRole("button", { name: /weaker match/ })).toBeNull();
+    expect(screen.getByText(/1 with no evidence hidden/)).toBeTruthy();
+  });
+
+  it("marks each evidence block's provenance — subject-tagged vs keyword only", async () => {
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          fusedScore: 0.9,
+          contributions: [
+            { term: "Immuno-oncology", rank: 1 },
+            { term: "Cancer Metabolism", rank: 1 },
+          ],
+          searchEvidence: [
+            searchEvidence("Immuno-oncology", 142), // strength "tagged" ⇒ structured
+            {
+              term: "Cancer Metabolism",
+              evidence: {
+                kind: "publications",
+                strength: "mention", // free text ⇒ the keyword-only signal
+                text: "3 publications mentioning 'metabolism'",
+              },
+              pubCount: 210,
+              keyPaper: { descriptorUis: [], contentQuery: "metabolism" },
+            },
+          ],
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    expect(document.body.textContent).toContain("subject-tagged");
+    expect(document.body.textContent).toContain("keyword only");
   });
 
   // ── Retained searches (#6d) ────────────────────────────────────────────────
