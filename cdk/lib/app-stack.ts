@@ -1309,6 +1309,33 @@ export class AppStack extends Stack {
         // PROD-off until a clean recency-off vs recency-on run clears the sponsor eval's ~0.0074
         // nDCG noise floor. A one-sided staging run (no recency-off arm) cannot prove it.
         SPONSOR_MATCH_RECENCY: env === "staging" ? "on" : "off",
+        // MATCHA* — the SPONSOR_MATCH* set under the product's new name. Sponsor match is becoming
+        // Matcha: the audience broadens past program officers to department chairs, so the
+        // sponsor-shaped framing goes. See `docs/2026-07-16-matcha-rework-handoff.md`.
+        //
+        // 🔴 THESE ARE DELIBERATELY INERT — NOTHING READS THEM YET, AND THAT IS THE POINT.
+        // Code ships on merge (mutable `:latest` image); env vars move ONLY on a manual
+        // `cdk deploy`. So a rename that lands code reading `MATCHA` before this deploy puts the
+        // name in the RUNNING task definition reads `undefined` — and `SPONSOR_MATCH` gates a 404
+        // (`route.ts`: `if (!isSponsorMatchEnabled()) return 404`), which is prod-ON today. Wrong
+        // order takes the whole feature down in prod. That gap is issue #1765, and it is exactly
+        // how D1's recency shipped dark for a week.
+        //
+        // Each mirrors its SPONSOR_MATCH* twin's value EXACTLY — a rename must not smuggle a flag
+        // flip. Anything eval-gated stays eval-gated under the new name; the gloss and recency
+        // arms are still owed a run that clears the ~0.0074 nDCG noise floor.
+        //
+        // Retirement order, and it is not optional: (1) this deploy, both envs; (2) VERIFY in the
+        // RUNNING task def, querying the container by `name == "app"` — an otel-collector sidecar
+        // reorders between revisions, so `containerDefinitions[0]` can read the sidecar's env and
+        // look like the flag is missing; (3) merge code reading the new names behind a
+        // `(process.env.MATCHA_X ?? process.env.SPONSOR_MATCH_X)` fallback for one release; (4)
+        // only once both envs are confirmed live, drop the SPONSOR_MATCH* set and the fallback,
+        // in that order.
+        MATCHA: "on", // twin of SPONSOR_MATCH (prod-ON since 2026-07-13)
+        MATCHA_SPINE: "on", // twin of SPONSOR_MATCH_SPINE — moves TOGETHER with MATCHA, never alone
+        MATCHA_GLOSS_QUERY: env === "staging" ? "on" : "off", // twin of SPONSOR_MATCH_GLOSS_QUERY
+        MATCHA_RECENCY: env === "staging" ? "on" : "off", // twin of SPONSOR_MATCH_RECENCY
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
