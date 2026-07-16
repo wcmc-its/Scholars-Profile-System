@@ -80,10 +80,12 @@ import {
 } from "@/components/ui/sheet";
 import {
   conceptCoverage,
+  conceptWeight,
   evidenceMatchCount,
   evidenceProvenance,
   fitTier,
   hasMatchEvidence,
+  latestEvidenceYear,
   matchedConcepts,
   matchedEvidence,
   preferenceBoost,
@@ -187,6 +189,10 @@ const SORT_TABS = [
 ] as const;
 type SortKey = (typeof SORT_TABS)[number]["key"];
 
+/** D8 — Detailed (the full evidence card) vs Compact (one scannable row per scholar). */
+type Density = "detailed" | "compact";
+const DENSITY_KEY = "sponsor-match-density";
+
 /** Facet order is the career ladder, not a count ranking — a stage list that reordered itself
  *  per search would be unreadable. */
 const CAREER_STAGE_ORDER: readonly CareerStage[] = ["grad", "postdoc", "early", "mid", "senior"];
@@ -218,6 +224,14 @@ export function SponsorMatchPanel() {
   // request + Edit/Re-run) takes its place — the mockup's "THE ASK" section. "Edit paste"
   // flips this back to the textarea. Starts true (nothing searched yet).
   const [editing, setEditing] = useState(true);
+  // D10 — the ask card has two states: Full (eyebrow + title + clamped paste + audit + actions) and
+  // Compact (a pinned bar: title + top concept chips + read ratio + actions). Fresh paste/re-run
+  // opens Full; a Recent replay opens Compact (already read). Scrolling past the header collapses it
+  // (the effect below); "Show original" restores Full. Per-search state — a new search resets it.
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  // D11 — the read-only paste clamps to ~4 lines until the officer asks for the rest. Reset per
+  // search so a new paste always starts clamped.
+  const [showFullText, setShowFullText] = useState(false);
   const [history, setHistory] = useState<Submission[]>([]);
   const [deptSel, setDeptSel] = useState<ReadonlySet<string>>(new Set());
   const [conceptSel, setConceptSel] = useState<ReadonlySet<string>>(new Set());
@@ -228,6 +242,19 @@ export function SponsorMatchPanel() {
   const [clinicianOnly, setClinicianOnly] = useState(false);
   const [roleSel, setRoleSel] = useState<ReadonlySet<string>>(new Set());
   const [sort, setSort] = useState<SortKey>("fit");
+  // D8 — density, remembered across visits. The results only render after a client fetch, so reading
+  // localStorage in the initializer is safe (no server render reaches this — the idle page has no list).
+  const [density, setDensity] = useState<Density>(() =>
+    typeof window !== "undefined" && window.localStorage.getItem(DENSITY_KEY) === "compact"
+      ? "compact"
+      : "detailed",
+  );
+  useEffect(() => {
+    if (typeof window !== "undefined") window.localStorage.setItem(DENSITY_KEY, density);
+  }, [density]);
+  // D8 — cwids force-expanded to the detailed card while in Compact mode (a row click). Cleared on
+  // each new search: a previous run's expansions do not carry to different people.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   // The two halves of the contract payload. `candidates` is fetched ONCE per search and
   // never refetched by a slider; `concepts` is the editable rail. Everything below is
   // derived from them.
@@ -299,8 +326,9 @@ export function SponsorMatchPanel() {
     setRoleSel(new Set());
   }
 
-  /** The ONLY network call. A search — never a re-rank. */
-  async function runSearch(text: string) {
+  /** The ONLY network call. A search — never a re-rank. `fromHistory` opens the ask card COMPACT
+   *  (a Recent replay is text the officer has already read), a fresh paste/re-run opens it Full. */
+  async function runSearch(text: string, opts: { fromHistory?: boolean } = {}) {
     if (pending || text.trim().length === 0) return;
     setStatus({ kind: "loading" });
     try {
@@ -316,12 +344,15 @@ export function SponsorMatchPanel() {
         // `{candidates?; concepts?}` opted the envelope out of exactly that.
         const data = (await r.json()) as Partial<SponsorMatchResponse>;
         clearFilters(); // stale facet selections must not silently hide fresh results
+        setExpanded(new Set()); // D8 — previous run's per-row expansions don't carry to new people
         void loadHistory(); // the row the server just retained
         setCandidates(data.candidates ?? []);
         setConcepts(data.concepts ?? []);
         setTitleSummary(data.titleSummary);
         setMatchedText(text);
         setEditing(false); // a committed search → show the read-only ask, not the textarea
+        setHeaderCollapsed(!!opts.fromHistory); // D10 — Full on a fresh paste/re-run, Compact on replay
+        setShowFullText(false); // D11 — new paste starts clamped
         setRunId((n) => n + 1); // #1696 — a new run: every row's claimed-pmid set starts empty
         // #1654 — detected preferences arrive ACTIVE. The sponsor said it; the default is to
         // honour it. Deselecting is the officer's override, not their opt-in.
@@ -425,6 +456,41 @@ export function SponsorMatchPanel() {
   const askMarked = useMemo(() => markedConceptCount(askSegments), [askSegments]);
   // Show the read-only ask once a search has committed and the officer is not editing the paste.
   const showAskCard = !editing && matchedText.length > 0;
+
+  // D10 — the ask card's scroll-collapse. A 0-height sentinel sits at the top of the Full card;
+  // once it scrolls above the viewport top the header collapses to the pinned Compact bar. One-way
+  // (like the one-shot observers elsewhere in this file) — "Show original" is the only way back.
+  const askWrapRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showAskCard || headerCollapsed) return;
+    const node = sentinelRef.current;
+    if (!node || typeof IntersectionObserver === "undefined") return;
+    const obs = new IntersectionObserver(
+      ([e]) => {
+        if (e && !e.isIntersecting && e.boundingClientRect.top < 0) setHeaderCollapsed(true);
+      },
+      { threshold: 0 },
+    );
+    obs.observe(node);
+    return () => obs.disconnect();
+  }, [showAskCard, headerCollapsed]);
+
+  // D10 — the compact bar's chips: the most-asked-for concepts (by the same conceptWeight the strip
+  // and the ranking use), a few shown and the rest counted (+N).
+  const topConceptChips = useMemo(() => {
+    const sorted = [...concepts].sort((a, b) => conceptWeight(b) - conceptWeight(a));
+    return { head: sorted.slice(0, 3), extra: Math.max(0, sorted.length - 3) };
+  }, [concepts]);
+
+  // D10 — restore Full and bring it into view, so the scroll-collapse observer re-arms on a header
+  // that is actually on screen rather than immediately re-collapsing because we were scrolled down.
+  const showOriginal = useCallback(() => {
+    setHeaderCollapsed(false);
+    requestAnimationFrame(() =>
+      askWrapRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }),
+    );
+  }, []);
 
   const deptFacet = useMemo(() => {
     const counts = new Map<string, number>();
@@ -656,7 +722,7 @@ export function SponsorMatchPanel() {
                     type="button"
                     onClick={() => {
                       setDescription(h.description);
-                      void runSearch(h.description);
+                      void runSearch(h.description, { fromHistory: true }); // D10 — replay opens Compact
                     }}
                     className="text-foreground/90 mt-1 block w-full text-left text-sm font-medium underline-offset-4 hover:underline"
                   >
@@ -678,6 +744,28 @@ export function SponsorMatchPanel() {
       </Sheet>
     ) : null;
 
+  // D8 — a result row is the detailed card when density is Detailed OR the officer expanded it from
+  // Compact; otherwise the one-line CompactRow, which expands in place on click. Used for both the
+  // primary rows and the below-floor weak rows, so the floor and the density toggle compose.
+  const renderResult = ({ c, rank }: { c: SponsorCandidate; rank: number }) =>
+    density === "detailed" || expanded.has(c.cwid) ? (
+      <ResearcherRow
+        candidate={c}
+        rank={rank}
+        concepts={concepts}
+        topScore={topScore}
+        runId={runId}
+      />
+    ) : (
+      <CompactRow
+        candidate={c}
+        rank={rank}
+        concepts={concepts}
+        topScore={topScore}
+        onExpand={() => setExpanded((s) => toggled(s, c.cwid))}
+      />
+    );
+
   return (
     <div data-slot="sponsor-match-panel">
       <div className="mb-5">
@@ -694,73 +782,170 @@ export function SponsorMatchPanel() {
            shown READ-ONLY with its pulled-out terms highlighted, titled by the extractor's essence
            handle, with Edit paste / Re-run. (Title stays the console's sans, not the mockup's
            serif chrome — the panel deliberately keeps console chrome; see the file header.) */
-        <section
-          data-slot="sponsor-match-ask-card"
-          className="border-border bg-background mb-4 rounded-lg border"
-        >
-          <div className="border-border border-b px-5 py-4">
-            <span className="text-muted-foreground block text-[11px] font-semibold tracking-[0.09em] uppercase">
-              What we read from the sponsor
+        headerCollapsed ? (
+          /* D10 — COMPACT / pinned. `sticky top-0` keeps the sponsor's ask in view while the officer
+             scrolls the results, without the full card eating the screen. Title + the most-asked-for
+             concepts (+N) + the read ratio (D11) + the same actions. Direct child of the panel (not
+             a short wrapper) so its containing block is tall enough for sticky to hold. */
+          <div
+            data-slot="sponsor-match-ask-compact"
+            className="border-border bg-background sticky top-0 z-30 mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3.5 py-2.5 shadow-md"
+          >
+            <span aria-hidden="true" className="text-xs">
+              📌
             </span>
             {ask ? (
-              <h2
+              <span
                 data-slot="sponsor-match-ask"
-                className="mt-1.5 text-lg font-semibold tracking-tight"
+                className="min-w-0 truncate text-sm font-semibold"
               >
                 {ask.title}
-              </h2>
+              </span>
             ) : null}
-          </div>
-          <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-start">
-            <div className="min-w-0 flex-1">
-              {/* The pasted request, read-only, each pulled-out term marked. `break-words` for the
-                  300-char Outlook SafeLinks URL that carries no break opportunity. */}
-              <p
-                data-slot="sponsor-match-ask-quote"
-                className="text-muted-foreground text-sm leading-relaxed break-words whitespace-pre-wrap"
-              >
-                {askSegments.map((s, i) =>
-                  s.term ? (
-                    <mark
-                      key={i}
-                      title={s.term}
-                      className="text-foreground rounded bg-[var(--color-accent-slate)]/15 px-0.5"
-                    >
-                      {s.text}
-                    </mark>
-                  ) : (
-                    <span key={i}>{s.text}</span>
-                  ),
-                )}
-              </p>
-              {/* Honest lower bound (kept from the old readback): a concept goes unmarked when the
-                  matcher canonicalised it to a form not verbatim in the paste — never because it
-                  was ignored. Shown only when something is actually unmarked. */}
-              {concepts.length > 0 && askMarked < concepts.length ? (
-                <p className="text-muted-foreground mt-2 text-xs leading-relaxed">
-                  {askMarked} of {concepts.length} concepts are highlighted — a concept goes
-                  unmarked when the matcher wrote it in standard terms that do not appear here (an
-                  abbreviation expanded, a brand name resolved). Unmarked never means ignored:
-                  every concept below ranks.
-                </p>
-              ) : null}
-            </div>
-            <div className="flex shrink-0 flex-wrap gap-2">
-              <Button type="button" variant="outline" onClick={() => setEditing(true)}>
-                Edit paste
-              </Button>
-              <Button
+            {topConceptChips.head.length > 0 ? (
+              <span className="flex flex-wrap items-center gap-1">
+                {topConceptChips.head.map((c) => (
+                  <span
+                    key={c.term}
+                    className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[11px]"
+                  >
+                    {c.term}
+                  </span>
+                ))}
+                {topConceptChips.extra > 0 ? (
+                  <span className="text-muted-foreground text-[11px]">+{topConceptChips.extra}</span>
+                ) : null}
+              </span>
+            ) : null}
+            {/* D11 — the extraction audit rides the pinned bar, so an under-read is visible without
+                expanding; tapping it restores the highlighted full text. */}
+            {concepts.length > 0 ? (
+              <button
                 type="button"
-                disabled={pending}
-                onClick={() => void runSearch(matchedText)}
-                className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
+                onClick={showOriginal}
+                title="Concepts found verbatim in the paste (the rest were canonicalized to standard terms). Show the highlighted original."
+                className="text-muted-foreground text-[11px] tabular-nums underline-offset-2 hover:underline"
               >
-                {pending ? "Ranking…" : "Re-run match"}
-              </Button>
-              {historyDrawer}
-            </div>
+                {askMarked}/{concepts.length} read
+              </button>
+            ) : null}
+            <span className="flex-1" />
+            <button
+              type="button"
+              onClick={showOriginal}
+              className="text-xs text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+            >
+              Show original ▾
+            </button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setEditing(true)}>
+              Edit paste
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={pending}
+              onClick={() => void runSearch(matchedText)}
+              className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
+            >
+              {pending ? "Ranking…" : "Re-run"}
+            </Button>
           </div>
-        </section>
+        ) : (
+          /* D10/D11 — FULL. `askWrapRef` is the scroll-into-view target for "Show original"; the
+             sentinel after the card is what the collapse observer watches (past the header). */
+          <div ref={askWrapRef} className="mb-4">
+            <section
+              data-slot="sponsor-match-ask-card"
+              className="border-border bg-background rounded-lg border"
+            >
+              <div className="border-border border-b px-5 py-4">
+                <span className="text-muted-foreground block text-[11px] font-semibold tracking-[0.09em] uppercase">
+                  What we read from the sponsor
+                </span>
+                {ask ? (
+                  <h2
+                    data-slot="sponsor-match-ask"
+                    className="mt-1.5 text-lg font-semibold tracking-tight"
+                  >
+                    {ask.title}
+                  </h2>
+                ) : null}
+              </div>
+              <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-start">
+                <div className="min-w-0 flex-1">
+                  {/* The pasted request, read-only, each pulled-out term marked. `break-words` for
+                      the 300-char Outlook SafeLinks URL that carries no break opportunity. D11 —
+                      clamped to ~4 lines until "Show full text". */}
+                  <p
+                    data-slot="sponsor-match-ask-quote"
+                    className={`text-muted-foreground text-sm leading-relaxed break-words whitespace-pre-wrap ${
+                      showFullText ? "" : "line-clamp-4"
+                    }`}
+                  >
+                    {askSegments.map((s, i) =>
+                      s.term ? (
+                        <mark
+                          key={i}
+                          title={s.term}
+                          className="text-foreground rounded bg-[var(--color-accent-slate)]/15 px-0.5"
+                        >
+                          {s.text}
+                        </mark>
+                      ) : (
+                        <span key={i}>{s.text}</span>
+                      ),
+                    )}
+                  </p>
+                  {/* D11 — expand the clamped paste; D10 — collapse the whole header to the pinned bar. */}
+                  <div className="mt-1.5 flex items-center gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setShowFullText((v) => !v)}
+                      className="text-xs text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+                    >
+                      {showFullText ? "Show less ▴" : "Show full text ▾"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setHeaderCollapsed(true)}
+                      className="text-muted-foreground text-xs underline-offset-4 hover:underline"
+                    >
+                      Collapse ▴
+                    </button>
+                  </div>
+                  {/* Honest lower bound (kept from the old readback): a concept goes unmarked when the
+                      matcher canonicalised it to a form not verbatim in the paste — never because it
+                      was ignored. Shown only when something is actually unmarked. */}
+                  {concepts.length > 0 && askMarked < concepts.length ? (
+                    <p className="text-muted-foreground mt-2 text-xs leading-relaxed">
+                      {askMarked} of {concepts.length} concepts are highlighted — a concept goes
+                      unmarked when the matcher wrote it in standard terms that do not appear here (an
+                      abbreviation expanded, a brand name resolved). Unmarked never means ignored:
+                      every concept below ranks.
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={() => setEditing(true)}>
+                    Edit paste
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => void runSearch(matchedText)}
+                    className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
+                  >
+                    {pending ? "Ranking…" : "Re-run match"}
+                  </Button>
+                  {historyDrawer}
+                </div>
+              </div>
+            </section>
+            {/* D10 — the collapse sentinel sits just past the header; when it scrolls above the
+                viewport top the observer pins the compact bar. `aria-hidden` — it is a scroll probe. */}
+            <div ref={sentinelRef} aria-hidden="true" className="h-0" />
+          </div>
+        )
       ) : (
         <form
           onSubmit={(e) => {
@@ -968,6 +1153,28 @@ export function SponsorMatchPanel() {
                     {resultsSummary(visible.length, filtered.length, ranked.length)}
                   </h2>
                   <div className="ml-auto flex items-center gap-2">
+                    {/* D8 — density toggle. Same pill idiom as the sort tabs beside it. */}
+                    <div
+                      role="group"
+                      aria-label="Result density"
+                      className="flex items-center gap-1"
+                    >
+                      {(["detailed", "compact"] as const).map((d) => (
+                        <button
+                          key={d}
+                          type="button"
+                          aria-pressed={density === d}
+                          onClick={() => setDensity(d)}
+                          className={`rounded-full border px-2.5 py-0.5 text-xs capitalize transition-colors ${
+                            density === d
+                              ? "border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
+                              : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
+                          }`}
+                        >
+                          {d}
+                        </button>
+                      ))}
+                    </div>
                     <div
                       role="group"
                       aria-label="Sort researchers"
@@ -1041,15 +1248,7 @@ export function SponsorMatchPanel() {
                   <>
                     <ul>
                       {primaryRows.map(({ c, rank }) => (
-                        <li key={c.cwid}>
-                          <ResearcherRow
-                            candidate={c}
-                            rank={rank}
-                            concepts={concepts}
-                            topScore={topScore}
-                            runId={runId}
-                          />
-                        </li>
+                        <li key={c.cwid}>{renderResult({ c, rank })}</li>
                       ))}
                     </ul>
 
@@ -1081,15 +1280,7 @@ export function SponsorMatchPanel() {
                         {showWeak ? (
                           <ul className="mt-4">
                             {collapsedWeak.map(({ c, rank }) => (
-                              <li key={c.cwid}>
-                                <ResearcherRow
-                                  candidate={c}
-                                  rank={rank}
-                                  concepts={concepts}
-                                  topScore={topScore}
-                                  runId={runId}
-                                />
-                              </li>
+                              <li key={c.cwid}>{renderResult({ c, rank })}</li>
                             ))}
                           </ul>
                         ) : null}
@@ -1397,38 +1588,106 @@ const COVERAGE_TITLE: Record<ConceptCoverage["state"], string> = {
  * eight divs is not a thing a screen reader can be made to say usefully, and the coverage
  * sentence is what a reader would want read out anyway.
  */
-function CoverageStrip({ coverage }: { coverage: ConceptCoverage[] }) {
+function CoverageStrip({ coverage, inline = false }: { coverage: ConceptCoverage[]; inline?: boolean }) {
   if (coverage.length === 0) return null;
   const withEvidence = coverage.filter((c) => c.state === "evidence");
-  const rankedOnly = coverage.filter((c) => c.state === "ranked");
+  const bar = (
+    <div className="flex gap-0.5" aria-hidden="true">
+      {coverage.map(({ concept, weight, state }) => (
+        <div
+          key={concept.term}
+          title={`${concept.term} — ${COVERAGE_TITLE[state]}`}
+          // `flexBasis: 0` so the widths are the weights and nothing else; the min-width keeps a
+          // near-muted concept from collapsing to an invisible sliver you cannot hover.
+          style={{ flexGrow: weight, flexBasis: 0 }}
+          className={`h-2 min-w-[3px] rounded-[2px] ${COVERAGE_CLASS[state]}`}
+        />
+      ))}
+    </div>
+  );
+  // D8 — inline (compact-row) variant: the bar only, at a fixed width, no caption. The row's x/8
+  // carries the count the caption would. Same segments as the detailed strip, so they read alike.
+  if (inline) {
+    return (
+      <div className="w-[110px] shrink-0" data-slot="sponsor-match-coverage">
+        {bar}
+      </div>
+    );
+  }
   return (
     <div className="mt-2" data-slot="sponsor-match-coverage">
-      <div className="flex gap-0.5" aria-hidden="true">
-        {coverage.map(({ concept, weight, state }) => (
-          <div
-            key={concept.term}
-            title={`${concept.term} — ${COVERAGE_TITLE[state]}`}
-            // `flexBasis: 0` so the widths are the weights and nothing else; the min-width keeps a
-            // near-muted concept from collapsing to an invisible sliver you cannot hover.
-            style={{ flexGrow: weight, flexBasis: 0 }}
-            className={`h-2 min-w-[3px] rounded-[2px] ${COVERAGE_CLASS[state]}`}
-          />
-        ))}
-      </div>
-      {/* Three states, three clauses — and they must ADD UP to the number of concepts asked.
-          The first version of this line said "Covers 8 of 8 concepts asked" over a card that also
-          said "ranked, no evidence shown" twice, because `covered` counted every concept the person
-          ranked under while the blocks below could only ever show MAX_EVIDENCE_CONCEPTS (3) of
-          them. Both statements were true and together they read as a contradiction. Say which
-          concepts we can SHOW evidence for, which ones they also ranked under, and which ones they
-          have nothing for. */}
+      {bar}
+      {/* D7 — the "also ranked under X, Y" prose is gone. A sub-threshold hit is now carried by
+          the strip's own lighter `ranked` fill (see COVERAGE_CLASS) and the segment's hover title,
+          not a sentence that duplicated it. The line states only the fact the strip can't: how many
+          of the asked concepts we can SHOW evidence for. */}
       <p className="text-muted-foreground mt-1.5 text-xs">
         Evidence for {withEvidence.length} of {coverage.length} concepts asked
-        {rankedOnly.length > 0 ? (
-          <> · also ranked under {rankedOnly.map((c) => c.concept.term).join(", ")}</>
-        ) : null}
       </p>
     </div>
+  );
+}
+
+/**
+ * D8 — one scannable row per scholar: rank · name+title · tier · coverage strip · asks covered
+ * (x/8) · latest-evidence year · ›. A button that expands to the detailed card in place.
+ *
+ * Everything here is client-derived from the candidate already in the browser — NO artifact fetch,
+ * which is the whole point of the compact register: 100 rows cost 0 key-paper requests. `latest YYYY`
+ * comes from `latestEvidenceYear`, which is populated only on the bespoke path today; the slot stays
+ * empty on the production spine path until D1 surfaces a per-scholar year (and its stale colour-flag).
+ */
+function CompactRow({
+  candidate,
+  rank,
+  concepts,
+  topScore,
+  onExpand,
+}: {
+  candidate: SponsorCandidate;
+  rank: number;
+  concepts: SponsorConcept[];
+  topScore: number;
+  onExpand: () => void;
+}) {
+  const coverage = conceptCoverage(candidate, concepts);
+  const withEvidence = coverage.filter((c) => c.state === "evidence").length;
+  const tier = fitTier(candidate.fusedScore, topScore);
+  const year = latestEvidenceYear(candidate);
+  return (
+    <button
+      type="button"
+      onClick={onExpand}
+      aria-label={`Expand ${candidate.name}`}
+      data-slot="sponsor-match-compact-row"
+      className="border-border hover:bg-muted/40 flex w-full items-center gap-2.5 border-t px-2 py-2 text-left transition-colors"
+    >
+      <span className="text-muted-foreground w-6 shrink-0 text-right text-xs tabular-nums">
+        {rank}
+      </span>
+      <span className="min-w-0 flex-1 truncate">
+        <span className="text-sm font-medium">{candidate.name}</span>
+        {candidate.title ? (
+          <span className="text-muted-foreground ml-1.5 text-xs">{candidate.title}</span>
+        ) : null}
+      </span>
+      {/* Short tier word here (mockup's dense list), not the detailed card's "Strong fit". */}
+      <span
+        className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize ${TIER_CLASS[tier]}`}
+      >
+        {tier}
+      </span>
+      <CoverageStrip coverage={coverage} inline />
+      <span className="text-muted-foreground w-9 shrink-0 text-right text-xs tabular-nums">
+        {withEvidence}/{coverage.length}
+      </span>
+      <span className="text-muted-foreground w-16 shrink-0 text-right text-[11px] tabular-nums">
+        {year != null ? `latest ${year}` : ""}
+      </span>
+      <span className="text-muted-foreground shrink-0 text-xs" aria-hidden="true">
+        ›
+      </span>
+    </button>
   );
 }
 
@@ -1718,9 +1977,9 @@ function ResearcherRow({
             })}
           </div>
         ) : null}
-        {/* The "ranked, no evidence shown" rows used to live here, one per concept. Deleted: they
-            said the same thing the coverage line's "also ranked under …" clause now says once, and
-            said it in a way that read as a contradiction of the count beside it. */}
+        {/* The "ranked, no evidence shown" rows used to live here, one per concept. Deleted: the
+            strip's lighter `ranked` segment now carries that fact (D7), and a per-concept row said
+            it in a way that read as a contradiction of the count beside it. */}
         {topics.length > 0 ? (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {topics.map((t) => (

@@ -1404,14 +1404,11 @@ describe("SponsorMatchPanel", () => {
     expect(screen.queryByText("WCM SPORE in Prostate Cancer")).toBeNull();
   });
 
-  it("the coverage line ADDS UP — evidence, also-ranked, and gaps account for every concept", async () => {
-    // THE CONTRADICTION THIS REPLACES. The line used to read "Covers 2 of 3 concepts asked" while
-    // the card below also said "ranked, no evidence shown" — both true, and together nonsense:
-    // `covered` counted every concept the person RANKED under, but the server ships evidence blocks
-    // for at most MAX_EVIDENCE_CONCEPTS of them. Anyone matching more concepts than that hit it.
-    //
-    // Three clauses now, and they must partition the ask: evidence for / also ranked under / no
-    // evidence for. Alice ranks under 2 of the 3 concepts and has a block for only ONE.
+  it("coverage line shows the evidence count; a ranked-only concept is the strip's partial fill, not prose (D7)", async () => {
+    // D7 — the coverage caption no longer enumerates "also ranked under X". A sub-threshold hit
+    // (ranked under a concept, no evidence block) is now carried by the strip's own lighter `ranked`
+    // segment, which names the concept on hover. The caption states only the count the strip can't.
+    // Alice ranks under 2 of the 3 concepts and has a block for only ONE.
     stubFetch({
       concepts: CONCEPTS,
       candidates: [
@@ -1434,8 +1431,13 @@ describe("SponsorMatchPanel", () => {
 
     const line = document.querySelector('[data-slot="sponsor-match-coverage"] p')!.textContent!;
     expect(line).toContain("Evidence for 1 of 3 concepts asked");
-    // Ranked, but capped out of an evidence block — NOT a gap, and no longer claimed as "covered".
-    expect(line).toContain("also ranked under Cancer Metabolism");
+    // D7 — the prose is gone; the ranked-only concept is the strip's lighter segment, which names
+    // itself on hover ("Cancer Metabolism — ranked under this, evidence not shown").
+    expect(line).not.toContain("also ranked under");
+    const rankedSeg = document.querySelector(
+      '[data-slot="sponsor-match-coverage"] [title^="Cancer Metabolism"]',
+    )!;
+    expect(rankedSeg.getAttribute("title")).toContain("ranked under this");
     // A genuine gap: she never ranked under it at all. It moved OFF the coverage line to a single
     // muted line at the card's foot (mockup), so the strip caption no longer carries it.
     expect(line).not.toContain("no evidence for");
@@ -1444,6 +1446,33 @@ describe("SponsorMatchPanel", () => {
     expect(gaps).toContain("CRISPR screening");
     // 1 + 1 + 1 = the 3 concepts asked. The old line could not make that claim.
     expect(screen.queryByText(/ranked, no evidence shown/)).toBeNull();
+  });
+
+  it("Compact density renders one scannable row per scholar; a row click expands the detailed card (D8/D9)", async () => {
+    await renderAndSearch(); // default Detailed (localStorage cleared in beforeEach)
+    // Detailed by default: the full evidence card is present, no compact rows.
+    expect(document.querySelector('[data-slot="sponsor-match-row"]')).not.toBeNull();
+    expect(document.querySelector('[data-slot="sponsor-match-compact-row"]')).toBeNull();
+
+    // Toggle to Compact → one-line rows, no detailed cards.
+    fireEvent.click(screen.getByRole("button", { name: "compact" }));
+    expect(document.querySelector('[data-slot="sponsor-match-row"]')).toBeNull();
+    expect(
+      document.querySelectorAll('[data-slot="sponsor-match-compact-row"]').length,
+    ).toBeGreaterThan(0);
+
+    // Alice carries a 2024 paper on the bespoke path → the row shows the latest year. D9 — a compact
+    // row carries no no-evidence enumeration.
+    const alice = screen.getByRole("button", { name: "Expand Alice Alpha" });
+    expect(alice.textContent).toContain("latest 2024");
+    expect(alice.querySelector('[data-slot="sponsor-match-gaps"]')).toBeNull();
+
+    // A row click expands THAT scholar to the detailed card in place; the rest stay compact.
+    fireEvent.click(alice);
+    const card = document.querySelector('[data-slot="sponsor-match-row"]');
+    expect(card).not.toBeNull();
+    expect(card!.textContent).toContain("Alice Alpha");
+    expect(document.querySelector('[data-slot="sponsor-match-compact-row"]')).not.toBeNull(); // Bob still compact
   });
 
   // ── Sponsor preferences (#1654) ────────────────────────────────────────────
