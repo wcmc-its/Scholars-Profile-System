@@ -91,10 +91,12 @@ import {
   preferenceBoost,
   PREFERENCE_LAMBDA,
   rareTerms,
+  staleBefore,
   TIER_GOOD,
   rerankCandidates,
   sponsorAskFrom,
   type ConceptCoverage,
+  type RecencyMode,
   type EvidenceProvenance,
   type SponsorCandidate,
   type SponsorConcept,
@@ -193,6 +195,16 @@ type SortKey = (typeof SORT_TABS)[number]["key"];
 type Density = "detailed" | "compact";
 const DENSITY_KEY = "sponsor-match-density";
 
+/** D3 — the recency dial. Same pill idiom as the density/sort tabs beside it. "Since" carries a
+ *  year, so it opens on a sensible cutoff and offers a span back from today. */
+const RECENCY_TABS = [
+  { key: "any", label: "Any" },
+  { key: "recent", label: "Prefer recent" },
+  { key: "since", label: "Since" },
+] as const;
+const RECENCY_SINCE_DEFAULT_AGE = 5;
+const RECENCY_SINCE_SPAN = 15;
+
 /** Facet order is the career ladder, not a count ranking — a stage list that reordered itself
  *  per search would be unreadable. */
 const CAREER_STAGE_ORDER: readonly CareerStage[] = ["grad", "postdoc", "early", "mid", "senior"];
@@ -252,6 +264,13 @@ export function SponsorMatchPanel() {
   useEffect(() => {
     if (typeof window !== "undefined") window.localStorage.setItem(DENSITY_KEY, density);
   }, [density]);
+  // D3 — how much recency counts for THIS ask. NOT remembered like density: it is a property of the
+  // sponsor's request, not of the officer, and carrying one ask's dial onto the next would silently
+  // re-rank a fresh search. Default "recent" = D1's curve = what the server fused with, so the list
+  // opens exactly as the ranker sent it; moving this re-ranks the already-fetched candidates in the
+  // browser, like the centrality slider — no re-query.
+  const [recency, setRecency] = useState<RecencyMode>("recent");
+  const currentYear = useMemo(() => new Date().getUTCFullYear(), []);
   // D8 — cwids force-expanded to the detailed card while in Compact mode (a row click). Cleared on
   // each new search: a previous run's expansions do not carry to different people.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -353,6 +372,7 @@ export function SponsorMatchPanel() {
         setEditing(false); // a committed search → show the read-only ask, not the textarea
         setHeaderCollapsed(!!opts.fromHistory); // D10 — Full on a fresh paste/re-run, Compact on replay
         setShowFullText(false); // D11 — new paste starts clamped
+        setRecency("recent"); // D3 — the dial is per-ask; a new sponsor starts at the ranker's default
         setRunId((n) => n + 1); // #1696 — a new run: every row's claimed-pmid set starts empty
         // #1654 — detected preferences arrive ACTIVE. The sponsor said it; the default is to
         // honour it. Deselecting is the officer's override, not their opt-in.
@@ -407,18 +427,27 @@ export function SponsorMatchPanel() {
 
   const ranked = useMemo(
     () =>
-      rerankCandidates(
-        results,
-        concepts,
-        activePreferences.length > 0
+      rerankCandidates(results, concepts, {
+        // D3 — the officer's dial. "recent" (the default) is the server's own weighting, so an
+        // untouched control reproduces the shipped order; anything else is a deliberate re-rank.
+        recency,
+        ...(activePreferences.length > 0
           ? {
               prefBoost: (c) => preferenceBoost(c, activePreferences),
               lambda: PREFERENCE_LAMBDA,
             }
-          : {},
-      ),
-    [results, concepts, activePreferences],
+          : {}),
+      }),
+    [results, concepts, activePreferences, recency],
   );
+
+  // D3 — the dial only means anything when the payload carries years (SPONSOR_MATCH_RECENCY on).
+  // Absent ⇒ every weight is 1 and the control would be a lie, so it does not render.
+  const hasRecencyData = useMemo(() => results.some((c) => c.mostRecentYear != null), [results]);
+  // D8 — the boundary the compact row's year is flagged against, derived from the ACTIVE mode
+  // (see `staleBefore`): the officer's own cutoff under "Since", one half-life under "Prefer
+  // recent", and null under "Any" — where nothing is weighing recency, so nothing claims stale.
+  const staleYear = useMemo(() => staleBefore(recency, currentYear), [recency, currentYear]);
 
   const topScore = ranked[0]?.fusedScore ?? 0;
 
@@ -762,6 +791,7 @@ export function SponsorMatchPanel() {
         rank={rank}
         concepts={concepts}
         topScore={topScore}
+        staleYear={staleYear}
         onExpand={() => setExpanded((s) => toggled(s, c.cwid))}
       />
     );
@@ -1153,7 +1183,60 @@ export function SponsorMatchPanel() {
                   <h2 className="text-base font-semibold">
                     {resultsSummary(visible.length, filtered.length, ranked.length)}
                   </h2>
-                  <div className="ml-auto flex items-center gap-2">
+                  {/* gap-4 BETWEEN groups against gap-1 within: three adjacent pill groups with a
+                      near-equal gap read as one long undifferentiated row (the D3 dial made it
+                      seven pills), and the officer can no longer see which pill answers which
+                      question. The container wraps, so the extra width costs nothing. */}
+                  <div className="ml-auto flex flex-wrap items-center gap-4">
+                    {/* D3 — recency dial. Same pill idiom as the density/sort tabs. Hidden entirely
+                        when the payload carries no years, because a dial that cannot move anything
+                        is worse than no dial. "Since" reveals a native year picker — a soft cutoff
+                        that down-weights older evidence to the floor, never hides it (that is D4). */}
+                    {hasRecencyData ? (
+                      <div role="group" aria-label="Recency" className="flex items-center gap-1">
+                        {RECENCY_TABS.map((t) => {
+                          const active =
+                            t.key === "since" ? typeof recency === "object" : recency === t.key;
+                          return (
+                            <button
+                              key={t.key}
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() =>
+                                setRecency(
+                                  t.key === "since"
+                                    ? { since: currentYear - RECENCY_SINCE_DEFAULT_AGE }
+                                    : t.key,
+                                )
+                              }
+                              className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                                active
+                                  ? "border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
+                                  : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
+                              }`}
+                            >
+                              {t.label}
+                            </button>
+                          );
+                        })}
+                        {typeof recency === "object" ? (
+                          <select
+                            aria-label="Recency cutoff year"
+                            value={recency.since}
+                            onChange={(e) => setRecency({ since: Number(e.target.value) })}
+                            className="border-border bg-background text-foreground/80 rounded-full border px-1.5 py-0.5 text-xs"
+                          >
+                            {Array.from({ length: RECENCY_SINCE_SPAN }, (_, i) => currentYear - i).map(
+                              (y) => (
+                                <option key={y} value={y}>
+                                  {y}
+                                </option>
+                              ),
+                            )}
+                          </select>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {/* D8 — density toggle. Same pill idiom as the sort tabs beside it. */}
                     <div
                       role="group"
@@ -1638,24 +1721,32 @@ function CoverageStrip({ coverage, inline = false }: { coverage: ConceptCoverage
  * comes from `latestEvidenceYear`; D1 surfaced the per-scholar year on the production spine path
  * (`candidate.mostRecentYear`, under `SPONSOR_MATCH_RECENCY`), so the slot now renders there when the
  * flag is on. The bespoke path still reads `evidence.papers`. Absent (flag off / no year) ⇒ no year.
+ *
+ * D3/D8 — the year is FLAGGED (de-emphasised) below `staleYear`, the boundary derived from the
+ * officer's active recency mode (`staleBefore`). Under "Any" the boundary is null and the year
+ * renders unflagged: nothing is weighing recency there, so nothing may claim a match is stale.
  */
 function CompactRow({
   candidate,
   rank,
   concepts,
   topScore,
+  staleYear,
   onExpand,
 }: {
   candidate: SponsorCandidate;
   rank: number;
   concepts: SponsorConcept[];
   topScore: number;
+  /** D8 — flag the year below this; `null` ⇒ unflagged (see `staleBefore`). */
+  staleYear: number | null;
   onExpand: () => void;
 }) {
   const coverage = conceptCoverage(candidate, concepts);
   const withEvidence = coverage.filter((c) => c.state === "evidence").length;
   const tier = fitTier(candidate.fusedScore, topScore);
   const year = latestEvidenceYear(candidate);
+  const stale = year != null && staleYear != null && year < staleYear;
   return (
     <button
       type="button"
@@ -1683,7 +1774,16 @@ function CompactRow({
       <span className="text-muted-foreground w-9 shrink-0 text-right text-xs tabular-nums">
         {withEvidence}/{coverage.length}
       </span>
-      <span className="text-muted-foreground w-16 shrink-0 text-right text-[11px] tabular-nums">
+      {/* D8 — the stale flag is DE-EMPHASIS, not a hue, and deliberately so: every house colour is
+          already spoken for (green = strong/tagged, amber = good-tier AND keyword-only, blue =
+          provenance, purple = technology), so an "old" colour would make one of them mean three
+          things. A stale year recedes instead — which is also what the ranker is doing to it. */}
+      <span
+        title={stale ? `Latest evidence predates ${staleYear} — recency is down-weighting this match` : undefined}
+        className={`w-16 shrink-0 text-right text-[11px] tabular-nums ${
+          stale ? "text-muted-foreground/50" : "text-muted-foreground"
+        }`}
+      >
         {year != null ? `latest ${year}` : ""}
       </span>
       <span className="text-muted-foreground shrink-0 text-xs" aria-hidden="true">
