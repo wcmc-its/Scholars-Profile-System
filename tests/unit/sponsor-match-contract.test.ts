@@ -20,6 +20,7 @@ import {
   fitTier,
   fusedScore,
   recencyWeight,
+  staleBefore,
   RECENCY_FLOOR,
   RECENCY_HALF_LIFE_YEARS,
   hasMatchEvidence,
@@ -625,6 +626,73 @@ describe("recencyWeight — D1 recency curve", () => {
 
   it("clamps a future year to age 0 (no boost above 1)", () => {
     expect(recencyWeight(2030, 2026)).toBe(1);
+  });
+});
+
+describe("recencyWeight — D3 modes", () => {
+  it('defaults to "recent" — the server\'s curve, so an untouched control reproduces its order', () => {
+    expect(recencyWeight(2000, 2026)).toBe(recencyWeight(2000, 2026, "recent"));
+  });
+
+  it('"any" turns recency off — ×1 for everyone, however old', () => {
+    expect(recencyWeight(1975, 2026, "any")).toBe(1);
+    expect(recencyWeight(2026, 2026, "any")).toBe(1);
+  });
+
+  it('"since" is a SOFT step, not a filter: at/after the cutoff full weight, older floored', () => {
+    expect(recencyWeight(2021, 2026, { since: 2020 })).toBe(1);
+    expect(recencyWeight(2020, 2026, { since: 2020 })).toBe(1); // inclusive
+    expect(recencyWeight(2019, 2026, { since: 2020 })).toBe(RECENCY_FLOOR);
+    // floored, never zeroed — an older match still ranks (D4 is what hides)
+    expect(recencyWeight(1975, 2026, { since: 2020 })).toBeGreaterThan(0);
+  });
+
+  it("a candidate with no year is neutral in every mode", () => {
+    for (const m of ["any", "recent", { since: 2020 }] as const) {
+      expect(recencyWeight(null, 2026, m)).toBe(1);
+    }
+  });
+});
+
+describe("staleBefore — D8's flag boundary, derived from the active mode", () => {
+  it('"recent" → one half-life back (no second definition of "old")', () => {
+    expect(staleBefore("recent", 2026)).toBe(2026 - RECENCY_HALF_LIFE_YEARS);
+  });
+
+  it('"since" → the officer\'s own cutoff', () => {
+    expect(staleBefore({ since: 2015 }, 2026)).toBe(2015);
+  });
+
+  it('"any" → null: nothing weighs recency, so nothing may claim stale', () => {
+    expect(staleBefore("any", 2026)).toBeNull();
+  });
+});
+
+describe("rerankCandidates — D3 re-ranks live on the officer's dial", () => {
+  it('"any" drops recency, restoring the pure topical order', () => {
+    const concepts = [concept("t", 1, 1)];
+    // "old" has the better topical rank; under the default curve recency sinks it below "recent".
+    const oldC = { ...candidate("old", [{ term: "t", rank: 1 }]), mostRecentYear: 1999 };
+    const recentC = { ...candidate("recent", [{ term: "t", rank: 6 }]), mostRecentYear: 2025 };
+
+    expect(
+      rerankCandidates([oldC, recentC], concepts, { currentYear: 2026 }).map((c) => c.cwid),
+    ).toEqual(["recent", "old"]);
+    // Dial to Any → topical fit alone → the better-ranked "old" leads again.
+    expect(
+      rerankCandidates([oldC, recentC], concepts, { currentYear: 2026, recency: "any" }).map(
+        (c) => c.cwid,
+      ),
+    ).toEqual(["old", "recent"]);
+  });
+
+  it('"since" sinks everything below the cutoff to the floor', () => {
+    const concepts = [concept("t", 1, 1)];
+    const a = { ...candidate("a", [{ term: "t", rank: 1 }]), mostRecentYear: 2019 };
+    const b = { ...candidate("b", [{ term: "t", rank: 3 }]), mostRecentYear: 2021 };
+    const ranked = rerankCandidates([a, b], concepts, { currentYear: 2026, recency: { since: 2020 } });
+    // `a` outranks `b` topically, but falls under the cutoff and is floored; `b` keeps full weight.
+    expect(ranked.map((c) => c.cwid)).toEqual(["b", "a"]);
   });
 });
 

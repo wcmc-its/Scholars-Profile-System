@@ -1475,6 +1475,89 @@ describe("SponsorMatchPanel", () => {
     expect(document.querySelector('[data-slot="sponsor-match-compact-row"]')).not.toBeNull(); // Bob still compact
   });
 
+  // ── D3 recency dial ────────────────────────────────────────────────────────
+  /**
+   * The dial must be CONNECTED, not merely present: the whole point is that it re-ranks the
+   * already-fetched candidates in the browser. `old` outranks `new` topically (rank 1 vs 6) but is
+   * 27 years stale, so the default curve sinks it; Any restores the topical order. Years are
+   * relative to the real clock the panel reads, so the flip holds whatever year this runs in.
+   */
+  it("D3 — the recency dial re-ranks the fetched candidates; Any restores the topical order, with no re-query", async () => {
+    const NOW = new Date().getUTCFullYear();
+    const fetchMock = stubFetch({
+      concepts: [{ term: "ADC", kind: "concept", members: ["ADC"], centrality: 1, weightFactor: 1 }],
+      candidates: [
+        candidate({
+          cwid: "old",
+          name: "Olive Old",
+          mostRecentYear: NOW - 27,
+          contributions: [{ term: "ADC", rank: 1 }],
+        }),
+        candidate({
+          cwid: "new",
+          name: "Nina New",
+          mostRecentYear: NOW,
+          contributions: [{ term: "ADC", rank: 6 }],
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "ADC work" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Nina New");
+
+    const leader = () =>
+      document.querySelector('[data-slot="sponsor-match-row"]')!.textContent!;
+
+    // Default "Prefer recent" = the server's own curve: recency sinks the older, better-ranked one.
+    expect(leader()).toContain("Nina New");
+
+    // Any → recency off → the topical order returns…
+    fireEvent.click(screen.getByRole("button", { name: "Any" }));
+    expect(leader()).toContain("Olive Old");
+
+    // …and none of it cost a round-trip. This is a client re-rank, like the centrality slider.
+    expect(rankCalls(fetchMock)).toBe(1);
+  });
+
+  it("D3/D8 — a stale year is flagged and explained; under Any nothing claims stale", async () => {
+    const NOW = new Date().getUTCFullYear();
+    stubFetch({
+      concepts: [{ term: "ADC", kind: "concept", members: ["ADC"], centrality: 1, weightFactor: 1 }],
+      candidates: [
+        candidate({
+          cwid: "old",
+          name: "Olive Old",
+          mostRecentYear: NOW - 27,
+          contributions: [{ term: "ADC", rank: 1 }],
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "ADC work" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Olive Old");
+    fireEvent.click(screen.getByRole("button", { name: "compact" }));
+
+    const yearCell = () =>
+      [...screen.getByRole("button", { name: "Expand Olive Old" }).querySelectorAll("span")].find(
+        (s) => s.textContent?.startsWith("latest"),
+      )!;
+
+    expect(yearCell().textContent).toBe(`latest ${NOW - 27}`);
+    // Under the default curve the year is older than one half-life ⇒ flagged, and it SAYS why.
+    expect(yearCell().getAttribute("title")).toContain("down-weighting");
+
+    // Any weighs no recency, so the row may not claim the match is stale.
+    fireEvent.click(screen.getByRole("button", { name: "Any" }));
+    expect(yearCell().getAttribute("title")).toBeNull();
+  });
+
+  it("D3 — the dial is hidden when the payload carries no years (flag off)", async () => {
+    await renderAndSearch(); // THREE carries no `mostRecentYear`
+    expect(screen.queryByRole("group", { name: "Recency" })).toBeNull();
+  });
+
   // ── Sponsor preferences (#1654) ────────────────────────────────────────────
   it("drops a deselected preference from the ask header, so it cannot contradict the ranking", async () => {
     // The header is DERIVED from the ACTIVE preferences, not frozen at submit. An officer who

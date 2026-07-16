@@ -176,13 +176,47 @@ export const TIER_GOOD = 0.33;
 export const RECENCY_HALF_LIFE_YEARS = 8;
 export const RECENCY_FLOOR = 0.5;
 
+/**
+ * D3 — how much recency counts, chosen by the officer PER ASK. A sponsor scouting an active group
+ * and one after a founding method want different answers, and the ranker cannot know which.
+ *
+ *   - `"recent"` — the DEFAULT and D1's curve above. It is what the server fuses with, which is the
+ *     property that keeps a default client re-rank reproducing the server's order.
+ *   - `"any"` — recency off (×1 for everyone). Topical fit alone, as before D1.
+ *   - `{ since }` — a SOFT step: evidence at/after the cutoff keeps full weight, older drops to the
+ *     FLOOR. Still ranks — it is a boost, NOT a filter. (D4 is the hard "hide before <yr>".)
+ *
+ * Client-side only, like the centrality slider: the officer moves it, the already-fetched candidates
+ * re-rank, no re-query and no new search. Because the DEFAULT reproduces the server's weighting, this
+ * control changes no default ranking and so needs no eval gate of its own.
+ */
+export type RecencyMode = "any" | "recent" | { since: number };
+
 export function recencyWeight(
   mostRecentYear: number | null | undefined,
   currentYear: number,
+  mode: RecencyMode = "recent",
 ): number {
   if (mostRecentYear == null) return 1;
+  if (mode === "any") return 1;
+  if (typeof mode === "object") return mostRecentYear >= mode.since ? 1 : RECENCY_FLOOR;
   const age = Math.max(0, currentYear - mostRecentYear);
   return RECENCY_FLOOR + (1 - RECENCY_FLOOR) * 0.5 ** (age / RECENCY_HALF_LIFE_YEARS);
+}
+
+/**
+ * D8's stale-year boundary: the year below which the compact row's "latest YYYY" reads as OLD.
+ *
+ * DERIVED from the active recency mode, deliberately, so there is ONE definition of "old" rather
+ * than a second `STALE_YEARS` constant drifting against the curve: under `{ since }` it is the
+ * officer's own cutoff, under `"recent"` it is one half-life of the curve that is actually
+ * down-weighting them, and under `"any"` it is `null` — recency is not being weighed at all, so a
+ * staleness claim would be unearned. `null` ⇒ the row renders the year unflagged.
+ */
+export function staleBefore(mode: RecencyMode, currentYear: number): number | null {
+  if (mode === "any") return null;
+  if (typeof mode === "object") return mode.since;
+  return currentYear - RECENCY_HALF_LIFE_YEARS;
 }
 
 /**
@@ -634,6 +668,10 @@ export type RerankOptions = {
    *  The only divergence is a tab left open across Jan 1 — a bounded ~4% weight drift on the freshest
    *  candidate that self-heals on the next fetch, not worth shipping a server-year field on the wire. */
   currentYear?: number;
+  /** D3 — the officer's recency setting. Absent ⇒ `"recent"`, D1's curve, which is what the server
+   *  fused with; that default is what keeps the round-trip (client re-rank at default weights
+   *  reproduces the server's order) true. Moving it is a deliberate user re-rank, like a slider. */
+  recency?: RecencyMode;
 };
 
 /** Fusion weight for one concept: `centrality^γ × weightFactor`. Centrality is the slider;
@@ -684,7 +722,11 @@ export function fusedScore(
   // (flag off), which keeps the round-trip test and every existing order unchanged. The server's
   // `rrfFuse` applies the identical factor (same UTC year), so the client re-rank at default weights
   // reproduces the server's order — see the `currentYear` note for the once-a-year boundary edge.
-  score *= recencyWeight(candidate.mostRecentYear, opts.currentYear ?? new Date().getUTCFullYear());
+  score *= recencyWeight(
+    candidate.mostRecentYear,
+    opts.currentYear ?? new Date().getUTCFullYear(),
+    opts.recency ?? "recent",
+  );
   if (!opts.prefBoost) return score;
   return score * (1 + (opts.lambda ?? 1) * opts.prefBoost(candidate));
 }
