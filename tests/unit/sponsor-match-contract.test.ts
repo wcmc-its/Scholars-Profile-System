@@ -15,6 +15,7 @@ import {
   conceptCoverage,
   conceptWeight,
   evidenceMatchCount,
+  latestEvidenceYear,
   evidenceProvenance,
   fitTier,
   fusedScore,
@@ -565,5 +566,20 @@ describe("evidenceMatchCount — the matched N, never the total M", () => {
     expect(evidenceMatchCount({ kind: "publications", strength: "mention", text: "x" })).toBeNull();
     expect(evidenceMatchCount({ kind: "clinical", specialty: "Cardiology", boardCertified: false })).toBeNull();
     expect(evidenceMatchCount({ kind: "selfDescription", html: "…" })).toBeNull();
+  });
+});
+
+describe("latestEvidenceYear — D8 compact-row 'latest YYYY' (interim source)", () => {
+  it("is the max year across the bespoke path's papers, ignoring null years", () => {
+    const c = {
+      ...candidate("a", [{ term: "t", rank: 1 }]),
+      evidence: { papers: [{ pmid: "1", title: "x", year: 2019, journal: null }, { pmid: "2", title: "y", year: 2024, journal: null }, { pmid: "3", title: "z", year: null, journal: null }] },
+    };
+    expect(latestEvidenceYear(c)).toBe(2024);
+  });
+
+  it("is null on the spine path (no `evidence.papers`) — the row renders no year until D1", () => {
+    expect(latestEvidenceYear(candidate("a", [{ term: "t", rank: 1 }]))).toBeNull();
+    expect(latestEvidenceYear({ ...candidate("a", [{ term: "t", rank: 1 }]), evidence: { papers: [] } })).toBeNull();
   });
 });

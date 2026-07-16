@@ -930,3 +930,20 @@ export function evidenceMatchCount(evidence: ResultEvidence): number | null {
       return null;
   }
 }
+
+/**
+ * The most-recent evidence year we ALREADY HOLD for a candidate — D8's compact-row "latest YYYY".
+ *
+ * INTERIM SOURCE, and deliberately narrow: only the bespoke engine's `evidence.papers` carries a
+ * year up front. The production SPINE path ships `searchEvidence`, whose artifact (and its year) is
+ * lazy-fetched on view — so this returns `null` there, and the compact row renders no year until D1
+ * surfaces a per-scholar most-recent year in the payload. Point this at that field when it lands;
+ * nothing else on the row should need to change. (D8's stale colour-flag is likewise gated on D1's
+ * recency threshold — the year renders neutral until then.)
+ */
+export function latestEvidenceYear(candidate: SponsorCandidate): number | null {
+  const years = (candidate.evidence?.papers ?? [])
+    .map((p) => p.year)
+    .filter((y): y is number => typeof y === "number");
+  return years.length > 0 ? Math.max(...years) : null;
+}
