@@ -1558,6 +1558,78 @@ describe("SponsorMatchPanel", () => {
     expect(screen.queryByRole("group", { name: "Recency" })).toBeNull();
   });
 
+  // ── D4 hard year cutoff ────────────────────────────────────────────────────
+  /**
+   * D4 REMOVES people, which is categorically different from D1 demoting them: the demotion is
+   * floored at ×0.5 and stays on the page, a removal is unbounded and unnoticeable. So these
+   * tests exercise the two ways it can silently produce a wrong answer — hiding on an ABSENT
+   * year, and hiding under a mode the officer did not ask for — not just the happy path.
+   */
+  const sinceFixture = () =>
+    stubFetch({
+      concepts: [{ term: "ADC", kind: "concept", members: ["ADC"], centrality: 1, weightFactor: 1 }],
+      candidates: [
+        candidate({
+          cwid: "fresh",
+          name: "Fran Fresh",
+          mostRecentYear: 2026,
+          contributions: [{ term: "ADC", rank: 1 }],
+        }),
+        candidate({
+          cwid: "stale",
+          name: "Stan Stale",
+          mostRecentYear: 2011,
+          contributions: [{ term: "ADC", rank: 2 }],
+        }),
+        // No year at all — the flag-off/uncurated case. MUST survive every cutoff.
+        candidate({ cwid: "noyear", name: "Nora Noyear", contributions: [{ term: "ADC", rank: 3 }] }),
+      ],
+    });
+
+  const search = async () => {
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "ADC work" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Fran Fresh");
+  };
+
+  it("D4 — Since removes the scholars below the cutoff and says how many, naming the escape", async () => {
+    sinceFixture();
+    await search();
+    // Before: "Prefer recent" is a SOFT preference — Stan is demoted, never removed.
+    expect(screen.queryByText("Stan Stale")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Since" }));
+    expect(screen.queryByText("Stan Stale")).toBeNull();
+    // The count is the only signal an absence leaves. Without it the officer cannot know the
+    // filter cost them anyone, let alone whom.
+    expect(screen.queryByText(/1 hidden · no publication since/)).not.toBeNull();
+    expect(screen.queryByText(/set recency to “Any” to include them/)).not.toBeNull();
+  });
+
+  it("D4 — a candidate with NO year is never hidden: absent is not old", async () => {
+    // `mostRecentYear` is absent when the flag is off OR when nobody curated the scholar's pubs.
+    // Neither is a fact about the scholar, and deleting people for a gap in our own data is the
+    // one failure this filter must not have.
+    sinceFixture();
+    await search();
+    fireEvent.click(screen.getByRole("button", { name: "Since" }));
+    expect(screen.queryByText("Nora Noyear")).not.toBeNull();
+  });
+
+  it("D4 — Prefer recent and Any hide NOBODY (a soft preference must never delete)", async () => {
+    // `staleBefore("recent")` is currentYear−8, so a filter keyed on IT rather than on the mode
+    // would make the DEFAULT dial position silently delete Stan. It must not.
+    sinceFixture();
+    await search();
+    expect(screen.queryByText("Stan Stale")).not.toBeNull(); // default = "Prefer recent"
+    expect(screen.queryByText(/hidden · no publication since/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Any" }));
+    expect(screen.queryByText("Stan Stale")).not.toBeNull();
+    expect(screen.queryByText(/hidden · no publication since/)).toBeNull();
+  });
+
   // ── Sponsor preferences (#1654) ────────────────────────────────────────────
   it("drops a deselected preference from the ask header, so it cannot contradict the ranking", async () => {
     // The header is DERIVED from the ACTIVE preferences, not frozen at submit. An officer who
