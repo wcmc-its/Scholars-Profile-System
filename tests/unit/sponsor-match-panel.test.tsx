@@ -460,6 +460,140 @@ describe("SponsorMatchPanel", () => {
     expect(rankOf("Cara Gamma")).toBe("3");
   });
 
+  /**
+   * "Name" means BY SURNAME. It used to compare `name`, i.e. the display string, i.e. by FIRST
+   * name — and every fixture in this file was named so that the two orders agree, which is exactly
+   * why the sort test above could not see it.
+   *
+   * These names invert: by given name it is Alice / Bob / Zoe; by surname it is Abbott, Abbott,
+   * Zephyr — so the two orderings share no position and the old comparator cannot produce this
+   * expectation. Bob and Zoe share a surname, which pins the tie-break onto the full name rather
+   * than onto whatever order the ranker happened to fuse them in.
+   */
+  it("sorts by SURNAME, not by the first name in the display string", async () => {
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "z",
+          name: "Alice Zephyr",
+          lastNameSort: "zephyr",
+          fusedScore: (0.9 * 3.0) / 61,
+          contributions: [{ term: "Immuno-oncology", rank: 1 }],
+        }),
+        candidate({
+          cwid: "a2",
+          name: "Zoe Abbott",
+          lastNameSort: "abbott",
+          fusedScore: (0.9 * 3.0) / 62,
+          contributions: [{ term: "Immuno-oncology", rank: 2 }],
+        }),
+        candidate({
+          cwid: "a1",
+          name: "Bob Abbott",
+          lastNameSort: "abbott",
+          fusedScore: (0.9 * 3.0) / 63,
+          contributions: [{ term: "Immuno-oncology", rank: 3 }],
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Zephyr");
+
+    expect(rowOrder()).toEqual(["Alice Zephyr", "Zoe Abbott", "Bob Abbott"]); // fit order
+
+    fireEvent.click(screen.getByRole("button", { name: "Name" }));
+    // Surnames first, given name only to break the Abbott tie. Under the old comparator this
+    // would read ["Alice Zephyr", "Bob Abbott", "Zoe Abbott"].
+    expect(rowOrder()).toEqual(["Bob Abbott", "Zoe Abbott", "Alice Zephyr"]);
+  });
+
+  /**
+   * A doc that predates the ETL field is re-keyed with the ETL's OWN `extractLastNameSort`, so it
+   * takes its true alphabetical place rather than being sorted as "" (top of the list, reads as an
+   * outage) or by its display name (a SECOND comparator over the same list — see below).
+   *
+   * ⚠ THIS FIXTURE IS THE TEST. Three rows, ONE unkeyed, and the unkeyed surname ("unindexed")
+   * must land BETWEEN the two keyed ones — so the row order is wrong under every comparator except
+   * a total one. A keyed-vs-unkeyed split admits a 3-cycle here (abbott<zephyr, but
+   * "Alice Zephyr"<"Bob Unindexed"<"Zoe Abbott"), which sorts Zephyr AHEAD of Abbott: one unkeyed
+   * row inverting two KEYED rows. A 2-row pool cannot express that and is why the earlier version
+   * of this test passed under the old comparator — it proved nothing.
+   */
+  it("re-keys an unindexed row so it cannot invert two keyed rows", async () => {
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Zoe Abbott",
+          lastNameSort: "abbott",
+          fusedScore: (0.9 * 3.0) / 61,
+          contributions: [{ term: "Immuno-oncology", rank: 1 }],
+        }),
+        candidate({
+          cwid: "u",
+          name: "Bob Unindexed", // no `lastNameSort` — not yet reindexed
+          fusedScore: (0.9 * 3.0) / 62,
+          contributions: [{ term: "Immuno-oncology", rank: 2 }],
+        }),
+        candidate({
+          cwid: "z",
+          name: "Alice Zephyr",
+          lastNameSort: "zephyr",
+          fusedScore: (0.9 * 3.0) / 63,
+          contributions: [{ term: "Immuno-oncology", rank: 3 }],
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Zoe Abbott");
+
+    fireEvent.click(screen.getByRole("button", { name: "Name" }));
+    // abbott < unindexed < zephyr. The keyed pair keeps its order and the unkeyed row slots in.
+    expect(rowOrder()).toEqual(["Zoe Abbott", "Bob Unindexed", "Alice Zephyr"]);
+  });
+
+  /**
+   * `extractLastNameSort` returns "" — NOT null — for a blank name, so an emptiness guard of
+   * `!= null` lets "" through as a live key that sorts ahead of every real surname. This is the
+   * regression that shipped once already behind a comment claiming the opposite.
+   */
+  it("does not herd a blank surname key to the top of the alphabet", async () => {
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "b",
+          name: "Wanda Blank",
+          lastNameSort: "", // the ETL's value for an unusable preferredName
+          fusedScore: (0.9 * 3.0) / 61,
+          contributions: [{ term: "Immuno-oncology", rank: 1 }],
+        }),
+        candidate({
+          cwid: "a",
+          name: "Zoe Abbott",
+          lastNameSort: "abbott",
+          fusedScore: (0.9 * 3.0) / 62,
+          contributions: [{ term: "Immuno-oncology", rank: 2 }],
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Zoe Abbott");
+
+    fireEvent.click(screen.getByRole("button", { name: "Name" }));
+    // "" is re-derived to "blank" from the display name, so Abbott still leads. Under a `!= null`
+    // guard the blank row would sort first purely for being blank.
+    expect(rowOrder()).toEqual(["Zoe Abbott", "Wanda Blank"]);
+  });
+
   it("Fit is the default sort", async () => {
     await renderAndSearch();
     expect(screen.getByRole("button", { name: "Fit" }).getAttribute("aria-pressed")).toBe("true");
@@ -1473,6 +1607,165 @@ describe("SponsorMatchPanel", () => {
     expect(card).not.toBeNull();
     expect(card!.textContent).toContain("Alice Alpha");
     expect(document.querySelector('[data-slot="sponsor-match-compact-row"]')).not.toBeNull(); // Bob still compact
+  });
+
+  /**
+   * THE COLLAPSE DIRECTION, which is the whole test. `toggled` was always a correct toggle, but it
+   * was wired ONLY to the compact row — so the instant it ADDED a cwid, the row holding it unmounted
+   * and the expanded card offered nothing to fire it again with. `expanded` could only grow, and
+   * only a new search ever emptied it.
+   *
+   * A test that expands and stops (the one above) passes either way. This one has to press the
+   * collapse control, so it cannot pass without one existing.
+   */
+  it("D8 — an expanded row COLLAPSES back to its compact row", async () => {
+    await renderAndSearch();
+    fireEvent.click(screen.getByRole("button", { name: "compact" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand Alice Alpha" }));
+
+    // Expanded: the detailed card is up and the compact row that spawned it is gone.
+    expect(document.querySelector('[data-slot="sponsor-match-row"]')).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Expand Alice Alpha" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Alice Alpha" }));
+
+    // Back to a compact row — and the round trip is repeatable, which "expanded.add() only" is not.
+    expect(document.querySelector('[data-slot="sponsor-match-row"]')).toBeNull();
+    expect(screen.getByRole("button", { name: "Expand Alice Alpha" })).toBeTruthy();
+  });
+
+  it("D8 — Detailed density offers no collapse: there is nothing to collapse TO", async () => {
+    await renderAndSearch(); // Detailed by default
+    // The card is not an expansion of anything here, so a control returning it to a mode the
+    // officer is not in would be a worse bug than the one above.
+    // Queried per-scholar, not by a /^Collapse/ sweep: the ask card's own paste clamp is a button
+    // reading "Collapse ▴", and a loose regex would pass on that instead of on what it names.
+    for (const name of ["Alice Alpha", "Bob Beta", "Cara Gamma"]) {
+      expect(screen.queryByRole("button", { name: `Collapse ${name}` })).toBeNull();
+    }
+  });
+
+  // ── Shortlist (§6) ─────────────────────────────────────────────────────────
+  /**
+   * ⚠ THIS TEST DOES NOT TOUCH THE DENSITY TOGGLE, AND THAT IS THE ENTIRE POINT. Detailed is the
+   * DEFAULT density, so a shortlist wired only to the compact row is INVISIBLE on a first visit —
+   * dark in exactly the way D1's year was dark, and for the same reason: shipped, tested, and
+   * never reachable. Every other test in this section clicks "compact" first, which is precisely
+   * why none of them can catch that.
+   *
+   * Second half of the same defect: the selection bar is NOT density-gated, so a compact-only
+   * checkbox would let the bar offer "Export shortlist (1)" over detailed cards with nothing to
+   * untick it with — exporting a list you cannot see or audit.
+   */
+  it("the shortlist is reachable in the DEFAULT density, not only in compact", async () => {
+    await renderAndSearch();
+    // No density click. This is what an officer sees on their first visit.
+    expect(screen.getByRole("button", { name: "detailed" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(document.querySelector('[data-slot="sponsor-match-row"]')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Shortlist Alice Alpha" }));
+    expect(document.querySelector('[data-slot="sponsor-match-shortlist"]')!.textContent).toContain(
+      "1 shortlisted",
+    );
+    // And it unticks from the same card it was ticked on — the bar can never outlive its checkbox.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Shortlist Alice Alpha" }));
+    expect(document.querySelector('[data-slot="sponsor-match-shortlist"]')).toBeNull();
+  });
+
+  /**
+   * Selection spans BOTH densities (the checkbox is a verb of the result set, not of a row style),
+   * and on the compact row it forced the root off `<button>`: a checkbox inside a button is invalid
+   * HTML and the two click targets fight. `data-slot` stays on the root, and the expand button
+   * keeps its name — the two tests above still pass, which is the evidence the restructure
+   * preserved the row.
+   */
+  it("shortlists compact rows, counts them, and exports the SHORTLIST — not the filtered list", async () => {
+    const parts: string[] = [];
+    const OrigBlob = globalThis.Blob;
+    class CapturingBlob {
+      constructor(bits: BlobPart[]) {
+        parts.push(bits.map(String).join(""));
+      }
+    }
+    globalThis.Blob = CapturingBlob as unknown as typeof Blob;
+    const origCreate = URL.createObjectURL;
+    const origRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = (() => "blob:stub") as typeof URL.createObjectURL;
+    URL.revokeObjectURL = (() => {}) as typeof URL.revokeObjectURL;
+    try {
+      await renderAndSearch();
+      fireEvent.click(screen.getByRole("button", { name: "compact" }));
+      // Cara is weak-tier and sits below the relevance floor; open it so her row has a checkbox.
+      fireEvent.click(screen.getByRole("button", { name: /Show ↓/ }));
+
+      // Nothing ticked ⇒ no bar, and Export is the un-narrowed one it has always been.
+      expect(document.querySelector('[data-slot="sponsor-match-shortlist"]')).toBeNull();
+      expect(screen.getByRole("button", { name: /Export \(3\)/ })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("checkbox", { name: "Shortlist Alice Alpha" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: "Shortlist Cara Gamma" }));
+
+      expect(document.querySelector('[data-slot="sponsor-match-shortlist"]')!.textContent).toContain(
+        "2 shortlisted",
+      );
+      // The un-narrowed export is still REACHABLE — it just stops being the unqualified "Export",
+      // and says which list it is.
+      expect(screen.getByRole("button", { name: /Export all \(3\)/ })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^Export \(3\)/ })).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: /Export shortlist \(2\)/ }));
+      expect(parts).toHaveLength(1);
+      const rows = parts[0].split("\r\n").slice(1).filter(Boolean);
+      expect(rows).toHaveLength(2); // the two picked — not the three the facets matched
+      expect(parts[0]).toContain("Alice Alpha");
+      expect(parts[0]).toContain("Cara Gamma");
+      expect(parts[0]).not.toContain("Bob Beta");
+      // POOL ranks, carried: Cara exports as #3, not as "#2 of the shortlist".
+      expect(rows[0].startsWith("1,")).toBe(true);
+      expect(rows[1].startsWith("3,")).toBe(true);
+    } finally {
+      globalThis.Blob = OrigBlob;
+      URL.createObjectURL = origCreate;
+      URL.revokeObjectURL = origRevoke;
+    }
+  });
+
+  it("a facet does not drop a shortlisted scholar — they were CHOSEN, not matched", async () => {
+    await renderAndSearch();
+    fireEvent.click(screen.getByRole("button", { name: "compact" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Shortlist Alice Alpha" })); // Medicine
+
+    // Narrow to a department Alice is not in. Her row leaves the view; her pick does not.
+    fireEvent.click(screen.getByRole("checkbox", { name: /Surgery/ }));
+    expect(screen.queryByRole("checkbox", { name: "Shortlist Alice Alpha" })).toBeNull();
+    expect(document.querySelector('[data-slot="sponsor-match-shortlist"]')!.textContent).toContain(
+      "1 shortlisted",
+    );
+  });
+
+  it("the shortlist is PER-ASK — a new search clears it", async () => {
+    await renderAndSearch();
+    fireEvent.click(screen.getByRole("button", { name: "compact" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Shortlist Alice Alpha" }));
+    expect(document.querySelector('[data-slot="sponsor-match-shortlist"]')!.textContent).toContain(
+      "1 shortlisted",
+    );
+
+    // A different sponsor. A cwid set carried across would export people this sponsor never asked
+    // about, under this ask's title and this ask's ranks.
+    fireEvent.click(screen.getByRole("button", { name: "Edit paste" }));
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "ADC linkers" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+
+    await waitFor(() =>
+      expect(document.querySelector('[data-slot="sponsor-match-shortlist"]')).toBeNull(),
+    );
+    // The stub returns the same people, so this is the real check: the row is back and UNTICKED.
+    expect(
+      (screen.getByRole("checkbox", { name: "Shortlist Alice Alpha" }) as HTMLInputElement).checked,
+    ).toBe(false);
   });
 
   // ── D3 recency dial ────────────────────────────────────────────────────────

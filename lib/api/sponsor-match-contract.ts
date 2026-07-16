@@ -497,6 +497,18 @@ export type SponsorCandidate = {
    * renders no year — exactly today's behavior. Absent ≠ 0.
    */
   mostRecentYear?: number | null;
+  /**
+   * The scholar's surname sort key, projected from the people-doc's ETL-derived `lastNameSort`
+   * (lowercased, suffix-aware — trailing Jr/Sr/III/IV/Esq already dropped). Exists so Matcha can
+   * offer an A–Z sort by LAST name: `name` is a display string, and splitting it on whitespace
+   * gets suffixes, particles and postnominals wrong. NOT a ranking input — it never touches
+   * `fusedScore`.
+   *
+   * Unlike `mostRecentYear` this is unflagged: the spine always asks for it, because a sort is a
+   * presentation affordance and must work regardless of `SPONSOR_MATCH_RECENCY`. Absent/null ⇒ the
+   * doc predates the field; a sort must place those deliberately rather than treat null as "".
+   */
+  lastNameSort?: string | null;
   evidence?: SponsorEvidence;
   /**
    * #1689/#1696 — the search's own evidence, ONE ENTRY PER CONCEPT this candidate matched.
