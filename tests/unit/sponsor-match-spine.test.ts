@@ -86,6 +86,29 @@ describe("rrfFuse (§4 weighted RRF)", () => {
     expect(small).toBeGreaterThan(large);
   });
 
+  it("D1 — a per-scholar recency map multiplies the summed score and can reorder", () => {
+    // a and b tie on the topical fusion (each #1 in an equal-weight term); recency breaks the tie.
+    const rankings = [
+      { term: "t1", weight: 1, ranked: ["a"] },
+      { term: "t2", weight: 1, ranked: ["b"] },
+    ];
+    expect(rrfFuse(rankings).map((r) => r.cwid)).toEqual(["a", "b"]); // tie → stable order
+
+    const out = rrfFuse(rankings, DEFAULT_K, new Map([["a", 0.5], ["b", 1]]));
+    expect(out.map((r) => r.cwid)).toEqual(["b", "a"]); // b's higher recency wins
+    const base = 1 / (DEFAULT_K + 1);
+    expect(out.find((r) => r.cwid === "a")!.score).toBeCloseTo(base * 0.5, 12);
+    expect(out.find((r) => r.cwid === "b")!.score).toBeCloseTo(base * 1, 12);
+  });
+
+  it("D1 — a cwid absent from the recency map defaults to ×1 (byte-identical to no map)", () => {
+    const rankings = [{ term: "t", weight: 1, ranked: ["a"] }];
+    expect(rrfFuse(rankings, DEFAULT_K, new Map())[0].score).toBeCloseTo(
+      rrfFuse(rankings)[0].score,
+      12,
+    );
+  });
+
   it("returns [] for no rankings or all-empty rankings", () => {
     expect(rrfFuse([])).toEqual([]);
     expect(rrfFuse([{ term: "t", weight: 1, ranked: [] }])).toEqual([]);

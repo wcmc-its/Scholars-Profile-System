@@ -48,6 +48,7 @@ import {
 } from "@/lib/api/sponsor-match-axes";
 import {
   conceptWeight,
+  recencyWeight,
   sponsorMeasuresFrom,
   DEFAULT_K,
   MAX_EVIDENCE_CONCEPTS,
@@ -242,6 +243,9 @@ async function retrieveCluster(
   clusterQuery: string,
   descendantUis: string[],
   rep: MeshResolution | null,
+  // D1 — when true, ask searchPeople to project each hit's `mostRecentYear` (from the precomputed
+  // `mostRecentPubDate`). Off ⇒ the field is not requested, so the hit shape is byte-identical.
+  includeRecency: boolean,
 ): Promise<{ ranked: string[]; hits: PeopleHit[] }> {
   const ranked: string[] = [];
   const hits: PeopleHit[] = [];
@@ -293,6 +297,9 @@ async function retrieveCluster(
       // OpenSearch parent circuit breaker on the broadest sponsor pastes. Recall-neutral
       // — aggs never touch hits, scoring, or ordering.
       skipFacetAggs: true,
+      // D1 — project the precomputed most-recent-pub year for the recency weight. Gated so the
+      // off path keeps today's `_source` shape and hit payload.
+      includeMostRecentPub: includeRecency,
     });
     for (const h of result.hits) {
       ranked.push(h.cwid);
@@ -425,6 +432,11 @@ export async function rankResearchersForDescriptionSpine(
   // linkers") or the bare token ("lysosomes"). It changes who ranks where, so it is eval-gated:
   // staging-on to measure, prod-off until a clean A/B proves it. STATIC literal for flag-parity.
   const glossQuery = process.env.SPONSOR_MATCH_GLOSS_QUERY === "on";
+  // SPONSOR_MATCH_RECENCY — D1. Surface each scholar's most-recent publication year and fold it
+  // into the fused score (recency as a scored dimension), which re-tiers via the share-to-top (D2).
+  // A ranking change ⇒ eval-gated: staging-on to A/B, prod-off until a clean recency-off vs
+  // recency-on run clears the sponsor eval's ~0.0074 nDCG noise floor. STATIC literal for flag-parity.
+  const recencyOn = process.env.SPONSOR_MATCH_RECENCY === "on";
   for (const cluster of clusters) {
     // MAX member coverage ≈ the broadest merged synonym = a lower bound on the cluster's true
     // union corpus coverage (the exact union-coverage is an ETL upgrade). Display-only: 0 here
@@ -482,7 +494,12 @@ export async function rankResearchersForDescriptionSpine(
 
     // Representative resolution = the first member's (drives name/tier only).
     const rep = repByTerm.get(term) ?? null;
-    const { ranked, hits } = await retrieveCluster(clusterQuery, cluster.descendantUis, rep);
+    const { ranked, hits } = await retrieveCluster(
+      clusterQuery,
+      cluster.descendantUis,
+      rep,
+      recencyOn,
+    );
     for (const h of hits) if (!hitByCwid.has(h.cwid)) hitByCwid.set(h.cwid, h);
     // #1689 — evidence is CONCEPT-SCOPED, so it is stored per (concept, cwid) and read back
     // below, once the fusion knows every concept the candidate actually ranked under.
@@ -560,7 +577,23 @@ export async function rankResearchersForDescriptionSpine(
     rankings.push({ term, weight: conceptWeight(concept), ranked });
   }
 
-  const allFused = rrfFuse(rankings);
+  // D1 — per-scholar recency multiplier for the fusion. Built from the hits already in hand (each
+  // carries `mostRecentYear` under the flag), so it costs no extra I/O. Applied INSIDE rrfFuse so
+  // the server's order AND its top-N cut (the slice below) are recency-aware, and so the client's
+  // `fusedScore()` — which applies the identical factor — reproduces this order at default weights.
+  // `undefined` when the flag is off ⇒ rrfFuse multiplies every scholar by 1 (unchanged fusion).
+  const currentYear = new Date().getUTCFullYear();
+  const recencyWeightByCwid = recencyOn
+    ? new Map<string, number>(
+        [...hitByCwid]
+          .filter(([, h]) => h.mostRecentYear != null)
+          .map(([cwid, h]): [string, number] => [
+            cwid,
+            recencyWeight(h.mostRecentYear, currentYear),
+          ]),
+      )
+    : undefined;
+  const allFused = rrfFuse(rankings, DEFAULT_K, recencyWeightByCwid);
   const fused = opts.limit != null ? allFused.slice(0, opts.limit) : allFused;
   if (fused.length === 0) return { concepts, candidates: [], titleSummary };
 
@@ -677,6 +710,9 @@ export async function rankResearchersForDescriptionSpine(
       technologyCount: techByCwid.get(f.cwid) ?? 0,
       identityImageEndpoint: identityImageEndpoint(f.cwid),
       measures: measuresByCwid.get(f.cwid),
+      // D1 — the per-scholar most-recent year (recency input + D8's "latest YYYY"). Emitted only
+      // under the flag and only when known, so the off / no-year response stays byte-identical.
+      ...(recencyOn && hit?.mostRecentYear != null ? { mostRecentYear: hit.mostRecentYear } : {}),
       ...(searchEvidence.length > 0 ? { searchEvidence } : {}),
     };
   });

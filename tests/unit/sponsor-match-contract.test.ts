@@ -19,6 +19,9 @@ import {
   evidenceProvenance,
   fitTier,
   fusedScore,
+  recencyWeight,
+  RECENCY_FLOOR,
+  RECENCY_HALF_LIFE_YEARS,
   hasMatchEvidence,
   matchedConcepts,
   matchedEvidence,
@@ -569,8 +572,23 @@ describe("evidenceMatchCount — the matched N, never the total M", () => {
   });
 });
 
-describe("latestEvidenceYear — D8 compact-row 'latest YYYY' (interim source)", () => {
-  it("is the max year across the bespoke path's papers, ignoring null years", () => {
+describe("latestEvidenceYear — D8 compact-row 'latest YYYY'", () => {
+  it("reads the spine path's `mostRecentYear` (D1) first", () => {
+    expect(
+      latestEvidenceYear({ ...candidate("a", [{ term: "t", rank: 1 }]), mostRecentYear: 2023 }),
+    ).toBe(2023);
+  });
+
+  it("prefers `mostRecentYear` over the bespoke papers when both are present", () => {
+    const c = {
+      ...candidate("a", [{ term: "t", rank: 1 }]),
+      mostRecentYear: 2025,
+      evidence: { papers: [{ pmid: "1", title: "x", year: 2019, journal: null }] },
+    };
+    expect(latestEvidenceYear(c)).toBe(2025);
+  });
+
+  it("falls back to the max year across the bespoke path's papers, ignoring null years", () => {
     const c = {
       ...candidate("a", [{ term: "t", rank: 1 }]),
       evidence: { papers: [{ pmid: "1", title: "x", year: 2019, journal: null }, { pmid: "2", title: "y", year: 2024, journal: null }, { pmid: "3", title: "z", year: null, journal: null }] },
@@ -578,8 +596,82 @@ describe("latestEvidenceYear — D8 compact-row 'latest YYYY' (interim source)",
     expect(latestEvidenceYear(c)).toBe(2024);
   });
 
-  it("is null on the spine path (no `evidence.papers`) — the row renders no year until D1", () => {
+  it("is null when neither a `mostRecentYear` nor dated papers are present (flag off)", () => {
     expect(latestEvidenceYear(candidate("a", [{ term: "t", rank: 1 }]))).toBeNull();
     expect(latestEvidenceYear({ ...candidate("a", [{ term: "t", rank: 1 }]), evidence: { papers: [] } })).toBeNull();
+  });
+});
+
+describe("recencyWeight — D1 recency curve", () => {
+  it("is neutral (1) when the candidate has no known year", () => {
+    expect(recencyWeight(null, 2026)).toBe(1);
+    expect(recencyWeight(undefined, 2026)).toBe(1);
+  });
+
+  it("is 1 at age 0 and floored below, monotonically decreasing with age", () => {
+    expect(recencyWeight(2026, 2026)).toBeCloseTo(1, 12);
+    // one half-life of age → FLOOR + (1-FLOOR)/2
+    expect(recencyWeight(2026 - RECENCY_HALF_LIFE_YEARS, 2026)).toBeCloseTo(
+      RECENCY_FLOOR + (1 - RECENCY_FLOOR) / 2,
+      12,
+    );
+    // strictly decreasing, and never below the floor
+    const w2 = recencyWeight(2020, 2026);
+    const w20 = recencyWeight(2000, 2026);
+    expect(w2).toBeGreaterThan(w20);
+    expect(w20).toBeGreaterThan(RECENCY_FLOOR);
+    expect(w20).toBeLessThan(1);
+  });
+
+  it("clamps a future year to age 0 (no boost above 1)", () => {
+    expect(recencyWeight(2030, 2026)).toBe(1);
+  });
+});
+
+describe("fusedScore — D1 recency factor", () => {
+  it("multiplies the summed score by the per-scholar recency weight", () => {
+    const weights = new Map([["t", 1]]);
+    const base = candidate("a", [{ term: "t", rank: 1 }]);
+    const old = { ...base, mostRecentYear: 2000 };
+    expect(fusedScore(old, weights, { currentYear: 2026 })).toBeCloseTo(
+      fusedScore(base, weights, { currentYear: 2026 }) * recencyWeight(2000, 2026),
+      12,
+    );
+  });
+
+  it("leaves a candidate with no year unchanged (byte-identical, flag off)", () => {
+    const weights = new Map([["t", 1]]);
+    const c = candidate("a", [{ term: "t", rank: 1 }]);
+    expect(fusedScore(c, weights, { currentYear: 2026 })).toBeCloseTo(1 / (DEFAULT_K + 1), 12);
+  });
+});
+
+describe("D1+D2 — recency re-ranks AND re-tiers (regression AC)", () => {
+  /**
+   * The handoff's D2 AC in mechanism form: an old-only candidate that would tier "Good" on its
+   * topical base alone drops to "Weak" once recency is folded in, and a recent peer leads. Bases
+   * are constructed so the old candidate sits at exactly half the recent one's score (share 0.5,
+   * "good") BEFORE recency; the year is the only thing that pushes it under the 0.33 boundary.
+   */
+  it("an old-only candidate tiers Weak where a recent peer tiers Strong", () => {
+    const concepts = [concept("t", 1, 1)]; // conceptWeight = 1^3 × 1 = 1
+    // rank 1 vs rank 32 under K=30 → base share (K+1)/(K+32) = 31/62 = 0.5.
+    const recentC = { ...candidate("recent", [{ term: "t", rank: 1 }]), mostRecentYear: 2024 };
+    const oldC = { ...candidate("old", [{ term: "t", rank: 32 }]), mostRecentYear: 1999 };
+
+    // Baseline (no years): the old candidate is "good", not "weak".
+    const baseline = rerankCandidates(
+      [candidate("recent", [{ term: "t", rank: 1 }]), candidate("old", [{ term: "t", rank: 32 }])],
+      concepts,
+      { currentYear: 2026 },
+    );
+    expect(fitTier(baseline[1].fusedScore, baseline[0].fusedScore)).toBe("good");
+
+    // With recency: recent leads, and the old-only candidate falls to "weak".
+    const ranked = rerankCandidates([oldC, recentC], concepts, { currentYear: 2026 });
+    expect(ranked.map((c) => c.cwid)).toEqual(["recent", "old"]);
+    const topScore = ranked[0].fusedScore;
+    expect(fitTier(ranked[0].fusedScore, topScore)).toBe("strong");
+    expect(fitTier(ranked[1].fusedScore, topScore)).toBe("weak");
   });
 });
