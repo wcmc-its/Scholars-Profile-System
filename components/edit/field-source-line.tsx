@@ -27,7 +27,7 @@ export function FieldSourceLine({
       Source:{" "}
       <Link
         href="/about#provenance"
-        className="text-apollo-slate font-medium underline-offset-2 hover:underline"
+        className="text-[var(--color-facet-topic-count)] font-medium underline-offset-2 hover:underline"
       >
         {label ?? fieldSource(attribute)}
       </Link>

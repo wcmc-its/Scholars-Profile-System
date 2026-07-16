@@ -29,7 +29,6 @@ import { LockedBadge } from "@/components/edit/locked-badge";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -240,11 +239,12 @@ export function EntityPanel<T extends EntityRow>({
   const targetById = (id: string | null) => (id === null ? null : list.find((e) => e.externalId === id) ?? null);
 
   const listBody = (
-    // A stronger top rule (border-strong) closes the header block and opens the
-    // entry list, so the list reads as clearly subordinate to the panel <h2>;
-    // the lighter divide-y between rows keeps individual entries distinct.
+    // The lighter divide-y between rows keeps individual entries distinct. The
+    // stronger top rule (border-strong) that closes the header block lives on
+    // the list *container* (below), so in filterable mode it pins to the top of
+    // the scroll viewport instead of scrolling away with the first rows.
     <ul
-      className="divide-apollo-border border-apollo-border-strong divide-y border-t"
+      className="divide-apollo-border divide-y"
       data-slot={`${slot}-list`}
     >
       {rows.map((e) => (
@@ -312,9 +312,11 @@ export function EntityPanel<T extends EntityRow>({
       ) : filterable ? (
         // Bounded inner scroll on desktop only; on phones an unbounded height
         // lets the page scroll naturally instead of trapping it (T2.5 / 4.5).
-        <ScrollArea className="md:h-[60vh]">{listBody}</ScrollArea>
+        <ScrollArea className="border-apollo-border-strong border-t md:h-[60vh]">
+          {listBody}
+        </ScrollArea>
       ) : (
-        <div>{listBody}</div>
+        <div className="border-apollo-border-strong border-t">{listBody}</div>
       )}
 
       <ConfirmDialog
@@ -395,7 +397,7 @@ function EntityRowView({
         <div className="min-w-0 flex-1">
           <p
             className={cn(
-              "text-foreground font-normal",
+              "text-foreground text-[14px] font-normal",
               isHidden && "text-muted-foreground line-through decoration-muted-foreground",
             )}
           >
@@ -424,30 +426,26 @@ function EntityRowView({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {state === "shown" && (
-            <Button
+            <button
               type="button"
-              variant="ghost"
-              size="sm"
-              className="min-h-11 md:min-h-8"
+              className="text-muted-foreground hover:text-foreground focus-visible:ring-apollo-ring inline-flex min-h-11 cursor-pointer items-center gap-1 rounded-md text-xs transition-colors focus-visible:ring-2 focus-visible:outline-none md:min-h-8"
               onClick={onHide}
               data-testid={`${testId}-hide`}
             >
-              <EyeOff />
+              <EyeOff className="size-3.5" />
               Hide
-            </Button>
+            </button>
           )}
           {canShow && (
-            <Button
+            <button
               type="button"
-              variant="ghost"
-              size="sm"
-              className="min-h-11 md:min-h-8"
+              className="text-muted-foreground hover:text-foreground focus-visible:ring-apollo-ring inline-flex min-h-11 cursor-pointer items-center gap-1 rounded-md text-xs transition-colors focus-visible:ring-2 focus-visible:outline-none md:min-h-8"
               onClick={onShow}
               data-testid={`${testId}-show`}
             >
-              <Eye />
+              <Eye className="size-3.5" />
               Show
-            </Button>
+            </button>
           )}
           {requestMenu}
         </div>

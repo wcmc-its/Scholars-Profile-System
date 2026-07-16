@@ -218,7 +218,7 @@ export function ProfileAppointmentsCard({ cwid, mode, scholarName }: ProfileAppo
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-2">
-                    <span className="font-normal">{row.title}</span>
+                    <span className="text-[14px] font-normal">{row.title}</span>
                     <span className="text-muted-foreground text-xs">{CATEGORY_CHIP[row.category]}</span>
                     {!row.showOnProfile ? (
                       <span className="text-muted-foreground text-xs">· Hidden</span>
@@ -275,6 +275,7 @@ export function ProfileAppointmentsCard({ cwid, mode, scholarName }: ProfileAppo
           <Button
             type="button"
             variant="default"
+            className="bg-[var(--color-facet-topic-count)] text-white hover:bg-[var(--color-facet-topic-count)] hover:brightness-95 focus-visible:ring-[var(--color-facet-topic-count)]"
             disabled={busy}
             onClick={() => {
               setAdding(true);

@@ -42,7 +42,7 @@ export function AppointmentsCard({ cwid, mode, scholarName, appointments }: Appo
             <>
               <Badge
                 variant="outline"
-                className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-md"
+                className="bg-[var(--color-facet-topic-fill)] text-[var(--color-facet-topic-text)] rounded-md border-transparent"
               >
                 Primary
               </Badge>

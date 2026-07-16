@@ -117,9 +117,9 @@ export function AttributeRail({ items, active, basePath, groupMeta }: AttributeR
           // Hairline rule between sections — restructured rail only (groupMeta is
           // present only there); skipped before the first (floating Home) group.
           const showDivider = groupMeta != null && groupIndex > 0;
-          // Colour the group by provenance: green = your content/actions,
-          // neutral = WCM reference (quiet — the lock cue lives on the panel).
-          const accent = groupAccent(g.items);
+          // All rail group headers are neutral gray — provenance lives on the
+          // panel (the green "Yours to edit" badge / neutral lock cue), not the nav.
+          const accent = groupAccent();
           return (
             <div
               key={g.label || "__floating"}
@@ -255,30 +255,18 @@ function railTier(item: RailItem): RailKind {
 }
 
 /**
- * Per-group accent. Provenance colour follows the token language (globals.css
- * "APOLLO EDITOR COLOUR LANGUAGE"):
- *   green   = the scholar's own content & actions (kind owned / service) — "yours";
- *   neutral = reference sourced from WCM (kind sourced / readonly) — quiet, its
- *             lock cue lives on the panel, not the nav (no hue, no dot).
- * Applied to the group's header text, a leading dot (yours only), and a left
- * spine. Maroon is reserved for brand (the active item) — never a group accent.
+ * Per-group accent. ALL rail group headers are neutral gray now — provenance is
+ * carried by the panel (the green "Yours to edit" badge / neutral lock cue),
+ * never by the nav. Green is reserved exclusively for the ownership badge; maroon
+ * for the active item. Applied to the group's header text and a left spine (no
+ * hue, no dot).
  */
-function groupAccent(items: ReadonlyArray<RailItem>): {
+function groupAccent(): {
   text: string;
   dot: string;
   spine: string;
 } {
-  const yours = items.some((i) => {
-    const k = railTier(i);
-    return k === "owned" || k === "service";
-  });
-  return yours
-    ? {
-        text: "text-apollo-green-foreground",
-        dot: "bg-apollo-green",
-        spine: "border-apollo-green/50",
-      }
-    : { text: "text-muted-foreground", dot: "", spine: "border-apollo-rail-border" };
+  return { text: "text-muted-foreground", dot: "", spine: "border-apollo-rail-border" };
 }
 
 function RailLink({

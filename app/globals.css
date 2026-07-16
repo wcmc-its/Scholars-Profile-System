@@ -86,23 +86,26 @@
   --apollo-rail-hover: #ece7e1; /* nav-item hover fill */
   --apollo-ring: #8a1f2b;
   --apollo-lock-bg: #f2efeb; /* locked chip / locked actions */
-  /* Secondary slate accent — badges, topic pills, links, the "Source:" link.
+  /* Secondary slate accent — status pills (Active/Past, Hidden).
    *
    * APOLLO EDITOR COLOUR LANGUAGE (the /edit house style). The chrome is warm
    * near-neutral so colour stays meaningful. Each job has ONE treatment, and
    * they read the same on every surface:
    *
-   *   BRAND    maroon (--apollo-maroon)  — the h2 rule + the active rail item.
-   *                                        Brand only; never a provenance cue.
+   *   BRAND    maroon (--apollo-maroon)  — the h2 rule, the active rail item,
+   *                                        and the .apollo-card spine (container
+   *                                        chrome). Brand only; never a provenance cue.
    *   YOURS    green  (--apollo-green*)  + pencil — the "Yours to edit" badge
-   *                                        and the rail's owned/service groups.
-   *                                        "You can change it here."
+   *                                        ONLY. "You can change it here."
    *   LOCKED   neutral (--apollo-lock-bg) + lock icon + TEXT — LockedBadge and
-   *                                        the rail's WCM groups. Not a hue
-   *                                        (survives colourblindness); the WCM
-   *                                        rail group is deliberately quiet.
-   *   DANGER   --destructive             — Hide / destructive actions, warning banner.
-   *   INFO     slate tint               — the "Primary" badge and similar pills.
+   *                                        WCM provenance. Not a hue (survives
+   *                                        colourblindness). ALL rail group headers
+   *                                        are neutral gray (--muted-foreground).
+   *   DANGER   --destructive             — destructive actions, warning banner.
+   *   INFO     facet-blue (--color-facet-topic-count) — cross-reference links
+   *                                        (the "Source:" link), the "Add" action,
+   *                                        and the "Primary" designation badge.
+   *                                        slate tint stays on STATUS pills.
    *
    * Green pulls double duty (YOURS badge + success banner) — disambiguated by
    * icon + context (pencil vs check), never by hue alone, same as LOCKED.
@@ -292,13 +295,12 @@
   background: var(--apollo-surface);
   border: 1px solid var(--apollo-border);
   border-radius: var(--apollo-radius-card);
-  /* Slate spine (inset shadow, not a border — respects the corner radius and
-     adds no reflow) turns the detail panel from a plain white box into the
-     editor's one recurring colour motif, tying it to the slate rail column and
-     the "Preview Profile" link. Tier lives in the header (maroon vs slate
-     accent); the spine is container chrome. */
+  /* Maroon spine (inset shadow, not a border — respects the corner radius and
+     adds no reflow) turns the detail panel from a plain white box into a
+     brand-cued surface. Maroon is brand (the h2 rule + active rail item); the
+     spine is container chrome, not a provenance cue. */
   box-shadow:
-    inset 3px 0 0 var(--apollo-slate),
+    inset 3px 0 0 var(--apollo-maroon),
     var(--apollo-shadow-card);
   padding: 28px 32px 32px;
 }

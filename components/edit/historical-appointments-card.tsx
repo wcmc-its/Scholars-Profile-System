@@ -83,7 +83,7 @@ export function HistoricalAppointmentsCard({
               data-testid={`historical-appointment-row-${a.externalId}`}
             >
               <div className="min-w-0">
-                <p className="font-normal">{a.title}</p>
+                <p className="text-[14px] font-normal">{a.title}</p>
                 <p className="text-muted-foreground text-xs">
                   {a.organization}
                   {yearRange(a.startDate, a.endDate) && (
