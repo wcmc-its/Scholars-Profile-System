@@ -63,7 +63,11 @@ export function FundingCard({ cwid, mode, scholarName, grants }: FundingCardProp
         heading: "Funding",
         description: `Hide a grant to remove yourself from it on ${
           mode === "superuser" ? "this scholar's profile" : "this site"
-        }. Each entry is your role on one award; hiding it doesn't affect the award's other investigators. It may take up to a day to clear from funding search. Hiding is display-only — it doesn't correct the award; the record stays in WCM systems and on internal reports.`,
+        }. Each entry is your role on one award; hiding it doesn't affect the award's other investigators. It may take up to a day to clear from funding search. Hiding is display-only — it doesn't correct the award; ${
+          hasReporter
+            ? "the underlying record stays in its source system (InfoEd or NIH RePORTER)."
+            : "the record stays in WCM systems and on internal reports."
+        }`,
         empty:
           mode === "superuser"
             ? "We don't have funding records for this scholar."
