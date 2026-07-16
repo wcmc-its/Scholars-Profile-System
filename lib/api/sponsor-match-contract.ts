@@ -220,6 +220,26 @@ export function staleBefore(mode: RecencyMode, currentYear: number): number | nu
 }
 
 /**
+ * D4 — the HARD cutoff: the year below which a scholar is removed from the results, not merely
+ * down-weighted. `null` ⇒ nothing is hidden.
+ *
+ * ONLY `{ since }` hides, and that is the whole design. It is the one mode the officer sets
+ * DELIBERATELY, naming a year; "recent" is a soft preference and "any" weighs nothing, so neither
+ * may remove anyone. Note this is deliberately NOT `staleBefore` even though both read the mode:
+ * `staleBefore` returns `currentYear − HALF_LIFE` under "recent", so filtering on it would make
+ * the DEFAULT dial position silently delete every scholar 8 years out — a soft preference
+ * executing a hard deletion. Two questions ("what reads as old?" vs "what gets removed?"), two
+ * functions; they coincide only under `{ since }`, where the officer answered both at once.
+ *
+ * The caller MUST keep a candidate whose `mostRecentYear` is absent. Absent is not old — it is
+ * the flag being off, or a scholar with no curated publication — and hiding on a missing datum
+ * deletes people for a gap in our data rather than a fact about them.
+ */
+export function hiddenBefore(mode: RecencyMode): number | null {
+  return typeof mode === "object" ? mode.since : null;
+}
+
+/**
  * How many concepts' worth of evidence one candidate card carries (#1696) — the top-K
  * contributions BY STRENGTH at DEFAULT weights, strongest first.
  *

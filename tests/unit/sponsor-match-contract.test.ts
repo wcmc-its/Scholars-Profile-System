@@ -21,6 +21,7 @@ import {
   fusedScore,
   recencyWeight,
   staleBefore,
+  hiddenBefore,
   RECENCY_FLOOR,
   RECENCY_HALF_LIFE_YEARS,
   hasMatchEvidence,
@@ -665,6 +666,28 @@ describe("staleBefore — D8's flag boundary, derived from the active mode", () 
 
   it('"any" → null: nothing weighs recency, so nothing may claim stale', () => {
     expect(staleBefore("any", 2026)).toBeNull();
+  });
+});
+
+describe("hiddenBefore — D4's hard cutoff, and why it is NOT staleBefore", () => {
+  it('"since" → the officer\'s cutoff: the one mode that may remove people', () => {
+    expect(hiddenBefore({ since: 2020 })).toBe(2020);
+  });
+
+  it('"recent" → null: a SOFT preference must never delete', () => {
+    // The trap this exists to prevent: staleBefore("recent") is a real year (currentYear−8), so a
+    // filter keyed on staleBefore would make the DEFAULT dial position silently remove every
+    // scholar 8 years out. Reading as old and being deleted are different questions.
+    expect(hiddenBefore("recent")).toBeNull();
+    expect(staleBefore("recent", 2026)).toBe(2018); // ← non-null, and deliberately not a cutoff
+  });
+
+  it('"any" → null: nothing weighs recency, so nothing is removed', () => {
+    expect(hiddenBefore("any")).toBeNull();
+  });
+
+  it("the two agree ONLY under { since }, where the officer answered both questions at once", () => {
+    expect(hiddenBefore({ since: 2015 })).toBe(staleBefore({ since: 2015 }, 2026));
   });
 });
 

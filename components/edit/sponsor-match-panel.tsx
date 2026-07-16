@@ -92,6 +92,7 @@ import {
   PREFERENCE_LAMBDA,
   rareTerms,
   staleBefore,
+  hiddenBefore,
   TIER_GOOD,
   rerankCandidates,
   sponsorAskFrom,
@@ -441,6 +442,30 @@ export function SponsorMatchPanel() {
     [results, concepts, activePreferences, recency],
   );
 
+  // D4 — the hard cutoff. Only `{ since }` hides (see `hiddenBefore`); the default dial position
+  // never removes anyone. A candidate with NO year is KEPT: absent is not old, and a missing
+  // `mostRecentYear` means the flag is off or nobody curated their publications — neither is a
+  // fact about the scholar, and we do not delete people for a gap in our own data.
+  //
+  // Why this is filtered here and not fused into the score: D1's demotion is bounded (the ×0.5
+  // floor), so a stale scholar still ranks and the officer can see and judge them. Removal is
+  // unbounded and unnoticeable — you cannot spot the expert who is not on the page — so it stays
+  // OUT of the ranking function and lives here, where it is an explicit officer action with a
+  // count attached.
+  // It REDEFINES THE POOL rather than filtering the painted rows, and that is the whole of it:
+  // facets count it, the facet filters search it, the rank is stamped from it, and the CSV
+  // exports it. Hiding only at the render layer would leave a "Neurology · 12" facet that filters
+  // down to 9, and would export scholars the officer had just excluded.
+  const yearCutoff = hiddenBefore(recency);
+  const rankedInYear = useMemo(
+    () =>
+      yearCutoff == null
+        ? ranked
+        : ranked.filter((c) => c.mostRecentYear == null || c.mostRecentYear >= yearCutoff),
+    [ranked, yearCutoff],
+  );
+  const hiddenByYear = ranked.length - rankedInYear.length;
+
   // D3 — the dial only means anything when the payload carries years (SPONSOR_MATCH_RECENCY on).
   // Absent ⇒ every weight is 1 and the control would be a lie, so it does not render.
   const hasRecencyData = useMemo(() => results.some((c) => c.mostRecentYear != null), [results]);
@@ -449,7 +474,12 @@ export function SponsorMatchPanel() {
   // recent", and null under "Any" — where nothing is weighing recency, so nothing claims stale.
   const staleYear = useMemo(() => staleBefore(recency, currentYear), [recency, currentYear]);
 
-  const topScore = ranked[0]?.fusedScore ?? 0;
+  // Tiers are a share of the top of the POOL the officer is actually looking at, so they re-tier
+  // against a year-restricted pool the same way D2 re-tiers against a re-ranked one. Reading
+  // `ranked[0]` would let a hidden scholar set the bar for a list they are not in — and if the top
+  // match were filtered out, every remaining row could read "weak" against someone the officer
+  // cannot see. Identical under "any"/"recent", where nothing is hidden.
+  const topScore = rankedInYear[0]?.fusedScore ?? 0;
 
   const conceptPanels = useMemo(
     () => ({
@@ -521,12 +551,15 @@ export function SponsorMatchPanel() {
     );
   }, []);
 
+  // Facet over the POOL (see RESULT_MAX) — which under a year cutoff IS the year-restricted pool.
+  // A facet offering "Neurology · 12" that filters down to 9 because 3 were hidden by the cutoff
+  // would be lying about its own result set.
   const deptFacet = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const c of ranked)
+    for (const c of rankedInYear)
       if (c.department) counts.set(c.department, (counts.get(c.department) ?? 0) + 1);
     return [...counts].sort((a, b) => b[1] - a[1]).slice(0, DEPT_FACET_MAX);
-  }, [ranked]);
+  }, [rankedInYear]);
 
   // Facet over the concepts people actually MATCHED (their contributions), not the whole
   // rail — a concept nobody ranked under is not a useful filter. Counts are over the full
@@ -629,7 +662,7 @@ export function SponsorMatchPanel() {
   // what the CSV exports. `visible` below is the same list with the render cap applied.
   const filtered = useMemo(
     () =>
-      ranked
+      rankedInYear
         .map((c, i) => ({ c, rank: i + 1 }))
         .filter(
           ({ c }) =>
@@ -644,7 +677,7 @@ export function SponsorMatchPanel() {
             (!clinicianOnly || c.measures?.isClinician === true) &&
             (roleSel.size === 0 || roleSel.has(roleCategoryLabel(c.measures?.roleCategory))),
         ),
-    [ranked, deptSel, conceptSel, ctlOnly, stageSel, clinicianOnly, roleSel],
+    [rankedInYear, deptSel, conceptSel, ctlOnly, stageSel, clinicianOnly, roleSel],
   );
 
   // The cap lands on the FIT-ordered rows, then Name reorders that hundred. Slicing after the
@@ -1377,6 +1410,21 @@ export function SponsorMatchPanel() {
                     {excludedCount > 0 ? (
                       <p className="text-muted-foreground mt-4 text-[11px]">
                         {excludedCount} with no evidence hidden
+                      </p>
+                    ) : null}
+
+                    {/* D4 — removed by the officer's own year cutoff. This count is the ONLY thing
+                        standing between the filter and a silent wrong answer: an absent scholar is
+                        unnoticeable (you cannot spot the expert who is not on the page), and the
+                        year it filters on is `mostRecentPubDate`, which counts CURATED pubs only —
+                        so an uncurated backlog reads as dormancy and removes a live expert. Naming
+                        the escape ("Any") in the copy matters for the same reason: the officer has
+                        to be told the door exists to think of opening it. Same count-not-names rule
+                        as above. */}
+                    {hiddenByYear > 0 ? (
+                      <p className="text-muted-foreground mt-4 text-[11px]">
+                        {hiddenByYear} hidden · no publication since {yearCutoff} — set recency to
+                        “Any” to include them
                       </p>
                     ) : null}
                   </>
