@@ -380,6 +380,81 @@ export type ProfilePublication = ScoredPublication<{
   }>;
 }>;
 
+/** Issue #1760 — the controlled honor category, mirroring the Prisma
+ *  `HonorCategory` enum. The declaration order here IS the profile's group
+ *  order, so keep it in step with the schema's enum order. */
+export type HonorCategory =
+  | "ACADEMY_MEMBERSHIP"
+  | "INVESTIGATORSHIP"
+  | "PRIZE"
+  | "OTHER";
+
+/** Issue #1760 — one honor as carried in the profile payload.
+ *
+ *  `status` and `showOnProfile` are deliberately NOT carried. The display gate
+ *  is applied in the loader query (see `honors` in `getScholarFullProfileBySlug`),
+ *  so every row that reaches this type has already passed it. Carrying the flags
+ *  would imply a render-time decision that no longer exists — and would invite a
+ *  future view-side filter to become the thing standing between a `pending`
+ *  roster row and the public page. */
+export type HonorEntry = {
+  category: HonorCategory;
+  /** Free text: "Member", "Fellow", "Lasker Award". */
+  name: string;
+  /** The conferring body, free text — no controlled vocabulary. */
+  organization: string;
+  /** Election/award year; null when unknown, and omitted at render rather than
+   *  guessed. */
+  year: number | null;
+};
+
+/** Issue #1760 — the honor categories in `HonorCategory` enum order. This array
+ *  IS the profile's group order; the enum's declaration order is the contract,
+ *  not an alphabetisation of it. */
+export const HONOR_CATEGORY_ORDER: readonly HonorCategory[] = [
+  "ACADEMY_MEMBERSHIP",
+  "INVESTIGATORSHIP",
+  "PRIZE",
+  "OTHER",
+];
+
+/** One rendered honor group: a category and its rows, already ordered. */
+export type HonorGroup = {
+  category: HonorCategory;
+  entries: HonorEntry[];
+};
+
+/**
+ * Issue #1760 — partition payload honors into the profile's category groups.
+ *
+ * Groups come back in `HONOR_CATEGORY_ORDER` (the enum order); within a group,
+ * rows are year DESC with unknown years last — an honor whose year we don't have
+ * is not a year-zero honor, so it sorts to the end rather than the top. Ties keep
+ * the loader's order (name asc), so the render is stable.
+ *
+ * The sort is explicit here rather than delegated to the query because MySQL's
+ * null placement under `ORDER BY ... DESC` is a DB behaviour no unit test in this
+ * repo can observe, and the profile UI cannot be rendered locally against real
+ * data. Empty groups are dropped, so a caller that gets `[]` renders no section.
+ *
+ * Pure and DB-free: this decides ORDER, never visibility. Visibility is gated in
+ * the loader query — by the time a row is here, it has already earned its place.
+ */
+export function groupHonors(honors: ReadonlyArray<HonorEntry>): HonorGroup[] {
+  return HONOR_CATEGORY_ORDER.map((category) => ({
+    category,
+    // `filter` already copies, so the in-place `sort` cannot mutate the payload.
+    entries: honors
+      .filter((h) => h.category === category)
+      .sort((a, b) => {
+        if (a.year === b.year) return 0;
+        if (a.year === null) return 1;
+        if (b.year === null) return -1;
+        return b.year - a.year;
+      }),
+  })).filter((g) => g.entries.length > 0);
+}
+
 export type ProfilePayload = {
   cwid: string;
   slug: string;
@@ -477,6 +552,19 @@ export type ProfilePayload = {
    *  row is carried (hidden ones included); `groupProfileAppointments` applies
    *  the `showOnProfile` gate + the category split at render. */
   profileAppointments: ProfileAppointmentEntry[];
+  /** Issue #1760 — curator-/self-entered honors and distinctions, entered on
+   *  `/edit`. PROFILE-ONLY, like `profileAppointments`: no department rollup and
+   *  no search facet read this (deliberate later increments), so the trust
+   *  boundary stays structural — those serializers never touch the table.
+   *
+   *  THE GATE — unlike `profileAppointments` above, which carries hidden rows and
+   *  filters at render, an honor is gated in the QUERY: only `status = published`
+   *  AND `showOnProfile = true` rows are read at all. The Phase 3 roster feed
+   *  writes `pending` rows for a human to confirm, and an unconfirmed row must
+   *  never reach the client — so the filter lives where forgetting it is
+   *  impossible rather than merely unlikely. Grouping (category, then year) is
+   *  applied at render; see `groupHonors` below. */
+  honors: HonorEntry[];
   educations: Array<{
     degree: string;
     institution: string;
@@ -772,6 +860,22 @@ export const getScholarFullProfileBySlug = cache(
         profileAppointments: {
           where: { showOnProfile: true },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        },
+        // #1760 — honors & distinctions (profile-only). THE GATE: a row is read
+        // only when it is BOTH `published` and shown. The Phase 3 roster sweep
+        // writes `pending` rows for the Dean's office to confirm and NEVER
+        // auto-publishes, so a `pending`/`rejected` row must not enter this
+        // payload — gating here means an unconfirmed honor cannot reach the
+        // client even if a render-side guard is later dropped.
+        //
+        // `year: desc` is the payload's stable order, but it is NOT the display
+        // contract: the view re-sorts explicitly (category in enum order, then
+        // year desc / nulls last) rather than trusting MySQL's null placement,
+        // which no local test here can observe. `name` breaks ties so the cached
+        // payload is deterministic.
+        honors: {
+          where: { status: "published", showOnProfile: true },
+          orderBy: [{ year: "desc" }, { name: "asc" }],
         },
         educations: {
           orderBy: [{ year: "desc" }],
@@ -1302,6 +1406,16 @@ export const getScholarFullProfileBySlug = cache(
         startDate: a.startDate ? a.startDate.toISOString().slice(0, 10) : null,
         endDate: a.endDate ? a.endDate.toISOString().slice(0, 10) : null,
         showOnProfile: a.showOnProfile,
+      })),
+      // #1760 — honors, already gated to published + shown by the loader query
+      // above, so there is nothing left to filter here. `status`/`showOnProfile`
+      // are dropped rather than carried: the payload states the honors that
+      // render, not the ones that exist.
+      honors: scholar.honors.map((h) => ({
+        category: h.category,
+        name: h.name,
+        organization: h.organization,
+        year: h.year,
       })),
       // section-visibility — `hideEducation` drops the whole Education section.
       educations: hiddenSections.has("hideEducation")

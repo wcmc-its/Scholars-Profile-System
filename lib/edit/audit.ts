@@ -144,7 +144,16 @@ export type AuditAction =
    *  drain companion then removes the produced `GRANT#` items. before/after
    *  carry the status transition (+ `produced_opportunity_ids`). Same ENUM
    *  note as `opportunity_submission_delete`. */
-  | "opportunity_submission_suppress";
+  | "opportunity_submission_suppress"
+  /** a scholar / curator (or superuser) added / edited / removed an `honor` row
+   *  on /edit (#1760) — an academy membership, investigatorship, or prize.
+   *  `targetEntityType='honor'`, `targetEntityId` is the row `id`; before/after
+   *  carry the row snapshot. Its own store → its own audit action, never
+   *  `field_override`. Requires the `scholars_audit` action ENUM be extended —
+   *  see `scripts/sql/audit-log.sql`. */
+  | "honor_create"
+  | "honor_update"
+  | "honor_delete";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -180,7 +189,10 @@ export type AuditEntityType =
   | "opportunity_submission"
   /** a self-asserted `profile_appointment` row edited on /edit (#1568);
    *  `targetEntityId` is the `profile_appointment.id`. */
-  | "profile_appointment";
+  | "profile_appointment"
+  /** an honor / distinction row curated on /edit (#1760); `targetEntityId` is
+   *  the `honor.id`. */
+  | "honor";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

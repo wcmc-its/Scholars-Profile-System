@@ -60,6 +60,10 @@ vi.mock("@/lib/api/profile", () => ({
   getActiveScholarSlugs: vi.fn(async () => []),
   isSparseProfile: vi.fn(() => false),
   buildProfileJsonLd: vi.fn(() => ({})),
+  // #1760 — <ProfileView> groups honors for its section. This factory replaces
+  // the module wholesale (see the DB-pool note below), so the pure helper has to
+  // be restated here. The fixture carries no honors, so [] is the real answer.
+  groupHonors: vi.fn(() => []),
 }));
 
 // Mock @/lib/seo/jsonld to avoid JSON-LD side-effects.

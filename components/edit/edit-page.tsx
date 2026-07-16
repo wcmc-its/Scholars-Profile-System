@@ -11,6 +11,7 @@
 import { AppointmentsCard } from "@/components/edit/appointments-card";
 import { HistoricalAppointmentsCard } from "@/components/edit/historical-appointments-card";
 import { ProfileAppointmentsCard } from "@/components/edit/profile-appointments-card";
+import { HonorsCard } from "@/components/edit/honors-card";
 import { CoiCard } from "@/components/edit/coi-card";
 import { CoiGapCard } from "@/components/edit/coi-gap-card";
 import { ReporterProfileCard } from "@/components/edit/reporter-profile-card";
@@ -1092,6 +1093,18 @@ function renderPanel(
             mode === "unit-admin" ||
             mode === "proxy") && (
             <ProfileAppointmentsCard cwid={cwid} mode={voiceMode} scholarName={scholarName} />
+          )}
+          {/* #1760 — curation editor for honors and distinctions (academy
+              memberships, investigatorships, named chairs, prizes) that no WCM
+              feed carries. Same authorized set as the two cards above (self,
+              superuser / comms_steward, unit-admin, proxy — what the write route
+              authorizes); the card fetches its own rows and each write is
+              re-authorized server-side. */}
+          {(mode === "self" ||
+            isSuperuserLike(mode) ||
+            mode === "unit-admin" ||
+            mode === "proxy") && (
+            <HonorsCard cwid={cwid} mode={voiceMode} scholarName={scholarName} />
           )}
         </div>
       );

@@ -111,6 +111,7 @@ model Scholar {
   appointments         Appointment[]
   educations           Education[]
   profileAppointments  ProfileAppointment[]
+  honors               Honor[]
   grants               Grant[]
   authorships          PublicationAuthor[]
   topicAssignments     TopicAssignment[]
@@ -205,6 +206,58 @@ model ProfileAppointment {
 enum ProfileAppointmentCategory {
   WCM_LEADERSHIP // internal WCM role not carried by ED (Program Director, Head of Section, ...)
   EXTERNAL // appointment at another institution (prior or current — dates say which)
+}
+
+/// Honors and distinctions (#1760) — academy memberships, investigatorships,
+/// named chairs, and prizes, entered by a curator (or a scholar on their own
+/// profile) on `/edit`. Modelled on `profile_appointment`: a SEPARATE store no
+/// ETL truncates, FK-cascaded to scholar, PROFILE-ONLY by construction.
+///
+/// `category` alone is controlled; `name` and `organization` are free text —
+/// the conferring body is deliberately NOT validated against a vocabulary,
+/// because the long tail of societies is the point and a closed list would
+/// silently drop the honors it doesn't know.
+///
+/// `status` exists for the Phase 3 roster feed, which writes `pending` rows for
+/// a human to confirm — an agent sweep NEVER auto-publishes. Curator/self entry
+/// writes `published` (the default) directly. `source` = CURATOR | SELF | a feed
+/// identifier; `sourceRef` is the roster URL the row came from, kept for de-dup
+/// and audit (NULL for hand-entered rows).
+model Honor {
+  id            String        @id @default(uuid()) @db.VarChar(64)
+  cwid          String        @db.VarChar(32)
+  scholar       Scholar       @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  category      HonorCategory
+  name          String        @db.VarChar(255) // free text: "Member", "Fellow", "Lasker Award"
+  organization  String        @db.VarChar(255) // conferring body, free text
+  year          Int? // election/award year; NULL when unknown
+  status        HonorStatus   @default(published)
+  showOnProfile Boolean       @default(true) @map("show_on_profile")
+  source        String        @default("CURATOR") @db.VarChar(32) // CURATOR | SELF | <feed>
+  sourceRef     String?       @map("source_ref") @db.VarChar(512) // roster URL; de-dup + audit
+  enteredByCwid String        @map("entered_by_cwid") @db.VarChar(32)
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  @@index([cwid, status, showOnProfile])
+  @@map("honor")
+}
+
+/// No NAMED_CHAIR member, deliberately: ED already ingests endowed titles into
+/// `Appointment.title` / `Scholar.primaryTitle` nightly and `lib/leadership.ts`
+/// parses them, so a chair recorded here would render twice on the profile.
+/// Endowed chairs are out of this pipeline entirely. `OTHER` absorbs the oddballs.
+enum HonorCategory {
+  ACADEMY_MEMBERSHIP // elected membership in a national academy or learned society
+  INVESTIGATORSHIP // named investigator appointment (HHMI and the like)
+  PRIZE // award, prize, or medal
+  OTHER
+}
+
+enum HonorStatus {
+  published
+  pending
+  rejected
 }
 
 /// Education and training entries from ASMS.
