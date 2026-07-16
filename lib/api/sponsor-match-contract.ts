@@ -154,6 +154,38 @@ export const TIER_STRONG = 0.66;
 export const TIER_GOOD = 0.33;
 
 /**
+ * D1 — recency as a scored dimension. A per-scholar multiplier on the fused score, so a recent
+ * body of work outranks an equally-relevant but dormant one — and because `fitTier` buckets a
+ * candidate's score as a SHARE of the top score, folding recency into that one value RE-TIERS for
+ * free (D2, no separate wiring). It MUST be per-scholar-varying: a factor uniform across every
+ * candidate cancels in that ratio and moves nothing.
+ *
+ *     weight = FLOOR + (1 − FLOOR)·0.5^(age / HALF_LIFE),   age = max(0, currentYear − mostRecentYear)
+ *
+ * FLOORed so an older-but-genuine expert is down-weighted, never zeroed — centrality^γ still leads.
+ * HALF_LIFE reuses the key-paper blend's 8-year half-life (one recency constant across the surface,
+ * not two to justify). A candidate with no known year gets 1.0 (neutral), so the flag-off and
+ * no-publications states are byte-identical to today.
+ *
+ * ponytail: recency = f(most-recent year) ONLY. The spec's trailing-window DENSITY term is deferred
+ * — the spine ships no per-year distribution and has no zero-I/O source for one (`searchEvidence`
+ * drops artifact years to stay under the OpenSearch parent circuit breaker). Add density when a
+ * precomputed people-doc trailing-window count lands; the D2 regression AC (an all-old scholar →
+ * Weak) needs only the year. Tune FLOOR/HALF_LIFE against staging once officers have used it.
+ */
+export const RECENCY_HALF_LIFE_YEARS = 8;
+export const RECENCY_FLOOR = 0.5;
+
+export function recencyWeight(
+  mostRecentYear: number | null | undefined,
+  currentYear: number,
+): number {
+  if (mostRecentYear == null) return 1;
+  const age = Math.max(0, currentYear - mostRecentYear);
+  return RECENCY_FLOOR + (1 - RECENCY_FLOOR) * 0.5 ** (age / RECENCY_HALF_LIFE_YEARS);
+}
+
+/**
  * How many concepts' worth of evidence one candidate card carries (#1696) — the top-K
  * contributions BY STRENGTH at DEFAULT weights, strongest first.
  *
@@ -403,6 +435,14 @@ export type SponsorCandidate = {
    */
   identityImageEndpoint?: string;
   measures?: SponsorMeasures;
+  /**
+   * D1 — the scholar's most-recent publication YEAR (derived from the precomputed people-doc
+   * `mostRecentPubDate`). Two consumers, one field: the recency ranking input (`recencyWeight`,
+   * folded into `fusedScore`) and D8's compact-row "latest YYYY" (`latestEvidenceYear`).
+   * Present only under `SPONSOR_MATCH_RECENCY`; absent ⇒ recency is neutral (×1) and the row
+   * renders no year — exactly today's behavior. Absent ≠ 0.
+   */
+  mostRecentYear?: number | null;
   evidence?: SponsorEvidence;
   /**
    * #1689/#1696 — the search's own evidence, ONE ENTRY PER CONCEPT this candidate matched.
@@ -588,6 +628,12 @@ export type RerankOptions = {
   prefBoost?: (candidate: SponsorCandidate) => number;
   /** Preference strength λ. Only read when `prefBoost` is supplied. */
   lambda?: number;
+  /** D1 recency clock — the year `recencyWeight` measures a candidate's `mostRecentYear` against.
+   *  A test/determinism seam: tests pass a fixed year; production omits it, and both the server and
+   *  the client read `new Date().getUTCFullYear()`. They agree within a UTC year (the common case).
+   *  The only divergence is a tab left open across Jan 1 — a bounded ~4% weight drift on the freshest
+   *  candidate that self-heals on the next fetch, not worth shipping a server-year field on the wire. */
+  currentYear?: number;
 };
 
 /** Fusion weight for one concept: `centrality^γ × weightFactor`. Centrality is the slider;
@@ -614,9 +660,9 @@ export function conceptWeights(concepts: readonly SponsorConcept[]): Map<string,
 }
 
 /**
- * The reference score (pivot handoff §4):
+ * The reference score (pivot handoff §4; D1 adds the recency factor):
  *
- *     score(s) = Σ_c  weight(c) / (K + rank_{s,c})   × (1 + λ·prefBoost(s))
+ *     score(s) = [ Σ_c  weight(c) / (K + rank_{s,c}) ]  × recency(s)  × (1 + λ·prefBoost(s))
  *
  * PURE — this is what makes the live re-rank possible: given the response, a slider move
  * is arithmetic over data already in the browser, not a round-trip. A contribution whose
@@ -633,6 +679,12 @@ export function fusedScore(
   for (const { term, rank } of candidate.contributions) {
     score += (weightByTerm.get(term) ?? 0) / (k + rank);
   }
+  // D1 — per-scholar recency, folded into the ONE value both the sort and `fitTier` read, so it
+  // moves order AND tier together. Neutral (×1) when the candidate carries no `mostRecentYear`
+  // (flag off), which keeps the round-trip test and every existing order unchanged. The server's
+  // `rrfFuse` applies the identical factor (same UTC year), so the client re-rank at default weights
+  // reproduces the server's order — see the `currentYear` note for the once-a-year boundary edge.
+  score *= recencyWeight(candidate.mostRecentYear, opts.currentYear ?? new Date().getUTCFullYear());
   if (!opts.prefBoost) return score;
   return score * (1 + (opts.lambda ?? 1) * opts.prefBoost(candidate));
 }
@@ -934,14 +986,14 @@ export function evidenceMatchCount(evidence: ResultEvidence): number | null {
 /**
  * The most-recent evidence year we ALREADY HOLD for a candidate — D8's compact-row "latest YYYY".
  *
- * INTERIM SOURCE, and deliberately narrow: only the bespoke engine's `evidence.papers` carries a
- * year up front. The production SPINE path ships `searchEvidence`, whose artifact (and its year) is
- * lazy-fetched on view — so this returns `null` there, and the compact row renders no year until D1
- * surfaces a per-scholar most-recent year in the payload. Point this at that field when it lands;
- * nothing else on the row should need to change. (D8's stale colour-flag is likewise gated on D1's
- * recency threshold — the year renders neutral until then.)
+ * D1 landed the per-scholar year on the production SPINE path: `mostRecentYear` (from the people-doc
+ * `mostRecentPubDate`), surfaced under `SPONSOR_MATCH_RECENCY`. Read it first. The bespoke engine
+ * ships no `mostRecentYear` but carries per-paper years up front in `evidence.papers`, so fall back
+ * to the max of those. Returns `null` when neither is present (flag off, or a scholar with no dated
+ * evidence) — the compact row then renders no year, as before.
  */
 export function latestEvidenceYear(candidate: SponsorCandidate): number | null {
+  if (candidate.mostRecentYear != null) return candidate.mostRecentYear;
   const years = (candidate.evidence?.papers ?? [])
     .map((p) => p.year)
     .filter((y): y is number => typeof y === "number");

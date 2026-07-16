@@ -1303,6 +1303,12 @@ export class AppStack extends Stack {
         // STAGING-on to A/B it; PROD-off until a clean gloss-off vs gloss-on run clears the sponsor
         // eval's ~0.0074 nDCG noise floor. A one-sided staging run (no gloss-off arm) cannot prove it.
         SPONSOR_MATCH_GLOSS_QUERY: env === "staging" ? "on" : "off",
+        // SPONSOR_MATCH_RECENCY — D1: fold each scholar's most-recent publication year into the
+        // fused score (recency as a scored dimension), which re-tiers via the share-to-top (D2).
+        // A RANKING change, so it is eval-gated exactly like the gloss query: STAGING-on to A/B it,
+        // PROD-off until a clean recency-off vs recency-on run clears the sponsor eval's ~0.0074
+        // nDCG noise floor. A one-sided staging run (no recency-off arm) cannot prove it.
+        SPONSOR_MATCH_RECENCY: env === "staging" ? "on" : "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim

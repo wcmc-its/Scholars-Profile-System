@@ -375,6 +375,61 @@ describe("rankResearchersForDescriptionSpine", () => {
     );
   });
 
+  it("with SPONSOR_MATCH_RECENCY=on, projects the year and re-ranks by recency (the flag→candidate hop)", async () => {
+    // The one hop that turns the flag into a candidate field, tested end to end: flag → searchPeople
+    // opt → hit year → recencyWeightByCwid → rrfFuse reorder → candidate.mostRecentYear.
+    process.env.SPONSOR_MATCH_RECENCY = "on";
+    try {
+      const thisYear = new Date().getUTCFullYear();
+      mockExtractSponsorConcepts.mockResolvedValue([{ term: "adc", kind: "concept", centrality: 1.0 }]);
+      mockMatchQueryToTaxonomy.mockImplementation(async (q: string) => meshRes(`D_${q}`, [`D_${q}`]));
+      // "old" ranks #1 (higher topical base), "recent" #2 — but "recent" is current-year and "old"
+      // is 30y stale, so recency (≈1 vs ≈FLOOR) flips the order. Years are relative to the real
+      // clock the spine reads, so the flip holds regardless of the calendar year the test runs in.
+      mockSearchPeople.mockImplementation(async () => ({
+        hits: [
+          { ...hit("old"), mostRecentYear: thisYear - 30 },
+          { ...hit("recent"), mostRecentYear: thisYear },
+        ],
+        total: 2,
+        pageSize: 20,
+      }));
+
+      const { candidates } = await rankResearchersForDescriptionSpine("adc paste");
+
+      // (a) every candidate-producing searchPeople call asked for the year.
+      expect(mockSearchPeople.mock.calls.every((c) => c[0].includeMostRecentPub === true)).toBe(true);
+      // (b) the year rides onto the candidate on the spine path (D8's "latest YYYY").
+      expect(candidates.find((c) => c.cwid === "recent")!.mostRecentYear).toBe(thisYear);
+      // (c) recency actually reordered: the recent scholar (worse topical rank) now leads.
+      expect(candidates.map((c) => c.cwid)).toEqual(["recent", "old"]);
+    } finally {
+      delete process.env.SPONSOR_MATCH_RECENCY;
+    }
+  });
+
+  it("with SPONSOR_MATCH_RECENCY off (default), does not request or attach the year (byte-identical)", async () => {
+    delete process.env.SPONSOR_MATCH_RECENCY;
+    mockExtractSponsorConcepts.mockResolvedValue([{ term: "adc", kind: "concept", centrality: 1.0 }]);
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) => meshRes(`D_${q}`, [`D_${q}`]));
+    // Even though the (mocked) hits carry a year, the spine must ignore it when the flag is off.
+    mockSearchPeople.mockImplementation(async () => ({
+      hits: [
+        { ...hit("old"), mostRecentYear: 1999 },
+        { ...hit("recent"), mostRecentYear: 2024 },
+      ],
+      total: 2,
+      pageSize: 20,
+    }));
+
+    const { candidates } = await rankResearchersForDescriptionSpine("adc paste");
+
+    expect(mockSearchPeople.mock.calls.every((c) => c[0].includeMostRecentPub !== true)).toBe(true);
+    expect(candidates.every((c) => c.mostRecentYear === undefined)).toBe(true);
+    // No recency ⇒ the topical base order stands: "old" (#1) before "recent" (#2).
+    expect(candidates.map((c) => c.cwid)).toEqual(["old", "recent"]);
+  });
+
   it("coverage NEVER reaches the fusion weight — rare, zero and absent all weigh the same", async () => {
     mockTopicFindMany.mockResolvedValue([
       { label: "rare" },

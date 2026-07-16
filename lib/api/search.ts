@@ -249,6 +249,11 @@ export type PeopleHit = {
   divisionName: string | null;
   roleCategory: string | null;
   pubCount: number;
+  /** D1 (sponsor recency) — the scholar's most-recent publication YEAR, from the precomputed
+   *  `mostRecentPubDate`. Present only under `includeMostRecentPub` (the sponsor recency path);
+   *  absent for every other caller, so the hit shape is unchanged. Feeds `recencyWeight` and D8's
+   *  "latest YYYY". */
+  mostRecentYear?: number | null;
   grantCount: number;
   hasActiveGrants: boolean;
   /** #1412 — this scholar's count of grants matching the query, from ONE page-level
@@ -1359,6 +1364,13 @@ export async function searchPeople(opts: {
    */
   representativePub?: boolean;
   /**
+   * D1 (sponsor recency) — when true, project the precomputed `mostRecentPubDate` into `_source`
+   * and emit its year as `PeopleHit.mostRecentYear`. Zero extra OpenSearch cost (the field is
+   * already stored and used for the recency sort/filter, just not projected). Default false ⇒ the
+   * `_source` include-list and hit shape are byte-identical, so no other caller is affected.
+   */
+  includeMostRecentPub?: boolean;
+  /**
    * Issue #688 — the resolved descriptor's display name (the term the user
    * effectively searched), passed alongside `meshDescendantUis` so the
    * provenance string can read "… narrower term of {name}". Absent when the
@@ -1521,6 +1533,7 @@ export async function searchPeople(opts: {
   // hit emission below are byte-identical to the pre-#702 shape.
   const matchExplain = opts.matchExplain === true;
   const representativePub = opts.representativePub === true;
+  const includeMostRecentPub = opts.includeMostRecentPub === true;
   // Search reason-from-doc — serve the tagged reason count from the people-doc
   // `meshSubtreeCounts` field (O(1) lookup) rather than the publications-index
   // agg. Active only when the flag is on AND the query resolved to a concept
@@ -2594,6 +2607,10 @@ export async function searchPeople(opts: {
       // shape. `clinicalExpertise` is not indexed into any live query path, so it
       // is not returned. Drives the `clinical:exact` evidence below.
       ...(clinicalReasonOn ? ["clinicalSpecialties", "clinicalBoardSet"] : []),
+      // D1 (sponsor recency) — the scholar's most-recent pub date, requested ONLY when the
+      // sponsor recency path asks for it, so every other caller keeps today's `_source` shape.
+      // Already stored + used for the recentPub sort/filter; this only projects it back.
+      ...(includeMostRecentPub ? ["mostRecentPubDate"] : []),
     ],
     // OpenSearch's default cap of 10000 short-circuits the total counter
     // and would make the subhead read "10,000 publications" even when
@@ -2735,6 +2752,11 @@ export async function searchPeople(opts: {
       // reason. A not-yet-reindexed doc lacks them → no clinical reason, never a 500.
       clinicalSpecialties?: string[];
       clinicalBoardSet?: string[];
+      // D1 (sponsor recency) — the scholar's most-recent pub date (ISO), present only when
+      // `includeMostRecentPub` added it to the include-list above. Derived from
+      // `dateAddedToEntrez`, so it is the display-honest recency max (excludes retractions /
+      // hidden / dark pmids), not a raw MAX(pub.year).
+      mostRecentPubDate?: string | null;
     };
     highlight?: Record<string, string[]>;
   };
@@ -3337,6 +3359,14 @@ export async function searchPeople(opts: {
           return gm && gm.count > 0
             ? { grantMatchCount: gm.count, grantMatchTaggedCount: gm.taggedCount }
             : {};
+        })(),
+        // D1 (sponsor recency) — the most-recent publication YEAR, derived from the projected
+        // `mostRecentPubDate`. Emitted only when the field was requested + is parseable, so the
+        // flag-off / no-date response stays byte-identical to today.
+        ...(() => {
+          const d = h._source.mostRecentPubDate;
+          const y = d ? new Date(d).getUTCFullYear() : NaN;
+          return Number.isFinite(y) ? { mostRecentYear: y } : {};
         })(),
         identityImageEndpoint: identityImageEndpoint(h._source.cwid),
         highlight,

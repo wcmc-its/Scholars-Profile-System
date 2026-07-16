@@ -82,7 +82,16 @@ export type FusedScholar = {
  * `K` defaults to the contract's `DEFAULT_K`; the client re-ranks with the same
  * constant, and `sponsor-match-contract.test.ts` pins the two together.
  */
-export function rrfFuse(rankings: TermRanking[], K = DEFAULT_K): FusedScholar[] {
+export function rrfFuse(
+  rankings: TermRanking[],
+  K = DEFAULT_K,
+  // D1 — optional per-scholar recency multiplier (cwid → weight in [FLOOR,1], from `recencyWeight`).
+  // Applied to the SUMMED score so the server's order AND its top-N cut are recency-aware, and so
+  // the client's `fusedScore()` (which applies the identical factor) reproduces this order at
+  // default weights. Absent (flag off / other callers) ⇒ every scholar multiplies by 1 — the
+  // fusion is byte-identical to before.
+  recencyWeightByCwid?: ReadonlyMap<string, number>,
+): FusedScholar[] {
   const score = new Map<string, number>();
   const contributions = new Map<string, { term: string; rank: number }[]>();
   const firstSeen = new Map<string, number>();
@@ -98,6 +107,10 @@ export function rrfFuse(rankings: TermRanking[], K = DEFAULT_K): FusedScholar[] 
     }
   }
   return [...score.entries()]
-    .map(([cwid, s]) => ({ cwid, score: s, contributions: contributions.get(cwid)! }))
+    .map(([cwid, s]) => ({
+      cwid,
+      score: s * (recencyWeightByCwid?.get(cwid) ?? 1),
+      contributions: contributions.get(cwid)!,
+    }))
     .sort((a, b) => b.score - a.score || firstSeen.get(a.cwid)! - firstSeen.get(b.cwid)!);
 }
