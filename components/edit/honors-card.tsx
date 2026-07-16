@@ -1,11 +1,16 @@
 /**
- * HonorsCard — the curation editor for `honor` rows (#1760), shown under the
- * Appointments attribute tab beneath the read-only (ETL-fed) Appointments cards
- * and the self-asserted Additional appointments card.
+ * HonorsCard — the curation editor for `honor` rows (#1760), rendered on its OWN
+ * `Honors & Distinctions` attribute tab (a sibling of Appointments, not a card
+ * inside it — an honor is not an appointment and has its own profile section).
  *
  * Honors are the distinctions no WCM feed carries: academy memberships, named
- * investigatorships and chairs, and prizes. Each mutation is an immediate POST
- * to `/api/edit/honor` (no batched save):
+ * investigatorships, and prizes. **Deliberately NOT endowed chairs** — ED already
+ * ingests endowed titles into `Appointment.title` / `Scholar.primaryTitle` nightly
+ * and `lib/leadership.ts` parses them, so a chair recorded here would render twice
+ * on the profile. `HonorCategory` carries no `NAMED_CHAIR` member; `OTHER` absorbs
+ * the oddballs. Do not reintroduce it in the copy below.
+ *
+ * Each mutation is an immediate POST to `/api/edit/honor` (no batched save):
  *   - add    → `{ action: "create", cwid, <fields> }`
  *   - edit   → `{ action: "update", id, <fields> }` (full replace of the fields)
  *   - remove → `{ action: "delete", id }`
@@ -20,8 +25,8 @@
  * would otherwise be indistinguishable from published ones.
  *
  * Chrome deliberately mirrors `profile-appointments-card.tsx` field-for-field
- * (native controls, no bespoke chrome, no new colours) — the two cards stack in
- * the same tab and must not read as two different products.
+ * (native controls, no bespoke chrome, no new colours) — the two are siblings in
+ * the rail and must not read as two different products.
  */
 "use client";
 
@@ -175,7 +180,7 @@ export function HonorsCard({ cwid, mode, scholarName }: HonorsCardProps) {
       heading="Honors and distinctions"
       owned
       subsection
-      description={`Add the honors no WCM feed carries — academy memberships, investigatorships, named chairs, and prizes. These appear only on ${possessive} public profile.`}
+      description={`Add the honors no WCM feed carries — academy memberships, investigatorships, and prizes. These appear only on ${possessive} public profile.`}
     >
       {loadError ? (
         <Alert variant="destructive">

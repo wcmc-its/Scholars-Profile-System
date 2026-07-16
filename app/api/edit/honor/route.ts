@@ -1,7 +1,8 @@
 /**
  * /api/edit/honor — CRUD for a scholar's honors & distinctions (`honor`, #1760):
- * academy memberships, investigatorships, named chairs, and prizes. Curator/self
- * entry on /edit is the whole ingest for Phase 1; no feed writes this table yet.
+ * academy memberships, investigatorships, and prizes — NOT endowed chairs (see
+ * the `HonorCategory` note in schema.prisma). Curator/self entry on /edit is the
+ * whole ingest for Phase 1; no feed writes this table yet.
  *
  *   GET  ?cwid=<target>  — list the target scholar's rows (defaults to self).
  *   POST { action, ... } — a single write endpoint (mirrors /api/edit/appointment):
