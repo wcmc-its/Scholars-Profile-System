@@ -86,7 +86,9 @@
   --apollo-rail-hover: #ece7e1; /* nav-item hover fill */
   --apollo-ring: #8a1f2b;
   --apollo-lock-bg: #f2efeb; /* locked chip / locked actions */
-  /* Secondary slate accent — status pills (Active/Past, Hidden).
+  /* Secondary slate accent — the /edit console's general secondary colour:
+   * nav/action links AND tint pills (bg-apollo-slate-tint) across ~18 sites
+   * (rosters, prestige/publication badges, COI, home panel, status pills).
    *
    * APOLLO EDITOR COLOUR LANGUAGE (the /edit house style). The chrome is warm
    * near-neutral so colour stays meaningful. Each job has ONE treatment, and
@@ -102,10 +104,13 @@
    *                                        colourblindness). ALL rail group headers
    *                                        are neutral gray (--muted-foreground).
    *   DANGER   --destructive             — destructive actions, warning banner.
-   *   INFO     facet-blue (--color-facet-topic-count) — cross-reference links
-   *                                        (the "Source:" link), the "Add" action,
-   *                                        and the "Primary" designation badge.
-   *                                        slate tint stays on STATUS pills.
+   *   INFO     facet-blue (--color-facet-topic-count) — a small, DELIBERATE
+   *                                        accent on two provenance-forward
+   *                                        elements: the "Source:" link and the
+   *                                        "Primary" designation badge (+ the
+   *                                        "Add" action). Intentionally distinct
+   *                                        from the console slate above; NOT a
+   *                                        console-wide replacement for it.
    *
    * Green pulls double duty (YOURS badge + success banner) — disambiguated by
    * icon + context (pencil vs check), never by hue alone, same as LOCKED.
