@@ -23,7 +23,7 @@
  *   → captures/draw-1/arm-off.json, arm-on.json   ({"<id>": ["cwid", ...]}, the ACTUAL= shape)
  */
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join } from "node:path";
 
 import {
   rerankCandidates,
@@ -201,13 +201,15 @@ for (const id of captured) {
 
   const { off, on } = armsFor(concepts, candidates, CURRENT_YEAR);
 
-  armOff[id] = off.map((c) => c.cwid);
-  armOn[id] = on.map((c) => c.cwid);
+  const offCwids = off.map((c) => c.cwid);
+  const onCwids = on.map((c) => c.cwid);
+  armOff[id] = offCwids;
+  armOn[id] = onCwids;
 
   // Exact score ties are what the tie-break fix exists for — report them so a reader can see
   // whether the fix was load-bearing on THIS data rather than taking the stress test on faith.
   const ties = off.filter((c, i) => i > 0 && c.fusedScore === off[i - 1].fusedScore).length;
-  const moved = armOff[id].findIndex((c, i) => c !== armOn[id][i]);
+  const moved = offCwids.findIndex((c, i) => c !== onCwids[i]);
   report.push(
     `── ${id}  candidates=${candidates.length}  with-year=${withYear}  ` +
       `off-ties=${ties}  first-rank-moved=${moved === -1 ? "none" : `#${moved + 1}`}`,

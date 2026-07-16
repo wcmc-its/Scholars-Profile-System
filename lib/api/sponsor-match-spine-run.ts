@@ -434,8 +434,27 @@ export async function rankResearchersForDescriptionSpine(
   const glossQuery = process.env.SPONSOR_MATCH_GLOSS_QUERY === "on";
   // SPONSOR_MATCH_RECENCY — D1. Surface each scholar's most-recent publication year and fold it
   // into the fused score (recency as a scored dimension), which re-tiers via the share-to-top (D2).
-  // A ranking change ⇒ eval-gated: staging-on to A/B, prod-off until a clean recency-off vs
-  // recency-on run clears the sponsor eval's ~0.0074 nDCG noise floor. STATIC literal for flag-parity.
+  // A ranking change ⇒ eval-gated. STATIC literal for flag-parity.
+  //
+  // THE GATE IS NON-INFERIORITY, NOT SUPERIORITY, and that is not a lowered bar — it is the only
+  // question the instrument can answer. `sponsor-fixtures.json` grades TOPICAL fit and citation
+  // impact (`_grades`: "work centers on the topic"; `_method`: "+ citation impact") and has no
+  // opinion about recency. Citation impact accumulates with age, so the gold is mildly
+  // recency-ANTAGONISTIC: a highly-cited expert who last published years ago is a grade 3, D1
+  // demotes them, and the eval scores that as a loss. Expected sign of Δ ≤ 0 BY CONSTRUCTION.
+  // An earlier version of this comment demanded the A/B "clear the ~0.0074 nDCG noise floor" —
+  // i.e. asked the gold to show recency winning, which it can never do, paired or deployed.
+  // Run: scripts/search-eval/sponsor-capture.sh → sponsor-rerank-ab.ts → sponsor-ni-test.ts
+  // (one capture, re-ranked twice offline; no deploy, no flag flip — and a flag flip would be
+  // unsound anyway, since the flag is not in the route's cache key).
+  //
+  // ⚠ THE REAL RISK IS NOT nDCG. `mostRecentPubDate` counts CONFIRMED authorships only
+  // (search-index-docs.ts ~992), so a scholar with an uncurated backlog reads as stale and gets
+  // demoted for a CURATION gap rather than for dormancy — and curation is thinnest for
+  // affiliated faculty, making the bias systematic rather than random. This is not hypothetical:
+  // the 2026-07-16 A/B's single largest loss (als, −0.177 nDCG, which alone decided the gate)
+  // was one grade-3 scholar sitting on 59 unaccepted publications. Before flipping prod,
+  // quantify that exposure by role_category — the eval cannot see it.
   const recencyOn = process.env.SPONSOR_MATCH_RECENCY === "on";
   for (const cluster of clusters) {
     // MAX member coverage ≈ the broadest merged synonym = a lower bound on the cluster's true
