@@ -629,8 +629,10 @@ export type RerankOptions = {
   /** Preference strength λ. Only read when `prefBoost` is supplied. */
   lambda?: number;
   /** D1 recency clock — the year `recencyWeight` measures a candidate's `mostRecentYear` against.
-   *  Defaults to the current UTC year; passed explicitly by tests, and available to pin a client
-   *  re-rank to the server's year. */
+   *  A test/determinism seam: tests pass a fixed year; production omits it, and both the server and
+   *  the client read `new Date().getUTCFullYear()`. They agree within a UTC year (the common case).
+   *  The only divergence is a tab left open across Jan 1 — a bounded ~4% weight drift on the freshest
+   *  candidate that self-heals on the next fetch, not worth shipping a server-year field on the wire. */
   currentYear?: number;
 };
 
@@ -680,8 +682,8 @@ export function fusedScore(
   // D1 — per-scholar recency, folded into the ONE value both the sort and `fitTier` read, so it
   // moves order AND tier together. Neutral (×1) when the candidate carries no `mostRecentYear`
   // (flag off), which keeps the round-trip test and every existing order unchanged. The server's
-  // `rrfFuse` applies the identical factor so the client re-rank at default weights still
-  // reproduces the server's order (`sponsor-match-contract.test.ts`).
+  // `rrfFuse` applies the identical factor (same UTC year), so the client re-rank at default weights
+  // reproduces the server's order — see the `currentYear` note for the once-a-year boundary edge.
   score *= recencyWeight(candidate.mostRecentYear, opts.currentYear ?? new Date().getUTCFullYear());
   if (!opts.prefBoost) return score;
   return score * (1 + (opts.lambda ?? 1) * opts.prefBoost(candidate));

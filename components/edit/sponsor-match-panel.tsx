@@ -1634,8 +1634,9 @@ function CoverageStrip({ coverage, inline = false }: { coverage: ConceptCoverage
  *
  * Everything here is client-derived from the candidate already in the browser — NO artifact fetch,
  * which is the whole point of the compact register: 100 rows cost 0 key-paper requests. `latest YYYY`
- * comes from `latestEvidenceYear`, which is populated only on the bespoke path today; the slot stays
- * empty on the production spine path until D1 surfaces a per-scholar year (and its stale colour-flag).
+ * comes from `latestEvidenceYear`; D1 surfaced the per-scholar year on the production spine path
+ * (`candidate.mostRecentYear`, under `SPONSOR_MATCH_RECENCY`), so the slot now renders there when the
+ * flag is on. The bespoke path still reads `evidence.papers`. Absent (flag off / no year) ⇒ no year.
  */
 function CompactRow({
   candidate,
