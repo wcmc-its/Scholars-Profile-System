@@ -300,6 +300,10 @@ async function retrieveCluster(
       // D1 — project the precomputed most-recent-pub year for the recency weight. Gated so the
       // off path keeps today's `_source` shape and hit payload.
       includeMostRecentPub: includeRecency,
+      // Matcha's A–Z sort key. UNCONDITIONAL, unlike the year above: sorting by last name is a
+      // presentation affordance that must not inherit the recency flag's fate. Free — the field is
+      // already stored for the directory's own A–Z sort, this only projects it.
+      includeLastName: true,
     });
     for (const h of result.hits) {
       ranked.push(h.cwid);
@@ -732,6 +736,10 @@ export async function rankResearchersForDescriptionSpine(
       // D1 — the per-scholar most-recent year (recency input + D8's "latest YYYY"). Emitted only
       // under the flag and only when known, so the off / no-year response stays byte-identical.
       ...(recencyOn && hit?.mostRecentYear != null ? { mostRecentYear: hit.mostRecentYear } : {}),
+      // Matcha's A–Z sort key. Emitted unconditionally (no flag gates it) and NOT collapsed to the
+      // display name when unknown: a null tells the sort this scholar has no surname key, which is
+      // a different fact from a scholar sorting under the first token of `name`.
+      lastNameSort: hit?.lastNameSort ?? null,
       ...(searchEvidence.length > 0 ? { searchEvidence } : {}),
     };
   });

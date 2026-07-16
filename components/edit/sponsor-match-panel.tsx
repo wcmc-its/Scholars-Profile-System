@@ -108,6 +108,7 @@ import {
 import type { CareerStage } from "@/lib/career-stage";
 import { buildSponsorMatchCsv } from "@/lib/edit/sponsor-match-export";
 import { careerStageLabel, roleCategoryLabel } from "@/lib/match-display";
+import { extractLastNameSort } from "@/lib/name-sort";
 import { profilePath } from "@/lib/profile-url";
 import { markPaste, markedConceptCount } from "@/lib/sponsor-paste-highlight";
 
@@ -196,8 +197,9 @@ type SortKey = (typeof SORT_TABS)[number]["key"];
 type Density = "detailed" | "compact";
 const DENSITY_KEY = "sponsor-match-density";
 
-/** D3 — the recency dial. Same pill idiom as the density/sort tabs beside it. "Since" carries a
- *  year, so it opens on a sensible cutoff and offers a span back from today. */
+/** D3 — the recency dial. Same detached-pill idiom as the density tabs beside it (the sort pair is
+ *  conjoined instead — see the header). "Since" carries a year, so it opens on a sensible cutoff
+ *  and offers a span back from today. */
 const RECENCY_TABS = [
   { key: "any", label: "Any" },
   { key: "recent", label: "Prefer recent" },
@@ -215,6 +217,54 @@ function toggled(set: ReadonlySet<string>, value: string): Set<string> {
   if (next.has(value)) next.delete(value);
   else next.add(value);
   return next;
+}
+
+/**
+ * A–Z by SURNAME — the only order an officer scanning for a name expects, and the one this sort
+ * did not have: it compared `name`, so "Name" meant by FIRST name.
+ *
+ * `lastNameSort` is the ETL's own key (lowercased, suffix-stripped), not a split of `name`. Do not
+ * be tempted back to `name.split(" ").pop()`: that lands on the suffix for "… Jr", on the
+ * postnominals for "… MD, PhD", and on the wrong half of a particle surname — and it would fail
+ * exactly on the names it is hardest to notice failing on.
+ *
+ * ONE KEY PER ROW, ALWAYS — this comparator must be TOTAL, and a keyed-vs-unkeyed split is not.
+ * An earlier shape compared surnames only when BOTH rows carried the key and fell back to the full
+ * name otherwise; that is two comparators over one list, and it admits a real 3-cycle: given
+ * `Zoe Abbott`(abbott), `Bob Unindexed`(none), `Alice Zephyr`(zephyr) you get abbott<zephyr,
+ * "Alice Zephyr"<"Bob Unindexed", "Bob Unindexed"<"Zoe Abbott" — so a single UNKEYED row silently
+ * inverts the A–Z order of two fully KEYED ones, differently depending on the fit order it arrived
+ * in. `Array.prototype.sort` on an inconsistent comparator is implementation-defined, so the same
+ * pool could order differently run to run.
+ *
+ * So an absent key is re-derived with `extractLastNameSort` — the ETL's OWN function
+ * (`search-index-docs.ts` builds the field with it), not a guess. That is the whole reason this
+ * helper is dependency-free and shared. It is a reindex-window fallback: normally the key is on
+ * the wire and this never fires.
+ *
+ * ⚠ Note `extractLastNameSort` returns "" (never null) for a blank name, so an emptiness check
+ * cannot be `!= null` — "" is a live string that sorts AHEAD of every real surname. Falsy-check it.
+ *
+ * Equal surnames tie-break on the full name, so siblings order deterministically instead of by
+ * whatever order the ranker happened to fuse them in.
+ *
+ * Two consequences of the re-derivation, both wanted:
+ *   - The BESPOKE engine ships no `lastNameSort` at all (`bespokeToCandidate` in the route emits
+ *     `name` only), so under a keyed-only comparator that whole engine silently reverted to
+ *     first-name order with nothing in the UI to say so. It re-keys off `name`, which IS the
+ *     `preferredName` the ETL itself feeds `extractLastNameSort`, so it now sorts correctly too.
+ *   - This orders with `localeCompare`, while the PUBLIC People search sorts server-side on
+ *     `{ lastNameSort: "asc" }` — OpenSearch keyword BYTE order. Same field, different collation:
+ *     an accented surname sorts near its unaccented neighbour here and after "zzz" there. That is
+ *     a real divergence and this side is the better behaviour; do not "fix" it into byte order.
+ */
+function surnameKey(c: SponsorCandidate): string {
+  const key = c.lastNameSort?.trim();
+  return key ? key : extractLastNameSort(c.name);
+}
+
+function compareByName(a: SponsorCandidate, b: SponsorCandidate): number {
+  return surnameKey(a).localeCompare(surnameKey(b)) || a.name.localeCompare(b.name);
 }
 
 /** Client-side download — the matcher is admin-only and the whole pool is already in the
@@ -275,6 +325,14 @@ export function SponsorMatchPanel() {
   // D8 — cwids force-expanded to the detailed card while in Compact mode (a row click). Cleared on
   // each new search: a previous run's expansions do not carry to different people.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  // The shortlist — the people the officer picked out of THIS ask, and the default export.
+  // Per-ask for the same reason `expanded` is, and it is the stronger case of the two: a cwid set
+  // carried onto the next sponsor would export people that sponsor never asked about, under the
+  // new ask's title, with the new ask's ranks. Cleared in `runSearch` beside `expanded`.
+  //
+  // Uncapped. The earlier design capped picks at 5–6, which was never a fact about shortlisting —
+  // it was Compare's column budget. Compare is parked, and a CSV has no columns to run out of.
+  const [shortlist, setShortlist] = useState<ReadonlySet<string>>(new Set());
   // The two halves of the contract payload. `candidates` is fetched ONCE per search and
   // never refetched by a slider; `concepts` is the editable rail. Everything below is
   // derived from them.
@@ -365,6 +423,7 @@ export function SponsorMatchPanel() {
         const data = (await r.json()) as Partial<SponsorMatchResponse>;
         clearFilters(); // stale facet selections must not silently hide fresh results
         setExpanded(new Set()); // D8 — previous run's per-row expansions don't carry to new people
+        setShortlist(new Set()); // the shortlist is per-ask: last sponsor's picks are not this one's
         void loadHistory(); // the row the server just retained
         setCandidates(data.candidates ?? []);
         setConcepts(data.concepts ?? []);
@@ -658,35 +717,40 @@ export function SponsorMatchPanel() {
   // Name reorders the rows while each row keeps the rank it holds in the ranking. A sort that
   // renumbered rows would be claiming Alice is the best match because her name comes first.
   //
+  // Stamped ONCE, here, and read by both consumers below: the facet-filtered view and the
+  // shortlist. They must agree on what "#7" means, and they can only do that by numbering the
+  // same list — a second `.map((c, i) => …)` further down would be a second, silently different
+  // ranking the moment anything upstream of it filtered.
+  const rankedRows = useMemo(
+    () => rankedInYear.map((c, i) => ({ c, rank: i + 1 })),
+    [rankedInYear],
+  );
+
   // Uncapped, and deliberately: this is every candidate that matches the filters, and it is
   // what the CSV exports. `visible` below is the same list with the render cap applied.
   const filtered = useMemo(
     () =>
-      rankedInYear
-        .map((c, i) => ({ c, rank: i + 1 }))
-        .filter(
-          ({ c }) =>
-            (deptSel.size === 0 || (c.department != null && deptSel.has(c.department))) &&
-            (conceptSel.size === 0 || c.contributions.some((x) => conceptSel.has(x.term))) &&
-            (!ctlOnly || c.technologyCount > 0) &&
-            // A row with no measure fails a measure filter — it cannot be shown to satisfy a
-            // constraint we have no evidence it meets.
-            (stageSel.size === 0 ||
-              (c.measures?.careerStage != null &&
-                stageSel.has(careerStageLabel(c.measures.careerStage)))) &&
-            (!clinicianOnly || c.measures?.isClinician === true) &&
-            (roleSel.size === 0 || roleSel.has(roleCategoryLabel(c.measures?.roleCategory))),
-        ),
-    [rankedInYear, deptSel, conceptSel, ctlOnly, stageSel, clinicianOnly, roleSel],
+      rankedRows.filter(
+        ({ c }) =>
+          (deptSel.size === 0 || (c.department != null && deptSel.has(c.department))) &&
+          (conceptSel.size === 0 || c.contributions.some((x) => conceptSel.has(x.term))) &&
+          (!ctlOnly || c.technologyCount > 0) &&
+          // A row with no measure fails a measure filter — it cannot be shown to satisfy a
+          // constraint we have no evidence it meets.
+          (stageSel.size === 0 ||
+            (c.measures?.careerStage != null &&
+              stageSel.has(careerStageLabel(c.measures.careerStage)))) &&
+          (!clinicianOnly || c.measures?.isClinician === true) &&
+          (roleSel.size === 0 || roleSel.has(roleCategoryLabel(c.measures?.roleCategory))),
+      ),
+    [rankedRows, deptSel, conceptSel, ctlOnly, stageSel, clinicianOnly, roleSel],
   );
 
   // The cap lands on the FIT-ordered rows, then Name reorders that hundred. Slicing after the
   // name sort would paint the alphabetically-first 100 and call them the best matches.
   const visible = useMemo(() => {
     const rows = filtered.slice(0, RESULT_MAX);
-    return sort === "name"
-      ? [...rows].sort((a, b) => a.c.name.localeCompare(b.c.name))
-      : rows;
+    return sort === "name" ? [...rows].sort((a, b) => compareByName(a.c, b.c)) : rows;
   }, [filtered, sort]);
 
   // The relevance floor. Full cards for strong/good; the weak tier collapses under one bar the
@@ -714,14 +778,25 @@ export function SponsorMatchPanel() {
   const primaryRows = aboveFloor.length > 0 ? aboveFloor : belowFloor;
   const collapsedWeak = aboveFloor.length > 0 ? belowFloor : [];
 
-  /** Exports every row the filters matched — current sliders, current filters — NOT just the
-   *  hundred we painted. An officer who filters to the CTL portfolio and gets 180 hits must
-   *  download 180, not the first 100 with no warning that the rest exist. A server route could
-   *  not do this at all: it would re-run the match and emit the DEFAULT ranking, not the one
-   *  the officer re-weighted. */
-  function exportFiltered() {
+  /** The shortlist AS ROWS, and the single source for both the bar's count and the file it
+   *  downloads — so the count can never promise rows the export does not write.
+   *
+   *  Read off `rankedRows`: the pool AFTER the year cutoff, BEFORE the facets. That split is not
+   *  arbitrary, it is the one this whole file already draws — the cutoff REDEFINES the pool (see
+   *  `rankedInYear`: facets count it, the rank is stamped from it), while a facet is a VIEW. A
+   *  view must not quietly drop a person the officer picked by hand: shortlist three people, then
+   *  narrow to one department to look for a fourth, and the other two are still shortlisted,
+   *  because they were CHOSEN rather than matched. */
+  const shortlistRows = useMemo(
+    () => rankedRows.filter(({ c }) => shortlist.has(c.cwid)),
+    [rankedRows, shortlist],
+  );
+
+  /** One mapping, both exports. Two copies of it would drift, and the CSV would then depend on
+   *  which button the officer pressed — the rows are the same rows either way. */
+  function exportCsv(rows: readonly { c: SponsorCandidate; rank: number }[], filename: string) {
     const csv = buildSponsorMatchCsv(
-      filtered.map(({ c, rank }) => ({
+      rows.map(({ c, rank }) => ({
         rank,
         cwid: c.cwid,
         name: c.name,
@@ -741,7 +816,27 @@ export function SponsorMatchPanel() {
         ).toString(),
       })),
     );
-    downloadCsv("sponsor-match-researchers.csv", csv);
+    downloadCsv(filename, csv);
+  }
+
+  /** Exports every row the filters matched — current sliders, current filters — NOT just the
+   *  hundred we painted. An officer who filters to the CTL portfolio and gets 180 hits must
+   *  download 180, not the first 100 with no warning that the rest exist. A server route could
+   *  not do this at all: it would re-run the match and emit the DEFAULT ranking, not the one
+   *  the officer re-weighted.
+   *
+   *  Still REACHABLE once a shortlist exists, just no longer the unqualified "Export" — see the
+   *  button, which renames itself rather than disappearing. Dropping it would strand the officer
+   *  who ticked one row and still wanted the whole filtered list. */
+  function exportFiltered() {
+    exportCsv(filtered, "sponsor-match-researchers.csv");
+  }
+
+  /** The default export once anything is ticked. Its own filename: these two files have the same
+   *  columns and wildly different meanings, and a shortlist landing in Downloads under the name of
+   *  the 400-row list is how the wrong one gets sent to a sponsor. */
+  function exportShortlist() {
+    exportCsv(shortlistRows, "sponsor-match-shortlist.csv");
   }
 
   // #6d retained searches, in a right-side drawer (reused shadcn Sheet — no hand-rolled
@@ -809,14 +904,28 @@ export function SponsorMatchPanel() {
   // D8 — a result row is the detailed card when density is Detailed OR the officer expanded it from
   // Compact; otherwise the one-line CompactRow, which expands in place on click. Used for both the
   // primary rows and the below-floor weak rows, so the floor and the density toggle compose.
-  const renderResult = ({ c, rank }: { c: SponsorCandidate; rank: number }) =>
-    density === "detailed" || expanded.has(c.cwid) ? (
+  const renderResult = ({ c, rank }: { c: SponsorCandidate; rank: number }) => {
+    // THE ONLY STATE A COLLAPSE MEANS ANYTHING IN. `toggled` was always a correct toggle, but it
+    // hung solely off CompactRow — so the instant it ADDED a cwid the row it lived on unmounted,
+    // and the expanded card that replaced it offered no way to fire it in the delete direction.
+    // The toggle could only ever add; nothing but a new search emptied the set.
+    //
+    // Under Detailed the card IS the density: there is nothing to collapse TO, so the control must
+    // not render — an affordance that puts a row back into a mode the officer is not in is worse
+    // than the bug.
+    const expandedFromCompact = density !== "detailed" && expanded.has(c.cwid);
+    return density === "detailed" || expandedFromCompact ? (
       <ResearcherRow
         candidate={c}
         rank={rank}
         concepts={concepts}
         topScore={topScore}
         runId={runId}
+        {...(expandedFromCompact
+          ? { onCollapse: () => setExpanded((s) => toggled(s, c.cwid)) }
+          : {})}
+        selected={shortlist.has(c.cwid)}
+        onSelect={() => setShortlist((s) => toggled(s, c.cwid))}
       />
     ) : (
       <CompactRow
@@ -826,8 +935,11 @@ export function SponsorMatchPanel() {
         topScore={topScore}
         staleYear={staleYear}
         onExpand={() => setExpanded((s) => toggled(s, c.cwid))}
+        selected={shortlist.has(c.cwid)}
+        onSelect={() => setShortlist((s) => toggled(s, c.cwid))}
       />
     );
+  };
 
   return (
     <div data-slot="sponsor-match-panel">
@@ -1216,15 +1328,19 @@ export function SponsorMatchPanel() {
                   <h2 className="text-base font-semibold">
                     {resultsSummary(visible.length, filtered.length, ranked.length)}
                   </h2>
-                  {/* gap-4 BETWEEN groups against gap-1 within: three adjacent pill groups with a
+                  {/* gap-4 BETWEEN groups, tighter WITHIN: three adjacent pill groups with a
                       near-equal gap read as one long undifferentiated row (the D3 dial made it
                       seven pills), and the officer can no longer see which pill answers which
-                      question. The container wraps, so the extra width costs nothing. */}
+                      question. The container wraps, so the extra width costs nothing.
+                      Within-group spacing is gap-1 for the recency dial and the density toggle, and
+                      ZERO for the sort pair, which is conjoined into one segmented control — a
+                      tighter bond than the other two, not a fourth idiom. The three-group read is
+                      what gap-4 protects; do not flatten it. */}
                   <div className="ml-auto flex flex-wrap items-center gap-4">
-                    {/* D3 — recency dial. Same pill idiom as the density/sort tabs. Hidden entirely
-                        when the payload carries no years, because a dial that cannot move anything
-                        is worse than no dial. "Since" reveals a native year picker — a soft cutoff
-                        that down-weights older evidence to the floor, never hides it (that is D4). */}
+                    {/* D3 — recency dial. Same detached-pill idiom as the density toggle. Hidden
+                        entirely when the payload carries no years, because a dial that cannot move
+                        anything is worse than no dial. "Since" reveals a native year picker — a soft
+                        cutoff that down-weights older evidence to the floor, never hides it (D4). */}
                     {hasRecencyData ? (
                       <div role="group" aria-label="Recency" className="flex items-center gap-1">
                         {RECENCY_TABS.map((t) => {
@@ -1270,7 +1386,8 @@ export function SponsorMatchPanel() {
                         ) : null}
                       </div>
                     ) : null}
-                    {/* D8 — density toggle. Same pill idiom as the sort tabs beside it. */}
+                    {/* D8 — density toggle. Detached pills, like the recency dial beside it — NOT
+                        like the sort pair, which is conjoined. */}
                     <div
                       role="group"
                       aria-label="Result density"
@@ -1292,20 +1409,27 @@ export function SponsorMatchPanel() {
                         </button>
                       ))}
                     </div>
-                    <div
-                      role="group"
-                      aria-label="Sort researchers"
-                      className="flex items-center gap-1"
-                    >
-                      {SORT_TABS.map((t) => (
+                    {/* Fit/Name are CONJOINED into one segmented control — no gap, one shared
+                        border, radius on the pair's outer edges only. They are not two questions
+                        like the groups either side of them; they are two positions of ONE, and
+                        mutually exclusive, so the control should look like something with a
+                        position rather than like two independent toggles that happen to disagree.
+                        This TIGHTENS the pair within the three-group header — the gap-4 between
+                        groups above still does the grouping, and must stay. `-ml-px` laps the
+                        second pill's border onto the first's so the seam is one line, not two;
+                        `z-10` on the active pill lifts its slate edge over that seam. */}
+                    <div role="group" aria-label="Sort researchers" className="flex items-center">
+                      {SORT_TABS.map((t, i) => (
                         <button
                           key={t.key}
                           type="button"
                           aria-pressed={sort === t.key}
                           onClick={() => setSort(t.key)}
-                          className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                          className={`relative border px-2.5 py-0.5 text-xs transition-colors ${
+                            i === 0 ? "rounded-l-full" : "-ml-px"
+                          } ${i === SORT_TABS.length - 1 ? "rounded-r-full" : ""} ${
                             sort === t.key
-                              ? "border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
+                              ? "z-10 border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
                               : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
                           }`}
                         >
@@ -1313,6 +1437,11 @@ export function SponsorMatchPanel() {
                         </button>
                       ))}
                     </div>
+                    {/* Once a shortlist exists this button RENAMES rather than disappears: the
+                        unqualified "Export" is then the shortlist's, in the bar below, and this
+                        one has to say out loud that it is the wider list. An officer who ticks
+                        three rows and presses a button still labelled "Export (400)" gets 400
+                        rows — and would have no reason to look at the filename to find out. */}
                     <Button
                       type="button"
                       variant="outline"
@@ -1321,7 +1450,9 @@ export function SponsorMatchPanel() {
                       disabled={filtered.length === 0}
                     >
                       <Download className="size-3.5" />
-                      Export ({filtered.length})
+                      {shortlistRows.length > 0
+                        ? `Export all (${filtered.length})`
+                        : `Export (${filtered.length})`}
                     </Button>
                   </div>
                 </div>
@@ -1354,6 +1485,30 @@ export function SponsorMatchPanel() {
                     >
                       Clear all
                     </button>
+                  </div>
+                ) : null}
+
+                {/* The shortlist bar. It carries exactly ONE action, because exactly one exists:
+                    Compare and "Draft sponsor intro" are parked (2026-07-16, decisions 4/5) and
+                    are not stubbed here — a disabled button for an unbuilt feature is a promise
+                    the surface cannot keep, and this console has shipped enough inert controls.
+                    The count is `shortlistRows`, not `shortlist.size`, so it counts what Export
+                    will actually write rather than what the Set remembers. */}
+                {shortlistRows.length > 0 ? (
+                  <div
+                    data-slot="sponsor-match-shortlist"
+                    className="border-border bg-muted/40 mb-3 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2"
+                  >
+                    <span className="text-sm font-medium">
+                      {shortlistRows.length} shortlisted
+                    </span>
+                    <span className="text-muted-foreground text-sm" aria-hidden="true">
+                      ·
+                    </span>
+                    <Button type="button" variant="outline" size="sm" onClick={exportShortlist}>
+                      <Download className="size-3.5" />
+                      Export shortlist ({shortlistRows.length})
+                    </Button>
                   </div>
                 ) : null}
 
@@ -1781,6 +1936,8 @@ function CompactRow({
   topScore,
   staleYear,
   onExpand,
+  selected,
+  onSelect,
 }: {
   candidate: SponsorCandidate;
   rank: number;
@@ -1789,6 +1946,9 @@ function CompactRow({
   /** D8 — flag the year below this; `null` ⇒ unflagged (see `staleBefore`). */
   staleYear: number | null;
   onExpand: () => void;
+  /** Shortlist membership, and its toggle. Per-ask; owned by the panel (see `shortlist`). */
+  selected: boolean;
+  onSelect: () => void;
 }) {
   const coverage = conceptCoverage(candidate, concepts);
   const withEvidence = coverage.filter((c) => c.state === "evidence").length;
@@ -1796,48 +1956,69 @@ function CompactRow({
   const year = latestEvidenceYear(candidate);
   const stale = year != null && staleYear != null && year < staleYear;
   return (
-    <button
-      type="button"
-      onClick={onExpand}
-      aria-label={`Expand ${candidate.name}`}
+    // THE ROOT IS A DIV, AND IT HAS TO BE. It was a `<button>` — the whole row was the expand
+    // target — and a checkbox cannot live inside one: interactive content nested in a button is
+    // invalid HTML, and the two click targets fight (the label's click bubbles to the button, so
+    // ticking a row would also expand it). So the row splits into two siblings: the checkbox, and
+    // a button that carries the expand and fills the rest of the width. The row LOOKS the same —
+    // the border/padding/hover moved up to the div verbatim, and the button re-declares the flex
+    // that used to be the root's — and `data-slot` stays on the root, which is what selects a row.
+    <div
       data-slot="sponsor-match-compact-row"
-      className="border-border hover:bg-muted/40 flex w-full items-center gap-2.5 border-t px-2 py-2 text-left transition-colors"
+      className="border-border hover:bg-muted/40 flex w-full items-center gap-2.5 border-t px-2 py-2 transition-colors"
     >
-      <span className="text-muted-foreground w-6 shrink-0 text-right text-xs tabular-nums">
-        {rank}
-      </span>
-      <span className="min-w-0 flex-1 truncate">
-        <span className="text-sm font-medium">{candidate.name}</span>
-        {candidate.title ? (
-          <span className="text-muted-foreground ml-1.5 text-xs">{candidate.title}</span>
-        ) : null}
-      </span>
-      {/* Short tier word here (mockup's dense list), not the detailed card's "Strong fit". */}
-      <span
-        className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize ${TIER_CLASS[tier]}`}
+      {/* Named for the PERSON, not "Select": the row's own name is the only thing that
+          distinguishes 100 otherwise identical checkboxes to a screen reader. Same house
+          checkbox as the facet rail — `FacetGroup`'s classes, verbatim. */}
+      <input
+        type="checkbox"
+        checked={selected}
+        onChange={onSelect}
+        aria-label={`Shortlist ${candidate.name}`}
+        className="size-3.5 shrink-0 accent-[var(--color-accent-slate)]"
+      />
+      <button
+        type="button"
+        onClick={onExpand}
+        aria-label={`Expand ${candidate.name}`}
+        className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
       >
-        {tier}
-      </span>
-      <CoverageStrip coverage={coverage} inline />
-      <span className="text-muted-foreground w-9 shrink-0 text-right text-xs tabular-nums">
-        {withEvidence}/{coverage.length}
-      </span>
-      {/* D8 — the stale flag is DE-EMPHASIS, not a hue, and deliberately so: every house colour is
-          already spoken for (green = strong/tagged, amber = good-tier AND keyword-only, blue =
-          provenance, purple = technology), so an "old" colour would make one of them mean three
-          things. A stale year recedes instead — which is also what the ranker is doing to it. */}
-      <span
-        title={stale ? `Latest evidence predates ${staleYear} — recency is down-weighting this match` : undefined}
-        className={`w-16 shrink-0 text-right text-[11px] tabular-nums ${
-          stale ? "text-muted-foreground/50" : "text-muted-foreground"
-        }`}
-      >
-        {year != null ? `latest ${year}` : ""}
-      </span>
-      <span className="text-muted-foreground shrink-0 text-xs" aria-hidden="true">
-        ›
-      </span>
-    </button>
+        <span className="text-muted-foreground w-6 shrink-0 text-right text-xs tabular-nums">
+          {rank}
+        </span>
+        <span className="min-w-0 flex-1 truncate">
+          <span className="text-sm font-medium">{candidate.name}</span>
+          {candidate.title ? (
+            <span className="text-muted-foreground ml-1.5 text-xs">{candidate.title}</span>
+          ) : null}
+        </span>
+        {/* Short tier word here (mockup's dense list), not the detailed card's "Strong fit". */}
+        <span
+          className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize ${TIER_CLASS[tier]}`}
+        >
+          {tier}
+        </span>
+        <CoverageStrip coverage={coverage} inline />
+        <span className="text-muted-foreground w-9 shrink-0 text-right text-xs tabular-nums">
+          {withEvidence}/{coverage.length}
+        </span>
+        {/* D8 — the stale flag is DE-EMPHASIS, not a hue, and deliberately so: every house colour is
+            already spoken for (green = strong/tagged, amber = good-tier AND keyword-only, blue =
+            provenance, purple = technology), so an "old" colour would make one of them mean three
+            things. A stale year recedes instead — which is also what the ranker is doing to it. */}
+        <span
+          title={stale ? `Latest evidence predates ${staleYear} — recency is down-weighting this match` : undefined}
+          className={`w-16 shrink-0 text-right text-[11px] tabular-nums ${
+            stale ? "text-muted-foreground/50" : "text-muted-foreground"
+          }`}
+        >
+          {year != null ? `latest ${year}` : ""}
+        </span>
+        <span className="text-muted-foreground shrink-0 text-xs" aria-hidden="true">
+          ›
+        </span>
+      </button>
+    </div>
   );
 }
 
@@ -1892,6 +2073,9 @@ function ResearcherRow({
   concepts,
   topScore,
   runId,
+  onCollapse,
+  selected,
+  onSelect,
 }: {
   candidate: SponsorCandidate;
   rank: number;
@@ -1899,6 +2083,18 @@ function ResearcherRow({
   topScore: number;
   /** #1696 — the current ranking run. See `claimedPmids` below: this row can OUTLIVE a run. */
   runId: number;
+  /** Put this card back to its compact row. OPTIONAL, and the option is the point: under Detailed
+   *  density this card is not an expansion of anything, so there is no state to return to and the
+   *  caller supplies nothing. Only the expanded-from-compact caller passes it (`renderResult`). */
+  onCollapse?: () => void;
+  /** Shortlist state. NOT optional, unlike `onCollapse` — the shortlist is a verb of the RESULT
+   *  SET, not of a density. Detailed is the DEFAULT density (see `DENSITY_KEY`), so a checkbox that
+   *  rendered only on compact rows would leave the whole feature invisible on first visit, and the
+   *  selection bar — which is not density-gated — would then offer "Export shortlist (2)" over rows
+   *  carrying no checkbox to audit or untick it with. The mockup draws the compact row only because
+   *  that is the row it draws; it is silent on this card, which is not the same as forbidding it. */
+  selected: boolean;
+  onSelect: () => void;
 }) {
   const name = candidate.name;
   // Chips + tier are DERIVED, never wired — so both stay live under the sliders. The raw
@@ -1988,8 +2184,18 @@ function ResearcherRow({
       data-slot="sponsor-match-row"
       className="border-border mb-4 flex gap-3 rounded-xl border p-5"
     >
-      <div className="text-muted-foreground w-6 shrink-0 pt-1 text-right text-sm tabular-nums">
-        {rank}
+      {/* Rank over checkbox, sharing the compact row's left margin so the tick column runs straight
+          down the list whichever density you are in. Same markup as the compact row's — one
+          affordance, drawn once. */}
+      <div className="flex w-6 shrink-0 flex-col items-end gap-2 pt-1">
+        <span className="text-muted-foreground text-sm tabular-nums">{rank}</span>
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onSelect}
+          aria-label={`Shortlist ${candidate.name}`}
+          className="size-3.5 shrink-0 accent-[var(--color-accent-slate)]"
+        />
       </div>
       {/* The shared headshot, not a bespoke initials circle — this is a list of PEOPLE, and the
           public People card has rendered their faces all along. `HeadshotAvatar` degrades to a
@@ -2024,6 +2230,21 @@ function ResearcherRow({
             {TIER_LABEL[tier]}
           </span>
           <ContactButton cwid={candidate.cwid} />
+          {/* The way back. `↑` is this file's existing word for "collapse" — the relevance floor's
+              toggle already reads "Hide ↑" — rather than a third glyph for a second idea; the
+              compact row's `›` is its opposite number. It needs a REAL name because it is the only
+              control on a card whose visible content is a single character, and "button" is not a
+              thing an officer with 100 rows open can act on. */}
+          {onCollapse ? (
+            <button
+              type="button"
+              onClick={onCollapse}
+              aria-label={`Collapse ${name}`}
+              className="text-muted-foreground hover:text-foreground ml-auto shrink-0 text-xs leading-none"
+            >
+              ↑
+            </button>
+          ) : null}
         </div>
         {candidate.department ? (
           <div className="text-muted-foreground text-sm">{candidate.department}</div>

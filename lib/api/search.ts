@@ -254,6 +254,12 @@ export type PeopleHit = {
    *  absent for every other caller, so the hit shape is unchanged. Feeds `recencyWeight` and D8's
    *  "latest YYYY". */
   mostRecentYear?: number | null;
+  /** The ETL-derived surname sort key (lowercased, suffix-stripped — see the `lastNameSort`
+   *  sort/prefix uses below). Present only under `includeLastName` (the sponsor last-name sort);
+   *  absent for every other caller, so the hit shape is unchanged. Projected rather than derived
+   *  from `preferredName` because splitting a display name on whitespace mis-handles suffixes,
+   *  particles and postnominals — the ETL already resolved that. */
+  lastNameSort?: string | null;
   grantCount: number;
   hasActiveGrants: boolean;
   /** #1412 — this scholar's count of grants matching the query, from ONE page-level
@@ -1371,6 +1377,13 @@ export async function searchPeople(opts: {
    */
   includeMostRecentPub?: boolean;
   /**
+   * Sponsor last-name sort — when true, project the ETL's `lastNameSort` into `_source` and emit it
+   * as `PeopleHit.lastNameSort`. Zero extra OpenSearch cost (the field is already stored and used
+   * for the A–Z sort/prefix filter, just not projected). Default false ⇒ the `_source` include-list
+   * and hit shape are byte-identical, so no other caller is affected.
+   */
+  includeLastName?: boolean;
+  /**
    * Issue #688 — the resolved descriptor's display name (the term the user
    * effectively searched), passed alongside `meshDescendantUis` so the
    * provenance string can read "… narrower term of {name}". Absent when the
@@ -1534,6 +1547,7 @@ export async function searchPeople(opts: {
   const matchExplain = opts.matchExplain === true;
   const representativePub = opts.representativePub === true;
   const includeMostRecentPub = opts.includeMostRecentPub === true;
+  const includeLastName = opts.includeLastName === true;
   // Search reason-from-doc — serve the tagged reason count from the people-doc
   // `meshSubtreeCounts` field (O(1) lookup) rather than the publications-index
   // agg. Active only when the flag is on AND the query resolved to a concept
@@ -2611,6 +2625,10 @@ export async function searchPeople(opts: {
       // sponsor recency path asks for it, so every other caller keeps today's `_source` shape.
       // Already stored + used for the recentPub sort/filter; this only projects it back.
       ...(includeMostRecentPub ? ["mostRecentPubDate"] : []),
+      // Sponsor last-name sort — the ETL surname key, requested ONLY when a caller asks, so every
+      // other caller keeps today's `_source` shape. Already stored + used for the A–Z sort/prefix
+      // filter; this only projects it back.
+      ...(includeLastName ? ["lastNameSort"] : []),
     ],
     // OpenSearch's default cap of 10000 short-circuits the total counter
     // and would make the subhead read "10,000 publications" even when
@@ -2757,6 +2775,10 @@ export async function searchPeople(opts: {
       // `dateAddedToEntrez`, so it is the display-honest recency max (excludes retractions /
       // hidden / dark pmids), not a raw MAX(pub.year).
       mostRecentPubDate?: string | null;
+      // Sponsor last-name sort — the ETL surname key, present only when `includeLastName` added it
+      // to the include-list above. A not-yet-reindexed doc lacks it → the hit carries null, never a
+      // 500; a consumer sorting on it must decide where absent lands rather than assume a name.
+      lastNameSort?: string | null;
     };
     highlight?: Record<string, string[]>;
   };
@@ -3368,6 +3390,11 @@ export async function searchPeople(opts: {
           const y = d ? new Date(d).getUTCFullYear() : NaN;
           return Number.isFinite(y) ? { mostRecentYear: y } : {};
         })(),
+        // Sponsor last-name sort — the ETL surname key. Gated on the ASK, not on the value: a
+        // caller that asked gets the key either way, null when the doc predates the field, so a
+        // sort can place absent deliberately instead of inferring it from an absent key. Callers
+        // that didn't ask keep today's byte-identical hit.
+        ...(includeLastName ? { lastNameSort: h._source.lastNameSort ?? null } : {}),
         identityImageEndpoint: identityImageEndpoint(h._source.cwid),
         highlight,
         matchReason: resolveHitMatchReason(

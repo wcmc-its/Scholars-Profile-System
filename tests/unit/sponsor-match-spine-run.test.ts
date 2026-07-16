@@ -430,6 +430,29 @@ describe("rankResearchersForDescriptionSpine", () => {
     expect(candidates.map((c) => c.cwid)).toEqual(["old", "recent"]);
   });
 
+  it("projects the ETL surname key onto every candidate, unflagged, and nulls it when unknown", async () => {
+    // Matcha's A–Z sort, tested on the hop that actually carries it: searchPeople opt → hit →
+    // candidate.lastNameSort. RECENCY stays OFF deliberately — the sort must not inherit that flag.
+    delete process.env.SPONSOR_MATCH_RECENCY;
+    mockExtractSponsorConcepts.mockResolvedValue([{ term: "adc", kind: "concept", centrality: 1.0 }]);
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) => meshRes(`D_${q}`, [`D_${q}`]));
+    // "keyed" carries the ETL key; "unkeyed" is a not-yet-reindexed doc that lacks the field.
+    mockSearchPeople.mockImplementation(async () => ({
+      hits: [{ ...hit("keyed"), lastNameSort: "zzyzx" }, hit("unkeyed")],
+      total: 2,
+      pageSize: 20,
+    }));
+
+    const { candidates } = await rankResearchersForDescriptionSpine("adc paste");
+
+    // (a) every candidate-producing call asked for the key, with no flag set.
+    expect(mockSearchPeople.mock.calls.every((c) => c[0].includeLastName === true)).toBe(true);
+    // (b) the key rides onto the candidate.
+    expect(candidates.find((c) => c.cwid === "keyed")!.lastNameSort).toBe("zzyzx");
+    // (c) absent ⇒ null, NOT undefined and NOT a guess derived from the display name.
+    expect(candidates.find((c) => c.cwid === "unkeyed")!.lastNameSort).toBeNull();
+  });
+
   it("coverage NEVER reaches the fusion weight — rare, zero and absent all weigh the same", async () => {
     mockTopicFindMany.mockResolvedValue([
       { label: "rare" },
