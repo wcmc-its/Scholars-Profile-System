@@ -833,7 +833,7 @@ export function SponsorMatchPanel() {
             <button
               type="button"
               onClick={showOriginal}
-              className="text-xs text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+              className="text-xs text-[var(--color-facet-topic-count)] underline-offset-4 hover:underline"
             >
               Show original ▾
             </button>
@@ -856,76 +856,25 @@ export function SponsorMatchPanel() {
           <div ref={askWrapRef} className="mb-4">
             <section
               data-slot="sponsor-match-ask-card"
-              className="border-border bg-background rounded-lg border"
+              className="border-border bg-background rounded-xl border px-5 py-4"
             >
-              <div className="border-border border-b px-5 py-4">
-                <span className="text-muted-foreground block text-[11px] font-semibold tracking-[0.09em] uppercase">
-                  What we read from the sponsor
-                </span>
-                {ask ? (
-                  <h2
-                    data-slot="sponsor-match-ask"
-                    className="mt-1.5 text-lg font-semibold tracking-tight"
-                  >
-                    {ask.title}
-                  </h2>
-                ) : null}
-              </div>
-              <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-start">
-                <div className="min-w-0 flex-1">
-                  {/* The pasted request, read-only, each pulled-out term marked. `break-words` for
-                      the 300-char Outlook SafeLinks URL that carries no break opportunity. D11 —
-                      clamped to ~4 lines until "Show full text". */}
-                  <p
-                    data-slot="sponsor-match-ask-quote"
-                    className={`text-muted-foreground text-sm leading-relaxed break-words whitespace-pre-wrap ${
-                      showFullText ? "" : "line-clamp-4"
-                    }`}
-                  >
-                    {askSegments.map((s, i) =>
-                      s.term ? (
-                        <mark
-                          key={i}
-                          title={s.term}
-                          className="text-foreground rounded bg-[var(--color-accent-slate)]/15 px-0.5"
-                        >
-                          {s.text}
-                        </mark>
-                      ) : (
-                        <span key={i}>{s.text}</span>
-                      ),
-                    )}
-                  </p>
-                  {/* D11 — expand the clamped paste; D10 — collapse the whole header to the pinned bar. */}
-                  <div className="mt-1.5 flex items-center gap-4">
-                    <button
-                      type="button"
-                      onClick={() => setShowFullText((v) => !v)}
-                      className="text-xs text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+              {/* The mockup's header row: eyebrow + title on the left, the actions on the right —
+                  ONE continuous padded card, no rule between header and body. */}
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <span className="text-muted-foreground block text-[11px] tracking-[0.05em] uppercase">
+                    What we read from the sponsor
+                  </span>
+                  {ask ? (
+                    <h2
+                      data-slot="sponsor-match-ask"
+                      className="mt-1 text-base font-medium"
                     >
-                      {showFullText ? "Show less ▴" : "Show full text ▾"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setHeaderCollapsed(true)}
-                      className="text-muted-foreground text-xs underline-offset-4 hover:underline"
-                    >
-                      Collapse ▴
-                    </button>
-                  </div>
-                  {/* Honest lower bound (kept from the old readback): a concept goes unmarked when the
-                      matcher canonicalised it to a form not verbatim in the paste — never because it
-                      was ignored. Shown only when something is actually unmarked. */}
-                  {concepts.length > 0 && askMarked < concepts.length ? (
-                    <p className="text-muted-foreground mt-2 text-xs leading-relaxed">
-                      {askMarked} of {concepts.length} concepts are highlighted — a concept goes
-                      unmarked when the matcher wrote it in standard terms that do not appear here (an
-                      abbreviation expanded, a brand name resolved). Unmarked never means ignored:
-                      every concept below ranks.
-                    </p>
+                      {ask.title}
+                    </h2>
                   ) : null}
                 </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
+                <div className="flex shrink-0 flex-wrap gap-1.5">
                   <Button type="button" variant="outline" onClick={() => setEditing(true)}>
                     Edit paste
                   </Button>
@@ -940,6 +889,58 @@ export function SponsorMatchPanel() {
                   {historyDrawer}
                 </div>
               </div>
+
+              {/* The pasted request, read-only, each pulled-out term marked. `break-words` for the
+                  300-char Outlook SafeLinks URL that carries no break opportunity. D11 — clamped to
+                  ~4 lines until "Show full text". The marks are facet-blue: the highlights ARE the
+                  provenance ("what we read"), the one place this console reaches for that accent. */}
+              <p
+                data-slot="sponsor-match-ask-quote"
+                className={`text-muted-foreground mt-3 text-[13px] leading-[1.6] break-words whitespace-pre-wrap ${
+                  showFullText ? "" : "line-clamp-4"
+                }`}
+              >
+                {askSegments.map((s, i) =>
+                  s.term ? (
+                    <mark
+                      key={i}
+                      title={s.term}
+                      className="rounded-[3px] bg-[var(--color-facet-topic-fill)] px-[3px] text-[var(--color-facet-topic-text)]"
+                    >
+                      {s.text}
+                    </mark>
+                  ) : (
+                    <span key={i}>{s.text}</span>
+                  ),
+                )}
+              </p>
+              {/* D11 — expand the clamped paste; D10 — collapse the whole header to the pinned bar. */}
+              <div className="mt-1.5 flex items-center gap-3.5">
+                <button
+                  type="button"
+                  onClick={() => setShowFullText((v) => !v)}
+                  className="text-xs text-[var(--color-facet-topic-count)] underline-offset-4 hover:underline"
+                >
+                  {showFullText ? "Show less ▴" : "Show full text ▾"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHeaderCollapsed(true)}
+                  className="text-muted-foreground text-xs underline-offset-4 hover:underline"
+                >
+                  Collapse ▴
+                </button>
+              </div>
+              {/* Honest lower bound: a concept goes unmarked when the matcher canonicalised it to a
+                  form not verbatim in the paste — never because it was ignored. Shown only when
+                  something is actually unmarked; sits at the card foot, ruled off, per the mockup. */}
+              {concepts.length > 0 && askMarked < concepts.length ? (
+                <p className="text-muted-foreground border-border mt-3 border-t pt-2.5 text-[11px] leading-[1.5]">
+                  {askMarked} of {concepts.length} concepts are highlighted — a concept goes unmarked
+                  when the matcher wrote it in standard terms (an abbreviation expanded, a brand
+                  resolved). Unmarked never means ignored.
+                </p>
+              ) : null}
             </section>
             {/* D10 — the collapse sentinel sits just past the header; when it scrolls above the
                 viewport top the observer pins the compact bar. `aria-hidden` — it is a scroll probe. */}
