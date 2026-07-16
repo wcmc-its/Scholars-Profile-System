@@ -80,6 +80,7 @@ type AttrKey =
   | "biosketch"
   | "cv"
   | "appointments"
+  | "honors"
   | "education"
   | "coi"
   | "coi-gap"
@@ -145,6 +146,10 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // behalf. Grouped with the other Tools. Rail item appears only when the flag is on.
   { key: "cv", label: "CV (WCM format)", modes: ["self", "superuser"] },
   { key: "appointments", label: "Appointments", modes: ["self", "superuser"] },
+  // Honors & distinctions (#1760) — a sibling of Appointments, NOT a sub-card of it.
+  // An honor is its own content type with its own profile section; it is not an
+  // appointment, and burying it under Appointments made it undiscoverable.
+  { key: "honors", label: "Honors & Distinctions", modes: ["self", "superuser"] },
   { key: "education", label: "Education", modes: ["self", "superuser"] },
   // Mentees — suppressible (hide/show); corrections route to ITS Support.
   { key: "mentees", label: "Mentees", modes: ["self", "superuser"] },
@@ -254,6 +259,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "email",
   "photo",
   "appointments",
+  "honors",
   "education",
   "publications",
   "funding",
@@ -290,6 +296,10 @@ const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   biosketch: "service",
   cv: "service",
   appointments: "sourced",
+  // Honors (#1760) — "owned", NOT "sourced": no WCM feed writes this table. Every
+  // row is entered by the scholar or a curator on /edit. (Appointments is
+  // "sourced" because ED feeds that tab; honors has no such feed.)
+  honors: "owned",
   education: "sourced",
   mentees: "sourced",
   "name-title": "readonly",
@@ -327,6 +337,7 @@ const RAIL_V2_ORDER: ReadonlyArray<AttrKey> = [
   "email",
   "photo",
   "appointments",
+  "honors",
   "education",
   "publications",
   "funding",
@@ -353,6 +364,9 @@ const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string }> = {
   email: { group: RAIL_V2_WCM_GROUP },
   photo: { group: RAIL_V2_WCM_GROUP },
   appointments: { group: RAIL_V2_WCM_GROUP },
+  // "Yours to edit", not the WCM group — no feed carries honors; the whole point
+  // of the table is the distinctions WCM does not publish.
+  honors: { group: "Yours to edit" },
   education: { group: RAIL_V2_WCM_GROUP },
   publications: { group: RAIL_V2_WCM_GROUP },
   funding: { group: RAIL_V2_WCM_GROUP },
@@ -411,6 +425,7 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "biosketch",
   "cv",
   "appointments",
+  "honors",
   "education",
   // Publications — now a superuser surface too (#836 follow-on); the scholar's
   // authorships with hide/show + reject, acted on the scholar's behalf.
@@ -1094,12 +1109,17 @@ function renderPanel(
             mode === "proxy") && (
             <ProfileAppointmentsCard cwid={cwid} mode={voiceMode} scholarName={scholarName} />
           )}
-          {/* #1760 — curation editor for honors and distinctions (academy
-              memberships, investigatorships, named chairs, prizes) that no WCM
-              feed carries. Same authorized set as the two cards above (self,
-              superuser / comms_steward, unit-admin, proxy — what the write route
-              authorizes); the card fetches its own rows and each write is
-              re-authorized server-side. */}
+        </div>
+      );
+    case "honors":
+      // #1760 — curation editor for honors and distinctions (academy memberships,
+      // investigatorships, prizes) that no WCM feed carries. Its OWN attribute,
+      // a sibling of Appointments: an honor is not an appointment, and it has its
+      // own profile section. Authorized set matches what the write route allows
+      // (self, superuser / comms_steward, unit-admin, proxy); the card fetches its
+      // own rows and each write is re-authorized server-side.
+      return (
+        <div className="flex flex-col gap-6">
           {(mode === "self" ||
             isSuperuserLike(mode) ||
             mode === "unit-admin" ||

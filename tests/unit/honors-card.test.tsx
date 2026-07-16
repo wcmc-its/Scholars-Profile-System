@@ -1,5 +1,5 @@
 /**
- * #1760 — the `HonorsCard` curation editor under the Appointments tab. Mirrors
+ * #1760 — the `HonorsCard` curation editor on its own Honors & Distinctions tab. Mirrors
  * `profile-appointments-card.test.tsx`: the fetch-on-mount list render (with the
  * Hidden marker and the non-`published` status marker the curator view depends
  * on), the add flow (POST create + optimistic append), and the remove flow (POST
@@ -74,6 +74,23 @@ function routedFetch(initial: Row[]) {
 }
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("HonorsCard — the copy must not offer a category that does not exist", () => {
+  // Shipped bug: the panel description read "…academy memberships,
+  // investigatorships, named chairs, and prizes" while HonorCategory carries NO
+  // NAMED_CHAIR member — the UI invited users to add something the dropdown
+  // cannot express. Endowed chairs are deliberately out of this pipeline (ED
+  // already publishes them via primaryTitle). It survived a grep because the
+  // grep was case-SENSITIVE and the prose says "named chairs" in lower case.
+  it("never mentions chairs — the category was deliberately removed", async () => {
+    vi.stubGlobal("fetch", routedFetch([]));
+    const { container } = render(
+      <HonorsCard cwid="abc1001" mode="self" scholarName="Ada Lovelace" />,
+    );
+    await screen.findByText("No honors added yet.");
+    expect(container.textContent ?? "").not.toMatch(/chair/i);
+  });
+});
 
 describe("HonorsCard — list render", () => {
   it("fetches on mount and renders rows with a meta line, Hidden and status markers", async () => {

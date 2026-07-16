@@ -209,9 +209,10 @@ enum ProfileAppointmentCategory {
 }
 
 /// Honors and distinctions (#1760) — academy memberships, investigatorships,
-/// named chairs, and prizes, entered by a curator (or a scholar on their own
-/// profile) on `/edit`. Modelled on `profile_appointment`: a SEPARATE store no
-/// ETL truncates, FK-cascaded to scholar, PROFILE-ONLY by construction.
+/// and prizes, entered by a curator (or a scholar on their own profile) on
+/// `/edit`. NOT endowed chairs — see the `HonorCategory` note below.
+/// Modelled on `profile_appointment`: a SEPARATE store no ETL truncates,
+/// FK-cascaded to scholar, PROFILE-ONLY by construction.
 ///
 /// `category` alone is controlled; `name` and `organization` are free text —
 /// the conferring body is deliberately NOT validated against a vocabulary,
