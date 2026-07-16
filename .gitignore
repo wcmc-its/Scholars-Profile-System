@@ -165,3 +165,7 @@ app/api/auth/dev-login/
 
 # Reference material from WCM Operations (ServiceNow KB samples) — local only, never commit
 docs/sample docs from ServiceNow/
+
+# Sponsor-match eval captures — raw /api/edit/sponsor-match payloads carrying named-person data
+# (name, department, cwid). The repo is PUBLIC: local only, never commit. See sponsor-README.md.
+scripts/search-eval/captures/
