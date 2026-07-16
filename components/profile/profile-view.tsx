@@ -29,7 +29,10 @@ import { PublicationsSection } from "@/components/profile/publications-section";
 import {
   buildProfileJsonLd,
   getScholarFullProfileBySlug,
+  groupHonors,
   isSparseProfile,
+  type HonorCategory,
+  type HonorEntry,
   type ProfilePayload,
   type ProfilePublication,
 } from "@/lib/api/profile";
@@ -112,6 +115,17 @@ export async function ProfileView({ slug }: { slug: string }) {
   // profile (no aggregate/third-party serializer reads them). Split into the two
   // headings; hidden rows (`showOnProfile === false`) are dropped by the helper.
   const selfAppointments = groupProfileAppointments(profile.profileAppointments ?? []);
+
+  // #1760 — honors & distinctions, grouped by category (enum order) then year.
+  // No visibility filter here BY DESIGN: the loader query already dropped every
+  // row that isn't `published` + `showOnProfile`, so an unpublished honor is not
+  // something this component could render even by mistake. `?? []` guards a
+  // cached payload that predates the field, matching `profileAppointments` above.
+  const honorGroups = groupHonors(profile.honors ?? []);
+  // Count what actually RENDERS, not what arrived: derived from the groups so the
+  // rail can never disagree with the body below it (and so a payload predating
+  // the field can't throw on `.length`).
+  const honorCount = honorGroups.reduce((sum, g) => sum + g.entries.length, 0);
 
   // v2b — Mentoring section. Fetches AOC mentees from reciterdb. Returns []
   // for scholars with no recorded mentor relationships, in which case the
@@ -477,6 +491,32 @@ export async function ProfileView({ slug }: { slug: string }) {
                 className="text-base leading-relaxed text-zinc-800 dark:text-zinc-200 [&_a]:text-[var(--color-accent-slate)] [&_a]:underline [&_a]:underline-offset-4 [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:mb-1"
                 dangerouslySetInnerHTML={{ __html: profile.overview }}
               />
+            </Section>
+          ) : null}
+
+          {/* #1760 — curator-/self-entered honors. Omitted entirely when no row
+              qualifies (`groupHonors` drops empty groups, so [] ⇒ no section).
+              Sits above Highlights: an academy election is a standing credential,
+              where Highlights below it are a rolling selection of recent work. */}
+          {honorGroups.length > 0 ? (
+            <Section
+              title="Honors & Distinctions"
+              headingLg
+              count={{
+                value: honorCount,
+                unit: honorCount === 1 ? "honor" : "honors",
+              }}
+            >
+              <div className="flex flex-col gap-6">
+                {honorGroups.map((group) => (
+                  <div key={group.category}>
+                    <h3 className="text-base font-semibold">
+                      {HONOR_CATEGORY_HEADINGS[group.category]}
+                    </h3>
+                    <HonorList entries={group.entries} />
+                  </div>
+                ))}
+              </div>
             </Section>
           ) : null}
 
@@ -849,6 +889,38 @@ function SelfAppointmentList({ entries }: { entries: ReadonlyArray<ProfileAppoin
             {meta.length > 0 ? (
               <div className="text-muted-foreground mt-0.5 text-xs">{meta.join(" · ")}</div>
             ) : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** #1760 — the heading each honor category renders under. Copy only: the ORDER
+ *  is `HONOR_CATEGORY_ORDER` in the loader, so a heading cannot silently reorder
+ *  the section by being renamed. Every `HonorCategory` needs an entry — the
+ *  `Record` makes a new enum member a type error rather than a blank heading. */
+const HONOR_CATEGORY_HEADINGS: Record<HonorCategory, string> = {
+  ACADEMY_MEMBERSHIP: "Academy memberships",
+  INVESTIGATORSHIP: "Investigatorships",
+  PRIZE: "Prizes & awards",
+  OTHER: "Other",
+};
+
+/** #1760 — the rows for one honor category. Reads `name · organization · year`
+ *  per SPEC, with the name carrying the emphasis and the conferring body / year
+ *  muted after it (the `SelfAppointmentList` idiom above). An unknown year is
+ *  omitted outright — the row simply ends at the organization rather than
+ *  rendering a placeholder for a fact we don't have. */
+function HonorList({ entries }: { entries: ReadonlyArray<HonorEntry> }) {
+  return (
+    <ul className="mt-2 flex flex-col gap-2">
+      {entries.map((h, i) => {
+        const meta = [h.organization, h.year === null ? null : String(h.year)].filter(Boolean);
+        return (
+          <li key={i} className="leading-snug">
+            <span className="font-semibold">{h.name}</span>
+            <span className="text-muted-foreground text-sm"> · {meta.join(" · ")}</span>
           </li>
         );
       })}

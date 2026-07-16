@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type Mock } from "vitest";
 import { EXPECTED_HEADSHOT_URL, FIXTURE_CWID } from "../fixtures/scholar";
 
 // Mock Prisma BEFORE importing the module under test.
@@ -22,6 +22,9 @@ vi.mock("@/lib/db", () => ({
         status: "active",
         appointments: [],
         profileAppointments: [],
+        // #1760 — the loader `include`s honors, so the emitted row always carries
+        // the relation. Gated to published + shown in the query, hence [] here.
+        honors: [],
         educations: [],
         grants: [],
         topicAssignments: [],
@@ -98,5 +101,30 @@ describe("profile serializer", () => {
     const payload = (await fn!("jane-doe")) as { centers?: unknown } | null;
     expect(payload).not.toBeNull();
     expect(payload!.centers).toEqual([]);
+  });
+
+  // #1760 — THE GATE. Only `status = published` AND `showOnProfile = true` honors
+  // may reach the payload, and the filter must live in the QUERY: the Phase 3
+  // roster sweep writes `pending` rows for a human to confirm, so a render-side
+  // filter would put an unconfirmed honor one forgotten guard away from the
+  // public page. This asserts the where-clause the loader actually sends —
+  // mocking the row shape could never prove a row was excluded, because the mock
+  // returns whatever it's told regardless of the filter.
+  it("gates honors to published + shown in the loader query", async () => {
+    const { prisma } = (await import("@/lib/db")) as unknown as {
+      prisma: { scholar: { findFirst: Mock } };
+    };
+    const mod: Record<string, unknown> = await import("@/lib/api/profile");
+    const fn = (mod as {
+      getScholarFullProfileBySlug?: (id: string) => Promise<unknown>;
+    }).getScholarFullProfileBySlug;
+
+    prisma.scholar.findFirst.mockClear();
+    await fn!("honors-gate-fixture");
+
+    const args = prisma.scholar.findFirst.mock.calls.at(-1)?.[0] as {
+      include: { honors: { where: unknown } };
+    };
+    expect(args.include.honors.where).toEqual({ status: "published", showOnProfile: true });
   });
 });
