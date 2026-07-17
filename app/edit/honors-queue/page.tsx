@@ -61,10 +61,15 @@ export default async function HonorsQueuePage() {
   // All three status buckets — Pending is the working queue; Approved/Rejected are
   // read-only history (the "we should see accepted honors somewhere" ask). ~250
   // rows total on a full seed, so three small queries, not a paging concern.
-  const [groups, approved, rejected] = await Promise.all([
+  // Round 5: user-asserted honors (`source='SELF'`) get their own tab, so Known
+  // loads only what a scholar did NOT enter about themselves. SELF honors are
+  // created `published` and never enter the pending/rejected flow, so only the
+  // published load needs splitting.
+  const [groups, approved, rejected, userAsserted] = await Promise.all([
     loadHonorQueue(db.read, "pending"),
-    loadHonorQueue(db.read, "published"),
+    loadHonorQueue(db.read, "published", { self: false }),
     loadHonorQueue(db.read, "rejected"),
+    loadHonorQueue(db.read, "published", { self: true }),
   ]);
   const pendingCount = groups.reduce((sum, g) => sum + g.rows.length, 0);
   const contestedCount = groups.filter((g) => g.contested).length;
@@ -107,7 +112,7 @@ export default async function HonorsQueuePage() {
                   : ""
               }. Nothing here renders on a profile until it is approved.`}
         </p>
-        <HonorsQueue pending={groups} approved={approved} rejected={rejected} />
+        <HonorsQueue pending={groups} approved={approved} rejected={rejected} userAsserted={userAsserted} />
       </main>
     </div>
   );

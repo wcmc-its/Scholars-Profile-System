@@ -361,3 +361,34 @@ describe("isHonorsQueueTabVisible", () => {
     ).toBe(false);
   });
 });
+
+// #1762 round 5 — the User-asserted tab depends on this partition: a wrong filter
+// leaks self-entered honors into Known, or hides them entirely.
+describe("loadHonorQueue — self-source partition", () => {
+  function spy() {
+    const calls: Array<{ where?: unknown }> = [];
+    const client = {
+      honor: { findMany: async (args: { where?: unknown }) => (calls.push(args), []) },
+      scholar: { findMany: async () => [] },
+    } as unknown as Parameters<typeof loadHonorQueue>[0];
+    return { calls, client };
+  }
+
+  it("self:true filters to source SELF", async () => {
+    const { calls, client } = spy();
+    await loadHonorQueue(client, "published", { self: true });
+    expect(calls[0].where).toEqual({ status: "published", source: "SELF" });
+  });
+
+  it("self:false excludes source SELF", async () => {
+    const { calls, client } = spy();
+    await loadHonorQueue(client, "published", { self: false });
+    expect(calls[0].where).toEqual({ status: "published", source: { not: "SELF" } });
+  });
+
+  it("omitted ⇒ no source filter (unchanged behavior)", async () => {
+    const { calls, client } = spy();
+    await loadHonorQueue(client, "pending");
+    expect(calls[0].where).toEqual({ status: "pending" });
+  });
+});

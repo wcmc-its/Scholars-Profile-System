@@ -24,11 +24,16 @@
  * one click and hides nothing permanently.
  *
  * Round 4 (#1762): the person-type filter and a group-by control (none / person /
- * award) apply to ALL THREE tabs, not just Possible. Group-by is ORTHOGONAL to the
+ * award) apply to ALL tabs, not just Possible. Group-by is ORTHOGONAL to the
  * contested-pair mechanic — a contested line stays one pick-one unit under every
  * group-by mode (under "person" it lands in a "multiple candidates" bucket, since
  * it spans people by construction). The sort control stays on Possible, the
- * working queue; the decided tabs are a history log ordered newest-decision-first.
+ * working queue; the read-only tabs are a history log ordered newest-decision-first.
+ *
+ * Round 5 (#1762): Known leads the tab strip (the confirmed record is what the
+ * office reaches for first, so it is also the default). Self-asserted honors
+ * (`source='SELF'`) get their own "User asserted" tab and are kept OUT of Known,
+ * so the curated record never blurs with what scholars claimed about themselves.
  */
 import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
@@ -42,9 +47,12 @@ type Props = {
   pending: HonorQueueGroup[];
   approved: HonorQueueGroup[];
   rejected: HonorQueueGroup[];
+  /** Round 5: honors a scholar entered about themselves (`source='SELF'`), shown
+   *  in their own read-only "User asserted" tab and kept out of Known. */
+  userAsserted: HonorQueueGroup[];
 };
 
-type Tab = "pending" | "approved" | "rejected";
+type Tab = "pending" | "approved" | "rejected" | "self";
 type PersonFilter = "faculty" | "affiliated" | "other" | "all";
 type SortKey = "prestige" | "recent" | "confident";
 export type GroupBy = "none" | "person" | "award";
@@ -125,12 +133,15 @@ export function buildSections(groups: HonorQueueGroup[], mode: GroupBy): Section
 function emptyMessage(tab: Tab, sourceEmpty: boolean): string {
   if (!sourceEmpty) return "None in this group. Try a wider filter.";
   if (tab === "pending") return "Nothing pending. Every honor has been decided.";
-  return tab === "approved" ? "No honors approved yet." : "No honors rejected yet.";
+  if (tab === "approved") return "No honors approved yet.";
+  if (tab === "rejected") return "No honors rejected yet.";
+  return "No self-asserted honors yet.";
 }
 
-export function HonorsQueue({ pending, approved, rejected }: Props) {
+export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props) {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("pending");
+  // Known first — round 5: the office lands on the confirmed record, not the queue.
+  const [tab, setTab] = useState<Tab>("approved");
   // Full-time faculty first — the curator's stated priority. Widen from there.
   const [filter, setFilter] = useState<PersonFilter>("faculty");
   // Prestige first — the round-3 ask: work the biggest honors before the rest.
@@ -141,9 +152,10 @@ export function HonorsQueue({ pending, approved, rejected }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // The active tab's groups. Pending is the mutable working queue; the decided
+  // The active tab's groups. Pending is the mutable working queue; the other
   // tabs are props reconciled by `router.refresh()` after a decision.
-  const source = tab === "pending" ? groups : tab === "approved" ? approved : rejected;
+  const source =
+    tab === "pending" ? groups : tab === "approved" ? approved : tab === "rejected" ? rejected : userAsserted;
 
   // Tab-label totals are per-tab and independent of the active tab — the count on
   // "Possible" must not change when the curator opens "Known".
@@ -152,8 +164,9 @@ export function HonorsQueue({ pending, approved, rejected }: Props) {
       pending: groups.reduce((n, g) => n + g.rows.length, 0),
       approved: approved.reduce((n, g) => n + g.rows.length, 0),
       rejected: rejected.reduce((n, g) => n + g.rows.length, 0),
+      self: userAsserted.reduce((n, g) => n + g.rows.length, 0),
     }),
-    [groups, approved, rejected],
+    [groups, approved, rejected, userAsserted],
   );
 
   // Filter-chip counts reflect the ACTIVE tab's rows (round 4: the filter is on
@@ -229,9 +242,10 @@ export function HonorsQueue({ pending, approved, rejected }: Props) {
           rendering on profiles. Labels are the curator's (round 3); the internal
           keys stay pending/approved/rejected. */}
       <div className="flex gap-1 border-b" role="tablist">
-        <TabButton active={tab === "pending"} onClick={() => setTab("pending")} label="Possible" count={tabTotals.pending} />
         <TabButton active={tab === "approved"} onClick={() => setTab("approved")} label="Known" count={tabTotals.approved} />
+        <TabButton active={tab === "pending"} onClick={() => setTab("pending")} label="Possible" count={tabTotals.pending} />
         <TabButton active={tab === "rejected"} onClick={() => setTab("rejected")} label="Rejected" count={tabTotals.rejected} />
+        <TabButton active={tab === "self"} onClick={() => setTab("self")} label="User asserted" count={tabTotals.self} />
       </div>
 
       {error ? (
@@ -377,7 +391,7 @@ function PendingSections({
 
 /** Known/Rejected tabs: read-only history. Rows within a section, and the
  *  sections themselves, are ordered newest-decision-first. */
-function DecidedSections({ sections, kind }: { sections: Section[]; kind: "approved" | "rejected" }) {
+function DecidedSections({ sections, kind }: { sections: Section[]; kind: "approved" | "rejected" | "self" }) {
   const ordered = sections
     .map((s) => ({
       key: s.key,
