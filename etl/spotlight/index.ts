@@ -27,9 +27,11 @@
  *   npm run etl:spotlight
  *   tsx etl/spotlight/index.ts
  */
+import { createHash } from "node:crypto";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import Ajv from "ajv/dist/2020"; // ajv v8+ with JSON Schema 2020-12 support
 import { db } from "../../lib/db";
+import { parseManifestGeneratedAt } from "../freshness/anchor";
 
 // ---------------------------------------------------------------------------
 // Module-level env constants — use AWS SDK default credential chain; do NOT
@@ -39,6 +41,13 @@ import { db } from "../../lib/db";
 const BUCKET = process.env.ARTIFACTS_BUCKET ?? "wcmc-reciterai-artifacts";
 const PREFIX = process.env.ARTIFACT_PREFIX ?? "spotlight";
 const REGION = process.env.AWS_DEFAULT_REGION ?? "us-east-1";
+
+// §4.3 escape hatch — bypass the sha256 short-circuit and force a full replace.
+// Mirrors etl/tools' --force / SCHOLAR_TOOL_FORCE_REPLACE. Needed because a
+// producer's correct republish carries the SAME declared sha as an earlier bad
+// artifact, so change-detection alone would skip it forever.
+const forceReplace =
+  process.argv.includes("--force") || process.env.SPOTLIGHT_FORCE_REPLACE === "1";
 
 // ---------------------------------------------------------------------------
 // Type interfaces — mirror docs/spotlight.schema.json $defs (canonical source).
@@ -111,6 +120,17 @@ async function fetchText(s3: S3Client, key: string): Promise<string> {
   return resp.Body!.transformToString("utf-8");
 }
 
+// §4.3 — fetch the artifact as raw bytes so we can hash exactly what the
+// producer hashed (avoids a UTF-8 re-encode round-trip). Same as etl/tools.
+async function fetchBytes(s3: S3Client, key: string): Promise<Uint8Array> {
+  const resp = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
+  return resp.Body!.transformToByteArray();
+}
+
+function sha256hex(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
 // ---------------------------------------------------------------------------
 // EtlRun helper — same pattern as etl/hierarchy/index.ts. The
 // `manifestTaxonomyVersion` column is shared across sources; for Spotlight we
@@ -124,6 +144,20 @@ async function recordRun(args: {
   manifest?: SpotlightManifest;
   errorMessage?: string;
 }): Promise<void> {
+  // §2.1: the artifact's real publish moment, so freshness measures content age
+  // rather than job liveness. null (→ freshness falls back to completedAt) on a
+  // missing/malformed/future timestamp; WARN in that case so a manifest-bearing
+  // source whose anchor went inert is distinguishable from a manifest-less one.
+  const manifestGeneratedAt = parseManifestGeneratedAt(args.manifest?.generated_at, Date.now());
+  if (args.manifest && manifestGeneratedAt === null) {
+    console.warn(
+      `[Spotlight] ${JSON.stringify({
+        event: "manifest_generated_at_unusable",
+        ts: Date.now(),
+        generated_at: args.manifest.generated_at ?? null,
+      })}`
+    );
+  }
   await db.write.etlRun.create({
     data: {
       source: "Spotlight",
@@ -133,6 +167,7 @@ async function recordRun(args: {
       errorMessage: args.errorMessage ?? null,
       manifestSha256: args.manifest?.sha256 ?? null,
       manifestTaxonomyVersion: args.manifest?.taxonomy_version ?? null,
+      manifestGeneratedAt,
     },
   });
 }
@@ -167,8 +202,10 @@ async function main(): Promise<void> {
     orderBy: { completedAt: "desc" },
   });
 
-  // Step 3b: sha256 short-circuit.
-  if (lastRun?.manifestSha256 === manifest.sha256) {
+  // Step 3b: sha256 short-circuit — skipped under --force (§4.3), because a
+  // producer's *correct* republish carries the same declared sha as an earlier
+  // bad artifact and would otherwise be skipped as "unchanged" forever.
+  if (!forceReplace && lastRun?.manifestSha256 === manifest.sha256) {
     console.log(
       `[Spotlight] ${JSON.stringify({
         event: "short_circuit",
@@ -181,6 +218,11 @@ async function main(): Promise<void> {
     await recordRun({ status: "success", rowsProcessed: 0, manifest });
     return;
   }
+  if (forceReplace) {
+    console.log(
+      `[Spotlight] ${JSON.stringify({ event: "force_replace", ts: Date.now(), version: manifest.version })}`
+    );
+  }
 
   // Step 4: Fetch schema for this SPECIFIC version — NOT latest/ — to guard
   // against schema drift during the 30-day breaking-change deprecation window.
@@ -188,9 +230,39 @@ async function main(): Promise<void> {
   const schemaText = await fetchText(s3, `${PREFIX}/${manifest.version}/spotlight.schema.json`);
   const schema = JSON.parse(schemaText);
 
-  // Step 5: Fetch spotlight.json from the same version-specific prefix.
-  const artifactText = await fetchText(s3, `${PREFIX}/${manifest.version}/spotlight.json`);
-  const artifact: SpotlightArtifact = JSON.parse(artifactText);
+  // Step 5: Fetch spotlight.json from the same version-specific prefix and
+  // verify its bytes against manifest.sha256 BEFORE any parse/write (§4.3).
+  // Until now sha256 was only a change-detection key, recorded as if verified —
+  // a corrupt-but-schema-valid artifact would bake its declared sha into
+  // etl_run, and the producer's later correct republish (same declared sha)
+  // would be skipped as "unchanged" forever. Hashing the fetched bytes closes
+  // that: a byte-mismatch fails the run loudly and never records a poisoned
+  // baseline.
+  // Fail CLOSED when the manifest declares no sha256 (absent or ""): an
+  // unverifiable artifact must not be trusted, and recording an empty baseline
+  // would let the next run short-circuit on "" === "".
+  const artifactBytes = await fetchBytes(s3, `${PREFIX}/${manifest.version}/spotlight.json`);
+  const digest = sha256hex(artifactBytes);
+  if (!manifest.sha256 || digest !== manifest.sha256) {
+    console.error(
+      `[Spotlight] ${JSON.stringify({
+        event: "integrity_failed",
+        ts: Date.now(),
+        key: `${PREFIX}/${manifest.version}/spotlight.json`,
+        expected_sha256: manifest.sha256,
+        actual_sha256: digest,
+        bytes: artifactBytes.byteLength,
+      })}`
+    );
+    await recordRun({
+      status: "failed",
+      rowsProcessed: 0,
+      manifest,
+      errorMessage: `sha256 mismatch on spotlight.json: expected ${manifest.sha256}, got ${digest}`,
+    });
+    process.exit(1);
+  }
+  const artifact: SpotlightArtifact = JSON.parse(Buffer.from(artifactBytes).toString("utf-8"));
 
   // Step 6: Validate against schema. D-11 additive-fields rule — `strict: false`
   // and no `additionalProperties: false` enforcement so additive bumps don't

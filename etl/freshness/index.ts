@@ -39,6 +39,7 @@
  * rather than false-alarmed.
  */
 import { db } from "@/lib/db";
+import { freshnessAnchor } from "@/etl/freshness/anchor";
 
 type Cadence = "nightly" | "weekly" | "annual";
 
@@ -135,14 +136,18 @@ async function evaluate(now: number): Promise<SourceStatus[]> {
       );
       continue;
     }
-    // Most recent SUCCESSFUL run for this source. `completedAt` is the
-    // freshness anchor (a 'running'/'failed' row does not advance freshness).
+    // Most recent SUCCESSFUL run for this source (a 'running'/'failed' row does
+    // not advance freshness). Age anchors on the producer's manifestGeneratedAt
+    // when present, NOT completedAt: a sha256 short-circuit stamps a fresh
+    // completedAt but the S3 artifact is unchanged, so completedAt would let a
+    // frozen producer read as fresh (§2.1). Sources with no S3 manifest fall
+    // back to completedAt via freshnessAnchor().
     const last = await db.read.etlRun.findFirst({
       where: { source, status: "success", completedAt: { not: null } },
       orderBy: { completedAt: "desc" },
-      select: { completedAt: true },
+      select: { completedAt: true, manifestGeneratedAt: true },
     });
-    const lastSuccessAt = last?.completedAt ?? null;
+    const lastSuccessAt = freshnessAnchor(last);
     const ageHours =
       lastSuccessAt === null
         ? null
