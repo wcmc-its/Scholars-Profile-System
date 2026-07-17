@@ -22,8 +22,15 @@
  * Full-time faculty matter most, so Pending opens filtered to them and sorted by
  * match-confidence then recency; the filter widens to Affiliated / Other / All on
  * one click and hides nothing permanently.
+ *
+ * Round 4 (#1762): the person-type filter and a group-by control (none / person /
+ * award) apply to ALL THREE tabs, not just Possible. Group-by is ORTHOGONAL to the
+ * contested-pair mechanic — a contested line stays one pick-one unit under every
+ * group-by mode (under "person" it lands in a "multiple candidates" bucket, since
+ * it spans people by construction). The sort control stays on Possible, the
+ * working queue; the decided tabs are a history log ordered newest-decision-first.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
@@ -40,6 +47,12 @@ type Props = {
 type Tab = "pending" | "approved" | "rejected";
 type PersonFilter = "faculty" | "affiliated" | "other" | "all";
 type SortKey = "prestige" | "recent" | "confident";
+export type GroupBy = "none" | "person" | "award";
+
+/** Contested lines span people, so they can't sit under any one person heading —
+ *  they bucket together here under group-by "person". The double-underscore
+ *  sentinel can't collide with a real cwid (alphanumeric, no underscores). */
+const CONTESTED_BUCKET = "__contested__";
 
 /** All rows on one group share a roster line ⇒ one honor ⇒ one prestige/year, so
  *  the group's sort key is `rows[0]`'s. Comparators return standard <0/0/>0. */
@@ -75,6 +88,46 @@ function honorLine(row: HonorQueueRow): string {
   return parts.join(" · ");
 }
 
+type Section = { key: string; heading: string | null; groups: HonorQueueGroup[] };
+
+/** The bucket a group falls in for a given group-by mode. A contested group
+ *  (>1 distinct cwid) never keys on a person — it goes to the shared contested
+ *  bucket so the pick-one unit is never split. */
+function bucketKey(group: HonorQueueGroup, mode: GroupBy): string {
+  if (mode === "award") return group.rows[0].organization;
+  if (mode === "person") return group.contested ? CONTESTED_BUCKET : group.rows[0].cwid;
+  return ""; // "none" — one bucket, one flat list
+}
+
+function sectionHeading(mode: GroupBy, key: string, sample: HonorQueueGroup): string | null {
+  if (mode === "none") return null;
+  if (mode === "award") return sample.rows[0].organization;
+  if (key === CONTESTED_BUCKET) return "Multiple candidates for one award";
+  return sample.rows[0].scholarName; // person
+}
+
+/**
+ * Bucket already-filtered groups into sections by the group-by mode. Pure and
+ * unsorted — each view (Possible vs decided) applies its own ordering. Exported
+ * for the grouping test. Insertion order preserves the caller's group order.
+ */
+export function buildSections(groups: HonorQueueGroup[], mode: GroupBy): Section[] {
+  const buckets = new Map<string, HonorQueueGroup[]>();
+  for (const g of groups) {
+    const k = bucketKey(g, mode);
+    const bucket = buckets.get(k);
+    if (bucket) bucket.push(g);
+    else buckets.set(k, [g]);
+  }
+  return [...buckets].map(([key, gs]) => ({ key, heading: sectionHeading(mode, key, gs[0]), groups: gs }));
+}
+
+function emptyMessage(tab: Tab, sourceEmpty: boolean): string {
+  if (!sourceEmpty) return "None in this group. Try a wider filter.";
+  if (tab === "pending") return "Nothing pending. Every honor has been decided.";
+  return tab === "approved" ? "No honors approved yet." : "No honors rejected yet.";
+}
+
 export function HonorsQueue({ pending, approved, rejected }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("pending");
@@ -82,24 +135,41 @@ export function HonorsQueue({ pending, approved, rejected }: Props) {
   const [filter, setFilter] = useState<PersonFilter>("faculty");
   // Prestige first — the round-3 ask: work the biggest honors before the rest.
   const [sortKey, setSortKey] = useState<SortKey>("prestige");
+  // No extra grouping by default — the flat, roster-line view of rounds 1–3.
+  const [groupBy, setGroupBy] = useState<GroupBy>("none");
   const [groups, setGroups] = useState(pending);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // The active tab's groups. Pending is the mutable working queue; the decided
+  // tabs are props reconciled by `router.refresh()` after a decision.
+  const source = tab === "pending" ? groups : tab === "approved" ? approved : rejected;
+
+  // Tab-label totals are per-tab and independent of the active tab — the count on
+  // "Possible" must not change when the curator opens "Known".
+  const tabTotals = useMemo(
+    () => ({
+      pending: groups.reduce((n, g) => n + g.rows.length, 0),
+      approved: approved.reduce((n, g) => n + g.rows.length, 0),
+      rejected: rejected.reduce((n, g) => n + g.rows.length, 0),
+    }),
+    [groups, approved, rejected],
+  );
+
+  // Filter-chip counts reflect the ACTIVE tab's rows (round 4: the filter is on
+  // every tab, so its counts follow the tab).
   const counts = useMemo(() => {
     const c = { faculty: 0, affiliated: 0, other: 0, all: 0 };
-    for (const g of groups)
+    for (const g of source)
       for (const r of g.rows) {
         c.all += 1;
         c[personBucket(r.roleCategory)] += 1;
       }
     return c;
-  }, [groups]);
+  }, [source]);
 
-  const visibleGroups = useMemo(
-    () => groups.filter((g) => groupMatchesFilter(g, filter)).sort((a, b) => compareGroups(a, b, sortKey)),
-    [groups, filter, sortKey],
-  );
+  const filtered = useMemo(() => source.filter((g) => groupMatchesFilter(g, filter)), [source, filter]);
+  const sections = useMemo(() => buildSections(filtered, groupBy), [filtered, groupBy]);
 
   async function decide(row: HonorQueueRow, decision: "approve" | "reject", groupKey: string) {
     setBusy(row.id);
@@ -159,19 +229,9 @@ export function HonorsQueue({ pending, approved, rejected }: Props) {
           rendering on profiles. Labels are the curator's (round 3); the internal
           keys stay pending/approved/rejected. */}
       <div className="flex gap-1 border-b" role="tablist">
-        <TabButton active={tab === "pending"} onClick={() => setTab("pending")} label="Possible" count={counts.all} />
-        <TabButton
-          active={tab === "approved"}
-          onClick={() => setTab("approved")}
-          label="Known"
-          count={approved.reduce((n, g) => n + g.rows.length, 0)}
-        />
-        <TabButton
-          active={tab === "rejected"}
-          onClick={() => setTab("rejected")}
-          label="Rejected"
-          count={rejected.reduce((n, g) => n + g.rows.length, 0)}
-        />
+        <TabButton active={tab === "pending"} onClick={() => setTab("pending")} label="Possible" count={tabTotals.pending} />
+        <TabButton active={tab === "approved"} onClick={() => setTab("approved")} label="Known" count={tabTotals.approved} />
+        <TabButton active={tab === "rejected"} onClick={() => setTab("rejected")} label="Rejected" count={tabTotals.rejected} />
       </div>
 
       {error ? (
@@ -180,17 +240,28 @@ export function HonorsQueue({ pending, approved, rejected }: Props) {
         </p>
       ) : null}
 
-      {tab === "pending" ? (
-        <>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            {/* Person-type filter — full-time faculty first, by the curator's ask. */}
-            <div className="flex flex-wrap gap-2" data-slot="honors-person-filter">
-              <FilterChip active={filter === "faculty"} onClick={() => setFilter("faculty")} label="Full-time faculty" count={counts.faculty} />
-              <FilterChip active={filter === "affiliated"} onClick={() => setFilter("affiliated")} label="Affiliated faculty" count={counts.affiliated} />
-              <FilterChip active={filter === "other"} onClick={() => setFilter("other")} label="Trainees & other" count={counts.other} />
-              <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
-            </div>
-            {/* Sort control — prestige, recency, or match-confidence. */}
+      {/* Round 4: filter + group-by ride every tab; sort stays on the working queue. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2" data-slot="honors-person-filter">
+          <FilterChip active={filter === "faculty"} onClick={() => setFilter("faculty")} label="Full-time faculty" count={counts.faculty} />
+          <FilterChip active={filter === "affiliated"} onClick={() => setFilter("affiliated")} label="Affiliated faculty" count={counts.affiliated} />
+          <FilterChip active={filter === "other"} onClick={() => setFilter("other")} label="Trainees & other" count={counts.other} />
+          <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="text-muted-foreground flex items-center gap-2 text-xs" data-slot="honors-group-by">
+            Group
+            <select
+              value={groupBy}
+              onChange={(e) => setGroupBy(e.target.value as GroupBy)}
+              className="rounded-sm border px-2 py-1 text-xs"
+            >
+              <option value="none">No grouping</option>
+              <option value="person">By person</option>
+              <option value="award">By award</option>
+            </select>
+          </label>
+          {tab === "pending" ? (
             <label className="text-muted-foreground flex items-center gap-2 text-xs" data-slot="honors-sort">
               Sort
               <select
@@ -203,22 +274,21 @@ export function HonorsQueue({ pending, approved, rejected }: Props) {
                 <option value="confident">Most confident match</option>
               </select>
             </label>
-          </div>
+          ) : null}
+        </div>
+      </div>
 
-          {visibleGroups.length === 0 ? (
-            <p className="text-muted-foreground text-sm" data-slot="honors-queue-empty">
-              {groups.length === 0
-                ? "Nothing pending. Every honor has been decided."
-                : "None in this group. Try a wider filter."}
-            </p>
-          ) : (
-            visibleGroups.map((group) => (
-              <PendingGroup key={group.key} group={group} busy={busy} onDecide={decide} onRejectAll={rejectAll} />
-            ))
-          )}
-        </>
+      {filtered.length === 0 ? (
+        <p
+          className="text-muted-foreground text-sm"
+          data-slot={tab === "pending" ? "honors-queue-empty" : `honors-${tab}-empty`}
+        >
+          {emptyMessage(tab, source.length === 0)}
+        </p>
+      ) : tab === "pending" ? (
+        <PendingSections sections={sections} sortKey={sortKey} busy={busy} onDecide={decide} onRejectAll={rejectAll} />
       ) : (
-        <DecidedList groups={tab === "approved" ? approved : rejected} kind={tab} />
+        <DecidedSections sections={sections} kind={tab} />
       )}
     </div>
   );
@@ -256,6 +326,90 @@ function FilterChip({ active, onClick, label, count }: { active: boolean; onClic
     >
       {label} ({count})
     </button>
+  );
+}
+
+/** A heading (only when grouped) over its rows/cards. Under group-by "none" the
+ *  heading is null and this is a plain flat block. */
+function SectionShell({ heading, count, children }: { heading: string | null; count: number; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-4" data-slot={heading ? "honor-section" : "honor-section-flat"}>
+      {heading ? (
+        <h3 className="text-foreground/80 border-b pb-1 text-sm font-semibold" data-slot="honor-section-heading">
+          {heading} <span className="text-muted-foreground font-normal">({count})</span>
+        </h3>
+      ) : null}
+      {children}
+    </section>
+  );
+}
+
+/** Possible tab: each section's groups sorted by the active sort key, sections
+ *  ordered by their top group. Renders the interactive contested-aware cards. */
+function PendingSections({
+  sections,
+  sortKey,
+  busy,
+  onDecide,
+  onRejectAll,
+}: {
+  sections: Section[];
+  sortKey: SortKey;
+  busy: string | null;
+  onDecide: (row: HonorQueueRow, decision: "approve" | "reject", groupKey: string) => void;
+  onRejectAll: (group: HonorQueueGroup) => void;
+}) {
+  const ordered = sections
+    .map((s) => ({ ...s, groups: [...s.groups].sort((a, b) => compareGroups(a, b, sortKey)) }))
+    .sort((a, b) => compareGroups(a.groups[0], b.groups[0], sortKey));
+  return (
+    <div className="flex flex-col gap-6">
+      {ordered.map((section) => (
+        <SectionShell key={section.key} heading={section.heading} count={section.groups.reduce((n, g) => n + g.rows.length, 0)}>
+          {section.groups.map((group) => (
+            <PendingGroup key={group.key} group={group} busy={busy} onDecide={onDecide} onRejectAll={onRejectAll} />
+          ))}
+        </SectionShell>
+      ))}
+    </div>
+  );
+}
+
+/** Known/Rejected tabs: read-only history. Rows within a section, and the
+ *  sections themselves, are ordered newest-decision-first. */
+function DecidedSections({ sections, kind }: { sections: Section[]; kind: "approved" | "rejected" }) {
+  const ordered = sections
+    .map((s) => ({
+      key: s.key,
+      heading: s.heading,
+      rows: s.groups.flatMap((g) => g.rows).sort((a, b) => b.decidedAt.localeCompare(a.decidedAt)),
+    }))
+    .sort((a, b) => b.rows[0].decidedAt.localeCompare(a.rows[0].decidedAt));
+  return (
+    <div className="flex flex-col gap-6">
+      {ordered.map((section) => (
+        <SectionShell key={section.key} heading={section.heading} count={section.rows.length}>
+          <ul className="flex flex-col divide-y" data-slot={`honors-${kind}-list`}>
+            {section.rows.map((row) => (
+              <DecidedRow key={row.id} row={row} />
+            ))}
+          </ul>
+        </SectionShell>
+      ))}
+    </div>
+  );
+}
+
+function DecidedRow({ row }: { row: HonorQueueRow }) {
+  return (
+    <li className="flex items-baseline justify-between gap-4 py-2">
+      <div className="min-w-0">
+        <span className="font-medium">{row.scholarName}</span>
+        {row.roleLabel ? <span className="text-muted-foreground text-sm"> · {row.roleLabel}</span> : null}
+        <span className="text-muted-foreground text-sm"> — {honorLine(row)}</span>
+      </div>
+      <span className="text-muted-foreground shrink-0 text-xs">{row.decidedAt.slice(0, 10)}</span>
+    </li>
   );
 }
 
@@ -354,32 +508,5 @@ function PendingGroup({
         </div>
       ) : null}
     </div>
-  );
-}
-
-function DecidedList({ groups, kind }: { groups: HonorQueueGroup[]; kind: "approved" | "rejected" }) {
-  const rows = groups.flatMap((g) => g.rows);
-  if (rows.length === 0) {
-    return (
-      <p className="text-muted-foreground text-sm" data-slot={`honors-${kind}-empty`}>
-        {kind === "approved" ? "No honors approved yet." : "No honors rejected yet."}
-      </p>
-    );
-  }
-  // Most-recently decided first — this is a history log, read backwards.
-  const ordered = [...rows].sort((a, b) => b.decidedAt.localeCompare(a.decidedAt));
-  return (
-    <ul className="flex flex-col divide-y" data-slot={`honors-${kind}-list`}>
-      {ordered.map((row) => (
-        <li key={row.id} className="flex items-baseline justify-between gap-4 py-2">
-          <div className="min-w-0">
-            <span className="font-medium">{row.scholarName}</span>
-            {row.roleLabel ? <span className="text-muted-foreground text-sm"> · {row.roleLabel}</span> : null}
-            <span className="text-muted-foreground text-sm"> — {honorLine(row)}</span>
-          </div>
-          <span className="text-muted-foreground shrink-0 text-xs">{row.decidedAt.slice(0, 10)}</span>
-        </li>
-      ))}
-    </ul>
   );
 }
