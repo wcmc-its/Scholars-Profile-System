@@ -39,6 +39,20 @@ type Props = {
 
 type Tab = "pending" | "approved" | "rejected";
 type PersonFilter = "faculty" | "affiliated" | "other" | "all";
+type SortKey = "prestige" | "recent" | "confident";
+
+/** All rows on one group share a roster line ⇒ one honor ⇒ one prestige/year, so
+ *  the group's sort key is `rows[0]`'s. Comparators return standard <0/0/>0. */
+function compareGroups(a: HonorQueueGroup, b: HonorQueueGroup, key: SortKey): number {
+  const ay = a.rows[0].year;
+  const by = b.rows[0].year;
+  const recent = () => (ay === by ? 0 : ay === null ? 1 : by === null ? -1 : by - ay);
+  const prestige = () => b.rows[0].prestige - a.rows[0].prestige;
+  const confident = () => Number(a.contested) - Number(b.contested); // singles first
+  if (key === "prestige") return prestige() || recent();
+  if (key === "recent") return recent() || prestige();
+  return confident() || prestige() || recent();
+}
 
 /** Which filter bucket a scholar's roleCategory falls in. */
 function personBucket(roleCategory: string | null): Exclude<PersonFilter, "all"> {
@@ -66,6 +80,8 @@ export function HonorsQueue({ pending, approved, rejected }: Props) {
   const [tab, setTab] = useState<Tab>("pending");
   // Full-time faculty first — the curator's stated priority. Widen from there.
   const [filter, setFilter] = useState<PersonFilter>("faculty");
+  // Prestige first — the round-3 ask: work the biggest honors before the rest.
+  const [sortKey, setSortKey] = useState<SortKey>("prestige");
   const [groups, setGroups] = useState(pending);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -81,8 +97,8 @@ export function HonorsQueue({ pending, approved, rejected }: Props) {
   }, [groups]);
 
   const visibleGroups = useMemo(
-    () => groups.filter((g) => groupMatchesFilter(g, filter)),
-    [groups, filter],
+    () => groups.filter((g) => groupMatchesFilter(g, filter)).sort((a, b) => compareGroups(a, b, sortKey)),
+    [groups, filter, sortKey],
   );
 
   async function decide(row: HonorQueueRow, decision: "approve" | "reject", groupKey: string) {
@@ -139,13 +155,15 @@ export function HonorsQueue({ pending, approved, rejected }: Props) {
 
   return (
     <div className="flex flex-col gap-6" data-slot="honors-queue">
-      {/* Status tabs — Pending is the working queue; the others are history. */}
+      {/* Status tabs. "Possible" = matched but unconfirmed; "Known" = confirmed and
+          rendering on profiles. Labels are the curator's (round 3); the internal
+          keys stay pending/approved/rejected. */}
       <div className="flex gap-1 border-b" role="tablist">
-        <TabButton active={tab === "pending"} onClick={() => setTab("pending")} label="Pending" count={counts.all} />
+        <TabButton active={tab === "pending"} onClick={() => setTab("pending")} label="Possible" count={counts.all} />
         <TabButton
           active={tab === "approved"}
           onClick={() => setTab("approved")}
-          label="Approved"
+          label="Known"
           count={approved.reduce((n, g) => n + g.rows.length, 0)}
         />
         <TabButton
@@ -164,12 +182,27 @@ export function HonorsQueue({ pending, approved, rejected }: Props) {
 
       {tab === "pending" ? (
         <>
-          {/* Person-type filter — full-time faculty first, by the curator's ask. */}
-          <div className="flex flex-wrap gap-2" data-slot="honors-person-filter">
-            <FilterChip active={filter === "faculty"} onClick={() => setFilter("faculty")} label="Full-time faculty" count={counts.faculty} />
-            <FilterChip active={filter === "affiliated"} onClick={() => setFilter("affiliated")} label="Affiliated faculty" count={counts.affiliated} />
-            <FilterChip active={filter === "other"} onClick={() => setFilter("other")} label="Trainees & other" count={counts.other} />
-            <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            {/* Person-type filter — full-time faculty first, by the curator's ask. */}
+            <div className="flex flex-wrap gap-2" data-slot="honors-person-filter">
+              <FilterChip active={filter === "faculty"} onClick={() => setFilter("faculty")} label="Full-time faculty" count={counts.faculty} />
+              <FilterChip active={filter === "affiliated"} onClick={() => setFilter("affiliated")} label="Affiliated faculty" count={counts.affiliated} />
+              <FilterChip active={filter === "other"} onClick={() => setFilter("other")} label="Trainees & other" count={counts.other} />
+              <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
+            </div>
+            {/* Sort control — prestige, recency, or match-confidence. */}
+            <label className="text-muted-foreground flex items-center gap-2 text-xs" data-slot="honors-sort">
+              Sort
+              <select
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value as SortKey)}
+                className="rounded-sm border px-2 py-1 text-xs"
+              >
+                <option value="prestige">Most prestigious</option>
+                <option value="recent">Most recent</option>
+                <option value="confident">Most confident match</option>
+              </select>
+            </label>
           </div>
 
           {visibleGroups.length === 0 ? (

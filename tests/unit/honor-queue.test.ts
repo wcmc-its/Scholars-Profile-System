@@ -230,6 +230,39 @@ describe("isFullTimeFaculty", () => {
   });
 });
 
+describe("honorPrestige — a sort weight, never a gate", () => {
+  it("ranks the national academies above the early-career fellowships", async () => {
+    const { honorPrestige } = await import("@/lib/edit/honor-queue");
+    expect(honorPrestige("National Academy of Sciences")).toBeGreaterThan(
+      honorPrestige("Alfred P. Sloan Foundation"),
+    );
+    expect(honorPrestige("National Academy of Medicine")).toBeGreaterThan(
+      honorPrestige("American Association for the Advancement of Science"),
+    );
+  });
+
+  it("scores an unknown body 0 (it sorts last, is never dropped)", async () => {
+    const { honorPrestige } = await import("@/lib/edit/honor-queue");
+    expect(honorPrestige("Some Society We Have Not Weighted")).toBe(0);
+  });
+
+  it("tolerates surrounding whitespace on the organization key", async () => {
+    const { honorPrestige } = await import("@/lib/edit/honor-queue");
+    expect(honorPrestige("  National Academy of Sciences  ")).toBe(
+      honorPrestige("National Academy of Sciences"),
+    );
+  });
+
+  it("attaches the weight to each loaded row", async () => {
+    const groups = await loadHonorQueue(
+      client([honor({ id: "a", cwid: "aaa1001", sourceRef: "x|Y|2013", organization: "National Academy of Sciences" })], [
+        { cwid: "aaa1001", preferredName: "A" },
+      ]),
+    );
+    expect(groups[0].rows[0].prestige).toBe(100);
+  });
+});
+
 describe("yearPlausibilityNote — a SIGNAL, never a filter", () => {
   it("flags an old award on a junior current title", () => {
     expect(yearPlausibilityNote({ year: 1985, title: "Clinical Instructor in Emergency Medicine" }))
