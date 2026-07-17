@@ -2323,6 +2323,13 @@ function ResearcherRow({
   // strip's caption to a single muted line at the card's foot (mockup), where a gap belongs: after
   // the evidence, not ahead of it.
   const gaps = coverage.filter((c) => c.state === "none");
+  // #1780 follow-up — the concepts this scholar RANKS under (drives the score) but for which the
+  // spine shipped no evidence: keyword-level, or capped below the evidence blocks above. Named
+  // here because nothing else does: the strip shows an unlabeled `ranked` segment, the blocks
+  // caption only the evidenced concepts, and the gaps line only the `none` ones. Live-derived, so
+  // muting a concept drops it. This is what makes reweighting legible — an officer who zeroes the
+  // concepts a #1 "ranks under, no evidence" would otherwise see nothing to zero (Safford, staging).
+  const rankedNoEvidence = coverage.filter((c) => c.state === "ranked");
   const tier = fitTier(candidate.fusedScore, topScore);
   const papers = candidate.evidence?.papers ?? [];
   const topics = candidate.evidence?.topics ?? [];
@@ -2565,9 +2572,32 @@ function ResearcherRow({
             })}
           </div>
         ) : null}
-        {/* The "ranked, no evidence shown" rows used to live here, one per concept. Deleted: the
-            strip's lighter `ranked` segment now carries that fact (D7), and a per-concept row said
-            it in a way that read as a contradiction of the count beside it. */}
+        {/* #1780 follow-up — name the "ranks under, no evidence" concepts. They once rendered one
+            row PER CONCEPT and were deleted: those read as a contradiction of the evidence count,
+            and the strip's lighter `ranked` segment carries the FILL fact. But a strip segment is
+            UNLABELED — the concept actually DRIVING a rank is otherwise un-nameable anywhere on the
+            card, so an officer reweighting a #1 whose reasons are all keyword-level (Safford, staging
+            2026-07-17) has nothing to grab. Back as a SINGLE muted line, not per-concept rows, in the
+            strip's own `ranked` colour: it names the drivers without masquerading as evidence, and
+            fulfils the `asksCovered` tooltip's promise ("open the row to see which"). */}
+        {rankedNoEvidence.length > 0 ? (
+          <div
+            data-slot="matcha-ranked-no-evidence"
+            className="border-border mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-t pt-2.5"
+          >
+            <HoverTooltip
+              wide
+              text="Drives this scholar's rank, but the match is keyword-level or capped below the evidence shown above — so there is no publication to display here. Reweighting these still moves the ranking."
+            >
+              <span className="rounded bg-[var(--color-accent-slate)]/30 px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.02em] text-foreground">
+                Ranks here
+              </span>
+            </HoverTooltip>
+            <span className="text-muted-foreground text-xs">
+              {rankedNoEvidence.map((r) => r.concept.term).join(" · ")}
+            </span>
+          </div>
+        ) : null}
         {topics.length > 0 ? (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {topics.map((t) => (

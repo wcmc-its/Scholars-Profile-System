@@ -1065,6 +1065,58 @@ describe("MatchaPanel", () => {
     expect(blocks[1][1]).toContain("30 of 210 publications tagged");
   });
 
+  it("names a ranked-but-unevidenced concept so reweighting is legible (#1780)", async () => {
+    // The Safford case (staging 2026-07-17): a scholar ranks under a concept via a keyword/capped
+    // hit that ships no evidence block. The card must NAME that concept — otherwise the driver is
+    // invisible (an unlabeled strip segment) and an officer sees a #1 with no reason to zero.
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          // Ranks under Immuno-oncology but ships NO searchEvidence for it (only the default
+          // __match__, which joins to no concept) ⇒ conceptCoverage state "ranked".
+          contributions: [{ term: "Immuno-oncology", rank: 1 }],
+        }),
+      ],
+    });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    const line = document.querySelector('[data-slot="matcha-ranked-no-evidence"]');
+    expect(line).toBeTruthy();
+    expect(line!.textContent).toContain("Immuno-oncology");
+    // Named, but NOT as an evidence block — it must not masquerade as shown evidence.
+    expect(evidenceBlocks().map(([caption]) => caption)).not.toContain("Immuno-oncology");
+  });
+
+  it("does not repeat an evidenced concept in the ranked-no-evidence line", async () => {
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          contributions: [{ term: "Immuno-oncology", rank: 1 }],
+          searchEvidence: [searchEvidence("Immuno-oncology", 142)],
+        }),
+      ],
+    });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    // Immuno-oncology is evidenced ⇒ it renders as a block; the ranked-no-evidence line does not
+    // exist for it (no OTHER concept is ranked-without-evidence here).
+    const line = document.querySelector('[data-slot="matcha-ranked-no-evidence"]');
+    expect(line?.textContent ?? "").not.toContain("Immuno-oncology");
+    expect(evidenceBlocks().map(([caption]) => caption)).toContain("Immuno-oncology");
+  });
+
   it("drops a muted concept's evidence block along with its chip", async () => {
     // Slide a concept to zero and it stops being a reason this person ranked. A block still
     // captioned with it would have the card contradicting the ranking beside it.
