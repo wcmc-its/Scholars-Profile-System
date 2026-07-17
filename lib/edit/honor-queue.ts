@@ -99,18 +99,22 @@ export type HonorQueueGroup = {
  */
 export const HONOR_PRESTIGE: Readonly<Record<string, number>> = {
   // Individual mega-prizes — above 100 on purpose (see note). Keyed on the exact
-  // `organization` the NOBEL/LASKER seed writes; the specific prize lives in the
-  // honor `name` ("Nobel Prize in Physiology or Medicine").
+  // `organization` the seed writes; the specific prize lives in the honor `name`
+  // ("Nobel Prize in Physiology or Medicine", "National Medal of Science").
   "Nobel Foundation": 120,
+  "National Science Foundation": 115, // National Medal of Science — US highest science honor
   "Lasker Foundation": 112,
   "John D. and Catherine T. MacArthur Foundation": 108,
+  "Shaw Prize Foundation": 106,
   "National Academy of Sciences": 100,
+  "National Academy of Engineering": 100,
   "National Academy of Medicine": 100,
   "Howard Hughes Medical Institute": 96,
   "American Philosophical Society": 92,
   "American Academy of Arts and Sciences": 90,
   "Association of American Physicians": 78,
   "American Society for Clinical Investigation": 74,
+  "National Academy of Inventors": 70,
   "American Association for the Advancement of Science": 66,
   "U.S. Government (PECASE)": 60,
   "Alfred P. Sloan Foundation": 56,
@@ -214,9 +218,16 @@ function tokenize(s: string): string[] {
 export async function loadHonorQueue(
   client: HonorQueueClient,
   status: HonorStatus = "pending",
+  // #1762 round 5: partition self-asserted honors (`source='SELF'`) into their
+  // own tab. `self:true` ⇒ only self-entered; `self:false` ⇒ everything a scholar
+  // did NOT enter themselves; omitted ⇒ no source filter (the original behavior).
+  opts: { self?: boolean } = {},
 ): Promise<HonorQueueGroup[]> {
   const rows = await client.honor.findMany({
-    where: { status },
+    where: {
+      status,
+      ...(opts.self === true ? { source: "SELF" } : opts.self === false ? { source: { not: "SELF" } } : {}),
+    },
     orderBy: { createdAt: "asc" },
     select: {
       id: true,
