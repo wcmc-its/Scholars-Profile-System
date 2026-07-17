@@ -29,9 +29,8 @@ import { PublicationsSection } from "@/components/profile/publications-section";
 import {
   buildProfileJsonLd,
   getScholarFullProfileBySlug,
-  groupHonors,
   isSparseProfile,
-  type HonorCategory,
+  sortHonors,
   type HonorEntry,
   type ProfilePayload,
   type ProfilePublication,
@@ -116,16 +115,14 @@ export async function ProfileView({ slug }: { slug: string }) {
   // headings; hidden rows (`showOnProfile === false`) are dropped by the helper.
   const selfAppointments = groupProfileAppointments(profile.profileAppointments ?? []);
 
-  // #1760 — honors & distinctions, grouped by category (enum order) then year.
-  // No visibility filter here BY DESIGN: the loader query already dropped every
-  // row that isn't `published` + `showOnProfile`, so an unpublished honor is not
-  // something this component could render even by mistake. `?? []` guards a
-  // cached payload that predates the field, matching `profileAppointments` above.
-  const honorGroups = groupHonors(profile.honors ?? []);
-  // Count what actually RENDERS, not what arrived: derived from the groups so the
-  // rail can never disagree with the body below it (and so a payload predating
-  // the field can't throw on `.length`).
-  const honorCount = honorGroups.reduce((sum, g) => sum + g.entries.length, 0);
+  // #1760 — honors & distinctions, one flat list ordered year DESC. The category
+  // is not rendered; see `sortHonors`. No visibility filter here BY DESIGN: the
+  // loader query already dropped every row that isn't `published` +
+  // `showOnProfile`, so an unpublished honor is not something this component
+  // could render even by mistake. `?? []` guards a cached payload that predates
+  // the field, matching `profileAppointments` above.
+  const honors = sortHonors(profile.honors ?? []);
+  const honorCount = honors.length;
 
   // v2b — Mentoring section. Fetches AOC mentees from reciterdb. Returns []
   // for scholars with no recorded mentor relationships, in which case the
@@ -494,32 +491,6 @@ export async function ProfileView({ slug }: { slug: string }) {
             </Section>
           ) : null}
 
-          {/* #1760 — curator-/self-entered honors. Omitted entirely when no row
-              qualifies (`groupHonors` drops empty groups, so [] ⇒ no section).
-              Sits above Highlights: an academy election is a standing credential,
-              where Highlights below it are a rolling selection of recent work. */}
-          {honorGroups.length > 0 ? (
-            <Section
-              title="Honors & Distinctions"
-              headingLg
-              count={{
-                value: honorCount,
-                unit: honorCount === 1 ? "honor" : "honors",
-              }}
-            >
-              <div className="flex flex-col gap-6">
-                {honorGroups.map((group) => (
-                  <div key={group.category}>
-                    <h3 className="text-base font-semibold">
-                      {HONOR_CATEGORY_HEADINGS[group.category]}
-                    </h3>
-                    <HonorList entries={group.entries} />
-                  </div>
-                ))}
-              </div>
-            </Section>
-          ) : null}
-
           {profile.highlights.length > 0 ? (
             <Section
               title={
@@ -614,6 +585,25 @@ export async function ProfileView({ slug }: { slug: string }) {
               }
             >
               <GrantsSection grants={profile.grants} />
+            </Section>
+          ) : null}
+
+          {/* #1760 — curator-/self-entered honors. Omitted entirely when no row
+              qualifies (`sortHonors` returns [] for [], so [] ⇒ no section).
+              Sits directly below Funding: it is the last human-curated section,
+              above the machine-fed blocks (trials, technologies, mentoring,
+              disclosures) that follow. One flat list, year DESC — the category
+              does not render; see `sortHonors`. */}
+          {honors.length > 0 ? (
+            <Section
+              title="Honors & Distinctions"
+              headingLg
+              count={{
+                value: honorCount,
+                unit: honorCount === 1 ? "honor" : "honors",
+              }}
+            >
+              <HonorList entries={honors} />
             </Section>
           ) : null}
 
@@ -896,18 +886,7 @@ function SelfAppointmentList({ entries }: { entries: ReadonlyArray<ProfileAppoin
   );
 }
 
-/** #1760 — the heading each honor category renders under. Copy only: the ORDER
- *  is `HONOR_CATEGORY_ORDER` in the loader, so a heading cannot silently reorder
- *  the section by being renamed. Every `HonorCategory` needs an entry — the
- *  `Record` makes a new enum member a type error rather than a blank heading. */
-const HONOR_CATEGORY_HEADINGS: Record<HonorCategory, string> = {
-  ACADEMY_MEMBERSHIP: "Academy memberships",
-  INVESTIGATORSHIP: "Investigatorships",
-  PRIZE: "Prizes & awards",
-  OTHER: "Other",
-};
-
-/** #1760 — the rows for one honor category. Reads `name · organization · year`
+/** #1760 — the honor rows. Reads `name · organization · year`
  *  per SPEC, with the name carrying the emphasis and the conferring body / year
  *  muted after it (the `SelfAppointmentList` idiom above). An unknown year is
  *  omitted outright — the row simply ends at the organization rather than

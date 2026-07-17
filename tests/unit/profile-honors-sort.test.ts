@@ -1,19 +1,24 @@
 /**
- * #1760 — profile grouping for `honor` rows.
+ * #1760 — profile ordering for `honor` rows.
  *
- * Covers the render contract the "Honors & Distinctions" section relies on:
- * groups in `HonorCategory` ENUM order (not alphabetical, not input order), rows
- * within a group by year DESC with unknown years last, and empty groups dropped
- * so the section can omit itself.
+ * Covers the render contract the "Honors & Distinctions" section relies on: one
+ * flat list, year DESC, unknown years last, and `[]` for `[]` so the section can
+ * omit itself.
  *
- * The visibility gate is deliberately NOT tested here — `groupHonors` cannot see
+ * Category grouping was REMOVED (2026-07-16): the row already names its
+ * conferring body, so an "Academy memberships" heading over "National Academy of
+ * Medicine" only restated it. `category` still drives /edit and the Phase 3
+ * roster feed, so it stays on `HonorEntry` — it just never reaches the profile.
+ * The test that category does NOT influence order is what pins that.
+ *
+ * The visibility gate is deliberately NOT tested here — `sortHonors` cannot see
  * `status`/`showOnProfile`, because the loader query drops non-published/hidden
  * rows before they ever reach the payload. That gate is pinned in
  * `profile-api.test.ts`, at the query where it actually lives.
  */
 import { describe, expect, it } from "vitest";
 
-import { groupHonors, type HonorEntry } from "@/lib/api/profile";
+import { sortHonors, type HonorEntry } from "@/lib/api/profile";
 
 function honor(overrides: Partial<HonorEntry>): HonorEntry {
   return {
@@ -25,65 +30,15 @@ function honor(overrides: Partial<HonorEntry>): HonorEntry {
   };
 }
 
-describe("groupHonors — category grouping", () => {
-  it("returns groups in HonorCategory enum order regardless of input order", () => {
-    const rows = [
-      honor({ category: "OTHER", name: "Other honor" }),
-      honor({ category: "PRIZE", name: "Lasker Award" }),
-      honor({ category: "ACADEMY_MEMBERSHIP", name: "Member" }),
-      honor({ category: "INVESTIGATORSHIP", name: "Investigator" }),
-    ];
-
-    expect(groupHonors(rows).map((g) => g.category)).toEqual([
-      "ACADEMY_MEMBERSHIP",
-      "INVESTIGATORSHIP",
-      "PRIZE",
-      "OTHER",
-    ]);
-  });
-
-  it("puts every row in exactly one group, partitioning the input", () => {
-    const rows = [
-      honor({ category: "ACADEMY_MEMBERSHIP", name: "Member" }),
-      honor({ category: "ACADEMY_MEMBERSHIP", name: "Fellow" }),
-      honor({ category: "PRIZE", name: "Lasker Award" }),
-    ];
-
-    const grouped = groupHonors(rows);
-    const total = grouped.reduce((sum, g) => sum + g.entries.length, 0);
-
-    expect(total).toBe(rows.length);
-    expect(grouped.map((g) => g.entries.map((h) => h.name))).toEqual([
-      ["Member", "Fellow"],
-      ["Lasker Award"],
-    ]);
-  });
-
-  it("drops empty groups so a category with no rows renders no heading", () => {
-    const grouped = groupHonors([honor({ category: "PRIZE", name: "Lasker Award" })]);
-
-    expect(grouped).toHaveLength(1);
-    expect(grouped[0].category).toBe("PRIZE");
-  });
-
-  it("returns no groups for empty input, so the section omits itself", () => {
-    expect(groupHonors([])).toEqual([]);
-  });
-});
-
-describe("groupHonors — year ordering", () => {
-  it("orders rows within a group by year descending", () => {
+describe("sortHonors — year ordering", () => {
+  it("orders rows by year descending", () => {
     const rows = [
       honor({ name: "Middle", year: 2015 }),
       honor({ name: "Oldest", year: 2001 }),
       honor({ name: "Newest", year: 2024 }),
     ];
 
-    expect(groupHonors(rows)[0].entries.map((h) => h.name)).toEqual([
-      "Newest",
-      "Middle",
-      "Oldest",
-    ]);
+    expect(sortHonors(rows).map((h) => h.name)).toEqual(["Newest", "Middle", "Oldest"]);
   });
 
   it("sorts unknown years last rather than treating null as year zero", () => {
@@ -93,7 +48,7 @@ describe("groupHonors — year ordering", () => {
       honor({ name: "Known 2001", year: 2001 }),
     ];
 
-    expect(groupHonors(rows)[0].entries.map((h) => h.name)).toEqual([
+    expect(sortHonors(rows).map((h) => h.name)).toEqual([
       "Known 2024",
       "Known 2001",
       "Unknown year",
@@ -101,17 +56,20 @@ describe("groupHonors — year ordering", () => {
   });
 
   it("keeps the loader's order for rows sharing a year, and for all-null years", () => {
-    const sameYear = [
-      honor({ name: "Alpha", year: 2020 }),
-      honor({ name: "Beta", year: 2020 }),
-    ];
-    expect(groupHonors(sameYear)[0].entries.map((h) => h.name)).toEqual(["Alpha", "Beta"]);
+    const sameYear = [honor({ name: "Alpha", year: 2020 }), honor({ name: "Beta", year: 2020 })];
+    expect(sortHonors(sameYear).map((h) => h.name)).toEqual(["Alpha", "Beta"]);
 
     const noYears = [honor({ name: "Alpha", year: null }), honor({ name: "Beta", year: null })];
-    expect(groupHonors(noYears)[0].entries.map((h) => h.name)).toEqual(["Alpha", "Beta"]);
+    expect(sortHonors(noYears).map((h) => h.name)).toEqual(["Alpha", "Beta"]);
   });
 
-  it("orders each group independently", () => {
+  it("returns no rows for empty input, so the section omits itself", () => {
+    expect(sortHonors([])).toEqual([]);
+  });
+});
+
+describe("sortHonors — category does not reach the render", () => {
+  it("interleaves categories purely by year, never grouping them", () => {
     const rows = [
       honor({ category: "ACADEMY_MEMBERSHIP", name: "Academy 2005", year: 2005 }),
       honor({ category: "PRIZE", name: "Prize 2010", year: 2010 }),
@@ -119,16 +77,36 @@ describe("groupHonors — year ordering", () => {
       honor({ category: "PRIZE", name: "Prize 2022", year: 2022 }),
     ];
 
-    expect(groupHonors(rows).map((g) => g.entries.map((h) => h.name))).toEqual([
-      ["Academy 2020", "Academy 2005"],
-      ["Prize 2022", "Prize 2010"],
+    // Grouped output would be ["Academy 2020","Academy 2005","Prize 2022","Prize 2010"].
+    // A flat year sort interleaves them — that difference IS the contract.
+    expect(sortHonors(rows).map((h) => h.name)).toEqual([
+      "Prize 2022",
+      "Academy 2020",
+      "Prize 2010",
+      "Academy 2005",
     ]);
   });
 
+  it("keeps every row — nothing is filtered by category", () => {
+    const rows = [
+      honor({ category: "OTHER", name: "Other honor", year: 2003 }),
+      honor({ category: "PRIZE", name: "Lasker Award", year: 2004 }),
+      honor({ category: "ACADEMY_MEMBERSHIP", name: "Member", year: 2005 }),
+      honor({ category: "INVESTIGATORSHIP", name: "Investigator", year: 2006 }),
+    ];
+
+    expect(sortHonors(rows)).toHaveLength(rows.length);
+  });
+});
+
+describe("sortHonors — purity", () => {
   it("does not mutate the caller's array", () => {
+    // Load-bearing: `sort` is in-place, and this helper no longer gets a free
+    // copy from a `filter` the way the old grouping version did. If the spread
+    // in `sortHonors` is ever dropped, this is the test that fails.
     const rows = [honor({ name: "Old", year: 2001 }), honor({ name: "New", year: 2024 })];
 
-    groupHonors(rows);
+    sortHonors(rows);
 
     expect(rows.map((h) => h.name)).toEqual(["Old", "New"]);
   });

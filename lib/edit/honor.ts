@@ -26,9 +26,11 @@
 import type { HonorCategory } from "@/lib/generated/prisma/enums";
 
 /**
- * The categories in SCHEMA ENUM ORDER — the profile section groups by category
- * and renders the groups in this order, so the order is contractual, not
- * cosmetic. `satisfies` pins every member to a real `HonorCategory`; the
+ * The categories in SCHEMA ENUM ORDER — this drives the /edit dropdown's option
+ * order. The PROFILE does not render the category at all (2026-07-16: the row
+ * already names its conferring body, so a category heading only restated it), so
+ * this order is now an /edit and Phase 3 concern, not a reader-facing one.
+ * `satisfies` pins every member to a real `HonorCategory`; the
  * `HONOR_CATEGORY_LABELS` record below (keyed `Record<HonorCategory, string>`)
  * is what forces the reverse direction — a category added to the schema without
  * being listed here is a compile error there.
@@ -44,7 +46,8 @@ export function isHonorCategory(value: unknown): value is HonorCategory {
   return typeof value === "string" && (HONOR_CATEGORIES as readonly string[]).includes(value);
 }
 
-/** Human labels for the /edit category dropdown + the profile group headings. */
+/** Human labels for the /edit category dropdown. The profile does not render the
+ *  category — see `HONOR_CATEGORIES` above. */
 export const HONOR_CATEGORY_LABELS: Record<HonorCategory, string> = {
   ACADEMY_MEMBERSHIP: "Academy membership",
   INVESTIGATORSHIP: "Investigatorship",
