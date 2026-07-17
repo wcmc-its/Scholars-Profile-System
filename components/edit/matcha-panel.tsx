@@ -1196,12 +1196,22 @@ export function MatchaPanel() {
               </div>
               {/* Honest lower bound: a concept goes unmarked when the matcher canonicalised it to a
                   form not verbatim in the paste — never because it was ignored. Shown only when
-                  something is actually unmarked; sits at the card foot, ruled off, per the mockup. */}
+                  something is actually unmarked; sits at the card foot, ruled off, per the mockup.
+                  ⚠ THE SECOND SENTENCE EXISTS BECAUSE THE FIRST ANSWERS THE WRONG QUESTION. This
+                  note explains why a CONCEPT is unmarked. A reader who notices unhighlighted PROSE
+                  is looking at text that was never elected a concept at all, and reads this line as
+                  the explanation for THAT — so "unmarked never means ignored" reassured about
+                  something they had not asked. Observed live (#1780): a reader asked why "induced
+                  pluripotent stem cell models" was unhighlighted; it was not a concept. Whether it
+                  SHOULD have been is extractor coverage, and is not this sentence's job — but the
+                  sentence must not imply the highlight is a complete account of the paste. */}
               {concepts.length > 0 && askMarked < concepts.length ? (
                 <p className="text-muted-foreground border-border mt-3 border-t pt-2.5 text-[11px] leading-[1.5]">
                   {askMarked} of {concepts.length} concepts are highlighted — a concept goes unmarked
                   when the matcher wrote it in standard terms (an abbreviation expanded, a brand
-                  resolved). Unmarked never means ignored.
+                  resolved). Unmarked never means ignored. Highlighting marks the concepts above, so
+                  other wording in the paste going unmarked does not mean it was read — it means it
+                  is not one of them.
                 </p>
               ) : null}
             </section>
@@ -2101,7 +2111,25 @@ function CompactRow({
   onSelect: () => void;
 }) {
   const coverage = conceptCoverage(candidate, concepts);
-  const withEvidence = coverage.filter((c) => c.state === "evidence").length;
+  // §5a — COUNT WHAT THE SCHOLAR RANKS UNDER, NOT WHAT WE CAN EVIDENCE.
+  //
+  // This read `state === "evidence"`, which is capped at MAX_EVIDENCE_CONCEPTS (3) by the
+  // contract's strength cap. So on any ask with >3 concepts the column COULD NOT read above 3,
+  // and it did not: measured on staging over 17 real asks, 39–83% of candidates (mean ~60%) had
+  // more contributions than evidence. On a 7-concept ask EVERY visible row read "3/7" — a column
+  // that distinguishes nobody. Worse, the strip beside it is drawn from `contributions` and so
+  // showed the true count: the same row answered its own question two different ways.
+  //
+  // `!== "none"` is ranked + evidence — every concept the scholar actually ranks under.
+  // `contributions` ship in full, so this is free and has no ceiling.
+  //
+  // NO RANK THRESHOLD, deliberately. The worry was that unbounded counts tail hits ("rank 97
+  // reads as covered"). Measured over the same 17 asks: `contributions` never carry a rank above
+  // 100 — the engine returns 100 per concept, so the pool bound IS the threshold. At that bound
+  // only 0.8% of candidates peg at N/N and the mean reads ~1.8 of 7: a spread column, not a mush.
+  // A hand-picked T would only push it toward 0 (T=25 ⇒ mean 0.52) — the same "display constant
+  // chosen by taste" that made MAX_EVIDENCE_CONCEPTS a bug here. Do not add one without new data.
+  const asksCovered = coverage.filter((c) => c.state !== "none").length;
   const tier = fitTier(candidate.fusedScore, topScore);
   const year = latestEvidenceYear(candidate);
   const stale = year != null && staleYear != null && year < staleYear;
@@ -2149,9 +2177,20 @@ function CompactRow({
           {tier}
         </span>
         <CoverageStrip coverage={coverage} inline />
-        <span className="text-muted-foreground w-9 shrink-0 text-right text-xs tabular-nums">
-          {withEvidence}/{coverage.length}
-        </span>
+        {/* The mockup heads this column "ASKS", but a compact row has no header to hang that on,
+            so a bare "3/8" has to say what it counts itself — it is the strip's number, and the
+            strip's own legend is one hover away on the bars beside it. */}
+        <HoverTooltip
+          wide
+          text={`Ranks under ${asksCovered} of the ${coverage.length} concepts this opportunity calls for — every concept the scholar ranks under, not only the ones we can show evidence for. Open the row to see which.`}
+        >
+          <span
+            className="text-muted-foreground w-9 shrink-0 text-right text-xs tabular-nums"
+            data-slot="matcha-asks-count"
+          >
+            {asksCovered}/{coverage.length}
+          </span>
+        </HoverTooltip>
         {/* D8 — the stale flag is DE-EMPHASIS, not a hue, and deliberately so: every house colour is
             already spoken for (green = strong/tagged, amber = good-tier AND keyword-only, blue =
             provenance, purple = technology), so an "old" colour would make one of them mean three
