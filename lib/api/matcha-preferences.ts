@@ -8,7 +8,7 @@
  *
  * DETERMINISTIC, NOT LLM, on purpose:
  *
- *  1. The vocabulary is CLOSED. A preference is only actionable if some `SponsorMeasures`
+ *  1. The vocabulary is CLOSED. A preference is only actionable if some `MatchaMeasures`
  *     field can answer it, and there are exactly two: career stage and clinician status.
  *     An open-ended LLM extraction would happily return "prefers collaborative teams" —
  *     which we cannot score, so it would render as a nudge that nudges nothing.
@@ -23,7 +23,7 @@
  * OUTPUT is still constrained to these measures — not a wider vocabulary.
  */
 import type { CareerStage } from "@/lib/career-stage";
-import type { SponsorPreference } from "@/lib/api/sponsor-match-contract";
+import type { MatchaPreference } from "@/lib/api/matcha-contract";
 
 /** Early-career phrasings. `ESI` is matched case-sensitively as a word — lowercase "esi"
  *  is a substring of nothing useful, but it is also not how a sponsor writes it. */
@@ -160,9 +160,9 @@ function findPhrase(haystack: string, phrases: readonly string[]): { at: number;
  * Early-career and senior are mutually exclusive: a paste that somehow names both is
  * expressing no usable preference, so neither is emitted rather than having them fight.
  */
-export function extractSponsorPreferences(paste: string): SponsorPreference[] {
+export function extractMatchaPreferences(paste: string): MatchaPreference[] {
   const hay = paste.toLowerCase();
-  const out: SponsorPreference[] = [];
+  const out: MatchaPreference[] = [];
 
   const early = findPhrase(hay, EARLY_PHRASES);
   const senior = findPhrase(hay, SENIOR_PHRASES);

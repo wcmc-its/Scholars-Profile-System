@@ -4,7 +4,7 @@
  * CTL sponsor match — paste a commercial sponsor's description (an email or a
  * call transcript), rank WCM researchers on topical fit ALONE
  * (`docs/2026-07-09-ctl-technologies-handoff.md` §2). One POST to
- * `/api/edit/sponsor-match`; no stage axis, no ESI, no intake queue.
+ * `/api/edit/matcha`; no stage axis, no ESI, no intake queue.
  *
  * THE SLIDERS DO NOT TALK TO THE SERVER. The response carries the decomposed score
  * inputs — each concept's editable `centrality` and fixed `weightFactor`, and each candidate's
@@ -95,22 +95,22 @@ import {
   hiddenBefore,
   TIER_GOOD,
   rerankCandidates,
-  sponsorAskFrom,
+  askTitleFrom,
   type ConceptCoverage,
   type RecencyMode,
   type EvidenceProvenance,
-  type SponsorCandidate,
-  type SponsorConcept,
-  type SponsorFitTier,
-  type SponsorMatchResponse,
-  type SponsorPreference,
-} from "@/lib/api/sponsor-match-contract";
+  type MatchaCandidate,
+  type MatchaConcept,
+  type MatchaFitTier,
+  type MatchaResponse,
+  type MatchaPreference,
+} from "@/lib/api/matcha-contract";
 import type { CareerStage } from "@/lib/career-stage";
-import { buildSponsorMatchCsv } from "@/lib/edit/sponsor-match-export";
+import { buildMatchaCsv } from "@/lib/edit/matcha-export";
 import { careerStageLabel, roleCategoryLabel } from "@/lib/match-display";
 import { extractLastNameSort } from "@/lib/name-sort";
 import { profilePath } from "@/lib/profile-url";
-import { markPaste, markedConceptCount } from "@/lib/sponsor-paste-highlight";
+import { markPaste, markedConceptCount } from "@/lib/matcha-paste-highlight";
 
 type Status =
   | { kind: "idle" }
@@ -118,7 +118,7 @@ type Status =
   | { kind: "ok" }
   | { kind: "error"; message: string };
 
-/** A retained search, as `GET /api/edit/sponsor-match` ships it (#6d). */
+/** A retained search, as `GET /api/edit/matcha` ships it (#6d). */
 type Submission = {
   id: string;
   description: string;
@@ -167,7 +167,7 @@ function oneInN(coverage: number): string {
   return `about 1 in ${Math.round(1 / coverage).toLocaleString()} Weill Cornell papers`;
 }
 
-const TIER_LABEL: Record<SponsorFitTier, string> = {
+const TIER_LABEL: Record<MatchaFitTier, string> = {
   strong: "Strong fit",
   good: "Good fit",
   weak: "Weak fit",
@@ -175,7 +175,7 @@ const TIER_LABEL: Record<SponsorFitTier, string> = {
 
 /** Mockup's tier palette, which reads better than the old all-slate ramp: green / amber / grey.
  *  Every hex already exists as a house token — nothing new is introduced. */
-const TIER_CLASS: Record<SponsorFitTier, string> = {
+const TIER_CLASS: Record<MatchaFitTier, string> = {
   strong:
     "border-[var(--apollo-green-tint-border)] bg-[var(--apollo-green-tint)] text-[var(--apollo-green-foreground)]",
   good: "border-[var(--color-facet-position-count)]/25 bg-[var(--color-facet-position-fill)] text-[var(--color-facet-position-count)]",
@@ -258,12 +258,12 @@ function toggled(set: ReadonlySet<string>, value: string): Set<string> {
  *     an accented surname sorts near its unaccented neighbour here and after "zzz" there. That is
  *     a real divergence and this side is the better behaviour; do not "fix" it into byte order.
  */
-function surnameKey(c: SponsorCandidate): string {
+function surnameKey(c: MatchaCandidate): string {
   const key = c.lastNameSort?.trim();
   return key ? key : extractLastNameSort(c.name);
 }
 
-function compareByName(a: SponsorCandidate, b: SponsorCandidate): number {
+function compareByName(a: MatchaCandidate, b: MatchaCandidate): number {
   return surnameKey(a).localeCompare(surnameKey(b)) || a.name.localeCompare(b.name);
 }
 
@@ -280,7 +280,7 @@ function downloadCsv(filename: string, csv: string) {
   URL.revokeObjectURL(url);
 }
 
-export function SponsorMatchPanel() {
+export function MatchaPanel() {
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   // The paste is EDITABLE until a search commits, then the ask (title + read-only, highlighted
@@ -336,14 +336,14 @@ export function SponsorMatchPanel() {
   // The two halves of the contract payload. `candidates` is fetched ONCE per search and
   // never refetched by a slider; `concepts` is the editable rail. Everything below is
   // derived from them.
-  const [candidates, setCandidates] = useState<SponsorCandidate[]>([]);
-  const [concepts, setConcepts] = useState<SponsorConcept[]>([]);
+  const [candidates, setCandidates] = useState<MatchaCandidate[]>([]);
+  const [concepts, setConcepts] = useState<MatchaConcept[]>([]);
   // The extractor's essence title (org + focus). Stable across slider/preference edits — only
   // a new search replaces it — so the header does not churn as the officer tunes the ranking.
   const [titleSummary, setTitleSummary] = useState<string | undefined>(undefined);
   // #1654 — the sponsor's non-topical asks, and which of them the officer is honouring.
   // Keyed by label: an extractor that fires twice on the same ask would emit one entry.
-  const [preferences, setPreferences] = useState<SponsorPreference[]>([]);
+  const [preferences, setPreferences] = useState<MatchaPreference[]>([]);
   const [activePrefs, setActivePrefs] = useState<ReadonlySet<string>>(new Set());
   // #6a — the text THAT WAS SEARCHED, snapshotted at submit. Not `description`: the textarea
   // stays mounted and editable while results are on screen, so highlighting the live value
@@ -368,7 +368,7 @@ export function SponsorMatchPanel() {
   // browser. Two histories would have been two sources of truth for the same question.
   const loadHistory = useCallback(async () => {
     try {
-      const r = await fetch("/api/edit/sponsor-match", { credentials: "same-origin" });
+      const r = await fetch("/api/edit/matcha", { credentials: "same-origin" });
       if (!r.ok) return; // a failed history load must never disturb the matcher
       const data = (await r.json()) as { submissions?: Submission[] };
       setHistory(data.submissions ?? []);
@@ -383,7 +383,7 @@ export function SponsorMatchPanel() {
 
   async function deleteSubmission(id: string) {
     try {
-      const r = await fetch("/api/edit/sponsor-match", {
+      const r = await fetch("/api/edit/matcha", {
         method: "DELETE",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
@@ -410,7 +410,7 @@ export function SponsorMatchPanel() {
     if (pending || text.trim().length === 0) return;
     setStatus({ kind: "loading" });
     try {
-      const r = await fetch("/api/edit/sponsor-match", {
+      const r = await fetch("/api/edit/matcha", {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
@@ -420,7 +420,7 @@ export function SponsorMatchPanel() {
         // Typed as the CONTRACT's response, not an anonymous shape. The contract's headline
         // promise is that a drift between ranker and panel is a compile error; an inline
         // `{candidates?; concepts?}` opted the envelope out of exactly that.
-        const data = (await r.json()) as Partial<SponsorMatchResponse>;
+        const data = (await r.json()) as Partial<MatchaResponse>;
         clearFilters(); // stale facet selections must not silently hide fresh results
         setExpanded(new Set()); // D8 — previous run's per-row expansions don't carry to new people
         setShortlist(new Set()); // the shortlist is per-ask: last sponsor's picks are not this one's
@@ -560,7 +560,7 @@ export function SponsorMatchPanel() {
   // but the console owns what it displays, exactly as it owns the preference predicate.
   const ask = useMemo(
     () =>
-      sponsorAskFrom(
+      askTitleFrom(
         concepts,
         preferences.filter((p) => activePrefs.has(p.label)),
         titleSummary,
@@ -794,8 +794,8 @@ export function SponsorMatchPanel() {
 
   /** One mapping, both exports. Two copies of it would drift, and the CSV would then depend on
    *  which button the officer pressed — the rows are the same rows either way. */
-  function exportCsv(rows: readonly { c: SponsorCandidate; rank: number }[], filename: string) {
-    const csv = buildSponsorMatchCsv(
+  function exportCsv(rows: readonly { c: MatchaCandidate; rank: number }[], filename: string) {
+    const csv = buildMatchaCsv(
       rows.map(({ c, rank }) => ({
         rank,
         cwid: c.cwid,
@@ -851,7 +851,7 @@ export function SponsorMatchPanel() {
             Recent ({history.length})
           </Button>
         </SheetTrigger>
-        <SheetContent data-slot="sponsor-match-history">
+        <SheetContent data-slot="matcha-history">
           <SheetHeader>
             <SheetTitle>Recent searches ({history.length})</SheetTitle>
             <SheetDescription>
@@ -904,7 +904,7 @@ export function SponsorMatchPanel() {
   // D8 — a result row is the detailed card when density is Detailed OR the officer expanded it from
   // Compact; otherwise the one-line CompactRow, which expands in place on click. Used for both the
   // primary rows and the below-floor weak rows, so the floor and the density toggle compose.
-  const renderResult = ({ c, rank }: { c: SponsorCandidate; rank: number }) => {
+  const renderResult = ({ c, rank }: { c: MatchaCandidate; rank: number }) => {
     // THE ONLY STATE A COLLAPSE MEANS ANYTHING IN. `toggled` was always a correct toggle, but it
     // hung solely off CompactRow — so the instant it ADDED a cwid the row it lived on unmounted,
     // and the expanded card that replaced it offered no way to fire it in the delete direction.
@@ -942,13 +942,21 @@ export function SponsorMatchPanel() {
   };
 
   return (
-    <div data-slot="sponsor-match-panel">
+    <div data-slot="matcha-panel">
       <div className="mb-5">
-        <h1 className="text-2xl font-bold tracking-tight">Sponsor match</h1>
+        {/* The name says nothing about what the tool does, so the hover has to. `title` rather
+            than a bespoke tooltip: it is one sentence of prose on a heading, and every tooltip
+            primitive here would add a focus trap and a portal to say less. */}
+        <h1
+          className="text-2xl font-bold tracking-tight"
+          title="Paste a description of an interest and rank Weill Cornell researchers by topical fit alone — no career-stage or grant-eligibility weighting. Recommendations, not endorsements."
+        >
+          Matcha
+        </h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          Paste a commercial sponsor&rsquo;s description of their interest and rank Weill
-          Cornell researchers by topical fit alone — no career-stage or grant-eligibility
-          weighting. Recommendations, not endorsements.
+          Paste a description of an interest and rank Weill Cornell researchers by topical fit
+          alone — no career-stage or grant-eligibility weighting. Recommendations, not
+          endorsements.
         </p>
       </div>
 
@@ -963,7 +971,7 @@ export function SponsorMatchPanel() {
              concepts (+N) + the read ratio (D11) + the same actions. Direct child of the panel (not
              a short wrapper) so its containing block is tall enough for sticky to hold. */
           <div
-            data-slot="sponsor-match-ask-compact"
+            data-slot="matcha-ask-compact"
             className="border-border bg-background sticky top-0 z-30 mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3.5 py-2.5 shadow-md"
           >
             <span aria-hidden="true" className="text-xs">
@@ -971,7 +979,7 @@ export function SponsorMatchPanel() {
             </span>
             {ask ? (
               <span
-                data-slot="sponsor-match-ask"
+                data-slot="matcha-ask"
                 className="min-w-0 truncate text-sm font-semibold"
               >
                 {ask.title}
@@ -1030,7 +1038,7 @@ export function SponsorMatchPanel() {
              sentinel after the card is what the collapse observer watches (past the header). */
           <div ref={askWrapRef} className="mb-4">
             <section
-              data-slot="sponsor-match-ask-card"
+              data-slot="matcha-ask-card"
               className="border-border bg-background rounded-xl border px-5 py-4"
             >
               {/* The mockup's header row: eyebrow + title on the left, the actions on the right —
@@ -1042,7 +1050,7 @@ export function SponsorMatchPanel() {
                   </span>
                   {ask ? (
                     <h2
-                      data-slot="sponsor-match-ask"
+                      data-slot="matcha-ask"
                       className="mt-1 text-base font-medium"
                     >
                       {ask.title}
@@ -1070,7 +1078,7 @@ export function SponsorMatchPanel() {
                   ~4 lines until "Show full text". The marks are facet-blue: the highlights ARE the
                   provenance ("what we read"), the one place this console reaches for that accent. */}
               <p
-                data-slot="sponsor-match-ask-quote"
+                data-slot="matcha-ask-quote"
                 className={`text-muted-foreground mt-3 text-[13px] leading-[1.6] break-words whitespace-pre-wrap ${
                   showFullText ? "" : "line-clamp-4"
                 }`}
@@ -1130,11 +1138,11 @@ export function SponsorMatchPanel() {
           }}
           className="mb-4"
         >
-          <label htmlFor="sponsor-description" className="mb-1.5 block text-sm font-medium">
-            Sponsor&rsquo;s description
+          <label htmlFor="matcha-description" className="mb-1.5 block text-sm font-medium">
+            The ask
           </label>
           <textarea
-            id="sponsor-description"
+            id="matcha-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={6}
@@ -1211,10 +1219,10 @@ export function SponsorMatchPanel() {
                     the extractor reads an ask that was never there. */}
                 {preferences.length > 0 ? (
                   <div
-                    data-slot="sponsor-match-preferences"
+                    data-slot="matcha-preferences"
                     className="border-border mb-3 rounded-lg border p-3"
                   >
-                    <h2 className="text-base font-semibold">Sponsor preferences</h2>
+                    <h2 className="text-base font-semibold">Preferences</h2>
                     <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
                       Detected in the paste. These nudge the ranking; they never filter anyone out.
                     </p>
@@ -1246,7 +1254,7 @@ export function SponsorMatchPanel() {
                     no filter. Both now render only when at least one ranked row carries the
                     measure, so they still disappear rather than lie. */}
                 <div
-                  data-slot="sponsor-match-facets"
+                  data-slot="matcha-facets"
                   className="border-border rounded-lg border p-3"
                 >
                   <div className="flex items-baseline justify-between gap-2">
@@ -1459,7 +1467,7 @@ export function SponsorMatchPanel() {
 
                 {filterChips.length > 0 ? (
                   <div
-                    data-slot="sponsor-match-active-filters"
+                    data-slot="matcha-active-filters"
                     className="mb-3 flex flex-wrap items-center gap-1.5"
                   >
                     {filterChips.map((chip) => (
@@ -1496,7 +1504,7 @@ export function SponsorMatchPanel() {
                     will actually write rather than what the Set remembers. */}
                 {shortlistRows.length > 0 ? (
                   <div
-                    data-slot="sponsor-match-shortlist"
+                    data-slot="matcha-shortlist"
                     className="border-border bg-muted/40 mb-3 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2"
                   >
                     <span className="text-sm font-medium">
@@ -1527,7 +1535,7 @@ export function SponsorMatchPanel() {
                     {/* The relevance floor: everything in the weak tier collapses into one bar the
                         officer can open — a toggle, never a silent cut. The divider names the line. */}
                     {collapsedWeak.length > 0 ? (
-                      <div data-slot="sponsor-match-floor">
+                      <div data-slot="matcha-floor">
                         <div className="my-4 flex items-center gap-3" aria-hidden="true">
                           <div className="border-border h-0 flex-1 border-t border-dashed" />
                           <span className="text-muted-foreground text-[11px] tracking-[0.04em]">
@@ -1614,13 +1622,13 @@ function ConceptRail({
   onCentralityChange,
 }: {
   title: string;
-  concepts: SponsorConcept[];
+  concepts: MatchaConcept[];
   /** Terms to badge, computed once across the whole ask by `rareTerms`. */
   rare: ReadonlySet<string>;
   onCentralityChange: (term: string, centrality: number) => void;
 }) {
   return (
-    <div data-slot="sponsor-match-concepts" className="border-border rounded-lg border p-3">
+    <div data-slot="matcha-concepts" className="border-border rounded-lg border p-3">
       <h2 className="text-base font-semibold">{title}</h2>
       {/* The mockup's caption here read "Rarity (fixed) rewards experts in areas few at WCM
           cover." That is now FALSE and must not ship: rarity is a bounded ±15% tiebreaker, and
@@ -1896,13 +1904,13 @@ function CoverageStrip({ coverage, inline = false }: { coverage: ConceptCoverage
   // carries the count the caption would. Same segments as the detailed strip, so they read alike.
   if (inline) {
     return (
-      <div className="w-[110px] shrink-0" data-slot="sponsor-match-coverage">
+      <div className="w-[110px] shrink-0" data-slot="matcha-coverage">
         {bar}
       </div>
     );
   }
   return (
-    <div className="mt-2" data-slot="sponsor-match-coverage">
+    <div className="mt-2" data-slot="matcha-coverage">
       {bar}
       {/* D7 — the "also ranked under X, Y" prose is gone. A sub-threshold hit is now carried by
           the strip's own lighter `ranked` fill (see COVERAGE_CLASS) and the segment's hover title,
@@ -1939,9 +1947,9 @@ function CompactRow({
   selected,
   onSelect,
 }: {
-  candidate: SponsorCandidate;
+  candidate: MatchaCandidate;
   rank: number;
-  concepts: SponsorConcept[];
+  concepts: MatchaConcept[];
   topScore: number;
   /** D8 — flag the year below this; `null` ⇒ unflagged (see `staleBefore`). */
   staleYear: number | null;
@@ -1964,7 +1972,7 @@ function CompactRow({
     // the border/padding/hover moved up to the div verbatim, and the button re-declares the flex
     // that used to be the root's — and `data-slot` stays on the root, which is what selects a row.
     <div
-      data-slot="sponsor-match-compact-row"
+      data-slot="matcha-compact-row"
       className="border-border hover:bg-muted/40 flex w-full items-center gap-2.5 border-t px-2 py-2 transition-colors"
     >
       {/* Named for the PERSON, not "Select": the row's own name is the only thing that
@@ -2077,9 +2085,9 @@ function ResearcherRow({
   selected,
   onSelect,
 }: {
-  candidate: SponsorCandidate;
+  candidate: MatchaCandidate;
   rank: number;
-  concepts: SponsorConcept[];
+  concepts: MatchaConcept[];
   topScore: number;
   /** #1696 — the current ranking run. See `claimedPmids` below: this row can OUTLIVE a run. */
   runId: number;
@@ -2181,7 +2189,7 @@ function ResearcherRow({
     // filter/sort that reorders cards still shows each one its POOL rank ("#30 overall").
     <div
       ref={rowRef}
-      data-slot="sponsor-match-row"
+      data-slot="matcha-row"
       className="border-border mb-4 flex gap-3 rounded-xl border p-5"
     >
       {/* Rank over checkbox, sharing the compact row's left margin so the tick column runs straight
@@ -2282,7 +2290,7 @@ function ResearcherRow({
               // and any papers it resolved for the PREVIOUS paste. (Same two-part idiom as
               // `people-result-card.tsx`, which bakes `qParam` into both.) `term` alone keeps a
               // card's sibling blocks distinct WITHIN a run.
-              <div key={`${runId}:${concept.term}`} data-slot="sponsor-match-evidence">
+              <div key={`${runId}:${concept.term}`} data-slot="matcha-evidence">
                 {/* The concept, its provenance, and what the sponsor asked for it — the facts the
                     block answers, on one line. The provenance chip LEADS the block (colour first),
                     so an officer sees whether a hit is structured or keyword-only before reading the
@@ -2331,7 +2339,7 @@ function ResearcherRow({
               return (
                 <div
                   key={`${runId}:${concept.term}`}
-                  data-slot="sponsor-match-evidence-supporting"
+                  data-slot="matcha-evidence-supporting"
                   className="border-border flex items-baseline justify-between gap-2 border-t pt-2.5 text-sm"
                 >
                   <span className="text-muted-foreground">
@@ -2413,7 +2421,7 @@ function ResearcherRow({
             is context for the evidence above it, not a headline. */}
         {gaps.length > 0 ? (
           <div
-            data-slot="sponsor-match-gaps"
+            data-slot="matcha-gaps"
             className="border-border mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-t pt-2.5"
           >
             <span className="rounded bg-[var(--color-facet-position-fill)] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.02em] text-[var(--color-facet-position-text)]">

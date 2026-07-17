@@ -11,27 +11,27 @@ import {
   preferenceBoost,
   rerankCandidates,
   PREFERENCE_LAMBDA,
-  type SponsorCandidate,
-  type SponsorConcept,
-  type SponsorPreference,
-} from "@/lib/api/sponsor-match-contract";
-import { extractSponsorPreferences } from "@/lib/api/sponsor-preferences";
+  type MatchaCandidate,
+  type MatchaConcept,
+  type MatchaPreference,
+} from "@/lib/api/matcha-contract";
+import { extractMatchaPreferences } from "@/lib/api/matcha-preferences";
 
-const EARLY: SponsorPreference = {
+const EARLY: MatchaPreference = {
   measure: "careerStage",
   stages: ["early"],
   label: "Early-career",
   evidence: "…early-career…",
   importance: 1,
 };
-const CLINICIAN: SponsorPreference = {
+const CLINICIAN: MatchaPreference = {
   measure: "isClinician",
   label: "Physician-scientist",
   evidence: "…physician-scientist…",
   importance: 1,
 };
 
-function cand(over: Partial<SponsorCandidate> & { cwid: string }): SponsorCandidate {
+function cand(over: Partial<MatchaCandidate> & { cwid: string }): MatchaCandidate {
   return {
     name: over.cwid,
     profileSlug: over.cwid,
@@ -44,9 +44,9 @@ function cand(over: Partial<SponsorCandidate> & { cwid: string }): SponsorCandid
   };
 }
 
-describe("extractSponsorPreferences", () => {
+describe("extractMatchaPreferences", () => {
   it("reads an early-career ask and a physician-scientist ask, with paste provenance", () => {
-    const prefs = extractSponsorPreferences(
+    const prefs = extractMatchaPreferences(
       "We fund fibrosis research and especially want to support early-career physician-scientists.",
     );
     expect(prefs.map((p) => p.label)).toEqual(["Early-career", "Physician-scientist"]);
@@ -56,20 +56,20 @@ describe("extractSponsorPreferences", () => {
   });
 
   it("returns [] for a purely topical paste — the nudge stays inert, as before", () => {
-    expect(extractSponsorPreferences("We are interested in CAR-T for solid tumors.")).toEqual([]);
+    expect(extractMatchaPreferences("We are interested in CAR-T for solid tumors.")).toEqual([]);
   });
 
   it("emits NO stage preference when a paste names both early and senior", () => {
     // Contradictory asks express no usable preference. Emitting both would have them cancel
     // inside the boost while still looking, on screen, like the sponsor was honoured.
-    const prefs = extractSponsorPreferences(
+    const prefs = extractMatchaPreferences(
       "Open to early-career applicants as well as senior investigators.",
     );
     expect(prefs.filter((p) => p.measure === "careerStage")).toEqual([]);
   });
 
   it("reads a senior ask on its own", () => {
-    const prefs = extractSponsorPreferences("We seek established investigators with a track record.");
+    const prefs = extractMatchaPreferences("We seek established investigators with a track record.");
     expect(prefs[0]).toMatchObject({ measure: "careerStage", stages: ["senior"] });
   });
 
@@ -82,7 +82,7 @@ describe("extractSponsorPreferences", () => {
       "We welcome basic, translational, and clinical investigators alike, including those " +
       "advancing imaging, biomarkers, device and surgical innovation. Bold ideas are welcome " +
       "at any career stage.";
-    expect(extractSponsorPreferences(real)).toEqual([]);
+    expect(extractMatchaPreferences(real)).toEqual([]);
   });
 
   it("suppresses the inclusive clause but still reads a genuine ask elsewhere in the paste", () => {
@@ -91,13 +91,13 @@ describe("extractSponsorPreferences", () => {
     const mixed =
       "We welcome basic and clinical investigators alike. That said, this award is reserved " +
       "for early-career applicants.";
-    const prefs = extractSponsorPreferences(mixed);
+    const prefs = extractMatchaPreferences(mixed);
     expect(prefs.map((p) => p.label)).toEqual(["Early-career"]);
   });
 
   it("'at any career stage' does not read as a stage preference", () => {
     expect(
-      extractSponsorPreferences("Applications are encouraged at any career stage."),
+      extractMatchaPreferences("Applications are encouraged at any career stage."),
     ).toEqual([]);
   });
 });
@@ -125,11 +125,11 @@ describe("preferenceBoost", () => {
 });
 
 describe("the nudge is a nudge — λ bounds what it can reorder", () => {
-  const CONCEPTS: SponsorConcept[] = [
+  const CONCEPTS: MatchaConcept[] = [
     { term: "fibrosis", kind: "concept", members: ["fibrosis"], centrality: 1, weightFactor: 1 },
   ];
   const opts = {
-    prefBoost: (c: SponsorCandidate) => preferenceBoost(c, [EARLY]),
+    prefBoost: (c: MatchaCandidate) => preferenceBoost(c, [EARLY]),
     lambda: PREFERENCE_LAMBDA,
   };
 

@@ -1,11 +1,11 @@
 /**
- * Sponsor-match searchPeople SPINE — impure per-term composition
+ * Matcha searchPeople SPINE — impure per-term composition
  * (pivot handoff `docs/2026-07-11-sponsor-match-searchpeople-pivot-handoff.md`
  * §4/§6). The pure helpers stay in `sponsor-match-spine.ts` (extraction, RRF)
  * and `sponsor-match-axes.ts` (clustering); THIS module owns the
  * side-effecting glue the bake-off runs behind `SPONSOR_MATCH_SPINE`:
  *
- *   paste ─▶ extractSponsorConcepts (Bedrock LLM: concepts + centrality; dictionary
+ *   paste ─▶ extractMatchaConcepts (Bedrock LLM: concepts + centrality; dictionary
  *            `extractTerms` fallback on outage) ─▶ per-term matchQueryToTaxonomy (MeSH)
  *         ─▶ mergeTermClusters (dedup redundant phrasing)
  *         ─▶ per-cluster searchPeople (topical-only: faculty/grant prominence OFF)
@@ -18,7 +18,7 @@
  * engines run side-by-side on the same deploy so the offline eval can score
  * ORDER; nothing here is wired live until the sub-flag flips.
  *
- * EXTRACTION: the Bedrock LLM front-end `extractSponsorConcepts` (§7-Q1) is the
+ * EXTRACTION: the Bedrock LLM front-end `extractMatchaConcepts` (§7-Q1) is the
  * primary term source — it reads the prose and names canonical research concepts
  * `matchQueryToTaxonomy` can resolve, each with a real per-term CENTRALITY. It
  * replaced the v1 dictionary `extractTerms` after a staging bake-off measured the
@@ -35,32 +35,32 @@
  */
 import { db } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
-import { extractTerms, rrfFuse, type TermRanking } from "@/lib/api/sponsor-match-spine";
+import { extractTerms, rrfFuse, type TermRanking } from "@/lib/api/matcha-spine";
 import {
-  extractSponsorConcepts,
+  extractMatchaConcepts,
   type ExtractedConcept,
-} from "@/lib/api/sponsor-match-extract";
+} from "@/lib/api/matcha-extract";
 import {
   mergeTermClusters,
   type ClusterTerm,
   type ConceptKind,
   type TermCluster,
-} from "@/lib/api/sponsor-match-axes";
+} from "@/lib/api/matcha-axes";
 import {
   conceptWeight,
   recencyWeight,
-  sponsorMeasuresFrom,
+  matchaMeasuresFrom,
   DEFAULT_K,
   MAX_EVIDENCE_CONCEPTS,
-  type SponsorCandidate,
-  type SponsorConcept,
-  type SponsorSearchEvidence,
-} from "@/lib/api/sponsor-match-contract";
+  type MatchaCandidate,
+  type MatchaConcept,
+  type MatchaSearchEvidence,
+} from "@/lib/api/matcha-contract";
 import { isResearchMatchEvidence } from "@/lib/api/result-evidence";
 import { searchPeople, type PeopleHit } from "@/lib/api/search";
 import { meshMatchTier } from "@/lib/search";
 import { matchQueryToTaxonomy, type MeshResolution } from "@/lib/api/search-taxonomy";
-import { normalizeDescription } from "@/lib/api/sponsor-match";
+import { normalizeDescription } from "@/lib/api/matcha";
 
 /**
  * NO DEFAULT TRUNCATION — the candidate universe shipped to the client is the FULL fused
@@ -210,8 +210,8 @@ type ResolvedTerm = {
  * re-querying the server on every drag. `concepts` is [] only when nothing was extracted.
  */
 export type SpineRankResult = {
-  concepts: SponsorConcept[];
-  candidates: SponsorCandidate[];
+  concepts: MatchaConcept[];
+  candidates: MatchaCandidate[];
   /** The extractor's short search title (essence + org, written in the SAME extraction call).
    *  Rides through to the route, which prefers it over the derived concept-list title. Absent
    *  on the dictionary-fallback path (no LLM ⇒ no title) and on the empty short-circuits. */
@@ -351,7 +351,7 @@ export async function rankResearchersForDescriptionSpine(
   // The dictionary cannot tell a method from a disease, so it tags everything
   // "concept" (the rail then shows one panel). Both empty ⇒ the same [] short-circuit
   // as before. MAX_TERMS caps either source.
-  const extraction = await extractSponsorConcepts(text);
+  const extraction = await extractMatchaConcepts(text);
   const titleSummary = extraction.titleSummary; // survives the dictionary fallback below (undefined there)
   let extracted: ExtractedConcept[] = extraction.concepts.slice(0, MAX_TERMS);
   if (extracted.length === 0) {
@@ -424,10 +424,10 @@ export async function rankResearchersForDescriptionSpine(
   // the client must be able to recompute `weight = centrality × weightFactor` itself.
   // Shipping only their product would make the sliders unusable.
   const rankings: TermRanking[] = [];
-  const concepts: SponsorConcept[] = [];
+  const concepts: MatchaConcept[] = [];
   const hitByCwid = new Map<string, PeopleHit>();
   // #1689 — per (concept, cwid). See `evidenceKey`.
-  const evidenceByTermCwid = new Map<string, SponsorSearchEvidence>();
+  const evidenceByTermCwid = new Map<string, MatchaSearchEvidence>();
   // Which kind this paste is buying — read once, applied per cluster below.
   const targetKind = targetKindOf(clusters);
   // GATE on the RETRIEVAL half of the gloss (the ranking change), not the display half. The
@@ -435,7 +435,7 @@ export async function rankResearchersForDescriptionSpine(
   // only decides whether the free-text QUERY searches the gloss ("lysosomal processing of ADC
   // linkers") or the bare token ("lysosomes"). It changes who ranks where, so it is eval-gated:
   // staging-on to measure, prod-off until a clean A/B proves it. STATIC literal for flag-parity.
-  const glossQuery = process.env.SPONSOR_MATCH_GLOSS_QUERY === "on";
+  const glossQuery = (process.env.MATCHA_GLOSS_QUERY ?? process.env.SPONSOR_MATCH_GLOSS_QUERY) === "on";
   // SPONSOR_MATCH_RECENCY — D1. Surface each scholar's most-recent publication year and fold it
   // into the fused score (recency as a scored dimension), which re-tiers via the share-to-top (D2).
   // A ranking change ⇒ eval-gated. STATIC literal for flag-parity.
@@ -459,7 +459,7 @@ export async function rankResearchersForDescriptionSpine(
   // the 2026-07-16 A/B's single largest loss (als, −0.177 nDCG, which alone decided the gate)
   // was one grade-3 scholar sitting on 59 unaccepted publications. Before flipping prod,
   // quantify that exposure by role_category — the eval cannot see it.
-  const recencyOn = process.env.SPONSOR_MATCH_RECENCY === "on";
+  const recencyOn = (process.env.MATCHA_RECENCY ?? process.env.SPONSOR_MATCH_RECENCY) === "on";
   for (const cluster of clusters) {
     // MAX member coverage ≈ the broadest merged synonym = a lower bound on the cluster's true
     // union corpus coverage (the exact union-coverage is an ETL upgrade). Display-only: 0 here
@@ -492,7 +492,7 @@ export async function rankResearchersForDescriptionSpine(
     const term = cluster.members[0];
     // The representative member's gloss — the sponsor's words for this concept, shown on the rail.
     const clusterGloss = glossByTerm.get(term);
-    const concept: SponsorConcept = {
+    const concept: MatchaConcept = {
       term,
       kind: cluster.kind,
       members: cluster.members,
@@ -647,9 +647,9 @@ export async function rankResearchersForDescriptionSpine(
   ]);
   const techByCwid = new Map(grouped.map((g) => [g.cwid, g._count._all]));
   const now = new Date();
-  const measuresByCwid = new Map(measureRows.map((s) => [s.cwid, sponsorMeasuresFrom(s, now)]));
+  const measuresByCwid = new Map(measureRows.map((s) => [s.cwid, matchaMeasuresFrom(s, now)]));
 
-  // Map to the wire `SponsorCandidate`. Display fields (name/slug/title/department) ride
+  // Map to the wire `MatchaCandidate`. Display fields (name/slug/title/department) ride
   // in from the `searchPeople` hits — no extra profile read. `fusedScore` is the RRF sum
   // at DEFAULT weights; the UI buckets it into a tier relative to the top hit and never
   // renders the raw number. `contributions` is the hinge — it comes straight out of
@@ -666,7 +666,7 @@ export async function rankResearchersForDescriptionSpine(
   // way every consumer of the payload weighs it.
   const conceptByTerm = new Map(concepts.map((c) => [c.term, c]));
 
-  const candidates: SponsorCandidate[] = fused.map((f) => {
+  const candidates: MatchaCandidate[] = fused.map((f) => {
     const hit = hitByCwid.get(f.cwid);
 
     // #1696 — evidence for EVERY concept the candidate ranked under, not just their best one.
@@ -699,7 +699,7 @@ export async function rankResearchersForDescriptionSpine(
     //   prevent.
     //
     // DEFAULT_K and default weights, because the server can only cap at the weights it knows.
-    // See `SponsorCandidate.searchEvidence` for the residual this leaves, which is real and is
+    // See `MatchaCandidate.searchEvidence` for the residual this leaves, which is real and is
     // documented rather than papered over.
     //
     // ABSENT ≠ NONE, per concept and per candidate. A concept whose evidence is not MATCH

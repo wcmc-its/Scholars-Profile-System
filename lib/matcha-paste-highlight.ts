@@ -21,7 +21,7 @@
  * (kilobytes) and the needle set is a couple of dozen terms — O(needles × paste) is microseconds
  * and runs once per search, not per keystroke.
  */
-import type { SponsorConcept } from "@/lib/api/sponsor-match-contract";
+import type { MatchaConcept } from "@/lib/api/matcha-contract";
 
 /** A run of paste text. `term` present ⇒ it is the representative term of the concept this run
  *  was matched to (the join key back to the rail's chips). Absent ⇒ ordinary text. */
@@ -53,7 +53,7 @@ function escapeRegExp(literal: string): string {
  *
  * A term may occur many times; every occurrence is marked.
  */
-export function markPaste(paste: string, concepts: readonly SponsorConcept[]): PasteSegment[] {
+export function markPaste(paste: string, concepts: readonly MatchaConcept[]): PasteSegment[] {
   if (paste.length === 0) return [];
 
   // Every phrasing that merged into a cluster is a candidate needle, plus the representative

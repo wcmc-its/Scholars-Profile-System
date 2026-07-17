@@ -2705,7 +2705,7 @@ model SamlAssertionSeen {
 
 /// A sponsor-match search, retained (#6d).
 ///
-/// THIS REVERSES THE ROUTE'S ORIGINAL POSTURE, DELIBERATELY. `/api/edit/sponsor-match` was
+/// THIS REVERSES THE ROUTE'S ORIGINAL POSTURE, DELIBERATELY. `/api/edit/matcha` (then `/api/edit/sponsor-match`) was
 /// built to persist nothing — "the pasted text is a query, never persisted" — on the stated
 /// grounds that sponsor descriptions are commercially sensitive. That rule turned out to have
 /// no policy behind it: the claim lived in a single code comment and nowhere else, while the

@@ -1,5 +1,5 @@
 /**
- * Sponsor-match concept extractor — the Bedrock LLM front-end that replaces the v1
+ * Matcha concept extractor — the Bedrock LLM front-end that replaces the v1
  * dictionary `extractTerms` at the spine's extraction seam (pivot §7-Q1). It reads a
  * pasted sponsor description and returns the research CONCEPTS a funder wants funded,
  * each as a short canonical noun phrase (a shape `matchQueryToTaxonomy` can resolve)
@@ -35,7 +35,7 @@ import { modelAcceptsTemperature } from "@/lib/edit/overview-generator";
  *  (1.0 = the primary target, ~0.3 = an incidental mention), and its `kind`. The `term`
  *  is the join key the spine resolves via `matchQueryToTaxonomy` and clusters/fuses on.
  *
- *  NOT the wire type — the rail's `SponsorConcept` (`sponsor-match-contract.ts`) is the
+ *  NOT the wire type — the rail's `MatchaConcept` (`sponsor-match-contract.ts`) is the
  *  merged CLUSTER and additionally carries `members` + `weightFactor`, neither of which exists
  *  until clustering and the idf lookup run downstream. This is only what the extractor
  *  itself can know. */
@@ -57,10 +57,10 @@ export type ExtractedConcept = {
 
 /** What ONE extraction call yields: the concepts plus the LLM's short search title, written
  *  in the SAME call (not a second one — the contract forbids a separate title call; see
- *  `sponsorAskFrom`). `titleSummary` is absent when the paste named no concept, the model
+ *  `askTitleFrom`). `titleSummary` is absent when the paste named no concept, the model
  *  omitted it, or it failed the format guard — the caller then derives a concept-list title.
  *  NEVER a guessed sponsor. */
-export type SponsorExtraction = {
+export type MatchaExtraction = {
   concepts: ExtractedConcept[];
   titleSummary?: string;
 };
@@ -76,7 +76,7 @@ export type SponsorExtraction = {
  *  `-20250929-v1:0` minor is the same profile id the overview generator's
  *  `humanizeModelId` recognizes as active; the IAM glob permits an intra-family bump
  *  (4.5 → 4.6) with no policy change if a newer minor is preferred later. This const is
- *  the DEFAULT; `extractSponsorConcepts` resolves `SPONSOR_MATCH_EXTRACT_MODEL` ahead of
+ *  the DEFAULT; `extractMatchaConcepts` resolves `SPONSOR_MATCH_EXTRACT_MODEL` ahead of
  *  it — a code-default runtime rollback lever mirroring the overview generator's
  *  `OVERVIEW_GENERATE_MODEL`/`BIOSKETCH_GENERATE_MODEL` (registered in the flag-parity
  *  allowlist, deliberately NOT wired per-env; unset ⇒ this default in every env, so
@@ -307,7 +307,7 @@ export function sanitizeTitleSummary(raw: unknown): string | undefined {
  * malformed output) — the caller falls back to the v1 dictionary extractor on [], so
  * this must never throw.
  */
-export async function extractSponsorConcepts(paste: string): Promise<SponsorExtraction> {
+export async function extractMatchaConcepts(paste: string): Promise<MatchaExtraction> {
   const text = paste.trim();
   if (text.length === 0) return { concepts: [] };
 
@@ -315,7 +315,7 @@ export async function extractSponsorConcepts(paste: string): Promise<SponsorExtr
   // generator's `OVERVIEW_GENERATE_MODEL` lever; the IAM policy scopes the whole
   // `us.anthropic.claude-sonnet-4-*` family so an intra-family repoint needs no
   // cdk/IAM change). `modelAcceptsTemperature` still gates temperature by id.
-  const modelId = process.env.SPONSOR_MATCH_EXTRACT_MODEL ?? EXTRACT_MODEL;
+  const modelId = process.env.MATCHA_EXTRACT_MODEL ?? process.env.SPONSOR_MATCH_EXTRACT_MODEL ?? EXTRACT_MODEL;
   try {
     const { object } = await generateObject({
       model: sponsorBedrock()(modelId),

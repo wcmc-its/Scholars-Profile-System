@@ -62,22 +62,41 @@ const DEFAULT_LIMIT = 100;
 /** Top-N papers and topics attached per row as "why this person ranked" evidence. */
 const TOP_EVIDENCE_ROWS = 3;
 
+/**
+ * ⚠ THE `??` IS A DEPRECATION SHIM WITH AN EXPIRY, NOT A STYLE CHOICE.
+ *
+ * Sponsor match became Matcha, and the flags were renamed with it. Code ships on merge (mutable
+ * `:latest` image); env vars move ONLY on a manual `cdk deploy`. So for exactly as long as some
+ * running task definition still carries the OLD name and not the new one, reading `MATCHA` alone
+ * would be `undefined` — and this master switch gates a 404 that is prod-ON. That is how the
+ * feature 404s in prod, and it is why the flags were deployed FIRST (both envs verified live in
+ * the running task def before this landed; `sps-app-staging:127`, `sps-app-prod:36`).
+ *
+ * Both names are live right now, so the fallback is currently redundant. It is here for the
+ * ROLLBACK: an image rolled back past the flag deploy, or a task def that predates it, still
+ * finds a name it understands. Retire it once no reachable revision carries the old set — drop
+ * `SPONSOR_MATCH*` from `cdk/lib/app-stack.ts` FIRST, then this `??`, in that order.
+ *
+ * Two STATIC literals, deliberately — the flag-parity CI gate forbids `process.env[dynamic]`,
+ * not `??`.
+ */
+
 /** Master switch (default off) — gates the page, the route, and the subnav tab. */
-export function isSponsorMatchEnabled(): boolean {
-  return process.env.SPONSOR_MATCH === "on";
+export function isMatchaEnabled(): boolean {
+  return (process.env.MATCHA ?? process.env.SPONSOR_MATCH) === "on";
 }
 
 /** Sub-flag (default off, dark in BOTH envs) — swaps the route's engine from the
  *  bespoke BM25×Variant-B path to the compose-`searchPeople` per-term spine
- *  (`sponsor-match-spine-run.ts`), for the same-deploy A/B bake-off. Inert unless
- *  `SPONSOR_MATCH` is also on (that master flag still gates the surface). */
-export function isSponsorMatchSpineEnabled(): boolean {
-  return process.env.SPONSOR_MATCH_SPINE === "on";
+ *  (`matcha-spine-run.ts`), for the same-deploy A/B bake-off. Inert unless
+ *  `MATCHA` is also on (that master flag still gates the surface). */
+export function isMatchaSpineEnabled(): boolean {
+  return (process.env.MATCHA_SPINE ?? process.env.SPONSOR_MATCH_SPINE) === "on";
 }
 
 /** One evidence paper on a ranked row: PubMed-linkable, with the normalized
  *  BM25 relevance ((0–1], query-max-normalized) that weighted its contribution. */
-export type SponsorMatchPaper = {
+export type MatchaPaper = {
   pmid: string;
   title: string;
   year: number | null;
@@ -87,18 +106,18 @@ export type SponsorMatchPaper = {
 
 /** One matched parent topic on a ranked row (pubCount = this scholar's matching
  *  papers carrying the topic). */
-export type SponsorMatchTopic = { topicId: string; label: string; pubCount: number };
+export type MatchaTopic = { topicId: string; label: string; pubCount: number };
 
 /** RankedScholar + the sponsor-console evidence fields (display only, never
  *  scoring inputs). */
-export type SponsorRankedScholar = RankedScholar & {
-  topPapers: SponsorMatchPaper[];
-  matchedTopics: SponsorMatchTopic[];
-  /** #1654 — the clinician half of `SponsorMeasures`; the career-stage half already rides
+export type MatchaRankedScholar = RankedScholar & {
+  topPapers: MatchaPaper[];
+  matchedTopics: MatchaTopic[];
+  /** #1654 — the clinician half of `MatchaMeasures`; the career-stage half already rides
    *  in on `RankedScholar`. Undefined ⇒ no Scholar row, never "not a clinician". */
   isClinician?: boolean;
   /** ED's person-type code, for the person-type facet. Undefined ⇒ no Scholar row; null ⇒
-   *  the row has no role. Neither is "unknown" — see `SponsorMeasures.roleCategory`. */
+   *  the row has no role. Neither is "unknown" — see `MatchaMeasures.roleCategory`. */
   roleCategory?: string | null;
 };
 
@@ -127,7 +146,7 @@ export function normalizeDescription(raw: string): string {
 export async function rankResearchersForDescription(
   description: string,
   opts: { limit?: number; now?: Date } = {},
-): Promise<SponsorRankedScholar[]> {
+): Promise<MatchaRankedScholar[]> {
   const now = opts.now ?? new Date();
   const text = normalizeDescription(description);
   if (text.length === 0) return [];
@@ -237,7 +256,7 @@ export async function rankResearchersForDescription(
   );
 
   // Denormalized display fields + evidence, attached post-ranking (never scoring inputs).
-  const out: SponsorRankedScholar[] = ranked.map((r) => ({
+  const out: MatchaRankedScholar[] = ranked.map((r) => ({
     ...r,
     topPapers: [],
     matchedTopics: [],

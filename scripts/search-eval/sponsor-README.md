@@ -36,7 +36,7 @@ ACTUAL=after.json  ./sponsor-eval.sh > after.txt
 diff before.txt after.txt
 ```
 
-Live-fetch mode (`--fetch`) POSTs each paste to `$HOST/api/edit/sponsor-match`. That route is
+Live-fetch mode (`--fetch`) POSTs each paste to `$HOST/api/edit/matcha`. That route is
 auth-gated (`/edit`, developer-only) — export `SPONSOR_COOKIE='<your dev session cookie>'` first.
 Until the new-ranking flags flip on the target env, `--fetch` scores the *deployed* ranking, so the
 capture-a-run.json path is the one to use for A/B across a flag change.

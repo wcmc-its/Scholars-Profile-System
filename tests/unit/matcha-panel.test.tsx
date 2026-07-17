@@ -25,17 +25,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import { SponsorMatchPanel } from "@/components/edit/sponsor-match-panel";
+import { MatchaPanel } from "@/components/edit/matcha-panel";
 import type {
-  SponsorCandidate,
-  SponsorConcept,
-  SponsorPreference,
-  SponsorSearchEvidence,
-} from "@/lib/api/sponsor-match-contract";
+  MatchaCandidate,
+  MatchaConcept,
+  MatchaPreference,
+  MatchaSearchEvidence,
+} from "@/lib/api/matcha-contract";
 
 // K = 60. Scores below are the RRF sums the server would have sent; the panel recomputes
 // them from `contributions` × `concepts`, so they only have to be self-consistent.
-const CONCEPTS: SponsorConcept[] = [
+const CONCEPTS: MatchaConcept[] = [
   {
     term: "Immuno-oncology",
     kind: "concept",
@@ -64,7 +64,7 @@ const CONCEPTS: SponsorConcept[] = [
   },
 ];
 
-function candidate(over: Partial<SponsorCandidate> & { cwid: string }): SponsorCandidate {
+function candidate(over: Partial<MatchaCandidate> & { cwid: string }): MatchaCandidate {
   return {
     name: "X",
     profileSlug: `slug-${over.cwid}`,
@@ -91,7 +91,7 @@ function candidate(over: Partial<SponsorCandidate> & { cwid: string }): SponsorC
 }
 
 // In fused order, as the server ships them.
-const THREE: SponsorCandidate[] = [
+const THREE: MatchaCandidate[] = [
   candidate({
     cwid: "a",
     name: "Alice Alpha",
@@ -128,7 +128,7 @@ const THREE: SponsorCandidate[] = [
  * Ranks drive the ordering, not `fusedScore`: the panel re-ranks from `contributions` and
  * `concepts` in the browser (that is the whole contract), so `fusedScore` only feeds the tier.
  */
-const POOL: SponsorCandidate[] = Array.from({ length: 120 }, (_, i) => {
+const POOL: MatchaCandidate[] = Array.from({ length: 120 }, (_, i) => {
   const rank = i + 1;
   const deep = rank === 105;
   return candidate({
@@ -143,7 +143,7 @@ const POOL: SponsorCandidate[] = Array.from({ length: 120 }, (_, i) => {
 
 /** Exactly what the route's `bespokeToCandidate` emits: a real score, and NO contributions
  *  (that engine does no concept decomposition, so there is nothing to re-rank by). */
-const BESPOKE: SponsorCandidate[] = [
+const BESPOKE: MatchaCandidate[] = [
   candidate({ cwid: "a", name: "Alice Alpha", fusedScore: 0.91 }),
   candidate({ cwid: "b", name: "Bob Beta", fusedScore: 0.44 }),
   candidate({ cwid: "c", name: "Cara Gamma", department: "Surgery", fusedScore: 0.06 }),
@@ -158,9 +158,9 @@ const BESPOKE: SponsorCandidate[] = [
  * silently-empty history rather than an obviously-wrong one — worth not doing.
  */
 function stubFetch(payload: {
-  concepts: SponsorConcept[];
-  candidates: SponsorCandidate[];
-  preferences?: SponsorPreference[];
+  concepts: MatchaConcept[];
+  candidates: MatchaCandidate[];
+  preferences?: MatchaPreference[];
   submissions?: Submission[];
 }) {
   const fetchMock = vi.fn(async (_url: string, init?: { method?: string }) => {
@@ -194,8 +194,8 @@ type Submission = {
 };
 
 async function renderAndSearch() {
-  render(<SponsorMatchPanel />);
-  fireEvent.change(screen.getByLabelText(/description/i), {
+  render(<MatchaPanel />);
+  fireEvent.change(screen.getByLabelText(/the ask/i), {
     target: { value: "CAR T collaborators" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
@@ -204,8 +204,8 @@ async function renderAndSearch() {
 
 async function renderAndSearchPool() {
   stubFetch({ concepts: CONCEPTS, candidates: POOL });
-  render(<SponsorMatchPanel />);
-  fireEvent.change(screen.getByLabelText(/description/i), {
+  render(<MatchaPanel />);
+  fireEvent.change(screen.getByLabelText(/the ask/i), {
     target: { value: "CAR T collaborators" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
@@ -235,7 +235,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("SponsorMatchPanel", () => {
+describe("MatchaPanel", () => {
   // ── The contract's hinge ────────────────────────────────────────────────────
   it("re-ranks LIVE on a slider move — with NO new fetch", async () => {
     const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE });
@@ -497,8 +497,8 @@ describe("SponsorMatchPanel", () => {
         }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Zephyr");
 
@@ -548,8 +548,8 @@ describe("SponsorMatchPanel", () => {
         }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Zoe Abbott");
 
@@ -583,8 +583,8 @@ describe("SponsorMatchPanel", () => {
         }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Zoe Abbott");
 
@@ -662,8 +662,8 @@ describe("SponsorMatchPanel", () => {
         }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
@@ -712,8 +712,8 @@ describe("SponsorMatchPanel", () => {
         candidate({ cwid: "c", name: "Carol Gamma", fusedScore: 0.4, measures: {} }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
@@ -746,8 +746,8 @@ describe("SponsorMatchPanel", () => {
       concepts: CONCEPTS, // "Immuno-oncology" carries the member "immunotherapy"
       candidates: [candidate({ cwid: "a", name: "Alice Alpha", fusedScore: 0.9 })],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), {
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), {
       target: { value: "We fund immunotherapy research." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
@@ -769,7 +769,7 @@ describe("SponsorMatchPanel", () => {
 
     // Edit paste restores the textarea, pre-filled with the text that was searched.
     fireEvent.click(screen.getByRole("button", { name: "Edit paste" }));
-    const paste = screen.getByLabelText(/description/i) as HTMLTextAreaElement;
+    const paste = screen.getByLabelText(/the ask/i) as HTMLTextAreaElement;
     expect(paste.value).toBe("CAR T collaborators");
     expect(screen.getByRole("button", { name: "Rank researchers" })).toBeTruthy();
   });
@@ -784,7 +784,7 @@ describe("SponsorMatchPanel", () => {
    * query cannot tell which one it found, and would pass on a card that rendered no block at all.
    */
   function evidenceBlocks(): [string, string][] {
-    return [...document.querySelectorAll('[data-slot="sponsor-match-evidence"]')].map((el) => {
+    return [...document.querySelectorAll('[data-slot="matcha-evidence"]')].map((el) => {
       const caption = el.firstElementChild!;
       // The caption is `[[concept][provenance chip]] [ask N.NN]` — the concept + its chip share a
       // wrapper on the left, the ask sits on the right. Take the concept span (the wrapper's first
@@ -798,13 +798,13 @@ describe("SponsorMatchPanel", () => {
 
   /** The `ask N.NN` each block reports, in DOM order. */
   function evidenceAsks(): string[] {
-    return [...document.querySelectorAll('[data-slot="sponsor-match-evidence"]')].map(
+    return [...document.querySelectorAll('[data-slot="matcha-evidence"]')].map(
       (el) => el.firstElementChild?.lastElementChild?.textContent ?? "",
     );
   }
 
   /** The spine's per-concept evidence, in the shape the wire carries it (#1696). */
-  function searchEvidence(term: string, count: number): SponsorSearchEvidence {
+  function searchEvidence(term: string, count: number): MatchaSearchEvidence {
     return {
       term,
       evidence: {
@@ -840,8 +840,8 @@ describe("SponsorMatchPanel", () => {
         }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
@@ -877,8 +877,8 @@ describe("SponsorMatchPanel", () => {
         }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
@@ -914,8 +914,8 @@ describe("SponsorMatchPanel", () => {
         }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
     expect(evidenceBlocks().map(([caption]) => caption)).toEqual([
@@ -952,8 +952,8 @@ describe("SponsorMatchPanel", () => {
         }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
@@ -979,7 +979,7 @@ describe("SponsorMatchPanel", () => {
    * is visible as an `exclude=111` on a later URL. Ranking POSTs return Alice with `over`'s
    * contributions/evidence.
    */
-  function stubWithKeyPaper(over: Partial<SponsorCandidate>) {
+  function stubWithKeyPaper(over: Partial<MatchaCandidate>) {
     const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
       if (typeof url === "string" && url.startsWith("/api/search/key-paper")) {
         // HONOR `exclude`, as the real route does. A stub that returns pmid 111 no matter what
@@ -1043,8 +1043,8 @@ describe("SponsorMatchPanel", () => {
       ],
     });
 
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
@@ -1090,8 +1090,8 @@ describe("SponsorMatchPanel", () => {
       searchEvidence: [searchEvidence("Immuno-oncology", 142)],
     });
 
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
@@ -1125,8 +1125,8 @@ describe("SponsorMatchPanel", () => {
       searchEvidence: [searchEvidence("Immuno-oncology", 142)],
     });
 
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
     await waitFor(() => expect(keyPaperCalls()).toHaveLength(1));
@@ -1135,7 +1135,7 @@ describe("SponsorMatchPanel", () => {
     // Re-run with an edited paste. The committed search replaced the textarea with the read-only
     // ask, so "Edit paste" reveals it again; Alice returns under the SAME cwid.
     fireEvent.click(screen.getByRole("button", { name: "Edit paste" }));
-    fireEvent.change(screen.getByLabelText(/description/i), {
+    fireEvent.change(screen.getByLabelText(/the ask/i), {
       target: { value: "CAR T and solid tumors" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
@@ -1186,8 +1186,8 @@ describe("SponsorMatchPanel", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
@@ -1238,8 +1238,8 @@ describe("SponsorMatchPanel", () => {
         }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
@@ -1301,8 +1301,8 @@ describe("SponsorMatchPanel", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
@@ -1366,8 +1366,8 @@ describe("SponsorMatchPanel", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
@@ -1401,13 +1401,13 @@ describe("SponsorMatchPanel", () => {
         }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
-    const full = document.querySelectorAll('[data-slot="sponsor-match-evidence"]');
-    const supporting = document.querySelectorAll('[data-slot="sponsor-match-evidence-supporting"]');
+    const full = document.querySelectorAll('[data-slot="matcha-evidence"]');
+    const supporting = document.querySelectorAll('[data-slot="matcha-evidence-supporting"]');
     expect(full).toHaveLength(2); // PRIMARY_BLOCKS
     expect(supporting).toHaveLength(1);
     // The weakest concept demotes, and shows the MATCHED count for THIS concept (12) over the total
@@ -1451,8 +1451,8 @@ describe("SponsorMatchPanel", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
@@ -1527,8 +1527,8 @@ describe("SponsorMatchPanel", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
@@ -1558,24 +1558,24 @@ describe("SponsorMatchPanel", () => {
         }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
-    const line = document.querySelector('[data-slot="sponsor-match-coverage"] p')!.textContent!;
+    const line = document.querySelector('[data-slot="matcha-coverage"] p')!.textContent!;
     expect(line).toContain("Evidence for 1 of 3 concepts asked");
     // D7 — the prose is gone; the ranked-only concept is the strip's lighter segment, which names
     // itself on hover ("Cancer Metabolism — ranked under this, evidence not shown").
     expect(line).not.toContain("also ranked under");
     const rankedSeg = document.querySelector(
-      '[data-slot="sponsor-match-coverage"] [title^="Cancer Metabolism"]',
+      '[data-slot="matcha-coverage"] [title^="Cancer Metabolism"]',
     )!;
     expect(rankedSeg.getAttribute("title")).toContain("ranked under this");
     // A genuine gap: she never ranked under it at all. It moved OFF the coverage line to a single
     // muted line at the card's foot (mockup), so the strip caption no longer carries it.
     expect(line).not.toContain("no evidence for");
-    const gaps = document.querySelector('[data-slot="sponsor-match-gaps"]')!.textContent!;
+    const gaps = document.querySelector('[data-slot="matcha-gaps"]')!.textContent!;
     expect(gaps).toContain("No evidence");
     expect(gaps).toContain("CRISPR screening");
     // 1 + 1 + 1 = the 3 concepts asked. The old line could not make that claim.
@@ -1585,28 +1585,28 @@ describe("SponsorMatchPanel", () => {
   it("Compact density renders one scannable row per scholar; a row click expands the detailed card (D8/D9)", async () => {
     await renderAndSearch(); // default Detailed (localStorage cleared in beforeEach)
     // Detailed by default: the full evidence card is present, no compact rows.
-    expect(document.querySelector('[data-slot="sponsor-match-row"]')).not.toBeNull();
-    expect(document.querySelector('[data-slot="sponsor-match-compact-row"]')).toBeNull();
+    expect(document.querySelector('[data-slot="matcha-row"]')).not.toBeNull();
+    expect(document.querySelector('[data-slot="matcha-compact-row"]')).toBeNull();
 
     // Toggle to Compact → one-line rows, no detailed cards.
     fireEvent.click(screen.getByRole("button", { name: "compact" }));
-    expect(document.querySelector('[data-slot="sponsor-match-row"]')).toBeNull();
+    expect(document.querySelector('[data-slot="matcha-row"]')).toBeNull();
     expect(
-      document.querySelectorAll('[data-slot="sponsor-match-compact-row"]').length,
+      document.querySelectorAll('[data-slot="matcha-compact-row"]').length,
     ).toBeGreaterThan(0);
 
     // Alice carries a 2024 paper on the bespoke path → the row shows the latest year. D9 — a compact
     // row carries no no-evidence enumeration.
     const alice = screen.getByRole("button", { name: "Expand Alice Alpha" });
     expect(alice.textContent).toContain("latest 2024");
-    expect(alice.querySelector('[data-slot="sponsor-match-gaps"]')).toBeNull();
+    expect(alice.querySelector('[data-slot="matcha-gaps"]')).toBeNull();
 
     // A row click expands THAT scholar to the detailed card in place; the rest stay compact.
     fireEvent.click(alice);
-    const card = document.querySelector('[data-slot="sponsor-match-row"]');
+    const card = document.querySelector('[data-slot="matcha-row"]');
     expect(card).not.toBeNull();
     expect(card!.textContent).toContain("Alice Alpha");
-    expect(document.querySelector('[data-slot="sponsor-match-compact-row"]')).not.toBeNull(); // Bob still compact
+    expect(document.querySelector('[data-slot="matcha-compact-row"]')).not.toBeNull(); // Bob still compact
   });
 
   /**
@@ -1624,13 +1624,13 @@ describe("SponsorMatchPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Expand Alice Alpha" }));
 
     // Expanded: the detailed card is up and the compact row that spawned it is gone.
-    expect(document.querySelector('[data-slot="sponsor-match-row"]')).not.toBeNull();
+    expect(document.querySelector('[data-slot="matcha-row"]')).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Expand Alice Alpha" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Collapse Alice Alpha" }));
 
     // Back to a compact row — and the round trip is repeatable, which "expanded.add() only" is not.
-    expect(document.querySelector('[data-slot="sponsor-match-row"]')).toBeNull();
+    expect(document.querySelector('[data-slot="matcha-row"]')).toBeNull();
     expect(screen.getByRole("button", { name: "Expand Alice Alpha" })).toBeTruthy();
   });
 
@@ -1663,15 +1663,15 @@ describe("SponsorMatchPanel", () => {
     expect(screen.getByRole("button", { name: "detailed" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
-    expect(document.querySelector('[data-slot="sponsor-match-row"]')).toBeTruthy();
+    expect(document.querySelector('[data-slot="matcha-row"]')).toBeTruthy();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Shortlist Alice Alpha" }));
-    expect(document.querySelector('[data-slot="sponsor-match-shortlist"]')!.textContent).toContain(
+    expect(document.querySelector('[data-slot="matcha-shortlist"]')!.textContent).toContain(
       "1 shortlisted",
     );
     // And it unticks from the same card it was ticked on — the bar can never outlive its checkbox.
     fireEvent.click(screen.getByRole("checkbox", { name: "Shortlist Alice Alpha" }));
-    expect(document.querySelector('[data-slot="sponsor-match-shortlist"]')).toBeNull();
+    expect(document.querySelector('[data-slot="matcha-shortlist"]')).toBeNull();
   });
 
   /**
@@ -1701,13 +1701,13 @@ describe("SponsorMatchPanel", () => {
       fireEvent.click(screen.getByRole("button", { name: /Show ↓/ }));
 
       // Nothing ticked ⇒ no bar, and Export is the un-narrowed one it has always been.
-      expect(document.querySelector('[data-slot="sponsor-match-shortlist"]')).toBeNull();
+      expect(document.querySelector('[data-slot="matcha-shortlist"]')).toBeNull();
       expect(screen.getByRole("button", { name: /Export \(3\)/ })).toBeTruthy();
 
       fireEvent.click(screen.getByRole("checkbox", { name: "Shortlist Alice Alpha" }));
       fireEvent.click(screen.getByRole("checkbox", { name: "Shortlist Cara Gamma" }));
 
-      expect(document.querySelector('[data-slot="sponsor-match-shortlist"]')!.textContent).toContain(
+      expect(document.querySelector('[data-slot="matcha-shortlist"]')!.textContent).toContain(
         "2 shortlisted",
       );
       // The un-narrowed export is still REACHABLE — it just stops being the unqualified "Export",
@@ -1740,7 +1740,7 @@ describe("SponsorMatchPanel", () => {
     // Narrow to a department Alice is not in. Her row leaves the view; her pick does not.
     fireEvent.click(screen.getByRole("checkbox", { name: /Surgery/ }));
     expect(screen.queryByRole("checkbox", { name: "Shortlist Alice Alpha" })).toBeNull();
-    expect(document.querySelector('[data-slot="sponsor-match-shortlist"]')!.textContent).toContain(
+    expect(document.querySelector('[data-slot="matcha-shortlist"]')!.textContent).toContain(
       "1 shortlisted",
     );
   });
@@ -1749,18 +1749,18 @@ describe("SponsorMatchPanel", () => {
     await renderAndSearch();
     fireEvent.click(screen.getByRole("button", { name: "compact" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Shortlist Alice Alpha" }));
-    expect(document.querySelector('[data-slot="sponsor-match-shortlist"]')!.textContent).toContain(
+    expect(document.querySelector('[data-slot="matcha-shortlist"]')!.textContent).toContain(
       "1 shortlisted",
     );
 
     // A different sponsor. A cwid set carried across would export people this sponsor never asked
     // about, under this ask's title and this ask's ranks.
     fireEvent.click(screen.getByRole("button", { name: "Edit paste" }));
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "ADC linkers" } });
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "ADC linkers" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
 
     await waitFor(() =>
-      expect(document.querySelector('[data-slot="sponsor-match-shortlist"]')).toBeNull(),
+      expect(document.querySelector('[data-slot="matcha-shortlist"]')).toBeNull(),
     );
     // The stub returns the same people, so this is the real check: the row is back and UNTICKED.
     expect(
@@ -1794,13 +1794,13 @@ describe("SponsorMatchPanel", () => {
         }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "ADC work" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "ADC work" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Nina New");
 
     const leader = () =>
-      document.querySelector('[data-slot="sponsor-match-row"]')!.textContent!;
+      document.querySelector('[data-slot="matcha-row"]')!.textContent!;
 
     // Default "Prefer recent" = the server's own curve: recency sinks the older, better-ranked one.
     expect(leader()).toContain("Nina New");
@@ -1826,8 +1826,8 @@ describe("SponsorMatchPanel", () => {
         }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "ADC work" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "ADC work" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Olive Old");
     fireEvent.click(screen.getByRole("button", { name: "compact" }));
@@ -1880,8 +1880,8 @@ describe("SponsorMatchPanel", () => {
     });
 
   const search = async () => {
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "ADC work" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "ADC work" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Fran Fresh");
   };
@@ -1942,12 +1942,12 @@ describe("SponsorMatchPanel", () => {
         },
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
-    const header = () => document.querySelector('[data-slot="sponsor-match-ask"]')?.textContent;
+    const header = () => document.querySelector('[data-slot="matcha-ask"]')?.textContent;
     expect(header()).toContain("Early-career");
 
     fireEvent.click(screen.getByRole("checkbox", { name: /Early-career/ }));
@@ -1985,8 +1985,8 @@ describe("SponsorMatchPanel", () => {
         },
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
@@ -2022,8 +2022,8 @@ describe("SponsorMatchPanel", () => {
         candidate({ cwid: "u", name: "Unknown Ursula", fusedScore: 0.8 }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Unknown Ursula");
 
@@ -2084,8 +2084,8 @@ describe("SponsorMatchPanel", () => {
         }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
@@ -2123,8 +2123,8 @@ describe("SponsorMatchPanel", () => {
         }),
       ],
     });
-    render(<SponsorMatchPanel />);
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
@@ -2151,7 +2151,7 @@ describe("SponsorMatchPanel", () => {
         },
       ],
     });
-    render(<SponsorMatchPanel />);
+    render(<MatchaPanel />);
     // The count rides the drawer trigger; opening it reveals the list + the retention notice.
     fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
     expect(await screen.findByText(/Recent searches \(1\)/)).toBeTruthy();
@@ -2178,7 +2178,7 @@ describe("SponsorMatchPanel", () => {
         },
       ],
     });
-    render(<SponsorMatchPanel />);
+    render(<MatchaPanel />);
     fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
     await screen.findByText(/Recent searches \(1\)/);
 

@@ -23,7 +23,7 @@
 import Link from "next/link";
 
 import { AccountMenu } from "@/components/site/account-menu";
-import { isSponsorMatchEnabled } from "@/lib/api/sponsor-match";
+import { isMatchaEnabled } from "@/lib/api/matcha";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 
 export type AdminSubnavActive =
@@ -38,7 +38,7 @@ export type AdminSubnavActive =
   | "usage"
   | "cores"
   | "find-researchers"
-  | "sponsor-match"
+  | "matcha"
   /** The viewer's own self-edit surface (`/edit`) — no list tab is active;
    *  profile actions live in the right-end account menu. */
   | "self";
@@ -185,15 +185,15 @@ export function AdminSubnav({
             active={active === "find-researchers"}
           />
         )}
-        {/* CTL sponsor match (`/edit/sponsor-match`) — same audience as the
+        {/* CTL sponsor match (`/edit/matcha`) — same audience as the
             Funding matcher above; hidden while SPONSOR_MATCH is off (server-read
             env check here, so no new prop threads through every console page). */}
-        {(superuserSurfaces || viewerIsDeveloper) && isSponsorMatchEnabled() && (
+        {(superuserSurfaces || viewerIsDeveloper) && isMatchaEnabled() && (
           <AdminTab
-            href="/edit/sponsor-match"
-            id="sponsor-match"
-            label="Sponsor match"
-            active={active === "sponsor-match"}
+            href="/edit/matcha"
+            id="matcha"
+            label="Matcha"
+            active={active === "matcha"}
           />
         )}
         {/* The account chip/dropdown anchors the right end — profile actions live
