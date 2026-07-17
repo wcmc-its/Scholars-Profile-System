@@ -266,7 +266,7 @@ describe("AdminSubnav", () => {
       vi.resetModules();
       vi.doMock("@/lib/api/matcha", () => ({ isMatchaEnabled: () => true }));
       const { AdminSubnav: Subnav } = await import("@/components/edit/admin-subnav");
-      render(<Subnav active="profiles" pendingSlugRequests={null} superuserSurfaces />);
+      render(<Subnav active="profiles" pendingSlugRequests={null} pendingHonors={null} superuserSurfaces />);
       const tab = screen.getByTestId("admin-tab-matcha");
       expect(tab.textContent).toContain("Matcha");
       // The tab is still a LINK. Wrapping a nav item in a hover trigger that ate its href would
@@ -279,7 +279,7 @@ describe("AdminSubnav", () => {
       vi.resetModules();
       vi.doMock("@/lib/api/matcha", () => ({ isMatchaEnabled: () => true }));
       const { AdminSubnav: Subnav } = await import("@/components/edit/admin-subnav");
-      render(<Subnav active="profiles" pendingSlugRequests={null} superuserSurfaces />);
+      render(<Subnav active="profiles" pendingSlugRequests={null} pendingHonors={null} superuserSurfaces />);
       const tab = screen.getByTestId("admin-tab-matcha");
       // Radix HoverCard opens on pointerenter (200ms) and on focus. Focus is the deterministic
       // path in jsdom and is the accessibility-relevant one besides.
@@ -298,7 +298,7 @@ describe("AdminSubnav", () => {
       vi.resetModules();
       vi.doMock("@/lib/api/matcha", () => ({ isMatchaEnabled: () => true }));
       const { AdminSubnav: Subnav } = await import("@/components/edit/admin-subnav");
-      render(<Subnav active="profiles" pendingSlugRequests={3} superuserSurfaces />);
+      render(<Subnav active="profiles" pendingSlugRequests={3} pendingHonors={null} superuserSurfaces />);
       // Proves the card CAN open in this render — otherwise the negative below is vacuous.
       fireEvent.focus(screen.getByTestId("admin-tab-matcha"));
       await screen.findByText(/Paste the ask\. Get the shortlist\./);
