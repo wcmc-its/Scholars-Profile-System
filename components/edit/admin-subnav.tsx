@@ -30,6 +30,7 @@ export type AdminSubnavActive =
   | "profiles"
   | "units"
   | "slug-requests"
+  | "honors-queue"
   | "slugs"
   | "administrators"
   | "methods"
@@ -46,6 +47,7 @@ export type AdminSubnavActive =
 export function AdminSubnav({
   active,
   pendingSlugRequests,
+  pendingHonors = null,
   administratorsTab,
   methodsTab,
   dataQualityTab,
@@ -57,6 +59,9 @@ export function AdminSubnav({
 }: {
   active: AdminSubnavActive;
   pendingSlugRequests: number | null;
+  /** #1762 — count of honors awaiting approval. `null` hides the tab (flag off);
+   *  defaults to null so every existing caller keeps compiling unchanged. */
+  pendingHonors?: number | null;
   /** `null` hides the "Administrators" tab — the feature is flag-gated
    *  (`SELF_EDIT_ADMINISTRATORS_TAB`), mirroring the `pendingSlugRequests`
    *  hide pattern. A number shows the tab (Phase B passes `0` — no badge). */
@@ -110,6 +115,18 @@ export function AdminSubnav({
             label="URL requests"
             active={active === "slug-requests"}
             count={pendingSlugRequests}
+          />
+        )}
+        {/* #1762 — honors awaiting approval. `null` hides it (flag off), matching
+            the `administratorsTab` idiom. Wired here, not only reachable by URL:
+            #1767's first bug was an honors surface nobody could find. */}
+        {superuserSurfaces && pendingHonors !== null && (
+          <AdminTab
+            href="/edit/honors-queue"
+            id="honors-queue"
+            label="Honors"
+            active={active === "honors-queue"}
+            count={pendingHonors}
           />
         )}
         {/* Always visible to superusers — the slug namespace (active / historical

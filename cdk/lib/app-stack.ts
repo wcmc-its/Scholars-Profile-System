@@ -1354,6 +1354,16 @@ export class AppStack extends Stack {
         // SCHOLARS_MAIL_FROM; until that flips the requester is notified in-app
         // only, and the decision never fails for a missing email.
         SELF_EDIT_SLUG_REQUEST: "on",
+        // #1762 -- the /edit honors approval queue. STAGING ONLY for now: it is
+        // superuser-gated and nothing it approves can render until a human
+        // approves it, but prod has no honor rows to work yet (the Phase 2 seed
+        // hasn't run), so the tab would be an empty surface promising a workflow
+        // that doesn't exist there. Flip prod WITH the seed, not before.
+        // isHonorQueueEnabled() reads === "on" (lib/edit/honor-queue.ts); off ⇒
+        // the page AND the decision endpoint 404, and the subnav tab is hidden.
+        // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`
+        // -- the CD pipeline re-rolls the image and never deploys CDK.
+        HONORS_APPROVAL_QUEUE: env === "staging" ? "on" : "off",
         // #742 -- the /edit Overview "Generate a draft" surface: the Existing /
         // Generator tabs, the Sources drawer, and the AI overview-statement
         // generator. overviewGenerateEnabled() reads === "on"

@@ -451,6 +451,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "HONORS_APPROVAL_QUEUE",
+                "Value": "off",
+              },
+              {
                 "Name": "SELF_EDIT_OVERVIEW_GENERATE",
                 "Value": "on",
               },
@@ -4165,6 +4169,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_SLUG_REQUEST",
+                "Value": "on",
+              },
+              {
+                "Name": "HONORS_APPROVAL_QUEUE",
                 "Value": "on",
               },
               {
