@@ -70,6 +70,7 @@ ETL_GUARD_BYPASS
 FAMILY_REVIEW_TERMS_PATH
 FAMILY_SENSITIVITY_CURATED_PATH
 FAMILY_SUPPRESSION_CURATED_PATH
+HIERARCHY_FORCE_REPLACE             # §4.3 escape hatch: force a hierarchy full-replace past the sha256 short-circuit
 MESH_ALIAS_CURATED_PATH
 MESH_ANCHOR_CURATED_PATH
 MESH_ANCHOR_MIN_SUPPORT
@@ -81,6 +82,7 @@ SCHOLARS_DISABLE_CHIEF_DETECTION
 SCHOLAR_PROXY_NOTIFY_SEND
 SCHOLAR_TOOL_DRY_RUN
 SCHOLAR_TOOL_FORCE_REPLACE
+SPOTLIGHT_FORCE_REPLACE             # §4.3 escape hatch: force a spotlight full-replace past the sha256 short-circuit
 TECHNOLOGIES_MIN_RETAIN             # CTL volume-guard floor (code default 0.8)
 TECHNOLOGIES_SEED_PATH              # read the committed seed instead of scraping CTL
 SCHOLARS_VIVO_ORG_CROSSWALK
