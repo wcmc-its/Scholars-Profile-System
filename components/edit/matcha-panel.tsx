@@ -488,7 +488,7 @@ export function MatchaPanel() {
         kind: "error",
         message:
           r.status === 403
-            ? "You don't have access to the sponsor matcher."
+            ? "You don't have access to Matcha."
             : "Couldn't rank researchers. Please try again.",
       });
     } catch {
@@ -1115,7 +1115,7 @@ export function MatchaPanel() {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <span className="text-muted-foreground block text-[11px] tracking-[0.05em] uppercase">
-                    What we read from the sponsor
+                    What we read from the ask
                   </span>
                   {ask ? (
                     <h2
@@ -1241,7 +1241,7 @@ export function MatchaPanel() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={6}
-            placeholder="Paste the sponsor's description of their interest…"
+            placeholder="Paste the opportunity's description of their interest…"
             className="border-border w-full rounded-md border bg-background px-3 py-2 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]"
             spellCheck={false}
           />
@@ -1766,7 +1766,7 @@ function ConceptRail({
                 so the ranking and this line are the same signal. Absent ⇒ nothing rendered. */}
             {c.gloss ? (
               <p className="text-muted-foreground text-xs italic leading-snug">
-                sponsor&rsquo;s words: &ldquo;{c.gloss}&rdquo;
+                from the ask: &ldquo;{c.gloss}&rdquo;
               </p>
             ) : null}
             {/* The merged forms that collapsed into this concept — so an officer can see
