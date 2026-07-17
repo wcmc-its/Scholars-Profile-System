@@ -3,7 +3,7 @@
  * (pivot handoff `docs/2026-07-11-sponsor-match-searchpeople-pivot-handoff.md`
  * §4/§6). The pure helpers stay in `sponsor-match-spine.ts` (extraction, RRF)
  * and `sponsor-match-axes.ts` (clustering); THIS module owns the
- * side-effecting glue the bake-off runs behind `SPONSOR_MATCH_SPINE`:
+ * side-effecting glue the bake-off runs behind `MATCHA_SPINE`:
  *
  *   paste ─▶ extractMatchaConcepts (Bedrock LLM: concepts + centrality; dictionary
  *            `extractTerms` fallback on outage) ─▶ per-term matchQueryToTaxonomy (MeSH)
@@ -435,8 +435,8 @@ export async function rankResearchersForDescriptionSpine(
   // only decides whether the free-text QUERY searches the gloss ("lysosomal processing of ADC
   // linkers") or the bare token ("lysosomes"). It changes who ranks where, so it is eval-gated:
   // staging-on to measure, prod-off until a clean A/B proves it. STATIC literal for flag-parity.
-  const glossQuery = (process.env.MATCHA_GLOSS_QUERY ?? process.env.SPONSOR_MATCH_GLOSS_QUERY) === "on";
-  // SPONSOR_MATCH_RECENCY — D1. Surface each scholar's most-recent publication year and fold it
+  const glossQuery = process.env.MATCHA_GLOSS_QUERY === "on";
+  // MATCHA_RECENCY — D1. Surface each scholar's most-recent publication year and fold it
   // into the fused score (recency as a scored dimension), which re-tiers via the share-to-top (D2).
   // A ranking change ⇒ eval-gated. STATIC literal for flag-parity.
   //
@@ -459,7 +459,7 @@ export async function rankResearchersForDescriptionSpine(
   // the 2026-07-16 A/B's single largest loss (als, −0.177 nDCG, which alone decided the gate)
   // was one grade-3 scholar sitting on 59 unaccepted publications. Before flipping prod,
   // quantify that exposure by role_category — the eval cannot see it.
-  const recencyOn = (process.env.MATCHA_RECENCY ?? process.env.SPONSOR_MATCH_RECENCY) === "on";
+  const recencyOn = process.env.MATCHA_RECENCY === "on";
   for (const cluster of clusters) {
     // MAX member coverage ≈ the broadest merged synonym = a lower bound on the cluster's true
     // union corpus coverage (the exact union-coverage is an ETL upgrade). Display-only: 0 here

@@ -8,7 +8,7 @@
  * Audience: superuser OR development role — the same gate as
  * `/edit/find-researchers`; the data route (`/api/edit/matcha`) is the
  * real authorization boundary and re-checks it. `notFound()` while
- * `SPONSOR_MATCH` is off (mirrors `/edit/methods` — never reveal a dark
+ * `MATCHA` is off (mirrors `/edit/methods` — never reveal a dark
  * surface). `force-dynamic` + `noindex`, mirroring the other `/edit/*` pages.
  */
 import { notFound, redirect } from "next/navigation";

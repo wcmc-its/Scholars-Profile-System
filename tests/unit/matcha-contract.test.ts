@@ -161,7 +161,7 @@ describe("rerankCandidates", () => {
 
   /**
    * An engine with no concept decomposition (the bespoke ranker, which the route falls back
-   * to whenever SPONSOR_MATCH_SPINE is off) ships `concepts: []` and `contributions: []`,
+   * to whenever MATCHA_SPINE is off) ships `concepts: []` and `contributions: []`,
    * carrying its real BM25 score in `fusedScore`. Applying the formula to that sums an empty
    * contributions list to 0 for EVERY candidate and overwrites the server's score with it.
    * The order survives (everything ties, and ties keep the incoming order), so the list looks

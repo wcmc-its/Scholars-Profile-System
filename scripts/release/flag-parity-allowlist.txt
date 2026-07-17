@@ -62,7 +62,6 @@ SEARCH_PUB_TAB_IMPACT
 SEARCH_PUB_TAB_MSM
 SEARCH_RANKING_V2                   # default-on (!== "off")
 SELF_EDIT_OVERVIEW_GENERATE_RATE_LIMIT
-SPONSOR_MATCH_EXTRACT_MODEL         # pre-Matcha name, still read as the `??` fallback — retire WITH the shim in lib/api/matcha-extract.ts
 SPS_TRACE_REDACT
 TELEMETRY_SALT
 

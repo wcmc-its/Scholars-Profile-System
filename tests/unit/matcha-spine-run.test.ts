@@ -316,11 +316,11 @@ describe("rankResearchersForDescriptionSpine", () => {
     expect(weightOf(ml, "machine learning")).toBeGreaterThan(weightOf(ml, "disease progression"));
   });
 
-  it("with SPONSOR_MATCH_GLOSS_QUERY=on, searches the funder's GLOSS as the free-text query, not the bare token", async () => {
+  it("with MATCHA_GLOSS_QUERY=on, searches the funder's GLOSS as the free-text query, not the bare token", async () => {
     // "lysosomes" the token matches any lysosome paper; "lysosomal processing of ADC linkers" the
     // gloss ranks the sponsor's SENSE. The MeSH axis still resolves the TERM, so only the BM25
     // query moves. A concept with no gloss falls back to its token — a mixed ask degrades cleanly.
-    process.env.SPONSOR_MATCH_GLOSS_QUERY = "on";
+    process.env.MATCHA_GLOSS_QUERY = "on";
     try {
       mockExtractSponsorConcepts.mockResolvedValue([
         {
@@ -348,14 +348,14 @@ describe("rankResearchersForDescriptionSpine", () => {
         "lysosomal processing of ADC linkers",
       );
     } finally {
-      delete process.env.SPONSOR_MATCH_GLOSS_QUERY;
+      delete process.env.MATCHA_GLOSS_QUERY;
     }
   });
 
   it("with the flag OFF (default), searches the BARE TOKEN — but still wires the gloss for DISPLAY", async () => {
     // The display half is unconditional (the rail always shows the sponsor's words); only the
     // ranking half is gated. Flag off ⇒ retrieval is byte-identical to the pre-gloss behaviour.
-    delete process.env.SPONSOR_MATCH_GLOSS_QUERY;
+    delete process.env.MATCHA_GLOSS_QUERY;
     mockExtractSponsorConcepts.mockResolvedValue([
       { term: "lysosomes", kind: "concept", centrality: 1.0, gloss: "lysosomal processing of ADC linkers" },
     ]);
@@ -375,10 +375,10 @@ describe("rankResearchersForDescriptionSpine", () => {
     );
   });
 
-  it("with SPONSOR_MATCH_RECENCY=on, projects the year and re-ranks by recency (the flag→candidate hop)", async () => {
+  it("with MATCHA_RECENCY=on, projects the year and re-ranks by recency (the flag→candidate hop)", async () => {
     // The one hop that turns the flag into a candidate field, tested end to end: flag → searchPeople
     // opt → hit year → recencyWeightByCwid → rrfFuse reorder → candidate.mostRecentYear.
-    process.env.SPONSOR_MATCH_RECENCY = "on";
+    process.env.MATCHA_RECENCY = "on";
     try {
       const thisYear = new Date().getUTCFullYear();
       mockExtractSponsorConcepts.mockResolvedValue([{ term: "adc", kind: "concept", centrality: 1.0 }]);
@@ -404,12 +404,12 @@ describe("rankResearchersForDescriptionSpine", () => {
       // (c) recency actually reordered: the recent scholar (worse topical rank) now leads.
       expect(candidates.map((c) => c.cwid)).toEqual(["recent", "old"]);
     } finally {
-      delete process.env.SPONSOR_MATCH_RECENCY;
+      delete process.env.MATCHA_RECENCY;
     }
   });
 
-  it("with SPONSOR_MATCH_RECENCY off (default), does not request or attach the year (byte-identical)", async () => {
-    delete process.env.SPONSOR_MATCH_RECENCY;
+  it("with MATCHA_RECENCY off (default), does not request or attach the year (byte-identical)", async () => {
+    delete process.env.MATCHA_RECENCY;
     mockExtractSponsorConcepts.mockResolvedValue([{ term: "adc", kind: "concept", centrality: 1.0 }]);
     mockMatchQueryToTaxonomy.mockImplementation(async (q: string) => meshRes(`D_${q}`, [`D_${q}`]));
     // Even though the (mocked) hits carry a year, the spine must ignore it when the flag is off.
@@ -433,7 +433,7 @@ describe("rankResearchersForDescriptionSpine", () => {
   it("projects the ETL surname key onto every candidate, unflagged, and nulls it when unknown", async () => {
     // Matcha's A–Z sort, tested on the hop that actually carries it: searchPeople opt → hit →
     // candidate.lastNameSort. RECENCY stays OFF deliberately — the sort must not inherit that flag.
-    delete process.env.SPONSOR_MATCH_RECENCY;
+    delete process.env.MATCHA_RECENCY;
     mockExtractSponsorConcepts.mockResolvedValue([{ term: "adc", kind: "concept", centrality: 1.0 }]);
     mockMatchQueryToTaxonomy.mockImplementation(async (q: string) => meshRes(`D_${q}`, [`D_${q}`]));
     // "keyed" carries the ETL key; "unkeyed" is a not-yet-reindexed doc that lacks the field.

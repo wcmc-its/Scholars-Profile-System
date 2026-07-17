@@ -46,7 +46,7 @@ const RECITERAI_YEAR_FLOOR = 2020; // D-15; mirrors lib/api/match-researchers.ts
 
 /** One synthetic topic id for the single TopicResult (weight 1) — the unchanged
  *  downstream renders its pubCount/minYear as the row evidence. */
-const SPONSOR_MATCH_TOPIC_ID = "__sponsor_match__";
+const MATCHA_TOPIC_ID = "__sponsor_match__";
 
 /** Sponsor emails run a few paragraphs; anything past this is boilerplate that
  *  only degrades the BM25 query. Sliced, not rejected — a long paste still works.
@@ -62,28 +62,10 @@ const DEFAULT_LIMIT = 100;
 /** Top-N papers and topics attached per row as "why this person ranked" evidence. */
 const TOP_EVIDENCE_ROWS = 3;
 
-/**
- * ⚠ THE `??` IS A DEPRECATION SHIM WITH AN EXPIRY, NOT A STYLE CHOICE.
- *
- * Sponsor match became Matcha, and the flags were renamed with it. Code ships on merge (mutable
- * `:latest` image); env vars move ONLY on a manual `cdk deploy`. So for exactly as long as some
- * running task definition still carries the OLD name and not the new one, reading `MATCHA` alone
- * would be `undefined` — and this master switch gates a 404 that is prod-ON. That is how the
- * feature 404s in prod, and it is why the flags were deployed FIRST (both envs verified live in
- * the running task def before this landed; `sps-app-staging:127`, `sps-app-prod:36`).
- *
- * Both names are live right now, so the fallback is currently redundant. It is here for the
- * ROLLBACK: an image rolled back past the flag deploy, or a task def that predates it, still
- * finds a name it understands. Retire it once no reachable revision carries the old set — drop
- * `SPONSOR_MATCH*` from `cdk/lib/app-stack.ts` FIRST, then this `??`, in that order.
- *
- * Two STATIC literals, deliberately — the flag-parity CI gate forbids `process.env[dynamic]`,
- * not `??`.
- */
 
 /** Master switch (default off) — gates the page, the route, and the subnav tab. */
 export function isMatchaEnabled(): boolean {
-  return (process.env.MATCHA ?? process.env.SPONSOR_MATCH) === "on";
+  return process.env.MATCHA === "on";
 }
 
 /** Sub-flag (default off, dark in BOTH envs) — swaps the route's engine from the
@@ -91,7 +73,7 @@ export function isMatchaEnabled(): boolean {
  *  (`matcha-spine-run.ts`), for the same-deploy A/B bake-off. Inert unless
  *  `MATCHA` is also on (that master flag still gates the surface). */
 export function isMatchaSpineEnabled(): boolean {
-  return (process.env.MATCHA_SPINE ?? process.env.SPONSOR_MATCH_SPINE) === "on";
+  return process.env.MATCHA_SPINE === "on";
 }
 
 /** One evidence paper on a ranked row: PubMed-linkable, with the normalized
@@ -243,7 +225,7 @@ export async function rankResearchersForDescription(
   const ranked = rankResearchers(
     [
       {
-        topicId: SPONSOR_MATCH_TOPIC_ID,
+        topicId: MATCHA_TOPIC_ID,
         topicWeight: 1,
         scholars: [...byScholar.values()].map((s) => ({
           ...s.entry,
