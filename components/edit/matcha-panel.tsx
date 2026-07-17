@@ -68,6 +68,7 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { EvidenceLine } from "@/components/search/evidence-line";
 import type { ResultEvidence } from "@/lib/api/result-evidence";
 import { Button } from "@/components/ui/button";
+import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Sheet,
@@ -152,6 +153,14 @@ const DEPT_FACET_MAX = 12;
  *  9" meant 9 of the top 100, not 9 of the pool, and a CTL holder at rank 101 was unreachable
  *  by the one filter this console exists for. Facet over the pool; cap what you paint. */
 const RESULT_MAX = 100;
+
+/** What the tool does, in one sentence. ONE constant, rendered twice — as the subtitle, and as the
+ *  h1's hover for anyone who scrolled past the subtitle or met the name on its own. They were two
+ *  copies of the same prose; a drift between them is a surface contradicting itself.
+ *  ⚠ These words are under review (round-2 §3: "people will not understand the full scope") — that
+ *  is COPY work awaiting sign-off, deliberately not done here. Change the string, not the wiring. */
+const MATCHA_BLURB =
+  "Paste a description of an interest and rank Weill Cornell researchers by topical fit alone — no career-stage or grant-eligibility weighting. Recommendations, not endorsements.";
 
 /** Three-register hierarchy (mockup): the first N matched concepts render as FULL evidence blocks
  *  (badge, artifact, role, recency); the rest demote to a one-line supporting row. `matchedEvidence`
@@ -300,6 +309,17 @@ export function MatchaPanel() {
   // opens Full; a Recent replay opens Compact (already read). Scrolling past the header collapses it
   // (the effect below); "Show original" restores Full. Per-search state — a new search resets it.
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  // "Show original" PINS Full open, and the pin is the whole fix (round-2 §6). The control was never
+  // broken: it set `headerCollapsed` false and scrolled the card back into view — and the act of
+  // scrolling re-armed the observer below on a sentinel that was still above the viewport top, which
+  // re-collapsed the header on the same frame. The officer asked to see the paste and the observer
+  // out-voted them. So an EXPLICIT request disarms the scroll-collapse for the REST OF THE ASK; only
+  // a new search re-arms it. A longer timeout would have made the race quieter, not decided it.
+  //
+  // Consequence, and it is intended: once "Show original" is used, scrolling no longer auto-collapses
+  // the header to the sticky bar. "Collapse ▴" is how the officer asks for the sticky bar back — an
+  // explicit request answered by an explicit control, which is the trade §6 asked for.
+  const [headerPinned, setHeaderPinned] = useState(false);
   // D11 — the read-only paste clamps to ~4 lines until the officer asks for the rest. Reset per
   // search so a new paste always starts clamped.
   const [showFullText, setShowFullText] = useState(false);
@@ -448,6 +468,7 @@ export function MatchaPanel() {
         setMatchedText(text);
         setEditing(false); // a committed search → show the read-only ask, not the textarea
         setHeaderCollapsed(!!opts.fromHistory); // D10 — Full on a fresh paste/re-run, Compact on replay
+        setHeaderPinned(false); // §6 — the pin is per-ask: a new paste re-arms the scroll-collapse
         setShowFullText(false); // D11 — new paste starts clamped
         setRecency("recent"); // D3 — the dial is per-ask; a new sponsor starts at the ranker's default
         setRunId((n) => n + 1); // #1696 — a new run: every row's claimed-pmid set starts empty
@@ -595,10 +616,16 @@ export function MatchaPanel() {
   // D10 — the ask card's scroll-collapse. A 0-height sentinel sits at the top of the Full card;
   // once it scrolls above the viewport top the header collapses to the pinned Compact bar. One-way
   // (like the one-shot observers elsewhere in this file) — "Show original" is the only way back.
+  //
+  // §6 — `headerPinned` DISARMS it, and that guard is the fix. Scroll-collapse is an inference from
+  // behaviour ("you have scrolled past, you are done reading"); "Show original" is a statement of
+  // intent. When they disagree the statement wins, so the observer is not merely reset here — it is
+  // never constructed while the pin is held. (Constructing it and ignoring its first callback would
+  // not work: every later scroll fires it again.)
   const askWrapRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!showAskCard || headerCollapsed) return;
+    if (!showAskCard || headerCollapsed || headerPinned) return;
     const node = sentinelRef.current;
     if (!node || typeof IntersectionObserver === "undefined") return;
     const obs = new IntersectionObserver(
@@ -609,7 +636,7 @@ export function MatchaPanel() {
     );
     obs.observe(node);
     return () => obs.disconnect();
-  }, [showAskCard, headerCollapsed]);
+  }, [showAskCard, headerCollapsed, headerPinned]);
 
   // D10 — the compact bar's chips: the most-asked-for concepts (by the same conceptWeight the strip
   // and the ranking use), a few shown and the rest counted (+N).
@@ -618,9 +645,12 @@ export function MatchaPanel() {
     return { head: sorted.slice(0, 3), extra: Math.max(0, sorted.length - 3) };
   }, [concepts]);
 
-  // D10 — restore Full and bring it into view, so the scroll-collapse observer re-arms on a header
-  // that is actually on screen rather than immediately re-collapsing because we were scrolled down.
+  // D10/§6 — restore Full, PIN it, and bring it into view. The pin has to be set here rather than
+  // left to the scroll landing: `scrollIntoView` is `behavior: "smooth"`, so it resolves over many
+  // frames, while the observer re-arms on the very next commit — the old code lost that race every
+  // time, which is the whole of the "show original won't stay open" bug.
   const showOriginal = useCallback(() => {
+    setHeaderPinned(true);
     setHeaderCollapsed(false);
     requestAnimationFrame(() =>
       askWrapRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }),
@@ -980,20 +1010,11 @@ export function MatchaPanel() {
   return (
     <div data-slot="matcha-panel">
       <div className="mb-5">
-        {/* The name says nothing about what the tool does, so the hover has to. `title` rather
-            than a bespoke tooltip: it is one sentence of prose on a heading, and every tooltip
-            primitive here would add a focus trap and a portal to say less. */}
-        <h1
-          className="text-2xl font-bold tracking-tight"
-          title="Paste a description of an interest and rank Weill Cornell researchers by topical fit alone — no career-stage or grant-eligibility weighting. Recommendations, not endorsements."
-        >
-          Matcha
-        </h1>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Paste a description of an interest and rank Weill Cornell researchers by topical fit
-          alone — no career-stage or grant-eligibility weighting. Recommendations, not
-          endorsements.
-        </p>
+        {/* The name says nothing about what the tool does, so the hover has to. */}
+        <HoverTooltip wide placement="bottom" text={MATCHA_BLURB}>
+          <h1 className="text-2xl font-bold tracking-tight">Matcha</h1>
+        </HoverTooltip>
+        <p className="text-muted-foreground mt-1 text-sm">{MATCHA_BLURB}</p>
       </div>
 
       {showAskCard ? (
@@ -1039,14 +1060,19 @@ export function MatchaPanel() {
             {/* D11 — the extraction audit rides the pinned bar, so an under-read is visible without
                 expanding; tapping it restores the highlighted full text. */}
             {concepts.length > 0 ? (
-              <button
-                type="button"
-                onClick={showOriginal}
-                title="Concepts found verbatim in the paste (the rest were canonicalized to standard terms). Show the highlighted original."
-                className="text-muted-foreground text-[11px] tabular-nums underline-offset-2 hover:underline"
+              <HoverTooltip
+                wide
+                placement="bottom"
+                text="Concepts found verbatim in the paste (the rest were canonicalized to standard terms). Show the highlighted original."
               >
-                {askMarked}/{concepts.length} read
-              </button>
+                <button
+                  type="button"
+                  onClick={showOriginal}
+                  className="text-muted-foreground text-[11px] tabular-nums underline-offset-2 hover:underline"
+                >
+                  {askMarked}/{concepts.length} read
+                </button>
+              </HoverTooltip>
             ) : null}
             <span className="flex-1" />
             <button
@@ -1121,13 +1147,19 @@ export function MatchaPanel() {
               >
                 {askSegments.map((s, i) =>
                   s.term ? (
-                    <mark
-                      key={i}
-                      title={s.term}
-                      className="rounded-[3px] bg-[var(--color-facet-topic-fill)] px-[3px] text-[var(--color-facet-topic-text)]"
-                    >
-                      {s.text}
-                    </mark>
+                    // The wrapper span is `inline-flex`, so a marked RUN can no longer break across
+                    // lines — it wraps as a unit. Accepted: a mark spans one canonicalised term (a
+                    // word or two), never the 300-char SafeLinks URL `break-words` above exists for.
+                    // If a long term ever wraps badly here, that is this trade, not a mystery.
+                    <HoverTooltip key={i} text={s.term}>
+                      <mark
+                        data-slot="matcha-ask-mark"
+                        data-term={s.term}
+                        className="rounded-[3px] bg-[var(--color-facet-topic-fill)] px-[3px] text-[var(--color-facet-topic-text)]"
+                      >
+                        {s.text}
+                      </mark>
+                    </HoverTooltip>
                   ) : (
                     <span key={i}>{s.text}</span>
                   ),
@@ -1142,6 +1174,11 @@ export function MatchaPanel() {
                 >
                   {showFullText ? "Show less ▴" : "Show full text ▾"}
                 </button>
+                {/* Collapsing by hand does NOT release the pin, and that is not an oversight: while
+                    the header is collapsed the observer early-returns on `headerCollapsed` anyway,
+                    and every path back to Full writes `headerPinned` itself (`showOriginal` → true,
+                    `runSearch` → false). So the pin's value here is never read — releasing it was
+                    written first, passed every test, and was removed for that reason. */}
                 <button
                   type="button"
                   onClick={() => setHeaderCollapsed(true)}
@@ -1163,7 +1200,12 @@ export function MatchaPanel() {
             </section>
             {/* D10 — the collapse sentinel sits just past the header; when it scrolls above the
                 viewport top the observer pins the compact bar. `aria-hidden` — it is a scroll probe. */}
-            <div ref={sentinelRef} aria-hidden="true" className="h-0" />
+            <div
+              ref={sentinelRef}
+              data-slot="matcha-ask-sentinel"
+              aria-hidden="true"
+              className="h-0"
+            />
           </div>
         )
       ) : (
@@ -1685,14 +1727,17 @@ function ConceptRail({
                     fact and stops there; it deliberately does NOT say "so it counts for
                     more", which is what made the old badge misleading. */}
                 {rare.has(c.term) && c.corpusCoverage != null ? (
-                  <span
-                    title={`Scarce at Weill Cornell relative to the other concepts in this ask — ${oneInN(
+                  <HoverTooltip
+                    wide
+                    triggerClassName="ml-1.5"
+                    text={`Scarce at Weill Cornell relative to the other concepts in this ask — ${oneInN(
                       c.corpusCoverage,
                     )}.`}
-                    className="ml-1.5 rounded-full bg-[var(--color-facet-method-fill)] px-1.5 py-0.5 text-xs text-[var(--color-facet-method-count)]"
                   >
-                    ·rare
-                  </span>
+                    <span className="rounded-full bg-[var(--color-facet-method-fill)] px-1.5 py-0.5 text-xs text-[var(--color-facet-method-count)]">
+                      ·rare
+                    </span>
+                  </HoverTooltip>
                 ) : null}
               </span>
               <span className="text-muted-foreground font-mono text-xs tabular-nums">
@@ -1761,20 +1806,32 @@ function FacetGroup({
   options: readonly (readonly [string, number])[];
   selected: ReadonlySet<string>;
   onToggle: (value: string) => void;
+  /** What the GROUP measures. Hung on the group's heading, which is the thing it describes. */
   title?: string;
 }) {
   return (
     <div className="mt-3">
-      <h3 className="text-muted-foreground text-[11px] font-semibold tracking-[0.08em] uppercase">
-        {label}
-      </h3>
+      {/* The hover moved from every option row to the heading, and the anchor is the correction:
+          the text describes the GROUP ("Years since terminal degree, bucketed"), so hanging it on
+          each option asserted it of that option, and a group of five stamped the identical
+          tooltip five times. It cannot go back on the `<label>` regardless — the tooltip wrapper
+          becomes the flex item, and the row's `flex-1 truncate` value and `shrink-0` count would
+          collapse to their natural widths, unaligning every count in the rail. */}
+      {title ? (
+        <HoverTooltip wide text={title}>
+          <h3 className="text-muted-foreground decoration-muted-foreground/40 text-[11px] font-semibold tracking-[0.08em] uppercase underline decoration-dotted underline-offset-4">
+            {label}
+          </h3>
+        </HoverTooltip>
+      ) : (
+        <h3 className="text-muted-foreground text-[11px] font-semibold tracking-[0.08em] uppercase">
+          {label}
+        </h3>
+      )}
       <ul className="mt-1.5 space-y-1">
         {options.map(([value, n]) => (
           <li key={value}>
-            <label
-              title={title}
-              className="flex cursor-pointer items-center gap-2 text-sm"
-            >
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
               <input
                 type="checkbox"
                 checked={selected.has(value)}
@@ -1889,7 +1946,7 @@ function useInViewOnce<T extends HTMLElement>(): [React.RefObject<T | null>, boo
 }
 
 /** The three fills. `ranked` is the same hue as `evidence` because the person genuinely ranked
- *  under that concept — but it is a SEPARATE state, not a lighter grade of found, and its title
+ *  under that concept — but it is a SEPARATE state, not a lighter grade of found, and its tooltip
  *  says so. The distinction the officer needs is "we have nothing for this" (`none`) versus
  *  "we have something and are not showing it here" (`ranked`), and a ramp would erase it. */
 const COVERAGE_CLASS: Record<ConceptCoverage["state"], string> = {
@@ -1906,33 +1963,69 @@ const COVERAGE_TITLE: Record<ConceptCoverage["state"], string> = {
   none: "no evidence",
 };
 
+/** What the STRIP is — round-2 §4's actual complaint. Every segment already explained ITSELF
+ *  ("Cancer Metabolism — no evidence") and nothing explained the row: eight anonymous bars whose
+ *  widths encode a number the reader was never told was a number. A segment's own state is
+ *  meaningless until you know the bar is one concept, the width is how hard the sponsor asked for
+ *  it, and the fill is whether we can show evidence — so the legend rides EVERY segment tooltip
+ *  rather than a caption the hover doesn't reach, and leads the strip's aria-label. */
+const COVERAGE_LEGEND =
+  "One bar per concept the sponsor asked for · width = how much they asked for it · fill = whether we can show evidence.";
+
 /**
  * The ask, drawn as a bar: one segment per concept the sponsor asked for, width = how much they
  * asked for it. The width IS `conceptWeight` — the very number the fusion ranks on — so the bar
  * cannot drift from the ranking, and it re-draws live as the sliders move, exactly like the chips.
  *
- * The mockup's hover-to-trace (segment lights up its term row) is skipped: `title` is a native
- * tooltip for free, and cross-highlighting needs hover state threaded through every block for a
- * cue the tooltip already gives. Add it when someone asks for it.
+ * The mockup's hover-to-trace (segment lights up its term row) is skipped: the segment tooltip
+ * already names the concept, and cross-highlighting needs hover state threaded through every block
+ * for a cue the tooltip gives. Add it when someone asks for it.
  *
- * The strip is `aria-hidden` and the line beneath it carries the same facts as text — a bar of
- * eight divs is not a thing a screen reader can be made to say usefully, and the coverage
- * sentence is what a reader would want read out anyway.
+ * ACCESSIBILITY: this used to be `aria-hidden`, on the reasoning that "a bar of eight divs is not a
+ * thing a screen reader can be made to say usefully" and that the caption carried the same facts.
+ * The first half is right; the second was false. The caption says "Evidence for 1 of 3" — a count,
+ * naming no concept and no state — and the INLINE variant has no caption at all, so a screen reader
+ * got a `w-[110px]` void. The strip is now one `role="img"` whose label reads the legend and then
+ * every concept and its state: the graphic spoken as a sentence, which is the usual answer for a
+ * data graphic and the one the old comment stopped one step short of.
  */
 function CoverageStrip({ coverage, inline = false }: { coverage: ConceptCoverage[]; inline?: boolean }) {
   if (coverage.length === 0) return null;
   const withEvidence = coverage.filter((c) => c.state === "evidence");
+  const spoken = coverage
+    .map(({ concept, state }) => `${concept.term} — ${COVERAGE_TITLE[state]}`)
+    .join("; ");
   const bar = (
-    <div className="flex gap-0.5" aria-hidden="true">
+    <div className="flex gap-0.5" role="img" aria-label={`Concept coverage. ${COVERAGE_LEGEND} ${spoken}`}>
       {coverage.map(({ concept, weight, state }) => (
-        <div
+        <HoverTooltip
           key={concept.term}
-          title={`${concept.term} — ${COVERAGE_TITLE[state]}`}
-          // `flexBasis: 0` so the widths are the weights and nothing else; the min-width keeps a
-          // near-muted concept from collapsing to an invisible sliver you cannot hover.
-          style={{ flexGrow: weight, flexBasis: 0 }}
-          className={`h-2 min-w-[3px] rounded-[2px] ${COVERAGE_CLASS[state]}`}
-        />
+          wide
+          text={`${concept.term} — ${COVERAGE_TITLE[state]}`}
+          body={
+            <span className="block">
+              <span className="block font-semibold">{concept.term}</span>
+              <span className="block">{COVERAGE_TITLE[state]}</span>
+              <span className="mt-1 block border-t border-white/25 pt-1 text-white/70">
+                {COVERAGE_LEGEND}
+              </span>
+            </span>
+          }
+          // THE WEIGHTS LIVE ON THE WRAPPER, and they have to: the wrapper is what the bar's flex
+          // container sizes. Leave `flexGrow` on the child and every segment silently collapses to
+          // `min-w-[3px]` — eight equal slivers, the widths (the ranking's own numbers) gone, and
+          // not one test the poorer for it. `flexBasis: 0` so width is weight and nothing else; the
+          // min-width keeps a near-muted concept hoverable instead of an invisible sliver.
+          triggerStyle={{ flexGrow: weight, flexBasis: 0 }}
+          triggerClassName="min-w-[3px]"
+        >
+          <span
+            data-slot="matcha-coverage-segment"
+            data-coverage={state}
+            data-term={concept.term}
+            className={`h-2 w-full rounded-[2px] ${COVERAGE_CLASS[state]}`}
+          />
+        </HoverTooltip>
       ))}
     </div>
   );
@@ -1949,7 +2042,7 @@ function CoverageStrip({ coverage, inline = false }: { coverage: ConceptCoverage
     <div className="mt-2" data-slot="matcha-coverage">
       {bar}
       {/* D7 — the "also ranked under X, Y" prose is gone. A sub-threshold hit is now carried by
-          the strip's own lighter `ranked` fill (see COVERAGE_CLASS) and the segment's hover title,
+          the strip's own lighter `ranked` fill (see COVERAGE_CLASS) and the segment's hover,
           not a sentence that duplicated it. The line states only the fact the strip can't: how many
           of the asked concepts we can SHOW evidence for. */}
       <p className="text-muted-foreground mt-1.5 text-xs">
@@ -2049,15 +2142,32 @@ function CompactRow({
         {/* D8 — the stale flag is DE-EMPHASIS, not a hue, and deliberately so: every house colour is
             already spoken for (green = strong/tagged, amber = good-tier AND keyword-only, blue =
             provenance, purple = technology), so an "old" colour would make one of them mean three
-            things. A stale year recedes instead — which is also what the ranker is doing to it. */}
-        <span
-          title={stale ? `Latest evidence predates ${staleYear} — recency is down-weighting this match` : undefined}
-          className={`w-16 shrink-0 text-right text-[11px] tabular-nums ${
-            stale ? "text-muted-foreground/50" : "text-muted-foreground"
-          }`}
-        >
-          {year != null ? `latest ${year}` : ""}
-        </span>
+            things. A stale year recedes instead — which is also what the ranker is doing to it.
+            Which is exactly why the tooltip is LOAD-BEARING here and not a nicety: de-emphasis with
+            no hue is a treatment that cannot say what it means, so the hover is the only thing that
+            explains why this row is dimmer than the one above it. That made it the worst possible
+            place for a `title` nobody waits 1s to read. */}
+        {stale ? (
+          <HoverTooltip
+            wide
+            triggerClassName="w-16 shrink-0 justify-end"
+            text={`Latest evidence predates ${staleYear} — recency is down-weighting this match`}
+          >
+            <span
+              data-slot="matcha-latest-year"
+              className="text-muted-foreground/50 text-right text-[11px] tabular-nums"
+            >
+              {year != null ? `latest ${year}` : ""}
+            </span>
+          </HoverTooltip>
+        ) : (
+          <span
+            data-slot="matcha-latest-year"
+            className="text-muted-foreground w-16 shrink-0 text-right text-[11px] tabular-nums"
+          >
+            {year != null ? `latest ${year}` : ""}
+          </span>
+        )}
         <span className="text-muted-foreground shrink-0 text-xs" aria-hidden="true">
           ›
         </span>
@@ -2101,13 +2211,16 @@ function ProvenanceChip({ evidence }: { evidence: ResultEvidence }) {
   if (!provenance) return null;
   const { mark, label, title, className } = PROVENANCE_META[provenance];
   return (
-    <span
-      title={title}
-      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-[0.02em] ${className}`}
-    >
-      <span aria-hidden="true">{mark}</span>
-      {label}
-    </span>
+    <HoverTooltip wide text={title} triggerClassName="shrink-0">
+      <span
+        data-slot="matcha-provenance-chip"
+        data-provenance={provenance}
+        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-[0.02em] ${className}`}
+      >
+        <span aria-hidden="true">{mark}</span>
+        {label}
+      </span>
+    </HoverTooltip>
   );
 }
 
@@ -2398,13 +2511,14 @@ function ResearcherRow({
         {topics.length > 0 ? (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {topics.map((t) => (
-              <span
+              <HoverTooltip
                 key={t.label}
-                title={`${t.pubCount} matching paper${t.pubCount === 1 ? "" : "s"} in this topic`}
-                className="border-border text-muted-foreground rounded-full border px-2 py-0.5 text-xs"
+                text={`${t.pubCount} matching paper${t.pubCount === 1 ? "" : "s"} in this topic`}
               >
-                {t.label}
-              </span>
+                <span className="border-border text-muted-foreground rounded-full border px-2 py-0.5 text-xs">
+                  {t.label}
+                </span>
+              </HoverTooltip>
             ))}
           </div>
         ) : null}
@@ -2444,13 +2558,19 @@ function ResearcherRow({
         {/* Teal, per the mockup — CTL-IP gets its own hue so it does not read as another
             concept chip. Both hexes already ship in globals.css on `.entity-badge--institute`. */}
         {candidate.technologyCount > 0 ? (
-          <span
-            title="Licensable technologies this researcher already holds in the CTL portfolio."
-            className="mt-1.5 inline-flex rounded-full bg-[#e0eded] px-2 py-0.5 text-xs font-medium text-[#2c5862]"
+          // `mt-1.5` rides the WRAPPER: it is the inline-level box the surrounding block lays out
+          // now, so a margin left on the child would indent inside the wrapper instead of spacing
+          // the badge off the block above it.
+          <HoverTooltip
+            wide
+            triggerClassName="mt-1.5"
+            text="Licensable technologies this researcher already holds in the CTL portfolio."
           >
-            {candidate.technologyCount} CTL technolog
-            {candidate.technologyCount === 1 ? "y" : "ies"}
-          </span>
+            <span className="inline-flex rounded-full bg-[#e0eded] px-2 py-0.5 text-xs font-medium text-[#2c5862]">
+              {candidate.technologyCount} CTL technolog
+              {candidate.technologyCount === 1 ? "y" : "ies"}
+            </span>
+          </HoverTooltip>
         ) : null}
         {/* Gaps at the foot of the card (mockup): the sponsor asks this scholar answers with
             nothing. A single muted line, not a per-concept row — it is the last thing read, and it
