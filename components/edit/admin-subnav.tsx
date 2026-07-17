@@ -20,26 +20,12 @@
  * slug-request feature is flag-gated (`SELF_EDIT_SLUG_REQUEST`), so a surface
  * that doesn't exist isn't advertised.
  */
-import type { ReactNode } from "react";
 import Link from "next/link";
 
 import { AccountMenu } from "@/components/site/account-menu";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { MatchaTab } from "@/components/edit/matcha-tab";
 import { isMatchaEnabled } from "@/lib/api/matcha";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
-
-/** The tab is where the name "Matcha" is at its most opaque — it is what someone meets BEFORE they
- *  know what the tool is, so this is the moment the explanation is worth most. A HoverCard, not a
- *  tooltip: the copy is a bold lead plus a sentence, which is the panel primitive's shape (cf.
- *  `person-popover`), not a one-line pill's. Words are the user's (2026-07-17); the page's own
- *  subtitle carries the longer form. */
-const MATCHA_TAB_HOVER = (
-  <>
-    <strong className="text-foreground font-semibold">Paste the ask. Get the shortlist.</strong>{" "}
-    Matcha reads any opportunity description into its underlying topics and methods, weighs each
-    one, and ranks scholars by fit across all of them — with the evidence behind every name.
-  </>
-);
 
 export type AdminSubnavActive =
   | "profiles"
@@ -239,15 +225,12 @@ export function AdminSubnav({
         )}
         {/* CTL sponsor match (`/edit/matcha`) — same audience as the
             Funding matcher above; hidden while SPONSOR_MATCH is off (server-read
-            env check here, so no new prop threads through every console page). */}
+            env check here, so no new prop threads through every console page).
+            Rendered via the CLIENT `MatchaTab` because it carries a HoverCard —
+            see the header of `matcha-tab.tsx` for why that composition must not
+            live in this server component. */}
         {(superuserSurfaces || viewerIsDeveloper) && isMatchaEnabled() && (
-          <AdminTab
-            href="/edit/matcha"
-            id="matcha"
-            label="Matcha"
-            active={active === "matcha"}
-            hover={MATCHA_TAB_HOVER}
-          />
+          <MatchaTab active={active === "matcha"} />
         )}
         {/* The account chip/dropdown anchors the right end — profile actions live
             entirely in the menu, which derives its scholar + rows from the
@@ -265,16 +248,12 @@ function AdminTab({
   label,
   active,
   count,
-  hover,
 }: {
   href: string;
   id: AdminSubnavActive;
   label: string;
   active: boolean;
   count?: number;
-  /** Optional explanatory hover panel. Additive and opt-in — a tab without it renders exactly as
-   *  it did, so this stays one tab's change rather than every tab's. */
-  hover?: ReactNode;
 }) {
   const inner = (
     <span className="inline-flex items-center gap-2">
@@ -306,11 +285,5 @@ function AdminTab({
       {inner}
     </Link>
   );
-  if (!hover) return tab;
-  return (
-    <HoverCard>
-      <HoverCardTrigger asChild>{tab}</HoverCardTrigger>
-      <HoverCardContent className="w-80 p-3.5 text-sm leading-relaxed">{hover}</HoverCardContent>
-    </HoverCard>
-  );
+  return tab;
 }
