@@ -1800,6 +1800,82 @@ describe("MatchaPanel", () => {
     expect(growOf(segments[0])).toBeGreaterThan(growOf(segments[1]));
   });
 
+  /**
+   * §5a — THE ASKS COLUMN COUNTS WHAT THE SCHOLAR RANKS UNDER, NOT WHAT WE CAN EVIDENCE.
+   *
+   * This column shipped counting `state === "evidence"`, which the contract caps at
+   * MAX_EVIDENCE_CONCEPTS (3). It had NO test at all — which is exactly why it shipped lying.
+   * Measured on staging over 17 real asks: 39–83% of candidates (mean ~60%) had more
+   * contributions than evidence, and on a 7-concept ask EVERY visible row read "3/7".
+   *
+   * The fixture below is that production shape in miniature: a scholar who ranks under BOTH
+   * concepts but can only be evidenced for ONE. Pre-fix this row read "1/2"; it must read "2/2".
+   */
+  it("§5a — the ASKS count is uncapped: it counts ranked concepts, not the evidence-capped subset", async () => {
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "cap",
+          name: "Cappy Capped",
+          fusedScore: 0.9,
+          // Ranks under BOTH concepts…
+          contributions: [
+            { term: "Immuno-oncology", rank: 4 },
+            { term: "Cancer Metabolism", rank: 9 },
+          ],
+          // …but only ONE is evidenced. This asymmetry IS the MAX_EVIDENCE_CONCEPTS cap.
+          searchEvidence: [searchEvidence("Immuno-oncology", 12)],
+        }),
+      ],
+    });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T collaborators" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Cappy Capped");
+    fireEvent.click(screen.getByRole("button", { name: "compact" }));
+
+    const count = document.querySelector('[data-slot="matcha-asks-count"]')!;
+    // 2 of 3 — the concepts RANKED under. "1/3" is the old evidence-capped read: same scholar,
+    // same data, one fewer concept claimed, purely because we cap what we can EVIDENCE at 3.
+    expect(count.textContent).toBe("2/3");
+    expect(count.textContent).not.toBe("1/3");
+  });
+
+  it("§5a — the ASKS count does not count a concept the scholar never ranked under", async () => {
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "one",
+          name: "Solo Single",
+          fusedScore: 0.9,
+          // Ranks under ONE of the two concepts — `state: "none"` for the other.
+          contributions: [{ term: "Immuno-oncology", rank: 4 }],
+          searchEvidence: [searchEvidence("Immuno-oncology", 12)],
+        }),
+      ],
+    });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T collaborators" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Solo Single");
+    fireEvent.click(screen.getByRole("button", { name: "compact" }));
+
+    // The guard against over-correcting: `!== "none"` must not become "count every concept".
+    expect(document.querySelector('[data-slot="matcha-asks-count"]')!.textContent).toBe("1/3");
+  });
+
+  it("§5a — the count says what it counts; a bare ratio cannot", async () => {
+    await renderAndSearch();
+    fireEvent.click(screen.getByRole("button", { name: "compact" }));
+    const tip = await tooltipTextOf(
+      document.querySelector('[data-slot="matcha-asks-count"]') as HTMLElement,
+    );
+    expect(tip).toContain("concepts this opportunity calls for");
+    expect(tip).toContain("not only the ones we can show evidence for");
+  });
+
   it("Compact density renders one scannable row per scholar; a row click expands the detailed card (D8/D9)", async () => {
     await renderAndSearch(); // default Detailed (localStorage cleared in beforeEach)
     // Detailed by default: the full evidence card is present, no compact rows.
