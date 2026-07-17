@@ -45,7 +45,7 @@
  * rejects. Removing it also removes a client-controlled trust boundary; nothing on the
  * request side needs sanitizing now beyond `description` and `engine`.
  *
- * Engine selection (`SPONSOR_MATCH_SPINE`, a dark sub-flag of `SPONSOR_MATCH`):
+ * Engine selection (`MATCHA_SPINE`, a dark sub-flag of `MATCHA`):
  * flag OFF ⇒ always the bespoke `rankResearchersForDescription` (one BM25 round-trip over
  * the whole paste), and any `engine` field is ignored. Flag ON ⇒ the searchPeople per-term
  * spine is the default, and an optional body `engine: "spine" | "bespoke"` forces either so
@@ -60,7 +60,7 @@
  *
  * Authorization mirrors the surface this lives on (`/edit/matcha`) and
  * its sibling `/api/edit/opportunity-intake`: superuser OR development role,
- * with a denial log. 404 while `SPONSOR_MATCH` is off — the dark-ship posture.
+ * with a denial log. 404 while `MATCHA` is off — the dark-ship posture.
  */
 import { createHash } from "node:crypto";
 

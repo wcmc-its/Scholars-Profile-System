@@ -76,7 +76,7 @@ export type MatchaExtraction = {
  *  `-20250929-v1:0` minor is the same profile id the overview generator's
  *  `humanizeModelId` recognizes as active; the IAM glob permits an intra-family bump
  *  (4.5 → 4.6) with no policy change if a newer minor is preferred later. This const is
- *  the DEFAULT; `extractMatchaConcepts` resolves `SPONSOR_MATCH_EXTRACT_MODEL` ahead of
+ *  the DEFAULT; `extractMatchaConcepts` resolves `MATCHA_EXTRACT_MODEL` ahead of
  *  it — a code-default runtime rollback lever mirroring the overview generator's
  *  `OVERVIEW_GENERATE_MODEL`/`BIOSKETCH_GENERATE_MODEL` (registered in the flag-parity
  *  allowlist, deliberately NOT wired per-env; unset ⇒ this default in every env, so
@@ -315,7 +315,7 @@ export async function extractMatchaConcepts(paste: string): Promise<MatchaExtrac
   // generator's `OVERVIEW_GENERATE_MODEL` lever; the IAM policy scopes the whole
   // `us.anthropic.claude-sonnet-4-*` family so an intra-family repoint needs no
   // cdk/IAM change). `modelAcceptsTemperature` still gates temperature by id.
-  const modelId = process.env.MATCHA_EXTRACT_MODEL ?? process.env.SPONSOR_MATCH_EXTRACT_MODEL ?? EXTRACT_MODEL;
+  const modelId = process.env.MATCHA_EXTRACT_MODEL ?? EXTRACT_MODEL;
   try {
     const { object } = await generateObject({
       model: sponsorBedrock()(modelId),

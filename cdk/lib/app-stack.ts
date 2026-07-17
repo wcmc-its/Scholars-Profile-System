@@ -1272,70 +1272,28 @@ export class AppStack extends Stack {
         // presence-gated (hidden when a scholar holds nothing), so a scholar with
         // no technologies is unaffected either way.
         AVAILABLE_TECHNOLOGIES_SECTION: "on", // Prod flipped 2026-07-14 (#1631); takes effect on the next `cdk deploy Sps-App-prod`.
-        // SPONSOR_MATCH — the /edit/sponsor-match CTL surface (paste a sponsor's
-        // description → researchers ranked on topical fit alone).
+        // MATCHA* — the /edit/matcha surface (paste a description of an interest → WCM researchers
+        // ranked on topical fit alone). Renamed from SPONSOR_MATCH* 2026-07-17 (#1770 deployed the
+        // names, #1773 moved the code, this drops the old set). The old names are GONE from the
+        // code as of this change — nothing reads them, so nothing wires them.
         //
-        // ⚠ THESE TWO FLAGS MUST MOVE TOGETHER. `SPONSOR_MATCH=on` + `SPONSOR_MATCH_SPINE=off`
-        // is a SUPPORTED config, not an error: it serves the surface off the BESPOKE engine,
-        // which lost the bake-off decisively (nDCG@20 0.367 vs the spine's 0.594) and returned
-        // ZERO real scleroderma experts on the rare-disease fixture. The console would look
-        // perfectly healthy and hand CTL the wrong researchers. Never flip one without the other.
-        SPONSOR_MATCH: "on", // Prod flipped 2026-07-13 (eval picked the spine; see below).
-        // SPONSOR_MATCH_SPINE — sub-flag of SPONSOR_MATCH: swaps the route's engine from the
-        // bespoke BM25×Variant-B path to the compose-searchPeople per-term spine.
+        // ⚠ THIS REMOVAL COSTS AN IMAGE ROLLBACK. Pre-#1773 images read `SPONSOR_MATCH`, which
+        // this deploy deletes from the task def — so rolling the image back PAST the rename now
+        // 404s the feature (`route.ts`: `if (!isMatchaEnabled()) return 404`, and MATCHA is
+        // prod-ON). To roll back that far, re-add these four names first. Forward is unaffected.
         //
-        // The eval picked the winner, so this is no longer a bake-off switch. Spine 0.594 vs
-        // bespoke 0.367 on the neutral gold (13/15 fixtures), and the spine has since gone
-        // 0.515 → 0.636 mean nDCG@20 (#1676 fixed the corpus-rarity inversion; #1681 retuned K
-        // and γ and deleted rarity from the weight outright).
-        //
-        // The fan-out that gated this launch is MEASURED, not assumed: the worst-case 8-concept
-        // spine fan-out ran clean on staging (m6g.large ×1 — HALF prod's capacity), and 40
-        // heavier-than-spine queries fired at prod's OpenSearch in 6s moved its heap not at all
-        // (14→16%, zero circuit-breaker trips). Prod's own public search runs the nine facet
-        // aggs the spine skips (`skipFacetAggs: true`, #1671), so a spine query is strictly
-        // lighter than a query prod already serves ~15×/second.
-        SPONSOR_MATCH_SPINE: "on", // Prod flipped 2026-07-13, TOGETHER with SPONSOR_MATCH above.
-        // SPONSOR_MATCH_GLOSS_QUERY — the RETRIEVAL half of the concept gloss: search the sponsor's
-        // qualifying phrase ("lysosomal processing of ADC linkers") as the free-text query instead
-        // of the bare token ("lysosomes"). The DISPLAY half (the rail's "sponsor's words" line, the
-        // provenance chips) is unconditional; this flag ONLY moves the ranking, so it is eval-gated.
-        // STAGING-on to A/B it; PROD-off until a clean gloss-off vs gloss-on run clears the sponsor
-        // eval's ~0.0074 nDCG noise floor. A one-sided staging run (no gloss-off arm) cannot prove it.
-        SPONSOR_MATCH_GLOSS_QUERY: env === "staging" ? "on" : "off",
-        // SPONSOR_MATCH_RECENCY — D1: fold each scholar's most-recent publication year into the
-        // fused score (recency as a scored dimension), which re-tiers via the share-to-top (D2).
-        // A RANKING change, so it is eval-gated exactly like the gloss query: STAGING-on to A/B it,
-        // PROD-off until a clean recency-off vs recency-on run clears the sponsor eval's ~0.0074
-        // nDCG noise floor. A one-sided staging run (no recency-off arm) cannot prove it.
-        SPONSOR_MATCH_RECENCY: env === "staging" ? "on" : "off",
-        // MATCHA* — the SPONSOR_MATCH* set under the product's new name. Sponsor match is becoming
-        // Matcha: the audience broadens past program officers to department chairs, so the
-        // sponsor-shaped framing goes. See `docs/2026-07-16-matcha-rework-handoff.md`.
-        //
-        // 🔴 THESE ARE DELIBERATELY INERT — NOTHING READS THEM YET, AND THAT IS THE POINT.
-        // Code ships on merge (mutable `:latest` image); env vars move ONLY on a manual
-        // `cdk deploy`. So a rename that lands code reading `MATCHA` before this deploy puts the
-        // name in the RUNNING task definition reads `undefined` — and `SPONSOR_MATCH` gates a 404
-        // (`route.ts`: `if (!isSponsorMatchEnabled()) return 404`), which is prod-ON today. Wrong
-        // order takes the whole feature down in prod. That gap is issue #1765, and it is exactly
-        // how D1's recency shipped dark for a week.
-        //
-        // Each mirrors its SPONSOR_MATCH* twin's value EXACTLY — a rename must not smuggle a flag
-        // flip. Anything eval-gated stays eval-gated under the new name; the gloss and recency
-        // arms are still owed a run that clears the ~0.0074 nDCG noise floor.
-        //
-        // Retirement order, and it is not optional: (1) this deploy, both envs; (2) VERIFY in the
-        // RUNNING task def, querying the container by `name == "app"` — an otel-collector sidecar
-        // reorders between revisions, so `containerDefinitions[0]` can read the sidecar's env and
-        // look like the flag is missing; (3) merge code reading the new names behind a
-        // `(process.env.MATCHA_X ?? process.env.SPONSOR_MATCH_X)` fallback for one release; (4)
-        // only once both envs are confirmed live, drop the SPONSOR_MATCH* set and the fallback,
-        // in that order.
-        MATCHA: "on", // twin of SPONSOR_MATCH (prod-ON since 2026-07-13)
-        MATCHA_SPINE: "on", // twin of SPONSOR_MATCH_SPINE — moves TOGETHER with MATCHA, never alone
-        MATCHA_GLOSS_QUERY: env === "staging" ? "on" : "off", // twin of SPONSOR_MATCH_GLOSS_QUERY
-        MATCHA_RECENCY: env === "staging" ? "on" : "off", // twin of SPONSOR_MATCH_RECENCY
+        // ⚠ THESE TWO MOVE TOGETHER. `MATCHA=on` + `MATCHA_SPINE=off` is a SUPPORTED config, not
+        // an error: it serves the surface off the BESPOKE engine, which lost the bake-off
+        // decisively (nDCG@20 0.367 vs the spine's 0.594) and returned ZERO real scleroderma
+        // experts on the rare-disease fixture. The console would look perfectly healthy and hand
+        // out the wrong researchers. Never flip one without the other.
+        MATCHA: "on", // Prod-ON since 2026-07-13 (as SPONSOR_MATCH; the eval picked the spine).
+        MATCHA_SPINE: "on", // Prod-ON since 2026-07-13, TOGETHER with MATCHA above.
+        // Both below are RANKING changes ⇒ eval-gated: staging-on to A/B, prod-off until a clean
+        // off-vs-on run clears the sponsor eval's ~0.0074 nDCG noise floor. A one-sided staging
+        // run (no off arm) cannot prove either. The rename did not reset that debt.
+        MATCHA_GLOSS_QUERY: env === "staging" ? "on" : "off",
+        MATCHA_RECENCY: env === "staging" ? "on" : "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim

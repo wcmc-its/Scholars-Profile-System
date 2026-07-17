@@ -5,7 +5,7 @@
  *    credited once (max-`score` row), never once per topic;
  *  - relevance actually WEIGHTS the ranking (not just gates the pool);
  *  - empty/whitespace/control-char input short-circuits with NO OpenSearch call;
- *  - route wiring: 404 while SPONSOR_MATCH is off, 403 + denial log for a
+ *  - route wiring: 404 while MATCHA is off, 403 + denial log for a
  *    non-developer, 400 on a missing description, 200 happy-path shape;
  *  - BOTH engines answer in the UI contract's `{ concepts, candidates }` shape (bespoke
  *    maps into it with no decomposition: empty concepts + empty contributions, but real
@@ -122,8 +122,8 @@ function row(cwid: string, pmid: string, parentTopicId: string, score: number) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  process.env.SPONSOR_MATCH = "on";
-  process.env.SPONSOR_MATCH_SPINE = "off";
+  process.env.MATCHA = "on";
+  process.env.MATCHA_SPINE = "off";
   mockScholarFindMany.mockResolvedValue([]);
   mockTechnologyGroupBy.mockResolvedValue([]);
   mockPublicationFindMany.mockResolvedValue([]);
@@ -259,7 +259,7 @@ describe("POST /api/edit/matcha (route)", () => {
   }
 
   it("404s while the flag is off", async () => {
-    process.env.SPONSOR_MATCH = "off";
+    process.env.MATCHA = "off";
     const resp = await POST(postRequest(developerCtx, { description: "x" }));
     expect(resp.status).toBe(404);
     expect(mockReadEditRequest).not.toHaveBeenCalled();
@@ -362,9 +362,9 @@ describe("POST /api/edit/matcha (route)", () => {
     expect(body.preferences[0]).toMatchObject({ measure: "careerStage", stages: ["early"] });
   });
 
-  describe("engine selection (SPONSOR_MATCH_SPINE)", () => {
+  describe("engine selection (MATCHA_SPINE)", () => {
     it("spine flag OFF: always bespoke, and any `engine` field is ignored", async () => {
-      process.env.SPONSOR_MATCH_SPINE = "off";
+      process.env.MATCHA_SPINE = "off";
       const resp = await POST(postRequest(developerCtx, { description: "x", engine: "spine" }));
       expect(resp.status).toBe(200);
       expect(mockRankForDescription).toHaveBeenCalledWith("x");
@@ -372,7 +372,7 @@ describe("POST /api/edit/matcha (route)", () => {
     });
 
     it("spine flag ON: defaults to the spine engine (no engine field)", async () => {
-      process.env.SPONSOR_MATCH_SPINE = "on";
+      process.env.MATCHA_SPINE = "on";
       const resp = await POST(postRequest(developerCtx, { description: "x" }));
       expect(resp.status).toBe(200);
       expect(mockRankSpine).toHaveBeenCalledWith("x");
@@ -380,7 +380,7 @@ describe("POST /api/edit/matcha (route)", () => {
     });
 
     it("spine flag ON: `engine: \"bespoke\"` forces the bespoke engine", async () => {
-      process.env.SPONSOR_MATCH_SPINE = "on";
+      process.env.MATCHA_SPINE = "on";
       const resp = await POST(postRequest(developerCtx, { description: "x", engine: "bespoke" }));
       expect(resp.status).toBe(200);
       expect(mockRankForDescription).toHaveBeenCalledWith("x");
@@ -388,7 +388,7 @@ describe("POST /api/edit/matcha (route)", () => {
     });
 
     it("spine flag ON: `engine: \"spine\"` forces the spine engine", async () => {
-      process.env.SPONSOR_MATCH_SPINE = "on";
+      process.env.MATCHA_SPINE = "on";
       const resp = await POST(postRequest(developerCtx, { description: "x", engine: "spine" }));
       expect(resp.status).toBe(200);
       expect(mockRankSpine).toHaveBeenCalledWith("x");
@@ -396,7 +396,7 @@ describe("POST /api/edit/matcha (route)", () => {
     });
 
     it("spine flag ON: an unrecognized `engine` value → 400, neither engine called", async () => {
-      process.env.SPONSOR_MATCH_SPINE = "on";
+      process.env.MATCHA_SPINE = "on";
       const resp = await POST(postRequest(developerCtx, { description: "x", engine: "turbo" }));
       expect(resp.status).toBe(400);
       expect(await resp.json()).toMatchObject({ ok: false, error: "invalid_engine", field: "engine" });
@@ -405,7 +405,7 @@ describe("POST /api/edit/matcha (route)", () => {
     });
 
     it("spine flag ON: ships the spine's decomposed concepts + candidates verbatim", async () => {
-      process.env.SPONSOR_MATCH_SPINE = "on";
+      process.env.MATCHA_SPINE = "on";
       const concepts = [
         {
           term: "cancer metabolism",
@@ -456,7 +456,7 @@ describe("POST /api/edit/matcha (route)", () => {
   // is now client-side (`rerankCandidates`) over the already-fetched candidates.
   describe("no concept override (the contract's hinge)", () => {
     beforeEach(() => {
-      process.env.SPONSOR_MATCH_SPINE = "on";
+      process.env.MATCHA_SPINE = "on";
     });
 
     it("ignores a `concepts` body field entirely — it is not an input any more", async () => {
@@ -482,7 +482,7 @@ describe("POST /api/edit/matcha (route)", () => {
   // ── Retention (#6d) ───────────────────────────────────────────────────────
   describe("retained searches", () => {
     it("retains the search — the paste IN FULL, its handle, engine, count and actor", async () => {
-      process.env.SPONSOR_MATCH_SPINE = "on";
+      process.env.MATCHA_SPINE = "on";
       mockRankSpine.mockResolvedValue({
         concepts: [
           { term: "cancer metabolism", kind: "concept", members: [], centrality: 0.9, weightFactor: 1 },
@@ -522,7 +522,7 @@ describe("POST /api/edit/matcha (route)", () => {
     it("STILL SERVES THE RANKING when the retention write fails — the archive is a by-product", async () => {
       // A retention failure must never cost the officer their answer. If this ever regresses,
       // a DB blip takes down the matcher itself.
-      process.env.SPONSOR_MATCH_SPINE = "on";
+      process.env.MATCHA_SPINE = "on";
       mockRankSpine.mockResolvedValue({ concepts: [], candidates: [] });
       mockSubmissionCreate.mockRejectedValue(new Error("db down"));
 

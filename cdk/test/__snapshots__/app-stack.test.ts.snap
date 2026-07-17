@@ -419,22 +419,6 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
-                "Name": "SPONSOR_MATCH",
-                "Value": "on",
-              },
-              {
-                "Name": "SPONSOR_MATCH_SPINE",
-                "Value": "on",
-              },
-              {
-                "Name": "SPONSOR_MATCH_GLOSS_QUERY",
-                "Value": "off",
-              },
-              {
-                "Name": "SPONSOR_MATCH_RECENCY",
-                "Value": "off",
-              },
-              {
                 "Name": "MATCHA",
                 "Value": "on",
               },
@@ -4149,22 +4133,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "AVAILABLE_TECHNOLOGIES_SECTION",
-                "Value": "on",
-              },
-              {
-                "Name": "SPONSOR_MATCH",
-                "Value": "on",
-              },
-              {
-                "Name": "SPONSOR_MATCH_SPINE",
-                "Value": "on",
-              },
-              {
-                "Name": "SPONSOR_MATCH_GLOSS_QUERY",
-                "Value": "on",
-              },
-              {
-                "Name": "SPONSOR_MATCH_RECENCY",
                 "Value": "on",
               },
               {

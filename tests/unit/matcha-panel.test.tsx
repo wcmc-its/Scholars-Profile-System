@@ -344,7 +344,7 @@ describe("MatchaPanel", () => {
   });
 
   /**
-   * The bespoke engine (whenever SPONSOR_MATCH_SPINE is off) ships concepts: [] and
+   * The bespoke engine (whenever MATCHA_SPINE is off) ships concepts: [] and
    * contributions: [], carrying its real BM25 score in fusedScore. Re-ranking that by the
    * formula would zero every score — leaving the ORDER correct, so the list looks fine, while
    * every fit badge silently collapses to "Weak fit", top hit included.

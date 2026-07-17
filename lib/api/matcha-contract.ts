@@ -493,7 +493,7 @@ export type MatchaCandidate = {
    * D1 — the scholar's most-recent publication YEAR (derived from the precomputed people-doc
    * `mostRecentPubDate`). Two consumers, one field: the recency ranking input (`recencyWeight`,
    * folded into `fusedScore`) and D8's compact-row "latest YYYY" (`latestEvidenceYear`).
-   * Present only under `SPONSOR_MATCH_RECENCY`; absent ⇒ recency is neutral (×1) and the row
+   * Present only under `MATCHA_RECENCY`; absent ⇒ recency is neutral (×1) and the row
    * renders no year — exactly today's behavior. Absent ≠ 0.
    */
   mostRecentYear?: number | null;
@@ -505,7 +505,7 @@ export type MatchaCandidate = {
    * `fusedScore`.
    *
    * Unlike `mostRecentYear` this is unflagged: the spine always asks for it, because a sort is a
-   * presentation affordance and must work regardless of `SPONSOR_MATCH_RECENCY`. Absent/null ⇒ the
+   * presentation affordance and must work regardless of `MATCHA_RECENCY`. Absent/null ⇒ the
    * doc predates the field; a sort must place those deliberately rather than treat null as "".
    */
   lastNameSort?: string | null;
@@ -1061,7 +1061,7 @@ export function evidenceMatchCount(evidence: ResultEvidence): number | null {
  * The most-recent evidence year we ALREADY HOLD for a candidate — D8's compact-row "latest YYYY".
  *
  * D1 landed the per-scholar year on the production SPINE path: `mostRecentYear` (from the people-doc
- * `mostRecentPubDate`), surfaced under `SPONSOR_MATCH_RECENCY`. Read it first. The bespoke engine
+ * `mostRecentPubDate`), surfaced under `MATCHA_RECENCY`. Read it first. The bespoke engine
  * ships no `mostRecentYear` but carries per-paper years up front in `evidence.papers`, so fall back
  * to the max of those. Returns `null` when neither is present (flag off, or a scholar with no dated
  * evidence) — the compact row then renders no year, as before.

@@ -5,7 +5,7 @@
  *    incidental 0.3, terms trimmed, empty/whitespace terms dropped, case-insensitive
  *    dedupe (first wins), capped at 12;
  *  - the model id defaults to the pinned Sonnet profile and honours the
- *    `SPONSOR_MATCH_EXTRACT_MODEL` override (runtime rollback lever);
+ *    `MATCHA_EXTRACT_MODEL` override (runtime rollback lever);
  *  - a deterministic config reaches the call (temperature 0 on the Sonnet profile,
  *    which accepts it; a structured schema; a bounded output budget);
  *  - an empty/whitespace paste short-circuits WITHOUT calling the model;
@@ -163,20 +163,20 @@ describe("extractMatchaConcepts", () => {
     expect(args.system).toContain("CENTRALITY");
   });
 
-  it("defaults to the pinned Sonnet profile and honours the SPONSOR_MATCH_EXTRACT_MODEL override", async () => {
+  it("defaults to the pinned Sonnet profile and honours the MATCHA_EXTRACT_MODEL override", async () => {
     mockGenerateObject.mockResolvedValue(objectWith([{ term: "cystic fibrosis", centrality: 1 }]));
 
     await extractMatchaConcepts("some sponsor prose");
     expect(capturedModelIds.at(-1)).toBe("us.anthropic.claude-sonnet-4-5-20250929-v1:0");
 
-    const orig = process.env.SPONSOR_MATCH_EXTRACT_MODEL;
-    process.env.SPONSOR_MATCH_EXTRACT_MODEL = "us.anthropic.claude-sonnet-4-6-v1:0";
+    const orig = process.env.MATCHA_EXTRACT_MODEL;
+    process.env.MATCHA_EXTRACT_MODEL = "us.anthropic.claude-sonnet-4-6-v1:0";
     try {
       await extractMatchaConcepts("some sponsor prose");
       expect(capturedModelIds.at(-1)).toBe("us.anthropic.claude-sonnet-4-6-v1:0");
     } finally {
-      if (orig === undefined) delete process.env.SPONSOR_MATCH_EXTRACT_MODEL;
-      else process.env.SPONSOR_MATCH_EXTRACT_MODEL = orig;
+      if (orig === undefined) delete process.env.MATCHA_EXTRACT_MODEL;
+      else process.env.MATCHA_EXTRACT_MODEL = orig;
     }
   });
 
