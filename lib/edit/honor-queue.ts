@@ -51,9 +51,10 @@ export type HonorQueueRow = {
   name: string;
   organization: string;
   year: number | null;
-  /** Prestige weight of the honor, 0–100, from `HONOR_PRESTIGE` keyed on
-   *  `organization`. A sort dimension, not a hard rank; unknown bodies score 0
-   *  and sink. Editable — see the map. */
+  /** Prestige weight of the honor from `HONOR_PRESTIGE` keyed on `organization`.
+   *  Mostly 0–100; the individual mega-prizes (Nobel/Lasker/MacArthur) score
+   *  above 100. A sort dimension, not a hard rank; unknown bodies score 0 and
+   *  sink. Editable — see the map. */
   prestige: number;
   source: string;
   sourceRef: string | null;
@@ -87,11 +88,22 @@ export type HonorQueueGroup = {
  *
  * These weights are a DEFERABLE JUDGEMENT, deliberately in one editable table so
  * the Dean's office can retune without touching logic. The ordering encodes the
- * usual academic reading — the national academies and HHMI at the top, the
- * clinical/scientific societies next, the early-career fellowships below — but
- * it is a starting point, not a claim of exact rank. Unknown bodies → 0.
+ * usual academic reading — the individual mega-prizes above the national
+ * academies and HHMI, the clinical/scientific societies next, the early-career
+ * fellowships below — but it is a starting point, not a claim of exact rank.
+ * Unknown bodies → 0.
+ *
+ * The 0–100 band is descriptive, NOT a cap (#1762 round 4): a Nobel is another
+ * tier above academy *membership*, so the mega-prizes score above 100. Retune
+ * with the Dean's office.
  */
 export const HONOR_PRESTIGE: Readonly<Record<string, number>> = {
+  // Individual mega-prizes — above 100 on purpose (see note). Keyed on the exact
+  // `organization` the NOBEL/LASKER seed writes; the specific prize lives in the
+  // honor `name` ("Nobel Prize in Physiology or Medicine").
+  "Nobel Foundation": 120,
+  "Lasker Foundation": 112,
+  "John D. and Catherine T. MacArthur Foundation": 108,
   "National Academy of Sciences": 100,
   "National Academy of Medicine": 100,
   "Howard Hughes Medical Institute": 96,

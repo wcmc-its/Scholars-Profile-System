@@ -141,13 +141,15 @@ export function AdminSubnav({
             to decide between a count and `null`, so the count IS the gate — a
             second one here could only ever disagree with it. The slug tab keeps
             `superuserSurfaces` because it genuinely is superuser-only. */}
+        {/* #1762 round 4: NO count badge — the curator asked to drop the pending
+            count from the tab. `pendingHonors` still gates visibility (null hides
+            the tab), it just no longer renders a pill. */}
         {pendingHonors !== null && (
           <AdminTab
             href="/edit/honors-queue"
             id="honors-queue"
             label="Honors"
             active={active === "honors-queue"}
-            count={pendingHonors}
           />
         )}
         {/* Always visible to superusers — the slug namespace (active / historical
