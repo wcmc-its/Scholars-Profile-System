@@ -27,7 +27,7 @@ import { toCsv } from "@/lib/csv";
 
 /** One exported row. Every field is already on the wire or derived client-side from it —
  *  this export adds no new data requirement to the ranker. */
-export type SponsorMatchCsvRow = {
+export type MatchaCsvRow = {
   /** The FIT rank, taken before filtering — so a filtered export still says "#7 overall",
    *  matching what the row shows on screen. Never the position within the filtered subset. */
   rank: number;
@@ -66,7 +66,7 @@ const HEADERS = [
   "Profile URL",
 ] as const;
 
-export function buildSponsorMatchCsv(rows: readonly SponsorMatchCsvRow[]): string {
+export function buildMatchaCsv(rows: readonly MatchaCsvRow[]): string {
   return toCsv(
     HEADERS,
     rows.map((r) => [

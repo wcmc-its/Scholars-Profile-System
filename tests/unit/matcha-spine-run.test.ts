@@ -6,7 +6,7 @@
  *  - takes NO concept override: re-ranking is client-side (`rerankCandidates`), so a
  *    slider drag costs zero round-trips. #1673's server-side override — which re-retrieved
  *    and re-fused on every drag — is deliberately gone;
- *  - LLM `extractSponsorConcepts` is the primary term source; its per-term centrality
+ *  - LLM `extractMatchaConcepts` is the primary term source; its per-term centrality
  *    reaches the fusion weight (a higher-centrality cluster outranks a lower one), and
  *    an empty LLM result falls back to the dictionary `extractTerms` (both empty ⇒ []);
  *  - term source → per-term MeSH resolution → cluster dedup → per-cluster
@@ -23,7 +23,7 @@
  *  - paging keys off the reported `result.pageSize`, not a copied constant;
  *  - empty/whitespace/control-char paste short-circuits with no vocab load or search;
  *  - a `searchPeople` failure propagates (no silent partial results).
- * Mocks db + searchPeople + matchQueryToTaxonomy + extractSponsorConcepts (never
+ * Mocks db + searchPeople + matchQueryToTaxonomy + extractMatchaConcepts (never
  * invokes Bedrock); the pure spine/axes helpers and `normalizeDescription` run for
  * real.
  */
@@ -34,7 +34,7 @@ import {
   matchedConcepts,
   MAX_EVIDENCE_CONCEPTS,
   rerankCandidates,
-} from "@/lib/api/sponsor-match-contract";
+} from "@/lib/api/matcha-contract";
 
 const {
   mockTopicFindMany,
@@ -81,14 +81,14 @@ vi.mock("@/lib/search", () => ({ meshMatchTier: vi.fn(() => "exact") }));
 // The real extractor returns { concepts, titleSummary }. The existing tests resolve this mock
 // with a bare concepts ARRAY, so wrap that shape here — a test that cares about the title can
 // resolve the full { concepts, titleSummary } object instead. The spy still records the paste.
-vi.mock("@/lib/api/sponsor-match-extract", () => ({
-  extractSponsorConcepts: (paste: string) =>
+vi.mock("@/lib/api/matcha-extract", () => ({
+  extractMatchaConcepts: (paste: string) =>
     Promise.resolve(mockExtractSponsorConcepts(paste)).then((r) =>
       Array.isArray(r) ? { concepts: r } : r,
     ),
 }));
 
-import { rankResearchersForDescriptionSpine } from "@/lib/api/sponsor-match-spine-run";
+import { rankResearchersForDescriptionSpine } from "@/lib/api/matcha-spine-run";
 
 /** A MeSH resolution stub — spine-run reads descriptorUi/descendantUis/confidence/
  *  curatedTopicAnchors/ambiguous/matchedForm/name. */

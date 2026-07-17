@@ -6,7 +6,7 @@
  * survive review. See `sponsor-match-contract.ts` (`weightFactor`).
  */
 import { describe, expect, it } from "vitest";
-import { mergeTermClusters, type ClusterTerm } from "@/lib/api/sponsor-match-axes";
+import { mergeTermClusters, type ClusterTerm } from "@/lib/api/matcha-axes";
 
 describe("mergeTermClusters (§5a redundant-phrasing dedup)", () => {
   // "cancer, oncology, leukemia" — oncology ≈ cancer (same set), leukemia ⊂ cancer.

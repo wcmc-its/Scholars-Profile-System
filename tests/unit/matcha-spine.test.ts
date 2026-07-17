@@ -3,8 +3,8 @@
  * weighted RRF. No db/network.
  */
 import { describe, expect, it } from "vitest";
-import { extractTerms, rrfFuse } from "@/lib/api/sponsor-match-spine";
-import { DEFAULT_K } from "@/lib/api/sponsor-match-contract";
+import { extractTerms, rrfFuse } from "@/lib/api/matcha-spine";
+import { DEFAULT_K } from "@/lib/api/matcha-contract";
 
 describe("extractTerms (v1 dictionary match)", () => {
   const vocab = ["CRISPR", "machine learning", "PCR", "cell", "t-test", "a.b"];

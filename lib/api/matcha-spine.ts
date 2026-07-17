@@ -1,5 +1,5 @@
 /**
- * Sponsor-match spine — pure composition helpers for the compose-`searchPeople`
+ * Matcha spine — pure composition helpers for the compose-`searchPeople`
  * ranking (handoff `docs/2026-07-11-sponsor-match-searchpeople-pivot-handoff.md`
  * §4/§6). No db, no network: the impure per-term `searchPeople` retrieval and the
  * term→MeSH resolution (`matchQueryToTaxonomy`) live in the caller; these two
@@ -11,7 +11,7 @@
  *                  `searchPeople` rankings (§4: score(s) = Σ_c weight_c / (K + rank)).
  */
 
-import { DEFAULT_K } from "@/lib/api/sponsor-match-contract";
+import { DEFAULT_K } from "@/lib/api/matcha-contract";
 
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -42,7 +42,7 @@ export function extractTerms(paste: string, vocab: string[]): string[] {
 }
 
 export type TermRanking = {
-  /** The cluster's representative term. Joins to `SponsorConcept.term` on the wire, so
+  /** The cluster's representative term. Joins to `MatchaConcept.term` on the wire, so
    *  the client can attribute each contribution back to the slider that drives it. */
   term: string;
   /** fusion weight for this cluster/term = centrality^γ × kindPrior (≥ 0). Corpus rarity is

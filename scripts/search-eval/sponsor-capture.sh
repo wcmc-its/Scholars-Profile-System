@@ -59,7 +59,7 @@ while IFS= read -r prompt; do
     # sets sec-fetch-site/origin, curl must send them explicitly or the route 403s. `engine` is
     # omitted deliberately — `useSpine = engine !== "bespoke"` makes undefined mean the spine,
     # which is the prod path and the only one that carries recency.
-    resp="$(curl -4 -s -w $'\n%{http_code}' --max-time 300 -X POST "$HOST/api/edit/sponsor-match" \
+    resp="$(curl -4 -s -w $'\n%{http_code}' --max-time 300 -X POST "$HOST/api/edit/matcha" \
       -H 'content-type: application/json' \
       -H 'sec-fetch-site: same-origin' \
       -H "origin: $HOST" \

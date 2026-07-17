@@ -41,7 +41,7 @@ vi.mock("@/lib/edit/overview-generator", () => ({
   modelAcceptsTemperature: (id: string) => !/claude-(opus-4-[78]|fable)/.test(id),
 }));
 
-import { extractSponsorConcepts } from "@/lib/api/sponsor-match-extract";
+import { extractMatchaConcepts } from "@/lib/api/matcha-extract";
 
 /** Shape a mocked generateObject success — it returns `{ object }`. */
 /** `kind` is optional here on purpose: the LLM's zod schema requires it, but
@@ -60,7 +60,7 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
-describe("extractSponsorConcepts", () => {
+describe("extractMatchaConcepts", () => {
   it("applies hygiene: clamp-high, non-finite/non-positive → 0.3 floor, trim, drop-empty, case-insensitive dedupe", async () => {
     mockGenerateObject.mockResolvedValue(
       objectWith([
@@ -77,7 +77,7 @@ describe("extractSponsorConcepts", () => {
       ]),
     );
 
-    const out = await extractSponsorConcepts("some sponsor prose");
+    const out = await extractMatchaConcepts("some sponsor prose");
 
     expect(out.concepts).toEqual([
       { term: "systemic sclerosis", kind: "concept", centrality: 1.0 },
@@ -104,7 +104,7 @@ describe("extractSponsorConcepts", () => {
       ]),
     );
 
-    const out = await extractSponsorConcepts("some sponsor prose");
+    const out = await extractMatchaConcepts("some sponsor prose");
 
     expect(out.concepts.map((c) => c.kind)).toEqual(["method", "concept", "concept", "concept"]);
   });
@@ -124,7 +124,7 @@ describe("extractSponsorConcepts", () => {
       ]),
     );
 
-    const out = await extractSponsorConcepts("some sponsor prose");
+    const out = await extractMatchaConcepts("some sponsor prose");
 
     // Absent stays absent (no `gloss` key), so a concept that stood alone never invents context.
     expect(out.concepts).toEqual([
@@ -145,7 +145,7 @@ describe("extractSponsorConcepts", () => {
       objectWith(Array.from({ length: 15 }, (_, i) => ({ term: `concept-${i}`, centrality: 0.5 }))),
     );
 
-    const out = await extractSponsorConcepts("a long call touching many topics");
+    const out = await extractMatchaConcepts("a long call touching many topics");
 
     expect(out.concepts).toHaveLength(12);
     expect(out.concepts[0].term).toBe("concept-0"); // order preserved (most-central-first from the model)
@@ -154,7 +154,7 @@ describe("extractSponsorConcepts", () => {
   it("sends a deterministic config — temperature 0, a schema, and a bounded output budget", async () => {
     mockGenerateObject.mockResolvedValue(objectWith([{ term: "cystic fibrosis", centrality: 1 }]));
 
-    await extractSponsorConcepts("cystic fibrosis research");
+    await extractMatchaConcepts("cystic fibrosis research");
 
     const args = mockGenerateObject.mock.calls[0][0];
     expect(args.temperature).toBe(0); // Sonnet accepts temperature (gate → true)
@@ -166,13 +166,13 @@ describe("extractSponsorConcepts", () => {
   it("defaults to the pinned Sonnet profile and honours the SPONSOR_MATCH_EXTRACT_MODEL override", async () => {
     mockGenerateObject.mockResolvedValue(objectWith([{ term: "cystic fibrosis", centrality: 1 }]));
 
-    await extractSponsorConcepts("some sponsor prose");
+    await extractMatchaConcepts("some sponsor prose");
     expect(capturedModelIds.at(-1)).toBe("us.anthropic.claude-sonnet-4-5-20250929-v1:0");
 
     const orig = process.env.SPONSOR_MATCH_EXTRACT_MODEL;
     process.env.SPONSOR_MATCH_EXTRACT_MODEL = "us.anthropic.claude-sonnet-4-6-v1:0";
     try {
-      await extractSponsorConcepts("some sponsor prose");
+      await extractMatchaConcepts("some sponsor prose");
       expect(capturedModelIds.at(-1)).toBe("us.anthropic.claude-sonnet-4-6-v1:0");
     } finally {
       if (orig === undefined) delete process.env.SPONSOR_MATCH_EXTRACT_MODEL;
@@ -181,21 +181,21 @@ describe("extractSponsorConcepts", () => {
   });
 
   it("short-circuits an empty/whitespace paste WITHOUT calling the model", async () => {
-    expect(await extractSponsorConcepts("")).toEqual({ concepts: [] });
-    expect(await extractSponsorConcepts("   \n\t ")).toEqual({ concepts: [] });
+    expect(await extractMatchaConcepts("")).toEqual({ concepts: [] });
+    expect(await extractMatchaConcepts("   \n\t ")).toEqual({ concepts: [] });
     expect(mockGenerateObject).not.toHaveBeenCalled();
   });
 
   it("returns no concepts when Bedrock errors — never throws", async () => {
     mockGenerateObject.mockRejectedValue(new Error("bedrock 500"));
-    await expect(extractSponsorConcepts("cancer immunotherapy")).resolves.toEqual({ concepts: [] });
+    await expect(extractMatchaConcepts("cancer immunotherapy")).resolves.toEqual({ concepts: [] });
   });
 
   it("returns no concepts when the model produces no valid object (unparseable output)", async () => {
     const err = new Error("no object generated");
     err.name = "AI_NoObjectGeneratedError";
     mockGenerateObject.mockRejectedValue(err);
-    await expect(extractSponsorConcepts("cancer immunotherapy")).resolves.toEqual({ concepts: [] });
+    await expect(extractMatchaConcepts("cancer immunotherapy")).resolves.toEqual({ concepts: [] });
   });
 
   it("carries a titleSummary through, cleaned — trims, collapses whitespace, drops a trailing period", async () => {
@@ -206,7 +206,7 @@ describe("extractSponsorConcepts", () => {
       },
     });
 
-    const out = await extractSponsorConcepts("some sponsor prose");
+    const out = await extractMatchaConcepts("some sponsor prose");
 
     expect(out.titleSummary).toBe("Vertex — gene editing for cystic fibrosis");
   });
@@ -218,9 +218,9 @@ describe("extractSponsorConcepts", () => {
         titleSummary: "x".repeat(200), // over the length cap → rejected
       },
     });
-    expect((await extractSponsorConcepts("prose")).titleSummary).toBeUndefined();
+    expect((await extractMatchaConcepts("prose")).titleSummary).toBeUndefined();
 
     mockGenerateObject.mockResolvedValue(objectWith([{ term: "cystic fibrosis", centrality: 1 }]));
-    expect((await extractSponsorConcepts("prose")).titleSummary).toBeUndefined(); // omitted by model
+    expect((await extractMatchaConcepts("prose")).titleSummary).toBeUndefined(); // omitted by model
   });
 });

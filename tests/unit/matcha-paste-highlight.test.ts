@@ -7,10 +7,10 @@
  */
 import { describe, expect, it } from "vitest";
 
-import type { SponsorConcept } from "@/lib/api/sponsor-match-contract";
-import { markPaste, markedConceptCount } from "@/lib/sponsor-paste-highlight";
+import type { MatchaConcept } from "@/lib/api/matcha-contract";
+import { markPaste, markedConceptCount } from "@/lib/matcha-paste-highlight";
 
-function concept(term: string, members: string[] = []): SponsorConcept {
+function concept(term: string, members: string[] = []): MatchaConcept {
   return { term, kind: "concept", members, centrality: 0.5, weightFactor: 1 };
 }
 

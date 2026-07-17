@@ -71,7 +71,7 @@ if [[ "$MODE" == "fetch" ]]; then
       # /api/edit/* enforces a same-origin guard (lib/edit/authz.ts verifyRequestOrigin):
       # Sec-Fetch-Site=same-origin (primary) or Origin-host==Host (fallback). A browser
       # fetch sets these; curl must send them explicitly or the route 403s (cross_origin).
-      resp="$(curl -4 -s -w $'\n%{http_code}' --max-time 300 -X POST "$HOST/api/edit/sponsor-match" \
+      resp="$(curl -4 -s -w $'\n%{http_code}' --max-time 300 -X POST "$HOST/api/edit/matcha" \
         -H 'content-type: application/json' \
         -H 'sec-fetch-site: same-origin' \
         -H "origin: $HOST" \
@@ -96,7 +96,7 @@ if [[ "$MODE" == "fetch" ]]; then
       echo 'null'; return
     fi
     # Tolerate every ranked-list shape this route has ever returned; [] if none present.
-    # `candidates` is the CURRENT one (the UI ⇄ ranker contract, `lib/api/sponsor-match-contract.ts`);
+    # `candidates` is the CURRENT one (the UI ⇄ ranker contract, `lib/api/matcha-contract.ts`);
     # `researchers` is what it returned before that landed. BOTH are kept on purpose — this harness
     # probes a DEPLOYED environment, so it has to score a staging box running the old shape and a
     # freshly-deployed one running the new shape, often on the same afternoon. Drop `researchers` and

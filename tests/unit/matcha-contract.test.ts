@@ -29,16 +29,16 @@ import {
   matchedEvidence,
   rareTerms,
   rerankCandidates,
-  sponsorAskFrom,
-  type SponsorCandidate,
-  type SponsorConcept,
-  type SponsorPreference,
-  type SponsorSearchEvidence,
-} from "@/lib/api/sponsor-match-contract";
+  askTitleFrom,
+  type MatchaCandidate,
+  type MatchaConcept,
+  type MatchaPreference,
+  type MatchaSearchEvidence,
+} from "@/lib/api/matcha-contract";
 import type { ResultEvidence } from "@/lib/api/result-evidence";
-import { rrfFuse, type TermRanking } from "@/lib/api/sponsor-match-spine";
+import { rrfFuse, type TermRanking } from "@/lib/api/matcha-spine";
 
-function concept(term: string, centrality: number, weightFactor: number): SponsorConcept {
+function concept(term: string, centrality: number, weightFactor: number): MatchaConcept {
   return { term, kind: "concept", members: [term], centrality, weightFactor };
 }
 
@@ -46,7 +46,7 @@ function candidate(
   cwid: string,
   contributions: { term: string; rank: number }[],
   fused = 0,
-): SponsorCandidate {
+): MatchaCandidate {
   return {
     cwid,
     name: cwid,
@@ -206,7 +206,7 @@ describe("matchedConcepts", () => {
 
 describe("matchedEvidence (#1696)", () => {
   /** The spine's per-concept evidence, reduced to what this join cares about. */
-  function ev(term: string): SponsorSearchEvidence {
+  function ev(term: string): MatchaSearchEvidence {
     return {
       term,
       evidence: {
@@ -224,7 +224,7 @@ describe("matchedEvidence (#1696)", () => {
   const THREE = [concept("target", 1, 1), concept("mech", 0.5, 1), concept("aside", 0.2, 1)];
 
   it("renders one block per matched concept, ordered like the chips", () => {
-    const c: SponsorCandidate = {
+    const c: MatchaCandidate = {
       ...candidate("a", [
         { term: "aside", rank: 1 },
         { term: "target", rank: 4 },
@@ -251,7 +251,7 @@ describe("matchedEvidence (#1696)", () => {
   });
 
   it("emits NO block for a concept with no evidence — absent is not an empty block", () => {
-    const c: SponsorCandidate = {
+    const c: MatchaCandidate = {
       ...candidate("a", [
         { term: "target", rank: 1 },
         { term: "mech", rank: 2 },
@@ -269,7 +269,7 @@ describe("matchedEvidence (#1696)", () => {
     // The card must not go on captioning "mech" as a reason after the officer has said the
     // sponsor does not care about it — the block would contradict the ranking beside it.
     const muted = [concept("target", 1, 1), concept("mech", 0, 1)];
-    const c: SponsorCandidate = {
+    const c: MatchaCandidate = {
       ...candidate("a", [
         { term: "target", rank: 1 },
         { term: "mech", rank: 2 },
@@ -289,7 +289,7 @@ describe("matchedEvidence (#1696)", () => {
 });
 
 describe("conceptCoverage", () => {
-  function ev(term: string): SponsorSearchEvidence {
+  function ev(term: string): MatchaSearchEvidence {
     return {
       term,
       evidence: { kind: "publications", strength: "tagged", text: "t", term, count: 1 },
@@ -301,7 +301,7 @@ describe("conceptCoverage", () => {
   const ASK = [concept("target", 1, 1), concept("mech", 0.8, 1), concept("gap", 0.5, 1)];
 
   it("reports the GAP — an asked concept the candidate never ranked under", () => {
-    const c: SponsorCandidate = {
+    const c: MatchaCandidate = {
       ...candidate("a", [{ term: "target", rank: 1 }]),
       searchEvidence: [ev("target")],
     };
@@ -318,7 +318,7 @@ describe("conceptCoverage", () => {
     // `mech` ranked but the spine shipped no block for it (it caps at MAX_EVIDENCE_CONCEPTS by
     // strength at DEFAULT weights). That is reachable by dragging a slider, and it must never
     // collapse into the same state as `gap`, which the candidate simply does not have.
-    const c: SponsorCandidate = {
+    const c: MatchaCandidate = {
       ...candidate("a", [
         { term: "target", rank: 1 },
         { term: "mech", rank: 2 },
@@ -334,7 +334,7 @@ describe("conceptCoverage", () => {
   it("`evidence` means a block RENDERS — evidence for a concept never ranked under is not one", () => {
     // Guards the strip against promising a block that `matchedEvidence` will not produce: it
     // derives from `matchedConcepts` (contributions), so wire evidence alone is not enough.
-    const c: SponsorCandidate = {
+    const c: MatchaCandidate = {
       ...candidate("a", [{ term: "target", rank: 1 }]),
       searchEvidence: [ev("target"), ev("gap")],
     };
@@ -384,7 +384,7 @@ describe("fitTier", () => {
 
 describe("rareTerms", () => {
   /** A concept carrying a measured corpus coverage (the display-only field). */
-  function covered(term: string, corpusCoverage: number): SponsorConcept {
+  function covered(term: string, corpusCoverage: number): MatchaConcept {
     return { term, kind: "concept", members: [term], centrality: 1, weightFactor: 1, corpusCoverage };
   }
 
@@ -423,17 +423,17 @@ describe("rareTerms", () => {
   // weight is a claim about the RANKING. Moving weightFactor must not move the badge —
   // otherwise we are back to the misleading badge the finding called out.
   it("is independent of weightFactor", () => {
-    const a: SponsorConcept[] = [
+    const a: MatchaConcept[] = [
       { term: "x", kind: "concept", members: ["x"], centrality: 1, weightFactor: 1, corpusCoverage: 1e-5 },
       { term: "y", kind: "concept", members: ["y"], centrality: 1, weightFactor: 1, corpusCoverage: 1e-3 },
     ];
-    const b: SponsorConcept[] = a.map((c) => ({ ...c, weightFactor: 999, centrality: 0.01 }));
+    const b: MatchaConcept[] = a.map((c) => ({ ...c, weightFactor: 999, centrality: 0.01 }));
     expect(rareTerms(b)).toEqual(rareTerms(a));
   });
 });
 
 /**
- * `sponsorAskFrom` — the search's handle.
+ * `askTitleFrom` — the search's handle.
  *
  * These exist to pin a DESIGN decision, not just behaviour: the title PREFERS the essence
  * handle the extractor wrote in the SAME call that read the concepts (`titleSummary`), and
@@ -444,8 +444,8 @@ describe("rareTerms", () => {
  * reintroduces a separate call, these tests should be deleted deliberately, not quietly made
  * to pass.
  */
-describe("sponsorAskFrom", () => {
-  const prefs: SponsorPreference[] = [
+describe("askTitleFrom", () => {
+  const prefs: MatchaPreference[] = [
     {
       label: "Early career",
       evidence: "…reserved for early-career investigators…",
@@ -456,7 +456,7 @@ describe("sponsorAskFrom", () => {
   ];
 
   it("names the search after its top concepts", () => {
-    const ask = sponsorAskFrom([
+    const ask = askTitleFrom([
       concept("cardiac fibrosis", 0.9, 1),
       concept("myofibroblast differentiation", 0.8, 1),
     ]);
@@ -464,7 +464,7 @@ describe("sponsorAskFrom", () => {
   });
 
   it("stops at two concepts — more is a list, not a handle", () => {
-    const ask = sponsorAskFrom([
+    const ask = askTitleFrom([
       concept("a", 0.9, 1),
       concept("b", 0.8, 1),
       concept("c", 0.7, 1),
@@ -474,18 +474,18 @@ describe("sponsorAskFrom", () => {
   });
 
   it("appends the non-topical ask when the sponsor stated one", () => {
-    const ask = sponsorAskFrom([concept("cardiac fibrosis", 0.9, 1)], prefs);
+    const ask = askTitleFrom([concept("cardiac fibrosis", 0.9, 1)], prefs);
     expect(ask?.title).toBe("cardiac fibrosis · Early career");
   });
 
   it("is ABSENT when there are no concepts — never an empty-string title", () => {
     // Absent ≠ empty, the contract's rule. The bespoke engine returns `concepts: []`, so this
     // is the live path, not a hypothetical: it must yield no header at all.
-    expect(sponsorAskFrom([], prefs)).toBeUndefined();
+    expect(askTitleFrom([], prefs)).toBeUndefined();
   });
 
   it("prefers the extractor's titleSummary over the derived concept list", () => {
-    const ask = sponsorAskFrom(
+    const ask = askTitleFrom(
       [concept("cardiac fibrosis", 0.9, 1), concept("myofibroblast differentiation", 0.8, 1)],
       [],
       "Acme Bio — cardiac fibrosis reversal",
@@ -494,22 +494,22 @@ describe("sponsorAskFrom", () => {
   });
 
   it("appends preference chips to the titleSummary base, same as the concept-list base", () => {
-    const ask = sponsorAskFrom([concept("cardiac fibrosis", 0.9, 1)], prefs, "Acme Bio — cardiac fibrosis");
+    const ask = askTitleFrom([concept("cardiac fibrosis", 0.9, 1)], prefs, "Acme Bio — cardiac fibrosis");
     expect(ask?.title).toBe("Acme Bio — cardiac fibrosis · Early career");
   });
 
   it("falls back to the concept list when titleSummary is blank, and titles even a zero-concept search when the extractor named one", () => {
     // A whitespace-only summary is not a title — derive from concepts instead.
-    expect(sponsorAskFrom([concept("cardiac fibrosis", 0.9, 1)], [], "   ")?.title).toBe(
+    expect(askTitleFrom([concept("cardiac fibrosis", 0.9, 1)], [], "   ")?.title).toBe(
       "cardiac fibrosis",
     );
     // The bespoke path has no title; but if a summary is present with no concepts, name it.
-    expect(sponsorAskFrom([], [], "Acme Bio — rare disease")?.title).toBe("Acme Bio — rare disease");
+    expect(askTitleFrom([], [], "Acme Bio — rare disease")?.title).toBe("Acme Bio — rare disease");
   });
 });
 
 describe("hasMatchEvidence — the zero-evidence exclusion", () => {
-  const ev: SponsorSearchEvidence = {
+  const ev: MatchaSearchEvidence = {
     term: "t",
     evidence: { kind: "publications", strength: "tagged", text: "1 of 10 tagged t", term: "t", count: 1 },
     pubCount: 10,

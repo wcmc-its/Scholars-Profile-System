@@ -20,10 +20,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import { SponsorMatchPanel } from "@/components/edit/sponsor-match-panel";
-import type { SponsorCandidate, SponsorConcept } from "@/lib/api/sponsor-match-contract";
+import { MatchaPanel } from "@/components/edit/matcha-panel";
+import type { MatchaCandidate, MatchaConcept } from "@/lib/api/matcha-contract";
 
-const CONCEPTS: SponsorConcept[] = [
+const CONCEPTS: MatchaConcept[] = [
   {
     term: "Immuno-oncology",
     kind: "concept",
@@ -33,7 +33,7 @@ const CONCEPTS: SponsorConcept[] = [
   },
 ];
 
-const CANDIDATES: SponsorCandidate[] = [
+const CANDIDATES: MatchaCandidate[] = [
   {
     cwid: "aaa1001",
     name: "Alice Alpha",
@@ -100,8 +100,8 @@ const contactCalls = (m: { mock: { calls: unknown[][] } }) =>
   m.mock.calls.filter((c) => String(c[0]).includes("/contact-email"));
 
 async function renderAndSearch() {
-  render(<SponsorMatchPanel />);
-  fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+  render(<MatchaPanel />);
+  fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
   fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
   await screen.findByText("Alice Alpha");
 }
@@ -120,7 +120,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("sponsor-match Contact button", () => {
+describe("matcha Contact button", () => {
   it("resolves NO addresses at render — one button per card, zero directory lookups", async () => {
     // THE FAN-OUT GUARD. Two candidates here; a real paste ranks ~341. Eager resolution would be
     // one uncached lookup per card, per search, for a button most rows never get pressed on.

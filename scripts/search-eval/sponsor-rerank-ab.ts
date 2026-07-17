@@ -29,10 +29,10 @@ import {
   rerankCandidates,
   recencyWeight,
   DEFAULT_K,
-  type SponsorCandidate,
-  type SponsorConcept,
-} from "@/lib/api/sponsor-match-contract";
-import { rrfFuse } from "@/lib/api/sponsor-match-spine";
+  type MatchaCandidate,
+  type MatchaConcept,
+} from "@/lib/api/matcha-contract";
+import { rrfFuse } from "@/lib/api/matcha-spine";
 
 /**
  * The recency clock. `currentYear` is the one score input the server does NOT ship on the wire
@@ -60,7 +60,7 @@ const CURRENT_YEAR = Number(process.env.CURRENT_YEAR ?? new Date().getUTCFullYea
  * lexicographic min of (concept index, rank) over its contributions.
  */
 function firstSeenKey(
-  candidate: SponsorCandidate,
+  candidate: MatchaCandidate,
   conceptIndex: ReadonlyMap<string, number>,
 ): [number, number] {
   let best: [number, number] = [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER];
@@ -74,8 +74,8 @@ function firstSeenKey(
 
 /** Both arms from one payload. The ONLY difference is `recency` — everything else is shared. */
 function armsFor(
-  concepts: readonly SponsorConcept[],
-  candidates: readonly SponsorCandidate[],
+  concepts: readonly MatchaConcept[],
+  candidates: readonly MatchaCandidate[],
   currentYear: number,
 ) {
   const conceptIndex = new Map(concepts.map((c, i) => [c.term, i]));
@@ -109,7 +109,7 @@ if (process.argv[2] === "--selftest") {
   const concepts = [
     { term: "alpha", kind: "concept", members: ["alpha"], centrality: 0.9, weightFactor: 1.25 },
     { term: "beta", kind: "concept", members: ["beta"], centrality: 0.9, weightFactor: 1.25 },
-  ] as unknown as SponsorConcept[];
+  ] as unknown as MatchaConcept[];
   const w = 0.9 ** 3 * 1.25;
   const rankings = [
     { term: "alpha", weight: w, ranked: ["x", "z"] },
@@ -131,7 +131,7 @@ if (process.argv[2] === "--selftest") {
     fusedScore: f.score,
     contributions: f.contributions,
     mostRecentYear: years[f.cwid],
-  })) as unknown as SponsorCandidate[];
+  })) as unknown as MatchaCandidate[];
 
   const arms = armsFor(concepts, wire, YEAR);
   ok("arm OFF reproduces the server's flag-off order", JSON.stringify(arms.off.map((c) => c.cwid)) === JSON.stringify(serverOff), `${arms.off.map((c) => c.cwid).join(",")} vs ${serverOff.join(",")}`);
@@ -180,8 +180,8 @@ if (captured.length === 0) {
 
 for (const id of captured) {
   const body = JSON.parse(readFileSync(join(dir, `${id}.json`), "utf8")) as {
-    concepts: SponsorConcept[];
-    candidates: SponsorCandidate[];
+    concepts: MatchaConcept[];
+    candidates: MatchaCandidate[];
   };
   const { concepts, candidates } = body;
 
