@@ -408,51 +408,34 @@ export type HonorEntry = {
   year: number | null;
 };
 
-/** Issue #1760 — the honor categories in `HonorCategory` enum order. This array
- *  IS the profile's group order; the enum's declaration order is the contract,
- *  not an alphabetisation of it. */
-export const HONOR_CATEGORY_ORDER: readonly HonorCategory[] = [
-  "ACADEMY_MEMBERSHIP",
-  "INVESTIGATORSHIP",
-  "PRIZE",
-  "OTHER",
-];
-
-/** One rendered honor group: a category and its rows, already ordered. */
-export type HonorGroup = {
-  category: HonorCategory;
-  entries: HonorEntry[];
-};
-
 /**
- * Issue #1760 — partition payload honors into the profile's category groups.
+ * Issue #1760 — order payload honors for the profile section.
  *
- * Groups come back in `HONOR_CATEGORY_ORDER` (the enum order); within a group,
- * rows are year DESC with unknown years last — an honor whose year we don't have
+ * Rows are year DESC with unknown years last — an honor whose year we don't have
  * is not a year-zero honor, so it sorts to the end rather than the top. Ties keep
  * the loader's order (name asc), so the render is stable.
  *
  * The sort is explicit here rather than delegated to the query because MySQL's
  * null placement under `ORDER BY ... DESC` is a DB behaviour no unit test in this
  * repo can observe, and the profile UI cannot be rendered locally against real
- * data. Empty groups are dropped, so a caller that gets `[]` renders no section.
+ * data. `[]` in ⇒ `[]` out, so a caller that gets `[]` renders no section.
+ *
+ * `category` deliberately does NOT reach the render: the row already names its
+ * conferring body, so a "Academy memberships" heading over "National Academy of
+ * Medicine" only restates it. The enum still drives /edit and the Phase 3 roster
+ * feed — it is a curation concept, not a reader-facing one.
  *
  * Pure and DB-free: this decides ORDER, never visibility. Visibility is gated in
  * the loader query — by the time a row is here, it has already earned its place.
  */
-export function groupHonors(honors: ReadonlyArray<HonorEntry>): HonorGroup[] {
-  return HONOR_CATEGORY_ORDER.map((category) => ({
-    category,
-    // `filter` already copies, so the in-place `sort` cannot mutate the payload.
-    entries: honors
-      .filter((h) => h.category === category)
-      .sort((a, b) => {
-        if (a.year === b.year) return 0;
-        if (a.year === null) return 1;
-        if (b.year === null) return -1;
-        return b.year - a.year;
-      }),
-  })).filter((g) => g.entries.length > 0);
+export function sortHonors(honors: ReadonlyArray<HonorEntry>): HonorEntry[] {
+  // Copy before sorting — `sort` is in-place and the payload array is not ours.
+  return [...honors].sort((a, b) => {
+    if (a.year === b.year) return 0;
+    if (a.year === null) return 1;
+    if (b.year === null) return -1;
+    return b.year - a.year;
+  });
 }
 
 export type ProfilePayload = {
@@ -562,8 +545,8 @@ export type ProfilePayload = {
    *  AND `showOnProfile = true` rows are read at all. The Phase 3 roster feed
    *  writes `pending` rows for a human to confirm, and an unconfirmed row must
    *  never reach the client — so the filter lives where forgetting it is
-   *  impossible rather than merely unlikely. Grouping (category, then year) is
-   *  applied at render; see `groupHonors` below. */
+   *  impossible rather than merely unlikely. Ordering (year DESC) is applied at
+   *  render; see `sortHonors` below. */
   honors: HonorEntry[];
   educations: Array<{
     degree: string;
