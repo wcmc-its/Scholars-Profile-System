@@ -68,6 +68,10 @@ const TRACKED: Readonly<
 > = {
   // Nightly cadence (cron 0 7 * * ? *)
   ED: { cadence: "nightly" },
+  // Deployed nightly step (cdk/lib/etl-stack.ts EdAdmins, tier:"continue") that
+  // writes source "ED-Admins" (etl/ed-admins/index.ts) — a continue-tier failure
+  // is invisible to the ExecutionsFailed alarm, so freshness is its only net.
+  "ED-Admins": { cadence: "nightly" },
   ReCiter: { cadence: "nightly" },
   // PubMed competing-interest statements backfill — runs right after ReCiter.
   "ReCiter-COI-Statements": { cadence: "nightly" },
@@ -110,6 +114,10 @@ const TRACKED: Readonly<
   POPS: { cadence: "weekly" },
   ReporterGrants: { cadence: "weekly" },
   ClinicalTrials: { cadence: "weekly" },
+  // Deployed weekly step (cdk/lib/etl-stack.ts TechnologyWeekly, tier:"continue")
+  // that writes source "Technology" (etl/technologies/index.ts) — continue-tier, so
+  // freshness is the only detector of a silent no-op or a dropped schedule.
+  Technology: { cadence: "weekly" },
   // Annual cadence (cron 0 9 1 7 ? *)
   Hierarchy: { cadence: "annual" },
 };
