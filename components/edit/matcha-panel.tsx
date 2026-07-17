@@ -1159,10 +1159,18 @@ export function MatchaPanel() {
                     // word or two), never the 300-char SafeLinks URL `break-words` above exists for.
                     // If a long term ever wraps badly here, that is this trade, not a mystery.
                     <HoverTooltip key={i} text={s.term}>
+                      {/* #1780 — method marks take the rail's purple (facet-method) token, concepts
+                          the blue (facet-topic) one, so the paste read-back matches the Concept/Method
+                          rail split. */}
                       <mark
                         data-slot="matcha-ask-mark"
                         data-term={s.term}
-                        className="rounded-[3px] bg-[var(--color-facet-topic-fill)] px-[3px] text-[var(--color-facet-topic-text)]"
+                        data-kind={s.kind}
+                        className={`rounded-[3px] px-[3px] ${
+                          s.kind === "method"
+                            ? "bg-[var(--color-facet-method-fill)] text-[var(--color-facet-method-text)]"
+                            : "bg-[var(--color-facet-topic-fill)] text-[var(--color-facet-topic-text)]"
+                        }`}
                       >
                         {s.text}
                       </mark>
@@ -1209,9 +1217,9 @@ export function MatchaPanel() {
                 <p className="text-muted-foreground border-border mt-3 border-t pt-2.5 text-[11px] leading-[1.5]">
                   {askMarked} of {concepts.length} concepts are highlighted — a concept goes unmarked
                   when the matcher wrote it in standard terms (an abbreviation expanded, a brand
-                  resolved). Unmarked never means ignored. Highlighting marks the concepts above, so
-                  other wording in the paste going unmarked does not mean it was read — it means it
-                  is not one of them.
+                  resolved). Unmarked never means ignored. Highlighting marks the concepts and methods
+                  above, so other wording in the paste going unmarked does not mean it was read — it
+                  means it is not one of them.
                 </p>
               ) : null}
             </section>
