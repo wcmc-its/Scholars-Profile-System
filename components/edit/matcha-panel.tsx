@@ -876,14 +876,15 @@ export function MatchaPanel() {
                 which was true of the global list and is now false for a normal user — and this is
                 the sentence a chair reads before pasting a donor email, so under-promising
                 privacy is not the safe default here either. Each branch states exactly who can
-                read THIS list. */}
+                read THIS list, and it leads: who can see this is what the reader needs BEFORE
+                they paste, not after. */}
             <SheetDescription>
-              Searches are saved — including the description you pasted — so we can measure and
-              improve match quality against real sponsor text.{" "}
               {historyScope === "all"
                 ? "As an administrator you are seeing every user's searches."
-                : "Only you and console administrators can see yours."}{" "}
-              Delete any search to remove its text for good.
+                : "Only you and console administrators can see your searches."}{" "}
+              They&rsquo;re saved — including the description you pasted — so we can measure and
+              improve match quality against real opportunity text. Delete any search to remove its
+              text for good.
             </SheetDescription>
           </SheetHeader>
           <ul className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">

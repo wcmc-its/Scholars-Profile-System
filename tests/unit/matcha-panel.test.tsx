@@ -2174,7 +2174,7 @@ describe("MatchaPanel", () => {
     expect(await screen.findByText(/Recent searches \(1\)/)).toBeTruthy();
     expect(screen.getByText("cardiac fibrosis")).toBeTruthy();
     // The officer is TOLD, on the surface where it happens — not in a policy page.
-    expect(screen.getByText(/Searches are saved/)).toBeTruthy();
+    expect(screen.getByText(/They’re saved/)).toBeTruthy();
     expect(screen.getByText(/improve match quality/)).toBeTruthy();
   });
 
@@ -2206,7 +2206,9 @@ describe("MatchaPanel", () => {
       expect(screen.getByText("cardiac fibrosis")).toBeTruthy();
       expect(screen.queryByText("Dana Ellis")).toBeNull();
       // And the notice must not tell a chair that the console at large reads their donor email.
-      expect(screen.getByText(/Only you and console administrators can see yours/)).toBeTruthy();
+      expect(
+        screen.getByText(/Only you and console administrators can see your searches/),
+      ).toBeTruthy();
     });
 
     it("scope 'all': the submitter's NAME renders — it is what distinguishes a superuser's rows", async () => {
