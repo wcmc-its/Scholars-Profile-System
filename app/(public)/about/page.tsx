@@ -131,11 +131,11 @@ export default function DocsPage() {
           </p>
           <ul>
             <li>
-              <em>Where your data comes from.</em> Authoritative source systems: PubMed, the WCM Web
-              Directory, the Enterprise Directory, ASMS, InfoEd, NIH RePORTER, NYP, the Graduate
-              School, and the COI system. On top of those sit two in-house layers. ReCiter decides
-              which publications are yours. ReciterAI derives your research areas, the Impact score,
-              and your synopses.
+              <em>Where your data comes from.</em> Authoritative source systems: PubMed, Scopus,
+              OpenAlex, the WCM Web Directory, the Enterprise Directory, ASMS, InfoEd, NIH RePORTER,
+              NYP, the Graduate School, and the COI system. On top of those sit two in-house layers. ReCiter
+              decides which publications are yours. ReciterAI derives your research areas, the Impact
+              score, and your synopses.
             </li>
             <li>
               <em>How you correct it.</em> Almost always at the source, not in Scholars. If you edit
@@ -506,13 +506,30 @@ export default function DocsPage() {
                 </td>
               </tr>
               <tr>
+                <td>Publications not in PubMed (added by a curator)</td>
+                <td>Scopus or OpenAlex, by way of ReCiter</td>
+                <td>Nightly</td>
+                <td>
+                  Added or removed in{" "}
+                  <a href={PM} className={LINK}>
+                    Publication Manager
+                  </a>
+                </td>
+              </tr>
+              <tr>
                 <td>Publication metadata (title, author order, journal, DOI, MeSH)</td>
-                <td>PubMed (NIH/NLM)</td>
+                <td>PubMed (NIH/NLM), or the external source for a curator-added paper</td>
                 <td>Nightly</td>
                 <td>At the publisher / NLM; flows in on next refresh</td>
               </tr>
               <tr>
-                <td>Citation counts and cites/cited-by</td>
+                <td>Times-cited count</td>
+                <td>Scopus, by way of ReCiter</td>
+                <td>Nightly</td>
+                <td>Scopus source</td>
+              </tr>
+              <tr>
+                <td>Cites and cited-by lists</td>
                 <td>iCite (NIH)</td>
                 <td>Nightly</td>
                 <td>NIH / iCite source</td>
@@ -589,6 +606,17 @@ export default function DocsPage() {
         <p>A few less obvious behaviors the map explains:</p>
         <ul>
           <li>
+            Most publications reach your profile because ReCiter matched them to you from PubMed. A
+            paper that is not in PubMed can still appear, but only if a curator adds it in{" "}
+            <a href={PM} className={LINK}>
+              Publication Manager
+            </a>{" "}
+            from an outside source such as Scopus or OpenAlex. Those papers are labeled with their
+            source (for example <em>Source: Scopus</em>) and carry a DOI rather than a PMID. They are
+            added deliberately, not matched automatically, so ReCiter&apos;s attribution scoring never
+            sees them.
+          </li>
+          <li>
             MeSH &ldquo;check tags&rdquo; (Humans, Male, Female, Adult, and so on) are filtered out by
             ReciterDB before Scholars sees them, so they never appear as topics. That is intended,
             not a gap.
@@ -655,12 +683,14 @@ export default function DocsPage() {
                   Add or confirm it at{" "}
                   <a href={PM} className={LINK}>
                     reciter.weill.cornell.edu
-                  </a>, you or the library curation team, whoever gets there first
+                  </a>, you or the library curation team, whoever gets there first. A paper that is
+                  not in PubMed at all is added there too, from an outside source such as Scopus or
+                  OpenAlex
                 </td>
               </tr>
               <tr>
                 <td>A wrong field on a publication (title, author order, DOI)</td>
-                <td>PubMed (NIH/NLM)</td>
+                <td>PubMed (NIH/NLM), or the external source for a curator-added paper</td>
                 <td>Bibliographic metadata flows from the publisher/NLM</td>
               </tr>
               <tr>
@@ -1338,7 +1368,9 @@ export default function DocsPage() {
             { term: "Research areas (and subareas)", def: "WCM’s AI-derived map of what scholars work on: broad research areas such as Cancer Biology, each with finer subareas. ReciterAI derives them from publications, not from MeSH or a fixed list, and scores how strongly each paper relates to each area. Distinct from the MeSH keywords that power search." },
             { term: "Edit my profile", def: "The page where a scholar edits their overview, hides or restores publications, and submits data corrections (Request a change), which route to the owning office." },
             { term: "Profile URL (slug)", def: "A profile’s web address: the short scholars.weill.cornell.edu/<slug> and the longer /scholars/<slug> both work and lead to the same page. The slug is derived automatically from the scholar’s preferred name (e.g. jane-smith); a later namesake gets a number (jane-smith-2) and the earlier profile keeps the plain form; it is not a ranking. The address is stable: if it changes, the old one permanently redirects, so existing links keep working. A custom address (still based on the scholar’s name) can be set by a Scholars administrator." },
-            { term: "iCite", def: "The NIH tool Scholars uses for publication citation counts (times-cited) and cites/cited-by. Scholars does not use Scopus." },
+            { term: "iCite", def: "The NIH tool Scholars uses for the cites and cited-by lists on a publication, which track PubMed’s own Cited By. The headline times-cited count comes from Scopus instead, and is usually the larger of the two because Scopus indexes venues PubMed does not." },
+            { term: "Scopus", def: "Elsevier’s abstract and citation database. Scholars uses it for two things: the headline times-cited count on a publication, and publications that are not in PubMed, which a curator can add in Publication Manager. It is not used for author disambiguation — deciding which publications are yours is ReCiter’s job, from PubMed." },
+            { term: "OpenAlex", def: "An open catalog of scholarly works. Like Scopus, it is a source for publications that are not in PubMed, which a curator can add in Publication Manager; such a paper is labeled “Source: OpenAlex” and carries a DOI rather than a PMID. It is not used for citation counts or for author disambiguation." },
             { term: "InfoEd", def: "WCM’s grants system of record, for all sponsors. NIH RePORTER supplies federal abstract text and the portfolio link." },
             { term: "Available technologies", def: "Licensable inventions a scholar holds in the WCM Center for Technology Licensing (CTL) portfolio, shown on their profile with a link to the public technology page (innovation.weill.cornell.edu). Sourced from CTL and refreshed weekly." },
             { term: "MeSH", def: "Medical Subject Headings, the NLM’s controlled vocabulary for indexing biomedical literature. Scholars search is MeSH-aware." },
