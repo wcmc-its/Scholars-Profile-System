@@ -3,7 +3,7 @@
  * (#497 PR-3c, `slug-personalization-ui-spec.md` § 3.1).
  */
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
@@ -253,5 +253,48 @@ describe("AdminSubnav", () => {
   it('marks the Units tab active with aria-current when active="units"', () => {
     render(<AdminSubnav active="units" pendingSlugRequests={null} unitsTab />);
     expect(screen.getByTestId("admin-tab-units").getAttribute("aria-current")).toBe("page");
+  });
+
+  // ── The Matcha tab and its explanatory hover (round-2 §2) ───────────────────
+  //
+  // The whole suite above never sees this tab: `isMatchaEnabled()` reads env, so it is dark by
+  // default and every existing assertion passes with the tab absent. That is precisely how this
+  // feature shipped a shortlist that was dark in the default density while six tests clicked
+  // "compact" first — so the flag is forced ON here rather than left to the ambient env.
+  describe("the Matcha tab (§2)", () => {
+    it("renders and links when the flag is on — the HoverCard wrap must not swallow the nav", async () => {
+      vi.resetModules();
+      vi.doMock("@/lib/api/matcha", () => ({ isMatchaEnabled: () => true }));
+      const { AdminSubnav: Subnav } = await import("@/components/edit/admin-subnav");
+      render(<Subnav active="profiles" pendingSlugRequests={null} superuserSurfaces />);
+      const tab = screen.getByTestId("admin-tab-matcha");
+      expect(tab.textContent).toContain("Matcha");
+      // The tab is still a LINK. Wrapping a nav item in a hover trigger that ate its href would
+      // be invisible to a render-only assertion — the tab would look right and go nowhere.
+      expect(tab.getAttribute("href")).toBe("/edit/matcha");
+      vi.doUnmock("@/lib/api/matcha");
+    });
+
+    it("carries the explanatory copy — the name is opaque BEFORE you reach the page", async () => {
+      vi.resetModules();
+      vi.doMock("@/lib/api/matcha", () => ({ isMatchaEnabled: () => true }));
+      const { AdminSubnav: Subnav } = await import("@/components/edit/admin-subnav");
+      render(<Subnav active="profiles" pendingSlugRequests={null} superuserSurfaces />);
+      const tab = screen.getByTestId("admin-tab-matcha");
+      // Radix HoverCard opens on pointerenter (200ms) and on focus. Focus is the deterministic
+      // path in jsdom and is the accessibility-relevant one besides.
+      fireEvent.focus(tab);
+      const panel = await screen.findByText(/Paste the ask\. Get the shortlist\./);
+      expect(panel).toBeTruthy();
+      expect(panel.parentElement?.textContent).toContain("ranks scholars by fit across all of them");
+      vi.doUnmock("@/lib/api/matcha");
+    });
+
+    it("leaves every other tab hover-free — the prop is additive, not a sweep", () => {
+      render(<AdminSubnav active="profiles" pendingSlugRequests={3} />);
+      // If the hover had been made required/default, Profiles would gain a trigger too.
+      fireEvent.focus(screen.getByTestId("admin-tab-slug-requests"));
+      expect(screen.queryByText(/Paste the ask/)).toBeNull();
+    });
   });
 });

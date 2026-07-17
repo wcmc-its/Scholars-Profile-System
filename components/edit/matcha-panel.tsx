@@ -154,13 +154,17 @@ const DEPT_FACET_MAX = 12;
  *  by the one filter this console exists for. Facet over the pool; cap what you paint. */
 const RESULT_MAX = 100;
 
-/** What the tool does, in one sentence. ONE constant, rendered twice — as the subtitle, and as the
- *  h1's hover for anyone who scrolled past the subtitle or met the name on its own. They were two
- *  copies of the same prose; a drift between them is a surface contradicting itself.
- *  ⚠ These words are under review (round-2 §3: "people will not understand the full scope") — that
- *  is COPY work awaiting sign-off, deliberately not done here. Change the string, not the wiring. */
+/** What the tool does (round-2 §3, user-authored 2026-07-17 — "people will not understand the full
+ *  scope"). It leads with the VERB, names the input shapes, and says the output is ranked people
+ *  with openable evidence you can re-weight; the old sentence stated what the ranker ignores before
+ *  it stated what you can do, and never mentioned the shortlist at all.
+ *  The lead is split out only because it renders bold — the words are one sentence, not two facts.
+ *  ⚠ "Recommendations, not endorsements" was dropped DELIBERATELY (user, 2026-07-17), not lost. It
+ *  still stands on the Funding matcher (`find-researchers.tsx`); do not re-add it here on the
+ *  assumption that its absence is an oversight. */
+const MATCHA_LEAD = "Matcha turns a raw ask into a ranked shortlist of researchers.";
 const MATCHA_BLURB =
-  "Paste a description of an interest and rank Weill Cornell researchers by topical fit alone — no career-stage or grant-eligibility weighting. Recommendations, not endorsements.";
+  "Paste any description of an opportunity — a funding call, an email, a few bullet points. Matcha pulls out the topics and methods it's really asking for, weighs how much each one matters, and ranks scholars by fit across all of them. Every recommendation comes with the evidence behind it, and you can adjust the weights to re-rank on the spot.";
 
 /** Three-register hierarchy (mockup): the first N matched concepts render as FULL evidence blocks
  *  (badge, artifact, role, recency); the rest demote to a one-line supporting row. `matchedEvidence`
@@ -1010,11 +1014,14 @@ export function MatchaPanel() {
   return (
     <div data-slot="matcha-panel">
       <div className="mb-5">
-        {/* The name says nothing about what the tool does, so the hover has to. */}
-        <HoverTooltip wide placement="bottom" text={MATCHA_BLURB}>
-          <h1 className="text-2xl font-bold tracking-tight">Matcha</h1>
-        </HoverTooltip>
-        <p className="text-muted-foreground mt-1 text-sm">{MATCHA_BLURB}</p>
+        {/* No hover on the h1: the subtitle directly beneath it now carries the full scope, so a
+            hover repeating it would be a tooltip for a paragraph already on screen. The name is
+            opaque BEFORE you land here, which is why the explanatory hover lives on the nav tab
+            (`admin-subnav`) instead — that is the moment it is needed. */}
+        <h1 className="text-2xl font-bold tracking-tight">Matcha</h1>
+        <p className="text-muted-foreground mt-1 max-w-3xl text-sm">
+          <strong className="text-foreground font-semibold">{MATCHA_LEAD}</strong> {MATCHA_BLURB}
+        </p>
       </div>
 
       {showAskCard ? (
@@ -1969,8 +1976,14 @@ const COVERAGE_TITLE: Record<ConceptCoverage["state"], string> = {
  *  meaningless until you know the bar is one concept, the width is how hard the sponsor asked for
  *  it, and the fill is whether we can show evidence — so the legend rides EVERY segment tooltip
  *  rather than a caption the hover doesn't reach, and leads the strip's aria-label. */
+/** ⚠ "this opportunity", not "the sponsor" — the audience is chairs, and an ask is as often an email
+ *  or a few bullet points as a funding call (round-2 §3, user 2026-07-17). The strip's own spec text
+ *  said "the sponsor's whole ask"; that framing is what §3 retires.
+ *  ⚠ Not the literal words "the ask" either: this string rides the strip's `aria-label`, and the
+ *  paste textarea is ALREADY labelled "the ask" — two accessible names matching the same phrase is
+ *  a screen reader hearing one label for two unrelated things (and it collides in tests). */
 const COVERAGE_LEGEND =
-  "One bar per concept the sponsor asked for · width = how much they asked for it · fill = whether we can show evidence.";
+  "One bar per concept this opportunity calls for · width = how much it matters · fill = whether we can show evidence.";
 
 /**
  * The ask, drawn as a bar: one segment per concept the sponsor asked for, width = how much they

@@ -1748,14 +1748,17 @@ describe("MatchaPanel", () => {
     // §4 — and the segment says what the STRIP is, not only what the segment is. This is the whole
     // requirement ("the bars don't mean much"): a segment's state is unreadable until you know the
     // bar is one concept and the width is the ask's weight.
-    expect(segTip).toContain("One bar per concept the sponsor asked for");
-    expect(segTip).toContain("width = how much they asked for it");
+    expect(segTip).toContain("One bar per concept this opportunity calls for");
+    expect(segTip).toContain("width = how much it matters");
     // …and the strip is legible to a screen reader at all, which it was not: the bar was
     // `aria-hidden`, so its only textual equivalent was the "1 of 3" caption — a count naming no
     // concept and no state, and absent entirely from the inline variant.
     const strip = document.querySelector('[data-slot="matcha-coverage"] [role="img"]')!;
     const spoken = strip.getAttribute("aria-label")!;
-    expect(spoken).toContain("One bar per concept the sponsor asked for");
+    expect(spoken).toContain("One bar per concept this opportunity calls for");
+    // ⚠ The legend must NOT say the literal "the ask": this string is an accessible name, and the
+    // paste textarea already carries that label — two elements answering to one name.
+    expect(spoken).not.toContain("the ask");
     expect(spoken).toContain("Cancer Metabolism — ranked under this, evidence not shown");
     expect(spoken).toContain("CRISPR screening — no evidence");
     // A genuine gap: she never ranked under it at all. It moved OFF the coverage line to a single
