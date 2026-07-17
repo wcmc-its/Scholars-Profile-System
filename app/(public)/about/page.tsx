@@ -395,13 +395,14 @@ export default function DocsPage() {
         <p>
           You are the one stakeholder with a data responsibility native to Scholars.{" "}
           <strong>
-            Center membership is the only <em>institutional</em> field whose system of record is
+            Center membership is one of the <em>institutional</em> fields whose system of record is
             Scholars itself
           </strong>
-          . Your overview, publication-visibility choices, and Selected highlights are stored here
-          too, but those are an individual&apos;s own profile rather than shared data about the
-          institution. Center rosters are not held anywhere upstream, so they are maintained in this
-          application, and they are self-serve for the right roles.
+          . Unit and division metadata and manually-created division rosters are Scholars-owned too,
+          and that set is likely to grow. Your overview, publication-visibility choices, and Selected
+          highlights are stored here as well, but those are an individual&apos;s own profile rather
+          than shared data about the institution. Center rosters are not held anywhere upstream, so
+          they are maintained in this application, and they are self-serve for the right roles.
         </p>
         <p>
           A center Owner or Curator manages the roster at <code>/edit/center/[code]</code>: add,
@@ -564,18 +565,27 @@ export default function DocsPage() {
                 <td>Nightly</td>
                 <td>Request a change (routes to the COI office)</td>
               </tr>
-              <tr className="[&>td]:bg-[#f7f1f1]">
+              <tr>
+                <td>Available technologies (licensable inventions)</td>
+                <td>WCM Center for Technology Licensing (CTL)</td>
+                <td>Weekly</td>
+                <td>
+                  Corrected in CTL&apos;s public portfolio (
+                  <a href="https://innovation.weill.cornell.edu" className={LINK}>
+                    innovation.weill.cornell.edu
+                  </a>
+                  ); flows in on the next refresh
+                </td>
+              </tr>
+              <tr>
                 <td>Center membership</td>
-                <td>Scholars (this app), the only institutional field Scholars owns</td>
+                <td>Scholars (this app)</td>
                 <td>On edit</td>
                 <td>Edited in-app by a center Owner/Curator</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <Callout variant="warn" heading="Citation source">
-          <p>Scholars uses iCite as its only citation source. It does not use Scopus.</p>
-        </Callout>
         <p>A few less obvious behaviors the map explains:</p>
         <ul>
           <li>
@@ -708,7 +718,12 @@ export default function DocsPage() {
                 <td>ReciterAI (computed)</td>
                 <td>Report a systematic error via Request a change (routes to the Scholars team)</td>
               </tr>
-              <tr className="[&>td]:bg-[#f7f1f1]">
+              <tr>
+                <td>A wrong or missing available technology</td>
+                <td>WCM Center for Technology Licensing (CTL)</td>
+                <td>Corrected in CTL&apos;s portfolio; flows in on the next refresh</td>
+              </tr>
+              <tr>
                 <td>Center membership</td>
                 <td>Scholars</td>
                 <td>
@@ -806,8 +821,16 @@ export default function DocsPage() {
           publication controls.
         </p>
         <p>
-          These curation roles are granted inside Scholars by a Superuser. They are separate from the
-          ED person-type (faculty / appointee) that categorizes people on their profiles.
+          Roles come from two places. Some are imported from the Enterprise Directory as maintained in
+          the WCM Web Directory for an org unit: a unit&apos;s Department and Division Administrators,
+          and IAMDELA roles defined at the org-unit level, resolve to Owner rights on that unit. On top
+          of that, a Superuser grants Owner and Curator roles inside Scholars, and a unit Owner (a
+          Department Administrator, for example) can assign additional users as Curators for their unit.
+          These curation roles are separate from the ED person-type (faculty / appointee) that
+          categorizes people on their profiles.
+        </p>
+        <p>
+          Separately, a scholar can assign a <strong>proxy</strong> to act on their own profile.
         </p>
 
         <h2 id="research-areas">Research areas</h2>
@@ -1315,10 +1338,11 @@ export default function DocsPage() {
             { term: "Research areas (and subareas)", def: "WCM’s AI-derived map of what scholars work on: broad research areas such as Cancer Biology, each with finer subareas. ReciterAI derives them from publications, not from MeSH or a fixed list, and scores how strongly each paper relates to each area. Distinct from the MeSH keywords that power search." },
             { term: "Edit my profile", def: "The page where a scholar edits their overview, hides or restores publications, and submits data corrections (Request a change), which route to the owning office." },
             { term: "Profile URL (slug)", def: "A profile’s web address: the short scholars.weill.cornell.edu/<slug> and the longer /scholars/<slug> both work and lead to the same page. The slug is derived automatically from the scholar’s preferred name (e.g. jane-smith); a later namesake gets a number (jane-smith-2) and the earlier profile keeps the plain form; it is not a ranking. The address is stable: if it changes, the old one permanently redirects, so existing links keep working. A custom address (still based on the scholar’s name) can be set by a Scholars administrator." },
-            { term: "iCite", def: "The NIH tool Scholars uses as its only citation source. Scholars does not use Scopus." },
+            { term: "iCite", def: "The NIH tool Scholars uses for publication citation counts (times-cited) and cites/cited-by. Scholars does not use Scopus." },
             { term: "InfoEd", def: "WCM’s grants system of record, for all sponsors. NIH RePORTER supplies federal abstract text and the portfolio link." },
+            { term: "Available technologies", def: "Licensable inventions a scholar holds in the WCM Center for Technology Licensing (CTL) portfolio, shown on their profile with a link to the public technology page (innovation.weill.cornell.edu). Sourced from CTL and refreshed weekly." },
             { term: "MeSH", def: "Medical Subject Headings, the NLM’s controlled vocabulary for indexing biomedical literature. Scholars search is MeSH-aware." },
-            { term: "System of record (SOR)", def: "The authoritative system that owns a field. Scholars shows a copy and cannot override it; corrections happen at the SOR. Center membership is the only institutional field whose SOR is Scholars itself; a scholar’s own overview and visibility choices are stored in Scholars too, but those are personal profile data, not shared institutional records." },
+            { term: "System of record (SOR)", def: "The authoritative system that owns a field. Scholars shows a copy and cannot override it; corrections happen at the SOR. Scholars is the SOR for the institutional data it curates directly (center membership, unit and division metadata, and manually-created division rosters), and that set may grow; a scholar’s own overview and visibility choices are stored in Scholars too, but those are personal profile data, not shared institutional records." },
             { term: "Roles (Superuser / Owner / Curator)", def: "Unit-scoped permissions for curating centers, divisions, and departments. Superuser is global and grants roles; Owner and Curator act on one unit. Every edit is audit-logged." },
             { term: "Spotlight / Selected research", def: "The home-page showcase of representative publications per subarea, selected by ReciterAI Impact within the subarea and refreshed weekly. Not scholar-curated." },
             { term: "Suppression", def: "Hiding a misattributed publication from a profile. A reversible, recorded near-term measure; the source-level fix is rejecting the paper in Publication Manager." },

@@ -28,6 +28,7 @@ const nodes = {
   nih:    { x: BX, y: 514, w: SW, h: SH, kind: "ext", title: "NIH RePORTER", sub: ["HTTPS · grant enrichment"], chip: { tone: "ondemand", text: "on-demand" } },
   nsf:    { x: AX, y: 574, w: SW, h: SH, kind: "ext", title: "NSF Awards", sub: ["HTTPS · federal awards"], chip: { tone: "ondemand", text: "on-demand" } },
   mesh:   { x: BX, y: 574, w: SW, h: SH, kind: "ext", title: "NLM MeSH", sub: ["HTTPS · taxonomy"], chip: { tone: "annual", text: "annual" } },
+  ctl:    { x: AX, y: 634, w: SW, h: SH, kind: "ext", title: "CTL portfolio", sub: ["HTTPS · WCM licensable technologies"], chip: { tone: "weekly", text: "weekly" } },
   // ----- center: the platform -----
   etl:    { x: 738, y: 172, w: 320, h: 54, kind: "app", title: "ETL pipeline", sub: ["Step Functions · nightly / weekly / annual"] },
   aur:    { x: 738, y: 284, w: 154, h: 60, kind: "data", title: "Aurora MySQL", sub: ["canonical store"] },
@@ -43,7 +44,7 @@ const nodes = {
 
 const groups = [
   { x: 26, y: 118, w: 640, h: 344, kind: "ext", title: "WCM source systems" },
-  { x: 26, y: 484, w: 640, h: 150, kind: "ext", title: "External data (HTTPS)" },
+  { x: 26, y: 484, w: 640, h: 210, kind: "ext", title: "External data (HTTPS)" },
   { x: 706, y: 136, w: 384, h: 436, kind: "edge", title: "Scholars Profile System" },
   { x: 1138, y: 136, w: 372, h: 436, kind: "net", title: "Who it serves" },
 ];
@@ -73,7 +74,7 @@ const edges = [
   { p0: A(nodes.idp, "t", 0.5), p1: A(nodes.staff, "b", 0.5), color: "gray", label: "SSO" },
 ];
 
-export const spec = { id: "system-context", vb: [1540, 664], groups, nodes, edges };
+export const spec = { id: "system-context", vb: [1540, 724], groups, nodes, edges };
 
 export const meta = {
   nav: "① System context",
@@ -115,6 +116,8 @@ export const meta = {
     "<b>manual</b> institutional export, static until the next export lands) and " +
     "are enriched against the <b>ClinicalTrials.gov</b> registry (API v2); both stage into reciterdb " +
     "tables (<code>clinical_trials</code> / <code>clinical_trials_enriched</code>, the latter pulled " +
-    "upstream by ReciterAI) that the nightly ETL reads — SPS never calls ClinicalTrials.gov directly.",
+    "upstream by ReciterAI) that the nightly ETL reads — SPS never calls ClinicalTrials.gov directly. " +
+    "<b>CTL portfolio</b> (available technologies) is WCM's own Center for Technology Licensing, " +
+    "scraped weekly from its public portal (<code>innovation.weill.cornell.edu</code>).",
   source: "docs/architecture-overview.md · cdk/lib/etl-stack.ts · lib/headshot.ts · ETL connectors in lib/sources/ · etl/pops/index.ts · docs/pops-clinical-search-spec.md · etl/clinical-trials/* · docs/clinical-trials-source-spec.md",
 };
