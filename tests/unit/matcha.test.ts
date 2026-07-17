@@ -601,10 +601,10 @@ describe("POST /api/edit/matcha (route)", () => {
         isDeveloper: true,
       });
       mockSubmissionFindMany.mockResolvedValue([
-        { id: "r4", descriptionHash: "h-adc", candidateCount: 430, description: "ADC" },
-        { id: "r3", descriptionHash: "h-adc", candidateCount: 430, description: "ADC" },
-        { id: "r2", descriptionHash: "h-adc", candidateCount: 438, description: "ADC" },
-        { id: "r1", descriptionHash: "h-other", candidateCount: 12, description: "other" },
+        { id: "r4", descriptionHash: "h-adc", candidateCount: 430, description: "ADC", submittedBy: "dev1" },
+        { id: "r3", descriptionHash: "h-adc", candidateCount: 430, description: "ADC", submittedBy: "dev1" },
+        { id: "r2", descriptionHash: "h-adc", candidateCount: 438, description: "ADC", submittedBy: "dev1" },
+        { id: "r1", descriptionHash: "h-other", candidateCount: 12, description: "other", submittedBy: "dev1" },
       ]);
 
       const body = await (await GET()).json();
@@ -617,6 +617,160 @@ describe("POST /api/edit/matcha (route)", () => {
       expect(body.submissions[0]).not.toHaveProperty("descriptionHash");
       // The scan window must exceed the page size, or a heavily re-run paste starves the list.
       expect(mockSubmissionFindMany.mock.calls[0][0].take).toBe(500);
+    });
+  });
+
+  /**
+   * §9/§10 — WHO CAN READ THE PASTES, and whose name is on them.
+   *
+   * The db is mocked, so a mocked `findMany` returns its fixture no matter what `where` it is
+   * handed — asserting on the RESPONSE could never catch a dropped filter. These tests assert on
+   * the ARGUMENT the route passes, which is the only thing that is actually the route's decision.
+   * Each one has been mutation-tested: revert the `where` line and it goes red.
+   */
+  describe("history scope (§9) and the submitter's name (§10)", () => {
+    function historyRows() {
+      return [
+        { id: "r1", descriptionHash: "h1", candidateCount: 5, description: "mine", submittedBy: "dev1" },
+        { id: "r2", descriptionHash: "h2", candidateCount: 7, description: "theirs", submittedBy: "chair9" },
+      ];
+    }
+
+    it("a DEVELOPER sees ONLY THEIR OWN rows — isDeveloper IS NOT isSuperuser", async () => {
+      // THE TRAP. The PAGE gates on `isSuperuser || isDeveloper`, so a developer reaches this
+      // handler — and the obvious "symmetry" fix is to widen the read's leg to match the page's
+      // gate. That would leave the entire paste corpus readable by a strictly larger group than
+      // was decided (2026-07-17: SUPERUSER sees everyone's). Widen this and chairs' donor email
+      // is readable by every developer.
+      mockGetEffectiveEditSession.mockResolvedValue({
+        cwid: "dev1",
+        isSuperuser: false,
+        isDeveloper: true, // ← the leg that must NOT unlock the global list
+      });
+      mockSubmissionFindMany.mockResolvedValue(historyRows());
+
+      await GET();
+
+      expect(mockSubmissionFindMany.mock.calls[0][0].where).toEqual({ submittedBy: "dev1" });
+    });
+
+    it("a SUPERUSER sees every officer's rows — an unfiltered read", async () => {
+      mockGetEffectiveEditSession.mockResolvedValue({
+        cwid: "su1",
+        isSuperuser: true,
+        isDeveloper: false,
+      });
+      mockSubmissionFindMany.mockResolvedValue(historyRows());
+
+      const body = await (await GET()).json();
+
+      expect(mockSubmissionFindMany.mock.calls[0][0].where).toBeUndefined();
+      expect(body.scope).toBe("all");
+      expect(body.submissions).toHaveLength(2);
+    });
+
+    it("FAILS CLOSED: a session with NO isSuperuser field degrades to own-rows-only", async () => {
+      // `EditSession.isSuperuser` is required by the type, but the synthetic session shapes this
+      // codebase builds elsewhere have already proved a field can go missing at runtime
+      // (`isDeveloper` is literally optional on the same interface). The ternary's TRUE leg is the
+      // privileged one precisely so that absent ⇒ falsy ⇒ own rows. Invert it — write
+      // `!session.isSuperuser ? { submittedBy } : undefined` and then drop the flag — and an
+      // undefined flag silently unlocks everyone's pastes.
+      mockGetEffectiveEditSession.mockResolvedValue({ cwid: "who1", isDeveloper: true });
+      mockSubmissionFindMany.mockResolvedValue(historyRows());
+
+      const body = await (await GET()).json();
+
+      expect(mockSubmissionFindMany.mock.calls[0][0].where).toEqual({ submittedBy: "who1" });
+      expect(body.scope).toBe("own");
+    });
+
+    it("resolves the submitter's NAME at read time, and never ships the raw cwid", async () => {
+      mockGetEffectiveEditSession.mockResolvedValue({
+        cwid: "su1",
+        isSuperuser: true,
+        isDeveloper: false,
+      });
+      mockSubmissionFindMany.mockResolvedValue(historyRows());
+      mockScholarFindMany.mockResolvedValue([
+        { cwid: "dev1", preferredName: "Dana Ellis" },
+        { cwid: "chair9", preferredName: "Chris Hale" },
+      ]);
+
+      const body = await (await GET()).json();
+
+      expect(body.submissions.map((s: { submittedByName: string }) => s.submittedByName)).toEqual([
+        "Dana Ellis",
+        "Chris Hale",
+      ]);
+      // Read-time, not denormalised: the lookup is keyed on the cwid the ROW stores, so a
+      // preferred-name change is picked up by the next read with no backfill.
+      expect(mockScholarFindMany.mock.calls[0][0].where).toEqual({ cwid: { in: ["dev1", "chair9"] } });
+      // The stored identity stays server-side; nothing renders a cwid at a chair.
+      expect(body.submissions[0]).not.toHaveProperty("submittedBy");
+    });
+
+    it("FALLS BACK TO THE CWID when the submitter has no Scholar row — not '' and not 'Unknown'", async () => {
+      // Superusers and developers reach `/edit` without being affiliated scholars, so a miss is
+      // the NORMAL case, not an error. Both an empty cell and the word "Unknown" read as data
+      // loss for an actor we can name perfectly well.
+      mockGetEffectiveEditSession.mockResolvedValue({
+        cwid: "su1",
+        isSuperuser: true,
+        isDeveloper: false,
+      });
+      mockSubmissionFindMany.mockResolvedValue(historyRows());
+      mockScholarFindMany.mockResolvedValue([{ cwid: "dev1", preferredName: "Dana Ellis" }]); // chair9 absent
+
+      const body = await (await GET()).json();
+
+      const names = body.submissions.map((s: { submittedByName: string }) => s.submittedByName);
+      expect(names).toEqual(["Dana Ellis", "chair9"]);
+      expect(names).not.toContain("");
+      expect(names).not.toContain("Unknown");
+    });
+
+    it("treats a BLANK preferredName as a miss — a NOT NULL column can still hold ''", async () => {
+      // `preferred_name` is `String @db.VarChar(255)` — NOT NULL — so `?? cwid` alone would let a
+      // blank row through as a name and render the empty cell this fallback exists to prevent.
+      mockGetEffectiveEditSession.mockResolvedValue({
+        cwid: "su1",
+        isSuperuser: true,
+        isDeveloper: false,
+      });
+      mockSubmissionFindMany.mockResolvedValue([historyRows()[1]]);
+      mockScholarFindMany.mockResolvedValue([{ cwid: "chair9", preferredName: "   " }]);
+
+      const body = await (await GET()).json();
+
+      expect(body.submissions[0].submittedByName).toBe("chair9");
+    });
+
+    it("scopes BEFORE the cap, so `Recent (N)` counts only what the viewer can see", async () => {
+      // `take` is applied to the SCOPED set, not to a global list that is then filtered — the
+      // difference between a cap over your own rows and a cap over everyone's that leaves you
+      // three. And N is `submissions.length`, so it can never count rows this viewer cannot open
+      // (`reference_funding_tagged_count_counts_the_or` is that bug, already shipped once).
+      mockGetEffectiveEditSession.mockResolvedValue({
+        cwid: "dev1",
+        isSuperuser: false,
+        isDeveloper: true,
+      });
+      mockSubmissionFindMany.mockResolvedValue(historyRows());
+
+      const body = await (await GET()).json();
+      const args = mockSubmissionFindMany.mock.calls[0][0];
+
+      // ONE query carries BOTH — the scope is delegated to SQL where the cap applies to the
+      // scoped set, rather than the cap running over a global list that JS then filters (which
+      // would leave a heavy user three rows and call it their history).
+      expect(args.where).toEqual({ submittedBy: "dev1" });
+      expect(args.take).toBe(500);
+      // And the route does NOT re-filter in JS: every row the scoped query returns is shipped,
+      // so `submissions.length` — the N the drawer renders — is exactly the query's answer for
+      // this viewer. A JS post-filter here would mean N counted rows the SQL had already refused.
+      expect(body.submissions).toHaveLength(2);
+      expect(body.scope).toBe("own");
     });
   });
 });

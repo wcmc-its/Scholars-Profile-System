@@ -5,7 +5,8 @@
  * POST `{ description }` → `MatchaResponse` (`lib/api/sponsor-match-contract.ts`):
  * `{ ok, concepts, candidates }`. One engine call.
  *
- * GET — every retained search, newest first, so officers see each other's.
+ * GET — the retained searches, newest first. SCOPED: a superuser sees every officer's; everyone
+ * else sees only their own (see the handler).
  * DELETE `{ submissionId }` — erase one. Any officer on this surface may erase any row.
  *
  * THE SEARCH IS NOW RETAINED (#6d), REVERSING THIS ROUTE'S ORIGINAL POSTURE. It was built to
@@ -172,6 +173,36 @@ function isCacheableResult(r: MatchaEngineResult): boolean {
   return r.candidates.length > 0;
 }
 
+/**
+ * The submitters' display names, resolved AT READ TIME — `cwid → preferredName`, and a cwid is
+ * ABSENT from the map when it has no usable name.
+ *
+ * NOT DENORMALISED ONTO THE ROW ON PURPOSE. A name copied into `SponsorMatchSubmission` at write
+ * time goes stale the moment someone changes their preferred name, and duplicates the directory
+ * this whole system is already keyed on. `submittedBy` stays the stored identity (the cwid is the
+ * FK everything joins on); the name is a courtesy resolved fresh on every read.
+ *
+ * NOT EVERY SUBMITTER HAS A SCHOLAR ROW — `/edit` is reachable by superusers and developers who
+ * are not affiliated scholars — so the miss is the NORMAL case here, not an error. Callers fall
+ * back to the cwid. An empty `preferredName` is treated as a MISS rather than a name: the column
+ * is NOT NULL, so a blank one is a row that exists carrying nothing, and rendering it produces
+ * exactly the empty cell the fallback exists to prevent. Never "" and never "Unknown" — both
+ * read as data loss for an actor we can name perfectly well.
+ */
+async function submitterNames(cwids: string[]): Promise<Map<string, string>> {
+  const distinct = Array.from(new Set(cwids));
+  if (distinct.length === 0) return new Map();
+  const scholars = await db.read.scholar.findMany({
+    where: { cwid: { in: distinct } },
+    select: { cwid: true, preferredName: true },
+  });
+  const byCwid = new Map<string, string>();
+  for (const s of scholars) {
+    if (s.preferredName && s.preferredName.trim().length > 0) byCwid.set(s.cwid, s.preferredName);
+  }
+  return byCwid;
+}
+
 /** Bespoke engine → the wire contract. It has no concept decomposition, so
  *  `contributions` is empty (nothing to re-rank over client-side — see the module doc).
  *  It DOES carry the signals the spine's headless shape cannot: a career stage, the
@@ -292,15 +323,34 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 /**
- * GET — the retained searches, newest first, ACROSS OFFICERS, ONE ROW PER PASTE.
+ * GET — the retained searches, newest first, ONE ROW PER PASTE, SCOPED TO THE VIEWER.
  *
- * Cross-officer is the point. The console already kept a private history in each officer's
- * localStorage; a second private list would have been a reimplementation. What nobody could see
- * before is that a colleague has already run this sponsor — which is the duplicated work this
- * list exists to prevent.
+ * A SUPERUSER SEES EVERY OFFICER'S; EVERYONE ELSE SEES ONLY THEIR OWN (decided 2026-07-17).
+ * This list was global, and its doc-comment argued that cross-officer visibility WAS the point:
+ * the value over the old localStorage history was learning that a colleague had already run this
+ * sponsor. That reasoning held while `/edit` was a handful of developers pasting public sponsor
+ * CFPs. It stops holding the moment the audience is department chairs and the paste is EMAIL —
+ * chair A pastes a donor thread, chair B opens the drawer and reads it. The de-duplication win
+ * was never worth a shared inbox, and it is not what this surface is being opened up for.
+ *
+ * 🔴 `isDeveloper` IS NOT `isSuperuser`, and the asymmetry with the page gate is DELIBERATE.
+ * The surface gates on `isSuperuser || isDeveloper`, so a developer reaches this handler — but
+ * the decision says SUPERUSER sees everyone's. Widening this leg to match the page gate out of
+ * symmetry would leave the paste corpus readable by a strictly larger group than was agreed.
+ * The gate here is `isSuperuser` ALONE, and `matcha.test.ts` proves a developer sees only their
+ * own rows.
+ *
+ * FAIL-CLOSED BY CONSTRUCTION: the ternary's TRUE leg is the privileged one, so an absent or
+ * undefined `isSuperuser` degrades to `{ submittedBy: session.cwid }` — own rows — rather than
+ * falling through to an unfiltered read. Never invert it.
  *
  * The paste itself rides along, because the officer must be able to read back what was searched
  * (and re-run it). It is the same text they pasted, returned to the same authorised surface.
+ *
+ * `take: SUBMISSION_SCAN_MAX` is applied AFTER the scope, so a normal user's window is over
+ * their own rows and the cap is correspondingly less likely to bite. `scope` ships alongside the
+ * rows so the console renders the submitter column against THE SAME VERDICT that scoped the
+ * query, rather than re-deriving a second one from the page's session.
  *
  * DEDUPED ON `descriptionHash`, and the two halves of that sentence live in different places.
  * The TABLE keeps every run on purpose — `descriptionHash` is deliberately non-unique, because
@@ -327,6 +377,9 @@ export async function GET(): Promise<NextResponse> {
   }
   try {
     const rows = await db.read.sponsorMatchSubmission.findMany({
+      // Superuser ⇒ everyone's. Anyone else — INCLUDING a developer — ⇒ their own. The TRUE leg
+      // is the privileged one so an absent flag fails closed. See the doc-comment.
+      where: session.isSuperuser ? undefined : { submittedBy: session.cwid },
       orderBy: { createdAt: "desc" },
       take: SUBMISSION_SCAN_MAX,
       select: {
@@ -347,22 +400,34 @@ export async function GET(): Promise<NextResponse> {
     for (const row of rows) {
       if (!newestPerPaste.has(row.descriptionHash)) newestPerPaste.set(row.descriptionHash, row);
     }
+    // Resolve names over the rows we actually SHIP (≤100 distinct pastes, and in practice a
+    // handful of distinct actors), not the 500 scanned.
+    const shipped = Array.from(newestPerPaste.values()).slice(0, SUBMISSION_LIST_MAX);
+    const nameByCwid = await submitterNames(shipped.map((row) => row.submittedBy));
+
     // An explicit ALLOWLIST, not a `...rest` omit of `descriptionHash`: the hash is an internal
     // join key the console has no use for, and spreading the row would put every column added to
     // this model in future on the wire by default. Naming the fields makes leaking one a choice.
-    const submissions = Array.from(newestPerPaste.values())
-      .slice(0, SUBMISSION_LIST_MAX)
-      .map((row) => ({
-        id: row.id,
-        description: row.description,
-        title: row.title,
-        engine: row.engine,
-        candidateCount: row.candidateCount,
-        submittedBy: row.submittedBy,
-        createdAt: row.createdAt,
-      }));
+    const submissions = shipped.map((row) => ({
+      id: row.id,
+      description: row.description,
+      title: row.title,
+      engine: row.engine,
+      candidateCount: row.candidateCount,
+      // The label the drawer renders, and the ONLY submitter field on the wire. ALWAYS
+      // non-empty: the name, else the cwid. The raw `submittedBy` cwid is selected above (the
+      // scope predicate and the name lookup both need it) but is deliberately NOT shipped —
+      // nothing renders it now, and an unread identity field on the wire is the invitation to
+      // render a cwid at a chair again.
+      submittedByName: nameByCwid.get(row.submittedBy) ?? row.submittedBy,
+      createdAt: row.createdAt,
+    }));
 
-    return editOk({ submissions });
+    // `Recent (N)` counts `submissions`, which is post-scope, post-dedup and post-cap — so N is
+    // the number of rows THIS viewer can actually see and open, never a count of a wider set.
+    // (`reference_funding_tagged_count_counts_the_or` is the bug this repo already shipped once
+    // by counting the pre-filter population.)
+    return editOk({ submissions, scope: session.isSuperuser ? "all" : "own" });
   } catch (err) {
     logEditFailure(`${PATH}#list`, err);
     return editError(502, "submissions_unavailable");

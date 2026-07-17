@@ -125,9 +125,17 @@ type Submission = {
   title: string | null;
   engine: string;
   candidateCount: number;
-  submittedBy: string;
+  /** Who ran it. The route resolves `Scholar.preferredName` at READ TIME and falls back to the
+   *  actor's cwid, so this is ALWAYS non-empty — never "" and never "Unknown". The raw cwid is
+   *  deliberately not on the wire: not every submitter is an affiliated scholar, and the route
+   *  has already made that decision correctly. */
+  submittedByName: string;
   createdAt: string;
 };
+
+/** Whose retained searches this list holds — the SERVER's verdict, not a second one derived from
+ *  the page's session (§9). `"all"` only for a superuser; everything else is the viewer's own. */
+type HistoryScope = "all" | "own";
 
 /** Facet groups stay scannable: top-N by researcher coverage. As a vertical checkbox panel
  *  (rather than the old wrapping chip row) an uncapped department list runs to ~20 rows on a
@@ -296,6 +304,9 @@ export function MatchaPanel() {
   // search so a new paste always starts clamped.
   const [showFullText, setShowFullText] = useState(false);
   const [history, setHistory] = useState<Submission[]>([]);
+  /** Defaults to `"own"` so a response without a `scope` never renders a submitter column the
+   *  server did not authorise — the same fail-closed direction the route's `where` takes. */
+  const [historyScope, setHistoryScope] = useState<HistoryScope>("own");
   const [deptSel, setDeptSel] = useState<ReadonlySet<string>>(new Set());
   const [conceptSel, setConceptSel] = useState<ReadonlySet<string>>(new Set());
   const [ctlOnly, setCtlOnly] = useState(false);
@@ -363,15 +374,21 @@ export function MatchaPanel() {
 
   // #6d — the retained searches, from the SERVER. This REPLACES the old localStorage history
   // outright rather than sitting beside it: the server list does everything the private one did
-  // (read back a past paste, re-run it) and adds the two things it could not — a colleague's
-  // searches, and a delete that actually erases the sponsor's words rather than clearing one
-  // browser. Two histories would have been two sources of truth for the same question.
+  // (read back a past paste, re-run it) and adds the thing it could not — a delete that actually
+  // erases the sponsor's words rather than clearing one browser. Two histories would have been
+  // two sources of truth for the same question.
+  //
+  // §9 — THE LIST IS SCOPED SERVER-SIDE. It once carried every officer's searches to anyone on
+  // this surface; a superuser still sees that, and everybody else now gets only their own. The
+  // client does not filter — it renders what the route decided it may see, and `scope` says
+  // which of the two lists this is.
   const loadHistory = useCallback(async () => {
     try {
       const r = await fetch("/api/edit/matcha", { credentials: "same-origin" });
       if (!r.ok) return; // a failed history load must never disturb the matcher
-      const data = (await r.json()) as { submissions?: Submission[] };
+      const data = (await r.json()) as { submissions?: Submission[]; scope?: HistoryScope };
       setHistory(data.submissions ?? []);
+      setHistoryScope(data.scope === "all" ? "all" : "own");
     } catch {
       /* offline / transient — the list is a convenience, not the product. */
     }
@@ -854,10 +871,19 @@ export function MatchaPanel() {
         <SheetContent data-slot="matcha-history">
           <SheetHeader>
             <SheetTitle>Recent searches ({history.length})</SheetTitle>
+            {/* The retention notice, and it must track §9's scope or it is a lie in whichever
+                direction it is left. It said "Everyone with access to this console can see them",
+                which was true of the global list and is now false for a normal user — and this is
+                the sentence a chair reads before pasting a donor email, so under-promising
+                privacy is not the safe default here either. Each branch states exactly who can
+                read THIS list. */}
             <SheetDescription>
               Searches are saved — including the description you pasted — so we can measure and
-              improve match quality against real sponsor text. Everyone with access to this
-              console can see them. Delete any search to remove its text for good.
+              improve match quality against real sponsor text.{" "}
+              {historyScope === "all"
+                ? "As an administrator you are seeing every user's searches."
+                : "Only you and console administrators can see yours."}{" "}
+              Delete any search to remove its text for good.
             </SheetDescription>
           </SheetHeader>
           <ul className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
@@ -867,7 +893,16 @@ export function MatchaPanel() {
                   <span className="shrink-0 tabular-nums">
                     {new Date(h.createdAt).toLocaleDateString()}
                   </span>
-                  <span className="min-w-0 truncate">{h.submittedBy}</span>
+                  {/* §10 — SUPERUSER VIEW ONLY, and the name rather than the cwid.
+                      Once the list is scoped (§9) a normal user's rows are ALL their own, so the
+                      column is a constant repeated down the list: it tells them nothing they did
+                      not already know and spends the width this drawer does not have. It earns
+                      its place only where rows differ by actor, which is the superuser's list.
+                      `submittedByName` is resolved server-side from `Scholar.preferredName` with
+                      a cwid fallback — never blank, never "Unknown". */}
+                  {historyScope === "all" ? (
+                    <span className="min-w-0 truncate">{h.submittedByName}</span>
+                  ) : null}
                   <span className="ml-auto shrink-0 tabular-nums">{h.candidateCount} matched</span>
                 </div>
                 {/* Replaying closes the drawer so the results are visible — SheetClose composes
