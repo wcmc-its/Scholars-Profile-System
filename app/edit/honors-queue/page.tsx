@@ -7,9 +7,15 @@
  * are NOT compiler-enforced — a key missing there typechecks clean and silently
  * never renders. A page has no such trap.
  *
- * Superuser-gated on every GET (the query is the boundary, not the UI) and
- * flag-gated behind `HONORS_APPROVAL_QUEUE` — off ⇒ 404, mirroring the endpoint.
- * `force-dynamic` + `noindex`, like the other `/edit/*` pages.
+ * Gated on `isSuperuser || isHonorsCurator` on EVERY GET (the query is the
+ * boundary, not the UI) and flag-gated behind `HONORS_APPROVAL_QUEUE` — off ⇒ 404,
+ * mirroring the endpoint. `force-dynamic` + `noindex`, like the other `/edit/*`
+ * pages.
+ *
+ * NOT `requireSuperuserGet`: the approver is the Research Dean's office, which
+ * self-serves (#1762), so a non-superuser `honors_curator` must get in. And NOT
+ * `authorizeOverviewWrite`, whose first leg is `self` — a scholar would be able to
+ * approve the pending honor on their own profile. See `lib/auth/honors-curator.ts`.
  */
 import { notFound, redirect } from "next/navigation";
 
@@ -20,8 +26,10 @@ import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
-import { requireSuperuserGet } from "@/lib/edit/authz";
 import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
+// No `countPendingHonors` here: this page has already loaded the queue, so it
+// feeds the sub-nav badge from `groups` rather than paying for a second COUNT —
+// the same thing `/edit/slug-requests` does with `requests.length`.
 import { isHonorQueueEnabled, loadHonorQueue } from "@/lib/edit/honor-queue";
 import { isSlugRequestEnabled, loadSlugRequestQueue } from "@/lib/edit/slug-request";
 
@@ -37,16 +45,17 @@ export default async function HonorsQueuePage() {
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/honors-queue");
   }
-  const denial = requireSuperuserGet({
-    session,
-    path: "/edit/honors-queue",
-    targetId: "honors-queue",
-  });
-  if (denial !== null) {
-    return <ForbiddenEditPage />;
-  }
+  // Flag first: a dark surface 404s for everyone, including superusers, before any
+  // authorization is even considered.
   if (!isHonorQueueEnabled()) {
     notFound();
+  }
+  // `isSuperuser || isHonorsCurator` — never a bare curator read; the session route
+  // reports `isDeveloper: false` for a superuser to skip a redundant LDAPS call
+  // (`app/api/auth/session/route.ts`), and a bare read of any role flag inherits
+  // that shape and locks superusers out.
+  if (!session.isSuperuser && session.isHonorsCurator !== true) {
+    return <ForbiddenEditPage />;
   }
 
   const groups = await loadHonorQueue(db.read);

@@ -12,7 +12,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { loadHonorQueue, yearPlausibilityNote } from "@/lib/edit/honor-queue";
+import {
+  isHonorsQueueTabVisible,
+  loadHonorQueue,
+  yearPlausibilityNote,
+} from "@/lib/edit/honor-queue";
 
 type Row = {
   id: string;
@@ -164,5 +168,81 @@ describe("yearPlausibilityNote — a SIGNAL, never a filter", () => {
 
   it("stays silent when there is no title to judge", () => {
     expect(yearPlausibilityNote({ year: 1970, title: null })).toBeNull();
+  });
+});
+
+describe("yearPlausibilityNote — the threshold must not rot", () => {
+  // The rule this encodes is "pre-1996 award + junior current title", which was
+  // measured in 2026. A literal 1996 in the source would still say 1996 in 2036,
+  // by which point it means "40 years ago" — a different rule that no test would
+  // have flagged. `now` is injected for the same reason `honorYearMax` takes it.
+  const AT_2026 = new Date("2026-06-01T00:00:00Z");
+  const JUNIOR = "Postdoctoral Associate";
+
+  it("reproduces the original pre-1996 boundary exactly, as of 2026", () => {
+    expect(yearPlausibilityNote({ year: 1995, title: JUNIOR }, AT_2026)).not.toBeNull();
+    // 1996 was NOT a suspect year under the original rule. Strictly-greater-than.
+    expect(yearPlausibilityNote({ year: 1996, title: JUNIOR }, AT_2026)).toBeNull();
+  });
+
+  it("moves with the calendar rather than staying pinned to 1996", () => {
+    const AT_2036 = new Date("2036-06-01T00:00:00Z");
+    // A 2005 award is unremarkable in 2026 (21y) and suspect in 2036 (31y). A
+    // hardcoded 1996 would call it fine forever.
+    expect(yearPlausibilityNote({ year: 2005, title: JUNIOR }, AT_2026)).toBeNull();
+    expect(yearPlausibilityNote({ year: 2005, title: JUNIOR }, AT_2036)).not.toBeNull();
+  });
+
+  it("defaults `now` to the real clock rather than requiring the caller to pass it", () => {
+    // The production call site passes nothing; a very old award must still annotate.
+    expect(yearPlausibilityNote({ year: 1970, title: JUNIOR })).not.toBeNull();
+  });
+});
+
+describe("isHonorsQueueTabVisible", () => {
+  const on = { HONORS_APPROVAL_QUEUE: "on" };
+  const withEnv = <T,>(env: Record<string, string>, fn: () => T): T => {
+    const prev = { ...process.env };
+    Object.assign(process.env, env);
+    try {
+      return fn();
+    } finally {
+      process.env = prev as NodeJS.ProcessEnv;
+    }
+  };
+
+  it("admits a non-superuser honors_curator — the whole point of the role", () => {
+    // The Research Dean's office self-serves. If this is false the tab is invisible
+    // to exactly the people it was built for.
+    expect(
+      withEnv(on, () => isHonorsQueueTabVisible({ isSuperuser: false, isHonorsCurator: true })),
+    ).toBe(true);
+  });
+
+  it("admits a superuser who is NOT in the curator group", () => {
+    // `isSuperuser || isHonorsCurator`, never bare: the session route reports
+    // isDeveloper:false FOR a superuser, and a bare role read inherits that shape.
+    expect(
+      withEnv(on, () => isHonorsQueueTabVisible({ isSuperuser: true, isHonorsCurator: false })),
+    ).toBe(true);
+  });
+
+  it("tolerates the flag being absent from a synthetic session", () => {
+    expect(withEnv(on, () => isHonorsQueueTabVisible({ isSuperuser: true }))).toBe(true);
+    expect(withEnv(on, () => isHonorsQueueTabVisible({ isSuperuser: false }))).toBe(false);
+  });
+
+  it("refuses everyone when the surface is dark, curator or not", () => {
+    expect(
+      withEnv({ HONORS_APPROVAL_QUEUE: "off" }, () =>
+        isHonorsQueueTabVisible({ isSuperuser: true, isHonorsCurator: true }),
+      ),
+    ).toBe(false);
+  });
+
+  it("refuses a viewer who is neither", () => {
+    expect(
+      withEnv(on, () => isHonorsQueueTabVisible({ isSuperuser: false, isHonorsCurator: false })),
+    ).toBe(false);
   });
 });

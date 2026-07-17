@@ -41,6 +41,8 @@ export type ProfilesRosterProps = {
   /** Pending slug-request count for the admin sub-nav pill; `null` when the
    *  slug-request feature is off (the "URL requests" tab is then hidden). */
   pendingSlugRequests: number | null;
+  /** #1762 — forwarded straight to AdminSubnav; `null` hides the Honors tab. */
+  pendingHonors: number | null;
   /** Forwarded to the sub-nav: `null` hides the "Administrators" tab (the
    *  feature is flag-gated, #728 Phase B); a number shows it. */
   administratorsTab?: number | null;
@@ -94,6 +96,7 @@ export function ProfilesRoster({
   page,
   pageSize,
   pendingSlugRequests,
+  pendingHonors,
   administratorsTab,
   methodsTab,
   dataQualityTab,
@@ -124,6 +127,7 @@ export function ProfilesRoster({
       <AdminSubnav
         active="profiles"
         pendingSlugRequests={pendingSlugRequests}
+        pendingHonors={pendingHonors}
         administratorsTab={administratorsTab}
         methodsTab={methodsTab}
         dataQualityTab={dataQualityTab}

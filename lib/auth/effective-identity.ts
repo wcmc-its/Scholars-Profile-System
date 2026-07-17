@@ -25,6 +25,7 @@
  */
 import { isCommsSteward } from "@/lib/auth/comms-steward";
 import { isDeveloper } from "@/lib/auth/development";
+import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { getSession } from "@/lib/auth/session-server";
 import { type SessionData, nowSeconds } from "@/lib/auth/session";
 import { type EditSession, isSuperuser } from "@/lib/auth/superuser";
@@ -83,13 +84,14 @@ export async function getEffectiveEditSession(): Promise<EditSession | null> {
   if (!session) return null;
   const cwid = getEffectiveCwid(session);
   // #1514 — same concurrent resolve as getEditSession: independent fail-closed
-  // checks, one directory round-trip of wall-clock instead of three.
-  const [su, cs, dev] = await Promise.all([
+  // checks, one directory round-trip of wall-clock instead of four.
+  const [su, cs, dev, hc] = await Promise.all([
     isSuperuser(cwid),
     isCommsSteward(cwid),
     isDeveloper(cwid),
+    isHonorsCurator(cwid),
   ]);
-  return { cwid, isSuperuser: su, isCommsSteward: cs, isDeveloper: dev };
+  return { cwid, isSuperuser: su, isCommsSteward: cs, isDeveloper: dev, isHonorsCurator: hc };
 }
 
 /**

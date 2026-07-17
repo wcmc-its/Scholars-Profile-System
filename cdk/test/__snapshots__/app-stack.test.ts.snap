@@ -455,6 +455,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "HONORS_CURATOR_ENABLED",
+                "Value": "off",
+              },
+              {
+                "Name": "SCHOLARS_HONORS_CURATOR_GROUP_CN",
+                "Value": "ITS:Library:Scholars/honors-curator-role",
+              },
+              {
                 "Name": "SELF_EDIT_OVERVIEW_GENERATE",
                 "Value": "on",
               },
@@ -4174,6 +4182,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "HONORS_APPROVAL_QUEUE",
                 "Value": "on",
+              },
+              {
+                "Name": "HONORS_CURATOR_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_HONORS_CURATOR_GROUP_CN",
+                "Value": "ITS:Library:Scholars/honors-curator-role",
               },
               {
                 "Name": "SELF_EDIT_OVERVIEW_GENERATE",

@@ -207,6 +207,7 @@ describe("getEditSession", () => {
       isSuperuser: true,
       isCommsSteward: false,
       isDeveloper: false,
+      isHonorsCurator: false,
     });
   });
 
@@ -218,6 +219,7 @@ describe("getEditSession", () => {
       isSuperuser: false,
       isCommsSteward: false,
       isDeveloper: false,
+      isHonorsCurator: false,
     });
   });
 });

@@ -157,7 +157,7 @@ describe("ProfilesRoster — row name links to the editor", () => {
         facets={{ departments: [], divisions: [], centers: [], roleCategories: [] }}
         page={0}
         pageSize={50}
-        pendingSlugRequests={null}
+        pendingSlugRequests={null} pendingHonors={null}
         canImpersonate={false}
         viewerCwid="adm001"
         {...overrides}

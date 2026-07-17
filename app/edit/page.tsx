@@ -17,6 +17,7 @@ import { getSession } from "@/lib/auth/session-server";
 import { getEffectiveCwid } from "@/lib/auth/effective-identity";
 import { isSuperuser } from "@/lib/auth/superuser";
 import { isCommsSteward, isMethodsTabVisible } from "@/lib/auth/comms-steward";
+import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { db } from "@/lib/db";
@@ -41,6 +42,7 @@ import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
 import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
 import { isCvEnabled } from "@/lib/edit/cv-export";
 import { isRailRestructureEnabled } from "@/lib/edit/rail-layout";
+import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 
 // /edit reads suppression-OFF + writes via /api/edit/*; the page must never
 // be cached (CloudFront also marks it CachingDisabled per cloudfront-cache-spec.md).
@@ -230,6 +232,11 @@ export default async function EditSelfPage({
     // so the tab hides while down-scoped under "View as". Flag-gated short-circuit
     // (no LDAP when `COMMS_STEWARD_ENABLED` is off), fail-closed.
     commsSteward,
+    // #1762 — whether the EFFECTIVE viewer is an honors_curator, gating the
+    // "Honors" tab below. Effective for the same reason as `commsSteward`: the tab
+    // must hide while down-scoped under "View as". Flag-gated short-circuit (no
+    // LDAP when `HONORS_CURATOR_ENABLED` is off), fail-closed.
+    honorsCurator,
   ] = await Promise.all([
     isSuperuser(editCwid).catch(() => false),
     slugRequestEnabled ? loadLatestSlugRequest(editCwid, db.read) : Promise.resolve(null),
@@ -241,6 +248,7 @@ export default async function EditSelfPage({
     }),
     listUnitAdminEditorsForScholar(editCwid, db.read as unknown as UnitAdminEditorsLookup),
     isCommsSteward(editCwid).catch(() => false),
+    isHonorsCurator(editCwid).catch(() => false),
   ]);
 
   const manageableUnits = [...units.departments, ...units.divisions, ...units.centers];
@@ -270,6 +278,16 @@ export default async function EditSelfPage({
   const showConsoleNav = canBrowseProfiles || commsSteward || hasUnitGrants;
   const pendingSlugRequests =
     canBrowseProfiles && slugRequestEnabled ? await countPendingSlugRequests(db.read) : null;
+  // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:
+  // flag off, or this viewer is neither superuser nor honors_curator.
+  // This page has no `EditSession` — it resolves each role against `editCwid`
+  // (the EFFECTIVE viewer) above, so hand the gate the same shape it expects.
+  const pendingHonors = isHonorsQueueTabVisible({
+    isSuperuser: canBrowseProfiles,
+    isHonorsCurator: honorsCurator,
+  })
+    ? await countPendingHonors(db.read)
+    : null;
 
   return (
     <EditPage
@@ -290,6 +308,7 @@ export default async function EditSelfPage({
             profilesTab={commsSteward}
             unitsTab={canBrowseProfiles || commsSteward || hasUnitGrants}
             pendingSlugRequests={pendingSlugRequests}
+            pendingHonors={pendingHonors}
             administratorsTab={canBrowseProfiles && isAdministratorsTabEnabled() ? 0 : null}
             methodsTab={
               isMethodsTabVisible({

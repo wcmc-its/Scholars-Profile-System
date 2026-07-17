@@ -26,14 +26,14 @@ import { AdminSubnav } from "@/components/edit/admin-subnav";
 
 describe("AdminSubnav", () => {
   it("renders both tabs with the pending-count pill when the feature is on", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={3} />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={3} pendingHonors={null} />);
     expect(screen.getByTestId("admin-tab-profiles")).toBeTruthy();
     expect(screen.getByTestId("admin-tab-slug-requests")).toBeTruthy();
     expect(screen.getByTestId("admin-subnav-pending-count").textContent).toBe("3");
   });
 
   it("marks the active tab with aria-current and links the inactive one", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={1} />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={1} pendingHonors={null} />);
     expect(screen.getByTestId("admin-tab-profiles").getAttribute("aria-current")).toBe("page");
     // The inactive tab is a link to its surface.
     expect(screen.getByTestId("admin-tab-slug-requests").getAttribute("href")).toBe(
@@ -42,44 +42,44 @@ describe("AdminSubnav", () => {
   });
 
   it("hides the URL-requests tab when the feature is off (pendingSlugRequests null)", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
     expect(screen.getByTestId("admin-tab-profiles")).toBeTruthy();
     expect(screen.queryByTestId("admin-tab-slug-requests")).toBeNull();
   });
 
   it("always shows the Slug-registry tab — even when the URL-requests tab is hidden", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
     const tab = screen.getByTestId("admin-tab-slugs");
     expect(tab).toBeTruthy();
     expect(tab.getAttribute("href")).toBe("/edit/slugs");
     // it stays visible even when the slug-request feature is on too
-    render(<AdminSubnav active="profiles" pendingSlugRequests={3} />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={3} pendingHonors={null} />);
     expect(screen.getAllByTestId("admin-tab-slugs").length).toBeGreaterThan(0);
   });
 
   it("marks the Slug-registry tab active with aria-current", () => {
-    render(<AdminSubnav active="slugs" pendingSlugRequests={null} />);
+    render(<AdminSubnav active="slugs" pendingSlugRequests={null} pendingHonors={null} />);
     expect(screen.getByTestId("admin-tab-slugs").getAttribute("aria-current")).toBe("page");
   });
 
   it("omits the count pill when zero pending", () => {
-    render(<AdminSubnav active="slug-requests" pendingSlugRequests={0} />);
+    render(<AdminSubnav active="slug-requests" pendingSlugRequests={0} pendingHonors={null} />);
     expect(screen.getByTestId("admin-tab-slug-requests").getAttribute("aria-current")).toBe("page");
     expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
   });
 
   it("hides the Administrators tab when administratorsTab is null", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} administratorsTab={null} />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} administratorsTab={null} />);
     expect(screen.queryByTestId("admin-tab-administrators")).toBeNull();
   });
 
   it("hides the Administrators tab when administratorsTab is omitted (undefined)", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
     expect(screen.queryByTestId("admin-tab-administrators")).toBeNull();
   });
 
   it("shows the Administrators tab when administratorsTab is 0 (no badge)", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} administratorsTab={0} />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} administratorsTab={0} />);
     const tab = screen.getByTestId("admin-tab-administrators");
     expect(tab).toBeTruthy();
     expect(tab.getAttribute("href")).toBe("/edit/administrators");
@@ -89,7 +89,7 @@ describe("AdminSubnav", () => {
 
   it("marks the Administrators tab active with aria-current", () => {
     render(
-      <AdminSubnav active="administrators" pendingSlugRequests={null} administratorsTab={0} />,
+      <AdminSubnav active="administrators" pendingSlugRequests={null} pendingHonors={null} administratorsTab={0} />,
     );
     expect(screen.getByTestId("admin-tab-administrators").getAttribute("aria-current")).toBe(
       "page",
@@ -97,27 +97,27 @@ describe("AdminSubnav", () => {
   });
 
   it("hides the Method families tab when methodsTab is null/omitted", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} methodsTab={null} />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} methodsTab={null} />);
     expect(screen.queryByTestId("admin-tab-methods")).toBeNull();
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
     expect(screen.queryByTestId("admin-tab-methods")).toBeNull();
   });
 
   it("shows the Method families tab (linking /edit/methods) when methodsTab is 0", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} methodsTab={0} />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} methodsTab={0} />);
     const tab = screen.getByTestId("admin-tab-methods");
     expect(tab.getAttribute("href")).toBe("/edit/methods");
     expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
   });
 
   it("marks the Method families tab active with aria-current", () => {
-    render(<AdminSubnav active="methods" pendingSlugRequests={null} methodsTab={0} />);
+    render(<AdminSubnav active="methods" pendingSlugRequests={null} pendingHonors={null} methodsTab={0} />);
     expect(screen.getByTestId("admin-tab-methods").getAttribute("aria-current")).toBe("page");
   });
 
   it("shows the Funding matcher tab on every superuser surface (rides superuserSurfaces)", () => {
     // Default superuserSurfaces=true (a superuser-only page like Profiles).
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
     expect(screen.getByTestId("admin-tab-find-researchers").getAttribute("href")).toBe(
       "/edit/find-researchers",
     );
@@ -125,7 +125,7 @@ describe("AdminSubnav", () => {
 
   it("hides the Funding matcher tab for a non-superuser, non-developer (comms_steward)", () => {
     render(
-      <AdminSubnav active="methods" pendingSlugRequests={null} methodsTab={0} superuserSurfaces={false} />,
+      <AdminSubnav active="methods" pendingSlugRequests={null} pendingHonors={null} methodsTab={0} superuserSurfaces={false} />,
     );
     expect(screen.queryByTestId("admin-tab-find-researchers")).toBeNull();
   });
@@ -134,7 +134,7 @@ describe("AdminSubnav", () => {
     render(
       <AdminSubnav
         active="find-researchers"
-        pendingSlugRequests={null}
+        pendingSlugRequests={null} pendingHonors={null}
         superuserSurfaces={false}
         viewerIsDeveloper
       />,
@@ -150,7 +150,7 @@ describe("AdminSubnav", () => {
     render(
       <AdminSubnav
         active="methods"
-        pendingSlugRequests={3}
+        pendingSlugRequests={3} pendingHonors={null}
         administratorsTab={0}
         methodsTab={0}
         superuserSurfaces={false}
@@ -168,7 +168,7 @@ describe("AdminSubnav", () => {
   // anchors the right end on every console surface; profile actions live in the
   // menu, so there is no "My Profile" tab.
   it("mounts the account menu (console context) at the right end — no My Profile tab", () => {
-    render(<AdminSubnav active="self" pendingSlugRequests={null} methodsTab={0} />);
+    render(<AdminSubnav active="self" pendingSlugRequests={null} pendingHonors={null} methodsTab={0} />);
     expect(screen.queryByTestId("admin-subnav-self-edit")).toBeNull();
     const stub = screen.getByTestId("account-menu-stub");
     expect(stub.getAttribute("data-context")).toBe("console");
@@ -178,7 +178,7 @@ describe("AdminSubnav", () => {
 
   it('active="self" for a superuser shows the full tab strip (no tab active)', () => {
     render(
-      <AdminSubnav active="self" pendingSlugRequests={0} administratorsTab={0} methodsTab={0} />,
+      <AdminSubnav active="self" pendingSlugRequests={0} pendingHonors={null} administratorsTab={0} methodsTab={0} />,
     );
     // All admin tabs are present and are links (none active — we're on self).
     for (const id of ["profiles", "slugs", "administrators", "methods"]) {
@@ -192,7 +192,7 @@ describe("AdminSubnav", () => {
     render(
       <AdminSubnav
         active="self"
-        pendingSlugRequests={null}
+        pendingSlugRequests={null} pendingHonors={null}
         methodsTab={0}
         superuserSurfaces={false}
       />,
@@ -204,21 +204,21 @@ describe("AdminSubnav", () => {
 
   // Data Quality dashboard tab (docs/data-quality-dashboard-spec.md).
   it("hides the Data quality tab when dataQualityTab is null/omitted", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} dataQualityTab={null} />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} dataQualityTab={null} />);
     expect(screen.queryByTestId("admin-tab-data-quality")).toBeNull();
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
     expect(screen.queryByTestId("admin-tab-data-quality")).toBeNull();
   });
 
   it("shows the Data quality tab (linking /edit/data-quality) when dataQualityTab is 0", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} dataQualityTab={0} />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} dataQualityTab={0} />);
     const tab = screen.getByTestId("admin-tab-data-quality");
     expect(tab.getAttribute("href")).toBe("/edit/data-quality");
     expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
   });
 
   it("marks the Data quality tab active with aria-current", () => {
-    render(<AdminSubnav active="data-quality" pendingSlugRequests={null} dataQualityTab={0} />);
+    render(<AdminSubnav active="data-quality" pendingSlugRequests={null} pendingHonors={null} dataQualityTab={0} />);
     expect(screen.getByTestId("admin-tab-data-quality").getAttribute("aria-current")).toBe("page");
   });
 
@@ -228,7 +228,7 @@ describe("AdminSubnav", () => {
     render(
       <AdminSubnav
         active="units"
-        pendingSlugRequests={null}
+        pendingSlugRequests={null} pendingHonors={null}
         superuserSurfaces={false}
         unitsTab
         dataQualityTab={0}
@@ -241,17 +241,75 @@ describe("AdminSubnav", () => {
   // comms-steward-profile-editing-spec.md §3b — a steward edits org units, so
   // the Units tab is shown via the `unitsTab` capability.
   it("shows the Units tab (linking /edit/units) when unitsTab is true", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} profilesTab unitsTab />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} profilesTab unitsTab />);
     expect(screen.getByTestId("admin-tab-units").getAttribute("href")).toBe("/edit/units");
   });
 
   it("hides the Units tab when unitsTab is false/omitted", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} superuserSurfaces />);
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} superuserSurfaces />);
     expect(screen.queryByTestId("admin-tab-units")).toBeNull();
   });
 
   it('marks the Units tab active with aria-current when active="units"', () => {
-    render(<AdminSubnav active="units" pendingSlugRequests={null} unitsTab />);
+    render(<AdminSubnav active="units" pendingSlugRequests={null} pendingHonors={null} unitsTab />);
     expect(screen.getByTestId("admin-tab-units").getAttribute("aria-current")).toBe("page");
+  });
+});
+
+describe("AdminSubnav — the Honors tab (#1762)", () => {
+  it("shows the tab with its pending count", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={7} />);
+    const tab = screen.getByTestId("admin-tab-honors-queue");
+    expect(tab).toBeTruthy();
+    expect(tab.getAttribute("href")).toBe("/edit/honors-queue");
+    expect(tab.textContent).toContain("7");
+  });
+
+  it("hides the tab when the count is null", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+    expect(screen.queryByTestId("admin-tab-honors-queue")).toBeNull();
+  });
+
+  it("🔴 shows the tab to a NON-superuser honors_curator", () => {
+    // The regression this pins: the tab was gated on `superuserSurfaces &&`, which
+    // is false for a curator — so the Honors tab rendered only for superusers, and
+    // (because the prop was optional and defaulted to null) only on the Honors page
+    // itself. The Research Dean's office could reach their own queue solely by
+    // typing the URL. That is #1767's "an honors surface nobody could find",
+    // verbatim. The caller decides visibility by passing a count vs null; this
+    // component must not second-guess it with a superuser check.
+    render(
+      <AdminSubnav
+        active="profiles"
+        superuserSurfaces={false}
+        profilesTab
+        pendingSlugRequests={null}
+        pendingHonors={3}
+      />,
+    );
+    expect(screen.queryByTestId("admin-tab-honors-queue")).toBeTruthy();
+  });
+
+  it("still hides the URL-requests tab from a non-superuser", () => {
+    // The counterpart: the slug tab genuinely IS superuser-only, so dropping
+    // `superuserSurfaces` from the honors tab must not have leaked to its
+    // neighbour.
+    render(
+      <AdminSubnav
+        active="profiles"
+        superuserSurfaces={false}
+        profilesTab
+        pendingSlugRequests={4}
+        pendingHonors={3}
+      />,
+    );
+    expect(screen.queryByTestId("admin-tab-slug-requests")).toBeNull();
+  });
+
+  it("renders a zero count rather than hiding an empty queue", () => {
+    // 0 is not null: an empty queue is a real, reachable state and the tab must
+    // stay put, or a curator with nothing to do concludes the surface vanished.
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={0} />);
+    expect(screen.queryByTestId("admin-tab-honors-queue")).toBeTruthy();
   });
 });

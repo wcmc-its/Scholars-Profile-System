@@ -23,6 +23,7 @@ import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { loadAllUnitsDirectory, loadManageableUnits } from "@/lib/edit/manageable-units";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
+import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,11 @@ export default async function EditUnitsPage() {
   // off). The pending-request count drives the superuser "URL requests" badge.
   const pendingSlugRequests =
     session.isSuperuser && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
+  // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:
+  // flag off, or this viewer is neither superuser nor honors_curator.
+  const pendingHonors = isHonorsQueueTabVisible(session)
+    ? await countPendingHonors(db.read)
+    : null;
 
   return (
     <div className="min-h-screen bg-[var(--background)]" data-slot="units-index-page">
@@ -80,6 +86,7 @@ export default async function EditUnitsPage() {
         profilesTab={session.isCommsSteward}
         unitsTab
         pendingSlugRequests={pendingSlugRequests}
+        pendingHonors={pendingHonors}
         administratorsTab={session.isSuperuser && isAdministratorsTabEnabled() ? 0 : null}
         methodsTab={isMethodsTabVisible(session) ? 0 : null}
         // A global editor (superuser/comms_steward) OR a unit Owner/Curator with

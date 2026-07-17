@@ -53,6 +53,8 @@ export type SlugRegistryProps = {
   /** Pending slug-request count for the sub-nav pill; `null` when the feature
    *  is off (the "URL requests" tab is then hidden — but THIS tab stays). */
   pendingSlugRequests: number | null;
+  /** #1762 — forwarded straight to AdminSubnav; `null` hides the Honors tab. */
+  pendingHonors: number | null;
   /** Forwarded to the sub-nav: `null` hides the "Administrators" tab. */
   administratorsTab?: number | null;
   /** Forwarded to the sub-nav: `null` hides the "Method Families" tab. */
@@ -81,6 +83,7 @@ export function SlugRegistry({
   pageSize,
   requestedSegmentVisible,
   pendingSlugRequests,
+  pendingHonors,
   administratorsTab,
   methodsTab,
   dataQualityTab,
@@ -118,6 +121,7 @@ export function SlugRegistry({
         active="slugs"
         unitsTab={unitsTab}
         pendingSlugRequests={pendingSlugRequests}
+        pendingHonors={pendingHonors}
         administratorsTab={administratorsTab}
         methodsTab={methodsTab}
         dataQualityTab={dataQualityTab}

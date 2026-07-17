@@ -19,7 +19,8 @@
  * rows sharing one are candidates for the same assertion.
  *
  * Read-only and pure of authz: the caller gates. `loadHonorQueue` is only ever
- * reached from a superuser-checked page.
+ * reached from a page that has already checked `isSuperuser || isHonorsCurator`
+ * (#1762 — the Research Dean's office self-serves; see `lib/auth/honors-curator.ts`).
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import type { HonorCategory } from "@/lib/generated/prisma/enums";
@@ -59,6 +60,29 @@ export type HonorQueueGroup = {
 
 export function isHonorQueueEnabled(): boolean {
   return process.env.HONORS_APPROVAL_QUEUE === "on";
+}
+
+/**
+ * Whether to advertise the "Honors" tab in the admin sub-nav for this viewer:
+ * the surface is enabled AND the viewer can open it. Mirrors
+ * `isMethodsTabVisible` (`lib/auth/comms-steward.ts`), including the reason it
+ * role-gates rather than only flag-gating: a unit Owner can land on some admin
+ * surfaces but is neither superuser nor curator, and must never be shown a tab
+ * that 403s.
+ *
+ * 🔴 `isSuperuser || isHonorsCurator`, never a bare `isHonorsCurator`. The
+ * session route reports `isDeveloper: false` FOR a superuser to skip a redundant
+ * LDAPS call (`app/api/auth/session/route.ts`), and any bare role read inherits
+ * that shape — locking superusers out of the surface they administer.
+ *
+ * Takes the resolved session booleans rather than a cwid, so this module needs no
+ * LDAP import and stays safe to pull into any server component.
+ */
+export function isHonorsQueueTabVisible(session: {
+  isSuperuser: boolean;
+  isHonorsCurator?: boolean;
+}): boolean {
+  return isHonorQueueEnabled() && (session.isSuperuser || session.isHonorsCurator === true);
 }
 
 /**
@@ -160,13 +184,35 @@ export async function loadHonorQueue(client: HonorQueueClient): Promise<HonorQue
  */
 const JUNIOR_TITLE = /postdoc|fellow|resident|student|instructor|assistant/i;
 
-export function yearPlausibilityNote(row: {
-  year: number | null;
-  title: string | null;
-}): string | null {
+/**
+ * Awards MORE than this many years old are worth a second look when the title
+ * reads junior. 30 reproduces the D3 adjudication's "pre-1996 award + junior
+ * current title" suspect rule exactly as of 2026 (`> 30` ⇒ 1995 and earlier), and
+ * then keeps meaning the same thing as the years pass, which a literal 1996 would
+ * not. Strictly greater, not >=: 1996 itself was NOT a suspect year under the
+ * original rule, and quietly widening the net by one year is the kind of drift
+ * nobody would catch.
+ */
+const SUSPECT_AWARD_AGE_YEARS = 30;
+
+export function yearPlausibilityNote(
+  row: { year: number | null; title: string | null },
+  // Per call, not frozen at module load — the same reason `honorYearMax`
+  // (lib/edit/honor.ts) takes it: a hardcoded year silently rots, and this one
+  // would drift the annotation threshold by one every Jan 1 without any test
+  // noticing.
+  now: Date = new Date(),
+): string | null {
   if (row.year === null) return null;
-  if (row.year >= 1996) return null;
   if (!row.title || !JUNIOR_TITLE.test(row.title)) return null;
-  const age = 2026 - row.year;
+  const age = now.getUTCFullYear() - row.year;
+  if (age <= SUSPECT_AWARD_AGE_YEARS) return null;
   return `Awarded ${age} years ago, but the current title reads junior — check this is the same person, not a namesake.`;
+}
+
+/** Count pending honors — the admin sub-nav's pending-count pill (#1762). */
+export function countPendingHonors(
+  client: Pick<PrismaClient, "honor">,
+): Promise<number> {
+  return client.honor.count({ where: { status: "pending" } });
 }

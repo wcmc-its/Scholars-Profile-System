@@ -47,7 +47,7 @@ export type AdminSubnavActive =
 export function AdminSubnav({
   active,
   pendingSlugRequests,
-  pendingHonors = null,
+  pendingHonors,
   administratorsTab,
   methodsTab,
   dataQualityTab,
@@ -59,9 +59,20 @@ export function AdminSubnav({
 }: {
   active: AdminSubnavActive;
   pendingSlugRequests: number | null;
-  /** #1762 — count of honors awaiting approval. `null` hides the tab (flag off);
-   *  defaults to null so every existing caller keeps compiling unchanged. */
-  pendingHonors?: number | null;
+  /**
+   * #1762 — count of honors awaiting approval. `null` hides the tab: the flag is
+   * off, or this viewer is neither a superuser nor an `honors_curator`.
+   *
+   * 🔴 REQUIRED, and deliberately NOT optional-with-a-default, mirroring
+   * `pendingSlugRequests`. An optional prop compiles clean at all 12 callers and
+   * silently defaults to `null` — so the tab renders on the honors page alone and
+   * nowhere else, i.e. only for someone who already knows the URL. That is
+   * exactly #1767's bug ("an honors surface nobody could find"), and exactly
+   * #1760's rail-order bug: the compiler-enforced maps were right, the
+   * unenforced arrays typechecked clean and never rendered. Required is what
+   * makes the compiler the test.
+   */
+  pendingHonors: number | null;
   /** `null` hides the "Administrators" tab — the feature is flag-gated
    *  (`SELF_EDIT_ADMINISTRATORS_TAB`), mirroring the `pendingSlugRequests`
    *  hide pattern. A number shows the tab (Phase B passes `0` — no badge). */
@@ -117,10 +128,19 @@ export function AdminSubnav({
             count={pendingSlugRequests}
           />
         )}
-        {/* #1762 — honors awaiting approval. `null` hides it (flag off), matching
-            the `administratorsTab` idiom. Wired here, not only reachable by URL:
-            #1767's first bug was an honors surface nobody could find. */}
-        {superuserSurfaces && pendingHonors !== null && (
+        {/* #1762 — honors awaiting approval. Wired here, not only reachable by
+            URL: #1767's first bug was an honors surface nobody could find.
+
+            Gated on `pendingHonors !== null` ALONE — deliberately without
+            `superuserSurfaces`, unlike the slug tab above. This queue has a
+            non-superuser tier (`honors_curator`, the Research Dean's office),
+            and `superuserSurfaces` is false for them, so ANDing it would hide the
+            tab from the very people the role exists to serve. The caller already
+            resolved `(isSuperuser || isHonorsCurator) && isHonorQueueEnabled()`
+            to decide between a count and `null`, so the count IS the gate — a
+            second one here could only ever disagree with it. The slug tab keeps
+            `superuserSurfaces` because it genuinely is superuser-only. */}
+        {pendingHonors !== null && (
           <AdminTab
             href="/edit/honors-queue"
             id="honors-queue"

@@ -33,6 +33,7 @@ import { db } from "@/lib/db";
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
+import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { isMethodsLensSensitiveGateOn } from "@/lib/profile/methods-lens-flags";
 
 export const dynamic = "force-dynamic";
@@ -77,6 +78,11 @@ export default async function MethodFamiliesPage() {
   const superuserSurfaces = session.isSuperuser;
   const pendingSlugRequests =
     superuserSurfaces && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
+  // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:
+  // flag off, or this viewer is neither superuser nor honors_curator.
+  const pendingHonors = isHonorsQueueTabVisible(session)
+    ? await countPendingHonors(db.read)
+    : null;
   const administratorsTab = superuserSurfaces && isAdministratorsTabEnabled() ? 0 : null;
 
   return (
@@ -96,6 +102,7 @@ export default async function MethodFamiliesPage() {
       <AdminSubnav
         active="methods"
         pendingSlugRequests={pendingSlugRequests}
+        pendingHonors={pendingHonors}
         administratorsTab={administratorsTab}
         methodsTab={isMethodsTabVisible(session) ? 0 : null}
         dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
