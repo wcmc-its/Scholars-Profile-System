@@ -162,11 +162,24 @@ function stubFetch(payload: {
   candidates: MatchaCandidate[];
   preferences?: MatchaPreference[];
   submissions?: Submission[];
+  /** §9 — the SERVER's verdict on whose searches this list holds. Defaults to `"own"`, which is
+   *  what every non-superuser gets and therefore the right default for a fixture. `"omit"` sends
+   *  a payload with NO `scope` key at all — an explicit sentinel, because `undefined` cannot
+   *  express that here: it is indistinguishable from "not set" and would silently take the
+   *  default, turning the fail-closed test into theatre that passes on any implementation. */
+  scope?: "all" | "own" | "omit";
 }) {
   const fetchMock = vi.fn(async (_url: string, init?: { method?: string }) => {
     const method = init?.method ?? "GET";
     if (method === "GET") {
-      return { ok: true, json: async () => ({ ok: true, submissions: payload.submissions ?? [] }) };
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          submissions: payload.submissions ?? [],
+          ...(payload.scope === "omit" ? {} : { scope: payload.scope ?? "own" }),
+        }),
+      };
     }
     return { ok: true, json: async () => ({ ok: true, ...payload }) };
   });
@@ -189,7 +202,9 @@ type Submission = {
   title: string | null;
   engine: string;
   candidateCount: number;
-  submittedBy: string;
+  /** §10 — the resolved label the route ships (name, else cwid). The raw cwid is not on the
+   *  wire; mirror the route's shape here or the fixture stops being a fixture. */
+  submittedByName: string;
   createdAt: string;
 };
 
@@ -2133,9 +2148,11 @@ describe("MatchaPanel", () => {
   });
 
   // ── Retained searches (#6d) ────────────────────────────────────────────────
-  it("lists retained searches from the SERVER, including a colleague's, and says they are kept", async () => {
-    // Cross-officer visibility is the whole reason this replaced the localStorage history: the
-    // private list could never tell you that someone else had already run this sponsor.
+  it("lists retained searches from the SERVER and says they are kept", async () => {
+    // The server list replaced a localStorage history because only it can offer a delete that
+    // actually erases the sponsor's words rather than clearing one browser. (It ALSO used to be
+    // cross-officer, and that WAS the headline reason — §9 removed it for everyone but a
+    // superuser once the audience became chairs pasting email. See the scope tests below.)
     stubFetch({
       concepts: CONCEPTS,
       candidates: THREE,
@@ -2146,7 +2163,7 @@ describe("MatchaPanel", () => {
           title: "cardiac fibrosis",
           engine: "spine",
           candidateCount: 12,
-          submittedBy: "zzz9001", // NOT the current officer
+          submittedByName: "Dana Ellis",
           createdAt: "2026-07-13T10:00:00.000Z",
         },
       ],
@@ -2155,11 +2172,96 @@ describe("MatchaPanel", () => {
     // The count rides the drawer trigger; opening it reveals the list + the retention notice.
     fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
     expect(await screen.findByText(/Recent searches \(1\)/)).toBeTruthy();
-    expect(screen.getByText("zzz9001")).toBeTruthy();
     expect(screen.getByText("cardiac fibrosis")).toBeTruthy();
     // The officer is TOLD, on the surface where it happens — not in a policy page.
-    expect(screen.getByText(/Searches are saved/)).toBeTruthy();
+    expect(screen.getByText(/They’re saved/)).toBeTruthy();
     expect(screen.getByText(/improve match quality/)).toBeTruthy();
+  });
+
+  describe("history scope (§9) and the submitter (§10)", () => {
+    function submission(over: Partial<Submission> = {}): Submission {
+      return {
+        id: "s1",
+        description: "We fund cardiac fibrosis work.",
+        title: "cardiac fibrosis",
+        engine: "spine",
+        candidateCount: 12,
+        submittedByName: "Dana Ellis",
+        createdAt: "2026-07-13T10:00:00.000Z",
+        ...over,
+      };
+    }
+
+    it("scope 'own': NO submitter column — every row is yours, so the name is a constant", async () => {
+      stubFetch({
+        concepts: CONCEPTS,
+        candidates: THREE,
+        scope: "own",
+        submissions: [submission()],
+      });
+      render(<MatchaPanel />);
+      fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
+      await screen.findByText(/Recent searches \(1\)/);
+
+      expect(screen.getByText("cardiac fibrosis")).toBeTruthy();
+      expect(screen.queryByText("Dana Ellis")).toBeNull();
+      // And the notice must not tell a chair that the console at large reads their donor email.
+      expect(
+        screen.getByText(/Only you and console administrators can see your searches/),
+      ).toBeTruthy();
+    });
+
+    it("scope 'all': the submitter's NAME renders — it is what distinguishes a superuser's rows", async () => {
+      stubFetch({
+        concepts: CONCEPTS,
+        candidates: THREE,
+        scope: "all",
+        submissions: [
+          submission({ id: "s1", submittedByName: "Dana Ellis" }),
+          submission({ id: "s2", title: "heart failure", submittedByName: "Chris Hale" }),
+        ],
+      });
+      render(<MatchaPanel />);
+      fireEvent.click(await screen.findByRole("button", { name: /Recent \(2\)/ }));
+      await screen.findByText(/Recent searches \(2\)/);
+
+      expect(screen.getByText("Dana Ellis")).toBeTruthy();
+      expect(screen.getByText("Chris Hale")).toBeTruthy();
+      expect(screen.getByText(/you are seeing every user's searches/)).toBeTruthy();
+    });
+
+    it("renders the CWID fallback verbatim when the route could not resolve a name", async () => {
+      // The route falls back to the cwid for a submitter with no Scholar row. The panel must
+      // render whatever label it is handed — a client-side "prettify" that blanked an
+      // unrecognised value would reintroduce the empty cell the fallback exists to prevent.
+      stubFetch({
+        concepts: CONCEPTS,
+        candidates: THREE,
+        scope: "all",
+        submissions: [submission({ submittedByName: "abc1234" })],
+      });
+      render(<MatchaPanel />);
+      fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
+      await screen.findByText(/Recent searches \(1\)/);
+
+      expect(screen.getByText("abc1234")).toBeTruthy();
+    });
+
+    it("FAILS CLOSED on a response with no scope — no submitter column", async () => {
+      // An older/partial payload must not default to the privileged rendering. `"omit"` really
+      // drops the key (see stubFetch) — with `undefined` this test would pass on any code.
+      stubFetch({
+        concepts: CONCEPTS,
+        candidates: THREE,
+        scope: "omit",
+        submissions: [submission()],
+      });
+      render(<MatchaPanel />);
+      fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
+      await screen.findByText(/Recent searches \(1\)/);
+
+      expect(screen.queryByText("Dana Ellis")).toBeNull();
+    });
   });
 
   it("deletes a retained search and drops it from the list", async () => {
@@ -2173,7 +2275,7 @@ describe("MatchaPanel", () => {
           title: "cardiac fibrosis",
           engine: "spine",
           candidateCount: 12,
-          submittedBy: "aaa1001",
+          submittedByName: "Dana Ellis",
           createdAt: "2026-07-13T10:00:00.000Z",
         },
       ],
