@@ -290,11 +290,25 @@ describe("AdminSubnav", () => {
       vi.doUnmock("@/lib/api/matcha");
     });
 
-    it("leaves every other tab hover-free — the prop is additive, not a sweep", () => {
-      render(<AdminSubnav active="profiles" pendingSlugRequests={3} />);
-      // If the hover had been made required/default, Profiles would gain a trigger too.
+    it("leaves every other tab hover-free — the prop is additive, not a sweep", async () => {
+      // ⚠ This MUST use the same mocked module as the test above. Written against the static
+      // import it passed even when every tab was given the hover — the flag is off there, so the
+      // card never opened and the assertion could not fail in either direction. Caught by
+      // mutation, not by review.
+      vi.resetModules();
+      vi.doMock("@/lib/api/matcha", () => ({ isMatchaEnabled: () => true }));
+      const { AdminSubnav: Subnav } = await import("@/components/edit/admin-subnav");
+      render(<Subnav active="profiles" pendingSlugRequests={3} superuserSurfaces />);
+      // Proves the card CAN open in this render — otherwise the negative below is vacuous.
+      fireEvent.focus(screen.getByTestId("admin-tab-matcha"));
+      await screen.findByText(/Paste the ask\. Get the shortlist\./);
+      // …and a tab that was passed no hover opens nothing. The wait is load-bearing: Radix opens
+      // on a 200ms delay, so asserting absence synchronously would pass before any card COULD
+      // have opened — which is exactly how the first version of this test was vacuous.
       fireEvent.focus(screen.getByTestId("admin-tab-slug-requests"));
-      expect(screen.queryByText(/Paste the ask/)).toBeNull();
+      await new Promise((r) => setTimeout(r, 350));
+      expect(screen.getAllByText(/Paste the ask\. Get the shortlist\./)).toHaveLength(1);
+      vi.doUnmock("@/lib/api/matcha");
     });
   });
 });
