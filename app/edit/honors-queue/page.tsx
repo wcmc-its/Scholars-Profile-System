@@ -58,7 +58,14 @@ export default async function HonorsQueuePage() {
     return <ForbiddenEditPage />;
   }
 
-  const groups = await loadHonorQueue(db.read);
+  // All three status buckets — Pending is the working queue; Approved/Rejected are
+  // read-only history (the "we should see accepted honors somewhere" ask). ~250
+  // rows total on a full seed, so three small queries, not a paging concern.
+  const [groups, approved, rejected] = await Promise.all([
+    loadHonorQueue(db.read, "pending"),
+    loadHonorQueue(db.read, "published"),
+    loadHonorQueue(db.read, "rejected"),
+  ]);
   const pendingCount = groups.reduce((sum, g) => sum + g.rows.length, 0);
   const contestedCount = groups.filter((g) => g.contested).length;
   // The subnav's slug badge is a live count; keep it truthful on this page too
@@ -100,7 +107,7 @@ export default async function HonorsQueuePage() {
                   : ""
               }. Nothing here renders on a profile until it is approved.`}
         </p>
-        <HonorsQueue initialGroups={groups} />
+        <HonorsQueue pending={groups} approved={approved} rejected={rejected} />
       </main>
     </div>
   );
