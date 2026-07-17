@@ -51,6 +51,10 @@ export type HonorQueueRow = {
   name: string;
   organization: string;
   year: number | null;
+  /** Prestige weight of the honor, 0–100, from `HONOR_PRESTIGE` keyed on
+   *  `organization`. A sort dimension, not a hard rank; unknown bodies score 0
+   *  and sink. Editable — see the map. */
+  prestige: number;
   source: string;
   sourceRef: string | null;
   createdAt: string;
@@ -75,6 +79,38 @@ export type HonorQueueGroup = {
    *  the others. The UI must not offer a plain "approve" here. */
   contested: boolean;
 };
+
+/**
+ * Prestige weight per conferring body, 0–100. A curator sort dimension (#1762
+ * round 3), NOT an eligibility gate — nothing is dropped by a low score, it just
+ * sorts later. Keyed on the honor's `organization` string exactly as seeded.
+ *
+ * These weights are a DEFERABLE JUDGEMENT, deliberately in one editable table so
+ * the Dean's office can retune without touching logic. The ordering encodes the
+ * usual academic reading — the national academies and HHMI at the top, the
+ * clinical/scientific societies next, the early-career fellowships below — but
+ * it is a starting point, not a claim of exact rank. Unknown bodies → 0.
+ */
+export const HONOR_PRESTIGE: Readonly<Record<string, number>> = {
+  "National Academy of Sciences": 100,
+  "National Academy of Medicine": 100,
+  "Howard Hughes Medical Institute": 96,
+  "American Philosophical Society": 92,
+  "American Academy of Arts and Sciences": 90,
+  "Association of American Physicians": 78,
+  "American Society for Clinical Investigation": 74,
+  "American Association for the Advancement of Science": 66,
+  "U.S. Government (PECASE)": 60,
+  "Alfred P. Sloan Foundation": 56,
+  "David and Lucile Packard Foundation": 54,
+  "Pew Charitable Trusts": 50,
+  "Searle Scholars Program": 50,
+  "Damon Runyon Cancer Research Foundation": 46,
+};
+
+export function honorPrestige(organization: string): number {
+  return HONOR_PRESTIGE[organization.trim()] ?? 0;
+}
 
 export function isHonorQueueEnabled(): boolean {
   return process.env.HONORS_APPROVAL_QUEUE === "on";
@@ -238,6 +274,7 @@ export async function loadHonorQueue(
           name: r.name,
           organization: r.organization,
           year: r.year,
+          prestige: honorPrestige(r.organization),
           source: r.source,
           sourceRef: r.sourceRef,
           createdAt: r.createdAt.toISOString(),
