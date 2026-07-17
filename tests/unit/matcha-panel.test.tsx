@@ -354,7 +354,7 @@ describe("MatchaPanel", () => {
     expect(screen.queryByText("·rare")).toBeNull();
   });
 
-  it("shows the funder's gloss as the concept's 'sponsor's words' line", async () => {
+  it("shows the funder's gloss as the concept's 'from the ask' line", async () => {
     stubFetch({
       concepts: [
         { ...CONCEPTS[0], gloss: "lysosomal processing of ADC linkers" },
@@ -365,7 +365,7 @@ describe("MatchaPanel", () => {
     });
     await renderAndSearch();
     expect(document.body.textContent).toContain("lysosomal processing of ADC linkers");
-    expect(document.body.textContent).toContain("sponsor");
+    expect(document.body.textContent).toContain("from the ask");
   });
 
   it("shows NO rail on the bespoke shape (empty concepts)", async () => {
@@ -771,7 +771,7 @@ describe("MatchaPanel", () => {
     // The read-only ask quotes the text that was SEARCHED. None of the three concept terms occurs
     // in "CAR T collaborators", so nothing marks — and the panel must SAY so, rather than let
     // an unmarked paste read as "the matcher ignored all of this".
-    expect(screen.getByText(/What we read from the sponsor/)).toBeTruthy();
+    expect(screen.getByText(/What we read from the ask/)).toBeTruthy();
     expect(screen.getByText(/0 of 3 concepts are highlighted/)).toBeTruthy();
   });
 
@@ -798,7 +798,7 @@ describe("MatchaPanel", () => {
     await renderAndSearch(); // pastes "CAR T collaborators"
     // The committed search is now the read-only ask — the textarea is gone, Re-run is offered.
     expect(screen.queryByLabelText(/description/i)).toBeNull();
-    expect(screen.getByText(/What we read from the sponsor/)).toBeTruthy();
+    expect(screen.getByText(/What we read from the ask/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Re-run match" })).toBeTruthy();
 
     // Edit paste restores the textarea, pre-filled with the text that was searched.
@@ -862,7 +862,7 @@ describe("MatchaPanel", () => {
   }
 
   /** The Full card is present iff its eyebrow is; the Compact bar iff "Show original ▾" is. */
-  const isFull = () => screen.queryByText(/What we read from the sponsor/) !== null;
+  const isFull = () => screen.queryByText(/What we read from the ask/) !== null;
 
   /** The LIVE observers watching the ask card's collapse sentinel — never a row's `inView` one, and
    *  never one the effect has already disconnected. This is "what could still collapse the header",
