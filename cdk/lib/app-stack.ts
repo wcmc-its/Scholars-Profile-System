@@ -1354,6 +1354,44 @@ export class AppStack extends Stack {
         // SCHOLARS_MAIL_FROM; until that flips the requester is notified in-app
         // only, and the decision never fails for a missing email.
         SELF_EDIT_SLUG_REQUEST: "on",
+        // #1762 -- the /edit honors approval queue. STAGING ONLY for now: it is
+        // superuser-gated and nothing it approves can render until a human
+        // approves it, but prod has no honor rows to work yet (the Phase 2 seed
+        // hasn't run), so the tab would be an empty surface promising a workflow
+        // that doesn't exist there. Flip prod WITH the seed, not before.
+        // isHonorQueueEnabled() reads === "on" (lib/edit/honor-queue.ts); off ⇒
+        // the page AND the decision endpoint 404, and the subnav tab is hidden.
+        // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`
+        // -- the CD pipeline re-rolls the image and never deploys CDK.
+        HONORS_APPROVAL_QUEUE: env === "staging" ? "on" : "off",
+        // #1762 — the `honors_curator` role. The approver is the RESEARCH DEAN's
+        // office (a different org unit from the Dean's office), which self-serves
+        // from day one, so this is not a fast-follow: without it the queue is
+        // superuser-only and the people it exists for cannot reach it.
+        //   HONORS_CURATOR_ENABLED -- master kill switch. While not "on",
+        //     isHonorsCurator() short-circuits to false BEFORE any directory work,
+        //     so the role is dormant and the queue stays superuser-only. Tracks
+        //     HONORS_APPROVAL_QUEUE: enabling a role for a surface that 404s buys
+        //     nothing. Flip prod WITH the seed and the queue, not before.
+        //   SCHOLARS_HONORS_CURATOR_GROUP_CN -- the ED group whose membership
+        //     confers the role. Created 2026-07-17 and probe-verified in-VPC:
+        //     objectClass groupOfURLs (dynamic) under `ou=application security`,
+        //     structurally identical to the superuser / comms-steward /
+        //     development groups. Resolved via isGroupMember() (resolve+compare,
+        //     ~230ms, #1626).
+        //     ⚠ Its memberURL filters `weillCornellEduPersonTypeCode=employee`.
+        //     That matches the development-role pattern, NOT the superuser /
+        //     comms-steward one (`employee-exempt` / `academic-faculty` /
+        //     `affiliate-contractor`). The filter is base-scoped and equality is
+        //     exact, so a curator whose type code differs silently matches nothing
+        //     and FAILS CLOSED — which presents as "the role is broken", not "the
+        //     group is wrong". Verify on staging with a real curator before prod.
+        //   No allowlist var: the three older roles carry one only because the VPC
+        //     once had no route to the directory; that landed (#1592) and all
+        //     three are now pinned "". A superuser is already the fallback tier.
+        // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        HONORS_CURATOR_ENABLED: env === "staging" ? "on" : "off",
+        SCHOLARS_HONORS_CURATOR_GROUP_CN: "ITS:Library:Scholars/honors-curator-role",
         // #742 -- the /edit Overview "Generate a draft" surface: the Existing /
         // Generator tabs, the Sources drawer, and the AI overview-statement
         // generator. overviewGenerateEnabled() reads === "on"

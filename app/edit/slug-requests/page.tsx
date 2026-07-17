@@ -20,6 +20,7 @@ import { db } from "@/lib/db";
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { requireSuperuserGet } from "@/lib/edit/authz";
 import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
+import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { isSlugRequestEnabled, loadSlugRequestQueue } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
@@ -49,6 +50,11 @@ export default async function SlugRequestsPage() {
   }
 
   const requests = await loadSlugRequestQueue(db.read);
+  // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:
+  // flag off, or this viewer is neither superuser nor honors_curator.
+  const pendingHonors = isHonorsQueueTabVisible(session)
+    ? await countPendingHonors(db.read)
+    : null;
 
 
   return (
@@ -69,6 +75,7 @@ export default async function SlugRequestsPage() {
         active="slug-requests"
         unitsTab={session.isSuperuser}
         pendingSlugRequests={requests.length}
+        pendingHonors={pendingHonors}
         administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
         methodsTab={isMethodsTabVisible(session) ? 0 : null}
         dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}

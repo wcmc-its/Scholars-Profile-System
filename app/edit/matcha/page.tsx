@@ -23,6 +23,7 @@ import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { logEditDenial } from "@/lib/edit/authz";
 import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
+import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +54,11 @@ export default async function MatchaPage() {
   const superuserSurfaces = session.isSuperuser;
   const pendingSlugRequests =
     superuserSurfaces && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
+  // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:
+  // flag off, or this viewer is neither superuser nor honors_curator.
+  const pendingHonors = isHonorsQueueTabVisible(session)
+    ? await countPendingHonors(db.read)
+    : null;
   const administratorsTab = superuserSurfaces && isAdministratorsTabEnabled() ? 0 : null;
 
   return (
@@ -72,6 +78,7 @@ export default async function MatchaPage() {
       <AdminSubnav
         active="matcha"
         pendingSlugRequests={pendingSlugRequests}
+        pendingHonors={pendingHonors}
         administratorsTab={administratorsTab}
         methodsTab={isMethodsTabVisible(session) ? 0 : null}
         dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}

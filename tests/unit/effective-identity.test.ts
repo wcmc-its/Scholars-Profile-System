@@ -312,6 +312,7 @@ describe("getEffectiveEditSession", () => {
       isSuperuser: false,
       isCommsSteward: false,
       isDeveloper: false,
+      isHonorsCurator: false,
     });
   });
 
@@ -328,6 +329,7 @@ describe("getEffectiveEditSession", () => {
       isSuperuser: true,
       isCommsSteward: false,
       isDeveloper: false,
+      isHonorsCurator: false,
     });
   });
 });

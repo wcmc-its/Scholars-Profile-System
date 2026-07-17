@@ -25,6 +25,7 @@
 import { cache } from "react";
 import { isCommsSteward } from "@/lib/auth/comms-steward";
 import { isDeveloper } from "@/lib/auth/development";
+import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { getSuperuserAllowlist, getSuperuserConfig } from "@/lib/auth/config";
 import { getSession } from "@/lib/auth/session-server";
 import { isGroupMember } from "@/lib/auth/ldap-group";
@@ -50,6 +51,16 @@ export interface EditSession {
    * and the find-researchers gate only ever reads a session from those.
    */
   isDeveloper?: boolean;
+  /**
+   * Live `honors_curator` verdict (#1762); a superuser is a superset of this.
+   * Gates ONLY the honors approval queue (`/edit/honors-queue` and its decision
+   * endpoint) — no edit-authz predicate reads it, so like `isDeveloper` it is
+   * OPTIONAL: the synthetic `EditSession` shapes the field / unit authz helpers
+   * build need not carry a flag they never consume. The live resolvers
+   * (`getEditSession` / `getEffectiveEditSession`) always populate it, and the
+   * queue's gates only ever read a session from those.
+   */
+  isHonorsCurator?: boolean;
 }
 
 
@@ -100,13 +111,20 @@ export const isSuperuser = cache(async (cwid: string): Promise<boolean> => {
 export async function getEditSession(): Promise<EditSession | null> {
   const session = await getSession();
   if (!session) return null;
-  // #1514 — three independent LDAPS group checks; resolve concurrently so the
-  // wall-clock cost is one directory round-trip, not three. All three are
+  // #1514 — four independent LDAPS group checks; resolve concurrently so the
+  // wall-clock cost is one directory round-trip, not four. All four are
   // fail-closed and never throw, so Promise.all cannot reject.
-  const [su, cs, dev] = await Promise.all([
+  const [su, cs, dev, hc] = await Promise.all([
     isSuperuser(session.cwid),
     isCommsSteward(session.cwid),
     isDeveloper(session.cwid),
+    isHonorsCurator(session.cwid),
   ]);
-  return { cwid: session.cwid, isSuperuser: su, isCommsSteward: cs, isDeveloper: dev };
+  return {
+    cwid: session.cwid,
+    isSuperuser: su,
+    isCommsSteward: cs,
+    isDeveloper: dev,
+    isHonorsCurator: hc,
+  };
 }
