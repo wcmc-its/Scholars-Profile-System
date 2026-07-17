@@ -32,6 +32,14 @@ function header(c: CardContent): string {
   return tb?.text ?? "";
 }
 
+/** The body TextBlock that carries the mirrored markdown action links. */
+function bodyLinks(c: CardContent): string {
+  const tb = c.body
+    .filter((b) => b.type === "TextBlock")
+    .find((b) => (b.text ?? "").includes("]("));
+  return tb?.text ?? "";
+}
+
 describe("buildAdaptiveCard", () => {
   it("ALARM on sps-alb-5xx-rate-staging renders alarm emoji + verbatim reason + console URL", () => {
     const alarm: CloudWatchAlarmPayload = {
@@ -210,6 +218,25 @@ describe("buildAdaptiveCard", () => {
     expect(c.actions).toHaveLength(1);
     expect(c.actions[0]!.title).toBe("View in CloudWatch");
   });
+
+  it("mirrors every action as a body markdown link (works on the flow-bot delivery path where buttons are inert)", () => {
+    const c = content(
+      buildAdaptiveCard({
+        AlarmName: "sps-aurora-connections-prod",
+        NewStateValue: "ALARM",
+        Region: "us-east-1",
+      }),
+    );
+    const links = bodyLinks(c);
+    expect(links).toContain(
+      `[View in CloudWatch](https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#alarmsV2:alarm/${encodeURIComponent("sps-aurora-connections-prod")})`,
+    );
+    expect(links).toContain(
+      "[View reliability dashboard](https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=sps-reliability-prod)",
+    );
+    // one markdown link per action, no more, no fewer
+    expect((links.match(/\]\(/g) ?? []).length).toBe(c.actions.length);
+  });
 });
 
 describe("isCloudWatchAlarmPayload", () => {
@@ -273,5 +300,11 @@ describe("buildEtlCard", () => {
     const err = fact(c, "Error")!;
     expect(err.length).toBe(1024);
     expect(err.endsWith("\u{2026}")).toBe(true);
+  });
+
+  it("mirrors the Step Functions action as a body markdown link", () => {
+    const c = content(buildEtlCard({ env: "prod", step: "Reciter", error: "boom" }));
+    expect(bodyLinks(c)).toContain("[View in Step Functions](");
+    expect(bodyLinks(c)).toContain("states/home");
   });
 });
