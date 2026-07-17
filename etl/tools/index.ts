@@ -61,6 +61,7 @@ import {
   buildFamilyEntityWritesFromS3,
   type FamilyEntityArtifact,
 } from "./family-entity-mapper-s3";
+import { entityLayerComplete } from "./entity-layer-guard";
 import { manifestContentSignature } from "./manifest-signature";
 import { publicationSuppressionChangedSince } from "./suppression-freshness";
 
@@ -432,12 +433,14 @@ async function main(): Promise<void> {
   // (the entity DIMENSION) + `entity_context.json` (the per-(pub × entity) FACTS)
   // sidecars (tools-a2-v4). OPTIONAL + paired: a pre-v4 manifest (or a manifest
   // missing either object) leaves the family_entity* tables untouched this run
-  // (benign). When present each is sha256-verified like the primary artifact —
-  // a mismatch fails the run rather than writing partial entity data.
+  // (benign) — see the `entityLayerPresent` guard on the write path below. When
+  // present each is sha256-verified like the primary artifact — a mismatch fails
+  // the run rather than writing partial entity data.
   let entityArtifact: FamilyEntityArtifact = { entities: [], entityContext: {} };
   const entitiesObj = manifest.objects?.["entities.json"];
   const entityCtxObj = manifest.objects?.["entity_context.json"];
-  if (!entitiesObj?.key || !entityCtxObj?.key) {
+  const entityLayerPresent = entityLayerComplete(manifest);
+  if (!entityLayerPresent) {
     log("entity_layer_absent", {
       reason: "manifest has no entities.json / entity_context.json object",
       has_entities: Boolean(entitiesObj?.key),
@@ -630,6 +633,18 @@ async function main(): Promise<void> {
     existing: await db.write.scholarFamily.count(),
     maxDropPct: 50,
   });
+  // #1166 — guard the entity layer with the same shrink check as its siblings, but
+  // ONLY when the manifest actually ships both sidecars. When the layer is absent we
+  // skip the wipe entirely (below), so there is nothing to guard; when it is present,
+  // an empty-or-truncated entities.json must not be mirrored as a wipe of the 4k+
+  // family_entity rows (the tools:scholar-tool incident, in a different organ).
+  if (entityLayerPresent) {
+    assertSourceVolume("tools:family-entity", {
+      incoming: entityResult.entityWrites.length,
+      existing: await db.write.familyEntity.count(),
+      maxDropPct: 50,
+    });
+  }
   // Delete + insert scholar_family AND the entity layer in one transaction so a
   // mid-write kill can't leave the Methods-lens projection half-rebuilt or skewed
   // between the family rollup and its entity detail. Timeout raised above the 5 s
@@ -668,10 +683,17 @@ async function main(): Promise<void> {
       // FACTS first then DIMENSION (no FK either way; order is cosmetic). Identity is
       // @@unique([supercategory, family_label, normalized_entity_id]) on the dimension;
       // the uuid id is unstable so this is a rebuild, not an upsert. Stamp the artifact
-      // sha per row so a producer republish is detectable. An empty entityArtifact
-      // (pre-v4 manifest) clears the tables — intentional: no entity data ⇒ no rows.
-      await tx.familyEntityUsage.deleteMany();
-      await tx.familyEntity.deleteMany();
+      // sha per row so a producer republish is detectable.
+      //
+      // GUARDED by entityLayerPresent: a manifest missing either sidecar skips the
+      // wipe entirely, leaving the tables untouched (matches the load guard above).
+      // Previously the deleteMany ran unconditionally, so a partial manifest silently
+      // zeroed 4k+ rows on a run that still reported success. The createMany loops
+      // below are no-ops when the layer is absent (entityResult is empty).
+      if (entityLayerPresent) {
+        await tx.familyEntityUsage.deleteMany();
+        await tx.familyEntity.deleteMany();
+      }
       for (let i = 0; i < entityResult.entityWrites.length; i += ENTITY_BATCH) {
         const chunk = entityResult.entityWrites.slice(i, i + ENTITY_BATCH);
         await tx.familyEntity.createMany({
