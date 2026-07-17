@@ -42,6 +42,7 @@ import {
 } from "@/lib/api/matcha-extract";
 import {
   mergeTermClusters,
+  selectWithMethodFloor,
   type ClusterTerm,
   type ConceptKind,
   type TermCluster,
@@ -165,6 +166,19 @@ const CLUSTER_TAU = 0.5;
  *  that fail. TERM_DEPTH is deliberately left at 100 so per-concept pool depth (and that
  *  0→100 recall) is preserved. Acceptable for the dark bake-off tool. */
 const MAX_TERMS = 8;
+
+/** #1780 — reserve up to this many of the `MAX_TERMS` slots for METHOD-kind concepts scoring
+ *  `>= METHOD_THRESHOLD`, displacing only the lowest-centrality concepts (see
+ *  `selectWithMethodFloor`). A FLOOR inside the existing cap, so the fan-out — and server load —
+ *  is unchanged. The extractor demotes methods to 0.3–0.5, so a plain top-8 cut dropped 50% of
+ *  them; this guarantees the method-starved disease-primary asks still carry their top methods. */
+const METHOD_FLOOR = 3;
+
+/** Centrality a method must clear to earn a reserved slot. Above the 0.3 incidental floor
+ *  `sanitizeConcepts` assigns to unusable scores (so a floored junk method never qualifies),
+ *  and low enough to admit the terms the eval flagged (iPSC / organoids at 0.35). The one
+ *  tunable constant here; validate against a fan-out A/B before moving it. */
+const METHOD_THRESHOLD = 0.35;
 
 /** Per-term retrieval depth. `searchPeople` pages at its own module-private page
  *  size (20 today, not overridable) and reports it as `pageSize` on every result —
@@ -353,7 +367,13 @@ export async function rankResearchersForDescriptionSpine(
   // as before. MAX_TERMS caps either source.
   const extraction = await extractMatchaConcepts(text);
   const titleSummary = extraction.titleSummary; // survives the dictionary fallback below (undefined there)
-  let extracted: ExtractedConcept[] = extraction.concepts.slice(0, MAX_TERMS);
+  // #1780 — cap to MAX_TERMS, but reserve slots for qualifying methods the plain centrality cut
+  // would drop (they score 0.3–0.5 by the rubric). A floor inside the cap ⇒ fan-out unchanged.
+  let extracted: ExtractedConcept[] = selectWithMethodFloor(extraction.concepts, {
+    max: MAX_TERMS,
+    methodFloor: METHOD_FLOOR,
+    methodThreshold: METHOD_THRESHOLD,
+  });
   if (extracted.length === 0) {
     const vocab = await loadTaxonomyVocab();
     extracted = extractTerms(text, vocab)
