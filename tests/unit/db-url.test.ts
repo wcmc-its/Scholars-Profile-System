@@ -10,6 +10,19 @@ describe("withMariadbPoolParams", () => {
     expect(out.searchParams.get("connectionLimit")).toBe("15");
   });
 
+  it("adds a low minimumIdle so idle pool connections reap instead of pinning connectionLimit", () => {
+    const out = new URL(
+      withMariadbPoolParams("mysql://app:pw@host:3306/scholars"),
+    );
+    expect(out.searchParams.get("minimumIdle")).toBe("2");
+    // Must stay below connectionLimit -- at minimumIdle == connectionLimit the
+    // mariadb driver never reaps idle connections, which pins the pool at its
+    // full budget (the sps-aurora-connections-prod flat-90 regression).
+    expect(Number(out.searchParams.get("minimumIdle"))).toBeLessThan(
+      Number(out.searchParams.get("connectionLimit")),
+    );
+  });
+
   it("preserves an explicit value already on the URL (secret wins)", () => {
     const out = new URL(
       withMariadbPoolParams(
