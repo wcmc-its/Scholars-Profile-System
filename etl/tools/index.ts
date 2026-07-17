@@ -155,6 +155,12 @@ async function recordRun(args: {
       // displayed; readable provenance stays in manifestTaxonomyVersion.
       manifestSha256: args.manifest ? manifestContentSignature(args.manifest) : null,
       manifestTaxonomyVersion: args.manifest?.version ?? null,
+      // §2.1 note: Tools is deliberately NOT generated_at-anchored here. Its
+      // freshness SLA is nightly (30h — the IMPORT cadence), but the tools
+      // PRODUCER is hand-run (~weekly at best), so anchoring on generated_at
+      // would false-alarm even when healthy. Tools stays completedAt-anchored;
+      // recalibrating its SLA to the producer cadence is part of the deferred
+      // tools-cadence decision (handoff P2).
     },
   });
 }
