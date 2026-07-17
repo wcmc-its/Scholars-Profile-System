@@ -16,6 +16,14 @@
  * MeSH-concept chip's scope note should surface without waiting). Optional
  * `wide` lets the tooltip wrap paragraph-length text (default
  * `whitespace-nowrap` is right for short labels but truncates sentences).
+ *
+ * Optional `triggerClassName` / `triggerStyle` style the WRAPPER span. They exist
+ * because the wrapper — not the child — is what the surrounding layout sizes: wrap
+ * a flex item and the wrapper becomes the flex item, so a child carrying
+ * `flexGrow`/`flexBasis` silently loses them and collapses to its min-width. Matcha's
+ * coverage strip is exactly that case — each segment's width IS its concept's weight —
+ * and the collapse is invisible to tests (pure pixels). Both default to undefined, so
+ * every existing call site renders byte-identically.
  */
 import { Tooltip as TooltipPrimitive } from "radix-ui";
 
@@ -28,6 +36,8 @@ export function HoverTooltip({
   immediate = false,
   wide = false,
   placement = "top",
+  triggerClassName,
+  triggerStyle,
 }: {
   text: string;
   /** Optional rich tooltip body rendered in place of `text` (e.g. a snippet with
@@ -46,12 +56,20 @@ export function HoverTooltip({
    *  resolved-concept chip at the top of /search clips against the page
    *  chrome otherwise. */
   placement?: "top" | "bottom";
+  /** Classes for the wrapper span. Merged after `relative inline-flex`, so a
+   *  conflicting utility (a width, a `shrink-0`) wins via tailwind-merge. */
+  triggerClassName?: string;
+  /** Inline style for the wrapper span — for geometry no utility expresses, such as
+   *  the coverage strip's per-segment `flexGrow: weight`. */
+  triggerStyle?: React.CSSProperties;
 }) {
   return (
     <TooltipPrimitive.Provider delayDuration={immediate ? 0 : 200}>
       <TooltipPrimitive.Root>
         <TooltipPrimitive.Trigger asChild>
-          <span className="relative inline-flex">{children}</span>
+          <span className={cn("relative inline-flex", triggerClassName)} style={triggerStyle}>
+            {children}
+          </span>
         </TooltipPrimitive.Trigger>
         <TooltipPrimitive.Portal>
           <TooltipPrimitive.Content

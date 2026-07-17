@@ -23,9 +23,10 @@
  * fetch is stubbed — no route/engine involvement.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { MatchaPanel } from "@/components/edit/matcha-panel";
+import { conceptWeight } from "@/lib/api/matcha-contract";
 import type {
   MatchaCandidate,
   MatchaConcept,
@@ -217,6 +218,24 @@ async function renderAndSearch() {
   await screen.findByText("Alice Alpha");
 }
 
+/**
+ * Read a `HoverTooltip`'s text — the panel's ONLY hover mechanism since round-2 §1 swept the last
+ * native `title=` out of it.
+ *
+ * Why focus and not hover: the pill is portaled and is only in the DOM while OPEN, and Radix opens
+ * on focus IMMEDIATELY (the 200ms delay is mouse-enter only), so focus needs no timers. The event
+ * goes to `el.parentElement` because that is the wrapper span `HoverTooltip` puts around its child
+ * — the wrapper is the Radix trigger, not the element you passed in.
+ *
+ * Radix renders the content twice: the visible pill, and a `VisuallyHidden` copy carrying
+ * `role="tooltip"` for AT. This reads the latter — one element, whole text, no duplicate matches.
+ */
+async function tooltipTextOf(el: Element): Promise<string> {
+  fireEvent.focus(el.parentElement as HTMLElement);
+  const tip = await screen.findByRole("tooltip");
+  return tip.textContent ?? "";
+}
+
 async function renderAndSearchPool() {
   stubFetch({ concepts: CONCEPTS, candidates: POOL });
   render(<MatchaPanel />);
@@ -319,9 +338,9 @@ describe("MatchaPanel", () => {
     // The tooltip states the measured fact and makes no claim about the ranking. The old
     // badge said "so a match on it counts for more", which is exactly the conflation the
     // IDF finding called out.
-    const title = badges[0].getAttribute("title")!;
-    expect(title).toMatch(/about 1 in 20,000 Weill Cornell papers/);
-    expect(title).not.toMatch(/counts for more/);
+    const tip = await tooltipTextOf(badges[0]);
+    expect(tip).toMatch(/about 1 in 20,000 Weill Cornell papers/);
+    expect(tip).not.toMatch(/counts for more/);
   });
 
   it("badges nothing when no concept has a known coverage", async () => {
@@ -771,7 +790,7 @@ describe("MatchaPanel", () => {
     const mark = screen.getByText("immunotherapy", { selector: "mark" });
     expect(mark).toBeTruthy();
     // The mark points back at the CONCEPT, not at itself — that is the audit trail.
-    expect(mark.getAttribute("title")).toBe("Immuno-oncology");
+    expect(await tooltipTextOf(mark)).toBe("Immuno-oncology");
     expect(screen.getByText(/1 of 3 concepts are highlighted/)).toBeTruthy();
   });
 
@@ -789,6 +808,143 @@ describe("MatchaPanel", () => {
     expect(screen.getByRole("button", { name: "Rank researchers" })).toBeTruthy();
   });
 
+  // ── D10 — ask-card scroll-collapse, and the "Show original" pin (§6) ────────
+  /**
+   * The bug these guard was NOT a broken control. `showOriginal` always un-collapsed the header
+   * correctly; the scroll-collapse observer then re-armed on the next commit, fired against a
+   * sentinel still above the viewport top, and re-collapsed it on the same frame. The officer's
+   * explicit request lost a race to an inference about their scrolling, every time.
+   *
+   * jsdom has no IntersectionObserver, so the panel's `typeof IntersectionObserver === "undefined"`
+   * guard means the collapse is DEAD in every other test in this file — which is exactly why it
+   * shipped untested. The stub below is what makes the observer real here, and it deliberately does
+   * NOT auto-fire on `observe`: the test drives the callback, so "the observer re-armed" and "the
+   * observer fired" stay separate, assertable facts.
+   *
+   * ⚠ The stub catches EVERY IntersectionObserver the panel builds, and the ask sentinel's is not
+   * the only one — each rendered `ResearcherRow` builds one for its `inView` artifact resolution.
+   * `armedOnSentinel()` filters to the one under test by the node it observes; counting them all
+   * would silently count row observers and make "the observer re-armed" unfalsifiable.
+   *
+   * ⚠ `disconnect()` MUST be honoured. The effect disconnects on cleanup, and a stub that let a
+   * disconnected observer still fire would model something the browser cannot do — a stale observer
+   * re-collapsing the header. That is not a hypothetical: it failed this test's first draft, and
+   * "fix the component" would have been the wrong reading of a defect in the mock.
+   */
+  class MockIO {
+    static all: MockIO[] = [];
+    observed: Element[] = [];
+    disconnected = false;
+    constructor(public cb: IntersectionObserverCallback) {
+      MockIO.all.push(this);
+    }
+    observe(node: Element) {
+      this.observed.push(node);
+    }
+    unobserve() {}
+    disconnect() {
+      this.disconnected = true;
+    }
+    /** The sentinel has scrolled above the viewport top — the one condition the panel collapses on. */
+    scrolledPast() {
+      if (this.disconnected) throw new Error("a disconnected IntersectionObserver cannot fire");
+      this.cb(
+        [
+          {
+            isIntersecting: false,
+            boundingClientRect: { top: -10 } as DOMRectReadOnly,
+            target: this.observed[0]!,
+          } as IntersectionObserverEntry,
+        ],
+        this as unknown as IntersectionObserver,
+      );
+    }
+  }
+
+  /** The Full card is present iff its eyebrow is; the Compact bar iff "Show original ▾" is. */
+  const isFull = () => screen.queryByText(/What we read from the sponsor/) !== null;
+
+  /** The LIVE observers watching the ask card's collapse sentinel — never a row's `inView` one, and
+   *  never one the effect has already disconnected. This is "what could still collapse the header",
+   *  which is the quantity every assertion below is really about. */
+  const armedOnSentinel = () =>
+    MockIO.all.filter(
+      (io) =>
+        !io.disconnected &&
+        io.observed.some((n) => n.matches('[data-slot="matcha-ask-sentinel"]')),
+    );
+
+  async function searchWithObserver() {
+    MockIO.all = [];
+    vi.stubGlobal("IntersectionObserver", MockIO);
+    await renderAndSearch();
+  }
+
+  it("D10 — scrolling past the ask card collapses it to the pinned compact bar", async () => {
+    await searchWithObserver();
+    // A fresh paste opens Full, and exactly one observer is armed on the sentinel.
+    expect(isFull()).toBe(true);
+    expect(armedOnSentinel()).toHaveLength(1);
+
+    await act(async () => armedOnSentinel()[0].scrolledPast());
+    expect(isFull()).toBe(false);
+    expect(screen.getByRole("button", { name: "Show original ▾" })).toBeTruthy();
+  });
+
+  it("§6 — 'Show original' PINS the header open: nothing stays armed to re-collapse it", async () => {
+    await searchWithObserver();
+    await act(async () => armedOnSentinel()[0].scrolledPast());
+    expect(isFull()).toBe(false);
+
+    // The officer asks for the paste back.
+    fireEvent.click(screen.getByRole("button", { name: "Show original ▾" }));
+    expect(isFull()).toBe(true);
+
+    // THE FIX, stated as the only thing that matters: after an explicit request, NOTHING is watching
+    // the sentinel. Un-pinned, the effect re-runs on `headerCollapsed: false` and arms a fresh
+    // observer — and that observer, firing against a sentinel `scrollIntoView` has not yet reached,
+    // is what re-collapsed the card on the same frame the officer opened it.
+    expect(armedOnSentinel()).toHaveLength(0);
+
+    // The same fact stated behaviourally rather than structurally: whatever IS armed must not be
+    // able to close the card. Independently mutation-checked — with the count assertion above
+    // disabled and the pin reverted, this loop alone still goes red (it finds the re-armed observer,
+    // fires it, and `isFull()` turns false). Two teeth, so a refactor that changes HOW the observer
+    // is disarmed cannot quietly leave the behaviour broken.
+    await act(async () => {
+      for (const io of armedOnSentinel()) io.scrolledPast();
+    });
+    expect(isFull()).toBe(true);
+  });
+
+  it("§6 — the pin survives a manual Collapse and re-open: an explicit request keeps winning", async () => {
+    await searchWithObserver();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse ▴" }));
+    expect(isFull()).toBe(false);
+
+    // Collapse by hand is how the officer gets the sticky bar back; "Show original" is how they
+    // overrule it. Round-tripping the pair must not hand the scroll-collapse a fresh observer —
+    // if it did, the SECOND "Show original" would re-collapse exactly like the first one used to.
+    fireEvent.click(screen.getByRole("button", { name: "Show original ▾" }));
+    expect(isFull()).toBe(true);
+    expect(armedOnSentinel()).toHaveLength(0);
+  });
+
+  it("§6 — a new search releases the pin: the next ask is not stuck open", async () => {
+    await searchWithObserver();
+    await act(async () => armedOnSentinel()[0].scrolledPast());
+    fireEvent.click(screen.getByRole("button", { name: "Show original ▾" })); // pin held
+    expect(armedOnSentinel()).toHaveLength(0);
+
+    // Re-run. The pin is per-ask state, like `headerCollapsed` and the recency dial beside it — a
+    // pin that outlived its paste would leave every later ask unable to collapse, which is the
+    // obvious way to overshoot this fix.
+    fireEvent.click(screen.getByRole("button", { name: "Re-run match" }));
+    await waitFor(() => expect(armedOnSentinel()).toHaveLength(1));
+    expect(isFull()).toBe(true);
+    await act(async () => armedOnSentinel()[0].scrolledPast());
+    expect(isFull()).toBe(false);
+  });
 
   // ── Evidence, via the SEARCH's own renderer (#1689/#1696) ───────────────────
   /**
@@ -1584,9 +1740,27 @@ describe("MatchaPanel", () => {
     // itself on hover ("Cancer Metabolism — ranked under this, evidence not shown").
     expect(line).not.toContain("also ranked under");
     const rankedSeg = document.querySelector(
-      '[data-slot="matcha-coverage"] [title^="Cancer Metabolism"]',
+      '[data-slot="matcha-coverage-segment"][data-term="Cancer Metabolism"]',
     )!;
-    expect(rankedSeg.getAttribute("title")).toContain("ranked under this");
+    expect(rankedSeg.getAttribute("data-coverage")).toBe("ranked");
+    const segTip = await tooltipTextOf(rankedSeg);
+    expect(segTip).toContain("ranked under this");
+    // §4 — and the segment says what the STRIP is, not only what the segment is. This is the whole
+    // requirement ("the bars don't mean much"): a segment's state is unreadable until you know the
+    // bar is one concept and the width is the ask's weight.
+    expect(segTip).toContain("One bar per concept this opportunity calls for");
+    expect(segTip).toContain("width = how much it matters");
+    // …and the strip is legible to a screen reader at all, which it was not: the bar was
+    // `aria-hidden`, so its only textual equivalent was the "1 of 3" caption — a count naming no
+    // concept and no state, and absent entirely from the inline variant.
+    const strip = document.querySelector('[data-slot="matcha-coverage"] [role="img"]')!;
+    const spoken = strip.getAttribute("aria-label")!;
+    expect(spoken).toContain("One bar per concept this opportunity calls for");
+    // ⚠ The legend must NOT say the literal "the ask": this string is an accessible name, and the
+    // paste textarea already carries that label — two elements answering to one name.
+    expect(spoken).not.toContain("the ask");
+    expect(spoken).toContain("Cancer Metabolism — ranked under this, evidence not shown");
+    expect(spoken).toContain("CRISPR screening — no evidence");
     // A genuine gap: she never ranked under it at all. It moved OFF the coverage line to a single
     // muted line at the card's foot (mockup), so the strip caption no longer carries it.
     expect(line).not.toContain("no evidence for");
@@ -1595,6 +1769,35 @@ describe("MatchaPanel", () => {
     expect(gaps).toContain("CRISPR screening");
     // 1 + 1 + 1 = the 3 concepts asked. The old line could not make that claim.
     expect(screen.queryByText(/ranked, no evidence shown/)).toBeNull();
+  });
+
+  /**
+   * A segment's WIDTH is `conceptWeight` — `centrality ** CENTRALITY_GAMMA * weightFactor`, the very
+   * number the fusion ranks on. This test exists because wrapping the segments in `HoverTooltip`
+   * moved the flex item one level out: the wrapper span is what the bar now sizes, so `flexGrow` had
+   * to move onto it. Left on the child it would be inert — every segment would collapse to
+   * `min-w-[3px]`, the ranking's own numbers would vanish from the drawing, and NOTHING else in this
+   * file would have noticed, because a strip of eight equal slivers still renders, still hovers, and
+   * still says the right words. That is this repo's signature bug (declared, never connected) in its
+   * purest form: pixels, and only the eyeball or an assertion like this one can see it.
+   */
+  it("§4 — the segment WIDTHS are the concepts' fusion weights, and they ride the hover wrapper", async () => {
+    await renderAndSearch();
+    const segments = [
+      ...document.querySelectorAll<HTMLElement>('[data-slot="matcha-coverage-segment"]'),
+    ].slice(0, CONCEPTS.length);
+    expect(segments).toHaveLength(3);
+
+    const growOf = (seg: HTMLElement) => Number((seg.parentElement as HTMLElement).style.flexGrow);
+    for (const [i, seg] of segments.entries()) {
+      // On the WRAPPER, not the painted child — the child carries no sizing at all.
+      expect(seg.style.flexGrow).toBe("");
+      expect((seg.parentElement as HTMLElement).style.flexBasis).toBe("0px");
+      expect(growOf(seg)).toBeCloseTo(conceptWeight(CONCEPTS[i]), 6);
+    }
+    // And they are genuinely different: Immuno-oncology (0.9 × 3.0) outweighs Cancer Metabolism
+    // (0.5 × 1.0), so the bar cannot be eight equal slivers.
+    expect(growOf(segments[0])).toBeGreaterThan(growOf(segments[1]));
   });
 
   it("Compact density renders one scannable row per scholar; a row click expands the detailed card (D8/D9)", async () => {
@@ -1847,18 +2050,24 @@ describe("MatchaPanel", () => {
     await screen.findByText("Olive Old");
     fireEvent.click(screen.getByRole("button", { name: "compact" }));
 
+    // Queried by its own `data-slot`, not by sweeping every span for "latest": the tooltip wrapper
+    // is ALSO a span carrying that same text, so a text sweep silently returns the wrapper and
+    // every assertion below reads the wrong element.
     const yearCell = () =>
-      [...screen.getByRole("button", { name: "Expand Olive Old" }).querySelectorAll("span")].find(
-        (s) => s.textContent?.startsWith("latest"),
-      )!;
+      screen
+        .getByRole("button", { name: "Expand Olive Old" })
+        .querySelector('[data-slot="matcha-latest-year"]')!;
 
     expect(yearCell().textContent).toBe(`latest ${NOW - 27}`);
     // Under the default curve the year is older than one half-life ⇒ flagged, and it SAYS why.
-    expect(yearCell().getAttribute("title")).toContain("down-weighting");
+    // The hover is the ONLY thing that says so — the stale treatment is de-emphasis with no hue.
+    expect(await tooltipTextOf(yearCell())).toContain("down-weighting");
 
-    // Any weighs no recency, so the row may not claim the match is stale.
+    // Any weighs no recency, so the row may not claim the match is stale. No wrapper, no tooltip:
+    // the cell's parent is the row's expand button, so focusing it can open nothing.
     fireEvent.click(screen.getByRole("button", { name: "Any" }));
-    expect(yearCell().getAttribute("title")).toBeNull();
+    fireEvent.focus(yearCell().parentElement as HTMLElement);
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
   it("D3 — the dial is hidden when the payload carries no years (flag off)", async () => {
