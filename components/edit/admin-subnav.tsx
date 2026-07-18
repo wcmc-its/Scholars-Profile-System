@@ -114,6 +114,14 @@ export function AdminSubnav({
   return (
     <div className="border-border border-b" data-slot="admin-subnav">
       <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
+        {/* The role-gated tab set now runs to ~13 items and no longer fits the
+            bar on a laptop. Scroll the tab strip horizontally instead of letting
+            it overflow / shove the account chip off-screen. `min-w-0` lets this
+            flex child shrink below its content width so `overflow-x-auto` engages
+            (without it the row just pushes past the container). Radix
+            popovers/menus inside a tab portal to the body, so they are NOT clipped
+            by this scroller. The account chip stays pinned outside it. */}
+        <div className="flex min-w-0 flex-1 items-center gap-6 overflow-x-auto">
         {(superuserSurfaces || profilesTab) && (
           <AdminTab href="/edit/scholars" id="profiles" label="Profiles" active={active === "profiles"} />
         )}
@@ -234,6 +242,7 @@ export function AdminSubnav({
         {(superuserSurfaces || viewerIsDeveloper) && isMatchaEnabled() && (
           <MatchaTab active={active === "matcha"} />
         )}
+        </div>
         {/* The account chip/dropdown anchors the right end — profile actions live
             entirely in the menu, which derives its scholar + rows from the
             `/api/auth/session` probe, so no scholar object needs threading
