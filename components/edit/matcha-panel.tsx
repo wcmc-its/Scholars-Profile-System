@@ -164,7 +164,7 @@ const RESULT_MAX = 100;
  *  assumption that its absence is an oversight. */
 const MATCHA_LEAD = "Matcha turns a raw ask into a ranked shortlist of researchers.";
 const MATCHA_BLURB =
-  "Paste any description of an opportunity — a funding call, an email, a few bullet points. Matcha pulls out the topics and methods it's really asking for, weighs how much each one matters, and ranks scholars by fit across all of them. Every recommendation comes with the evidence behind it, and you can adjust the weights to re-rank on the spot.";
+  "Paste any ask — a funding call, a request for collaborators, an email, a few bullet points. Matcha pulls out the topics and methods it's really asking for, weighs how much each one matters, and ranks scholars by fit across all of them. Every recommendation comes with the evidence behind it, and you can adjust the weights to re-rank on the spot.";
 
 /** Three-register hierarchy (mockup): the first N matched concepts render as FULL evidence blocks
  *  (badge, artifact, role, recency); the rest demote to a one-line supporting row. `matchedEvidence`
@@ -2247,7 +2247,7 @@ const PROVENANCE_META: Record<
     mark: "✓",
     label: "subject-tagged",
     title:
-      "Matched via a MeSH subject tag or a curated method/clinical/topic signal — structured, but not proof of the sponsor's specific sense.",
+      "Matched via a MeSH subject tag or a curated method/clinical/topic signal — structured, but not proof of the ask's specific sense.",
     className:
       "border-[var(--apollo-green-tint-border)] bg-[var(--apollo-green-tint)] text-[var(--apollo-green-foreground)]",
   },
@@ -2255,7 +2255,7 @@ const PROVENANCE_META: Record<
     mark: "⚠",
     label: "keyword only",
     title:
-      "Matched on free text only — the concept's bare keyword, which can hit a paper unrelated to what the sponsor asked for.",
+      "Matched on free text only — the concept's bare keyword, which can hit a paper unrelated to what the ask is about.",
     className:
       "border-[var(--color-facet-position-border)] bg-[var(--color-facet-position-fill)] text-[var(--color-facet-position-text)]",
   },
