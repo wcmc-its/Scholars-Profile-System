@@ -13,10 +13,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildHonorCsv,
   isHonorsQueueTabVisible,
   loadHonorQueue,
   yearPlausibilityNote,
 } from "@/lib/edit/honor-queue";
+import type { HonorQueueRow } from "@/lib/edit/honor-queue";
 
 type Row = {
   id: string;
@@ -390,5 +392,50 @@ describe("loadHonorQueue — self-source partition", () => {
     const { calls, client } = spy();
     await loadHonorQueue(client, "pending");
     expect(calls[0].where).toEqual({ status: "pending" });
+  });
+});
+
+// #1762 — the Research Dean's CSV report. All synthetic names.
+describe("buildHonorCsv", () => {
+  function exportRow(over: Partial<HonorQueueRow & { status: string }>): HonorQueueRow & { status: string } {
+    return {
+      id: "1",
+      cwid: "abc1001",
+      slug: null,
+      scholarName: "Ada Lovelace",
+      roleLabel: "Full-time faculty",
+      roleCategory: "full_time_faculty",
+      title: null,
+      department: "Medicine",
+      category: "PRIZE",
+      name: "Member",
+      organization: "National Academy of Sciences",
+      year: 2020,
+      prestige: 100,
+      source: "DEAN_NAS",
+      sourceRef: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      decidedAt: "2026-02-03T00:00:00.000Z",
+      competingCwids: [],
+      status: "published",
+      ...over,
+    };
+  }
+
+  it("emits a header row and one line per honor, carrying Status and Source", () => {
+    const csv = buildHonorCsv([exportRow({}), exportRow({ status: "pending", source: "NOBEL", year: null })]);
+    const lines = csv.trimEnd().split("\r\n");
+    expect(lines[0]).toContain("Scholar");
+    expect(lines[0]).toContain("Status");
+    expect(lines).toHaveLength(3); // header + 2 rows
+    expect(lines[1]).toContain("Ada Lovelace");
+    expect(lines[1]).toContain("published");
+    expect(lines[1]).toContain("2026-02-03"); // decidedAt, date only
+    expect(lines[2]).toContain("NOBEL");
+  });
+
+  it("quotes a value containing a comma (CSV escaping)", () => {
+    const csv = buildHonorCsv([exportRow({ scholarName: "Hopper, Grace" })]);
+    expect(csv).toContain('"Hopper, Grace"');
   });
 });
