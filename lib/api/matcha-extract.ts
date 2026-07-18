@@ -25,11 +25,13 @@
  * [], so a Bedrock outage is a recall regression, not a 502. (Contrast the overview
  * generator, whose throws are mapped to 502 by design; here [] is the recovery path.)
  */
+import { createHash } from "node:crypto";
 import { generateObject } from "ai";
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 import { z } from "zod";
 import { modelAcceptsTemperature } from "@/lib/edit/overview-generator";
+import { cachedReasonAgg } from "@/lib/api/reason-agg-cache";
 
 /** One extracted concept: a canonical noun phrase, its funder-centrality in [0,1]
  *  (1.0 = the primary target, ~0.3 = an incidental mention), and its `kind`. The `term`
@@ -329,24 +331,43 @@ export async function extractMatchaConcepts(paste: string): Promise<MatchaExtrac
   // `us.anthropic.claude-sonnet-4-*` family so an intra-family repoint needs no
   // cdk/IAM change). `modelAcceptsTemperature` still gates temperature by id.
   const modelId = process.env.MATCHA_EXTRACT_MODEL ?? EXTRACT_MODEL;
-  try {
-    const { object } = await generateObject({
-      model: sponsorBedrock()(modelId),
-      schema: ConceptsSchema,
-      system: EXTRACT_SYSTEM_PROMPT,
-      prompt: buildExtractPrompt(text),
-      maxOutputTokens: EXTRACT_MAX_TOKENS,
-      abortSignal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
-      ...(modelAcceptsTemperature(modelId) ? { temperature: EXTRACT_TEMPERATURE } : {}),
-    });
-    return {
-      concepts: sanitizeConcepts(object.concepts),
-      titleSummary: sanitizeTitleSummary(object.titleSummary),
-    };
-  } catch (err) {
-    // NEVER throw — degrade to the v1 dictionary extractor (see caller). A Bedrock
-    // outage must cost recall, not return a 502.
-    console.warn("[sponsor-match] concept extraction failed; falling back to dictionary", err);
-    return { concepts: [] };
-  }
+
+  // Memoize the Bedrock call: extraction is a pure function of (trimmed paste, model id). Sonnet
+  // pins temp-0; even a non-pinned model's sampling is fine to REUSE within the TTL — it makes a
+  // paste's concepts stable across the #1780 Phase-2 add-a-term re-runs (the route re-runs the whole
+  // engine per added chip), which is exactly the redundant Sonnet call this removes (no cheap Bedrock
+  // model exists, and the route has no rate limit). Reuses the existing per-task cache (5-min fresh /
+  // 30-min ceiling + inflight-dedup) — NO new infra. Key includes `modelId` so a MATCHA_EXTRACT_MODEL
+  // repoint can't serve stale extractions; a prompt/rubric edit ships via app deploy = fresh tasks =
+  // cold cache. `shouldCache` refuses the Bedrock-outage `[]` so a blip can't stick (never cache a
+  // fail-soft empty).
+  // ponytail: per-task cache ⇒ cross-task adds miss (~1/N hit with 2-6 tasks, no ALB stickiness); a
+  // shared store (DynamoDB/ElastiCache) isn't worth the infra for one officer's interactive click flow.
+  const cacheKey = `matcha:extract:${modelId}:${createHash("sha256").update(text, "utf8").digest("hex")}`;
+  return cachedReasonAgg<MatchaExtraction>(
+    cacheKey,
+    async () => {
+      try {
+        const { object } = await generateObject({
+          model: sponsorBedrock()(modelId),
+          schema: ConceptsSchema,
+          system: EXTRACT_SYSTEM_PROMPT,
+          prompt: buildExtractPrompt(text),
+          maxOutputTokens: EXTRACT_MAX_TOKENS,
+          abortSignal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
+          ...(modelAcceptsTemperature(modelId) ? { temperature: EXTRACT_TEMPERATURE } : {}),
+        });
+        return {
+          concepts: sanitizeConcepts(object.concepts),
+          titleSummary: sanitizeTitleSummary(object.titleSummary),
+        };
+      } catch (err) {
+        // NEVER throw — degrade to the v1 dictionary extractor (see caller). A Bedrock
+        // outage must cost recall, not return a 502.
+        console.warn("[sponsor-match] concept extraction failed; falling back to dictionary", err);
+        return { concepts: [] };
+      }
+    },
+    (r) => r.concepts.length > 0,
+  );
 }
