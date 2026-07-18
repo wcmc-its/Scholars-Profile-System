@@ -237,6 +237,32 @@ describe("buildAdaptiveCard", () => {
     // one markdown link per action, no more, no fewer
     expect((links.match(/\]\(/g) ?? []).length).toBe(c.actions.length);
   });
+
+  it("uses the region CODE in URLs even when Region is the CloudWatch display name (regression: the display name's spaces broke every link)", () => {
+    // Real CloudWatch SNS payloads put the human-readable DISPLAY name here,
+    // NOT a region code -- the earlier fixtures used "us-east-1" and so never
+    // caught this. A space/paren in the URL kills Action.OpenUrl and the
+    // markdown link parser alike.
+    const c = content(
+      buildAdaptiveCard({
+        AlarmName: "sps-aurora-connections-staging",
+        NewStateValue: "ALARM",
+        Region: "US East (N. Virginia)",
+      }),
+    );
+    // The Region FACT keeps the human-readable name for the operator...
+    expect(fact(c, "Region")).toBe("US East (N. Virginia)");
+    // ...but every action URL uses the code and is free of spaces/the name.
+    for (const a of c.actions) {
+      expect(a.url).toContain("us-east-1");
+      expect(a.url).not.toContain("N. Virginia");
+      expect(a.url).not.toContain(" ");
+    }
+    // Body links carry the same code-based URLs (the bug rendered them raw).
+    const links = bodyLinks(c);
+    expect(links).toContain("(https://us-east-1.console.aws.amazon.com/");
+    expect(links).not.toContain("N. Virginia");
+  });
 });
 
 describe("isCloudWatchAlarmPayload", () => {
