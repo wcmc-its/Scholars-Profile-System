@@ -95,6 +95,7 @@
     "etl:resolve-anchor-candidates": "tsx scripts/resolve-anchor-candidates.ts",
     "etl:derive-anchors-dryrun": "tsx scripts/derive-anchors-dryrun.ts",
     "etl:family-sensitivity": "tsx etl/family-sensitivity/index.ts",
+    "etl:honors:import-seed": "tsx etl/honors/import-honors-seed.ts",
     "etl:family-suppression": "tsx etl/family-suppression/index.ts",
     "etl:family-review": "tsx etl/family-review/index.ts",
     "etl:mesh-coverage": "tsx etl/mesh-coverage/index.ts",
