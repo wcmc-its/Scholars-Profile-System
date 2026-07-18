@@ -452,11 +452,11 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "HONORS_APPROVAL_QUEUE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "HONORS_CURATOR_ENABLED",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_HONORS_CURATOR_GROUP_CN",
