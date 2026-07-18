@@ -142,3 +142,46 @@ export function selectWithMethodFloor<T extends { kind: ConceptKind; centrality:
   );
   return [...natural.filter((c) => !drop.has(c)), ...add].sort(byCentralityDesc);
 }
+
+const normTerm = (t: string) => t.trim().toLowerCase();
+
+/**
+ * #1780 Phase 2 — the culled tail: everything `all` (the full extraction) carries that `selected`
+ * (the ≤`max` cut, after any method floor / includes) did NOT. Sorted most-central-first so the
+ * chip-picker offers the next-most-relevant terms first. Pure; term-identity is case-insensitive.
+ */
+export function culledTerms<T extends { term: string; kind: ConceptKind; centrality: number }>(
+  all: readonly T[],
+  selected: readonly T[],
+): T[] {
+  const sel = new Set(selected.map((c) => normTerm(c.term)));
+  return all
+    .filter((c) => !sel.has(normTerm(c.term)))
+    .sort((a, b) => b.centrality - a.centrality);
+}
+
+/**
+ * #1780 Phase 2 — force user-picked culled terms back into the selection, ADDITIVELY (never drops a
+ * base concept), capped at `hardMax` total fan-outs. A term that re-appears in `all` reuses its
+ * extraction object (server-derived kind + centrality); on the rare extraction drift where it does
+ * not, `synth` builds a fallback. Already-selected terms and duplicate includes are skipped. This
+ * is the ONLY path that can push the term count past `selectWithMethodFloor`'s `max`, and it is
+ * gated on an explicit user click per term — the automatic cut still stops at `max`.
+ */
+export function applyIncludes<T extends { term: string; kind: ConceptKind; centrality: number }>(
+  selected: readonly T[],
+  all: readonly T[],
+  include: readonly string[],
+  opts: { hardMax: number; synth: (term: string) => T },
+): T[] {
+  const have = new Set(selected.map((c) => normTerm(c.term)));
+  const byTerm = new Map(all.map((c) => [normTerm(c.term), c] as const));
+  const additions: T[] = [];
+  for (const raw of include) {
+    const key = normTerm(raw);
+    if (key.length === 0 || have.has(key)) continue;
+    have.add(key);
+    additions.push(byTerm.get(key) ?? opts.synth(raw.trim()));
+  }
+  return [...selected, ...additions].slice(0, opts.hardMax);
+}

@@ -33,6 +33,7 @@ const {
   mockSubmissionFindMany,
   mockSubmissionFindUnique,
   mockGetEffectiveEditSession,
+  mockCachedReasonAgg,
 } = vi.hoisted(() => ({
   mockRelevanceScoresForQuery: vi.fn(),
   mockPublicationTopicFindMany: vi.fn(),
@@ -49,6 +50,11 @@ const {
   mockSubmissionFindMany: vi.fn(),
   mockSubmissionFindUnique: vi.fn(),
   mockGetEffectiveEditSession: vi.fn(),
+  // #1780 Phase 2 — the real `cachedReasonAgg` BYPASSES its cache under VITEST (returns `load()`
+  // directly), so the route's cache KEY is never exercised by default. This capturing stub keeps
+  // that pass-through behaviour (every existing test still runs the loader) while recording each
+  // key argument, so the include-namespacing logic can actually be asserted.
+  mockCachedReasonAgg: vi.fn(async (_key: string, load: () => Promise<unknown>) => load()),
 }));
 
 vi.mock("@/lib/api/search", () => ({
@@ -93,6 +99,9 @@ vi.mock("@/lib/api/matcha", async (importOriginal) => ({
 // they cover); its composition is tested in `sponsor-match-spine-run.test.ts`.
 vi.mock("@/lib/api/matcha-spine-run", () => ({
   rankResearchersForDescriptionSpine: mockRankSpine,
+}));
+vi.mock("@/lib/api/reason-agg-cache", () => ({
+  cachedReasonAgg: mockCachedReasonAgg,
 }));
 
 import { DELETE, GET, POST } from "@/app/api/edit/matcha/route";
@@ -375,7 +384,7 @@ describe("POST /api/edit/matcha (route)", () => {
       process.env.MATCHA_SPINE = "on";
       const resp = await POST(postRequest(developerCtx, { description: "x" }));
       expect(resp.status).toBe(200);
-      expect(mockRankSpine).toHaveBeenCalledWith("x");
+      expect(mockRankSpine).toHaveBeenCalledWith("x", { include: [] });
       expect(mockRankForDescription).not.toHaveBeenCalled();
     });
 
@@ -391,7 +400,7 @@ describe("POST /api/edit/matcha (route)", () => {
       process.env.MATCHA_SPINE = "on";
       const resp = await POST(postRequest(developerCtx, { description: "x", engine: "spine" }));
       expect(resp.status).toBe(200);
-      expect(mockRankSpine).toHaveBeenCalledWith("x");
+      expect(mockRankSpine).toHaveBeenCalledWith("x", { include: [] });
       expect(mockRankForDescription).not.toHaveBeenCalled();
     });
 
@@ -468,14 +477,92 @@ describe("POST /api/edit/matcha (route)", () => {
       );
       expect(resp.status).toBe(200);
       // Not passed through, not validated, not 400 — simply not a parameter. The spine is
-      // called with the description alone.
-      expect(mockRankSpine).toHaveBeenCalledWith("x");
+      // called with the description and an empty include set (#1780 Phase 2's `include[]` is the
+      // ONLY term input the client has, and this body did not send it).
+      expect(mockRankSpine).toHaveBeenCalledWith("x", { include: [] });
     });
 
     it("does not 400 on a garbage `concepts` field (there is no such trust boundary now)", async () => {
       const resp = await POST(postRequest(developerCtx, { description: "x", concepts: "nope" }));
       expect(resp.status).toBe(200);
-      expect(mockRankSpine).toHaveBeenCalledWith("x");
+      expect(mockRankSpine).toHaveBeenCalledWith("x", { include: [] });
+    });
+  });
+
+  // #1780 Phase 2 — the culled-term include[] path: sanitized at the route, threaded to the spine,
+  // and its tail shipped back. The trust-boundary sanitization itself is unit-tested on
+  // `sanitizeIncludeTerms`; here we prove the ROUTE actually wires it to the engine (the
+  // "declared but never connected" failure mode) — and does not resurrect a scoring override.
+  describe("include[] wiring (#1780 Phase 2)", () => {
+    beforeEach(() => {
+      process.env.MATCHA_SPINE = "on";
+    });
+
+    it("sanitizes include[] and passes the term strings to the spine", async () => {
+      const resp = await POST(
+        postRequest(developerCtx, {
+          description: "x",
+          include: ["  iPSC  ", "", 42, "iPSC", "organoids"],
+        }),
+      );
+      expect(resp.status).toBe(200);
+      // Trimmed, empties/non-strings dropped, de-duped, sorted — never the raw array.
+      expect(mockRankSpine).toHaveBeenCalledWith("x", { include: ["iPSC", "organoids"] });
+    });
+
+    it("ships the spine's culled tail back to the client", async () => {
+      mockRankSpine.mockResolvedValueOnce({
+        concepts: [],
+        candidates: [
+          {
+            cwid: "a",
+            name: "A",
+            profileSlug: "a",
+            title: null,
+            department: null,
+            fusedScore: 0.1,
+            contributions: [],
+            technologyCount: 0,
+          },
+        ],
+        culled: [{ term: "organoids", kind: "method", centrality: 0.5 }],
+      });
+      // A unique paste — the route's result cache is module-level and not reset between tests, so a
+      // shared "x" would risk serving (or being served) a neighbour's cached ranking.
+      const resp = await POST(postRequest(developerCtx, { description: "phase2 culled probe" }));
+      expect(resp.status).toBe(200);
+      const body = await resp.json();
+      expect(body.culled).toEqual([{ term: "organoids", kind: "method", centrality: 0.5 }]);
+    });
+  });
+
+  // #1780 Phase 2 — the include set must give the RESULT CACHE its own namespace, or a click-to-add
+  // would be served the base (no-include) ranking. Asserted on the KEY (via `mockCachedReasonAgg`)
+  // because the real cache bypasses under VITEST, so a loader-call assertion cannot catch a key bug.
+  describe("cache key namespacing (#1780 Phase 2)", () => {
+    beforeEach(() => {
+      process.env.MATCHA_SPINE = "on";
+    });
+    const keyOf = (n: number) => String(mockCachedReasonAgg.mock.calls[n][0]);
+
+    it("a base search and an include search of the same paste get DIFFERENT keys", async () => {
+      await POST(postRequest(developerCtx, { description: "x" }));
+      await POST(postRequest(developerCtx, { description: "x", include: ["organoids"] }));
+      expect(keyOf(0)).not.toBe(keyOf(1));
+      // Structurally namespaced under the base key ⇒ no base paste can ever collide with it.
+      expect(keyOf(1).startsWith(`${keyOf(0)}:inc:`)).toBe(true);
+    });
+
+    it("different include sets get different keys; the same set is stable and order-independent", async () => {
+      await POST(postRequest(developerCtx, { description: "x", include: ["a"] })); // 0
+      await POST(postRequest(developerCtx, { description: "x", include: ["b"] })); // 1
+      await POST(postRequest(developerCtx, { description: "x", include: ["a"] })); // 2
+      await POST(postRequest(developerCtx, { description: "x", include: ["a", "b"] })); // 3
+      await POST(postRequest(developerCtx, { description: "x", include: ["b", "a"] })); // 4
+      expect(keyOf(0)).not.toBe(keyOf(1)); // ["a"] ≠ ["b"]
+      expect(keyOf(0)).toBe(keyOf(2)); // ["a"] === ["a"]
+      expect(keyOf(0)).not.toBe(keyOf(3)); // ["a"] ≠ ["a","b"]
+      expect(keyOf(3)).toBe(keyOf(4)); // ["a","b"] === ["b","a"] (sanitize sorts to one key)
     });
   });
 

@@ -28,6 +28,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MatchaPanel } from "@/components/edit/matcha-panel";
 import { conceptWeight } from "@/lib/api/matcha-contract";
 import type {
+  CulledConcept,
   MatchaCandidate,
   MatchaConcept,
   MatchaPreference,
@@ -162,6 +163,8 @@ function stubFetch(payload: {
   concepts: MatchaConcept[];
   candidates: MatchaCandidate[];
   preferences?: MatchaPreference[];
+  /** #1780 Phase 2 — the culled tail, for the click-to-include chips. */
+  culled?: CulledConcept[];
   submissions?: Submission[];
   /** §9 — the SERVER's verdict on whose searches this list holds. Defaults to `"own"`, which is
    *  what every non-superuser gets and therefore the right default for a fixture. `"omit"` sends
@@ -2635,5 +2638,118 @@ describe("MatchaPanel", () => {
       submissionId: "s1",
     });
     expect(screen.queryByText("cardiac fibrosis")).toBeNull();
+  });
+});
+
+describe("MatchaPanel — #1780 Phase 2 culled chip-picker", () => {
+  const CULLED: CulledConcept[] = [
+    { term: "organoids", kind: "method", centrality: 0.5 },
+    { term: "single-cell RNA-seq", kind: "concept", centrality: 0.45 },
+  ];
+
+  it("renders the culled tail as kind-coloured 'Also detected' chips", async () => {
+    stubFetch({ concepts: CONCEPTS, candidates: THREE, culled: CULLED });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    expect(screen.getByText("Also detected")).toBeTruthy();
+    const method = screen.getByRole("button", { name: "Add organoids to the search" });
+    const concept = screen.getByRole("button", { name: "Add single-cell RNA-seq to the search" });
+    // Kind drives the colour token — purple method / blue concept, matching the rail + paste marks.
+    expect(method.className).toContain("--color-facet-method-fill");
+    expect(concept.className).toContain("--color-facet-topic-fill");
+  });
+
+  it("clicking a chip re-runs the match with the term in `include`", async () => {
+    const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE, culled: CULLED });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+    expect(rankCalls(fetchMock)).toBe(1); // the initial search sent include: []
+
+    fireEvent.click(screen.getByRole("button", { name: "Add organoids to the search" }));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(2));
+
+    const posts = fetchMock.mock.calls.filter(
+      (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
+    );
+    const body = JSON.parse(String((posts[posts.length - 1][1] as { body: string }).body));
+    expect(body.include).toEqual(["organoids"]); // force-included; NOT a scoring override
+    expect(body.description).toBe("CAR T");
+  });
+
+  it("shows no chip section when the response carries no culled tail", async () => {
+    stubFetch({ concepts: CONCEPTS, candidates: THREE }); // culled omitted ⇒ []
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+    expect(screen.queryByText("Also detected")).toBeNull();
+  });
+
+  it("accumulates include across multiple adds (append, not replace)", async () => {
+    const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE, culled: CULLED });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add organoids to the search" }));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(2));
+    fireEvent.click(screen.getByRole("button", { name: "Add single-cell RNA-seq to the search" }));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(3));
+
+    const posts = fetchMock.mock.calls.filter(
+      (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
+    );
+    const body = JSON.parse(String((posts[posts.length - 1][1] as { body: string }).body));
+    // Both adds present, in click order — kills a "replace instead of append" regression.
+    expect(body.include).toEqual(["organoids", "single-cell RNA-seq"]);
+  });
+
+  it("a Re-run after adding a chip preserves the included term", async () => {
+    const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE, culled: CULLED });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+    fireEvent.click(screen.getByRole("button", { name: "Add organoids to the search" }));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "Re-run match" }));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(3));
+    const posts = fetchMock.mock.calls.filter(
+      (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
+    );
+    const body = JSON.parse(String((posts[posts.length - 1][1] as { body: string }).body));
+    // The Re-run kept the officer's add — pins the `{ include: included }` wiring on the Re-run button.
+    expect(body.include).toEqual(["organoids"]);
+  });
+
+  it("disables the chips and shows the cap note at the term ceiling", async () => {
+    // The server caps on the PRE-cluster term count; the client reads it from `members`, NOT
+    // `concepts.length` (which under-counts after MeSH merges). Four concepts × 3 members = 12 raw
+    // terms ⇒ exactly at MAX_TERMS_WITH_INCLUDES. Regresses if atCap goes back to `concepts.length`.
+    const capped: MatchaConcept[] = ["c1", "c2", "c3", "c4"].map((t) => ({
+      term: t,
+      kind: "concept",
+      members: [t, `${t}a`, `${t}b`],
+      centrality: 0.5,
+      weightFactor: 1,
+    }));
+    stubFetch({ concepts: capped, candidates: THREE, culled: CULLED });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    const chip = screen.getByRole("button", {
+      name: "Add organoids to the search",
+    }) as HTMLButtonElement;
+    expect(chip.disabled).toBe(true);
+    expect(screen.getByText(/maximum terms reached/i)).toBeTruthy();
   });
 });

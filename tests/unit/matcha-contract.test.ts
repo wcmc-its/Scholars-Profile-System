@@ -30,6 +30,9 @@ import {
   rareTerms,
   rerankCandidates,
   askTitleFrom,
+  sanitizeIncludeTerms,
+  INCLUDE_MAX,
+  INCLUDE_TERM_MAXLEN,
   type MatchaCandidate,
   type MatchaConcept,
   type MatchaPreference,
@@ -764,5 +767,35 @@ describe("D1+D2 — recency re-ranks AND re-tiers (regression AC)", () => {
     const topScore = ranked[0].fusedScore;
     expect(fitTier(ranked[0].fusedScore, topScore)).toBe("strong");
     expect(fitTier(ranked[1].fusedScore, topScore)).toBe("weak");
+  });
+});
+
+describe("sanitizeIncludeTerms (#1780 Phase 2 — the include[] trust boundary)", () => {
+  it("returns [] for non-array / junk input", () => {
+    expect(sanitizeIncludeTerms(undefined)).toEqual([]);
+    expect(sanitizeIncludeTerms(null)).toEqual([]);
+    expect(sanitizeIncludeTerms("iPSC")).toEqual([]);
+    expect(sanitizeIncludeTerms({ 0: "iPSC" })).toEqual([]);
+  });
+
+  it("trims, drops empties and non-strings, and keeps real terms (sorted)", () => {
+    expect(sanitizeIncludeTerms(["  iPSC  ", "", "   ", 42, null, "organoids"])).toEqual([
+      "iPSC",
+      "organoids",
+    ]);
+  });
+
+  it("de-dups case-insensitively, keeping the first casing", () => {
+    expect(sanitizeIncludeTerms(["iPSC", "IPSC", "ipsc"])).toEqual(["iPSC"]);
+  });
+
+  it("drops a term longer than INCLUDE_TERM_MAXLEN", () => {
+    const long = "x".repeat(INCLUDE_TERM_MAXLEN + 1);
+    expect(sanitizeIncludeTerms([long, "ok"])).toEqual(["ok"]);
+  });
+
+  it("caps the array at INCLUDE_MAX", () => {
+    const many = Array.from({ length: INCLUDE_MAX + 5 }, (_, i) => `t${String(i).padStart(3, "0")}`);
+    expect(sanitizeIncludeTerms(many)).toHaveLength(INCLUDE_MAX);
   });
 });

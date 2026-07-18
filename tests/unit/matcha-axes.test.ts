@@ -7,6 +7,8 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  applyIncludes,
+  culledTerms,
   mergeTermClusters,
   selectWithMethodFloor,
   type ClusterTerm,
@@ -135,5 +137,72 @@ describe("selectWithMethodFloor (#1780 — reserve method slots inside the cap)"
     ];
     const out = selectWithMethodFloor(input, OPTS);
     expect(out.map((x) => x.term)).toEqual(["B", "C", "A"]);
+  });
+});
+
+describe("culledTerms (#1780 Phase 2 — the tail the cut did not search)", () => {
+  type C = { term: string; kind: "concept" | "method"; centrality: number };
+  const c = (term: string, kind: "concept" | "method", centrality: number): C => ({ term, kind, centrality });
+
+  it("returns everything in `all` that is not in `selected`, most-central first", () => {
+    const all = [c("A", "concept", 1.0), c("B", "concept", 0.9), c("iPSC", "method", 0.4), c("organoids", "method", 0.5)];
+    const selected = [c("A", "concept", 1.0), c("B", "concept", 0.9)];
+    expect(culledTerms(all, selected).map((x) => x.term)).toEqual(["organoids", "iPSC"]);
+  });
+
+  it("matches selection by term, case-insensitively (no dup chip for a searched term)", () => {
+    const all = [c("Single Cell", "method", 0.5), c("A", "concept", 1.0)];
+    const selected = [c("single cell", "method", 0.5)];
+    expect(culledTerms(all, selected).map((x) => x.term)).toEqual(["A"]);
+  });
+
+  it("is empty when everything was selected", () => {
+    const all = [c("A", "concept", 1.0)];
+    expect(culledTerms(all, all)).toEqual([]);
+  });
+});
+
+describe("applyIncludes (#1780 Phase 2 — force officer-picked terms back in, additively)", () => {
+  type C = { term: string; kind: "concept" | "method"; centrality: number };
+  const c = (term: string, kind: "concept" | "method", centrality: number): C => ({ term, kind, centrality });
+  const synth = (term: string): C => c(term, "concept", 0.5);
+  const OPTS = { hardMax: 12, synth };
+
+  it("appends an included tail term, reusing its extraction object (server-derived kind/centrality)", () => {
+    const selected = [c("A", "concept", 1.0), c("B", "concept", 0.9)];
+    const all = [...selected, c("iPSC", "method", 0.4)];
+    const out = applyIncludes(selected, all, ["iPSC"], OPTS);
+    expect(out).toHaveLength(3);
+    const added = out.find((x) => x.term === "iPSC");
+    expect(added).toEqual(c("iPSC", "method", 0.4)); // reused, not synthesized as a concept
+  });
+
+  it("is additive — never drops a base concept", () => {
+    const selected = [c("A", "concept", 1.0), c("B", "concept", 0.9)];
+    const all = [...selected, c("iPSC", "method", 0.4)];
+    const out = applyIncludes(selected, all, ["iPSC"], OPTS);
+    expect(out.map((x) => x.term)).toEqual(["A", "B", "iPSC"]);
+  });
+
+  it("skips an already-selected term and de-dups repeated includes", () => {
+    const selected = [c("A", "concept", 1.0)];
+    const all = [...selected, c("iPSC", "method", 0.4)];
+    const out = applyIncludes(selected, all, ["A", "iPSC", "iPSC"], OPTS);
+    expect(out.map((x) => x.term)).toEqual(["A", "iPSC"]); // A not duplicated, iPSC added once
+  });
+
+  it("caps the total at hardMax (drops overflow additions, never a base concept)", () => {
+    const selected = Array.from({ length: 8 }, (_, i) => c(`base${i}`, "concept", 1 - i * 0.05));
+    const all = [...selected, ...["a", "b", "c", "d", "e", "f"].map((t) => c(t, "method", 0.4))];
+    const out = applyIncludes(selected, all, ["a", "b", "c", "d", "e", "f"], OPTS);
+    expect(out).toHaveLength(12); // 8 base + 4 additions, the last 2 dropped
+    expect(out.slice(0, 8).map((x) => x.term)).toEqual(selected.map((x) => x.term)); // base intact
+  });
+
+  it("synthesizes a concept-kind fallback for a term absent from the fresh extraction (drift)", () => {
+    const selected = [c("A", "concept", 1.0)];
+    const all = [...selected]; // "gone" not present ⇒ extraction drift
+    const out = applyIncludes(selected, all, ["gone"], OPTS);
+    expect(out.find((x) => x.term === "gone")).toEqual(c("gone", "concept", 0.5));
   });
 });

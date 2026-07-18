@@ -41,6 +41,8 @@ import {
   type ExtractedConcept,
 } from "@/lib/api/matcha-extract";
 import {
+  applyIncludes,
+  culledTerms,
   mergeTermClusters,
   selectWithMethodFloor,
   type ClusterTerm,
@@ -53,6 +55,7 @@ import {
   matchaMeasuresFrom,
   DEFAULT_K,
   MAX_EVIDENCE_CONCEPTS,
+  type CulledConcept,
   type MatchaCandidate,
   type MatchaConcept,
   type MatchaSearchEvidence,
@@ -180,6 +183,18 @@ const METHOD_FLOOR = 3;
  *  tunable constant here; validate against a fan-out A/B before moving it. */
 const METHOD_THRESHOLD = 0.35;
 
+/** #1780 Phase 2 — the total-term ceiling once an officer manually adds culled terms. The automatic
+ *  cut still stops at `MAX_TERMS`; click-to-include adds are ADDITIVE on top, up to this hard cap,
+ *  bounding worst-case fan-out even if every chip is clicked. Each add is one user action = one
+ *  re-run, so this is not an automatic load increase — the "don't raise the cap" rule (which is
+ *  about the automatic cut) is intact. */
+const MAX_TERMS_WITH_INCLUDES = 12;
+
+/** Centrality assigned to an included term that did NOT re-appear in the fresh extraction (rare —
+ *  extraction is temp-0). A middling default: the officer asked for it, so it should rank, but it
+ *  must not dominate. The normal path reuses the extraction's real per-term centrality. */
+const INCLUDE_SYNTH_CENTRALITY = 0.5;
+
 /** Per-term retrieval depth. `searchPeople` pages at its own module-private page
  *  size (20 today, not overridable) and reports it as `pageSize` on every result —
  *  the paging loop keys its short-page stop to THAT, never to a copied constant
@@ -230,6 +245,9 @@ export type SpineRankResult = {
    *  Rides through to the route, which prefers it over the derived concept-list title. Absent
    *  on the dictionary-fallback path (no LLM ⇒ no title) and on the empty short-circuits. */
   titleSummary?: string;
+  /** #1780 Phase 2 — the extractor's concepts the cut did NOT search, for the click-to-include
+   *  chips. [] on the dictionary-fallback path (no LLM tail) and the empty short-circuits. */
+  culled?: CulledConcept[];
 };
 
 /**
@@ -353,7 +371,7 @@ async function retrieveCluster(
  */
 export async function rankResearchersForDescriptionSpine(
   description: string,
-  opts: { limit?: number } = {},
+  opts: { limit?: number; include?: readonly string[] } = {},
 ): Promise<SpineRankResult> {
   const empty: SpineRankResult = { concepts: [], candidates: [] };
   const text = normalizeDescription(description);
@@ -374,6 +392,16 @@ export async function rankResearchersForDescriptionSpine(
     methodFloor: METHOD_FLOOR,
     methodThreshold: METHOD_THRESHOLD,
   });
+  // #1780 Phase 2 — force officer-picked culled terms back in, additively, capped at
+  // MAX_TERMS_WITH_INCLUDES. LLM path only: the dictionary fallback below has no culled tail, so
+  // there is nothing for an officer to have added. Sanitized upstream at the route trust boundary.
+  const include = opts.include ?? [];
+  if (extracted.length > 0 && include.length > 0) {
+    extracted = applyIncludes(extracted, extraction.concepts, include, {
+      hardMax: MAX_TERMS_WITH_INCLUDES,
+      synth: (term) => ({ term, kind: "concept" as const, centrality: INCLUDE_SYNTH_CENTRALITY }),
+    });
+  }
   if (extracted.length === 0) {
     const vocab = await loadTaxonomyVocab();
     extracted = extractTerms(text, vocab)
@@ -381,6 +409,15 @@ export async function rankResearchersForDescriptionSpine(
       .map((term) => ({ term, kind: "concept" as const, centrality: UNIFORM_CENTRALITY }));
   }
   if (extracted.length === 0) return empty;
+
+  // #1780 Phase 2 — the culled tail for the client's include chips: the full extraction minus the
+  // FINAL selection, so a just-added term drops off the chips. [] on the dictionary fallback
+  // (`extraction.concepts` is [] there ⇒ nothing to offer).
+  const culled: CulledConcept[] = culledTerms(extraction.concepts, extracted).map((c) => ({
+    term: c.term,
+    kind: c.kind,
+    centrality: c.centrality,
+  }));
 
   // The funder's qualifying context per term (the LLM extractor's `gloss`; empty on the dictionary
   // fallback). The spine searches this — the sponsor's SENSE — as the free-text query instead of the
@@ -638,7 +675,7 @@ export async function rankResearchersForDescriptionSpine(
     : undefined;
   const allFused = rrfFuse(rankings, DEFAULT_K, recencyWeightByCwid);
   const fused = opts.limit != null ? allFused.slice(0, opts.limit) : allFused;
-  if (fused.length === 0) return { concepts, candidates: [], titleSummary };
+  if (fused.length === 0) return { concepts, candidates: [], titleSummary, culled };
 
   // technologyCount — CTL officers care whether the researcher already holds CTL IP.
   // Same inline groupBy the bespoke engine and `rankResearchersForOpportunity` use
@@ -763,5 +800,5 @@ export async function rankResearchersForDescriptionSpine(
       ...(searchEvidence.length > 0 ? { searchEvidence } : {}),
     };
   });
-  return { concepts, candidates, titleSummary };
+  return { concepts, candidates, titleSummary, culled };
 }
