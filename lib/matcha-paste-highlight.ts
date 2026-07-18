@@ -22,12 +22,16 @@
  * and runs once per search, not per keystroke.
  */
 import type { MatchaConcept } from "@/lib/api/matcha-contract";
+import type { ConceptKind } from "@/lib/api/matcha-axes";
 
 /** A run of paste text. `term` present ⇒ it is the representative term of the concept this run
- *  was matched to (the join key back to the rail's chips). Absent ⇒ ordinary text. */
+ *  was matched to (the join key back to the rail's chips). Absent ⇒ ordinary text. `kind` rides
+ *  along on a marked run so the panel can colour a method mark differently from a concept mark
+ *  (#1780), matching the rail's Concept/Method split. */
 export type PasteSegment = {
   text: string;
   term?: string;
+  kind?: ConceptKind;
 };
 
 /** A word character for boundary purposes. Deliberately includes digits: "CD8" must not match
@@ -59,7 +63,9 @@ export function markPaste(paste: string, concepts: readonly MatchaConcept[]): Pa
   // Every phrasing that merged into a cluster is a candidate needle, plus the representative
   // term itself. Deduped case-insensitively; a member that duplicates another is not two hits.
   const needles = new Map<string, string>(); // needle → concept term
+  const kindByTerm = new Map<string, ConceptKind>(); // concept term → kind (for the mark colour)
   for (const concept of concepts) {
+    kindByTerm.set(concept.term, concept.kind);
     for (const member of [concept.term, ...concept.members]) {
       const key = member.trim();
       // Must contain a letter or digit. A member that is empty, or is pure punctuation, would
@@ -108,7 +114,7 @@ export function markPaste(paste: string, concepts: readonly MatchaConcept[]): Pa
   let cursor = 0;
   for (const c of claimed) {
     if (c.start > cursor) segments.push({ text: paste.slice(cursor, c.start) });
-    segments.push({ text: paste.slice(c.start, c.end), term: c.term });
+    segments.push({ text: paste.slice(c.start, c.end), term: c.term, kind: kindByTerm.get(c.term) });
     cursor = c.end;
   }
   if (cursor < paste.length) segments.push({ text: paste.slice(cursor) });

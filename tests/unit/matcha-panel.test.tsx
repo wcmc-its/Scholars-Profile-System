@@ -28,6 +28,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MatchaPanel } from "@/components/edit/matcha-panel";
 import { conceptWeight } from "@/lib/api/matcha-contract";
 import type {
+  CulledConcept,
   MatchaCandidate,
   MatchaConcept,
   MatchaPreference,
@@ -162,6 +163,8 @@ function stubFetch(payload: {
   concepts: MatchaConcept[];
   candidates: MatchaCandidate[];
   preferences?: MatchaPreference[];
+  /** #1780 Phase 2 — the culled tail, for the click-to-include chips. */
+  culled?: CulledConcept[];
   submissions?: Submission[];
   /** §9 — the SERVER's verdict on whose searches this list holds. Defaults to `"own"`, which is
    *  what every non-superuser gets and therefore the right default for a fixture. `"omit"` sends
@@ -354,7 +357,7 @@ describe("MatchaPanel", () => {
     expect(screen.queryByText("·rare")).toBeNull();
   });
 
-  it("shows the funder's gloss as the concept's 'sponsor's words' line", async () => {
+  it("shows the funder's gloss as the concept's 'from the ask' line", async () => {
     stubFetch({
       concepts: [
         { ...CONCEPTS[0], gloss: "lysosomal processing of ADC linkers" },
@@ -365,7 +368,7 @@ describe("MatchaPanel", () => {
     });
     await renderAndSearch();
     expect(document.body.textContent).toContain("lysosomal processing of ADC linkers");
-    expect(document.body.textContent).toContain("sponsor");
+    expect(document.body.textContent).toContain("from the ask");
   });
 
   it("shows NO rail on the bespoke shape (empty concepts)", async () => {
@@ -771,7 +774,7 @@ describe("MatchaPanel", () => {
     // The read-only ask quotes the text that was SEARCHED. None of the three concept terms occurs
     // in "CAR T collaborators", so nothing marks — and the panel must SAY so, rather than let
     // an unmarked paste read as "the matcher ignored all of this".
-    expect(screen.getByText(/What we read from the sponsor/)).toBeTruthy();
+    expect(screen.getByText(/What we read from the ask/)).toBeTruthy();
     expect(screen.getByText(/0 of 3 concepts are highlighted/)).toBeTruthy();
   });
 
@@ -798,7 +801,7 @@ describe("MatchaPanel", () => {
     await renderAndSearch(); // pastes "CAR T collaborators"
     // The committed search is now the read-only ask — the textarea is gone, Re-run is offered.
     expect(screen.queryByLabelText(/description/i)).toBeNull();
-    expect(screen.getByText(/What we read from the sponsor/)).toBeTruthy();
+    expect(screen.getByText(/What we read from the ask/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Re-run match" })).toBeTruthy();
 
     // Edit paste restores the textarea, pre-filled with the text that was searched.
@@ -862,7 +865,7 @@ describe("MatchaPanel", () => {
   }
 
   /** The Full card is present iff its eyebrow is; the Compact bar iff "Show original ▾" is. */
-  const isFull = () => screen.queryByText(/What we read from the sponsor/) !== null;
+  const isFull = () => screen.queryByText(/What we read from the ask/) !== null;
 
   /** The LIVE observers watching the ask card's collapse sentinel — never a row's `inView` one, and
    *  never one the effect has already disconnected. This is "what could still collapse the header",
@@ -1063,6 +1066,58 @@ describe("MatchaPanel", () => {
     // two blocks and two counts, and be wrong about both.
     expect(blocks[0][1]).toContain("142 of 210 publications tagged");
     expect(blocks[1][1]).toContain("30 of 210 publications tagged");
+  });
+
+  it("names a ranked-but-unevidenced concept so reweighting is legible (#1780)", async () => {
+    // The Safford case (staging 2026-07-17): a scholar ranks under a concept via a keyword/capped
+    // hit that ships no evidence block. The card must NAME that concept — otherwise the driver is
+    // invisible (an unlabeled strip segment) and an officer sees a #1 with no reason to zero.
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          // Ranks under Immuno-oncology but ships NO searchEvidence for it (only the default
+          // __match__, which joins to no concept) ⇒ conceptCoverage state "ranked".
+          contributions: [{ term: "Immuno-oncology", rank: 1 }],
+        }),
+      ],
+    });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    const line = document.querySelector('[data-slot="matcha-ranked-no-evidence"]');
+    expect(line).toBeTruthy();
+    expect(line!.textContent).toContain("Immuno-oncology");
+    // Named, but NOT as an evidence block — it must not masquerade as shown evidence.
+    expect(evidenceBlocks().map(([caption]) => caption)).not.toContain("Immuno-oncology");
+  });
+
+  it("does not repeat an evidenced concept in the ranked-no-evidence line", async () => {
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          contributions: [{ term: "Immuno-oncology", rank: 1 }],
+          searchEvidence: [searchEvidence("Immuno-oncology", 142)],
+        }),
+      ],
+    });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    // Immuno-oncology is evidenced ⇒ it renders as a block; the ranked-no-evidence line does not
+    // exist for it (no OTHER concept is ranked-without-evidence here).
+    const line = document.querySelector('[data-slot="matcha-ranked-no-evidence"]');
+    expect(line?.textContent ?? "").not.toContain("Immuno-oncology");
+    expect(evidenceBlocks().map(([caption]) => caption)).toContain("Immuno-oncology");
   });
 
   it("drops a muted concept's evidence block along with its chip", async () => {
@@ -2583,5 +2638,118 @@ describe("MatchaPanel", () => {
       submissionId: "s1",
     });
     expect(screen.queryByText("cardiac fibrosis")).toBeNull();
+  });
+});
+
+describe("MatchaPanel — #1780 Phase 2 culled chip-picker", () => {
+  const CULLED: CulledConcept[] = [
+    { term: "organoids", kind: "method", centrality: 0.5 },
+    { term: "single-cell RNA-seq", kind: "concept", centrality: 0.45 },
+  ];
+
+  it("renders the culled tail as kind-coloured 'Also detected' chips", async () => {
+    stubFetch({ concepts: CONCEPTS, candidates: THREE, culled: CULLED });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    expect(screen.getByText("Also detected")).toBeTruthy();
+    const method = screen.getByRole("button", { name: "Add organoids to the search" });
+    const concept = screen.getByRole("button", { name: "Add single-cell RNA-seq to the search" });
+    // Kind drives the colour token — purple method / blue concept, matching the rail + paste marks.
+    expect(method.className).toContain("--color-facet-method-fill");
+    expect(concept.className).toContain("--color-facet-topic-fill");
+  });
+
+  it("clicking a chip re-runs the match with the term in `include`", async () => {
+    const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE, culled: CULLED });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+    expect(rankCalls(fetchMock)).toBe(1); // the initial search sent include: []
+
+    fireEvent.click(screen.getByRole("button", { name: "Add organoids to the search" }));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(2));
+
+    const posts = fetchMock.mock.calls.filter(
+      (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
+    );
+    const body = JSON.parse(String((posts[posts.length - 1][1] as { body: string }).body));
+    expect(body.include).toEqual(["organoids"]); // force-included; NOT a scoring override
+    expect(body.description).toBe("CAR T");
+  });
+
+  it("shows no chip section when the response carries no culled tail", async () => {
+    stubFetch({ concepts: CONCEPTS, candidates: THREE }); // culled omitted ⇒ []
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+    expect(screen.queryByText("Also detected")).toBeNull();
+  });
+
+  it("accumulates include across multiple adds (append, not replace)", async () => {
+    const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE, culled: CULLED });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add organoids to the search" }));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(2));
+    fireEvent.click(screen.getByRole("button", { name: "Add single-cell RNA-seq to the search" }));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(3));
+
+    const posts = fetchMock.mock.calls.filter(
+      (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
+    );
+    const body = JSON.parse(String((posts[posts.length - 1][1] as { body: string }).body));
+    // Both adds present, in click order — kills a "replace instead of append" regression.
+    expect(body.include).toEqual(["organoids", "single-cell RNA-seq"]);
+  });
+
+  it("a Re-run after adding a chip preserves the included term", async () => {
+    const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE, culled: CULLED });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+    fireEvent.click(screen.getByRole("button", { name: "Add organoids to the search" }));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "Re-run match" }));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(3));
+    const posts = fetchMock.mock.calls.filter(
+      (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
+    );
+    const body = JSON.parse(String((posts[posts.length - 1][1] as { body: string }).body));
+    // The Re-run kept the officer's add — pins the `{ include: included }` wiring on the Re-run button.
+    expect(body.include).toEqual(["organoids"]);
+  });
+
+  it("disables the chips and shows the cap note at the term ceiling", async () => {
+    // The server caps on the PRE-cluster term count; the client reads it from `members`, NOT
+    // `concepts.length` (which under-counts after MeSH merges). Four concepts × 3 members = 12 raw
+    // terms ⇒ exactly at MAX_TERMS_WITH_INCLUDES. Regresses if atCap goes back to `concepts.length`.
+    const capped: MatchaConcept[] = ["c1", "c2", "c3", "c4"].map((t) => ({
+      term: t,
+      kind: "concept",
+      members: [t, `${t}a`, `${t}b`],
+      centrality: 0.5,
+      weightFactor: 1,
+    }));
+    stubFetch({ concepts: capped, candidates: THREE, culled: CULLED });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    const chip = screen.getByRole("button", {
+      name: "Add organoids to the search",
+    }) as HTMLButtonElement;
+    expect(chip.disabled).toBe(true);
+    expect(screen.getByText(/maximum terms reached/i)).toBeTruthy();
   });
 });

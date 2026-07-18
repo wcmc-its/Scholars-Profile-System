@@ -348,6 +348,52 @@ export type MatchaConcept = {
   gloss?: string;
 };
 
+/**
+ * #1780 Phase 2 — a concept the extractor pulled from the paste but the ≤`MAX_TERMS` cut did
+ * NOT search (the "culled tail"). Shipped so the console can offer it as a click-to-include chip;
+ * the client never saw these before. Carries only what a chip needs — `term` (label), `kind`
+ * (blue concept vs purple method colour), `centrality` (chip sort order). NOT a ranking input:
+ * adding one sends the term back in `MatchaRequest.include`, and the server re-derives its real
+ * kind/centrality from its own fresh extraction (never trusts these values for scoring).
+ */
+export type CulledConcept = {
+  term: string;
+  kind: "concept" | "method";
+  centrality: number;
+};
+
+/** Absolute cap on `include[]` terms accepted per request. A DoS bound at the trust boundary —
+ *  the spine enforces the real total-fan-out cap (`MAX_TERMS_WITH_INCLUDES`). */
+export const INCLUDE_MAX = 12;
+/** Longest a single `include[]` term may be. A culled term is a short noun phrase; anything
+ *  longer is junk, not a concept. */
+export const INCLUDE_TERM_MAXLEN = 100;
+
+/**
+ * Sanitize the client-supplied `include[]` — the culled terms an officer chose to add back — at
+ * the trust boundary. These become taxonomy QUERIES only (no `centrality`/`weightFactor` override;
+ * that client-controlled seam was removed in #1673 and is not reopened here), so free-form-but-
+ * bounded is safe: non-strings dropped, trimmed, empties dropped, deduped case-insensitively,
+ * each capped at `INCLUDE_TERM_MAXLEN`, the array capped at `INCLUDE_MAX`. Returned SORTED so the
+ * same set in any order yields one cache key.
+ */
+export function sanitizeIncludeTerms(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of raw) {
+    if (typeof v !== "string") continue;
+    const term = v.trim();
+    if (term.length === 0 || term.length > INCLUDE_TERM_MAXLEN) continue;
+    const key = term.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(term);
+    if (out.length >= INCLUDE_MAX) break;
+  }
+  return out.sort();
+}
+
 /** Per-candidate, per-concept retrieval rank (1-based) — `rank_{s,c}` in the formula.
  *  The re-rank inputs. A candidate carries one of these for EVERY concept it appeared
  *  under, however weakly. */
@@ -647,6 +693,10 @@ export type MatchaResponse = {
    *  falls back to a concept-list title. See `askTitleFrom`. */
   titleSummary?: string;
   preferences?: MatchaPreference[];
+  /** #1780 Phase 2 — the extractor's concepts that the cut did NOT search, offered as
+   *  click-to-include chips. Absent/[] when nothing was culled (few-concept asks) or on the
+   *  bespoke engine (no extraction). */
+  culled?: CulledConcept[];
 };
 
 /**

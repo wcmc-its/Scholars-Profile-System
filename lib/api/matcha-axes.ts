@@ -90,3 +90,98 @@ export function mergeTermClusters(terms: ClusterTerm[], tau: number): TermCluste
       return { members, descendantUis: [...uni], centrality, kind: terms[idxs[0]].kind };
     });
 }
+
+/**
+ * Choose which extracted concepts survive the fan-out cap (#1780). The cap `max` bounds
+ * server load (per-concept `searchPeople` fan-out) and MUST NOT be raised here. The
+ * extractor's rubric scores methods 0.3–0.5 ("supporting detail"), so a plain top-`max`
+ * cut parks them in the culled tail — measured at 50% of all method concepts across the 15
+ * eval fixtures, and every method dropped on 8 of 15 disease-primary asks.
+ *
+ * The fix is a FLOOR, not a raised cap: guarantee up to `methodFloor` methods scoring
+ * `>= methodThreshold` survive, displacing only the lowest-centrality *concepts* — never a
+ * method, and never more than `max` total. So a method-primary ask whose methods already
+ * fill the top-`max` (e.g. gene therapy) is untouched; only method-STARVED asks get the
+ * guarantee. The displaced concept is the marginal `max`-th one the reserved method
+ * outranked in the cut — the intended trade (method representation over the 8th concept).
+ *
+ * Also fixes an order bug in the old `slice(0, max)`: it trusted the model's return order,
+ * which is not strictly its own centrality numbers. Selection here is by an EXPLICIT
+ * centrality sort, ties broken by input order so the result stays deterministic (the
+ * bake-off compares runs).
+ */
+export function selectWithMethodFloor<T extends { kind: ConceptKind; centrality: number }>(
+  concepts: readonly T[],
+  opts: { max: number; methodFloor: number; methodThreshold: number },
+): T[] {
+  const idx = new Map<T, number>(concepts.map((c, i) => [c, i]));
+  const byCentralityDesc = (a: T, b: T) =>
+    b.centrality - a.centrality || idx.get(a)! - idx.get(b)!;
+  const sorted = [...concepts].sort(byCentralityDesc);
+  const natural = sorted.slice(0, opts.max);
+
+  const methodsIn = natural.filter((c) => c.kind === "method").length;
+  const qualifying = sorted.filter(
+    (c) => c.kind === "method" && c.centrality >= opts.methodThreshold,
+  );
+  // How many qualifying methods to force in over the natural cut. <= 0 ⇒ already enough
+  // methods present (incl. every method-primary ask, and any ask with < `max` concepts,
+  // where nothing was cut) ⇒ return the natural top-`max` unchanged.
+  const need = Math.min(opts.methodFloor, qualifying.length) - methodsIn;
+  if (need <= 0) return natural;
+
+  const inNatural = new Set(natural);
+  const add = qualifying.filter((c) => !inNatural.has(c)).slice(0, need);
+  // Drop the `need` lowest-centrality CONCEPTS from the natural cut (never a method). A
+  // cut that bit (natural.length === max, need > 0 ⇒ methodsIn < max) always leaves enough.
+  const drop = new Set(
+    natural
+      .filter((c) => c.kind === "concept")
+      .sort((a, b) => a.centrality - b.centrality || idx.get(b)! - idx.get(a)!)
+      .slice(0, need),
+  );
+  return [...natural.filter((c) => !drop.has(c)), ...add].sort(byCentralityDesc);
+}
+
+const normTerm = (t: string) => t.trim().toLowerCase();
+
+/**
+ * #1780 Phase 2 — the culled tail: everything `all` (the full extraction) carries that `selected`
+ * (the ≤`max` cut, after any method floor / includes) did NOT. Sorted most-central-first so the
+ * chip-picker offers the next-most-relevant terms first. Pure; term-identity is case-insensitive.
+ */
+export function culledTerms<T extends { term: string; kind: ConceptKind; centrality: number }>(
+  all: readonly T[],
+  selected: readonly T[],
+): T[] {
+  const sel = new Set(selected.map((c) => normTerm(c.term)));
+  return all
+    .filter((c) => !sel.has(normTerm(c.term)))
+    .sort((a, b) => b.centrality - a.centrality);
+}
+
+/**
+ * #1780 Phase 2 — force user-picked culled terms back into the selection, ADDITIVELY (never drops a
+ * base concept), capped at `hardMax` total fan-outs. A term that re-appears in `all` reuses its
+ * extraction object (server-derived kind + centrality); on the rare extraction drift where it does
+ * not, `synth` builds a fallback. Already-selected terms and duplicate includes are skipped. This
+ * is the ONLY path that can push the term count past `selectWithMethodFloor`'s `max`, and it is
+ * gated on an explicit user click per term — the automatic cut still stops at `max`.
+ */
+export function applyIncludes<T extends { term: string; kind: ConceptKind; centrality: number }>(
+  selected: readonly T[],
+  all: readonly T[],
+  include: readonly string[],
+  opts: { hardMax: number; synth: (term: string) => T },
+): T[] {
+  const have = new Set(selected.map((c) => normTerm(c.term)));
+  const byTerm = new Map(all.map((c) => [normTerm(c.term), c] as const));
+  const additions: T[] = [];
+  for (const raw of include) {
+    const key = normTerm(raw);
+    if (key.length === 0 || have.has(key)) continue;
+    have.add(key);
+    additions.push(byTerm.get(key) ?? opts.synth(raw.trim()));
+  }
+  return [...selected, ...additions].slice(0, opts.hardMax);
+}

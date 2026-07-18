@@ -30,20 +30,23 @@ export type PublicationTopicGuardInput = {
 };
 
 /**
- * Throws when `publication_topic` is in a state that would render
- * subtopic pages empty. Two failure modes, both the #91 regression:
+ * Throws when `publication_topic` did not end this run in a state that can
+ * render subtopic pages. Two failure modes, both the #91 regression:
  *
- *   1. The table is empty outright — no run has ever populated it (or
- *      this run produced nothing and the table was already empty). This
- *      is the literal #91 root cause.
- *   2. The TOPIC# scan returned records but none were upserted — every
- *      row was rejected by an FK/field guard. publication_topic may
- *      still hold stale rows from a prior run, but a scan that lands
- *      zero rows means the projection is structurally broken (empty
- *      scholar set, empty topic catalog, or no matching publications).
- *
- * A scan that returns zero records against a non-empty table is NOT a
- * failure — that is a quiet upstream day with nothing to upsert. No-op.
+ *   1. The table is empty outright — no run has ever populated it (or this
+ *      run produced nothing and the table was already empty). The literal
+ *      #91 root cause.
+ *   2. Zero rows were upserted this run. Block 2 feeds off a single
+ *      *unfiltered full-table* DynamoDB scan (etl/dynamodb/index.ts), not a
+ *      delta — so a healthy run always scans ~78k TOPIC# records and lands
+ *      rows. `upsertedCount === 0` means either the scan came back empty
+ *      (the TOPIC# rows vanished, or the DynamoDB TABLE env points at the
+ *      wrong table) or every scanned row was rejected by an FK/field guard
+ *      (the projection is broken). publication_topic may still hold
+ *      prior-run rows and pages may still render — but a run that lands
+ *      nothing against a full scan is a silent-staleness trap, not a quiet
+ *      day. The old `scannedCount === 0` carve-out let a 100%-gone source
+ *      pass as success; there is no quiet-day case for a full scan.
  *
  * Mode 1 is checked first, so an empty table always reports as such even
  * when mode 2's condition also holds.
@@ -62,13 +65,21 @@ export function assertPublicationTopicPopulated(
     );
   }
 
-  if (scannedCount > 0 && upsertedCount === 0) {
+  if (upsertedCount === 0) {
+    const cause =
+      scannedCount === 0
+        ? "the full-table scan returned zero TOPIC# records — the source " +
+          "rows have vanished or the DynamoDB TABLE env points at the wrong " +
+          "table"
+        : `the scan returned ${scannedCount} TOPIC# record(s) but every one ` +
+          "was rejected by an FK/field guard (missing scholar, parent topic, " +
+          "publication, or a required field) — the projection is broken";
     throw new Error(
-      `the TOPIC# scan returned ${scannedCount} record(s) but none were ` +
-        "upserted into publication_topic — every row was rejected by an " +
-        "FK/field guard (missing scholar, parent topic, publication, or a " +
-        "required field). The table still holds prior-run rows, but this " +
-        "run landed nothing and the projection is broken. (issue #91)",
+      `no publication_topic rows were upserted this run: ${cause}. The table ` +
+        "still holds prior-run rows, but this run landed nothing, so subtopic " +
+        "pages would silently freeze on stale data. Confirm the upstream " +
+        "ReCiterAI TOPIC# records and the DynamoDB TABLE env, then re-run " +
+        "`npm run etl:dynamodb`. (issue #91)",
     );
   }
 }

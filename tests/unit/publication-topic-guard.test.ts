@@ -9,7 +9,8 @@
  *   - Empty table with upstream data present — throws (literal #91 cause)
  *   - Empty table with an empty scan — throws
  *   - Scan returned records but zero upserted, stale table — throws
- *   - Quiet upstream day (zero scanned, table non-empty) — no throw
+ *   - Zero scanned, table non-empty — throws (full scan ⇒ source gone,
+ *     no quiet-day case; issue in the 2026-07-17 handoff §1.3)
  *   - Minimal non-empty table (one row) — no throw
  *   - Partial-but-positive upsert — no throw (the guard has no partial floor)
  */
@@ -62,19 +63,21 @@ describe("assertPublicationTopicPopulated (#91 Block 2 guard)", () => {
         scannedCount: 78103,
         upsertedCount: 0,
       }),
-    ).toThrow(/none were upserted/);
+    ).toThrow(/rejected by an FK\/field guard/);
   });
 
-  it("does not throw on a quiet upstream day — zero scanned, table non-empty", () => {
-    // No TOPIC# records to process and the table is already populated:
-    // nothing to do, not a regression.
+  it("throws when zero were scanned against a non-empty table — full scan, source gone", () => {
+    // Block 2 feeds off an unfiltered full-table scan, so scannedCount === 0
+    // means the TOPIC# rows vanished or the TABLE env is wrong — NOT a quiet
+    // day. The table still holds prior-run rows, but freezing on stale data
+    // is the silent-staleness trap this guard exists to catch (handoff §1.3).
     expect(() =>
       assertPublicationTopicPopulated({
         tableCount: 78103,
         scannedCount: 0,
         upsertedCount: 0,
       }),
-    ).not.toThrow();
+    ).toThrow(/full-table scan returned zero TOPIC# records/);
   });
 
   it("treats a single row as a non-empty table (boundary)", () => {

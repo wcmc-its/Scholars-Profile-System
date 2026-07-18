@@ -18,6 +18,14 @@
  *   which the driver would otherwise clamp it to.
  * - connectionLimit: the driver defaults to 10; 15 matches the documented
  *   per-task budget (docs/PRODUCTION.md) and stays well under Aurora's ceiling.
+ * - minimumIdle: the mariadb driver defaults minimumIdle to connectionLimit,
+ *   so every pool eagerly opens and PINS its full budget and the idle reaper
+ *   never removes anything (maxRemoval = idle - minimumIdle = 0). That is what
+ *   left the prod writer at a dead-constant ~90 DatabaseConnections that never
+ *   drained (sps-aurora-connections-prod). Setting it below connectionLimit
+ *   lets idleTimeout reap idle connections down to a small floor during lulls,
+ *   so the baseline reflects real usage and the alarm regains signal; the pool
+ *   still grows back to connectionLimit under load.
  *
  * Only params absent from the URL are added, so a value baked into the secret
  * still wins. The adapter rewrites the `mysql:` scheme to `mariadb:` and keeps
@@ -26,6 +34,7 @@
 export const MARIADB_POOL_PARAMS: Readonly<Record<string, string>> = {
   connectTimeout: "5000",
   connectionLimit: "15",
+  minimumIdle: "2",
 };
 
 /**

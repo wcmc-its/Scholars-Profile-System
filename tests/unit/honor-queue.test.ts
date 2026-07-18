@@ -13,10 +13,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildHonorCsv,
   isHonorsQueueTabVisible,
   loadHonorQueue,
   yearPlausibilityNote,
 } from "@/lib/edit/honor-queue";
+import type { HonorQueueRow } from "@/lib/edit/honor-queue";
 
 type Row = {
   id: string;
@@ -28,6 +30,7 @@ type Row = {
   source: string;
   sourceRef: string | null;
   createdAt: Date;
+  updatedAt: Date;
 };
 
 function honor(over: Partial<Row> & { id: string; cwid: string }): Row {
@@ -39,12 +42,16 @@ function honor(over: Partial<Row> & { id: string; cwid: string }): Row {
     source: "D3_RERUN_sloan",
     sourceRef: null,
     createdAt: new Date("2026-07-17T00:00:00Z"),
+    updatedAt: new Date("2026-07-17T00:00:00Z"),
     ...over,
   };
 }
 
 /** Minimal stand-in for the Prisma surface the loader touches. */
-function client(rows: Row[], scholars: Array<{ cwid: string; preferredName: string; primaryTitle?: string }>) {
+function client(
+  rows: Row[],
+  scholars: Array<{ cwid: string; preferredName: string; primaryTitle?: string; postnominal?: string | null; roleCategory?: string | null }>,
+) {
   return {
     honor: { findMany: async () => rows },
     scholar: {
@@ -53,7 +60,9 @@ function client(rows: Row[], scholars: Array<{ cwid: string; preferredName: stri
           cwid: s.cwid,
           slug: `slug-${s.cwid}`,
           preferredName: s.preferredName,
+          postnominal: s.postnominal ?? null,
           fullName: s.preferredName,
+          roleCategory: s.roleCategory ?? "full_time_faculty",
           primaryTitle: s.primaryTitle ?? "Professor of Medicine",
           primaryDepartment: "Medicine",
         })),
@@ -113,22 +122,42 @@ describe("loadHonorQueue — grouping by roster line", () => {
     expect(groups[0].contested).toBe(false);
   });
 
-  it("orders contested groups first, then oldest", async () => {
+  it("orders confident single matches BEFORE contested lines (2026-07-17 curator ask)", async () => {
+    // Confidence DESC: a clean single match outranks an ambiguous contested line,
+    // the inverse of the original contested-first ordering. The curator rubber-
+    // stamps the confident ones and deals with the messy contested lines after.
     const rows = [
-      honor({ id: "old", cwid: "aaa1001", sourceRef: null, createdAt: new Date("2020-01-01") }),
-      honor({ id: "c1", cwid: "bbb2002", sourceRef: "ref-x", createdAt: new Date("2026-01-01") }),
-      honor({ id: "c2", cwid: "ccc3003", sourceRef: "ref-x", createdAt: new Date("2026-01-01") }),
+      honor({ id: "c1", cwid: "bbb2002", sourceRef: "sloan|Jo Lee|2020", year: 2020 }),
+      honor({ id: "c2", cwid: "ccc3003", sourceRef: "sloan|Jo Lee|2020", year: 2020 }),
+      honor({ id: "single", cwid: "aaa1001", sourceRef: "sloan|Ada Byron|2019", year: 2019 }),
     ];
     const groups = await loadHonorQueue(
       client(rows, [
-        { cwid: "aaa1001", preferredName: "A" },
-        { cwid: "bbb2002", preferredName: "B" },
-        { cwid: "ccc3003", preferredName: "C" },
+        { cwid: "aaa1001", preferredName: "Ada Byron" },
+        { cwid: "bbb2002", preferredName: "Jo Lee" },
+        { cwid: "ccc3003", preferredName: "Jordan Lee" },
       ]),
     );
 
-    expect(groups[0].contested).toBe(true);
-    expect(groups[1].rows[0].id).toBe("old");
+    expect(groups[0].contested).toBe(false);
+    expect(groups[0].rows[0].id).toBe("single");
+    expect(groups[1].contested).toBe(true);
+  });
+
+  it("within confident matches, sorts most-recent award first (nulls last)", async () => {
+    const rows = [
+      honor({ id: "old", cwid: "aaa1001", sourceRef: "sloan|Ann Old|1990", year: 1990 }),
+      honor({ id: "new", cwid: "bbb2002", sourceRef: "sloan|Bea New|2024", year: 2024 }),
+      honor({ id: "noyear", cwid: "ccc3003", sourceRef: "sloan|Cy None|", year: null }),
+    ];
+    const groups = await loadHonorQueue(
+      client(rows, [
+        { cwid: "aaa1001", preferredName: "Ann Old" },
+        { cwid: "bbb2002", preferredName: "Bea New" },
+        { cwid: "ccc3003", preferredName: "Cy None" },
+      ]),
+    );
+    expect(groups.map((g) => g.rows[0].id)).toEqual(["new", "old", "noyear"]);
   });
 
   it("returns [] for an empty queue without querying scholars", async () => {
@@ -145,6 +174,94 @@ describe("loadHonorQueue — grouping by roster line", () => {
 
     expect(await loadHonorQueue(c)).toEqual([]);
     expect(scholarCalls).toBe(0);
+  });
+});
+
+describe("loadHonorQueue — the verification pair (name matched against + published name)", () => {
+  it("recovers the roster's printed name from sourceRef and applies the postnominal", async () => {
+    const rows = [honor({ id: "a", cwid: "aaa1001", sourceRef: "sloan_full|Robert Young|2013" })];
+    const groups = await loadHonorQueue(
+      client(rows, [{ cwid: "aaa1001", preferredName: "Robert C Young", postnominal: "MD" }]),
+    );
+    // The name the ROSTER printed — "the name being matched against".
+    expect(groups[0].rosterMatchedName).toBe("Robert Young");
+    // The name the PROFILE will render — preferredName + postnominal.
+    expect(groups[0].rows[0].scholarName).toBe("Robert C Young, MD");
+  });
+
+  it("leaves rosterMatchedName null for a hand-entered honor (null sourceRef)", async () => {
+    const groups = await loadHonorQueue(
+      client([honor({ id: "a", cwid: "aaa1001", sourceRef: null })], [{ cwid: "aaa1001", preferredName: "A Smith" }]),
+    );
+    expect(groups[0].rosterMatchedName).toBeNull();
+  });
+
+  it("carries the roleCategory + a display label for the person filter", async () => {
+    const groups = await loadHonorQueue(
+      client([honor({ id: "a", cwid: "aaa1001", sourceRef: "x|Y|2013" })], [
+        { cwid: "aaa1001", preferredName: "A", roleCategory: "affiliated_faculty" },
+      ]),
+    );
+    expect(groups[0].rows[0].roleCategory).toBe("affiliated_faculty");
+    expect(groups[0].rows[0].roleLabel).toBeTruthy();
+  });
+
+  it("loads a non-pending status when asked (the Approved/Rejected history)", async () => {
+    let whereStatus: unknown;
+    const c = {
+      honor: {
+        findMany: async (args: { where: { status: string } }) => {
+          whereStatus = args.where.status;
+          return [];
+        },
+      },
+      scholar: { findMany: async () => [] },
+    } as unknown as Parameters<typeof loadHonorQueue>[0];
+    await loadHonorQueue(c, "published");
+    expect(whereStatus).toBe("published");
+  });
+});
+
+describe("isFullTimeFaculty", () => {
+  it("is true only for full_time_faculty", async () => {
+    const { isFullTimeFaculty } = await import("@/lib/edit/honor-queue");
+    expect(isFullTimeFaculty("full_time_faculty")).toBe(true);
+    expect(isFullTimeFaculty("affiliated_faculty")).toBe(false);
+    expect(isFullTimeFaculty("postdoc")).toBe(false);
+    expect(isFullTimeFaculty(null)).toBe(false);
+  });
+});
+
+describe("honorPrestige — a sort weight, never a gate", () => {
+  it("ranks the national academies above the early-career fellowships", async () => {
+    const { honorPrestige } = await import("@/lib/edit/honor-queue");
+    expect(honorPrestige("National Academy of Sciences")).toBeGreaterThan(
+      honorPrestige("Alfred P. Sloan Foundation"),
+    );
+    expect(honorPrestige("National Academy of Medicine")).toBeGreaterThan(
+      honorPrestige("American Association for the Advancement of Science"),
+    );
+  });
+
+  it("scores an unknown body 0 (it sorts last, is never dropped)", async () => {
+    const { honorPrestige } = await import("@/lib/edit/honor-queue");
+    expect(honorPrestige("Some Society We Have Not Weighted")).toBe(0);
+  });
+
+  it("tolerates surrounding whitespace on the organization key", async () => {
+    const { honorPrestige } = await import("@/lib/edit/honor-queue");
+    expect(honorPrestige("  National Academy of Sciences  ")).toBe(
+      honorPrestige("National Academy of Sciences"),
+    );
+  });
+
+  it("attaches the weight to each loaded row", async () => {
+    const groups = await loadHonorQueue(
+      client([honor({ id: "a", cwid: "aaa1001", sourceRef: "x|Y|2013", organization: "National Academy of Sciences" })], [
+        { cwid: "aaa1001", preferredName: "A" },
+      ]),
+    );
+    expect(groups[0].rows[0].prestige).toBe(100);
   });
 });
 
@@ -244,5 +361,81 @@ describe("isHonorsQueueTabVisible", () => {
     expect(
       withEnv(on, () => isHonorsQueueTabVisible({ isSuperuser: false, isHonorsCurator: false })),
     ).toBe(false);
+  });
+});
+
+// #1762 round 5 — the User-asserted tab depends on this partition: a wrong filter
+// leaks self-entered honors into Known, or hides them entirely.
+describe("loadHonorQueue — self-source partition", () => {
+  function spy() {
+    const calls: Array<{ where?: unknown }> = [];
+    const client = {
+      honor: { findMany: async (args: { where?: unknown }) => (calls.push(args), []) },
+      scholar: { findMany: async () => [] },
+    } as unknown as Parameters<typeof loadHonorQueue>[0];
+    return { calls, client };
+  }
+
+  it("self:true filters to source SELF", async () => {
+    const { calls, client } = spy();
+    await loadHonorQueue(client, "published", { self: true });
+    expect(calls[0].where).toEqual({ status: "published", source: "SELF" });
+  });
+
+  it("self:false excludes source SELF", async () => {
+    const { calls, client } = spy();
+    await loadHonorQueue(client, "published", { self: false });
+    expect(calls[0].where).toEqual({ status: "published", source: { not: "SELF" } });
+  });
+
+  it("omitted ⇒ no source filter (unchanged behavior)", async () => {
+    const { calls, client } = spy();
+    await loadHonorQueue(client, "pending");
+    expect(calls[0].where).toEqual({ status: "pending" });
+  });
+});
+
+// #1762 — the Research Dean's CSV report. All synthetic names.
+describe("buildHonorCsv", () => {
+  function exportRow(over: Partial<HonorQueueRow & { status: string }>): HonorQueueRow & { status: string } {
+    return {
+      id: "1",
+      cwid: "abc1001",
+      slug: null,
+      scholarName: "Ada Lovelace",
+      roleLabel: "Full-time faculty",
+      roleCategory: "full_time_faculty",
+      title: null,
+      department: "Medicine",
+      category: "PRIZE",
+      name: "Member",
+      organization: "National Academy of Sciences",
+      year: 2020,
+      prestige: 100,
+      source: "DEAN_NAS",
+      sourceRef: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      decidedAt: "2026-02-03T00:00:00.000Z",
+      competingCwids: [],
+      status: "published",
+      ...over,
+    };
+  }
+
+  it("emits a header row and one line per honor, carrying Status and Source", () => {
+    const csv = buildHonorCsv([exportRow({}), exportRow({ status: "pending", source: "NOBEL", year: null })]);
+    const lines = csv.trimEnd().split("\r\n");
+    expect(lines[0]).toContain("Scholar");
+    expect(lines[0]).toContain("Status");
+    expect(lines).toHaveLength(3); // header + 2 rows
+    expect(lines[1]).toContain("Ada Lovelace");
+    expect(lines[1]).toContain("published");
+    expect(lines[1]).toContain("2026-02-03"); // decidedAt, date only
+    expect(lines[2]).toContain("NOBEL");
+  });
+
+  it("quotes a value containing a comma (CSV escaping)", () => {
+    const csv = buildHonorCsv([exportRow({ scholarName: "Hopper, Grace" })]);
+    expect(csv).toContain('"Hopper, Grace"');
   });
 });

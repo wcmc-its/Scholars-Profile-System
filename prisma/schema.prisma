@@ -1781,6 +1781,7 @@ model EtlRun {
   errorMessage            String?   @map("error_message") @db.Text
   manifestSha256          String?   @map("manifest_sha256") @db.VarChar(64) // D-02 / Claude's Discretion: hex sha256 of last successful Hierarchy run's hierarchy.json bytes
   manifestTaxonomyVersion String?   @map("manifest_taxonomy_version") @db.VarChar(64) // D-02: persists manifest.taxonomy_version for drift detection (loud WARN on diff)
+  manifestGeneratedAt     DateTime? @map("manifest_generated_at") // §2.1: the producer's manifest.generated_at (artifact publish moment). Freshness anchors on THIS, not completedAt — a sha256 short-circuit stamps a fresh completedAt but the artifact has not changed. NULL for sources with no S3 manifest (freshness falls back to completedAt).
 
   @@index([source, startedAt])
   @@index([source, status, completedAt])
