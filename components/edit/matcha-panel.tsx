@@ -98,6 +98,7 @@ import {
   rerankCandidates,
   askTitleFrom,
   type ConceptCoverage,
+  type CulledConcept,
   type RecencyMode,
   type EvidenceProvenance,
   type MatchaCandidate,
@@ -142,6 +143,9 @@ type HistoryScope = "all" | "own";
  *  (rather than the old wrapping chip row) an uncapped department list runs to ~20 rows on a
  *  broad paste and swamps the rail — and the tail is all count-1 departments, which are the
  *  least useful thing to filter by. Both groups cap the same way. */
+/** #1780 Phase 2 — total-term ceiling once the officer manually adds culled terms. Mirrors the
+ *  spine's `MAX_TERMS_WITH_INCLUDES`; the chips disable when the searched set reaches it. */
+const MAX_TERMS_WITH_INCLUDES = 12;
 const CONCEPT_FACET_MAX = 12;
 const DEPT_FACET_MAX = 12;
 
@@ -373,6 +377,11 @@ export function MatchaPanel() {
   // derived from them.
   const [candidates, setCandidates] = useState<MatchaCandidate[]>([]);
   const [concepts, setConcepts] = useState<MatchaConcept[]>([]);
+  // #1780 Phase 2 — the extractor's terms the cut did NOT search, offered as click-to-include
+  // chips, and the terms the officer has clicked to add back. `included` is threaded into the NEXT
+  // `runSearch` so the server force-pins them; both reset on a fresh paste (not on an add re-run).
+  const [culled, setCulled] = useState<CulledConcept[]>([]);
+  const [included, setIncluded] = useState<string[]>([]);
   // The extractor's essence title (org + focus). Stable across slider/preference edits — only
   // a new search replaces it — so the header does not churn as the officer tunes the ranking.
   const [titleSummary, setTitleSummary] = useState<string | undefined>(undefined);
@@ -447,7 +456,10 @@ export function MatchaPanel() {
 
   /** The ONLY network call. A search — never a re-rank. `fromHistory` opens the ask card COMPACT
    *  (a Recent replay is text the officer has already read), a fresh paste/re-run opens it Full. */
-  async function runSearch(text: string, opts: { fromHistory?: boolean } = {}) {
+  async function runSearch(
+    text: string,
+    opts: { fromHistory?: boolean; include?: readonly string[] } = {},
+  ) {
     if (pending || text.trim().length === 0) return;
     setStatus({ kind: "loading" });
     try {
@@ -455,7 +467,8 @@ export function MatchaPanel() {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ description: text }),
+        // #1780 Phase 2 — force-include the officer's culled picks. Absent opt ⇒ a fresh search ⇒ [].
+        body: JSON.stringify({ description: text, include: opts.include ?? [] }),
       });
       if (r.ok) {
         // Typed as the CONTRACT's response, not an anonymous shape. The contract's headline
@@ -468,6 +481,10 @@ export function MatchaPanel() {
         void loadHistory(); // the row the server just retained
         setCandidates(data.candidates ?? []);
         setConcepts(data.concepts ?? []);
+        setCulled(data.culled ?? []); // #1780 Phase 2 — the latest tail (excludes anything now searched)
+        // Reset the officer's include picks ONLY on a fresh search. An add re-run passes `include`,
+        // and the click handler already set `included` to the new set — don't clobber it.
+        if (!opts.include) setIncluded([]);
         setTitleSummary(data.titleSummary);
         setMatchedText(text);
         setEditing(false); // a committed search → show the read-only ask, not the textarea
@@ -494,6 +511,17 @@ export function MatchaPanel() {
     } catch {
       setStatus({ kind: "error", message: "Couldn't rank researchers. Please try again." });
     }
+  }
+
+  /** #1780 Phase 2 — the officer clicks a culled chip to add it. Unlike a slider, adding a term
+   *  cannot be a client-only re-rank (a new term has no contributions in any candidate yet), so it
+   *  force-includes and RE-RUNS. Additive: the term joins the searched set (up to the ceiling), it
+   *  does not displace an existing concept. */
+  function addCulled(term: string) {
+    if (pending) return;
+    const next = [...included, term];
+    setIncluded(next);
+    void runSearch(matchedText, { include: next });
   }
 
   /** THE HINGE. A slider writes `centrality` here; the `ranked` memo below recomputes the
@@ -593,6 +621,24 @@ export function MatchaPanel() {
   // Rarity is judged across the WHOLE ask, not per panel — a method is scarce relative to
   // the other concepts the sponsor named, not just to the other methods.
   const rare = useMemo(() => rareTerms(concepts), [concepts]);
+
+  // #1780 Phase 2 — culled chips still worth offering: the extractor's tail minus anything now in
+  // the searched set (a just-added term drops off). `atCap` disables adds once the searched set
+  // reaches the ceiling — the officer can add culled terms, but not without bound.
+  const culledVisible = useMemo(() => {
+    const searched = new Set(concepts.map((c) => c.term.trim().toLowerCase()));
+    return culled.filter((c) => !searched.has(c.term.trim().toLowerCase()));
+  }, [culled, concepts]);
+  // The server enforces the ceiling on the PRE-cluster term set (`extracted`), but the wire
+  // `concepts` are POST-cluster — MeSH-equivalent terms merge, so `concepts.length` under-counts
+  // and would never reach the cap once any merge happens (letting the officer add past what the
+  // server honours, which `applyIncludes` then silently truncates). `members` carries every term
+  // that merged into a cluster, so their sum IS the server's real searched-term count.
+  const searchedTermCount = useMemo(
+    () => concepts.reduce((n, c) => n + c.members.length, 0),
+    [concepts],
+  );
+  const atCap = searchedTermCount >= MAX_TERMS_WITH_INCLUDES;
 
   // The search's handle. DERIVED HERE, not taken from `response.ask`, for the same reason the
   // ranking is: the officer can DESELECT a preference the extractor got wrong, and a title
@@ -1096,7 +1142,7 @@ export function MatchaPanel() {
               type="button"
               size="sm"
               disabled={pending}
-              onClick={() => void runSearch(matchedText)}
+              onClick={() => void runSearch(matchedText, { include: included })}
               className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
             >
               {pending ? "Ranking…" : "Re-run"}
@@ -1133,7 +1179,7 @@ export function MatchaPanel() {
                   <Button
                     type="button"
                     disabled={pending}
-                    onClick={() => void runSearch(matchedText)}
+                    onClick={() => void runSearch(matchedText, { include: included })}
                     className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
                   >
                     {pending ? "Ranking…" : "Re-run match"}
@@ -1313,6 +1359,46 @@ export function MatchaPanel() {
                     rare={rare}
                     onCentralityChange={setCentrality}
                   />
+                ) : null}
+
+                {/* #1780 Phase 2 — the extractor pulled these from the paste but the cut did NOT
+                    search them. Click one to include it: unlike a slider, adding a term has to
+                    RE-RUN (a new term has no scores in the browser yet). Additive up to the term
+                    ceiling; kind-coloured to match the rail and the paste marks (blue concept /
+                    purple method). Disappears once nothing is left to add. */}
+                {culledVisible.length > 0 ? (
+                  <div data-slot="matcha-culled" className="border-border rounded-lg border p-3">
+                    <h2 className="text-base font-semibold">Also detected</h2>
+                    <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
+                      Pulled from the paste but not searched. Add one to include it — this re-runs
+                      the match.
+                    </p>
+                    <ul className="mt-2 flex flex-wrap gap-1.5">
+                      {culledVisible.map((c) => (
+                        <li key={c.term}>
+                          <button
+                            type="button"
+                            disabled={pending || atCap}
+                            onClick={() => addCulled(c.term)}
+                            aria-label={`Add ${c.term} to the search`}
+                            className={`rounded-full border px-2 py-0.5 text-xs font-medium transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 ${
+                              c.kind === "method"
+                                ? "border-[var(--color-facet-method-border)] bg-[var(--color-facet-method-fill)] text-[var(--color-facet-method-text)]"
+                                : "border-[var(--color-facet-topic-border)] bg-[var(--color-facet-topic-fill)] text-[var(--color-facet-topic-text)]"
+                            }`}
+                          >
+                            <span aria-hidden="true">+ </span>
+                            {c.term}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                    {atCap ? (
+                      <p className="text-muted-foreground mt-2 text-xs italic">
+                        Maximum terms reached.
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
 
                 {/* #1654 — the sponsor's non-topical asks. Sits ABOVE Filter, and apart from it,

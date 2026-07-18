@@ -69,10 +69,11 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { cachedReasonAgg } from "@/lib/api/reason-agg-cache";
 import type {
+  CulledConcept,
   MatchaCandidate,
   MatchaConcept,
 } from "@/lib/api/matcha-contract";
-import { askTitleFrom } from "@/lib/api/matcha-contract";
+import { askTitleFrom, sanitizeIncludeTerms } from "@/lib/api/matcha-contract";
 import {
   isMatchaEnabled,
   isMatchaSpineEnabled,
@@ -149,6 +150,9 @@ type MatchaEngineResult = {
   /** The spine's LLM-written search title (absent for the bespoke engine, which has no
    *  extraction). Cached with the rest of the result; prefers over a concept-list title. */
   titleSummary?: string;
+  /** #1780 Phase 2 — the culled tail for the include chips. Cached with the result (it is a
+   *  function of description + include, which is exactly the cache key). Absent on bespoke. */
+  culled?: CulledConcept[];
 };
 
 /**
@@ -257,6 +261,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(400, "invalid_description", "description");
   }
 
+  // #1780 Phase 2 — the culled terms the officer clicked to add back. Sanitized HERE at the trust
+  // boundary (see `sanitizeIncludeTerms`): term strings only, no scoring override — the spine
+  // re-derives each term's kind/centrality from its own fresh extraction. Sorted for a stable key.
+  const include = sanitizeIncludeTerms(body.include);
+
   // Engine selection. Flag OFF ⇒ bespoke, `engine` ignored. Flag ON ⇒ spine by default;
   // `engine` may force either for the same-deploy bake-off.
   let useSpine = false;
@@ -277,16 +286,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const preferences = extractMatchaPreferences(description);
 
     const engine = useSpine ? "spine" : "bespoke";
+    // The retention dedup key stays the PURE paste hash (two officers running the same paste is the
+    // fact the archive surfaces — regardless of what either added).
     const engineInputHash = sponsorInputHash(normalizeDescription(description));
-    const { concepts, candidates, titleSummary } = await cachedReasonAgg<MatchaEngineResult>(
-      sponsorCacheKey(engineInputHash, engine),
-      async () => {
-        if (useSpine) return rankResearchersForDescriptionSpine(description);
-        const researchers = await rankResearchersForDescription(description);
-        return { concepts: [], candidates: researchers.map(bespokeToCandidate) };
-      },
-      isCacheableResult,
-    );
+    const baseCacheKey = sponsorCacheKey(engineInputHash, engine);
+    // The CACHE key gives the include set its OWN namespace (`…:inc:<hash>`), STRUCTURALLY distinct
+    // from the base key — so no base paste can ever collide with an include search (even one whose
+    // text is itself a JSON tuple), and each distinct add re-runs the engine and memoises separately.
+    const cacheKey =
+      include.length > 0
+        ? `${baseCacheKey}:inc:${sponsorInputHash(JSON.stringify(include))}`
+        : baseCacheKey;
+    const { concepts, candidates, titleSummary, culled } =
+      await cachedReasonAgg<MatchaEngineResult>(
+        cacheKey,
+        async () => {
+          if (useSpine) return rankResearchersForDescriptionSpine(description, { include });
+          const researchers = await rankResearchersForDescription(description);
+          return { concepts: [], candidates: researchers.map(bespokeToCandidate) };
+        },
+        isCacheableResult,
+      );
 
     // The search's handle. The essence + org come from the extractor's `titleSummary` (written
     // in the SAME extraction call, not a second one); `askTitleFrom` prefers it and falls
@@ -315,7 +335,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       logEditFailure(`${PATH}#retain`, err);
     }
 
-    return editOk({ concepts, candidates, preferences, ask, titleSummary });
+    return editOk({ concepts, candidates, preferences, ask, titleSummary, culled });
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(502, "match_unavailable");
