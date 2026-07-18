@@ -107,6 +107,7 @@ export const HONOR_PRESTIGE: Readonly<Record<string, number>> = {
   "Lasker Foundation": 112,
   "John D. and Catherine T. MacArthur Foundation": 108,
   "Shaw Prize Foundation": 106,
+  "Columbia University": 104, // Louisa Gross Horwitz Prize (strong Nobel predictor)
   "National Academy of Sciences": 100,
   "National Academy of Engineering": 100,
   "National Academy of Medicine": 100,
@@ -122,6 +123,7 @@ export const HONOR_PRESTIGE: Readonly<Record<string, number>> = {
   "David and Lucile Packard Foundation": 54,
   "Pew Charitable Trusts": 50,
   "Searle Scholars Program": 50,
+  "Burroughs Wellcome Fund": 48, // Career Award (early-career, ~Damon Runyon tier)
   "Damon Runyon Cancer Research Foundation": 46,
 };
 
