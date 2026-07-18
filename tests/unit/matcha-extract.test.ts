@@ -259,7 +259,8 @@ describe("extractMatchaConcepts", () => {
     it("shouldCache REFUSES an empty extraction (a Bedrock-outage [] must not stick) and accepts a non-empty one", async () => {
       mockGenerateObject.mockResolvedValue(objectWith([{ term: "als", centrality: 1 }]));
       await extractMatchaConcepts("prose");
-      const shouldCache = mockCachedReasonAgg.mock.calls[0][2] as (
+      // The stub's declared arity is 2, but mock.calls records the real 3rd arg — read it via unknown[].
+      const shouldCache = (mockCachedReasonAgg.mock.calls[0] as unknown[])[2] as (
         d: { concepts: unknown[] },
       ) => boolean;
       expect(shouldCache({ concepts: [] })).toBe(false);
