@@ -145,7 +145,7 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // `authorizeOverviewWrite`), so a delegate can generate it on the scholar's
   // behalf. Grouped with the other Tools. Rail item appears only when the flag is on.
   { key: "cv", label: "CV (WCM format)", modes: ["self", "superuser"] },
-  { key: "appointments", label: "Appointments", modes: ["self", "superuser"] },
+  { key: "appointments", label: "Positions & appointments", modes: ["self", "superuser"] },
   // Honors & distinctions (#1760) — a sibling of Appointments, NOT a sub-card of it.
   // An honor is its own content type with its own profile section; it is not an
   // appointment, and burying it under Appointments made it undiscoverable.

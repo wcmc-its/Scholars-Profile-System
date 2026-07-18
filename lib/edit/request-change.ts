@@ -15,7 +15,7 @@ import { REQUEST_A_CHANGE, type RequestAttribute } from "@/lib/edit/request-a-ch
 const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
   "name-title": "Name & Title",
   photo: "Photo",
-  appointments: "Appointments",
+  appointments: "Positions & appointments",
   education: "Education",
   funding: "Funding",
   "funding-reporter": "Funding",
