@@ -17,12 +17,18 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockGenerateObject, capturedModelIds } = vi.hoisted(() => ({
+const { mockGenerateObject, capturedModelIds, mockCachedReasonAgg } = vi.hoisted(() => ({
   mockGenerateObject: vi.fn(),
   capturedModelIds: [] as string[],
+  // Capturing pass-through stub (same idiom as matcha.test.ts): the real cache BYPASSES under
+  // VITEST anyway, so this both preserves pass-through (every existing test still runs the loader)
+  // and records the (key, load, shouldCache) args so the memo key + empty-guard are assertable.
+  // Signature takes only (key, load) — mock.calls still records the 3rd `shouldCache` arg for the guard assertion.
+  mockCachedReasonAgg: vi.fn(async (_key: string, load: () => Promise<unknown>) => load()),
 }));
 
 vi.mock("ai", () => ({ generateObject: mockGenerateObject }));
+vi.mock("@/lib/api/reason-agg-cache", () => ({ cachedReasonAgg: mockCachedReasonAgg }));
 // The provider + credential chain are constructed but never exercised (generateObject
 // is mocked) — dummy them so nothing reaches AWS at construction time. The model-id
 // factory records its argument so the default/override lever is observable.
@@ -222,5 +228,42 @@ describe("extractMatchaConcepts", () => {
 
     mockGenerateObject.mockResolvedValue(objectWith([{ term: "cystic fibrosis", centrality: 1 }]));
     expect((await extractMatchaConcepts("prose")).titleSummary).toBeUndefined(); // omitted by model
+  });
+
+  // Memoization seam — the Bedrock call is wrapped in cachedReasonAgg so the #1780 Phase-2
+  // add-a-term re-runs don't re-extract the (unchanged) paste. The real cache bypasses under
+  // VITEST, so — as with matcha.test.ts — we assert on the KEY + the empty-guard, not on hit counts.
+  describe("extraction memo (cache key + fail-soft guard)", () => {
+    it("keys on the model id + a hash of the TRIMMED paste (same paste ⇒ same key, whitespace-normalized)", async () => {
+      mockGenerateObject.mockResolvedValue(objectWith([{ term: "als", centrality: 1 }]));
+      await extractMatchaConcepts("cystic fibrosis gene therapy");
+      await extractMatchaConcepts("  cystic fibrosis gene therapy  "); // trims to the same input
+      const key0 = String(mockCachedReasonAgg.mock.calls[0][0]);
+      const key1 = String(mockCachedReasonAgg.mock.calls[1][0]);
+      // `matcha:extract:<modelId>:<sha256>` — note the pinned Sonnet id itself ends in `:0`.
+      expect(key0).toMatch(/^matcha:extract:us\.anthropic\.claude-sonnet-4-5-\d+-v1:0:[0-9a-f]{64}$/);
+      expect(key1).toBe(key0);
+    });
+
+    it("puts the resolved MATCHA_EXTRACT_MODEL override in the key (a repoint can't serve stale extractions)", async () => {
+      mockGenerateObject.mockResolvedValue(objectWith([{ term: "als", centrality: 1 }]));
+      await extractMatchaConcepts("same paste");
+      process.env.MATCHA_EXTRACT_MODEL = "us.anthropic.claude-opus-4-8-v1:0";
+      await extractMatchaConcepts("same paste");
+      delete process.env.MATCHA_EXTRACT_MODEL;
+      const [k0, k1] = mockCachedReasonAgg.mock.calls.map((c) => String(c[0]));
+      expect(k1).not.toBe(k0);
+      expect(k1).toContain("claude-opus-4-8");
+    });
+
+    it("shouldCache REFUSES an empty extraction (a Bedrock-outage [] must not stick) and accepts a non-empty one", async () => {
+      mockGenerateObject.mockResolvedValue(objectWith([{ term: "als", centrality: 1 }]));
+      await extractMatchaConcepts("prose");
+      const shouldCache = mockCachedReasonAgg.mock.calls[0][2] as (
+        d: { concepts: unknown[] },
+      ) => boolean;
+      expect(shouldCache({ concepts: [] })).toBe(false);
+      expect(shouldCache({ concepts: [{ term: "als" }] })).toBe(true);
+    });
   });
 });
