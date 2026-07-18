@@ -149,7 +149,14 @@ export function buildAdaptiveCard(
   alarm: CloudWatchAlarmPayload,
   severity?: AlertSeverity,
 ): AdaptiveCardEnvelope {
-  const region = alarm.Region ?? "us-east-1";
+  // `alarm.Region` on the CloudWatch SNS payload is the DISPLAY name
+  // ("US East (N. Virginia)"), NOT a region code -- dropping it into a console
+  // URL yields spaces + parens and a dead link (breaks the Action.OpenUrl
+  // buttons AND the markdown link parser). Console URLs must use the region
+  // code; SPS is single-region us-east-1 (same as buildEtlCard below).
+  // ponytail: hardcode us-east-1; parse AlarmArn[3] if this ever goes multi-region.
+  const region = "us-east-1";
+  const regionDisplay = alarm.Region ?? region;
   const stateEmoji = STATE_EMOJI[alarm.NewStateValue] ?? UNKNOWN_STATE_EMOJI;
   // P2/warn ALARM cards lead with the warning glyph so the lower tier reads at
   // a glance (and stays distinguishable if a warn card falls back to the page
@@ -182,7 +189,7 @@ export function buildAdaptiveCard(
     });
   }
   facts.push({ title: "Reason", value: reasonFact(alarm.NewStateReason) });
-  facts.push({ title: "Region", value: region });
+  facts.push({ title: "Region", value: regionDisplay });
   facts.push({ title: "When", value: when });
 
   // CloudWatch alarm page stays first (actions[0]); the reliability dashboard
