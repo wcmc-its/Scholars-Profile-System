@@ -22,6 +22,7 @@
  * reached from a page that has already checked `isSuperuser || isHonorsCurator`
  * (#1762 — the Research Dean's office self-serves; see `lib/auth/honors-curator.ts`).
  */
+import { toCsv } from "@/lib/csv";
 import { formatPublishedName } from "@/lib/postnominal";
 import { formatRoleCategory } from "@/lib/role-display";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
@@ -375,4 +376,60 @@ export function countPendingHonors(
   client: Pick<PrismaClient, "honor">,
 ): Promise<number> {
   return client.honor.count({ where: { status: "pending" } });
+}
+
+/** Column headers for the honors CSV report — the Research Dean's export (#1762). */
+const HONOR_CSV_HEADERS = [
+  "#",
+  "Scholar",
+  "CWID",
+  "Role",
+  "Department",
+  "Honor",
+  "Organization",
+  "Year",
+  "Category",
+  "Status",
+  "Source",
+  "Updated",
+] as const;
+
+/**
+ * Every honor across all three statuses, flattened one row each and tagged with
+ * its status — the Research Dean's report scope (the full record, filterable in a
+ * spreadsheet). Reuses `loadHonorQueue` so the scholar join and name formatting
+ * match the queue exactly; the roster-line grouping is discarded. SELF-asserted
+ * honors are included — their `Source` column distinguishes them.
+ */
+export async function loadHonorExport(
+  client: HonorQueueClient,
+): Promise<Array<HonorQueueRow & { status: HonorStatus }>> {
+  const [pending, published, rejected] = await Promise.all([
+    loadHonorQueue(client, "pending"),
+    loadHonorQueue(client, "published"),
+    loadHonorQueue(client, "rejected"),
+  ]);
+  const flat = (groups: HonorQueueGroup[], status: HonorStatus) =>
+    groups.flatMap((g) => g.rows.map((r) => ({ ...r, status })));
+  return [...flat(pending, "pending"), ...flat(published, "published"), ...flat(rejected, "rejected")];
+}
+
+/** Serialize honor export rows to a CSV report (RFC-4180 via `lib/csv`, which also
+ *  guards spreadsheet formula injection). Pure — the export route just streams it. */
+export function buildHonorCsv(rows: ReadonlyArray<HonorQueueRow & { status: string }>): string {
+  const body = rows.map((r, i) => [
+    i + 1,
+    r.scholarName,
+    r.cwid,
+    r.roleLabel ?? r.roleCategory ?? "",
+    r.department ?? "",
+    r.name,
+    r.organization,
+    r.year ?? "",
+    r.category,
+    r.status,
+    r.source,
+    r.decidedAt.slice(0, 10),
+  ]);
+  return toCsv(HONOR_CSV_HEADERS, body);
 }

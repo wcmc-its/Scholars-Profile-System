@@ -102,7 +102,17 @@ export default async function HonorsQueuePage() {
       />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
-        <h1 className="mb-1 text-xl font-semibold">Honors approval</h1>
+        <div className="mb-1 flex items-center justify-between gap-3">
+          <h1 className="text-xl font-semibold">Honors approval</h1>
+          {/* #1762 — the Research Dean's office exports the full record (all
+              statuses) as CSV. Same gate as this page enforces the route. A plain
+              <a>: /export is a CSV download route (route.ts), not a page, so
+              <Link>'s client nav + prefetch would fetch the file itself. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a href="/edit/honors-queue/export" className="text-sm hover:underline" data-testid="honors-export-link">
+            Download CSV
+          </a>
+        </div>
         <p className="text-muted-foreground mb-6 text-sm">
           {pendingCount === 0
             ? "Honors awaiting a decision. Nothing here renders on a profile until it is approved."
