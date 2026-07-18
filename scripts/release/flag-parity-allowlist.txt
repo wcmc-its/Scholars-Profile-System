@@ -71,6 +71,7 @@ FAMILY_REVIEW_TERMS_PATH
 FAMILY_SENSITIVITY_CURATED_PATH
 FAMILY_SUPPRESSION_CURATED_PATH
 HIERARCHY_FORCE_REPLACE             # §4.3 escape hatch: force a hierarchy full-replace past the sha256 short-circuit
+HONORS_SEED_PATH                    # #1761 seed import: non-repo data path, operator run-task only
 MESH_ALIAS_CURATED_PATH
 MESH_ANCHOR_CURATED_PATH
 MESH_ANCHOR_MIN_SUPPORT
