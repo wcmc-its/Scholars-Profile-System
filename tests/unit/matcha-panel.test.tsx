@@ -1820,6 +1820,15 @@ describe("MatchaPanel", () => {
     // bar is one concept and the width is the ask's weight.
     expect(segTip).toContain("One bar per concept this opportunity calls for");
     expect(segTip).toContain("width = how much it matters");
+    // The evidence-state segment leads with its KIND + term and points at the detailed view — the
+    // strip rides the compact row too, where the old "evidence below" was simply wrong.
+    const evSeg = document.querySelector(
+      '[data-slot="matcha-coverage-segment"][data-term="Immuno-oncology"]',
+    )!;
+    expect(evSeg.getAttribute("data-coverage")).toBe("evidence");
+    const evTip = await tooltipTextOf(evSeg);
+    expect(evTip).toContain("Concept: Immuno-oncology");
+    expect(evTip).toContain("Evidence shown in the Detailed view");
     // …and the strip is legible to a screen reader at all, which it was not: the bar was
     // `aria-hidden`, so its only textual equivalent was the "1 of 3" caption — a count naming no
     // concept and no state, and absent entirely from the inline variant.
