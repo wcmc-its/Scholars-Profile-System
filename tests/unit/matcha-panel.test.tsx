@@ -336,6 +336,9 @@ describe("MatchaPanel", () => {
     // "immunotherapy" merged into the Immuno-oncology cluster — one slider, not two. Since the
     // warm-palette redesign the merged forms live behind the concept's provenance ⓘ hover.
     const info = screen.getByLabelText(/Where .*Immuno-oncology.* came from/);
+    // The ⓘ must be keyboard-reachable: it now carries provenance that used to be always-visible DOM,
+    // so a non-focusable trigger would hide it from keyboard/SR users (opens on hover only).
+    expect(info.getAttribute("tabindex")).toBe("0");
     const tip = await tooltipTextOf(info);
     expect(tip).toContain("immunotherapy");
     expect(tip).toContain("merged forms");

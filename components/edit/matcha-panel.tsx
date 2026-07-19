@@ -1068,7 +1068,11 @@ export function MatchaPanel() {
             hovers exist rather than one. */}
         <h1 className="text-2xl font-bold tracking-tight">Matcha</h1>
         <HoverTooltip wide text={MATCHA_BLURB}>
+          {/* tabIndex so the ⓘ is keyboard-reachable: this hover now carries the tool's scope copy
+              that used to live in an always-visible subtitle, so focus-to-open + Radix's
+              aria-describedby are what keep it accessible to keyboard/SR users. */}
           <span
+            tabIndex={0}
             aria-label="About Matcha"
             className="text-muted-foreground inline-flex size-[18px] cursor-help items-center justify-center rounded-full border border-apollo-border-strong text-xs font-medium"
           >
@@ -1550,10 +1554,12 @@ export function MatchaPanel() {
                       tighter bond than the other two, not a fourth idiom. The three-group read is
                       what gap-4 protects; do not flatten it. */}
                   <div className="ml-auto flex flex-wrap items-center gap-4">
-                    {/* D3 — recency dial. Same detached-pill idiom as the density toggle. Hidden
-                        entirely when the payload carries no years, because a dial that cannot move
-                        anything is worse than no dial. "Since" reveals a native year picker — a soft
-                        cutoff that down-weights older evidence to the floor, never hides it (D4). */}
+                    {/* D3 — recency dial. Stays DETACHED pills — a three-mode dial with a year
+                        sub-control, not a clean binary, so it does NOT conjoin the way the density and
+                        sort pairs now do. Hidden entirely when the payload carries no years, because a
+                        dial that cannot move anything is worse than no dial. "Since" reveals a native
+                        year picker — a soft cutoff that down-weights older evidence to the floor,
+                        never hides it (D4). */}
                     {hasRecencyData ? (
                       <div role="group" aria-label="Recency" className="flex items-center gap-1">
                         {RECENCY_TABS.map((t) => {
@@ -1916,7 +1922,11 @@ function ConceptRail({
                     </span>
                   }
                 >
+                  {/* tabIndex so the ⓘ is keyboard-reachable: it now carries the gloss + merged-form
+                      provenance that used to render as always-visible DOM, so focus-to-open + Radix's
+                      aria-describedby keep it accessible to keyboard/SR users. */}
                   <span
+                    tabIndex={0}
                     aria-label={`Where “${c.term}” came from`}
                     className="text-muted-foreground inline-flex size-[15px] cursor-help items-center justify-center rounded-full border border-apollo-border-strong text-[10px] font-medium"
                   >
@@ -2442,11 +2452,12 @@ function ResearcherRow({
    *  caller supplies nothing. Only the expanded-from-compact caller passes it (`renderResult`). */
   onCollapse?: () => void;
   /** Shortlist state. NOT optional, unlike `onCollapse` — the shortlist is a verb of the RESULT
-   *  SET, not of a density. Detailed is the DEFAULT density (see `DENSITY_KEY`), so a checkbox that
-   *  rendered only on compact rows would leave the whole feature invisible on first visit, and the
-   *  selection bar — which is not density-gated — would then offer "Export shortlist (2)" over rows
-   *  carrying no checkbox to audit or untick it with. The mockup draws the compact row only because
-   *  that is the row it draws; it is silent on this card, which is not the same as forbidding it. */
+   *  SET, not of a density, so the checkbox must render in BOTH densities. Compact is the DEFAULT
+   *  density now (see `DENSITY_KEY`), so it is a DETAILED-only checkbox that would leave the feature
+   *  invisible on first visit — the mirror of the old risk — and the selection bar, which is not
+   *  density-gated, would then offer "Export shortlist (2)" over rows carrying no checkbox to audit or
+   *  untick it with. The mockup draws the compact row only because that is the row it draws; it is
+   *  silent on this card, which is not the same as forbidding it. */
   selected: boolean;
   onSelect: () => void;
 }) {
