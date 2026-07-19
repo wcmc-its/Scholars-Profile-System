@@ -2128,7 +2128,10 @@ const COVERAGE_CLASS: Record<ConceptCoverage["state"], string> = {
 };
 
 const COVERAGE_TITLE: Record<ConceptCoverage["state"], string> = {
-  evidence: "evidence below",
+  // NOT "evidence below": the strip rides the COMPACT row too (the default density), where there is
+  // nothing below it — the evidence only appears when the row is expanded to the detailed card. So
+  // the label names WHERE the evidence is, not a direction that is only true in one density.
+  evidence: "Evidence shown in the Detailed view",
   // Deliberately not "partial evidence" — see `conceptCoverage`. The cap is at default weights,
   // so this state is reachable by dragging a slider, and it must not read as a weaker match.
   ranked: "ranked under this, evidence not shown",
@@ -2182,8 +2185,13 @@ function CoverageStrip({ coverage, inline = false }: { coverage: ConceptCoverage
           text={`${concept.term} — ${COVERAGE_TITLE[state]}`}
           body={
             <span className="block">
-              <span className="block font-semibold">{concept.term}</span>
-              <span className="block">{COVERAGE_TITLE[state]}</span>
+              {/* Lead with the KIND + term ("Concept: …" / "Method: …") so the bold first line reads
+                  as a labelled title, then the state on a dimmer line — the two were the same white
+                  weight and ran together as one broken-looking title. */}
+              <span className="block font-semibold">
+                {concept.kind === "method" ? "Method" : "Concept"}: {concept.term}
+              </span>
+              <span className="block text-white/80">{COVERAGE_TITLE[state]}</span>
               <span className="mt-1 block border-t border-white/25 pt-1 text-white/70">
                 {COVERAGE_LEGEND}
               </span>
