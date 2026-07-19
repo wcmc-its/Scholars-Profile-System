@@ -159,14 +159,13 @@ const DEPT_FACET_MAX = 12;
 const RESULT_MAX = 100;
 
 /** What the tool does (round-2 §3, user-authored 2026-07-17 — "people will not understand the full
- *  scope"). It leads with the VERB, names the input shapes, and says the output is ranked people
- *  with openable evidence you can re-weight; the old sentence stated what the ranker ignores before
- *  it stated what you can do, and never mentioned the shortlist at all.
- *  The lead is split out only because it renders bold — the words are one sentence, not two facts.
+ *  scope"). It names the input shapes and says the output is ranked people with openable evidence
+ *  you can re-weight. The always-visible subtitle was removed in the warm-palette redesign — this
+ *  copy now backs the h1's hover `ⓘ` (the "on the page" explainer; the nav-tab hover serves the
+ *  "before you land" moment). Keep it verbatim: §5 of the redesign handoff quotes this exact text.
  *  ⚠ "Recommendations, not endorsements" was dropped DELIBERATELY (user, 2026-07-17), not lost. It
  *  still stands on the Funding matcher (`find-researchers.tsx`); do not re-add it here on the
  *  assumption that its absence is an oversight. */
-const MATCHA_LEAD = "Matcha turns a raw ask into a ranked shortlist of researchers.";
 const MATCHA_BLURB =
   "Paste any ask — a funding call, a request for collaborators, an email, a few bullet points. Matcha pulls out the topics and methods it's really asking for, weighs how much each one matters, and ranks scholars by fit across all of them. Every recommendation comes with the evidence behind it, and you can adjust the weights to re-rank on the spot.";
 
@@ -222,9 +221,9 @@ type SortKey = (typeof SORT_TABS)[number]["key"];
 type Density = "detailed" | "compact";
 const DENSITY_KEY = "sponsor-match-density";
 
-/** D3 — the recency dial. Same detached-pill idiom as the density tabs beside it (the sort pair is
- *  conjoined instead — see the header). "Since" carries a year, so it opens on a sensible cutoff
- *  and offers a span back from today. */
+/** D3 — the recency dial. Stays DETACHED pills: it is a three-mode dial with a year sub-control, not
+ *  a clean binary, so it does not conjoin the way the density and sort pairs now do (see the header).
+ *  "Since" carries a year, so it opens on a sensible cutoff and offers a span back from today. */
 const RECENCY_TABS = [
   { key: "any", label: "Any" },
   { key: "recent", label: "Prefer recent" },
@@ -344,12 +343,15 @@ export function MatchaPanel() {
   const [clinicianOnly, setClinicianOnly] = useState(false);
   const [roleSel, setRoleSel] = useState<ReadonlySet<string>>(new Set());
   const [sort, setSort] = useState<SortKey>("fit");
-  // D8 — density, remembered across visits. The results only render after a client fetch, so reading
-  // localStorage in the initializer is safe (no server render reaches this — the idle page has no list).
+  // D8 — density, remembered across visits. Warm-palette redesign flipped the DEFAULT to compact:
+  // officers land on the scannable list, and a compact row expands to its full card in place, so
+  // nothing is lost. The initializer reads compact UNLESS localStorage pins detailed. Reading
+  // localStorage here is safe — results only render after a client fetch (no server render reaches
+  // this; the idle page has no list).
   const [density, setDensity] = useState<Density>(() =>
-    typeof window !== "undefined" && window.localStorage.getItem(DENSITY_KEY) === "compact"
-      ? "compact"
-      : "detailed",
+    typeof window !== "undefined" && window.localStorage.getItem(DENSITY_KEY) === "detailed"
+      ? "detailed"
+      : "compact",
   );
   useEffect(() => {
     if (typeof window !== "undefined") window.localStorage.setItem(DENSITY_KEY, density);
@@ -1059,15 +1061,20 @@ export function MatchaPanel() {
 
   return (
     <div data-slot="matcha-panel">
-      <div className="mb-5">
-        {/* No hover on the h1: the subtitle directly beneath it now carries the full scope, so a
-            hover repeating it would be a tooltip for a paragraph already on screen. The name is
-            opaque BEFORE you land here, which is why the explanatory hover lives on the nav tab
-            (`admin-subnav`) instead — that is the moment it is needed. */}
+      <div className="mb-5 flex items-center gap-2">
+        {/* The always-visible subtitle is gone (warm-palette redesign): its scope copy now rides the
+            hover `ⓘ` beside the h1 — the "on the page" explainer. The nav-tab hover (`admin-subnav`)
+            keeps the "before you land here" moment; the name is opaque until then, which is why BOTH
+            hovers exist rather than one. */}
         <h1 className="text-2xl font-bold tracking-tight">Matcha</h1>
-        <p className="text-muted-foreground mt-1 max-w-3xl text-sm">
-          <strong className="text-foreground font-semibold">{MATCHA_LEAD}</strong> {MATCHA_BLURB}
-        </p>
+        <HoverTooltip wide text={MATCHA_BLURB}>
+          <span
+            aria-label="About Matcha"
+            className="text-muted-foreground inline-flex size-[18px] cursor-help items-center justify-center rounded-full border border-apollo-border-strong text-xs font-medium"
+          >
+            i
+          </span>
+        </HoverTooltip>
       </div>
 
       {showAskCard ? (
@@ -1082,7 +1089,7 @@ export function MatchaPanel() {
              a short wrapper) so its containing block is tall enough for sticky to hold. */
           <div
             data-slot="matcha-ask-compact"
-            className="border-border bg-background sticky top-0 z-30 mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3.5 py-2.5 shadow-md"
+            className="border-apollo-border bg-apollo-surface-2 sticky top-0 z-30 mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3.5 py-2.5 shadow-md"
           >
             <span aria-hidden="true" className="text-xs">
               📌
@@ -1154,7 +1161,7 @@ export function MatchaPanel() {
           <div ref={askWrapRef} className="mb-4">
             <section
               data-slot="matcha-ask-card"
-              className="border-border bg-background rounded-xl border px-5 py-4"
+              className="border-apollo-border bg-apollo-surface rounded-xl border px-5 py-4 shadow-[var(--apollo-shadow-card)]"
             >
               {/* The mockup's header row: eyebrow + title on the left, the actions on the right —
                   ONE continuous padded card, no rule between header and body. */}
@@ -1343,7 +1350,11 @@ export function MatchaPanel() {
                `/edit/find-researchers`'s idiom. lg:w-80 (not find-researchers' w-64) because
                this rail carries sliders and member chips. */
             <div className="flex flex-col gap-x-8 gap-y-6 lg:flex-row">
-              <aside className="w-full shrink-0 space-y-4 lg:w-80">
+              {/* Warm-palette redesign — the rail is ONE greige unit (bg-apollo-rail + hairline
+                  border), and the inner groups drop their own boxes: `divide-y` draws a single
+                  hairline between whichever groups actually render (adjacent-sibling, so a hidden
+                  group leaves no orphan rule). `p-1.5` is the mockup's 6px rail inset. */}
+              <aside className="w-full shrink-0 divide-y divide-apollo-border rounded-xl border border-apollo-rail-border bg-apollo-rail p-1.5 lg:w-80">
                 {conceptPanels.concept.length > 0 ? (
                   <ConceptRail
                     title="Concepts"
@@ -1367,7 +1378,7 @@ export function MatchaPanel() {
                     ceiling; kind-coloured to match the rail and the paste marks (blue concept /
                     purple method). Disappears once nothing is left to add. */}
                 {culledVisible.length > 0 ? (
-                  <div data-slot="matcha-culled" className="border-border rounded-lg border p-3">
+                  <div data-slot="matcha-culled" className="p-3">
                     <h2 className="text-base font-semibold">Also detected</h2>
                     <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
                       Pulled from the paste but not searched. Add one to include it — this re-runs
@@ -1401,19 +1412,27 @@ export function MatchaPanel() {
                   </div>
                 ) : null}
 
-                {/* #1654 — the sponsor's non-topical asks. Sits ABOVE Filter, and apart from it,
-                    because it is not a filter: it reweights the ranking (nothing is hidden), and
-                    that is a different promise to the officer. Each is checked by default — the
-                    sponsor said it — and unchecking re-ranks live, which is the escape hatch when
-                    the extractor reads an ask that was never there. */}
+                {/* #1654 — the sponsor's non-topical asks, renamed "Eligibility" in the warm-palette
+                    redesign and given the teal THIRD accent (blue/purple are the concept/method kinds,
+                    green/amber the fit tiers — see the ELIGIBILITY role in globals.css). It stays a
+                    NUDGE, not a filter: it reweights the ranking and hides no one, which is why it sits
+                    apart from Filter. Each is checked by default — the sponsor said it — and unchecking
+                    re-ranks live, the escape hatch when the extractor reads an ask that was never there.
+                    ⚠ Open product Q for review: "Eligibility" reads like a hard gate but this only
+                    NUDGES; keep the nudge sub-note, or change it to actually gate (a behaviour change,
+                    not a rename). Default here: keep it a nudge. */}
                 {preferences.length > 0 ? (
-                  <div
-                    data-slot="matcha-preferences"
-                    className="border-border mb-3 rounded-lg border p-3"
-                  >
-                    <h2 className="text-base font-semibold">Preferences</h2>
+                  <div data-slot="matcha-preferences" className="p-3">
+                    <h2 className="flex items-center gap-2 text-base font-semibold text-elig-text">
+                      <span
+                        aria-hidden
+                        className="inline-block size-2 shrink-0 rounded-full bg-elig-border"
+                      />
+                      Eligibility
+                    </h2>
                     <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
-                      Detected in the paste. These nudge the ranking; they never filter anyone out.
+                      Requirements detected in the ask. These nudge the ranking — they don&rsquo;t hide
+                      anyone.
                     </p>
                     <ul className="mt-2 space-y-2">
                       {preferences.map((p) => (
@@ -1421,14 +1440,14 @@ export function MatchaPanel() {
                           <label className="flex cursor-pointer items-start gap-2 text-sm">
                             <input
                               type="checkbox"
-                              className="mt-[3px] size-3.5 shrink-0 accent-[var(--color-accent-slate)]"
+                              className="mt-[3px] size-3.5 shrink-0 accent-elig-border"
                               checked={activePrefs.has(p.label)}
                               onChange={() => setActivePrefs(toggled(activePrefs, p.label))}
                             />
                             <span className="min-w-0">
                               <span className="font-medium">{p.label}</span>
                               <span className="text-muted-foreground block text-xs italic leading-snug">
-                                from paste: &ldquo;{p.evidence}&rdquo;
+                                from the ask: &ldquo;{p.evidence}&rdquo;
                               </span>
                             </span>
                           </label>
@@ -1442,10 +1461,7 @@ export function MatchaPanel() {
                     `measures` had a producer (#1654) — a filter that cannot filter is worse than
                     no filter. Both now render only when at least one ranked row carries the
                     measure, so they still disappear rather than lie. */}
-                <div
-                  data-slot="matcha-facets"
-                  className="border-border rounded-lg border p-3"
-                >
+                <div data-slot="matcha-facets" className="p-3">
                   <div className="flex items-baseline justify-between gap-2">
                     <h2 className="text-base font-semibold">Filter</h2>
                     <span className="text-muted-foreground text-xs tabular-nums">
@@ -1583,22 +1599,26 @@ export function MatchaPanel() {
                         ) : null}
                       </div>
                     ) : null}
-                    {/* D8 — density toggle. Detached pills, like the recency dial beside it — NOT
-                        like the sort pair, which is conjoined. */}
-                    <div
-                      role="group"
-                      aria-label="Result density"
-                      className="flex items-center gap-1"
-                    >
-                      {(["detailed", "compact"] as const).map((d) => (
+                    {/* D8 — density toggle, CONJOINED like the Sort pair (warm-palette redesign): one
+                        shared border, radius on the outer edges only, `-ml-px` seam laps the second
+                        segment's border onto the first, `z-10` on the active segment lifts its slate
+                        edge over that seam. Density is ONE axis with two mutually-exclusive positions —
+                        exactly the criterion the Sort comment uses to justify conjoining — so it should
+                        read as a control with a position, not two independent pills that happen to
+                        disagree. Recency stays detached: three-mode dial + year sub-control, not a
+                        clean binary. The gap-4 between the three groups still does the grouping. */}
+                    <div role="group" aria-label="Result density" className="flex items-center">
+                      {(["detailed", "compact"] as const).map((d, i, arr) => (
                         <button
                           key={d}
                           type="button"
                           aria-pressed={density === d}
                           onClick={() => setDensity(d)}
-                          className={`rounded-full border px-2.5 py-0.5 text-xs capitalize transition-colors ${
+                          className={`relative border px-2.5 py-0.5 text-xs capitalize transition-colors ${
+                            i === 0 ? "rounded-l-full" : "-ml-px"
+                          } ${i === arr.length - 1 ? "rounded-r-full" : ""} ${
                             density === d
-                              ? "border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
+                              ? "z-10 border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
                               : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
                           }`}
                         >
@@ -1662,7 +1682,7 @@ export function MatchaPanel() {
                     {filterChips.map((chip) => (
                       <span
                         key={chip.key}
-                        className="border-border bg-muted/40 inline-flex items-center gap-1 rounded-full border py-0.5 pr-1 pl-2 text-xs"
+                        className="border-apollo-border bg-apollo-surface-2 inline-flex items-center gap-1 rounded-full border py-0.5 pr-1 pl-2 text-xs"
                       >
                         <span className="max-w-[16rem] truncate">{chip.label}</span>
                         <button
@@ -1694,7 +1714,7 @@ export function MatchaPanel() {
                 {shortlistRows.length > 0 ? (
                   <div
                     data-slot="matcha-shortlist"
-                    className="border-border bg-muted/40 mb-3 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2"
+                    className="border-apollo-border bg-apollo-surface-2 mb-3 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2"
                   >
                     <span className="text-sm font-medium">
                       {shortlistRows.length} shortlisted
@@ -1817,7 +1837,7 @@ function ConceptRail({
   onCentralityChange: (term: string, centrality: number) => void;
 }) {
   return (
-    <div data-slot="matcha-concepts" className="border-border rounded-lg border p-3">
+    <div data-slot="matcha-concepts" className="p-3">
       <h2 className="text-base font-semibold">{title}</h2>
       {/* The mockup's caption here read "Rarity (fixed) rewards experts in areas few at WCM
           cover." That is now FALSE and must not ship: rarity is a bounded ±15% tiebreaker, and
@@ -1850,33 +1870,64 @@ function ConceptRail({
                     </span>
                   </HoverTooltip>
                 ) : null}
+                {/* Warm-palette redesign — provenance `ⓘ` on EVERY concept/method, replacing the old
+                    inline gloss paragraph AND the inline member chips. Reuses the SAME `HoverTooltip`
+                    primitive `·rare` uses (no Radix-in-server-component hazard). Leads with "From the
+                    ask": the gloss quote when present, else a plain provenance line so the tooltip is
+                    never empty; and when a concept merged multiple forms, they follow as kind-coloured
+                    chips under "One slider · merged forms" — so it is clear e.g. IPF rides the fibrosis
+                    slider. The marker's mere presence signals "pulled from the ask"; its chips-vs-none
+                    signals multi-form vs single term. */}
+                <HoverTooltip
+                  wide
+                  triggerClassName="ml-1.5 align-middle"
+                  text={c.gloss ? `From the ask: “${c.gloss}”` : "Detected in the paste."}
+                  body={
+                    <span className="block space-y-1.5 text-left">
+                      <span className="block text-[10px] font-medium tracking-[0.05em] text-white/60 uppercase">
+                        From the ask
+                      </span>
+                      {c.gloss ? (
+                        <span className="block italic">&ldquo;{c.gloss}&rdquo;</span>
+                      ) : (
+                        <span className="block text-white/80">Detected in the paste.</span>
+                      )}
+                      {c.members.length > 1 ? (
+                        <>
+                          <span className="block text-[10px] font-medium tracking-[0.05em] text-white/60 uppercase">
+                            One slider · merged forms
+                          </span>
+                          <span className="flex flex-wrap gap-1">
+                            {c.members.map((m) => (
+                              <span
+                                key={m}
+                                className={`rounded-full border px-1.5 py-0.5 text-[11px] ${
+                                  c.kind === "method"
+                                    ? "border-[var(--color-facet-method-border)] bg-[var(--color-facet-method-fill)] text-[var(--color-facet-method-text)]"
+                                    : "border-[var(--color-facet-topic-border)] bg-[var(--color-facet-topic-fill)] text-[var(--color-facet-topic-text)]"
+                                }`}
+                              >
+                                {m}
+                              </span>
+                            ))}
+                          </span>
+                        </>
+                      ) : null}
+                    </span>
+                  }
+                >
+                  <span
+                    aria-label={`Where “${c.term}” came from`}
+                    className="text-muted-foreground inline-flex size-[15px] cursor-help items-center justify-center rounded-full border border-apollo-border-strong text-[10px] font-medium"
+                  >
+                    i
+                  </span>
+                </HoverTooltip>
               </span>
               <span className="text-muted-foreground font-mono text-xs tabular-nums">
                 {c.centrality.toFixed(2)}
               </span>
             </div>
-            {/* The funder's own words for this concept — the qualifying context the canonical term
-                strips. Shown once here, next to the concept it defines; the spine also SEARCHES it,
-                so the ranking and this line are the same signal. Absent ⇒ nothing rendered. */}
-            {c.gloss ? (
-              <p className="text-muted-foreground text-xs italic leading-snug">
-                from the ask: &ldquo;{c.gloss}&rdquo;
-              </p>
-            ) : null}
-            {/* The merged forms that collapsed into this concept — so an officer can see
-                that "cancer" and "oncology" are one slider, not two. */}
-            {c.members.length > 1 ? (
-              <div className="flex flex-wrap gap-1">
-                {c.members.slice(1).map((m) => (
-                  <span
-                    key={m}
-                    className="border-border text-muted-foreground rounded-full border px-1.5 py-0.5 text-xs"
-                  >
-                    {m}
-                  </span>
-                ))}
-              </div>
-            ) : null}
             <input
               type="range"
               min={0}
@@ -2237,7 +2288,7 @@ function CompactRow({
     // that used to be the root's — and `data-slot` stays on the root, which is what selects a row.
     <div
       data-slot="matcha-compact-row"
-      className="border-border hover:bg-muted/40 flex w-full items-center gap-2.5 border-t px-2 py-2 transition-colors"
+      className="border-apollo-border hover:bg-apollo-surface-2 flex w-full items-center gap-2.5 border-t px-2 py-2 transition-colors"
     >
       {/* Named for the PERSON, not "Select": the row's own name is the only thing that
           distinguishes 100 otherwise identical checkboxes to a screen reader. Same house
@@ -2492,7 +2543,7 @@ function ResearcherRow({
     <div
       ref={rowRef}
       data-slot="matcha-row"
-      className="border-border mb-4 flex gap-3 rounded-xl border p-5"
+      className="border-apollo-border bg-apollo-surface mb-4 flex gap-3 rounded-xl border p-5 shadow-[var(--apollo-shadow-card)]"
     >
       {/* Rank over checkbox, sharing the compact row's left margin so the tick column runs straight
           down the list whichever density you are in. Same markup as the compact row's — one

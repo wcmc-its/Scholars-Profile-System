@@ -62,7 +62,7 @@ export default async function MatchaPage() {
   const administratorsTab = superuserSurfaces && isAdministratorsTabEnabled() ? 0 : null;
 
   return (
-    <div className="min-h-screen bg-[var(--background)]" data-slot="matcha-page">
+    <div className="min-h-screen bg-apollo-page" data-slot="matcha-page">
       <header className="bg-apollo-bar text-white">
         <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
           <span

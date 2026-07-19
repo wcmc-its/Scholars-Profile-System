@@ -108,6 +108,9 @@ async function renderAndSearch() {
 
 beforeEach(() => {
   window.localStorage.clear();
+  // The per-card Contact button lives on the DETAILED card; compact is the app default since the
+  // warm-palette redesign, so pin detailed for this file (it tests the button, not density).
+  window.localStorage.setItem("sponsor-match-density", "detailed");
   // A plain object, so `window.location.href = "mailto:…"` records instead of navigating.
   Object.defineProperty(window, "location", {
     configurable: true,

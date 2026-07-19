@@ -111,6 +111,14 @@
    *                                        "Add" action). Intentionally distinct
    *                                        from the console slate above; NOT a
    *                                        console-wide replacement for it.
+   *   ELIGIBILITY teal (--elig-*)      — the Matcha "Eligibility" rail group ONLY
+   *                                        (detected sponsor requirements that NUDGE
+   *                                        the ranking, never hide anyone). Blue and
+   *                                        purple are the concept/method kinds and
+   *                                        green/amber the fit tiers, so teal is the
+   *                                        one unclaimed hue for this third axis.
+   *                                        AA-checked: text 6.58:1 on the rail tint,
+   *                                        border/accent 3.24:1 (non-text).
    *
    * Green pulls double duty (YOURS badge + success banner) — disambiguated by
    * icon + context (pencil vs check), never by hue alone, same as LOCKED.
@@ -139,6 +147,12 @@
   --color-facet-position-border: #A67012;
   --color-facet-position-text: #6B4310;
   --color-facet-position-count: #8A5A06;
+  /* Eligibility (teal) — the Matcha "Eligibility" rail group's third accent (see the
+     ELIGIBILITY role in the colour-language docblock above). Fill/border/text mirror the
+     facet groups' shape; AA verified on the warm rail (#f4f1ed): text 6.58:1, border 3.24:1. */
+  --elig-fill: #e2efee;
+  --elig-border: #3f938a;
+  --elig-text: #1f5f57;
   /* Semantic green — success banners. */
   --apollo-green: #2e7d5b;
   --apollo-green-tint: #e7f3ee;
@@ -257,6 +271,10 @@
   --color-apollo-coral-tint: var(--apollo-coral-tint);
   --color-apollo-coral-tint-border: var(--apollo-coral-tint-border);
   --color-apollo-coral-foreground: var(--apollo-coral-foreground);
+  /* Eligibility (teal) — bg-elig-fill / border-elig-border / text-elig-text / accent-elig-border. */
+  --color-elig-fill: var(--elig-fill);
+  --color-elig-border: var(--elig-border);
+  --color-elig-text: var(--elig-text);
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
