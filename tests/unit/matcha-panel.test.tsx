@@ -17,8 +17,8 @@
  *    keeps its rank number from the FULL list;
  *  - retained searches are listed from the SERVER and are cross-officer (#6d), the officer is
  *    told they are kept, and deleting one really deletes it;
- *  - the rail splits Concepts from Methods by `kind`, shows merged members as chips, and
- *    badges a rare concept;
+ *  - the rail splits Concepts from Methods by `kind`, surfaces merged members behind each concept's
+ *    provenance ⓘ, and badges a rare concept;
  *  - the bespoke shape (empty concepts) renders no rail at all.
  * fetch is stubbed — no route/engine involvement.
  */
@@ -265,6 +265,12 @@ function rowOrder(): string[] {
 
 beforeEach(() => {
   window.localStorage.clear();
+  // Compact is the APP's default density since the warm-palette redesign, but almost every test here
+  // exercises the DETAILED card (evidence blocks, full tier labels, profile links). Pin detailed for
+  // the suite so those assertions read what they were written against; the compact-default first-visit
+  // behaviour is asserted on its own in "the shortlist is reachable in the default density", which
+  // clears this key before rendering.
+  window.localStorage.setItem("sponsor-match-density", "detailed");
   stubFetch({ concepts: CONCEPTS, candidates: THREE });
 });
 
@@ -325,10 +331,17 @@ describe("MatchaPanel", () => {
     expect(screen.getByLabelText("CRISPR screening centrality")).toBeTruthy();
   });
 
-  it("shows merged member forms as chips", async () => {
+  it("shows merged member forms as chips behind the provenance ⓘ", async () => {
     await renderAndSearch();
-    // "immunotherapy" merged into the Immuno-oncology cluster — one slider, not two.
-    expect(screen.getByText("immunotherapy")).toBeTruthy();
+    // "immunotherapy" merged into the Immuno-oncology cluster — one slider, not two. Since the
+    // warm-palette redesign the merged forms live behind the concept's provenance ⓘ hover.
+    const info = screen.getByLabelText(/Where .*Immuno-oncology.* came from/);
+    // The ⓘ must be keyboard-reachable: it now carries provenance that used to be always-visible DOM,
+    // so a non-focusable trigger would hide it from keyboard/SR users (opens on hover only).
+    expect(info.getAttribute("tabindex")).toBe("0");
+    const tip = await tooltipTextOf(info);
+    expect(tip).toContain("immunotherapy");
+    expect(tip).toContain("merged forms");
   });
 
   it("badges the scarce concept, and says what it actually measured", async () => {
@@ -357,18 +370,20 @@ describe("MatchaPanel", () => {
     expect(screen.queryByText("·rare")).toBeNull();
   });
 
-  it("shows the funder's gloss as the concept's 'from the ask' line", async () => {
+  it("shows the funder's gloss behind the concept's provenance ⓘ ('From the ask')", async () => {
     stubFetch({
       concepts: [
         { ...CONCEPTS[0], gloss: "lysosomal processing of ADC linkers" },
-        CONCEPTS[1], // no gloss ⇒ no such line
+        CONCEPTS[1], // no gloss ⇒ its ⓘ shows a plain provenance line instead
         CONCEPTS[2],
       ],
       candidates: THREE,
     });
     await renderAndSearch();
-    expect(document.body.textContent).toContain("lysosomal processing of ADC linkers");
-    expect(document.body.textContent).toContain("from the ask");
+    const info = screen.getByLabelText(/Where .*Immuno-oncology.* came from/);
+    const tip = await tooltipTextOf(info);
+    expect(tip).toContain("lysosomal processing of ADC linkers");
+    expect(tip).toContain("From the ask");
   });
 
   it("shows NO rail on the bespoke shape (empty concepts)", async () => {
@@ -1932,8 +1947,8 @@ describe("MatchaPanel", () => {
   });
 
   it("Compact density renders one scannable row per scholar; a row click expands the detailed card (D8/D9)", async () => {
-    await renderAndSearch(); // default Detailed (localStorage cleared in beforeEach)
-    // Detailed by default: the full evidence card is present, no compact rows.
+    await renderAndSearch(); // Detailed (pinned in beforeEach; compact is the app default)
+    // Detailed: the full evidence card is present, no compact rows.
     expect(document.querySelector('[data-slot="matcha-row"]')).not.toBeNull();
     expect(document.querySelector('[data-slot="matcha-compact-row"]')).toBeNull();
 
@@ -1984,7 +1999,7 @@ describe("MatchaPanel", () => {
   });
 
   it("D8 — Detailed density offers no collapse: there is nothing to collapse TO", async () => {
-    await renderAndSearch(); // Detailed by default
+    await renderAndSearch(); // Detailed (pinned in beforeEach)
     // The card is not an expansion of anything here, so a control returning it to a mode the
     // officer is not in would be a worse bug than the one above.
     // Queried per-scholar, not by a /^Collapse/ sweep: the ask card's own paste clamp is a button
@@ -1996,29 +2011,38 @@ describe("MatchaPanel", () => {
 
   // ── Shortlist (§6) ─────────────────────────────────────────────────────────
   /**
-   * ⚠ THIS TEST DOES NOT TOUCH THE DENSITY TOGGLE, AND THAT IS THE ENTIRE POINT. Detailed is the
-   * DEFAULT density, so a shortlist wired only to the compact row is INVISIBLE on a first visit —
-   * dark in exactly the way D1's year was dark, and for the same reason: shipped, tested, and
-   * never reachable. Every other test in this section clicks "compact" first, which is precisely
-   * why none of them can catch that.
+   * ⚠ THIS TEST DOES NOT TOUCH THE DENSITY TOGGLE, AND THAT IS THE ENTIRE POINT. Compact is the
+   * DEFAULT density since the warm-palette redesign, so a shortlist wired only to the DETAILED card
+   * would be INVISIBLE on a first visit — dark in exactly the way D1's year was dark: shipped,
+   * tested, and never reachable. It renders WITHOUT the shared helper (which opts into detailed) so
+   * the assertion sees the true first-visit density.
    *
-   * Second half of the same defect: the selection bar is NOT density-gated, so a compact-only
-   * checkbox would let the bar offer "Export shortlist (1)" over detailed cards with nothing to
-   * untick it with — exporting a list you cannot see or audit.
+   * Second half of the same defect: the selection bar is NOT density-gated, so a detailed-only
+   * checkbox would let the bar offer a shortlist over compact rows with nothing to untick it with —
+   * exporting a list you cannot see or audit.
    */
-  it("the shortlist is reachable in the DEFAULT density, not only in compact", async () => {
-    await renderAndSearch();
-    // No density click. This is what an officer sees on their first visit.
-    expect(screen.getByRole("button", { name: "detailed" }).getAttribute("aria-pressed")).toBe(
+  it("the shortlist is reachable in the DEFAULT density, not only in detailed", async () => {
+    // Clear the suite's detailed pin (see beforeEach) so this sees the true first-visit default.
+    window.localStorage.clear();
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), {
+      target: { value: "CAR T collaborators" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    // First visit lands on COMPACT rows; the shortlist checkbox must be reachable there with no
+    // density click — the mirror of the old detailed-default guard.
+    expect(screen.getByRole("button", { name: "compact" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
-    expect(document.querySelector('[data-slot="matcha-row"]')).toBeTruthy();
+    expect(document.querySelector('[data-slot="matcha-compact-row"]')).toBeTruthy();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Shortlist Alice Alpha" }));
     expect(document.querySelector('[data-slot="matcha-shortlist"]')!.textContent).toContain(
       "1 shortlisted",
     );
-    // And it unticks from the same card it was ticked on — the bar can never outlive its checkbox.
+    // And it unticks from the same row it was ticked on — the bar can never outlive its checkbox.
     fireEvent.click(screen.getByRole("checkbox", { name: "Shortlist Alice Alpha" }));
     expect(document.querySelector('[data-slot="matcha-shortlist"]')).toBeNull();
   });
