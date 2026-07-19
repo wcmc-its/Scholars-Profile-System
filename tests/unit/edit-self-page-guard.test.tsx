@@ -123,6 +123,7 @@ function fakeCtx(cwid: string, roleCategory: string | null) {
     reporterProfileConfirmed: [],
     highlights: null,
     technologies: [],
+    news: [],
   };
 }
 

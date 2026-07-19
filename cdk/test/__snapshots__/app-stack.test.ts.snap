@@ -419,6 +419,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "NEWS_MENTIONS_SECTION",
+                "Value": "off",
+              },
+              {
+                "Name": "NEWS_APPROVAL_QUEUE",
+                "Value": "off",
+              },
+              {
                 "Name": "MATCHA",
                 "Value": "on",
               },
@@ -4145,6 +4153,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "AVAILABLE_TECHNOLOGIES_SECTION",
+                "Value": "on",
+              },
+              {
+                "Name": "NEWS_MENTIONS_SECTION",
+                "Value": "on",
+              },
+              {
+                "Name": "NEWS_APPROVAL_QUEUE",
                 "Value": "on",
               },
               {

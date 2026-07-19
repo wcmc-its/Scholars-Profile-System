@@ -109,6 +109,7 @@ async function main() {
     // cdk/lib/etl-stack.ts) — adding a step here does not schedule it in
     // staging/prod.
     ["Technology", "etl/technologies/index.ts"],
+    ["News", "etl/news/index.ts"],
     // POPS clinical enrichment — depends on hasClinicalProfile set by the ED
     // chain head above; must run before the search reindex below so the new
     // clinicalSpecialties / clinicalExpertise fields land in the people doc.

@@ -55,7 +55,7 @@ describe("isEditableField", () => {
 // ---------------------------------------------------------------------------
 
 describe("section visibility", () => {
-  it("SECTION_VISIBILITY_FIELDS lists exactly the eight hideable sections", () => {
+  it("SECTION_VISIBILITY_FIELDS lists exactly the nine hideable sections", () => {
     expect([...SECTION_VISIBILITY_FIELDS]).toEqual([
       "hideMentoring",
       "hideEducation",
@@ -65,15 +65,18 @@ describe("section visibility", () => {
       "hideClinicalTrials",
       "hideMethods",
       "hideTechnologies",
+      "hideNews",
     ]);
   });
 
-  it("isSectionVisibilityField narrows only the eight keys", () => {
+  it("isSectionVisibilityField narrows only the nine keys", () => {
     for (const f of SECTION_VISIBILITY_FIELDS) {
       expect(isSectionVisibilityField(f)).toBe(true);
     }
     // The #1639 CTL section-hide key narrows in.
     expect(isSectionVisibilityField("hideTechnologies")).toBe(true);
+    // The news section-hide key narrows in.
+    expect(isSectionVisibilityField("hideNews")).toBe(true);
     for (const f of ["overview", "slug", "hideDisclosures", "hidePublications", ""]) {
       expect(isSectionVisibilityField(f)).toBe(false);
     }

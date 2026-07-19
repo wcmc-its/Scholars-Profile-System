@@ -57,6 +57,7 @@ export const SECTION_VISIBILITY_FIELDS = [
   "hideClinicalTrials",
   "hideMethods",
   "hideTechnologies",
+  "hideNews",
 ] as const;
 export type SectionVisibilityField = (typeof SECTION_VISIBILITY_FIELDS)[number];
 

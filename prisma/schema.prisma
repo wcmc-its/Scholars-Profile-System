@@ -131,6 +131,7 @@ model Scholar {
   scholarTools         ScholarTool[]
   scholarFamilies      ScholarFamily[]
   technologies         ScholarTechnology[]
+  newsMentions         NewsMention[]
   department           Department?              @relation(fields: [deptCode], references: [code], onDelete: SetNull)
   division             Division?                @relation(fields: [divCode], references: [code], onDelete: SetNull)
   postdoctoralMentor   Scholar?                 @relation("PostdocMentor", fields: [postdoctoralMentorCwid], references: [cwid], onDelete: SetNull)
@@ -2269,6 +2270,73 @@ model ScholarTechnology {
   @@unique([cwid, url])
   @@index([cwid])
   @@map("scholar_technology")
+}
+
+/// News mentions of a scholar, scraped weekly from the WCM Research news feed
+/// (research.weill.cornell.edu/about-us/news-updates) by etl/news. Mirrors
+/// `scholar_technology` (one scraped-WCM-site section, article metadata
+/// denormalized per mention) but with `honor`'s review discipline: this table
+/// is NEVER truncated by the ETL. The importer UPSERTS and preserves human
+/// review state — a re-scrape must not wipe the queue's approve/reject/hide
+/// decisions (the load-bearing divergence from scholar_technology, which
+/// truncate-rebuilds).
+///
+/// A scholar is attached to an article one of two ways:
+///   VIVO — the article hyperlinks the scholar's VIVO profile
+///          (vivo.weill.cornell.edu/display/cwid-<cwid>). Identifier join,
+///          trusted, ingested straight to `published`.
+///   NAME — the article names the scholar in prose without a VIVO link; the ETL
+///          matched the folded full name against the Scholar table. Ingested as
+///          `pending` for review in /edit/news-queue. A full name shared by >1
+///          scholar yields one pending row per candidate (same sourceRef) — the
+///          reviewer disambiguates by title/department and approving one rejects
+///          its siblings.
+model NewsMention {
+  id   String @id @default(uuid()) @db.VarChar(64)
+  cwid String @db.VarChar(32)
+  /// Absolute URL of the public news article — the (cwid, url) dedup key and the
+  /// contested-group key stem.
+  url           String            @db.VarChar(512)
+  title         String            @db.Text
+  /// Publication date parsed from the article detail page ("July 16, 2026").
+  /// Null when the page carries no parseable date.
+  publishedAt   DateTime?         @map("published_at")
+  /// Listing excerpt/summary as plain text. Null when the listing omits it.
+  excerpt       String?           @db.Text
+  /// Absolute URL of the article thumbnail. Null when the listing omits it.
+  thumbnailUrl  String?           @map("thumbnail_url") @db.VarChar(512)
+  status        NewsMentionStatus @default(pending)
+  /// How the (scholar, article) link was established: VIVO (link) | NAME (prose
+  /// match) | CURATOR (manual). Governs trust/provenance, not display.
+  source        String            @default("VIVO") @db.VarChar(32)
+  /// The prose name string the ETL matched (NAME source only), shown in the
+  /// review queue. Null for VIVO/CURATOR rows.
+  detectedName  String?           @map("detected_name") @db.VarChar(255)
+  /// Match confidence for a NAME row: HIGH (unique full-name match) | MEDIUM
+  /// (full name shared by >1 scholar — ambiguous). Null for VIVO/CURATOR.
+  likelihood    String?           @db.VarChar(8)
+  /// Contested-group key "<url>|<detectedName>" — pending rows sharing it are
+  /// competing candidates for one prose mention. Null for VIVO/CURATOR rows.
+  sourceRef     String?           @map("source_ref") @db.VarChar(768)
+  /// Per-mention profile hide (the scholar's /edit "hide" control). A published
+  /// mention renders only when this is true.
+  showOnProfile Boolean           @default(true) @map("show_on_profile")
+  /// The actor who last changed status/visibility via /edit; null for ETL writes.
+  enteredByCwid String?           @map("entered_by_cwid") @db.VarChar(32)
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+
+  scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+
+  @@unique([cwid, url])
+  @@index([cwid, status, showOnProfile])
+  @@map("news_mention")
+}
+
+enum NewsMentionStatus {
+  published // VIVO-linked (trusted) OR queue-approved — renders on the profile
+  pending   // NAME-matched candidate awaiting review in /edit/news-queue
+  rejected  // reviewer or scholar said "not this person" — hidden, terminal
 }
 
 /// Per-(scholar, method-family) rollup from the A2 canonical taxonomy (#799).

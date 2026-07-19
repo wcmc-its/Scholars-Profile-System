@@ -22,6 +22,7 @@ import { Suspense } from "react";
 import { GrantsSection } from "@/components/profile/grants-section";
 import { ClinicalTrialsSection } from "@/components/profile/clinical-trials-section";
 import { TechnologiesSection } from "@/components/profile/technologies-section";
+import { NewsSection } from "@/components/profile/news-section";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { ProfilePubsCluster } from "@/components/profile/profile-pubs-cluster";
 import { PublicationRow } from "@/components/profile/publication-row";
@@ -653,6 +654,30 @@ export async function ProfileView({ slug }: { slug: string }) {
               }
             >
               <TechnologiesSection technologies={profile.technologies} />
+            </Section>
+          ) : null}
+
+          {profile.news.length > 0 ? (
+            <Section
+              title="News mentions"
+              headingLg
+              count={{
+                value: profile.news.length,
+                unit: profile.news.length === 1 ? "mention" : "mentions",
+              }}
+              headerAction={
+                <a
+                  href="https://research.weill.cornell.edu/about-us/news-updates"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Opens the full WCM Research news feed"
+                  className="text-sm whitespace-nowrap text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+                >
+                  View all WCM research news ↗
+                </a>
+              }
+            >
+              <NewsSection news={profile.news} />
             </Section>
           ) : null}
 
