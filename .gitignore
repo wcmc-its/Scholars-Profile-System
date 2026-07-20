@@ -169,6 +169,6 @@ docs/sample docs from ServiceNow/
 # Sponsor-match eval captures — raw /api/edit/sponsor-match payloads carrying named-person data
 # (name, department, cwid). The repo is PUBLIC: local only, never commit. See sponsor-README.md.
 scripts/search-eval/captures/
-# gloss A/B artifacts: gloss-ab-out/ holds ranked cwids (real people) and this repo is PUBLIC.
-scripts/search-eval/gloss-ab-out/
+# spine-eval artifacts: spine-eval-out/ holds ranked cwids (real people) and this repo is PUBLIC.
+scripts/search-eval/spine-eval-out/
 scripts/search-eval/extractions.json

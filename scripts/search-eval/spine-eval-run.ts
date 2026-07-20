@@ -1,35 +1,29 @@
-// MATCHA_GLOSS_QUERY A/B — STEP 2 of 3, runs IN-VPC on `sps-etl-staging`.
+// In-VPC spine runner — STEP 2 of 3. Runs on a one-off `sps-etl-staging` task.
 //
-// Retrieval needs OpenSearch, which is in-VPC only; extraction needs Bedrock, which this task role
-// does NOT have. Step 1 already did the extraction on the laptop, so this seeds the extractor's
-// memo and never calls Bedrock at all.
+// Produces a ranked cwid list per fixture by calling the REAL spine against the REAL staging
+// OpenSearch, in the `{id: [cwid, ...]}` shape `sponsor-eval.sh` consumes.
+//
+// WHY IT IS SPLIT ACROSS TWO ENVIRONMENTS. Retrieval needs OpenSearch, which is in-VPC only.
+// Extraction needs Bedrock, which the `sps-etl` task role does NOT have. Neither environment has
+// both, so step 1 extracts on the laptop and this step seeds the result in.
 //
 // THE SEED. `extractMatchaConcepts` memoises on `matcha:extract:<modelId>:<sha256(trimmed text)>`
 // via `cachedReasonAgg` (#1800). Priming that exact key makes the spine's own extractor call a
-// cache hit, so `rankResearchersForDescriptionSpine` runs unmodified and every MeSH argument it
-// passes to `searchPeople` stays real — the thing a hand-rolled retrieval harness silently drops.
+// cache hit, so `rankResearchersForDescriptionSpine` runs UNMODIFIED and every MeSH argument it
+// hands `searchPeople` stays real — the thing a hand-rolled retrieval harness silently drops.
+// It also means one extraction is shared by every arm of a comparison, so the extractor's
+// ~0.0074 nDCG noise cancels WITHIN a pair instead of needing repeated draws.
 //
-// THE THREE ARMS, on a STOCK image. The deployed spine composes the ON query as
-// `glossByTerm.get(m) ?? m` — the gloss REPLACES the token. So seeding a doctored gloss of
-// `"<term> <gloss>"` makes that same substituting code emit `term gloss`, which is exactly the
-// append fix. That is why this measures the proposed fix without building or pushing an image.
+// ONE ARM PER PROCESS. The memo key does not include any arm identity and `reason-agg-cache`
+// exports no clear, so re-seeding the same key in one process serves the FIRST value. Whatever a
+// caller varies between arms (an env flag, a doctored extraction), it must run this script once
+// per arm — see `spine-eval-dispatch.sh`.
 //
-//   off         flag unset  + real extraction      => members.join(" ")
-//   substitute  flag on     + real extraction      => gloss alone        (today's staging)
-//   append      flag on     + "<term> <gloss>"     => term + gloss       (the fix)
+// History: this began as the MATCHA_GLOSS_QUERY A/B harness. That flag was measured and DELETED
+// (see the spine's `clusterQuery` comment), so the gloss-specific arms are gone and what remains
+// is the reusable vehicle.
 //
-// ponytail: simulating `append` through the seed rather than shipping a patched image. Ceiling —
-// it only holds while the ON arm substitutes; once the append fix is merged, the `append` arm here
-// would double the term, so re-point this at the real flag and drop the doctored arm.
-//
-// ONE ARM PER PROCESS. The memo key does not include the arm, and `reason-agg-cache` exports no
-// clear, so a second arm in the same process would be served the first arm's seeded value. The
-// caller loops `ARM=... npx tsx gloss-ab-run.ts` so each arm starts on a cold Map.
-//
-// Results go back via the task role's OWN s3:PutObject (it has that, and no s3:GetObject — which
-// is why the INBOUND direction needs presigned GETs but the outbound does not).
-//
-// Run: ARM=off|substitute|append npx tsx gloss-ab-run.ts <extractions.json> [s3://bucket/key]
+// Run: npx tsx spine-eval-run.ts <extractions.json> [s3://bucket/key]
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -38,22 +32,9 @@ import { rankResearchersForDescriptionSpine } from "@/lib/api/matcha-spine-run";
 import { normalizeDescription } from "@/lib/api/matcha";
 import type { MatchaExtraction } from "@/lib/api/matcha-extract";
 
-type Arm = "off" | "substitute" | "append";
-const ARM = (process.env.ARM ?? "") as Arm;
-if (!["off", "substitute", "append"].includes(ARM)) throw new Error(`bad ARM: ${ARM}`);
-
-/** The arm's seeded extraction. `append` doctors each gloss to "<term> <gloss>" so the deployed
- *  SUBSTITUTING composition emits the appended query. Concepts with no gloss are untouched in
- *  every arm — they contribute their bare token either way. */
-function seedFor(extraction: MatchaExtraction, arm: Arm): MatchaExtraction {
-  if (arm !== "append") return extraction;
-  return {
-    ...extraction,
-    concepts: extraction.concepts.map((c) =>
-      c.gloss ? { ...c, gloss: `${c.term} ${c.gloss}` } : c,
-    ),
-  };
-}
+/** Label for this run, echoed into the artifact. Free-form — the caller uses it to tell arms
+ *  apart when it varies something (an env flag, a patched image) between invocations. */
+const ARM = process.env.ARM ?? "default";
 
 async function main() {
   const payload = JSON.parse(readFileSync(process.argv[2], "utf8")) as {
@@ -64,8 +45,6 @@ async function main() {
 
   // Enters the memo key. Pinned identically in step 1; the default is module-private.
   process.env.MATCHA_EXTRACT_MODEL = payload.modelId;
-  if (ARM === "off") delete process.env.MATCHA_GLOSS_QUERY;
-  else process.env.MATCHA_GLOSS_QUERY = "on";
 
   // REASON_AGG_BYPASS makes cachedReasonAgg call through instead of caching, which would send
   // every seed straight to a Bedrock call this role cannot make. Fail loudly, not silently.
@@ -83,10 +62,9 @@ async function main() {
       continue;
     }
 
-    const seed = seedFor(f.extraction, ARM);
     const key = `matcha:extract:${payload.modelId}:${createHash("sha256").update(text.trim(), "utf8").digest("hex")}`;
     // `() => true` so a seed is always retained; the default shouldCache is not ours to assume.
-    await cachedReasonAgg<MatchaExtraction>(key, async () => seed, () => true);
+    await cachedReasonAgg<MatchaExtraction>(key, async () => f.extraction, () => true);
 
     const result = await rankResearchersForDescriptionSpine(f.paste);
 
@@ -94,7 +72,7 @@ async function main() {
     // fail-softs to [] and the spine falls back to the v1 DICTIONARY extractor, which would return
     // a plausible-looking ranking off entirely different terms. Every returned concept must trace
     // to a seeded term (the spine caps and clusters, so a subset is expected; a stranger is not).
-    const seeded = new Set(seed.concepts.map((c) => c.term));
+    const seeded = new Set(f.extraction.concepts.map((c) => c.term));
     const strangers = result.concepts.map((c) => c.term).filter((t) => !seeded.has(t));
     if (strangers.length > 0) {
       unmeasured.push({ id: f.id, why: `seed MISSED — dictionary fallback: ${strangers.join(", ")}` });
@@ -124,9 +102,8 @@ async function main() {
 }
 
 // EXIT EXPLICITLY. `main()` resolving is not enough to end the process: the Prisma pool and the
-// OpenSearch client's keep-alive sockets stay open, so node keeps the event loop alive and the
-// caller's `for ARM in ...` loop never reaches the next arm. The work is already durable at this
-// point (results are uploaded), so a hard exit loses nothing.
+// OpenSearch client's keep-alive sockets stay open, so node keeps the event loop alive and a
+// caller looping over arms never reaches the next one. The results are already durable here.
 void main().then(
   () => process.exit(0),
   (e) => {

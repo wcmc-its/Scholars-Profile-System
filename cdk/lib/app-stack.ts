@@ -1289,10 +1289,14 @@ export class AppStack extends Stack {
         // out the wrong researchers. Never flip one without the other.
         MATCHA: "on", // Prod-ON since 2026-07-13 (as SPONSOR_MATCH; the eval picked the spine).
         MATCHA_SPINE: "on", // Prod-ON since 2026-07-13, TOGETHER with MATCHA above.
-        // Both below are RANKING changes ⇒ eval-gated: staging-on to A/B, prod-off until a clean
-        // off-vs-on run clears the sponsor eval's ~0.0074 nDCG noise floor. A one-sided staging
-        // run (no off arm) cannot prove either. The rename did not reset that debt.
-        MATCHA_GLOSS_QUERY: env === "staging" ? "on" : "off",
+        // A RANKING change ⇒ eval-gated: staging-on to A/B, prod-off until a clean off-vs-on run
+        // clears the sponsor eval's ~0.0074 nDCG noise floor. A one-sided staging run (no off arm)
+        // cannot prove it. The rename did not reset that debt.
+        //
+        // MATCHA_GLOSS_QUERY was the other one and is GONE — its A/B ran on 2026-07-19 and it lost
+        // on every metric (nDCG 0.613 off vs 0.535 best gloss variant; 15 judged-relevant scholars
+        // lost to gain 1). Retrieval now always uses the bare member tokens, so there is no flag
+        // left to set. See docs/2026-07-19-matcha-gloss-query-concept-vs-keyword-handoff.md.
         MATCHA_RECENCY: env === "staging" ? "on" : "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MATCHA_GLOSS_QUERY A/B — STEP 3 of 3, the driver. Runs LOCALLY.
+# In-VPC spine eval — STEP 3 of 3, the driver. Runs LOCALLY.
 #
 # Ships step 2 + the local extraction into the VPC on a one-off `sps-etl-staging` task and brings
 # three ranked lists back.
@@ -9,15 +9,20 @@
 # extraction inline); a presigned URL needs no task-side permission, only network. OUTBOUND is a
 # plain s3:// URI written with the role's own s3:PutObject, which it does have.
 #
-#   ./gloss-ab-dispatch.sh                 # uses ./extractions.json from step 1
-#   ./gloss-ab-dispatch.sh other.json
+#   ./spine-eval-dispatch.sh                 # uses ./extractions.json from step 1
+#   ./spine-eval-dispatch.sh other.json
 #
 # Prerequisite (step 1, on the laptop — needs Bedrock, which the in-VPC role does NOT have):
-#   AWS_REGION=us-east-1 npx tsx gloss-ab-extract.ts <pastes.json> > extractions.json
+#   AWS_REGION=us-east-1 npx tsx spine-eval-extract.ts <pastes.json> > extractions.json
 #
-# Produces off.json / substitute.json / append.json in $OUT, in the {id: [cwid,...]} shape
-# sponsor-eval.sh already consumes:
-#   ACTUAL=off.json ./sponsor-eval.sh sponsor-fixtures.json > off.txt
+# Produces one <arm>.json per entry in $ARMS, in the {id: [cwid,...]} shape sponsor-eval.sh
+# consumes:
+#   ACTUAL=$OUT/base.json ./sponsor-eval.sh sponsor-fixtures.json
+#
+# ARMS defaults to a single "base" run. To compare variants, set ARMS and have the runner behave
+# differently per arm -- e.g. ARMS="base variant" with an env flag keyed off $ARM. One arm per
+# PROCESS is mandatory: the extractor memo key carries no arm identity, so two arms in one node
+# process would both be served the first arm's seeded extraction.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -30,8 +35,9 @@ EXTRACTIONS="${1:-$DIR/extractions.json}"
 BUCKET="${BUCKET:-sps-etl-staging-curationbackupbuckete5a802a9-gj1msbqkbgok}"
 CLUSTER="${CLUSTER:-sps-cluster-staging}"
 TASKDEF="${TASKDEF:-sps-etl-staging}"
-OUT="${OUT:-$DIR/gloss-ab-out}"
-PREFIX="gloss-ab/$(date +%Y%m%d-%H%M%S)"
+OUT="${OUT:-$DIR/spine-eval-out}"
+ARMS="${ARMS:-base}"
+PREFIX="spine-eval/$(date +%Y%m%d-%H%M%S)"
 EXPIRY="${EXPIRY:-7200}"
 
 [[ -f "$EXTRACTIONS" ]] || { echo "no extractions at $EXTRACTIONS" >&2; exit 1; }
@@ -65,7 +71,7 @@ echo "  network config OK ($(jq -r '.awsvpcConfiguration.subnets|length' <<<"$NE
 
 echo "staging payload -> s3://${BUCKET}/${PREFIX}/"
 aws s3 cp "$EXTRACTIONS"          "s3://$BUCKET/$PREFIX/extractions.json" --only-show-errors
-aws s3 cp "$DIR/gloss-ab-run.ts"  "s3://$BUCKET/$PREFIX/run.ts"           --only-show-errors
+aws s3 cp "$DIR/spine-eval-run.ts" "s3://$BUCKET/$PREFIX/run.ts"           --only-show-errors
 
 GET_DATA="$(aws s3 presign "s3://$BUCKET/$PREFIX/extractions.json" --expires-in "$EXPIRY")"
 GET_RUN="$(aws s3 presign  "s3://$BUCKET/$PREFIX/run.ts"           --expires-in "$EXPIRY")"
@@ -90,7 +96,7 @@ cd /app
 node -e '"'"'
 const fs = require("fs");
 (async () => {
-  for (const [url, path] of [[process.env.GET_RUN, "/app/scripts/search-eval/_gloss-ab-run.ts"], [process.env.GET_DATA, "/tmp/data.json"]]) {
+  for (const [url, path] of [[process.env.GET_RUN, "/app/scripts/search-eval/_spine-eval-run.ts"], [process.env.GET_DATA, "/tmp/data.json"]]) {
     const r = await fetch(url);
     if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
     const buf = Buffer.from(await r.arrayBuffer());
@@ -100,19 +106,16 @@ const fs = require("fs");
   }
 })().catch((e) => { console.error(String(e)); process.exit(1); });
 '"'"'
-for ARM in off substitute append; do
+for ARM in $ARMS; do
   echo "=== arm $ARM ==="
-  eval "PUT=\$PUT_$ARM"
-  ARM=$ARM npx tsx /app/scripts/search-eval/_gloss-ab-run.ts /tmp/data.json "$PUT"
+  ARM=$ARM npx tsx /app/scripts/search-eval/_spine-eval-run.ts /tmp/data.json "$OUT_BASE/$ARM.json"
 done
 echo "ALL ARMS DONE"'
 
 # Outbound needs no presigning: the task role HAS s3:PutObject on this bucket (it just has no
-# s3:GetObject, which is why the inbound direction does need presigned GETs). Pass plain s3:// URIs
-# and let the runner put with its own role.
-PUT_OFF="s3://$BUCKET/$PREFIX/off.json"
-PUT_SUB="s3://$BUCKET/$PREFIX/substitute.json"
-PUT_APP="s3://$BUCKET/$PREFIX/append.json"
+# s3:GetObject, which is why the inbound direction does need presigned GETs). Pass a plain s3://
+# prefix and let the runner put with its own role.
+OUT_BASE="s3://$BUCKET/$PREFIX"
 
 echo "launching one-off task on ${TASKDEF}..."
 TASK_ARN="$(aws ecs run-task \
@@ -122,10 +125,10 @@ TASK_ARN="$(aws ecs run-task \
   --network-configuration "$NETCFG" \
   --overrides "$(jq -n \
       --arg s "$SCRIPT" --arg gr "$GET_RUN" --arg gd "$GET_DATA" \
-      --arg po "$PUT_OFF" --arg ps "$PUT_SUB" --arg pa "$PUT_APP" \
+      --arg ob "$OUT_BASE" --arg ar "$ARMS" \
       '{containerOverrides:[{name:"etl",command:["bash","-c",$s],environment:[
          {name:"GET_RUN",value:$gr},{name:"GET_DATA",value:$gd},
-         {name:"PUT_off",value:$po},{name:"PUT_substitute",value:$ps},{name:"PUT_append",value:$pa}]}]}')" \
+         {name:"OUT_BASE",value:$ob},{name:"ARMS",value:$ar}]}]}')" \
   --query 'tasks[0].taskArn' --output text)"
 
 [[ -n "$TASK_ARN" && "$TASK_ARN" != "None" ]] || { echo "run-task returned no ARN" >&2; exit 1; }
@@ -159,7 +162,7 @@ if [[ "$CODE" != "0" ]]; then
   exit 1
 fi
 
-for arm in off substitute append; do
+for arm in $ARMS; do
   aws s3 cp "s3://$BUCKET/$PREFIX/$arm.json" "$OUT/$arm.raw.json" --only-show-errors
   # sponsor-eval.sh wants a bare {id: [cwid,...]}; keep the audit fields beside it.
   jq '.ranked' "$OUT/$arm.raw.json" > "$OUT/$arm.json"
@@ -173,5 +176,5 @@ for arm in off substitute append; do
 done
 
 echo
-echo "→ $OUT/{off,substitute,append}.json"
-echo "score with:  cd $DIR && ACTUAL=$OUT/append.json ./sponsor-eval.sh sponsor-fixtures.json"
+echo "-> $OUT/ ($ARMS)"
+echo "score with:  cd $DIR && ACTUAL=$OUT/<arm>.json ./sponsor-eval.sh sponsor-fixtures.json"
