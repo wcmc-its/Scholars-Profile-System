@@ -21,6 +21,10 @@ export function ConsoleShell({
   session,
   pendingSlugRequests,
   pendingHonors,
+  unitsTab,
+  dataQualityTab,
+  administratorsTab,
+  usageTab,
   children,
 }: {
   active: AdminSubnavActive;
@@ -28,9 +32,24 @@ export function ConsoleShell({
   /** DB counts — a read per request, so the page resolves them, not this shell. */
   pendingSlugRequests: number | null;
   pendingHonors: number | null;
+  /**
+   * Per-page OVERRIDES for the tabs whose visibility turns on unit-admin
+   * grants/scope — which the `EditSession` cannot carry (no `isUnitAdmin`). When a
+   * page passes one it REPLACES the `deriveConsoleTabs` (session-role) default;
+   * omit to keep the derived value. Only the four pages that admit a unit
+   * Owner/Curator need these — administrators, data-quality, units, usage — and
+   * each resolves them from the viewer's grants exactly as it did before.
+   */
+  unitsTab?: boolean;
+  dataQualityTab?: number | null;
+  administratorsTab?: number | null;
+  usageTab?: boolean;
   children: React.ReactNode;
 }) {
   const tabs = deriveConsoleTabs(session);
+  if (unitsTab !== undefined) tabs.unitsTab = unitsTab;
+  if (dataQualityTab !== undefined) tabs.dataQualityTab = dataQualityTab;
+  if (administratorsTab !== undefined) tabs.administratorsTab = administratorsTab;
   return (
     <div className="bg-apollo-page min-h-screen">
       {/* Skip link — first focusable element, jumps past the tab strip to the page. */}
@@ -46,6 +65,7 @@ export function ConsoleShell({
         pendingSlugRequests={pendingSlugRequests}
         pendingHonors={pendingHonors}
         {...tabs}
+        usageTab={usageTab}
       />
       <main id="console-main" tabIndex={-1} className="mx-auto max-w-[var(--max-content)] px-6 py-8">
         {children}

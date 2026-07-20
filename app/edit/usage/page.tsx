@@ -14,7 +14,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { AdminSubnav } from "@/components/edit/admin-subnav";
+import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import {
   type DayViews,
@@ -22,12 +22,9 @@ import {
   type UsageSummary,
   loadUsageSummary,
 } from "@/lib/api/usage-summary";
-import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { logEditDenial } from "@/lib/edit/authz";
-import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { canViewUsage } from "@/lib/edit/usage-access";
@@ -300,42 +297,23 @@ export default async function EditUsagePage() {
   }
 
   return (
-    <div className="min-h-screen bg-apollo-page" data-slot="edit-usage-page">
-      <header className="bg-apollo-bar text-white">
-        <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
-          <span
-            className="bg-apollo-maroon flex size-7 items-center justify-center rounded-sm text-xs font-bold"
-            aria-hidden
-          >
-            WCM
-          </span>
-          <span className="font-semibold">Scholars Profile Console</span>
-        </div>
-      </header>
-
-      <AdminSubnav
-        active="usage"
-        superuserSurfaces={session.isSuperuser}
-        unitsTab
-        usageTab
-        pendingSlugRequests={pendingSlugRequests}
-        pendingHonors={pendingHonors}
-        administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
-        methodsTab={isMethodsTabVisible(session) ? 0 : null}
-        dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
-      />
-
-      <main className="mx-auto max-w-[var(--max-content)] px-6 py-8" data-slot="edit-usage">
-        <h1 className="mb-1 text-xl font-semibold">Usage</h1>
-        {unavailable ? (
-          <p className="text-muted-foreground mt-8" data-testid="edit-usage-unavailable">
-            Usage data is temporarily unavailable. Please try again later or contact ITS Support if
-            this persists.
-          </p>
-        ) : (
-          <UsageBody summary={summary!} />
-        )}
-      </main>
-    </div>
+    <ConsoleShell
+      active="usage"
+      session={session}
+      pendingSlugRequests={pendingSlugRequests}
+      pendingHonors={pendingHonors}
+      unitsTab
+      usageTab
+    >
+      <h1 className="mb-1 text-xl font-semibold">Usage</h1>
+      {unavailable ? (
+        <p className="text-muted-foreground mt-8" data-testid="edit-usage-unavailable">
+          Usage data is temporarily unavailable. Please try again later or contact ITS Support if
+          this persists.
+        </p>
+      ) : (
+        <UsageBody summary={summary!} />
+      )}
+    </ConsoleShell>
   );
 }

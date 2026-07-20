@@ -12,15 +12,12 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 
-import { AdminSubnav } from "@/components/edit/admin-subnav";
+import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { getCoreList } from "@/lib/api/cores";
-import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { logEditDenial } from "@/lib/edit/authz";
-import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 
@@ -60,30 +57,12 @@ export default async function EditCoresIndexPage() {
     : null;
 
   return (
-    <div className="min-h-screen bg-apollo-page" data-slot="edit-cores-index">
-      <header className="bg-apollo-bar text-white">
-        <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
-          <span
-            className="bg-apollo-maroon flex size-7 items-center justify-center rounded-sm text-xs font-bold"
-            aria-hidden
-          >
-            WCM
-          </span>
-          <span className="font-semibold">Scholars Profile Console</span>
-        </div>
-      </header>
-
-      <AdminSubnav
-        active="cores"
-        unitsTab={session.isSuperuser}
-        pendingSlugRequests={pendingSlugRequests}
-        pendingHonors={pendingHonors}
-        administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
-        methodsTab={isMethodsTabVisible(session) ? 0 : null}
-        dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
-      />
-
-      <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
+    <ConsoleShell
+      active="cores"
+      session={session}
+      pendingSlugRequests={pendingSlugRequests}
+      pendingHonors={pendingHonors}
+    >
         <h1 className="mb-1 text-xl font-semibold">Core facilities</h1>
         <p className="text-muted-foreground mb-6 text-sm">
           Review the engine-suggested publications for each core facility. Confirmed publications
@@ -110,7 +89,6 @@ export default async function EditCoresIndexPage() {
             </li>
           ))}
         </ul>
-      </main>
-    </div>
+    </ConsoleShell>
   );
 }

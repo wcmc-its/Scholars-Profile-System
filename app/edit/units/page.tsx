@@ -13,13 +13,11 @@
  */
 import { redirect } from "next/navigation";
 
-import { AdminSubnav } from "@/components/edit/admin-subnav";
+import { ConsoleShell } from "@/components/edit/console-shell";
 import { AllUnitsDirectory } from "@/components/edit/all-units-directory";
 import { ManageableUnitsIndex } from "@/components/edit/manageable-units-index";
-import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { loadAllUnitsDirectory, loadManageableUnits } from "@/lib/edit/manageable-units";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
@@ -64,42 +62,21 @@ export default async function EditUnitsPage() {
     : null;
 
   return (
-    <div className="min-h-screen bg-apollo-page" data-slot="units-index-page">
-      <header className="bg-apollo-bar text-white">
-        <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
-          <span
-            className="bg-apollo-maroon flex size-7 items-center justify-center rounded-sm text-xs font-bold"
-            aria-hidden
-          >
-            WCM
-          </span>
-          <span className="font-semibold">Scholars Profile Console</span>
-        </div>
-      </header>
-
-      <AdminSubnav
-        active="units"
-        superuserSurfaces={session.isSuperuser}
-        // #986 — a comms_steward is a global profile editor, so it gets the
-        // Profiles tab here too (a plain unit owner/curator does not). A superuser
-        // already has it via `superuserSurfaces`.
-        profilesTab={session.isCommsSteward}
-        unitsTab
-        pendingSlugRequests={pendingSlugRequests}
-        pendingHonors={pendingHonors}
-        administratorsTab={session.isSuperuser && isAdministratorsTabEnabled() ? 0 : null}
-        methodsTab={isMethodsTabVisible(session) ? 0 : null}
-        // A global editor (superuser/comms_steward) OR a unit Owner/Curator with
-        // grants gets the Data quality tab — the latter sees it scoped to their units.
-        dataQualityTab={
-          isDataQualityDashboardEnabled() &&
-          (session.isSuperuser || session.isCommsSteward || units.total > 0)
-            ? 0
-            : null
-        }
-      />
-
-      <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
+    <ConsoleShell
+      active="units"
+      session={session}
+      pendingSlugRequests={pendingSlugRequests}
+      pendingHonors={pendingHonors}
+      unitsTab
+      // A global editor (superuser/comms_steward) OR a unit Owner/Curator with
+      // grants gets the Data quality tab — the latter sees it scoped to their units.
+      dataQualityTab={
+        isDataQualityDashboardEnabled() &&
+        (session.isSuperuser || session.isCommsSteward || units.total > 0)
+          ? 0
+          : null
+      }
+    >
         <h1 className="mb-1 text-xl font-semibold">Org units</h1>
         <p className="text-muted-foreground mb-6 text-sm">
           Departments, divisions, and centers you can edit — their description, leadership, and (for
@@ -115,7 +92,6 @@ export default async function EditUnitsPage() {
             <AllUnitsDirectory units={directoryUnits} isSuperuser={session.isSuperuser} />
           </section>
         )}
-      </main>
-    </div>
+    </ConsoleShell>
   );
 }
