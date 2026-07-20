@@ -487,12 +487,6 @@ export async function rankResearchersForDescriptionSpine(
   const evidenceByTermCwid = new Map<string, MatchaSearchEvidence>();
   // Which kind this paste is buying — read once, applied per cluster below.
   const targetKind = targetKindOf(clusters);
-  // GATE on the RETRIEVAL half of the gloss (the ranking change), not the display half. The
-  // concept's `gloss` still rides the wire and the rail always shows the sponsor's words; this flag
-  // only decides whether the free-text QUERY searches the gloss ("lysosomal processing of ADC
-  // linkers") or the bare token ("lysosomes"). It changes who ranks where, so it is eval-gated:
-  // staging-on to measure, prod-off until a clean A/B proves it. STATIC literal for flag-parity.
-  const glossQuery = process.env.MATCHA_GLOSS_QUERY === "on";
   // MATCHA_RECENCY — D1. Surface each scholar's most-recent publication year and fold it
   // into the fused score (recency as a scored dimension), which re-tiers via the share-to-top (D2).
   // A ranking change ⇒ eval-gated. STATIC literal for flag-parity.
@@ -564,13 +558,23 @@ export async function rankResearchersForDescriptionSpine(
     };
     concepts.push(concept);
 
-    // The free-text query. With the flag ON: each member's gloss (the sponsor's sense) where we have
-    // one, else the bare member token — only the BM25 axis moves (`descendantUis` still comes from
-    // the term's MeSH resolution, so the structured signal is unchanged). With it OFF: the original
-    // bare-token query, so retrieval ranks exactly as it did before the gloss landed.
-    const clusterQuery = glossQuery
-      ? cluster.members.map((m) => glossByTerm.get(m) ?? m).join(" ")
-      : cluster.members.join(" ");
+    // The free-text query: the cluster's bare member tokens. The sponsor's GLOSS is deliberately
+    // NOT in here — it is display-only (see `clusterGloss` above, which still rides the wire for
+    // the rail's "sponsor's words" line).
+    //
+    // MEASURED AND REJECTED (2026-07-19, `docs/2026-07-19-matcha-gloss-query-concept-vs-keyword-handoff.md`).
+    // Searching the gloss was tried behind `MATCHA_GLOSS_QUERY` on the premise that it ADDS recall
+    // for the sponsor's sense. A three-arm in-VPC A/B over the 15 sponsor fixtures says the premise
+    // was backwards — a long prose gloss NARROWS the BM25 query:
+    //
+    //   bare tokens (this)   nDCG@20 0.613   coverage 260/270   5,834 candidates
+    //   token + gloss        nDCG@20 0.535   coverage 242/270   4,770 candidates
+    //   gloss alone          nDCG@20 0.434   coverage 237/270   5,019 candidates
+    //
+    // Of 238 judged-relevant scholars the best gloss variant LOST 15 that this bare-token query
+    // retrieves and gained 1 — a real recall regression, not an artifact of the gold. So the flag,
+    // both gloss compositions, and the eval-gate are gone; retrieval keeps the measured winner.
+    const clusterQuery = cluster.members.join(" ");
 
     // Representative resolution = the first member's (drives name/tier only).
     const rep = repByTerm.get(term) ?? null;

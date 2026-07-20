@@ -316,60 +316,39 @@ describe("rankResearchersForDescriptionSpine", () => {
     expect(weightOf(ml, "machine learning")).toBeGreaterThan(weightOf(ml, "disease progression"));
   });
 
-  it("with MATCHA_GLOSS_QUERY=on, searches the funder's GLOSS as the free-text query, not the bare token", async () => {
-    // "lysosomes" the token matches any lysosome paper; "lysosomal processing of ADC linkers" the
-    // gloss ranks the sponsor's SENSE. The MeSH axis still resolves the TERM, so only the BM25
-    // query moves. A concept with no gloss falls back to its token — a mixed ask degrades cleanly.
-    process.env.MATCHA_GLOSS_QUERY = "on";
-    try {
-      mockExtractSponsorConcepts.mockResolvedValue([
-        {
-          term: "lysosomes",
-          kind: "concept",
-          centrality: 1.0,
-          gloss: "lysosomal processing of ADC linkers",
-        },
-        { term: "HER2-low breast cancer", kind: "concept", centrality: 0.8 }, // no gloss
-      ]);
-      mockMatchQueryToTaxonomy.mockImplementation(async (q: string) => meshRes(`D_${q}`, [`D_${q}`]));
-      mockSearchPeople.mockImplementation(async () => people(["p"]));
-
-      const { concepts } = await rankResearchersForDescriptionSpine("adc paste");
-
-      // The gloss concept searched its gloss; the term's MeSH descendants still drove the structured axis.
-      const glossCall = mockSearchPeople.mock.calls.find(
-        (c) => c[0].q === "lysosomal processing of ADC linkers",
-      )![0];
-      expect(glossCall.meshDescendantUis).toEqual(["D_lysosomes"]);
-      // The unglossed concept queried its bare token — never the term for the OTHER concept.
-      expect(mockSearchPeople.mock.calls.some((c) => c[0].q === "HER2-low breast cancer")).toBe(true);
-      expect(mockSearchPeople.mock.calls.some((c) => c[0].q === "lysosomes")).toBe(false);
-      expect(concepts.find((c) => c.term === "lysosomes")!.gloss).toBe(
-        "lysosomal processing of ADC linkers",
-      );
-    } finally {
-      delete process.env.MATCHA_GLOSS_QUERY;
-    }
-  });
-
-  it("with the flag OFF (default), searches the BARE TOKEN — but still wires the gloss for DISPLAY", async () => {
-    // The display half is unconditional (the rail always shows the sponsor's words); only the
-    // ranking half is gated. Flag off ⇒ retrieval is byte-identical to the pre-gloss behaviour.
-    delete process.env.MATCHA_GLOSS_QUERY;
+  it("NEVER searches the funder's gloss — it is display-only, and searching it was measured worse", async () => {
+    // The gloss ("lysosomal processing of ADC linkers") rides the wire so the rail can show the
+    // sponsor's words, but it must NOT enter the BM25 query. Searching it was tried behind
+    // MATCHA_GLOSS_QUERY and REJECTED on measurement: a long prose gloss narrows retrieval, and
+    // the best gloss variant lost 15 judged-relevant scholars to gain 1 (see the spine's own
+    // comment and docs/2026-07-19-matcha-gloss-query-concept-vs-keyword-handoff.md).
+    //
+    // This is the regression guard for that decision: the query is the bare member tokens, and
+    // neither the gloss alone nor token+gloss may reappear as a query.
     mockExtractSponsorConcepts.mockResolvedValue([
-      { term: "lysosomes", kind: "concept", centrality: 1.0, gloss: "lysosomal processing of ADC linkers" },
+      {
+        term: "lysosomes",
+        kind: "concept",
+        centrality: 1.0,
+        gloss: "lysosomal processing of ADC linkers",
+      },
+      { term: "HER2-low breast cancer", kind: "concept", centrality: 0.8 }, // no gloss
     ]);
     mockMatchQueryToTaxonomy.mockImplementation(async (q: string) => meshRes(`D_${q}`, [`D_${q}`]));
     mockSearchPeople.mockImplementation(async () => people(["p"]));
 
     const { concepts } = await rankResearchersForDescriptionSpine("adc paste");
 
-    // Retrieval used the bare token, NOT the gloss.
-    expect(mockSearchPeople.mock.calls.some((c) => c[0].q === "lysosomes")).toBe(true);
-    expect(
-      mockSearchPeople.mock.calls.some((c) => c[0].q === "lysosomal processing of ADC linkers"),
-    ).toBe(false);
-    // …but the gloss STILL rides the wire for the rail's "sponsor's words" line.
+    const queries = mockSearchPeople.mock.calls.map((c) => c[0].q);
+    // The bare token IS the query, and the MeSH axis still resolves off the term.
+    const bare = mockSearchPeople.mock.calls.find((c) => c[0].q === "lysosomes")![0];
+    expect(bare.meshDescendantUis).toEqual(["D_lysosomes"]);
+    expect(queries).toContain("HER2-low breast cancer");
+    // Neither rejected composition may come back.
+    expect(queries).not.toContain("lysosomal processing of ADC linkers");
+    expect(queries).not.toContain("lysosomes lysosomal processing of ADC linkers");
+    expect(queries.some((q: string) => q.includes("processing of ADC"))).toBe(false);
+    // ...but the gloss still reaches the UI.
     expect(concepts.find((c) => c.term === "lysosomes")!.gloss).toBe(
       "lysosomal processing of ADC linkers",
     );
