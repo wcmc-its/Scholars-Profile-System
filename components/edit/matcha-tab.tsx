@@ -22,7 +22,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 export function MatchaTab({ active }: { active: boolean }) {
   const tab = active ? (
     <span
-      className="border-apollo-maroon inline-block border-b-2 py-3 text-sm font-medium"
+      className="border-apollo-maroon inline-block shrink-0 border-b-2 py-3 text-sm font-medium whitespace-nowrap"
       aria-current="page"
       data-testid="admin-tab-matcha"
     >
@@ -31,7 +31,7 @@ export function MatchaTab({ active }: { active: boolean }) {
   ) : (
     <Link
       href="/edit/matcha"
-      className="text-muted-foreground hover:text-foreground inline-block border-b-2 border-transparent py-3 text-sm"
+      className="text-muted-foreground hover:text-foreground inline-block shrink-0 border-b-2 border-transparent py-3 text-sm whitespace-nowrap"
       data-testid="admin-tab-matcha"
     >
       Matcha

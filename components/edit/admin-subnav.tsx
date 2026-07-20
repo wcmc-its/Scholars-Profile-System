@@ -116,13 +116,17 @@ export function AdminSubnav({
   return (
     <div className="border-border border-b" data-slot="admin-subnav">
       <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
-        {/* The role-gated tab set now runs to ~13 items and no longer fits the
+        {/* The role-gated tab set now runs to ~14 items and no longer fits the
             bar on a laptop. Scroll the tab strip horizontally instead of letting
             it overflow / shove the account chip off-screen. `min-w-0` lets this
-            flex child shrink below its content width so `overflow-x-auto` engages
-            (without it the row just pushes past the container). Radix
-            popovers/menus inside a tab portal to the body, so they are NOT clipped
-            by this scroller. The account chip stays pinned outside it. */}
+            flex child shrink below its content width so `overflow-x-auto` can
+            engage. That is only HALF the fix: flex items default to
+            `flex-shrink: 1`, so without `shrink-0 whitespace-nowrap` on each tab
+            (see `AdminTab` below and the hand-mirrored `matcha-tab.tsx`) the tabs
+            squeeze and their labels wrap to two lines instead — the content never
+            exceeds the container, so the scrollbar never appears. That was the
+            #1803 bug. Radix popovers/menus inside a tab portal to the body, so
+            they are NOT clipped by this scroller. Account chip pinned outside. */}
         <div className="flex min-w-0 flex-1 items-center gap-6 overflow-x-auto">
         {(superuserSurfaces || profilesTab) && (
           <AdminTab href="/edit/scholars" id="profiles" label="Profiles" active={active === "profiles"} />
@@ -298,7 +302,7 @@ function AdminTab({
   );
   const tab = active ? (
     <span
-      className="border-apollo-maroon inline-block border-b-2 py-3 text-sm font-medium"
+      className="border-apollo-maroon inline-block shrink-0 border-b-2 py-3 text-sm font-medium whitespace-nowrap"
       aria-current="page"
       data-testid={`admin-tab-${id}`}
     >
@@ -307,7 +311,7 @@ function AdminTab({
   ) : (
     <Link
       href={href}
-      className="text-muted-foreground hover:text-foreground inline-block border-b-2 border-transparent py-3 text-sm"
+      className="text-muted-foreground hover:text-foreground inline-block shrink-0 border-b-2 border-transparent py-3 text-sm whitespace-nowrap"
       data-testid={`admin-tab-${id}`}
     >
       {inner}
