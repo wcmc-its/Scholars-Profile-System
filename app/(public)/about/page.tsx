@@ -133,9 +133,9 @@ export default function DocsPage() {
             <li>
               <em>Where your data comes from.</em> Authoritative source systems: PubMed, Scopus,
               OpenAlex, the WCM Web Directory, the Enterprise Directory, ASMS, InfoEd, NIH RePORTER,
-              NYP, the Graduate School, and the COI system. On top of those sit two in-house layers. ReCiter
-              decides which publications are yours. ReciterAI derives your research areas, the Impact
-              score, and your synopses.
+              NYP, the Graduate School, the WCM Research news site, and the COI system. On top of
+              those sit two in-house layers. ReCiter decides which publications are yours. ReciterAI
+              derives your research areas, the Impact score, and your synopses.
             </li>
             <li>
               <em>How you correct it.</em> Almost always at the source, not in Scholars. If you edit
@@ -592,6 +592,24 @@ export default function DocsPage() {
                     innovation.weill.cornell.edu
                   </a>
                   ); flows in on the next refresh
+                </td>
+              </tr>
+              <tr>
+                <td>News mentions</td>
+                <td>
+                  WCM Research news site (
+                  <a
+                    href="https://research.weill.cornell.edu/about-us/news-updates"
+                    className={LINK}
+                  >
+                    research.weill.cornell.edu
+                  </a>
+                  ), scraped for articles that mention you
+                </td>
+                <td>Weekly</td>
+                <td>
+                  Hide one you&apos;d rather not show, or use &ldquo;Not me&rdquo; to remove a wrong
+                  attribution; article text itself is corrected at the news site
                 </td>
               </tr>
               <tr>
