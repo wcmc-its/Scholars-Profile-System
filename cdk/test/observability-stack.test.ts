@@ -563,7 +563,7 @@ describe("SpsObservabilityStack", () => {
       });
       expect(Object.keys(alarms)).toHaveLength(1);
       const props = Object.values(alarms)[0]?.Properties;
-      expect(props?.Threshold).toBe(10);
+      expect(props?.Threshold).toBe(3);
       expect(props?.EvaluationPeriods).toBe(2);
       expect(props?.DatapointsToAlarm).toBe(2);
       expect(props?.ComparisonOperator).toBe("GreaterThanThreshold");
@@ -916,7 +916,10 @@ describe("SpsObservabilityStack", () => {
       const warnId = topicId("sps-warn-staging");
       const notifyId = topicId("sps-notify-staging");
       const expected: Record<string, string | undefined> = {
-        "sps-alb-latency-p99-staging": pageId,
+        // Latency is the ONE tier that differs between envs: prod pages,
+        // staging warns. Staging's batch p99 crossed the prod SLO bar 10 times
+        // in 7 days and no user was waiting on any of them.
+        "sps-alb-latency-p99-staging": warnId,
         "sps-opensearch-breaker-staging": warnId,
         "sps-opensearch-cluster-red-staging": pageId,
         "sps-aurora-cpu-staging": warnId,
@@ -1030,7 +1033,7 @@ describe("SpsObservabilityStack", () => {
     it("creates the edit_authz_denied alarm with the staging env name", () => {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: "sps-edit-authz-denied-staging",
-        Threshold: 10,
+        Threshold: 3,
       });
     });
 
