@@ -562,9 +562,12 @@ export async function rankResearchersForDescriptionSpine(
   if (source.length === 0) return empty;
 
   // The funder's qualifying context per term (the LLM extractor's `gloss`; empty on the dictionary
-  // fallback). Keyed off the FULL source so a surviving cluster's representative gloss is found. The
-  // spine searches this — the sponsor's SENSE — as the free-text query instead of the bare canonical
-  // token; the MeSH resolution below still keys on `term`, so only the BM25 axis moves.
+  // fallback). Keyed off the FULL source so a surviving cluster's representative gloss is found.
+  // #1814 deleted searching it AS the free-text query — a long prose gloss NARROWS a BM25 query
+  // rather than broadening it (see the measurement at the `clusterQuery` assignment below) — and it
+  // stayed display-only (the rail's provenance line) until MATCHA_GLOSS_RERANK (#1849) gave it a
+  // second, narrower path back in: an OpenSearch rescore query on `retrieveCluster`'s `rescoreQuery`,
+  // which only re-orders the retrieved window and never adds or drops a candidate.
   const glossByTerm = new Map(
     source.flatMap((c) => (c.gloss ? [[c.term, c.gloss] as const] : [])),
   );
@@ -894,8 +897,9 @@ export async function rankResearchersForDescriptionSpine(
         // CONCEPT — the same inputs the public People card passes. Per-concept, which is
         // what lets each of a card's blocks reveal papers about ITS OWN concept.
         keyPaper: {
-          // Same gloss-biased free-text query the retrieval used, so the representative paper a
-          // disclosure reveals is chosen for the sponsor's sense, not the bare token.
+          // The same free-text query the retrieval used — `clusterQuery`, i.e. the cluster's bare
+          // member tokens — so the paper a disclosure reveals is chosen on what actually ranked it.
+          // (Not gloss-biased: the gloss stopped reaching any query in #1814.)
           descriptorUis: cluster.descendantUis,
           contentQuery: clusterQuery,
           conceptLabel: rep?.name,
