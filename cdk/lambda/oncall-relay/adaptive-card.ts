@@ -2,16 +2,12 @@
 // to a Power Automate "When an HTTP request is received" workflow. Decoupled
 // from network + Secrets Manager so the formatter is independently testable.
 //
-// Navigation links live in the card BODY as markdown, not only as
-// `Action.OpenUrl` buttons. On the Power Automate Workflows (flow-bot)
-// delivery path this relay POSTs to, top-level card actions render but do
-// nothing when clicked -- so a button-only card has no working link. Teams
-// renders `[label](url)` in a TextBlock (and Fact values) by default, so the
-// body links work regardless of delivery path; the `actions` array is kept
-// for any host that does honor it. Titles are constant literals and URLs are
-// code-generated console deep-links, so the markdown body stays
-// injection-safe (CloudWatch's NewStateReason is operator-generated from the
-// metric expression, not user-controlled).
+// Navigation lives in `Action.OpenUrl` buttons. #1793 also mirrored them as
+// markdown links in the card body, on the theory that buttons are inert on
+// the flow-bot delivery path; that theory was wrong -- the real bug was a
+// dead URL (#1802, the region display name). With a valid URL a live staging
+// card proved the native buttons work, so the mirrored body links were
+// removed as clutter.
 
 /** Schema of the inner `Message` JSON CloudWatch alarms publish to SNS. */
 export interface CloudWatchAlarmPayload {
@@ -127,24 +123,6 @@ function severityLabel(severity: AlertSeverity): string {
   return severity === "warn" ? "P2 (warn)" : "P1 (page)";
 }
 
-/**
- * Mirror the card's `Action.OpenUrl` entries as one inline markdown-links
- * TextBlock for the card body -- the buttons themselves are inert on the flow-
- * bot delivery path (see file header). Returns `undefined` for no actions so
- * the block is simply omitted.
- */
-function actionLinksBlock(
-  actions: ReadonlyArray<{ title: string; url: string }>,
-): Record<string, unknown> | undefined {
-  if (actions.length === 0) return undefined;
-  return {
-    type: "TextBlock",
-    text: actions.map((a) => `[${a.title}](${a.url})`).join("  \u{2022}  "),
-    wrap: true,
-    spacing: "Medium",
-  };
-}
-
 export function buildAdaptiveCard(
   alarm: CloudWatchAlarmPayload,
   severity?: AlertSeverity,
@@ -223,8 +201,6 @@ export function buildAdaptiveCard(
       facts,
     },
   ];
-  const links = actionLinksBlock(actions);
-  if (links !== undefined) body.push(links);
 
   return {
     type: "message",
@@ -258,11 +234,103 @@ export function isCloudWatchAlarmPayload(
   );
 }
 
-/** Render `error` (a States error object or a string) as one safe fact line. */
+/**
+ * Subset of the ECS `DescribeTasks` response that Step Functions packs, as a
+ * JSON *string*, into a `States.TaskFailed` Cause. Only the fields an operator
+ * acts on are declared -- everything else in the blob is network plumbing.
+ */
+interface EcsTaskCause {
+  readonly StoppedReason?: string;
+  readonly StopCode?: string;
+  readonly ClusterArn?: string;
+  readonly TaskArn?: string;
+  readonly Containers?: ReadonlyArray<{
+    readonly Name?: string;
+    readonly ExitCode?: number;
+    readonly Reason?: string;
+  }>;
+  readonly Overrides?: {
+    readonly ContainerOverrides?: ReadonlyArray<{
+      readonly Command?: ReadonlyArray<string>;
+    }>;
+  };
+}
+
+/** Last `/`-delimited segment of an ARN (task id, cluster name). */
+function arnTail(arn: string | undefined): string | undefined {
+  if (arn === undefined) return undefined;
+  const tail = arn.split("/").pop();
+  return tail === undefined || tail.length === 0 ? undefined : tail;
+}
+
+/**
+ * Reduce a States `Cause` to operator-actionable parts. An EcsRunTask failure
+ * arrives as the whole ~2.3KB DescribeTasks JSON -- subnet id, ENI id, MAC,
+ * private IP, every ARN, image digest -- which both buried the signal past the
+ * 1024-char truncation and spilled internal network detail into Teams. Keep
+ * the failing container + exit code, the command it ran (that names the ETL
+ * step), why ECS stopped it, and the cluster/task id to pull logs with.
+ *
+ * A Cause we can't recognise is returned verbatim rather than dropped: a
+ * truncated blob still beats an empty fact.
+ */
+function causeParts(cause: unknown): string[] {
+  if (typeof cause !== "string" || cause.length === 0) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cause);
+  } catch {
+    return [cause]; // plain-text Cause (a Lambda/script error message)
+  }
+  if (typeof parsed !== "object" || parsed === null) return [cause];
+  const task = parsed as EcsTaskCause;
+
+  const parts: string[] = [];
+  for (const c of task.Containers ?? []) {
+    if (c.ExitCode === 0) continue; // a sidecar that exited cleanly isn't the failure
+    const name = c.Name ?? "container";
+    parts.push(
+      c.ExitCode === undefined
+        ? `container "${name}" failed`
+        : `container "${name}" exited ${c.ExitCode}`,
+    );
+    if (c.Reason !== undefined && c.Reason.length > 0) parts.push(c.Reason);
+  }
+  const command = (task.Overrides?.ContainerOverrides ?? []).find(
+    (o) => (o.Command ?? []).length > 0,
+  )?.Command;
+  if (command !== undefined) parts.push(`cmd: ${command.join(" ")}`);
+  if (task.StoppedReason !== undefined && task.StoppedReason.length > 0) {
+    parts.push(
+      task.StopCode !== undefined
+        ? `${task.StopCode}: ${task.StoppedReason}`
+        : task.StoppedReason,
+    );
+  }
+  const taskId = arnTail(task.TaskArn);
+  if (taskId !== undefined) {
+    const cluster = arnTail(task.ClusterArn);
+    parts.push(cluster !== undefined ? `task ${taskId} in ${cluster}` : `task ${taskId}`);
+  }
+  return parts.length > 0 ? parts : [cause];
+}
+
+/**
+ * Render `error` (a States error object or a string) as one safe fact line.
+ * Single line on purpose -- Adaptive Card Fact values flatten newlines
+ * inconsistently across Teams clients, so the parts are joined with a dash.
+ */
 function errorFact(error: unknown): string {
   if (error === undefined || error === null) return "(none)";
   if (typeof error === "string") {
     return error.length === 0 ? "(empty)" : truncate(error, REASON_MAX_CHARS);
+  }
+  const states = error as { readonly Error?: unknown; readonly Cause?: unknown };
+  if (typeof states.Error === "string") {
+    return truncate(
+      [states.Error, ...causeParts(states.Cause)].join(" \u{2014} "),
+      REASON_MAX_CHARS,
+    );
   }
   try {
     return truncate(JSON.stringify(error), REASON_MAX_CHARS);
@@ -318,8 +386,6 @@ export function buildEtlCard(payload: EtlEventPayload): AdaptiveCardEnvelope {
     },
     { type: "FactSet", facts },
   ];
-  const links = actionLinksBlock(actions);
-  if (links !== undefined) body.push(links);
 
   return {
     type: "message",
