@@ -21,6 +21,11 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# AWS CLI v2 pipes long output into a pager by default. Any `aws` call here whose output is NOT
+# captured into a variable would then block on `less` waiting for a keypress, which reads exactly
+# like a hung script. Disable it for this process.
+export AWS_PAGER=""
+
 EXTRACTIONS="${1:-$DIR/extractions.json}"
 BUCKET="${BUCKET:-sps-etl-staging-curationbackupbuckete5a802a9-gj1msbqkbgok}"
 CLUSTER="${CLUSTER:-sps-cluster-staging}"
