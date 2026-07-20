@@ -68,10 +68,24 @@ GET_RUN="$(aws s3 presign  "s3://$BUCKET/$PREFIX/run.ts"           --expires-in 
 # One arm per PROCESS — the memo key does not include the arm and the cache has no clear, so a
 # second arm in the same node process would be served the first arm's seeded extraction.
 # `set -e` inside the container so a failed arm fails the task instead of uploading a partial.
+# NO curl IN THE IMAGE. The etl stage is node:22-bookworm-slim + openssl/ca-certificates only, so
+# `curl` exits 127. Node 22 ships a global fetch — use the runtime that is guaranteed present
+# rather than apt-get installing one at task start.
 SCRIPT='set -e
 cd /app
-curl -fsSL "$GET_RUN"  -o /tmp/run.ts
-curl -fsSL "$GET_DATA" -o /tmp/data.json
+node -e '"'"'
+const fs = require("fs");
+(async () => {
+  for (const [url, path] of [[process.env.GET_RUN, "/tmp/run.ts"], [process.env.GET_DATA, "/tmp/data.json"]]) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length === 0) throw new Error(`${path}: empty payload`);
+    fs.writeFileSync(path, buf);
+    console.error(`fetched ${path} (${buf.length} bytes)`);
+  }
+})().catch((e) => { console.error(String(e)); process.exit(1); });
+'"'"'
 for ARM in off substitute append; do
   echo "=== arm $ARM ==="
   eval "PUT=\$PUT_$ARM"
@@ -111,8 +125,8 @@ REASON="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" \
   --query 'tasks[0].stoppedReason' --output text)"
 echo "exit=$CODE reason=$REASON"
 if [[ "$CODE" != "0" ]]; then
-  echo "task failed — logs:" >&2
-  echo "  aws logs tail /ecs/sps-etl-staging --since 30m" >&2
+  echo "task failed — logs (note the /aws/ prefix; the group is NOT /ecs/...):" >&2
+  echo "  aws logs tail /aws/ecs/$TASKDEF --since 30m" >&2
   exit 1
 fi
 
