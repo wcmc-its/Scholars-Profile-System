@@ -570,7 +570,20 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     vpcCidr: "10.20.0.0/16",
     natGateways: 1,
     auroraMinCapacity: 0.5,
-    auroraMaxCapacity: 2,
+    // Raised 2 -> 4 on 2026-07-20. The staging writer was hard-clipping against
+    // its 2.0 ceiling for 6.6 h/week (3.9% of 5-minute periods at >=1.9 ACU),
+    // with p95 ACUUtilization 91.5% and mean capacity 1.27 of 2.0 -- the ETL had
+    // no headroom to absorb into, which is the real cause of the nightly CPU
+    // spikes that #1812 retuned the sustain window to ride out.
+    //
+    // Cost of the raise is bounded and small: Serverless v2 bills ACUs actually
+    // CONSUMED, not MaxCapacity, so a higher ceiling costs nothing on its own.
+    // Only the currently-clipped hours can grow, and the worst case is
+    // 2.0 extra ACU x 6.6 h/wk x 4.33 wk x $0.12/ACU-hr = ~$7/month. In practice
+    // less, since more headroom lets the ETL finish sooner rather than run wider.
+    // MinCapacity stays 0.5 so the idle floor -- which is what actually dominates
+    // the monthly bill -- is unchanged.
+    auroraMaxCapacity: 4,
     auroraReaderCount: 0,
     auroraBackupRetentionDays: 14,
     opensearchDataNodes: 1,

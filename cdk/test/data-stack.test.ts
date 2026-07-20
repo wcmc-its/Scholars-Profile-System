@@ -558,9 +558,11 @@ describe("DataStack", () => {
       template.resourceCountIs("AWS::RDS::DBInstance", 1);
     });
 
-    it("uses staging Aurora ACU range (0.5–2)", () => {
+    // Max raised 2 -> 4 on 2026-07-20: the writer was hard-clipping against the
+    // 2.0 ceiling 6.6 h/week. Min stays 0.5 — the idle floor dominates the bill.
+    it("uses staging Aurora ACU range (0.5–4)", () => {
       template.hasResourceProperties("AWS::RDS::DBCluster", {
-        ServerlessV2ScalingConfiguration: { MinCapacity: 0.5, MaxCapacity: 2 },
+        ServerlessV2ScalingConfiguration: { MinCapacity: 0.5, MaxCapacity: 4 },
       });
     });
 

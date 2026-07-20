@@ -49,19 +49,30 @@ const HOUR_MS = 60 * 60 * 1000;
  * Per-cadence freshness SLA in hours. Set slightly above the cadence interval
  * so a single late/slow run does not flap: nightly gets a 30h ceiling (24h +
  * 25% grace, matching the EtlStack nightly cadence-alarm window); weekly gets
- * 8 days (7d + 1d grace); monthly gets 35 days; annual gets ~13 months
+ * 8 days (7d + 1d grace); monthly gets 40 days; annual gets ~13 months
  * (operator-triggered behind a manual approval gate, so this is a backstop, not
  * a tight SLA).
  *
- * `monthly` exists for sources whose PRODUCER is monthly. The worst-case gap
- * between two on-time monthly publishes is a 31-day month plus the producing
- * run's own latency, so anything at or below 31 days would false-alarm every
- * long month; 35d = 31d + ~4d grace.
+ * `monthly` exists for sources whose PRODUCER is monthly. Deriving it needs BOTH
+ * intervals, because the age we measure is the artifact's, but the moment we
+ * re-read it is our loader's:
+ *
+ *   31d  worst-case gap between two on-time monthly publishes (a 31-day month)
+ * +  7d  worst-case lag before OUR weekly loader picks the new artifact up
+ *        (Spotlight is a weekly EtlStack step, cron(0 12 ? * SUN *)), during
+ *        which freshness still reports the PREVIOUS artifact's age
+ * +  2d  grace
+ * = 40d
+ *
+ * The load lag is the easy term to forget: because freshnessAnchor() anchors on
+ * the producer's `manifestGeneratedAt` rather than our row's `completedAt`, a
+ * perfectly healthy monthly producer still reads as 38 days old just before our
+ * loader next runs. An SLA at or below 38 would false-alarm every long month.
  */
 export const SLA_HOURS: Readonly<Record<Cadence, number>> = {
   nightly: 30,
   weekly: 8 * 24,
-  monthly: 35 * 24,
+  monthly: 40 * 24,
   annual: 400 * 24,
 };
 

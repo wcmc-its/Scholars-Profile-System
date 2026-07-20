@@ -13,11 +13,29 @@ describe("freshness SLAs", () => {
     expect(TRACKED.Spotlight?.cadence).toBe("monthly");
   });
 
-  // 35d = a 31-day month + ~4d grace. Anything <= 31 days false-alarms every
-  // long month; the point of the widening is lost if this creeps back down.
-  it("gives the monthly cadence enough room for a 31-day month", () => {
-    expect(SLA_HOURS.monthly).toBe(35 * 24);
-    expect(SLA_HOURS.monthly).toBeGreaterThan(31 * 24);
+  // 40d = 31d (longest month) + 7d (our weekly loader's worst-case pickup lag)
+  // + 2d grace. Both terms are required: freshness anchors on the PRODUCER's
+  // manifestGeneratedAt, but we only re-read it when the weekly ETL runs, so a
+  // perfectly healthy monthly producer still reads 38 days old just before our
+  // loader next fires. An SLA <= 38 false-alarms every long month.
+  //
+  // Asserted as the derivation rather than a bare literal, so the next person to
+  // adjust it has to move a term they can name. A first cut at 35 forgot the
+  // load-lag term entirely and would have alarmed on a healthy producer.
+  const LONGEST_MONTH_DAYS = 31;
+  const WEEKLY_LOADER_LAG_DAYS = 7;
+
+  it("covers a 31-day month PLUS the weekly loader's pickup lag", () => {
+    const worstHealthyAgeDays = LONGEST_MONTH_DAYS + WEEKLY_LOADER_LAG_DAYS;
+    expect(SLA_HOURS.monthly).toBeGreaterThan(worstHealthyAgeDays * 24);
+    expect(SLA_HOURS.monthly).toBe(40 * 24);
+  });
+
+  // The weekly SLA has the same shape of dependency and must stay above a 7-day
+  // producer interval; if someone ever tightens it below that, weekly sources
+  // start alarming on healthy runs.
+  it("keeps the weekly SLA above its own 7-day interval", () => {
+    expect(SLA_HOURS.weekly).toBeGreaterThan(7 * 24);
   });
 
   // Guards the ordering invariant the table depends on: a longer cadence must
