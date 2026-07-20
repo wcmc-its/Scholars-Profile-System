@@ -452,23 +452,48 @@ export async function rankResearchersForDescriptionSpine(
   // #1780 — cap to MAX_TERMS CLUSTERS, reserving slots for qualifying methods a plain centrality cut
   // would drop (they score 0.3–0.5 by the rubric). Runs on clusters now (#1838), so both the floor
   // and the cap count DISTINCT axes, and the fan-out stays bounded at MAX_TERMS.
+  // #1838 interaction with the #1780 method floor, disclosed: a qualifying method whose MeSH set is
+  // SUBSUMED BY a co-extracted concept (e.g. "Immunotherapy, Adoptive" under "Immunotherapy") now
+  // merges into that concept's cluster, which takes the representative's "concept" kind — so the
+  // floor no longer reserves a separate slot for it. That is by design here: a method sharing a
+  // concept's MeSH axis IS that axis, and a reserved slot for it is exactly the duplication #1838
+  // removes. The method term still rides the merged cluster's query; it drops only if the whole
+  // cluster falls below the cap (i.e. behind MAX_TERMS more-central DISTINCT axes).
   let clusters: SpineCluster[] = selectWithMethodFloor(allClusters, {
     max: MAX_TERMS,
     methodFloor: METHOD_FLOOR,
     methodThreshold: METHOD_THRESHOLD,
   });
+
   // #1780 Phase 2 — force officer-picked culled clusters back in, additively, capped at
   // MAX_TERMS_WITH_INCLUDES. LLM path only: the dictionary fallback has no culled tail, so there is
-  // nothing for an officer to have added. An included chip is a culled cluster's representative term,
-  // so it re-selects that whole already-resolved cluster; a term matching no representative synths a
-  // bare singleton axis (BM25 only, no MeSH boost). Sanitized upstream at the route trust boundary.
+  // nothing for an officer to have added. An included chip is normally a culled cluster's
+  // representative term ⇒ applyIncludes re-selects that whole already-resolved cluster. A term that
+  // matches no representative (it dropped out of THIS run's temp-0 re-extraction — see the #1839
+  // note) is SYNTHED, but we resolve it to MeSH FIRST so it keeps the attribution boost + tagged-count
+  // evidence it carried before #1838 moved resolution ahead of the cap. Sanitized at the route boundary.
+  const sourceTermSet = new Set(source.map((c) => c.term.trim().toLowerCase()));
+  const includeResolved: ResolvedTerm[] =
+    llmPath && include.length > 0
+      ? await Promise.all(
+          [...new Set(include.map((t) => t.trim()).filter((t) => t.length > 0))]
+            .filter((t) => !sourceTermSet.has(t.toLowerCase()))
+            .map(async (term) => ({
+              term,
+              centrality: INCLUDE_SYNTH_CENTRALITY,
+              kind: "concept" as const,
+              resolution: (await matchQueryToTaxonomy(term)).meshResolution,
+            })),
+        )
+      : [];
+  const includeResByTerm = new Map(includeResolved.map((r) => [r.term.toLowerCase(), r] as const));
   if (llmPath && include.length > 0) {
     clusters = applyIncludes(clusters, allClusters, include, {
       hardMax: MAX_TERMS_WITH_INCLUDES,
       synth: (term) => ({
         term,
         members: [term],
-        descendantUis: [],
+        descendantUis: includeResByTerm.get(term.trim().toLowerCase())?.resolution?.descendantUis ?? [],
         centrality: INCLUDE_SYNTH_CENTRALITY,
         kind: "concept" as const,
       }),
@@ -490,7 +515,9 @@ export async function rankResearchersForDescriptionSpine(
   // rarity badge via `corpusCoverage` and no longer touches the fusion weight at all.
   const rootUiByTerm = new Map<string, string>();
   const repByTerm = new Map<string, MeshResolution>();
-  for (const r of resolved) {
+  // `includeResolved` (the #1838 fix for non-reappearing includes) rides in here so a synthed
+  // include's rep/coverage resolve exactly like an extracted concept's.
+  for (const r of [...resolved, ...includeResolved]) {
     if (r.resolution) {
       rootUiByTerm.set(r.term, r.resolution.descriptorUi);
       repByTerm.set(r.term, r.resolution);

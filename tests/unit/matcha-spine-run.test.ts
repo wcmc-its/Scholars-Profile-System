@@ -568,6 +568,32 @@ describe("rankResearchersForDescriptionSpine", () => {
     }
   });
 
+  it("#1838 resolves an officer-included term absent from the fresh extraction, keeping its MeSH boost", async () => {
+    // The include-chip flow: an officer clicks a culled term that THIS run's temp-0 re-extraction did
+    // not surface, so it is not a cluster representative and applyIncludes SYNTHS it. Pre-#1838 the
+    // synth term was resolved to MeSH (resolution ran after includes); moving resolution ahead of the
+    // cap dropped that, degrading the officer's concept to a bare keyword axis with no attribution
+    // boost and no evidence. The fix resolves the non-reappearing include before synthing it.
+    mockExtractSponsorConcepts.mockResolvedValue([{ term: "cancer", kind: "concept", centrality: 1.0 }]);
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) =>
+      q === "neuroprotection" ? meshRes("D_NP", ["D_NP1", "D_NP2"]) : meshRes("D_CA", ["D_CA"]),
+    );
+    mockSearchPeople.mockImplementation(async ({ q }: { q: string }) => people([`p-${q}`]));
+
+    const { concepts } = await rankResearchersForDescriptionSpine("cancer prose", {
+      include: ["neuroprotection"],
+    });
+
+    // The include got its own taxonomy round-trip and is searched WITH its MeSH descendant set as an
+    // attribution boost — NOT a bare BM25 token. A pre-fix synth (descendantUis:[]) sends undefined.
+    expect(mockMatchQueryToTaxonomy).toHaveBeenCalledWith("neuroprotection");
+    const npCall = mockSearchPeople.mock.calls.find((c) => c[0].q === "neuroprotection");
+    expect(npCall).toBeDefined();
+    expect(npCall![0].meshDescendantUis).toEqual(["D_NP1", "D_NP2"]);
+    // …and it is additive: the base concept survives alongside the officer's addition.
+    expect(concepts.map((c) => c.term).sort()).toEqual(["cancer", "neuroprotection"]);
+  });
+
   it("skips the discarded facet aggregations on every per-cluster searchPeople call", async () => {
     // Fan-out breaker (prime lever): the spine reads only hits/total/pageSize, so it
     // must pass `skipFacetAggs: true` so OpenSearch never runs the nine People-index
