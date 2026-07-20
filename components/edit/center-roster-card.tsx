@@ -262,7 +262,7 @@ export function CenterRosterCard({
                       {hasPrograms && (
                         <td className="px-3 py-2">
                           <select
-                            className="border-apollo-border-strong h-8 rounded-md border bg-transparent px-2 text-sm"
+                            className="border-apollo-border-strong h-8 rounded-md border bg-apollo-surface px-2 text-sm"
                             value={m.membershipType ?? ""}
                             onChange={(e) =>
                               patch(m.cwid, {
@@ -280,7 +280,7 @@ export function CenterRosterCard({
                       {hasPrograms && (
                         <td className="px-3 py-2">
                           <select
-                            className="border-apollo-border-strong h-8 rounded-md border bg-transparent px-2 text-sm"
+                            className="border-apollo-border-strong h-8 rounded-md border bg-apollo-surface px-2 text-sm"
                             value={m.programCode ?? ""}
                             onChange={(e) => patch(m.cwid, { programCode: e.target.value || null })}
                             data-testid={`roster-program-${m.cwid}`}

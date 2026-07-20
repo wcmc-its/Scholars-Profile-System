@@ -178,7 +178,7 @@ export function SlugRequestRow({ request, onDecided }: SlugRequestRowProps) {
             </label>
             <textarea
               id={`slug-decline-${request.id}`}
-              className="border-apollo-border-strong bg-transparent placeholder:text-muted-foreground focus-visible:ring-ring min-h-16 rounded-md border px-3 py-2 text-sm shadow-xs focus-visible:ring-1 focus-visible:outline-none"
+              className="border-apollo-border-strong bg-apollo-surface placeholder:text-muted-foreground focus-visible:ring-ring min-h-16 rounded-md border px-3 py-2 text-sm shadow-xs focus-visible:ring-1 focus-visible:outline-none"
               value={declineNote}
               onChange={(e) => setDeclineNote(e.target.value)}
               maxLength={1000}
