@@ -149,4 +149,34 @@ capture a baseline.
   lock in the corrected expected sets rather than catch a live failure. Their archetype
   labels are provisional proxies pending the same domain-expert review as the original set
   (see `fixtures.json` `_note_failure_classes`).
+
+## Eval reliability (read before trusting any reranking A/B)
+
+Two measurement limits constrain every Matcha/search reranking A/B run from this
+directory (#1839). Neither is a code bug; both silently mislead if unknown. **Any A/B
+must state how it handles them before its result is trusted.**
+
+**1. Temperature 0 on Bedrock is not deterministic — there is no seed.** Repeated
+`temperature: 0` extractions of the same fixture vary both the per-concept centrality
+(measured 0.20–0.30 for one concept — a 3.4× spread in the cubed fusion weight) and the
+extracted concept *vocabulary* (a concept appears in some runs, not others). So any
+single-run per-fixture number — a centrality, a coordination count, an extracted set — is
+a **sample, not a fixed value**. A claim of the form "the model scored X" needs N runs
+(compare distributions), or pin the extraction to a captured fixture and vary only the
+thing under test — as `sponsor-rerank-ab.ts` does (one capture, re-ranked offline).
+
+**2. The union gold pool is blind to buried candidates.** `sponsor-fixtures-union.json`
+is built from "original evidence-judged pool + the deployed ranker's top-20" (`_union_note`).
+The deployed ranker is head-noun / centrality-cubed dominated, so a candidate reachable
+only via a low-weighted axis was never in the top-20 and was never graded. **Consequence:**
+any change that *promotes previously-buried candidates* — a re-weighting, an axis lift, a
+cap raise, cluster-before-cap (#1838) — scores those promotions as gain-0 false positives
+**by construction**, so a raw nDCG comparison will likely show a loss even when the change
+is correct. The bias-immune "judged-relevant lost vs gained" measure is unavailable here
+because pool recall is not invariant across the arms. To A/B a pool-widening or promotion
+change, first rebuild a coverage-fair gold that judges the newly-surfaced candidates
+(re-run the evidence judge over the union of both arms' top-K), or use a metric that does
+not penalize ungraded promotions. **Do not read an nDCG loss as a verdict without this** —
+prefer a structural check (e.g. #1838 verifies "the default clusters are mutually distinct
+and fan-out is unchanged", not a bake-off score).
 ```
