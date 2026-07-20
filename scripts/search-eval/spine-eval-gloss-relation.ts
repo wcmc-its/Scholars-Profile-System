@@ -43,7 +43,14 @@ import { generateObject } from "ai";
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 import { z } from "zod";
-import { extractMatchaConcepts } from "@/lib/api/matcha-extract";
+import {
+  extractMatchaConcepts,
+  EXTRACT_MODEL,
+  EXTRACT_MAX_TOKENS,
+  EXTRACT_SYSTEM_PROMPT,
+  EXTRACT_TEMPERATURE,
+  buildExtractPrompt,
+} from "@/lib/api/matcha-extract";
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 import { prisma } from "@/lib/db";
 
@@ -201,6 +208,162 @@ async function adjudicate(term: string, gloss: string | null, relation: string, 
   return { verdict: truth === relation ? "agree" : "disagree", detail: `tree says ${truth}` };
 }
 
+// ── Gate 0: can the EXTRACTOR emit its own coordinations? ────────────────────────────────────
+//
+// The relation run above proves an INDEPENDENT GRADER can identify coordinations. That is a
+// DIFFERENT claim from the one the conjunction-weighting spec rests on, which is that the
+// extractor can mark them in the call it already makes. Gate 0 measures the second.
+//
+// It runs the REAL extractor prompt (imported, never copied — a duplicated prompt would drift and
+// then this would measure a prompt nobody ships) plus an addendum, against an augmented schema.
+// Production `ConceptsSchema` is untouched: the gate decides whether to change it.
+
+const GROUP_ADDENDUM = [
+  "",
+  "Finally, mark COORDINATIONS. Sometimes ONE phrase in the description names an intersection that",
+  "no single medical subject heading can express — a disease crossed with a population, a method",
+  "crossed with a disease, an outcome crossed with a setting. You will have returned its parts as",
+  "SEPARATE concepts, because each part is separately looked up. Keep doing that.",
+  "",
+  "But also give every concept that came from ONE such phrase the SAME `coordinateGroup` label — a",
+  "short slug naming the joint idea. Concepts that did not come from an intersectional phrase get",
+  "no `coordinateGroup` at all.",
+  "",
+  'Example: "cognitive decline in older adults" yields concepts "cognitive decline" and "aged",',
+  'both with coordinateGroup "cognitive-decline-in-aging". A concept merely mentioned nearby is NOT',
+  "part of the coordination — only the parts of that one phrase.",
+  "",
+  "Most descriptions contain few or no coordinations. Do not manufacture them.",
+].join("\n");
+
+const GroupedConceptsSchema = z.object({
+  concepts: z.array(
+    z.object({
+      term: z.string(),
+      centrality: z.number(),
+      gloss: z.string().nullish(),
+      coordinateGroup: z.string().nullish(),
+    }),
+  ),
+});
+
+/** Normalize for comparing a grader's component phrase against an extractor's term. */
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+async function gate0(pastes: { id: string; paste: string }[]) {
+  let graderCoordinations = 0,
+    matched = 0,
+    extractorGroups = 0,
+    extractorGroupsCorroborated = 0;
+  const detail: Record<string, unknown>[] = [];
+
+  for (const { id, paste } of pastes) {
+    // The extractor's own attempt, real prompt + addendum.
+    let grouped;
+    try {
+      grouped = (
+        await generateObject({
+          model: bedrock()(EXTRACT_MODEL),
+          schema: GroupedConceptsSchema,
+          system: EXTRACT_SYSTEM_PROMPT + GROUP_ADDENDUM,
+          prompt: buildExtractPrompt(paste),
+          maxOutputTokens: EXTRACT_MAX_TOKENS * 2, // the addendum widens the output
+          abortSignal: AbortSignal.timeout(60_000),
+          temperature: EXTRACT_TEMPERATURE,
+        })
+      ).object;
+    } catch (err) {
+      console.error(`!! ${id}: grouped extraction failed — ${String(err)} — UNMEASURED`);
+      continue;
+    }
+
+    // The grader must judge THE SAME concept list the grouped call produced. Grading a separate
+    // production extraction instead compares two independently-generated vocabularies by string
+    // equality — the extractor says "aged", the other call says "older adults", and a CORRECT
+    // grouping scores zero. That flaw produced a 0% false negative on the first run of this gate.
+    const concepts = grouped.concepts;
+    if (concepts.length === 0) {
+      console.error(`!! ${id}: 0 concepts — UNMEASURED`);
+      continue;
+    }
+    const judged = (
+      await generateObject({
+        model: bedrock()(GRADER_MODEL),
+        schema: RelationSchema,
+        system: RELATION_SYSTEM_PROMPT,
+        prompt: [
+          "ORIGINAL DESCRIPTION:",
+          paste,
+          "",
+          "CONCEPTS EXTRACTED FROM IT:",
+          ...concepts.map((c) => `- term: ${c.term}\n  gloss: ${c.gloss ?? "(none)"}`),
+        ].join("\n"),
+        abortSignal: AbortSignal.timeout(60_000),
+        temperature: 0,
+      })
+    ).object;
+
+    // Extractor groups, as sets of normalized terms.
+    const byGroup = new Map<string, Set<string>>();
+    for (const c of grouped.concepts) {
+      if (!c.coordinateGroup) continue;
+      const g = byGroup.get(c.coordinateGroup) ?? new Set<string>();
+      g.add(norm(c.term));
+      byGroup.set(c.coordinateGroup, g);
+    }
+    // A "group" of one is not a coordination — it is a stray label.
+    const realGroups = [...byGroup.entries()].filter(([, m]) => m.size >= 2);
+    extractorGroups += realGroups.length;
+
+    // RECALL: for each coordination the grader found, did the extractor co-group its parts?
+    // Counted per split the grader reported, since that is the case the spec's weighting fixes.
+    // A "split" with one member is not a split. The grader emits these; counting them inflates the
+    // denominator with cases that can never match, since a group needs >=2 members by definition.
+    for (const s of judged.splitConjunctions.filter((x) => x.splitInto.length >= 2)) {
+      graderCoordinations++;
+      const want = s.splitInto.map(norm);
+      const hit = realGroups.some(([, m]) => want.filter((w) => m.has(w)).length >= 2);
+      if (hit) matched++;
+      detail.push({ pasteId: id, sourcePhrase: s.sourcePhrase, splitInto: s.splitInto, grouped: hit });
+    }
+    // PRECISION: does each extractor group correspond to something the grader saw as joint?
+    const graderJoint = judged.splitConjunctions
+      .filter((s) => s.splitInto.length >= 2)
+      .map((s) => s.splitInto.map(norm));
+    for (const [label, m] of realGroups) {
+      const ok = graderJoint.some((j) => j.filter((w) => m.has(w)).length >= 2);
+      if (ok) extractorGroupsCorroborated++;
+      else detail.push({ pasteId: id, extractorOnlyGroup: label, members: [...m] });
+    }
+    console.error(`ok ${id}: extractor groups=${realGroups.length}, grader splits=${judged.splitConjunctions.length}`);
+  }
+
+  const recallPct = graderCoordinations ? +((100 * matched) / graderCoordinations).toFixed(1) : null;
+  const precisionPct = extractorGroups
+    ? +((100 * extractorGroupsCorroborated) / extractorGroups).toFixed(1)
+    : null;
+  console.log(
+    JSON.stringify(
+      {
+        gate: "0 — extractor self-emitted coordinations",
+        extractModel: EXTRACT_MODEL,
+        graderModel: GRADER_MODEL,
+        graderCoordinations,
+        matchedByExtractor: matched,
+        // THE GATE. Spec threshold: stop below 70%. Reweighting on a signal the producer cannot
+        // emit reliably moves rankings for the WRONG asks, which is worse than not reweighting.
+        recallPct,
+        extractorGroups,
+        extractorGroupsCorroborated,
+        precisionPct,
+        detail,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
 /**
  * The oracle is the only part of this script that can be silently WRONG rather than loudly
  * broken — a bad axis or containment rule still emits a plausible agreement rate. Costs one DB
@@ -236,6 +399,11 @@ async function selftest() {
 async function main() {
   if (process.argv[2] === "--selftest") {
     await selftest();
+    await prisma.$disconnect();
+    process.exit(0);
+  }
+  if (process.argv[2] === "--gate0") {
+    await gate0(JSON.parse(readFileSync(process.argv[3], "utf8")));
     await prisma.$disconnect();
     process.exit(0);
   }
