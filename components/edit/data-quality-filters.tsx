@@ -159,7 +159,10 @@ export function DataQualityFilters({
         e.preventDefault(); // Enter in the search box applies immediately.
         flushSearch();
       }}
-      className="w-full"
+      /* R4 (surface language): a filter sidebar is a rail — one greige unit with
+         its own edge, not controls loose on the page. --apollo-rail-border is the
+         strong value because the hairline reads 1.035:1 on the rail and dies. */
+      className="bg-apollo-rail border-apollo-rail-border w-full rounded-xl border p-4"
       data-testid="dq-filter-form"
     >
       <div className="mb-4 flex items-center gap-2">

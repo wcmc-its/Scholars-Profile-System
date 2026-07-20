@@ -162,7 +162,7 @@ export function ProfilesRoster({
               id="roster-unit"
               name="unit"
               defaultValue={unit}
-              className="border-apollo-border-strong h-9 max-w-[16rem] rounded-md border bg-transparent px-3 text-sm"
+              className="border-apollo-border-strong h-9 max-w-[16rem] rounded-md border bg-apollo-surface px-3 text-sm"
             >
               <option value="">All units</option>
               <optgroup label="Departments">
@@ -196,7 +196,7 @@ export function ProfilesRoster({
               id="roster-type"
               name="type"
               defaultValue={roleCategory}
-              className="border-apollo-border-strong h-9 rounded-md border bg-transparent px-3 text-sm"
+              className="border-apollo-border-strong h-9 rounded-md border bg-apollo-surface px-3 text-sm"
             >
               <option value="">All</option>
               {facets.roleCategories.map((r) => (
@@ -214,7 +214,7 @@ export function ProfilesRoster({
               id="roster-status"
               name="status"
               defaultValue={status}
-              className="border-apollo-border-strong h-9 rounded-md border bg-transparent px-3 text-sm"
+              className="border-apollo-border-strong h-9 rounded-md border bg-apollo-surface px-3 text-sm"
             >
               <option value="all">All</option>
               <option value="visible">Visible</option>

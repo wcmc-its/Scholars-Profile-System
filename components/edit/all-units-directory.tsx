@@ -141,7 +141,7 @@ export function AllUnitsDirectory({
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as SortKey)}
-            className="border-input text-foreground h-9 rounded-md border bg-transparent px-2 text-sm"
+            className="border-apollo-border-strong text-foreground h-9 rounded-md border bg-apollo-surface px-2 text-sm"
             data-testid="all-units-sort"
           >
             <option value="name">Name</option>

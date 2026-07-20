@@ -490,8 +490,14 @@ function FilterRail({
     });
   }
 
+  // R4 (surface language): the filter column is a rail — one greige unit with its
+  // own edge. --apollo-rail-border is the strong value; the hairline reads
+  // 1.035:1 on the rail and dies.
   return (
-    <aside className="w-full shrink-0 space-y-5 lg:w-64" aria-label="Filter opportunities">
+    <aside
+      className="bg-apollo-rail border-apollo-rail-border w-full shrink-0 space-y-5 rounded-xl border p-4 lg:w-64"
+      aria-label="Filter opportunities"
+    >
       <div className="flex items-baseline justify-between">
         <h3 className="text-sm font-semibold">Filters</h3>
         {active ? (
