@@ -90,8 +90,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 12 CloudWatch alarms (11 platform + 1 B27 relay-errors)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 12);
+    it("creates exactly 13 CloudWatch alarms (12 platform + 1 B27 relay-errors)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 13);
     });
 
     it("every alarm name contains the prod env literal (Footgun #4)", () => {
@@ -99,13 +99,13 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(12);
+      expect(names).toHaveLength(13);
       for (const name of names) {
         expect(name).toMatch(/-prod$/);
       }
     });
 
-    it("alarm names cover the eleven platform surfaces plus the B27 relay-errors alarm", () => {
+    it("alarm names cover the twelve platform surfaces plus the B27 relay-errors alarm", () => {
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
@@ -116,6 +116,7 @@ describe("SpsObservabilityStack", () => {
           "sps-alb-5xx-rate-prod",
           "sps-alb-latency-p99-prod",
           "sps-alb-unhealthy-hosts-prod",
+          "sps-aurora-acu-prod",
           "sps-aurora-connections-prod",
           "sps-aurora-cpu-prod",
           "sps-db-pool-timeout-prod",
@@ -282,6 +283,9 @@ describe("SpsObservabilityStack", () => {
         "sps-opensearch-breaker-prod": warnId,
         "sps-opensearch-cluster-red-prod": pageId,
         "sps-aurora-cpu-prod": warnId,
+        // Serverless v2 ceiling indicator. prod-only by design — staging is
+        // permanently at its MaxCapacity, so the alarm would be born in ALARM.
+        "sps-aurora-acu-prod": warnId,
         "sps-aurora-connections-prod": warnId,
         "sps-db-pool-timeout-prod": pageId,
         "sps-opensearch-jvm-pressure-prod": warnId,
@@ -310,7 +314,8 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      expect(seen).toBe(12);
+      // 13 in prod; staging is 12 — it gets no ACU alarm (see the note above).
+      expect(seen).toBe(13);
     });
 
     it("creates the app-unavailable composite that pages on the serving cascade", () => {

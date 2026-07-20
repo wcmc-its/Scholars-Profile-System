@@ -117,6 +117,37 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudWatch::CompositeAlarm",
     },
+    "AuroraAcuAlarmBB9AAFC5": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "Aurora Serverless v2 WRITER ACUUtilization > 80% sustained for 15m (prod) -- the cluster is approaching its MaxCapacity ceiling and has little headroom left to absorb load. sps-aurora-cpu-prod CANNOT see this: on Serverless v2, CPU is a fraction of currently-provisioned capacity, so a pinned cluster still reads low CPU. Next: compare ServerlessDatabaseCapacity against the cluster MaxCapacity, correlate the window against the nightly ETL, and raise MaxCapacity if the load is legitimate.",
+        "AlarmName": "sps-aurora-acu-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "DBClusterIdentifier",
+            "Value": "sps-data-prod-auroraclusterfromsnapshot7b6a45d8-ylbuldcja7bm",
+          },
+          {
+            "Name": "Role",
+            "Value": "WRITER",
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "MetricName": "ACUUtilization",
+        "Namespace": "AWS/RDS",
+        "Period": 300,
+        "Statistic": "Average",
+        "Threshold": 80,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
     "AuroraConnectionsAlarm320D1F2B": {
       "Properties": {
         "AlarmActions": [

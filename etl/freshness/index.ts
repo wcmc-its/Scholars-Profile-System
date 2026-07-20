@@ -41,7 +41,7 @@
 import { db } from "@/lib/db";
 import { freshnessAnchor } from "@/etl/freshness/anchor";
 
-type Cadence = "nightly" | "weekly" | "annual";
+type Cadence = "nightly" | "weekly" | "monthly" | "annual";
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -49,12 +49,30 @@ const HOUR_MS = 60 * 60 * 1000;
  * Per-cadence freshness SLA in hours. Set slightly above the cadence interval
  * so a single late/slow run does not flap: nightly gets a 30h ceiling (24h +
  * 25% grace, matching the EtlStack nightly cadence-alarm window); weekly gets
- * 8 days (7d + 1d grace); annual gets ~13 months (operator-triggered behind a
- * manual approval gate, so this is a backstop, not a tight SLA).
+ * 8 days (7d + 1d grace); monthly gets 40 days; annual gets ~13 months
+ * (operator-triggered behind a manual approval gate, so this is a backstop, not
+ * a tight SLA).
+ *
+ * `monthly` exists for sources whose PRODUCER is monthly. Deriving it needs BOTH
+ * intervals, because the age we measure is the artifact's, but the moment we
+ * re-read it is our loader's:
+ *
+ *   31d  worst-case gap between two on-time monthly publishes (a 31-day month)
+ * +  7d  worst-case lag before OUR weekly loader picks the new artifact up
+ *        (Spotlight is a weekly EtlStack step, cron(0 12 ? * SUN *)), during
+ *        which freshness still reports the PREVIOUS artifact's age
+ * +  2d  grace
+ * = 40d
+ *
+ * The load lag is the easy term to forget: because freshnessAnchor() anchors on
+ * the producer's `manifestGeneratedAt` rather than our row's `completedAt`, a
+ * perfectly healthy monthly producer still reads as 38 days old just before our
+ * loader next runs. An SLA at or below 38 would false-alarm every long month.
  */
-const SLA_HOURS: Readonly<Record<Cadence, number>> = {
+export const SLA_HOURS: Readonly<Record<Cadence, number>> = {
   nightly: 30,
   weekly: 8 * 24,
+  monthly: 40 * 24,
   annual: 400 * 24,
 };
 
@@ -64,7 +82,7 @@ const SLA_HOURS: Readonly<Record<Cadence, number>> = {
  * etl/), NOT the StepSpec ids in etl-stack.ts (e.g. step "Ed" writes source
  * "ED", step "Dynamodb" writes "ReCiterAI-projection").
  */
-const TRACKED: Readonly<
+export const TRACKED: Readonly<
   Record<string, { cadence: Cadence; envs?: readonly string[] }>
 > = {
   // Nightly cadence (cron 0 7 * * ? *)
@@ -104,7 +122,6 @@ const TRACKED: Readonly<
   // Weekly cadence (cron 0 12 ? * SUN *)
   Completeness: { cadence: "weekly" },
   Headshot: { cadence: "weekly" },
-  Spotlight: { cadence: "weekly" },
   Reporter: { cadence: "weekly" },
   NSF: { cadence: "weekly" },
   Gates: { cadence: "weekly" },
@@ -119,6 +136,22 @@ const TRACKED: Readonly<
   // that writes source "Technology" (etl/technologies/index.ts) — continue-tier, so
   // freshness is the only detector of a silent no-op or a dropped schedule.
   Technology: { cadence: "weekly" },
+  // Monthly cadence. Spotlight is the one source whose producer is OUTSIDE this
+  // repo: ReciterAI publishes the artifact and SPS only loads what it finds, so
+  // the SLA here has to track the PRODUCER's schedule, not our loader's. That
+  // producer is declared monthly — `reciterai-spotlight-monthly`, cron(0 13 1 *
+  // ? *) in ReciterAI infra/eventbridge.json — so the 8-day weekly SLA this
+  // source used to carry could never be met and reported stale by construction.
+  //
+  // Caveat for whoever reads a Spotlight staleness alert next: as of 2026-07-20
+  // that EventBridge rule and its `reciterai-spotlight-orchestrator` Lambda are
+  // DECLARED IN IaC BUT NOT DEPLOYED (describe-rule and get-function-configuration
+  // both return ResourceNotFoundException, and no log group was ever created).
+  // Every artifact published so far was a human running `cli/backfill_spotlight.py
+  // --publish` by hand, most recently 2026-06-15. So this SLA describes the
+  // INTENDED cadence; until the producer is actually deployed, expect staleness
+  // and fix it upstream rather than by widening this number again. See SPS #1813.
+  Spotlight: { cadence: "monthly" },
   // Annual cadence (cron 0 9 1 7 ? *)
   Hierarchy: { cadence: "annual" },
 };
