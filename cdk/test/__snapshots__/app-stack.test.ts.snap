@@ -4165,7 +4165,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "CONSOLE_SUBNAV_GROUPED",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "MATCHA",
