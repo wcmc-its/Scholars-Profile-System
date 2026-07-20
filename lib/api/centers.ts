@@ -9,7 +9,19 @@
  */
 import { cache } from "react";
 import { prisma } from "@/lib/db";
+import {
+  countActiveCenterMembersByCode,
+  isCenterMembershipActive,
+  todayIso,
+} from "@/lib/api/center-member-count";
 import { cachedRead } from "@/lib/api/swr-cache";
+
+// Re-exported for the many call sites that already import them from here.
+export {
+  countActiveCenterMembersByCode,
+  isCenterMembershipActive,
+  type CenterMemberCountClient,
+} from "@/lib/api/center-member-count";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -45,31 +57,6 @@ import {
 import { isCenterMethodsFacetEnabled } from "@/lib/profile/methods-lens-flags";
 
 /**
- * #552 § 3.3 — the load-bearing membership active predicate. A membership is
- * active when today falls within `[startDate, endDate]`, both ends inclusive,
- * with a null bound treated as open. This mirrors the editor's `statusOf`
- * (`components/edit/center-roster-card.tsx`) exactly: `today` is a `YYYY-MM-DD`
- * string and the `@db.Date` bounds are compared as their UTC date strings, so
- * the date-only columns never get mis-compared against a time-carrying instant.
- */
-export function isCenterMembershipActive(
-  startDate: Date | null,
-  endDate: Date | null,
-  today: string,
-): boolean {
-  const start = startDate ? startDate.toISOString().slice(0, 10) : null;
-  const end = endDate ? endDate.toISOString().slice(0, 10) : null;
-  if (start && start > today) return false; // pending
-  if (end && end < today) return false; // inactive
-  return true;
-}
-
-/** UTC date string for "now", matching the editor's `todayIso`. */
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-/**
  * Active CWID set for a center's public surfaces. Reads the membership rows,
  * keeps only those active per § 3.3 (a center's roster is small, so the
  * date filter is an in-memory scan), then filters the survivors through
@@ -97,6 +84,7 @@ export const loadActiveCenterMemberCwids = cache(async (
   });
   return scholars.map((s) => s.cwid);
 });
+
 
 /**
  * #1137 — does this center define a program taxonomy (≥1 `CenterProgram` row)?
