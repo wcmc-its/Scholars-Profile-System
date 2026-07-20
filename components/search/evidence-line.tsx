@@ -208,8 +208,13 @@ const ROLE_LABEL: Record<AuthorRole, string> = {
 };
 
 /** A lead artifact older than this reads as stale: its year takes the warning tone so a
- *  decades-old headline cannot be skimmed past. The cutoff is a DISPLAY heuristic — recency is
- *  not (yet) a ranking input (see issue #1736); the display can only stop laundering the year. */
+ *  decades-old headline cannot be skimmed past. The cutoff is a DISPLAY heuristic and is NOT the
+ *  ranker's notion of old — this component renders on both the public People card, where recency
+ *  does not rank at all, and in the Matcha panel, where it HAS ranked since #1757 (`rrfFuse`
+ *  multiplies by `recencyWeightByCwid`, `lib/api/matcha-spine.ts:112`, gated on `MATCHA_RECENCY`).
+ *  A second, mode-derived cutoff lives at `matcha-contract.ts` `staleBefore` (half-life 8); the two
+ *  are knowingly independent because they answer different questions. Do not reconcile them here
+ *  without scoping the blast radius across both consumers. */
 const STALE_AFTER_YEARS = 10;
 
 function isStaleYear(year: number | null | undefined): boolean {

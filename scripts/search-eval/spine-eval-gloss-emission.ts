@@ -2,13 +2,20 @@
 // own term? Bedrock only — no OpenSearch, no DB, no session cookie, so it runs from the laptop.
 //
 // Written to answer whether MATCHA_GLOSS_QUERY could matter. It could: 88% of concepts on the 15
-// sponsor fixtures carry a gloss and 61% of those share NO token with their own term. That is why
-// searching the gloss lost its A/B and the retrieval half was deleted (the gloss is display-only
-// now). Kept because the same numbers are the QA signal for the gloss the RAIL shows: a gloss that
-// shares no token with its concept is usually a borrowed or context-only gloss (#1799's failure
-// mode), and this is how you catch a regression in that.
+// sponsor fixtures carry a gloss, and 61% of those DROP AT LEAST ONE of their term's own tokens.
+// Read that number carefully — earlier notes (and this header) reported it as "share NO token",
+// which is a different and strictly smaller quantity. `conceptsLosingOwnTerm` is the at-least-one
+// measure; `conceptsSharingNoToken` is the strict one. The strict number has never been quoted from
+// an actual run, so do not size anything off the 61%.
 //
-// Run: AWS_REGION=us-east-1 npx tsx scratch-gloss-divergence.ts <pastes.json> [label]
+// Searching the gloss lost its A/B and the retrieval half was deleted (#1814; display-only now).
+// Kept because the same numbers are the QA signal for the gloss the RAIL shows: a gloss that shares
+// no token with its concept is usually a borrowed or context-only gloss (#1799's failure mode), and
+// this is how you catch a regression in that. Caveat for any such use: `toks` below is an aggressive
+// local stemmer in a DIFFERENT lexical space than the OpenSearch analyzer, so this is a sizing
+// instrument, never a proxy for what BM25 actually matches.
+//
+// Run: AWS_REGION=us-east-1 npx tsx spine-eval-gloss-emission.ts <pastes.json> [label]
 //   pastes.json = [{id, paste}]
 import { readFileSync } from "node:fs";
 import { extractMatchaConcepts } from "@/lib/api/matcha-extract";
@@ -63,10 +70,13 @@ async function main() {
         offQuery: off,
         onQuery: on,
         addedTokens: added,
-        // The sharp case: the ON query does not even contain the concept's own token, so BM25
-        // moves off the concept entirely rather than merely narrowing it.
         droppedOwnTokens: dropped,
+        // Drops at least one of its term's tokens — the query narrows.
         losesOwnTerm: dropped.length > 0,
+        // The sharp case: the ON query retains NONE of the concept's own tokens, so BM25 moves off
+        // the concept entirely rather than merely narrowing it. Strictly rarer than `losesOwnTerm`;
+        // conflating the two overstates the divergence, which is how the 61% got misreported.
+        sharesNoToken: offT.size > 0 && dropped.length === offT.size,
       });
     }
 
@@ -92,7 +102,9 @@ async function main() {
         // The headline: pastes where the flag provably cannot change retrieval at all.
         provablyInertPastes: nInertPastes,
         pctPastesInert: measured ? +((100 * nInertPastes) / measured).toFixed(1) : null,
+        // Report both, always. The weak measure alone reads as the strict one and gets requoted.
         conceptsLosingOwnTerm: diverging.filter((d) => d.losesOwnTerm).length,
+        conceptsSharingNoToken: diverging.filter((d) => d.sharesNoToken).length,
         perPaste,
         diverging,
       },

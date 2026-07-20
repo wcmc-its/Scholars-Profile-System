@@ -455,6 +455,103 @@ describe("grant-prominence lever — topical-only (companion to #1345)", () => {
   });
 });
 
+/**
+ * The productivity lever — the third employment-adjacent prior, previously unreachable.
+ *
+ * Corpus size is priced TWICE on the topic path: additively via `ln1p(publicationCount)`
+ * in the outer sum, and multiplicatively via the inner `>=20 ⇒ ×1.2` / `5..19 ⇒ ×1.1`
+ * step functions. The lever gates both, because a caller that shed the faculty and grant
+ * terms is otherwise still carrying half a prior it opted out of — and, worse, carrying
+ * it AMPLIFIED: the outer sum's denominator shrinks when the flat terms go, so the
+ * pubcount term's share of the multiplier rises.
+ */
+const PUBCOUNT_FVF = {
+  field_value_factor: { field: "publicationCount", modifier: "ln1p", factor: 1, missing: 0 },
+};
+const PUBCOUNT_STEP_HIGH = { filter: { range: { publicationCount: { gte: 20 } } }, weight: 1.2 };
+const PUBCOUNT_STEP_MID = { filter: { range: { publicationCount: { gte: 5, lt: 20 } } }, weight: 1.1 };
+
+describe("pubcount-prominence lever — the third prior", () => {
+  beforeEach(() => {
+    capturedBodies.length = 0;
+    groupByMock.mockResolvedValue([]);
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  it("pubcountProminence:false drops the outer ln1p term (faculty + grant intact)", async () => {
+    await searchPeople({ q: "cantley", relevanceMode: "v3", shape: "name", pubcountProminence: false });
+    const fns = functionScore(capturedBodies[0])!.functions;
+    expect(fns).not.toContainEqual(PUBCOUNT_FVF);
+    expect(fns).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length - 1);
+    expect(fns).toContainEqual({ weight: 1.0 }); // BASE survives
+    expect(fns).toContainEqual({ filter: { term: { personType: "full_time_faculty" } }, weight: 1.0 });
+    expect(fns).toContainEqual({ filter: { term: { hasActiveGrants: true } }, weight: 0.5 });
+  });
+
+  it("also drops the INNER multiplicative step functions — both halves or none", async () => {
+    await searchPeople({
+      q: "ras signaling pancreatic cancer",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: ["D012345"],
+      pubcountProminence: false,
+    });
+    const outer = functionScore(capturedBodies[0])!;
+    expect(outer.functions).not.toContainEqual(PUBCOUNT_FVF);
+
+    const inner = (outer.query as { function_score?: FnScore }).function_score;
+    expect(inner).toBeDefined();
+    expect(inner!.functions).not.toContainEqual(PUBCOUNT_STEP_HIGH);
+    expect(inner!.functions).not.toContainEqual(PUBCOUNT_STEP_MID);
+    // The attribution boost is NOT productivity — it must survive, or the lever is
+    // silently disabling the topic ladder rather than the prior.
+    expect(inner!.functions).toContainEqual({
+      filter: { terms: { publicationMeshUi: ["D012345"] } },
+      weight: 1.5,
+    });
+  });
+
+  it("topic shape default keeps BOTH halves (the state before this lever existed)", async () => {
+    await searchPeople({
+      q: "ras signaling pancreatic cancer",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: ["D012345"],
+    });
+    const outer = functionScore(capturedBodies[0])!;
+    expect(outer.functions).toContainEqual(PUBCOUNT_FVF);
+    expect(outer.functions).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length);
+
+    const inner = (outer.query as { function_score?: FnScore }).function_score;
+    expect(inner!.functions).toContainEqual(PUBCOUNT_STEP_HIGH);
+    expect(inner!.functions).toContainEqual(PUBCOUNT_STEP_MID);
+  });
+
+  /**
+   * The load-bearing assertion. Public search and Matcha want opposite things here, so
+   * the ONLY thing that makes this change safe to ship without public-search gold is
+   * that omitting the option changes nothing at all. Deep-equal on the whole body, not
+   * a spot check — a spot check cannot see a field this lever moved by accident.
+   */
+  it("omitting the option is byte-identical to before the lever existed", async () => {
+    await searchPeople({
+      q: "ras signaling pancreatic cancer",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: ["D012345"],
+    });
+    await searchPeople({
+      q: "ras signaling pancreatic cancer",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: ["D012345"],
+      pubcountProminence: true,
+    });
+    expect(capturedBodies).toHaveLength(2);
+    expect(capturedBodies[0]).toEqual(capturedBodies[1]);
+  });
+});
+
 describe("getConceptScholarConcentration — #1343 concept-axis source", () => {
   beforeEach(() => {
     capturedBodies.length = 0;

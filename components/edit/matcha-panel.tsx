@@ -597,7 +597,7 @@ export function MatchaPanel() {
   );
   const hiddenByYear = ranked.length - rankedInYear.length;
 
-  // D3 — the dial only means anything when the payload carries years (SPONSOR_MATCH_RECENCY on).
+  // D3 — the dial only means anything when the payload carries years (MATCHA_RECENCY on).
   // Absent ⇒ every weight is 1 and the control would be a lie, so it does not render.
   const hasRecencyData = useMemo(() => results.some((c) => c.mostRecentYear != null), [results]);
   // D8 — the boundary the compact row's year is flagged against, derived from the ACTIVE mode
@@ -2245,7 +2245,7 @@ function CoverageStrip({ coverage, inline = false }: { coverage: ConceptCoverage
  * Everything here is client-derived from the candidate already in the browser — NO artifact fetch,
  * which is the whole point of the compact register: 100 rows cost 0 key-paper requests. `latest YYYY`
  * comes from `latestEvidenceYear`; D1 surfaced the per-scholar year on the production spine path
- * (`candidate.mostRecentYear`, under `SPONSOR_MATCH_RECENCY`), so the slot now renders there when the
+ * (`candidate.mostRecentYear`, under `MATCHA_RECENCY`), so the slot now renders there when the
  * flag is on. The bespoke path still reads `evidence.papers`. Absent (flag off / no year) ⇒ no year.
  *
  * D3/D8 — the year is FLAGGED (de-emphasised) below `staleYear`, the boundary derived from the

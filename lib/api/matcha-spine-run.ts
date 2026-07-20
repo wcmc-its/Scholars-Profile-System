@@ -300,6 +300,13 @@ async function retrieveCluster(
       // this exact caller as the intended `false`).
       facultyProminence: false,
       grantProminence: false,
+      // The third prior, and the one the two above made WORSE by omission. The outer
+      // prominence function_score sums its terms before multiplying, so dropping the flat
+      // faculty and grant terms shrinks the denominator and RAISES the pubcount term's
+      // share of the multiplier. This caller declared topical fit only and was, until now,
+      // amplifying a productivity prior it had no lever for. Gates the inner ×1.2/×1.1
+      // step functions too — corpus size is priced twice and half a lever measures nothing.
+      pubcountProminence: false,
       // #1689 — ASK FOR THE EVIDENCE. This is the whole fix, and it is three options on a
       // call this loop already makes.
       //
@@ -420,9 +427,11 @@ export async function rankResearchersForDescriptionSpine(
   }));
 
   // The funder's qualifying context per term (the LLM extractor's `gloss`; empty on the dictionary
-  // fallback). The spine searches this — the sponsor's SENSE — as the free-text query instead of the
-  // bare canonical token, so a generic organelle/method word ranks the sense rather than everything
-  // it can literally hit. The MeSH resolution below still keys on `term`, so only the BM25 axis moves.
+  // fallback). DISPLAY ONLY — it rides the wire for the rail's provenance line and reaches no query.
+  // It USED TO be searched as the free-text query instead of the bare canonical token, on the premise
+  // that it ranks the sponsor's sense rather than everything the token can literally hit. #1814 A/B'd
+  // that and it lost on every metric: a long prose gloss NARROWS a BM25 query rather than broadening
+  // it. See the measurement at the `clusterQuery` assignment below.
   const glossByTerm = new Map(
     extracted.flatMap((c) => (c.gloss ? [[c.term, c.gloss] as const] : [])),
   );
@@ -646,8 +655,9 @@ export async function rankResearchersForDescriptionSpine(
         // CONCEPT — the same three inputs the public People card passes. Per-concept, which is
         // what lets each of a card's blocks reveal papers about ITS OWN concept.
         keyPaper: {
-          // Same gloss-biased free-text query the retrieval used, so the representative paper a
-          // disclosure reveals is chosen for the sponsor's sense, not the bare token.
+          // The same free-text query the retrieval used — `clusterQuery`, i.e. the cluster's bare
+          // member tokens — so the paper a disclosure reveals is chosen on what actually ranked it.
+          // (Not gloss-biased: the gloss stopped reaching any query in #1814.)
           descriptorUis: cluster.descendantUis,
           contentQuery: clusterQuery,
           conceptLabel: rep?.name,
