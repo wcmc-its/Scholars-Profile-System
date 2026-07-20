@@ -444,6 +444,13 @@ async function retrieveCluster(
     // this exact caller as the intended `false`).
     facultyProminence: false,
     grantProminence: false,
+    // The third prior, and the one the two above made WORSE by omission. The outer
+    // prominence function_score sums its terms before multiplying, so dropping the flat
+    // faculty and grant terms shrinks the denominator and RAISES the pubcount term's
+    // share of the multiplier. This caller declared topical fit only and was, until now,
+    // amplifying a productivity prior it had no lever for. Gates the inner ×1.2/×1.1
+    // step functions too — corpus size is priced twice and half a lever measures nothing.
+    pubcountProminence: false,
     // #2068 — the volume-prior ceiling lever, pinned OFF rather than inherited from the
     // deployment's SEARCH_PEOPLE_PUBCOUNT_DAMPEN. `shape: "topic"` is inside that lever's
     // gate, so without this pin the spine would silently pick up a /search A/B: with the
