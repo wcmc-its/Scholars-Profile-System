@@ -1440,6 +1440,36 @@ export async function searchPeople(opts: {
    */
   grantProminence?: boolean;
   /**
+   * The PRODUCTIVITY prominence lever — the third employment-adjacent prior, and the
+   * one `facultyProminence`/`grantProminence` left unreachable. When `false`, BOTH
+   * publication-count terms are omitted:
+   *   - the outer additive `ln1p(publicationCount)` `field_value_factor`, and
+   *   - the inner multiplicative step functions (`>=20 ⇒ ×1.2`, `5..19 ⇒ ×1.1`).
+   *
+   * Both, deliberately. Corpus size is priced twice on this path (additively in the
+   * outer sum, multiplicatively in the inner product) and levering only one leaves a
+   * caller that asked for topical-fit-only still carrying half the prior — which is
+   * an uncontrolled measurement, not a partial fix.
+   *
+   * Why this lever has to exist: dropping the flat faculty and grant terms SHRINKS the
+   * outer sum's denominator, so the surviving pubcount term's share of the multiplier
+   * RISES. A caller passing `facultyProminence: false, grantProminence: false` — i.e.
+   * asking for topical fit only — thereby AMPLIFIES a productivity prior it cannot
+   * reach. Matcha's per-term retrieval is exactly that caller.
+   *
+   * Defaults to today's behavior (`true` — terms present), so `/search` and every
+   * existing headless caller emit a byte-identical query body. Note this is an OPTION
+   * with a call-site default, never an env flag: every env-resolved knob inside
+   * `searchPeople` is process-global and would move BOTH consumers at once, and the
+   * public search and Matcha want opposite things here.
+   *
+   * NOT a reversal of #513's accepted selection bias toward established faculty — that
+   * sign-off was for public search, where a prolific generalist outranking a focused
+   * specialist is defensible. It does not extend to a caller that has declared topical
+   * fit only.
+   */
+  pubcountProminence?: boolean;
+  /**
    * Issue #692 — generic-term demotion (mode `on`). When true and `contentQuery`
    * differs from the raw query, the topic + hybrid bodies score on the content
    * query (full query discounted) and highlighting is restricted to the content
@@ -2403,14 +2433,20 @@ export async function searchPeople(opts: {
         weight: PEOPLE_METHOD_FAMILY_TAG_WEIGHT,
       });
     }
-    scoreFunctions.push({
-      filter: { range: { publicationCount: { gte: 20 } } },
-      weight: 1.2,
-    });
-    scoreFunctions.push({
-      filter: { range: { publicationCount: { gte: 5, lt: 20 } } },
-      weight: 1.1,
-    });
+    // The inner, MULTIPLICATIVE half of the productivity prior. Gated by the same
+    // `pubcountProminence` lever as the outer additive `ln1p` term: corpus size is
+    // priced twice on this path, and a caller that asked for topical fit only must
+    // shed both or it is carrying half the prior it opted out of.
+    if (opts.pubcountProminence !== false) {
+      scoreFunctions.push({
+        filter: { range: { publicationCount: { gte: 20 } } },
+        weight: 1.2,
+      });
+      scoreFunctions.push({
+        filter: { range: { publicationCount: { gte: 5, lt: 20 } } },
+        weight: 1.1,
+      });
+    }
     if (applySparseDecay) {
       scoreFunctions.push({
         filter: {
@@ -2475,14 +2511,20 @@ export async function searchPeople(opts: {
   const prominenceFunctions: Record<string, unknown>[] = applyProminence
     ? [
         { weight: PEOPLE_PROMINENCE_BASE_WEIGHT },
-        {
-          field_value_factor: {
-            field: "publicationCount",
-            modifier: "ln1p",
-            factor: PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
-            missing: 0,
-          },
-        },
+        // The productivity prior, dropped when the pubcount lever is off. Paired with the
+        // inner step functions above — see `pubcountProminence`, which gates both.
+        ...(opts.pubcountProminence !== false
+          ? [
+              {
+                field_value_factor: {
+                  field: "publicationCount",
+                  modifier: "ln1p",
+                  factor: PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
+                  missing: 0,
+                },
+              },
+            ]
+          : []),
         // #1345 — the flat full_time_faculty prominence term, dropped when the
         // faculty-prominence lever is off (expertise-independent employment prior).
         ...(opts.facultyProminence !== false
