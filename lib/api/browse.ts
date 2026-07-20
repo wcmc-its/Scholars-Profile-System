@@ -14,7 +14,7 @@
  * All callers are Server Components / ISR pages. Public-data only — no auth.
  */
 import { prisma } from "@/lib/db";
-import { countActiveCenterMembersByCode } from "@/lib/api/centers";
+import { countActiveCenterMembersByCode } from "@/lib/api/center-member-count";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import type {

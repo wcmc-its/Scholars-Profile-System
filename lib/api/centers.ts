@@ -9,8 +9,19 @@
  */
 import { cache } from "react";
 import { prisma } from "@/lib/db";
-import type { PrismaClient } from "@/lib/generated/prisma/client";
+import {
+  countActiveCenterMembersByCode,
+  isCenterMembershipActive,
+  todayIso,
+} from "@/lib/api/center-member-count";
 import { cachedRead } from "@/lib/api/swr-cache";
+
+// Re-exported for the many call sites that already import them from here.
+export {
+  countActiveCenterMembersByCode,
+  isCenterMembershipActive,
+  type CenterMemberCountClient,
+} from "@/lib/api/center-member-count";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -46,31 +57,6 @@ import {
 import { isCenterMethodsFacetEnabled } from "@/lib/profile/methods-lens-flags";
 
 /**
- * #552 § 3.3 — the load-bearing membership active predicate. A membership is
- * active when today falls within `[startDate, endDate]`, both ends inclusive,
- * with a null bound treated as open. This mirrors the editor's `statusOf`
- * (`components/edit/center-roster-card.tsx`) exactly: `today` is a `YYYY-MM-DD`
- * string and the `@db.Date` bounds are compared as their UTC date strings, so
- * the date-only columns never get mis-compared against a time-carrying instant.
- */
-export function isCenterMembershipActive(
-  startDate: Date | null,
-  endDate: Date | null,
-  today: string,
-): boolean {
-  const start = startDate ? startDate.toISOString().slice(0, 10) : null;
-  const end = endDate ? endDate.toISOString().slice(0, 10) : null;
-  if (start && start > today) return false; // pending
-  if (end && end < today) return false; // inactive
-  return true;
-}
-
-/** UTC date string for "now", matching the editor's `todayIso`. */
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-/**
  * Active CWID set for a center's public surfaces. Reads the membership rows,
  * keeps only those active per § 3.3 (a center's roster is small, so the
  * date filter is an in-memory scan), then filters the survivors through
@@ -99,63 +85,6 @@ export const loadActiveCenterMemberCwids = cache(async (
   return scholars.map((s) => s.cwid);
 });
 
-/** Minimal client surface for {@link countActiveCenterMembersByCode}. */
-export type CenterMemberCountClient = Pick<PrismaClient, "centerMembership" | "scholar">;
-
-/**
- * Active member count per center, batched across many centers.
- *
- * `Center.scholarCount` is a denormalized column that NOTHING maintains: the ED
- * ETL's Phase 3 count refresh iterates departments and divisions only, and the
- * roster write path never touches it. It is `@default(0)`, so every manually
- * created center reported "0 scholars" on `/edit/units` and `/browse` forever
- * while its public page — which computes the count live — showed the real
- * number. Listing surfaces call this instead of reading the column.
- *
- * Applies the SAME gate as `loadActiveCenterMemberCwids` (§ 3.3 date window,
- * then non-deleted + `status='active'` Scholar) so a center's count means the
- * same thing everywhere, and so "scholars" in the `/edit/units` table is
- * comparable across kinds — dept/division counts are `scholar.count` under that
- * identical predicate, and that column sorts across all three kinds.
- *
- * Two queries regardless of center count, matching the batched posture of the
- * directory loader that calls it.
- */
-export async function countActiveCenterMembersByCode(
-  client: CenterMemberCountClient,
-  centerCodes: string[],
-): Promise<Map<string, number>> {
-  const counts = new Map<string, number>();
-  if (centerCodes.length === 0) return counts;
-
-  const today = todayIso();
-  const rows = (await client.centerMembership.findMany({
-    where: { centerCode: { in: centerCodes } },
-    select: { centerCode: true, cwid: true, startDate: true, endDate: true },
-  })) as Array<{
-    centerCode: string;
-    cwid: string;
-    startDate: Date | null;
-    endDate: Date | null;
-  }>;
-  const active = rows.filter((r) => isCenterMembershipActive(r.startDate, r.endDate, today));
-  if (active.length === 0) return counts;
-
-  const scholars = await client.scholar.findMany({
-    where: {
-      cwid: { in: [...new Set(active.map((r) => r.cwid))] },
-      deletedAt: null,
-      status: "active",
-    },
-    select: { cwid: true },
-  });
-  const visible = new Set(scholars.map((s) => s.cwid));
-
-  for (const r of active) {
-    if (visible.has(r.cwid)) counts.set(r.centerCode, (counts.get(r.centerCode) ?? 0) + 1);
-  }
-  return counts;
-}
 
 /**
  * #1137 — does this center define a program taxonomy (≥1 `CenterProgram` row)?

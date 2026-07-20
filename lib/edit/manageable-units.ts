@@ -24,7 +24,7 @@
  * `administrators.ts` / `impersonation-display.ts`.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
-import { countActiveCenterMembersByCode } from "@/lib/api/centers";
+import { countActiveCenterMembersByCode } from "@/lib/api/center-member-count";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { compactUnitName, officialUnitName } from "@/lib/org-unit-names";
 

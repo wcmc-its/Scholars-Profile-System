@@ -15,7 +15,7 @@
  */
 import { describe, it, expect } from "vitest";
 
-import { countActiveCenterMembersByCode } from "@/lib/api/centers";
+import { countActiveCenterMembersByCode } from "@/lib/api/center-member-count";
 
 type Row = {
   centerCode: string;
