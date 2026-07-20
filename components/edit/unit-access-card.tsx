@@ -22,6 +22,7 @@
 "use client";
 
 import * as React from "react";
+import { Lock } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import {
@@ -225,17 +226,32 @@ export function UnitAccessCard({ entityType, entityId, access, actorCwid }: Unit
                     <td className="py-2">{formatGrantedBy(row.grantedBy)}</td>
                     <td className="py-2 tabular-nums">{formatGrantedAt(row.grantedAt)}</td>
                     <td className="py-2 text-right">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        disabled={isSelf || edLocked || busy}
-                        title={removeTitle}
-                        onClick={() => setRevokeTarget(row)}
-                        data-testid={`unit-access-remove-${row.cwid}`}
-                      >
-                        Remove
-                      </Button>
+                      {/* The Button carries `disabled:pointer-events-none`, so `title` on a
+                          disabled Remove never fires and the row reads as broken rather than
+                          governed. ED-locked rows say so in the open, LOCKED-style: neutral +
+                          lock + text, no hue. `title` stays for the self-removal case. */}
+                      <div className="flex items-center justify-end gap-2">
+                        {edLocked && (
+                          <span
+                            className="text-muted-foreground inline-flex items-center gap-1 text-xs whitespace-nowrap"
+                            data-testid={`unit-access-ed-locked-note-${row.cwid}`}
+                          >
+                            <Lock className="size-3" aria-hidden />
+                            Managed in the Enterprise Directory
+                          </span>
+                        )}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={isSelf || edLocked || busy}
+                          title={removeTitle}
+                          onClick={() => setRevokeTarget(row)}
+                          data-testid={`unit-access-remove-${row.cwid}`}
+                        >
+                          Remove
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 );

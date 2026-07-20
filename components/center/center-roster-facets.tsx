@@ -44,7 +44,9 @@ export function RosterFacet({
   // don't match the query: pin selected first, then the query-filtered
   // UNSELECTED matches, de-duped (a selected option never appears twice). The
   // search bypasses the collapse cap. With no query this is the original
-  // collapse-after list in original order.
+  // collapse-after list in original order, plus any selection that sits past
+  // the cap — a filter you can see acting but can't see (or un-tick) is worse
+  // than a longer list, and "Clear" would take every other facet down with it.
   let visible: FacetOption[];
   if (q) {
     const selectedOpts = options.filter((o) => selected.has(o.value));
@@ -53,7 +55,9 @@ export function RosterFacet({
     );
     visible = [...selectedOpts, ...matches];
   } else {
-    visible = showAll ? options : options.slice(0, collapseAfter);
+    visible = showAll
+      ? options
+      : options.filter((o, i) => i < collapseAfter || selected.has(o.value));
   }
   const hiddenCount = q ? 0 : options.length - visible.length;
   const noMatches = showSearch && q.length > 0 && visible.length === 0;

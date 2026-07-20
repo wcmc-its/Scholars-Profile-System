@@ -248,3 +248,34 @@ describe("HonorsCard — mutations", () => {
     expect(deleteCall).toBeTruthy();
   });
 });
+
+/**
+ * A failed GET must not be reported as an empty list. The catch sets `rows` to
+ * `[]` alongside `loadError`, so the empty-state copy rendered directly beneath
+ * the alert saying we could not load them — the card said both "we couldn't
+ * read this" and "there is nothing here". The Add button stayed live too, and
+ * it is gated on `rows !== null`, which the catch satisfies; adding against an
+ * unread list invites a duplicate of an honour that is already stored.
+ */
+describe("HonorsCard — a failed read is not an empty list", () => {
+  it("shows the error and withholds both the empty-state copy and the Add button", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() => Promise.resolve(json({ error: "boom" }, false))),
+    );
+    render(<HonorsCard cwid="abc1001" mode="self" scholarName="Ada Lovelace" />);
+
+    await screen.findByText(/couldn’t load these honors/i);
+    expect(screen.queryByText(/No honors added yet/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /add an honor/i })).toBeNull();
+  });
+
+  it("still offers the empty state and Add on a successful empty read", async () => {
+    vi.stubGlobal("fetch", routedFetch([]));
+    render(<HonorsCard cwid="abc1001" mode="self" scholarName="Ada Lovelace" />);
+
+    await screen.findByText(/No honors added yet/i);
+    expect(screen.queryByText(/couldn’t load these honors/i)).toBeNull();
+    expect(screen.getByRole("button", { name: /add an honor/i })).toBeTruthy();
+  });
+});

@@ -213,3 +213,45 @@ describe("RosterFacet — searchable Methods facet (#972)", () => {
     expect(screen.queryByText("No methods match")).toBeNull(); // suppressed: a selection is visible
   });
 });
+
+/**
+ * A selection past `collapseAfter` must stay visible with NO query. The pinning
+ * above only ran inside the search branch, so a collapsed facet could hold an
+ * active, invisible filter: the table reads as filtered with nothing on screen
+ * explaining why, and the only recovery is "Clear", which drops every other
+ * facet too. Worst on `center-members-client.tsx`, which sets `collapseAfter`
+ * without `searchable`, so the search-box escape hatch does not exist.
+ *
+ * No fixture in this suite ever placed a selection past the cap, which is why
+ * the bug shipped.
+ */
+describe("RosterFacet — a selection past the collapse cap stays visible", () => {
+  it("pins a selected option that sits past collapseAfter when there is no query", () => {
+    const selected: ReadonlySet<string> = new Set(["v9::ELISA"]); // index 9, past cap of 8
+    render(
+      <RosterFacet
+        title="Methods & tools"
+        options={OPTS}
+        selected={selected}
+        onToggle={noop}
+        collapseAfter={8}
+      />,
+    );
+    expect(optionLabels().some((t) => /ELISA/.test(t))).toBe(true);
+  });
+
+  it("still hides unselected options past the cap", () => {
+    render(
+      <RosterFacet
+        title="Methods & tools"
+        options={OPTS}
+        selected={empty}
+        onToggle={noop}
+        collapseAfter={8}
+      />,
+    );
+    const labels = optionLabels();
+    expect(labels).toHaveLength(8);
+    expect(labels.some((t) => /ELISA/.test(t))).toBe(false);
+  });
+});

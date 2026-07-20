@@ -191,9 +191,10 @@ export function ProfileAppointmentsCard({ cwid, mode, scholarName }: ProfileAppo
 
       {rows === null ? (
         <p className="text-muted-foreground text-sm">Loading…</p>
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && !loadError ? (
+        // Only claim the list is empty when we actually read it — see honors-card.
         <p className="text-muted-foreground text-sm">No additional appointments added yet.</p>
-      ) : (
+      ) : rows.length === 0 ? null : (
         <ul className="flex flex-col gap-3" data-testid="profile-appointment-list">
           {rows.map((row) =>
             editingId === row.id ? (
@@ -270,7 +271,8 @@ export function ProfileAppointmentsCard({ cwid, mode, scholarName }: ProfileAppo
             setError(null);
           }}
         />
-      ) : rows !== null ? (
+      ) : rows !== null && !loadError ? (
+        // Adding against a failed read invites a duplicate — see honors-card.
         <div>
           <Button
             type="button"
