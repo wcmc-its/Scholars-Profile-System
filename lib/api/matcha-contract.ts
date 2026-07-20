@@ -339,11 +339,12 @@ export type MatchaConcept = {
    * ("lysosomal processing of ADC linkers", not the bare token "lysosomes"). The canonical `term`
    * is stripped to a MeSH-resolvable noun phrase; this keeps the sense that strip discards.
    *
-   * It does BOTH jobs, deliberately: the spine searches it as the free-text (BM25) query so the
-   * ranking favours the sponsor's sense over everything the bare token can literally hit, and the
-   * rail renders it as the "sponsor's words" line. ABSENT when the concept stood alone in the paste
-   * or on the dictionary-fallback path (no LLM) — never fabricated, so the rail shows nothing rather
-   * than invent a gloss. DISPLAY value only on the wire; the retrieval use happens server-side.
+   * DISPLAY ONLY: the rail renders it as the "sponsor's words" line. It reaches no query. The spine
+   * USED TO also search it as the free-text (BM25) query, on the premise that this favours the
+   * sponsor's sense over everything the bare token can literally hit; #1814 measured that and it lost
+   * on every metric, so the retrieval half is deleted. ABSENT when the concept stood alone in the
+   * paste or on the dictionary-fallback path (no LLM) — never fabricated, so the rail shows nothing
+   * rather than invent a gloss.
    */
   gloss?: string;
 };

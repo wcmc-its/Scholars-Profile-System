@@ -50,10 +50,11 @@ export type ExtractedConcept = {
   centrality: number;
   /** The funder's QUALIFYING CONTEXT for this concept — their own words for what they mean by it
    *  ("lysosomal processing of ADC linkers", not the bare token "lysosomes"). It exists to keep the
-   *  sponsor's SENSE that a canonical MeSH noun phrase strips: the spine searches the gloss as the
-   *  free-text query so a generic organelle/method word ranks the sense, not everything it can
-   *  literally hit. Absent when the concept stands alone in the paste (no qualifying context) or on
-   *  the dictionary-fallback path (no LLM). NEVER fabricated — absent stays absent. */
+   *  sponsor's SENSE that a canonical MeSH noun phrase strips. DISPLAY ONLY — it reaches no query;
+   *  the rail renders it as the "sponsor's words" line. The spine USED TO search it as the free-text
+   *  query; #1814 measured that and it lost on every metric. Absent when the concept stands alone in
+   *  the paste (no qualifying context) or on the dictionary-fallback path (no LLM). NEVER fabricated
+   *  — absent stays absent. */
   gloss?: string;
 };
 
@@ -290,8 +291,10 @@ export function sanitizeConcepts(
 
 /** A gloss is a phrase, not a paragraph — the prompt asks for ≤15 words. Trim, collapse internal
  *  whitespace, drop a trailing period; reject empty or over-long (a model that dumped prose here
- *  would otherwise flood the free-text query) → `undefined`, so an absent/unusable gloss cleanly
- *  falls back to the bare term. Output hygiene on already-LLM-written text, never fabrication. */
+ *  would otherwise blow out the rail's provenance line) → `undefined`, so an absent/unusable gloss
+ *  cleanly falls back to the bare term. The length cap once also protected the free-text query, but
+ *  the gloss no longer reaches one (#1814). Output hygiene on already-LLM-written text, never
+ *  fabrication. */
 const MAX_GLOSS_CHARS = 140;
 export function sanitizeGloss(raw: unknown): string | undefined {
   if (typeof raw !== "string") return undefined;
