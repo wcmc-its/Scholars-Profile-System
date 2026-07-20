@@ -578,12 +578,61 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     expect(await screen.findByText(/Paste the ask\. Get the shortlist\./)).toBeTruthy();
   });
 
+  // Order is spec-pinned twice — the tier-1 bar as `Profiles · Org units · Queues ·
+  // Registries · Insights · Tools`, and "member order within each group preserves
+  // today's left-to-right bar order, except Cores". On origin/master that order was
+  // implicit in a single JSX literal; grouping introduces TWO new independent
+  // sources for it (GROUP_ORDER, and the tier-1 spread composition), and every
+  // other assertion in this file locates nodes by testid, so an order-only edit
+  // would move the console nav off spec with the whole suite green. jsdom cannot
+  // verify layout, but DOM sequence is not layout — it observes that exactly.
+  const order = (container: HTMLElement) =>
+    Array.from(
+      container.querySelectorAll("[data-testid^='admin-tab-'], [data-testid^='admin-group-']"),
+    ).map((n) => n.getAttribute("data-testid"));
+
+  it("renders tier 1 in the spec's order", () => {
+    grouped();
+    render(<AdminSubnav active="profiles" {...allOn} />);
+    expect(order(screen.getByTestId("admin-subnav-tier1"))).toEqual([
+      "admin-tab-profiles",
+      "admin-tab-units",
+      "admin-group-queues",
+      "admin-group-registries",
+      "admin-group-insights",
+      "admin-group-tools",
+    ]);
+  });
+
+  it("renders tier-2 members in today's left-to-right bar order, with Cores moved into Queues", () => {
+    grouped();
+    const { unmount } = render(<AdminSubnav active="slug-requests" {...allOn} />);
+    expect(order(screen.getByTestId("admin-subnav-tier2-queues"))).toEqual([
+      "admin-tab-slug-requests",
+      "admin-tab-honors-queue",
+      "admin-tab-news-queue",
+      "admin-tab-cores",
+    ]);
+    unmount();
+    render(<AdminSubnav active="slugs" {...allOn} />);
+    expect(order(screen.getByTestId("admin-subnav-tier2-registries"))).toEqual([
+      "admin-tab-slugs",
+      "admin-tab-administrators",
+      "admin-tab-methods",
+    ]);
+  });
+
   it("is dark by default — the flag off reproduces the flat 14-tab strip", () => {
     vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
     vi.stubEnv("CORE_PAGES", "on");
     render(<AdminSubnav active="profiles" {...allOn} />);
-    for (const id of ["profiles", "units", "slug-requests", "slugs", "usage", "cores", "activity"])
-      expect(screen.getByTestId(`admin-tab-${id}`)).toBeTruthy();
+    expect(order(screen.getByTestId("admin-subnav-tier1"))).toEqual(
+      [
+        "profiles", "units", "slug-requests", "honors-queue", "news-queue", "slugs",
+        "administrators", "methods", "data-quality", "activity", "usage", "cores",
+        "find-researchers",
+      ].map((id) => `admin-tab-${id}`),
+    );
     for (const g of ["queues", "registries", "insights", "tools"])
       expect(screen.queryByTestId(`admin-group-${g}`)).toBeNull();
   });

@@ -334,7 +334,10 @@ export function AdminSubnav({
             exceeds the container, so the scrollbar never appears. That was the
             #1803 bug. Radix popovers/menus inside a tab portal to the body, so
             they are NOT clipped by this scroller. Account chip pinned outside. */}
-        <div className="flex min-w-0 flex-1 items-center gap-6 overflow-x-auto">
+        <div
+          className="flex min-w-0 flex-1 items-center gap-6 overflow-x-auto"
+          data-testid="admin-subnav-tier1"
+        >
           {tier1}
         </div>
         {/* The account chip/dropdown anchors the right end — profile actions live
