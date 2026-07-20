@@ -71,12 +71,21 @@ GET_RUN="$(aws s3 presign  "s3://$BUCKET/$PREFIX/run.ts"           --expires-in 
 # NO curl IN THE IMAGE. The etl stage is node:22-bookworm-slim + openssl/ca-certificates only, so
 # `curl` exits 127. Node 22 ships a global fetch — use the runtime that is guaranteed present
 # rather than apt-get installing one at task start.
+#
+# The runner lands UNDER /app, NOT /tmp. Node resolves bare imports (`@aws-sdk/client-s3`) by
+# walking up from the FILE's own directory, so a script in /tmp never sees /app/node_modules and
+# `cd /app` does not change that. Only the data file may live in /tmp — it is read by path.
+#
+# And it goes in scripts/search-eval/, not /app itself: `WORKDIR /app` creates that directory as
+# ROOT, while `COPY --chown=node:node . .` chowns only the content it copies. The image runs as
+# USER node, so creating a new file directly in /app is EACCES — but the copied SUBDIRECTORIES are
+# node-owned and writable, and they still resolve up to /app/node_modules.
 SCRIPT='set -e
 cd /app
 node -e '"'"'
 const fs = require("fs");
 (async () => {
-  for (const [url, path] of [[process.env.GET_RUN, "/tmp/run.ts"], [process.env.GET_DATA, "/tmp/data.json"]]) {
+  for (const [url, path] of [[process.env.GET_RUN, "/app/scripts/search-eval/_gloss-ab-run.ts"], [process.env.GET_DATA, "/tmp/data.json"]]) {
     const r = await fetch(url);
     if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
     const buf = Buffer.from(await r.arrayBuffer());
@@ -89,7 +98,7 @@ const fs = require("fs");
 for ARM in off substitute append; do
   echo "=== arm $ARM ==="
   eval "PUT=\$PUT_$ARM"
-  ARM=$ARM npx tsx /tmp/run.ts /tmp/data.json "$PUT"
+  ARM=$ARM npx tsx /app/scripts/search-eval/_gloss-ab-run.ts /tmp/data.json "$PUT"
 done
 echo "ALL ARMS DONE"'
 
