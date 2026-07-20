@@ -2,9 +2,24 @@
  * AllUnitsDirectory (#971) — the complete, info-rich org-unit listing on
  * `/edit/units`, visible only to superusers + comms stewards (the page gates it;
  * this component renders whatever it's handed). Where "Units you manage" shows
- * the actor's own grants in bare rows, this is the full org-chart audit view:
- * every department, division, and center with its names, leadership, counts,
+ * the actor's own grants as cards, this is the full org-chart audit view: every
+ * department, division, and center with its names, leadership, counts,
  * provenance, and the two curation gaps that matter (no description, no leader).
+ *
+ * A TABLE, not a card list (Apollo surface language R5): every unit carries the
+ * same attributes in the same order, so they are rows. The columns are
+ * Unit / Kind / Code / Scholars / Leader / Description — and "Description" is
+ * the point of the shape change: a per-card "No description" pill cannot be
+ * scanned, so the page's Missing-description filter had no visually verifiable
+ * result. As a column it reads down the page in one pass.
+ *
+ * The whole row is the click target via a STRETCHED ANCHOR (R7): the unit-name
+ * cell holds a real `<Link href>` whose `after:absolute after:inset-0`
+ * pseudo-element covers the `relative` `<tr>`. No onClick/onKeyDown on the row —
+ * cmd-click, middle-click, "copy link", tab focus, and screen-reader link
+ * announcement all keep working, which a role="button" row would break. The one
+ * other interactive element in a row — the Web Directory code link — carries
+ * `relative z-10` so it sits ABOVE the stretched anchor and stays clickable.
  *
  * A client component for one reason: an in-memory filter + sort over the bounded
  * list (~80 units), mirroring `UnitFinder`'s "server-provided bounded list,
@@ -16,7 +31,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ArrowRight, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +44,12 @@ const KIND_ORDER: ReadonlyArray<{ kind: ManageableUnitKind; title: string }> = [
   { kind: "division", title: "Divisions" },
   { kind: "center", title: "Centers" },
 ];
+
+/** Unit · Kind · Code · Scholars · Leader · Description — the group header row spans them all. */
+const COLUMN_COUNT = 6;
+
+const TH_CLASS =
+  "text-muted-foreground px-3 py-2 text-xs font-semibold tracking-wide whitespace-nowrap uppercase";
 
 /**
  * Human label for a unit's data provenance — the raw `source` ("ED", "manual")
@@ -165,12 +186,76 @@ export function AllUnitsDirectory({
         </GapToggle>
       </div>
 
-      {sort === "scholars" ? (
-        <UnitList units={filtered} />
-      ) : (
-        KIND_ORDER.map(({ kind, title }) => (
-          <UnitGroup key={kind} title={title} units={filtered.filter((u) => u.kind === kind)} />
-        ))
+      {/* No match renders nothing at all, exactly as the card list did — the
+          filter bar above is the only affordance a reader needs at that point,
+          and a header-only table reads as a broken one. */}
+      {filtered.length === 0 ? null : (
+        // The fill step from page (--apollo-page) to table body (--apollo-surface)
+        // is never a boundary on its own: the wrapping hairline carries it, and
+        // overflow-hidden makes the rounded corners clip the thead + row fills.
+        <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-xl border">
+          <div className="overflow-x-auto">
+            <table
+              className="w-full border-collapse text-left text-sm"
+              data-testid="all-units-table"
+            >
+              <thead className="bg-apollo-surface-2">
+                <tr className="border-apollo-border border-b">
+                  <th scope="col" className={`${TH_CLASS} w-[34%]`}>
+                    Unit
+                  </th>
+                  <th scope="col" className={TH_CLASS}>
+                    Kind
+                  </th>
+                  <th scope="col" className={TH_CLASS}>
+                    Code
+                  </th>
+                  <th scope="col" className={`${TH_CLASS} text-right`}>
+                    Scholars
+                  </th>
+                  <th scope="col" className={TH_CLASS}>
+                    Leader
+                  </th>
+                  <th scope="col" className={TH_CLASS}>
+                    Description
+                  </th>
+                </tr>
+              </thead>
+              {sort === "scholars" ? (
+                // Sorting by scholars is deliberately a flat list across kinds,
+                // so the biggest units lead — grouping would undo the sort.
+                <tbody>
+                  {filtered.map((unit) => (
+                    <UnitRow key={`${unit.kind}:${unit.code}`} unit={unit} />
+                  ))}
+                </tbody>
+              ) : (
+                // One <tbody> per kind, each led by a header row spanning every
+                // column — the table equivalent of the old group sections.
+                KIND_ORDER.map(({ kind, title }) => {
+                  const group = filtered.filter((u) => u.kind === kind);
+                  if (group.length === 0) return null;
+                  return (
+                    <tbody key={kind} data-testid={`all-units-group-${title.toLowerCase()}`}>
+                      <tr>
+                        <th
+                          scope="colgroup"
+                          colSpan={COLUMN_COUNT}
+                          className="bg-apollo-surface-2 border-apollo-border text-muted-foreground border-y px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
+                        >
+                          {title}
+                        </th>
+                      </tr>
+                      {group.map((unit) => (
+                        <UnitRow key={`${unit.kind}:${unit.code}`} unit={unit} />
+                      ))}
+                    </tbody>
+                  );
+                })
+              )}
+            </table>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -204,27 +289,11 @@ function GapToggle({
   );
 }
 
-function UnitGroup({ title, units }: { title: string; units: UnitDirectoryEntry[] }) {
-  if (units.length === 0) return null;
-  return (
-    <section className="flex flex-col gap-2" data-testid={`all-units-group-${title.toLowerCase()}`}>
-      <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">{title}</p>
-      <UnitList units={units} />
-    </section>
-  );
-}
-
-function UnitList({ units }: { units: UnitDirectoryEntry[] }) {
-  if (units.length === 0) return null;
-  return (
-    <ul className="flex flex-col gap-2">
-      {units.map((unit) => (
-        <UnitRow key={`${unit.kind}:${unit.code}`} unit={unit} />
-      ))}
-    </ul>
-  );
-}
-
+/**
+ * One unit as a row. The row is `relative` so the unit-name `<Link>`'s
+ * `after:inset-0` pseudo-element stretches across all six cells — that anchor,
+ * not a row handler, is what makes the row clickable (R7).
+ */
 function UnitRow({ unit }: { unit: UnitDirectoryEntry }) {
   const hasDescription = !hasNoDescription(unit);
   const compactDiffers = unit.compactName !== unit.officialName;
@@ -235,27 +304,33 @@ function UnitRow({ unit }: { unit: UnitDirectoryEntry }) {
     : unit.category
       ? categoryLabel(unit.category)
       : null;
+  // Compact name (when it differs) and provenance are per-unit facts that do not
+  // deserve columns of their own — they ride under the name as a muted sub-line.
+  const subLine = [compactDiffers ? unit.compactName : null, sourceLabel(unit.source)]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
-    <li
-      className="border-apollo-border bg-apollo-surface flex items-center gap-3 rounded-xl border px-4 py-3.5"
+    <tr
+      className="border-apollo-border hover:bg-apollo-surface-2 focus-within:outline focus-within:-outline-offset-2 focus-within:outline-apollo-maroon relative border-t focus-within:outline-2"
       data-testid={`all-units-row-${unit.kind}-${unit.code}`}
     >
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-          {/* Parent department rides above the name as a muted, left-aligned
-              eyebrow so a division's place in the org chart reads at a glance. */}
-          {unit.parentDeptName && (
-            <span className="text-muted-foreground basis-full text-xs leading-tight">
-              {unit.parentDeptName}
-            </span>
-          )}
-          <span className="truncate text-[15px] font-semibold">{unit.officialName}</span>
-          {typeChip && (
-            <span className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border flex-none rounded-full border px-2 py-0.5 text-xs font-medium">
-              {typeChip}
-            </span>
-          )}
+      <td className="px-3 py-2.5 align-top">
+        {/* Parent department rides above the name as a muted eyebrow so a
+            division's place in the org chart reads at a glance. */}
+        {unit.parentDeptName && (
+          <span className="text-muted-foreground block text-xs leading-tight">
+            {unit.parentDeptName}
+          </span>
+        )}
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <Link
+            href={unit.href}
+            className="text-foreground font-semibold after:absolute after:inset-0 hover:underline"
+            data-testid={`all-units-edit-${unit.kind}-${unit.code}`}
+          >
+            {unit.officialName}
+          </Link>
           {unit.retired && (
             <span
               className="flex-none rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700"
@@ -264,66 +339,75 @@ function UnitRow({ unit }: { unit: UnitDirectoryEntry }) {
               Retired
             </span>
           )}
-        </div>
-        <div className="text-muted-foreground text-sm">
-          {unit.kindLabel} · <UnitCodeRef code={unit.code} />
-          {compactDiffers ? ` · ${unit.compactName}` : ""} · {unit.scholarCount} scholars ·{" "}
-          {sourceLabel(unit.source)}
-        </div>
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-sm">
-          {unit.leaderName ? (
-            <span className="text-foreground">
-              {unit.leaderInterim ? "Interim " : ""}
-              {unit.leaderName}
-            </span>
-          ) : (
-            <GapPill kind={unit.kind} code={unit.code} marker="leader">
-              No leader
-            </GapPill>
-          )}
-          {hasDescription ? (
-            <span className="text-muted-foreground line-clamp-1 max-w-md truncate">
-              {unit.description}
-            </span>
-          ) : (
-            <GapPill kind={unit.kind} code={unit.code} marker="description">
-              No description
-            </GapPill>
-          )}
-        </div>
-      </div>
-      <div className="flex flex-none items-center gap-4">
-        <a
-          href={unit.href}
-          className="text-apollo-slate inline-flex items-center gap-1 text-sm font-medium whitespace-nowrap"
-          data-testid={`all-units-edit-${unit.kind}-${unit.code}`}
-        >
-          Edit
-          <ArrowRight className="size-3.5" aria-hidden />
-        </a>
-      </div>
-    </li>
-  );
-}
+        </span>
+        <span className="text-muted-foreground block text-xs leading-tight">{subLine}</span>
+      </td>
 
-function GapPill({
-  kind,
-  code,
-  marker,
-  children,
-}: {
-  kind: ManageableUnitKind;
-  code: string;
-  marker: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <span
-      className="flex-none rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700"
-      data-testid={`all-units-gap-${kind}-${code}-${marker}`}
-    >
-      {children}
-    </span>
+      <td className="px-3 py-2.5 align-top whitespace-nowrap">
+        <span className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border inline-flex rounded-full border px-2 py-0.5 text-xs font-medium">
+          {unit.kindLabel}
+        </span>
+        {/* Institute / Basic & Clinical / … — the finer qualifier, only when it
+            says something the kind badge does not. */}
+        {typeChip && typeChip !== unit.kindLabel && (
+          <span className="text-muted-foreground mt-0.5 block text-xs">{typeChip}</span>
+        )}
+      </td>
+
+      <td className="text-muted-foreground px-3 py-2.5 align-top whitespace-nowrap">
+        <UnitCodeRef code={unit.code} />
+      </td>
+
+      <td
+        className="px-3 py-2.5 text-right align-top tabular-nums whitespace-nowrap"
+        data-testid={`all-units-scholars-${unit.kind}-${unit.code}`}
+      >
+        {unit.scholarCount}
+      </td>
+
+      <td className="px-3 py-2.5 align-top">
+        {unit.leaderName ? (
+          <span className="text-foreground">
+            {unit.leaderInterim ? "Interim " : ""}
+            {unit.leaderName}
+          </span>
+        ) : (
+          // An em dash, not an empty cell — a blank reads as "not rendered yet"
+          // rather than "nothing there". Screen readers get the words.
+          <span
+            className="text-muted-foreground"
+            title="No leader"
+            data-testid={`all-units-gap-${unit.kind}-${unit.code}-leader`}
+          >
+            <span aria-hidden>—</span>
+            <span className="sr-only">No leader</span>
+          </span>
+        )}
+      </td>
+
+      <td className="px-3 py-2.5 align-top whitespace-nowrap">
+        {hasDescription ? (
+          // The description text itself is not a column (it is a paragraph, and
+          // every row would truncate it) — the check says "present", the tooltip
+          // shows it.
+          <span
+            className="text-apollo-green"
+            title={unit.description ?? undefined}
+            data-testid={`all-units-has-${unit.kind}-${unit.code}-description`}
+          >
+            <span aria-hidden>✓</span>
+            <span className="sr-only">Has a description</span>
+          </span>
+        ) : (
+          <span
+            className="text-apollo-maroon font-medium"
+            data-testid={`all-units-gap-${unit.kind}-${unit.code}-description`}
+          >
+            Missing
+          </span>
+        )}
+      </td>
+    </tr>
   );
 }
 
@@ -332,6 +416,10 @@ function GapPill({
  * real org-unit code (departments + divisions), plain text otherwise (centers,
  * whose slug the Web Directory does not resolve). Opens in a new tab: the Web
  * Directory is a separate WCM system, so the edit console stays put.
+ *
+ * `relative z-10` is LOAD-BEARING: without it the row's stretched anchor
+ * (`after:inset-0`) paints over this link and swallows the click, sending the
+ * reader to the unit editor instead of the Web Directory.
  */
 function UnitCodeRef({ code }: { code: string }) {
   if (!isOrgUnitCode(code)) return <>{code}</>;
@@ -340,7 +428,7 @@ function UnitCodeRef({ code }: { code: string }) {
       href={`https://directory.weill.cornell.edu/orgunits/${code}`}
       target="_blank"
       rel="noopener noreferrer"
-      className="hover:text-foreground underline underline-offset-2"
+      className="hover:text-foreground relative z-10 underline underline-offset-2"
       data-testid={`all-units-code-link-${code}`}
     >
       {code}
