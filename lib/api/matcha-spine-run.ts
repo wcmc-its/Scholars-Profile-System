@@ -184,11 +184,13 @@ const METHOD_FLOOR = 3;
 const METHOD_THRESHOLD = 0.35;
 
 /** #1780 Phase 2 — the total-term ceiling once an officer manually adds culled terms. The automatic
- *  cut still stops at `MAX_TERMS`; click-to-include adds are ADDITIVE on top, up to this hard cap,
- *  bounding worst-case fan-out even if every chip is clicked. Each add is one user action = one
- *  re-run, so this is not an automatic load increase — the "don't raise the cap" rule (which is
- *  about the automatic cut) is intact. */
-const MAX_TERMS_WITH_INCLUDES = 12;
+ *  cut still stops at `MAX_TERMS` (8); click-to-include adds are ADDITIVE on top, up to this hard
+ *  cap, bounding worst-case fan-out even if every chip is clicked. Each add is one user action =
+ *  one re-run, so this is not an automatic load increase — the "don't raise the cap" rule (which is
+ *  about the automatic cut) is intact. Raised 12→15 in step with `MAX_CONCEPTS`: the extractor now
+ *  names up to 15 distinct axes, so the culled tail an officer can search is up to 15 (7 chips over
+ *  the default 8) rather than 4. Default fan-out is unchanged — only an opting-in officer pays. */
+const MAX_TERMS_WITH_INCLUDES = 15;
 
 /** Centrality assigned to an included term that did NOT re-appear in the fresh extraction (rare —
  *  extraction is temp-0). A middling default: the officer asked for it, so it should rank, but it
