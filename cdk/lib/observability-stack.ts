@@ -513,11 +513,18 @@ export class SpsObservabilityStack extends Stack {
     // catch a batch job doing its job. 6x5m rides it out while still catching a
     // genuinely stuck query.
     //
-    // The underlying capacity fact, which no alarm currently states: staging's
-    // writer sits at ServerlessDatabaseCapacity 2.0 (= its MaxCapacity) with
-    // ACUUtilization pinned at 100% for the whole week, so the ETL has no
+    // The underlying capacity fact: staging's writer is SMALL (MaxCapacity 2.0)
+    // and the ETL windows clip against that ceiling, so the ETL has little
     // headroom to absorb into. Retuning the alarm hides the symptom; sizing
     // staging would fix it.
+    //
+    // CORRECTED 2026-07-20. This note previously said ACUUtilization was "pinned
+    // at 100% for the whole week". Measured over 7 days at 5-minute Averages,
+    // that overstates it: p50 is 69.1% and the writer is hard-clipped at the
+    // ceiling for 6.6 h/week (3.9% of periods), not continuously. Staging is
+    // busy and clipped during ETL, not saturated around the clock -- so sizing
+    // it is a throughput improvement, not an emergency. See (5b) for the full
+    // distribution and for why staging gets no ACU alarm until it is resized.
     const auroraCpuSustainPeriods = env === "prod" ? 3 : 6;
     const auroraCpuAlarm = new cloudwatch.Alarm(this, "AuroraCpuAlarm", {
       alarmName: `sps-aurora-cpu-${env}`,
@@ -562,12 +569,20 @@ export class SpsObservabilityStack extends Stack {
     // exactly 2x the per-instance series because prod runs a writer AND a reader
     // -- so a writer-only saturation reads (100+idle)/2 and could never reach 80.
     //
-    // STAGING deliberately gets no ACU alarm. Its writer sits at MaxCapacity 2.0
-    // with ACUUtilization >=50% for 74.6% of the week and >=80% for 9.5%
-    // (longest run 80 min): every threshold that would signal a real problem is
-    // already its steady state, so the alarm would be born permanently ALARM and
-    // un-actionable. Resize staging (see the sizing note on (5)), let it run a
-    // week, re-measure, then apply this identical shape.
+    // STAGING deliberately gets no ACU alarm, on the same 7-day window
+    // (5-minute Averages, n=2016, MaxCapacity 2.0):
+    //   p50 69.1   p90 76.6   p95 91.5   p99 100.0   max 100.0
+    //   >=50% for 76.0% of the week (longest run 205 min)
+    //   >=80% for  8.7% of the week (longest run  70 min)
+    //   mean ServerlessDatabaseCapacity 1.27 of 2.0; hard-clipped at the ceiling
+    //   for 6.6 h/week (3.9% of periods at >=1.9 ACU)
+    //
+    // So an 80/15m alarm here would NOT be permanently in ALARM -- but it would
+    // fire on ~8.7% of the week in runs up to 70 minutes, several times a week,
+    // every week, with the same un-actionable answer each time: staging is small.
+    // That is noise, not signal, and it is the ceiling that needs fixing rather
+    // than the threshold. Resize staging (see the sizing note on (5)), let it run
+    // a week, re-measure, then apply this identical shape.
     if (metricsByName && env === "prod") {
       const auroraAcuAlarm = new cloudwatch.Alarm(this, "AuroraAcuAlarm", {
         alarmName: `sps-aurora-acu-${env}`,
