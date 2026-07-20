@@ -33,6 +33,7 @@ import { UnitLeaderCard } from "@/components/edit/unit-leader-card";
 import { UnitRetireCard } from "@/components/edit/unit-retire-card";
 import { UnitFacultyExportCard } from "@/components/edit/unit-faculty-export-card";
 import { UnitRosterCard } from "@/components/edit/unit-roster-card";
+import { UnitNameCard } from "@/components/edit/unit-name-card";
 import { UnitSlugCard } from "@/components/edit/unit-slug-card";
 import type { RailItem } from "@/components/edit/attribute-rail";
 import type { UnitActorRole, UnitEditContext } from "@/lib/api/unit-edit-context";
@@ -45,6 +46,7 @@ type AttrKey =
   | "roster"
   | "programs"
   | "access"
+  | "name"
   | "slug"
   | "center-type"
   | "retire";
@@ -58,9 +60,19 @@ type AttrDef = {
 
 const isOwnerPlus = (role: UnitActorRole) => role === "owner" || role === "superuser";
 const isSuperuser = (role: UnitActorRole) => role === "superuser";
-const hasRoster = (ctx: UnitEditContext) =>
+
+/** Whether SPS — not the enterprise directory — owns this unit's data.
+ *
+ *  A center is always manually owned; a division only when `source='manual'`.
+ *  A department, and an ED-sourced division, carry directory-derived values that
+ *  the next `etl/ed` run would overwrite, so SPS may not edit them in-row.
+ *  This is the boundary for BOTH the curated roster and the name — the same
+ *  predicate `/api/edit/unit` and `/api/edit/roster` enforce server-side. */
+const isManuallyOwned = (ctx: UnitEditContext) =>
   ctx.unit.unitType === "center" ||
   (ctx.unit.unitType === "division" && ctx.unit.source === "manual");
+
+const hasRoster = isManuallyOwned;
 
 // A department / division has no curated roster, but when the roster-export flag
 // is on they get a read-only "Members" tab carrying the faculty CSV export.
@@ -70,6 +82,9 @@ const hasFacultyExportTab = (ctx: UnitEditContext) =>
 
 /** The full attribute set; `visible` encodes the SPEC § attribute table. */
 const ATTRIBUTES: ReadonlyArray<AttrDef> = [
+  // Only for units SPS owns — a department's name is the directory's, and an
+  // edit here would be silently reverted by the next nightly ETL.
+  { key: "name", label: "Name", visible: isManuallyOwned },
   { key: "description", label: "Description", visible: () => true },
   // #1021 — same visibility as Description (curators / owners / superuser).
   { key: "url", label: "Website", visible: () => true },
@@ -245,6 +260,16 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
       // #1117 — only surfaced for a center with a program taxonomy.
       return (
         <CenterProgramCard centerCode={ctx.unit.code} programs={ctx.programs ?? []} />
+      );
+    case "name":
+      // The rail only surfaces this row for a manually-owned unit, so the
+      // unitType is center | division here (never department).
+      return (
+        <UnitNameCard
+          entityType={ctx.unit.unitType === "division" ? "division" : "center"}
+          entityId={ctx.unit.code}
+          name={ctx.unit.name}
+        />
       );
     case "slug":
       return (

@@ -27,6 +27,8 @@ const {
   mockExecuteRaw,
   mockDepartmentFindUnique,
   mockDivisionFindUnique,
+  mockTxDivisionUpdate,
+  mockTxDivisionFindUnique,
   mockCenterFindUnique,
   mockDivisionFindFirst,
   mockUnitAdminFindMany,
@@ -42,6 +44,8 @@ const {
   mockExecuteRaw: vi.fn(),
   mockDepartmentFindUnique: vi.fn(),
   mockDivisionFindUnique: vi.fn(),
+  mockTxDivisionUpdate: vi.fn(),
+  mockTxDivisionFindUnique: vi.fn(),
   mockCenterFindUnique: vi.fn(),
   mockDivisionFindFirst: vi.fn(),
   mockUnitAdminFindMany: vi.fn(),
@@ -97,7 +101,11 @@ const fakeTx = {
     findUnique: mockTxCenterFindUnique,
     update: mockTxCenterUpdate,
   },
-  division: { create: mockTxDivisionCreate },
+  division: {
+    create: mockTxDivisionCreate,
+    findUnique: mockTxDivisionFindUnique,
+    update: mockTxDivisionUpdate,
+  },
   $executeRaw: mockExecuteRaw,
 };
 
@@ -571,5 +579,197 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
     );
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ ok: false, error: "invalid_entity_type" });
+  });
+});
+
+describe("/api/edit/unit op:'update' — renaming (unit name)", () => {
+  beforeEach(() => {
+    mockCenterFindUnique.mockResolvedValue({ code: "MEYER", slug: "meyer" });
+    mockTxCenterFindUnique.mockResolvedValue({ name: "Old Center Name" });
+    mockUnitAdminFindMany.mockResolvedValue([
+      { entityType: "center", entityId: "MEYER", role: "curator" },
+    ]);
+  });
+
+  it("a Curator renames a center — name is NOT superuser-gated", async () => {
+    const res = await POST(
+      post({
+        op: "update",
+        entityType: "center",
+        entityId: "MEYER",
+        fieldName: "name",
+        value: "Jill Roberts Institute for Research in Inflammatory Bowel Disease",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxCenterUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { code: "MEYER" },
+        data: { name: "Jill Roberts Institute for Research in Inflammatory Bowel Disease" },
+      }),
+    );
+  });
+
+  it("a comms steward renames a center with no unit-admin grant at all", async () => {
+    // The whole point of the feature: the comms office actions a rename
+    // without a code deploy and without a per-unit grant.
+    mockGetEditSession.mockResolvedValue({
+      cwid: "com001",
+      isSuperuser: false,
+      isCommsSteward: true,
+    });
+    mockUnitAdminFindMany.mockResolvedValue([]);
+    const res = await POST(
+      post({
+        op: "update",
+        entityType: "center",
+        entityId: "MEYER",
+        fieldName: "name",
+        value: "Renamed By Comms",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxCenterUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { name: "Renamed By Comms" } }),
+    );
+  });
+
+  it("a user with no role cannot rename", async () => {
+    mockGetEditSession.mockResolvedValue(NONADMIN);
+    mockUnitAdminFindMany.mockResolvedValue([]);
+    const res = await POST(
+      post({
+        op: "update",
+        entityType: "center",
+        entityId: "MEYER",
+        fieldName: "name",
+        value: "Nope",
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(mockTxCenterUpdate).not.toHaveBeenCalled();
+  });
+
+  it("a rename does NOT move the slug", async () => {
+    await POST(
+      post({
+        op: "update",
+        entityType: "center",
+        entityId: "MEYER",
+        fieldName: "name",
+        value: "Some New Name",
+      }),
+    );
+    const data = mockTxCenterUpdate.mock.calls[0][0].data;
+    expect(data).not.toHaveProperty("slug");
+    expect(mockReflectUnitChange).toHaveBeenCalledWith(
+      expect.objectContaining({ unitKind: "center", unitSlug: "meyer", previousSlug: null }),
+    );
+  });
+
+  it("blank and over-long names are rejected", async () => {
+    const blank = await POST(
+      post({ op: "update", entityType: "center", entityId: "MEYER", fieldName: "name", value: "   " }),
+    );
+    expect(blank.status).toBe(400);
+    const long = await POST(
+      post({
+        op: "update",
+        entityType: "center",
+        entityId: "MEYER",
+        fieldName: "name",
+        value: "x".repeat(256),
+      }),
+    );
+    expect(long.status).toBe(400);
+    expect(await long.json()).toMatchObject({ error: "name_too_long" });
+    expect(mockTxCenterUpdate).not.toHaveBeenCalled();
+  });
+
+  it("renames a MANUALLY-created division", async () => {
+    mockDivisionFindUnique.mockResolvedValue({
+      code: "N9999",
+      slug: "cardiology",
+      deptCode: "MED",
+      department: { slug: "medicine" },
+      source: "manual",
+    });
+    mockTxDivisionFindUnique.mockResolvedValue({ name: "Old Division" });
+    mockUnitAdminFindMany.mockResolvedValue([
+      { entityType: "division", entityId: "N9999", role: "curator" },
+    ]);
+    const res = await POST(
+      post({
+        op: "update",
+        entityType: "division",
+        entityId: "N9999",
+        fieldName: "name",
+        value: "New Division Name",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxDivisionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { code: "N9999" }, data: { name: "New Division Name" } }),
+    );
+  });
+
+  it("REFUSES to rename an ED-sourced division — the ETL owns that name", async () => {
+    mockDivisionFindUnique.mockResolvedValue({
+      code: "N1234",
+      slug: "cardiology",
+      deptCode: "MED",
+      department: { slug: "medicine" },
+      source: "ED",
+    });
+    mockUnitAdminFindMany.mockResolvedValue([
+      { entityType: "division", entityId: "N1234", role: "owner" },
+    ]);
+    const res = await POST(
+      post({
+        op: "update",
+        entityType: "division",
+        entityId: "N1234",
+        fieldName: "name",
+        value: "Should Not Persist",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "unit_not_manual" });
+    expect(mockTxDivisionUpdate).not.toHaveBeenCalled();
+  });
+
+  it("a division exposes ONLY name — no other field is writable in-row", async () => {
+    mockDivisionFindUnique.mockResolvedValue({
+      code: "N9999",
+      slug: "cardiology",
+      deptCode: "MED",
+      department: { slug: "medicine" },
+      source: "manual",
+    });
+    const res = await POST(
+      post({
+        op: "update",
+        entityType: "division",
+        entityId: "N9999",
+        fieldName: "description",
+        value: "via the wrong route",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_field" });
+  });
+
+  it("a department is still rejected outright", async () => {
+    const res = await POST(
+      post({
+        op: "update",
+        entityType: "department",
+        entityId: "MED",
+        fieldName: "name",
+        value: "Renamed Dept",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_entity_type" });
   });
 });

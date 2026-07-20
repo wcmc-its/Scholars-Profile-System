@@ -57,6 +57,7 @@ const PATH = "/api/edit/unit";
 
 /** The set of Center fields a per-field update touches. */
 const CENTER_UPDATE_FIELDS = [
+  "name",
   "description",
   "url",
   "slug",
@@ -70,11 +71,32 @@ function isCenterUpdateField(value: string): value is CenterUpdateField {
   return (CENTER_UPDATE_FIELDS as readonly string[]).includes(value);
 }
 
-/** Structural Center fields — Superuser-only (SPEC § Authorization). */
+/** Structural Center fields — Superuser-only (SPEC § Authorization).
+ *
+ *  `name` is deliberately NOT here. A rename is content curation, not structure:
+ *  it moves no URL (the slug is edited separately and stays stable across
+ *  renames) and breaks no link. It therefore rides the normal `canEditUnit`
+ *  path — Superuser, comms_steward, Owner, or Curator — which is what lets the
+ *  comms office action a name change without a code deploy. */
 const CENTER_STRUCTURAL_FIELDS: ReadonlySet<CenterUpdateField> = new Set([
   "slug",
   "centerType",
 ]);
+
+/** The only field a manually-created Division exposes to a per-field update.
+ *
+ *  Ownership, not entity kind, is the boundary: a unit whose name SPS owns is
+ *  renamable here, and an ED-sourced one is not (its `name` is the directory's
+ *  and the next `etl/ed` run would clobber any edit). Same predicate the roster
+ *  route gates on (`division.source !== "manual"` → 400) and the same one
+ *  `unit-edit-context` uses for `hasRoster`. Divisions carry no
+ *  `officialName`/`compactName` columns, so `name` is the whole surface. */
+const DIVISION_UPDATE_FIELDS = ["name"] as const;
+type DivisionUpdateField = (typeof DIVISION_UPDATE_FIELDS)[number];
+
+function isDivisionUpdateField(value: string): value is DivisionUpdateField {
+  return (DIVISION_UPDATE_FIELDS as readonly string[]).includes(value);
+}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request);
@@ -406,32 +428,52 @@ async function handleUpdate(
 ): Promise<NextResponse> {
   const { entityType, entityId, fieldName, value } = body;
 
-  // v1 op:"update" handles centers only — dept/div edits route through
-  // /api/edit/field with a `field_override` row.
-  if (entityType !== "center") {
+  // op:"update" writes unit COLUMNS, so it serves the units whose columns SPS
+  // owns: centers (always manual) and manually-created divisions (`name` only).
+  // Departments — and ED-sourced divisions — keep their directory-derived
+  // values and route through /api/edit/field with a `field_override` row.
+  if (entityType !== "center" && entityType !== "division") {
     return editError(400, "invalid_entity_type", "entityType");
   }
+  const isDivision = entityType === "division";
   if (typeof entityId !== "string" || entityId.length === 0) {
     return editError(400, "invalid_entity_id", "entityId");
   }
-  if (typeof fieldName !== "string" || !isCenterUpdateField(fieldName)) {
+  if (
+    typeof fieldName !== "string" ||
+    (isDivision ? !isDivisionUpdateField(fieldName) : !isCenterUpdateField(fieldName))
+  ) {
     return editError(400, "invalid_field", "fieldName");
   }
 
   // Unit existence — 400 precedes 403.
-  const unit = await findUnit("center", entityId, db.read);
+  const unit = await findUnit(entityType, entityId, db.read);
   if (!unit.ok) return editError(400, "unit_not_found", "entityId");
 
+  // An ED-sourced division's name belongs to the directory: the next etl/ed run
+  // would overwrite anything written here, so refuse rather than accept an edit
+  // that silently reverts overnight.
+  if (isDivision) {
+    const div = await db.read.division.findUnique({
+      where: { code: entityId },
+      select: { source: true },
+    });
+    if (div?.source !== "manual") {
+      return editError(400, "unit_not_manual", "entityId");
+    }
+  }
+
   // Authz: structural fields are Superuser-only; everything else is
-  // Curator/Owner of the center (no cascade — centers have no parent).
-  if (CENTER_STRUCTURAL_FIELDS.has(fieldName)) {
+  // Curator/Owner of the center (no cascade — centers have no parent), or of
+  // the division (which DOES cascade from its parent department).
+  if (!isDivision && CENTER_STRUCTURAL_FIELDS.has(fieldName as CenterUpdateField)) {
     if (!session.isSuperuser) {
       logEditDenial({
         actorCwid: session.cwid,
         targetCwid: entityId,
         path: PATH,
         reason: "not_superuser",
-        targetEntityType: "center",
+        targetEntityType: entityType,
         targetEntityId: entityId,
       });
       return editError(403, "not_superuser");
@@ -439,7 +481,9 @@ async function handleUpdate(
   } else {
     const effective = await getEffectiveUnitRole(
       session,
-      { kind: "center", code: entityId },
+      unit.kind === "division"
+        ? { kind: "division", code: entityId, parentDeptCode: unit.parentDeptCode }
+        : { kind: "center", code: entityId },
       db.read as unknown as UnitAdminLookup,
     );
     const authz = canEditUnit(session, effective);
@@ -449,7 +493,7 @@ async function handleUpdate(
         targetCwid: entityId,
         path: PATH,
         reason: authz.reason,
-        targetEntityType: "center",
+        targetEntityType: entityType,
         targetEntityId: entityId,
       });
       return editError(403, authz.reason);
@@ -462,7 +506,14 @@ async function handleUpdate(
   }
   let updatePayload: Record<string, unknown>;
   let storedValue: string | boolean;
-  if (fieldName === "description") {
+  if (fieldName === "name") {
+    const r = validateUnitName(value);
+    if (!r.ok) return editError(400, r.error, "value");
+    storedValue = r.value;
+    // Non-nullable column — unlike description/url, "" is a validation error
+    // (`invalid_name`), not a clear.
+    updatePayload = { name: r.value };
+  } else if (fieldName === "description") {
     const r = validateUnitDescription(value);
     if (!r.ok) return editError(400, r.error, "value");
     storedValue = r.value;
@@ -508,9 +559,32 @@ async function handleUpdate(
   // Write — in-row update + B03 audit row, one transaction.
   try {
     await db.write.$transaction(async (tx) => {
+      if (isDivision) {
+        // `name` is the only division field here, so the before-snapshot is
+        // one column and needs no field dispatch.
+        const beforeDiv = await tx.division.findUnique({
+          where: { code: entityId },
+          select: { name: true },
+        });
+        await tx.division.update({ where: { code: entityId }, data: updatePayload });
+        await appendAuditRow(tx, {
+          actorCwid: realCwid,
+          impersonatedCwid,
+          targetEntityType: "division",
+          targetEntityId: entityId,
+          action: "field_override",
+          fieldsChanged: [fieldName],
+          beforeValues: { [fieldName]: beforeDiv?.name ?? null },
+          afterValues: { [fieldName]: storedValue },
+          ts: new Date(),
+          requestId,
+        });
+        return;
+      }
       const before = await tx.center.findUnique({
         where: { code: entityId },
         select: {
+          name: true,
           slug: true,
           description: true,
           url: true,
@@ -524,7 +598,9 @@ async function handleUpdate(
         data: updatePayload,
       });
       const beforeValue =
-        fieldName === "slug"
+        fieldName === "name"
+          ? before?.name
+          : fieldName === "slug"
           ? before?.slug
           : fieldName === "description"
             ? before?.description
@@ -538,7 +614,7 @@ async function handleUpdate(
       await appendAuditRow(tx, {
         actorCwid: realCwid,
         impersonatedCwid,
-        targetEntityType: "center",
+        targetEntityType: entityType,
         targetEntityId: entityId,
         // `field_override` action — semantic stretch for centers (no
         // `field_override` row exists), but the audit's manifest of edits
@@ -560,11 +636,21 @@ async function handleUpdate(
   // Post-commit reflection. A slug change flips the URL immediately
   // (Center.slug is the column; no ETL lag), so the previous slug page
   // needs busting too.
-  await reflectUnitChange({
-    unitKind: "center",
-    unitSlug: fieldName === "slug" ? (storedValue as string) : unit.slug,
-    previousSlug: fieldName === "slug" ? unit.slug : null,
-  });
+  if (unit.kind === "division") {
+    // A rename moves no URL, so there is no previous slug to bust — but the
+    // parent dept page lists the division by name and must refresh too.
+    await reflectUnitChange({
+      unitKind: "division",
+      unitSlug: unit.slug,
+      parentDeptSlug: unit.parentDeptSlug ?? undefined,
+    });
+  } else {
+    await reflectUnitChange({
+      unitKind: "center",
+      unitSlug: fieldName === "slug" ? (storedValue as string) : unit.slug,
+      previousSlug: fieldName === "slug" ? unit.slug : null,
+    });
+  }
 
   return editOk({ fieldName, value: storedValue });
 }
