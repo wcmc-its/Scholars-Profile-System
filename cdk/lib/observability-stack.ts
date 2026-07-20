@@ -13,6 +13,7 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as sns from "aws-cdk-lib/aws-sns";
 import * as snsSubs from "aws-cdk-lib/aws-sns-subscriptions";
+import * as sqs from "aws-cdk-lib/aws-sqs";
 import { type Construct } from "constructs";
 import { type AppStack } from "./app-stack";
 import { type SpsEnvConfig } from "./config";
@@ -838,8 +839,31 @@ export class SpsObservabilityStack extends Stack {
       retention: logs.RetentionDays.ONE_MONTH,
     });
 
+    // Dead-letter queue for the paging path. An async Lambda invocation retries
+    // twice and then DISCARDS the event. On 2026-07-19 the prod relay hit
+    // `TypeError: fetch failed` POSTing to the Teams webhook, burned all three
+    // attempts inside three minutes (13:05:11 / 13:06:05 / 13:08:11), and the
+    // message was gone -- and that message was the daily Freshness page
+    // reporting a 34-day-stale Spotlight artifact (#1813).
+    //
+    // `sps-oncall-relay-errors-${env}` did its job: it fired and emailed. But
+    // it can only say a delivery FAILED, never what the lost card said. This
+    // queue keeps the SNS event so a dropped page stays readable and can be
+    // replayed. 14 days is the SQS maximum -- a page lost on a Friday must
+    // still be recoverable after a holiday.
+    //
+    // Deliberately NO alarm on queue depth: it would fire on precisely the
+    // condition the errors alarm already covers, i.e. page twice for one fault.
+    const relayDlq = new sqs.Queue(this, "OncallRelayDlq", {
+      queueName: `sps-oncall-relay-dlq-${env}`,
+      retentionPeriod: Duration.days(14),
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      enforceSSL: true,
+    });
+
     const relay = new NodejsFunction(this, "OncallRelayFunction", {
       functionName: `sps-oncall-relay-${env}`,
+      deadLetterQueue: relayDlq,
       entry: path.join(__dirname, "../lambda/oncall-relay/index.ts"),
       handler: "handler",
       runtime: lambda.Runtime.NODEJS_22_X,

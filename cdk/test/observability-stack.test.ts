@@ -596,6 +596,23 @@ describe("SpsObservabilityStack", () => {
       });
     });
 
+    it("the relay has a dead-letter queue so a dropped page stays recoverable", () => {
+      // Regression guard for 2026-07-19: three `fetch failed` retries exhausted
+      // in three minutes and the event -- the daily Freshness page for a
+      // 34-day-stale Spotlight artifact -- was discarded with no way to read it
+      // back. The errors alarm reports THAT a delivery failed, never WHAT was
+      // lost; only the DLQ preserves the payload.
+      template.hasResourceProperties("AWS::Lambda::Function", {
+        FunctionName: "sps-oncall-relay-prod",
+        DeadLetterConfig: { TargetArn: Match.anyValue() },
+      });
+      template.hasResourceProperties("AWS::SQS::Queue", {
+        QueueName: "sps-oncall-relay-dlq-prod",
+        MessageRetentionPeriod: 1209600, // 14 days, the SQS maximum
+        SqsManagedSseEnabled: true,
+      });
+    });
+
     it("Lambda env vars carry only the secret ARN -- no URL-shaped values (T3)", () => {
       const fns = template.findResources("AWS::Lambda::Function");
       const props = Object.values(fns)[0]?.Properties as
