@@ -26,9 +26,13 @@
 // clear, so a second arm in the same process would be served the first arm's seeded value. The
 // caller loops `ARM=... npx tsx gloss-ab-run.ts` so each arm starts on a cold Map.
 //
-// Run: ARM=off|substitute|append npx tsx gloss-ab-run.ts <extractions.json> [presigned-PUT-url]
+// Results go back via the task role's OWN s3:PutObject (it has that, and no s3:GetObject — which
+// is why the INBOUND direction needs presigned GETs but the outbound does not).
+//
+// Run: ARM=off|substitute|append npx tsx gloss-ab-run.ts <extractions.json> [s3://bucket/key]
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { cachedReasonAgg } from "@/lib/api/reason-agg-cache";
 import { rankResearchersForDescriptionSpine } from "@/lib/api/matcha-spine-run";
 import { normalizeDescription } from "@/lib/api/matcha";
@@ -56,7 +60,7 @@ async function main() {
     modelId: string;
     fixtures: { id: string; paste: string; text: string; extraction: MatchaExtraction }[];
   };
-  const putUrl = process.argv[3];
+  const dest = process.argv[3]; // s3://bucket/key
 
   // Enters the memo key. Pinned identically in step 1; the default is module-private.
   process.env.MATCHA_EXTRACT_MODEL = payload.modelId;
@@ -107,9 +111,12 @@ async function main() {
   }
 
   const out = JSON.stringify({ arm: ARM, ranked, unmeasured }, null, 2);
-  if (putUrl) {
-    const res = await fetch(putUrl, { method: "PUT", body: out });
-    if (!res.ok) throw new Error(`upload failed: ${res.status}`);
+  if (dest) {
+    const m = /^s3:\/\/([^/]+)\/(.+)$/.exec(dest);
+    if (!m) throw new Error(`bad destination (want s3://bucket/key): ${dest}`);
+    await new S3Client({}).send(
+      new PutObjectCommand({ Bucket: m[1], Key: m[2], Body: out, ContentType: "application/json" }),
+    );
     console.error(`uploaded ${Object.keys(ranked).length} fixtures (${unmeasured.length} unmeasured)`);
   } else {
     console.log(out);

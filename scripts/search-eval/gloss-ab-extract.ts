@@ -19,6 +19,9 @@ import { normalizeDescription } from "@/lib/api/matcha";
 export const PINNED_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
 
 async function main() {
+  // The AI SDK prints a compatibility warning to STDOUT, which is where the JSON artifact goes —
+  // it corrupts the file the dispatcher uploads. Silence it rather than grepping it back out.
+  (globalThis as { AI_SDK_LOG_WARNINGS?: boolean }).AI_SDK_LOG_WARNINGS = false;
   process.env.MATCHA_EXTRACT_MODEL = PINNED_MODEL;
   const pastes: { id: string; paste: string }[] = JSON.parse(readFileSync(process.argv[2], "utf8"));
 

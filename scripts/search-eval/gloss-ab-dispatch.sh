@@ -59,10 +59,12 @@ for ARM in off substitute append; do
 done
 echo "ALL ARMS DONE"'
 
-declare -A PUTS
-for arm in off substitute append; do
-  PUTS[$arm]="$(aws s3 presign "s3://$BUCKET/$PREFIX/$arm.json" --expires-in "$EXPIRY" --http-method PUT)"
-done
+# Outbound needs no presigning: the task role HAS s3:PutObject on this bucket (it just has no
+# s3:GetObject, which is why the inbound direction does need presigned GETs). Pass plain s3:// URIs
+# and let the runner put with its own role.
+PUT_OFF="s3://$BUCKET/$PREFIX/off.json"
+PUT_SUB="s3://$BUCKET/$PREFIX/substitute.json"
+PUT_APP="s3://$BUCKET/$PREFIX/append.json"
 
 echo "launching one-off task on $TASKDEF…"
 TASK_ARN="$(aws ecs run-task \
@@ -72,7 +74,7 @@ TASK_ARN="$(aws ecs run-task \
   --network-configuration "$NETCFG" \
   --overrides "$(jq -n \
       --arg s "$SCRIPT" --arg gr "$GET_RUN" --arg gd "$GET_DATA" \
-      --arg po "${PUTS[off]}" --arg ps "${PUTS[substitute]}" --arg pa "${PUTS[append]}" \
+      --arg po "$PUT_OFF" --arg ps "$PUT_SUB" --arg pa "$PUT_APP" \
       '{containerOverrides:[{name:"etl",command:["bash","-c",$s],environment:[
          {name:"GET_RUN",value:$gr},{name:"GET_DATA",value:$gd},
          {name:"PUT_off",value:$po},{name:"PUT_substitute",value:$ps},{name:"PUT_append",value:$pa}]}]}')" \
