@@ -469,6 +469,49 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::SNS::Subscription",
     },
+    "OncallRelayDlq06D1281A": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "MessageRetentionPeriod": 1209600,
+        "QueueName": "sps-oncall-relay-dlq-prod",
+        "SqsManagedSseEnabled": true,
+      },
+      "Type": "AWS::SQS::Queue",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "OncallRelayDlqPolicy40550BA8": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sqs:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "OncallRelayDlq06D1281A",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Queues": [
+          {
+            "Ref": "OncallRelayDlq06D1281A",
+          },
+        ],
+      },
+      "Type": "AWS::SQS::QueuePolicy",
+    },
     "OncallRelayErrorsD5425B8E": {
       "Properties": {
         "AlarmActions": [
@@ -507,6 +550,14 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
           "S3Key": "17a03f020da9b01a893dde74941b93f2b502064f610b4bfc4f51b2df343bc16c.zip",
+        },
+        "DeadLetterConfig": {
+          "TargetArn": {
+            "Fn::GetAtt": [
+              "OncallRelayDlq06D1281A",
+              "Arn",
+            ],
+          },
         },
         "Environment": {
           "Variables": {
@@ -669,6 +720,16 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       "Properties": {
         "PolicyDocument": {
           "Statement": [
+            {
+              "Action": "sqs:SendMessage",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "OncallRelayDlq06D1281A",
+                  "Arn",
+                ],
+              },
+            },
             {
               "Action": [
                 "secretsmanager:GetSecretValue",
@@ -1415,6 +1476,49 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::SNS::Subscription",
     },
+    "OncallRelayDlq06D1281A": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "MessageRetentionPeriod": 1209600,
+        "QueueName": "sps-oncall-relay-dlq-staging",
+        "SqsManagedSseEnabled": true,
+      },
+      "Type": "AWS::SQS::Queue",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "OncallRelayDlqPolicy40550BA8": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sqs:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "OncallRelayDlq06D1281A",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Queues": [
+          {
+            "Ref": "OncallRelayDlq06D1281A",
+          },
+        ],
+      },
+      "Type": "AWS::SQS::QueuePolicy",
+    },
     "OncallRelayErrorsD5425B8E": {
       "Properties": {
         "AlarmActions": [
@@ -1453,6 +1557,14 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
           "S3Key": "17a03f020da9b01a893dde74941b93f2b502064f610b4bfc4f51b2df343bc16c.zip",
+        },
+        "DeadLetterConfig": {
+          "TargetArn": {
+            "Fn::GetAtt": [
+              "OncallRelayDlq06D1281A",
+              "Arn",
+            ],
+          },
         },
         "Environment": {
           "Variables": {
@@ -1615,6 +1727,16 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       "Properties": {
         "PolicyDocument": {
           "Statement": [
+            {
+              "Action": "sqs:SendMessage",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "OncallRelayDlq06D1281A",
+                  "Arn",
+                ],
+              },
+            },
             {
               "Action": [
                 "secretsmanager:GetSecretValue",
