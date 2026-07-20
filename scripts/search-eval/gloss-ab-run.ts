@@ -123,4 +123,14 @@ async function main() {
   }
 }
 
-void main();
+// EXIT EXPLICITLY. `main()` resolving is not enough to end the process: the Prisma pool and the
+// OpenSearch client's keep-alive sockets stay open, so node keeps the event loop alive and the
+// caller's `for ARM in ...` loop never reaches the next arm. The work is already durable at this
+// point (results are uploaded), so a hard exit loses nothing.
+void main().then(
+  () => process.exit(0),
+  (e) => {
+    console.error(e);
+    process.exit(1);
+  },
+);
