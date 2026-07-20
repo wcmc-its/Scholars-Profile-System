@@ -531,7 +531,7 @@ describe("SpsObservabilityStack", () => {
           }>
         | undefined;
       expect(transforms).toHaveLength(1);
-      expect(transforms?.[0]?.MetricNamespace).toBe("SPS/Auth");
+      expect(transforms?.[0]?.MetricNamespace).toBe("SPS/Auth/prod");
       expect(transforms?.[0]?.MetricName).toBe("EditAuthzDenied");
       // The log group reference resolves to AppStack's app log group via
       // CloudFormation `Fn::ImportValue`; assert the destination LogGroupName
@@ -554,7 +554,7 @@ describe("SpsObservabilityStack", () => {
       const props = Object.values(alarms)[0]?.Properties;
       expect(props?.Threshold).toBe(0);
       expect(props?.DatapointsToAlarm).toBe(1);
-      expect(props?.Namespace).toBe("SPS/Search");
+      expect(props?.Namespace).toBe("SPS/Search/prod");
     });
 
     it("the edit_authz_denied alarm has the right threshold and SNS action", () => {
@@ -569,7 +569,7 @@ describe("SpsObservabilityStack", () => {
       expect(props?.ComparisonOperator).toBe("GreaterThanThreshold");
       expect(props?.Statistic).toBe("Sum");
       expect(props?.Period).toBe(300);
-      expect(props?.Namespace).toBe("SPS/Auth");
+      expect(props?.Namespace).toBe("SPS/Auth/prod");
       expect(props?.MetricName).toBe("EditAuthzDenied");
       expect(props?.TreatMissingData).toBe("notBreaching");
       const actions = props?.AlarmActions as unknown[] | undefined;
@@ -1105,6 +1105,70 @@ describe("SpsObservabilityStack", () => {
       )?.DashboardName;
       expect(name).toBeDefined();
       expect(name!).toMatch(PRINTABLE_ASCII);
+    });
+  });
+
+  // ----------------------------------------------------------------------
+  // Cross-env separation of the log-derived metrics
+  // ----------------------------------------------------------------------
+  // Regression guard for a live defect found 2026-07-19: all three MetricFilters
+  // published into an env-less namespace (SPS/Data, SPS/Search, SPS/Auth). Both
+  // envs deploy into the SAME account, so each was ONE series that both envs'
+  // filters wrote and both envs' alarms read -- a staging pool timeout would
+  // have fired sps-db-pool-timeout-prod onto the prod P1 page topic. Neither
+  // env's own suite could see it: each asserted its own namespace in isolation
+  // and both passed. Only comparing the two templates catches it.
+  describe("log-derived metrics are scoped per env", () => {
+    const prod = buildObservabilityStack("prod").template;
+    const staging = buildObservabilityStack("staging").template;
+
+    const namespaces = (t: typeof prod, resource: string): string[] => {
+      const found = t.findResources(resource);
+      return Object.values(found)
+        .flatMap((r) => {
+          const p = r.Properties ?? {};
+          const transforms = p.MetricTransformations as
+            | Array<{ MetricNamespace?: string }>
+            | undefined;
+          return transforms !== undefined
+            ? transforms.map((x) => x.MetricNamespace)
+            : [p.Namespace as string | undefined];
+        })
+        .filter((n): n is string => typeof n === "string")
+        .filter((n) => n.startsWith("SPS/"));
+    };
+
+    it("every MetricFilter namespace carries its env literal", () => {
+      const prodNs = namespaces(prod, "AWS::Logs::MetricFilter");
+      const stagingNs = namespaces(staging, "AWS::Logs::MetricFilter");
+      expect(prodNs).toHaveLength(3);
+      expect(stagingNs).toHaveLength(3);
+      for (const n of prodNs) expect(n).toMatch(/\/prod$/);
+      for (const n of stagingNs) expect(n).toMatch(/\/staging$/);
+    });
+
+    it("no log-derived namespace is shared between prod and staging", () => {
+      const shared = namespaces(prod, "AWS::Logs::MetricFilter").filter((n) =>
+        namespaces(staging, "AWS::Logs::MetricFilter").includes(n),
+      );
+      expect(shared).toEqual([]);
+    });
+
+    it("each env's alarms read the namespace its own filter writes", () => {
+      for (const [t, env] of [
+        [prod, "prod"],
+        [staging, "staging"],
+      ] as const) {
+        const written = new Set(namespaces(t, "AWS::Logs::MetricFilter"));
+        const read = namespaces(t, "AWS::CloudWatch::Alarm");
+        // Only the three log-derived alarms live under SPS/; the rest key on
+        // AWS/* namespaces and are filtered out above.
+        expect(read).toHaveLength(3);
+        for (const n of read) {
+          expect(n).toMatch(new RegExp(`/${env}$`));
+          expect(written.has(n)).toBe(true);
+        }
+      }
     });
   });
 });
