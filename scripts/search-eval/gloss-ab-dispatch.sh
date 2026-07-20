@@ -125,8 +125,23 @@ TASK_ARN="$(aws ecs run-task \
 
 [[ -n "$TASK_ARN" && "$TASK_ARN" != "None" ]] || { echo "run-task returned no ARN" >&2; exit 1; }
 echo "task: $TASK_ARN"
+# `aws ecs wait tasks-stopped` is a FIXED 100 x 6s = 10 minutes with no way to extend, and it exits
+# non-zero on timeout — which would abort this script before the download step even though the
+# results may already be in S3. Poll instead, with a ceiling generous enough for three arms.
 echo "waiting (retrieval is ~15 OpenSearch fan-outs per arm; several minutes)..."
-aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN"
+DEADLINE=$(( SECONDS + ${WAIT_MAX:-2400} ))
+while :; do
+  STATUS="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" \
+    --query 'tasks[0].lastStatus' --output text)"
+  [[ "$STATUS" == "STOPPED" ]] && break
+  if (( SECONDS > DEADLINE )); then
+    echo "still $STATUS after ${WAIT_MAX:-2400}s — giving up on the wait, NOT on the results." >&2
+    echo "  logs: aws logs tail /aws/ecs/$TASKDEF --since 1h" >&2
+    echo "  then re-run just the download against: s3://$BUCKET/$PREFIX/" >&2
+    exit 1
+  fi
+  sleep 10
+done
 
 CODE="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" \
   --query 'tasks[0].containers[0].exitCode' --output text)"
