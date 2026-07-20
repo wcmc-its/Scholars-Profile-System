@@ -2,9 +2,12 @@
 # MATCHA_GLOSS_QUERY A/B — STEP 3 of 3, the driver. Runs LOCALLY.
 #
 # Ships step 2 + the local extraction into the VPC on a one-off `sps-etl-staging` task and brings
-# three ranked lists back. Transport is PRESIGNED URLs, not task IAM: that role can PutObject but
-# has NO s3:GetObject, and the ECS command override caps at 8KB — too small for the extraction.
-# A presigned URL needs no permissions on the task side, only network, which this task has.
+# three ranked lists back.
+#
+# Transport is asymmetric because the task role's permissions are: INBOUND uses presigned GET URLs
+# (the role has NO s3:GetObject, and the ECS command override caps at 8KB — too small to carry the
+# extraction inline); a presigned URL needs no task-side permission, only network. OUTBOUND is a
+# plain s3:// URI written with the role's own s3:PutObject, which it does have.
 #
 #   ./gloss-ab-dispatch.sh                 # uses ./extractions.json from step 1
 #   ./gloss-ab-dispatch.sh other.json
@@ -37,7 +40,7 @@ mkdir -p "$OUT"
 # `awsvpcConfiguration`/`subnets`. Resolved here rather than passed in, so no file or shell history
 # ever holds subnet/sg ids — this repo is PUBLIC.
 if [[ -z "${NETCFG:-}" ]]; then
-  echo "resolving network config from the $TASKDEF nightly state machine…"
+  echo "resolving network config from the ${TASKDEF} nightly state machine..."
   SM_ARN="$(aws stepfunctions list-state-machines \
     --query "stateMachines[?name=='scholars-nightly-${TASKDEF##*-}'].stateMachineArn" --output text)"
   [[ -n "$SM_ARN" && "$SM_ARN" != "None" ]] || {
@@ -55,7 +58,7 @@ jq -e '.awsvpcConfiguration.subnets | length > 0' <<<"$NETCFG" >/dev/null \
   || { echo "could not resolve networkConfiguration" >&2; exit 1; }
 echo "  network config OK ($(jq -r '.awsvpcConfiguration.subnets|length' <<<"$NETCFG") subnets)"
 
-echo "staging payload → s3://$BUCKET/$PREFIX/"
+echo "staging payload -> s3://${BUCKET}/${PREFIX}/"
 aws s3 cp "$EXTRACTIONS"          "s3://$BUCKET/$PREFIX/extractions.json" --only-show-errors
 aws s3 cp "$DIR/gloss-ab-run.ts"  "s3://$BUCKET/$PREFIX/run.ts"           --only-show-errors
 
@@ -83,7 +86,7 @@ PUT_OFF="s3://$BUCKET/$PREFIX/off.json"
 PUT_SUB="s3://$BUCKET/$PREFIX/substitute.json"
 PUT_APP="s3://$BUCKET/$PREFIX/append.json"
 
-echo "launching one-off task on $TASKDEF…"
+echo "launching one-off task on ${TASKDEF}..."
 TASK_ARN="$(aws ecs run-task \
   --cluster "$CLUSTER" \
   --task-definition "$TASKDEF" \
@@ -99,7 +102,7 @@ TASK_ARN="$(aws ecs run-task \
 
 [[ -n "$TASK_ARN" && "$TASK_ARN" != "None" ]] || { echo "run-task returned no ARN" >&2; exit 1; }
 echo "task: $TASK_ARN"
-echo "waiting (retrieval is ~15 OpenSearch fan-outs per arm; several minutes)…"
+echo "waiting (retrieval is ~15 OpenSearch fan-outs per arm; several minutes)..."
 aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN"
 
 CODE="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" \
