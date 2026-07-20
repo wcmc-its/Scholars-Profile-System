@@ -230,6 +230,12 @@ type ResolvedTerm = {
   resolution: MeshResolution | null;
 };
 
+/** A merged cluster plus its representative term (`members[0]`) — the identity the wire concept,
+ *  the include chips, and the culled tail all key on. Carrying `term` lets the #1780 term-based
+ *  helpers (`selectWithMethodFloor` / `applyIncludes` / `culledTerms`) run on CLUSTERS after the
+ *  merge, which is what #1838 (cluster-before-cap) needs: cap to distinct axes, not raw terms. */
+type SpineCluster = TermCluster & { term: string };
+
 /**
  * The spine's result — the UI ⇄ ranker contract's payload (`sponsor-match-contract.ts`).
  *
@@ -387,53 +393,40 @@ export async function rankResearchersForDescriptionSpine(
   // as before. MAX_TERMS caps either source.
   const extraction = await extractMatchaConcepts(text);
   const titleSummary = extraction.titleSummary; // survives the dictionary fallback below (undefined there)
-  // #1780 — cap to MAX_TERMS, but reserve slots for qualifying methods the plain centrality cut
-  // would drop (they score 0.3–0.5 by the rubric). A floor inside the cap ⇒ fan-out unchanged.
-  let extracted: ExtractedConcept[] = selectWithMethodFloor(extraction.concepts, {
-    max: MAX_TERMS,
-    methodFloor: METHOD_FLOOR,
-    methodThreshold: METHOD_THRESHOLD,
-  });
-  // #1780 Phase 2 — force officer-picked culled terms back in, additively, capped at
-  // MAX_TERMS_WITH_INCLUDES. LLM path only: the dictionary fallback below has no culled tail, so
-  // there is nothing for an officer to have added. Sanitized upstream at the route trust boundary.
   const include = opts.include ?? [];
-  if (extracted.length > 0 && include.length > 0) {
-    extracted = applyIncludes(extracted, extraction.concepts, include, {
-      hardMax: MAX_TERMS_WITH_INCLUDES,
-      synth: (term) => ({ term, kind: "concept" as const, centrality: INCLUDE_SYNTH_CENTRALITY }),
-    });
-  }
-  if (extracted.length === 0) {
+
+  // #1838 — CLUSTER BEFORE CAPPING (LLM path). The old order capped `extraction.concepts` to
+  // MAX_TERMS by centrality and only THEN clustered, so the 8 searched slots could be spent on
+  // taxonomically-redundant concepts (four diseases a co-extracted parent already subsumes) while
+  // distinct axes fell below the cut. Resolving + clustering the FULL extraction first, then capping
+  // to MAX_TERMS *clusters*, makes the default 8 hold 8 distinct axes. The fan-out that trips the
+  // OpenSearch breaker — per-cluster `searchPeople` — is UNCHANGED at ≤ MAX_TERMS; only taxonomy
+  // resolution now spans the full extraction (≤ MAX_CONCEPTS calls, was ≤ MAX_TERMS), which is not
+  // the breaker path. The dictionary fallback stays capped-FIRST: it has uniform centrality
+  // (clustering can't distinguish axes) and would otherwise resolve every vocab hit unbounded.
+  const llmPath = extraction.concepts.length > 0;
+  let source: ExtractedConcept[] = extraction.concepts;
+  if (!llmPath) {
     const vocab = await loadTaxonomyVocab();
-    extracted = extractTerms(text, vocab)
+    source = extractTerms(text, vocab)
       .slice(0, MAX_TERMS)
       .map((term) => ({ term, kind: "concept" as const, centrality: UNIFORM_CENTRALITY }));
   }
-  if (extracted.length === 0) return empty;
-
-  // #1780 Phase 2 — the culled tail for the client's include chips: the full extraction minus the
-  // FINAL selection, so a just-added term drops off the chips. [] on the dictionary fallback
-  // (`extraction.concepts` is [] there ⇒ nothing to offer).
-  const culled: CulledConcept[] = culledTerms(extraction.concepts, extracted).map((c) => ({
-    term: c.term,
-    kind: c.kind,
-    centrality: c.centrality,
-  }));
+  if (source.length === 0) return empty;
 
   // The funder's qualifying context per term (the LLM extractor's `gloss`; empty on the dictionary
-  // fallback). The spine searches this — the sponsor's SENSE — as the free-text query instead of the
-  // bare canonical token, so a generic organelle/method word ranks the sense rather than everything
-  // it can literally hit. The MeSH resolution below still keys on `term`, so only the BM25 axis moves.
+  // fallback). Keyed off the FULL source so a surviving cluster's representative gloss is found. The
+  // spine searches this — the sponsor's SENSE — as the free-text query instead of the bare canonical
+  // token; the MeSH resolution below still keys on `term`, so only the BM25 axis moves.
   const glossByTerm = new Map(
-    extracted.flatMap((c) => (c.gloss ? [[c.term, c.gloss] as const] : [])),
+    source.flatMap((c) => (c.gloss ? [[c.term, c.gloss] as const] : [])),
   );
 
-  // Resolve each concept to its MeSH descendant-UI set + representative descriptor
-  // (one taxonomy round-trip per concept; the list is short by construction). The
-  // centrality rides through so the ClusterTerm carries a real fusion multiplicand.
+  // Resolve each concept to its MeSH descendant-UI set + representative descriptor (one taxonomy
+  // round-trip per concept; the list is short by construction). Centrality/kind ride through so the
+  // ClusterTerm carries a real fusion multiplicand. #1838: this now runs over the full extraction.
   const resolved: ResolvedTerm[] = await Promise.all(
-    extracted.map(async (c) => ({
+    source.map(async (c) => ({
       term: c.term,
       centrality: c.centrality,
       kind: c.kind,
@@ -441,24 +434,90 @@ export async function rankResearchersForDescriptionSpine(
     })),
   );
 
-  // Cluster redundant phrasing by MeSH-set equivalence; each ClusterTerm carries its
-  // concept's centrality (mergeTermClusters takes the MAX across merged members) and
-  // its kind (the cluster takes its FIRST member's — the representative).
+  // Cluster redundant phrasing by MeSH-set equivalence (subsumption or Jaccard ≥ τ); each cluster
+  // takes the MAX member centrality and its FIRST member's kind. `term` = that representative member,
+  // the identity the wire concept, include chips, and culled tail all key on.
   const clusterTerms: ClusterTerm[] = resolved.map((r) => ({
     term: r.term,
     descendantUis: r.resolution?.descendantUis ?? [],
     centrality: r.centrality,
     kind: r.kind,
   }));
-  const clusters = mergeTermClusters(clusterTerms, CLUSTER_TAU);
-  if (clusters.length === 0) return empty;
+  const allClusters: SpineCluster[] = mergeTermClusters(clusterTerms, CLUSTER_TAU).map((c) => ({
+    ...c,
+    term: c.members[0],
+  }));
+  if (allClusters.length === 0) return empty;
+
+  // #1780 — cap to MAX_TERMS CLUSTERS, reserving slots for qualifying methods a plain centrality cut
+  // would drop (they score 0.3–0.5 by the rubric). Runs on clusters now (#1838), so both the floor
+  // and the cap count DISTINCT axes, and the fan-out stays bounded at MAX_TERMS.
+  // #1838 interaction with the #1780 method floor, disclosed: a qualifying method whose MeSH set is
+  // SUBSUMED BY a co-extracted concept (e.g. "Immunotherapy, Adoptive" under "Immunotherapy") now
+  // merges into that concept's cluster, which takes the representative's "concept" kind — so the
+  // floor no longer reserves a separate slot for it. That is by design here: a method sharing a
+  // concept's MeSH axis IS that axis, and a reserved slot for it is exactly the duplication #1838
+  // removes. The method term still rides the merged cluster's query; it drops only if the whole
+  // cluster falls below the cap (i.e. behind MAX_TERMS more-central DISTINCT axes).
+  let clusters: SpineCluster[] = selectWithMethodFloor(allClusters, {
+    max: MAX_TERMS,
+    methodFloor: METHOD_FLOOR,
+    methodThreshold: METHOD_THRESHOLD,
+  });
+
+  // #1780 Phase 2 — force officer-picked culled clusters back in, additively, capped at
+  // MAX_TERMS_WITH_INCLUDES. LLM path only: the dictionary fallback has no culled tail, so there is
+  // nothing for an officer to have added. An included chip is normally a culled cluster's
+  // representative term ⇒ applyIncludes re-selects that whole already-resolved cluster. A term that
+  // matches no representative (it dropped out of THIS run's temp-0 re-extraction — see the #1839
+  // note) is SYNTHED, but we resolve it to MeSH FIRST so it keeps the attribution boost + tagged-count
+  // evidence it carried before #1838 moved resolution ahead of the cap. Sanitized at the route boundary.
+  const sourceTermSet = new Set(source.map((c) => c.term.trim().toLowerCase()));
+  const includeResolved: ResolvedTerm[] =
+    llmPath && include.length > 0
+      ? await Promise.all(
+          [...new Set(include.map((t) => t.trim()).filter((t) => t.length > 0))]
+            .filter((t) => !sourceTermSet.has(t.toLowerCase()))
+            .map(async (term) => ({
+              term,
+              centrality: INCLUDE_SYNTH_CENTRALITY,
+              kind: "concept" as const,
+              resolution: (await matchQueryToTaxonomy(term)).meshResolution,
+            })),
+        )
+      : [];
+  const includeResByTerm = new Map(includeResolved.map((r) => [r.term.toLowerCase(), r] as const));
+  if (llmPath && include.length > 0) {
+    clusters = applyIncludes(clusters, allClusters, include, {
+      hardMax: MAX_TERMS_WITH_INCLUDES,
+      synth: (term) => ({
+        term,
+        members: [term],
+        descendantUis: includeResByTerm.get(term.trim().toLowerCase())?.resolution?.descendantUis ?? [],
+        centrality: INCLUDE_SYNTH_CENTRALITY,
+        kind: "concept" as const,
+      }),
+    });
+  }
+
+  // #1780 Phase 2 — the culled tail for the client's include chips: the clusters the cap did NOT
+  // search, most-central first. [] on the dictionary fallback (no LLM tail to offer).
+  const culled: CulledConcept[] = llmPath
+    ? culledTerms(allClusters, clusters).map((c) => ({
+        term: c.term,
+        kind: c.kind,
+        centrality: c.centrality,
+      }))
+    : [];
 
   // Coverage lookup: `mesh_descriptor.local_pub_coverage` (a fraction, not a count). One
   // bounded read over the resolved root descriptor UIs. DISPLAY-ONLY now — it feeds the rail's
   // rarity badge via `corpusCoverage` and no longer touches the fusion weight at all.
   const rootUiByTerm = new Map<string, string>();
   const repByTerm = new Map<string, MeshResolution>();
-  for (const r of resolved) {
+  // `includeResolved` (the #1838 fix for non-reappearing includes) rides in here so a synthed
+  // include's rep/coverage resolve exactly like an extracted concept's.
+  for (const r of [...resolved, ...includeResolved]) {
     if (r.resolution) {
       rootUiByTerm.set(r.term, r.resolution.descriptorUi);
       repByTerm.set(r.term, r.resolution);

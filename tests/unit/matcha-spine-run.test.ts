@@ -508,6 +508,92 @@ describe("rankResearchersForDescriptionSpine", () => {
     expect(mockSearchPeople).toHaveBeenCalledTimes(8);
   });
 
+  it("#1838 clusters BEFORE capping so the default slots are distinct axes, not subsumed duplicates", async () => {
+    // A co-extracted parent that SUBSUMES four children (all under it in the tree), plus five
+    // distinct axes at lower centrality. The OLD order (cap 8 concepts by centrality, THEN cluster)
+    // spends five of its eight slots on the CVD family — which collapses to ONE cluster — and drops
+    // the two lowest-centrality distinct axes below the cut. Clustering FIRST collapses the family
+    // before it consumes a slot, so every distinct axis survives the cap on clusters.
+    const parent = { term: "cardiovascular diseases", kind: "concept" as const, centrality: 1.0 };
+    const children = [
+      { term: "atherosclerosis", kind: "concept" as const, centrality: 0.95 },
+      { term: "heart failure", kind: "concept" as const, centrality: 0.9 },
+      { term: "hypertension", kind: "concept" as const, centrality: 0.85 },
+      { term: "congenital heart disease", kind: "concept" as const, centrality: 0.8 },
+    ];
+    const distinct = [
+      { term: "vascular biology", kind: "concept" as const, centrality: 0.7 },
+      { term: "inflammation", kind: "concept" as const, centrality: 0.65 },
+      { term: "health equity", kind: "concept" as const, centrality: 0.6 },
+      { term: "genomics", kind: "concept" as const, centrality: 0.55 },
+      { term: "imaging", kind: "concept" as const, centrality: 0.5 },
+    ];
+    mockExtractSponsorConcepts.mockResolvedValue([parent, ...children, ...distinct]);
+
+    // The parent's descendant set CONTAINS each child's ⇒ subsumption merges all five into one
+    // cluster (union-find connects the children through the parent). Each distinct axis resolves to
+    // its own disjoint singleton set ⇒ its own cluster.
+    const childUi = new Map([
+      ["atherosclerosis", "ATH"],
+      ["heart failure", "HF"],
+      ["hypertension", "HTN"],
+      ["congenital heart disease", "CHD"],
+    ]);
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) => {
+      if (q === "cardiovascular diseases") return meshRes("CVD", ["CVD", "ATH", "HF", "HTN", "CHD"]);
+      const ui = childUi.get(q);
+      if (ui) return meshRes(ui, [ui]);
+      return meshRes(`D_${q}`, [`D_${q}`]);
+    });
+    mockSearchPeople.mockImplementation(async ({ q }: { q: string }) => people([`p-${q}`]));
+
+    await rankResearchersForDescriptionSpine("cardiovascular research");
+
+    // Resolution runs over the FULL extraction (10 concepts), not a pre-cap top-8 — that reorder IS
+    // the fix. The old order resolved only the 8 survivors of the concept cap.
+    expect(mockMatchQueryToTaxonomy).toHaveBeenCalledTimes(10);
+
+    // SIX distinct clusters searched: the CVD family as ONE, plus all five distinct axes. Fan-out is
+    // still ≤ MAX_TERMS (8), unchanged. Under the old order the family ate five slots and the two
+    // lowest-centrality axes were dropped, leaving only four searches.
+    const searchedQueries = mockSearchPeople.mock.calls.map((c) => c[0].q);
+    expect(mockSearchPeople).toHaveBeenCalledTimes(6);
+    // The family is ONE query joining its merged members, the parent leading as representative.
+    expect(searchedQueries).toContain(
+      "cardiovascular diseases atherosclerosis heart failure hypertension congenital heart disease",
+    );
+    // The axes the old cap-before-cluster order dropped below the 8-slot cut now all survive.
+    for (const axis of ["vascular biology", "inflammation", "health equity", "genomics", "imaging"]) {
+      expect(searchedQueries).toContain(axis);
+    }
+  });
+
+  it("#1838 resolves an officer-included term absent from the fresh extraction, keeping its MeSH boost", async () => {
+    // The include-chip flow: an officer clicks a culled term that THIS run's temp-0 re-extraction did
+    // not surface, so it is not a cluster representative and applyIncludes SYNTHS it. Pre-#1838 the
+    // synth term was resolved to MeSH (resolution ran after includes); moving resolution ahead of the
+    // cap dropped that, degrading the officer's concept to a bare keyword axis with no attribution
+    // boost and no evidence. The fix resolves the non-reappearing include before synthing it.
+    mockExtractSponsorConcepts.mockResolvedValue([{ term: "cancer", kind: "concept", centrality: 1.0 }]);
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) =>
+      q === "neuroprotection" ? meshRes("D_NP", ["D_NP1", "D_NP2"]) : meshRes("D_CA", ["D_CA"]),
+    );
+    mockSearchPeople.mockImplementation(async ({ q }: { q: string }) => people([`p-${q}`]));
+
+    const { concepts } = await rankResearchersForDescriptionSpine("cancer prose", {
+      include: ["neuroprotection"],
+    });
+
+    // The include got its own taxonomy round-trip and is searched WITH its MeSH descendant set as an
+    // attribution boost — NOT a bare BM25 token. A pre-fix synth (descendantUis:[]) sends undefined.
+    expect(mockMatchQueryToTaxonomy).toHaveBeenCalledWith("neuroprotection");
+    const npCall = mockSearchPeople.mock.calls.find((c) => c[0].q === "neuroprotection");
+    expect(npCall).toBeDefined();
+    expect(npCall![0].meshDescendantUis).toEqual(["D_NP1", "D_NP2"]);
+    // …and it is additive: the base concept survives alongside the officer's addition.
+    expect(concepts.map((c) => c.term).sort()).toEqual(["cancer", "neuroprotection"]);
+  });
+
   it("skips the discarded facet aggregations on every per-cluster searchPeople call", async () => {
     // Fan-out breaker (prime lever): the spine reads only hits/total/pageSize, so it
     // must pass `skipFacetAggs: true` so OpenSearch never runs the nine People-index
