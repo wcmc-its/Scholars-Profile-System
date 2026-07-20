@@ -1284,6 +1284,19 @@ export class AppStack extends Stack {
         // on a manual `cdk deploy --exclusively Sps-App-<env>` — the CD pipeline
         // re-rolls the image and never deploys CDK.
         NEWS_APPROVAL_QUEUE: env === "staging" ? "on" : "off",
+        // CONSOLE_SUBNAV_GROUPED — collapses the /edit console sub-nav's 14
+        // role-gated tabs into two tiers: Profiles · Org units · Queues ·
+        // Registries · Insights · Tools, with the active group's members on a
+        // second row (`docs/2026-07-20-console-subnav-two-tier-spec.md`).
+        // Presentation only — no route, caller or prop changes, and off ⇒ the
+        // previous flat strip renders byte-identically.
+        //
+        // DARK IN BOTH ENVS ON PURPOSE. This component renders on all 14 console
+        // pages, so a render fault takes out the whole console nav; and jsdom
+        // cannot verify layout, which is exactly how #1803 shipped broken with
+        // green CI. Flip staging first (`"staging" ? "on" : "off"`), deploy, and
+        // eyeball both tiers at a narrow window before prod goes anywhere near it.
+        CONSOLE_SUBNAV_GROUPED: "off",
         // MATCHA* — the /edit/matcha surface (paste a description of an interest → WCM researchers
         // ranked on topical fit alone). Renamed from SPONSOR_MATCH* 2026-07-17 (#1770 deployed the
         // names, #1773 moved the code, this drops the old set). The old names are GONE from the

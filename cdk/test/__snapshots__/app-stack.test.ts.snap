@@ -427,6 +427,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "CONSOLE_SUBNAV_GROUPED",
+                "Value": "off",
+              },
+              {
                 "Name": "MATCHA",
                 "Value": "on",
               },
@@ -4158,6 +4162,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "NEWS_APPROVAL_QUEUE",
                 "Value": "on",
+              },
+              {
+                "Name": "CONSOLE_SUBNAV_GROUPED",
+                "Value": "off",
               },
               {
                 "Name": "MATCHA",

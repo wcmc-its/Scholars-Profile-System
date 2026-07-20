@@ -2,7 +2,7 @@
  * `components/edit/admin-subnav.tsx` — the superuser admin sub-nav
  * (#497 PR-3c, `slug-personalization-ui-spec.md` § 3.1).
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("next/link", () => ({
@@ -372,5 +372,268 @@ describe("AdminSubnav — the Honors tab (#1762)", () => {
     // stay put, or a curator with nothing to do concludes the surface vanished.
     render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={0} />);
     expect(screen.queryByTestId("admin-tab-honors-queue")).toBeTruthy();
+  });
+});
+
+// ── Two-tier grouping, behind CONSOLE_SUBNAV_GROUPED ────────────────────────
+//
+// `docs/2026-07-20-console-subnav-two-tier-spec.md`. The flag defaults OFF, so
+// every assertion ABOVE this block is now also the regression pin for the
+// flag-off path: the visibility refactor (inline JSX guards → one computed list)
+// had to leave that DOM byte-identical, and 35 untouched tests say it did.
+//
+// Each flag here is stubbed rather than left to the ambient env. That is the
+// lesson of the Matcha block above: `isMatchaEnabled()` reads env, so a suite
+// that leaves it ambient asserts against a tab that is simply absent, and passes
+// in both directions.
+describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  /** Everything a full superuser sees: all 14 tabs visible, all four groups populated. */
+  const allOn = {
+    pendingSlugRequests: 2,
+    pendingHonors: 0,
+    administratorsTab: 0,
+    methodsTab: 0,
+    dataQualityTab: 0,
+    unitsTab: true,
+  } as const;
+
+  function grouped() {
+    vi.stubEnv("CONSOLE_SUBNAV_GROUPED", "on");
+    vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
+    vi.stubEnv("CORE_PAGES", "on");
+    vi.stubEnv("MATCHA", "on");
+  }
+
+  it("collapses 14 tabs into a 6-item tier 1", () => {
+    grouped();
+    render(<AdminSubnav active="profiles" {...allOn} />);
+    // Profiles + Org units stay top-level; the other twelve become four groups.
+    for (const id of ["profiles", "units"]) expect(screen.getByTestId(`admin-tab-${id}`)).toBeTruthy();
+    for (const g of ["queues", "registries", "insights", "tools"])
+      expect(screen.getByTestId(`admin-group-${g}`)).toBeTruthy();
+    // …and the grouped members are NOT in tier 1 — no group is active here, so
+    // they are not in the DOM at all. This is the assertion that would fail if
+    // grouping silently rendered both tiers flat.
+    for (const id of ["slug-requests", "slugs", "usage", "matcha", "cores", "activity"])
+      expect(screen.queryByTestId(`admin-tab-${id}`)).toBeNull();
+  });
+
+  it("links a group entry to its first visible member's existing href — no route moved", () => {
+    grouped();
+    render(<AdminSubnav active="profiles" {...allOn} />);
+    // Queues' first visible member is URL requests. A group entry is a plain
+    // <Link>, never a hover menu or a button (#1783).
+    expect(screen.getByTestId("admin-group-queues").getAttribute("href")).toBe("/edit/slug-requests");
+    expect(screen.getByTestId("admin-group-registries").getAttribute("href")).toBe("/edit/slugs");
+    expect(screen.getByTestId("admin-group-insights").getAttribute("href")).toBe("/edit/data-quality");
+    expect(screen.getByTestId("admin-group-tools").getAttribute("href")).toBe("/edit/find-researchers");
+  });
+
+  it("derives the active group correctly for every grouped id", () => {
+    // The map is the whole mechanism — a mis-slotted id sends the wrong group
+    // maroon and strands the member in a tier 2 nobody can open.
+    const expected: Record<string, string> = {
+      "slug-requests": "queues", "honors-queue": "queues", "news-queue": "queues", cores: "queues",
+      slugs: "registries", administrators: "registries", methods: "registries",
+      "data-quality": "insights", activity: "insights", usage: "insights",
+      "find-researchers": "tools", matcha: "tools",
+    };
+    for (const [id, group] of Object.entries(expected)) {
+      grouped();
+      const { unmount } = render(<AdminSubnav active={id as never} {...allOn} />);
+      expect(screen.getByTestId(`admin-group-${group}`).getAttribute("aria-current")).toBe("page");
+      // the member itself is reachable in tier 2, and only there
+      expect(screen.getByTestId(`admin-subnav-tier2-${group}`)).toBeTruthy();
+      expect(screen.getByTestId(`admin-tab-${id}`).getAttribute("aria-current")).toBe("page");
+      unmount();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("renders tier 2 with exactly the active group's visible members", () => {
+    grouped();
+    render(<AdminSubnav active="slugs" {...allOn} />);
+    const tier2 = screen.getByTestId("admin-subnav-tier2-registries");
+    for (const id of ["slugs", "administrators", "methods"])
+      expect(tier2.querySelector(`[data-testid="admin-tab-${id}"]`)).toBeTruthy();
+    // a member of a DIFFERENT group is not smuggled in
+    expect(tier2.querySelector('[data-testid="admin-tab-usage"]')).toBeNull();
+  });
+
+  it('active="self" renders tier 1 only — no tier 2 row', () => {
+    grouped();
+    render(<AdminSubnav active="self" {...allOn} />);
+    expect(screen.getByTestId("admin-group-queues")).toBeTruthy();
+    for (const g of ["queues", "registries", "insights", "tools"])
+      expect(screen.queryByTestId(`admin-subnav-tier2-${g}`)).toBeNull();
+    expect(screen.getByTestId("account-menu-stub")).toBeTruthy();
+  });
+
+  it("omits a group entirely when all its members are hidden", () => {
+    grouped();
+    // A comms_steward: no superuser surfaces, no admin/data-quality props ⇒
+    // Registries loses URL registry + Administrators, Insights loses everything.
+    render(
+      <AdminSubnav
+        active="profiles"
+        pendingSlugRequests={null}
+        pendingHonors={null}
+        methodsTab={0}
+        superuserSurfaces={false}
+        profilesTab
+      />,
+    );
+    expect(screen.queryByTestId("admin-group-insights")).toBeNull();
+    expect(screen.queryByTestId("admin-tab-data-quality")).toBeNull();
+    expect(screen.queryByTestId("admin-tab-usage")).toBeNull();
+  });
+
+  // Single-member promotion. Narrow roles are the common case here, and without
+  // this each one's entire console becomes a two-click funnel through a group
+  // wrapper that only ever contains the one tab they can reach.
+  describe("single-member promotion", () => {
+    it("honors_curator → Queues={Honors} renders Honors directly in tier 1", () => {
+      grouped();
+      render(
+        <AdminSubnav active="honors-queue" pendingSlugRequests={null} pendingHonors={3} superuserSurfaces={false} />,
+      );
+      const tab = screen.getByTestId("admin-tab-honors-queue");
+      expect(tab.getAttribute("aria-current")).toBe("page");
+      expect(screen.queryByTestId("admin-group-queues")).toBeNull();
+      expect(screen.queryByTestId("admin-subnav-tier2-queues")).toBeNull();
+    });
+
+    it("comms_steward → News and Method families both promoted, under their own labels", () => {
+      grouped();
+      render(
+        <AdminSubnav
+          active="news-queue"
+          pendingSlugRequests={null}
+          pendingHonors={null}
+          methodsTab={0}
+          superuserSurfaces={false}
+          profilesTab
+          unitsTab
+        />,
+      );
+      expect(screen.getByTestId("admin-tab-news-queue").textContent).toContain("News");
+      expect(screen.getByTestId("admin-tab-methods").textContent).toContain("Method families");
+      expect(screen.queryByTestId("admin-group-queues")).toBeNull();
+      expect(screen.queryByTestId("admin-group-registries")).toBeNull();
+    });
+
+    it("non-superuser unit admin → Insights={Usage} promoted", () => {
+      grouped();
+      render(
+        <AdminSubnav
+          active="usage"
+          pendingSlugRequests={null}
+          pendingHonors={null}
+          superuserSurfaces={false}
+          unitsTab
+          usageTab
+        />,
+      );
+      expect(screen.getByTestId("admin-tab-usage").getAttribute("aria-current")).toBe("page");
+      expect(screen.queryByTestId("admin-group-insights")).toBeNull();
+    });
+
+    it("dev-role viewer → Tools={Funding matcher} promoted while MATCHA is off, grouped when on", () => {
+      vi.stubEnv("CONSOLE_SUBNAV_GROUPED", "on");
+      const props = {
+        active: "find-researchers",
+        pendingSlugRequests: null,
+        pendingHonors: null,
+        superuserSurfaces: false,
+        viewerIsDeveloper: true,
+      } as const;
+      const { unmount } = render(<AdminSubnav {...props} />);
+      expect(screen.getByTestId("admin-tab-find-researchers").textContent).toContain("Funding matcher");
+      expect(screen.queryByTestId("admin-group-tools")).toBeNull();
+      unmount();
+      // Flipping MATCHA on gives Tools a second member, so the group appears.
+      vi.stubEnv("MATCHA", "on");
+      render(<AdminSubnav {...props} />);
+      expect(screen.getByTestId("admin-group-tools").getAttribute("aria-current")).toBe("page");
+      expect(screen.getByTestId("admin-subnav-tier2-tools")).toBeTruthy();
+    });
+  });
+
+  // 🔴 #1783. Matcha's tab carries a Radix HoverCard and must stay the CLIENT
+  // `MatchaTab` on both tiers. Composing Radix inside this server component
+  // silently dropped the tab once — a 200 with no error, which jsdom cannot see.
+  // A render-only assertion would miss it too, so this opens the card.
+  it("keeps Matcha a client MatchaTab inside tier 2 — the #1783 guard", async () => {
+    grouped();
+    // Active on Matcha's SIBLING, so Matcha is the inactive variant — a <Link>.
+    // An active tab renders as an aria-current <span> with no href, which would
+    // make the href assertion below vacuously unfalsifiable.
+    render(<AdminSubnav active="find-researchers" {...allOn} />);
+    const tab = screen.getByTestId("admin-tab-matcha");
+    expect(tab.getAttribute("href")).toBe("/edit/matcha");
+    expect(screen.getByTestId("admin-subnav-tier2-tools").contains(tab)).toBe(true);
+    fireEvent.focus(tab);
+    expect(await screen.findByText(/Paste the ask\. Get the shortlist\./)).toBeTruthy();
+  });
+
+  // Order is spec-pinned twice — the tier-1 bar as `Profiles · Org units · Queues ·
+  // Registries · Insights · Tools`, and "member order within each group preserves
+  // today's left-to-right bar order, except Cores". On origin/master that order was
+  // implicit in a single JSX literal; grouping introduces TWO new independent
+  // sources for it (GROUP_ORDER, and the tier-1 spread composition), and every
+  // other assertion in this file locates nodes by testid, so an order-only edit
+  // would move the console nav off spec with the whole suite green. jsdom cannot
+  // verify layout, but DOM sequence is not layout — it observes that exactly.
+  const order = (container: HTMLElement) =>
+    Array.from(
+      container.querySelectorAll("[data-testid^='admin-tab-'], [data-testid^='admin-group-']"),
+    ).map((n) => n.getAttribute("data-testid"));
+
+  it("renders tier 1 in the spec's order", () => {
+    grouped();
+    render(<AdminSubnav active="profiles" {...allOn} />);
+    expect(order(screen.getByTestId("admin-subnav-tier1"))).toEqual([
+      "admin-tab-profiles",
+      "admin-tab-units",
+      "admin-group-queues",
+      "admin-group-registries",
+      "admin-group-insights",
+      "admin-group-tools",
+    ]);
+  });
+
+  it("renders tier-2 members in today's left-to-right bar order, with Cores moved into Queues", () => {
+    grouped();
+    const { unmount } = render(<AdminSubnav active="slug-requests" {...allOn} />);
+    expect(order(screen.getByTestId("admin-subnav-tier2-queues"))).toEqual([
+      "admin-tab-slug-requests",
+      "admin-tab-honors-queue",
+      "admin-tab-news-queue",
+      "admin-tab-cores",
+    ]);
+    unmount();
+    render(<AdminSubnav active="slugs" {...allOn} />);
+    expect(order(screen.getByTestId("admin-subnav-tier2-registries"))).toEqual([
+      "admin-tab-slugs",
+      "admin-tab-administrators",
+      "admin-tab-methods",
+    ]);
+  });
+
+  it("is dark by default — the flag off reproduces the flat 14-tab strip", () => {
+    vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
+    vi.stubEnv("CORE_PAGES", "on");
+    render(<AdminSubnav active="profiles" {...allOn} />);
+    expect(order(screen.getByTestId("admin-subnav-tier1"))).toEqual(
+      [
+        "profiles", "units", "slug-requests", "honors-queue", "news-queue", "slugs",
+        "administrators", "methods", "data-quality", "activity", "usage", "cores",
+        "find-researchers",
+      ].map((id) => `admin-tab-${id}`),
+    );
+    for (const g of ["queues", "registries", "insights", "tools"])
+      expect(screen.queryByTestId(`admin-group-${g}`)).toBeNull();
   });
 });

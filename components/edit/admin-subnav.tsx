@@ -47,6 +47,64 @@ export type AdminSubnavActive =
    *  profile actions live in the right-end account menu. */
   | "self";
 
+/**
+ * Two-tier grouping (`docs/2026-07-20-console-subnav-two-tier-spec.md`), behind
+ * `CONSOLE_SUBNAV_GROUPED`. The 14 role-gated tabs are not peers: four groups
+ * collapse twelve of them, leaving Profiles / Org units top-level (the daily
+ * drivers, and "Web Directory" would collide with the Enterprise Directory
+ * source system).
+ *
+ * Routes, callers and `AdminSubnavProps` are all untouched — the group is
+ * DERIVED from `active` via this map, so nothing new threads through the 14
+ * console pages. `Record<AdminSubnavActive, …>` is the point: a new id fails to
+ * compile until it is placed, rather than silently landing ungrouped.
+ */
+type GroupId = "queues" | "registries" | "insights" | "tools";
+
+const GROUP_LABEL: Record<GroupId, string> = {
+  queues: "Queues",
+  registries: "Registries",
+  insights: "Insights",
+  tools: "Tools",
+};
+
+/** Tier-1 order after the top-level tabs. */
+const GROUP_ORDER: GroupId[] = ["queues", "registries", "insights", "tools"];
+
+const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
+  profiles: null,
+  units: null,
+  /** Pending work — something is waiting on a human. All four are approve/reject
+   *  review surfaces; `cores` moves here from its old bar position (its own code
+   *  comment calls it the "Cores review-queue index"). */
+  "slug-requests": "queues",
+  "honors-queue": "queues",
+  "news-queue": "queues",
+  cores: "queues",
+  /** Reference/config data you look up; rarely mutated. */
+  slugs: "registries",
+  administrators: "registries",
+  methods: "registries",
+  /** Read-only dashboards; no writes. */
+  "data-quality": "insights",
+  activity: "insights",
+  usage: "insights",
+  /** Paste an input, get a ranked result. */
+  "find-researchers": "tools",
+  matcha: "tools",
+  /** The viewer's own `/edit` — no group is active, so tier 2 does not render. */
+  self: null,
+};
+
+/** One console tab, with its visibility resolved. */
+type TabSpec = {
+  show: boolean;
+  id: AdminSubnavActive;
+  href: string;
+  label: string;
+  count?: number;
+};
+
 export function AdminSubnav({
   active,
   pendingSlugRequests,
@@ -113,6 +171,155 @@ export function AdminSubnav({
    *  Default `false`. */
   viewerIsDeveloper?: boolean;
 }) {
+  /**
+   * Visibility is computed BEFORE grouping. A group may render only if at least
+   * one of its members is visible, which an inline JSX guard per tab cannot
+   * answer — so every condition below is lifted VERBATIM out of the old strip
+   * into one list. No gate changed; this half is a pure refactor and the
+   * flag-off render below reproduces the previous DOM exactly.
+   *
+   * `isNewsQueueEnabled()` / `isCorePagesEnabled()` / `isMatchaEnabled()` are
+   * server env reads and stay in this server component — threading them into a
+   * client child is the #1783 failure mode.
+   */
+  const tabs: TabSpec[] = (
+    [
+      { show: superuserSurfaces || profilesTab, id: "profiles", href: "/edit/scholars", label: "Profiles" },
+      { show: unitsTab, id: "units", href: "/edit/units", label: "Org units" },
+      {
+        show: superuserSurfaces && pendingSlugRequests !== null,
+        id: "slug-requests",
+        href: "/edit/slug-requests",
+        label: "URL requests",
+        count: pendingSlugRequests ?? undefined,
+      },
+      // Gated on `pendingHonors !== null` ALONE — deliberately without
+      // `superuserSurfaces`, unlike the slug tab above. This queue has a
+      // non-superuser tier (`honors_curator`, the Research Dean's office) for whom
+      // `superuserSurfaces` is false, so ANDing it would hide the tab from the very
+      // people the role exists to serve (#1767: "an honors surface nobody could
+      // find"). The caller already resolved the gate into a count-vs-null.
+      // #1762 round 4: no count badge — the curator asked for it to be dropped.
+      { show: pendingHonors !== null, id: "honors-queue", href: "/edit/honors-queue", label: "Honors" },
+      {
+        show: (superuserSurfaces || profilesTab) && isNewsQueueEnabled(),
+        id: "news-queue",
+        href: "/edit/news-queue",
+        label: "News",
+      },
+      // Always visible to superusers — the slug namespace exists regardless of the
+      // slug-request flag.
+      { show: superuserSurfaces, id: "slugs", href: "/edit/slugs", label: "URL registry" },
+      {
+        show: superuserSurfaces && administratorsTab !== null && administratorsTab !== undefined,
+        id: "administrators",
+        href: "/edit/administrators",
+        label: "Administrators",
+      },
+      {
+        show: methodsTab !== null && methodsTab !== undefined,
+        id: "methods",
+        href: "/edit/methods",
+        label: "Method families",
+      },
+      {
+        show: dataQualityTab !== null && dataQualityTab !== undefined,
+        id: "data-quality",
+        href: "/edit/data-quality",
+        label: "Data quality",
+      },
+      // Fleet-wide edit-activity oversight. Superuser-only; no separate flag — the
+      // superuser gate on the page IS the control.
+      { show: superuserSurfaces, id: "activity", href: "/edit/activity", label: "Activity" },
+      // Wider audience than the other superuser tabs: a superuser OR any unit admin
+      // (via `usageTab`, set when `canViewUsage` passes).
+      { show: superuserSurfaces || usageTab, id: "usage", href: "/edit/usage", label: "Usage" },
+      // Gated on the same `CORE_PAGES` flag as the public core surfaces, so it stays
+      // dark in any env where cores aren't live yet (staging-on / prod-off).
+      { show: superuserSurfaces && isCorePagesEnabled(), id: "cores", href: "/edit/core", label: "Cores" },
+      // GrantRecs reverse-matcher — its only entry point is this bar.
+      // `viewerIsDeveloper` is the escape hatch for a pure development-role viewer.
+      {
+        show: superuserSurfaces || viewerIsDeveloper,
+        id: "find-researchers",
+        href: "/edit/find-researchers",
+        label: "Funding matcher",
+      },
+      // CTL sponsor match — same audience as the Funding matcher; dark while
+      // SPONSOR_MATCH is off.
+      {
+        show: (superuserSurfaces || viewerIsDeveloper) && isMatchaEnabled(),
+        id: "matcha",
+        href: "/edit/matcha",
+        label: "Matcha",
+      },
+    ] satisfies TabSpec[]
+  ).filter((t) => t.show);
+
+  const renderTab = (t: TabSpec) =>
+    // Matcha alone renders through the CLIENT `MatchaTab`, because it carries a
+    // Radix HoverCard: composing Radix in this server component silently DROPPED
+    // the tab once (#1783 — a 200 with no error, which jsdom cannot catch). Group
+    // entries below stay plain server `<Link>`s for exactly the same reason.
+    t.id === "matcha" ? (
+      <MatchaTab key="matcha" active={active === "matcha"} />
+    ) : (
+      <AdminTab
+        key={t.id}
+        href={t.href}
+        testId={`admin-tab-${t.id}`}
+        label={t.label}
+        active={active === t.id}
+        count={t.count}
+      />
+    );
+
+  // Ships dark. Flipping it in a deployed env needs the var set "on" in BOTH
+  // `.env.local` AND the per-env `environment:` block in cdk/lib/app-stack.ts,
+  // then `cdk deploy Sps-App-<env>` — env vars live in the task def, so a merged
+  // flag is inert until that deploy (the flag-parity rule).
+  const grouped = process.env.CONSOLE_SUBNAV_GROUPED === "on";
+  const activeGroup = grouped ? TAB_GROUP[active] : null;
+  const groups = grouped
+    ? GROUP_ORDER.map((id) => ({ id, members: tabs.filter((t) => TAB_GROUP[t.id] === id) })).filter(
+        // A group with zero visible members is omitted entirely.
+        (g) => g.members.length > 0,
+      )
+    : [];
+
+  const tier1 = grouped
+    ? [
+        ...tabs.filter((t) => TAB_GROUP[t.id] === null).map(renderTab),
+        ...groups.map((g) =>
+          // Single-member promotion. Not a nicety: narrow roles are common here
+          // (`honors_curator` → Queues={Honors}; a comms_steward → Registries={Method
+          // families}; a pure dev-role viewer → Tools={Funding matcher}), and
+          // wrapping one tab in a group turns their entire console into a pointless
+          // two-click funnel.
+          g.members.length === 1 ? (
+            renderTab(g.members[0])
+          ) : (
+            <AdminTab
+              key={g.id}
+              // A group entry is a LINK to its first visible member's existing href —
+              // not a hover menu, not a button. Every surface stays reachable by
+              // visible clicks: 1 for a top-level tab or a group's default member,
+              // 2 for any other member.
+              href={g.members[0].href}
+              testId={`admin-group-${g.id}`}
+              label={GROUP_LABEL[g.id]}
+              active={activeGroup === g.id}
+            />
+          ),
+        ),
+      ]
+    : tabs.map(renderTab);
+
+  // Tier 2 renders only for an active group that was NOT promoted into tier 1.
+  // `active="self"` maps to no group, so the viewer's own /edit gets tier 1 only —
+  // matching today, where no list tab is active.
+  const tier2 = groups.find((g) => g.id === activeGroup && g.members.length > 1);
+
   return (
     <div className="border-border border-b" data-slot="admin-subnav">
       <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
@@ -127,142 +334,11 @@ export function AdminSubnav({
             exceeds the container, so the scrollbar never appears. That was the
             #1803 bug. Radix popovers/menus inside a tab portal to the body, so
             they are NOT clipped by this scroller. Account chip pinned outside. */}
-        <div className="flex min-w-0 flex-1 items-center gap-6 overflow-x-auto">
-        {(superuserSurfaces || profilesTab) && (
-          <AdminTab href="/edit/scholars" id="profiles" label="Profiles" active={active === "profiles"} />
-        )}
-        {unitsTab && (
-          <AdminTab href="/edit/units" id="units" label="Org units" active={active === "units"} />
-        )}
-        {superuserSurfaces && pendingSlugRequests !== null && (
-          <AdminTab
-            href="/edit/slug-requests"
-            id="slug-requests"
-            label="URL requests"
-            active={active === "slug-requests"}
-            count={pendingSlugRequests}
-          />
-        )}
-        {/* #1762 — honors awaiting approval. Wired here, not only reachable by
-            URL: #1767's first bug was an honors surface nobody could find.
-
-            Gated on `pendingHonors !== null` ALONE — deliberately without
-            `superuserSurfaces`, unlike the slug tab above. This queue has a
-            non-superuser tier (`honors_curator`, the Research Dean's office),
-            and `superuserSurfaces` is false for them, so ANDing it would hide the
-            tab from the very people the role exists to serve. The caller already
-            resolved `(isSuperuser || isHonorsCurator) && isHonorQueueEnabled()`
-            to decide between a count and `null`, so the count IS the gate — a
-            second one here could only ever disagree with it. The slug tab keeps
-            `superuserSurfaces` because it genuinely is superuser-only. */}
-        {/* #1762 round 4: NO count badge — the curator asked to drop the pending
-            count from the tab. `pendingHonors` still gates visibility (null hides
-            the tab), it just no longer renders a pill. */}
-        {pendingHonors !== null && (
-          <AdminTab
-            href="/edit/honors-queue"
-            id="honors-queue"
-            label="Honors"
-            active={active === "honors-queue"}
-          />
-        )}
-        {/* News approval queue — the comms surface that confirms prose name-match
-            mentions before they publish. Same server-read-flag pattern as the
-            Matcha/Cores tabs below (no prop threads through every console page):
-            `NEWS_APPROVAL_QUEUE` gates the flag, and `superuserSurfaces || profilesTab`
-            is exactly the audience the page authorizes (superuser OR comms_steward —
-            a comms_steward passes `profilesTab`, a superuser `superuserSurfaces`). No
-            badge, mirroring the Honors tab. */}
-        {(superuserSurfaces || profilesTab) && isNewsQueueEnabled() && (
-          <AdminTab
-            href="/edit/news-queue"
-            id="news-queue"
-            label="News"
-            active={active === "news-queue"}
-          />
-        )}
-        {/* Always visible to superusers — the slug namespace (active / historical
-            / override / reserved) exists regardless of the slug-request flag. */}
-        {superuserSurfaces && (
-          <AdminTab
-            href="/edit/slugs"
-            id="slugs"
-            label="URL registry"
-            active={active === "slugs"}
-          />
-        )}
-        {superuserSurfaces && administratorsTab !== null && administratorsTab !== undefined && (
-          <AdminTab
-            href="/edit/administrators"
-            id="administrators"
-            label="Administrators"
-            active={active === "administrators"}
-          />
-        )}
-        {methodsTab !== null && methodsTab !== undefined && (
-          <AdminTab
-            href="/edit/methods"
-            id="methods"
-            label="Method families"
-            active={active === "methods"}
-          />
-        )}
-        {dataQualityTab !== null && dataQualityTab !== undefined && (
-          <AdminTab
-            href="/edit/data-quality"
-            id="data-quality"
-            label="Data quality"
-            active={active === "data-quality"}
-          />
-        )}
-        {/* Fleet-wide edit-activity oversight (`/edit/activity`). Superuser-only
-            — rides `superuserSurfaces`, so a comms_steward / unit owner (who
-            cannot open the page) never sees the tab. No separate flag: the
-            superuser gate on the page IS the control. */}
-        {superuserSurfaces && (
-          <AdminTab
-            href="/edit/activity"
-            id="activity"
-            label="Activity"
-            active={active === "activity"}
-          />
-        )}
-        {/* Global usage dashboard (`/edit/usage`). Wider audience than the other
-            superuser tabs: a superuser (via `superuserSurfaces`) OR any unit
-            admin (via `usageTab`, set when `canViewUsage` passes). Aggregates
-            only, so no per-unit scoping. */}
-        {(superuserSurfaces || usageTab) && (
-          <AdminTab href="/edit/usage" id="usage" label="Usage" active={active === "usage"} />
-        )}
-        {/* Cores review-queue index (`/edit/core`). Superuser-facing — rides
-            `superuserSurfaces` like the other superuser tabs — and gated on the
-            same `CORE_PAGES` flag as the public core surfaces, so it stays dark
-            in any env where cores aren't live yet (staging-on / prod-off). */}
-        {superuserSurfaces && isCorePagesEnabled() && (
-          <AdminTab href="/edit/core" id="cores" label="Cores" active={active === "cores"} />
-        )}
-        {/* GrantRecs reverse-matcher — its only entry point is now this bar.
-            Rides `superuserSurfaces` (every superuser console page passes it) so
-            superusers see it on every console surface; `viewerIsDeveloper` is the
-            escape hatch that also shows it to a pure development-role viewer on
-            its own page. Hidden for a comms_steward (neither superuser nor dev). */}
-        {(superuserSurfaces || viewerIsDeveloper) && (
-          <AdminTab
-            href="/edit/find-researchers"
-            id="find-researchers"
-            label="Funding matcher"
-            active={active === "find-researchers"}
-          />
-        )}
-        {/* CTL sponsor match (`/edit/matcha`) — same audience as the
-            Funding matcher above; hidden while SPONSOR_MATCH is off (server-read
-            env check here, so no new prop threads through every console page).
-            Rendered via the CLIENT `MatchaTab` because it carries a HoverCard —
-            see the header of `matcha-tab.tsx` for why that composition must not
-            live in this server component. */}
-        {(superuserSurfaces || viewerIsDeveloper) && isMatchaEnabled() && (
-          <MatchaTab active={active === "matcha"} />
-        )}
+        <div
+          className="flex min-w-0 flex-1 items-center gap-6 overflow-x-auto"
+          data-testid="admin-subnav-tier1"
+        >
+          {tier1}
         </div>
         {/* The account chip/dropdown anchors the right end — profile actions live
             entirely in the menu, which derives its scholar + rows from the
@@ -270,19 +346,38 @@ export function AdminSubnav({
             through every console page that renders this strip. */}
         <AccountMenu context="console" />
       </div>
+      {/* Tier 2 — the active group's visible members, reusing `AdminTab`
+          unchanged. Renders ONLY when a group is active, so it appears and
+          disappears across full navigations, never within a page. Same
+          `overflow-x-auto` + per-tab `shrink-0 whitespace-nowrap` treatment as
+          tier 1 (#1819): a wide group scrolls rather than squeezing its labels
+          onto two lines. */}
+      {tier2 && (
+        <div className="bg-muted/30 border-border border-t">
+          <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
+            <div
+              className="flex min-w-0 flex-1 items-center gap-6 overflow-x-auto"
+              data-testid={`admin-subnav-tier2-${tier2.id}`}
+            >
+              {tier2.members.map(renderTab)}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function AdminTab({
   href,
-  id,
+  testId,
   label,
   active,
   count,
 }: {
   href: string;
-  id: AdminSubnavActive;
+  /** e.g. `admin-tab-profiles`, or `admin-group-queues` for a tier-1 group entry. */
+  testId: string;
   label: string;
   active: boolean;
   count?: number;
@@ -304,7 +399,7 @@ function AdminTab({
     <span
       className="border-apollo-maroon inline-block shrink-0 border-b-2 py-3 text-sm font-medium whitespace-nowrap"
       aria-current="page"
-      data-testid={`admin-tab-${id}`}
+      data-testid={testId}
     >
       {inner}
     </span>
@@ -312,7 +407,7 @@ function AdminTab({
     <Link
       href={href}
       className="text-muted-foreground hover:text-foreground inline-block shrink-0 border-b-2 border-transparent py-3 text-sm whitespace-nowrap"
-      data-testid={`admin-tab-${id}`}
+      data-testid={testId}
     >
       {inner}
     </Link>
