@@ -92,7 +92,7 @@ function overviewUpdated(e: DataQualityEntry): string {
 
 /** A green ✓ (good) or muted "—" (not checked / n/a). */
 function Yes() {
-  return <span className="font-semibold text-emerald-600" aria-label="yes">✓</span>;
+  return <span className="font-semibold text-apollo-green" aria-label="yes">✓</span>;
 }
 function Gap() {
   return <span className="text-apollo-maroon font-semibold" aria-label="missing">✗</span>;
