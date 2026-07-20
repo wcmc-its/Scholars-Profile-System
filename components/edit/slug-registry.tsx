@@ -197,7 +197,7 @@ export function SlugRegistry({
             : `Showing ${start}–${end} of ${total.toLocaleString()}`}
         </p>
 
-        <div className="border-border overflow-hidden rounded-md border">
+        <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-md border">
           <SegmentTable segment={segment} rows={rows} />
         </div>
 
@@ -254,7 +254,7 @@ function SegmentTable({
 function TableShell({ headers, children }: { headers: string[]; children: React.ReactNode }) {
   return (
     <table className="[&_td]:align-middle w-full text-sm">
-      <thead className="bg-muted/50 text-muted-foreground text-left">
+      <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
         <tr>
           {headers.map((h) => (
             <th key={h} className="px-3 py-2 font-medium">

@@ -756,7 +756,7 @@ function Kbd({ children }: { children: ReactNode }) {
 // keyboard contract (a/r/u + ↑/↓), firing only when the card itself is focused
 // (not a child button/link), so its inner controls keep their native behavior.
 const CARD_SHELL =
-  "rounded-lg border border-apollo-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-slate)]";
+  "bg-apollo-surface rounded-lg border border-apollo-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-slate)]";
 
 function CandidateCard({
   row,

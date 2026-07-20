@@ -57,7 +57,7 @@ function CountTable({
   return (
     <section className="mt-8">
       <h2 className="text-base font-semibold">{caption}</h2>
-      <div className="mt-2 overflow-x-auto">
+      <div className="border-apollo-border bg-apollo-surface mt-2 overflow-x-auto rounded-md border">
         <table className="w-full text-sm">
           <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
             <tr className="border-apollo-border border-b">
@@ -175,7 +175,7 @@ function TopProfilesTable({ profiles }: { profiles: ProfileViews[] }) {
   return (
     <section className="mt-8">
       <h2 className="text-base font-semibold">Top profiles</h2>
-      <div className="mt-2 overflow-x-auto">
+      <div className="border-apollo-border bg-apollo-surface mt-2 overflow-x-auto rounded-md border">
         <table className="w-full text-sm">
           <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
             <tr className="border-apollo-border border-b">

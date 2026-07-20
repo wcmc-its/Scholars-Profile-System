@@ -169,7 +169,7 @@ export function OpportunityIntakePanel() {
   }
 
   return (
-    <section className="border-border mt-10 rounded-lg border p-5" data-slot="opportunity-intake">
+    <section className="border-apollo-border bg-apollo-surface mt-10 rounded-lg border p-5" data-slot="opportunity-intake">
       <h2 className="text-lg font-semibold tracking-tight">Submit a funding opportunity URL</h2>
       <p className="text-muted-foreground mt-1 text-sm">
         Not in the Browse list? Paste the opportunity&rsquo;s web page. It goes through the same

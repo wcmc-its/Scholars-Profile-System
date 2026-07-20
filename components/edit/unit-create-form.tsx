@@ -245,7 +245,7 @@ export function UnitCreateForm({
           />
         ) : (
           <div
-            className="border-apollo-border-strong text-muted-foreground rounded-md border px-3 py-2 text-sm"
+            className="border-apollo-border-strong bg-apollo-surface text-muted-foreground rounded-md border px-3 py-2 text-sm"
             data-testid="create-dept-fixed"
           >
             {fixedDept ? (

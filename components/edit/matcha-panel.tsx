@@ -1330,7 +1330,7 @@ export function MatchaPanel() {
           <p className="text-muted-foreground py-3 text-sm">Ranking researchers…</p>
           <div className="space-y-3">
             {Array.from({ length: 4 }, (_, i) => (
-              <div key={i} className="border-border rounded-lg border p-4">
+              <div key={i} className="border-apollo-border bg-apollo-surface rounded-lg border p-4">
                 <Skeleton className="h-3 w-1/4" />
                 <Skeleton className="mt-2 h-4 w-2/3" />
               </div>
