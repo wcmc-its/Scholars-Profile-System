@@ -662,6 +662,21 @@ export type ProfilePayload = {
     /** True when the overview lists a "PoC Data" bullet; drives the POC DATA chip. */
     hasPocData: boolean;
   }>;
+  /** News mentions of this scholar, scraped from the WCM Research news feed and
+   *  attached by the VIVO cwid link (or a queue-confirmed prose name match).
+   *  Ships dark behind NEWS_MENTIONS_SECTION, so an unflagged env returns []
+   *  even after the ETL lands. Only published + per-row-visible rows appear. */
+  news: Array<{
+    /** Absolute URL of the public news article. */
+    url: string;
+    title: string;
+    /** Publication date as ISO YYYY-MM-DD; null when the article carried none. */
+    publishedAt: string | null;
+    /** Listing excerpt; null when the source omitted it. */
+    excerpt: string | null;
+    /** Absolute thumbnail URL under the WCM origin; null when none. */
+    thumbnailUrl: string | null;
+  }>;
   keywords: ProfileKeywords;
   /** #799 — family-primary Methods lens rows. Empty when the lens flag is off
    *  or the `scholar_family` rollup has no rows for this scholar (dormant until
@@ -896,6 +911,14 @@ export const getScholarFullProfileBySlug = cache(
         // seed lands.
         technologies: {
           orderBy: [{ title: "asc" }],
+        },
+        // News mentions. Filtered to published + per-row-visible AT THE QUERY (a
+        // scholar can accrue many pending/rejected rows that must never reach the
+        // payload); additionally gated dark in the mapper below, so an env with
+        // NEWS_MENTIONS_SECTION off returns [] even after the ETL lands.
+        newsMentions: {
+          where: { status: "published", showOnProfile: true },
+          orderBy: [{ publishedAt: "desc" }],
         },
         // Issue #167 — surface the division name so the sidebar can render
         // "<Division> (<Department>)". Department display still comes from
@@ -1538,6 +1561,19 @@ export const getScholarFullProfileBySlug = cache(
                 : [],
               overview: t.overview,
               hasPocData: t.hasPocData,
+            }))
+          : [],
+      // News mentions. Dark unless NEWS_MENTIONS_SECTION is on; `hideNews` drops
+      // the whole section (same precedent as `hideTechnologies`). The query
+      // already filtered to published + per-row-visible rows.
+      news:
+        process.env.NEWS_MENTIONS_SECTION === "on" && !hiddenSections.has("hideNews")
+          ? scholar.newsMentions.map((n) => ({
+              url: n.url,
+              title: n.title,
+              publishedAt: n.publishedAt ? n.publishedAt.toISOString().slice(0, 10) : null,
+              excerpt: n.excerpt,
+              thumbnailUrl: n.thumbnailUrl,
             }))
           : [],
       keywords,

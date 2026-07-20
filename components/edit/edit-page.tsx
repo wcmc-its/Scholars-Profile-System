@@ -32,6 +32,7 @@ import {
 import { PublicationsCard } from "@/components/edit/publications-card";
 import { ReadonlyAttributePanel } from "@/components/edit/readonly-attribute-panel";
 import { TechnologyEditCard } from "@/components/edit/technology-edit-card";
+import { NewsEditCard } from "@/components/edit/news-edit-card";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { SlugCard } from "@/components/edit/slug-card";
 import { SlugRequestCard, type SlugRequestSummary } from "@/components/edit/slug-request-card";
@@ -76,6 +77,7 @@ type AttrKey =
   | "publications"
   | "funding"
   | "technologies"
+  | "news"
   | "grant-recs"
   | "biosketch"
   | "cv"
@@ -127,6 +129,10 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // it on AVAILABLE_TECHNOLOGIES_SECTION, so the array is empty otherwise). Public
   // info like publications/coi, so it stays visible to proxy / unit-admin too.
   { key: "technologies", label: "Available technologies", readonly: true, modes: ["self", "superuser"] },
+  // News mentions (NEWS_MENTIONS_SECTION) — WCM newsroom articles that mention the
+  // scholar, scraped by etl/news. Interactive (hide / "Not me"), like publications;
+  // appears only when the scholar has ≥1 published mention (loader-gated).
+  { key: "news", label: "News mentions", modes: ["self", "superuser"] },
   // Grants for me (GrantRecs Phase 3, SELF_EDIT_GRANT_RECS) — owner-facing
   // funding-opportunity recommendations. Self OR superuser (on the scholar's
   // behalf); never a proxy / unit-admin. Rail item appears only when the flag is on.
@@ -268,6 +274,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   // "reporter-profile" (Funding's nested sub-view) rather than sitting between
   // them, so that sub-view keeps nesting under Funding, not under this flat item.
   "technologies",
+  "news",
   "mentees",
   "coi",
   "coi-gap",
@@ -290,6 +297,9 @@ const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   funding: "sourced",
   // Read-only, CTL-owned — same kind as the other SOR-owned read-only items (coi).
   technologies: "readonly",
+  // "sourced": WCM feed populates it, but the scholar can curate (hide / "Not me"),
+  // exactly like publications/funding — not "readonly" (CTL) or "owned" (honors).
+  news: "sourced",
   "reporter-profile": "readonly",
   // "Services" group (#917 v5) — owner-facing tools, distinct from sourced data.
   "grant-recs": "service",
@@ -345,6 +355,7 @@ const RAIL_V2_ORDER: ReadonlyArray<AttrKey> = [
   // After the Funding block (see SELF_RAIL_ORDER) — kept out from between Funding
   // and its nested "reporter-profile" sub-view so that nesting survives.
   "technologies",
+  "news",
   "mentees",
   "coi",
   "coi-gap",
@@ -371,6 +382,7 @@ const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string }> = {
   publications: { group: RAIL_V2_WCM_GROUP },
   funding: { group: RAIL_V2_WCM_GROUP },
   technologies: { group: RAIL_V2_WCM_GROUP },
+  news: { group: RAIL_V2_WCM_GROUP },
   "reporter-profile": { group: RAIL_V2_WCM_GROUP },
   mentees: { group: RAIL_V2_WCM_GROUP },
   coi: { group: RAIL_V2_WCM_GROUP },
@@ -421,6 +433,7 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   // After the Funding block — placed after "reporter-profile" (Funding's nested
   // sub-view) so that sub-view keeps nesting under Funding.
   "technologies",
+  "news",
   "grant-recs",
   "biosketch",
   "cv",
@@ -520,6 +533,7 @@ export function visibleAttrKeys(
   cvEnabled = false,
   hasReporterProfile = false,
   hasTechnologies = false,
+  hasNews = false,
 ): AttrKey[] {
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
   return (
@@ -564,6 +578,10 @@ export function visibleAttrKeys(
       // dropped from the rail and the valid-attr set, so `?attr=technologies`
       // canonicalizes away rather than rendering an empty panel.
       .filter((a) => a.key !== "technologies" || hasTechnologies)
+      // News mentions appear only when the scholar has ≥1 published mention
+      // (loader-gated on NEWS_MENTIONS_SECTION). Empty ⇒ dropped from the rail and
+      // the valid-attr set, so `?attr=news` canonicalizes away.
+      .filter((a) => a.key !== "news" || hasNews)
       .map((a) => a.key)
   );
 }
@@ -615,6 +633,9 @@ export function EditPage({
   // The loader already gates the array on AVAILABLE_TECHNOLOGIES_SECTION, so a
   // non-empty array here means the flag is on and the scholar has inventions.
   const hasTechnologies = ctx.technologies.length > 0;
+  // News mentions — same gate: the loader populates `ctx.news` only when
+  // NEWS_MENTIONS_SECTION is on AND there is ≥1 published mention.
+  const hasNews = ctx.news.length > 0;
   // GrantRecs Phase 3 — "Grants for me" shows on self / superuser surfaces. A genuine
   // superuser ALWAYS sees it (QA lens, flag-independent) so the recommendations can be
   // judged per scholar while the owner-facing SELF_EDIT_GRANT_RECS stays off for users;
@@ -638,7 +659,8 @@ export function EditPage({
     .filter((a) => a.key !== "grant-recs" || showGrantRecs)
     .filter((a) => a.key !== "biosketch" || showBiosketch)
     .filter((a) => a.key !== "cv" || showCv)
-    .filter((a) => a.key !== "technologies" || hasTechnologies);
+    .filter((a) => a.key !== "technologies" || hasTechnologies)
+    .filter((a) => a.key !== "news" || hasNews);
   // A proxy (#779) and a unit admin (Amendment 4) reuse the SELF rail/cards on
   // the scholar's route (D4). Treated like self for layout; the distinct chrome
   // (banner, breadcrumb, no account menu) is the shell's job.
@@ -1069,6 +1091,14 @@ function renderPanel(
           scholarName={scholarName}
           technologies={ctx.technologies}
         />
+      );
+    case "news":
+      // Interactive "News mentions" — the loader populates `ctx.news` only when
+      // NEWS_MENTIONS_SECTION is on AND the scholar has ≥1 published mention, and
+      // the rail item is dropped when the array is empty. `voiceMode` reframes the
+      // intro copy for a third-person editor.
+      return (
+        <NewsEditCard cwid={cwid} mode={voiceMode} scholarName={scholarName} news={ctx.news} />
       );
     case "appointments":
       return (

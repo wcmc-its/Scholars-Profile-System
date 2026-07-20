@@ -153,7 +153,16 @@ export type AuditAction =
    *  see `scripts/sql/audit-log.sql`. */
   | "honor_create"
   | "honor_update"
-  | "honor_delete";
+  | "honor_delete"
+  /** a scholar / curator / comms_steward (or superuser) changed a news mention's
+   *  review status or profile visibility on /edit — approve/reject in
+   *  /edit/news-queue, or hide / "not me" on the owning profile
+   *  (docs/2026-07-18-news-mentions-plan.md). `targetEntityType='news_mention'`,
+   *  `targetEntityId` is the row `id`; before/after carry the
+   *  status/showOnProfile transition. The etl/news ingest writes directly and is
+   *  NOT audited (like every ETL). Requires the `scholars_audit` action ENUM be
+   *  extended — see `scripts/sql/audit-log.sql`. */
+  | "news_mention_update";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -192,7 +201,11 @@ export type AuditEntityType =
   | "profile_appointment"
   /** an honor / distinction row curated on /edit (#1760); `targetEntityId` is
    *  the `honor.id`. */
-  | "honor";
+  | "honor"
+  /** a news mention curated on /edit (docs/2026-07-18-news-mentions-plan.md) —
+   *  approve/reject in the queue, or hide / "not me" on the profile;
+   *  `targetEntityId` is the `news_mention.id`. */
+  | "news_mention";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

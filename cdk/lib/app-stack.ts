@@ -1272,6 +1272,18 @@ export class AppStack extends Stack {
         // presence-gated (hidden when a scholar holds nothing), so a scholar with
         // no technologies is unaffected either way.
         AVAILABLE_TECHNOLOGIES_SECTION: "on", // Prod flipped 2026-07-14 (#1631); takes effect on the next `cdk deploy Sps-App-prod`.
+        // NEWS_MENTIONS_SECTION — the profile "News mentions" section + the /edit
+        // card, sourced from the WCM Research news feed via `npm run etl:news`. The
+        // payload returns [] when off and the section is presence-gated (hidden when
+        // a scholar has no mentions), so a scholar with none is unaffected either
+        // way. Dark-launched staging-first; flip prod once the seed lands.
+        NEWS_MENTIONS_SECTION: env === "staging" ? "on" : "off",
+        // NEWS_APPROVAL_QUEUE — the /edit/news-queue comms surface + its decision
+        // endpoint; off ⇒ both 404 and the subnav tab is hidden. Reviewer audience
+        // is superusers + external comms (the comms_steward role). Takes effect ONLY
+        // on a manual `cdk deploy --exclusively Sps-App-<env>` — the CD pipeline
+        // re-rolls the image and never deploys CDK.
+        NEWS_APPROVAL_QUEUE: env === "staging" ? "on" : "off",
         // MATCHA* — the /edit/matcha surface (paste a description of an interest → WCM researchers
         // ranked on topical fit alone). Renamed from SPONSOR_MATCH* 2026-07-17 (#1770 deployed the
         // names, #1773 moved the code, this drops the old set). The old names are GONE from the

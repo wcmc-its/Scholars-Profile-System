@@ -95,6 +95,7 @@ const ctx: EditContext = {
   // the flag is on AND the scholar has inventions); a dedicated describe block
   // below exercises the populated case.
   technologies: [],
+  news: [],
   mentees: [
     {
       externalId: "self01:mentee9",

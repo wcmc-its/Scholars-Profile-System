@@ -182,6 +182,9 @@ export default async function EditScholarPage({
     // Available technologies is valid only when the scholar has ≥1 CTL invention
     // (the loader gates the array on AVAILABLE_TECHNOLOGIES_SECTION).
     ctx.technologies.length > 0,
+    // News mentions is valid only when the scholar has ≥1 published mention (the
+    // loader gates the array on NEWS_MENTIONS_SECTION).
+    ctx.news.length > 0,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect(basePath);

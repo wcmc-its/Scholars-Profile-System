@@ -60,6 +60,7 @@ type EditContextReadClient = Pick<
   | "publicationConflictStatement"
   | "reporterProfileCandidate"
   | "scholarTechnology"
+  | "newsMention"
 >;
 
 export type EditContextScholar = {
@@ -227,6 +228,26 @@ export type EditContextTechnology = {
   overview: string | null;
   /** True when the overview lists a "PoC Data" bullet; drives the PoC chip. */
   hasPocData: boolean;
+};
+
+/**
+ * One news mention row for the interactive /edit "News mentions" card. Unlike
+ * technologies (CTL is the SOR, view-only), the scholar can curate these: hide a
+ * mention from the profile, or reject a wrong attribution ("not me"). Only the
+ * scholar's PUBLISHED mentions surface here — pending prose name-matches are
+ * confirmed by comms in /edit/news-queue, never on the profile.
+ */
+export type EditContextNews = {
+  /** news_mention.id — the row key the write route acts on. */
+  id: string;
+  url: string;
+  title: string;
+  /** ISO YYYY-MM-DD; null when the article carried no date. */
+  publishedAt: string | null;
+  /** Whether the mention currently shows on the public profile. */
+  showOnProfile: boolean;
+  /** How it was attached: VIVO (article link) | NAME (queue-confirmed) | CURATOR. */
+  source: string;
 };
 
 /**
@@ -520,6 +541,12 @@ export type EditContext = {
    * scholar has inventions — the same gate the public profile section uses.
    */
   technologies: ReadonlyArray<EditContextTechnology>;
+  /**
+   * The scholar's PUBLISHED news mentions for the interactive /edit "News
+   * mentions" card. Hidden ones are included so the scholar can un-hide. Empty
+   * unless `NEWS_MENTIONS_SECTION` is on.
+   */
+  news: ReadonlyArray<EditContextNews>;
   /** Suppressible mentees (derived from training records; mentor may hide). */
   mentees: ReadonlyArray<EditContextMentee>;
   /**
@@ -925,6 +952,35 @@ export async function loadEditContext(
             : [],
           overview: t.overview,
           hasPocData: t.hasPocData,
+        }))
+      : [];
+
+  // News mentions — the interactive /edit card. Loaded for every caller (public
+  // info like publications/technologies). PUBLISHED rows only (pending prose
+  // name-matches live in the comms queue, never on the profile); hidden ones
+  // included so the scholar can un-hide. Dark unless NEWS_MENTIONS_SECTION is on.
+  const news: EditContextNews[] =
+    process.env.NEWS_MENTIONS_SECTION === "on"
+      ? (
+          await client.newsMention.findMany({
+            where: { cwid, status: "published" },
+            select: {
+              id: true,
+              url: true,
+              title: true,
+              publishedAt: true,
+              showOnProfile: true,
+              source: true,
+            },
+            orderBy: [{ publishedAt: "desc" }],
+          })
+        ).map((n) => ({
+          id: n.id,
+          url: n.url,
+          title: n.title,
+          publishedAt: n.publishedAt ? n.publishedAt.toISOString().slice(0, 10) : null,
+          showOnProfile: n.showOnProfile,
+          source: n.source,
         }))
       : [];
 
@@ -1474,6 +1530,7 @@ export async function loadEditContext(
       grants,
       coiDisclosures,
       technologies,
+      news,
       mentees,
       unmatchedPubmedCoi,
       unmatchedPubmedCoiLower,
@@ -1640,6 +1697,7 @@ export async function loadEditContext(
     grants,
     coiDisclosures,
     technologies,
+    news,
     mentees,
     unmatchedPubmedCoi,
     unmatchedPubmedCoiLower,

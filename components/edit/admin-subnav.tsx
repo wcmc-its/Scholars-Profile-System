@@ -26,12 +26,14 @@ import { AccountMenu } from "@/components/site/account-menu";
 import { MatchaTab } from "@/components/edit/matcha-tab";
 import { isMatchaEnabled } from "@/lib/api/matcha";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
+import { isNewsQueueEnabled } from "@/lib/edit/news-queue";
 
 export type AdminSubnavActive =
   | "profiles"
   | "units"
   | "slug-requests"
   | "honors-queue"
+  | "news-queue"
   | "slugs"
   | "administrators"
   | "methods"
@@ -158,6 +160,21 @@ export function AdminSubnav({
             id="honors-queue"
             label="Honors"
             active={active === "honors-queue"}
+          />
+        )}
+        {/* News approval queue — the comms surface that confirms prose name-match
+            mentions before they publish. Same server-read-flag pattern as the
+            Matcha/Cores tabs below (no prop threads through every console page):
+            `NEWS_APPROVAL_QUEUE` gates the flag, and `superuserSurfaces || profilesTab`
+            is exactly the audience the page authorizes (superuser OR comms_steward —
+            a comms_steward passes `profilesTab`, a superuser `superuserSurfaces`). No
+            badge, mirroring the Honors tab. */}
+        {(superuserSurfaces || profilesTab) && isNewsQueueEnabled() && (
+          <AdminTab
+            href="/edit/news-queue"
+            id="news-queue"
+            label="News"
+            active={active === "news-queue"}
           />
         )}
         {/* Always visible to superusers — the slug namespace (active / historical

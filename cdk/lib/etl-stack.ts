@@ -1172,6 +1172,12 @@ export class EtlStack extends Stack {
       // or markup change must never abort the chain; its volume guard aborts the
       // step itself rather than blanking the section.
       { id: "TechnologyWeekly", npmScript: "etl:technologies", external: false, tier: "continue" },
+      // News mentions — scrapes the WCM Research news feed for scholar mentions.
+      // Same shape as TechnologyWeekly: no LDAP (external:false), and tier:"continue"
+      // so a WCM newsroom outage warns and proceeds rather than aborting the chain.
+      // Incremental by default (upserts new articles, preserves the review queue);
+      // a full backfill is an operator run with NEWS_BACKFILL=1.
+      { id: "NewsWeekly", npmScript: "etl:news", external: false, tier: "continue" },
       { id: "SearchIndexWeekly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Terminal volume gate — see IntegrityNightly above.

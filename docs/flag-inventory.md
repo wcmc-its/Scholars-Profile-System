@@ -39,6 +39,8 @@ two etl-stack drifts — everything else converged in the 2026-07-05/07 flips be
 | RECITER_REJECT_SEND (**etl-stack** copy) | on | off | #1469 | The app-side copy flipped prod-on 2026-07-05 (launch batch 2) — `/api/edit/reject` write-back is live. The remaining #1469 decision covers only the ETL `etl:reciter-refresh` scanner env (etl-stack) |
 | AVAILABLE_TECHNOLOGIES_SECTION | on | off | GAP (CTL rollout; code merged #1594/#1596/#1602) | Blocked on CTL contact/attribution sign-off → prod flip |
 | SPONSOR_MATCH | on | off | GAP (code merged #1607) | Rides the CTL technologies rollout |
+| NEWS_MENTIONS_SECTION | on | off | News mentions (docs/2026-07-18-news-mentions-plan.md) | Profile "News mentions" section + /edit card; presence-gated. Prod flip once etl:news has seeded |
+| NEWS_APPROVAL_QUEUE | on | off | News mentions (docs/2026-07-18-news-mentions-plan.md) | /edit/news-queue comms surface + decision endpoint; audience = superusers + external comms (comms_steward). Prod flip alongside the section |
 
 ## Converged since the 2026-07-02 snapshot (launch flag-parity + go-lives)
 
