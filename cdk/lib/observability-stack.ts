@@ -549,11 +549,28 @@ export class SpsObservabilityStack extends Stack {
     // recycling the app will not help; find what is holding the connections.
     //
     // One pool timeout is already a 500 in a user's face, so alarm on the first.
+    //
+    // ENV SUFFIX ON THE NAMESPACE IS LOAD-BEARING (Footgun #4, log-metric
+    // edition). Staging and prod deploy this stack into the SAME account, so an
+    // env-less namespace gives both envs ONE series: both metric filters write
+    // it and both env alarms read it. Measured 2026-07-19 -- `list-metrics
+    // --namespace SPS/Data` returned a single dimensionless DbPoolTimeout, and
+    // sps-db-pool-timeout-prod (which pages on sps-alarms-prod) and
+    // sps-db-pool-timeout-staging reported identical datapoint counts. A
+    // staging pool timeout would have fired the PROD page.
+    //
+    // The idiomatic fix -- a metric-filter `dimensions: { Env: env }` -- is
+    // rejected by AWS twice over: dimensions are mutually exclusive with
+    // `defaultValue` (the zero-emission below is what proves the filter is
+    // wired rather than phantom), and they require a JSON or space-delimited
+    // pattern whose dimension VALUE is read from a log field -- a static
+    // literal is not accepted, and the app does not log its env. Scoping the
+    // namespace keeps both properties and costs nothing.
     new logs.MetricFilter(this, "DbPoolTimeoutMetricFilter", {
       logGroup: appStack.appLogGroup,
       filterName: `sps-db-pool-timeout-${env}`,
       filterPattern: logs.FilterPattern.literal('"pool timeout"'),
-      metricNamespace: "SPS/Data",
+      metricNamespace: `SPS/Data/${env}`,
       metricName: "DbPoolTimeout",
       metricValue: "1",
       defaultValue: 0,
@@ -566,7 +583,7 @@ export class SpsObservabilityStack extends Stack {
         alarmName: `sps-db-pool-timeout-${env}`,
         alarmDescription: `A request could not get a DB connection from the pool (${env}) -- users are seeing 500s right now. If the log line says active=0 idle=0, the Aurora cluster is at its connection cap and recycling the app will NOT help. Next: check DatabaseConnections on the cluster, then stop any zombie one-off ECS tasks holding pools (see the sps-aurora-connections-${env} alarm and docs/performance-baseline.md).`,
         metric: new cloudwatch.Metric({
-          namespace: "SPS/Data",
+          namespace: `SPS/Data/${env}`, // env-scoped -- see the filter above
           metricName: "DbPoolTimeout",
           statistic: "Sum",
           period: Duration.minutes(5),
@@ -646,7 +663,7 @@ export class SpsObservabilityStack extends Stack {
       logGroup: appStack.appLogGroup,
       filterName: `sps-opensearch-breaker-${env}`,
       filterPattern: logs.FilterPattern.literal('"circuit_breaking_exception"'),
-      metricNamespace: "SPS/Search",
+      metricNamespace: `SPS/Search/${env}`, // env-scoped -- see (6b)
       metricName: "OpenSearchCircuitBreaker",
       metricValue: "1",
       defaultValue: 0,
@@ -659,7 +676,7 @@ export class SpsObservabilityStack extends Stack {
         alarmName: `sps-opensearch-breaker-${env}`,
         alarmDescription: `OpenSearch refused a query with circuit_breaking_exception (${env}) -- the parent breaker tripped at 95% of heap and the app returned 502. Next: check JVMMemoryPressure Maximum on the domain; the node is undersized or a query burst (e.g. the sponsor-match fan-out) is too heavy for the heap.`,
         metric: new cloudwatch.Metric({
-          namespace: "SPS/Search",
+          namespace: `SPS/Search/${env}`, // env-scoped -- see (6b)
           metricName: "OpenSearchCircuitBreaker",
           statistic: "Sum",
           period: Duration.minutes(5),
@@ -697,7 +714,7 @@ export class SpsObservabilityStack extends Stack {
         "=",
         "edit_authz_denied",
       ),
-      metricNamespace: "SPS/Auth",
+      metricNamespace: `SPS/Auth/${env}`, // env-scoped -- see (6b)
       metricName: "EditAuthzDenied",
       metricValue: "1",
       defaultValue: 0,
@@ -710,7 +727,7 @@ export class SpsObservabilityStack extends Stack {
         alarmName: `sps-edit-authz-denied-${env}`,
         alarmDescription: `Edit-surface 403 (edit_authz_denied) count > ${EDIT_AUTHZ_DENIED_THRESHOLD} in any 5m window for 2 consecutive windows (${env}). Sustained rate -- predicate bug or active probing. See docs/SLOs.md. Next: check for an authz-predicate regression in the last deploy, or active probing; review the edit_authz_denied logs for the actor and path.`,
         metric: new cloudwatch.Metric({
-          namespace: "SPS/Auth",
+          namespace: `SPS/Auth/${env}`, // env-scoped -- see (6b)
           metricName: "EditAuthzDenied",
           statistic: "Sum",
           period: Duration.minutes(5),
