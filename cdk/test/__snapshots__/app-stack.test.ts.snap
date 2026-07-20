@@ -603,6 +603,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
                 "Value": "on",
               },
@@ -4338,6 +4342,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_PEOPLE_CLINICAL_FN",
                 "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",

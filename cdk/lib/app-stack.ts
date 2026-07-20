@@ -1666,6 +1666,13 @@ export class AppStack extends Stack {
         // staging default — clinician-expert medRank 14->9, zero per-query regressions.
         // Prod flipped on 2026-07-04 (#1466); clinicalSpecialties backfilled on prod (#1481).
         SEARCH_PEOPLE_CLINICAL_FN: "on",
+        // #1836 — extend the clinical signal to the whole MeSH disease subtree a
+        // board specialty covers (a "heart failure" query lights up a board-certified
+        // cardiologist), via cap-free tree-number subsumption. Sub-toggle of
+        // SEARCH_PEOPLE_CLINICAL_FN. NEEDS a people reindex to populate the anchor
+        // fields. OFF in both envs at merge — flip staging + reindex, run the
+        // scripts/search-eval fixture count-up, then prod.
+        SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR: "off",
         // #824 follow-up -- match-aware People-results "why" line (method/topic/
         // humanized-areas snippet). APP-ONLY, no reindex: derives from
         // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-

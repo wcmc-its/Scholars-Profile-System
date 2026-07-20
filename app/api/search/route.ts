@@ -583,6 +583,10 @@ async function handleSearch(request: NextRequest) {
     // non-topic shapes. `meshOff` (scope=exact) suppresses it so the API matches
     // the SSR page, which passes `undefined` under "Exact word" to drop the boost.
     meshDescendantUis: meshOff ? undefined : taxonomyMatch.meshResolution?.descendantUis,
+    // #1836 — the query descriptor's ancestor tree-number closure for the cap-free
+    // clinical disease-subtree subsumption. searchPeople gates it behind
+    // SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR; suppressed under exact scope like the boost.
+    clinicalMeshTreeClosure: meshOff ? undefined : taxonomyMatch.meshResolution?.ancestorTreeNumbers,
     // #726 — tier + ambiguity/length floor for sparse concept admission.
     meshMatchTier: meshTier,
     meshAmbiguous: meshRes?.ambiguous,

@@ -488,6 +488,11 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           relevanceMode: peopleRelevanceMode,
           shape: peopleQueryShape,
           meshDescendantUis: meshOff ? undefined : taxonomyMatch.meshResolution?.descendantUis,
+          // #1836 — ancestor tree-number closure for the clinical disease-subtree
+          // subsumption (gated in searchPeople by SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR).
+          clinicalMeshTreeClosure: meshOff
+            ? undefined
+            : taxonomyMatch.meshResolution?.ancestorTreeNumbers,
           meshMatchTier: meshTier,
           meshAmbiguous: effectiveMeshResolution?.ambiguous,
           meshMatchedFormLength: effectiveMeshResolution?.matchedForm.length,
@@ -640,6 +645,11 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       relevanceMode: peopleRelevanceMode,
       shape: peopleQueryShape,
       meshDescendantUis: meshOff ? undefined : taxonomyMatch.meshResolution?.descendantUis,
+      // #1836 — ancestor tree-number closure for the clinical disease-subtree
+      // subsumption (gated in searchPeople by SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR).
+      clinicalMeshTreeClosure: meshOff
+        ? undefined
+        : taxonomyMatch.meshResolution?.ancestorTreeNumbers,
       // #726 — tier + ambiguity/length floor for sparse concept admission.
       meshMatchTier: meshTier,
       meshAmbiguous: effectiveMeshResolution?.ambiguous,

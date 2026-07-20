@@ -343,6 +343,18 @@ export const peopleIndexMapping = {
       // check is possible without a DB round-trip. OMITTED when boardCertSpecialties
       // is empty (omit-on-empty).
       clinicalBoardSet: { type: "keyword" },
+      // #1836 — `clinicalSpecialtyMeshTree`: the tree numbers of each specialty's
+      // curated MeSH *disease* anchor (keyword array). The clinical boost matches
+      // a query descriptor's ancestor tree-number closure against this with a
+      // `terms` filter — cap-free subsumption (a "heart failure" query lights up a
+      // cardiology-anchored `C14`). OMIT-on-empty; gated query-side by
+      // SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR. Populated by etl/pops → buildPeopleDoc.
+      clinicalSpecialtyMeshTree: { type: "keyword" },
+      // #1836 — `clinicalAnchors`: per-specialty {specialty, boardCertified, tree}
+      // rows, `_source`-read ONLY (never queried) to label the clinical evidence
+      // row for a disease-subtree match. `enabled: false` so it is stored but not
+      // indexed. OMIT-on-empty.
+      clinicalAnchors: { type: "object", enabled: false },
     },
   },
 };

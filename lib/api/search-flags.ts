@@ -1088,6 +1088,21 @@ export function resolveSearchPeopleClinicalFn(): boolean {
   return process.env.SEARCH_PEOPLE_CLINICAL_FN === "on";
 }
 
+/**
+ * #1836 — extend the clinical signal so it fires for the whole MeSH *disease*
+ * subtree a board specialty covers, not just literal specialty-name queries (a
+ * "heart failure" search lighting up a board-certified cardiologist). ON adds a
+ * tree-number-subsumption clause to the B2 boost filter and a `clinicalMeshMatch`
+ * evidence fallback, both keyed on the index-time `clinicalSpecialtyMeshTree` /
+ * `clinicalAnchors` fields. A sub-toggle of `SEARCH_PEOPLE_CLINICAL_FN` — inert
+ * unless that parent flag is also on. Default OFF; NEEDS a people reindex to
+ * populate the anchor fields. Flag-parity: wire `SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR`
+ * in `cdk/lib/app-stack.ts` (off in both envs at merge).
+ */
+export function resolveSearchPeopleClinicalMeshAnchor(): boolean {
+  return process.env.SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR === "on";
+}
+
 /** Default additive weight for the B2 clinical-specialty boost (matches the area-boost HI tier
  *  that lifted Igel in the prototype). Query-tunable via `SEARCH_PEOPLE_CLINICAL_FN_WEIGHT` so
  *  A/B cells need no reindex. */

@@ -62,6 +62,9 @@ seed-output/
 # Exception: #800 curated non-distinctive family suppression seed — checked in so
 # the data-steward-approved hard-hide list flows through PR review (etl:family-suppression).
 !etl/family-suppression/curated.csv
+# Exception: #1836 curated clinical specialty → MeSH disease anchor — checked in so
+# curation edits flow through PR review; the ETL image reads it at index build.
+!etl/clinical-mesh/specialty-anchors.csv
 # Exception: VIVO pageview baseline raw New Relic exports (issue #595) — checked
 # in so the baseline isn't a secondary analysis. Public URLs only (no PII).
 !docs/data/vivo-pageview-baseline/*.csv

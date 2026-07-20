@@ -62,6 +62,15 @@ const nextConfig: NextConfig = {
   // /api/edit/cv route 500s in production (the file is absent under .next/standalone).
   outputFileTracingIncludes: {
     "/api/edit/cv": ["./lib/edit/assets/wcm-cv-template.docx"],
+    // #1836 — the suppress/reject/revoke reflect fast-path rebuilds a search doc
+    // (reflectSearchSuppression → build{Scholar,Publication}Ops → loadMeshAncestorContext),
+    // which reads etl/clinical-mesh/specialty-anchors.csv via a cwd-relative path.
+    // The standalone runtime image doesn't ship etl/, so trace the CSV into these
+    // routes or the fast-path throws ENOENT (caught → silent zero-op reflect).
+    // ANY new app-runtime caller of loadMeshAncestorContext must be added here.
+    "/api/edit/suppress": ["./etl/clinical-mesh/specialty-anchors.csv"],
+    "/api/edit/reject": ["./etl/clinical-mesh/specialty-anchors.csv"],
+    "/api/edit/revoke": ["./etl/clinical-mesh/specialty-anchors.csv"],
   },
   // Issue #391 — keep jsdom (pulled in by isomorphic-dompurify in
   // lib/edit/validators.ts) external to the server bundle. jsdom reads
