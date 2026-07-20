@@ -3,7 +3,7 @@
  *  - happy path returns the model's concepts with hygiene applied — centrality >1
  *    clamped to 1, a non-finite (NaN/±Infinity) OR non-positive score floored to the
  *    incidental 0.3, terms trimmed, empty/whitespace terms dropped, case-insensitive
- *    dedupe (first wins), capped at 12;
+ *    dedupe (first wins), capped at 15;
  *  - the model id defaults to the pinned Sonnet profile and honours the
  *    `MATCHA_EXTRACT_MODEL` override (runtime rollback lever);
  *  - a deterministic config reaches the call (temperature 0 on the Sonnet profile,
@@ -146,14 +146,14 @@ describe("extractMatchaConcepts", () => {
     ]);
   });
 
-  it("caps the returned concepts at 12", async () => {
+  it("caps the returned concepts at 15", async () => {
     mockGenerateObject.mockResolvedValue(
-      objectWith(Array.from({ length: 15 }, (_, i) => ({ term: `concept-${i}`, centrality: 0.5 }))),
+      objectWith(Array.from({ length: 18 }, (_, i) => ({ term: `concept-${i}`, centrality: 0.5 }))),
     );
 
     const out = await extractMatchaConcepts("a long call touching many topics");
 
-    expect(out.concepts).toHaveLength(12);
+    expect(out.concepts).toHaveLength(15);
     expect(out.concepts[0].term).toBe("concept-0"); // order preserved (most-central-first from the model)
   });
 

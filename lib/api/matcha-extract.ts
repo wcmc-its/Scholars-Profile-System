@@ -87,19 +87,26 @@ export type MatchaExtraction = {
 const EXTRACT_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
 
 /** Hard cap on returned concepts — an UPPER bound on the LLM output. The spine then
- *  re-caps to its own (tighter) `MAX_TERMS` before the per-concept `searchPeople`
- *  fan-out, so THAT is the operative fan-out bound (every concept costs one taxonomy
- *  resolution + a per-cluster fan-out). The prompt also asks for ≤12; this is the
- *  belt-and-suspenders enforcement in `sanitize`. */
-const MAX_CONCEPTS = 12;
+ *  re-caps to its own (tighter) `MAX_TERMS` (8) before the per-concept `searchPeople`
+ *  fan-out, so THAT is the operative fan-out bound and raising THIS does NOT raise
+ *  automatic server load: the extra concepts (ranks 9–15) become the culled tail the
+ *  officer may opt to add as chips, one user action per add. Raised 12→15 because the
+ *  extractor was cap-limited (measured: 14/15 sponsor fixtures emit exactly 12), so it
+ *  wanted to name more DISTINCT axes than 12 — populations, methods, mechanisms that the
+ *  centrality cut drops. The prompt also asks for ≤15; this is the belt-and-suspenders
+ *  enforcement in `sanitize`. */
+const MAX_CONCEPTS = 15;
 
 /** Near-deterministic extraction (bake-off run-to-run comparability). Passed only when
  *  the model accepts it — Sonnet does; Opus 4.7/4.8 and Fable reject an explicit
  *  temperature with HTTP 400, so the gate keeps a future Opus pin from breaking. */
 const EXTRACT_TEMPERATURE = 0;
 
-/** Small output budget — ≤12 short noun phrases + a number each is well under 1K tokens. */
-const EXTRACT_MAX_TOKENS = 1024;
+/** Output budget. ≤15 concepts, each a short noun phrase + centrality + kind + a ≤15-word gloss.
+ *  Raised 1024→1280 alongside MAX_CONCEPTS 12→15: a truncated JSON object fails the schema and
+ *  drops the WHOLE extraction to the dictionary fallback, so the budget must comfortably clear the
+ *  larger output rather than sit at its edge. */
+const EXTRACT_MAX_TOKENS = 1280;
 
 /** Bound a Bedrock hang so it can't stall the spine worker (which then makes many
  *  sequential `searchPeople` round-trips). The overview generator sets none and leans
@@ -226,7 +233,7 @@ const EXTRACT_SYSTEM_PROMPT = [
   "    CAR-T persistence in solid tumors",
   "    remyelination in multiple sclerosis",
   "",
-  "Return at most 12 concepts, most central first. If the description names no",
+  "Return at most 15 concepts, most central first. If the description names no",
   "research concept, return an empty list and omit titleSummary. Output only the",
   "structured object — no commentary.",
 ].join("\n");
