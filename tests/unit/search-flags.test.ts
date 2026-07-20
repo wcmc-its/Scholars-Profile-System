@@ -23,6 +23,7 @@ import {
   resolveSearchPeopleDivisionShape,
   resolveSearchPeopleFacultyProminence,
   resolvePeopleTopicPhraseBoost,
+  resolveSearchPeopleClinicalMeshAnchor,
 } from "@/lib/api/search-flags";
 
 describe("resolveConceptMode (§7.1)", () => {
@@ -53,6 +54,27 @@ describe("resolveConceptMode (§7.1)", () => {
   it("ignores unknown values and falls back to the default", () => {
     process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "garbage";
     expect(resolveConceptMode()).toBe("expanded");
+  });
+});
+
+describe("resolveSearchPeopleClinicalMeshAnchor (#1836)", () => {
+  const original = process.env.SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR;
+  beforeEach(() => delete process.env.SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR);
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR;
+    else process.env.SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR = original;
+  });
+
+  it("defaults OFF when unset", () => {
+    expect(resolveSearchPeopleClinicalMeshAnchor()).toBe(false);
+  });
+  it("is on only for the exact string 'on'", () => {
+    process.env.SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR = "on";
+    expect(resolveSearchPeopleClinicalMeshAnchor()).toBe(true);
+    process.env.SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR = "ON";
+    expect(resolveSearchPeopleClinicalMeshAnchor()).toBe(false);
+    process.env.SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR = "true";
+    expect(resolveSearchPeopleClinicalMeshAnchor()).toBe(false);
   });
 });
 

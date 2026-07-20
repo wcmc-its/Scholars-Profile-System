@@ -70,6 +70,7 @@ import {
   supercategoryDescription,
 } from "@/lib/methods/supercategory-labels";
 import { methodFamilyPath, methodSupercategoryPath } from "@/lib/method-url";
+import { treeNumberPrefixes } from "@/lib/mesh-tree-ancestors";
 import { loadPublicationSuppressions, resolveDarkPmids } from "@/lib/api/manual-layer";
 import { cachedRead } from "@/lib/api/swr-cache";
 
@@ -172,6 +173,16 @@ export type MeshResolution = {
    * the publications-branch `search_query` line for baseline analysis only.
    */
   descendantUis: string[];
+  /**
+   * #1836 — the query descriptor's ANCESTOR tree-number closure (each tree
+   * number plus all its dot-prefixes, deduped). Used for the cap-free clinical
+   * disease-subtree subsumption: a specialty anchored at tree number `T` matches
+   * this query iff `T` is in this closure (i.e. the query descriptor is at-or-
+   * below `T`). Unlike `descendantUis` (capped at 200) this closure is tiny (≈
+   * tree depth). Optional so existing fixtures need not set it; the resolver
+   * always populates it.
+   */
+  ancestorTreeNumbers?: string[];
   /**
    * #726 — true when the normalized query matched more than one candidate
    * descriptor (the resolver tiebreaks a winner). A unique match is
@@ -1429,6 +1440,10 @@ function buildMeshResolution(
     curatedTopicAnchors: map.anchorsByUi.get(cand.row.descriptorUi) ?? [],
     // §5.4.2 — Invariant: descendantUis[0] === descriptorUi.
     descendantUis: getOrComputeDescendants(map, cand.row.descriptorUi),
+    // #1836 — ancestor tree-number closure for cap-free clinical subsumption.
+    ancestorTreeNumbers: [
+      ...new Set(cand.row.treeNumbers.flatMap((tn) => treeNumberPrefixes(tn))),
+    ],
     ambiguous: o.ambiguous,
   };
 }

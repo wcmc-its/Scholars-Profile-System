@@ -104,6 +104,7 @@ import {
   resolveAreaBoostWeights,
   resolveSearchPeopleClinicalFn,
   resolveSearchPeopleClinicalFnWeight,
+  resolveSearchPeopleClinicalMeshAnchor,
   resolveSearchPeopleClinicalReasonThresholds,
   resolveSearchPeopleConceptHint,
   resolveSearchResultEvidence,
@@ -114,6 +115,7 @@ import {
   type Scope,
 } from "@/lib/api/search-flags";
 import { investigatorGrantMatchCounts } from "@/lib/api/search-funding";
+import { clinicalMeshMatch, type ClinicalAnchor } from "@/lib/clinical-mesh-anchors";
 import {
   selectEvidence,
   selectEvidenceLines,
@@ -1329,6 +1331,15 @@ export async function searchPeople(opts: {
    */
   meshDescendantUis?: string[];
   /**
+   * #1836 — the query descriptor's ANCESTOR tree-number closure
+   * (`meshResolution.ancestorTreeNumbers`), passed only when
+   * SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR is on. Drives the cap-free clinical
+   * disease-subtree subsumption (`terms { clinicalSpecialtyMeshTree: closure }`)
+   * for both the B2 boost and the `clinicalMeshMatch` evidence fallback.
+   * Empty/absent ⇒ the clinical clause keeps today's literal-name behavior.
+   */
+  clinicalMeshTreeClosure?: string[];
+  /**
    * #726 — match-type signals for the MeSH concept-admission escalation,
    * derived by the caller from the resolved `MeshResolution`. `meshMatchTier`
    * grades trust (exact > anchored-entry > entry) to weight admission + the
@@ -1748,6 +1759,12 @@ export async function searchPeople(opts: {
   const clinicalReasonThresholds = clinicalReasonOn
     ? resolveSearchPeopleClinicalReasonThresholds()
     : undefined;
+  // #1836 — sub-toggle of the clinical flag: the MeSH disease-subtree subsumption
+  // is live only when BOTH clinical and its mesh-anchor flag are on. The query's
+  // ancestor tree-number closure drives the `terms` boost + the evidence fallback;
+  // empty ⇒ the clinical clause stays byte-identical to today's literal-name path.
+  const clinicalMeshOn = clinicalReasonOn && resolveSearchPeopleClinicalMeshAnchor();
+  const clinicalMeshClosure = clinicalMeshOn ? (opts.clinicalMeshTreeClosure ?? []) : [];
   const peopleTopicFields = (): string[] => [
     ...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS,
     ...(methodBoostOn ? ["methodFamily^4"] : []),
@@ -2463,11 +2480,28 @@ export async function searchPeople(opts: {
   // made the removed text-field variant inert. `match` (analyzed) handles case
   // ("obesity" → "Obesity"); `clinicalSpecialties` ONLY (board-derived, high precision) — NOT the
   // noisy `clinicalExpertise` free-text. No-ops when no specialty matches (e.g. "hypertension").
+  // #1836 — when the mesh-anchor flag is on and the query resolved to a
+  // descriptor, OR the literal specialty match with a cap-free tree-number
+  // subsumption clause (`clinicalSpecialtyMeshTree` ∩ the query's ancestor
+  // closure). One bool-should filter so the weight fires ONCE if either arm
+  // matches (no double count). Closure empty ⇒ falls back to today's `match`.
+  const clinicalFilter: Record<string, unknown> =
+    clinicalMeshClosure.length > 0
+      ? {
+          bool: {
+            should: [
+              { match: { clinicalSpecialties: trimmed } },
+              { terms: { clinicalSpecialtyMeshTree: clinicalMeshClosure } },
+            ],
+            minimum_should_match: 1,
+          },
+        }
+      : { match: { clinicalSpecialties: trimmed } };
   const clinicalFnFunctions: Record<string, unknown>[] =
     (applyTopicTemplate || applyHybridTemplate) && clinicalReasonOn && trimmed.length > 0
       ? [
           {
-            filter: { match: { clinicalSpecialties: trimmed } },
+            filter: clinicalFilter,
             weight: resolveSearchPeopleClinicalFnWeight(),
           },
         ]
@@ -2621,6 +2655,10 @@ export async function searchPeople(opts: {
       // shape. `clinicalExpertise` is not indexed into any live query path, so it
       // is not returned. Drives the `clinical:exact` evidence below.
       ...(clinicalReasonOn ? ["clinicalSpecialties", "clinicalBoardSet"] : []),
+      // #1836 — the per-specialty disease anchors, requested ONLY when the
+      // mesh-anchor flag is on so every other caller keeps today's `_source`
+      // shape. Drives the `clinicalMeshMatch` evidence fallback below.
+      ...(clinicalMeshOn ? ["clinicalAnchors"] : []),
       // D1 (sponsor recency) — the scholar's most-recent pub date, requested ONLY when the
       // sponsor recency path asks for it, so every other caller keeps today's `_source` shape.
       // Already stored + used for the recentPub sort/filter; this only projects it back.
@@ -2770,6 +2808,11 @@ export async function searchPeople(opts: {
       // reason. A not-yet-reindexed doc lacks them → no clinical reason, never a 500.
       clinicalSpecialties?: string[];
       clinicalBoardSet?: string[];
+      // #1836 — per-specialty disease anchors, present only when
+      // SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR is on (added to `_source` above); feed
+      // `clinicalMeshMatch` for the disease-subtree clinical reason. A not-yet-
+      // reindexed doc lacks them → no mesh clinical reason, never a 500.
+      clinicalAnchors?: ClinicalAnchor[];
       // D1 (sponsor recency) — the scholar's most-recent pub date (ISO), present only when
       // `includeMostRecentPub` added it to the include-list above. Derived from
       // `dateAddedToEntrez`, so it is the display-honest recency max (excludes retractions /
@@ -3181,6 +3224,8 @@ export async function searchPeople(opts: {
     topMeshTerms: Array<{ ui: string | null; label: string }> | string[] | undefined,
     clinicalSpecialties: string[] | undefined,
     clinicalBoardSet: string[] | undefined,
+    // #1836 — per-specialty disease anchors for the `clinicalMeshMatch` fallback.
+    clinicalAnchors: ClinicalAnchor[] | undefined,
     // #1366 — doc-precomputed reason-line counts (O(1) lookups, no agg). Keyed by
     // `familyLabel` / parent-topic slug. Only read by the stacked-lines path.
     methodFamilyCounts: Record<string, number> | undefined,
@@ -3284,8 +3329,13 @@ export async function searchPeople(opts: {
     // `clinicalExactMatch` returns null for a loose / no-overlap query — those
     // still boost ranking (the function_score) but emit no reason (under-claim
     // rather than mislabel).
+    // #1836 — literal specialty-name match first (most specific label); else the
+    // MeSH disease-subtree subsumption fallback (a "heart failure" query → a
+    // board-certified cardiologist). Both yield the same {specialty, boardCertified}
+    // shape, so the evidence renderers are unchanged.
     const clinical = clinicalReasonOn
-      ? clinicalExactMatch(contentQuery, clinicalSpecialties ?? [], clinicalBoardSet ?? [])
+      ? (clinicalExactMatch(contentQuery, clinicalSpecialties ?? [], clinicalBoardSet ?? []) ??
+        (clinicalMeshOn ? clinicalMeshMatch(clinicalMeshClosure, clinicalAnchors ?? []) : null))
       : null;
 
     const methodCount = m ? countOf(methodFamilyCounts?.[m.family]) : undefined;
@@ -3432,6 +3482,7 @@ export async function searchPeople(opts: {
                 h._source.topMeshTerms,
                 h._source.clinicalSpecialties,
                 h._source.clinicalBoardSet,
+                h._source.clinicalAnchors,
                 h._source.methodFamilyCounts,
                 h._source.areaCounts,
               );

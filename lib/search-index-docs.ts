@@ -37,6 +37,7 @@ import { isFamilyPubliclyVisible } from "@/lib/api/methods-overlay";
 import type { FamilyOverlayGate } from "@/lib/api/methods-overlay";
 import { isFundingActive } from "@/lib/api/search-funding";
 import { extractMeshDescriptorUis } from "@/lib/mesh-descriptor-uis";
+import { buildClinicalAnchors, loadSpecialtyAnchorMap } from "@/lib/clinical-mesh-anchors";
 import {
   buildMeshAncestorIndex,
   ancestorUisFor,
@@ -174,6 +175,10 @@ export const TOP_MESH_TERMS_LIMIT = 8;
 export type MeshAncestorContext = {
   index: MeshAncestorIndex;
   treeNumbersByUi: Map<string, string[]>;
+  /** #1836 — curated specialty→disease-anchor descriptor map (anchorKey → UI),
+   *  loaded from `etl/clinical-mesh/specialty-anchors.csv` alongside the tree
+   *  numbers so every `buildPeopleDoc` can emit the clinical anchor fields. */
+  specialtyAnchors: Map<string, string>;
 };
 
 /**
@@ -201,7 +206,11 @@ export async function loadMeshAncestorContext(
     treeNumbersByUi.set(r.descriptorUi, tns);
     indexRows.push({ ui: r.descriptorUi, treeNumbers: tns });
   }
-  return { index: buildMeshAncestorIndex(indexRows), treeNumbersByUi };
+  return {
+    index: buildMeshAncestorIndex(indexRows),
+    treeNumbersByUi,
+    specialtyAnchors: loadSpecialtyAnchorMap(),
+  };
 }
 
 /**
@@ -1275,6 +1284,18 @@ export async function buildPeopleDoc(
   // keyword field (not analyzed) so exact membership is recoverable at
   // query time without a DB round-trip.
   const clinicalBoardSet = boardCertSpecialties;
+  // #1836 — anchor each specialty to a MeSH disease descriptor's tree numbers so
+  // the clinical boost/evidence fire for the whole disease subtree it covers.
+  // Only when the ETL passed the ancestor context (which carries the curated
+  // specialty→UI map); OMIT-on-empty like the fields above.
+  const clinicalAnchorResult = meshAncestors
+    ? buildClinicalAnchors(
+        clinicalSpecialties,
+        clinicalBoardSet,
+        meshAncestors.specialtyAnchors,
+        meshAncestors.treeNumbersByUi,
+      )
+    : { tree: [], anchors: [] };
 
   return {
     cwid: s.cwid,
@@ -1353,6 +1374,17 @@ export async function buildPeopleDoc(
     ...(clinicalSpecialties.length > 0 ? { clinicalSpecialties } : {}),
     ...(clinicalExpertise.length > 0 ? { clinicalExpertise } : {}),
     ...(clinicalBoardSet.length > 0 ? { clinicalBoardSet } : {}),
+    // #1836 — disease-anchor tree numbers (keyword, for the query `terms`
+    // subsumption boost) + the per-specialty anchor rows (_source-only, for the
+    // evidence label). OMIT-on-empty, gated query-side by
+    // SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR; inert until that flag is on and a
+    // people reindex has landed.
+    ...(clinicalAnchorResult.tree.length > 0
+      ? { clinicalSpecialtyMeshTree: clinicalAnchorResult.tree }
+      : {}),
+    ...(clinicalAnchorResult.anchors.length > 0
+      ? { clinicalAnchors: clinicalAnchorResult.anchors }
+      : {}),
   };
 }
 

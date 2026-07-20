@@ -1,0 +1,66 @@
+# Issue #1836 — clinical board specialty → MeSH *disease* descriptor anchor.
+# Loaded once per index build (lib/clinical-mesh-anchors.ts) to stamp each
+# scholar's specialty with its disease-anchor tree numbers, so the clinical
+# boost + evidence fire for the whole disease subtree the specialty covers
+# (a "heart failure" query lighting up a board-certified cardiologist).
+#
+# Columns: specialty,descriptor_ui,note
+#   specialty      — POPS specialty string, matched case/punctuation-insensitively
+#                    (lib/clinical-mesh-anchors.ts anchorKey: lowercase + strip
+#                    non-alphanumerics). Wording still matters, so common variants
+#                    are listed explicitly.
+#   descriptor_ui  — a MeSH descriptor in the DISEASE tree (C.. or F03..). Only the
+#                    descriptor's C/F03 tree numbers are used; non-disease trees are
+#                    ignored, so a discipline that mis-resolves is harmless.
+#   note           — real NLM label + tree number(s)
+#
+# Every descriptor_ui below was VALIDATED against authoritative NLM MeSH
+# (id.nlm.nih.gov) on 2026-07-20: real descriptor, disease-tree, intent match.
+#
+# COVERAGE NOTE: the specialty STRINGS are ABMS-derived (staging Aurora + OpenSearch
+# were both unreachable when authored, so the real DISTINCT POPS vocabulary could
+# not be probed). Reconcile against live POPS strings post-deploy via
+# scripts/search-eval + a distinct-specialty probe, then add any missing wordings.
+specialty,descriptor_ui,note
+Cardiovascular Disease,D002318,Cardiovascular Diseases (C14)
+Cardiology,D002318,Cardiovascular Diseases (C14) — discipline→disease
+Interventional Cardiology,D002318,Cardiovascular Diseases (C14) — subspecialty
+Advanced Heart Failure and Transplant Cardiology,D002318,Cardiovascular Diseases (C14)
+Adult Congenital Heart Disease,D002318,Cardiovascular Diseases (C14)
+Clinical Cardiac Electrophysiology,D001145,"Arrhythmias, Cardiac (C14.280.067)"
+Cardiac Electrophysiology,D001145,"Arrhythmias, Cardiac (C14.280.067)"
+Dermatology,D012871,Skin Diseases (C17.800)
+Endocrinology Diabetes and Metabolism,D004700,Endocrine System Diseases (C19)
+Endocrinology Diabetes & Metabolism,D004700,Endocrine System Diseases (C19)
+Endocrinology,D004700,Endocrine System Diseases (C19)
+Gastroenterology,D004066,Digestive System Diseases (C06)
+Hematology,D006402,Hematologic Diseases (C15.378)
+Medical Oncology,D009369,Neoplasms (C04)
+Oncology,D009369,Neoplasms (C04)
+Hematology and Oncology,D009369,Neoplasms (C04) — hem-onc anchors to oncology intent
+Infectious Disease,D003141,Communicable Diseases (C01.221)
+Infectious Diseases,D003141,Communicable Diseases (C01.221)
+Nephrology,D007674,Kidney Diseases (C12.200.777.419) — discipline→disease
+Pulmonary Disease,D008171,Lung Diseases (C08.381)
+Pulmonary Disease and Critical Care Medicine,D008171,Lung Diseases (C08.381)
+Pulmonary and Critical Care Medicine,D008171,Lung Diseases (C08.381)
+Pulmonary Medicine,D008171,Lung Diseases (C08.381)
+Rheumatology,D012216,Rheumatic Diseases (C05.799)
+Allergy and Immunology,D007154,Immune System Diseases (C20) — subsumes hypersensitivity + immunodeficiency
+Allergy & Immunology,D007154,Immune System Diseases (C20)
+Neurology,D009422,Nervous System Diseases (C10) — discipline→disease
+Child Neurology,D009422,Nervous System Diseases (C10)
+Neurological Surgery,D009422,Nervous System Diseases (C10)
+Neurosurgery,D009422,Nervous System Diseases (C10)
+Psychiatry,D001523,Mental Disorders (F03) — discipline→disorder
+Addiction Psychiatry,D001523,Mental Disorders (F03)
+Child and Adolescent Psychiatry,D001523,Mental Disorders (F03)
+Geriatric Psychiatry,D001523,Mental Disorders (F03)
+Ophthalmology,D005128,Eye Diseases (C11)
+Otolaryngology,D010038,Otorhinolaryngologic Diseases (C09)
+Otolaryngology - Head and Neck Surgery,D010038,Otorhinolaryngologic Diseases (C09)
+Urology,D014570,Urologic Diseases (C12.200.777)
+Orthopaedic Surgery,D009140,Musculoskeletal Diseases (C05)
+Orthopedic Surgery,D009140,Musculoskeletal Diseases (C05)
+Orthopaedics,D009140,Musculoskeletal Diseases (C05)
+Vascular Surgery,D014652,Vascular Diseases (C14.907)
