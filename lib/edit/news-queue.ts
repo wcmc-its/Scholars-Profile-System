@@ -38,6 +38,10 @@ export type NewsQueueRow = {
   /** The prose name string the ETL matched — "the name being matched against". */
   detectedName: string | null;
   likelihood: string | null;
+  /** How the ETL attached this scholar: `VIVO` (trusted cwid link, auto-published)
+   *  or `NAME` (prose match, queue-reviewed). Only shown on the history tabs —
+   *  pending is name-only. */
+  source: string;
   sourceRef: string | null;
   createdAt: string;
   /** When decided (approve/reject) — its `updatedAt`; equals seed time on Pending. */
@@ -81,21 +85,49 @@ export function isNewsQueueTabVisible(session: {
 const LIKELIHOOD_RANK: Readonly<Record<string, number>> = { HIGH: 2, MEDIUM: 1 };
 
 /**
- * Pending (or decided) NAME-matched mentions, grouped by the detected name they
- * came from. VIVO rows never enter the queue (they publish straight away), so the
- * `source: "NAME"` filter is the queue's whole population.
+ * How many rows the read-only history tabs load.
  *
- * Ordering: confident single matches (HIGH, uncontested) first, contested groups
- * sink (they need human disambiguation), then most-recent article first;
- * `createdAt` breaks the final tie for a deterministic order.
+ * ponytail: a flat cap, not pagination. Mentions are never deleted (etl/news
+ * upserts, never downgrades), so `published` grows monotonically — the weekly
+ * scrape adds to it forever, and a full `NEWS_BACKFILL` lands ~1,200 rows on day
+ * one. Uncapped, every one of them is materialised, joined against a scholar
+ * IN-list, and serialised into the client-component payload on EVERY visit to
+ * the page — including the Pending workflow, which loads all three tabs at once.
+ * Pending itself is the working queue and must be complete, so it is uncapped.
+ * Upgrade path if comms ever needs the deep history: a cursor on
+ * (publishedAt, id) plus a (status, publishedAt) index — there is no index on
+ * `status` today, both existing ones lead with `cwid`.
+ */
+export const NEWS_HISTORY_LIMIT = 500;
+
+/**
+ * Mentions in `status`, grouped by the detected name they came from.
+ *
+ * NOT filtered to `source: "NAME"`. Pending is name-only by construction (a VIVO
+ * link publishes straight away and never sits pending), but the history statuses
+ * must show BOTH sources: a scholar with only VIVO-published mentions on their
+ * profile would otherwise appear nowhere in the queue at all. A VIVO row has a
+ * null `sourceRef`, so it groups alone under `id:<id>` and is never contested.
+ *
+ * Ordering: Pending puts confident single matches (HIGH, uncontested) first and
+ * sinks contested groups (they need human disambiguation). The history tabs skip
+ * that rank entirely — VIVO rows have a null likelihood and would rank 0, burying
+ * them under every NAME approval. Both then sort most-recent article first, with
+ * `createdAt` breaking the final tie for a deterministic order.
  */
 export async function loadNewsQueue(
   client: NewsQueueClient,
   status: NewsMentionStatus = "pending",
 ): Promise<NewsQueueGroup[]> {
+  // Pending is the working queue: complete, oldest-first. History is capped, so
+  // it must order newest-first at the DB or the cap would keep the oldest rows.
+  const isHistory = status !== "pending";
   const rows = await client.newsMention.findMany({
-    where: { status, source: "NAME" },
-    orderBy: { createdAt: "asc" },
+    where: { status },
+    orderBy: isHistory
+      ? [{ publishedAt: "desc" }, { createdAt: "desc" }]
+      : { createdAt: "asc" },
+    ...(isHistory ? { take: NEWS_HISTORY_LIMIT } : {}),
     select: {
       id: true,
       cwid: true,
@@ -104,6 +136,7 @@ export async function loadNewsQueue(
       publishedAt: true,
       detectedName: true,
       likelihood: true,
+      source: true,
       sourceRef: true,
       createdAt: true,
       updatedAt: true,
@@ -162,6 +195,7 @@ export async function loadNewsQueue(
           publishedAt: r.publishedAt ? r.publishedAt.toISOString().slice(0, 10) : null,
           detectedName: r.detectedName,
           likelihood: r.likelihood,
+          source: r.source,
           sourceRef: r.sourceRef,
           createdAt: r.createdAt.toISOString(),
           decidedAt: r.updatedAt.toISOString(),
@@ -171,10 +205,13 @@ export async function loadNewsQueue(
     });
   }
 
+  const rankByLikelihood = status === "pending";
   return out.sort((a, b) => {
-    const ra = a.contested ? 0 : (LIKELIHOOD_RANK[a.rows[0].likelihood ?? ""] ?? 0);
-    const rb = b.contested ? 0 : (LIKELIHOOD_RANK[b.rows[0].likelihood ?? ""] ?? 0);
-    if (ra !== rb) return rb - ra;
+    if (rankByLikelihood) {
+      const ra = a.contested ? 0 : (LIKELIHOOD_RANK[a.rows[0].likelihood ?? ""] ?? 0);
+      const rb = b.contested ? 0 : (LIKELIHOOD_RANK[b.rows[0].likelihood ?? ""] ?? 0);
+      if (ra !== rb) return rb - ra;
+    }
     const ad = a.rows[0].publishedAt;
     const bd = b.rows[0].publishedAt;
     if (ad !== bd) {

@@ -16,6 +16,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
+import { NEWS_HISTORY_LIMIT } from "@/lib/edit/news-queue";
 import type { NewsQueueGroup, NewsQueueRow } from "@/lib/edit/news-queue";
 
 type Tab = "pending" | "approved" | "rejected";
@@ -48,7 +49,17 @@ function Candidate({ row }: { row: NewsQueueRow }) {
         ) : (
           row.scholarName
         )}
-        {row.likelihood ? (
+        {/* ponytail: badge the VIVO rows only. A NAME row already announces itself
+            with its likelihood label, and only the history tabs mix the two —
+            pending is name-only, so a "NAME" badge there would be pure noise. */}
+        {row.source === "VIVO" ? (
+          <span
+            className="text-muted-foreground border-border ml-2 rounded-sm border px-1 py-px text-[10px] font-semibold tracking-wider uppercase"
+            title="Linked by VIVO cwid — published automatically, never queued"
+          >
+            VIVO
+          </span>
+        ) : row.likelihood ? (
           <span className="text-muted-foreground ml-2 text-[10px] font-semibold tracking-wider uppercase">
             {row.likelihood}
           </span>
@@ -107,6 +118,11 @@ export function NewsQueue({
 
   const groups = tab === "pending" ? pending : tab === "approved" ? approved : rejected;
   const busy = (id: string) => pendingTx && busyId === id;
+  // The history tabs are capped at the loader. Say so rather than letting a
+  // truncated list read as the complete record.
+  const truncated =
+    tab !== "pending" &&
+    groups.reduce((n, g) => n + g.rows.length, 0) >= NEWS_HISTORY_LIMIT;
 
   return (
     <div data-slot="news-queue">
@@ -132,6 +148,13 @@ export function NewsQueue({
       {error && (
         <p className="text-destructive mb-3 text-sm" role="alert">
           {error}
+        </p>
+      )}
+
+      {truncated && (
+        <p className="text-muted-foreground mb-3 text-sm">
+          Showing the {NEWS_HISTORY_LIMIT} most recent — older mentions are not listed here, but
+          still show on their profiles.
         </p>
       )}
 
