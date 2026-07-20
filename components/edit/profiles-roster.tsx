@@ -230,7 +230,7 @@ export function ProfilesRoster({
           {total === 0 ? "No matching profiles." : `Showing ${start}–${end} of ${total.toLocaleString()}`}
         </p>
 
-        <div className="border-apollo-border overflow-hidden rounded-md border">
+        <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-md border">
           <table className="w-full text-sm">
             <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
               <tr>

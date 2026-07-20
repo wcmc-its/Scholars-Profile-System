@@ -177,9 +177,9 @@ export function DataQualityDashboard({
             )}
           </div>
 
-          <div className="overflow-x-auto rounded-md border">
+          <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-md border">
             <table className="w-full text-sm" data-testid="dq-table">
-              <thead className="bg-muted/50 text-muted-foreground text-left text-xs uppercase">
+              <thead className="bg-apollo-surface-2 text-muted-foreground text-left text-xs uppercase">
                 <tr>
                   <th className="w-12 px-3 py-2">#</th>
                   <th className="px-3 py-2">Scholar</th>

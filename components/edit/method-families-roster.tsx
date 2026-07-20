@@ -424,7 +424,7 @@ export function MethodFamiliesRoster({ families, sensitivityGateOn }: MethodFami
         </Alert>
       )}
 
-      <div className="border-apollo-border overflow-x-auto rounded-md border">
+      <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-md border">
         <table className="w-full text-sm" data-testid="methods-families-table">
           <thead>
             <tr className="text-muted-foreground border-apollo-border bg-apollo-surface-2 border-b text-left">
