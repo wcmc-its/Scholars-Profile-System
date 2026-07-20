@@ -28,7 +28,7 @@ export const FIELD_SOURCE: Record<RequestAttribute, string> = {
   // header shows the combined "InfoEd and NIH RePORTER" when RePORTER rows are
   // present). The entry exists for `RequestAttribute` Record totality.
   "funding-reporter": "NIH RePORTER",
-  publications: "PubMed (attributed by ReCiter)",
+  publications: "ReCiter (PubMed, Scopus, OpenAlex)",
   // #728 Phase D — `org-unit` is a request-only pseudo-attribute (no `/edit`
   // panel renders a source line for it); the entry exists only because the map
   // is a total Record over the shared `RequestAttribute` union.
