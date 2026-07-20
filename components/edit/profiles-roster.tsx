@@ -231,7 +231,7 @@ export function ProfilesRoster({
         </p>
 
         <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-md border">
-          <table className="w-full text-sm">
+          <table className="[&_td]:align-middle w-full text-sm">
             <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
               <tr>
                 <th className="px-3 py-2 font-medium">Name</th>

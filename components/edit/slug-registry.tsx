@@ -253,7 +253,7 @@ function SegmentTable({
 
 function TableShell({ headers, children }: { headers: string[]; children: React.ReactNode }) {
   return (
-    <table className="w-full text-sm">
+    <table className="[&_td]:align-middle w-full text-sm">
       <thead className="bg-muted/50 text-muted-foreground text-left">
         <tr>
           {headers.map((h) => (

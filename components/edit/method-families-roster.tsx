@@ -461,7 +461,7 @@ export function MethodFamiliesRoster({ families, sensitivityGateOn }: MethodFami
                   <tr
                     key={key}
                     className={cn(
-                      "border-apollo-border border-b align-top last:border-b-0",
+                      "border-apollo-border border-b align-middle last:border-b-0",
                       reviewed && "opacity-60",
                     )}
                     data-testid={`methods-family-row-${row.supercategory}-${row.familyLabel}`}
