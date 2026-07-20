@@ -227,6 +227,12 @@ type CtrRow = {
 };
 type Suppr = { entityType: string; entityId: string };
 type ScholarRow = { cwid: string; preferredName: string };
+type MembershipRow = {
+  centerCode: string;
+  cwid: string;
+  startDate?: Date | null;
+  endDate?: Date | null;
+};
 
 function makeDirectoryClient(opts: {
   departments?: DeptRow[];
@@ -234,6 +240,8 @@ function makeDirectoryClient(opts: {
   centers?: CtrRow[];
   suppressions?: Suppr[];
   scholars?: ScholarRow[];
+  /** Center roster rows — centers count live off these, never off the row. */
+  memberships?: MembershipRow[];
 }) {
   const dept = vi.fn(async () => opts.departments ?? []);
   const div = vi.fn(async () => opts.divisions ?? []);
@@ -243,6 +251,14 @@ function makeDirectoryClient(opts: {
     const inList = args?.where?.cwid?.in ?? [];
     return (opts.scholars ?? []).filter((s) => inList.includes(s.cwid));
   });
+  const centerMembership = vi.fn(
+    async (args?: { where?: { centerCode?: { in?: string[] } } }) => {
+      const inList = args?.where?.centerCode?.in ?? [];
+      return (opts.memberships ?? [])
+        .filter((m) => inList.includes(m.centerCode))
+        .map((m) => ({ startDate: null, endDate: null, ...m }));
+    },
+  );
   return {
     client: {
       department: { findMany: dept },
@@ -250,8 +266,9 @@ function makeDirectoryClient(opts: {
       center: { findMany: ctr },
       suppression: { findMany: suppression },
       scholar: { findMany: scholar },
+      centerMembership: { findMany: centerMembership },
     } as never,
-    spies: { dept, div, ctr, suppression, scholar },
+    spies: { dept, div, ctr, suppression, scholar, centerMembership },
   };
 }
 
@@ -413,5 +430,36 @@ describe("loadAllUnitsDirectory", () => {
       "division:Cardiology",
       "center:Brain Center",
     ]);
+  });
+
+  // The directory must count a center's roster live. `Center.scholarCount`
+  // is never maintained (the ED ETL's Phase 3 refresh does departments and
+  // divisions only), so reading it reported "0 scholars" for every manually
+  // created center while its public page showed the real number. This fails if
+  // anyone reverts the center branch to `r.scholarCount`.
+  it("counts a center's members live, ignoring the stale scholarCount column", async () => {
+    const { client } = makeDirectoryClient({
+      centers: [{ code: "friedman_nutrition", name: "Friedman Center", scholarCount: 0 }],
+      memberships: [
+        { centerCode: "friedman_nutrition", cwid: "aaa1001" },
+        { centerCode: "friedman_nutrition", cwid: "bbb1002" },
+        { centerCode: "friedman_nutrition", cwid: "ccc1003" },
+      ],
+      scholars: [
+        { cwid: "aaa1001", preferredName: "A" },
+        { cwid: "bbb1002", preferredName: "B" },
+        { cwid: "ccc1003", preferredName: "C" },
+      ],
+    });
+    const r = await loadAllUnitsDirectory(client);
+    expect(r[0].scholarCount).toBe(3);
+  });
+
+  it("does not let a non-zero stale column leak through for a center with no roster", async () => {
+    const { client } = makeDirectoryClient({
+      centers: [{ code: "C1", name: "Empty Center", scholarCount: 999 }],
+    });
+    const r = await loadAllUnitsDirectory(client);
+    expect(r[0].scholarCount).toBe(0);
   });
 });

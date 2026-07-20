@@ -24,6 +24,7 @@
  * `administrators.ts` / `impersonation-display.ts`.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { countActiveCenterMembersByCode } from "@/lib/api/centers";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { compactUnitName, officialUnitName } from "@/lib/org-unit-names";
 
@@ -273,7 +274,7 @@ export type UnitDirectoryEntry = {
 /** The narrow Prisma surface `loadAllUnitsDirectory` reads — `db.read` satisfies it. */
 export type AllUnitsDirectoryClient = Pick<
   PrismaClient,
-  "department" | "division" | "center" | "suppression" | "scholar"
+  "department" | "division" | "center" | "suppression" | "scholar" | "centerMembership"
 >;
 
 /**
@@ -351,7 +352,8 @@ export async function loadAllUnitsDirectory(
         centerType: true,
         directorCwid: true,
         leaderInterim: true,
-        scholarCount: true,
+        // NB: `scholarCount` is deliberately NOT selected — the column is never
+        // maintained for centers. Counted live below.
         sortOrder: true,
         source: true,
       },
@@ -367,6 +369,13 @@ export async function loadAllUnitsDirectory(
 
   // One Set of `${kind}:${code}` for the retired flag — no per-unit lookup.
   const retiredSet = new Set(suppressions.map((s) => `${s.entityType}:${s.entityId}`));
+
+  // Centers count live: `Center.scholarCount` is never maintained. Two
+  // batched queries, so the directory stays O(1) in the number of centers.
+  const centerCounts = await countActiveCenterMembersByCode(
+    db,
+    ctrRows.map((r) => r.code),
+  );
 
   // One batched scholar name lookup for every leader cwid across all kinds.
   const leaderCwids = [
@@ -459,7 +468,7 @@ export async function loadAllUnitsDirectory(
         leaderCwid: r.directorCwid,
         leaderName: resolveLeader(r.code, r.directorCwid),
         leaderInterim: r.leaderInterim,
-        scholarCount: r.scholarCount,
+        scholarCount: centerCounts.get(r.code) ?? 0,
         source: r.source,
         // Centers are NOT modeled with a parent-dept FK — always null.
         parentDeptCode: null,

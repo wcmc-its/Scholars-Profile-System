@@ -14,6 +14,7 @@
  * All callers are Server Components / ISR pages. Public-data only — no auth.
  */
 import { prisma } from "@/lib/db";
+import { countActiveCenterMembersByCode } from "@/lib/api/centers";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import type {
@@ -241,11 +242,17 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
       slug: true,
       description: true,
       directorCwid: true,
-      scholarCount: true,
+      // NB: `scholarCount` is deliberately NOT selected — the column is never
+      // maintained for centers. Counted live below.
       sortOrder: true,
     },
   });
   if (centers.length === 0) return [];
+
+  const centerCounts = await countActiveCenterMembersByCode(
+    prisma,
+    centers.map((c) => c.code),
+  );
 
   const directorCwids = centers
     .map((c) => c.directorCwid)
@@ -270,7 +277,7 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
     directorSlug: c.directorCwid
       ? (directorMap.get(c.directorCwid)?.slug ?? null)
       : null,
-    scholarCount: c.scholarCount,
+    scholarCount: centerCounts.get(c.code) ?? 0,
     sortOrder: c.sortOrder,
   }));
 }
