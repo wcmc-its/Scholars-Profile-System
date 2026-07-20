@@ -14,7 +14,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { loadNewsQueue } from "@/lib/edit/news-queue";
+import { NEWS_HISTORY_LIMIT, loadNewsQueue } from "@/lib/edit/news-queue";
 
 type Row = {
   id: string;
@@ -60,11 +60,11 @@ function name(over: Partial<Row> & { id: string; cwid: string }): Row {
 /** Minimal stand-in for the Prisma surface the loader touches. `calls` records
  *  the `where` each findMany got, so a re-added source filter fails the test. */
 function client(rows: Row[]) {
-  const calls: unknown[] = [];
+  const calls: Array<Record<string, unknown>> = [];
   const c = {
     newsMention: {
-      findMany: async (args: { where: unknown }) => {
-        calls.push(args.where);
+      findMany: async (args: Record<string, unknown>) => {
+        calls.push(args);
         return rows;
       },
     },
@@ -89,7 +89,21 @@ describe("loadNewsQueue — history shows every source", () => {
   it("queries without a source filter", async () => {
     const { client: c, calls } = client([vivo({ id: "v1", cwid: "aaa1001" })]);
     await loadNewsQueue(c, "published");
-    expect(calls[0]).toEqual({ status: "published" });
+    expect(calls[0].where).toEqual({ status: "published" });
+  });
+
+  it("caps history and takes the most recent, but never caps pending", async () => {
+    // news_mention is append-only, so an uncapped history load grows forever and
+    // ships every row into the client payload. The cap must also order
+    // newest-first at the DB, or it would keep the OLDEST rows.
+    const { client: c, calls } = client([vivo({ id: "v1", cwid: "aaa1001" })]);
+
+    await loadNewsQueue(c, "published");
+    expect(calls[0].take).toBe(NEWS_HISTORY_LIMIT);
+    expect(calls[0].orderBy).toEqual([{ publishedAt: "desc" }, { createdAt: "desc" }]);
+
+    await loadNewsQueue(c, "pending");
+    expect(calls[1].take).toBeUndefined();
   });
 
   it("returns VIVO rows alongside NAME approvals, each solo and uncontested", async () => {

@@ -85,6 +85,22 @@ export function isNewsQueueTabVisible(session: {
 const LIKELIHOOD_RANK: Readonly<Record<string, number>> = { HIGH: 2, MEDIUM: 1 };
 
 /**
+ * How many rows the read-only history tabs load.
+ *
+ * ponytail: a flat cap, not pagination. Mentions are never deleted (etl/news
+ * upserts, never downgrades), so `published` grows monotonically — the weekly
+ * scrape adds to it forever, and a full `NEWS_BACKFILL` lands ~1,200 rows on day
+ * one. Uncapped, every one of them is materialised, joined against a scholar
+ * IN-list, and serialised into the client-component payload on EVERY visit to
+ * the page — including the Pending workflow, which loads all three tabs at once.
+ * Pending itself is the working queue and must be complete, so it is uncapped.
+ * Upgrade path if comms ever needs the deep history: a cursor on
+ * (publishedAt, id) plus a (status, publishedAt) index — there is no index on
+ * `status` today, both existing ones lead with `cwid`.
+ */
+export const NEWS_HISTORY_LIMIT = 500;
+
+/**
  * Mentions in `status`, grouped by the detected name they came from.
  *
  * NOT filtered to `source: "NAME"`. Pending is name-only by construction (a VIVO
@@ -103,9 +119,15 @@ export async function loadNewsQueue(
   client: NewsQueueClient,
   status: NewsMentionStatus = "pending",
 ): Promise<NewsQueueGroup[]> {
+  // Pending is the working queue: complete, oldest-first. History is capped, so
+  // it must order newest-first at the DB or the cap would keep the oldest rows.
+  const isHistory = status !== "pending";
   const rows = await client.newsMention.findMany({
     where: { status },
-    orderBy: { createdAt: "asc" },
+    orderBy: isHistory
+      ? [{ publishedAt: "desc" }, { createdAt: "desc" }]
+      : { createdAt: "asc" },
+    ...(isHistory ? { take: NEWS_HISTORY_LIMIT } : {}),
     select: {
       id: true,
       cwid: true,

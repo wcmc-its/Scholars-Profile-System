@@ -16,6 +16,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
+import { NEWS_HISTORY_LIMIT } from "@/lib/edit/news-queue";
 import type { NewsQueueGroup, NewsQueueRow } from "@/lib/edit/news-queue";
 
 type Tab = "pending" | "approved" | "rejected";
@@ -117,6 +118,11 @@ export function NewsQueue({
 
   const groups = tab === "pending" ? pending : tab === "approved" ? approved : rejected;
   const busy = (id: string) => pendingTx && busyId === id;
+  // The history tabs are capped at the loader. Say so rather than letting a
+  // truncated list read as the complete record.
+  const truncated =
+    tab !== "pending" &&
+    groups.reduce((n, g) => n + g.rows.length, 0) >= NEWS_HISTORY_LIMIT;
 
   return (
     <div data-slot="news-queue">
@@ -142,6 +148,13 @@ export function NewsQueue({
       {error && (
         <p className="text-destructive mb-3 text-sm" role="alert">
           {error}
+        </p>
+      )}
+
+      {truncated && (
+        <p className="text-muted-foreground mb-3 text-sm">
+          Showing the {NEWS_HISTORY_LIMIT} most recent — older mentions are not listed here, but
+          still show on their profiles.
         </p>
       )}
 
