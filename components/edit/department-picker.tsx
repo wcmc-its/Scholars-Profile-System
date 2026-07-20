@@ -88,7 +88,7 @@ export function DepartmentPicker({
   if (value) {
     return (
       <div
-        className="border-apollo-border-strong flex items-center justify-between gap-2 rounded-md border px-3 py-2"
+        className="border-apollo-border-strong bg-apollo-surface flex items-center justify-between gap-2 rounded-md border px-3 py-2"
         data-slot="department-picker-selected"
       >
         <span className="min-w-0 truncate text-sm">

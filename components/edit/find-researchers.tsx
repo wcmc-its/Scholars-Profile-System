@@ -768,7 +768,7 @@ function FacetGroup({
 }
 
 const thClass = "px-3 py-2 text-xs font-medium";
-const tdClass = "px-3 py-2.5 align-top";
+const tdClass = "px-3 py-2.5 align-middle";
 
 /**
  * One opportunity as a table row.

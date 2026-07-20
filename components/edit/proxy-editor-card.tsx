@@ -170,7 +170,7 @@ export function ProxyEditorCard({
             No proxy editors yet.
           </p>
         ) : (
-          <table className="w-full text-sm" data-testid="proxy-editor-table">
+          <table className="[&_td]:align-middle w-full text-sm" data-testid="proxy-editor-table">
             <thead>
               <tr className="text-muted-foreground border-apollo-border border-b text-left">
                 <th className="py-2 font-medium">Person</th>
@@ -259,7 +259,7 @@ export function ProxyEditorCard({
               No org-unit administrators can edit this profile.
             </p>
           ) : (
-            <table className="w-full text-sm" data-testid="unit-admin-editor-table">
+            <table className="[&_td]:align-middle w-full text-sm" data-testid="unit-admin-editor-table">
               <thead>
                 <tr className="text-muted-foreground border-apollo-border border-b text-left">
                   <th className="py-2 font-medium">Person</th>

@@ -268,7 +268,7 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props
             <select
               value={groupBy}
               onChange={(e) => setGroupBy(e.target.value as GroupBy)}
-              className="rounded-sm border px-2 py-1 text-xs"
+              className="bg-background rounded-sm border px-2 py-1 text-xs"
             >
               <option value="none">No grouping</option>
               <option value="person">By person</option>
@@ -281,7 +281,7 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props
               <select
                 value={sortKey}
                 onChange={(e) => setSortKey(e.target.value as SortKey)}
-                className="rounded-sm border px-2 py-1 text-xs"
+                className="bg-background rounded-sm border px-2 py-1 text-xs"
               >
                 <option value="prestige">Most prestigious</option>
                 <option value="recent">Most recent</option>

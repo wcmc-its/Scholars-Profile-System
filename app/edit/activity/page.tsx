@@ -128,7 +128,7 @@ function CountTable({
   return (
     <section className="mt-8">
       <h2 className="text-base font-semibold">{caption}</h2>
-      <div className="mt-2 overflow-x-auto">
+      <div className="border-apollo-border bg-apollo-surface mt-2 overflow-x-auto rounded-md border">
         <table className="w-full text-sm">
           <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
             <tr className="border-apollo-border border-b">
@@ -205,7 +205,7 @@ function ActivityBody({ summary }: { summary: EditActivitySummary }) {
 
       <section className="mt-8">
         <h2 className="text-base font-semibold">Recent activity</h2>
-        <div className="mt-2 overflow-x-auto">
+        <div className="border-apollo-border bg-apollo-surface mt-2 overflow-x-auto rounded-md border">
           <table className="w-full text-sm">
             <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
               <tr className="border-apollo-border border-b">

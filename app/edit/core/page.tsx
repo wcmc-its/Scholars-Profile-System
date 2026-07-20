@@ -90,7 +90,7 @@ export default async function EditCoresIndexPage() {
           appear on the public core page; rejected ones are hidden. A core with no staff feed yet
           has nothing to review.
         </p>
-        <ul className="divide-border divide-y rounded-md border" data-testid="edit-cores-list">
+        <ul className="divide-apollo-border bg-apollo-surface divide-y rounded-md border border-apollo-border" data-testid="edit-cores-list">
           {cores.map((c) => (
             <li key={c.id}>
               <Link

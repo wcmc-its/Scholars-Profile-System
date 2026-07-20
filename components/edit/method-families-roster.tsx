@@ -424,7 +424,7 @@ export function MethodFamiliesRoster({ families, sensitivityGateOn }: MethodFami
         </Alert>
       )}
 
-      <div className="border-apollo-border overflow-x-auto rounded-md border">
+      <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-md border">
         <table className="w-full text-sm" data-testid="methods-families-table">
           <thead>
             <tr className="text-muted-foreground border-apollo-border bg-apollo-surface-2 border-b text-left">
@@ -461,7 +461,7 @@ export function MethodFamiliesRoster({ families, sensitivityGateOn }: MethodFami
                   <tr
                     key={key}
                     className={cn(
-                      "border-apollo-border border-b align-top last:border-b-0",
+                      "border-apollo-border border-b align-middle last:border-b-0",
                       reviewed && "opacity-60",
                     )}
                     data-testid={`methods-family-row-${row.supercategory}-${row.familyLabel}`}

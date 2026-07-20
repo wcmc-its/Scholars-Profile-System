@@ -315,7 +315,7 @@ function UnitRow({ unit }: { unit: UnitDirectoryEntry }) {
       className="border-apollo-border hover:bg-apollo-surface-2 focus-within:outline focus-within:-outline-offset-2 focus-within:outline-apollo-maroon relative border-t focus-within:outline-2"
       data-testid={`all-units-row-${unit.kind}-${unit.code}`}
     >
-      <td className="px-3 py-2.5 align-top">
+      <td className="px-3 py-2.5 align-middle">
         {/* Parent department rides above the name as a muted eyebrow so a
             division's place in the org chart reads at a glance. */}
         {unit.parentDeptName && (
@@ -343,7 +343,7 @@ function UnitRow({ unit }: { unit: UnitDirectoryEntry }) {
         <span className="text-muted-foreground block text-xs leading-tight">{subLine}</span>
       </td>
 
-      <td className="px-3 py-2.5 align-top whitespace-nowrap">
+      <td className="px-3 py-2.5 align-middle whitespace-nowrap">
         <span className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border inline-flex rounded-full border px-2 py-0.5 text-xs font-medium">
           {unit.kindLabel}
         </span>
@@ -354,18 +354,18 @@ function UnitRow({ unit }: { unit: UnitDirectoryEntry }) {
         )}
       </td>
 
-      <td className="text-muted-foreground px-3 py-2.5 align-top whitespace-nowrap">
+      <td className="text-muted-foreground px-3 py-2.5 align-middle whitespace-nowrap">
         <UnitCodeRef code={unit.code} />
       </td>
 
       <td
-        className="px-3 py-2.5 text-right align-top tabular-nums whitespace-nowrap"
+        className="px-3 py-2.5 text-right align-middle tabular-nums whitespace-nowrap"
         data-testid={`all-units-scholars-${unit.kind}-${unit.code}`}
       >
         {unit.scholarCount}
       </td>
 
-      <td className="px-3 py-2.5 align-top">
+      <td className="px-3 py-2.5 align-middle">
         {unit.leaderName ? (
           <span className="text-foreground">
             {unit.leaderInterim ? "Interim " : ""}
@@ -385,7 +385,7 @@ function UnitRow({ unit }: { unit: UnitDirectoryEntry }) {
         )}
       </td>
 
-      <td className="px-3 py-2.5 align-top whitespace-nowrap">
+      <td className="px-3 py-2.5 align-middle whitespace-nowrap">
         {hasDescription ? (
           // The description text itself is not a column (it is a paragraph, and
           // every row would truncate it) — the check says "present", the tooltip

@@ -165,7 +165,7 @@ export function NewsQueue({
           {groups.map((g) => (
             <li
               key={g.key}
-              className="border-border rounded-md border p-4"
+              className="border-apollo-border bg-apollo-surface rounded-md border p-4"
               data-testid={`news-queue-group-${g.key}`}
             >
               {/* The article + the prose name that was matched against it. */}

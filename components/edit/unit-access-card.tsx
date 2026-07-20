@@ -196,7 +196,7 @@ export function UnitAccessCard({ entityType, entityId, access, actorCwid }: Unit
             No one has been granted access yet.
           </p>
         ) : (
-          <table className="w-full text-sm" data-testid="unit-access-table">
+          <table className="[&_td]:align-middle w-full text-sm" data-testid="unit-access-table">
             <thead>
               <tr className="text-muted-foreground border-apollo-border border-b text-left">
                 <th className="py-2 font-medium">Person</th>

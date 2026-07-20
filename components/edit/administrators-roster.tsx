@@ -414,7 +414,7 @@ export function AdministratorsRoster({
                       return (
                         <tr
                           key={rowKey}
-                          className="border-apollo-border border-b align-top"
+                          className="border-apollo-border border-b align-middle"
                           data-testid={`administrators-grant-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
                         >
                           <td className="py-2">

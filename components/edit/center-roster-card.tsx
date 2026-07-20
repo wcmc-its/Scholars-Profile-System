@@ -226,7 +226,7 @@ export function CenterRosterCard({
           </p>
         ) : (
           <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm" data-testid="center-roster-table">
+          <table className="[&_td]:align-middle w-full min-w-[760px] text-sm" data-testid="center-roster-table">
             <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
               <tr className="border-apollo-border border-b">
                 <th className="px-3 py-2 font-medium">Member</th>
