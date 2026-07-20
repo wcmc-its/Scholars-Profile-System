@@ -6,7 +6,11 @@
 # has NO s3:GetObject, and the ECS command override caps at 8KB — too small for the extraction.
 # A presigned URL needs no permissions on the task side, only network, which this task has.
 #
-#   ./gloss-ab-dispatch.sh <extractions.json>
+#   ./gloss-ab-dispatch.sh                 # uses ./extractions.json from step 1
+#   ./gloss-ab-dispatch.sh other.json
+#
+# Prerequisite (step 1, on the laptop — needs Bedrock, which the in-VPC role does NOT have):
+#   AWS_REGION=us-east-1 npx tsx gloss-ab-extract.ts <pastes.json> > extractions.json
 #
 # Produces off.json / substitute.json / append.json in $OUT, in the {id: [cwid,...]} shape
 # sponsor-eval.sh already consumes:
@@ -14,7 +18,7 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-EXTRACTIONS="${1:?usage: gloss-ab-dispatch.sh <extractions.json>}"
+EXTRACTIONS="${1:-$DIR/extractions.json}"
 BUCKET="${BUCKET:-sps-etl-staging-curationbackupbuckete5a802a9-gj1msbqkbgok}"
 CLUSTER="${CLUSTER:-sps-cluster-staging}"
 TASKDEF="${TASKDEF:-sps-etl-staging}"
@@ -25,18 +29,31 @@ EXPIRY="${EXPIRY:-7200}"
 [[ -f "$EXTRACTIONS" ]] || { echo "no extractions at $EXTRACTIONS" >&2; exit 1; }
 mkdir -p "$OUT"
 
-# Network config is not on the task def for a one-off run-task — read the service's own so the
-# task lands in the same subnets/SGs the ETL normally uses.
-echo "resolving network config from the ETL service…"
-SVC="$(aws ecs list-services --cluster "$CLUSTER" --query 'serviceArns[?contains(@,`etl`)]' --output text | head -1)"
-if [[ -n "$SVC" ]]; then
-  NETCFG="$(aws ecs describe-services --cluster "$CLUSTER" --services "$SVC" \
-    --query 'services[0].networkConfiguration' --output json)"
-else
-  # The ETL runs as scheduled tasks, not a service — fall back to the Step Functions state machine.
-  NETCFG="${NETCFG:?no etl service found; export NETCFG='{\"awsvpcConfiguration\":{...}}'}"
+# Network config is not on the task def, and a one-off run-task must supply it. There is NO ETL
+# service to copy it from — the ETL runs as `scholars-nightly-<env>` Step Functions — so read the
+# state machine's own definition and land in exactly the subnets/SGs the nightly ETL uses.
+#
+# Note the case change: Step Functions spells it `AwsvpcConfiguration`/`Subnets`, `run-task` wants
+# `awsvpcConfiguration`/`subnets`. Resolved here rather than passed in, so no file or shell history
+# ever holds subnet/sg ids — this repo is PUBLIC.
+if [[ -z "${NETCFG:-}" ]]; then
+  echo "resolving network config from the $TASKDEF nightly state machine…"
+  SM_ARN="$(aws stepfunctions list-state-machines \
+    --query "stateMachines[?name=='scholars-nightly-${TASKDEF##*-}'].stateMachineArn" --output text)"
+  [[ -n "$SM_ARN" && "$SM_ARN" != "None" ]] || {
+    echo "no scholars-nightly state machine found; export NETCFG='{\"awsvpcConfiguration\":{…}}'" >&2
+    exit 1
+  }
+  NETCFG="$(aws stepfunctions describe-state-machine --state-machine-arn "$SM_ARN" \
+    --query definition --output text \
+    | jq -c 'first(.. | objects | select(has("NetworkConfiguration")) | .NetworkConfiguration)
+             | {awsvpcConfiguration:{subnets:.AwsvpcConfiguration.Subnets,
+                                     securityGroups:.AwsvpcConfiguration.SecurityGroups,
+                                     assignPublicIp:(.AwsvpcConfiguration.AssignPublicIp // "DISABLED")}}')"
 fi
-[[ "$NETCFG" != "null" ]] || { echo "could not resolve networkConfiguration; export NETCFG=…" >&2; exit 1; }
+jq -e '.awsvpcConfiguration.subnets | length > 0' <<<"$NETCFG" >/dev/null \
+  || { echo "could not resolve networkConfiguration" >&2; exit 1; }
+echo "  network config OK ($(jq -r '.awsvpcConfiguration.subnets|length' <<<"$NETCFG") subnets)"
 
 echo "staging payload → s3://$BUCKET/$PREFIX/"
 aws s3 cp "$EXTRACTIONS"          "s3://$BUCKET/$PREFIX/extractions.json" --only-show-errors
