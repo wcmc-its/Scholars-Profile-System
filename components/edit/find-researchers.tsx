@@ -807,7 +807,7 @@ function MatchedView({
         </div>
       </div>
 
-      <Results status={status} sort={sort} setSort={setSort} />
+      <Results status={status} sort={sort} setSort={setSort} limit={limit} />
     </div>
   );
 }
@@ -936,10 +936,13 @@ function Results({
   status,
   sort,
   setSort,
+  limit,
 }: {
   status: Status;
   sort: Sort;
   setSort: (s: Sort) => void;
+  /** The requested page size, so a full page can be reported as a cap, not a total. */
+  limit: number;
 }) {
   // Hooks run unconditionally (before the loading/error returns). Selection is by
   // cwid, so it survives a sort re-fetch (same people, re-ordered); it resets per
@@ -974,6 +977,11 @@ function Results({
       (stage === "all" || r.careerStage === stage) &&
       (funding === "all" || r.fundingStatus === funding),
   );
+  // Rank is a property of the ranking, not of the current view. Stamping it from
+  // the filtered index renumbers people as facets change — narrow to one
+  // department and its top person becomes "1" while their topic fit, which is
+  // scored against the full set, sits unchanged beside it.
+  const rankByCwid = new Map(results.map((r, i) => [r.cwid, i + 1]));
   const selectedCount = filtered.filter((r) => selected.has(r.cwid)).length;
   const allSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.cwid));
 
@@ -1050,8 +1058,12 @@ function Results({
               <h3 className="text-base font-semibold">Researchers for this opportunity</h3>
               <p className="text-muted-foreground text-sm">
                 {filtered.length}
-                {filtered.length !== results.length ? ` of ${results.length}` : ""} matched ·
-                recommendations, not endorsements
+                {filtered.length !== results.length ? ` of ${results.length}` : ""} matched
+                {/* A full page means the ranker was capped, so `results` is the top
+                    slice and not the pool. Saying "N matched" there reports our own
+                    limit as if it were the number of people who qualified. */}
+                {results.length === limit ? ` · top ${limit} shown` : ""} · recommendations, not
+                endorsements
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -1143,11 +1155,11 @@ function Results({
                 Select all ({filtered.length})
               </label>
               <ul>
-                {filtered.map((r, i) => (
+                {filtered.map((r) => (
                   <li key={r.cwid}>
                     <ResearcherRow
                       r={r}
-                      rank={i + 1}
+                      rank={rankByCwid.get(r.cwid) ?? 0}
                       topicFit={topicFitByCwid.get(r.cwid) ?? 0}
                       topicLabels={topicLabels}
                       selected={selected.has(r.cwid)}

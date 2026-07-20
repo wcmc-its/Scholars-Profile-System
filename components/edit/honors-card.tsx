@@ -192,9 +192,13 @@ export function HonorsCard({ cwid, mode, scholarName }: HonorsCardProps) {
 
       {rows === null ? (
         <p className="text-muted-foreground text-sm">Loading…</p>
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && !loadError ? (
+        // Only claim the list is empty when we actually read it. The catch above
+        // sets rows to [] as well as loadError, so without this gate a failed
+        // fetch asserts "none exist" directly beneath the alert saying we
+        // couldn't load them.
         <p className="text-muted-foreground text-sm">No honors added yet.</p>
-      ) : (
+      ) : rows.length === 0 ? null : (
         <ul className="flex flex-col gap-3" data-testid="honor-list">
           {rows.map((row) =>
             editingId === row.id ? (
@@ -278,7 +282,9 @@ export function HonorsCard({ cwid, mode, scholarName }: HonorsCardProps) {
             setError(null);
           }}
         />
-      ) : rows !== null ? (
+      ) : rows !== null && !loadError ? (
+        // Adding against a failed read invites a duplicate: the honour may
+        // already be there, we just couldn't fetch it.
         <div>
           <Button
             type="button"
