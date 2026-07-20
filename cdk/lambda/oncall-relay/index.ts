@@ -72,16 +72,48 @@ async function getWarnWebhookUrl(): Promise<string | undefined> {
     const out = await getClient().send(
       new GetSecretValueCommand({ SecretId: secretArn }),
     );
-    cachedWarnWebhookUrl =
-      out.SecretString !== undefined && out.SecretString.length > 0
-        ? out.SecretString
-        : undefined;
+    cachedWarnWebhookUrl = usableWebhookUrl(out.SecretString);
   } catch {
     // ResourceNotFound (secret not provisioned yet) or any other read failure:
     // fall back to the primary channel. Never let the warn lookup drop a P2.
     cachedWarnWebhookUrl = undefined;
   }
   return cachedWarnWebhookUrl;
+}
+
+/**
+ * A webhook secret is only usable if it is a non-empty absolute https URL.
+ * Anything else is treated exactly like an absent secret, so the caller
+ * degrades to the primary channel instead of throwing.
+ *
+ * Note what this does and does NOT catch. It rejects empty values, non-https
+ * schemes, and unparseable junk. It did NOT catch the 2026-07-18 incident: the
+ * prod warn secret held a *syntactically valid* https URL whose hostname was a
+ * placeholder that does not resolve, so it parses cleanly and only fails at
+ * connect time. That is why the runtime fallback in the handler -- not this
+ * function -- is the load-bearing fix.
+ */
+function usableWebhookUrl(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return undefined;
+  try {
+    return new URL(trimmed).protocol === "https:" ? trimmed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Stop using the warn webhook for the rest of this container's life. Called
+ * when a warn POST fails at runtime: the next P2 in the same warm container
+ * goes straight to the page channel instead of paying another failed request
+ * and another pair of retries. `warnWebhookResolved` stays true, so this does
+ * not trigger a re-read; a genuinely fixed secret is picked up on the next
+ * cold start, same as provisioning one.
+ */
+function demoteWarnWebhook(): void {
+  cachedWarnWebhookUrl = undefined;
 }
 
 /**
@@ -148,35 +180,83 @@ export const handler: SNSHandler = async (event: SNSEvent): Promise<void> => {
       label = evt.step ?? evt.action ?? "etl-event";
     }
 
-    // P2/warn posts to the dedicated warn channel; if that webhook is not
-    // configured it falls back to the primary channel so nothing is dropped.
-    // P1 always posts to the primary channel.
+    // Ordered delivery attempts. A P2 tries the dedicated warn channel first
+    // and, if that FAILS AT RUNTIME, re-posts to the page channel rather than
+    // being dropped. P1 only ever uses the page channel.
+    //
+    // The runtime fallback exists because the "absent secret" fallback above is
+    // not enough. On 2026-07-18 the prod warn secret was provisioned with a
+    // placeholder URL: present, well-formed, and pointing at a host that does
+    // not resolve. Every prod P2 alert -- aurora, OpenSearch, authz, and the
+    // ETL freshness cards -- threw `fetch failed` and was discarded for two
+    // days while the page tier kept looking healthy, because a half-finished
+    // provisioning step is indistinguishable from a working one until you
+    // actually send. A P2 landing in the page channel is a nuisance; a P2
+    // landing nowhere is an outage you learn about from someone else.
+    //
+    // The page URL is resolved lazily so a working warn channel never depends
+    // on the page secret being readable.
     const warnUrl = severity === "warn" ? await getWarnWebhookUrl() : undefined;
-    const channel = warnUrl !== undefined ? "warn" : "page";
-    const url = warnUrl ?? (await getWebhookUrl());
+    const attempts: Array<{
+      channel: "warn" | "page";
+      resolve: () => Promise<string>;
+    }> = [];
+    if (warnUrl !== undefined) {
+      attempts.push({ channel: "warn", resolve: async () => warnUrl });
+    }
+    attempts.push({ channel: "page", resolve: getWebhookUrl });
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(card),
-    });
-
-    if (response.status >= 200 && response.status < 300) {
-      logOutcome(label, "delivered", {
-        status: response.status,
-        severity,
-        channel,
-      });
-      continue;
+    let delivered = false;
+    let lastFailure = "no_attempt";
+    for (const attempt of attempts) {
+      const { channel } = attempt;
+      // Resolving the URL is CONFIGURATION, not a delivery attempt, so it sits
+      // outside the try: a missing or empty page secret must keep propagating
+      // as its own specific error (`empty_secret`) instead of being flattened
+      // into `transport_error` and losing the reason.
+      const url = await attempt.resolve();
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(card),
+        });
+        if (response.status >= 200 && response.status < 300) {
+          logOutcome(label, "delivered", {
+            status: response.status,
+            severity,
+            channel,
+          });
+          delivered = true;
+          break;
+        }
+        lastFailure = `upstream_error_${response.status}`;
+        logOutcome(label, "upstream_error", {
+          status: response.status,
+          severity,
+          channel,
+        });
+      } catch (err) {
+        // A transport-level failure (DNS, TLS, connect) surfaces from fetch as
+        // an opaque `TypeError: fetch failed`; the useful detail is in `cause`.
+        lastFailure = "transport_error";
+        logOutcome(label, "transport_error", {
+          severity,
+          channel,
+          error: (err as Error).message,
+          cause: String((err as { cause?: unknown }).cause ?? ""),
+        });
+      }
+      // This channel just failed. If it was the warn channel, stop using it for
+      // the rest of this container so the fallback is paid once, not per alert.
+      if (channel === "warn") demoteWarnWebhook();
     }
 
-    logOutcome(label, "upstream_error", {
-      status: response.status,
-      severity,
-      channel,
-    });
-    // Throw so SNS retries the invocation and the Errors metric ticks.
-    throw new Error(`upstream_error_${response.status}`);
+    if (!delivered) {
+      // Every channel failed -- throw so SNS retries, the Errors metric ticks,
+      // and the event ultimately lands in the DLQ rather than vanishing.
+      throw new Error(lastFailure);
+    }
   }
 };
 

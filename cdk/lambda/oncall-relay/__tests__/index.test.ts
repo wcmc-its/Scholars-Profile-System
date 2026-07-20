@@ -263,6 +263,104 @@ describe("oncall-relay handler", () => {
     expect(fetchMock.mock.calls[0]![0]).toBe(WEBHOOK_URL);
   });
 
+  // ----------------------------------------------------------------------
+  // Runtime failover — 2026-07-18 incident
+  // ----------------------------------------------------------------------
+  // The prod warn secret was provisioned with a placeholder: present, valid
+  // https, hostname that does not resolve. Every prod P2 threw `fetch failed`
+  // and was discarded for two days while the page tier looked healthy. The
+  // "absent secret" fallback did not help — the secret was there.
+  it("a warn webhook that fails at transport re-posts to the page channel", async () => {
+    process.env.TEAMS_WARN_WEBHOOK_SECRET_ARN = WARN_SECRET_ARN;
+    sendMock.mockImplementation(async (cmd: { input: { SecretId: string } }) => ({
+      SecretString: cmd.input.SecretId === WARN_SECRET_ARN ? WARN_URL : WEBHOOK_URL,
+    }));
+    // Exactly the observed failure: undici's opaque wrapper over a DNS miss.
+    const transport = new TypeError("fetch failed");
+    (transport as { cause?: unknown }).cause = new Error("getaddrinfo ENOTFOUND");
+    fetchMock
+      .mockRejectedValueOnce(transport)
+      .mockResolvedValueOnce(new Response("ok", { status: 202 }));
+
+    await handler(snsEvent(undefined, WARN_TOPIC_ARN), {} as never, () => undefined);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]![0]).toBe(WARN_URL);
+    expect(fetchMock.mock.calls[1]![0]).toBe(WEBHOOK_URL);
+    const logs = consoleLogSpy.mock.calls.map((c) => String(c[0]));
+    expect(logs.find((l) => l.includes('"outcome":"transport_error"'))).toContain(
+      '"channel":"warn"',
+    );
+    // The alert still lands, on the page channel.
+    const delivered = logs.find((l) => l.includes('"outcome":"delivered"'));
+    expect(delivered).toContain('"channel":"page"');
+  });
+
+  it("a warn webhook returning a non-2xx also falls back to the page channel", async () => {
+    process.env.TEAMS_WARN_WEBHOOK_SECRET_ARN = WARN_SECRET_ARN;
+    sendMock.mockImplementation(async (cmd: { input: { SecretId: string } }) => ({
+      SecretString: cmd.input.SecretId === WARN_SECRET_ARN ? WARN_URL : WEBHOOK_URL,
+    }));
+    fetchMock
+      .mockResolvedValueOnce(new Response("gone", { status: 404 }))
+      .mockResolvedValueOnce(new Response("ok", { status: 202 }));
+
+    await handler(snsEvent(undefined, WARN_TOPIC_ARN), {} as never, () => undefined);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]![0]).toBe(WEBHOOK_URL);
+  });
+
+  it("a failed warn channel is not retried for the rest of the container", async () => {
+    process.env.TEAMS_WARN_WEBHOOK_SECRET_ARN = WARN_SECRET_ARN;
+    sendMock.mockImplementation(async (cmd: { input: { SecretId: string } }) => ({
+      SecretString: cmd.input.SecretId === WARN_SECRET_ARN ? WARN_URL : WEBHOOK_URL,
+    }));
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("fetch failed")) // warn, alert 1
+      .mockResolvedValueOnce(new Response("ok", { status: 202 })) // page, alert 1
+      .mockResolvedValueOnce(new Response("ok", { status: 202 })); // page, alert 2
+
+    await handler(snsEvent(undefined, WARN_TOPIC_ARN), {} as never, () => undefined);
+    await handler(snsEvent(undefined, WARN_TOPIC_ARN), {} as never, () => undefined);
+
+    // 3 calls, not 4: the second alert skips the known-bad warn channel.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2]![0]).toBe(WEBHOOK_URL);
+  });
+
+  it("throws only when EVERY channel fails, so SNS retries and the DLQ catches it", async () => {
+    process.env.TEAMS_WARN_WEBHOOK_SECRET_ARN = WARN_SECRET_ARN;
+    sendMock.mockImplementation(async (cmd: { input: { SecretId: string } }) => ({
+      SecretString: cmd.input.SecretId === WARN_SECRET_ARN ? WARN_URL : WEBHOOK_URL,
+    }));
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockRejectedValueOnce(new TypeError("fetch failed"));
+
+    await expect(
+      handler(snsEvent(undefined, WARN_TOPIC_ARN), {} as never, () => undefined),
+    ).rejects.toThrow("transport_error");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("a malformed warn secret is treated as absent, not used", async () => {
+    process.env.TEAMS_WARN_WEBHOOK_SECRET_ARN = WARN_SECRET_ARN;
+    for (const bad of ["   ", "not-a-url", "http://insecure.example/hook"]) {
+      __resetForTests();
+      fetchMock.mockReset();
+      sendMock.mockImplementation(async (cmd: { input: { SecretId: string } }) => ({
+        SecretString: cmd.input.SecretId === WARN_SECRET_ARN ? bad : WEBHOOK_URL,
+      }));
+      fetchMock.mockResolvedValueOnce(new Response("ok", { status: 202 }));
+
+      await handler(snsEvent(undefined, WARN_TOPIC_ARN), {} as never, () => undefined);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0]![0]).toBe(WEBHOOK_URL);
+    }
+  });
+
   it("page-tier record (generic topic) posts to the primary channel and logs channel=page", async () => {
     sendMock.mockResolvedValueOnce({ SecretString: WEBHOOK_URL });
     fetchMock.mockResolvedValueOnce(new Response("ok", { status: 202 }));
