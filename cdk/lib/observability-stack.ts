@@ -67,13 +67,22 @@ const LATENCY_P99_THRESHOLD_MS = 1500;
 const MIN_5XX_FOR_RATE_ALARM = 5;
 
 /**
- * Threshold for the B02 edit_authz_denied alarm: more than 10 denials in a
+ * Threshold for the B02 edit_authz_denied alarm: more than 3 denials in a
  * 5-minute window, repeating for two consecutive windows. Distinguishes a
  * confused user (1-3 denials in a row) from a misconfigured bot or a
- * predicate regression. Re-tune after the first month of staging traffic,
- * same loop as COST_ANOMALY_THRESHOLD_USD; tracked in docs/SLOs.md.
+ * predicate regression.
+ *
+ * Lowered 10 -> 3 on 2026-07-19, which is the "re-tune after the first month
+ * of staging traffic" this comment used to defer. The measured baseline is not
+ * merely low, it is exactly zero: max 0.0 across 342 datapoints over 7 days,
+ * and no fire in the two months since the filter was created. Against a true
+ * zero, ">10 in each of two consecutive 5m windows" means 22+ denials in ten
+ * minutes before anyone hears about it -- while the realistic shape of an
+ * authz-predicate regression is a handful of denials per window, forever. That
+ * leaks silently at 10 and is caught at 3, and 3 still excludes the confused
+ * user this comment already defined as 1-3.
  */
-const EDIT_AUTHZ_DENIED_THRESHOLD = 10;
+const EDIT_AUTHZ_DENIED_THRESHOLD = 3;
 
 /** Props for {@link SpsObservabilityStack}. */
 export interface ObservabilityStackProps extends StackProps {
@@ -370,7 +379,21 @@ export class SpsObservabilityStack extends Stack {
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       },
     );
-    latencyAlarm.addAlarmAction(snsAction);
+    // Prod pages on latency; staging warns. The 1500ms bar is a PROD SLO, and
+    // staging's traffic is not prod's: measured over 7 days to 2026-07-19,
+    // staging p99 is p50 0.64s but p95 16.7s -- a bimodal shape that is the
+    // eval/sweep/batch workload (sponsor-match fan-out, extraction runs, roster
+    // sweeps), not a user-facing regression. That distribution crossed the bar
+    // constantly: 10 pages in 7 days, the single largest noise source in the
+    // estate and the only noisy alarm on the page topic. Prod over the same
+    // window sat at p50 0.35s and fired once in 30 days.
+    //
+    // Deliberately NOT retuning the staging threshold: any number that
+    // suppresses a 16.7s p95 is far too high to mean anything as a page, so a
+    // "calibrated" staging threshold would be theatre. The honest statement is
+    // that staging latency is not an on-call event -- nobody is waiting on a
+    // staging response -- so it warns and stays visible without waking anyone.
+    latencyAlarm.addAlarmAction(env === "prod" ? snsAction : warnAction);
 
     // ------------------------------------------------------------------
     // ECS service alarms (1)
@@ -469,9 +492,25 @@ export class SpsObservabilityStack extends Stack {
     // Aurora cluster alarms (2)
     // ------------------------------------------------------------------
     // (5) CPU -- catches hot loops + runaway queries.
+    //
+    // Staging sustains for 30m, prod for 15m. The THRESHOLD is right in both
+    // envs; the SUSTAIN is what made staging noisy. Measured over 7 days to
+    // 2026-07-19, staging CPU steady-state is p50 26.6% / p95 29.1% -- nowhere
+    // near the bar -- but every single >80% datapoint fell in the 03:27-03:42
+    // nightly ETL window, and all three alarm fires were that window. The spike
+    // is real, expected, and 15-20 minutes long, so 3x5m was precisely tuned to
+    // catch a batch job doing its job. 6x5m rides it out while still catching a
+    // genuinely stuck query.
+    //
+    // The underlying capacity fact, which no alarm currently states: staging's
+    // writer sits at ServerlessDatabaseCapacity 2.0 (= its MaxCapacity) with
+    // ACUUtilization pinned at 100% for the whole week, so the ETL has no
+    // headroom to absorb into. Retuning the alarm hides the symptom; sizing
+    // staging would fix it.
+    const auroraCpuSustainPeriods = env === "prod" ? 3 : 6;
     const auroraCpuAlarm = new cloudwatch.Alarm(this, "AuroraCpuAlarm", {
       alarmName: `sps-aurora-cpu-${env}`,
-      alarmDescription: `Aurora cluster CPU > 80% sustained for 10m (${env}). Likely a hot query loop or runaway analytic. Next: check Performance Insights or the slow-query log; scale ACUs only if the load is legitimate.`,
+      alarmDescription: `Aurora cluster CPU > 80% sustained for ${auroraCpuSustainPeriods * 5}m (${env}). Likely a hot query loop or runaway analytic. Next: check Performance Insights or the slow-query log; scale ACUs only if the load is legitimate.`,
       metric: metricsByName
         ? dbMetric("CPUUtilization", "Average", { period: Duration.minutes(5) })
         : dataStack.auroraCluster.metricCPUUtilization({
@@ -479,8 +518,8 @@ export class SpsObservabilityStack extends Stack {
             period: Duration.minutes(5),
           }),
       threshold: 80,
-      evaluationPeriods: 3,
-      datapointsToAlarm: 3,
+      evaluationPeriods: auroraCpuSustainPeriods,
+      datapointsToAlarm: auroraCpuSustainPeriods,
       comparisonOperator:
         cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
@@ -602,12 +641,20 @@ export class SpsObservabilityStack extends Stack {
     // OpenSearch domain alarms (2)
     // ------------------------------------------------------------------
     // (7) JVM memory pressure -- GC pressure cascades into query latency.
+    //
+    // 2 of 3 windows, not 3 of 3. The comment on the breaker filter below
+    // suspected this alarm was blind to short bursts; the 7-day baseline to
+    // 2026-07-19 confirms it. Staging exceeded 85% on three separate datapoints
+    // and the alarm never fired, because 3-of-3 demands 15 unbroken minutes
+    // while these bursts run under 10. Requiring 2 of 3 converts a 10-minute
+    // burst into a warn without touching the threshold -- which stays at 85
+    // because prod's own max (85.1%) is already sitting on it.
     const openSearchJvmAlarm = new cloudwatch.Alarm(
       this,
       "OpenSearchJvmPressureAlarm",
       {
         alarmName: `sps-opensearch-jvm-pressure-${env}`,
-        alarmDescription: `OpenSearch JVM memory pressure > 85% for 15m (${env}). GC pressure will cascade into query latency. Next: check shard count and query load on the dashboard; throttle heavy queries or scale the domain.`,
+        alarmDescription: `OpenSearch JVM memory pressure > 85% for 10m of any 15m window (${env}). GC pressure will cascade into query latency. Next: check shard count and query load on the dashboard; throttle heavy queries or scale the domain.`,
         metric: metricsByName
           ? osMetric("JVMMemoryPressure", "Maximum", {
               period: Duration.minutes(5),
@@ -618,7 +665,7 @@ export class SpsObservabilityStack extends Stack {
             }),
         threshold: 85,
         evaluationPeriods: 3,
-        datapointsToAlarm: 3,
+        datapointsToAlarm: 2,
         comparisonOperator:
           cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
