@@ -48,7 +48,17 @@ function Candidate({ row }: { row: NewsQueueRow }) {
         ) : (
           row.scholarName
         )}
-        {row.likelihood ? (
+        {/* ponytail: badge the VIVO rows only. A NAME row already announces itself
+            with its likelihood label, and only the history tabs mix the two —
+            pending is name-only, so a "NAME" badge there would be pure noise. */}
+        {row.source === "VIVO" ? (
+          <span
+            className="text-muted-foreground border-border ml-2 rounded-sm border px-1 py-px text-[10px] font-semibold tracking-wider uppercase"
+            title="Linked by VIVO cwid — published automatically, never queued"
+          >
+            VIVO
+          </span>
+        ) : row.likelihood ? (
           <span className="text-muted-foreground ml-2 text-[10px] font-semibold tracking-wider uppercase">
             {row.likelihood}
           </span>
