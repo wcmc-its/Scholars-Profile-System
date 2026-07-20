@@ -32,13 +32,56 @@ function header(c: CardContent): string {
   return tb?.text ?? "";
 }
 
-/** The body TextBlock that carries the mirrored markdown action links. */
-function bodyLinks(c: CardContent): string {
-  const tb = c.body
-    .filter((b) => b.type === "TextBlock")
-    .find((b) => (b.text ?? "").includes("]("));
-  return tb?.text ?? "";
-}
+/**
+ * A real `States.TaskFailed` Cause from a failed `scholars-nightly-staging`
+ * EcsRunTask: the entire ECS DescribeTasks response, JSON-encoded as a string,
+ * leading with network plumbing. Infra identifiers are substituted (public
+ * repo) but the SHAPE and the field order are verbatim -- the ordering is what
+ * pushed the signal past the 1024-char truncation.
+ */
+const REAL_ECS_CAUSE = JSON.stringify({
+  Attachments: [
+    {
+      Details: [
+        { Name: "subnetId", Value: "subnet-0000000000example" },
+        { Name: "networkInterfaceId", Value: "eni-0000000000example" },
+        { Name: "macAddress", Value: "02:00:00:00:00:00" },
+        { Name: "privateDnsName", Value: "ip-10-0-0-1.ec2.internal" },
+        { Name: "privateIPv4Address", Value: "10.0.0.1" },
+      ],
+      Id: "00000000-0000-0000-0000-000000000000",
+      Status: "DELETED",
+      Type: "eni",
+    },
+  ],
+  Attributes: [{ Name: "ecs.cpu-architecture", Value: "x86_64" }],
+  AvailabilityZone: "us-east-1b",
+  ClusterArn: "arn:aws:ecs:us-east-1:000000000000:cluster/sps-cluster-staging",
+  Connectivity: "CONNECTED",
+  Containers: [
+    {
+      ContainerArn:
+        "arn:aws:ecs:us-east-1:000000000000:container/sps-cluster-staging/aaaa/bbbb",
+      Cpu: "0",
+      ExitCode: 1,
+      Image: "000000000000.dkr.ecr.us-east-1.amazonaws.com/scholars-etl-staging:latest",
+      LastStatus: "STOPPED",
+      Name: "etl",
+    },
+  ],
+  LastStatus: "STOPPED",
+  Overrides: {
+    ContainerOverrides: [
+      { Command: ["npm", "run", "etl:reciter"], Name: "etl" },
+    ],
+    InferenceAcceleratorOverrides: [],
+  },
+  StopCode: "EssentialContainerExited",
+  StoppedReason: "Essential container in task exited",
+  TaskArn:
+    "arn:aws:ecs:us-east-1:000000000000:task/sps-cluster-staging/992ebb2ca7ec4595a6fbef381d631004",
+  TaskDefinitionArn: "arn:aws:ecs:us-east-1:000000000000:task-definition/sps-etl-staging:42",
+});
 
 describe("buildAdaptiveCard", () => {
   it("ALARM on sps-alb-5xx-rate-staging renders alarm emoji + verbatim reason + console URL", () => {
@@ -219,7 +262,7 @@ describe("buildAdaptiveCard", () => {
     expect(c.actions[0]!.title).toBe("View in CloudWatch");
   });
 
-  it("mirrors every action as a body markdown link (works on the flow-bot delivery path where buttons are inert)", () => {
+  it("carries no mirrored markdown links in the body (native buttons work; #1793's mirror was clutter)", () => {
     const c = content(
       buildAdaptiveCard({
         AlarmName: "sps-aurora-connections-prod",
@@ -227,15 +270,8 @@ describe("buildAdaptiveCard", () => {
         Region: "us-east-1",
       }),
     );
-    const links = bodyLinks(c);
-    expect(links).toContain(
-      `[View in CloudWatch](https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#alarmsV2:alarm/${encodeURIComponent("sps-aurora-connections-prod")})`,
-    );
-    expect(links).toContain(
-      "[View reliability dashboard](https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=sps-reliability-prod)",
-    );
-    // one markdown link per action, no more, no fewer
-    expect((links.match(/\]\(/g) ?? []).length).toBe(c.actions.length);
+    expect(c.body.some((b) => (b.text ?? "").includes("]("))).toBe(false);
+    expect(c.actions).toHaveLength(2);
   });
 
   it("uses the region CODE in URLs even when Region is the CloudWatch display name (regression: the display name's spaces broke every link)", () => {
@@ -258,10 +294,6 @@ describe("buildAdaptiveCard", () => {
       expect(a.url).not.toContain("N. Virginia");
       expect(a.url).not.toContain(" ");
     }
-    // Body links carry the same code-based URLs (the bug rendered them raw).
-    const links = bodyLinks(c);
-    expect(links).toContain("(https://us-east-1.console.aws.amazon.com/");
-    expect(links).not.toContain("N. Virginia");
   });
 });
 
@@ -328,9 +360,55 @@ describe("buildEtlCard", () => {
     expect(err.endsWith("\u{2026}")).toBe(true);
   });
 
-  it("mirrors the Step Functions action as a body markdown link", () => {
+  it("carries no mirrored markdown links in the body", () => {
     const c = content(buildEtlCard({ env: "prod", step: "Reciter", error: "boom" }));
-    expect(bodyLinks(c)).toContain("[View in Step Functions](");
-    expect(bodyLinks(c)).toContain("states/home");
+    expect(c.body.some((b) => (b.text ?? "").includes("]("))).toBe(false);
+    expect(c.actions[0]!.title).toBe("View in Step Functions");
+  });
+
+  it("summarises a real States.TaskFailed ECS Cause instead of dumping the blob", () => {
+    const c = content(
+      buildEtlCard({
+        env: "staging",
+        step: "Reciter",
+        stateMachine: "scholars-nightly-staging",
+        error: { Error: "States.TaskFailed", Cause: REAL_ECS_CAUSE },
+      }),
+    );
+    const err = fact(c, "Error")!;
+    // The signal an operator acts on.
+    expect(err).toContain("States.TaskFailed");
+    expect(err).toContain('container "etl" exited 1');
+    expect(err).toContain("cmd: npm run etl:reciter");
+    expect(err).toContain("EssentialContainerExited: Essential container in task exited");
+    expect(err).toContain("task 992ebb2ca7ec4595a6fbef381d631004 in sps-cluster-staging");
+    // The internal network detail that used to spill into Teams is gone.
+    expect(err).not.toContain("subnet-");
+    expect(err).not.toContain("eni-");
+    expect(err).not.toContain("macAddress");
+    expect(err).not.toContain("10.0.0.1");
+    expect(err).not.toContain("dkr.ecr");
+    // ...and the whole thing now fits well inside the truncation cap, so it is
+    // no longer cut off mid-JSON (the raw blob is >2KB).
+    expect(REAL_ECS_CAUSE.length).toBeGreaterThan(1024);
+    expect(err.length).toBeLessThan(300);
+    expect(err.endsWith("\u{2026}")).toBe(false);
+  });
+
+  it("a Cause that is plain text, or JSON we do not recognise, is kept verbatim", () => {
+    const plain = content(
+      buildEtlCard({ error: { Error: "Lambda.Unknown", Cause: "connect ETIMEDOUT" } }),
+    );
+    expect(fact(plain, "Error")).toBe("Lambda.Unknown \u{2014} connect ETIMEDOUT");
+
+    const odd = content(
+      buildEtlCard({ error: { Error: "States.Timeout", Cause: '{"someOther":"shape"}' } }),
+    );
+    expect(fact(odd, "Error")).toBe('States.Timeout \u{2014} {"someOther":"shape"}');
+  });
+
+  it("a States error with no Cause renders the error type alone", () => {
+    const c = content(buildEtlCard({ error: { Error: "States.Timeout" } }));
+    expect(fact(c, "Error")).toBe("States.Timeout");
   });
 });
