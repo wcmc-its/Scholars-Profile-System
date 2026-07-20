@@ -21,7 +21,7 @@ import { RailSelect } from "@/components/edit/rail-select";
 import { ProxyBanner } from "@/components/edit/proxy-banner";
 import { SuperuserBanner } from "@/components/edit/superuser-banner";
 import { UnitAdminBanner } from "@/components/edit/unit-admin-banner";
-import { AccountMenu } from "@/components/site/account-menu";
+import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 
 export type EditShellProps = {
   mode: "self" | "superuser" | "proxy" | "unit-admin";
@@ -100,33 +100,8 @@ export function EditShell({
         Skip to editor
       </a>
 
-      {/* Top bar (black) — Apollo chrome with a real account/exit menu. */}
-      <header className="bg-apollo-bar text-white">
-        <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center justify-between px-6">
-          <div className="flex items-center gap-3">
-            <span
-              className="bg-apollo-maroon text-apollo-maroon-foreground flex size-9 items-center justify-center rounded-md text-xs font-bold tracking-wide"
-              aria-hidden
-            >
-              WCM
-            </span>
-            <h1 className="text-base font-semibold">Scholars Profile Console</h1>
-          </div>
-          {account ? (
-            <AccountMenu scholar={account} showViewProfile={false} />
-          ) : (
-            <form action="/api/auth/logout" method="POST">
-              <button
-                type="submit"
-                className="text-sm text-white/85 transition-colors hover:text-white focus:text-white focus:outline-none"
-                data-testid="edit-signout"
-              >
-                Sign out
-              </button>
-            </form>
-          )}
-        </div>
-      </header>
+      {/* Top bar (black) — the shared Apollo chrome with a real account/exit menu. */}
+      <ConsoleTopBar account={account} />
 
       {/* Sub-nav — maroon underline on the active tab. A superuser editing a
           scholar gets a "Profiles / <name>" breadcrumb back to the roster; a
