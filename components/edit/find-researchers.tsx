@@ -19,11 +19,18 @@
  * so browser Back returns to the list and a colleague can be linked straight to
  * an opportunity's matches.
  *
- * Browse cards and the detail layout are modeled on Duke Research Funding
- * (researchfunding.duke.edu): deadline-led card meta, award amount on the card,
- * and a right-rail fact column with a "More information" button on the detail.
+ * The browse list is a TABLE, not a card list: every opportunity carries the
+ * same four attributes in the same order (opportunity, sponsor, activity code,
+ * deadline), so a row is the honest shape — 200 uniform records as ~90px cards
+ * cost a screenful each and made the columns impossible to scan down. The whole
+ * row is the click target via a stretched anchor on the title (a REAL link, so
+ * cmd-click / middle-click / copy-link-address all work), never a click handler
+ * on the `<tr>`. The detail layout still follows Duke Research Funding
+ * (researchfunding.duke.edu): a right-rail fact column with a "More
+ * information" button.
  */
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Check, ChevronRight, Download, ExternalLink } from "lucide-react";
 
@@ -162,19 +169,110 @@ function awardRange(floor: number | null, ceiling: number | null): string | null
   return null;
 }
 
+/** Separators a sponsor prefix may be joined to a title with. */
+const TITLE_SEPARATOR = /^(\s*)([-–—:|])(\s*)/;
+
 /**
- * "Due Jun 12, 2026" toned by urgency: amber inside the 30-day window, a
- * "(passed)" suffix once behind us — so staff can triage actionable vs dead
- * opportunities at a glance. Null when there is no parseable due date.
+ * The remainder of `rest` after a leading separator, or null when `rest` does
+ * not start with one. A separator must carry whitespace on at least one side so
+ * a hyphenated word ("NIH-funded…") is never split.
  */
-function DueDate({ iso }: { iso: string | null }) {
-  const due = formatDue(iso);
-  if (!due) return null;
+function afterSeparator(rest: string): string | null {
+  const m = TITLE_SEPARATOR.exec(rest);
+  if (!m) return null;
+  if (m[1].length === 0 && m[3].length === 0) return null;
+  const out = rest.slice(m[0].length).trim();
+  return out.length >= 2 ? out : null;
+}
+
+/**
+ * Strip a redundant sponsor prefix off an opportunity title.
+ *
+ * The corpus carries titles that restate the sponsor the row already shows in
+ * its own column — e.g. sponsor "National Institutes of Health (NIH)" against
+ * title "National Institutes of Health (NIH) - NIH Outstanding New
+ * Environmental Scientist (ONES) Award (R01)". With sponsor promoted to a
+ * column, that prefix is pure noise.
+ *
+ * DELIBERATELY CONSERVATIVE — a mangled title is far worse than a duplicated
+ * one, so this strips only on an unambiguous match: the title must START with
+ * the sponsor (or the sponsor minus its trailing parenthetical, or that
+ * parenthetical's contents — "NIH"), AND that prefix must be followed by a real
+ * separator, AND a usable remainder must survive. Anything else is returned
+ * untouched. "Skin Cancer Foundation Research Grants" keeps its sponsor prefix
+ * because there is no separator: the sponsor name is part of the award's name.
+ */
+export function stripSponsorPrefix(
+  title: string | null,
+  sponsor: string | null | undefined,
+): string | null {
+  if (!title || !sponsor) return title;
+  const t = title.trim();
+  const s = sponsor.trim();
+  if (!s) return title;
+
+  // Longest candidate first, so the full sponsor wins over its abbreviation.
+  const candidates = [s];
+  const paren = /^(.*?)\s*\(([^()]+)\)$/.exec(s);
+  if (paren) candidates.push(paren[1].trim(), paren[2].trim());
+
+  for (const c of candidates) {
+    if (c.length < 2 || t.length <= c.length) continue;
+    if (t.slice(0, c.length).toLowerCase() !== c.toLowerCase()) continue;
+    const rest = afterSeparator(t.slice(c.length));
+    if (rest) return rest;
+  }
+  return title;
+}
+
+/**
+ * Text for the Deadline column.
+ *
+ * `Opportunity.dueDate` is nullable and the model has NO rolling flag, so a
+ * null date on its own does not license the claim "Rolling" — `status` is the
+ * only evidence for that, and its vocabulary is open / forecasted / continuous.
+ * So: "continuous" is rolling; a dateless forecast is a date not yet announced,
+ * NOT a rolling one (the #1608 distinction `grant-recs-card` already draws);
+ * anything else dateless gets an em dash, because we genuinely do not know
+ * whether it rolls or was simply never captured.
+ */
+export function deadlineLabel(dueDate: string | null, status: string | null, now: number): string {
+  const formatted = formatDue(dueDate);
+  if (formatted) return dueUrgency(dueDate, now) === "past" ? `${formatted} (passed)` : formatted;
+  const s = (status ?? "").toLowerCase();
+  if (s === "continuous") return "Rolling";
+  if (s === "forecasted") return "Date TBD";
+  return "—";
+}
+
+/**
+ * Deadline cell: the date toned by urgency (amber inside the 30-day window, a
+ * "(passed)" suffix once behind us) so staff can triage actionable vs dead
+ * opportunities by scanning one column. The em-dash case carries a spoken
+ * equivalent — a bare "—" reaches a screen reader as nothing at all.
+ */
+function DeadlineCell({ iso, status }: { iso: string | null; status: string | null }) {
+  const label = deadlineLabel(iso, status, Date.now());
+  if (label === "—") {
+    return (
+      <span className="text-muted-foreground">
+        <span aria-hidden>—</span>
+        <span className="sr-only">No deadline recorded</span>
+      </span>
+    );
+  }
   const urgency = dueUrgency(iso, Date.now());
   return (
-    <span className={urgency === "soon" ? "font-medium text-amber-700 dark:text-amber-400" : undefined}>
-      Due {due}
-      {urgency === "past" ? " (passed)" : ""}
+    <span
+      className={
+        urgency === "soon"
+          ? "font-medium text-amber-700 dark:text-amber-400"
+          : urgency === "past"
+            ? "text-muted-foreground"
+            : undefined
+      }
+    >
+      {label}
     </span>
   );
 }
@@ -236,8 +334,9 @@ export function FindResearchers() {
   const router = useRouter();
   const pathname = usePathname();
   const selectedId = useSearchParams().get("opp");
+  const hrefFor = (id: string) => `${pathname}?opp=${encodeURIComponent(id)}`;
   const setSelectedId = (id: string | null) => {
-    router.push(id ? `${pathname}?opp=${encodeURIComponent(id)}` : pathname);
+    router.push(id ? hrefFor(id) : pathname);
   };
 
   return (
@@ -252,7 +351,7 @@ export function FindResearchers() {
       </div>
 
       {selectedId === null ? (
-        <BrowseList onSelect={setSelectedId} />
+        <BrowseList hrefFor={hrefFor} />
       ) : (
         <MatchedView key={selectedId} opportunityId={selectedId} onBack={() => setSelectedId(null)} />
       )}
@@ -338,7 +437,7 @@ function facetOptions(
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
-function BrowseList({ onSelect }: { onSelect: (id: string) => void }) {
+function BrowseList({ hrefFor }: { hrefFor: (id: string) => string }) {
   const [includeGrantsGov, setIncludeGrantsGov] = useState(false);
   const [sort, setSort] = useState<BrowseSort>("curated");
   const [filters, setFilters] = useState<BrowseFilters>(EMPTY_BROWSE_FILTERS);
@@ -430,13 +529,41 @@ function BrowseList({ onSelect }: { onSelect: (id: string) => void }) {
               <p className="text-muted-foreground mb-2 text-xs">
                 {shown.length} opportunit{shown.length === 1 ? "y" : "ies"}
               </p>
-              <ul className="space-y-3">
-                {shown.map((o) => (
-                  <li key={o.opportunityId}>
-                    <OpportunityRow o={o} onSelect={onSelect} />
-                  </li>
-                ))}
-              </ul>
+              {/* The wrapping border + radius IS the boundary between the page
+                  and the table surface; `overflow-x-auto` both clips the thead
+                  fill to those corners and lets the columns scroll on a narrow
+                  viewport instead of bleeding out of the layout. */}
+              <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-lg border">
+                <table className="w-full border-collapse text-sm">
+                  <caption className="sr-only">
+                    Funding opportunities. Select a row to rank researchers against it.
+                  </caption>
+                  <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
+                    <tr className="border-apollo-border border-b">
+                      <th scope="col" className={thClass}>
+                        Opportunity
+                      </th>
+                      <th scope="col" className={thClass}>
+                        Sponsor
+                      </th>
+                      <th scope="col" className={`${thClass} whitespace-nowrap`}>
+                        Activity code
+                      </th>
+                      <th scope="col" className={`${thClass} whitespace-nowrap`}>
+                        Award
+                      </th>
+                      <th scope="col" className={`${thClass} whitespace-nowrap`}>
+                        Deadline
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shown.map((o) => (
+                      <OpportunityRow key={o.opportunityId} o={o} href={hrefFor(o.opportunityId)} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </>
           )}
         </div>
@@ -640,48 +767,50 @@ function FacetGroup({
   );
 }
 
-// Card layout modeled on Duke Research Funding's results list: deadline-led
-// meta row, link-blue title, award amount + chevron affordance on the right.
-function OpportunityRow({
-  o,
-  onSelect,
-}: {
-  o: OpportunityListItem;
-  onSelect: (id: string) => void;
-}) {
-  const due = formatDue(o.dueDate);
+const thClass = "px-3 py-2 text-xs font-medium";
+const tdClass = "px-3 py-2.5 align-top";
+
+/**
+ * One opportunity as a table row.
+ *
+ * THE WHOLE ROW IS THE CLICK TARGET, and it gets there the boring way: the
+ * title is a real `<Link>` whose `after:absolute after:inset-0` pseudo-element
+ * covers the `relative` row. No onClick/onKeyDown/role="button" on the `<tr>` —
+ * that would forfeit cmd-click, middle-click, right-click "copy link address",
+ * tab focus and the screen-reader "link" announcement, all of which an anchor
+ * gives for free. `focus-within` puts the focus ring on the row so keyboard
+ * users see what they are about to open.
+ *
+ * If a secondary control is ever added to a row it MUST carry `relative z-10`,
+ * or the stretched pseudo-element will sit on top of it and swallow the click.
+ */
+function OpportunityRow({ o, href }: { o: OpportunityListItem; href: string }) {
   const award = awardRange(o.awardFloor ?? null, o.awardCeiling ?? null);
+  // Sponsor has its own column now, so a title that restates it is noise.
+  const title = stripSponsorPrefix(o.title, o.sponsor) ?? o.opportunityId;
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(o.opportunityId)}
-      className="border-border block w-full rounded-lg border bg-background p-4 text-left shadow-sm transition-shadow hover:border-[var(--color-accent-slate)]/50 hover:shadow"
-    >
-      {due || o.sponsor || o.source ? (
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
-            <DueDate iso={o.dueDate} />
-            {o.sponsor ? <span className="truncate">{o.sponsor}</span> : null}
-          </div>
+    <tr className="border-apollo-border hover:bg-apollo-surface-2 focus-within:outline-apollo-maroon relative border-b transition-colors last:border-b-0 focus-within:outline focus-within:outline-2 focus-within:-outline-offset-2">
+      <td className={tdClass}>
+        <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <Link
+            href={href}
+            className="font-medium leading-snug text-[var(--color-accent-slate)] after:absolute after:inset-0 after:content-[''] hover:underline focus:outline-none"
+          >
+            {title}
+          </Link>
+          {/* Badges sit INLINE with the title they modify — the curated badge
+              used to float top-right, detached from what it qualified. */}
           <SourceBadge source={o.source} />
-        </div>
-      ) : null}
-      <div className="mt-1.5 flex items-center justify-between gap-4">
-        <span className="flex min-w-0 flex-wrap items-baseline gap-2">
-          <span className="font-semibold leading-snug text-[var(--color-accent-slate)]">
-            {o.title ?? o.opportunityId}
-          </span>
           <PrestigeBadge prestige={o.prestige} />
         </span>
-        <span className="flex shrink-0 items-center gap-2">
-          {award ? (
-            <span className="text-sm font-medium tabular-nums text-foreground">{award}</span>
-          ) : null}
-          <ChevronRight className="text-muted-foreground size-4" aria-hidden />
-        </span>
-      </div>
-      {o.mechanism ? <div className="text-muted-foreground mt-1 text-sm">{o.mechanism}</div> : null}
-    </button>
+      </td>
+      <td className={`${tdClass} text-muted-foreground`}>{o.sponsor ?? "—"}</td>
+      <td className={`${tdClass} whitespace-nowrap`}>{o.mechanism ?? "—"}</td>
+      <td className={`${tdClass} whitespace-nowrap tabular-nums`}>{award ?? "—"}</td>
+      <td className={`${tdClass} whitespace-nowrap`}>
+        <DeadlineCell iso={o.dueDate} status={o.status} />
+      </td>
+    </tr>
   );
 }
 
