@@ -67,7 +67,7 @@ export default async function EditCorePage({
   if (!queue) notFound();
 
   return (
-    <div className="min-h-screen bg-[var(--background)]" data-slot="edit-core-page">
+    <div className="min-h-screen bg-apollo-page" data-slot="edit-core-page">
       <header className="bg-apollo-bar text-white">
         <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
           <span

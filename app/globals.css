@@ -76,14 +76,43 @@
   --apollo-maroon: #8a1f2b; /* WCM editor maroon */
   --apollo-maroon-press: #6e1620; /* hover / active maroon */
   --apollo-maroon-foreground: #ffffff;
+  /* APOLLO EDITOR SURFACE LANGUAGE (the /edit console's elevation rules).
+   * Deliberately SEPARATE from the colour-language docblock below: that one
+   * governs which HUE means what, this one governs which SURFACE sits on what.
+   * Merging them is how the first one got vague — keep them apart.
+   *
+   * THREE LEVELS. Adjacent levels must never be the same value.
+   *
+   *   PAGE   --apollo-page  #faf8f6  Every /edit route shell. NEVER --background
+   *                                  (that is oklch(1 0 0), pure white) — a white
+   *                                  card on a white page has no step left to make.
+   *   CARD   --apollo-surface #ffffff Card, panel, table body, and INPUT FILL.
+   *                                  Inputs are never bg-transparent: transparent
+   *                                  survives on white and dissolves on greige, so
+   *                                  it cannot be the answer once the page is warm.
+   *   RAIL   --apollo-rail   #ede7df  Rails and filter sidebars. Held #f4f1ed until
+   *                                  it had to separate from a thead on
+   *                                  --apollo-surface-2 (same value ⇒ 1.000:1).
+   *
+   * THE LOAD-BEARING RULE: a fill step is never a boundary — the hairline is.
+   * Every fill step here is under 1.23:1 and none separates anything alone:
+   *   page→card 1.059  rail→card 1.228  rail→page 1.159  rail→thead 1.091
+   * So any change of level carries a border. Corollary: the darker the fill, the
+   * stronger the border it needs. --apollo-border reads 1.035:1 on the rail (dead),
+   * which is why --apollo-rail-border is the STRONG value, not the hairline.
+   *
+   * thead / chip / ghost-hover stay on --apollo-surface-2. A table header labels
+   * the data, it is not data, so it does not sit on the card level.
+   *
+   * Introduce a new surface only by editing here first. */
   --apollo-page: #faf8f6; /* warm page behind the detail card */
-  --apollo-surface: #ffffff; /* card / panel surface */
-  --apollo-surface-2: #f4f1ed; /* chips, url-prefix, ghost-hover */
-  --apollo-border: #e9e3df; /* warm hairline */
-  --apollo-border-strong: #dbd3cd; /* input / control borders */
-  --apollo-rail: #f4f1ed;
-  --apollo-rail-border: #e9e3df;
-  --apollo-rail-hover: #ece7e1; /* nav-item hover fill */
+  --apollo-surface: #ffffff; /* card / panel / table body / input fill */
+  --apollo-surface-2: #f4f1ed; /* chips, url-prefix, thead, ghost-hover */
+  --apollo-border: #e9e3df; /* warm hairline — on WHITE surfaces only */
+  --apollo-border-strong: #dbd3cd; /* inputs, controls, and any greige edge */
+  --apollo-rail: #ede7df; /* rail / filter sidebar — a step off surface-2 */
+  --apollo-rail-border: #dbd3cd; /* the hairline dies on the rail; use strong */
+  --apollo-rail-hover: #e4ddd2; /* nav-item hover fill (1.098:1 off the rail) */
   --apollo-ring: #8a1f2b;
   --apollo-lock-bg: #f2efeb; /* locked chip / locked actions */
   /* Secondary slate accent — the /edit console's general secondary colour:

@@ -100,7 +100,7 @@ export default async function EditDataQualityPage({
     : null;
 
   return (
-    <div className="min-h-screen bg-[var(--background)]" data-slot="data-quality-page">
+    <div className="min-h-screen bg-apollo-page" data-slot="data-quality-page">
       <header className="bg-apollo-bar text-white">
         <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
           <span

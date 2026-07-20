@@ -78,7 +78,7 @@ export default async function HonorsQueuePage() {
   const slugRequests = isSlugRequestEnabled() ? await loadSlugRequestQueue(db.read) : [];
 
   return (
-    <div className="min-h-screen bg-[var(--background)]" data-slot="honors-queue-page">
+    <div className="min-h-screen bg-apollo-page" data-slot="honors-queue-page">
       <header className="bg-apollo-bar text-white">
         <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
           <span

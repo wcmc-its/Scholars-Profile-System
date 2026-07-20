@@ -86,7 +86,7 @@ export default async function MethodFamiliesPage() {
   const administratorsTab = superuserSurfaces && isAdministratorsTabEnabled() ? 0 : null;
 
   return (
-    <div className="min-h-screen bg-[var(--background)]" data-slot="method-families-page">
+    <div className="min-h-screen bg-apollo-page" data-slot="method-families-page">
       <header className="bg-apollo-bar text-white">
         <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
           <span
