@@ -564,12 +564,28 @@ export async function rankResearchersForDescriptionSpine(
     };
     concepts.push(concept);
 
-    // The free-text query. With the flag ON: each member's gloss (the sponsor's sense) where we have
-    // one, else the bare member token — only the BM25 axis moves (`descendantUis` still comes from
-    // the term's MeSH resolution, so the structured signal is unchanged). With it OFF: the original
-    // bare-token query, so retrieval ranks exactly as it did before the gloss landed.
+    // The free-text query. With the flag ON: the member token AND the sponsor's gloss for it, so
+    // BM25 searches both the concept and the sponsor's sense of it. With it OFF: the original
+    // bare-token query, so retrieval ranks exactly as it did before the gloss landed. Either way
+    // `descendantUis` still comes from the term's MeSH resolution — the structured signal is
+    // unchanged and only the BM25 axis moves.
+    //
+    // APPEND, NOT SUBSTITUTE — and that is the whole point. The gloss REPLACING the token was
+    // measured over the 15 sponsor fixtures (real Sonnet, 179 concepts): 88% of concepts carry a
+    // gloss, and 61% of those produced a query containing NONE of the concept's own tokens —
+    // "cancer metabolism" became "metabolic reprogramming to fuel growth, survive stress, and
+    // evade immune clearance", "immune checkpoint blockade" became "mechanistic and translational
+    // understanding in solid tumors, resistance and relapse". The MeSH axis cannot backstop that
+    // drift here: this call passes no `scope`, so the `scope === "concept"` admission gate
+    // (search.ts) never fires and `descendantUis` is a BOOST, not a filter — nothing keeps an
+    // untagged prose match out of the pool once the concept's own token is gone.
     const clusterQuery = glossQuery
-      ? cluster.members.map((m) => glossByTerm.get(m) ?? m).join(" ")
+      ? cluster.members
+          .map((m) => {
+            const g = glossByTerm.get(m);
+            return g ? `${m} ${g}` : m;
+          })
+          .join(" ")
       : cluster.members.join(" ");
 
     // Representative resolution = the first member's (drives name/tier only).

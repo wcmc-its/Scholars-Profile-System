@@ -316,10 +316,16 @@ describe("rankResearchersForDescriptionSpine", () => {
     expect(weightOf(ml, "machine learning")).toBeGreaterThan(weightOf(ml, "disease progression"));
   });
 
-  it("with MATCHA_GLOSS_QUERY=on, searches the funder's GLOSS as the free-text query, not the bare token", async () => {
+  it("with MATCHA_GLOSS_QUERY=on, searches the TOKEN AND the funder's GLOSS — never the gloss alone", async () => {
     // "lysosomes" the token matches any lysosome paper; "lysosomal processing of ADC linkers" the
-    // gloss ranks the sponsor's SENSE. The MeSH axis still resolves the TERM, so only the BM25
-    // query moves. A concept with no gloss falls back to its token — a mixed ask degrades cleanly.
+    // gloss ranks the sponsor's SENSE. Searching BOTH keeps the concept anchored while adding the
+    // sponsor's sense. The MeSH axis still resolves the TERM, so only the BM25 query moves. A
+    // concept with no gloss falls back to its token — a mixed ask degrades cleanly.
+    //
+    // REGRESSION GUARD: the gloss must never REPLACE the token. It used to, and over the 15
+    // sponsor fixtures 61% of glossed concepts then produced a query carrying none of the
+    // concept's own tokens. `descendantUis` cannot backstop that — this call passes no `scope`,
+    // so the MeSH set is a boost, not an admission filter.
     process.env.MATCHA_GLOSS_QUERY = "on";
     try {
       mockExtractSponsorConcepts.mockResolvedValue([
@@ -336,14 +342,20 @@ describe("rankResearchersForDescriptionSpine", () => {
 
       const { concepts } = await rankResearchersForDescriptionSpine("adc paste");
 
-      // The gloss concept searched its gloss; the term's MeSH descendants still drove the structured axis.
+      // The gloss concept searched token AND gloss; the term's MeSH descendants still drove the
+      // structured axis.
       const glossCall = mockSearchPeople.mock.calls.find(
-        (c) => c[0].q === "lysosomal processing of ADC linkers",
+        (c) => c[0].q === "lysosomes lysosomal processing of ADC linkers",
       )![0];
       expect(glossCall.meshDescendantUis).toEqual(["D_lysosomes"]);
+      // The concept's own token survives into the free-text query — the drift guard.
+      expect(glossCall.q).toContain("lysosomes");
+      // The gloss ALONE is never the query (the pre-fix substitute behaviour).
+      expect(
+        mockSearchPeople.mock.calls.some((c) => c[0].q === "lysosomal processing of ADC linkers"),
+      ).toBe(false);
       // The unglossed concept queried its bare token — never the term for the OTHER concept.
       expect(mockSearchPeople.mock.calls.some((c) => c[0].q === "HER2-low breast cancer")).toBe(true);
-      expect(mockSearchPeople.mock.calls.some((c) => c[0].q === "lysosomes")).toBe(false);
       expect(concepts.find((c) => c.term === "lysosomes")!.gloss).toBe(
         "lysosomal processing of ADC linkers",
       );
