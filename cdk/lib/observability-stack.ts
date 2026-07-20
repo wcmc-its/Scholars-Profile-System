@@ -188,15 +188,25 @@ export class SpsObservabilityStack extends Stack {
     }
     // Aurora (AWS/RDS) metric by literal DBClusterIdentifier — used when
     // metricsByName is on. period/label are per call-site.
+    // `dimensions` merges EXTRA dimensions alongside DBClusterIdentifier. Needed
+    // for ACUUtilization, where the bare cluster dimension averages every
+    // instance and must be narrowed with Role=WRITER — see (5b).
     const dbMetric = (
       metricName: string,
       statistic: string,
-      opts: { period: Duration; label?: string },
+      opts: {
+        period: Duration;
+        label?: string;
+        dimensions?: Record<string, string>;
+      },
     ): cloudwatch.Metric =>
       new cloudwatch.Metric({
         namespace: "AWS/RDS",
         metricName,
-        dimensionsMap: { DBClusterIdentifier: envConfig.auroraClusterIdentifier },
+        dimensionsMap: {
+          DBClusterIdentifier: envConfig.auroraClusterIdentifier,
+          ...opts.dimensions,
+        },
         statistic,
         period: opts.period,
         label: opts.label,
@@ -526,6 +536,55 @@ export class SpsObservabilityStack extends Stack {
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
     auroraCpuAlarm.addAlarmAction(warnAction); // P2 -- leading indicator, not an outage
+
+    // (5b) ACU saturation -- the thing (5) structurally CANNOT see. On Aurora
+    // Serverless v2, CPUUtilization is a fraction of CURRENTLY PROVISIONED
+    // capacity, so a cluster pinned at its MaxCapacity ceiling still reports low
+    // CPU (prod: ~6% avg, 18.45% max) while having no headroom left. That makes
+    // (5) unable to serve as the capacity leading indicator it is documented to
+    // be. ACUUtilization is the metric that can.
+    //
+    // Measured over 7 days on the prod writer, 5-minute Averages (n=2016):
+    //   p50 17.9   p90 25.2   p95 25.5   p99 31.0   max 52.90
+    // At second resolution the true dwell at the ceiling is ~0.01% of the week
+    // and the longest consecutive run at 100% is ONE SECOND -- bursts that scale
+    // up and back down, i.e. Serverless v2 working correctly.
+    //
+    // A "100% at p95, >5% of the week pinned" reading predates this alarm and is
+    // WRONG: it was p95 of HOURLY MAXIMA, a different quantity. Do not retune off
+    // it. 80 sits 1.51x above the worst observed 5-minute Average (52.90) and
+    // 3.1x above p95, and measured 0/2016 periods across the baseline week --
+    // including the 03:47-04:17 nightly-ETL window where every top-five peak
+    // lands. 3x5m of sustain cannot be tripped by the observed burst pattern.
+    //
+    // Role=WRITER is load-bearing, not decoration. The bare DBClusterIdentifier
+    // dimension AVERAGES every instance in the cluster -- its SampleCount is
+    // exactly 2x the per-instance series because prod runs a writer AND a reader
+    // -- so a writer-only saturation reads (100+idle)/2 and could never reach 80.
+    //
+    // STAGING deliberately gets no ACU alarm. Its writer sits at MaxCapacity 2.0
+    // with ACUUtilization >=50% for 74.6% of the week and >=80% for 9.5%
+    // (longest run 80 min): every threshold that would signal a real problem is
+    // already its steady state, so the alarm would be born permanently ALARM and
+    // un-actionable. Resize staging (see the sizing note on (5)), let it run a
+    // week, re-measure, then apply this identical shape.
+    if (metricsByName && env === "prod") {
+      const auroraAcuAlarm = new cloudwatch.Alarm(this, "AuroraAcuAlarm", {
+        alarmName: `sps-aurora-acu-${env}`,
+        alarmDescription: `Aurora Serverless v2 WRITER ACUUtilization > 80% sustained for 15m (${env}) -- the cluster is approaching its MaxCapacity ceiling and has little headroom left to absorb load. sps-aurora-cpu-${env} CANNOT see this: on Serverless v2, CPU is a fraction of currently-provisioned capacity, so a pinned cluster still reads low CPU. Next: compare ServerlessDatabaseCapacity against the cluster MaxCapacity, correlate the window against the nightly ETL, and raise MaxCapacity if the load is legitimate.`,
+        metric: dbMetric("ACUUtilization", "Average", {
+          period: Duration.minutes(5),
+          dimensions: { Role: "WRITER" },
+        }),
+        threshold: 80,
+        evaluationPeriods: 3,
+        datapointsToAlarm: 3,
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      auroraAcuAlarm.addAlarmAction(warnAction); // P2 -- capacity leading indicator
+    }
 
     // (6) Connection count -- catches connection-pool exhaustion before the app
     // starts surfacing connection errors. Threshold is absolute rather than

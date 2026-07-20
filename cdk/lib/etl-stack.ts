@@ -1346,6 +1346,15 @@ export class EtlStack extends Stack {
        * the CloudWatch constraint above. Omitted => no cadence alarm.
        */
       readonly cadenceWindow?: Duration;
+      /**
+       * Period for the ExecutionsFailed status alarm. Defaults to 1h, which
+       * suits a machine that runs many times a day. A machine that runs ONCE a
+       * day needs its period widened to the run interval — otherwise the alarm
+       * clears a few hours after each fire and re-fires on the next run, turning
+       * one continuous condition into one notification per day. Must keep
+       * `evaluationPeriods * period <= 604800s` per the constraint above.
+       */
+      readonly statusPeriod?: Duration;
     }
     const cadences: ReadonlyArray<CadenceArgs> = [
       {
@@ -1378,6 +1387,16 @@ export class EtlStack extends Stack {
         id: "Heartbeat",
         cadenceLabel: "heartbeat",
         cadenceWindow: Duration.hours(30),
+        // The heartbeat emits ExecutionsFailed once a day, so the default 1h
+        // status period made the alarm clear ~3h after every fire and re-fire
+        // the next morning: ONE continuous stale-source condition produced 8
+        // OK->ALARM transitions per env over 14 days (16 across both envs).
+        // A 24h period holds ALARM across consecutive failing days and collapses
+        // those 8 notifications into 1. 1 * 86400 <= 604800, so the deploy-only
+        // constraint above still holds. Cost is detection latency, which is
+        // irrelevant here — a daily job cannot fail faster than daily, and the
+        // cadence alarm (30h) still owns "the heartbeat itself went dark".
+        statusPeriod: Duration.days(1),
         stateMachine: this.heartbeatStateMachine,
       },
     ];
@@ -1389,7 +1408,7 @@ export class EtlStack extends Stack {
         namespace: "AWS/States",
         metricName: "ExecutionsFailed",
         statistic: cloudwatch.Stats.SUM,
-        period: Duration.hours(1),
+        period: c.statusPeriod ?? Duration.hours(1),
         dimensionsMap: dimensions,
       });
       const statusAlarm = new cloudwatch.Alarm(this, `${c.id}StatusAlarm`, {

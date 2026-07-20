@@ -1477,38 +1477,41 @@ describe("EtlStack", () => {
       const rules = template.findResources("AWS::Events::Rule");
       // 3 cadence rules + the #595 heartbeat rule + the #393 reconciler rule +
       // the #353 cdn reconciler rule + the #1032 curated-tables backup rule +
-      // the #443 ED email-visibility bridge rule + the #1218 opportunity-projection
-      // rule; all enabled in staging.
-      expect(Object.keys(rules)).toHaveLength(9);
+      // the #443 ED email-visibility bridge rule; all enabled in staging.
+      // The #1218 opportunity-projection rule was RETIRED in staging on
+      // 2026-07-20 (the nightly now covers the work), so 8 rather than 9.
+      expect(Object.keys(rules)).toHaveLength(8);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
         expect({ id, state }).toEqual({ id, state: "ENABLED" });
       }
     });
 
-    it("staging schedules the daily opportunity projection (#1218): daily rule → state machine running etl:dynamodb on the ETL task def", () => {
-      // Daily at 06:30 UTC, enabled in staging.
-      template.hasResourceProperties("AWS::Events::Rule", {
-        Name: "sps-opportunity-projection-staging",
-        ScheduleExpression: "cron(30 6 * * ? *)",
-        State: "ENABLED",
-      });
-      // Its own single-step state machine (Catch → SNS failure notification).
-      template.hasResourceProperties("AWS::StepFunctions::StateMachine", {
-        StateMachineName: "scholars-opportunity-projection-staging",
-      });
-      // The step overrides the ETL container to run the projection script.
-      const sms = template.findResources("AWS::StepFunctions::StateMachine");
-      const projectionSm = Object.values(sms).find(
-        (s) => s.Properties?.StateMachineName === "scholars-opportunity-projection-staging",
+    it("staging ships NO standalone opportunity projection (#1218 retired 2026-07-20): no rule, no state machine, no cadence alarm", () => {
+      // #1218 was a stopgap for a nightly that aborted at etl:ed (#443). The
+      // nightly now completes and runs TaskDynamodb itself, so the standalone
+      // daily is redundant and was retired via opportunityProjectionScheduleEnabled.
+      //
+      // This test is the guard against silent RESURRECTION, which is the failure
+      // that actually happened: an operator disabled the live EventBridge rule by
+      // hand on 2026-06-23, but the template still declared State=ENABLED, so the
+      // next cdk deploy would have turned a deliberately-stopped job back on.
+      // Config is now the single source of truth; assert the template agrees.
+      const ruleNames = Object.values(template.findResources("AWS::Events::Rule"))
+        .map((r) => r.Properties?.Name as string | undefined);
+      expect(ruleNames).not.toContain("sps-opportunity-projection-staging");
+
+      const smNames = Object.values(
+        template.findResources("AWS::StepFunctions::StateMachine"),
+      ).map((s) => s.Properties?.StateMachineName as string | undefined);
+      expect(smNames).not.toContain("scholars-opportunity-projection-staging");
+
+      const alarmNames = Object.values(
+        template.findResources("AWS::CloudWatch::Alarm"),
+      ).map((a) => a.Properties?.AlarmName as string | undefined);
+      expect(alarmNames).not.toContain(
+        "sps-opportunity-projection-cadence-staging",
       );
-      expect(projectionSm).toBeDefined();
-      const def = JSON.stringify(projectionSm?.Properties?.DefinitionString ?? "");
-      expect(def).toMatch(/etl:dynamodb/);
-      // A cadence alarm guards against silent schedule death.
-      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
-        AlarmName: "sps-opportunity-projection-cadence-staging",
-      });
     });
 
     it("staging schedules the daily curated-tables backup (#1032): daily rule → state machine running backup:curated on the ETL task def", () => {

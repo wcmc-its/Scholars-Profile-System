@@ -635,9 +635,20 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // backup is live + verified here). Read-only + tiny, so safe from launch.
     curationBackupScheduleEnabled: true,
     // #1218 — daily standalone DynamoDB projection so the funding-matcher corpus
-    // stays fresh while the nightly is blocked at etl:ed (#443). On in staging
-    // (matcher is live here); idempotent upsert, so safe from launch.
-    opportunityProjectionScheduleEnabled: true,
+    // stays fresh while the nightly is blocked at etl:ed (#443).
+    //
+    // RETIRED in staging 2026-07-20. #1218 was a stopgap for a nightly that
+    // aborted at etl:ed; the nightly now completes (4/4 recent runs SUCCEEDED)
+    // and TaskDynamodb runs inside it, so the standalone daily is redundant.
+    // An operator already disabled the EventBridge rule by hand on 2026-06-23 —
+    // but the deployed template still declared State=ENABLED, so the live state
+    // and the template contradicted each other and the next `cdk deploy
+    // Sps-Etl-staging` would have silently re-enabled a job nobody wants.
+    // Flipping this false removes the schedule, the state machine and the
+    // cadence alarm together, which also clears sps-opportunity-projection-
+    // cadence-staging — in ALARM continuously for 27 days on the shared P2
+    // channel because the alarm was correctly reporting a real, intended stop.
+    opportunityProjectionScheduleEnabled: false,
     // grant→researcher matcher: subtopic-grain path ON in staging (corpus
     // backfilled + reprojected). Self-gates on per-opportunity match_dsl.
     grantMatcherSubtopicGrain: true,
