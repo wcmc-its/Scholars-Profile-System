@@ -721,14 +721,18 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     edgeCertArn:
       "arn:aws:acm:us-east-1:665083158573:certificate/f50f0b04-dc62-4d8e-97b8-2761d1efdd0f",
     cloudFrontLogsBucketName: "sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz",
-    // #1507 -- HTTPS origin leg, two gates.
-    // edgeOriginCertArn: seed with the wildcard ARN to add the ALB :443 listener
-    //   (+ X-Origin-Verify rule, + :443 SG ingress). That alone serves NetScaler.
-    // edgeOriginHostname: seed ONLY once the record resolves to the public ALB --
-    //   it is what flips CloudFront's origin to HTTPS_ONLY against that name.
-    //   Intended value: "scholars-staging-origin.weill.cornell.edu".
-    edgeOriginHostname: "",
-    edgeOriginCertArn: "",
+    // #1507 -- HTTPS origin leg, two gates. Seeded for the NetScaler front:
+    // CloudFront dials the NetScaler VIP over HTTPS (carrying X-Origin-Verify),
+    // and NetScaler dials the app ALB's :443 listener (which the cert adds).
+    // edgeOriginCertArn: the scholars-staging cert already on the live ALB :443
+    //   listener -- the *.weill.cornell.edu wildcard is currently FAILED in ACM,
+    //   and a single-host cert is all the :443 listener needs.
+    // edgeOriginHostname: the NetScaler VIP CloudFront's origin flips onto
+    //   (HTTPS_ONLY). Resolves + presents its own cert; NetScaler proxies to the
+    //   ALB. Reconciles the manual console cutover into IaC.
+    edgeOriginHostname: "cf-ns-scholars-staging.weill.cornell.edu",
+    edgeOriginCertArn:
+      "arn:aws:acm:us-east-1:665083158573:certificate/f50f0b04-dc62-4d8e-97b8-2761d1efdd0f",
     // Observability metric-by-name decouple (cutover, item-3 Phase B2): ON.
     // Severs the Data->Observability (Aurora/OS) + App->Observability (ALB) cross-
     // stack Ref exports so the useSharedVpc flip can replace those resources without
