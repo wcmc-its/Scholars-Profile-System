@@ -9,8 +9,6 @@
 
 # --- tracked gaps: flags waiting on an open issue to wire + flip ---
 SEARCH_REQUIRE_DISPLAYABLE_AUTHOR   # 718: wire cdk ETL+app, reindex, then flip
-FACULTY_REVIEW_TOKEN                 # 1855: route merged dark (#1853); mint secret + wire cdk app-stack, then remove
-FACULTY_REVIEW_TOKEN_PREVIOUS        # 1855: rotation slot for FACULTY_REVIEW_TOKEN (like SCHOLARS_REVALIDATE_TOKEN_PREVIOUS)
 
 # --- runtime/system (injected by platform, test runner, or build) ---
 AWS_DEFAULT_REGION
@@ -42,6 +40,7 @@ OVERVIEW_GENERATE_TEMPERATURE
 RECITER_REFRESH_DELAY_MINUTES
 REPORTER_MATCH_V2_MAX_PER_RUN
 REPORTER_MATCH_V2_MIN_PMIDS
+FACULTY_REVIEW_TOKEN_PREVIOUS       # rotation slot; primary FACULTY_REVIEW_TOKEN wired in app-stack (#1855)
 SCHOLARS_REVALIDATE_TOKEN_PREVIOUS
 SEARCH_AREA_BOOST_W_HI              # area-boost tier weight (code default 3) — A/B lever
 SEARCH_AREA_BOOST_W_MID             # area-boost tier weight (code default 1.5) — A/B lever

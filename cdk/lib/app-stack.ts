@@ -246,6 +246,11 @@ export class AppStack extends Stack {
       "RevalidateTokenSecret",
       `scholars/${env}/revalidate-token`,
     );
+    const facultyReviewTokenSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "FacultyReviewTokenSecret",
+      `scholars/${env}/faculty-review-token`,
+    );
     // SSO session-cookie encryption key (#100). getSessionConfig() requireEnv's
     // SESSION_COOKIE_SECRET; the middleware gate and the SAML callback both read
     // it, so without it the callback 500s minting the session (the gap sibling
@@ -2265,6 +2270,9 @@ export class AppStack extends Stack {
         // Read by lib/revalidate-auth.ts / app/api/revalidate as
         // SCHOLARS_REVALIDATE_TOKEN -- the env-var name is the contract. #447
         SCHOLARS_REVALIDATE_TOKEN: ecs.Secret.fromSecretsManager(revalidateTokenSecret),
+        // Read by app/api/faculty-review/[cwid]/grants as FACULTY_REVIEW_TOKEN --
+        // the WCM Faculty Review Tool's shared bearer. Dark until seeded (#1855).
+        FACULTY_REVIEW_TOKEN: ecs.Secret.fromSecretsManager(facultyReviewTokenSecret),
         // iron-session key read by lib/auth/config.ts getSessionConfig (#100).
         // Required by the /edit middleware gate and the SAML callback's
         // session minting; without it the callback 500s after a valid login.

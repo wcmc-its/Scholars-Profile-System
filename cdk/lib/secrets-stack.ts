@@ -143,6 +143,18 @@ export class SecretsStack extends Stack {
         description:
           "SPS /api/revalidate shared bearer (B04). Quarterly calendar rotation per docs/revalidate-token-rotation.md.",
       },
+      // Faculty Review Tool shared bearer for GET /api/faculty-review/[cwid]/grants
+      // (#1855). Read as FACULTY_REVIEW_TOKEN; seed out-of-band with a random
+      // value BEFORE AppStack ships — an unseeded secret fails GetSecretValue at
+      // task start. Rotate via FACULTY_REVIEW_TOKEN_PREVIOUS, mirroring the
+      // revalidate token, whose "-token" (5-char) tail sidesteps the Secrets
+      // Manager 6-char partial-ARN gotcha the same way this name does.
+      {
+        constructId: "FacultyReviewToken",
+        name: `scholars/${env}/faculty-review-token`,
+        description:
+          "SPS /api/faculty-review/[cwid]/grants shared bearer for the WCM Faculty Review Tool (#1855). Read as FACULTY_REVIEW_TOKEN; seed out-of-band; rotate via FACULTY_REVIEW_TOKEN_PREVIOUS.",
+      },
       // iron-session encryption password for the SSO session cookie (B01 #100).
       // getSessionConfig() requireEnv's SESSION_COOKIE_SECRET (>=32 chars), so
       // the SAML callback 500s minting the session without it -- the gate gap
