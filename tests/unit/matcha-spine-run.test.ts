@@ -1472,6 +1472,13 @@ describe("MATCHA_GLOSS_RERANK — gloss rescore threading", () => {
     expect(mockSearchPeople.mock.calls[0][0].rescoreWeight).toBe(0.5);
   });
 
+  it("a negative λ is clamped to 0 (keeps the rescore recall-safe by construction)", async () => {
+    process.env.MATCHA_GLOSS_RERANK = "on";
+    process.env.MATCHA_GLOSS_RERANK_LAMBDA = "-1";
+    await rankResearchersForDescriptionSpine("cancer metabolism paste");
+    expect(mockSearchPeople.mock.calls[0][0].rescoreWeight).toBe(0);
+  });
+
   it("flag ON but the cluster has NO gloss ⇒ no rescore (off-path byte-identical)", async () => {
     process.env.MATCHA_GLOSS_RERANK = "on";
     mockExtractSponsorConcepts.mockResolvedValue([
