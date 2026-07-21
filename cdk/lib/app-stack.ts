@@ -1683,9 +1683,9 @@ export class AppStack extends Stack {
         // board specialty covers (a "heart failure" query lights up a board-certified
         // cardiologist), via cap-free tree-number subsumption. Sub-toggle of
         // SEARCH_PEOPLE_CLINICAL_FN. NEEDS a people reindex to populate the anchor
-        // fields. OFF in both envs at merge — flip staging + reindex, run the
-        // scripts/search-eval fixture count-up, then prod.
-        SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR: "off",
+        // fields (inert + safe until then — the boost/evidence read absent fields).
+        // Staging-on for the #1836 rollout eval; prod still off pending sign-off.
+        SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR: env === "staging" ? "on" : "off",
         // #824 follow-up -- match-aware People-results "why" line (method/topic/
         // humanized-areas snippet). APP-ONLY, no reindex: derives from
         // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-
