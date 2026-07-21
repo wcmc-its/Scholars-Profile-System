@@ -127,11 +127,15 @@ two halves:
   `scholars/${env}/edge/origin-shared-secret`; rotation runbook in
   [`PRODUCTION_ADDENDUM.md § Origin protection`](./PRODUCTION_ADDENDUM.md).
 - **AWS WAF** attaches to the distribution: a rate-based rule (1000 req / 5 min / IP) plus
-  AWS Managed Rules. The production WAF topology is decided (#502): CloudFront + AWS WAF →
-  NetScaler → ALB → Fargate, with the NetScaler (AWS VPX, WCM network team) being provisioned
-  via RITM0801140 (prod+staging, staging-first). A WCM-only access gate (#461)
-  stays in place meanwhile. **Do not lift the WCM-only gate until the NetScaler enforces
-  equivalent filtering.**
+  AWS Managed Rules. The WAF topology is decided (#502): CloudFront + AWS WAF → NetScaler →
+  ALB → Fargate, with the NetScaler an AWS VPX run by the WCM network team (RITM0801140,
+  prod+staging, staging-first). **Staging is cut over and live** (2026-07-21): CloudFront
+  reaches the app through the NetScaler VIP — origin leg **HTTPS-only** (an HTTP origin behind
+  the VIP's HTTP→HTTPS upgrade loops), NetScaler → ALB on **`:80`** forwarding `X-Origin-Verify`;
+  durable in CDK via the `#1507` origin-flip (PR #1852). **Prod is still pending** — its VIP
+  does not exist yet (NetScaler-team task, follow-up 2026-07-24) — so prod still points straight
+  at its ALB. A WCM-only access gate (#461) stays in place meanwhile. **Do not lift the WCM-only
+  gate until the NetScaler enforces equivalent filtering.**
 - **TLS:** ACM certs for `scholars[-staging].weill.cornell.edu` are provisioned and rotated
   by WCM ITS (not CDK). HSTS ships on the security-headers policy; CSP and the other headers
   are filled in by B21 ([`ADR-007`](./ADR-007-csp-script-src-strategy.md)).
@@ -163,9 +167,12 @@ is SAML + RBAC, see [`access-control-rbac.md`](./access-control-rbac.md)), secre
   (accepted; raise EIP quota and bump to 2 post-launch).
 - **TGW + WCM firewall are not SPS-owned** — the ETL connectivity path depends on another
   team; resolver associations are codified but routing is external.
-- **NetScaler not yet in the request path** (#502, RITM0801140) — the WAF topology is resolved
-  (CloudFront + AWS WAF → NetScaler → ALB → Fargate) but the NetScaler (AWS VPX, WCM network
-  team) is still being provisioned; both distributions point straight at their ALB today, and
-  the #461 WCM-only gate stays until it enforces equivalent filtering.
+- **NetScaler in the request path on staging only** (#502, RITM0801140) — the WAF topology is
+  resolved (CloudFront + AWS WAF → NetScaler → ALB → Fargate). Staging is cut over and live
+  (2026-07-21, PR #1852); prod still points straight at its ALB because its NetScaler VIP does
+  not exist yet (NetScaler-team task, follow-up 2026-07-24). The #461 WCM-only gate stays until
+  the NetScaler enforces equivalent filtering. Note: **do not deploy the Edge stack (either env)
+  until #1856** — its WAF allow-list sources a missing SSM param, so a deploy would strip the
+  live IPSet.
 - **`cdk diff` is the only drift detector** — there is no continuous config-drift scanner;
   console changes are caught at the next diff, not in real time.
