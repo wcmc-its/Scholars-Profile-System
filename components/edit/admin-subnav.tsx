@@ -23,6 +23,7 @@
 import Link from "next/link";
 
 import { AccountMenu } from "@/components/site/account-menu";
+import { AdminGroupMenu } from "@/components/edit/admin-group-menu";
 import { MatchaTab } from "@/components/edit/matcha-tab";
 import { isMatchaEnabled } from "@/lib/api/matcha";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
@@ -260,7 +261,7 @@ export function AdminSubnav({
     // Matcha alone renders through the CLIENT `MatchaTab`, because it carries a
     // Radix HoverCard: composing Radix in this server component silently DROPPED
     // the tab once (#1783 — a 200 with no error, which jsdom cannot catch). Group
-    // entries below stay plain server `<Link>`s for exactly the same reason.
+    // entries take the same care via the client `AdminGroupMenu` below.
     t.id === "matcha" ? (
       <MatchaTab key="matcha" active={active === "matcha"} />
     ) : (
@@ -295,30 +296,32 @@ export function AdminSubnav({
           // (`honors_curator` → Queues={Honors}; a comms_steward → Registries={Method
           // families}; a pure dev-role viewer → Tools={Funding matcher}), and
           // wrapping one tab in a group turns their entire console into a pointless
-          // two-click funnel.
+          // extra hop.
           g.members.length === 1 ? (
             renderTab(g.members[0])
           ) : (
-            <AdminTab
+            // A multi-member group reveals its members in a hover/focus menu
+            // (`AdminGroupMenu`, client — #1783). The label is still a LINK to the
+            // first visible member, so a click/tap reaches that surface directly and
+            // every other member is one hover-or-focus away.
+            <AdminGroupMenu
               key={g.id}
-              // A group entry is a LINK to its first visible member's existing href —
-              // not a hover menu, not a button. Every surface stays reachable by
-              // visible clicks: 1 for a top-level tab or a group's default member,
-              // 2 for any other member.
-              href={g.members[0].href}
-              testId={`admin-group-${g.id}`}
+              groupId={g.id}
               label={GROUP_LABEL[g.id]}
+              href={g.members[0].href}
               active={activeGroup === g.id}
+              members={g.members.map((m) => ({
+                id: m.id,
+                href: m.href,
+                label: m.label,
+                active: active === m.id,
+                count: m.count,
+              }))}
             />
           ),
         ),
       ]
     : tabs.map(renderTab);
-
-  // Tier 2 renders only for an active group that was NOT promoted into tier 1.
-  // `active="self"` maps to no group, so the viewer's own /edit gets tier 1 only —
-  // matching today, where no list tab is active.
-  const tier2 = groups.find((g) => g.id === activeGroup && g.members.length > 1);
 
   return (
     <div className="border-border border-b" data-slot="admin-subnav">
@@ -346,24 +349,6 @@ export function AdminSubnav({
             through every console page that renders this strip. */}
         <AccountMenu context="console" />
       </div>
-      {/* Tier 2 — the active group's visible members, reusing `AdminTab`
-          unchanged. Renders ONLY when a group is active, so it appears and
-          disappears across full navigations, never within a page. Same
-          `overflow-x-auto` + per-tab `shrink-0 whitespace-nowrap` treatment as
-          tier 1 (#1819): a wide group scrolls rather than squeezing its labels
-          onto two lines. */}
-      {tier2 && (
-        <div className="bg-muted/30 border-border border-t">
-          <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
-            <div
-              className="flex min-w-0 flex-1 items-center gap-6 overflow-x-auto"
-              data-testid={`admin-subnav-tier2-${tier2.id}`}
-            >
-              {tier2.members.map(renderTab)}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
