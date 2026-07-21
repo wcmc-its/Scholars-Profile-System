@@ -15,12 +15,18 @@ GET /api/faculty-review/{cwid}/grants
 
 | | |
 |---|---|
-| Base URL (staging) | `https://<sps-staging-host>` |
-| Base URL (prod) | `https://<sps-prod-host>` |
+| Host | The SPS **internal ALB** (per env), reachable in-VPC / on the WCM network. The exact internal hostname is provided by the SPS operator out-of-band — it is **not** published here. |
+| Scheme / port | `http` on port 80 (internal ALB; TLS terminates at the network edge, not on this internal hop) |
 | Path param | `cwid` — the scholar's CWID (1–32 chars) |
 | Method | `GET` |
 | Auth | `Authorization: Bearer <token>` (required) |
 | Response | `application/json`, `Cache-Control: no-store` |
+
+This endpoint is served from the **internal ALB only**, not the public edge
+(`scholars-*.weill.cornell.edu`). The public CloudFront edge has no behavior for
+`/api/faculty-review/*` and strips the `Authorization` header, so requests through
+it always `401`. Call the internal ALB directly — it forwards `Authorization`
+natively and keeps this grant-data endpoint off the public internet.
 
 Consumption model: **per-faculty, on demand.** Look up one scholar at review
 time; loop your review cohort client-side. There is no bulk/all-faculty
@@ -47,9 +53,10 @@ Authorization: Bearer <FACULTY_REVIEW_TOKEN>
 ## Request example
 
 ```bash
+# $SPS_INTERNAL_HOST = the per-env internal ALB hostname (from the SPS operator)
 curl -sS \
   -H "Authorization: Bearer $FACULTY_REVIEW_TOKEN" \
-  "https://<sps-host>/api/faculty-review/abc1001/grants"
+  "http://$SPS_INTERNAL_HOST/api/faculty-review/abc1001/grants"
 ```
 
 ## Response
