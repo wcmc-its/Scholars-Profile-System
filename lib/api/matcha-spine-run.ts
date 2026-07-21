@@ -286,6 +286,12 @@ async function retrieveCluster(
   // D1 — when true, ask searchPeople to project each hit's `mostRecentYear` (from the precomputed
   // `mostRecentPubDate`). Off ⇒ the field is not requested, so the hit shape is byte-identical.
   includeRecency: boolean,
+  // MATCHA_GLOSS_RERANK — the cluster's representative gloss + λ. Passed by the caller ONLY when
+  // the flag is on AND the cluster has a gloss; undefined ⇒ no rescore ⇒ searchPeople args (and
+  // thus the /search body) are byte-identical to today. `rescore` re-orders only, never widens
+  // the pool, so recall is invariant across the whole λ sweep.
+  rescoreQuery?: string,
+  rescoreWeight?: number,
 ): Promise<{ ranked: string[]; hits: PeopleHit[] }> {
   const ranked: string[] = [];
   const hits: PeopleHit[] = [];
@@ -344,6 +350,17 @@ async function retrieveCluster(
       // presentation affordance that must not inherit the recency flag's fate. Free — the field is
       // already stored for the directory's own A–Z sort, this only projects it.
       includeLastName: true,
+      // MATCHA_GLOSS_RERANK — spread ONLY when a gloss is in hand, so the off-path opts are
+      // byte-identical. `rescoreWindow: TERM_DEPTH` makes the rescore window span the full
+      // per-cluster pool this loop pages in, so every page re-orders the same window.
+      // ponytail: window-constancy across pages holds because TERM_DEPTH (100) is a multiple of the
+      // page size (20) — the last issued page's from+size equals TERM_DEPTH, so every page's
+      // window_size = max(TERM_DEPTH, from+size) is a constant TERM_DEPTH. If TERM_DEPTH ever stops
+      // being a multiple of the page size, round this up to a page boundary or the last page rescores
+      // a wider window than the others and paged order goes inconsistent.
+      ...(rescoreQuery
+        ? { rescoreQuery, rescoreWeight, rescoreWindow: TERM_DEPTH }
+        : {}),
     });
     for (const h of result.hits) {
       ranked.push(h.cwid);
@@ -572,6 +589,19 @@ export async function rankResearchersForDescriptionSpine(
   // was one grade-3 scholar sitting on 59 unaccepted publications. Before flipping prod,
   // quantify that exposure by role_category — the eval cannot see it.
   const recencyOn = process.env.MATCHA_RECENCY === "on";
+  // MATCHA_GLOSS_RERANK — gloss as an OpenSearch rescore (recall-safe re-order). A ranking change
+  // ⇒ eval-gated: staging-on to A/B, prod-off. λ (`rescore_query_weight`) is the one tunable, swept
+  // 0.25/0.5/1.0 in-VPC as separate processes; read from env so an arm sets it without a redeploy.
+  // `?? ""` + `Number.isFinite` keeps λ=0 (the perfect ablation) meaning zero, not the default.
+  // Clamp at 0: a negative λ would let an in-window doc score BELOW an out-of-window one and demote
+  // it out of the top pool — i.e. break the "recall-safe by construction" invariant that is the whole
+  // reason this is a rescore and not a gloss query. Never a real arm (sweep is 0.25/0.5/1.0); the
+  // clamp just keeps the invariant true unconditionally instead of only for λ ≥ 0.
+  const glossRerankOn = process.env.MATCHA_GLOSS_RERANK === "on";
+  const glossRerankLambda = (() => {
+    const parsed = Number.parseFloat(process.env.MATCHA_GLOSS_RERANK_LAMBDA ?? "");
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0.5;
+  })();
   for (const cluster of clusters) {
     // MAX member coverage ≈ the broadest merged synonym = a lower bound on the cluster's true
     // union corpus coverage (the exact union-coverage is an ETL upgrade). Display-only: 0 here
@@ -644,6 +674,10 @@ export async function rankResearchersForDescriptionSpine(
       cluster.descendantUis,
       rep,
       recencyOn,
+      // Gloss rescore only when the flag is on AND this cluster has a gloss (dictionary-fallback
+      // clusters have none ⇒ off-path byte-identical). `clusterGloss` is the rail's "sponsor's words".
+      glossRerankOn && clusterGloss ? clusterGloss : undefined,
+      glossRerankLambda,
     );
     for (const h of hits) if (!hitByCwid.has(h.cwid)) hitByCwid.set(h.cwid, h);
     // #1689 — evidence is CONCEPT-SCOPED, so it is stored per (concept, cwid) and read back

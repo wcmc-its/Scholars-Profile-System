@@ -1324,6 +1324,13 @@ export class AppStack extends Stack {
         // lost to gain 1). Retrieval now always uses the bare member tokens, so there is no flag
         // left to set. See docs/2026-07-19-matcha-gloss-query-concept-vs-keyword-handoff.md.
         MATCHA_RECENCY: env === "staging" ? "on" : "off",
+        // MATCHA_GLOSS_RERANK — gloss as an OpenSearch rescore (recall-safe re-order of the
+        // per-cluster pool). A RANKING change ⇒ eval-gated: OFF in BOTH envs until an offline
+        // in-VPC λ-sweep A/B (base vs gloss-rerank) picks a λ on the graded-only nDCG, THEN
+        // staging-on. STATIC literal for flag parity. λ is read from MATCHA_GLOSS_RERANK_LAMBDA
+        // (default 0.5); wire it here too when this goes staging-on. See
+        // docs/2026-07-21-matcha-gloss-reranker-handoff.md.
+        MATCHA_GLOSS_RERANK: "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
