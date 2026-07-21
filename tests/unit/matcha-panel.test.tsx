@@ -2551,6 +2551,34 @@ describe("MatchaPanel", () => {
     expect(screen.getByText(/improve match quality/)).toBeTruthy();
   });
 
+  it("replaying a Recent opens the ask FULL, not collapsed to the pinned bar", async () => {
+    // The gripe: a Recent replay used to open the compact pinned bar ("already read"), hiding the
+    // full "What we read from the ask" card. A replay is still the officer's context, so it now
+    // opens Full exactly like a fresh paste; the scroll-tuck (D10) and manual Collapse still apply.
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: THREE,
+      submissions: [
+        {
+          id: "s1",
+          description: "We fund cardiac fibrosis work.",
+          title: "cardiac fibrosis",
+          engine: "spine",
+          candidateCount: 12,
+          submittedByName: "Dana Ellis",
+          createdAt: "2026-07-13T10:00:00.000Z",
+        },
+      ],
+    });
+    render(<MatchaPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
+    fireEvent.click(await screen.findByText("cardiac fibrosis")); // replay the saved ask
+
+    // Full card (its eyebrow) is present; the compact bar's "Show original ▾" is NOT.
+    expect(await screen.findByText(/What we read from the ask/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Show original ▾" })).toBeNull();
+  });
+
   describe("history scope (§9) and the submitter (§10)", () => {
     function submission(over: Partial<Submission> = {}): Submission {
       return {

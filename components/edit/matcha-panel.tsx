@@ -456,11 +456,13 @@ export function MatchaPanel() {
     setRoleSel(new Set());
   }
 
-  /** The ONLY network call. A search — never a re-rank. `fromHistory` opens the ask card COMPACT
-   *  (a Recent replay is text the officer has already read), a fresh paste/re-run opens it Full. */
+  /** The ONLY network call. A search — never a re-rank. The ask card always opens Full (the
+   *  read-only paste with its highlighted terms + actions); scrolling past it tucks it to the
+   *  pinned bar (D10), and "Collapse ▴" pins it by hand. A Recent replay opens Full too — an
+   *  already-read ask is still the officer's context, and hiding it behind a bar was the gripe. */
   async function runSearch(
     text: string,
-    opts: { fromHistory?: boolean; include?: readonly string[] } = {},
+    opts: { include?: readonly string[] } = {},
   ) {
     if (pending || text.trim().length === 0) return;
     setStatus({ kind: "loading" });
@@ -490,7 +492,7 @@ export function MatchaPanel() {
         setTitleSummary(data.titleSummary);
         setMatchedText(text);
         setEditing(false); // a committed search → show the read-only ask, not the textarea
-        setHeaderCollapsed(!!opts.fromHistory); // D10 — Full on a fresh paste/re-run, Compact on replay
+        setHeaderCollapsed(false); // D10 — always open Full (fresh, re-run, AND replay); scroll tucks it
         setHeaderPinned(false); // §6 — the pin is per-ask: a new paste re-arms the scroll-collapse
         setShowFullText(false); // D11 — new paste starts clamped
         setRecency("recent"); // D3 — the dial is per-ask; a new sponsor starts at the ranker's default
@@ -997,7 +999,7 @@ export function MatchaPanel() {
                     type="button"
                     onClick={() => {
                       setDescription(h.description);
-                      void runSearch(h.description, { fromHistory: true }); // D10 — replay opens Compact
+                      void runSearch(h.description); // D10 — replay opens Full, same as a fresh paste
                     }}
                     className="text-foreground/90 mt-1 block w-full text-left text-sm font-medium underline-offset-4 hover:underline"
                   >
