@@ -10,6 +10,7 @@
  */
 import Link from "next/link";
 
+import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { identityImageEndpoint } from "@/lib/headshot";
 
@@ -21,28 +22,7 @@ export type ProxyLandingScholar = {
 export function ProxyLanding({ scholars }: { scholars: ProxyLandingScholar[] }) {
   return (
     <div className="bg-apollo-page min-h-screen">
-      <header className="bg-apollo-bar text-white">
-        <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center justify-between px-6">
-          <div className="flex items-center gap-3">
-            <span
-              className="bg-apollo-maroon text-apollo-maroon-foreground flex size-9 items-center justify-center rounded-md text-xs font-bold tracking-wide"
-              aria-hidden
-            >
-              WCM
-            </span>
-            <h1 className="text-base font-semibold">Scholars Profile Console</h1>
-          </div>
-          <form action="/api/auth/logout" method="POST">
-            <button
-              type="submit"
-              className="text-sm text-white/85 transition-colors hover:text-white focus:text-white focus:outline-none"
-              data-testid="edit-signout"
-            >
-              Sign out
-            </button>
-          </form>
-        </div>
-      </header>
+      <ConsoleTopBar />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-10">
         <h2 className="text-lg font-semibold">Profiles you edit as a proxy</h2>

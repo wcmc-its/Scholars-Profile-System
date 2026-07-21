@@ -19,14 +19,11 @@
  */
 import { notFound, redirect } from "next/navigation";
 
-import { AdminSubnav } from "@/components/edit/admin-subnav";
+import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { HonorsQueue } from "@/components/edit/honors-queue";
-import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
-import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
 // No `countPendingHonors` here: this page has already loaded the queue, so it
 // feeds the sub-nav badge from `groups` rather than paying for a second COUNT —
 // the same thing `/edit/slug-requests` does with `requests.length`.
@@ -78,31 +75,13 @@ export default async function HonorsQueuePage() {
   const slugRequests = isSlugRequestEnabled() ? await loadSlugRequestQueue(db.read) : [];
 
   return (
-    <div className="min-h-screen bg-apollo-page" data-slot="honors-queue-page">
-      <header className="bg-apollo-bar text-white">
-        <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
-          <span
-            className="bg-apollo-maroon flex size-7 items-center justify-center rounded-sm text-xs font-bold"
-            aria-hidden
-          >
-            WCM
-          </span>
-          <span className="font-semibold">Scholars Profile Console</span>
-        </div>
-      </header>
-
-      <AdminSubnav
-        active="honors-queue"
-        unitsTab={session.isSuperuser}
-        pendingSlugRequests={slugRequests.length}
-        pendingHonors={pendingCount}
-        administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
-        methodsTab={isMethodsTabVisible(session) ? 0 : null}
-        dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
-      />
-
-      <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
-        <div className="mb-1 flex items-center justify-between gap-3">
+    <ConsoleShell
+      active="honors-queue"
+      session={session}
+      pendingSlugRequests={slugRequests.length}
+      pendingHonors={pendingCount}
+    >
+      <div className="mb-1 flex items-center justify-between gap-3">
           <h1 className="text-xl font-semibold">Honors approval</h1>
           {/* #1762 — the Research Dean's office exports the full record (all
               statuses) as CSV. Same gate as this page enforces the route. A plain
@@ -123,7 +102,6 @@ export default async function HonorsQueuePage() {
               }. Nothing here renders on a profile until it is approved.`}
         </p>
         <HonorsQueue pending={groups} approved={approved} rejected={rejected} userAsserted={userAsserted} />
-      </main>
-    </div>
+    </ConsoleShell>
   );
 }

@@ -16,6 +16,7 @@
  */
 import { notFound, redirect } from "next/navigation";
 
+import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { CoreClaimQueue } from "@/components/edit/core-claim-queue";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { loadCoreReviewQueue } from "@/lib/api/core-queue";
@@ -68,17 +69,7 @@ export default async function EditCorePage({
 
   return (
     <div className="min-h-screen bg-apollo-page" data-slot="edit-core-page">
-      <header className="bg-apollo-bar text-white">
-        <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
-          <span
-            className="bg-apollo-maroon flex size-7 items-center justify-center rounded-sm text-xs font-bold"
-            aria-hidden
-          >
-            WCM
-          </span>
-          <span className="font-semibold">Scholars Profile Console</span>
-        </div>
-      </header>
+      <ConsoleTopBar variant="console" />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
         <h1 className="mb-1 text-xl font-semibold">{queue.core.name} — core publications</h1>

@@ -17,13 +17,10 @@
  */
 import { notFound, redirect } from "next/navigation";
 
-import { AdminSubnav } from "@/components/edit/admin-subnav";
+import { ConsoleShell } from "@/components/edit/console-shell";
 import { NewsQueue } from "@/components/edit/news-queue";
-import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
-import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { isNewsQueueEnabled, loadNewsQueue } from "@/lib/edit/news-queue";
@@ -59,35 +56,14 @@ export default async function NewsQueuePage() {
   const pendingSlugRequests =
     superuserSurfaces && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
   const pendingHonors = isHonorsQueueTabVisible(session) ? await countPendingHonors(db.read) : null;
-  const administratorsTab = superuserSurfaces && isAdministratorsTabEnabled() ? 0 : null;
 
   return (
-    <div className="min-h-screen bg-apollo-page" data-slot="news-queue-page">
-      <header className="bg-apollo-bar text-white">
-        <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
-          <span
-            className="bg-apollo-maroon flex size-7 items-center justify-center rounded-sm text-xs font-bold"
-            aria-hidden
-          >
-            WCM
-          </span>
-          <span className="font-semibold">Scholars Profile Console</span>
-        </div>
-      </header>
-
-      <AdminSubnav
-        active="news-queue"
-        pendingSlugRequests={pendingSlugRequests}
-        pendingHonors={pendingHonors}
-        administratorsTab={administratorsTab}
-        methodsTab={isMethodsTabVisible(session) ? 0 : null}
-        dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
-        superuserSurfaces={superuserSurfaces}
-        profilesTab={session.isCommsSteward || session.isSuperuser}
-        unitsTab={session.isCommsSteward || session.isSuperuser}
-      />
-
-      <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
+    <ConsoleShell
+      active="news-queue"
+      session={session}
+      pendingSlugRequests={pendingSlugRequests}
+      pendingHonors={pendingHonors}
+    >
         <h1 className="mb-1 text-xl font-semibold">News approval</h1>
         <p className="text-muted-foreground mb-6 max-w-3xl text-sm">
           {pendingCount === 0
@@ -99,7 +75,6 @@ export default async function NewsQueuePage() {
               }. Nothing here shows on a profile until it is approved.`}
         </p>
         <NewsQueue pending={pending} approved={approved} rejected={rejected} />
-      </main>
-    </div>
+    </ConsoleShell>
   );
 }

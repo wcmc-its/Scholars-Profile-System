@@ -16,17 +16,15 @@
  */
 import { notFound, redirect } from "next/navigation";
 
-import { AdminSubnav } from "@/components/edit/admin-subnav";
+import { ConsoleShell } from "@/components/edit/console-shell";
 import { DataQualityDashboard } from "@/components/edit/data-quality-dashboard";
 import {
   loadDataQualityFacets,
   loadDataQualityRoster,
   parseDataQualityParams,
 } from "@/lib/api/data-quality";
-import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import {
   isDataQualityDashboardEnabled,
   isEmptyScope,
@@ -100,32 +98,14 @@ export default async function EditDataQualityPage({
     : null;
 
   return (
-    <div className="min-h-screen bg-apollo-page" data-slot="data-quality-page">
-      <header className="bg-apollo-bar text-white">
-        <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
-          <span
-            className="bg-apollo-maroon flex size-7 items-center justify-center rounded-sm text-xs font-bold"
-            aria-hidden
-          >
-            WCM
-          </span>
-          <span className="font-semibold">Scholars Profile Console</span>
-        </div>
-      </header>
-
-      <AdminSubnav
-        active="data-quality"
-        superuserSurfaces={session.isSuperuser}
-        profilesTab={session.isCommsSteward}
-        unitsTab
-        pendingSlugRequests={pendingSlugRequests}
-        pendingHonors={pendingHonors}
-        administratorsTab={session.isSuperuser && isAdministratorsTabEnabled() ? 0 : null}
-        methodsTab={isMethodsTabVisible(session) ? 0 : null}
-        dataQualityTab={0}
-      />
-
-      <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
+    <ConsoleShell
+      active="data-quality"
+      session={session}
+      pendingSlugRequests={pendingSlugRequests}
+      pendingHonors={pendingHonors}
+      unitsTab
+      dataQualityTab={0}
+    >
         <h1 className="mb-1 text-xl font-semibold">Data quality</h1>
         <p className="text-muted-foreground mb-6 text-sm">
           {scope.all
@@ -147,7 +127,6 @@ export default async function EditDataQualityPage({
           page={params.page}
           pageSize={PAGE_SIZE}
         />
-      </main>
-    </div>
+    </ConsoleShell>
   );
 }

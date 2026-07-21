@@ -11,15 +11,12 @@
  */
 import { notFound, redirect } from "next/navigation";
 
-import { AdminSubnav } from "@/components/edit/admin-subnav";
+import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { SlugRequestQueue } from "@/components/edit/slug-request-queue";
-import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { requireSuperuserGet } from "@/lib/edit/authz";
-import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { isSlugRequestEnabled, loadSlugRequestQueue } from "@/lib/edit/slug-request";
 
@@ -58,37 +55,18 @@ export default async function SlugRequestsPage() {
 
 
   return (
-    <div className="min-h-screen bg-apollo-page" data-slot="slug-requests-page">
-      <header className="bg-apollo-bar text-white">
-        <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
-          <span
-            className="bg-apollo-maroon flex size-7 items-center justify-center rounded-sm text-xs font-bold"
-            aria-hidden
-          >
-            WCM
-          </span>
-          <span className="font-semibold">Scholars Profile Console</span>
-        </div>
-      </header>
-
-      <AdminSubnav
-        active="slug-requests"
-        unitsTab={session.isSuperuser}
-        pendingSlugRequests={requests.length}
-        pendingHonors={pendingHonors}
-        administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
-        methodsTab={isMethodsTabVisible(session) ? 0 : null}
-        dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
-      />
-
-      <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
-        <h1 className="mb-1 text-xl font-semibold">Profile URL requests</h1>
-        <p className="text-muted-foreground mb-6 text-sm">
-          Pending scholar requests for a personalized URL, oldest first. Approving writes the
-          override and redirects the old address.
-        </p>
-        <SlugRequestQueue initialRequests={requests} />
-      </main>
-    </div>
+    <ConsoleShell
+      active="slug-requests"
+      session={session}
+      pendingSlugRequests={requests.length}
+      pendingHonors={pendingHonors}
+    >
+      <h1 className="mb-1 text-xl font-semibold">Profile URL requests</h1>
+      <p className="text-muted-foreground mb-6 text-sm">
+        Pending scholar requests for a personalized URL, oldest first. Approving writes the override
+        and redirects the old address.
+      </p>
+      <SlugRequestQueue initialRequests={requests} />
+    </ConsoleShell>
   );
 }
