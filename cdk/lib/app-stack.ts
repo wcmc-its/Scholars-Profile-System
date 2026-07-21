@@ -1291,12 +1291,13 @@ export class AppStack extends Stack {
         // Presentation only — no route, caller or prop changes, and off ⇒ the
         // previous flat strip renders byte-identically.
         //
-        // DARK IN BOTH ENVS ON PURPOSE. This component renders on all 14 console
-        // pages, so a render fault takes out the whole console nav; and jsdom
-        // cannot verify layout, which is exactly how #1803 shipped broken with
-        // green CI. Flip staging first (`"staging" ? "on" : "off"`), deploy, and
-        // eyeball both tiers at a narrow window before prod goes anywhere near it.
-        CONSOLE_SUBNAV_GROUPED: "off",
+        // Staging-only. This component renders on all 14 console pages, so a
+        // render fault takes out the whole console nav; and jsdom cannot verify
+        // layout, which is exactly how #1803 shipped broken with green CI. So
+        // staging exists to be looked at: flip here, `cdk deploy --exclusively
+        // Sps-App-staging -c env=staging`, then eyeball BOTH tiers at a narrow
+        // window (the tier-2 row must scroll, not wrap) before prod is considered.
+        CONSOLE_SUBNAV_GROUPED: env === "staging" ? "on" : "off",
         // MATCHA* — the /edit/matcha surface (paste a description of an interest → WCM researchers
         // ranked on topical fit alone). Renamed from SPONSOR_MATCH* 2026-07-17 (#1770 deployed the
         // names, #1773 moved the code, this drops the old set). The old names are GONE from the
