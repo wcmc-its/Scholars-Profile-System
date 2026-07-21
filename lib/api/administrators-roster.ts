@@ -42,11 +42,13 @@ export type AdminRosterGrant = {
 /** One person on the roster, with the set of unit grants they hold. */
 export type AdminRosterEntry = {
   cwid: string;
-  /** Display name (`preferredName`), or the bare CWID when no Scholar row exists. */
+  /** Display name: the Scholar `preferredName`, else the directory name captured at
+   *  pull time (`UnitAdmin.granteeName`), else the bare CWID. */
   name: string;
   /** The SOR title (`primaryTitle`); null when none on file. */
   title: string | null;
-  /** False when the name fell back to the CWID (no Scholar row) — drives the #443 note. */
+  /** False when the name fell back to the bare CWID (no Scholar row AND no
+   *  pull-time directory name) — drives the #443 note. */
   nameResolved: boolean;
   grants: AdminRosterGrant[];
 };
@@ -76,7 +78,14 @@ export async function loadUnitAdministratorRoster(
 
   const rows = await client.unitAdmin.findMany({
     where: scope === undefined ? {} : { entityId: { in: scope } },
-    select: { entityType: true, entityId: true, cwid: true, role: true, source: true },
+    select: {
+      entityType: true,
+      entityId: true,
+      cwid: true,
+      role: true,
+      source: true,
+      granteeName: true,
+    },
   });
 
   if (rows.length === 0) {
@@ -136,11 +145,14 @@ export async function loadUnitAdministratorRoster(
     let entry = byCwid.get(r.cwid);
     if (!entry) {
       const resolved = scholarName.get(r.cwid);
+      // Prefer the Scholar profile name (curated) for a scholar admin; else the
+      // directory name captured at pull time (`granteeName`) — the fix for
+      // NON-Scholar admins that used to fall back to the bare CWID; else the CWID.
       entry = {
         cwid: r.cwid,
-        name: resolved?.name ?? r.cwid,
+        name: resolved?.name ?? r.granteeName ?? r.cwid,
         title: resolved?.title ?? null,
-        nameResolved: resolved !== undefined,
+        nameResolved: resolved !== undefined || r.granteeName != null,
         grants: [],
       };
       byCwid.set(r.cwid, entry);
