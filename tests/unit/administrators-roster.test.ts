@@ -17,6 +17,8 @@ type UnitAdminRow = {
   cwid: string;
   role: "owner" | "curator";
   source: string;
+  /** Directory name captured at pull time (ed-admins ETL); resolves non-Scholar admins. */
+  granteeName?: string | null;
 };
 type NamedRow = { code: string; name: string };
 type ScholarRow = { cwid: string; preferredName: string; primaryTitle: string | null };
@@ -171,6 +173,33 @@ describe("loadUnitAdministratorRoster — provenance + name resolution", () => {
     const fac = entries.find((e) => e.cwid === "fac1")!;
     expect(fac.name).toBe("Faculty One");
     expect(fac.nameResolved).toBe(true);
+  });
+
+  it("uses the pull-time granteeName for a non-Scholar admin, not degraded", async () => {
+    const client = makeClient({
+      unitAdmin: [
+        // staff1 has no Scholar row but the ETL captured its directory name.
+        { entityType: "department", entityId: "D1", cwid: "staff1", role: "curator", source: "ED:IAMDELA", granteeName: "Dana Staff" },
+      ],
+      departments: [{ code: "D1", name: "Dept One" }],
+      scholars: [],
+    });
+    const { entries, nameResolutionDegraded } = await loadUnitAdministratorRoster({}, client);
+    expect(entries[0].name).toBe("Dana Staff");
+    expect(entries[0].nameResolved).toBe(true);
+    expect(nameResolutionDegraded).toBe(false);
+  });
+
+  it("prefers the Scholar profile name over granteeName for a scholar admin", async () => {
+    const client = makeClient({
+      unitAdmin: [
+        { entityType: "department", entityId: "D1", cwid: "fac1", role: "owner", source: "ED:DA", granteeName: "Directory Name" },
+      ],
+      departments: [{ code: "D1", name: "Dept One" }],
+      scholars: [{ cwid: "fac1", preferredName: "Curated Name", primaryTitle: "MD" }],
+    });
+    const { entries } = await loadUnitAdministratorRoster({}, client);
+    expect(entries[0].name).toBe("Curated Name");
   });
 
   it("uses the bare code when a unit row is missing", async () => {

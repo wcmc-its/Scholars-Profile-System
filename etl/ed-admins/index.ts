@@ -43,6 +43,7 @@ import {
   ED_ADMIN_TAGS,
   fetchActiveMembersByCwid,
   fetchOrgUnitAdmins,
+  fetchPersonNamesByCwid,
   openLdap,
   type EdOrgUnitAdmins,
 } from "@/lib/sources/ldap";
@@ -282,6 +283,29 @@ async function main(): Promise<void> {
       manualOwnerRows.map((r) => grantKey(r.entityType, r.entityId, r.cwid)),
     );
 
+    // Resolve grantee display names FROM THE DIRECTORY in the same pull that fetched
+    // the grants, and store them on the row. The app runtime can't reach LDAP (#443),
+    // so resolving on the fly at render falls back to the bare CWID for non-Scholar
+    // admins; capturing the name here is the fix. Best-effort: a lookup failure leaves
+    // the name untouched (prior value preserved on update, null on create) and the
+    // roster keeps its Scholar-name / CWID fallback.
+    const nameByCwid = new Map<string, string>();
+    try {
+      const raw = await fetchPersonNamesByCwid(taggedCwids);
+      for (const [cwid, n] of raw) {
+        const name = [n.firstName, n.lastName].filter(Boolean).join(" ").trim();
+        if (name) nameByCwid.set(cwid, name);
+      }
+      console.log(
+        `[ed-admins] resolved ${nameByCwid.size}/${taggedCwids.length} grantee display name(s).`,
+      );
+    } catch (err) {
+      console.warn(
+        "[ed-admins] grantee name resolution failed — grants keep their prior name / CWID fallback:",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+
     let upserts = 0;
     let skippedManualOwner = 0;
     for (const g of grants.values()) {
@@ -289,6 +313,7 @@ async function main(): Promise<void> {
         skippedManualOwner++;
         continue;
       }
+      const granteeName = nameByCwid.get(g.cwid.toLowerCase());
       await db.write.unitAdmin.upsert({
         where: {
           entityType_entityId_cwid: {
@@ -304,8 +329,16 @@ async function main(): Promise<void> {
           role: g.role,
           grantedBy: GRANTED_BY,
           source: g.source,
+          granteeName: granteeName ?? null,
         },
-        update: { role: g.role, grantedBy: GRANTED_BY, source: g.source },
+        // A lookup miss preserves a prior name (`undefined` = no-op) rather than
+        // wiping it to null on a transient directory failure.
+        update: {
+          role: g.role,
+          grantedBy: GRANTED_BY,
+          source: g.source,
+          granteeName: granteeName ?? undefined,
+        },
       });
       upserts++;
     }

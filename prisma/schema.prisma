@@ -1455,6 +1455,12 @@ model UnitAdmin {
   // "ED:DivA-IAMDELA" for ED-imported grants. Lets the per-source reconcile spare manual
   // rows (and other populations' rows) and lets the Administrators tab lock ED-sourced rows.
   source     String     @default("manual") @db.VarChar(32)
+  // Grantee display name resolved FROM THE DIRECTORY AT PULL TIME (the ed-admins
+  // ETL, where LDAP is reachable), so the Administrators roster shows a name for
+  // NON-Scholar admins too. The app runtime cannot reach LDAP (#443), so resolving
+  // on the fly at render falls back to the bare CWID — this stores it in the pull
+  // instead. Null until an ed-admins run with LDAP reachability populates it.
+  granteeName String?    @map("grantee_name") @db.VarChar(255)
   createdAt  DateTime   @default(now()) @map("created_at")
 
   @@id([entityType, entityId, cwid])
