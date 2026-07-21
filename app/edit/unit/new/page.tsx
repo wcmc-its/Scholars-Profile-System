@@ -24,6 +24,7 @@
  */
 import { redirect } from "next/navigation";
 
+import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { RequestNewOrgUnitDialog } from "@/components/edit/request-new-org-unit-dialog";
 import { UnitCreateForm } from "@/components/edit/unit-create-form";
@@ -174,17 +175,7 @@ function CreateChrome({
 }) {
   return (
     <div className="min-h-screen bg-apollo-page" data-slot="unit-create-page">
-      <header className="bg-apollo-bar text-white">
-        <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
-          <span
-            className="bg-apollo-maroon flex size-7 items-center justify-center rounded-sm text-xs font-bold"
-            aria-hidden
-          >
-            WCM
-          </span>
-          <span className="font-semibold">Scholars Profile Console</span>
-        </div>
-      </header>
+      <ConsoleTopBar variant="console" />
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
         <h1 className="mb-1 text-xl font-semibold">{heading}</h1>
         <p className="text-muted-foreground mb-6 text-sm">{subtitle}</p>

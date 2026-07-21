@@ -13,7 +13,6 @@
  */
 import Link from "next/link";
 
-import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { SlugAvailabilityChecker } from "@/components/edit/slug-availability-checker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,19 +49,6 @@ export type SlugRegistryProps = {
   pageSize: number;
   /** Whether the `requested` segment tab is shown (slug-request flag on). */
   requestedSegmentVisible: boolean;
-  /** Pending slug-request count for the sub-nav pill; `null` when the feature
-   *  is off (the "URL requests" tab is then hidden — but THIS tab stays). */
-  pendingSlugRequests: number | null;
-  /** #1762 — forwarded straight to AdminSubnav; `null` hides the Honors tab. */
-  pendingHonors: number | null;
-  /** Forwarded to the sub-nav: `null` hides the "Administrators" tab. */
-  administratorsTab?: number | null;
-  /** Forwarded to the sub-nav: `null` hides the "Method Families" tab. */
-  methodsTab?: number | null;
-  /** Forwarded to the sub-nav: `null` hides the "Data quality" tab. */
-  dataQualityTab?: number | null;
-  /** Forwarded to the sub-nav: show the "Units" tab (true for a superuser). */
-  unitsTab?: boolean;
 };
 
 function segHref(opts: { segment: SlugRegistrySegment; query: string; page: number }): string {
@@ -82,12 +68,6 @@ export function SlugRegistry({
   page,
   pageSize,
   requestedSegmentVisible,
-  pendingSlugRequests,
-  pendingHonors,
-  administratorsTab,
-  methodsTab,
-  dataQualityTab,
-  unitsTab,
 }: SlugRegistryProps) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min((page + 1) * pageSize, total);
@@ -104,30 +84,7 @@ export function SlugRegistry({
   ];
 
   return (
-    <div className="min-h-screen bg-apollo-page" data-slot="slug-registry">
-      <header className="bg-apollo-bar text-white">
-        <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
-          <span
-            className="bg-apollo-maroon flex size-7 items-center justify-center rounded-sm text-xs font-bold"
-            aria-hidden
-          >
-            WCM
-          </span>
-          <span className="font-semibold">Scholars Profile Console</span>
-        </div>
-      </header>
-
-      <AdminSubnav
-        active="slugs"
-        unitsTab={unitsTab}
-        pendingSlugRequests={pendingSlugRequests}
-        pendingHonors={pendingHonors}
-        administratorsTab={administratorsTab}
-        methodsTab={methodsTab}
-        dataQualityTab={dataQualityTab}
-      />
-
-      <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
+    <>
         <h1 className="mb-1 text-xl font-semibold">URL registry</h1>
         <p className="text-muted-foreground mb-6 text-sm">
           Who holds which profile URL — live, historical (redirecting), pinned by an override,
@@ -227,8 +184,7 @@ export function SlugRegistry({
             )}
           </div>
         )}
-      </main>
-    </div>
+    </>
   );
 }
 

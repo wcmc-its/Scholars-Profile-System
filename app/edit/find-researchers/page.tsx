@@ -18,16 +18,13 @@
 import { redirect } from "next/navigation";
 import { Eye } from "lucide-react";
 
-import { AdminSubnav } from "@/components/edit/admin-subnav";
+import { ConsoleShell } from "@/components/edit/console-shell";
 import { FindResearchers } from "@/components/edit/find-researchers";
 import { FindResearchersTabs } from "@/components/edit/find-researchers-tabs";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
-import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { logEditDenial } from "@/lib/edit/authz";
-import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
 import { isOpportunityIntakeEnabled } from "@/lib/edit/opportunity-submission";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
@@ -64,59 +61,35 @@ export default async function FindResearchersPage() {
   // gets the full tab set (Funding matcher rides `superuserSurfaces`); a pure
   // development-role member sees only the Funding matcher tab, shown via
   // `viewerIsDeveloper` since `superuserSurfaces` is false for them.
-  const superuserSurfaces = session.isSuperuser;
   const pendingSlugRequests =
-    superuserSurfaces && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
+    session.isSuperuser && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
   // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:
   // flag off, or this viewer is neither superuser nor honors_curator.
   const pendingHonors = isHonorsQueueTabVisible(session)
     ? await countPendingHonors(db.read)
     : null;
-  const administratorsTab = superuserSurfaces && isAdministratorsTabEnabled() ? 0 : null;
 
   return (
-    <div className="min-h-screen bg-apollo-page" data-slot="find-researchers-page">
-      <header className="bg-apollo-bar text-white">
-        <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
-          <span
-            className="bg-apollo-maroon flex size-7 items-center justify-center rounded-sm text-xs font-bold"
-            aria-hidden
-          >
-            WCM
-          </span>
-          <span className="font-semibold">Scholars Profile Console</span>
-        </div>
-      </header>
-
-      <AdminSubnav
-        active="find-researchers"
-        pendingSlugRequests={pendingSlugRequests}
-        pendingHonors={pendingHonors}
-        administratorsTab={administratorsTab}
-        methodsTab={isMethodsTabVisible(session) ? 0 : null}
-        dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
-        viewerIsDeveloper={session.isDeveloper}
-        superuserSurfaces={superuserSurfaces}
-        profilesTab={session.isCommsSteward || session.isSuperuser}
-        unitsTab={session.isCommsSteward || session.isSuperuser}
-      />
-
-      <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
-        <Alert variant="info" className="mb-6" data-slot="funding-matcher-staff-banner">
-          <Eye className="size-4" />
-          <AlertDescription>
-            <p>
-              Available to research-development staff.
-              {session.isSuperuser ? " You’re viewing as a superuser for testing." : ""}
-            </p>
-          </AlertDescription>
-        </Alert>
-        {/* With the intake flag on, the page splits into Browse / Submissions
-            sub-tabs (the URL intake + team queue history get their own surface,
-            `?tab=submissions`). Flag off → the bare matcher, no tab strip — the
-            dark-ship posture unchanged. */}
-        {isOpportunityIntakeEnabled() ? <FindResearchersTabs /> : <FindResearchers />}
-      </main>
-    </div>
+    <ConsoleShell
+      active="find-researchers"
+      session={session}
+      pendingSlugRequests={pendingSlugRequests}
+      pendingHonors={pendingHonors}
+    >
+      <Alert variant="info" className="mb-6" data-slot="funding-matcher-staff-banner">
+        <Eye className="size-4" />
+        <AlertDescription>
+          <p>
+            Available to research-development staff.
+            {session.isSuperuser ? " You’re viewing as a superuser for testing." : ""}
+          </p>
+        </AlertDescription>
+      </Alert>
+      {/* With the intake flag on, the page splits into Browse / Submissions
+          sub-tabs (the URL intake + team queue history get their own surface,
+          `?tab=submissions`). Flag off → the bare matcher, no tab strip — the
+          dark-ship posture unchanged. */}
+      {isOpportunityIntakeEnabled() ? <FindResearchersTabs /> : <FindResearchers />}
+    </ConsoleShell>
   );
 }

@@ -12,7 +12,6 @@
  */
 import Link from "next/link";
 
-import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { ViewAsButton } from "@/components/edit/view-as-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,32 +37,10 @@ export type ProfilesRosterProps = {
   facets: RosterFacets;
   page: number;
   pageSize: number;
-  /** Pending slug-request count for the admin sub-nav pill; `null` when the
-   *  slug-request feature is off (the "URL requests" tab is then hidden). */
-  pendingSlugRequests: number | null;
-  /** #1762 — forwarded straight to AdminSubnav; `null` hides the Honors tab. */
-  pendingHonors: number | null;
-  /** Forwarded to the sub-nav: `null` hides the "Administrators" tab (the
-   *  feature is flag-gated, #728 Phase B); a number shows it. */
-  administratorsTab?: number | null;
-  /** Forwarded to the sub-nav: `null` hides the "Method Families" tab
-   *  (comms_steward surface, flag + role-gated). */
-  methodsTab?: number | null;
-  /** Forwarded to the sub-nav: `null` hides the "Data quality" tab
-   *  (flag + role-gated). */
-  dataQualityTab?: number | null;
   /** Whether the viewer can launch "View as" (impersonation flag on + superuser, #729). */
   canImpersonate: boolean;
   /** The viewer's own cwid — the "View as" button is hidden on their own row. */
   viewerCwid: string;
-  /** Forwarded to the sub-nav: show the superuser-only surfaces (URL requests /
-   *  Slug registry / Administrators). `false` for a comms_steward viewer. */
-  superuserSurfaces?: boolean;
-  /** Forwarded to the sub-nav: show the "Profiles" tab independently of
-   *  `superuserSurfaces` (a comms_steward is a global profile editor). */
-  profilesTab?: boolean;
-  /** Forwarded to the sub-nav: show the "Units" tab (the `/edit/units` finder). */
-  unitsTab?: boolean;
 };
 
 const BASE = "/edit/scholars";
@@ -95,16 +72,8 @@ export function ProfilesRoster({
   facets,
   page,
   pageSize,
-  pendingSlugRequests,
-  pendingHonors,
-  administratorsTab,
-  methodsTab,
-  dataQualityTab,
   canImpersonate,
   viewerCwid,
-  superuserSurfaces = true,
-  profilesTab = false,
-  unitsTab = false,
 }: ProfilesRosterProps) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min((page + 1) * pageSize, total);
@@ -112,32 +81,8 @@ export function ProfilesRoster({
   const hasNext = (page + 1) * pageSize < total;
 
   return (
-    <div className="bg-apollo-page min-h-screen" data-slot="profiles-roster">
-      <header className="bg-apollo-bar text-white">
-        <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
-          <span
-            className="bg-apollo-maroon text-apollo-maroon-foreground flex size-7 items-center justify-center rounded-md text-xs font-bold"
-            aria-hidden
-          >
-            WCM
-          </span>
-          <span className="font-semibold">Scholars Profile Console</span>
-        </div>
-      </header>
-      <AdminSubnav
-        active="profiles"
-        pendingSlugRequests={pendingSlugRequests}
-        pendingHonors={pendingHonors}
-        administratorsTab={administratorsTab}
-        methodsTab={methodsTab}
-        dataQualityTab={dataQualityTab}
-        superuserSurfaces={superuserSurfaces}
-        profilesTab={profilesTab}
-        unitsTab={unitsTab}
-      />
-
-      <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
-        <h1 className="mb-4 text-xl font-semibold">Profiles</h1>
+    <>
+      <h1 className="mb-4 text-xl font-semibold">Profiles</h1>
 
         {/* GET form — search + status filter, no client JS. */}
         <form method="get" className="mb-4 flex flex-wrap items-end gap-3" data-testid="roster-search-form">
@@ -309,7 +254,6 @@ export function ProfilesRoster({
             )}
           </div>
         )}
-      </main>
-    </div>
+    </>
   );
 }
