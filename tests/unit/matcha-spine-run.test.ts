@@ -27,7 +27,7 @@
  * invokes Bedrock); the pure spine/axes helpers and `normalizeDescription` run for
  * real.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   conceptWeight,
@@ -1414,5 +1414,70 @@ describe("rankResearchersForDescriptionSpine — evidence (#1689)", () => {
     const { candidates } = await rankResearchersForDescriptionSpine("cancer work");
     expect(candidates[0].searchEvidence).toBeUndefined();
     expect("searchEvidence" in candidates[0]).toBe(false);
+  });
+});
+
+/**
+ * MATCHA_GLOSS_RERANK — the spine threads the cluster's gloss into `searchPeople` as an OpenSearch
+ * `rescore` (recall-safe re-order), but ONLY when the flag is on AND the cluster has a gloss.
+ * The guard the handoff calls out: flag OFF ⇒ the searchPeople args are byte-identical to today,
+ * so a mutation that always attaches the rescore is caught here.
+ */
+describe("MATCHA_GLOSS_RERANK — gloss rescore threading", () => {
+  const GLOSS = "reprogramming cellular metabolism to fuel tumor growth";
+  const prev = {
+    on: process.env.MATCHA_GLOSS_RERANK,
+    lambda: process.env.MATCHA_GLOSS_RERANK_LAMBDA,
+  };
+
+  beforeEach(() => {
+    // LLM path with ONE concept that carries a gloss ⇒ one cluster whose representative has a gloss.
+    mockExtractSponsorConcepts.mockResolvedValue([
+      { term: "cancer metabolism", kind: "concept", centrality: 1, gloss: GLOSS },
+    ]);
+    mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CM", ["D_CM"]));
+    mockSearchPeople.mockResolvedValue(people(["a", "b"]));
+    delete process.env.MATCHA_GLOSS_RERANK;
+    delete process.env.MATCHA_GLOSS_RERANK_LAMBDA;
+  });
+
+  afterEach(() => {
+    if (prev.on === undefined) delete process.env.MATCHA_GLOSS_RERANK;
+    else process.env.MATCHA_GLOSS_RERANK = prev.on;
+    if (prev.lambda === undefined) delete process.env.MATCHA_GLOSS_RERANK_LAMBDA;
+    else process.env.MATCHA_GLOSS_RERANK_LAMBDA = prev.lambda;
+  });
+
+  it("flag OFF ⇒ searchPeople args carry NO rescore keys (byte-identical guard)", async () => {
+    await rankResearchersForDescriptionSpine("cancer metabolism paste");
+    const call = mockSearchPeople.mock.calls[0][0];
+    expect("rescoreQuery" in call).toBe(false);
+    expect("rescoreWeight" in call).toBe(false);
+    expect("rescoreWindow" in call).toBe(false);
+  });
+
+  it("flag ON + cluster has a gloss ⇒ rescoreQuery=gloss, λ from env, window=TERM_DEPTH(100)", async () => {
+    process.env.MATCHA_GLOSS_RERANK = "on";
+    process.env.MATCHA_GLOSS_RERANK_LAMBDA = "0.25";
+    await rankResearchersForDescriptionSpine("cancer metabolism paste");
+    const call = mockSearchPeople.mock.calls[0][0];
+    expect(call.rescoreQuery).toBe(GLOSS);
+    expect(call.rescoreWeight).toBe(0.25);
+    expect(call.rescoreWindow).toBe(100);
+  });
+
+  it("flag ON + λ unset ⇒ defaults to 0.5", async () => {
+    process.env.MATCHA_GLOSS_RERANK = "on";
+    await rankResearchersForDescriptionSpine("cancer metabolism paste");
+    expect(mockSearchPeople.mock.calls[0][0].rescoreWeight).toBe(0.5);
+  });
+
+  it("flag ON but the cluster has NO gloss ⇒ no rescore (off-path byte-identical)", async () => {
+    process.env.MATCHA_GLOSS_RERANK = "on";
+    mockExtractSponsorConcepts.mockResolvedValue([
+      { term: "cancer metabolism", kind: "concept", centrality: 1 },
+    ]);
+    await rankResearchersForDescriptionSpine("cancer metabolism paste");
+    expect("rescoreQuery" in mockSearchPeople.mock.calls[0][0]).toBe(false);
   });
 });

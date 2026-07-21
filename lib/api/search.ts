@@ -1531,6 +1531,25 @@ export async function searchPeople(opts: {
    * boost (today's ranking). Resolved + gated route-side behind `SEARCH_PEOPLE_AREA_BOOST`.
    */
   areaConcentration?: { cwid: string; total: number }[];
+  /**
+   * MATCHA_GLOSS_RERANK — optional gloss re-ranker (Matcha spine). When `rescoreQuery`
+   * is a non-empty string, append an OpenSearch `rescore` that RE-ORDERS the top
+   * `window_size` hits by BM25(rescoreQuery) over the active shape's content fields,
+   * combined as `1·bm25(tokens) + rescoreWeight·bm25(rescoreQuery)`. A `rescore` can
+   * neither add nor drop a document, so recall is invariant by construction
+   * (`rescoreWeight=0` ⇒ base ordering). Absent/blank ⇒ the /search body is
+   * BYTE-IDENTICAL to today (empty spread). Passed only by the spine, per cluster.
+   */
+  rescoreQuery?: string;
+  /** λ = `rescore_query_weight`; the one tunable. Defaults to 1 when a rescore applies. */
+  rescoreWeight?: number;
+  /**
+   * Pool-depth floor for `rescore.window_size` — the caller's FULL retrieval depth
+   * (the spine passes `TERM_DEPTH`). `window_size = max(rescoreWindow, from+size)`, so
+   * every paged call re-orders the SAME window and the order is consistent across pages
+   * (a smaller window would rescore inconsistent sub-windows and drop/dupe rows).
+   */
+  rescoreWindow?: number;
 }): Promise<PeopleSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
@@ -2677,6 +2696,38 @@ export async function searchPeople(opts: {
     // v3 topic template, which wraps it in the multiplicative function_score.
     // Aggregations keep using the un-scored `must` (counts don't need scoring).
     query: scoringQuery,
+    // MATCHA_GLOSS_RERANK — optional gloss re-ranker. `rescore` re-orders the top
+    // `window_size` hits by BM25(gloss) over the shape's content fields; it can neither
+    // add nor drop a doc, so recall is invariant (the property gloss-as-query lacked).
+    // `window_size` spans the caller's full pool depth (`rescoreWindow`, = spine
+    // TERM_DEPTH) AND this page (`from+size`), so every paged call re-orders the SAME
+    // window → consistent order across pages. Absent/blank `rescoreQuery` ⇒ empty spread
+    // ⇒ the /search body is byte-identical to today.
+    ...(opts.rescoreQuery && opts.rescoreQuery.trim().length > 0
+      ? {
+          rescore: {
+            window_size: Math.max(
+              opts.rescoreWindow ?? 0,
+              page * PAGE_SIZE + PAGE_SIZE,
+            ),
+            query: {
+              rescore_query: {
+                multi_match: {
+                  query: opts.rescoreQuery.trim(),
+                  fields: applyTopicTemplate
+                    ? peopleTopicFields()
+                    : peopleDefaultFields(),
+                  type: "best_fields",
+                  operator: "or",
+                },
+              },
+              query_weight: 1,
+              rescore_query_weight: opts.rescoreWeight ?? 1,
+              score_mode: "total",
+            },
+          },
+        }
+      : {}),
     // User-axis filters live here so aggregations see the unfiltered hit
     // set and can compute excluding-self counts. Hits returned by the
     // main response still respect every active filter (post_filter is

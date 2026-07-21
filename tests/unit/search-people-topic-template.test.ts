@@ -574,3 +574,80 @@ describe("phrase boost — #1344 (people topic shape)", () => {
     expect(mm.multi_match.minimum_should_match).toBe("2<-34%");
   });
 });
+
+/**
+ * MATCHA_GLOSS_RERANK — the optional gloss RE-RANKER (docs/2026-07-21-matcha-gloss-reranker-handoff.md).
+ * A `rescore` re-orders the top `window_size` hits by BM25(gloss) over the shape's content fields; it
+ * can neither add nor drop a document, so recall is invariant. The guard that matters: absent/blank
+ * `rescoreQuery` ⇒ the body carries NO `rescore` key (byte-identical to today).
+ */
+describe("gloss re-ranker rescore — MATCHA_GLOSS_RERANK", () => {
+  const GLOSS = "reprogramming cellular metabolism to fuel tumor growth";
+  const TOPIC_FIELDS = [
+    "preferredName^1",
+    "fullName^1",
+    "areasOfInterest^3",
+    "primaryTitle^3",
+    "primaryDepartment^1",
+    "overview^2",
+    "publicationTitles^6",
+    "publicationMesh^4",
+  ];
+
+  const topicOpts = { q: "cancer metabolism", relevanceMode: "v3" as const, shape: "topic" as const };
+  /** The MAIN search body is the hit-returning page (`size: PAGE_SIZE`); size:0 pre-count/agg
+   *  bodies (which never carry a rescore) also land in `capturedBodies`, so select by size. */
+  const mainBody = () =>
+    capturedBodies.find((b) => (b as { size?: number }).size === 20) as Record<string, unknown>;
+
+  beforeEach(() => {
+    capturedBodies.length = 0;
+    groupByMock.mockResolvedValue([]);
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("appends a rescore that re-orders by BM25(gloss) over the topic content fields", async () => {
+    await searchPeople({ ...topicOpts, rescoreQuery: GLOSS, rescoreWeight: 0.5, rescoreWindow: 100 });
+    const rescore = mainBody().rescore as {
+      window_size: number;
+      query: {
+        rescore_query: { multi_match: { query: string; fields: string[]; type: string; operator: string } };
+        query_weight: number;
+        rescore_query_weight: number;
+        score_mode: string;
+      };
+    };
+    expect(rescore.window_size).toBe(100);
+    expect(rescore.query.query_weight).toBe(1);
+    expect(rescore.query.rescore_query_weight).toBe(0.5);
+    expect(rescore.query.score_mode).toBe("total");
+    // Same content fields the bare-token topic query targets (peopleTopicFields()).
+    expect(rescore.query.rescore_query.multi_match.query).toBe(GLOSS);
+    expect(rescore.query.rescore_query.multi_match.fields).toEqual(TOPIC_FIELDS);
+    expect(rescore.query.rescore_query.multi_match.operator).toBe("or");
+  });
+
+  it("λ defaults to 1 when rescoreWeight is omitted", async () => {
+    await searchPeople({ ...topicOpts, rescoreQuery: GLOSS, rescoreWindow: 100 });
+    const rescore = mainBody().rescore as { query: { rescore_query_weight: number } };
+    expect(rescore.query.rescore_query_weight).toBe(1);
+  });
+
+  it("window_size never drops below the current page (from+size), even with a tiny rescoreWindow", async () => {
+    await searchPeople({ ...topicOpts, rescoreQuery: GLOSS, rescoreWeight: 1, rescoreWindow: 10 });
+    // page 0 ⇒ from+size = 0 + 20 = 20 > 10 ⇒ the page floor wins, so a page's window always spans it.
+    expect((mainBody().rescore as { window_size: number }).window_size).toBe(20);
+  });
+
+  it("NO rescoreQuery ⇒ the body has no rescore key (byte-identical guard)", async () => {
+    await searchPeople({ ...topicOpts });
+    expect(mainBody().rescore).toBeUndefined();
+  });
+
+  it("blank / whitespace-only rescoreQuery ⇒ no rescore (trim guard)", async () => {
+    await searchPeople({ ...topicOpts, rescoreQuery: "   ", rescoreWeight: 0.5, rescoreWindow: 100 });
+    expect(mainBody().rescore).toBeUndefined();
+  });
+});

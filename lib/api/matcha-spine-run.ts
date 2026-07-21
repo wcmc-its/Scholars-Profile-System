@@ -286,6 +286,12 @@ async function retrieveCluster(
   // D1 — when true, ask searchPeople to project each hit's `mostRecentYear` (from the precomputed
   // `mostRecentPubDate`). Off ⇒ the field is not requested, so the hit shape is byte-identical.
   includeRecency: boolean,
+  // MATCHA_GLOSS_RERANK — the cluster's representative gloss + λ. Passed by the caller ONLY when
+  // the flag is on AND the cluster has a gloss; undefined ⇒ no rescore ⇒ searchPeople args (and
+  // thus the /search body) are byte-identical to today. `rescore` re-orders only, never widens
+  // the pool, so recall is invariant across the whole λ sweep.
+  rescoreQuery?: string,
+  rescoreWeight?: number,
 ): Promise<{ ranked: string[]; hits: PeopleHit[] }> {
   const ranked: string[] = [];
   const hits: PeopleHit[] = [];
@@ -344,6 +350,12 @@ async function retrieveCluster(
       // presentation affordance that must not inherit the recency flag's fate. Free — the field is
       // already stored for the directory's own A–Z sort, this only projects it.
       includeLastName: true,
+      // MATCHA_GLOSS_RERANK — spread ONLY when a gloss is in hand, so the off-path opts are
+      // byte-identical. `rescoreWindow: TERM_DEPTH` makes the rescore window span the full
+      // per-cluster pool this loop pages in, so every page re-orders the same window.
+      ...(rescoreQuery
+        ? { rescoreQuery, rescoreWeight, rescoreWindow: TERM_DEPTH }
+        : {}),
     });
     for (const h of result.hits) {
       ranked.push(h.cwid);
@@ -572,6 +584,15 @@ export async function rankResearchersForDescriptionSpine(
   // was one grade-3 scholar sitting on 59 unaccepted publications. Before flipping prod,
   // quantify that exposure by role_category — the eval cannot see it.
   const recencyOn = process.env.MATCHA_RECENCY === "on";
+  // MATCHA_GLOSS_RERANK — gloss as an OpenSearch rescore (recall-safe re-order). A ranking change
+  // ⇒ eval-gated: staging-on to A/B, prod-off. λ (`rescore_query_weight`) is the one tunable, swept
+  // 0.25/0.5/1.0 in-VPC as separate processes; read from env so an arm sets it without a redeploy.
+  // `?? ""` + `Number.isFinite` keeps λ=0 (the perfect ablation) meaning zero, not the default.
+  const glossRerankOn = process.env.MATCHA_GLOSS_RERANK === "on";
+  const glossRerankLambda = (() => {
+    const parsed = Number.parseFloat(process.env.MATCHA_GLOSS_RERANK_LAMBDA ?? "");
+    return Number.isFinite(parsed) ? parsed : 0.5;
+  })();
   for (const cluster of clusters) {
     // MAX member coverage ≈ the broadest merged synonym = a lower bound on the cluster's true
     // union corpus coverage (the exact union-coverage is an ETL upgrade). Display-only: 0 here
@@ -644,6 +665,10 @@ export async function rankResearchersForDescriptionSpine(
       cluster.descendantUis,
       rep,
       recencyOn,
+      // Gloss rescore only when the flag is on AND this cluster has a gloss (dictionary-fallback
+      // clusters have none ⇒ off-path byte-identical). `clusterGloss` is the rail's "sponsor's words".
+      glossRerankOn && clusterGloss ? clusterGloss : undefined,
+      glossRerankLambda,
     );
     for (const h of hits) if (!hitByCwid.has(h.cwid)) hitByCwid.set(h.cwid, h);
     // #1689 — evidence is CONCEPT-SCOPED, so it is stored per (concept, cwid) and read back

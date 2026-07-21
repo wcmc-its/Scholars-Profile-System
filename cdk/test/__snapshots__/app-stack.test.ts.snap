@@ -443,6 +443,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "MATCHA_GLOSS_RERANK",
+                "Value": "off",
+              },
+              {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
                 "Value": "on",
               },
@@ -4182,6 +4186,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "MATCHA_RECENCY",
                 "Value": "on",
+              },
+              {
+                "Name": "MATCHA_GLOSS_RERANK",
+                "Value": "off",
               },
               {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
