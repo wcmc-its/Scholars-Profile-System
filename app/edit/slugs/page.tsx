@@ -17,6 +17,7 @@
  */
 import { redirect } from "next/navigation";
 
+import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { SlugRegistry } from "@/components/edit/slug-registry";
 import {
@@ -24,12 +25,9 @@ import {
   loadSlugRegistry,
   type SlugRegistrySegment,
 } from "@/lib/api/slug-registry";
-import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { requireSuperuserGet } from "@/lib/edit/authz";
-import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 
@@ -92,20 +90,21 @@ export default async function EditSlugsPage({
 
 
   return (
-    <SlugRegistry
-      segment={segment}
-      rows={rows}
-      total={total}
-      query={query}
-      page={pageNum}
-      pageSize={PAGE_SIZE}
-      requestedSegmentVisible={requestedEnabled}
+    <ConsoleShell
+      active="slugs"
+      session={session}
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
-      administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
-      methodsTab={isMethodsTabVisible(session) ? 0 : null}
-      dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
-      unitsTab={session.isSuperuser}
-    />
+    >
+      <SlugRegistry
+        segment={segment}
+        rows={rows}
+        total={total}
+        query={query}
+        page={pageNum}
+        pageSize={PAGE_SIZE}
+        requestedSegmentVisible={requestedEnabled}
+      />
+    </ConsoleShell>
   );
 }

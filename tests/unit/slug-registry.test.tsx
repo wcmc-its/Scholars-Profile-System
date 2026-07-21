@@ -14,9 +14,6 @@ vi.mock("next/link", () => ({
     </a>
   ),
 }));
-vi.mock("@/components/edit/admin-subnav", () => ({
-  AdminSubnav: (p: { active: string }) => <div data-testid="mock-subnav" data-active={p.active} />,
-}));
 vi.mock("@/components/edit/slug-availability-checker", () => ({
   SlugAvailabilityChecker: () => <div data-testid="mock-checker" />,
 }));
@@ -33,16 +30,13 @@ function base(over: Partial<SlugRegistryProps> = {}): SlugRegistryProps {
     page: 0,
     pageSize: 50,
     requestedSegmentVisible: true,
-    pendingSlugRequests: 2,
-    administratorsTab: null,
     ...over,
   };
 }
 
 describe("SlugRegistry — chrome + segments", () => {
-  it("renders the sub-nav active on 'slugs' and the availability checker", () => {
+  it("renders the availability checker", () => {
     render(<SlugRegistry {...base()} />);
-    expect(screen.getByTestId("mock-subnav").getAttribute("data-active")).toBe("slugs");
     expect(screen.getByTestId("mock-checker")).toBeTruthy();
   });
 

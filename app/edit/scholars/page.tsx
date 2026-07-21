@@ -12,6 +12,7 @@
  */
 import { redirect } from "next/navigation";
 
+import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { ProfilesRoster } from "@/components/edit/profiles-roster";
 import {
@@ -20,12 +21,9 @@ import {
   type EditRosterStatusFilter,
   type EditRosterUnitFilter,
 } from "@/lib/api/edit-roster";
-import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession, impersonationEnabled } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { requireSuperuserGet } from "@/lib/edit/authz";
-import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 
@@ -82,11 +80,6 @@ export default async function EditScholarsPage({
       return <ForbiddenEditPage />;
     }
   }
-  // The superuser-only admin surfaces (URL requests / Slug registry /
-  // Administrators) stay gated to a superuser; a steward sees only Profiles +
-  // Method Families.
-  const superuserSurfaces = session.isSuperuser;
-
   const { q, status, page, unit: unitParam, type } = (await searchParams) ?? {};
   const query = (q ?? "").trim();
   const statusFilter = parseStatus(status);
@@ -112,7 +105,7 @@ export default async function EditScholarsPage({
   // The "URL requests" admin tab + pending-count pill (#497 PR-3c); `null` when
   // the slug-request feature is off, which hides the tab.
   const pendingSlugRequests =
-    superuserSurfaces && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
+    session.isSuperuser && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
   // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:
   // flag off, or this viewer is neither superuser nor honors_curator.
   const pendingHonors = isHonorsQueueTabVisible(session)
@@ -121,26 +114,25 @@ export default async function EditScholarsPage({
 
 
   return (
-    <ProfilesRoster
-      entries={entries}
-      total={total}
-      query={query}
-      status={statusFilter}
-      unit={unitParam ?? ""}
-      roleCategory={roleCategory ?? ""}
-      facets={facets}
-      page={pageNum}
-      pageSize={PAGE_SIZE}
+    <ConsoleShell
+      active="profiles"
+      session={session}
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
-      administratorsTab={superuserSurfaces && isAdministratorsTabEnabled() ? 0 : null}
-      methodsTab={isMethodsTabVisible(session) ? 0 : null}
-      dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
-      canImpersonate={impersonationEnabled() && session.isSuperuser}
-      viewerCwid={session.cwid}
-      superuserSurfaces={superuserSurfaces}
-      profilesTab
-      unitsTab={session.isSuperuser || session.isCommsSteward}
-    />
+    >
+      <ProfilesRoster
+        entries={entries}
+        total={total}
+        query={query}
+        status={statusFilter}
+        unit={unitParam ?? ""}
+        roleCategory={roleCategory ?? ""}
+        facets={facets}
+        page={pageNum}
+        pageSize={PAGE_SIZE}
+        canImpersonate={impersonationEnabled() && session.isSuperuser}
+        viewerCwid={session.cwid}
+      />
+    </ConsoleShell>
   );
 }

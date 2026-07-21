@@ -102,8 +102,10 @@ describe("/edit/scholars — authorization", () => {
       total: 1,
     });
     const result = asEl(await EditScholarsPage({ searchParams: sp() }));
-    expect(result.type).toBe(mockRoster);
-    expect(result.props.total).toBe(1);
+    expect(result.type).not.toBe(mockForbidden);
+    const roster = asEl(result.props.children);
+    expect(roster.type).toBe(mockRoster);
+    expect(roster.props.total).toBe(1);
     expect(mockLoadEditRoster).toHaveBeenCalledOnce();
   });
 });
@@ -157,7 +159,6 @@ describe("ProfilesRoster — row name links to the editor", () => {
         facets={{ departments: [], divisions: [], centers: [], roleCategories: [] }}
         page={0}
         pageSize={50}
-        pendingSlugRequests={null} pendingHonors={null}
         canImpersonate={false}
         viewerCwid="adm001"
         {...overrides}

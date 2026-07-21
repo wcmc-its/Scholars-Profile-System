@@ -34,6 +34,7 @@ vi.mock("@/lib/api/slug-registry", async (orig) => ({
 }));
 vi.mock("@/components/edit/slug-registry", () => ({ SlugRegistry: mockRegistry }));
 vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: mockForbidden }));
+vi.mock("@/components/edit/admin-subnav", () => ({ AdminSubnav: () => null }));
 vi.mock("@/lib/edit/administrators", () => ({ isAdministratorsTabEnabled: () => false }));
 vi.mock("@/lib/edit/slug-request", () => ({
   isSlugRequestEnabled: mockEnabled,
@@ -81,8 +82,10 @@ describe("/edit/slugs — authorization", () => {
     mockGetEditSession.mockResolvedValue(ADMIN);
     mockLoadRegistry.mockResolvedValue({ rows: [{ slug: "a", cwid: "1", name: "A" }], total: 1 });
     const result = asEl(await EditSlugsPage({ searchParams: sp() }));
-    expect(result.type).toBe(mockRegistry);
-    expect(result.props.total).toBe(1);
+    expect(result.type).not.toBe(mockForbidden);
+    const reg = asEl(result.props.children);
+    expect(reg.type).toBe(mockRegistry);
+    expect(reg.props.total).toBe(1);
     expect(mockLoadRegistry).toHaveBeenCalledOnce();
   });
 });
@@ -116,8 +119,9 @@ describe("/edit/slugs — flag gating (page is NEVER 404'd; only the requested s
     mockGetEditSession.mockResolvedValue(ADMIN);
     mockEnabled.mockReturnValue(false);
     const result = asEl(await EditSlugsPage({ searchParams: sp() }));
-    expect(result.type).toBe(mockRegistry);
-    expect(result.props.requestedSegmentVisible).toBe(false);
+    const reg = asEl(result.props.children);
+    expect(reg.type).toBe(mockRegistry);
+    expect(reg.props.requestedSegmentVisible).toBe(false);
     expect(result.props.pendingSlugRequests).toBeNull();
     expect(mockCountPending).not.toHaveBeenCalled();
   });
@@ -133,7 +137,8 @@ describe("/edit/slugs — flag gating (page is NEVER 404'd; only the requested s
     mockGetEditSession.mockResolvedValue(ADMIN);
     mockEnabled.mockReturnValue(true);
     const result = asEl(await EditSlugsPage({ searchParams: sp({ seg: "requested" }) }));
-    expect(result.props.requestedSegmentVisible).toBe(true);
+    const reg = asEl(result.props.children);
+    expect(reg.props.requestedSegmentVisible).toBe(true);
     expect(result.props.pendingSlugRequests).toBe(2);
     expect(mockLoadRegistry.mock.calls[0][0].segment).toBe("requested");
   });
