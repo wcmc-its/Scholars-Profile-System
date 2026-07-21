@@ -433,7 +433,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
 
   it("derives the active group correctly for every grouped id", () => {
     // The map is the whole mechanism — a mis-slotted id sends the wrong group
-    // maroon and strands the member in a tier 2 nobody can open.
+    // entry maroon.
     const expected: Record<string, string> = {
       "slug-requests": "queues", "honors-queue": "queues", "news-queue": "queues", cores: "queues",
       slugs: "registries", administrators: "registries", methods: "registries",
@@ -443,23 +443,39 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     for (const [id, group] of Object.entries(expected)) {
       grouped();
       const { unmount } = render(<AdminSubnav active={id as never} {...allOn} />);
+      // The collapsed group entry carries the active marker; its members live in the
+      // (closed) hover menu, not a persistent tier-2 row.
       expect(screen.getByTestId(`admin-group-${group}`).getAttribute("aria-current")).toBe("page");
-      // the member itself is reachable in tier 2, and only there
-      expect(screen.getByTestId(`admin-subnav-tier2-${group}`)).toBeTruthy();
-      expect(screen.getByTestId(`admin-tab-${id}`).getAttribute("aria-current")).toBe("page");
+      expect(screen.queryByTestId(`admin-subnav-tier2-${group}`)).toBeNull();
       unmount();
       vi.unstubAllEnvs();
     }
   });
 
-  it("renders tier 2 with exactly the active group's visible members", () => {
+  it("reveals a group's members in a hover menu — not a persistent tier-2 row", async () => {
     grouped();
-    render(<AdminSubnav active="slugs" {...allOn} />);
-    const tier2 = screen.getByTestId("admin-subnav-tier2-registries");
+    render(<AdminSubnav active="profiles" {...allOn} />);
+    // Closed by default: no member is in the DOM, and there is no tier-2 row.
+    expect(screen.queryByTestId("admin-tab-slugs")).toBeNull();
+    expect(screen.queryByTestId("admin-subnav-tier2-registries")).toBeNull();
+    // Focus the group entry to open its menu — Registries is inactive here, so its
+    // trigger is a focusable <Link> (a mouse hover does the same).
+    fireEvent.focus(screen.getByTestId("admin-group-registries"));
+    const menu = await screen.findByTestId("admin-group-menu-registries");
     for (const id of ["slugs", "administrators", "methods"])
-      expect(tier2.querySelector(`[data-testid="admin-tab-${id}"]`)).toBeTruthy();
+      expect(menu.querySelector(`[data-testid="admin-tab-${id}"]`)).toBeTruthy();
     // a member of a DIFFERENT group is not smuggled in
-    expect(tier2.querySelector('[data-testid="admin-tab-usage"]')).toBeNull();
+    expect(menu.querySelector('[data-testid="admin-tab-usage"]')).toBeNull();
+  });
+
+  it("renders no tier-2 sub-bar in any state — the hover menu replaced it", () => {
+    grouped();
+    for (const active of ["profiles", "slugs", "honors-queue", "self"]) {
+      const { unmount } = render(<AdminSubnav active={active as never} {...allOn} />);
+      for (const g of ["queues", "registries", "insights", "tools"])
+        expect(screen.queryByTestId(`admin-subnav-tier2-${g}`)).toBeNull();
+      unmount();
+    }
   });
 
   it('active="self" renders tier 1 only — no tier 2 row', () => {
@@ -557,25 +573,26 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
       vi.stubEnv("MATCHA", "on");
       render(<AdminSubnav {...props} />);
       expect(screen.getByTestId("admin-group-tools").getAttribute("aria-current")).toBe("page");
-      expect(screen.getByTestId("admin-subnav-tier2-tools")).toBeTruthy();
+      expect(screen.queryByTestId("admin-subnav-tier2-tools")).toBeNull();
     });
   });
 
-  // 🔴 #1783. Matcha's tab carries a Radix HoverCard and must stay the CLIENT
-  // `MatchaTab` on both tiers. Composing Radix inside this server component
-  // silently dropped the tab once — a 200 with no error, which jsdom cannot see.
-  // A render-only assertion would miss it too, so this opens the card.
-  it("keeps Matcha a client MatchaTab inside tier 2 — the #1783 guard", async () => {
+  // 🔴 #1783. Composing a Radix HoverCard inside the SERVER `admin-subnav.tsx`
+  // silently dropped the subtree once — a 200 with a render-error digest, invisible
+  // to jsdom. The group hover menu is Radix, so it lives in the CLIENT
+  // `AdminGroupMenu`; opening a group's menu proves the composition survives and its
+  // members render (Matcha included, now a plain link — no nested HoverCard).
+  it("opens a group's hover menu and renders its members — the #1783 guard", async () => {
     grouped();
-    // Active on Matcha's SIBLING, so Matcha is the inactive variant — a <Link>.
-    // An active tab renders as an aria-current <span> with no href, which would
-    // make the href assertion below vacuously unfalsifiable.
-    render(<AdminSubnav active="find-researchers" {...allOn} />);
-    const tab = screen.getByTestId("admin-tab-matcha");
-    expect(tab.getAttribute("href")).toBe("/edit/matcha");
-    expect(screen.getByTestId("admin-subnav-tier2-tools").contains(tab)).toBe(true);
-    fireEvent.focus(tab);
-    expect(await screen.findByText(/Paste the ask\. Get the shortlist\./)).toBeTruthy();
+    // Tools is inactive here (Profiles is active), so its trigger is a focusable
+    // <Link> that opens the menu on focus.
+    render(<AdminSubnav active="profiles" {...allOn} />);
+    fireEvent.focus(screen.getByTestId("admin-group-tools"));
+    const menu = await screen.findByTestId("admin-group-menu-tools");
+    const matcha = menu.querySelector('[data-testid="admin-tab-matcha"]');
+    expect(matcha).toBeTruthy();
+    expect(matcha!.getAttribute("href")).toBe("/edit/matcha");
+    expect(menu.querySelector('[data-testid="admin-tab-find-researchers"]')).toBeTruthy();
   });
 
   // Order is spec-pinned twice — the tier-1 bar as `Profiles · Org units · Queues ·
@@ -604,18 +621,19 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     ]);
   });
 
-  it("renders tier-2 members in today's left-to-right bar order, with Cores moved into Queues", () => {
+  it("lists a group's menu members in today's left-to-right bar order, with Cores moved into Queues", async () => {
     grouped();
-    const { unmount } = render(<AdminSubnav active="slug-requests" {...allOn} />);
-    expect(order(screen.getByTestId("admin-subnav-tier2-queues"))).toEqual([
+    // Active on Profiles so every group entry is an inactive, focusable <Link>.
+    render(<AdminSubnav active="profiles" {...allOn} />);
+    fireEvent.focus(screen.getByTestId("admin-group-queues"));
+    expect(order(await screen.findByTestId("admin-group-menu-queues"))).toEqual([
       "admin-tab-slug-requests",
       "admin-tab-honors-queue",
       "admin-tab-news-queue",
       "admin-tab-cores",
     ]);
-    unmount();
-    render(<AdminSubnav active="slugs" {...allOn} />);
-    expect(order(screen.getByTestId("admin-subnav-tier2-registries"))).toEqual([
+    fireEvent.focus(screen.getByTestId("admin-group-registries"));
+    expect(order(await screen.findByTestId("admin-group-menu-registries"))).toEqual([
       "admin-tab-slugs",
       "admin-tab-administrators",
       "admin-tab-methods",
