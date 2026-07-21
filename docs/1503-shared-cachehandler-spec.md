@@ -35,7 +35,7 @@ S3-backed shared `cacheHandler`. Rationale (per the #1503 decision): cheapest du
 ## 4. Design
 
 ### 4a. Key scheme & region
-- Next passes the handler an opaque **cache key** (a hash of the route + params). Store each entry at `s3://<cacheBucket>/<prefix>/<sha256(key)>` where `<prefix>` = `next-isr-cache/v1/`. The sha256 avoids S3 key-charset issues and gives fixed-length keys.
+- Next passes the handler an opaque **cache key** (a hash of the route + params). Store each entry at `s3://<cacheBucket>/<prefix>/<sha256(key)>` where `<prefix>` = `next-isr-cache/v1/<deployId>/` (**#1846** — `<deployId>` = `NEXT_DEPLOYMENT_ID`, the deploying commit SHA, surfaced as a runtime env by the Dockerfile runtime stage). Namespacing per deploy stops a new image reading the previous image's entry for a TTL-less static page; all tasks of one deploy share a namespace, and the `next-isr-cache/` lifecycle drains old ones. The sha256 avoids S3 key-charset issues and gives fixed-length keys.
 - **Region** = the app's region (from `AWS_REGION`, already in the task env). Same-region S3 keeps get latency low.
 - Object body = JSON `{ value, lastModified, tags }` where `value` is Next's serialized cache entry (page/RSC/fetch payload) and `tags` is the entry's tag list (see 4b). Large HTML/RSC payloads are fine for S3.
 

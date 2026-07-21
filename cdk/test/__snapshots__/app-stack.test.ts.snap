@@ -443,6 +443,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "MATCHA_GLOSS_RERANK",
+                "Value": "off",
+              },
+              {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
                 "Value": "on",
               },
@@ -981,6 +985,21 @@ exports[`AppStack prod matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/revalidate-token",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "FACULTY_REVIEW_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/faculty-review-token",
                     ],
                   ],
                 },
@@ -3116,6 +3135,25 @@ service:
                     {
                       "Ref": "AWS::Partition",
                     },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/faculty-review-token-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/session-cookie-key-??????",
                   ],
                 ],
@@ -4184,6 +4222,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "MATCHA_GLOSS_RERANK",
+                "Value": "off",
+              },
+              {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
                 "Value": "on",
               },
@@ -4345,7 +4387,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
@@ -4722,6 +4764,21 @@ exports[`AppStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/revalidate-token",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "FACULTY_REVIEW_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/faculty-review-token",
                     ],
                   ],
                 },
@@ -6443,6 +6500,34 @@ service:
       },
       "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
     },
+    "OriginVerifiedForwardHttpsBD6969E0": {
+      "Properties": {
+        "Actions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "PublicAppTargetGroup68798009",
+            },
+            "Type": "forward",
+          },
+        ],
+        "Conditions": [
+          {
+            "Field": "http-header",
+            "HttpHeaderConfig": {
+              "HttpHeaderName": "X-Origin-Verify",
+              "Values": [
+                "{{resolve:secretsmanager:scholars/staging/edge/origin-shared-secret:SecretString:::}}",
+              ],
+            },
+          },
+        ],
+        "ListenerArn": {
+          "Ref": "PublicAlbPublicHttpsListener8840F702",
+        },
+        "Priority": 1,
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+    },
     "OtelCollectorLogGroup0FD207F7": {
       "DeletionPolicy": "Retain",
       "Properties": {
@@ -6483,6 +6568,17 @@ service:
       },
       "Type": "AWS::EC2::SecurityGroupIngress",
     },
+    "PublicAlbIngressFromInternetHttps": {
+      "Properties": {
+        "CidrIp": "0.0.0.0/0",
+        "Description": "Internet to SPS public ALB HTTPS (staging) -- #1507 origin TLS",
+        "FromPort": 443,
+        "GroupId": "sg-0ab492e161a9e9976",
+        "IpProtocol": "tcp",
+        "ToPort": 443,
+      },
+      "Type": "AWS::EC2::SecurityGroupIngress",
+    },
     "PublicAlbPublicHttpListener8CAA0E91": {
       "Properties": {
         "DefaultActions": [
@@ -6500,6 +6596,31 @@ service:
         },
         "Port": 80,
         "Protocol": "HTTP",
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+    },
+    "PublicAlbPublicHttpsListener8840F702": {
+      "Properties": {
+        "Certificates": [
+          {
+            "CertificateArn": "arn:aws:acm:us-east-1:665083158573:certificate/f50f0b04-dc62-4d8e-97b8-2761d1efdd0f",
+          },
+        ],
+        "DefaultActions": [
+          {
+            "FixedResponseConfig": {
+              "ContentType": "text/plain",
+              "MessageBody": "Forbidden",
+              "StatusCode": "403",
+            },
+            "Type": "fixed-response",
+          },
+        ],
+        "LoadBalancerArn": {
+          "Ref": "PublicAlb84330974",
+        },
+        "Port": 443,
+        "Protocol": "HTTPS",
       },
       "Type": "AWS::ElasticLoadBalancingV2::Listener",
     },
@@ -6841,6 +6962,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/revalidate-token-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/faculty-review-token-??????",
                   ],
                 ],
               },

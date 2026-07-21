@@ -81,7 +81,6 @@ import {
 } from "@/components/ui/sheet";
 import {
   conceptCoverage,
-  conceptWeight,
   evidenceMatchCount,
   evidenceProvenance,
   fitTier,
@@ -311,22 +310,6 @@ export function MatchaPanel() {
   // request + Edit/Re-run) takes its place — the mockup's "THE ASK" section. "Edit paste"
   // flips this back to the textarea. Starts true (nothing searched yet).
   const [editing, setEditing] = useState(true);
-  // D10 — the ask card has two states: Full (eyebrow + title + clamped paste + audit + actions) and
-  // Compact (a pinned bar: title + top concept chips + read ratio + actions). Fresh paste/re-run
-  // opens Full; a Recent replay opens Compact (already read). Scrolling past the header collapses it
-  // (the effect below); "Show original" restores Full. Per-search state — a new search resets it.
-  const [headerCollapsed, setHeaderCollapsed] = useState(false);
-  // "Show original" PINS Full open, and the pin is the whole fix (round-2 §6). The control was never
-  // broken: it set `headerCollapsed` false and scrolled the card back into view — and the act of
-  // scrolling re-armed the observer below on a sentinel that was still above the viewport top, which
-  // re-collapsed the header on the same frame. The officer asked to see the paste and the observer
-  // out-voted them. So an EXPLICIT request disarms the scroll-collapse for the REST OF THE ASK; only
-  // a new search re-arms it. A longer timeout would have made the race quieter, not decided it.
-  //
-  // Consequence, and it is intended: once "Show original" is used, scrolling no longer auto-collapses
-  // the header to the sticky bar. "Collapse ▴" is how the officer asks for the sticky bar back — an
-  // explicit request answered by an explicit control, which is the trade §6 asked for.
-  const [headerPinned, setHeaderPinned] = useState(false);
   // D11 — the read-only paste clamps to ~4 lines until the officer asks for the rest. Reset per
   // search so a new paste always starts clamped.
   const [showFullText, setShowFullText] = useState(false);
@@ -457,9 +440,8 @@ export function MatchaPanel() {
   }
 
   /** The ONLY network call. A search — never a re-rank. The ask card always opens Full (the
-   *  read-only paste with its highlighted terms + actions); scrolling past it tucks it to the
-   *  pinned bar (D10), and "Collapse ▴" pins it by hand. A Recent replay opens Full too — an
-   *  already-read ask is still the officer's context, and hiding it behind a bar was the gripe. */
+   *  read-only paste with its highlighted terms + actions) — fresh, re-run, AND replay. It never
+   *  collapses: an already-read ask is still the officer's context, and hiding it was the gripe. */
   async function runSearch(
     text: string,
     opts: { include?: readonly string[] } = {},
@@ -492,8 +474,6 @@ export function MatchaPanel() {
         setTitleSummary(data.titleSummary);
         setMatchedText(text);
         setEditing(false); // a committed search → show the read-only ask, not the textarea
-        setHeaderCollapsed(false); // D10 — always open Full (fresh, re-run, AND replay); scroll tucks it
-        setHeaderPinned(false); // §6 — the pin is per-ask: a new paste re-arms the scroll-collapse
         setShowFullText(false); // D11 — new paste starts clamped
         setRecency("recent"); // D3 — the dial is per-ask; a new sponsor starts at the ranker's default
         setRunId((n) => n + 1); // #1696 — a new run: every row's claimed-pmid set starts empty
@@ -666,50 +646,6 @@ export function MatchaPanel() {
   const askMarked = useMemo(() => markedConceptCount(askSegments), [askSegments]);
   // Show the read-only ask once a search has committed and the officer is not editing the paste.
   const showAskCard = !editing && matchedText.length > 0;
-
-  // D10 — the ask card's scroll-collapse. A 0-height sentinel sits at the top of the Full card;
-  // once it scrolls above the viewport top the header collapses to the pinned Compact bar. One-way
-  // (like the one-shot observers elsewhere in this file) — "Show original" is the only way back.
-  //
-  // §6 — `headerPinned` DISARMS it, and that guard is the fix. Scroll-collapse is an inference from
-  // behaviour ("you have scrolled past, you are done reading"); "Show original" is a statement of
-  // intent. When they disagree the statement wins, so the observer is not merely reset here — it is
-  // never constructed while the pin is held. (Constructing it and ignoring its first callback would
-  // not work: every later scroll fires it again.)
-  const askWrapRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!showAskCard || headerCollapsed || headerPinned) return;
-    const node = sentinelRef.current;
-    if (!node || typeof IntersectionObserver === "undefined") return;
-    const obs = new IntersectionObserver(
-      ([e]) => {
-        if (e && !e.isIntersecting && e.boundingClientRect.top < 0) setHeaderCollapsed(true);
-      },
-      { threshold: 0 },
-    );
-    obs.observe(node);
-    return () => obs.disconnect();
-  }, [showAskCard, headerCollapsed, headerPinned]);
-
-  // D10 — the compact bar's chips: the most-asked-for concepts (by the same conceptWeight the strip
-  // and the ranking use), a few shown and the rest counted (+N).
-  const topConceptChips = useMemo(() => {
-    const sorted = [...concepts].sort((a, b) => conceptWeight(b) - conceptWeight(a));
-    return { head: sorted.slice(0, 3), extra: Math.max(0, sorted.length - 3) };
-  }, [concepts]);
-
-  // D10/§6 — restore Full, PIN it, and bring it into view. The pin has to be set here rather than
-  // left to the scroll landing: `scrollIntoView` is `behavior: "smooth"`, so it resolves over many
-  // frames, while the observer re-arms on the very next commit — the old code lost that race every
-  // time, which is the whole of the "show original won't stay open" bug.
-  const showOriginal = useCallback(() => {
-    setHeaderPinned(true);
-    setHeaderCollapsed(false);
-    requestAnimationFrame(() =>
-      askWrapRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }),
-    );
-  }, []);
 
   // Facet over the POOL (see RESULT_MAX) — which under a year cutoff IS the year-restricted pool.
   // A facet offering "Neurology · 12" that filters down to 9 because 3 were hidden by the cutoff
@@ -1088,83 +1024,7 @@ export function MatchaPanel() {
            shown READ-ONLY with its pulled-out terms highlighted, titled by the extractor's essence
            handle, with Edit paste / Re-run. (Title stays the console's sans, not the mockup's
            serif chrome — the panel deliberately keeps console chrome; see the file header.) */
-        headerCollapsed ? (
-          /* D10 — COMPACT / pinned. `sticky top-0` keeps the sponsor's ask in view while the officer
-             scrolls the results, without the full card eating the screen. Title + the most-asked-for
-             concepts (+N) + the read ratio (D11) + the same actions. Direct child of the panel (not
-             a short wrapper) so its containing block is tall enough for sticky to hold. */
-          <div
-            data-slot="matcha-ask-compact"
-            className="border-apollo-border bg-apollo-surface-2 sticky top-0 z-30 mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3.5 py-2.5 shadow-md"
-          >
-            <span aria-hidden="true" className="text-xs">
-              📌
-            </span>
-            {ask ? (
-              <span
-                data-slot="matcha-ask"
-                className="min-w-0 truncate text-sm font-semibold"
-              >
-                {ask.title}
-              </span>
-            ) : null}
-            {topConceptChips.head.length > 0 ? (
-              <span className="flex flex-wrap items-center gap-1">
-                {topConceptChips.head.map((c) => (
-                  <span
-                    key={c.term}
-                    className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[11px]"
-                  >
-                    {c.term}
-                  </span>
-                ))}
-                {topConceptChips.extra > 0 ? (
-                  <span className="text-muted-foreground text-[11px]">+{topConceptChips.extra}</span>
-                ) : null}
-              </span>
-            ) : null}
-            {/* D11 — the extraction audit rides the pinned bar, so an under-read is visible without
-                expanding; tapping it restores the highlighted full text. */}
-            {concepts.length > 0 ? (
-              <HoverTooltip
-                wide
-                placement="bottom"
-                text="Concepts found verbatim in the paste (the rest were canonicalized to standard terms). Show the highlighted original."
-              >
-                <button
-                  type="button"
-                  onClick={showOriginal}
-                  className="text-muted-foreground text-[11px] tabular-nums underline-offset-2 hover:underline"
-                >
-                  {askMarked}/{concepts.length} read
-                </button>
-              </HoverTooltip>
-            ) : null}
-            <span className="flex-1" />
-            <button
-              type="button"
-              onClick={showOriginal}
-              className="text-xs text-[var(--color-facet-topic-count)] underline-offset-4 hover:underline"
-            >
-              Show original ▾
-            </button>
-            <Button type="button" variant="outline" size="sm" onClick={() => setEditing(true)}>
-              Edit paste
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={pending}
-              onClick={() => void runSearch(matchedText, { include: included })}
-              className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
-            >
-              {pending ? "Ranking…" : "Re-run"}
-            </Button>
-          </div>
-        ) : (
-          /* D10/D11 — FULL. `askWrapRef` is the scroll-into-view target for "Show original"; the
-             sentinel after the card is what the collapse observer watches (past the header). */
-          <div ref={askWrapRef} className="mb-4">
+        <div className="mb-4">
             <section
               data-slot="matcha-ask-card"
               className="border-apollo-border bg-apollo-surface rounded-xl border px-5 py-4 shadow-[var(--apollo-shadow-card)]"
@@ -1239,7 +1099,7 @@ export function MatchaPanel() {
                   ),
                 )}
               </p>
-              {/* D11 — expand the clamped paste; D10 — collapse the whole header to the pinned bar. */}
+              {/* D11 — expand the clamped paste. */}
               <div className="mt-1.5 flex items-center gap-3.5">
                 <button
                   type="button"
@@ -1247,18 +1107,6 @@ export function MatchaPanel() {
                   className="text-xs text-[var(--color-facet-topic-count)] underline-offset-4 hover:underline"
                 >
                   {showFullText ? "Show less ▴" : "Show full text ▾"}
-                </button>
-                {/* Collapsing by hand does NOT release the pin, and that is not an oversight: while
-                    the header is collapsed the observer early-returns on `headerCollapsed` anyway,
-                    and every path back to Full writes `headerPinned` itself (`showOriginal` → true,
-                    `runSearch` → false). So the pin's value here is never read — releasing it was
-                    written first, passed every test, and was removed for that reason. */}
-                <button
-                  type="button"
-                  onClick={() => setHeaderCollapsed(true)}
-                  className="text-muted-foreground text-xs underline-offset-4 hover:underline"
-                >
-                  Collapse ▴
                 </button>
               </div>
               {/* Honest lower bound: a concept goes unmarked when the matcher canonicalised it to a
@@ -1282,16 +1130,7 @@ export function MatchaPanel() {
                 </p>
               ) : null}
             </section>
-            {/* D10 — the collapse sentinel sits just past the header; when it scrolls above the
-                viewport top the observer pins the compact bar. `aria-hidden` — it is a scroll probe. */}
-            <div
-              ref={sentinelRef}
-              data-slot="matcha-ask-sentinel"
-              aria-hidden="true"
-              className="h-0"
-            />
           </div>
-        )
       ) : (
         <form
           onSubmit={(e) => {

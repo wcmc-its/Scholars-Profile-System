@@ -34,11 +34,13 @@ GRANT_MATCHER_REL_BOOST
 IMPERSONATION_READONLY
 IMPERSONATION_TTL_SECONDS
 MATCHA_EXTRACT_MODEL                # Matcha concept-extractor model rollback lever (code default Sonnet 4.5)
+MATCHA_GLOSS_RERANK_LAMBDA          # gloss-rescore λ (rescore_query_weight; code default 0.5, clamped ≥0) — A/B sweep lever, set per-arm in the in-VPC eval; wire in app-stack when MATCHA_GLOSS_RERANK goes staging-on
 OVERVIEW_GENERATE_MODEL
 OVERVIEW_GENERATE_TEMPERATURE
 RECITER_REFRESH_DELAY_MINUTES
 REPORTER_MATCH_V2_MAX_PER_RUN
 REPORTER_MATCH_V2_MIN_PMIDS
+FACULTY_REVIEW_TOKEN_PREVIOUS       # rotation slot; primary FACULTY_REVIEW_TOKEN wired in app-stack (#1855)
 SCHOLARS_REVALIDATE_TOKEN_PREVIOUS
 SEARCH_AREA_BOOST_W_HI              # area-boost tier weight (code default 3) — A/B lever
 SEARCH_AREA_BOOST_W_MID             # area-boost tier weight (code default 1.5) — A/B lever

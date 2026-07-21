@@ -64,3 +64,65 @@ Orthopaedic Surgery,D009140,Musculoskeletal Diseases (C05)
 Orthopedic Surgery,D009140,Musculoskeletal Diseases (C05)
 Orthopaedics,D009140,Musculoskeletal Diseases (C05)
 Vascular Surgery,D014652,Vascular Diseases (C14.907)
+#
+# ── #1836 POPS-vocab reconciliation (2026-07-21) ──────────────────────────────
+# Expands the ABMS-seeded coverage above to the real distinct POPS specialty
+# strings (probed post-deploy). Every UI below was VALIDATED against authoritative
+# NLM (id.nlm.nih.gov) on 2026-07-21. Most REUSE an already-validated disease
+# anchor above; the six genuinely new UIs (D005261, D009765, D011248, D013896,
+# D012893, D020773) were fetched fresh. n = scholar count at authoring time.
+#
+# REUSE — existing validated disease anchors, additional POPS wordings:
+Hematology/Oncology,D009369,Neoplasms (C04)
+Pulmonary Disease Medicine,D008171,Lung Diseases (C08.381)
+Echocardiography,D002318,Cardiovascular Diseases (C14)
+Nuclear Cardiology,D002318,Cardiovascular Diseases (C14)
+Otolaryngology-Head & Neck Surgery,D010038,Otorhinolaryngologic Diseases (C09)
+Pulmonary Critical Care Medicine,D008171,Lung Diseases (C08.381)
+Reproductive Endocrinology/Infertility,D004700,Endocrine System Diseases (C19)
+Pediatric Cardiology,D002318,Cardiovascular Diseases (C14)
+Surgery, Neurological,D009422,Nervous System Diseases (C10)
+Psychiatry, Geriatric,D001523,Mental Disorders (F03)
+Transplant Hepatology,D004066,Digestive System Diseases (C06)
+Cardiac Surgery,D002318,Cardiovascular Diseases (C14)
+Pediatric Neurology,D009422,Nervous System Diseases (C10)
+Neurology With Special Qualifications In Child Neurology,D009422,Nervous System Diseases (C10)
+Pediatric Hematology-Oncology,D009369,Neoplasms (C04)
+Radiation Oncology,D009369,Neoplasms (C04)
+Epilepsy,D009422,Nervous System Diseases (C10)
+Vascular Neurology,D009422,Nervous System Diseases (C10)
+Clinical Neurophysiology,D009422,Nervous System Diseases (C10)
+Pediatric Gastroenterology,D004066,Digestive System Diseases (C06)
+Colon and Rectal Surgery,D004066,Digestive System Diseases (C06)
+Surgery, Colon and Rectal,D004066,Digestive System Diseases (C06)
+Pediatric Pulmonology,D008171,Lung Diseases (C08.381)
+Gynecologic Oncology,D009369,Neoplasms (C04)
+Pediatric Endocrinology,D004700,Endocrine System Diseases (C19)
+Pediatric Nephrology,D007674,Kidney Diseases (C12.200.777.419)
+Pediatric Infectious Disease,D003141,Communicable Diseases (C01.221)
+Pediatric Infectious Diseases,D003141,Communicable Diseases (C01.221)
+Pediatric Rheumatology,D012216,Rheumatic Diseases (C05.799)
+Pediatric Allergy and Immunology,D007154,Immune System Diseases (C20)
+Cardiac Computed Tomography (CT),D002318,Cardiovascular Diseases (C14)
+Vascular Medicine,D014652,Vascular Diseases (C14.907)
+#
+# NEW UIs — validated fresh against NLM 2026-07-21 (label + disease tree confirmed):
+Obstetrics and Gynecology,D005261,Female Urogenital Diseases and Pregnancy Complications (C12.050)
+Obesity,D009765,Obesity (C18.654.726.750.500)
+Obesity Medicine,D009765,Obesity (C18.654.726.750.500)
+Maternal & Fetal Medicine,D011248,Pregnancy Complications (C12.050.703)
+Surgery, Thoracic,D013896,Thoracic Diseases (C08.846)
+Thoracic Surgery,D013896,Thoracic Diseases (C08.846)
+Sleep Medicine,D012893,Sleep Wake Disorders (C10.886/F03.870)
+Headache,D020773,Headache Disorders (C10.228.140.546)
+#
+# DELIBERATELY SKIPPED (considered, no clean disease subtree to anchor):
+#   Internal Medicine (930), Pediatrics (315), Anesthesiology, Radiology,
+#   Pathology (all variants), Surgery (general), Emergency Medicine, Psychology,
+#   Critical Care, Family Medicine, Physical Medicine & Rehabilitation, Hospital
+#   Medicine, Primary Care — broad boards spanning all-or-no disease trees; a
+#   C-root anchor would over-match nearly every disease query. Kept as literal-
+#   specialty behavior (no anchor).
+#   Pain Medicine / Pain Medicine and Management — "Pain" is C23.888.592.612
+#   (a sign/symptom) + G11 physiology, not a disease subtree; would mis-anchor.
+#   Sports Medicine, Addiction Medicine — no single disease subtree to anchor to.

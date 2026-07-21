@@ -157,3 +157,21 @@ describe("key hashing", () => {
     expect(_sha("a")).not.toBe(_sha("b"));
   });
 });
+
+describe("deploy-scoped key namespace (#1846)", () => {
+  it("stores entry and tag objects under a per-deploy prefix segment", async () => {
+    const s3 = fakeS3();
+    const h = createHandler({ client: s3, bucket: "b", now: () => 1 });
+    await h.set("k", { html: "x" }, { tags: ["/p"] });
+    await h.revalidateTag("/p");
+    const keys = [...s3.store.keys()];
+    // Both the entry (`.../<sha>`) and the tag object (`.../_tags/<sha>`) must
+    // live under `next-isr-cache/v1/<deployNs>/…` — three path segments before
+    // the hash. The pre-#1846 key had only two (`next-isr-cache/v1/<sha>`), so
+    // this regex fails if the deploy namespace is ever dropped.
+    expect(keys.length).toBeGreaterThan(0);
+    for (const key of keys) {
+      expect(key).toMatch(/^next-isr-cache\/v1\/[^/]+\//);
+    }
+  });
+});

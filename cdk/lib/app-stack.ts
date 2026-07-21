@@ -246,6 +246,11 @@ export class AppStack extends Stack {
       "RevalidateTokenSecret",
       `scholars/${env}/revalidate-token`,
     );
+    const facultyReviewTokenSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "FacultyReviewTokenSecret",
+      `scholars/${env}/faculty-review-token`,
+    );
     // SSO session-cookie encryption key (#100). getSessionConfig() requireEnv's
     // SESSION_COOKIE_SECRET; the middleware gate and the SAML callback both read
     // it, so without it the callback 500s minting the session (the gap sibling
@@ -1324,6 +1329,13 @@ export class AppStack extends Stack {
         // lost to gain 1). Retrieval now always uses the bare member tokens, so there is no flag
         // left to set. See docs/2026-07-19-matcha-gloss-query-concept-vs-keyword-handoff.md.
         MATCHA_RECENCY: env === "staging" ? "on" : "off",
+        // MATCHA_GLOSS_RERANK — gloss as an OpenSearch rescore (recall-safe re-order of the
+        // per-cluster pool). A RANKING change ⇒ eval-gated: OFF in BOTH envs until an offline
+        // in-VPC λ-sweep A/B (base vs gloss-rerank) picks a λ on the graded-only nDCG, THEN
+        // staging-on. STATIC literal for flag parity. λ is read from MATCHA_GLOSS_RERANK_LAMBDA
+        // (default 0.5); wire it here too when this goes staging-on. See
+        // docs/2026-07-21-matcha-gloss-reranker-handoff.md.
+        MATCHA_GLOSS_RERANK: "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
@@ -1671,9 +1683,9 @@ export class AppStack extends Stack {
         // board specialty covers (a "heart failure" query lights up a board-certified
         // cardiologist), via cap-free tree-number subsumption. Sub-toggle of
         // SEARCH_PEOPLE_CLINICAL_FN. NEEDS a people reindex to populate the anchor
-        // fields. OFF in both envs at merge — flip staging + reindex, run the
-        // scripts/search-eval fixture count-up, then prod.
-        SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR: "off",
+        // fields (inert + safe until then — the boost/evidence read absent fields).
+        // Staging-on for the #1836 rollout eval; prod still off pending sign-off.
+        SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR: env === "staging" ? "on" : "off",
         // #824 follow-up -- match-aware People-results "why" line (method/topic/
         // humanized-areas snippet). APP-ONLY, no reindex: derives from
         // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-
@@ -2258,6 +2270,9 @@ export class AppStack extends Stack {
         // Read by lib/revalidate-auth.ts / app/api/revalidate as
         // SCHOLARS_REVALIDATE_TOKEN -- the env-var name is the contract. #447
         SCHOLARS_REVALIDATE_TOKEN: ecs.Secret.fromSecretsManager(revalidateTokenSecret),
+        // Read by app/api/faculty-review/[cwid]/grants as FACULTY_REVIEW_TOKEN --
+        // the WCM Faculty Review Tool's shared bearer. Dark until seeded (#1855).
+        FACULTY_REVIEW_TOKEN: ecs.Secret.fromSecretsManager(facultyReviewTokenSecret),
         // iron-session key read by lib/auth/config.ts getSessionConfig (#100).
         // Required by the /edit middleware gate and the SAML callback's
         // session minting; without it the callback 500s after a valid login.

@@ -132,5 +132,16 @@ COPY --from=prismacli --chown=node:node /pris/node_modules ./node_modules
 # prisma_schema_build_bg.wasm. Recreate it pointing into prisma/build/.
 RUN ln -sf ../prisma/build/index.js node_modules/.bin/prisma
 
+# #1846 — the ISR cacheHandler namespaces its S3 keys per deploy using
+# NEXT_DEPLOYMENT_ID at RUNTIME. The build stage's ENV (line ~33) does not cross
+# this FROM boundary, and Next does not surface its inlined deployment id back to
+# process.env, so re-declare the build-arg here and export it. Same value the
+# build stage receives (Deploy passes one --build-arg to every stage). Placed
+# after the COPY layers so the per-deploy value never invalidates the apt-get
+# cache layer above. Empty for local/CI builds → the handler's "nodeploy"
+# fallback (no bucket there anyway).
+ARG NEXT_DEPLOYMENT_ID=""
+ENV NEXT_DEPLOYMENT_ID=$NEXT_DEPLOYMENT_ID
+
 EXPOSE 3000
 CMD ["node", "server.js"]
