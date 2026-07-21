@@ -990,6 +990,21 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "FACULTY_REVIEW_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/faculty-review-token",
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "SESSION_COOKIE_SECRET",
                 "ValueFrom": {
                   "Fn::Join": [
@@ -3120,6 +3135,25 @@ service:
                     {
                       "Ref": "AWS::Partition",
                     },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/faculty-review-token-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/session-cookie-key-??????",
                   ],
                 ],
@@ -4730,6 +4764,21 @@ exports[`AppStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/revalidate-token",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "FACULTY_REVIEW_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/faculty-review-token",
                     ],
                   ],
                 },
@@ -6913,6 +6962,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/revalidate-token-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/faculty-review-token-??????",
                   ],
                 ],
               },
