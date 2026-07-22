@@ -641,6 +641,20 @@ describe("gloss re-ranker rescore — MATCHA_GLOSS_RERANK", () => {
     expect((mainBody().rescore as { window_size: number }).window_size).toBe(20);
   });
 
+  it("pageSize override widens from/size AND the window_size floor to the whole pool (spine one-request path)", async () => {
+    // Recall-neutrality fix: the spine passes pageSize=TERM_DEPTH (100) so the rescore applies ONCE
+    // over the full pool instead of stitching 5 independently-rescored 20-hit pages.
+    await searchPeople({ ...topicOpts, pageSize: 100, rescoreQuery: GLOSS, rescoreWeight: 0.5, rescoreWindow: 10 });
+    // The hit-returning body now has size:100, so mainBody()'s size:20 selector no longer matches it.
+    const body = capturedBodies.find((b) => (b as { size?: number }).size === 100) as Record<string, unknown>;
+    expect(body).toBeDefined();
+    expect(body.from).toBe(0);
+    expect(body.size).toBe(100);
+    // window_size floor = from+size = 0+100 = 100 (> the tiny rescoreWindow=10), proving pageSize
+    // threads into the floor — a paged 20-window can no longer under-cover the pool.
+    expect((body.rescore as { window_size: number }).window_size).toBe(100);
+  });
+
   it("NO rescoreQuery ⇒ the body has no rescore key (byte-identical guard)", async () => {
     await searchPeople({ ...topicOpts });
     expect(mainBody().rescore).toBeUndefined();

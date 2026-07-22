@@ -1550,8 +1550,18 @@ export async function searchPeople(opts: {
    * (a smaller window would rescore inconsistent sub-windows and drop/dupe rows).
    */
   rescoreWindow?: number;
+  /**
+   * Overrides the module-private `PAGE_SIZE` (20) for THIS call's `from`/`size`, the
+   * `rescore.window_size` floor, and the result's reported `pageSize`. The Matcha spine passes
+   * `TERM_DEPTH` to retrieve a cluster's whole pool in ONE request, so the gloss `rescore` applies
+   * once over the full window (recall-neutral) instead of stitching 5 independently-rescored pages
+   * whose top-100 never converged. Absent ⇒ `PAGE_SIZE` ⇒ the /search body + result are
+   * byte-identical to today.
+   */
+  pageSize?: number;
 }): Promise<PeopleSearchResult> {
   const { q, page = 0 } = opts;
+  const effectivePageSize = opts.pageSize ?? PAGE_SIZE;
   const sort = opts.sort ?? "relevance";
   const filters = opts.filters ?? {};
   const trimmed = q.trim();
@@ -1690,7 +1700,7 @@ export async function searchPeople(opts: {
         hits: [],
         total: 0,
         page,
-        pageSize: PAGE_SIZE,
+        pageSize: effectivePageSize,
         queryShape,
         // No OpenSearch call ran, so the attribution boost was never evaluated.
         attributionBoostFired: null,
@@ -2256,7 +2266,7 @@ export async function searchPeople(opts: {
       hits: [],
       total,
       page,
-      pageSize: PAGE_SIZE,
+      pageSize: effectivePageSize,
       queryShape,
       attributionBoostFired: null,
       facets: {
@@ -2626,8 +2636,8 @@ export async function searchPeople(opts: {
     : innerScoringQuery;
 
   const body = {
-    from: page * PAGE_SIZE,
-    size: PAGE_SIZE,
+    from: page * effectivePageSize,
+    size: effectivePageSize,
     // Perf — return only the scalars the People hit mapper reads (verified
     // against the `Hit._source` type + the mapper below). Without this,
     // OpenSearch ships the entire `_source` per hit (incl. concatenated
@@ -2708,7 +2718,7 @@ export async function searchPeople(opts: {
           rescore: {
             window_size: Math.max(
               opts.rescoreWindow ?? 0,
-              page * PAGE_SIZE + PAGE_SIZE,
+              page * effectivePageSize + effectivePageSize,
             ),
             query: {
               rescore_query: {
@@ -3548,7 +3558,7 @@ export async function searchPeople(opts: {
     }),
     total: r.hits.total.value,
     page,
-    pageSize: PAGE_SIZE,
+    pageSize: effectivePageSize,
     queryShape,
     attributionBoostFired,
     facets: {
