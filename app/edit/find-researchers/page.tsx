@@ -25,6 +25,7 @@ import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { logEditDenial } from "@/lib/edit/authz";
+import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
 import { isOpportunityIntakeEnabled } from "@/lib/edit/opportunity-submission";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
@@ -89,7 +90,11 @@ export default async function FindResearchersPage() {
           sub-tabs (the URL intake + team queue history get their own surface,
           `?tab=submissions`). Flag off → the bare matcher, no tab strip — the
           dark-ship posture unchanged. */}
-      {isOpportunityIntakeEnabled() ? <FindResearchersTabs /> : <FindResearchers />}
+      {isOpportunityIntakeEnabled() ? (
+        <FindResearchersTabs grantMatcha={isGrantMatchaEnabled()} />
+      ) : (
+        <FindResearchers grantMatcha={isGrantMatchaEnabled()} />
+      )}
     </ConsoleShell>
   );
 }
