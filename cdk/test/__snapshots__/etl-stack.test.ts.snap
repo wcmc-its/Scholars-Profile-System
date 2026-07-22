@@ -4437,7 +4437,15 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter:coi-statements"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskAsms":{"Next":"TaskInfoed","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyAsms"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter:coi-statements"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyReciter":{"Next":"TaskReciterCoiStatements","Type":"Task","Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"prod","step":"Reciter","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- Reciter failed"}},"TaskAsms":{"Next":"TaskInfoed","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyAsms"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -4653,15 +4661,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Ref": "EtlPageTopic608308D6",
               },
-              "","Message":{"env":"prod","step":"Dynamodb","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- Dynamodb failed"}},"FailDynamodb":{"Type":"Fail","Cause":"Dynamodb failed"},"NotifyReciter":{"Next":"FailReciter","Type":"Task","Resource":"arn:",
-              {
-                "Ref": "AWS::Partition",
-              },
-              ":states:::sns:publish","Parameters":{"TopicArn":"",
-              {
-                "Ref": "EtlPageTopic608308D6",
-              },
-              "","Message":{"env":"prod","step":"Reciter","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- Reciter failed"}},"FailReciter":{"Type":"Fail","Cause":"Reciter failed"},"NotifyEd":{"Next":"FailEd","Type":"Task","Resource":"arn:",
+              "","Message":{"env":"prod","step":"Dynamodb","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- Dynamodb failed"}},"FailDynamodb":{"Type":"Fail","Cause":"Dynamodb failed"},"NotifyEd":{"Next":"FailEd","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -12220,7 +12220,15 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter:coi-statements"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskAsms":{"Next":"TaskCoi","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyAsms"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter:coi-statements"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyReciter":{"Next":"TaskReciterCoiStatements","Type":"Task","Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"staging","step":"Reciter","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- Reciter failed"}},"TaskAsms":{"Next":"TaskCoi","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyAsms"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -12436,15 +12444,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Ref": "EtlPageTopic608308D6",
               },
-              "","Message":{"env":"staging","step":"Dynamodb","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- Dynamodb failed"}},"FailDynamodb":{"Type":"Fail","Cause":"Dynamodb failed"},"NotifyReciter":{"Next":"FailReciter","Type":"Task","Resource":"arn:",
-              {
-                "Ref": "AWS::Partition",
-              },
-              ":states:::sns:publish","Parameters":{"TopicArn":"",
-              {
-                "Ref": "EtlPageTopic608308D6",
-              },
-              "","Message":{"env":"staging","step":"Reciter","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- Reciter failed"}},"FailReciter":{"Type":"Fail","Cause":"Reciter failed"},"NotifyEd":{"Next":"FailEd","Type":"Task","Resource":"arn:",
+              "","Message":{"env":"staging","step":"Dynamodb","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- Dynamodb failed"}},"FailDynamodb":{"Type":"Fail","Cause":"Dynamodb failed"},"NotifyEd":{"Next":"FailEd","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
