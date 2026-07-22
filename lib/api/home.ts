@@ -2,9 +2,7 @@
  * Home-page data assembly. Reads scholars, publications, and topic taxonomy and
  * computes Variant B rankings from `lib/ranking.ts`.
  *
- * Four surfaces, four exported functions:
- *   - getRecentContributions(): RecentContribution[] | null   (RANKING-01)
- *   - getSelectedResearch():    SubtopicCard[]      | null    (HOME-02; deprecated by getSpotlights, removed in Plan 09-07)
+ * Exported read surfaces:
  *   - getSpotlights():          SpotlightCard[]     | null    (Phase 9 SPOTLIGHT-03)
  *   - getBrowseAllResearchAreas(): ParentTopic[]              (HOME-03; never null)
  *
@@ -18,8 +16,7 @@
  *     subtopic data embedded (`primary_subtopic_id`, `subtopic_ids`).
  *   - Subtopics ARE first-class entities (Phase 8 / HIERARCHY-05): the
  *     `Subtopic` catalog is sole-written by `etl/hierarchy/index.ts` from the
- *     S3 hierarchy artifact. `getSelectedResearch` joins to read display_name
- *     + short_description with a (display_name ?? label ?? slug) D-09 fallback.
+ *     S3 hierarchy artifact.
  *   - publication_topic.pmid FK-relates to publication.pmid (both VARCHAR(32))
  *     so card-rendering joins use Prisma `include: { publication }` directly.
  */
@@ -31,12 +28,7 @@ import {
   loadPublicationSuppressions,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
-import {
-  scorePublication,
-  type RankablePublication,
-} from "@/lib/ranking";
-import { ELIGIBLE_ROLES } from "@/lib/eligibility";
-import { FEED_EXCLUDED_TYPES, NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
+import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import { sampleSpotlightPapers } from "@/lib/spotlight-sampling";
 import { getSupercategoryHubEntries } from "@/lib/api/methods";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
@@ -44,10 +36,6 @@ import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 // ---------------------------------------------------------------------------
 // Per-surface floors per UI-SPEC §States and CONTEXT.md D-12
 // ---------------------------------------------------------------------------
-const RECENT_CONTRIBUTIONS_TARGET = 6;
-const RECENT_CONTRIBUTIONS_FLOOR = 3;
-const SELECTED_RESEARCH_TARGET = 8;
-const SELECTED_RESEARCH_FLOOR = 4;
 // Phase 9 SPOTLIGHT-03 — the producer ships one spotlight per parent topic.
 // Since the ReciterAI 25-card bump it publishes every cleared candidate, up to
 // SPOTLIGHT_TARGET cards (was a pre-truncated 10); the actual count varies per
@@ -57,10 +45,6 @@ const SELECTED_RESEARCH_FLOOR = 4;
 const SPOTLIGHT_TARGET = 25;
 const SPOTLIGHT_FLOOR = 6;
 
-// Hard-excluded publication types — see lib/publication-types.ts.
-// FEED_EXCLUDED_TYPES adds Retraction (issue #63) on top of the spec v1.7.1
-// list so retraction notices stay out of home / topic feeds.
-
 // ReCiterAI scoring data floor (D-15) — publication_score / publication_topic
 // rows only cover 2020+ publications.
 const RECITERAI_YEAR_FLOOR = 2020;
@@ -68,49 +52,6 @@ const RECITERAI_YEAR_FLOOR = 2020;
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
-
-export type RecentContribution = {
-  cwid: string;
-  slug: string;
-  preferredName: string;
-  primaryTitle: string | null;
-  identityImageEndpoint: string;
-  authorshipRole: "first author" | "senior author";
-  paper: {
-    pmid: string;
-    title: string;
-    journal: string | null;
-    year: number | null;
-    pubmedUrl: string | null;
-    doi: string | null;
-  };
-  // NO citation-count field — locked by design spec v1.7.1
-};
-
-export type SubtopicCard = {
-  parentTopicSlug: string;
-  parentTopicName: string;
-  subtopicSlug: string;
-  // (display_name ?? label) — applied at the API boundary per D-09
-  subtopicName: string;
-  // D-19 / HIERARCHY-05: subtitle source for components/home/subtopic-card.tsx (Plan 05)
-  subtopicShortDescription: string | null;
-  scholarCount: number;
-  publicationCount: number;
-  publications: Array<{
-    pmid: string;
-    title: string;
-    journal: string | null;
-    year: number | null;
-    firstWcmAuthor: {
-      cwid: string;
-      slug: string;
-      preferredName: string;
-      /** #536 — card renders the author name without a profile link for hidden roles. */
-      roleCategory: string | null;
-    } | null;
-  }>;
-};
 
 // Phase 9 SPOTLIGHT-03 — projection of one row from the `spotlight` table,
 // joined to Topic (for the parent-topic display label) and to
@@ -320,324 +261,6 @@ function cachedHomeRead<T>(key: string, load: () => Promise<T>): Promise<T> {
 }
 
 // ---------------------------------------------------------------------------
-// getRecentContributions — RANKING-01
-// ---------------------------------------------------------------------------
-
-/**
- * 6 cards max, scholar-centric, eligibility carve, parent-dedup, hide if <3.
- *
- * Pulls eligible-role first-or-senior author rows from `publication_topic`
- * (candidate (e)). Variant B ranking applied app-side via lib/ranking.ts;
- * dedup keeps the highest-scoring row per parent topic. Publication metadata
- * is included via the `publication` FK relation; hard-excluded pub types are
- * filtered in the same WHERE clause.
- */
-export async function getRecentContributions(
-  now: Date = new Date(),
-): Promise<RecentContribution[] | null> {
-  const rows = await prisma.publicationTopic.findMany({
-    where: {
-      authorPosition: { in: ["first", "last"] },
-      year: { gte: RECITERAI_YEAR_FLOOR },
-      scholar: {
-        deletedAt: null,
-        status: "active",
-        roleCategory: { in: [...ELIGIBLE_ROLES] },
-      },
-      publication: { publicationType: { notIn: [...FEED_EXCLUDED_TYPES] } },
-    },
-    include: {
-      scholar: {
-        select: {
-          cwid: true,
-          slug: true,
-          preferredName: true,
-          primaryTitle: true,
-          roleCategory: true,
-        },
-      },
-      topic: { select: { id: true, label: true } },
-      publication: {
-        select: {
-          pmid: true,
-          title: true,
-          journal: true,
-          year: true,
-          publicationType: true,
-          dateAddedToEntrez: true,
-          pubmedUrl: true,
-          doi: true,
-        },
-      },
-    },
-    take: 200, // bounded pull; further sort+filter in JS
-  });
-
-  if (rows.length === 0) {
-    logSparseHide("home_recent_contributions", 0, RECENT_CONTRIBUTIONS_FLOOR);
-    return null;
-  }
-
-  type Row = (typeof rows)[number];
-
-  const scored = rows
-    .map((r: Row) => {
-      const pub = r.publication;
-      const isFirst = r.authorPosition === "first";
-      const isLast = r.authorPosition === "last";
-      const rankable: RankablePublication = {
-        pmid: pub.pmid,
-        publicationType: pub.publicationType,
-        // publication_topic.score IS the per-publication-per-scholar
-        // ReCiterAI score under candidate (e). Decimal -> number coercion.
-        reciteraiImpact: Number(r.score),
-        dateAddedToEntrez: pub.dateAddedToEntrez,
-        authorship: {
-          isFirst,
-          isLast,
-          isPenultimate: r.authorPosition === "penultimate",
-        },
-        isConfirmed: true, // publication_topic rows are confirmed by definition
-      };
-      const score = scorePublication(rankable, "recent_contributions", true, now);
-      return { row: r, pub, score, parentId: r.parentTopicId, isFirst, isLast };
-    })
-    .filter((s) => s.score > 0)
-    .sort((a, b) => b.score - a.score);
-
-  // Dedup one card per parent research area (one card per parent_topic_id).
-  const seenParents = new Set<string>();
-  const top: typeof scored = [];
-  for (const s of scored) {
-    if (seenParents.has(s.parentId)) continue;
-    seenParents.add(s.parentId);
-    top.push(s);
-    if (top.length >= RECENT_CONTRIBUTIONS_TARGET) break;
-  }
-
-  if (top.length < RECENT_CONTRIBUTIONS_FLOOR) {
-    logSparseHide("home_recent_contributions", top.length, RECENT_CONTRIBUTIONS_FLOOR);
-    return null;
-  }
-
-  return top.map(({ row, pub, isLast }) => {
-    const scholar = row.scholar!;
-    return {
-      cwid: scholar.cwid,
-      slug: scholar.slug,
-      preferredName: scholar.preferredName,
-      primaryTitle: scholar.primaryTitle,
-      identityImageEndpoint: identityImageEndpoint(scholar.cwid),
-      authorshipRole: isLast ? "senior author" : "first author",
-      paper: {
-        pmid: pub.pmid,
-        title: pub.title,
-        journal: pub.journal,
-        year: pub.year,
-        pubmedUrl: pub.pubmedUrl ?? null,
-        doi: pub.doi ?? null,
-      },
-    } satisfies RecentContribution;
-  });
-}
-
-// ---------------------------------------------------------------------------
-// getSelectedResearch — HOME-02
-// ---------------------------------------------------------------------------
-
-/**
- * 8 subtopic cards max, one per parent, hide if <4.
- *
- * Aggregation under candidate (e): groupBy `(parentTopicId, primarySubtopicId)`
- * with `_sum: { score }` and `_count: { _all }`, filter rows with non-null
- * subtopic, sort by aggregate score, dedup per parent, slice to top 8.
- *
- * Subtopic display labels are slug-derived (DDB has no human label for
- * subtopics — locked finding from probe).
- */
-export async function getSelectedResearch(
-  _now: Date = new Date(),
-): Promise<SubtopicCard[] | null> {
-  void _now;
-  // Aggregate publication score per (parent, subtopic). Restrict to D-15 floor
-  // and drop rows with null primary_subtopic_id. We do NOT join publication
-  // here (no FK; would require IN clauses). Hard-excluded pub types are
-  // filtered out at the publication-stitch step below.
-  const groups = await prisma.publicationTopic.groupBy({
-    by: ["parentTopicId", "primarySubtopicId"],
-    where: {
-      primarySubtopicId: { not: null },
-      year: { gte: RECITERAI_YEAR_FLOOR },
-    },
-    _sum: { score: true },
-    _count: { _all: true },
-  });
-
-  type Group = {
-    parentTopicId: string;
-    primarySubtopicId: string | null;
-    _sum: { score: number | string | null };
-    _count: { _all: number };
-  };
-
-  // Sort groups by aggregate score desc.
-  const sorted = (groups as unknown as Group[])
-    .filter((g) => g.primarySubtopicId !== null)
-    .map((g) => ({
-      parentTopicId: g.parentTopicId,
-      primarySubtopicId: g.primarySubtopicId as string,
-      score: Number(g._sum.score ?? 0),
-      publicationCount: g._count._all,
-    }))
-    .filter((g) => g.score > 0)
-    .sort((a, b) => b.score - a.score);
-
-  // Dedup so each parent appears at most once.
-  const seenParents = new Set<string>();
-  const top: typeof sorted = [];
-  for (const g of sorted) {
-    if (seenParents.has(g.parentTopicId)) continue;
-    seenParents.add(g.parentTopicId);
-    top.push(g);
-    if (top.length >= SELECTED_RESEARCH_TARGET) break;
-  }
-
-  if (top.length < SELECTED_RESEARCH_FLOOR) {
-    logSparseHide("home_selected_research", top.length, SELECTED_RESEARCH_FLOOR);
-    return null;
-  }
-
-  // Resolve parent labels.
-  const parentIds = top.map((t) => t.parentTopicId);
-  const parents =
-    parentIds.length > 0
-      ? await prisma.topic.findMany({
-          where: { id: { in: parentIds } },
-          select: { id: true, label: true },
-        })
-      : [];
-  const parentLabelById = new Map(parents.map((p) => [p.id, p.label]));
-
-  // HIERARCHY-05 — fetch display_name and short_description for the chosen
-  // subtopic IDs from the Subtopic catalog (now populated by Hierarchy ETL).
-  // D-09: apply (display_name ?? label) fallback at the API boundary so the
-  // UI in Plan 05 doesn't reimplement the rule per surface.
-  const subtopicIds = top
-    .map((t) => t.primarySubtopicId)
-    .filter((id): id is string => id !== null);
-  const subtopicMeta =
-    subtopicIds.length > 0
-      ? await prisma.subtopic.findMany({
-          where: { id: { in: subtopicIds } },
-          select: {
-            id: true,
-            label: true,
-            displayName: true,
-            shortDescription: true,
-          },
-        })
-      : [];
-  const subtopicMetaById = new Map(subtopicMeta.map((s) => [s.id, s]));
-
-  // Resolve scholar count per (parent, subtopic) — distinct cwids. Prisma
-  // groupBy can't express COUNT(DISTINCT cwid), so use raw SQL.
-  type ScholarCountRow = {
-    parent_topic_id: string;
-    primary_subtopic_id: string;
-    scholar_count: number | bigint;
-  };
-  const scholarCountRows: ScholarCountRow[] =
-    parentIds.length > 0
-      ? ((await prisma.$queryRawUnsafe(
-          `SELECT pt.parent_topic_id, pt.primary_subtopic_id, COUNT(DISTINCT pt.cwid) AS scholar_count
-             FROM publication_topic pt
-             JOIN scholar s ON s.cwid = pt.cwid
-            WHERE pt.primary_subtopic_id IS NOT NULL
-              AND pt.year >= ?
-              AND pt.parent_topic_id IN (${parentIds.map(() => "?").join(",")})
-              AND s.deleted_at IS NULL
-              AND s.status = 'active'
-            GROUP BY pt.parent_topic_id, pt.primary_subtopic_id`,
-          RECITERAI_YEAR_FLOOR,
-          ...parentIds,
-        )) as ScholarCountRow[]) ?? []
-      : [];
-  const scholarCountKey = (parent: string, subtopic: string) => `${parent}::${subtopic}`;
-  const scholarCountByPair = new Map<string, number>(
-    scholarCountRows.map((r) => [
-      scholarCountKey(r.parent_topic_id, r.primary_subtopic_id),
-      Number(r.scholar_count),
-    ]),
-  );
-
-  // Fetch sample publication_topic rows for each (parent, subtopic) pair so
-  // the card can show two example publications. Then stitch publication
-  // metadata in a second batched query.
-  const sampleRows = await prisma.publicationTopic.findMany({
-    where: {
-      OR: top.map((t) => ({
-        parentTopicId: t.parentTopicId,
-        primarySubtopicId: t.primarySubtopicId,
-      })),
-      year: { gte: RECITERAI_YEAR_FLOOR },
-      publication: { publicationType: { notIn: [...FEED_EXCLUDED_TYPES] } },
-    },
-    include: {
-      scholar: { select: { cwid: true, slug: true, preferredName: true, roleCategory: true } },
-      publication: { select: { pmid: true, title: true, journal: true, year: true } },
-    },
-    orderBy: [{ score: "desc" }],
-    take: top.length * 8, // generous; we'll bucket and slice 2 per pair
-  });
-
-  type SampleRow = (typeof sampleRows)[number];
-  const sampleByPair = new Map<string, Array<{ row: SampleRow; pubTitle: string; pubPmid: string; pubJournal: string | null; pubYear: number | null }>>();
-  for (const s of sampleRows) {
-    const key = scholarCountKey(s.parentTopicId, s.primarySubtopicId ?? "");
-    const arr = sampleByPair.get(key) ?? [];
-    if (arr.length < 2) {
-      arr.push({ row: s, pubTitle: s.publication.title, pubPmid: s.publication.pmid, pubJournal: s.publication.journal, pubYear: s.publication.year });
-      sampleByPair.set(key, arr);
-    }
-  }
-
-  return top.map((t) => {
-    const key = scholarCountKey(t.parentTopicId, t.primarySubtopicId);
-    const samples = sampleByPair.get(key) ?? [];
-    const meta = subtopicMetaById.get(t.primarySubtopicId);
-    // D-09: prefer display_name, fall back to label, fall back to slug-derived
-    // (the slug-derived path is reached only if Hierarchy ETL hasn't run yet
-    // OR the artifact is missing this subtopic id — both transient states).
-    const subtopicName =
-      (meta?.displayName?.trim() || meta?.label?.trim() || t.primarySubtopicId);
-    const subtopicShortDescription = meta?.shortDescription?.trim() || null;
-    return {
-      parentTopicSlug: t.parentTopicId,
-      parentTopicName: parentLabelById.get(t.parentTopicId) ?? t.parentTopicId,
-      subtopicSlug: t.primarySubtopicId,
-      subtopicName,
-      subtopicShortDescription,
-      scholarCount: scholarCountByPair.get(key) ?? 0,
-      publicationCount: t.publicationCount,
-      publications: samples.map((s) => ({
-        pmid: s.pubPmid,
-        title: s.pubTitle,
-        journal: s.pubJournal,
-        year: s.pubYear,
-        firstWcmAuthor: s.row.scholar
-          ? {
-              cwid: s.row.scholar.cwid,
-              slug: s.row.scholar.slug,
-              preferredName: s.row.scholar.preferredName,
-              roleCategory: s.row.scholar.roleCategory,
-            }
-          : null,
-      })),
-    } satisfies SubtopicCard;
-  });
-}
-
-// ---------------------------------------------------------------------------
 // getSpotlights — Phase 9 SPOTLIGHT-03
 // ---------------------------------------------------------------------------
 
@@ -752,7 +375,7 @@ async function getSpotlightsUncached(): Promise<SpotlightCard[] | null> {
 
   // Step 4: Aggregate publication + scholar counts per (parent, subtopic).
   //
-  // Mirrors the pattern in getSelectedResearch — Prisma groupBy can't express
+  // Prisma groupBy can't express
   // COUNT(DISTINCT cwid), so a single raw query covers both counts in one
   // round-trip. Restricted to D-15 floor (publication_topic only carries
   // 2020+ data) and to active non-deleted scholars.

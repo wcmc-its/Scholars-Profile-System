@@ -273,11 +273,6 @@ function anchorNextSibling(node: XNode): XNode | null {
   return i >= 0 && i + 1 < sibs.length ? sibs[i + 1]! : null;
 }
 
-/** Remove an element from its parent. */
-export function removeNode(node: XNode | undefined): void {
-  if (node && node.parentNode) node.parentNode.removeChild(node);
-}
-
 const CELL_SIDES = ["top", "left", "bottom", "right"];
 
 /**
