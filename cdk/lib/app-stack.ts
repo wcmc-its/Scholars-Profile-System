@@ -3131,12 +3131,12 @@ export class AppStack extends Stack {
     });
     new CfnOutput(this, "EcsDbBootstrapTaskFamily", {
       value: this.dbBootstrapTaskDefinition.family,
-      description: "SPS one-shot scholars_audit bootstrap task family — run before migrate (#493)",
+      description: "SPS one-shot scholars_audit bootstrap task family - run before migrate (#493)",
     });
     new CfnOutput(this, "EcsVerifyGrantsTaskFamily", {
       value: this.verifyGrantsTaskDefinition.family,
       description:
-        "SPS one-shot grant-equality verify task family — run after db-bootstrap, before the service rolls (ADR-009)",
+        "SPS one-shot grant-equality verify task family - run after db-bootstrap, before the service rolls (ADR-009)",
     });
     new CfnOutput(this, "PublicAlbDns", {
       value: this.publicAlb.loadBalancerDnsName,

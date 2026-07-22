@@ -87,14 +87,24 @@ export function CenterRosterCard({
   const [error, setError] = React.useState<string | null>(null);
 
   async function post(body: Record<string, unknown>): Promise<boolean> {
-    const res = await fetch("/api/edit/roster", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ unitType: "center", unitCode, ...body }),
-    });
-    const data = (await res.json()) as { ok: boolean; error?: string };
-    if (!res.ok || data.ok !== true) {
-      setError(mapErrorToMessage(data.error ?? ""));
+    let res: Response;
+    try {
+      res = await fetch("/api/edit/roster", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unitType: "center", unitCode, ...body }),
+      });
+    } catch {
+      // Network failure — surface it and let callers roll back the optimistic write.
+      setError(mapErrorToMessage(""));
+      return false;
+    }
+    // A failed response may carry no JSON body (e.g. a bodyless 401 from auth
+    // middleware); check res.ok and parse defensively so a phantom row can't
+    // linger with no error shown.
+    const data = (await res.json().catch(() => null)) as { ok: boolean; error?: string } | null;
+    if (!res.ok || data?.ok !== true) {
+      setError(mapErrorToMessage(data?.error ?? ""));
       return false;
     }
     return true;
