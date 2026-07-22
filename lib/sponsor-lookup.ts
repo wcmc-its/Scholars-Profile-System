@@ -174,12 +174,6 @@ export function expandSponsor(short: string | null | undefined): string | null {
   return getSponsor(short)?.full ?? null;
 }
 
-/** Returns true when the canonical short is an NIH Institute or Center.
- *  Drives the "NIH/{IC}" eyebrow rendering (issue #80 item 1). */
-export function isNihIc(short: string | null | undefined): boolean {
-  return getSponsor(short)?.category === "NIH IC";
-}
-
 /** Verbose display form — full canonical name when in the lookup,
  *  otherwise the bare short label. Used in the Funder facet rows,
  *  the eyebrow line on result cards, and active-filter chips. */

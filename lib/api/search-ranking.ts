@@ -442,12 +442,3 @@ export function dedupeFirstByKey<T>(items: T[], key: (item: T) => string): T[] {
     return true;
   });
 }
-
-/** Test-only export — kept stable so equivalence tests don't drift. */
-export const _internal = {
-  DEFAULT_KIND_ORDER,
-  POSITION_CAPS,
-  TOTAL_BUDGET,
-  normalizeNameTokens,
-  tokenizeEntityName,
-};

@@ -346,9 +346,3 @@ export async function getMentoringPmidBuckets(): Promise<MentoringPmidBuckets> {
   })();
   return inflight;
 }
-
-/** Backwards-compatible "all mentees" pmid getter — kept so callers that
- *  don't care about the program-type breakdown stay working. */
-export async function getMentoringPmids(): Promise<string[]> {
-  return (await getMentoringPmidBuckets()).all;
-}
