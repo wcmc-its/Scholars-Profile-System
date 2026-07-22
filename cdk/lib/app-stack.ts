@@ -1344,16 +1344,16 @@ export class AppStack extends Stack {
         // (default 0.5); wire it here too when this goes staging-on. See
         // docs/2026-07-21-matcha-gloss-reranker-handoff.md.
         MATCHA_GLOSS_RERANK: "off",
-        // GRANT_MATCHA — the /edit/find-researchers "Matcha" mode: rank researchers for the
-        // selected opportunity through the Matcha spine (its title+synopsis → extractor →
-        // per-concept fan-out → RRF fuse) instead of the structured topic-vector matcher. Read via
+        // GRANT_MATCHA — the Grant Matcha convergence surfaces: the /edit/find-researchers "Matcha"
+        // mode (opportunity → researchers via the spine, #1866) AND the /edit/matcha people|grants
+        // target toggle + query→grants result cards (#1867 route + #1870 UI). Read via
         // isGrantMatchaEnabled() (=== "on"); a strict, reversible add — flag-off keeps the existing
         // topic-vector view as the only engine, and the surface stays admin-only regardless.
-        // DEPENDS ON MATCHA (on in both envs): the mode POSTs to /api/edit/matcha, which 404s when
-        // MATCHA is off. OFF in BOTH envs for now — dark until a staging eyeball of the seeded
-        // ask-card UX; then flip staging-on (the grant corpus is staging-only, prod held alongside
-        // SELF_EDIT_GRANT_RECS above). STATIC literal for flag parity.
-        GRANT_MATCHA: "off",
+        // DEPENDS ON MATCHA (on in both envs): the modes POST to /api/edit/matcha, which 404s when
+        // MATCHA is off. STAGING-ON for the eyeball/probe of the seeded ask-card + grant-card UX;
+        // prod held OFF — the grant corpus is staging-only (pending ReciterAI#269), alongside
+        // SELF_EDIT_GRANT_RECS above.
+        GRANT_MATCHA: env === "staging" ? "on" : "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
