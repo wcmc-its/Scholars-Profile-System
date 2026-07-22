@@ -43,9 +43,12 @@ export interface EtlStackProps extends StackProps {
  * `tier` classifies how a failure of this step is handled (reliability-audit
  * PR-7). Only the nightly/weekly cadence steps set it:
  *   - `"abort"`   — failure PAGES (publishes to `etl-page-<env>`) and STOPS the
- *                   chain (`.next(Fail)`). For the spine (Ed/Reciter/Dynamodb/
+ *                   chain (`.next(Fail)`). For the spine (Ed/Dynamodb/
  *                   search:index) + the terminal Integrity validator: a
- *                   stale-but-coherent site beats a broken one.
+ *                   stale-but-coherent site beats a broken one. (Reciter is a
+ *                   spine source but tier:"continue" — its volume guard makes a
+ *                   refusal coherent, not broken, so it must not freeze the
+ *                   enrichers; see the step comment / #1679.)
  *   - `"continue"`— failure WARNS (publishes to the existing `etl-failures-<env>`)
  *                   and PROCEEDS to the next step (`.next(successor)`). For the
  *                   enrichers, whose absence degrades gracefully.
@@ -1020,7 +1023,16 @@ export class EtlStack extends Stack {
       // it must NOT abort the nightly. Writes are enabled by
       // SELF_EDIT_ED_ADMINS_IMPORT="on" in baseEnvironment (else dry-run).
       { id: "EdAdmins", npmScript: "etl:ed:admins", external: true, tier: "continue" },
-      { id: "Reciter", npmScript: "etl:reciter", external: true, tier: "abort" },
+      // #1679 — tier:"continue", NOT "abort". etl:reciter's source-volume guard
+      // (lib/etl-guard.ts) REFUSES to write on a >20% source-row drop, so a
+      // guard refusal leaves the publication table at its last-good rows —
+      // stale, but coherent: the exact state the abort rationale calls
+      // acceptable. Aborting here froze 15 downstream steps (COI, identity,
+      // MeSH, retractions, search index, revalidate, integrity) for 3+ days in
+      // prod when ReCiterDB #122 tripped the guard. "continue" still WARNS to
+      // etl-failures (→ Teams) so the upstream loss is surfaced, then proceeds;
+      // a rare true crash self-heals on the next good run.
+      { id: "Reciter", npmScript: "etl:reciter", external: true, tier: "continue" },
       // PubMed competing-interest statements — same WCM-ReciterDB path as Reciter
       // (reads reporting_conflicts), so external:true and placed right after it.
       // Seeds publication_conflict_statement for the COI-gap source below.
