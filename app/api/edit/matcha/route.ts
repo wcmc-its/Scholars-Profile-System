@@ -82,10 +82,15 @@ import {
   type MatchaRankedScholar,
 } from "@/lib/api/matcha";
 import { rankResearchersForDescriptionSpine } from "@/lib/api/matcha-spine-run";
+import {
+  rankGrantsForDescriptionSpine,
+  type GrantSpineResult,
+} from "@/lib/api/matcha-grants-spine";
 import { extractMatchaPreferences } from "@/lib/api/matcha-preferences";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
+import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { identityImageEndpoint } from "@/lib/headshot";
 
@@ -259,6 +264,32 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { description } = body;
   if (typeof description !== "string" || description.trim().length === 0) {
     return editError(400, "invalid_description", "description");
+  }
+
+  // Grant Matcha (increment 2) — target the funding-OPPORTUNITIES corpus instead of people. Dark
+  // behind GRANT_MATCHA. Fully isolated from the people path below: its own cache namespace, its own
+  // hydration, and NO retention row / preferences (those are people-ask concerns). The grant spine
+  // reuses Matcha's extract→cluster→fuse over `scholars-opportunities` (see matcha-grants-spine.ts).
+  if (body.target === "grants") {
+    if (!isGrantMatchaEnabled()) return editError(400, "grant_matcha_disabled", "target");
+    try {
+      // Own cache namespace (`grant:<hash>`) so a grant ask can never serve a people result for the
+      // same paste. Hashes the NORMALIZED paste, never the raw text — same #6c invariant as the
+      // people key; the cache value holds `{ concepts, candidates }` only, no paste text.
+      const grantKey = `grant:${sponsorInputHash(normalizeDescription(description))}`;
+      const { concepts, candidates, titleSummary, culled } =
+        await cachedReasonAgg<GrantSpineResult>(
+          grantKey,
+          () => rankGrantsForDescriptionSpine(description),
+          // Don't cache a fail-soft empty (a Bedrock/OpenSearch blip): only memoise a real hit.
+          (r) => r.candidates.length > 0,
+        );
+      const ask = askTitleFrom(concepts, [], titleSummary);
+      return editOk({ target: "grants", concepts, candidates, ask, titleSummary, culled });
+    } catch (err) {
+      logEditFailure(`${PATH}#grants`, err);
+      return editError(502, "match_unavailable");
+    }
   }
 
   // #1780 Phase 2 — the culled terms the officer clicked to add back. Sanitized HERE at the trust
