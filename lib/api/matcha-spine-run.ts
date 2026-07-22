@@ -153,13 +153,13 @@ function targetKindOf(clusters: readonly TermCluster[]): ConceptKind {
 const CLUSTER_TAU = 0.5;
 
 /** Hard cap on extracted terms — also the fan-out breaker's concept multiplicand.
- *  Worst-case sequential `searchPeople` round-trips = MAX_TERMS × pages-per-cluster,
- *  and the broadest multi-concept pastes (max concepts × max pages) are exactly the
+ *  Worst-case sequential `searchPeople` round-trips = MAX_TERMS (one request per cluster),
+ *  and the broadest multi-concept pastes (max concepts) are exactly the
  *  ones that tripped the OpenSearch parent circuit breaker; `mergeTermClusters` already
  *  documents a small-list (≤ ~12) assumption. Lowered 12→8 to trim that worst-case
  *  burst ~33% (paired with `skipFacetAggs`, which removes the per-request agg heap that
  *  was the actual breaker driver). Every term still costs one taxonomy resolution +
- *  (per cluster) up to MAX_PAGES round-trips, so a taxonomy-dense 3,000-char paste can't
+ *  (per cluster) one round-trip, so a taxonomy-dense 3,000-char paste can't
  *  stall the worker.
  *  ponytail: the cut is recall-cheap here BY DESIGN — truncation keeps the FIRST
  *  concepts (LLM: most-central-first per the extraction prompt; dictionary fallback: vocab order,
@@ -197,14 +197,13 @@ const MAX_TERMS_WITH_INCLUDES = 15;
  *  must not dominate. The normal path reuses the extraction's real per-term centrality. */
 const INCLUDE_SYNTH_CENTRALITY = 0.5;
 
-/** Per-term retrieval depth. `searchPeople` pages at its own module-private page
- *  size (20 today, not overridable) and reports it as `pageSize` on every result —
- *  the paging loop keys its short-page stop to THAT, never to a copied constant
- *  that could silently drift. ~100 candidates = up to 5 sequential pages today;
- *  MAX_PAGES is only a defensive absolute cap on per-cluster round-trips (it covers
- *  full depth for any page size ≥ 10). */
+/** Per-term retrieval depth. `retrieveCluster` pulls the whole pool in ONE `searchPeople`
+ *  request via `pageSize: TERM_DEPTH`, so the optional gloss `rescore` applies once over the
+ *  full window — genuinely recall-neutral. (It was 5 paged calls, each rescored independently:
+ *  an OpenSearch `rescore` is only internally consistent within a single request, so the 5
+ *  top-100 windows never stitched into a stable set and candidate counts drifted with λ — the
+ *  recall bug this fixes.) */
 const TERM_DEPTH = 100;
-const MAX_PAGES = 10;
 
 /** Load the v1 vocab: every curated taxonomy label (topics + subtopics). Two bounded
  *  reads; the union is the dictionary `extractTerms` scans the paste against.
@@ -273,7 +272,7 @@ function evidenceKey(term: string, cwid: string): string {
 }
 
 /** Retrieve up to `TERM_DEPTH` scholar cwids for one cluster, in `searchPeople` rank
- *  order, paging as needed. Topical-only: the expertise-independent employment priors
+ *  order, in a SINGLE request (`pageSize: TERM_DEPTH`). Topical-only: the expertise-independent employment priors
  *  (faculty + active-grant prominence) are OFF so ranking reflects fit alone. A
  *  representative resolution supplies the MeSH attribution signals; `meshDescendantUis`
  *  is the cluster's UNION so the boost spans all merged synonyms. Also returns the
@@ -293,88 +292,76 @@ async function retrieveCluster(
   rescoreQuery?: string,
   rescoreWeight?: number,
 ): Promise<{ ranked: string[]; hits: PeopleHit[] }> {
-  const ranked: string[] = [];
-  const hits: PeopleHit[] = [];
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const result = await searchPeople({
-      q: clusterQuery,
-      page,
-      shape: "topic",
-      relevanceMode: "v3",
-      // Attribution boost spans the merged synonyms; the signals below graduate its
-      // weight and are only read on the topic shape (absent ⇒ boost dropped).
-      meshDescendantUis: descendantUis.length > 0 ? descendantUis : undefined,
-      meshMatchTier: rep
-        ? meshMatchTier(rep.confidence, rep.curatedTopicAnchors.length)
-        : undefined,
-      meshAmbiguous: rep?.ambiguous,
-      meshMatchedFormLength: rep?.matchedForm.length,
-      meshDescriptorName: rep?.name,
-      // Topical fit only — no employment priors (§4; the `grantProminence` doc names
-      // this exact caller as the intended `false`).
-      facultyProminence: false,
-      grantProminence: false,
-      // #1689 — ASK FOR THE EVIDENCE. This is the whole fix, and it is three options on a
-      // call this loop already makes.
-      //
-      // The console's "why this match" block was empty in prod because the SPINE never
-      // produced `evidence`, and two comments in this repo (this file's, and the contract's)
-      // blamed `skipFacetAggs`. THAT WAS WRONG, and it is worth being explicit about, because
-      // acting on it would have made things worse: `skipFacetAggs` is read at exactly one
-      // place (`...(opts.skipFacetAggs ? {} : { aggs })`) and gates only the nine People-index
-      // FACET aggs. It appears nowhere in `reasonAggEligible`. The real gate is `matchExplain`,
-      // which defaults to FALSE — the spine simply never asked. "Fixing" the stated cause by
-      // dropping `skipFacetAggs` would have re-added the size-200 `deptDivKey` agg to every
-      // fan-out call, re-tripped the breaker, and STILL produced no evidence.
-      //
-      // `reasonFromDoc` + `meshDescriptorUi` together select the CHEAP path: the tagged count
-      // is an O(1) read of the people-doc's own `meshSubtreeCounts[ui]`, so a resolved concept
-      // issues NO publications-index query at all. `rep` was already in hand for the
-      // attribution boost — the descriptor UI was sitting right there, unread.
-      matchExplain: true,
-      reasonFromDoc: true,
-      meshDescriptorUi: rep?.descriptorUi,
-      // Full active-scholar pool (directory baseline).
-      filters: { includeIncomplete: undefined },
-      // Fan-out breaker: this loop reads only hits/total/pageSize (facets are
-      // discarded), so skip the nine People-index facet aggregations. Sending them on
-      // every one of the per-concept × per-page sequential calls piled up the
-      // per-request heap (incl. a size-200 `deptDivKey` terms agg) that tripped the
-      // OpenSearch parent circuit breaker on the broadest sponsor pastes. Recall-neutral
-      // — aggs never touch hits, scoring, or ordering.
-      skipFacetAggs: true,
-      // D1 — project the precomputed most-recent-pub year for the recency weight. Gated so the
-      // off path keeps today's `_source` shape and hit payload.
-      includeMostRecentPub: includeRecency,
-      // Matcha's A–Z sort key. UNCONDITIONAL, unlike the year above: sorting by last name is a
-      // presentation affordance that must not inherit the recency flag's fate. Free — the field is
-      // already stored for the directory's own A–Z sort, this only projects it.
-      includeLastName: true,
-      // MATCHA_GLOSS_RERANK — spread ONLY when a gloss is in hand, so the off-path opts are
-      // byte-identical. `rescoreWindow: TERM_DEPTH` makes the rescore window span the full
-      // per-cluster pool this loop pages in, so every page re-orders the same window.
-      // ponytail: window-constancy across pages holds because TERM_DEPTH (100) is a multiple of the
-      // page size (20) — the last issued page's from+size equals TERM_DEPTH, so every page's
-      // window_size = max(TERM_DEPTH, from+size) is a constant TERM_DEPTH. If TERM_DEPTH ever stops
-      // being a multiple of the page size, round this up to a page boundary or the last page rescores
-      // a wider window than the others and paged order goes inconsistent.
-      ...(rescoreQuery
-        ? { rescoreQuery, rescoreWeight, rescoreWindow: TERM_DEPTH }
-        : {}),
-    });
-    for (const h of result.hits) {
-      ranked.push(h.cwid);
-      hits.push(h);
-    }
-    if (
-      ranked.length >= TERM_DEPTH ||
-      result.hits.length < result.pageSize || // authoritative page size, short page = last
-      ranked.length >= result.total
-    ) {
-      break;
-    }
-  }
-  return { ranked: ranked.slice(0, TERM_DEPTH), hits };
+  // ONE request for the whole TERM_DEPTH pool (was a 5-page loop). An OpenSearch `rescore` is only
+  // internally consistent WITHIN a single request; paging it re-ordered 5 separate top-100 windows
+  // that never stitched into a stable set, so candidate counts drifted with λ. `pageSize: TERM_DEPTH`
+  // overrides `searchPeople`'s default-20 page for `from`/`size`/`window_size` (see its docblock), so
+  // the rescore now applies exactly once over the full pool — genuinely recall-neutral.
+  const result = await searchPeople({
+    q: clusterQuery,
+    page: 0,
+    pageSize: TERM_DEPTH,
+    shape: "topic",
+    relevanceMode: "v3",
+    // Attribution boost spans the merged synonyms; the signals below graduate its
+    // weight and are only read on the topic shape (absent ⇒ boost dropped).
+    meshDescendantUis: descendantUis.length > 0 ? descendantUis : undefined,
+    meshMatchTier: rep
+      ? meshMatchTier(rep.confidence, rep.curatedTopicAnchors.length)
+      : undefined,
+    meshAmbiguous: rep?.ambiguous,
+    meshMatchedFormLength: rep?.matchedForm.length,
+    meshDescriptorName: rep?.name,
+    // Topical fit only — no employment priors (§4; the `grantProminence` doc names
+    // this exact caller as the intended `false`).
+    facultyProminence: false,
+    grantProminence: false,
+    // #1689 — ASK FOR THE EVIDENCE. This is the whole fix, and it is three options on a
+    // call this spine already makes.
+    //
+    // The console's "why this match" block was empty in prod because the SPINE never
+    // produced `evidence`, and two comments in this repo (this file's, and the contract's)
+    // blamed `skipFacetAggs`. THAT WAS WRONG, and it is worth being explicit about, because
+    // acting on it would have made things worse: `skipFacetAggs` is read at exactly one
+    // place (`...(opts.skipFacetAggs ? {} : { aggs })`) and gates only the nine People-index
+    // FACET aggs. It appears nowhere in `reasonAggEligible`. The real gate is `matchExplain`,
+    // which defaults to FALSE — the spine simply never asked. "Fixing" the stated cause by
+    // dropping `skipFacetAggs` would have re-added the size-200 `deptDivKey` agg to every
+    // fan-out call, re-tripped the breaker, and STILL produced no evidence.
+    //
+    // `reasonFromDoc` + `meshDescriptorUi` together select the CHEAP path: the tagged count
+    // is an O(1) read of the people-doc's own `meshSubtreeCounts[ui]`, so a resolved concept
+    // issues NO publications-index query at all. `rep` was already in hand for the
+    // attribution boost — the descriptor UI was sitting right there, unread.
+    matchExplain: true,
+    reasonFromDoc: true,
+    meshDescriptorUi: rep?.descriptorUi,
+    // Full active-scholar pool (directory baseline).
+    filters: { includeIncomplete: undefined },
+    // Fan-out breaker: this call reads only hits/total (facets are discarded), so skip the
+    // nine People-index facet aggregations. Sending them on every one of the per-concept
+    // sequential calls piled up the per-request heap (incl. a size-200 `deptDivKey` terms agg)
+    // that tripped the OpenSearch parent circuit breaker on the broadest sponsor pastes.
+    // Recall-neutral — aggs never touch hits, scoring, or ordering.
+    skipFacetAggs: true,
+    // D1 — project the precomputed most-recent-pub year for the recency weight. Gated so the
+    // off path keeps today's `_source` shape and hit payload.
+    includeMostRecentPub: includeRecency,
+    // Matcha's A–Z sort key. UNCONDITIONAL, unlike the year above: sorting by last name is a
+    // presentation affordance that must not inherit the recency flag's fate. Free — the field is
+    // already stored for the directory's own A–Z sort, this only projects it.
+    includeLastName: true,
+    // MATCHA_GLOSS_RERANK — spread ONLY when a gloss is in hand, so the off-path opts are
+    // byte-identical. `rescoreWindow: TERM_DEPTH` == the single-request `size`, so the rescore
+    // window spans the whole pool and every hit is re-ordered exactly once.
+    ...(rescoreQuery
+      ? { rescoreQuery, rescoreWeight, rescoreWindow: TERM_DEPTH }
+      : {}),
+  });
+  // size == TERM_DEPTH caps the response, so slice is a defensive no-op.
+  const ranked = result.hits.map((h) => h.cwid).slice(0, TERM_DEPTH);
+  const hits = result.hits.slice(0, TERM_DEPTH);
+  return { ranked, hits };
 }
 
 /**
@@ -831,7 +818,7 @@ export async function rankResearchersForDescriptionSpine(
     // the per-concept fan-out above and was then thrown away: the old code looked up the single
     // best-ranked concept and dropped the others on the floor. This is a Map read per
     // contribution, and no OpenSearch traffic whatsoever. That distinction is load-bearing on
-    // this route: the fan-out (MAX_TERMS × MAX_PAGES sequential `searchPeople` calls) is
+    // this route: the fan-out (MAX_TERMS sequential `searchPeople` calls) is
     // EXACTLY the budget the OpenSearch parent circuit breaker polices, and it is why
     // `skipFacetAggs` and the 12→8 MAX_TERMS cut exist. A richer card that spent more of that
     // budget would be a bad trade; this one spends none of it.

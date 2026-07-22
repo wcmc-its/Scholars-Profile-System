@@ -20,7 +20,7 @@
  *  - redundant phrasing collapses into ONE `searchPeople` call;
  *  - the vocab loads with a deterministic order (bake-off run-to-run comparability);
  *  - extracted terms are capped at MAX_TERMS (bounded per-request fan-out);
- *  - paging keys off the reported `result.pageSize`, not a copied constant;
+ *  - each cluster's pool is retrieved in ONE size-TERM_DEPTH request (recall-neutral rescore);
  *  - empty/whitespace/control-char paste short-circuits with no vocab load or search;
  *  - a `searchPeople` failure propagates (no silent partial results).
  * Mocks db + searchPeople + matchQueryToTaxonomy + extractMatchaConcepts (never
@@ -615,6 +615,7 @@ describe("rankResearchersForDescriptionSpine", () => {
     }
   });
 
+
   // ── Measures producer (#1654) ──────────────────────────────────────────────
   it("hydrates career stage + clinician from Scholar; a cwid with no row carries NO measures", async () => {
     // `searchPeople`'s headless shape has neither signal, so the spine reads them for the
@@ -653,29 +654,27 @@ describe("rankResearchersForDescriptionSpine", () => {
     expect(ghost?.measures).toBeUndefined();
   });
 
-  it("pages by the reported result.pageSize, not a copied constant", async () => {
+  it("retrieves each cluster's pool in ONE size-TERM_DEPTH request, in rank order (no paging)", async () => {
     mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
     mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
     mockMeshDescriptorFindMany.mockResolvedValue([
       { descriptorUi: "D_CANCER", localPubCoverage: 0.5 },
     ]);
-    // Three FULL pages of 2 (total 6). A break keyed to a hard-coded 20 would stop
-    // after page 0 (2 < 20); keying to the reported pageSize pages to the total.
-    const pages = [
-      ["a", "b"],
-      ["c", "d"],
-      ["e", "f"],
-    ];
-    mockSearchPeople.mockImplementation(async ({ page }: { page: number }) => ({
-      hits: pages[page].map(hit),
+    // Recall-neutrality fix: the pool now arrives in ONE size-TERM_DEPTH request (was up to 5 paged
+    // calls, each rescored independently — the 5 top-100 windows never stitched, so candidate counts
+    // drifted with λ). One request, all hits taken in rank order, no second round-trip; a paged
+    // rescore can't reappear.
+    mockSearchPeople.mockImplementation(async () => ({
+      hits: ["a", "b", "c", "d", "e", "f"].map(hit),
       total: 6,
-      pageSize: 2,
+      pageSize: 100,
     }));
 
     const { candidates: out } = await rankResearchersForDescriptionSpine("cancer research");
 
-    expect(mockSearchPeople).toHaveBeenCalledTimes(3);
-    expect(mockSearchPeople.mock.calls.map((c) => c[0].page)).toEqual([0, 1, 2]);
+    expect(mockSearchPeople).toHaveBeenCalledTimes(1);
+    expect(mockSearchPeople.mock.calls[0][0].page).toBe(0);
+    expect(mockSearchPeople.mock.calls[0][0].pageSize).toBe(100); // TERM_DEPTH
     expect(out.map((r) => r.cwid)).toEqual(["a", "b", "c", "d", "e", "f"]);
   });
 
