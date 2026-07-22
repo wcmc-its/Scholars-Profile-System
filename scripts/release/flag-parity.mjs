@@ -111,6 +111,92 @@ if (dumpAt !== -1) {
   process.exit(0);
 }
 
+// --- drift mode: synthesized app env vs a RUNNING task definition (#1765) ---
+// The mirror of the flag-parity gate above: CD ships a new `:latest` image on
+// every merge WITHOUT registering a new task definition, but env vars live in
+// the task def — so a merged flag stays DARK (undefined at runtime) until its
+// own `cdk deploy Sps-App-<env>`. Nothing else diffs the two. Feed the running
+// task def in and this fails when it's behind cdk source:
+//   aws ecs describe-task-definition --task-definition sps-app-staging \
+//     | node scripts/release/flag-parity.mjs --drift staging -
+// Select the app container by `name === "app"`, NEVER containerDefinitions[0]:
+// the otel-collector sidecar reorders between revisions, so [0] silently reads
+// the sidecar's env and every flag looks "missing".
+function classifyDrift(synth, containers) {
+  const app = Array.isArray(containers) ? containers.find((c) => c.name === "app") : undefined;
+  if (!app) return { appFound: false, names: (containers ?? []).map((c) => c.name) };
+  const running = Object.fromEntries((app.environment ?? []).map((e) => [e.name, e.value]));
+  const missing = []; // in cdk source, absent from running  → merged-but-dark
+  const diff = [];    // in both, value differs              → flipped-but-stale
+  for (const [k, v] of Object.entries(synth)) {
+    if (!(k in running)) missing.push(k);
+    else if (running[k] !== v) diff.push({ key: k, running: running[k], source: v });
+  }
+  const extra = Object.keys(running).filter((k) => !(k in synth)).sort(); // removed from source
+  return { appFound: true, missing: missing.sort(), diff, extra };
+}
+
+const driftAt = process.argv.indexOf("--drift");
+if (driftAt !== -1) {
+  const env = process.argv[driftAt + 1];
+  const src = process.argv[driftAt + 2];
+  if (!perEnv[env] || !src) {
+    console.error("usage: flag-parity.mjs --drift <staging|prod> <taskdef.json|->  (JSON from `aws ecs describe-task-definition`)");
+    process.exit(2);
+  }
+  let td;
+  try {
+    td = JSON.parse(src === "-" ? readFileSync(0, "utf8") : readFileSync(src, "utf8"));
+  } catch {
+    console.error("drift: input is not valid JSON");
+    process.exit(2);
+  }
+  const containers = (td.taskDefinition ?? td).containerDefinitions;
+  const r = classifyDrift(perEnv[env], containers);
+  if (!r.appFound) {
+    console.error(`drift: no container named "app" (found: ${(r.names ?? []).join(", ") || "none"})`);
+    process.exit(2);
+  }
+  if (r.missing.length || r.diff.length) {
+    console.error(`FLAG DRIFT (${env}): the running task definition is behind cdk source — a merged flag is DARK until \`cdk deploy Sps-App-${env}\`.`);
+    if (r.missing.length) {
+      console.error(`  missing from running (${r.missing.length}):`);
+      for (const k of r.missing) console.error(`    ${k} = ${JSON.stringify(perEnv[env][k])}`);
+    }
+    if (r.diff.length) {
+      console.error(`  value drift (${r.diff.length}):`);
+      for (const d of r.diff) console.error(`    ${d.key}: running=${JSON.stringify(d.running)} source=${JSON.stringify(d.source)}`);
+    }
+    if (r.extra.length) console.error(`  (informational) ${r.extra.length} running-only key(s) removed from source: ${r.extra.join(", ")}`);
+    process.exit(1);
+  }
+  console.log(`flag-drift OK (${env}): running app container matches synthesized env (${Object.keys(perEnv[env]).length} literal keys)${r.extra.length ? `; ${r.extra.length} extra running-only: ${r.extra.join(", ")}` : ""}.`);
+  process.exit(0);
+}
+
+// --- self-check for the drift classifier (no framework): node flag-parity.mjs --selfcheck ---
+if (process.argv.includes("--selfcheck")) {
+  const assert = (cond, msg) => { if (!cond) { console.error(`selfcheck FAIL: ${msg}`); process.exit(1); } };
+  // otel sidecar deliberately FIRST — proves selection is by name, not [0].
+  const containers = [
+    { name: "otel-collector", environment: [{ name: "OTEL_ONLY", value: "1" }] },
+    { name: "app", environment: [{ name: "A", value: "on" }, { name: "B", value: "old" }, { name: "GONE", value: "1" }] },
+  ];
+  const synth = { A: "on", B: "new", C: "off" };
+  const r = classifyDrift(synth, containers);
+  assert(r.appFound, "should select the container named 'app', not the [0] sidecar");
+  assert(JSON.stringify(r.missing) === JSON.stringify(["C"]), `missing should be [C], got ${JSON.stringify(r.missing)}`);
+  assert(r.diff.length === 1 && r.diff[0].key === "B", `diff should be [B], got ${JSON.stringify(r.diff)}`);
+  assert(JSON.stringify(r.extra) === JSON.stringify(["GONE"]), `extra should be [GONE], got ${JSON.stringify(r.extra)}`);
+  // no false positives when running matches source exactly
+  const clean = classifyDrift({ A: "on" }, [{ name: "app", environment: [{ name: "A", value: "on" }] }]);
+  assert(clean.missing.length === 0 && clean.diff.length === 0, "identical env must report no drift");
+  // missing 'app' container is a hard error, not a silent pass
+  assert(!classifyDrift(synth, [{ name: "otel-collector", environment: [] }]).appFound, "no 'app' container must be flagged");
+  console.log("flag-parity drift selfcheck OK");
+  process.exit(0);
+}
+
 // --- consumed keys: process.env.X and resolver-style env.X reads in code ---
 const consumed = new Set();
 const READ = /(?:process\.env|(?<![\w.$])env)\.([A-Z][A-Z0-9_]+)/g;

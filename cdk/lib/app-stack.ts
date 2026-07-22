@@ -1078,6 +1078,14 @@ export class AppStack extends Stack {
         streamPrefix: "app",
       }),
       portMappings: [{ containerPort: 3000, protocol: ecs.Protocol.TCP }],
+      // FLAGS LIVE HERE, NOT IN THE IMAGE. Merging a flag does NOT turn it on:
+      // the app image is `:latest` (mutable), so CD ships new code without a new
+      // task def, but env vars only move on a manual `cdk deploy Sps-App-<env>`.
+      // Until then the flag is `undefined` at runtime and the feature is DARK,
+      // even though the CDK source, the PR, and every handoff say "on" (#1765).
+      // Check for drift:
+      //   aws ecs describe-task-definition --task-definition sps-app-<env> \
+      //     | node scripts/release/flag-parity.mjs --drift <env> -
       environment: {
         NODE_ENV: "production",
         PORT: "3000",
