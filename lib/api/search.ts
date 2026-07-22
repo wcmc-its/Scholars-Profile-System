@@ -2141,11 +2141,11 @@ export async function searchPeople(opts: {
   // floor is ambiguity OR an ultra-short matched form — NOT anchor status — so
   // an unanchored entry-term still escalates (the tylenol 0→N recall win).
   //
-  // HOW the count gate is sourced is the B2 lever below: by default a dedicated
-  // cheap size:0 pre-count of the lexical predicate decides up front; with
-  // SEARCH_PEOPLE_CONCEPT_PRECOUNT=off the count comes from the main search's
-  // OWN total and we re-run escalated only on sparse (one fewer round-trip on
-  // the common non-sparse path). Both source the SAME lexical total against the
+  // HOW the count gate is sourced is the B2 lever below: by default (#1414 the
+  // reorder) the count comes from the main search's OWN total and we re-run
+  // escalated only on sparse (one fewer round-trip on the common non-sparse
+  // path); with SEARCH_PEOPLE_CONCEPT_PRECOUNT=on a dedicated cheap size:0
+  // pre-count of the lexical predicate decides up front instead. Both source the SAME lexical total against the
   // SAME predicate, so the escalation decision — and therefore `badge == list`
   // — is identical under either state.
   //
@@ -2202,13 +2202,14 @@ export async function searchPeople(opts: {
     ];
   };
 
-  // B2 — SEARCH_PEOPLE_CONCEPT_PRECOUNT (default on = today's pre-count path).
+  // B2 — SEARCH_PEOPLE_CONCEPT_PRECOUNT (#1414 default OFF = the reorder; `=on`
+  // opts into the dedicated pre-count path).
   const conceptPrecount = resolvePeopleConceptPrecount();
 
-  // Flag-ON (default): a dedicated size:0 pre-count of the LEXICAL predicate
+  // Flag-ON (`=on`): a dedicated size:0 pre-count of the LEXICAL predicate
   // gates the escalation up front, so the count/full bodies built below
   // dispatch once (already escalated when sparse). Mutating AFTER the pre-count
-  // request was dispatched keeps that count lexical. Flag-OFF: skip the
+  // request was dispatched keeps that count lexical. Flag-OFF (default): skip the
   // dedicated pre-count — the reordered count-only and full paths below read
   // the main search's own total (already track_total_hits) and re-run escalated
   // only on sparse, dropping this hop on the common non-sparse case (the win).
