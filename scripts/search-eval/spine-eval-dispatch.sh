@@ -72,9 +72,13 @@ echo "  network config OK ($(jq -r '.awsvpcConfiguration.subnets|length' <<<"$NE
 echo "staging payload -> s3://${BUCKET}/${PREFIX}/"
 aws s3 cp "$EXTRACTIONS"          "s3://$BUCKET/$PREFIX/extractions.json" --only-show-errors
 aws s3 cp "$DIR/spine-eval-run.ts" "s3://$BUCKET/$PREFIX/run.ts"           --only-show-errors
+# Ship the arm→flag module too: run.ts imports it, and the upload-run.ts pattern exists so eval
+# logic changes need NO image rebuild — the image only has to carry the spine (the rescore code).
+aws s3 cp "$DIR/spine-eval-arm.ts" "s3://$BUCKET/$PREFIX/arm.ts"           --only-show-errors
 
 GET_DATA="$(aws s3 presign "s3://$BUCKET/$PREFIX/extractions.json" --expires-in "$EXPIRY")"
 GET_RUN="$(aws s3 presign  "s3://$BUCKET/$PREFIX/run.ts"           --expires-in "$EXPIRY")"
+GET_ARM="$(aws s3 presign  "s3://$BUCKET/$PREFIX/arm.ts"           --expires-in "$EXPIRY")"
 
 # One arm per PROCESS — the memo key does not include the arm and the cache has no clear, so a
 # second arm in the same node process would be served the first arm's seeded extraction.
@@ -96,7 +100,7 @@ cd /app
 node -e '"'"'
 const fs = require("fs");
 (async () => {
-  for (const [url, path] of [[process.env.GET_RUN, "/app/scripts/search-eval/_spine-eval-run.ts"], [process.env.GET_DATA, "/tmp/data.json"]]) {
+  for (const [url, path] of [[process.env.GET_RUN, "/app/scripts/search-eval/_spine-eval-run.ts"], [process.env.GET_ARM, "/app/scripts/search-eval/spine-eval-arm.ts"], [process.env.GET_DATA, "/tmp/data.json"]]) {
     const r = await fetch(url);
     if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
     const buf = Buffer.from(await r.arrayBuffer());
@@ -124,10 +128,10 @@ TASK_ARN="$(aws ecs run-task \
   --launch-type FARGATE \
   --network-configuration "$NETCFG" \
   --overrides "$(jq -n \
-      --arg s "$SCRIPT" --arg gr "$GET_RUN" --arg gd "$GET_DATA" \
+      --arg s "$SCRIPT" --arg gr "$GET_RUN" --arg ga "$GET_ARM" --arg gd "$GET_DATA" \
       --arg ob "$OUT_BASE" --arg ar "$ARMS" \
       '{containerOverrides:[{name:"etl",command:["bash","-c",$s],environment:[
-         {name:"GET_RUN",value:$gr},{name:"GET_DATA",value:$gd},
+         {name:"GET_RUN",value:$gr},{name:"GET_ARM",value:$ga},{name:"GET_DATA",value:$gd},
          {name:"OUT_BASE",value:$ob},{name:"ARMS",value:$ar}]}]}')" \
   --query 'tasks[0].taskArn' --output text)"
 
