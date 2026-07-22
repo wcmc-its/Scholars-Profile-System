@@ -12,6 +12,7 @@ import { cachedReasonAgg } from "@/lib/api/reason-agg-cache";
 import { extractMatchaConcepts, type MatchaExtraction } from "@/lib/api/matcha-extract";
 import { normalizeDescription } from "@/lib/api/matcha";
 import { PINNED_MODEL } from "./spine-eval-extract";
+import { glossArmEnv } from "./spine-eval-arm";
 
 // A term no extractor would ever emit — if we get it back, the value came from OUR seed and
 // nothing else. Bedrock is never reached, so this also passes with no AWS credentials.
@@ -39,6 +40,14 @@ async function main() {
   assert.equal(got.concepts[0]?.term, SENTINEL, "SEED MISSED — key derivation disagrees");
   assert.equal(got.concepts.length, 2);
   console.log("✓ seed lands: extractMatchaConcepts served the seeded extraction, no Bedrock call");
+
+  // 3. Arm → env mapping. A wrong mapping ⇒ a base arm and a gloss arm produce IDENTICAL rankings
+  // and the sweep reads as "λ had no effect" — a false-negative kill, invisible to the seed guard.
+  assert.deepEqual(glossArmEnv("base"), {}, "base arm must leave the rescore off");
+  assert.deepEqual(glossArmEnv("gloss-0.25"), { MATCHA_GLOSS_RERANK: "on", MATCHA_GLOSS_RERANK_LAMBDA: "0.25" });
+  assert.deepEqual(glossArmEnv("gloss-0.5"), { MATCHA_GLOSS_RERANK: "on", MATCHA_GLOSS_RERANK_LAMBDA: "0.5" });
+  assert.deepEqual(glossArmEnv("gloss-1.0"), { MATCHA_GLOSS_RERANK: "on", MATCHA_GLOSS_RERANK_LAMBDA: "1.0" });
+  console.log("✓ arm→env: base leaves the rescore off; gloss-<λ> turns it on at λ");
 
   console.log("\nALL SELF-CHECKS PASSED — safe to dispatch");
 }
