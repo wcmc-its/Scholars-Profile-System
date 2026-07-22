@@ -24,7 +24,13 @@ import { useEffect, useState } from "react";
 
 import { PrestigeBadge } from "@/components/edit/prestige-badge";
 import type { Prestige } from "@/lib/funding/prestige";
-import { dueUrgency, fitTier, formatDue, type FitTierLabel } from "@/lib/match-display";
+import {
+  deadlineLabel,
+  dueUrgency,
+  fitTier,
+  formatUsd,
+  type FitTierLabel,
+} from "@/lib/match-display";
 
 type Axes = {
   topicAffinity: number;
@@ -78,28 +84,6 @@ const AXES: ReadonlyArray<{ key: keyof Axes; label: string }> = [
 ];
 
 const LIMIT = 25;
-
-function deadlineLabel(dueDate: string | null, status: string): string {
-  if (status === "continuous") return "Rolling · continuous";
-  // A forecasted item without a date yet is NOT rolling — it has a date TBD.
-  if (dueDate === null)
-    return status === "forecasted" ? "Forecasted · date TBD" : "Rolling · continuous";
-  // formatDue renders in UTC: due dates are midnight-UTC instants, so a local
-  // format would show the previous day in US-Eastern (#1608).
-  const formatted = formatDue(dueDate);
-  if (!formatted) return "—";
-  return status === "forecasted" ? `Forecasted · ${formatted}` : `Due ${formatted}`;
-}
-
-/** Compact USD: 500000 → "$500K", 1_200_000 → "$1.2M". */
-function formatUsd(n: number): string {
-  if (n >= 1_000_000) {
-    const m = n / 1_000_000;
-    return `$${m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)}M`;
-  }
-  if (n >= 1_000) return `$${Math.round(n / 1_000)}K`;
-  return `$${n}`;
-}
 
 export function GrantRecsCard({ cwid }: { cwid: string }) {
   const [sort, setSort] = useState<Sort>("fit");

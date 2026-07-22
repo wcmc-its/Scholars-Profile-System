@@ -207,6 +207,33 @@ export function dueUrgency(iso: string | null, now: number): DueUrgency {
   return null;
 }
 
+/**
+ * The at-a-glance deadline phrase for an opportunity. `status` is nullable
+ * because a Matcha `GrantCandidate` carries an unknown status (unlike the
+ * forward matcher's non-null `Opportunity.status`); an unknown status is just
+ * "not continuous / not forecasted", so it falls through to the dated / rolling
+ * branches. formatDue renders in UTC (#1608) — due dates are midnight-UTC.
+ */
+export function deadlineLabel(dueDate: string | null, status: string | null): string {
+  if (status === "continuous") return "Rolling · continuous";
+  // A forecasted item without a date yet is NOT rolling — it has a date TBD.
+  if (dueDate === null)
+    return status === "forecasted" ? "Forecasted · date TBD" : "Rolling · continuous";
+  const formatted = formatDue(dueDate);
+  if (!formatted) return "—";
+  return status === "forecasted" ? `Forecasted · ${formatted}` : `Due ${formatted}`;
+}
+
+/** Compact USD: 500000 → "$500K", 1_200_000 → "$1.2M". */
+export function formatUsd(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return `$${m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)}M`;
+  }
+  if (n >= 1_000) return `$${Math.round(n / 1_000)}K`;
+  return `$${n}`;
+}
+
 /** One researcher's row for the CSV export (selected rows in the matcher). */
 export type ResearcherCsvInput = {
   cwid: string;
