@@ -74,7 +74,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
       },
     },
     "EcsDbBootstrapTaskFamily": {
-      "Description": "SPS one-shot scholars_audit bootstrap task family — run before migrate (#493)",
+      "Description": "SPS one-shot scholars_audit bootstrap task family - run before migrate (#493)",
       "Value": "sps-db-bootstrap-prod",
     },
     "EcsMigrationTaskFamily": {
@@ -91,7 +91,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
       },
     },
     "EcsVerifyGrantsTaskFamily": {
-      "Description": "SPS one-shot grant-equality verify task family — run after db-bootstrap, before the service rolls (ADR-009)",
+      "Description": "SPS one-shot grant-equality verify task family - run after db-bootstrap, before the service rolls (ADR-009)",
       "Value": "sps-verify-grants-prod",
     },
     "EtlEcrRepoUri": {
@@ -3871,7 +3871,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
       },
     },
     "EcsDbBootstrapTaskFamily": {
-      "Description": "SPS one-shot scholars_audit bootstrap task family — run before migrate (#493)",
+      "Description": "SPS one-shot scholars_audit bootstrap task family - run before migrate (#493)",
       "Value": "sps-db-bootstrap-staging",
     },
     "EcsMigrationTaskFamily": {
@@ -3888,7 +3888,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
       },
     },
     "EcsVerifyGrantsTaskFamily": {
-      "Description": "SPS one-shot grant-equality verify task family — run after db-bootstrap, before the service rolls (ADR-009)",
+      "Description": "SPS one-shot grant-equality verify task family - run after db-bootstrap, before the service rolls (ADR-009)",
       "Value": "sps-verify-grants-staging",
     },
     "EtlEcrRepoUri": {

@@ -188,6 +188,18 @@ describe("CenterRosterCard — inline edits", () => {
     expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({ cwid: "new9", action: "add" });
   });
 
+  it("rolls back the optimistic add and shows an error when the response has no JSON body (#1828)", async () => {
+    // A bodyless 401 (e.g. from auth middleware): res.json() rejects. Before the
+    // fix, post() threw past add()'s rollback and left a phantom row with no error.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 401 }));
+    render(<CenterRosterCard {...base} members={[]} programs={PROGRAMS} />);
+    fireEvent.click(screen.getByTestId("typeahead-pick"));
+    fireEvent.click(screen.getByTestId("center-roster-add"));
+    // the optimistic row is inserted, then rolled back once the failed POST settles
+    await waitFor(() => expect(screen.queryByTestId("center-roster-row-new9")).toBeNull());
+    expect(screen.getByText(/wasn't saved/i)).toBeTruthy();
+  });
+
   it("Remove confirms then POSTs action:remove and drops the row", async () => {
     const fetchMock = stubOk();
     render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);

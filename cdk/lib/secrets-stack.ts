@@ -336,7 +336,7 @@ export class SecretsStack extends Stack {
       arns[spec.name] = cfn.ref;
       new CfnOutput(this, `${spec.constructId}Arn`, {
         value: cfn.ref,
-        description: `Secrets Manager ARN — ${spec.name}`,
+        description: `Secrets Manager ARN - ${spec.name}`,
       });
     }
     this.secretArns = arns;
