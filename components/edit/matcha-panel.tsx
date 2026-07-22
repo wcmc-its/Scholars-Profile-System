@@ -303,8 +303,17 @@ function downloadCsv(filename: string, csv: string) {
   URL.revokeObjectURL(url);
 }
 
-export function MatchaPanel() {
-  const [description, setDescription] = useState("");
+export function MatchaPanel({
+  initialDescription,
+  autoRun,
+}: {
+  /** Grant Matcha — seed the ask from an opportunity's title + synopsis so the officer lands on
+   *  the extracted concepts + ranked researchers instead of a blank textarea. */
+  initialDescription?: string;
+  /** Run the seeded ask once on mount (opportunity → people). No-op without initialDescription. */
+  autoRun?: boolean;
+} = {}) {
+  const [description, setDescription] = useState(initialDescription ?? "");
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   // The paste is EDITABLE until a search commits, then the ask (title + read-only, highlighted
   // request + Edit/Re-run) takes its place — the mockup's "THE ASK" section. "Edit paste"
@@ -415,6 +424,17 @@ export function MatchaPanel() {
   useEffect(() => {
     void loadHistory();
   }, [loadHistory]);
+
+  // Grant Matcha — when seeded with an opportunity's text, run the ask once on mount so the
+  // officer lands on the extracted concepts + ranked researchers. Mount-only by design: the
+  // find-researchers MatchedView remounts this per opportunity (via its `key`), so a fresh
+  // opportunity is a fresh mount and the empty dep array is intended, not a missing dependency.
+  useEffect(() => {
+    if (autoRun && (initialDescription ?? "").trim().length > 0) {
+      void runSearch(initialDescription as string);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function deleteSubmission(id: string) {
     try {

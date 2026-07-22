@@ -34,6 +34,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Check, ChevronRight, Download, ExternalLink } from "lucide-react";
 
+import { MatchaPanel } from "@/components/edit/matcha-panel";
 import { PrestigeBadge } from "@/components/edit/prestige-badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { CareerStage } from "@/lib/career-stage";
@@ -327,7 +328,7 @@ function ListSkeleton({ label, rows = 6 }: { label: string; rows?: number }) {
   );
 }
 
-export function FindResearchers() {
+export function FindResearchers({ grantMatcha = false }: { grantMatcha?: boolean } = {}) {
   // Selection lives in the URL (`?opp=`) — deep-linkable, and browser Back
   // returns to the list instead of leaving the console. The page is
   // force-dynamic, so `useSearchParams` needs no Suspense boundary.
@@ -353,7 +354,12 @@ export function FindResearchers() {
       {selectedId === null ? (
         <BrowseList hrefFor={hrefFor} />
       ) : (
-        <MatchedView key={selectedId} opportunityId={selectedId} onBack={() => setSelectedId(null)} />
+        <MatchedView
+          key={selectedId}
+          opportunityId={selectedId}
+          onBack={() => setSelectedId(null)}
+          grantMatcha={grantMatcha}
+        />
       )}
     </div>
   );
@@ -839,15 +845,23 @@ type Status =
 function MatchedView({
   opportunityId,
   onBack,
+  grantMatcha = false,
 }: {
   opportunityId: string;
   onBack: () => void;
+  grantMatcha?: boolean;
 }) {
   const [sort, setSort] = useState<Sort>("fit");
   const [stageLens, setStageLens] = useState(false);
   const [esiOnly, setEsiOnly] = useState(false);
   const [limit, setLimit] = useState<number>(25);
   const [status, setStatus] = useState<Status>({ kind: "loading" });
+  // Grant Matcha (increment 1) — which engine ranks researchers for this opportunity. Default
+  // "topic" keeps the structured topic-vector matcher; "matcha" runs the opportunity's text
+  // through the Matcha spine. Shown only when `grantMatcha` is on; the topic fetch below still
+  // runs (it supplies the opportunity title + synopsis the Matcha ask is seeded from), so
+  // flipping to Matcha costs no extra round-trip.
+  const [mode, setMode] = useState<"topic" | "matcha">("topic");
 
   useEffect(() => {
     let active = true;
@@ -890,6 +904,12 @@ function MatchedView({
     };
   }, [opportunityId, sort, stageLens, esiOnly, limit]);
 
+  // Grant Matcha — seed the ask from the opportunity text the topic fetch already returned.
+  const oppMeta = status.kind === "ok" ? status.view.opportunity : null;
+  const askSeed = [oppMeta?.title, oppMeta?.synopsis]
+    .filter((s): s is string => Boolean(s && s.trim()))
+    .join("\n\n");
+
   return (
     <div>
       <button
@@ -900,6 +920,48 @@ function MatchedView({
         <ArrowLeft className="size-4" aria-hidden /> Back to opportunities
       </button>
 
+      {grantMatcha ? (
+        <div
+          role="tablist"
+          aria-label="Match engine"
+          className="mb-4 inline-flex rounded-md border border-[var(--color-border)] p-0.5 text-sm"
+        >
+          {(["topic", "matcha"] as const).map((m) => {
+            const isActive = mode === m;
+            return (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => setMode(m)}
+                data-testid={`match-mode-${m}`}
+                className={[
+                  "rounded px-3 py-1 transition-colors",
+                  isActive
+                    ? "bg-[var(--color-accent-slate)] font-medium text-white"
+                    : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
+                ].join(" ")}
+              >
+                {m === "topic" ? "Topic match" : "Matcha"}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {grantMatcha && mode === "matcha" ? (
+        status.kind === "loading" ? (
+          <ListSkeleton label="Loading opportunity…" />
+        ) : status.kind === "error" ? (
+          <p className="text-sm text-[var(--color-text-secondary)]">{status.message}</p>
+        ) : (
+          // Seed the Matcha ask from this opportunity's title + synopsis and run it once. `key`
+          // remounts the panel per opportunity, so its mount-only auto-run fires fresh each time.
+          <MatchaPanel key={opportunityId} initialDescription={askSeed} autoRun />
+        )
+      ) : (
+        <>
       <div className="mb-4 flex flex-wrap items-end gap-x-4 gap-y-3">
         <label className="flex items-center gap-2 text-sm">
           <input
@@ -943,6 +1005,8 @@ function MatchedView({
       </div>
 
       <Results status={status} sort={sort} setSort={setSort} limit={limit} />
+        </>
+      )}
     </div>
   );
 }

@@ -279,6 +279,28 @@ afterEach(() => {
 });
 
 describe("MatchaPanel", () => {
+  // ── Grant Matcha — opportunity-seeded auto-run (convergence plan increment 1) ──
+  it("Grant Matcha — autoRun seeds the ask and fires exactly one search on mount", async () => {
+    const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE });
+    render(
+      <MatchaPanel initialDescription="glioblastoma immunotherapy CAR-T persistence" autoRun />,
+    );
+    // The seed fires exactly one ranking POST, carrying the seeded text verbatim.
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(1));
+    const post = fetchMock.mock.calls.find(
+      (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
+    )!;
+    const body = JSON.parse((post[1] as { body: string }).body) as { description: string };
+    expect(body.description).toBe("glioblastoma immunotherapy CAR-T persistence");
+  });
+
+  it("Grant Matcha — a seed WITHOUT autoRun never auto-searches (blank panel, as before)", async () => {
+    const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE });
+    render(<MatchaPanel initialDescription="glioblastoma immunotherapy" />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled()); // the history GET on mount
+    expect(rankCalls(fetchMock)).toBe(0);
+  });
+
   // ── The contract's hinge ────────────────────────────────────────────────────
   it("re-ranks LIVE on a slider move — with NO new fetch", async () => {
     const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE });

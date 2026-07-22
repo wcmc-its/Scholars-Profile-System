@@ -33,7 +33,7 @@ const TABS: ReadonlyArray<{ key: TabKey; label: string }> = [
   { key: "submissions", label: "Submissions" },
 ];
 
-export function FindResearchersTabs() {
+export function FindResearchersTabs({ grantMatcha = false }: { grantMatcha?: boolean } = {}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const active: TabKey = searchParams.get("tab") === "submissions" ? "submissions" : "browse";
@@ -75,7 +75,7 @@ export function FindResearchersTabs() {
       </div>
       {active === "browse" ? (
         <>
-          <FindResearchers />
+          <FindResearchers grantMatcha={grantMatcha} />
           <p className="text-muted-foreground mt-8 text-sm" data-slot="intake-affordance">
             Not in the list?{" "}
             <Link
