@@ -500,6 +500,30 @@ export type MatchaEvidence = {
   }[];
 };
 
+/**
+ * A ranked funding OPPORTUNITY — the grant-target analogue of {@link MatchaCandidate}, produced by
+ * `rankGrantsForDescriptionSpine` (Grant Matcha convergence, increment 2). It carries the two
+ * candidate-agnostic fields the client re-rank needs — `fusedScore` + `contributions` (THE HINGE) —
+ * so the same `rerankCandidates`/`fusedScore` machinery works over grants; the rest are opportunity
+ * display facts. No person fields (cwid/slug/department/measures/headshot), by design.
+ */
+export type GrantCandidate = {
+  opportunityId: string;
+  title: string | null;
+  sponsor: string | null;
+  mechanism: string | null;
+  status: string | null;
+  /** ISO date string, or null when the opportunity carries no deadline. */
+  dueDate: string | null;
+  awardCeiling: number | null;
+  numberOfAwards: number | null;
+  synopsis: string | null;
+  /** Fused RRF score at DEFAULT weights — same semantics as {@link MatchaCandidate.fusedScore}. */
+  fusedScore: number;
+  /** THE HINGE — every concept this opportunity ranked under (same shape as people). */
+  contributions: MatchaContribution[];
+};
+
 export type MatchaCandidate = {
   cwid: string;
   name: string;
