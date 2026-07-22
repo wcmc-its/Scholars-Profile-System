@@ -29,6 +29,7 @@ import { MatchaPanel } from "@/components/edit/matcha-panel";
 import { conceptWeight } from "@/lib/api/matcha-contract";
 import type {
   CulledConcept,
+  GrantCandidate,
   MatchaCandidate,
   MatchaConcept,
   MatchaPreference,
@@ -161,7 +162,11 @@ const BESPOKE: MatchaCandidate[] = [
  */
 function stubFetch(payload: {
   concepts: MatchaConcept[];
-  candidates: MatchaCandidate[];
+  // Grant Matcha — the grant path ships GrantCandidate[] under the same `candidates` key; the panel
+  // branches on its own `target` state, so the stub just echoes whichever shape the test provides.
+  candidates: MatchaCandidate[] | GrantCandidate[];
+  /** Grant Matcha — echoed back so a grant fixture reads `{ target: "grants", ... }` on the wire. */
+  target?: "grants";
   preferences?: MatchaPreference[];
   /** #1780 Phase 2 — the culled tail, for the click-to-include chips. */
   culled?: CulledConcept[];
@@ -299,6 +304,89 @@ describe("MatchaPanel", () => {
     render(<MatchaPanel initialDescription="glioblastoma immunotherapy" />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalled()); // the history GET on mount
     expect(rankCalls(fetchMock)).toBe(0);
+  });
+
+  // ── Grant Matcha — query→grants target toggle + grant cards (increment 3) ──
+  const GRANTS: GrantCandidate[] = [
+    {
+      opportunityId: "PA-26-001",
+      title: "Glioblastoma CAR-T Program",
+      sponsor: "NIH/NCI",
+      mechanism: "R01",
+      status: "posted",
+      dueDate: "2026-09-30",
+      awardCeiling: 2_000_000,
+      numberOfAwards: 5,
+      synopsis: "Adoptive cell therapy for GBM.",
+      fusedScore: 0.9,
+      contributions: [
+        { term: "Immuno-oncology", rank: 1 },
+        { term: "Cancer Metabolism", rank: 3 },
+      ],
+    },
+    {
+      opportunityId: "PA-26-002",
+      title: "Tumor Metabolism Pilot",
+      sponsor: "DoD CDMRP",
+      mechanism: null, // a null mechanism must not print "· null ·"
+      status: "forecasted",
+      dueDate: null, // forecasted + no date ⇒ "date TBD", not "Rolling"
+      awardCeiling: null,
+      numberOfAwards: null,
+      synopsis: null,
+      fusedScore: 0.3,
+      contributions: [{ term: "Cancer Metabolism", rank: 1 }],
+    },
+  ];
+
+  it("Grant Matcha — the target toggle is absent unless grantMatcha is on (dark by default)", async () => {
+    const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE });
+    render(<MatchaPanel />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled()); // let the mount history GET settle
+    expect(screen.queryByTestId("matcha-target-grants")).toBeNull();
+    expect(screen.getByRole("button", { name: "Rank researchers" })).toBeTruthy();
+  });
+
+  it("Grant Matcha — switching to Opportunities POSTs target:grants and renders grant cards", async () => {
+    const fetchMock = stubFetch({ target: "grants", concepts: CONCEPTS, candidates: GRANTS });
+    render(<MatchaPanel grantMatcha />);
+
+    // Switch corpus, then rank. The submit label follows the target.
+    fireEvent.click(screen.getByTestId("matcha-target-grants"));
+    fireEvent.change(screen.getByLabelText(/the ask/i), {
+      target: { value: "glioblastoma adoptive cell therapy" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rank opportunities" }));
+
+    // The card renders: title, the at-a-glance fact line, tier, and the "why it matched" chips.
+    const title = await screen.findByText("Glioblastoma CAR-T Program");
+    const card = title.closest("[data-slot='grant-result-card']") as HTMLElement;
+    expect(card.textContent).toContain("NIH/NCI · R01 · Due Sep 30, 2026 · up to $2M");
+    expect(card.textContent).toContain("Strong fit");
+    expect(card.textContent).toContain("Immuno-oncology · Cancer Metabolism");
+
+    // A null-mechanism / forecasted-no-date row reads cleanly, and it tiers Good relative to the top.
+    const second = (await screen.findByText("Tumor Metabolism Pilot")).closest(
+      "[data-slot='grant-result-card']",
+    ) as HTMLElement;
+    expect(second.textContent).toContain("DoD CDMRP · Forecasted · date TBD");
+    expect(second.textContent).toContain("Good fit");
+
+    // Exactly one ranking POST, and it carried the grant target — proving the client reached the
+    // increment-2 route branch instead of the people path.
+    expect(rankCalls(fetchMock)).toBe(1);
+    const post = fetchMock.mock.calls.find(
+      (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
+    )!;
+    const body = JSON.parse((post[1] as { body: string }).body) as {
+      description: string;
+      target: string;
+    };
+    expect(body.target).toBe("grants");
+    expect(body.description).toBe("glioblastoma adoptive cell therapy");
+
+    // No person rows leaked into the grant view.
+    expect(screen.queryByText("Alice Alpha")).toBeNull();
   });
 
   // ── The contract's hinge ────────────────────────────────────────────────────

@@ -105,10 +105,17 @@ import {
   type MatchaFitTier,
   type MatchaResponse,
   type MatchaPreference,
+  type GrantCandidate,
 } from "@/lib/api/matcha-contract";
 import type { CareerStage } from "@/lib/career-stage";
 import { buildMatchaCsv } from "@/lib/edit/matcha-export";
-import { careerStageLabel, roleCategoryLabel } from "@/lib/match-display";
+import {
+  careerStageLabel,
+  roleCategoryLabel,
+  deadlineLabel,
+  dueUrgency,
+  formatUsd,
+} from "@/lib/match-display";
 import { extractLastNameSort } from "@/lib/name-sort";
 import { profilePath } from "@/lib/profile-url";
 import { markPaste, markedConceptCount } from "@/lib/matcha-paste-highlight";
@@ -306,14 +313,23 @@ function downloadCsv(filename: string, csv: string) {
 export function MatchaPanel({
   initialDescription,
   autoRun,
+  grantMatcha = false,
 }: {
   /** Grant Matcha — seed the ask from an opportunity's title + synopsis so the officer lands on
    *  the extracted concepts + ranked researchers instead of a blank textarea. */
   initialDescription?: string;
   /** Run the seeded ask once on mount (opportunity → people). No-op without initialDescription. */
   autoRun?: boolean;
+  /** Grant Matcha (increment 3) — show the people|grants target toggle. Server-computed from
+   *  `GRANT_MATCHA`; the API route re-checks the flag as the real boundary. */
+  grantMatcha?: boolean;
 } = {}) {
   const [description, setDescription] = useState(initialDescription ?? "");
+  // Grant Matcha — which corpus this ask searches. "grants" POSTs `{ target: "grants" }` and
+  // renders GrantCandidate cards; "people" is the original sponsor→researcher path. Toggle is only
+  // reachable when `grantMatcha`, so this is pinned to "people" on the dark surface.
+  const [target, setTarget] = useState<"people" | "grants">("people");
+  const [grantCandidates, setGrantCandidates] = useState<GrantCandidate[]>([]);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   // The paste is EDITABLE until a search commits, then the ask (title + read-only, highlighted
   // request + Edit/Re-run) takes its place — the mockup's "THE ASK" section. "Edit paste"
@@ -398,6 +414,8 @@ export function MatchaPanel({
   // from a clean slate, and `matchedText` cannot see that: it would be unchanged.
   const [runId, setRunId] = useState(0);
   const pending = status.kind === "loading";
+  // What this ask ranks — drives the submit/loading/empty copy so grant mode never says "researchers".
+  const targetNoun = target === "grants" ? "opportunities" : "researchers";
 
   // #6d — the retained searches, from the SERVER. This REPLACES the old localStorage history
   // outright rather than sitting beside it: the server list does everything the private one did
@@ -474,13 +492,42 @@ export function MatchaPanel({
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
         // #1780 Phase 2 — force-include the officer's culled picks. Absent opt ⇒ a fresh search ⇒ [].
-        body: JSON.stringify({ description: text, include: opts.include ?? [] }),
+        // `target` selects the corpus; the route ignores anything but "grants" (→ people path).
+        body: JSON.stringify({ description: text, include: opts.include ?? [], target }),
       });
       if (r.ok) {
+        // Grant Matcha (increment 3) — the funding-opportunities corpus. The route's grant branch
+        // ships a DIFFERENT candidate shape (GrantCandidate[]) and no preferences/retention, so this
+        // parses + fans out separately from the people path below. `concepts`/`titleSummary` are the
+        // same extraction, so the ask card (derived from them) renders unchanged.
+        if (target === "grants") {
+          const data = (await r.json()) as {
+            concepts?: MatchaConcept[];
+            candidates?: GrantCandidate[];
+            titleSummary?: string;
+            culled?: CulledConcept[];
+          };
+          clearFilters();
+          setCandidates([]); // the people list stays empty in grant mode
+          setGrantCandidates(data.candidates ?? []);
+          setConcepts(data.concepts ?? []);
+          setCulled(data.culled ?? []);
+          if (!opts.include) setIncluded([]);
+          setTitleSummary(data.titleSummary);
+          setMatchedText(text);
+          setEditing(false);
+          setShowFullText(false);
+          setRunId((n) => n + 1);
+          setPreferences([]); // grant path ships none — never surface stale people prefs in the ask
+          setActivePrefs(new Set());
+          setStatus({ kind: "ok" });
+          return;
+        }
         // Typed as the CONTRACT's response, not an anonymous shape. The contract's headline
         // promise is that a drift between ranker and panel is a compile error; an inline
         // `{candidates?; concepts?}` opted the envelope out of exactly that.
         const data = (await r.json()) as Partial<MatchaResponse>;
+        setGrantCandidates([]); // toggling back to people clears any prior grant results
         clearFilters(); // stale facet selections must not silently hide fresh results
         setExpanded(new Set()); // D8 — previous run's per-row expansions don't carry to new people
         setShortlist(new Set()); // the shortlist is per-ask: last sponsor's picks are not this one's
@@ -510,10 +557,10 @@ export function MatchaPanel({
         message:
           r.status === 403
             ? "You don't have access to Matcha."
-            : "Couldn't rank researchers. Please try again.",
+            : `Couldn't rank ${targetNoun}. Please try again.`,
       });
     } catch {
-      setStatus({ kind: "error", message: "Couldn't rank researchers. Please try again." });
+      setStatus({ kind: "error", message: `Couldn't rank ${targetNoun}. Please try again.` });
     }
   }
 
@@ -613,6 +660,13 @@ export function MatchaPanel({
   // match were filtered out, every remaining row could read "weak" against someone the officer
   // cannot see. Identical under "any"/"recent", where nothing is hidden.
   const topScore = rankedInYear[0]?.fusedScore ?? 0;
+
+  // Grant Matcha — the denominator fed to `fitTier` for grant cards. Server returns them sorted, so
+  // `[0]` is usually the max, but reduce to be robust to an unsorted response.
+  const grantTopScore = useMemo(
+    () => grantCandidates.reduce((m, c) => Math.max(m, c.fusedScore), 0),
+    [grantCandidates],
+  );
 
   const conceptPanels = useMemo(
     () => ({
@@ -1159,6 +1213,43 @@ export function MatchaPanel({
           }}
           className="mb-4"
         >
+          {/* Grant Matcha (increment 3) — the corpus toggle, mirroring the increment-1 engine
+              toggle chrome. Switching clears results back to the editable textarea so the officer
+              re-runs the ask under the new target rather than reading a stale cross-target list. */}
+          {grantMatcha ? (
+            <div
+              role="tablist"
+              aria-label="Search target"
+              className="mb-3 inline-flex rounded-md border border-[var(--color-border)] p-0.5 text-sm"
+            >
+              {(["people", "grants"] as const).map((t) => {
+                const isActive = target === t;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    onClick={() => {
+                      if (t === target) return;
+                      setTarget(t);
+                      setStatus({ kind: "idle" });
+                      setEditing(true);
+                    }}
+                    data-testid={`matcha-target-${t}`}
+                    className={[
+                      "rounded px-3 py-1 transition-colors",
+                      isActive
+                        ? "bg-[var(--color-accent-slate)] font-medium text-white"
+                        : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
+                    ].join(" ")}
+                  >
+                    {t === "people" ? "Researchers" : "Opportunities"}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
           <label htmlFor="matcha-description" className="mb-1.5 block text-sm font-medium">
             The ask
           </label>
@@ -1167,7 +1258,11 @@ export function MatchaPanel({
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={6}
-            placeholder="Paste the opportunity's description of their interest…"
+            placeholder={
+              target === "grants"
+                ? "Describe the research to find matching funding opportunities…"
+                : "Paste the opportunity's description of their interest…"
+            }
             className="border-border w-full rounded-md border bg-background px-3 py-2 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]"
             spellCheck={false}
           />
@@ -1179,7 +1274,11 @@ export function MatchaPanel({
               disabled={pending || description.trim().length === 0}
               className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
             >
-              {pending ? "Ranking…" : "Rank researchers"}
+              {pending
+                ? "Ranking…"
+                : target === "grants"
+                  ? "Rank opportunities"
+                  : "Rank researchers"}
             </Button>
             {historyDrawer}
           </div>
@@ -1188,7 +1287,7 @@ export function MatchaPanel({
 
       {status.kind === "loading" ? (
         <div aria-busy="true">
-          <p className="text-muted-foreground py-3 text-sm">Ranking researchers…</p>
+          <p className="text-muted-foreground py-3 text-sm">Ranking {targetNoun}…</p>
           <div className="space-y-3">
             {Array.from({ length: 4 }, (_, i) => (
               <div key={i} className="border-apollo-border bg-apollo-surface rounded-lg border p-4">
@@ -1203,6 +1302,9 @@ export function MatchaPanel({
           {status.message}
         </p>
       ) : status.kind === "ok" ? (
+        target === "grants" ? (
+          <GrantResults candidates={grantCandidates} topScore={grantTopScore} />
+        ) : (
         <>
           {/* The ask (title + read-only, highlighted request) renders in the ask card above,
               in place of the textarea — see `showAskCard`. */}
@@ -1672,6 +1774,90 @@ export function MatchaPanel({
             </div>
           )}
         </>
+        )
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Grant Matcha (increment 3) — the query→grants results view. A lean ranked list of the
+ * opportunities the spine matched, reusing the forward matcher's at-a-glance fact line
+ * (sponsor · mechanism · deadline · ceiling) and THIS panel's own fit-tier vocabulary so grant
+ * tiers read identically to person tiers. No rail / facets / centrality sliders yet — letting the
+ * officer relax an eligibility or centrality predicate is a later increment.
+ */
+function GrantResults({ candidates, topScore }: { candidates: GrantCandidate[]; topScore: number }) {
+  if (candidates.length === 0) {
+    return (
+      <p className="text-muted-foreground py-4 text-sm">
+        No opportunities matched this description.
+      </p>
+    );
+  }
+  return (
+    <section aria-label="Ranked opportunities">
+      <p className="text-muted-foreground py-3 text-sm">
+        {candidates.length} matching opportunit{candidates.length === 1 ? "y" : "ies"}
+      </p>
+      <ul className="space-y-3">
+        {candidates.map((c) => (
+          <li key={c.opportunityId}>
+            <GrantResultCard candidate={c} topScore={topScore} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** One opportunity card: title + fit tier, the at-a-glance fact line, and the concepts it ranked
+ *  under as explanation chips (the same "Ranks here" pill idiom as the people rows). */
+function GrantResultCard({
+  candidate,
+  topScore,
+}: {
+  candidate: GrantCandidate;
+  topScore: number;
+}) {
+  const tier = fitTier(candidate.fusedScore, topScore);
+  const urgency = dueUrgency(candidate.dueDate, Date.now());
+  const facts = [candidate.sponsor, candidate.mechanism].filter((x): x is string => Boolean(x));
+  // Distinct concept terms this opportunity ranked under — the "why it matched" chips.
+  const terms = Array.from(new Set(candidate.contributions.map((c) => c.term)));
+  return (
+    <div
+      data-slot="grant-result-card"
+      className="border-apollo-border bg-apollo-surface rounded-lg border p-4"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="text-foreground font-medium">
+          {candidate.title ?? "Untitled opportunity"}
+        </h3>
+        <span
+          className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${TIER_CLASS[tier]}`}
+        >
+          {TIER_LABEL[tier]}
+        </span>
+      </div>
+      <div className="text-muted-foreground mt-0.5 text-sm">
+        {facts.length > 0 ? `${facts.join(" · ")} · ` : ""}
+        <span
+          className={
+            urgency === "soon" ? "font-medium text-amber-700 dark:text-amber-400" : undefined
+          }
+        >
+          {deadlineLabel(candidate.dueDate, candidate.status)}
+        </span>
+        {candidate.awardCeiling ? ` · up to ${formatUsd(candidate.awardCeiling)}` : null}
+      </div>
+      {terms.length > 0 ? (
+        <p className="text-muted-foreground mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
+          <span className="text-foreground rounded bg-[var(--color-accent-slate)]/30 px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.02em]">
+            Matches
+          </span>
+          {terms.join(" · ")}
+        </p>
       ) : null}
     </div>
   );

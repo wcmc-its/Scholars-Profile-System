@@ -18,6 +18,7 @@ import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { MatchaPanel } from "@/components/edit/matcha-panel";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { isMatchaEnabled } from "@/lib/api/matcha";
+import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
 import { logEditDenial } from "@/lib/edit/authz";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
@@ -63,7 +64,10 @@ export default async function MatchaPage() {
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <MatchaPanel />
+      {/* Grant Matcha (increment 3) — the people|grants target toggle appears only when
+          GRANT_MATCHA is on. Same server-computed-boolean-prop pattern as
+          `/edit/find-researchers`; the API route re-checks the flag as the real boundary. */}
+      <MatchaPanel grantMatcha={isGrantMatchaEnabled()} />
     </ConsoleShell>
   );
 }
