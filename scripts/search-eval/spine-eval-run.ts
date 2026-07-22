@@ -20,10 +20,10 @@
 // per arm — see `spine-eval-dispatch.sh`.
 //
 // History: this began as the MATCHA_GLOSS_QUERY A/B harness. That flag was measured and DELETED
-// (see the spine's `clusterQuery` comment), so the gloss-specific arms are gone and what remains
-// is the reusable vehicle.
+// (see the spine's `clusterQuery` comment). The reusable vehicle now carries the MATCHA_GLOSS_RERANK
+// λ-sweep: `ARM` selects the arm and `glossArmEnv` maps it to the rescore flags the spine reads.
 //
-// Run: npx tsx spine-eval-run.ts <extractions.json> [s3://bucket/key]
+// Run: npx tsx spine-eval-run.ts <extractions.json> [s3://bucket/key]   (ARM=base | ARM=gloss-0.5 …)
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -31,9 +31,10 @@ import { cachedReasonAgg } from "@/lib/api/reason-agg-cache";
 import { rankResearchersForDescriptionSpine } from "@/lib/api/matcha-spine-run";
 import { normalizeDescription } from "@/lib/api/matcha";
 import type { MatchaExtraction } from "@/lib/api/matcha-extract";
+import { glossArmEnv } from "./spine-eval-arm";
 
-/** Label for this run, echoed into the artifact. Free-form — the caller uses it to tell arms
- *  apart when it varies something (an env flag, a patched image) between invocations. */
+/** The arm to run: `base` (rescore off, the ablation) or `gloss-<λ>`. Echoed into the artifact AND
+ *  mapped to the gloss-rescore env below — one arm per process (the memo cache has no clear). */
 const ARM = process.env.ARM ?? "default";
 
 async function main() {
@@ -45,6 +46,18 @@ async function main() {
 
   // Enters the memo key. Pinned identically in step 1; the default is module-private.
   process.env.MATCHA_EXTRACT_MODEL = payload.modelId;
+
+  // Apply the arm's gloss-rescore flags BEFORE the spine reads process.env per fixture. `base`
+  // unsets the flag (today's ordering); `gloss-<λ>` turns the rescore on at λ. Explicit unset so a
+  // stray inherited MATCHA_GLOSS_RERANK can't leak the rescore into the ablation arm.
+  const armEnv = glossArmEnv(ARM);
+  if (armEnv.MATCHA_GLOSS_RERANK) {
+    process.env.MATCHA_GLOSS_RERANK = armEnv.MATCHA_GLOSS_RERANK;
+    process.env.MATCHA_GLOSS_RERANK_LAMBDA = armEnv.MATCHA_GLOSS_RERANK_LAMBDA;
+  } else {
+    delete process.env.MATCHA_GLOSS_RERANK;
+  }
+  console.error(`arm=${ARM} MATCHA_GLOSS_RERANK=${process.env.MATCHA_GLOSS_RERANK ?? "(off)"} λ=${process.env.MATCHA_GLOSS_RERANK_LAMBDA ?? "-"}`);
 
   // REASON_AGG_BYPASS makes cachedReasonAgg call through instead of caching, which would send
   // every seed straight to a Bedrock call this role cannot make. Fail loudly, not silently.
