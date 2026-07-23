@@ -2854,7 +2854,9 @@ export async function searchPeople(opts: {
                 // yields no fragment = UNDER-claim, the same safe direction the honesty guardrail
                 // already accepts. The high-weight (first/last-author) titles sort early, so the
                 // cap keeps the scholar's most representative work.
-                max_analyzed_offset: 10000,
+                // OpenSearch spells the query-level knob `max_analyzer_offset` (the INDEX setting
+                // keeps ES's `max_analyzed_offset`); the wrong spelling 400s the highlight request.
+                max_analyzer_offset: 10000,
               },
             }
           : {}),
