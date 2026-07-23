@@ -1750,11 +1750,11 @@ describe("AppStack", () => {
         expect(JSON.stringify(stmt.Resource)).toContain("table/reciterai");
       });
 
-      it("ships the three cores flags OFF in prod — CORE_PUB_MODAL / CORE_PAGES / CORE_CLAIM_WRITEBACK (staging-first)", () => {
+      it("ships the three cores flags ON in prod — CORE_PUB_MODAL / CORE_PAGES / CORE_CLAIM_WRITEBACK (promoted 2026-07-22; inert until prod ETL Block 6 fills the core tables)", () => {
         const env = appContainerEnv();
-        expect(env.get("CORE_PUB_MODAL")).toBe("off");
-        expect(env.get("CORE_PAGES")).toBe("off");
-        expect(env.get("CORE_CLAIM_WRITEBACK")).toBe("off");
+        expect(env.get("CORE_PUB_MODAL")).toBe("on");
+        expect(env.get("CORE_PAGES")).toBe("on");
+        expect(env.get("CORE_CLAIM_WRITEBACK")).toBe("on");
       });
 
       it("the app ships the request-change mailer OFF with the verified From set (#160 Phase 2)", () => {

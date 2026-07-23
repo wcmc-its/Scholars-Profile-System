@@ -1272,8 +1272,10 @@ export class AppStack extends Stack {
         // unless the parent is also on. Separate so the grant axis can soak
         // independently and ship dark to prod while the pub axis stays live. The
         // #160 grant-suppression gate is applied before edge-building. App-only,
-        // no reindex, no migration. Staging-on for soak; prod-off.
-        CENTER_COLLABORATION_GRANT_AXIS: env === "staging" ? "on" : "off",
+        // no reindex, no migration. Prod-on 2026-07-22 (flag bundle): the parent
+        // (CENTER_COLLABORATION_NETWORK) is already prod-on; inert unless a center
+        // has a CenterProgram taxonomy (Meyer today).
+        CENTER_COLLABORATION_GRANT_AXIS: "on",
         // CLINICAL_TRIALS_SECTION — the profile "Clinical trials" section
         // (#clinical-trials). Dark on prod; staging-on for soak. The profile
         // payload returns [] when off, so this is safe to leave off even after
@@ -1708,8 +1710,11 @@ export class AppStack extends Stack {
         // cardiologist), via cap-free tree-number subsumption. Sub-toggle of
         // SEARCH_PEOPLE_CLINICAL_FN. NEEDS a people reindex to populate the anchor
         // fields (inert + safe until then — the boost/evidence read absent fields).
-        // Staging-on for the #1836 rollout eval; prod still off pending sign-off.
-        SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR: env === "staging" ? "on" : "off",
+        // Staging-verified 2026-07-21 (MI/CAD light board-cert cardiologists via the
+        // C14 subtree; diabetes stays endocrinology-only). Prod-on 2026-07-22 (flag
+        // bundle) — INERT until a prod people reindex from an ETL image that carries
+        // etl/clinical-mesh/specialty-anchors.csv (expanded in #1861).
+        SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR: "on",
         // #824 follow-up -- match-aware People-results "why" line (method/topic/
         // humanized-areas snippet). APP-ONLY, no reindex: derives from
         // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-
@@ -2126,9 +2131,12 @@ export class AppStack extends Stack {
         //     atomically, no flip-before-grant window). While off the claim still
         //     lands in SPS core_claim (authoritative); only the engine-side
         //     mirror no-ops.
-        CORE_PUB_MODAL: env === "staging" ? "on" : "off",
-        CORE_PAGES: env === "staging" ? "on" : "off",
-        CORE_CLAIM_WRITEBACK: env === "staging" ? "on" : "off",
+        // Prod-on 2026-07-22 (flag bundle). Render nothing until prod ETL Block 6
+        // fills the core tables (safe-but-inert while empty); CORE_CLAIM_WRITEBACK's
+        // IAM grant deploys atomically with the flag; CORE_PAGES exposes /cores/[id].
+        CORE_PUB_MODAL: "on",
+        CORE_PAGES: "on",
+        CORE_CLAIM_WRITEBACK: "on",
         // Opportunity URL intake (docs/opportunity-url-intake-spec.md). Gates
         // the submit-a-URL panel on /edit/find-researchers + both
         // /api/edit/opportunity-intake verbs (they 404 while off). The writes
