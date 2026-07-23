@@ -142,6 +142,30 @@ describe("buildOpportunityWrites", () => {
     expect(bad.isHonorific).toBeNull();
   });
 
+  it("stores the structured eligibility map and derives flags FROM it; JsonNull when absent/array", () => {
+    const eligibility = {
+      applicant_org_types: ["higher_ed"],
+      career_stages: ["early_career_faculty"],
+      nomination_gated: true,
+      schema_version: "2.0.0",
+    };
+    const [withE] = buildOpportunityWrites([grantItem({ eligibility })]).writes;
+    expect(withE.eligibility).toEqual(eligibility);
+    // flags come from the MAP: a faculty-only career stage ⇒ faculty_eligible, not postdoc.
+    expect(withE.eligibilityFlags).toEqual(
+      expect.arrayContaining(["us_eligible", "faculty_eligible"]),
+    );
+    expect(withE.eligibilityFlags).not.toContain("postdoc_eligible");
+
+    // Absent upstream → JSON-null (pre-backfill rows fall back to prose for flags).
+    const [without] = buildOpportunityWrites([grantItem()]).writes;
+    expect(without.eligibility).toBe(Prisma.JsonNull);
+
+    // A stray non-object (array) is rejected, not stored.
+    const [bad] = buildOpportunityWrites([grantItem({ eligibility: ["nope"] })]).writes;
+    expect(bad.eligibility).toBe(Prisma.JsonNull);
+  });
+
   it("parses match_dsl / match_query S-string JSON; JsonNull when absent/malformed (contract v3)", () => {
     // ReciterAI writes these as compact-JSON DynamoDB `S` strings (DocumentClient yields strings).
     const [w] = buildOpportunityWrites([
@@ -171,9 +195,9 @@ describe("buildOpportunityWrites", () => {
   });
 });
 
-describe("deriveEligibilityFlags", () => {
+describe("deriveEligibilityFlags — prose fallback (eligibility map absent)", () => {
   it("defaults to US + faculty + postdoc eligible for ordinary research eligibility text", () => {
-    const flags = deriveEligibilityFlags("Institutions of Higher Education may apply.");
+    const flags = deriveEligibilityFlags(null, "Institutions of Higher Education may apply.");
     expect(flags).toContain("us_eligible");
     expect(flags).toContain("faculty_eligible");
     expect(flags).toContain("postdoc_eligible");
@@ -182,6 +206,7 @@ describe("deriveEligibilityFlags", () => {
 
   it("flags student_only and withholds faculty_eligible for predoctoral/student-only text", () => {
     const flags = deriveEligibilityFlags(
+      null,
       "Applicants must be enrolled predoctoral students; dissertation research only.",
     );
     expect(flags).toContain("student_only");
@@ -190,6 +215,7 @@ describe("deriveEligibilityFlags", () => {
 
   it("withholds postdoc_eligible when restricted to independent faculty investigators", () => {
     const flags = deriveEligibilityFlags(
+      null,
       "Applicant must hold an independent faculty appointment; no postdoctoral fellows.",
     );
     expect(flags).toContain("faculty_eligible");
@@ -197,14 +223,61 @@ describe("deriveEligibilityFlags", () => {
   });
 
   it("clears us_eligible for foreign-only restrictions", () => {
-    const flags = deriveEligibilityFlags("Open to foreign institutions only; non-US organizations.");
+    const flags = deriveEligibilityFlags(null, "Open to foreign institutions only; non-US organizations.");
     expect(flags).not.toContain("us_eligible");
   });
 
   it("flags internal_limited_submission", () => {
     const flags = deriveEligibilityFlags(
+      null,
       "This is a limited submission; only two applications per institution are permitted.",
     );
     expect(flags).toContain("internal_limited_submission");
+  });
+});
+
+describe("deriveEligibilityFlags — structured map (preferred when present)", () => {
+  it("prefers the map over prose and RETAINS us_eligible by default", () => {
+    // Prose says foreign-only (would clear us_eligible); the map does not → map wins, us_eligible kept.
+    const flags = deriveEligibilityFlags(
+      { applicant_org_types: ["higher_ed"], career_stages: [], limited_submission: false },
+      "Open to foreign institutions only.",
+    );
+    expect(flags).toEqual(
+      expect.arrayContaining(["us_eligible", "faculty_eligible", "postdoc_eligible"]),
+    );
+  });
+
+  it("student_only when career_stages ⊆ {undergraduate, graduate_student}; withholds faculty/postdoc", () => {
+    const flags = deriveEligibilityFlags({ career_stages: ["graduate_student"] }, "");
+    expect(flags).toContain("student_only");
+    expect(flags).not.toContain("faculty_eligible");
+    expect(flags).not.toContain("postdoc_eligible");
+  });
+
+  it("faculty_eligible (not postdoc) when career_stages is faculty/clinician only", () => {
+    const flags = deriveEligibilityFlags({ career_stages: ["early_career_faculty", "clinician"] }, "");
+    expect(flags).toContain("faculty_eligible");
+    expect(flags).not.toContain("postdoc_eligible");
+    expect(flags).not.toContain("student_only");
+  });
+
+  it("postdoc_eligible when postdoc listed; internal_limited_submission from the bool", () => {
+    const flags = deriveEligibilityFlags({ career_stages: ["postdoc"], limited_submission: true }, "");
+    expect(flags).toContain("postdoc_eligible");
+    expect(flags).toContain("internal_limited_submission");
+  });
+
+  it("clears us_eligible only when applicant_org_types is exclusively foreign_org", () => {
+    expect(deriveEligibilityFlags({ applicant_org_types: ["foreign_org"] }, "")).not.toContain("us_eligible");
+    expect(deriveEligibilityFlags({ applicant_org_types: ["foreign_org", "higher_ed"] }, "")).toContain(
+      "us_eligible",
+    );
+  });
+
+  it("empty map → permissive defaults (US + faculty + postdoc), no false restriction", () => {
+    const flags = deriveEligibilityFlags({}, "");
+    expect(flags).toEqual(expect.arrayContaining(["us_eligible", "faculty_eligible", "postdoc_eligible"]));
+    expect(flags).not.toContain("student_only");
   });
 });
