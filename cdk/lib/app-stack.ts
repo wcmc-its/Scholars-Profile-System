@@ -1337,13 +1337,19 @@ export class AppStack extends Stack {
         // lost to gain 1). Retrieval now always uses the bare member tokens, so there is no flag
         // left to set. See docs/2026-07-19-matcha-gloss-query-concept-vs-keyword-handoff.md.
         MATCHA_RECENCY: env === "staging" ? "on" : "off",
-        // MATCHA_GLOSS_RERANK — gloss as an OpenSearch rescore (recall-safe re-order of the
-        // per-cluster pool). A RANKING change ⇒ eval-gated: OFF in BOTH envs until an offline
-        // in-VPC λ-sweep A/B (base vs gloss-rerank) picks a λ on the graded-only nDCG, THEN
-        // staging-on. STATIC literal for flag parity. λ is read from MATCHA_GLOSS_RERANK_LAMBDA
-        // (default 0.5); wire it here too when this goes staging-on. See
-        // docs/2026-07-21-matcha-gloss-reranker-handoff.md.
-        MATCHA_GLOSS_RERANK: "off",
+        // MATCHA_GLOSS_RERANK — gloss as an OpenSearch rescore that re-orders the per-cluster pool
+        // by BM25(gloss). A RANKING change ⇒ eval-gated. The 2026-07-22 in-VPC λ-sweep cleared the
+        // gate on the eval-fair metric: graded-only nDCG@20 rose 0.872→0.894 (λ=1.0), monotonic,
+        // ~2.8× the 0.0074 noise floor; λ=0.5 = 0.890 (within 0.004 of peak, gentler displacement);
+        // graded-relevant retention rose 232→234 (zero experts lost). STAGING-ON at λ=0.5; prod held
+        // OFF pending an eyeball → deliberate prod flip. NOTE: the rescore is NOT recall-neutral on a
+        // multi-shard index (per-shard rescore-then-merge churns the ungraded deep tail, fused rank
+        // ≥66) — the win rests on the graded metric, not on recall-invariance. See
+        // docs/2026-07-22-gloss-rerank-eval-result-and-fix-handoff.md.
+        MATCHA_GLOSS_RERANK: env === "staging" ? "on" : "off",
+        // λ = rescore_query_weight, wired per-env (was eval-only, set per-arm in the sweep). 0.5 is
+        // the picked value; inert in prod while the flag is off, so a plain literal is fine.
+        MATCHA_GLOSS_RERANK_LAMBDA: "0.5",
         // GRANT_MATCHA — the Grant Matcha convergence surfaces: the /edit/find-researchers "Matcha"
         // mode (opportunity → researchers via the spine, #1866) AND the /edit/matcha people|grants
         // target toggle + query→grants result cards (#1867 route + #1870 UI). Read via
