@@ -68,6 +68,23 @@ async function main() {
   if (process.env.MATCHA_GLOSS_INWORDS == null) process.env.MATCHA_GLOSS_INWORDS = "on";
   console.error(`MATCHA_GLOSS_INWORDS=${process.env.MATCHA_GLOSS_INWORDS}`);
 
+  // Reproduce the staging APP's search-evidence flag env. The eval runs on the sps-etl-<env> task
+  // def, which carries NONE of these (verified: its env has zero SEARCH_* flags) — so `searchPeople`
+  // gates OUT all evidence (`SEARCH_RESULT_EVIDENCE` off ⇒ no `evidence`/`evidenceLines`), the spine
+  // then drops every (concept,cwid) block at `if (!hitEvidence) continue`, and inWords never attaches
+  // → the artifact's `.evidence` is present but every `blocks:[]`. Staging app has all of these ON
+  // (SEARCH_RESULT_EVIDENCE / _EVIDENCE_REASON_COUNTS / _PEOPLE_MATCH_AWARE_SNIPPET / _PEOPLE_CONCEPT_HINT),
+  // so the measured spine must too or it isn't the shipped path. Default-on, each overridable.
+  for (const f of [
+    "SEARCH_RESULT_EVIDENCE",
+    "SEARCH_EVIDENCE_REASON_COUNTS",
+    "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
+    "SEARCH_PEOPLE_CONCEPT_HINT",
+  ]) {
+    if (process.env[f] == null) process.env[f] = "on";
+  }
+  console.error(`SEARCH_RESULT_EVIDENCE=${process.env.SEARCH_RESULT_EVIDENCE} REASON_COUNTS=${process.env.SEARCH_EVIDENCE_REASON_COUNTS}`);
+
   // REASON_AGG_BYPASS makes cachedReasonAgg call through instead of caching, which would send
   // every seed straight to a Bedrock call this role cannot make. Fail loudly, not silently.
   if (process.env.REASON_AGG_BYPASS) throw new Error("REASON_AGG_BYPASS is set — the seed cannot take");
