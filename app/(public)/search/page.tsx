@@ -2064,7 +2064,6 @@ async function FundingResults({
       cwid: a.cwid,
       displayName: a.displayName,
       slug: a.slug,
-      identityImageEndpoint: a.identityImageEndpoint,
       count: a.count,
       isActive: (filters.investigator ?? []).includes(a.cwid),
       toggleHref: toggleHref("investigator", a.cwid),

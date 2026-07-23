@@ -79,14 +79,16 @@ export type FundingFilters = {
   investigator?: string[];
 };
 
-/** Issue #94 — Investigator facet bucket, hydrated server-side with
- *  display name, slug, and avatar endpoint so the client component just
- *  renders. Mirrors WcmAuthorFacetBucket on the Publications search. */
+/** Issue #94 — Investigator facet bucket, hydrated server-side with display
+ *  name + slug. #1410/#1878 — the avatar endpoint was dropped from the payload
+ *  (~95 bytes on each of up to 500 buckets, ~47 KB / ~14% of the funding
+ *  response) because it is a pure function of `cwid`; the client `HeadshotAvatar`
+ *  derives it. Byte-identical URL because `SCHOLARS_HEADSHOT_BASE` is unset in
+ *  every env. Mirrors WcmAuthorFacetBucket on the Publications search. */
 export type WcmInvestigatorFacetBucket = {
   cwid: string;
   displayName: string;
   slug: string;
-  identityImageEndpoint: string;
   count: number;
 };
 
@@ -1133,7 +1135,6 @@ export async function searchFunding(opts: {
       cwid: s.cwid,
       displayName: s.preferredName,
       slug: s.slug,
-      identityImageEndpoint: identityImageEndpoint(s.cwid),
       count: b.doc_count,
     }];
   });
@@ -1150,7 +1151,6 @@ export async function searchFunding(opts: {
         cwid: s.cwid,
         displayName: s.preferredName,
         slug: s.slug,
-        identityImageEndpoint: identityImageEndpoint(s.cwid),
         count: 0,
       });
     }
