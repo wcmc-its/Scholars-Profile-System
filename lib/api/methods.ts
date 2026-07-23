@@ -1324,7 +1324,9 @@ const PUB_SELECT = {
   doi: true,
   pmcid: true,
   impactScore: true,
-  abstract: true,
+  // #1881 — abstract is NOT selected: the method-feed mapper ships `abstract: null`
+  // (the feed never renders abstracts), so fetching the @db.Text column was pure
+  // over-fetch.
   dateAddedToEntrez: true,
 } as const;
 
