@@ -564,6 +564,9 @@ async function handleSearch(request: NextRequest) {
     q,
     page,
     sort,
+    // #1414(a) — this route logs `attributionBoostFired` (below), so it is the
+    // one caller that asks searchPeople to compute the attributionMatch agg.
+    includeAttributionTelemetry: true,
     filters: {
       // #1347 — `effectiveDeptDiv` unions the facet-selected deptDiv with the resolved
       // division roster keys (empty unless the division-shape flag is on).
