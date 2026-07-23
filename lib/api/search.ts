@@ -2845,6 +2845,16 @@ export async function searchPeople(opts: {
                 },
                 fragment_size: 200,
                 number_of_fragments: 1,
+                // `publicationTitles` is EVERY title a scholar has, each repeated by authorship
+                // weight (search-index-docs.ts) — tens of KB for prolific authors. It has no
+                // term_vector/offsets, so the plain highlighter re-analyzes the whole field per
+                // hit; across the size=100 spine pool × up to 8 clusters that blew the OpenSearch
+                // request-path timeout (a size=100 in-VPC eval reproduced it — completes with the
+                // highlight off, times out with it on). Cap the analysed span: a match past the cap
+                // yields no fragment = UNDER-claim, the same safe direction the honesty guardrail
+                // already accepts. The high-weight (first/last-author) titles sort early, so the
+                // cap keeps the scholar's most representative work.
+                max_analyzed_offset: 10000,
               },
             }
           : {}),
