@@ -59,7 +59,7 @@ vi.mock("@/lib/search", () => ({
                 buckets: Object.fromEntries(
                   Object.entries(pubAggByProject).map(([projectId, value]) => [
                     projectId,
-                    { doc_count: value, d: { value } },
+                    { doc_count: value },
                   ]),
                 ),
               },
@@ -223,7 +223,7 @@ describe("searchFunding (OpenSearch)", () => {
       terms: { field: "wcmInvestigatorCwids", size: 500 },
     });
     expect(inv.aggs.total).toEqual({
-      cardinality: { field: "wcmInvestigatorCwids", precision_threshold: 4000 },
+      cardinality: { field: "wcmInvestigatorCwids", precision_threshold: 1000 },
     });
   });
 
@@ -622,12 +622,12 @@ describe("searchFunding — PLAN P4 match-reason (funded outputs + named queries
     });
   });
 
-  it("runs a per-project pub-index cardinality(pmid) agg over the funded pmids", async () => {
+  it("runs a per-project pub-index filters agg over the funded pmids (doc_count = distinct pmids, no cardinality sub-agg) (#1881)", async () => {
     await runSearch({ q: "cancer", meshResolution: NEOPLASMS });
     const body = pubRequest()!.body as {
       size: number;
       query: { bool: { filter: unknown[] } };
-      aggs: { byProject: { filters: { filters: Record<string, unknown> }; aggs: unknown } };
+      aggs: { byProject: { filters: { filters: Record<string, unknown> }; aggs?: unknown } };
     };
     expect(body.size).toBe(0);
     // Top-level filter: the union of funded pmids ∩ the resolved descendant set.
@@ -635,11 +635,13 @@ describe("searchFunding — PLAN P4 match-reason (funded outputs + named queries
     expect(body.query.bool.filter).toContainEqual({
       terms: { meshDescriptorUi: ["D009369", "D001943"] },
     });
-    // One named per-project filter scoped to that project's pmids; cardinality sub-agg.
+    // One named per-project filter scoped to that project's pmids. #1881 — no
+    // cardinality sub-agg: the pub index is one-doc-per-pmid, so each bucket's
+    // doc_count already IS the distinct-pmid count.
     expect(body.aggs.byProject.filters.filters).toEqual({
       "ACC-001": { terms: { pmid: ["111", "222", "333"] } },
     });
-    expect(body.aggs.byProject.aggs).toEqual({ d: { cardinality: { field: "pmid" } } });
+    expect(body.aggs.byProject.aggs).toBeUndefined();
   });
 
   it("emits matchedFundedPubs (X, distinct-pmid) capped at pubCount (Y)", async () => {

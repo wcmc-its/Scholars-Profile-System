@@ -735,7 +735,9 @@ export async function searchFunding(opts: {
       aggs: {
         keys: { terms: { field: "wcmInvestigatorCwids", size: 500 } },
         total: {
-          cardinality: { field: "wcmInvestigatorCwids", precision_threshold: 4000 },
+          // #1881 — 1000 matches the people/pub facets; the rail-header count
+          // tolerates the same ~1–2% error (§4.5) and drops the priciest sketch.
+          cardinality: { field: "wcmInvestigatorCwids", precision_threshold: 1000 },
         },
       },
     },
@@ -1032,9 +1034,12 @@ export async function searchFunding(opts: {
             },
           },
           aggs: {
+            // #1881 — the publications index is one-doc-per-pmid (_id = pmid)
+            // and this query already scopes pmid ∩ meshDescriptorUi, so each
+            // project bucket's `doc_count` IS the distinct-pmid count. The old
+            // `cardinality(pmid)` HLL was redundant (and only approximate).
             byProject: {
               filters: { filters: projectFilters },
-              aggs: { d: { cardinality: { field: "pmid" } } },
             },
           },
         } as object,
@@ -1044,13 +1049,13 @@ export async function searchFunding(opts: {
           aggResp.body as {
             aggregations?: {
               byProject?: {
-                buckets?: Record<string, { d?: { value?: number } }>;
+                buckets?: Record<string, { doc_count?: number }>;
               };
             };
           }
         ).aggregations?.byProject?.buckets ?? {};
       for (const [projectId, b] of Object.entries(buckets)) {
-        fundedOutputs.set(projectId, b.d?.value ?? 0);
+        fundedOutputs.set(projectId, b.doc_count ?? 0);
       }
     }
   }
