@@ -1547,9 +1547,11 @@ export async function searchPeople(opts: {
    * MATCHA_GLOSS_RERANK — optional gloss re-ranker (Matcha spine). When `rescoreQuery`
    * is a non-empty string, append an OpenSearch `rescore` that RE-ORDERS the top
    * `window_size` hits by BM25(rescoreQuery) over the active shape's content fields,
-   * combined as `1·bm25(tokens) + rescoreWeight·bm25(rescoreQuery)`. A `rescore` can
-   * neither add nor drop a document, so recall is invariant by construction
-   * (`rescoreWeight=0` ⇒ base ordering). Absent/blank ⇒ the /search body is
+   * combined as `1·bm25(tokens) + rescoreWeight·bm25(rescoreQuery)`. NOTE: on a MULTI-SHARD
+   * index a `rescore` is NOT recall-neutral — it re-orders each shard's window BEFORE the
+   * coordinator merges to the global `size`, so λ changes which docs surface (the 2026-07-22
+   * eval measured this churn, confined to the ungraded deep tail). (`rescoreWeight=0` ⇒ base
+   * ordering.) Absent/blank ⇒ the /search body is
    * BYTE-IDENTICAL to today (empty spread). Passed only by the spine, per cluster.
    */
   rescoreQuery?: string;
@@ -1565,10 +1567,10 @@ export async function searchPeople(opts: {
   /**
    * Overrides the module-private `PAGE_SIZE` (20) for THIS call's `from`/`size`, the
    * `rescore.window_size` floor, and the result's reported `pageSize`. The Matcha spine passes
-   * `TERM_DEPTH` to retrieve a cluster's whole pool in ONE request, so the gloss `rescore` applies
-   * once over the full window (recall-neutral) instead of stitching 5 independently-rescored pages
-   * whose top-100 never converged. Absent ⇒ `PAGE_SIZE` ⇒ the /search body + result are
-   * byte-identical to today.
+   * `TERM_DEPTH` to retrieve a cluster's whole pool in ONE request instead of ≤5 paged calls — a
+   * perf simplification with BYTE-IDENTICAL output. It does NOT make the gloss `rescore`
+   * recall-neutral (that is false on a multi-shard index — see the `rescoreQuery` docblock).
+   * Absent ⇒ `PAGE_SIZE` ⇒ the /search body + result are byte-identical to today.
    */
   pageSize?: number;
 }): Promise<PeopleSearchResult> {
@@ -2724,12 +2726,12 @@ export async function searchPeople(opts: {
     // Aggregations keep using the un-scored `must` (counts don't need scoring).
     query: scoringQuery,
     // MATCHA_GLOSS_RERANK — optional gloss re-ranker. `rescore` re-orders the top
-    // `window_size` hits by BM25(gloss) over the shape's content fields; it can neither
-    // add nor drop a doc, so recall is invariant (the property gloss-as-query lacked).
-    // `window_size` spans the caller's full pool depth (`rescoreWindow`, = spine
-    // TERM_DEPTH) AND this page (`from+size`), so every paged call re-orders the SAME
-    // window → consistent order across pages. Absent/blank `rescoreQuery` ⇒ empty spread
-    // ⇒ the /search body is byte-identical to today.
+    // `window_size` hits by BM25(gloss) over the shape's content fields. NOTE: on a MULTI-SHARD
+    // index this is NOT recall-neutral — the rescore runs per shard BEFORE the coordinator merges
+    // to the global `size`, so λ changes which docs surface (2026-07-22 eval: churn confined to
+    // the ungraded deep tail). `window_size` spans the caller's full pool depth (`rescoreWindow`,
+    // = spine TERM_DEPTH). Absent/blank `rescoreQuery` ⇒ empty spread ⇒ the /search body is
+    // byte-identical to today.
     ...(opts.rescoreQuery && opts.rescoreQuery.trim().length > 0
       ? {
           rescore: {

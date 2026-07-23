@@ -34,7 +34,6 @@ GRANT_MATCHER_REL_BOOST
 IMPERSONATION_READONLY
 IMPERSONATION_TTL_SECONDS
 MATCHA_EXTRACT_MODEL                # Matcha concept-extractor model rollback lever (code default Sonnet 4.5)
-MATCHA_GLOSS_RERANK_LAMBDA          # gloss-rescore λ (rescore_query_weight; code default 0.5, clamped ≥0) — A/B sweep lever, set per-arm in the in-VPC eval; wire in app-stack when MATCHA_GLOSS_RERANK goes staging-on
 OVERVIEW_GENERATE_MODEL
 OVERVIEW_GENERATE_TEMPERATURE
 RECITER_REFRESH_DELAY_MINUTES

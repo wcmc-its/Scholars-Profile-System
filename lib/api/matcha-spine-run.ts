@@ -198,11 +198,11 @@ const MAX_TERMS_WITH_INCLUDES = 15;
 const INCLUDE_SYNTH_CENTRALITY = 0.5;
 
 /** Per-term retrieval depth. `retrieveCluster` pulls the whole pool in ONE `searchPeople`
- *  request via `pageSize: TERM_DEPTH`, so the optional gloss `rescore` applies once over the
- *  full window — genuinely recall-neutral. (It was 5 paged calls, each rescored independently:
- *  an OpenSearch `rescore` is only internally consistent within a single request, so the 5
- *  top-100 windows never stitched into a stable set and candidate counts drifted with λ — the
- *  recall bug this fixes.) */
+ *  request via `pageSize: TERM_DEPTH` — a perf simplification (≤5 paged calls → 1) with
+ *  BYTE-IDENTICAL output. It does NOT make the gloss `rescore` recall-neutral: the 2026-07-22
+ *  eval showed candidate sets still drift with λ and single-request == paged byte-for-byte, so
+ *  pagination was never the cause. The rescore is not recall-invariant on a multi-shard index
+ *  (per-shard rescore-then-merge); the churn is confined to the ungraded deep tail. */
 const TERM_DEPTH = 100;
 
 /** Load the v1 vocab: every curated taxonomy label (topics + subtopics). Two bounded
@@ -287,16 +287,17 @@ async function retrieveCluster(
   includeRecency: boolean,
   // MATCHA_GLOSS_RERANK — the cluster's representative gloss + λ. Passed by the caller ONLY when
   // the flag is on AND the cluster has a gloss; undefined ⇒ no rescore ⇒ searchPeople args (and
-  // thus the /search body) are byte-identical to today. `rescore` re-orders only, never widens
-  // the pool, so recall is invariant across the whole λ sweep.
+  // thus the /search body) are byte-identical to today. NOTE: the rescore is NOT recall-invariant
+  // on a multi-shard index — λ changes which docs each shard surfaces (churn = ungraded deep tail).
   rescoreQuery?: string,
   rescoreWeight?: number,
 ): Promise<{ ranked: string[]; hits: PeopleHit[] }> {
-  // ONE request for the whole TERM_DEPTH pool (was a 5-page loop). An OpenSearch `rescore` is only
-  // internally consistent WITHIN a single request; paging it re-ordered 5 separate top-100 windows
-  // that never stitched into a stable set, so candidate counts drifted with λ. `pageSize: TERM_DEPTH`
-  // overrides `searchPeople`'s default-20 page for `from`/`size`/`window_size` (see its docblock), so
-  // the rescore now applies exactly once over the full pool — genuinely recall-neutral.
+  // ONE request for the whole TERM_DEPTH pool (was a 5-page loop) — a perf simplification with
+  // BYTE-IDENTICAL output (the 2026-07-22 eval proved single-request == paged, byte-for-byte).
+  // `pageSize: TERM_DEPTH` overrides `searchPeople`'s default-20 page for `from`/`size`/`window_size`
+  // (see its docblock). This does NOT make the rescore recall-neutral: λ still changes which docs are
+  // retrieved (per-shard rescore-then-merge on the multi-shard people index); the churn is confined
+  // to the ungraded deep tail, so it doesn't move the graded-only nDCG.
   const result = await searchPeople({
     q: clusterQuery,
     page: 0,
@@ -576,14 +577,15 @@ export async function rankResearchersForDescriptionSpine(
   // was one grade-3 scholar sitting on 59 unaccepted publications. Before flipping prod,
   // quantify that exposure by role_category — the eval cannot see it.
   const recencyOn = process.env.MATCHA_RECENCY === "on";
-  // MATCHA_GLOSS_RERANK — gloss as an OpenSearch rescore (recall-safe re-order). A ranking change
-  // ⇒ eval-gated: staging-on to A/B, prod-off. λ (`rescore_query_weight`) is the one tunable, swept
-  // 0.25/0.5/1.0 in-VPC as separate processes; read from env so an arm sets it without a redeploy.
-  // `?? ""` + `Number.isFinite` keeps λ=0 (the perfect ablation) meaning zero, not the default.
-  // Clamp at 0: a negative λ would let an in-window doc score BELOW an out-of-window one and demote
-  // it out of the top pool — i.e. break the "recall-safe by construction" invariant that is the whole
-  // reason this is a rescore and not a gloss query. Never a real arm (sweep is 0.25/0.5/1.0); the
-  // clamp just keeps the invariant true unconditionally instead of only for λ ≥ 0.
+  // MATCHA_GLOSS_RERANK — gloss as an OpenSearch rescore (a re-order, not a query). A ranking change
+  // ⇒ eval-gated: staging-on at λ=0.5 (2026-07-22 sweep), prod-off. λ (`rescore_query_weight`) is the
+  // one tunable, swept 0.25/0.5/1.0 in-VPC as separate processes; read from env so an arm sets it
+  // without a redeploy. `?? ""` + `Number.isFinite` keeps λ=0 (the perfect ablation) meaning zero,
+  // not the default. Clamp at 0: a negative λ would let an in-window doc score BELOW an out-of-window
+  // one and demote it out of the returned window — turning the rescore into something that can drop
+  // an in-window doc, which is the whole reason this is a rescore and not a gloss query. (Even at
+  // λ≥0 the rescore is not perfectly recall-neutral on a multi-shard index — see retrieveCluster —
+  // but the clamp keeps it a pure within-window re-order.) Never a real arm (sweep is 0.25/0.5/1.0).
   const glossRerankOn = process.env.MATCHA_GLOSS_RERANK === "on";
   const glossRerankLambda = (() => {
     const parsed = Number.parseFloat(process.env.MATCHA_GLOSS_RERANK_LAMBDA ?? "");
