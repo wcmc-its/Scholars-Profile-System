@@ -93,7 +93,7 @@ const SECTION_PANEL_DEFS = [
   { key: "hideFunding", label: "Funding", recordAttr: "funding", countKey: "hideFunding" },
   { key: "hideCenters", label: "Centers", recordAttr: null, countKey: null },
   { key: "hidePostdocMentor", label: "Postdoctoral Mentor", recordAttr: null, countKey: null },
-  { key: "hideClinicalTrials", label: "Clinical trials", recordAttr: null, countKey: null },
+  { key: "hideClinicalTrials", label: "Clinical research", recordAttr: null, countKey: null },
   { key: "hideMethods", label: "Methods & Tools", recordAttr: null, countKey: null },
   { key: "hideTechnologies", label: "Available technologies", recordAttr: null, countKey: null },
 ] as const;

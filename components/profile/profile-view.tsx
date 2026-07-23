@@ -612,7 +612,7 @@ export async function ProfileView({ slug }: { slug: string }) {
             <Section
               title={
                 <>
-                  Clinical trials
+                  Clinical research
                   <ClinicalTrialsInfoTooltip />
                 </>
               }
@@ -621,7 +621,7 @@ export async function ProfileView({ slug }: { slug: string }) {
               // explicit "Active" group, so the rail was restating the body.
               count={{
                 value: profile.clinicalTrials.length,
-                unit: profile.clinicalTrials.length === 1 ? "clinical trial" : "clinical trials",
+                unit: profile.clinicalTrials.length === 1 ? "study" : "studies",
               }}
             >
               <ClinicalTrialsSection trials={profile.clinicalTrials} />

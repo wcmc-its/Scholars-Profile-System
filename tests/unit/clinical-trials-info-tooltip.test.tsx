@@ -1,5 +1,5 @@
 /**
- * "About Clinical trials" — the provenance note behind the section heading.
+ * "About Clinical research" — the provenance note behind the section heading.
  *
  * This one is a hover `Tooltip` (like Mentoring / External relationships), NOT the
  * click-Popover that Available technologies uses. The distinction is load-bearing:
@@ -15,14 +15,14 @@ import { ClinicalTrialsInfoTooltip } from "@/components/scholar/clinical-trials-
 describe("ClinicalTrialsInfoTooltip", () => {
   it("exposes a labelled trigger on the heading", () => {
     render(<ClinicalTrialsInfoTooltip />);
-    expect(screen.getByRole("button", { name: "About Clinical trials" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "About Clinical research" })).toBeTruthy();
   });
 
   it("does not spend a footer paragraph on the copy — it is behind the trigger", () => {
     render(<ClinicalTrialsInfoTooltip />);
     // Radix tooltips render their content only on hover/focus, so nothing is in the
     // document at rest. The copy must not be sitting in the section body.
-    expect(screen.queryByText(/Trial details are drawn/)).toBeNull();
+    expect(screen.queryByText(/Study details are drawn/)).toBeNull();
   });
 
   it("carries NO interactive content — a hover tooltip cannot host a link", () => {

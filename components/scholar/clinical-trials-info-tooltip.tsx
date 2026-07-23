@@ -9,10 +9,10 @@ import {
 } from "@/components/ui/tooltip";
 
 const COPY =
-  "Trial details are drawn from institutional records and, where an NCT registration exists, ClinicalTrials.gov. Status reflects the most recent available update.";
+  "Study details are drawn from institutional records and, where an NCT registration exists, ClinicalTrials.gov. Status reflects the most recent available update.";
 
 /**
- * "About Clinical trials" — the provenance note, moved off a footer paragraph and
+ * "About Clinical research" — the provenance note, moved off a footer paragraph and
  * behind the section heading.
  *
  * A hover `Tooltip`, matching MentoringInfoTooltip and DisclosureInfoTooltip. It
@@ -28,7 +28,7 @@ export function ClinicalTrialsInfoTooltip() {
         <TooltipTrigger asChild>
           <button
             type="button"
-            aria-label="About Clinical trials"
+            aria-label="About Clinical research"
             // NO nudge here — unlike its three siblings. See the descender rule in
             // technologies-info-button.tsx: "Clinical trials" has no descender
             // (no g/j/p/q/y), so its ink sits almost entirely above the baseline and

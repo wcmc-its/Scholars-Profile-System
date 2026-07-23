@@ -176,7 +176,7 @@ export function ProfileAppointmentsCard({ cwid, mode, scholarName }: ProfileAppo
   return (
     <EditPanel
       slot="profile-appointments-card"
-      heading="Additional appointments"
+      heading="Additional positions"
       owned
       subsection
       description={`Add roles and appointments the WCM directory feeds don't carry — internal WCM leadership and positions at other institutions. These appear only on ${possessive} public profile, never on center, department, division, or search pages.`}
@@ -286,7 +286,7 @@ export function ProfileAppointmentsCard({ cwid, mode, scholarName }: ProfileAppo
             }}
             data-testid="profile-appointment-add"
           >
-            Add an appointment
+            Add a position
           </Button>
         </div>
       ) : null}

@@ -550,7 +550,7 @@ export default function DocsPage() {
                 <td>Request a change (routes to Sponsored Research); applied in InfoEd</td>
               </tr>
               <tr>
-                <td>Clinical trials</td>
+                <td>Clinical research</td>
                 <td>OnCore (clinical trial management system)</td>
                 <td>Nightly</td>
                 <td>
