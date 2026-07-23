@@ -58,6 +58,21 @@ describe("HeadshotAvatar", () => {
     expect(["loading", "fallback"]).toContain(state);
   });
 
+  it("derives the URL from cwid when identityImageEndpoint is omitted, without forcing fallback (#1410)", () => {
+    // SSR is deterministic (no img-load events fire), so data-headshot-state
+    // reflects `noImage` directly. Omitting the endpoint must take the image
+    // path (derived from cwid → "loading"), NOT the empty-endpoint fallback —
+    // and an explicit "" must still force "fallback" (`??`, not `||`).
+    const derived = renderToString(
+      <HeadshotAvatar cwid="abc1234" preferredName="Jane Doe" size="md" />
+    );
+    const empty = renderToString(
+      <HeadshotAvatar cwid="abc1234" preferredName="Jane Doe" identityImageEndpoint="" size="md" />
+    );
+    expect(derived).toContain('data-headshot-state="loading"');
+    expect(empty).toContain('data-headshot-state="fallback"');
+  });
+
   it("applies size=lg classes for profile sidebar", () => {
     const { container } = render(
       <HeadshotAvatar

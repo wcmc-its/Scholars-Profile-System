@@ -12,9 +12,10 @@ const EXPANDED_VISIBLE = 50;
 /**
  * Issue #88 — Author facet on the Publications-tab left rail.
  *
- * Buckets arrive pre-hydrated from the server (display name, slug, avatar
- * endpoint) so the client only handles UI: typeahead, sort toggle, pinned
- * selections, "Show all" expansion. URLs are precomputed server-side
+ * Buckets arrive pre-hydrated from the server (display name, slug) so the
+ * client only handles UI: typeahead, sort toggle, pinned selections, "Show
+ * all" expansion. #1410 — the avatar endpoint is no longer shipped per bucket;
+ * `HeadshotAvatar` derives it from `cwid`. URLs are precomputed server-side
  * (Next.js can't pass functions Server → Client) — we toggle by navigating
  * to the resolved href.
  */
@@ -22,7 +23,6 @@ export type AuthorFacetItem = {
   cwid: string;
   displayName: string;
   slug: string;
-  identityImageEndpoint: string;
   count: number;
   isActive: boolean;
   toggleHref: string;
@@ -191,7 +191,6 @@ function AuthorRow({ author }: { author: AuthorFacetItem }) {
             size="sm"
             cwid={author.cwid}
             preferredName={author.displayName}
-            identityImageEndpoint={author.identityImageEndpoint}
           />
           <span className="min-w-0 flex-1 truncate" title={author.displayName}>
             {author.displayName}
