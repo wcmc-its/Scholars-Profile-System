@@ -59,11 +59,29 @@ async function main() {
   }
   console.error(`arm=${ARM} MATCHA_GLOSS_RERANK=${process.env.MATCHA_GLOSS_RERANK ?? "(off)"} λ=${process.env.MATCHA_GLOSS_RERANK_LAMBDA ?? "-"}`);
 
+  // MATCHA_GLOSS_INWORDS — default ON so every arm emits the "in their words" evidence the §1
+  // acceptance measurement counts (docs/2026-07-23-matcha-inwords-merged-next-steps-handoff.md).
+  // It is a per-field highlight_query (search.ts): it computes highlights on hits the base query
+  // already ranked, so it CANNOT change `ranked` — the nDCG λ-sweep reads `.ranked` only and is
+  // unaffected on every arm. Overridable (set "off" for the exact pre-#1884 path).
+  // ponytail: default-on beats threading a flag through the dispatch container — display-only, free.
+  if (process.env.MATCHA_GLOSS_INWORDS == null) process.env.MATCHA_GLOSS_INWORDS = "on";
+  console.error(`MATCHA_GLOSS_INWORDS=${process.env.MATCHA_GLOSS_INWORDS}`);
+
   // REASON_AGG_BYPASS makes cachedReasonAgg call through instead of caching, which would send
   // every seed straight to a Bedrock call this role cannot make. Fail loudly, not silently.
   if (process.env.REASON_AGG_BYPASS) throw new Error("REASON_AGG_BYPASS is set — the seed cannot take");
 
   const ranked: Record<string, string[]> = {};
+  // MATCHA_GLOSS_INWORDS acceptance data — per fixture, each candidate's per-concept evidence
+  // blocks reduced to {term, inWords}. `inwords-population.jq` reads this to report each concept's
+  // population rate (populated / matched-pool). `inWords` is set ONLY from a real <mark> fragment
+  // upstream, so `!= null` here is an honest "the scholar used the gloss's word." Additive to the
+  // artifact: the dispatch's `jq '.ranked'` ignores it, so sponsor-eval.sh sees byte-identical input.
+  const evidence: Record<
+    string,
+    { cwid: string; rank: number; blocks: { term: string; inWords: string | null }[] }[]
+  > = {};
   const unmeasured: { id: string; why: string }[] = [];
 
   for (const f of payload.fixtures) {
@@ -98,10 +116,15 @@ async function main() {
     }
 
     ranked[f.id] = result.candidates.map((c) => c.cwid);
+    evidence[f.id] = result.candidates.map((c, rank) => ({
+      cwid: c.cwid,
+      rank,
+      blocks: (c.searchEvidence ?? []).map((e) => ({ term: e.term, inWords: e.inWords ?? null })),
+    }));
     console.error(`  ✓ ${f.id} [${ARM}] ${result.candidates.length} candidates, ${result.concepts.length} concepts`);
   }
 
-  const out = JSON.stringify({ arm: ARM, ranked, unmeasured }, null, 2);
+  const out = JSON.stringify({ arm: ARM, ranked, evidence, unmeasured }, null, 2);
   if (dest) {
     const m = /^s3:\/\/([^/]+)\/(.+)$/.exec(dest);
     if (!m) throw new Error(`bad destination (want s3://bucket/key): ${dest}`);
