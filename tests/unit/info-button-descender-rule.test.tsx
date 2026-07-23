@@ -31,7 +31,7 @@ const TRIGGERS = [
   { Component: TechnologiesInfoButton, heading: "Available technologies" },
   { Component: MentoringInfoTooltip, heading: "Mentoring" },
   { Component: DisclosureInfoTooltip, heading: "External relationships" },
-  { Component: ClinicalTrialsInfoTooltip, heading: "Clinical trials" },
+  { Component: ClinicalTrialsInfoTooltip, heading: "Clinical research" },
 ] as const;
 
 describe("info-button nudge follows the heading's descender", () => {
@@ -49,7 +49,7 @@ describe("info-button nudge follows the heading's descender", () => {
 
   it("pins the descender split — if a heading is renamed, this is the thing to re-derive", () => {
     // Guards the premise itself: three of the four headings have a descender and one
-    // does not. Rename "Clinical trials" to something with a 'g' and the nudge must
+    // does not. Rename "Clinical research" to something with a 'g' and the nudge must
     // change with it.
     const withDescender = TRIGGERS.filter((t) => DESCENDERS.test(t.heading)).map((t) => t.heading);
     const without = TRIGGERS.filter((t) => !DESCENDERS.test(t.heading)).map((t) => t.heading);
@@ -58,6 +58,6 @@ describe("info-button nudge follows the heading's descender", () => {
       "Mentoring",
       "External relationships",
     ]);
-    expect(without).toEqual(["Clinical trials"]);
+    expect(without).toEqual(["Clinical research"]);
   });
 });

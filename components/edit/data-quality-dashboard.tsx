@@ -223,7 +223,7 @@ export function DataQualityDashboard({
                     <td className="px-3 py-2 text-center">
                       {e.pendingCoiHigh > 0 ? (
                         <span
-                          className="bg-apollo-maroon inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold text-white"
+                          className="bg-muted text-muted-foreground inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold"
                           title={
                             e.pendingCoiMedium > 0
                               ? `${e.pendingCoiHigh} to review · ${e.pendingCoiMedium} likely covered`
