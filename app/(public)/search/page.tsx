@@ -1730,7 +1730,6 @@ async function PublicationsResults({
       cwid: a.cwid,
       displayName: a.displayName,
       slug: a.slug,
-      identityImageEndpoint: a.identityImageEndpoint,
       count: a.count,
       isActive: wcmAuthor.includes(a.cwid),
       toggleHref: toggleHref("wcmAuthor", a.cwid),

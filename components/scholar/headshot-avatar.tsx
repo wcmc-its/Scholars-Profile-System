@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { identityImageEndpoint as deriveIdentityImageEndpoint } from "@/lib/headshot";
 import { cn, initials } from "@/lib/utils";
 
 type HeadshotState = "loading" | "image" | "fallback";
@@ -46,14 +47,19 @@ export function HeadshotAvatar({
 }: {
   cwid: string;
   preferredName: string;
-  identityImageEndpoint: string;
+  /** #1410 — optional: facet callers omit it to keep the derivable URL off the
+   *  payload, and this component rebuilds it from `cwid`. `??` (not `||`) so an
+   *  explicit `""` still forces the fallback, preserving existing callers. */
+  identityImageEndpoint?: string;
   size: "sm" | "md" | "lg";
   className?: string;
 }) {
   const [imgStatus, setImgStatus] = useState<"loading" | "loaded" | "error">(
     "loading"
   );
-  const noImage = !identityImageEndpoint || !cwid;
+  const src =
+    identityImageEndpoint ?? (cwid ? deriveIdentityImageEndpoint(cwid) : undefined);
+  const noImage = !src || !cwid;
 
   // #1387 — Radix AvatarImage only mounts its <img> on the client, so rendering
   // it during the initial (hydration) render diverges from the server's
@@ -77,7 +83,7 @@ export function HeadshotAvatar({
     >
       {mounted && !noImage && (
         <AvatarImage
-          src={identityImageEndpoint}
+          src={src}
           // Decorative: every headshot is rendered next to the scholar's name as
           // visible text, so naming the image too makes a screen reader announce
           // the name twice. Empty alt drops it from the a11y tree (axe

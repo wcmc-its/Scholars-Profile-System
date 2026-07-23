@@ -905,13 +905,16 @@ export type PublicationHit = {
 
 export type SearchFacetBucket = { value: string; count: number };
 
-/** Issue #88 — Author facet bucket, hydrated server-side with display
- *  name, slug, and avatar endpoint so the client component just renders. */
+/** Issue #88 — Author facet bucket, hydrated server-side with display name +
+ *  slug. #1410 — the avatar endpoint was dropped from the payload (it was
+ *  ~95 bytes on each of up to 500 buckets, ~24% of the whole response) because
+ *  it is a pure function of `cwid`; the client `HeadshotAvatar` derives it via
+ *  `identityImageEndpoint(cwid)`. Byte-identical URL because `SCHOLARS_HEADSHOT_BASE`
+ *  is unset in every env (⇒ same default server-side and client-side). */
 export type WcmAuthorFacetBucket = {
   cwid: string;
   displayName: string;
   slug: string;
-  identityImageEndpoint: string;
   count: number;
 };
 
@@ -4602,7 +4605,6 @@ export async function searchPublications(opts: {
       cwid: s.cwid,
       displayName: s.preferredName,
       slug: s.slug,
-      identityImageEndpoint: identityImageEndpoint(s.cwid),
       count: b.doc_count,
     }];
   });
@@ -4619,7 +4621,6 @@ export async function searchPublications(opts: {
         cwid: s.cwid,
         displayName: s.preferredName,
         slug: s.slug,
-        identityImageEndpoint: identityImageEndpoint(s.cwid),
         count: 0,
       });
     }

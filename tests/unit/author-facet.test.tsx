@@ -22,7 +22,6 @@ function makeItems(n: number): AuthorFacetItem[] {
     cwid: `c${i}`,
     displayName: `Author ${String(i).padStart(3, "0")}`,
     slug: `author-${i}`,
-    identityImageEndpoint: "",
     count: n - i,
     isActive: false,
     toggleHref: `/search?author=c${i}`,
