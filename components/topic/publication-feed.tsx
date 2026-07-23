@@ -69,9 +69,9 @@ type Hit = {
     isFirst: boolean;
     isLast: boolean;
   }>;
-  /** Issue #288 PR-A — inline abstract disclosure. Null when the publication
-   *  has no abstract; the disclosure component returns null in that case. */
-  abstract: string | null;
+  /** #1881 — presence flag; the abstract text is fetched lazily on expand
+   *  (#1537 `lazyAbstract`) instead of shipped with every feed row. */
+  hasAbstract: boolean;
   /**
    * Issue #327 — paper's argmax topic, surfaced inline as "Best fit: X"
    * on its own row below the bibliographic line. Server filters out the
@@ -524,7 +524,7 @@ function PubRow({ hit, topicSlug }: { hit: Hit; topicSlug: string }) {
         pmid={hit.pmid}
         pmcid={hit.pmcid}
         doi={hit.doi}
-        abstract={hit.abstract}
+        lazyAbstract={hit.hasAbstract}
       />
     </li>
   );

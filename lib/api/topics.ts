@@ -687,10 +687,11 @@ export type TopicPublicationHit = {
     /** #536 — co-author chip link suppression for hidden roles. */
     roleCategory: RoleCategory | null;
   }>;
-  /** Plain-text article abstract from `Publication.abstract` (#288 PR-A).
-   *  Null when the publication has no abstract. Rendered inline via
-   *  `<AbstractDisclosure>` in the topic publication feed. */
-  abstract: string | null;
+  /** #1881 — presence flag instead of the full abstract text (#1537 lazy path).
+   *  The feed ships only this boolean; `PublicationMeta` fetches the abstract
+   *  from `/api/publications/[pmid]` on expand. Saves ~20 KB/page of prose that
+   *  renders collapsed-by-default. */
+  hasAbstract: boolean;
   /**
    * Issue #327 — paper's argmax topic (`Publication.topTopicId`) and its
    * human-readable catalog label, surfaced inline on the citation row as
@@ -1058,7 +1059,7 @@ function mapToTopicPublicationHit(
     impactScore,
     impactJustification,
     authors: wcmAuthors ?? [],
-    abstract: r.publication.abstract ?? null,
+    hasAbstract: Boolean(r.publication.abstract),
     topTopic,
   };
 }
