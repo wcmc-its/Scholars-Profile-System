@@ -274,15 +274,38 @@ function evidenceKey(term: string, cwid: string): string {
   return JSON.stringify([term, cwid]);
 }
 
-/** Connective/prose words a gloss carries that must never drive an "in their words" fragment.
- *  Redundant with the field's own `english_stop` at query time, but applied here too so the emitted
- *  query string stays clean and `distinctiveGlossTerms` is testable in isolation. Only true function
- *  words. */
+/** Words a gloss carries that must never drive an "in their words" fragment: true function words
+ *  PLUS generic biomedical framing/methodology vocabulary.
+ *
+ *  The function words are redundant with the field's own `english_stop` at query time, but applied
+ *  here too so the emitted query string stays clean and `distinctiveGlossTerms` is testable in
+ *  isolation.
+ *
+ *  The generic-biomedical group was added after the §1 acceptance eval (2026-07-23, #1884 follow-up):
+ *  a gloss is a full sense phrase, and its generic framing words ("disease", "cell", "treatment",
+ *  "model", "response"…) matched common words in UNRELATED titles — 47% of the eval's `<mark>` tokens
+ *  were generic and ≥38% of populated fragments marked nothing else, so the line frequently asserted
+ *  a scholar's work on the concept when the cited title was unrelated (the fabricated-relevance trap).
+ *  Stripping them leaves only DISTINCTIVE sense words to highlight. Domain/sense terms (cancer, tumor,
+ *  lymphoma, cardiac, metabolic, immune, signaling, genetic, vascular, amyloid, …) are deliberately
+ *  NOT here — those ARE the sponsor's sense. The safe direction is over-strip → under-claim (no line
+ *  beats a misleading one), so tune this list toward stripping if a concept still reads noisy. */
 const GLOSS_STOPWORDS = new Set([
+  // true function words
   "and", "or", "the", "a", "an", "of", "to", "in", "on", "for", "with", "from", "by", "as", "at",
   "via", "that", "this", "these", "those", "its", "their", "between", "across", "into", "onto",
   "under", "over", "is", "are", "be", "been", "which", "who", "whose", "than", "then", "also",
-  "both", "each", "such", "may", "can", "not",
+  "both", "each", "such", "may", "can", "not", "using", "use", "based",
+  // generic biomedical framing / methodology (§1 eval, 2026-07-23) — NOT domain/sense terms
+  "disease", "diseases", "cell", "cells", "cellular", "treatment", "treatments", "therapy",
+  "therapies", "therapeutic", "model", "models", "modeling", "role", "roles", "patient", "patients",
+  "care", "data", "outcome", "outcomes", "clinical", "human", "study", "studies", "approach",
+  "approaches", "response", "responses", "function", "functions", "functional", "level", "levels",
+  "effect", "effects", "associated", "association", "mechanism", "mechanisms", "process", "processes",
+  "development", "factor", "factors", "activity", "activities", "system", "systems", "analysis",
+  "prediction", "predict", "predicting", "predictive", "detection", "diagnosis", "diagnostic",
+  "prevention", "monitoring", "management", "assessment", "evaluation", "novel", "potential",
+  "improve", "improved", "understanding", "target", "targets", "targeted", "targeting",
 ]);
 
 /**
