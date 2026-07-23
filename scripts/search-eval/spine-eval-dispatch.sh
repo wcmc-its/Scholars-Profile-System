@@ -129,10 +129,11 @@ TASK_ARN="$(aws ecs run-task \
   --network-configuration "$NETCFG" \
   --overrides "$(jq -n \
       --arg s "$SCRIPT" --arg gr "$GET_RUN" --arg ga "$GET_ARM" --arg gd "$GET_DATA" \
-      --arg ob "$OUT_BASE" --arg ar "$ARMS" \
-      '{containerOverrides:[{name:"etl",command:["bash","-c",$s],environment:[
-         {name:"GET_RUN",value:$gr},{name:"GET_ARM",value:$ga},{name:"GET_DATA",value:$gd},
-         {name:"OUT_BASE",value:$ob},{name:"ARMS",value:$ar}]}]}')" \
+      --arg ob "$OUT_BASE" --arg ar "$ARMS" --arg iw "${MATCHA_GLOSS_INWORDS:-}" \
+      '{containerOverrides:[{name:"etl",command:["bash","-c",$s],environment:(
+         [{name:"GET_RUN",value:$gr},{name:"GET_ARM",value:$ga},{name:"GET_DATA",value:$gd},
+          {name:"OUT_BASE",value:$ob},{name:"ARMS",value:$ar}]
+         + (if $iw != "" then [{name:"MATCHA_GLOSS_INWORDS",value:$iw}] else [] end))}]}')" \
   --query 'tasks[0].taskArn' --output text)"
 
 [[ -n "$TASK_ARN" && "$TASK_ARN" != "None" ]] || { echo "run-task returned no ARN" >&2; exit 1; }
