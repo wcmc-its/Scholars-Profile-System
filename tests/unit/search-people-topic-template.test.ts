@@ -269,14 +269,30 @@ describe("people-index topic-shape template — SPEC §6.1.3 (#310)", () => {
     expect(hasFunction(functionScore(capturedBodies[0]).functions, 1.5)).toBe(false);
   });
 
-  it("attributionBoostFired is true when the attributionMatch agg is non-empty", async () => {
+  it("attributionBoostFired is true when the attributionMatch agg is non-empty (telemetry opted in)", async () => {
     const result = await searchPeople({
       q: "ras signaling pancreatic cancer",
       relevanceMode: "v3",
       shape: "topic",
       meshDescendantUis: DESCENDANTS,
+      // #1414(a) — the agg is telemetry-only; the logging caller opts in.
+      includeAttributionTelemetry: true,
     });
     expect(result.attributionBoostFired).toBe(true);
+    // …and the agg is actually attached on the opted-in path.
+    expect(capturedBodies[0].aggs).toHaveProperty("attributionMatch");
+  });
+
+  it("#1414(a): WITHOUT includeAttributionTelemetry the agg is skipped and telemetry is null", async () => {
+    const result = await searchPeople({
+      q: "ras signaling pancreatic cancer",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: DESCENDANTS,
+      // no includeAttributionTelemetry — the default for every non-logging caller
+    });
+    expect(result.attributionBoostFired).toBeNull();
+    expect(capturedBodies[0].aggs).not.toHaveProperty("attributionMatch");
   });
 
   it("legacy mode with a topic shape does NOT apply the topic template", async () => {
@@ -337,11 +353,15 @@ describe("people-index topic-shape template — SPEC §6.1.3 (#310)", () => {
 
   it("skipFacetAggs omits the facet aggregations from the request body (spine fan-out breaker)", async () => {
     // Default: the facet aggs are attached — today's /search body.
+    // includeAttributionTelemetry so attributionMatch is in the block too (it is
+    // now #1414(a)-gated), which lets the skipFacetAggs half below prove the
+    // block gate dominates the telemetry opt-in.
     await searchPeople({
       q: "ras signaling pancreatic cancer",
       relevanceMode: "v3",
       shape: "topic",
       meshDescendantUis: DESCENDANTS,
+      includeAttributionTelemetry: true,
     });
     expect(capturedBodies[0]).toHaveProperty("aggs");
     const aggs = capturedBodies[0].aggs as Record<string, unknown>;
@@ -359,6 +379,7 @@ describe("people-index topic-shape template — SPEC §6.1.3 (#310)", () => {
       shape: "topic",
       meshDescendantUis: DESCENDANTS,
       skipFacetAggs: true,
+      includeAttributionTelemetry: true,
     });
     expect(capturedBodies[0]).not.toHaveProperty("aggs");
     expect(capturedBodies[0].query).toHaveProperty("function_score");

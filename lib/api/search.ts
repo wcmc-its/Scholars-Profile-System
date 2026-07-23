@@ -1514,7 +1514,8 @@ export async function searchPeople(opts: {
    * attributionMatch telemetry agg) are NOT attached to the search body, so OpenSearch
    * executes none of them. The response's `facets` then read empty (the `?.`
    * aggregation reads below already fall back to []/0) and `attributionBoostFired`
-   * reads false (telemetry only). Callers that DISCARD facets — the spine's
+   * reads null (it is opt-in via `includeAttributionTelemetry`, which the spine
+   * never sets). Callers that DISCARD facets — the spine's
    * `retrieveCluster` reads only hits/total/pageSize — pay nothing for them: dropping
    * the nine aggs (chief among them the size-200 `deptDivKey` terms agg that loads
    * global ordinals) removes the per-request heap that accumulated across the spine's
@@ -1523,6 +1524,17 @@ export async function searchPeople(opts: {
    * (only the `aggs` attachment is gated); the main search keeps every facet.
    */
   skipFacetAggs?: boolean;
+  /**
+   * #1414(a) — telemetry gate for the `attributionMatch` filter-agg. That agg
+   * exists ONLY to compute `attributionBoostFired` for the `search_query`
+   * structured log, whose sole reader is `app/api/search/route.ts`. Every other
+   * caller (the SSR page's badge + full searches, the sponsor spine) discards
+   * it, so by default the agg is NOT attached and `attributionBoostFired` reads
+   * null — the same value as "the boost was not in play". Set true only on the
+   * search whose result feeds that log, so the eval signal is preserved at zero
+   * extra cost on every other people search.
+   */
+  includeAttributionTelemetry?: boolean;
   /**
    * Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
    * The resolved area's scholars as `{cwid, total}` (relevance×coverage, sorted desc),
@@ -2391,8 +2403,12 @@ export async function searchPeople(opts: {
     // the scored set (must + always-on filters, i.e. the function_score scope,
     // before post_filter) that ALSO carry a descendant UI. `doc_count > 0`
     // means the attribution boost (#726-graduated) moved at least one result.
-    // Only added when the topic template is active AND the query resolved.
-    ...(applyTopicTemplate && meshDescendantUis.length > 0
+    // #1414(a) — telemetry-only agg; attached only when the caller will log it
+    // (`includeAttributionTelemetry`), and only when the topic template is
+    // active AND the query resolved.
+    ...(opts.includeAttributionTelemetry &&
+    applyTopicTemplate &&
+    meshDescendantUis.length > 0
       ? {
           attributionMatch: {
             filter: {
@@ -2903,11 +2919,14 @@ export async function searchPeople(opts: {
     };
   };
 
-  // Issue #310 / SPEC §9 — null unless the topic template ran against a
-  // resolved descriptor; otherwise true iff at least one scored doc carried a
+  // Issue #310 / SPEC §9 — null unless the caller opted into telemetry
+  // (#1414(a) `includeAttributionTelemetry`) AND the topic template ran against
+  // a resolved descriptor; otherwise true iff at least one scored doc carried a
   // descendant UI (the agg counts the function_score's attribution scope).
   const attributionBoostFired =
-    applyTopicTemplate && meshDescendantUis.length > 0
+    opts.includeAttributionTelemetry &&
+    applyTopicTemplate &&
+    meshDescendantUis.length > 0
       ? (r.aggregations?.attributionMatch?.doc_count ?? 0) > 0
       : null;
 
