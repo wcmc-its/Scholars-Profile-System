@@ -1336,11 +1336,37 @@ export async function getTopicScholars(
   // Role counts within the name-filtered universe (does NOT apply role filter,
   // so each chip's badge reflects the size of its own bucket regardless of
   // which chip is currently selected).
-  const roleGroup = await prisma.scholar.groupBy({
-    by: ["roleCategory"],
-    where: baseScholarFilter,
-    _count: { _all: true },
-  });
+  const filterWithRole: Record<string, unknown> = { ...baseScholarFilter };
+  if (role !== "all") {
+    filterWithRole.roleCategory = { in: ROLE_FILTER_CATEGORIES[role] };
+  }
+
+  // #1881 — the role-count groupBy and the member fetch are independent
+  // (filterWithRole derives only from the `role` option, not from the counts),
+  // so issue them concurrently instead of one serial round-trip.
+  // The member fetch pulls the entire matching set (no SQL-layer pagination) so
+  // we can sort by last-name initial — preferredName is "Given Last" format and
+  // we need alphabetical-by-surname for both the list order and the §13
+  // alpha-letter dividers. Topic universes are small enough (low hundreds at the
+  // high end) that an in-process sort is cheaper than a generated-column migration.
+  const [roleGroup, scholarsAll] = await Promise.all([
+    prisma.scholar.groupBy({
+      by: ["roleCategory"],
+      where: baseScholarFilter,
+      _count: { _all: true },
+    }),
+    prisma.scholar.findMany({
+      where: filterWithRole,
+      select: {
+        cwid: true,
+        slug: true,
+        preferredName: true,
+        postnominal: true,
+        primaryTitle: true,
+        roleCategory: true,
+      },
+    }),
+  ]);
   let allCount = 0;
   let facultyCount = 0;
   let postdocsCount = 0;
@@ -1352,28 +1378,6 @@ export async function getTopicScholars(
     else if (r.roleCategory === "postdoc") postdocsCount += n;
     else if (r.roleCategory === "doctoral_student") doctoralCount += n;
   }
-
-  const filterWithRole: Record<string, unknown> = { ...baseScholarFilter };
-  if (role !== "all") {
-    filterWithRole.roleCategory = { in: ROLE_FILTER_CATEGORIES[role] };
-  }
-
-  // Fetch the entire matching set (no pagination at SQL layer) so we can sort
-  // by last-name initial — preferredName is "Given Last" format and we need
-  // alphabetical-by-surname for both the list order and the §13 alpha-letter
-  // dividers. Topic universes are small enough (low hundreds at the high end)
-  // that an in-process sort is cheaper than a generated-column migration.
-  const scholarsAll = await prisma.scholar.findMany({
-    where: filterWithRole,
-    select: {
-      cwid: true,
-      slug: true,
-      preferredName: true,
-      postnominal: true,
-      primaryTitle: true,
-      roleCategory: true,
-    },
-  });
 
   const enriched = scholarsAll.map((s) => ({
     ...s,

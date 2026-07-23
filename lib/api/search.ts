@@ -18,6 +18,7 @@
  * `filters.includeIncomplete = false` explicitly; current callers (the /search
  * page and /api/search) leave it unset.
  */
+import { cache } from "react";
 import { identityImageEndpoint } from "@/lib/headshot";
 import type { AuthorRole } from "@/lib/search-index-docs";
 import { prisma } from "@/lib/db";
@@ -131,6 +132,15 @@ import {
 import type { PeopleQueryShape as PeopleQueryClassification } from "@/lib/api/people-query-shape";
 
 const PAGE_SIZE = 20;
+
+// #1881 — Topic id→label map for the humanized research-areas fallback. It is
+// deploy-stable reference data loaded on every match-aware people search;
+// `searchPeople` runs up to 2× per SSR render, so react `cache()` collapses the
+// duplicate full-table reads to one Prisma round-trip per request.
+const loadTopicLabelMap = cache(async (): Promise<Map<string, string>> => {
+  const rows = await prisma.topic.findMany({ select: { id: true, label: true } });
+  return new Map(rows.map((r) => [r.id, r.label]));
+});
 
 export type PeopleSort = "relevance" | "lastname" | "recentPub";
 /**
@@ -3245,8 +3255,8 @@ export async function searchPeople(opts: {
     // under_scores). `areasOfInterest` is a space-join of `Topic.id` slugs, so a
     // single `topic.findMany` resolves every area to its curated label; unknown
     // slugs fall back to `humanizeAreaSlug`.
-    const topicRows = await prisma.topic.findMany({ select: { id: true, label: true } });
-    for (const tr of topicRows) topicLabelBySlug.set(tr.id, tr.label);
+    const topicLabelMap = await loadTopicLabelMap();
+    for (const [id, label] of topicLabelMap) topicLabelBySlug.set(id, label);
   }
 
   // Strongest-signal reason: pub-evidence count (document) → concept fallback

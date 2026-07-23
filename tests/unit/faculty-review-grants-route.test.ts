@@ -100,6 +100,24 @@ describe("GET /api/faculty-review/[cwid]/grants", () => {
     expect(body.count).toBe(2);
     expect(mockFindMany).toHaveBeenCalledWith({
       where: { cwid: "abc1001" },
+      // #1881 — explicit select of only the 15 mapped columns (no abstract/Json drag).
+      select: {
+        externalId: true,
+        source: true,
+        title: true,
+        role: true,
+        awardNumber: true,
+        funder: true,
+        primeSponsor: true,
+        directSponsor: true,
+        isSubaward: true,
+        programType: true,
+        mechanism: true,
+        nihIc: true,
+        applId: true,
+        startDate: true,
+        endDate: true,
+      },
       orderBy: { endDate: "desc" },
     });
 

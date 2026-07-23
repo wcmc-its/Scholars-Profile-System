@@ -89,6 +89,27 @@ export async function GET(
   try {
     const rows = await db.read.grant.findMany({
       where: { cwid },
+      // #1881 — select only the columns the mapper below reads. Without this the
+      // row drags `abstract` (@db.Text) + `keywords`/`meshDescriptorUis` (Json)
+      // and ~9 other unused columns — ~100–150 KB discarded per NIH-heavy PI on
+      // this Bearer cohort-bulk API.
+      select: {
+        externalId: true,
+        source: true,
+        title: true,
+        role: true,
+        awardNumber: true,
+        funder: true,
+        primeSponsor: true,
+        directSponsor: true,
+        isSubaward: true,
+        programType: true,
+        mechanism: true,
+        nihIc: true,
+        applId: true,
+        startDate: true,
+        endDate: true,
+      },
       // Most-recent first; the [cwid, endDate] index serves this directly.
       orderBy: { endDate: "desc" },
     });
