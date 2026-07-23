@@ -211,13 +211,24 @@ const baseTopicOpts = {
 };
 
 describe("people-index MeSH concept admission — SPEC #726", () => {
+  const originalPrecount = process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT;
   beforeEach(() => {
+    // #1414 flipped the default to the reorder (no dedicated pre-count). This
+    // file captures the PRE-COUNT two-pass body shape — its mock drives the
+    // escalate/count-gate decision via the size:0 pre-count's `lexical.total`,
+    // and the assertions include `preCountIssued()`. Pin the pre-count path
+    // explicitly here; the reorder default is covered by
+    // search-people-concept-precount.test.ts.
+    process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT = "on";
     capturedBodies.length = 0;
     lexical.total = 1;
     groupByMock.mockResolvedValue([]);
   });
 
   afterEach(() => {
+    if (originalPrecount === undefined)
+      delete process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT;
+    else process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT = originalPrecount;
     vi.clearAllMocks();
   });
 
