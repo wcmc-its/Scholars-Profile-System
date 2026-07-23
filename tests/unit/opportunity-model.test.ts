@@ -26,6 +26,7 @@ describe("Opportunity model — codegen", () => {
       dueDate: new Date("2026-09-01"),
       eligibilityRaw: "Public/State Controlled Institutions of Higher Education",
       eligibilityFlags: ["us_eligible", "faculty_eligible"],
+      eligibility: { career_stages: ["early_career_faculty"], schema_version: "2.0.0" },
       cfdaList: ["93.310"],
       mechanism: "R01",
       awardCeiling: 500000n,

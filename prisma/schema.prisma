@@ -496,7 +496,14 @@ model Opportunity {
   eligibilityRaw   String    @map("eligibility_raw") @db.Text
   /// Derived flags (`us_eligible`/`faculty_eligible`/`postdoc_eligible`/
   /// `student_only`/`internal_limited_submission`) — see grant-opportunity-mapper.
+  /// Now derived from `eligibility` (the structured map) when present, else the raw prose.
   eligibilityFlags Json      @map("eligibility_flags")
+  /// Structured eligibility map from ReciterAI (GRANT# contract v2, #290 + v2 facets):
+  /// `{ applicant_org_types, career_stages, degree_required, citizenship_requirement,
+  /// nomination_gated, career_window, mentorship, funding_history_restriction,
+  /// faculty_track_required, institutional_eligibility, schema_version, ... }`. Nullable —
+  /// pre-backfill rows fall back to the prose-regex flag derivation.
+  eligibility      Json?     @map("eligibility")
   cfdaList         Json      @map("cfda_list")
   mechanism        String?   @db.VarChar(16)
   awardCeiling     BigInt?   @map("award_ceiling")

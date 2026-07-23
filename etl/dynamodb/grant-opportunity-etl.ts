@@ -96,6 +96,7 @@ export async function projectGrantOpportunities(
           isResearch: w.isResearch,
           meshDescriptorUi: w.meshDescriptorUi,
           prestige: w.prestige,
+          eligibility: w.eligibility,
           isHonorific: w.isHonorific,
           taxonomyVersion: w.taxonomyVersion,
           matchDsl: w.matchDsl,

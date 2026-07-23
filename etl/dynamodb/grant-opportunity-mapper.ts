@@ -42,6 +42,7 @@ export type GrantRecordInput = {
   is_research?: boolean;
   mesh_descriptor_ui?: unknown; // string[]
   prestige?: unknown; // { score, mechanism_tier, size_bucket, sponsor_tier, selectivity, label, rationale }
+  eligibility?: unknown; // native DDB map (M) → plain object post-DocumentClient: structured eligibility (#290 + v2)
   match_dsl?: unknown; // compact-JSON `S` string: { require, penalize, pediatric_markers, pediatric_required }
   match_query?: unknown; // compact-JSON `S` string: [{ q, w }] weighted BM25 terms
   match_rel?: unknown; // compact-JSON `S` string: { pmid: cosine∈[0,1] } dense relevance map
@@ -76,6 +77,7 @@ export type OpportunityWrite = {
   isResearch: boolean;
   meshDescriptorUi: Prisma.InputJsonValue | typeof Prisma.JsonNull;
   prestige: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+  eligibility: Prisma.InputJsonValue | typeof Prisma.JsonNull;
   matchDsl: Prisma.InputJsonValue | typeof Prisma.JsonNull;
   matchQuery: Prisma.InputJsonValue | typeof Prisma.JsonNull;
   matchRel: Prisma.InputJsonValue | typeof Prisma.JsonNull;
@@ -137,15 +139,46 @@ function parseJsonAttr(raw: unknown): Prisma.InputJsonValue | typeof Prisma.Json
   }
 }
 
-/**
- * Derive structured eligibility flags from the raw eligibility prose. Hard gates
- * are intentionally PERMISSIVE — only exclude on a clear signal — because the
- * nuanced career-stage fit lives in `appeal_by_stage`, not here (spec §9).
- *
- * Flags: `us_eligible`, `faculty_eligible`, `postdoc_eligible`, `student_only`,
- * `internal_limited_submission`.
- */
-export function deriveEligibilityFlags(eligibilityRaw: string | null | undefined): string[] {
+const FACULTY_STAGES = new Set([
+  "early_career_faculty",
+  "mid_career_faculty",
+  "senior_faculty",
+  "any_faculty",
+  "clinician",
+]);
+const STUDENT_STAGES = new Set(["undergraduate", "graduate_student"]);
+
+/** Derive the 5 flags from the STRUCTURED eligibility map (preferred when present). */
+function deriveEligibilityFlagsFromMap(elig: Record<string, unknown>): string[] {
+  const flags: string[] = [];
+  const asStrings = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  const orgTypes = asStrings(elig.applicant_org_types);
+  const stages = asStrings(elig.career_stages);
+
+  // us_eligible — RETAIN aggressively: the live matcher hard-requires it
+  // (`{ term: { eligibilityFlags: "us_eligible" } }`), so clearing it returns zero results.
+  // Clear ONLY when the award is exclusively foreign.
+  const foreignOnly = orgTypes.length > 0 && orgTypes.every((o) => o === "foreign_org");
+  if (!foreignOnly) flags.push("us_eligible");
+
+  // student_only — career_stages present AND wholly within {undergraduate, graduate_student}.
+  if (stages.length > 0 && stages.every((s) => STUDENT_STAGES.has(s))) flags.push("student_only");
+
+  // faculty_eligible — no person-level restriction (empty) OR intersects faculty/clinician.
+  if (stages.length === 0 || stages.some((s) => FACULTY_STAGES.has(s))) flags.push("faculty_eligible");
+
+  // postdoc_eligible — no restriction (empty) OR postdoc explicitly listed.
+  if (stages.length === 0 || stages.includes("postdoc")) flags.push("postdoc_eligible");
+
+  // internal_limited_submission — the structured bool (the prose-regex equivalent).
+  if (elig.limited_submission === true) flags.push("internal_limited_submission");
+
+  return flags;
+}
+
+/** Derive the 5 flags from the raw eligibility PROSE (fallback for pre-backfill rows). */
+function deriveEligibilityFlagsFromProse(eligibilityRaw: string | null | undefined): string[] {
   const text = (typeof eligibilityRaw === "string" ? eligibilityRaw : "").toLowerCase();
   const flags: string[] = [];
 
@@ -186,6 +219,24 @@ export function deriveEligibilityFlags(eligibilityRaw: string | null | undefined
   return flags;
 }
 
+/**
+ * Derive the eligibility flags. Prefer the STRUCTURED `eligibility` map when present (accurate,
+ * #290 + v2 facets); fall back to the raw-prose regexes for pre-backfill rows. Hard gates stay
+ * PERMISSIVE — nuanced career-stage fit lives in `appeal_by_stage`, not here (spec §9).
+ *
+ * Flags: `us_eligible`, `faculty_eligible`, `postdoc_eligible`, `student_only`,
+ * `internal_limited_submission`. 🔴 `us_eligible` is RETAINED — the matcher hard-requires it.
+ */
+export function deriveEligibilityFlags(
+  eligibility: unknown,
+  eligibilityRaw: string | null | undefined,
+): string[] {
+  if (eligibility && typeof eligibility === "object" && !Array.isArray(eligibility)) {
+    return deriveEligibilityFlagsFromMap(eligibility as Record<string, unknown>);
+  }
+  return deriveEligibilityFlagsFromProse(eligibilityRaw);
+}
+
 /** Build `opportunity` upsert writes from a flat list of `GRANT#` items. */
 export function buildOpportunityWrites(items: GrantRecordInput[]): BuildOpportunityResult {
   const writes: OpportunityWrite[] = [];
@@ -219,7 +270,11 @@ export function buildOpportunityWrites(items: GrantRecordInput[]): BuildOpportun
       openDate: parseIsoDate(it.open_date),
       dueDate: parseIsoDate(it.due_date),
       eligibilityRaw: trimStr(it.eligibility_raw),
-      eligibilityFlags: deriveEligibilityFlags(it.eligibility_raw),
+      eligibilityFlags: deriveEligibilityFlags(it.eligibility, it.eligibility_raw),
+      eligibility:
+        it.eligibility && typeof it.eligibility === "object" && !Array.isArray(it.eligibility)
+          ? (it.eligibility as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
       cfdaList: (Array.isArray(it.cfda_list) ? it.cfda_list : []) as Prisma.InputJsonValue,
       mechanism: trimStr(it.mechanism) || null,
       awardCeiling: toBigIntOrNull(it.award_ceiling),
