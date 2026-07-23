@@ -451,6 +451,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "0.5",
               },
               {
+                "Name": "MATCHA_GLOSS_INWORDS",
+                "Value": "off",
+              },
+              {
                 "Name": "GRANT_MATCHA",
                 "Value": "off",
               },
@@ -4236,6 +4240,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "MATCHA_GLOSS_RERANK_LAMBDA",
                 "Value": "0.5",
+              },
+              {
+                "Name": "MATCHA_GLOSS_INWORDS",
+                "Value": "off",
               },
               {
                 "Name": "GRANT_MATCHA",

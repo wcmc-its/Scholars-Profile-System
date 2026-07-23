@@ -172,6 +172,7 @@
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "sax": "^1.6.0",
+    "stemmer": "^2.0.1",
     "tailwind-merge": "^2.6.0",
     "vis-data": "^8.0.4",
     "vis-network": "^10.1.0",

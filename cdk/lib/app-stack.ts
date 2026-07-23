@@ -1350,6 +1350,15 @@ export class AppStack extends Stack {
         // λ = rescore_query_weight, wired per-env (was eval-only, set per-arm in the sweep). 0.5 is
         // the picked value; inert in prod while the flag is off, so a plain literal is fine.
         MATCHA_GLOSS_RERANK_LAMBDA: "0.5",
+        // MATCHA_GLOSS_INWORDS — the "in their words" evidence line: highlight the gloss's distinctive
+        // terms (the sponsor's sense words that diverge from the MeSH canonical) in each candidate's
+        // own publication titles, making the gloss re-ranker legible. Display-only (no ranking
+        // change) but shipped DARK in BOTH envs: it must be MEASURED per concept that the fragment
+        // populates often enough to earn its line — some glosses ("candidate biomarkers …") rarely
+        // appear verbatim — and never mislead when absent (the acceptance gate in
+        // docs/2026-07-22-gloss-mechanism-cognitive-probe-and-inwords-evidence-handoff.md §5). Flip
+        // staging on via a deliberate cdk deploy once that measurement clears.
+        MATCHA_GLOSS_INWORDS: "off",
         // GRANT_MATCHA — the Grant Matcha convergence surfaces: the /edit/find-researchers "Matcha"
         // mode (opportunity → researchers via the spine, #1866) AND the /edit/matcha people|grants
         // target toggle + query→grants result cards (#1867 route + #1870 UI). Read via

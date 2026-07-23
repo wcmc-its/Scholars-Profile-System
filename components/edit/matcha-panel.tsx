@@ -66,6 +66,7 @@ import { Download } from "lucide-react";
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { EvidenceLine } from "@/components/search/evidence-line";
+import { HighlightedSnippet } from "@/components/search/highlight-snippet";
 import type { ResultEvidence } from "@/lib/api/result-evidence";
 import { Button } from "@/components/ui/button";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
@@ -2742,6 +2743,24 @@ function ResearcherRow({
                   autoResolve={inView && i <= resolvedCount}
                   onResolved={() => setResolvedCount((n) => Math.max(n, i + 1))}
                 />
+                {/* MATCHA_GLOSS_INWORDS — "in their words": where the sponsor's OWN phrasing (the
+                    gloss's distinctive terms, e.g. "decline") literally appears in this scholar's
+                    publication titles, when the concept label above is the MeSH canonical
+                    ("cognitive dysfunction"). One subordinate line, below the primary lead, ONLY when
+                    a real fragment came back — absent means the scholar ranked up without the literal
+                    word, and we assert nothing. `HighlightedSnippet` strips tags + renders the marks
+                    as the same pill the card uses elsewhere, so it can't inject the source markup.
+                    ponytail: the raw 200-char title fragment; a window that spans two titles is
+                    cosmetic only — the marked term is always real. */}
+                {evidence.inWords ? (
+                  <p
+                    data-slot="matcha-in-their-words"
+                    className="text-muted-foreground mt-1 text-xs leading-snug"
+                  >
+                    <span className="font-medium">In their words: </span>
+                    <HighlightedSnippet html={evidence.inWords} />
+                  </p>
+                ) : null}
               </div>
             ))}
             {/* SUPPORTING register — the weaker matched concepts demote to a one-line row: the
