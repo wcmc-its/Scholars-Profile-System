@@ -961,9 +961,9 @@ export function resolveSearchSuggestMeshConcept(): boolean {
  * be sparse, and on the SSR page it fires twice (the People badge count-call and
  * the full People search each pay it).
  *
- * When this lever is at its default (`on`), `searchPeople` keeps that pre-count:
+ * When this lever is set to `on`, `searchPeople` keeps that pre-count:
  * the escalation is decided up front, so the count/full bodies dispatch once
- * (already escalated if sparse). When `off`, `searchPeople` skips the pre-count
+ * (already escalated if sparse). By default (the reorder), `searchPeople` skips the pre-count
  * and instead reads the main search's OWN `hits.total` (the bodies are already
  * `track_total_hits: true`), re-running escalated ONLY when sparse. That drops
  * the dedicated hop on the common non-sparse path (the win — 2 fewer hops per
@@ -974,13 +974,14 @@ export function resolveSearchSuggestMeshConcept(): boolean {
  * escalation decision (`lexicalTotal < MESH_ESCALATION_THRESHOLD`) off the
  * identical lexical predicate, so the count-only badge and the full list reach
  * the same total under either state (`badge == list`). Only the number of
- * round-trips differs. Default ON (`SEARCH_PEOPLE_CONCEPT_PRECOUNT=off` enables
- * the reorder); a `!== "off"` default-on lever so the implementation ships dark
- * (zero behavior change until flipped) with an independent rollback trigger,
- * separate from `SEARCH_SHELL_STREAMING` and the ranking flags above.
+ * round-trips differs. #1414: the reorder is the DEFAULT and is already live in
+ * both deployed envs (cdk sets `=off`, which — like unset — is not `"on"`, so it
+ * takes the reorder). This `=== "on"` default matches deployed, ending the prior
+ * local(unset→pre-count)≠deployed(reorder) mismatch. Rollback trigger:
+ * `SEARCH_PEOPLE_CONCEPT_PRECOUNT=on` restores the dedicated pre-count path.
  */
 export function resolvePeopleConceptPrecount(): boolean {
-  return process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT !== "off";
+  return process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT === "on";
 }
 
 /**

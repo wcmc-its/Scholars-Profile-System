@@ -521,23 +521,23 @@ describe("resolvePeopleConceptPrecount (B2)", () => {
     else process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT = original;
   });
 
-  it("defaults to true when unset (ships dark — today's dedicated pre-count path)", () => {
-    expect(resolvePeopleConceptPrecount()).toBe(true);
+  it("defaults to false when unset (#1414 — the reorder, matching both deployed envs)", () => {
+    expect(resolvePeopleConceptPrecount()).toBe(false);
   });
 
-  it("is false only for exactly 'off' (enables the reordered no-pre-count path)", () => {
+  it("is false for 'off' (deployed value; not 'on' → the reorder)", () => {
     process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT = "off";
     expect(resolvePeopleConceptPrecount()).toBe(false);
   });
 
-  it("is true for any value that is not 'off' (default-on `!== \"off\"` lever)", () => {
-    // Mirrors the other default-on presentation/perf flags: only the literal
-    // 'off' flips it; everything else (incl. casing variants) keeps it on.
+  it("is true only for exactly 'on' (rollback to the dedicated pre-count path)", () => {
+    // `=== "on"` opt-in: only the literal 'on' restores the pre-count; every
+    // other value (incl. casing variants and empty) takes the default reorder.
     process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT = "on";
     expect(resolvePeopleConceptPrecount()).toBe(true);
-    process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT = "OFF";
-    expect(resolvePeopleConceptPrecount()).toBe(true);
+    process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT = "ON";
+    expect(resolvePeopleConceptPrecount()).toBe(false);
     process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT = "";
-    expect(resolvePeopleConceptPrecount()).toBe(true);
+    expect(resolvePeopleConceptPrecount()).toBe(false);
   });
 });
