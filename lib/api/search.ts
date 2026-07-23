@@ -4839,9 +4839,25 @@ export async function suggestNames(prefix: string, size = 5): Promise<
 
   if (suggestPayload.length === 0) return [];
   const cwids = suggestPayload.map((o) => o._id);
+  // Perf (#1881) — restrict the mget to the 7 scalars the mapper below reads.
+  // Without this the autocomplete endpoint (fires per keystroke) ships each
+  // person's entire `_source` — concatenated publication abstracts, mesh blobs,
+  // and the `enabled:false` precomputed fields — 100 KB–1 MB per prolific doc ×
+  // up to 5, to read <1 KB. Same #1407 `_source` anti-pattern. The include list
+  // mirrors `MGetDoc["_source"]` below exactly, so the mapped output is
+  // byte-identical.
   const mget = await searchClient().mget({
     index: PEOPLE_INDEX,
     body: { ids: cwids },
+    _source_includes: [
+      "slug",
+      "preferredName",
+      "primaryTitle",
+      "primaryDepartment",
+      "personType",
+      "lastNameSort",
+      "pubCountBucket",
+    ],
   });
   type MGetDoc = {
     _id: string;
