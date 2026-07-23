@@ -90,6 +90,7 @@ import {
   type TaxonomyMatchResult,
 } from "@/lib/api/search-taxonomy";
 import { timed } from "@/lib/api/search-timing";
+import { cachedReasonAgg, badgeCountKey } from "@/lib/api/reason-agg-cache";
 import { prisma } from "@/lib/db";
 import { logSearchDegraded } from "@/lib/analytics/errors";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -627,7 +628,8 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // search.
   const searchesStart = performance.now();
   const [peopleResult, pubsResult, fundingResult] = await Promise.all([
-    searchPeople({
+    cachedReasonAgg(badgeCountKey("people", q, scope), () =>
+      searchPeople({
       q,
       // Track B — Research-Area concentration boost (count query; reorder-only, so the
       // badge total is unchanged — passed for parity with the list query).
@@ -668,8 +670,12 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       contentQuery,
       // Perf — badge count only; the people tab's full result streams below.
       countOnly: true,
-    }),
-    searchPublications({
+      }),
+    ),
+    cachedReasonAgg(
+      badgeCountKey("publications", q, scope, { meshOnly: pubMeshOnly }),
+      () =>
+        searchPublications({
       q,
       page: type === "publications" ? page : 0,
       sort: type === "publications" ? (sort as PublicationsSort) : "relevance",
@@ -702,8 +708,10 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       contentQuery,
       // Perf — badge count only; the pub tab's full result streams below.
       countOnly: true,
-    }),
-    searchFunding({
+        }),
+    ),
+    cachedReasonAgg(badgeCountKey("funding", q, scope), () =>
+      searchFunding({
       q,
       page: type === "funding" ? page : 0,
       sort: type === "funding" ? (sort as FundingSort) : "relevance",
@@ -719,7 +727,8 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       scope,
       // Perf — badge count only; the funding tab's full result streams below.
       countOnly: true,
-    }),
+      }),
+    ),
   ]).catch((err) => {
     // #668 §3 — an OpenSearch outage on the shell's badge-count fetch is logged
     // as a structured, server-side `search_degraded` event before it bubbles to

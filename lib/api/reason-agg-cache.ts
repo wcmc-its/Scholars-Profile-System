@@ -78,6 +78,38 @@ export function reasonAggKey(parts: {
   ]);
 }
 
+/**
+ * Cache key for a tab badge count (#1409). The badge total is INVARIANT across
+ * the user-axis facets — deptDiv/personType/activity/pi (people), year/pubType/
+ * journal/author/department/mentoring (publications), and every funding axis all
+ * live in `post_filter`, which is absent from the count body — so the key
+ * deliberately EXCLUDES them. That exclusion is the win: toggling a facet stays a
+ * cache hit. It includes only the inputs that move `hits.total.value`:
+ *   - `q` (trimmed, matching how the search bodies trim it);
+ *   - `scope` (the `?match=` value, which folds in meshOff/meshStrict and thus
+ *     the whole mesh-resolution path — see search/page.tsx scopeToMeshParams);
+ *   - `meshOnly` (publications only — the `?searchMode=mesh-only` filter is the
+ *     one per-request total-mover that rides in query context, not post_filter).
+ * Shape, contentQuery, and the mesh resolution are pure functions of (q, scope);
+ * the remaining total-movers (relevanceMode, genericTermMode, conceptMode,
+ * SEARCH_FUNDING_TAB_* …) are deploy-constant env flags, and this in-memory cache
+ * is emptied on every deploy, so they cannot vary between two requests it serves.
+ */
+export function badgeCountKey(
+  corpus: "people" | "publications" | "funding",
+  q: string,
+  scope: string,
+  opts?: { meshOnly?: boolean },
+): string {
+  return JSON.stringify([
+    "badge",
+    corpus,
+    q.trim(),
+    scope,
+    corpus === "publications" ? Boolean(opts?.meshOnly) : null,
+  ]);
+}
+
 /** Test-only probe: the current entry count, so eviction is assertable without
  *  exporting the map itself. */
 export function reasonAggCacheSize(): number {
