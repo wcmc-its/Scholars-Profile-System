@@ -476,6 +476,15 @@ export type MatchaSearchEvidence = {
   evidence: ResultEvidence;
   /** The scholar's total publication count — the `M` in "N of M publications". */
   pubCount: number;
+  /** MATCHA_GLOSS_INWORDS — the "in their words" fragment: a snippet of THIS scholar's own
+   *  publication-title text with the gloss's distinctive terms (the sponsor's sense words that
+   *  diverge from the canonical `term`) `<mark>`-wrapped. Makes the gloss re-ranker legible — it
+   *  shows WHERE the sponsor's phrasing ("cognitive decline") literally appears in the scholar's
+   *  work, when the visible concept label is the MeSH canonical ("cognitive dysfunction").
+   *  Honesty guardrail (non-negotiable): set ONLY from a real OpenSearch highlight fragment, so it
+   *  is absent whenever the scholar ranked up via partial/MeSH matches WITHOUT the literal word —
+   *  the renderer shows nothing rather than assert a sense the scholar never used. Absent ⇒ no line. */
+  inWords?: string;
   keyPaper: {
     descriptorUis: string[];
     contentQuery: string;

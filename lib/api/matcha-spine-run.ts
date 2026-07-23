@@ -63,6 +63,9 @@ import {
 import { isResearchMatchEvidence } from "@/lib/api/result-evidence";
 import { searchPeople, type PeopleHit } from "@/lib/api/search";
 import { meshMatchTier } from "@/lib/search";
+// Porter stemmer (reference impl) — matches the field's ES english stemmer closely enough that a
+// gloss term is dropped iff it stem-collides with the canonical concept (see distinctiveGlossTerms).
+import { stemmer } from "stemmer";
 import { matchQueryToTaxonomy, type MeshResolution } from "@/lib/api/search-taxonomy";
 import { normalizeDescription } from "@/lib/api/matcha";
 
@@ -271,6 +274,49 @@ function evidenceKey(term: string, cwid: string): string {
   return JSON.stringify([term, cwid]);
 }
 
+/** Connective/prose words a gloss carries that must never drive an "in their words" fragment.
+ *  Redundant with the field's own `english_stop` at query time, but applied here too so the emitted
+ *  query string stays clean and `distinctiveGlossTerms` is testable in isolation. Only true function
+ *  words. */
+const GLOSS_STOPWORDS = new Set([
+  "and", "or", "the", "a", "an", "of", "to", "in", "on", "for", "with", "from", "by", "as", "at",
+  "via", "that", "this", "these", "those", "its", "their", "between", "across", "into", "onto",
+  "under", "over", "is", "are", "be", "been", "which", "who", "whose", "than", "then", "also",
+  "both", "each", "such", "may", "can", "not",
+]);
+
+/**
+ * MATCHA_GLOSS_INWORDS — the gloss's DISTINCTIVE terms: its tokens minus any whose Porter STEM matches
+ * a canonical concept token's stem (every cluster member), minus connective stopwords. This is the
+ * HONESTY CORE of the "in their words" line. Highlighting the full gloss would mark the shared canonical
+ * word ("cognitive") on a title about something unrelated ("cognitive behavioral therapy") and thereby
+ * assert the sponsor's sense ("decline") on a scholar who never used it — the exact fabricated-relevance
+ * trap the evidence code exists to avoid.
+ *
+ * Compared by STEM, not surface form, because `publicationTitles` is analyzed with ES's english (Porter)
+ * stemmer at index AND query time (lib/search.ts — `scholar_text`, no `search_analyzer` override). An
+ * exact — or a shared-prefix — subtraction lets a morphological variant slip through and then stem-collide
+ * at query time onto the concept's OWN word in an unrelated title: "dysfunctions"→"dysfunct",
+ * "arteries"→"arteri", "eyes"→"ey", "genomic"→"genom" (two adversarial reviews found exactly these).
+ * `stemmer` is the reference Porter implementation — the SAME family as the field's stemmer — so folding
+ * both sides through it and comparing stems catches every plural/derivational variant the field folds,
+ * while keeping genuinely divergent sense words ("decline", "vascular") distinct. Returns "" when the
+ * gloss adds nothing distinctive (it merely restates the term); the caller then requests no highlight at
+ * all. Pure + client-safe.
+ */
+export function distinctiveGlossTerms(gloss: string, memberTerms: string[]): string {
+  const tok = (s: string): string[] => s.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 2);
+  const memberStems = new Set(memberTerms.flatMap(tok).map((t) => stemmer(t)));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of tok(gloss)) {
+    if (GLOSS_STOPWORDS.has(t) || seen.has(t) || memberStems.has(stemmer(t))) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out.join(" ");
+}
+
 /** Retrieve up to `TERM_DEPTH` scholar cwids for one cluster, in `searchPeople` rank
  *  order, in a SINGLE request (`pageSize: TERM_DEPTH`). Topical-only: the expertise-independent employment priors
  *  (faculty + active-grant prominence) are OFF so ranking reflects fit alone. A
@@ -291,6 +337,10 @@ async function retrieveCluster(
   // on a multi-shard index — λ changes which docs each shard surfaces (churn = ungraded deep tail).
   rescoreQuery?: string,
   rescoreWeight?: number,
+  // MATCHA_GLOSS_INWORDS — the gloss's distinctive terms to highlight in `publicationTitles`. Passed
+  // ONLY when the flag is on AND `distinctiveGlossTerms` returned something; undefined ⇒ no gloss
+  // highlight requested ⇒ searchPeople args (and the /search body) are byte-identical to today.
+  glossHighlightQuery?: string,
 ): Promise<{ ranked: string[]; hits: PeopleHit[] }> {
   // ONE request for the whole TERM_DEPTH pool (was a 5-page loop) — a perf simplification with
   // BYTE-IDENTICAL output (the 2026-07-22 eval proved single-request == paged, byte-for-byte).
@@ -358,6 +408,9 @@ async function retrieveCluster(
     ...(rescoreQuery
       ? { rescoreQuery, rescoreWeight, rescoreWindow: TERM_DEPTH }
       : {}),
+    // MATCHA_GLOSS_INWORDS — spread ONLY when distinctive gloss terms are in hand, so the off-path
+    // opts (and thus the highlight body) are byte-identical. Rides this SAME call — no round-trip.
+    ...(glossHighlightQuery ? { glossHighlightQuery } : {}),
   });
   // size == TERM_DEPTH caps the response, so slice is a defensive no-op.
   const ranked = result.hits.map((h) => h.cwid).slice(0, TERM_DEPTH);
@@ -587,6 +640,13 @@ export async function rankResearchersForDescriptionSpine(
   // λ≥0 the rescore is not perfectly recall-neutral on a multi-shard index — see retrieveCluster —
   // but the clamp keeps it a pure within-window re-order.) Never a real arm (sweep is 0.25/0.5/1.0).
   const glossRerankOn = process.env.MATCHA_GLOSS_RERANK === "on";
+  // MATCHA_GLOSS_INWORDS — the "in their words" evidence line: highlight the gloss's distinctive terms
+  // in each candidate's own publication titles, so the gloss re-ranker is legible (see the concept's
+  // `inWords` in the contract). Display-only (no ranking effect) but off by default + staging-first —
+  // it must be MEASURED per concept that the fragment populates often enough to earn its line (the
+  // handoff's acceptance gate); some glosses ("candidate biomarkers …") rarely appear verbatim. Dark
+  // ⇒ no gloss-highlight requested ⇒ off-path byte-identical.
+  const glossInWordsOn = process.env.MATCHA_GLOSS_INWORDS === "on";
   const glossRerankLambda = (() => {
     const parsed = Number.parseFloat(process.env.MATCHA_GLOSS_RERANK_LAMBDA ?? "");
     return Number.isFinite(parsed) ? Math.max(0, parsed) : 0.5;
@@ -667,6 +727,12 @@ export async function rankResearchersForDescriptionSpine(
       // clusters have none ⇒ off-path byte-identical). `clusterGloss` is the rail's "sponsor's words".
       glossRerankOn && clusterGloss ? clusterGloss : undefined,
       glossRerankLambda,
+      // MATCHA_GLOSS_INWORDS — highlight the gloss's DISTINCTIVE terms (its sense words minus the
+      // canonical member tokens) in publication titles. Only when the flag is on, a gloss exists, AND
+      // it carries something beyond the concept label; "" ⇒ undefined ⇒ no highlight requested.
+      glossInWordsOn && clusterGloss
+        ? distinctiveGlossTerms(clusterGloss, cluster.members) || undefined
+        : undefined,
     );
     for (const h of hits) if (!hitByCwid.has(h.cwid)) hitByCwid.set(h.cwid, h);
     // #1689 — evidence is CONCEPT-SCOPED, so it is stored per (concept, cwid) and read back
@@ -720,12 +786,19 @@ export async function rankResearchersForDescriptionSpine(
       // candidate's `searchEvidence` stays absent if none of them did. We render nothing rather
       // than guess.
       if (!hitEvidence || !isResearchMatchEvidence(hitEvidence)) continue;
+      // MATCHA_GLOSS_INWORDS — the "in their words" fragment for THIS (concept, cwid). Kept ONLY when
+      // it carries a real `<mark>` (OpenSearch returns the field only on a match, but a defensive
+      // check keeps the honesty guarantee explicit): a fragment without a mark is not the sponsor's
+      // word appearing in their work, so it earns no line. Absent ⇒ absent — never a placeholder.
+      const inWords =
+        h.glossHighlight && h.glossHighlight.includes("<mark>") ? h.glossHighlight : undefined;
       evidenceByTermCwid.set(evidenceKey(term, h.cwid), {
         // The join key back to `contributions[].term` / `concepts[].term` — the cluster's
         // representative, the same string that keys the ranking and the wire concept.
         term,
         evidence: hitEvidence,
         pubCount: h.pubCount,
+        ...(inWords ? { inWords } : {}),
         // What the lazy key-paper fetch needs to find this candidate's papers FOR THIS
         // CONCEPT — the same three inputs the public People card passes. Per-concept, which is
         // what lets each of a card's blocks reveal papers about ITS OWN concept.

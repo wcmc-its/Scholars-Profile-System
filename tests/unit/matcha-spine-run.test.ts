@@ -88,7 +88,106 @@ vi.mock("@/lib/api/matcha-extract", () => ({
     ),
 }));
 
-import { rankResearchersForDescriptionSpine } from "@/lib/api/matcha-spine-run";
+import {
+  distinctiveGlossTerms,
+  rankResearchersForDescriptionSpine,
+} from "@/lib/api/matcha-spine-run";
+
+// MATCHA_GLOSS_INWORDS — the honesty core of the "in their words" line. `distinctiveGlossTerms`
+// decides which words of the gloss are eligible to be highlighted in a scholar's OWN titles; if it
+// ever let a shared canonical token through, the line could assert the sponsor's sense on a scholar
+// who only used the concept's own word — the fabricated-relevance trap the whole evidence path
+// exists to avoid.
+describe("distinctiveGlossTerms (in-their-words highlight eligibility)", () => {
+  it("drops the canonical member tokens so a SHARED word can never be the highlight query", () => {
+    // The doc's case: term "cognitive dysfunction", gloss "cognitive decline with genetic and
+    // vascular contributions". "cognitive" is shared and MUST NOT survive (else a "cognitive
+    // behavioral therapy" title would falsely earn the "decline" line); "dysfunction" is a member
+    // token; stopwords "with"/"and" go. Only the sponsor's DIVERGENT sense words remain.
+    const terms = distinctiveGlossTerms(
+      "cognitive decline with genetic and vascular contributions",
+      ["cognitive dysfunction"],
+    );
+    const set = terms.split(" ");
+    expect(set).not.toContain("cognitive");
+    expect(set).not.toContain("dysfunction");
+    expect(set).not.toContain("with");
+    expect(set).not.toContain("and");
+    expect(set).toEqual(["decline", "genetic", "vascular", "contributions"]);
+  });
+
+  it("subtracts tokens from EVERY merged member, not just the first", () => {
+    // A cluster that merged "cognitive dysfunction" + "cognitive decline" leaves neither word
+    // eligible — both are now the concept's own vocabulary.
+    const terms = distinctiveGlossTerms("cognitive decline and vascular disease", [
+      "cognitive dysfunction",
+      "cognitive decline",
+    ]);
+    expect(terms.split(" ")).not.toContain("decline");
+    expect(terms).toContain("vascular");
+  });
+
+  it("STEM-collides morphological variants — a plural gloss token can't smuggle the canonical word past subtraction", () => {
+    // The defect an adversarial verifier found: publicationTitles is stemmed (english_stemmer) at
+    // query time, so highlighting "dysfunctions" marks "dysfunction" (the canonical word) on any
+    // title — including one with nothing to do with the sponsor's sense. Exact subtraction let the
+    // plural through; stem-aware subtraction must drop it.
+    const terms = distinctiveGlossTerms("cognitive dysfunctions and behavioral decline", [
+      "cognitive dysfunction",
+    ]).split(" ");
+    expect(terms).not.toContain("dysfunctions"); // would stem to the canonical "dysfunction"
+    expect(terms).toContain("decline");
+    expect(terms).toContain("behavioral");
+  });
+
+  it("STEM-collides derivational variants (cognition ~ cognitive) but keeps genuinely distinct words", () => {
+    const terms = distinctiveGlossTerms("cognition, gliosis, and vascular decline", [
+      "cognitive dysfunction",
+    ]).split(" ");
+    expect(terms).not.toContain("cognition"); // shares the "cognit" stem with canonical "cognitive"
+    expect(terms).toContain("gliosis");
+    expect(terms).toContain("vascular");
+  });
+
+  it("does NOT over-collide on a short canonical acronym — a long distinct term that merely starts the same survives", () => {
+    // canonical "MI" (2 chars) stems to "mi"; "mitochondrial" stems to "mitochondri" — distinct.
+    expect(distinctiveGlossTerms("mitochondrial dysfunction of the myocardium", ["MI"])).toContain(
+      "mitochondrial",
+    );
+  });
+
+  it("STEM-collides y→ies plurals, short -s plurals, and 5-char-stem derivations — the families a shared-prefix heuristic missed", () => {
+    // Second adversarial review: "arteries"/"artery" (Porter → "arteri"), "eyes"/"eye" (→ "ey"), and
+    // "genomic"/"genome" (→ "genom") all stem-collide with the canonical word, but a shared-prefix
+    // test kept them — marking the concept's OWN word on unrelated titles ("Renal artery …",
+    // "Eye movement …", a genome-maintenance title).
+    const arteries = distinctiveGlossTerms(
+      "progressive narrowing of the coronary arteries by atherosclerotic plaque",
+      ["coronary artery disease"],
+    ).split(" ");
+    expect(arteries).not.toContain("arteries");
+    expect(arteries).toContain("atherosclerotic");
+
+    expect(
+      distinctiveGlossTerms("chronic disease of the eyes and tear film", ["dry eye disease"]).split(" "),
+    ).not.toContain("eyes");
+
+    expect(
+      distinctiveGlossTerms("genomic instability and repair", ["genome maintenance"]).split(" "),
+    ).not.toContain("genomic");
+  });
+
+  it("returns '' when the gloss adds nothing beyond the concept label (no highlight requested)", () => {
+    expect(distinctiveGlossTerms("cognitive dysfunction", ["cognitive dysfunction"])).toBe("");
+    expect(distinctiveGlossTerms("with the and of", ["x"])).toBe(""); // pure stopwords
+  });
+
+  it("dedups and is case-insensitive", () => {
+    expect(distinctiveGlossTerms("Decline, DECLINE and decline", ["cognitive dysfunction"])).toBe(
+      "decline",
+    );
+  });
+});
 
 /** A MeSH resolution stub — spine-run reads descriptorUi/descendantUis/confidence/
  *  curatedTopicAnchors/ambiguous/matchedForm/name. */
