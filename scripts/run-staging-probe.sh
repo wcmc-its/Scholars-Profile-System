@@ -31,8 +31,14 @@ TASKDEF="sps-etl-$ENV"
 CONTAINER="etl"
 LOG_GROUP="/aws/ecs/sps-etl-$ENV"
 LOG_PREFIX="etl"
-SUBNETS="subnet-03de6e3dfe190288b,subnet-019afebef588ee4b3"   # Sps-Network-staging private
-SG="sg-09b494047547ea148"                                      # ETL task SG
+# ponytail: read the netcfg off the LIVE app service instead of hardcoding it. Pinned
+# subnet/SG ids here went stale after a network redeploy and the probe then failed as a
+# DB socket timeout — which reads like an outage but is just a bad launch config.
+NETCFG="$(aws ecs describe-services --cluster "$CLUSTER" --services "sps-app-$ENV" \
+  --query 'services[0].networkConfiguration.awsvpcConfiguration' --output json)"
+SUBNETS="$(python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)["subnets"]))' <<<"$NETCFG")"
+SG="$(python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)["securityGroups"]))' <<<"$NETCFG")"
+[[ -n "$SUBNETS" && -n "$SG" ]] || { echo "could not read live netcfg for $ENV" >&2; exit 1; }
 
 B64="$(gzip -9 -c "$PROBE" | base64 | tr -d '\n')"
 OVERRIDES="$(B64="$B64" CONTAINER="$CONTAINER" python3 - <<'PY'

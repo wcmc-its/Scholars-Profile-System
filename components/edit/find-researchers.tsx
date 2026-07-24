@@ -443,7 +443,8 @@ function facetOptions(
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
-function BrowseList({ hrefFor }: { hrefFor: (id: string) => string }) {
+/** Exported so `/edit/grant-matcha` reuses the SAME browse table rather than a second picker. */
+export function BrowseList({ hrefFor }: { hrefFor: (id: string) => string }) {
   const [includeGrantsGov, setIncludeGrantsGov] = useState(false);
   const [sort, setSort] = useState<BrowseSort>("curated");
   const [filters, setFilters] = useState<BrowseFilters>(EMPTY_BROWSE_FILTERS);
@@ -452,7 +453,12 @@ function BrowseList({ hrefFor }: { hrefFor: (id: string) => string }) {
   useEffect(() => {
     let active = true;
     setStatus({ kind: "loading" });
-    const qs = new URLSearchParams({ limit: "200" });
+    // The API's default limit of 200 was silently hiding a third of the default corpus (staging
+    // 2026-07-24: 304 research, non-honorific, non-grants.gov rows). 500 is the route's MAX_LIMIT
+    // and covers it with headroom.
+    // ponytail: `includeGrantsGov=1` still overflows (934 rows) — that view is opt-in and
+    // duplicates a public site, so it stays truncated. Page it if anyone actually browses it.
+    const qs = new URLSearchParams({ limit: "500" });
     if (includeGrantsGov) qs.set("includeGrantsGov", "1");
     fetch(`/api/opportunities?${qs}`, { cache: "no-store", credentials: "same-origin" })
       .then(async (r) => {
