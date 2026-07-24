@@ -415,6 +415,10 @@ export type MatchaMeasures = {
    *  People-index hit: the index coerces a null role to the literal string `"unknown"`
    *  (lib/search-index-docs.ts), and a fabricated value is worse than an absent one. */
   roleCategory?: string | null;
+  /** Grant Matcha — within the NIH ESI window (from `deriveGrantSignals`). Hydrated ONLY on the
+   *  spine's grant-matcha path (`eligibilitySignals`); absent on `/edit/matcha` and the bespoke
+   *  engine. Absent ≠ ineligible: it means the signal was not computed for this candidate. */
+  esiEligible?: boolean;
 };
 
 /** The scholar columns `matchaMeasuresFrom` needs. Both engines already read Scholar for

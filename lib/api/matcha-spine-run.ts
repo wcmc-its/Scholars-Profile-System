@@ -60,6 +60,7 @@ import {
   type MatchaConcept,
   type MatchaSearchEvidence,
 } from "@/lib/api/matcha-contract";
+import { deriveGrantSignals } from "@/lib/api/match-researchers";
 import { isResearchMatchEvidence } from "@/lib/api/result-evidence";
 import { searchPeople, type PeopleHit } from "@/lib/api/search";
 import { meshMatchTier } from "@/lib/search";
@@ -460,7 +461,7 @@ async function retrieveCluster(
  */
 export async function rankResearchersForDescriptionSpine(
   description: string,
-  opts: { limit?: number; include?: readonly string[] } = {},
+  opts: { limit?: number; include?: readonly string[]; eligibilitySignals?: boolean } = {},
 ): Promise<SpineRankResult> {
   const empty: SpineRankResult = { concepts: [], candidates: [] };
   const text = normalizeDescription(description);
@@ -888,7 +889,36 @@ export async function rankResearchersForDescriptionSpine(
   ]);
   const techByCwid = new Map(grouped.map((g) => [g.cwid, g._count._all]));
   const now = new Date();
-  const measuresByCwid = new Map(measureRows.map((s) => [s.cwid, matchaMeasuresFrom(s, now)]));
+  // Grant Matcha (§3) — hydrate `esiEligible` ONLY on the grant-matcha path (`eligibilitySignals`),
+  // via a SEPARATE gated query so `/edit/matcha` keeps its exact select and stays byte-unchanged.
+  // `fused` already bounds the cwid list, so this is one extra bounded read, off unless requested.
+  const esiByCwid = new Map<string, boolean>();
+  if (opts.eligibilitySignals) {
+    const grantRows = await db.read.scholar.findMany({
+      where: { cwid: { in: cwids } },
+      select: {
+        cwid: true,
+        grants: { select: { endDate: true, role: true, mechanism: true } },
+        educations: { select: { year: true, degree: true } },
+      },
+    });
+    for (const s of grantRows) {
+      esiByCwid.set(
+        s.cwid,
+        deriveGrantSignals({ grants: s.grants, educations: s.educations }, now).esiEligible,
+      );
+    }
+  }
+  const measuresByCwid = new Map(
+    measureRows.map((s) => {
+      const base = matchaMeasuresFrom(s, now);
+      // Merge only when requested — otherwise the measures object is byte-identical to today's.
+      return [
+        s.cwid,
+        opts.eligibilitySignals ? { ...base, esiEligible: esiByCwid.get(s.cwid) ?? false } : base,
+      ] as const;
+    }),
+  );
 
   // Map to the wire `MatchaCandidate`. Display fields (name/slug/title/department) ride
   // in from the `searchPeople` hits — no extra profile read. `fusedScore` is the RRF sum

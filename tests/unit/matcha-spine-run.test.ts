@@ -781,6 +781,68 @@ describe("rankResearchersForDescriptionSpine", () => {
     expect(ghost?.measures).toBeUndefined();
   });
 
+  // ── Grant Matcha ESI hydration (§3) ────────────────────────────────────────
+  it("hydrates measures.esiEligible ONLY when eligibilitySignals is set — /edit/matcha byte-unchanged", async () => {
+    const thisYear = new Date().getFullYear();
+    mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
+    mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
+    mockSearchPeople.mockResolvedValue(people(["early", "senior"]));
+    // Two Scholar reads fire on the grant-matcha path: the measures read (no `grants` in the
+    // select) and the gated grants read. Distinguish them by whether the select asks for `grants`.
+    const measureRows = [
+      {
+        cwid: "early",
+        roleCategory: "full_time_faculty",
+        primaryTitle: "Assistant Professor",
+        hasClinicalProfile: false,
+        appointments: [],
+        educations: [{ year: thisYear - 2, degree: "PhD" }],
+      },
+      {
+        cwid: "senior",
+        roleCategory: "full_time_faculty",
+        primaryTitle: "Professor",
+        hasClinicalProfile: false,
+        appointments: [],
+        educations: [{ year: thisYear - 30, degree: "PhD" }],
+      },
+    ];
+    const grantRows = [
+      // early: recent PhD, no major PI award ⇒ inside the ESI window.
+      { cwid: "early", grants: [], educations: [{ year: thisYear - 2, degree: "PhD" }] },
+      // senior: PhD 30y ago ⇒ past the window.
+      { cwid: "senior", grants: [], educations: [{ year: thisYear - 30, degree: "PhD" }] },
+    ];
+    mockScholarFindMany.mockImplementation(async (args: { select?: { grants?: unknown } }) =>
+      args.select?.grants ? grantRows : measureRows,
+    );
+
+    // WITH signals → esiEligible present and correct; the gated grants read fired.
+    const withSig = await rankResearchersForDescriptionSpine("cancer", {
+      eligibilitySignals: true,
+    });
+    expect(withSig.candidates.find((c) => c.cwid === "early")?.measures?.esiEligible).toBe(true);
+    expect(withSig.candidates.find((c) => c.cwid === "senior")?.measures?.esiEligible).toBe(false);
+    expect(
+      mockScholarFindMany.mock.calls.some(
+        (c) => (c[0] as { select?: { grants?: unknown } }).select?.grants,
+      ),
+    ).toBe(true);
+
+    // WITHOUT signals → esiEligible ABSENT, the rest of measures unchanged, and NO grants read at
+    // all: the plain `/edit/matcha` path never touches the new query.
+    mockScholarFindMany.mockClear();
+    const noSig = await rankResearchersForDescriptionSpine("cancer");
+    const early = noSig.candidates.find((c) => c.cwid === "early");
+    expect(early?.measures?.esiEligible).toBeUndefined();
+    expect(early?.measures).toMatchObject({ careerStage: "early", roleCategory: "full_time_faculty" });
+    expect(
+      mockScholarFindMany.mock.calls.every(
+        (c) => !(c[0] as { select?: { grants?: unknown } }).select?.grants,
+      ),
+    ).toBe(true);
+  });
+
   it("retrieves each cluster's pool in ONE size-TERM_DEPTH request, in rank order (no paging)", async () => {
     mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
     mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
