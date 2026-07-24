@@ -64,8 +64,17 @@ export default function HomePage() {
       </a>
       <SiteHeader revealOnScrollPast="home-hero-search-sentinel" />
       <main id="main-content" tabIndex={-1} className="flex-1 outline-none">
-        {/* Hero — data-free, paints immediately so search is usable at once. */}
-        <section className="border-border border-b bg-gradient-to-b from-white to-zinc-50 px-6 py-16">
+        {/* Hero — data-free, paints immediately so search is usable at once.
+            Faint Cornell-red radial wash bridges the red header into the hero
+            and fades out before the search box. rgba is --color-primary-cornell-red
+            (#B31B1B) at 10%. */}
+        <section
+          className="border-border border-b bg-white px-6 py-16"
+          style={{
+            backgroundImage:
+              "radial-gradient(ellipse 70% 70% at 50% 0%, rgba(179, 27, 27, 0.1), transparent 72%)",
+          }}
+        >
           <div className="mx-auto max-w-[760px] text-center">
             <h1 className="page-title text-4xl font-semibold tracking-tight sm:text-5xl">
               Scholars at Weill Cornell Medicine

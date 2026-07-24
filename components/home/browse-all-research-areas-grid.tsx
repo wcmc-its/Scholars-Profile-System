@@ -52,7 +52,7 @@ export function BrowseAllResearchAreasGrid({
             {col.map((t) => (
               <li
                 key={t.slug}
-                className="flex items-start justify-between gap-3 py-2.5"
+                className="-mx-2 flex items-start justify-between gap-3 rounded-md px-2 py-2.5 transition-colors hover:bg-zinc-100"
               >
                 <a
                   href={`/topics/${t.slug}`}
