@@ -6,7 +6,8 @@ import { Fragment, type ReactNode } from "react";
  * Reused here so the methods provenance rail matches the rest of the site rather
  * than the chat-design stand-in the mockups used.
  */
-export const SNIPPET_MARK_CLASS = "box-decoration-clone rounded-[3px] bg-[#b31b1b]/10 px-[3px]";
+export const SNIPPET_MARK_CLASS =
+  "box-decoration-clone -mx-[3px] rounded-[3px] bg-[#b31b1b]/10 px-[3px]";
 
 /** Escape a string for safe interpolation into a RegExp (the term is data). */
 function escapeRegExp(s: string): string {

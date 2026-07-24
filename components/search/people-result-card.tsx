@@ -620,7 +620,11 @@ export function PeopleResultCard({
                       }}
                       aria-expanded={alsoExpanded}
                       aria-controls={alsoExpanded ? alsoPanelId : undefined}
-                      className="relative z-10 -mx-2 flex w-full items-center gap-2.5 rounded-md px-2 py-[3px] text-left hover:bg-[#f0eeea] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2c4f6e] focus-visible:ring-offset-1"
+                      // #1910 — `cursor-pointer` is explicit: Tailwind v4's preflight
+                      // sets `button { cursor: default }`, so without it this working
+                      // disclosure (and its chevron) offered no affordance on hover.
+                      // `DisclosureRow` opts back in the same way.
+                      className="relative z-10 -mx-2 flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2 py-[3px] text-left hover:bg-[#f0eeea] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2c4f6e] focus-visible:ring-offset-1"
                     >
                       <span className="shrink-0 text-[11px] font-medium text-[#9a958a]">
                         Also matched

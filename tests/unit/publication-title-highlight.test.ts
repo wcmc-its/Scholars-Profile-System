@@ -7,12 +7,22 @@
  * post-it-yellow <mark> default (#20).
  */
 import { describe, expect, it } from "vitest";
-import { highlightedTitleHtml } from "@/lib/search/highlight-title";
+import { highlightedTitleHtml, MARK_CLASS } from "@/lib/search/highlight-title";
 
-const PILL = "box-decoration-clone rounded-[3px] bg-[#b31b1b]/10 px-[3px]";
-const mark = (inner: string) => `<mark class="${PILL}">${inner}</mark>`;
+// Sourced from the module rather than re-typed: a hand-copied literal here silently
+// pinned the pill's old class list and turned an intended style change into 6 failures.
+const mark = (inner: string) => `<mark class="${MARK_CLASS}">${inner}</mark>`;
 
 describe("highlightedTitleHtml", () => {
+  it("#1909 — the pill's padding is cancelled by an equal negative margin (no added advance)", () => {
+    // Without this the 3px right padding pushes a trailing period off the word and the
+    // title renders "Acute Myeloid Leukemia ." on every highlighted key paper.
+    const pad = MARK_CLASS.match(/(?:^|\s)px-\[(\d+)px\]/)?.[1];
+    const pull = MARK_CLASS.match(/(?:^|\s)-mx-\[(\d+)px\]/)?.[1];
+    expect(pad).toBeDefined();
+    expect(pull).toBe(pad);
+  });
+
   it("applies the pale-tint pill and resets the yellow background", () => {
     expect(highlightedTitleHtml("The Traveling <mark>Microbiome</mark>.")).toBe(
       `The Traveling ${mark("Microbiome")}.`,

@@ -208,7 +208,43 @@ describe("<ResultEvidence> — one render per kind", () => {
       descendantTerms: ["Mycobiome", "Virome", "Metagenome"],
     });
     expect(screen.getByText("Microbiota").className).toMatch(/underline/);
-    expect(screen.getByText(/matched Mycobiome, Virome, \+1 more/)).toBeTruthy();
+    // #1908 — middot-separated, not comma-separated (see the MeSH case below).
+    expect(screen.getByText(/matched Mycobiome · Virome · \+1 more/)).toBeTruthy();
+  });
+
+  it("#1908 — comma-inverted MeSH descriptors stay countable (the separator is not a comma)", () => {
+    renderEv({
+      kind: "publications",
+      strength: "tagged",
+      text: "152 of 250 publications tagged",
+      term: "Leukemia",
+      count: 152,
+      // Real staging data. Joined on ", " these two terms rendered as six.
+      descendantTerms: ["Leukemia, Hairy Cell", "Leukemia, Myeloid", "Leukemia, B-Cell"],
+    });
+    expect(
+      screen.getByText("(matched Leukemia, Hairy Cell · Leukemia, Myeloid · +1 more)"),
+    ).toBeTruthy();
+  });
+
+  it("#1907 — an over-budget descendant list drops WHOLE terms into '+N more', closing the paren", () => {
+    renderEv({
+      kind: "publications",
+      strength: "tagged",
+      text: "26 of 169 publications tagged",
+      term: "Leukemia",
+      count: 26,
+      descendantTerms: [
+        "Precursor Cell Lymphoblastic Leukemia-Lymphoma",
+        "Leukemia, Lymphocytic, Chronic, B-Cell",
+        "Leukemia, Myeloid",
+      ],
+    });
+    // Both shown would run 85 chars and clip mid-word at the row's pixel boundary,
+    // cutting the parenthetical open. One term survives; the rest roll up.
+    expect(
+      screen.getByText("(matched Precursor Cell Lymphoblastic Leukemia-Lymphoma · +2 more)"),
+    ).toBeTruthy();
   });
 
   it("#1361 — a mention literal term is semibold but NOT underlined (underline = concept only)", () => {
@@ -829,6 +865,35 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the prim
     // 1/538 = 0.19% → fires; the family label drops from near-black to muted grey.
     expect(container.textContent).toMatch(/· 0\.2% of output/);
     expect(screen.getByText("Mass spectrometry").className).toMatch(/text-\[#9a958a\]/);
+  });
+
+  it("#1907 — the cue sits OUTSIDE the truncating span, so a long phrase cannot clip it", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "2 of 114 publications tagged",
+          term: "Leukemia",
+          count: 2,
+          descendantTerms: ["Leukemia, Lymphoid", "Leukemia, Myeloid", "Leukemia, B-Cell"],
+        }}
+        pubCount={114}
+        stacked
+      />,
+    );
+    const cue = screen.getByText(/% of output/);
+    expect(cue.textContent).toMatch(/1\.8% of output/);
+    // The whole point: nothing between the cue and the row root may clip it. When the
+    // cue lived inside the truncating span, this row rendered dim with the sentence
+    // explaining the dimming cut off at the pixel boundary.
+    let node: HTMLElement | null = cue;
+    while (node && node !== container) {
+      expect(node.className).not.toMatch(/truncate/);
+      node = node.parentElement;
+    }
+    // …and the phrase it annotates still truncates.
+    expect(container.querySelector(".truncate")?.textContent).toMatch(/2 of 114 publications/);
   });
 
   it("a coverage that rounds below 0.1% displays '<0.1% of output'", () => {

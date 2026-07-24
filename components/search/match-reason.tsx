@@ -318,9 +318,16 @@ export function MatchAwareReason({
       <span className={`w-[124px] shrink-0 font-medium ${dim ? "text-[#9a958a]" : k.type}`}>
         {k.word}
       </span>
-      <span className="min-w-0 flex-1 truncate">
-        {children}
-        {cue ? <span className="font-normal italic text-[#9a958a]">{cue}</span> : null}
+      {/* #1907 — the cue is a SIBLING of the truncating span, not its last child.
+          Inside it, it was the first thing the pixel-boundary clip ate: a 2-of-114
+          lead rendered dim (the "this match is thin" signal) with " · 1.8% of output"
+          (the sentence that justifies the dimming) cut off. The phrase truncates; the
+          caveat does not. */}
+      <span className="flex min-w-0 flex-1 items-baseline">
+        <span className="min-w-0 truncate">{children}</span>
+        {cue ? (
+          <span className="shrink-0 font-normal italic text-[#9a958a]">{cue}</span>
+        ) : null}
       </span>
     </>
   );
