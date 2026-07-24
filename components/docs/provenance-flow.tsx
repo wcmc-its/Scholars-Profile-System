@@ -123,10 +123,10 @@ const SURFACES = [
 const SCHOLARS_OWNED = [
   "Your overview text",
   "Your Selected highlights",
-  "Honors and distinctions you or a curator add",
-  "Positions the directory does not carry: WCM roles such as Program Director, and posts at other institutions",
-  "Anything you have hidden: publications, grants, appointments, and more. Hiding affects your profile, not search.",
-  "Center membership, maintained by center administrators",
+  "Honors and distinctions, on your profile only",
+  "Positions the directory omits, on your profile only",
+  "Anything you have hidden. Hiding affects your profile, not search.",
+  "Center membership, kept by center administrators",
 ];
 
 export function ProvenanceFlow() {
@@ -173,20 +173,37 @@ export function ProvenanceFlow() {
               ))}
             </ul>
           </div>
-          <div className="rounded-[10px] border border-[#c9d8ee] bg-[#f3f6fb] p-3">
-            <span className="block text-sm font-semibold">Stored in Scholars, not upstream</span>
-            <span className="mt-0.5 block text-[13px] text-muted-foreground">
-              Applied over the top each time the page is built, so it survives every refresh. The
-              only part you edit here. Honors and added positions show on your profile only, not in
-              search or on department, division, and center pages.
-            </span>
-            <ul className="!mt-1.5 !ml-4 text-[13px] text-muted-foreground">
-              {SCHOLARS_OWNED.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </div>
         </div>
+      </div>
+
+      {/*
+        The Scholars-owned layer sits below the flow rather than in a column,
+        mirroring the architecture view's override layer: it merges upward into
+        the surfaces above instead of belonging to any one of them. Full width
+        also stops it towering over a column it never fit inside.
+      */}
+      <div className="mt-2.5 rounded-[10px] border border-[#c9d8ee] bg-[#f3f6fb] p-3.5">
+        <div className="flex items-baseline gap-2">
+          <svg
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-4 w-4 shrink-0 translate-y-1 text-muted-foreground"
+            aria-hidden="true"
+          >
+            <path d="M10 17V4" />
+            <path d="M6 8l4-4 4 4" />
+          </svg>
+          <span className="text-sm font-semibold">Stored in Scholars, and merged in on top</span>
+        </div>
+        <ul className="!mt-2 !ml-4 grid gap-y-1 text-[13px] text-muted-foreground sm:grid-cols-2 sm:gap-x-8">
+          {SCHOLARS_OWNED.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
       </div>
 
       {/* The return path: the section's actual argument. */}
