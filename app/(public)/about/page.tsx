@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsMobileNav, DocsToc, type NavGroup } from "@/components/docs/docs-toc";
+import { ProvenanceFlow } from "@/components/docs/provenance-flow";
 
 /**
  * /docs (v0): single comprehensive documentation page, stakeholder-first +
@@ -431,6 +432,8 @@ export default function DocsPage() {
           Every part of a profile traces to a system of record. Scholars shows a copy and cannot
           override the source; corrections made upstream appear here after the next refresh.
         </p>
+        <ProvenanceFlow />
+        <p>The full map, field by field:</p>
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-[640px]">
             <thead>
