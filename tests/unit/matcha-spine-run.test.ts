@@ -211,6 +211,17 @@ describe("distinctiveGlossTerms (in-their-words highlight eligibility)", () => {
     }
   });
 
+  it("matches the stoplist by STEM, so a variant can't leak and re-mark the stopped word", () => {
+    // §1 v2 eval: "progression" was stopped yet still marked 57x — the gloss carried "progressive",
+    // which a surface-only check kept, and the field's Porter stemmer then collided the two onto
+    // the same term at query time. "through" was simply never listed.
+    const terms = distinctiveGlossTerms("progressive amyloid burden through time", ["x"]).split(" ");
+    expect(terms).toContain("amyloid"); // non-vacuous: the sense word still survives
+    for (const leaked of ["progressive", "through", "time"]) {
+      expect(terms).not.toContain(leaked);
+    }
+  });
+
   it("KEEPS domain / sense terms — the generic stoplist must not eat the sponsor's actual meaning", () => {
     // "vascular"/"genetic" are the parent-doc's canonical distinctive words; "amyloid"/"metabolic"
     // are domain sense. None are generic framing, so all must survive.
