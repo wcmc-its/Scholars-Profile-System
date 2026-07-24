@@ -37,10 +37,6 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
       "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
-    "SsmParameterValuespsprodapppublicalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter": {
-      "Default": "/sps/prod/app/public-alb-dns",
-      "Type": "AWS::SSM::Parameter::Value<String>",
-    },
     "SsmParameterValuespsprodedgeallowedcidrsC96584B6F00A464EAD1953AFF4B05118Parameter": {
       "Default": "/sps/prod/edge/allowed-cidrs",
       "Type": "AWS::SSM::Parameter::Value<List<String>>",
@@ -756,15 +752,13 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
           "Origins": [
             {
               "CustomOriginConfig": {
-                "HTTPPort": 80,
-                "OriginProtocolPolicy": "http-only",
+                "HTTPSPort": 443,
+                "OriginProtocolPolicy": "https-only",
                 "OriginSSLProtocols": [
                   "TLSv1.2",
                 ],
               },
-              "DomainName": {
-                "Ref": "SsmParameterValuespsprodapppublicalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
-              },
+              "DomainName": "cf-ns-scholars.weill.cornell.edu",
               "Id": "SpsEdgeprodDistributionOrigin13FA7C7AF",
               "OriginCustomHeaders": [
                 {
