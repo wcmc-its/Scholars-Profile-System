@@ -45,7 +45,7 @@ function coveragePct(count: number, total: number): string {
 // fabricated reason.
 function EmptyMatchLine() {
   return (
-    <div className="mt-2 text-[12px] italic leading-snug text-[#bdbdbd]">
+    <div className="mt-2 text-[12px] italic leading-snug text-[var(--evidence-faint)]">
       &mdash; no specific match for this query &mdash;
     </div>
   );
@@ -58,17 +58,19 @@ function AreasHint({ labels, total }: { labels: string[]; total: number }) {
   const more = total - labels.length;
   return (
     <div className="mt-2 flex min-w-0 items-baseline gap-2 rounded-md border border-[#e3e2dd] bg-[#f7f6f3] px-2.5 py-1.5 text-[12px] text-muted-foreground">
-      <span className="shrink-0 text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
+      <span className="shrink-0 text-[9.5px] font-bold uppercase tracking-[0.06em] text-[var(--evidence-body)]">
         Areas
       </span>
       <span className="min-w-0 truncate text-[#4a4a4a]">
         {labels.map((label, i) => (
           <span key={`${label}-${i}`}>
-            {i > 0 ? <span className="px-1.5 text-[#c9c4ba]">·</span> : null}
+            {i > 0 ? <span className="px-1.5 text-[var(--evidence-faint)]">·</span> : null}
             {label}
           </span>
         ))}
-        {more > 0 ? <span className="ml-1 font-semibold text-[#9a958a]">+{more} more</span> : null}
+        {more > 0 ? (
+          <span className="ml-1 font-semibold text-[var(--evidence-body)]">+{more} more</span>
+        ) : null}
       </span>
     </div>
   );
@@ -134,48 +136,45 @@ export function ResultEvidence({
       case "method":
         return (
           <LesserReason
-            dotClassName="bg-[#8B4A2F]"
             suffix={lesserCount(evidence.count)}
             canExpand={canExpand}
             expanded={expanded}
             onToggle={onToggle}
             panelId={panelId}
           >
-            <span className="font-medium text-[#8B4A2F]">Method</span> ·{" "}
-            <span className={`font-[450] text-[#3a3a3a] ${ENTITY_UNDERLINE}`}>{evidence.family}</span>
+            <span className="font-medium">Method</span> ·{" "}
+            <span className={`font-[450] text-[var(--evidence-anchor)] ${ENTITY_UNDERLINE}`}>{evidence.family}</span>
           </LesserReason>
         );
       case "topic":
         return (
           <LesserReason
-            dotClassName="bg-[#2563eb]"
             suffix={lesserCount(evidence.count)}
             canExpand={canExpand}
             expanded={expanded}
             onToggle={onToggle}
             panelId={panelId}
           >
-            <span className="font-medium text-[#1d4ed8]">Research area</span> ·{" "}
-            <span className={`font-[450] text-[#3a3a3a] ${ENTITY_UNDERLINE}`}>{evidence.label}</span>
+            <span className="font-medium">Research area</span> ·{" "}
+            <span className={`font-[450] text-[var(--evidence-anchor)] ${ENTITY_UNDERLINE}`}>{evidence.label}</span>
           </LesserReason>
         );
       case "clinical":
         return (
           <LesserReason
-            dotClassName="bg-[#0891b2]"
             canExpand={canExpand}
             expanded={expanded}
             onToggle={onToggle}
             panelId={panelId}
           >
-            <span className="font-medium text-[#0e7490]">Clinical</span> ·{" "}
+            <span className="font-medium">Clinical</span> ·{" "}
             {evidence.boardCertified ? (
               <>
                 Board certified in{" "}
-                <span className={`font-[450] text-[#3a3a3a] ${ENTITY_UNDERLINE}`}>{evidence.specialty}</span>
+                <span className={`font-[450] text-[var(--evidence-anchor)] ${ENTITY_UNDERLINE}`}>{evidence.specialty}</span>
               </>
             ) : (
-              <span className={`font-[450] text-[#3a3a3a] ${ENTITY_UNDERLINE}`}>{evidence.specialty}</span>
+              <span className={`font-[450] text-[var(--evidence-anchor)] ${ENTITY_UNDERLINE}`}>{evidence.specialty}</span>
             )}
           </LesserReason>
         );
@@ -183,10 +182,8 @@ export function ResultEvidence({
         const mention = evidence.strength === "mention";
         return (
           <LesserReason
-            // #1366 follow-up Part C — dots are always FILLED in the category color; a
-            // mention's weakness is carried by `weak` (muted/italic text) + the
-            // MentionNote, not a hollow dot.
-            dotClassName={mention ? "bg-[#64748b]" : "bg-[#7c3aed]"}
+            // #1913 — no dot. A mention's weakness is carried by `weak` (muted/italic
+            // text) + the MentionNote, which is where it always actually lived.
             weak={mention}
             suffix={lesserCount(evidence.count)}
             canExpand={canExpand}
@@ -194,17 +191,15 @@ export function ResultEvidence({
             onToggle={onToggle}
             panelId={panelId}
           >
-            <span className={`font-medium ${mention ? "text-[#475569]" : "text-[#6d28d9]"}`}>
-              {mention ? "Keyword" : "Concept"}
-            </span>
+            <span className="font-medium">{mention ? "Keyword" : "Concept"}</span>
             {evidence.term ? (
               <>
                 {" · "}
                 <span
                   className={
                     mention
-                      ? "font-[450] text-[#3a3a3a]"
-                      : `font-[450] text-[#3a3a3a] ${ENTITY_UNDERLINE}`
+                      ? "font-[450] text-[var(--evidence-anchor)]"
+                      : `font-[450] text-[var(--evidence-anchor)] ${ENTITY_UNDERLINE}`
                   }
                 >
                   {evidence.term}
@@ -303,7 +298,7 @@ export function ResultEvidence({
           onToggle={onToggle}
           panelId={panelId}
         >
-          {evidence.boardCertified ? <span className="text-[#8c8c8c]">Board certified in </span> : null}
+          {evidence.boardCertified ? <span className="text-[var(--evidence-body)]">Board certified in </span> : null}
           <CountFirst entity={evidence.specialty} underline />
         </MatchAwareReason>
       );
@@ -314,8 +309,10 @@ export function ResultEvidence({
       // then the term. The dotted underline marks a system-resolved concept — a literal
       // keyword/mention term stays plain (semibold, no underline).
       const mention = evidence.strength === "mention";
-      const anchor = dim ? "text-[#9a958a]" : "text-[#1a1a1a]";
-      const muted = dim ? "text-[#9a958a]" : "text-[#8c8c8c]";
+      const anchor = dim
+        ? "text-[var(--evidence-body)]"
+        : "text-[var(--evidence-anchor)]";
+      const muted = dim ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-body)]";
       const lead = evidence.text.match(/^(\d[\d,]*)(\s[\s\S]*)$/);
       return (
         <MatchAwareReason
@@ -348,7 +345,7 @@ export function ResultEvidence({
                   #1907/#1908 — middot-separated (the descriptors carry their own commas)
                   and budgeted so the parenthetical closes instead of clipping open. */}
               {evidence.descendantTerms && evidence.descendantTerms.length > 0 ? (
-                <span className="text-[#6b7280]">
+                <span className="text-[var(--evidence-detail)]">
                   {" "}
                   (matched {descendantSummary(evidence.descendantTerms)})
                 </span>

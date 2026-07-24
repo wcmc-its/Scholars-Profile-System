@@ -64,19 +64,22 @@ export type PeopleResultCardProps = {
 };
 
 /**
- * #1366 follow-up Part D collapse — the per-category dot + label for the collapsed
- * "Also matched" summary. Bright FILLED dot (matches the expanded lesser rows) + the
- * AA-safe dark label tone. Keyed by the lesser row's kind (publications splits into
+ * #1366 follow-up Part D collapse — the per-category label for the collapsed
+ * "Also matched" summary. Keyed by the lesser row's kind (publications splits into
  * concept vs keyword by strength). No counts here on purpose (see the call site).
+ *
+ * #1913 — was a FILLED dot plus the label in that same hue. Six hues, each one
+ * duplicating a word sitting 5px to its right, and the colours read as links while
+ * nothing in the group is individually clickable. The labels now share the row's
+ * neutral tone and separate with a middot.
  */
-type SecondaryMeta = { dot: string; label: string; color: string };
-const SECONDARY_META: Record<string, SecondaryMeta> = {
-  method: { dot: "bg-[#8B4A2F]", label: "Method", color: "text-[#8B4A2F]" },
-  topic: { dot: "bg-[#2563eb]", label: "Research area", color: "text-[#1d4ed8]" },
-  clinical: { dot: "bg-[#0891b2]", label: "Clinical", color: "text-[#0e7490]" },
-  concept: { dot: "bg-[#7c3aed]", label: "Concept", color: "text-[#6d28d9]" },
-  keyword: { dot: "bg-[#64748b]", label: "Keyword", color: "text-[#475569]" },
-  funding: { dot: "bg-[#16a34a]", label: "Funding", color: "text-[#166534]" },
+const SECONDARY_LABEL: Record<string, string> = {
+  method: "Method",
+  topic: "Research area",
+  clinical: "Clinical",
+  concept: "Concept",
+  keyword: "Keyword",
+  funding: "Funding",
 };
 
 /**
@@ -452,14 +455,13 @@ export function PeopleResultCard({
                 silently drop the other matched grants, and the row's number would no
                 longer account for the records the disclosure lists. */}
             {fundingMentionSuffix ? (
-              <span className="text-[#8c8c8c]"> · {fundingMentionSuffix}</span>
+              <span className="text-[var(--evidence-faint)]"> · {fundingMentionSuffix}</span>
             ) : null}
           </MatchAwareReason>
         ) : (
           <LesserReason
-            // #1366 follow-up Part C — dot is always FILLED green; a literal mention's
-            // weakness is carried by `weak` (muted/italic text) + the MentionNote.
-            dotClassName="bg-[#16a34a]"
+            // #1913 — no dot. A literal mention's weakness is carried by `weak`
+            // (muted/italic text) + the MentionNote.
             weak={!fundingTagged}
             suffix={` · ${fundingCount}`}
             // Lone demoted secondary → no inner chevron; the "Also matched" umbrella is
@@ -470,7 +472,7 @@ export function PeopleResultCard({
             panelId={fundingPanelId}
             srLabel="key funding"
           >
-            <span className="font-medium text-[#166534]">Funding</span> ·{" "}
+            <span className="font-medium">Funding</span> ·{" "}
             {fundingTagged ? (
               <>
                 tagged{" "}
@@ -497,18 +499,18 @@ export function PeopleResultCard({
       </>
     ) : null;
 
-  // #1366 follow-up Part D collapse — colored dot + category label per secondary, NO
-  // counts / NO entities: the counts mix denominators (pub-share vs grant-share), so a
-  // bare count line would invert real strength. The only count on the card stays the
-  // primary's single-denominator fraction; expanding reveals the full lesser rows.
+  // #1366 follow-up Part D collapse — category label per secondary, NO counts / NO
+  // entities: the counts mix denominators (pub-share vs grant-share), so a bare count
+  // line would invert real strength. The only count on the card stays the primary's
+  // single-denominator fraction; expanding reveals the full lesser rows.
   const secondaryChips = lesserLines
     .map((ev) =>
       ev.kind === "publications"
-        ? SECONDARY_META[ev.strength === "mention" ? "keyword" : "concept"]
-        : SECONDARY_META[ev.kind],
+        ? SECONDARY_LABEL[ev.strength === "mention" ? "keyword" : "concept"]
+        : SECONDARY_LABEL[ev.kind],
     )
-    .filter((c): c is SecondaryMeta => Boolean(c));
-  if (hasFunding) secondaryChips.push(SECONDARY_META.funding);
+    .filter((label): label is string => Boolean(label));
+  if (hasFunding) secondaryChips.push(SECONDARY_LABEL.funding);
   // ponytail: 4 chips fit one line at typical widths; more collapse to "+N". Bump the
   // cap if cards routinely carry more secondaries.
   const shownChips = secondaryChips.slice(0, 4);
@@ -626,29 +628,35 @@ export function PeopleResultCard({
                       // `DisclosureRow` opts back in the same way.
                       className="relative z-10 -mx-2 flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2 py-[3px] text-left hover:bg-[#f0eeea] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2c4f6e] focus-visible:ring-offset-1"
                     >
-                      <span className="shrink-0 text-[11px] font-medium text-[#9a958a]">
+                      <span className="shrink-0 text-[11px] font-medium text-[var(--evidence-body)]">
                         Also matched
                       </span>
                       {!alsoExpanded ? (
                         <span className="flex min-w-0 items-center gap-2.5 text-[12px]">
-                          {shownChips.map((c, i) => (
-                            <span key={i} className="inline-flex items-center gap-[5px]">
-                              <span
-                                aria-hidden
-                                className={`size-2 shrink-0 rounded-full ${c.dot}`}
-                              />
-                              <span className={`font-medium ${c.color}`}>{c.label}</span>
+                          {/* #1913 — labels only, middot-separated. The dot-plus-
+                              same-hue-word pairing is gone, and so is the false link
+                              affordance the coloured labels carried. */}
+                          {shownChips.map((label, i) => (
+                            <span key={i} className="inline-flex items-center gap-2.5">
+                              {i > 0 ? (
+                                <span aria-hidden className="text-[var(--evidence-faint)]">
+                                  ·
+                                </span>
+                              ) : null}
+                              <span className="font-medium text-[var(--evidence-body)]">
+                                {label}
+                              </span>
                             </span>
                           ))}
                           {chipOverflow > 0 ? (
-                            <span className="text-[#9a958a]">+{chipOverflow}</span>
+                            <span className="text-[var(--evidence-faint)]">+{chipOverflow}</span>
                           ) : null}
                         </span>
                       ) : null}
                       <ChevronDown
                         aria-hidden
                         strokeWidth={2.5}
-                        className={`ml-auto mr-[3px] size-3.5 shrink-0 text-[#9a958a] motion-safe:transition-transform motion-safe:duration-150 ${
+                        className={`ml-auto mr-[3px] size-3.5 shrink-0 text-[var(--evidence-faint)] motion-safe:transition-transform motion-safe:duration-150 ${
                           alsoExpanded ? "rotate-180" : ""
                         }`}
                       />

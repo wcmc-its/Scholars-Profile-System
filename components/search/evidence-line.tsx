@@ -600,21 +600,20 @@ export function EvidenceLine({
   const panelSubtitle =
     stacked && isTopicPanel ? "not from your search" : undefined;
 
-  // Signal-colored left rail on the expanded panel, keyed to the row's category
-  // (blue = research area, green handled by KeyFunding). Undefined ⇒ the panel's
-  // default flush padding (no rail).
+  // Left rail on the expanded panel, tying it to the row that opened it. Undefined ⇒
+  // the panel's default flush padding (no rail).
+  //
+  // #1913 — the rail used to be keyed to the row's category hue, which is the one place
+  // that colour did real work: it linked panel to row. A neutral rail links them just as
+  // well by position, and it leaves the highlight pill inside the panel as the only
+  // colour in the block, which is where a reader's eye should land.
   const railClassName =
-    evidence.kind === "method"
-      ? "border-l-2 border-[#8B4A2F] pl-[14px]"
-      : evidence.kind === "topic"
-        ? "border-l-2 border-[#2563eb] pl-[14px]"
-        : evidence.kind === "clinical"
-          ? "border-l-2 border-[#0891b2] pl-[14px]"
-          : evidence.kind === "publications"
-            ? evidence.strength === "mention"
-              ? "border-l-2 border-[#64748b] pl-[14px]"
-              : "border-l-2 border-[#7c3aed] pl-[14px]"
-            : undefined;
+    evidence.kind === "method" ||
+    evidence.kind === "topic" ||
+    evidence.kind === "clinical" ||
+    evidence.kind === "publications"
+      ? "border-l-2 border-[#a8a294] pl-[14px]"
+      : undefined;
 
   // ARTIFACT-LEAD. Just the artifacts: the grants and the papers. `ResultEvidence` is NOT rendered
   // here — its fixed KIND column ("Concept ·") is a label on a thing the caption above already

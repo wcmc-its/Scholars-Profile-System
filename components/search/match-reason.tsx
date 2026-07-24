@@ -32,13 +32,23 @@ const ICONS: Record<MatchReasonKind, typeof FileText> = {
  * `PublicationResultRow`), so the badged row no longer force-bolds its children.
  */
 export type PubFlavor = "area" | "concept" | "keyword";
-// #1381 follow-up — the primary publications reason is now a colored dot + type word
-// (matching the "Also matched" secondaries + the approved lead mock), NOT a bordered
-// pill/icon. Bright FILLED dot + the AA-safe dark label tone, keyed by flavor.
-const FLAVOR_DOT: Record<PubFlavor, { dot: string; text: string; color: string }> = {
-  area: { dot: "bg-[#2563eb]", text: "Research area", color: "text-[#1d4ed8]" },
-  concept: { dot: "bg-[#7c3aed]", text: "Concept", color: "text-[#6d28d9]" },
-  keyword: { dot: "bg-[#64748b]", text: "Keyword", color: "text-[#475569]" },
+/**
+ * #1913 — the flavor's WORD, and only the word.
+ *
+ * This was a per-flavor hue plus a filled dot in that same hue, sitting immediately
+ * before the word that already said "Concept" / "Research area" / "Keyword". The dot
+ * carried nothing the word did not, and neither did the colour: sampled across 120
+ * cards, the primary lead is Concept 69% of the time and Method 29%, so a five-hue
+ * legend was distinguishing two values in 98% of rows, in a column already 124px wide.
+ *
+ * Retiring the axis also settles #1912. The category labels were the only part of the
+ * row clearing WCAG AA while the sentence they annotate failed it; the contrast budget
+ * now goes to the sentence.
+ */
+const FLAVOR_WORD: Record<PubFlavor, string> = {
+  area: "Research area",
+  concept: "Concept",
+  keyword: "Keyword",
 };
 
 /**
@@ -101,7 +111,7 @@ function DisclosureRow({
       <ChevronDown
         aria-hidden
         strokeWidth={2.5}
-        className={`shrink-0 ${wide ? "size-5 ml-auto" : compact ? "size-3.5 ml-auto mr-[3px]" : "size-3.5"} text-[#9a958a] motion-safe:transition-transform motion-safe:duration-150 ${
+        className={`shrink-0 ${wide ? "size-5 ml-auto" : compact ? "size-3.5 ml-auto mr-[3px]" : "size-3.5"} text-[var(--evidence-faint)] motion-safe:transition-transform motion-safe:duration-150 ${
           expanded ? "rotate-180" : ""
         }`}
       />
@@ -153,23 +163,25 @@ export function MatchReason({
   dim?: boolean;
 }) {
   const Icon = ICONS[kind];
-  const pill = badged
-    ? FLAVOR_DOT[flavor ?? (kind === "concept" ? "concept" : kind === "area" ? "area" : "keyword")]
+  const flavorWord = badged
+    ? FLAVOR_WORD[flavor ?? (kind === "concept" ? "concept" : kind === "area" ? "area" : "keyword")]
     : null;
   // Single line — clips an over-long reason (e.g. a representative-pub title)
   // rather than wrapping. A no-op for the short count/concept reasons.
   // #1366 follow-up Part B — the relevance caveat (italic muted) trailing the reason
   // text; `dim` mutes the pill + reason text so a low-relevance lead reads quieter.
-  const cueSpan = cue ? <span className="font-normal italic text-[#9a958a]">{cue}</span> : null;
-  const inner = pill ? (
-    // #1381 — dot + colored type word (no pill / icon), so the primary reads like the
-    // "Also matched" secondaries and the approved lead mock. The count prefix reads in
-    // normal weight; the resolved concept term (appended by the caller) keeps its own
-    // subtle underline.
+  const cueSpan = cue ? (
+    <span className="font-normal italic text-[var(--evidence-faint)]">{cue}</span>
+  ) : null;
+  const inner = flavorWord ? (
+    // #1913 — the type word alone, no dot and no per-flavor hue. The count prefix reads
+    // in normal weight; the resolved concept term (appended by the caller) keeps its own
+    // subtle underline, which is what marks the matched entity now.
     <>
-      <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${pill.dot}`} />
-      <span className={`min-w-0 truncate ${dim ? "text-[#9a958a]" : "text-[#8c8c8c]"}`}>
-        <span className={`font-medium ${dim ? "text-[#9a958a]" : pill.color}`}>{pill.text}</span>
+      <span
+        className={`min-w-0 truncate ${dim ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-body)]"}`}
+      >
+        <span className="font-medium">{flavorWord}</span>
         {" · "}
         {children}
         {cueSpan}
@@ -178,7 +190,7 @@ export function MatchReason({
   ) : (
     <>
       <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={2} />
-      <span className={`min-w-0 truncate${dim ? " text-[#9a958a]" : ""}`}>
+      <span className={`min-w-0 truncate${dim ? " text-[var(--evidence-faint)]" : ""}`}>
         {children}
         {cueSpan}
       </span>
@@ -221,16 +233,17 @@ export function MatchReason({
 /** #1381 follow-up — per-kind primary tokens: the FILLED dot color, the AA-safe dark
  *  type-word color, and the type word itself. Method = burnt umber (was red). Concept/
  *  keyword are folded in so the publications lead shares the one column-aligned chrome. */
+/** #1913 — the kind's WORD. The per-kind dot and hue are gone; see {@link FLAVOR_WORD}. */
 const PRIMARY_KIND: Record<
   "method" | "topic" | "clinical" | "funding" | "concept" | "keyword",
-  { dot: string; type: string; word: string }
+  { word: string }
 > = {
-  method: { dot: "bg-[#8B4A2F]", type: "text-[#8B4A2F]", word: "Method" },
-  topic: { dot: "bg-[#2563eb]", type: "text-[#1d4ed8]", word: "Research area" },
-  clinical: { dot: "bg-[#0891b2]", type: "text-[#0e7490]", word: "Clinical" },
-  funding: { dot: "bg-[#16a34a]", type: "text-[#166534]", word: "Funding" },
-  concept: { dot: "bg-[#7c3aed]", type: "text-[#6d28d9]", word: "Concept" },
-  keyword: { dot: "bg-[#64748b]", type: "text-[#475569]", word: "Keyword" },
+  method: { word: "Method" },
+  topic: { word: "Research area" },
+  clinical: { word: "Clinical" },
+  funding: { word: "Funding" },
+  concept: { word: "Concept" },
+  keyword: { word: "Keyword" },
 };
 
 /**
@@ -257,8 +270,10 @@ export function CountFirst({
   underline: boolean;
   dim?: boolean;
 }) {
-  const anchor = dim ? "text-[#9a958a]" : "text-[#1a1a1a]";
-  const muted = dim ? "text-[#9a958a]" : "text-[#8c8c8c]";
+  const anchor = dim
+    ? "text-[var(--evidence-body)]"
+    : "text-[var(--evidence-anchor)]";
+  const muted = dim ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-body)]";
   const hasCount = n != null && m != null;
   return (
     <>
@@ -312,10 +327,13 @@ export function MatchAwareReason({
   const k = PRIMARY_KIND[kind];
   // #1381 follow-up — the type word sits in a fixed-width column so the phrases align
   // across cards; the chevron (via DisclosureRow `wide`) is pushed to the far right.
+  // #1913 — the column IS the category indicator now; the dot that used to precede it
+  // repeated the word's own hue and is gone.
   const inner = (
     <>
-      <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${k.dot}`} />
-      <span className={`w-[124px] shrink-0 font-medium ${dim ? "text-[#9a958a]" : k.type}`}>
+      <span
+        className={`w-[124px] shrink-0 font-medium ${dim ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-body)]"}`}
+      >
         {k.word}
       </span>
       {/* #1907 — the cue is a SIBLING of the truncating span, not its last child.
@@ -326,7 +344,7 @@ export function MatchAwareReason({
       <span className="flex min-w-0 flex-1 items-baseline">
         <span className="min-w-0 truncate">{children}</span>
         {cue ? (
-          <span className="shrink-0 font-normal italic text-[#9a958a]">{cue}</span>
+          <span className="shrink-0 font-normal italic text-[var(--evidence-faint)]">{cue}</span>
         ) : null}
       </span>
     </>
@@ -362,23 +380,25 @@ export function MatchAwareReason({
  */
 export function MentionNote() {
   return (
-    <p className="mb-1.5 text-[11px] italic leading-snug text-[#9a958a]">
+    <p className="mb-1.5 text-[11px] italic leading-snug text-[var(--evidence-faint)]">
       text mention in the abstract, not a curated tag
     </p>
   );
 }
 
 /**
- * #1366 follow-up — a compact "Also matched" row: a small FILLED dot in the category
- * color, a muted label, an abbreviated "· N of M" count, and the same chevron
- * disclosure. The visually-subordinate sibling of {@link MatchReason}/
- * {@link MatchAwareReason}: the ONE primary signal keeps its full badge, the rest
- * demote here (tiered card, handoff Part 1). `dotClassName` carries the per-kind
- * FILLED color (`bg-…`); a literal-mention row's weakness is carried by `weak`
- * (muted/italic text) + the {@link MentionNote}, never by the dot fill.
+ * #1366 follow-up — a compact "Also matched" row: a muted label, an abbreviated
+ * "· N of M" count, and the same chevron disclosure. The visually-subordinate sibling
+ * of {@link MatchReason}/{@link MatchAwareReason}: the ONE primary signal keeps its
+ * full badge, the rest demote here (tiered card, handoff Part 1).
+ *
+ * #1913 — the per-kind FILLED dot is gone. It sat immediately before a label in the
+ * same hue, so it never distinguished anything the label did not, and the hue itself
+ * was resolving two values in 98% of rows. A literal-mention row's weakness is still
+ * carried by `weak` (muted/italic text) + the {@link MentionNote}, which is where that
+ * signal always actually lived.
  */
 export function LesserReason({
-  dotClassName,
   children,
   suffix,
   weak = false,
@@ -388,11 +408,10 @@ export function LesserReason({
   panelId,
   srLabel = "key papers",
 }: {
-  dotClassName: string;
   children: ReactNode;
   /** Abbreviated "· N of M" count (no "publications" word); omitted ⇒ label-only. */
   suffix?: string;
-  /** Extra-muted treatment for the literal-mention (hollow) rows. */
+  /** Extra-muted treatment for the literal-mention rows. */
   weak?: boolean;
   canExpand?: boolean;
   expanded?: boolean;
@@ -402,10 +421,11 @@ export function LesserReason({
 }) {
   const inner = (
     <>
-      <span aria-hidden className={`size-2 shrink-0 rounded-full ${dotClassName}`} />
-      <span className={`min-w-0 truncate text-[12px] ${weak ? "text-[#9a958a]" : "text-[#6b675e]"}`}>
+      <span
+        className={`min-w-0 truncate text-[12px] ${weak ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-body)]"}`}
+      >
         {children}
-        {suffix ? <span className="text-[#a9a399]">{suffix}</span> : null}
+        {suffix ? <span className="text-[var(--evidence-faint)]">{suffix}</span> : null}
       </span>
     </>
   );
@@ -494,7 +514,7 @@ export function RepresentativePapers({
   if (status === "loading" && papers.length === 0) {
     return (
       <div id={panelId} className="mt-1.5 pl-[1px] text-[12px] leading-snug">
-        <span aria-hidden className="text-[#9a958a]">
+        <span aria-hidden className="text-[var(--evidence-faint)]">
           finding key papers&hellip;
         </span>
       </div>
@@ -506,7 +526,7 @@ export function RepresentativePapers({
     // Every branch below produces at least one line of honest text.
     return (
       <div id={panelId} className="mt-1.5 pl-[1px]">
-        <p className="text-[12px] italic leading-snug text-[#6f6a5e]">
+        <p className="text-[12px] italic leading-snug text-[var(--evidence-faint)]">
           {dedupedEmpty
             ? // The de-dup case, and the useful one: this line's papers are not
               // missing, they are already listed under a stronger match on this same
@@ -539,7 +559,7 @@ export function RepresentativePapers({
       <div className="mb-1.5 text-[11.5px] font-medium leading-snug text-[#3a3a3a]">
         {panelLabel ?? (papers.length === 1 ? "Key paper" : "Key papers")}
         {panelSubtitle ? (
-          <span className="font-normal text-[#8c8c8c]"> · {panelSubtitle}</span>
+          <span className="font-normal text-[var(--evidence-faint)]"> · {panelSubtitle}</span>
         ) : null}
       </div>
       <ul className="mt-1 flex flex-col gap-1.5 text-[13px] leading-snug">
@@ -632,7 +652,7 @@ export function KeyFunding({
   if (status === "loading" && grants.length === 0) {
     return (
       <div id={panelId} className="mt-1.5 pl-[1px] text-[12px] leading-snug">
-        <span aria-hidden className="text-[#9a958a]">
+        <span aria-hidden className="text-[var(--evidence-faint)]">
           finding key funding&hellip;
         </span>
       </div>
@@ -643,8 +663,10 @@ export function KeyFunding({
   }
 
   const more = total - grants.length;
+  // #1913 — neutral rail, matching every other expanded panel. The rail's job is to tie
+  // the panel to the row above it, which position already does.
   return (
-    <div id={panelId} className="mt-1.5 border-l-2 border-[#16a34a] pl-[14px]">
+    <div id={panelId} className="mt-1.5 border-l-2 border-[#a8a294] pl-[14px]">
       {mentionNote ? <MentionNote /> : null}
       {/* Sentence-case, no count (the "+N more" link carries the total). */}
       <div className="mb-1.5 text-[11.5px] font-medium leading-snug text-[#3a3a3a]">

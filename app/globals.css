@@ -202,6 +202,18 @@
   --apollo-coral-tint: #faece7;
   --apollo-coral-tint-border: #f0997b;
   --apollo-coral-foreground: #712b13;
+  /* Search evidence-row text ramp (#1912). Four steps, and every one clears WCAG
+     AA 4.5:1 against BOTH grounds the row appears on: the white card face and the
+     row's own #f0eeea hover/expanded fill. Ratios below are the #f0eeea case,
+     which is the tighter of the two.
+
+     These replace a set of literals (#8c8c8c 2.90:1, #6b7280 4.17:1, #9a958a
+     2.57:1) that failed on the substantive half of the row while the decorative
+     category labels passed. */
+  --evidence-anchor: #1a1a1a; /* matched count + matched term      15.0:1 */
+  --evidence-body: #5c574d; /* phrase body, kind word, chips       6.2:1 */
+  --evidence-detail: #645f55; /* the "(matched …)" descendants     5.5:1 */
+  --evidence-faint: #6f6a5e; /* thin-match rows + relevance cue    4.7:1 */
   /* Detail-card radius + elevation. */
   --apollo-radius-card: 13px;
   --apollo-shadow-card: 0 1px 2px rgba(34, 30, 28, 0.04), 0 1px 3px rgba(34, 30, 28, 0.05);
