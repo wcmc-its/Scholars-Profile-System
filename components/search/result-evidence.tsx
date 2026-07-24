@@ -313,6 +313,10 @@ export function ResultEvidence({
         ? "text-[var(--evidence-body)]"
         : "text-[var(--evidence-anchor)]";
       const muted = dim ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-body)]";
+      // This branch builds the count-first phrase itself instead of going through
+      // `CountFirst`, so it has to carry the same accent rule by hand: the matched count
+      // is the one accented datum, the term keeps `anchor`, and a dim lead takes none.
+      const count = dim ? "text-[var(--evidence-body)]" : "text-[var(--evidence-accent)]";
       const lead = evidence.text.match(/^(\d[\d,]*)(\s[\s\S]*)$/);
       return (
         <MatchAwareReason
@@ -326,7 +330,7 @@ export function ResultEvidence({
         >
           {lead ? (
             <>
-              <span className={`font-semibold ${anchor}`}>{lead[1]}</span>
+              <span className={`font-semibold ${count}`}>{lead[1]}</span>
               <span className={muted}>{lead[2]}</span>
             </>
           ) : (

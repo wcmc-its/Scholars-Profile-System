@@ -219,9 +219,9 @@ export function MatchReason({
 }
 
 /**
- * #824 follow-up — the match-aware "why" line. A small uppercase badge (rust for
- * method, blue for topic, teal for clinical) with a leading lucide icon, then the
- * matched label in bold. The method family name now stands ALONE — the muted
+ * #824 follow-up — the match-aware "why" line. #1913 retired the per-kind badge
+ * (rust/blue/teal) and its icon; what remains is the type word in a fixed-width
+ * column, then the matched label. The method family name now stands ALONE — the muted
  * exemplar-tool trail was dropped: the rep-papers list below does the evidentiary
  * work, and the bare name reads as a confident, unambiguous label with no
  * casing/truncation to maintain. (The `tools` data is still on the evidence object,
@@ -230,10 +230,14 @@ export function MatchReason({
  * `<span>`s plus (when `canExpand`) a real chevron `<button>`; the icon is
  * decorative (`aria-hidden`).
  */
-/** #1381 follow-up — per-kind primary tokens: the FILLED dot color, the AA-safe dark
- *  type-word color, and the type word itself. Method = burnt umber (was red). Concept/
- *  keyword are folded in so the publications lead shares the one column-aligned chrome. */
-/** #1913 — the kind's WORD. The per-kind dot and hue are gone; see {@link FLAVOR_WORD}. */
+/** #1381 follow-up — the primary lead's type word, per kind; concept/keyword are folded
+ *  in so the publications lead shares the one column-aligned chrome.
+ *  #1913 — the record is the WORD and nothing else: the per-kind dot and the per-kind
+ *  hue are gone. The word does carry one colour again — the single
+ *  `--evidence-accent`, the same for every kind, and only on the primary lead. That is
+ *  an emphasis, not the category taxonomy: it says "this is the match", not "this is a
+ *  method". {@link FLAVOR_WORD} is the OTHER word list (the badged {@link MatchReason}
+ *  path) and stays neutral — the two diverged here; do not "fix" one to match the other. */
 const PRIMARY_KIND: Record<
   "method" | "topic" | "clinical" | "funding" | "concept" | "keyword",
   { word: string }
@@ -247,8 +251,9 @@ const PRIMARY_KIND: Record<
 };
 
 /**
- * #1381 follow-up — the count-first primary phrase: the matched **N** is the emphasized
- * anchor, then a muted "of M <thing> <relation>", then the entity. The entity carries a
+ * #1381 follow-up — the count-first primary phrase: the matched **N** leads in the
+ * accent (NOT the local `anchor`, which is now the entity's colour and only that),
+ * then a muted "of M <thing> <relation>", then the entity. The entity carries a
  * subtle dotted underline for every kind EXCEPT a literal keyword/mention (`underline`).
  * When there is no count (the single-evidence path, or clinical) it renders the entity
  * alone. `dim` faints the whole phrase for a low-relevance lead.
@@ -274,12 +279,16 @@ export function CountFirst({
     ? "text-[var(--evidence-body)]"
     : "text-[var(--evidence-anchor)]";
   const muted = dim ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-body)]";
+  // The matched count is the one accented datum in the phrase; the entity keeps
+  // `anchor`, because two accents in one line is a legend again. A dim lead takes no
+  // accent at all — a thin match must stay faint (the #1366 honesty signal).
+  const count = dim ? "text-[var(--evidence-body)]" : "text-[var(--evidence-accent)]";
   const hasCount = n != null && m != null;
   return (
     <>
       {hasCount ? (
         <>
-          <span className={`font-semibold ${anchor}`}>{n}</span>{" "}
+          <span className={`font-semibold ${count}`}>{n}</span>{" "}
           <span className={muted}>
             of {m} {thing} {relation}{" "}
           </span>
@@ -328,11 +337,14 @@ export function MatchAwareReason({
   // #1381 follow-up — the type word sits in a fixed-width column so the phrases align
   // across cards; the chevron (via DisclosureRow `wide`) is pushed to the far right.
   // #1913 — the column IS the category indicator now; the dot that used to precede it
-  // repeated the word's own hue and is gone.
+  // repeated the word's own hue and is gone. What came back is one accent, not the
+  // per-category axis: every kind gets the SAME `--evidence-accent`, and only here on
+  // the primary lead, so the lead separates tonally from the neutral LesserReason rows
+  // instead of the whole card reading as one flat warm grey. Dim is untouched.
   const inner = (
     <>
       <span
-        className={`w-[124px] shrink-0 font-medium ${dim ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-body)]"}`}
+        className={`w-[124px] shrink-0 font-medium ${dim ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-accent)]"}`}
       >
         {k.word}
       </span>

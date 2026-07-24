@@ -210,10 +210,17 @@
      These replace a set of literals (#8c8c8c 2.90:1, #6b7280 4.17:1, #9a958a
      2.57:1) that failed on the substantive half of the row while the decorative
      category labels passed. */
-  --evidence-anchor: #1a1a1a; /* matched count + matched term      15.0:1 */
-  --evidence-body: #5c574d; /* phrase body, kind word, chips       6.2:1 */
+  --evidence-anchor: #1a1a1a; /* matched term (the entity)        15.0:1 */
+  --evidence-body: #5c574d; /* phrase body, lesser labels, chips   6.2:1 */
   --evidence-detail: #645f55; /* the "(matched …)" descendants     5.5:1 */
   --evidence-faint: #6f6a5e; /* thin-match rows + relevance cue    4.7:1 */
+  /* Not a fifth ramp step — the ONE accent, and only on the PRIMARY lead (its kind
+     word + matched count), so primary reads as primary against the neutral "also
+     matched" rows. Not a new hue: it is the app's existing indigo — solid on
+     `.entity-badge--concept` below, and at .55 alpha on the entity's dotted underline
+     — so this is a reuse, not a return of the #1913 per-category taxonomy. Ratio is
+     the #f0eeea case, as above; on white it is 9.4:1. */
+  --evidence-accent: #34408a; /* primary lead: kind word + count   8.1:1 */
   /* Detail-card radius + elevation. */
   --apollo-radius-card: 13px;
   --apollo-shadow-card: 0 1px 2px rgba(34, 30, 28, 0.04), 0 1px 3px rgba(34, 30, 28, 0.05);
