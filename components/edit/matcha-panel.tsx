@@ -311,10 +311,56 @@ function downloadCsv(filename: string, csv: string) {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Grant Matcha — what THIS opportunity actually requires of a researcher. Every field is
+ * "absent ⇒ that axis does not render": the rail is relevance-driven, not a fixed 3-axis panel.
+ *
+ * `careerStages` is the load-bearing HARD axis (33.8% of mapped opportunities restrict it).
+ * `esiTargeted` is SOFT by design — the extractor's `esi_targeted` is a priority, not a gate,
+ * so it demotes and never hides. `usRequired` is DISPLAY-ONLY: person-level US citizenship is
+ * required by only 4.2% of opportunities and SPS holds no scholar citizenship field, so a US
+ * toggle would either filter nothing or imply data we do not have.
+ */
+export type EligibilityRequirements = {
+  /** Stages the opportunity admits. `null` ⇒ unrestricted ⇒ no career-stage axis. */
+  careerStages: readonly CareerStage[] | null;
+  esiTargeted: boolean;
+  usRequired: boolean;
+};
+
+/** Per-row eligibility verdict. `eligible`/`relaxed` are computed from the opportunity's stated
+ *  rule; `filtered` is asserted by the eligibility floor for the rows the gate dropped. */
+export type EligBadge = "eligible" | "relaxed" | "filtered";
+
+const ELIG_BADGE_TEXT: Record<EligBadge, string> = {
+  eligible: "Eligible",
+  relaxed: "Relaxed",
+  filtered: "Ineligible",
+};
+
+const ELIG_BADGE_CLASS: Record<EligBadge, string> = {
+  eligible: "bg-elig-border/15 text-elig-text",
+  relaxed: "bg-apollo-amber-tint text-apollo-amber border border-apollo-amber-tint-border",
+  filtered: "text-muted-foreground border border-dashed border-border",
+};
+
+/** The inline eligibility pill (mockup: badge inline, beside the fit tier). */
+function EligBadgePill({ badge }: { badge: EligBadge }) {
+  return (
+    <span
+      data-slot="matcha-elig-badge"
+      className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${ELIG_BADGE_CLASS[badge]}`}
+    >
+      {ELIG_BADGE_TEXT[badge]}
+    </span>
+  );
+}
+
 export function MatchaPanel({
   initialDescription,
   autoRun,
   grantMatcha = false,
+  eligibility,
 }: {
   /** Grant Matcha — seed the ask from an opportunity's title + synopsis so the officer lands on
    *  the extracted concepts + ranked researchers instead of a blank textarea. */
@@ -324,6 +370,11 @@ export function MatchaPanel({
   /** Grant Matcha (increment 3) — show the people|grants target toggle. Server-computed from
    *  `GRANT_MATCHA`; the API route re-checks the flag as the real boundary. */
   grantMatcha?: boolean;
+  /** Grant Matcha — THIS opportunity's eligibility requirements. Presence is the whole gate:
+   *  absent ⇒ `/edit/matcha`, which renders no eligibility axes, filters nobody, and does not
+   *  ask the route for signals. The rail is RELEVANCE-DRIVEN — an axis renders only when the
+   *  opportunity actually carries that requirement, so most opportunities show 0–2 axes. */
+  eligibility?: EligibilityRequirements;
 } = {}) {
   const [description, setDescription] = useState(initialDescription ?? "");
   // Grant Matcha — which corpus this ask searches. "grants" POSTs `{ target: "grants" }` and
@@ -350,6 +401,12 @@ export function MatchaPanel({
   // so the filter compares labels too. One vocabulary, no id↔label map to drift.
   const [stageSel, setStageSel] = useState<ReadonlySet<string>>(new Set());
   const [clinicianOnly, setClinicianOnly] = useState(false);
+  // Grant Matcha — the officer owns the predicate. The hard career-stage axis defaults ON (it IS
+  // the opportunity's own rule); unchecking RELAXES it, interleaving the dropped people back into
+  // the ranking by fit, badged — a client-side toggle over already-fetched candidates, never a
+  // re-query (the Matcha invariant). The ESI boost is soft and hides nobody.
+  const [stageGateOn, setStageGateOn] = useState(true);
+  const [esiBoostOn, setEsiBoostOn] = useState(true);
   const [roleSel, setRoleSel] = useState<ReadonlySet<string>>(new Set());
   const [sort, setSort] = useState<SortKey>("fit");
   // D8 — density, remembered across visits. Warm-palette redesign flipped the DEFAULT to compact:
@@ -494,7 +551,15 @@ export function MatchaPanel({
         credentials: "same-origin",
         // #1780 Phase 2 — force-include the officer's culled picks. Absent opt ⇒ a fresh search ⇒ [].
         // `target` selects the corpus; the route ignores anything but "grants" (→ people path).
-        body: JSON.stringify({ description: text, include: opts.include ?? [], target }),
+        body: JSON.stringify({
+          description: text,
+          include: opts.include ?? [],
+          target,
+          // Grant Matcha — ask the spine to hydrate `measures.esiEligible`. Sent ONLY when this
+          // panel was handed an opportunity's requirements; the route re-checks GRANT_MATCHA as
+          // the real boundary, and omitting the key leaves `/edit/matcha` byte-unchanged.
+          ...(eligibility ? { eligibilitySignals: true } : {}),
+        }),
       });
       if (r.ok) {
         // Grant Matcha (increment 3) — the funding-opportunities corpus. The route's grant branch
@@ -594,10 +659,21 @@ export function MatchaPanel({
   // officer left active count, so unchecking one re-ranks instantly, exactly like a slider.
   // `preferenceBoost` is the contract's reference predicate, not a local copy: the ranking
   // eval scores through the same function, so what we measure is what an officer sees.
-  const activePreferences = useMemo(
-    () => preferences.filter((p) => activePrefs.has(p.label)),
-    [preferences, activePrefs],
-  );
+  const activePreferences = useMemo(() => {
+    const base = preferences.filter((p) => activePrefs.has(p.label));
+    // Grant Matcha — ESI rides the SAME soft machinery as the extractor's preferences (λ=0.25),
+    // so an ESI-targeted opportunity nudges early-stage investigators up without hiding anyone.
+    if (!eligibility?.esiTargeted || !esiBoostOn) return base;
+    return [
+      ...base,
+      {
+        label: "Early-stage investigator",
+        evidence: "from this opportunity's eligibility",
+        importance: 1,
+        measure: "esiEligible",
+      } as const,
+    ];
+  }, [preferences, activePrefs, eligibility?.esiTargeted, esiBoostOn]);
 
   // Zero-evidence candidates are excluded from the RESULT set entirely — not collapsed under the
   // floor. `hasMatchEvidence` keeps only the scholars the spine shipped a research-match block for;
@@ -858,12 +934,43 @@ export function MatchaPanel({
     [rankedRows, deptSel, conceptSel, ctlOnly, stageSel, clinicianOnly, roleSel],
   );
 
+  // Grant Matcha — the HARD eligibility gate, applied CLIENT-SIDE over already-fetched
+  // candidates so relaxing an axis costs no round-trip. No requirements (or a relaxed toggle)
+  // ⇒ `stageGate` is null ⇒ `eligibleRows === filtered`, so `/edit/matcha` gets the identical
+  // list and an empty floor. A candidate with no career stage FAILS the gate rather than being
+  // waved through — the same "absent is not zero" posture the measure filters above take — and
+  // lands in the floor, recoverable by unchecking the axis.
+  const stageGate = stageGateOn ? (eligibility?.careerStages ?? null) : null;
+  const [eligibleRows, ineligibleRows] = useMemo(() => {
+    if (!stageGate) return [filtered, [] as typeof filtered];
+    const ok: typeof filtered = [];
+    const no: typeof filtered = [];
+    for (const row of filtered) {
+      const stage = row.c.measures?.careerStage;
+      (stage != null && stageGate.includes(stage) ? ok : no).push(row);
+    }
+    return [ok, no];
+  }, [filtered, stageGate]);
+
+  // Badging is INDEPENDENT of the toggle: it answers "does this candidate meet the opportunity's
+  // STATED rule?", which is exactly what makes a row legible once the officer relaxes the gate and
+  // ineligible people interleave back in by fit. Null ⇒ the opportunity states no rule ⇒ no badge
+  // renders anywhere, which is the `/edit/matcha` case.
+  const meetsStageRule = useMemo(() => {
+    const stages = eligibility?.careerStages ?? null;
+    if (!stages) return null;
+    return (c: MatchaCandidate) => {
+      const stage = c.measures?.careerStage;
+      return stage != null && stages.includes(stage);
+    };
+  }, [eligibility?.careerStages]);
+
   // The cap lands on the FIT-ordered rows, then Name reorders that hundred. Slicing after the
   // name sort would paint the alphabetically-first 100 and call them the best matches.
   const visible = useMemo(() => {
-    const rows = filtered.slice(0, RESULT_MAX);
+    const rows = eligibleRows.slice(0, RESULT_MAX);
     return sort === "name" ? [...rows].sort((a, b) => compareByName(a.c, b.c)) : rows;
-  }, [filtered, sort]);
+  }, [eligibleRows, sort]);
 
   // The relevance floor. Full cards for strong/good; the weak tier collapses under one bar the
   // officer can expand. Relative BY CONSTRUCTION — `fitTier` buckets each row against the TOP hit
@@ -871,6 +978,8 @@ export function MatchaPanel({
   // tracks the result set's own distribution rather than an absolute cutoff. Only meaningful in fit
   // order: a name sort mixes tiers alphabetically, so it stays a flat list with no floor.
   const [showWeak, setShowWeak] = useState(false);
+  // Grant Matcha — the eligibility floor's own collapse, independent of the relevance floor.
+  const [showIneligible, setShowIneligible] = useState(false);
   const aboveFloor = useMemo(
     () =>
       sort === "fit"
@@ -1035,7 +1144,19 @@ export function MatchaPanel({
   // D8 — a result row is the detailed card when density is Detailed OR the officer expanded it from
   // Compact; otherwise the one-line CompactRow, which expands in place on click. Used for both the
   // primary rows and the below-floor weak rows, so the floor and the density toggle compose.
-  const renderResult = ({ c, rank }: { c: MatchaCandidate; rank: number }) => {
+  const renderResult = ({
+    c,
+    rank,
+    eligBadge,
+  }: {
+    c: MatchaCandidate;
+    rank: number;
+    /** Explicit verdict for the eligibility floor. Omitted elsewhere ⇒ derived from the
+     *  opportunity's stated rule, so the ordinary call sites need no change and
+     *  `/edit/matcha` (no rule) gets `undefined` and renders no pill. */
+    eligBadge?: EligBadge;
+  }) => {
+    const badge = eligBadge ?? (meetsStageRule ? (meetsStageRule(c) ? "eligible" : "relaxed") : undefined);
     // THE ONLY STATE A COLLAPSE MEANS ANYTHING IN. `toggled` was always a correct toggle, but it
     // hung solely off CompactRow — so the instant it ADDED a cwid the row it lived on unmounted,
     // and the expanded card that replaced it offered no way to fire it in the delete direction.
@@ -1057,6 +1178,7 @@ export function MatchaPanel({
           : {})}
         selected={shortlist.has(c.cwid)}
         onSelect={() => setShortlist((s) => toggled(s, c.cwid))}
+        {...(badge ? { eligBadge: badge } : {})}
       />
     ) : (
       <CompactRow
@@ -1068,6 +1190,7 @@ export function MatchaPanel({
         onExpand={() => setExpanded((s) => toggled(s, c.cwid))}
         selected={shortlist.has(c.cwid)}
         onSelect={() => setShortlist((s) => toggled(s, c.cwid))}
+        {...(badge ? { eligBadge: badge } : {})}
       />
     );
   };
@@ -1389,7 +1512,7 @@ export function MatchaPanel({
                     ⚠ Open product Q for review: "Eligibility" reads like a hard gate but this only
                     NUDGES; keep the nudge sub-note, or change it to actually gate (a behaviour change,
                     not a rename). Default here: keep it a nudge. */}
-                {preferences.length > 0 ? (
+                {preferences.length > 0 || eligibility ? (
                   <div data-slot="matcha-preferences" className="p-3">
                     <h2 className="flex items-center gap-2 text-base font-semibold text-elig-text">
                       <span
@@ -1398,11 +1521,76 @@ export function MatchaPanel({
                       />
                       Eligibility
                     </h2>
+                    {/* Grant Matcha — the HARD axes, rendered RELEVANCE-DRIVEN: an axis appears only
+                        when THIS opportunity carries that requirement, so most opportunities show
+                        0–2. Absent on `/edit/matcha`, which keeps the nudge-only section verbatim. */}
+                    {eligibility?.careerStages ? (
+                      <div data-slot="matcha-elig-hard" className="mt-2">
+                        <p className="text-muted-foreground text-xs leading-relaxed">
+                          Hard filters from the opportunity. <b>Uncheck to reveal researchers
+                          who&rsquo;d otherwise be filtered out</b> — you own the predicate, not the
+                          extractor.
+                        </p>
+                        <label className="mt-2 flex cursor-pointer items-start gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            className="mt-[3px] size-3.5 shrink-0 accent-elig-border"
+                            checked={stageGateOn}
+                            onChange={() => setStageGateOn((v) => !v)}
+                          />
+                          <span className="min-w-0">
+                            <span className="font-medium">Career stage</span>
+                            <span className="text-muted-foreground block text-xs leading-snug">
+                              {stageGateOn
+                                ? `Required: ${eligibility.careerStages
+                                    .map((s) => careerStageLabel(s))
+                                    .join(" · ")}`
+                                : "Relaxed — ineligible researchers are shown, badged"}
+                            </span>
+                          </span>
+                        </label>
+                      </div>
+                    ) : null}
+                    {/* US is DISPLAY-ONLY by design: only 4.2% of opportunities require person-level
+                        citizenship and SPS holds no scholar citizenship field, so a toggle here would
+                        either filter nothing or imply data we do not have. */}
+                    {eligibility?.usRequired ? (
+                      <p
+                        data-slot="matcha-elig-us"
+                        className="text-muted-foreground mt-2 text-xs leading-relaxed"
+                      >
+                        Requires US citizenship or permanent residency — confirm per candidate. Not
+                        filterable here: the directory carries no citizenship field.
+                      </p>
+                    ) : null}
+                    {preferences.length > 0 || eligibility?.esiTargeted ? (
+                      <>
                     <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
                       Requirements detected in the ask. These nudge the ranking — they don&rsquo;t hide
                       anyone.
                     </p>
                     <ul className="mt-2 space-y-2">
+                      {/* ESI is SOFT on purpose — the extractor's `esi_targeted` is a priority, not a
+                          gate — so it rides the same λ=0.25 preference boost and hides nobody. */}
+                      {eligibility?.esiTargeted ? (
+                        <li>
+                          <label className="flex cursor-pointer items-start gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              className="mt-[3px] size-3.5 shrink-0 accent-elig-border"
+                              checked={esiBoostOn}
+                              onChange={() => setEsiBoostOn((v) => !v)}
+                            />
+                            <span className="min-w-0">
+                              <span className="font-medium">Early-stage investigator</span>
+                              <span className="text-muted-foreground block text-xs italic leading-snug">
+                                from this opportunity&rsquo;s eligibility — nudges ESI researchers up,
+                                hides no one
+                              </span>
+                            </span>
+                          </label>
+                        </li>
+                      ) : null}
                       {preferences.map((p) => (
                         <li key={p.label}>
                           <label className="flex cursor-pointer items-start gap-2 text-sm">
@@ -1422,6 +1610,8 @@ export function MatchaPanel({
                         </li>
                       ))}
                     </ul>
+                      </>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -1740,6 +1930,44 @@ export function MatchaPanel({
                           <ul className="mt-4">
                             {collapsedWeak.map(({ c, rank }) => (
                               <li key={c.cwid}>{renderResult({ c, rank })}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {/* Grant Matcha — the ELIGIBILITY floor, distinct from the relevance floor above.
+                        Everyone the hard axis dropped stays reachable behind a toggle: a matcher that
+                        silently buries a well-matched researcher teaches the officer to distrust it.
+                        Empty (so absent) on `/edit/matcha`, which has no hard axis. */}
+                    {ineligibleRows.length > 0 ? (
+                      <div data-slot="matcha-elig-floor">
+                        <div className="my-4 flex items-center gap-3" aria-hidden="true">
+                          <div className="border-border h-0 flex-1 border-t border-dashed" />
+                          <span className="text-muted-foreground text-[11px] tracking-[0.04em]">
+                            FILTERED BY ELIGIBILITY
+                          </span>
+                          <div className="border-border h-0 flex-1 border-t border-dashed" />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowIneligible((v) => !v)}
+                          aria-expanded={showIneligible}
+                          className="bg-muted/40 hover:bg-muted/60 flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors"
+                        >
+                          <span className="text-muted-foreground">
+                            {ineligibleRows.length} researcher
+                            {ineligibleRows.length === 1 ? "" : "s"} filtered out — well-matched but
+                            ineligible for this opportunity
+                          </span>
+                          <span className="shrink-0 font-medium text-[var(--color-accent-slate)]">
+                            {showIneligible ? "Hide ↑" : "Show ↓"}
+                          </span>
+                        </button>
+                        {showIneligible ? (
+                          <ul className="mt-4">
+                            {ineligibleRows.slice(0, RESULT_MAX).map(({ c, rank }) => (
+                              <li key={c.cwid}>{renderResult({ c, rank, eligBadge: "filtered" })}</li>
                             ))}
                           </ul>
                         ) : null}
@@ -2309,6 +2537,7 @@ function CompactRow({
   onExpand,
   selected,
   onSelect,
+  eligBadge,
 }: {
   candidate: MatchaCandidate;
   rank: number;
@@ -2320,6 +2549,8 @@ function CompactRow({
   /** Shortlist membership, and its toggle. Per-ask; owned by the panel (see `shortlist`). */
   selected: boolean;
   onSelect: () => void;
+  /** Grant Matcha — inline eligibility pill. Absent ⇒ no pill (the `/edit/matcha` case). */
+  eligBadge?: EligBadge;
 }) {
   const coverage = conceptCoverage(candidate, concepts);
   // §5a — COUNT WHAT THE SCHOLAR RANKS UNDER, NOT WHAT WE CAN EVIDENCE.
@@ -2381,6 +2612,8 @@ function CompactRow({
             <span className="text-muted-foreground ml-1.5 text-xs">{candidate.title}</span>
           ) : null}
         </span>
+        {/* Grant Matcha — the eligibility pill sits INLINE beside the fit tier (mockup §9). */}
+        {eligBadge ? <EligBadgePill badge={eligBadge} /> : null}
         {/* Short tier word here (mockup's dense list), not the detailed card's "Strong fit". */}
         <span
           className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize ${TIER_CLASS[tier]}`}
@@ -2496,6 +2729,7 @@ function ResearcherRow({
   onCollapse,
   selected,
   onSelect,
+  eligBadge,
 }: {
   candidate: MatchaCandidate;
   rank: number;
@@ -2516,6 +2750,8 @@ function ResearcherRow({
    *  silent on this card, which is not the same as forbidding it. */
   selected: boolean;
   onSelect: () => void;
+  /** Grant Matcha — inline eligibility pill. Absent ⇒ no pill (the `/edit/matcha` case). */
+  eligBadge?: EligBadge;
 }) {
   const name = candidate.name;
   // Chips + tier are DERIVED, never wired — so both stay live under the sliders. The raw
@@ -2657,6 +2893,8 @@ function ResearcherRow({
           >
             {TIER_LABEL[tier]}
           </span>
+          {/* Grant Matcha — the eligibility pill sits INLINE beside the fit tier (mockup §9). */}
+          {eligBadge ? <EligBadgePill badge={eligBadge} /> : null}
           <ContactButton cwid={candidate.cwid} />
           {/* The way back. `↑` is this file's existing word for "collapse" — the relevance floor's
               toggle already reads "Hide ↑" — rather than a third glyph for a second idea; the
