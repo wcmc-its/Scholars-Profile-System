@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsMobileNav, DocsToc, type NavGroup } from "@/components/docs/docs-toc";
+import { ProvenanceFlow } from "@/components/docs/provenance-flow";
 
 /**
  * /docs (v0): single comprehensive documentation page, stakeholder-first +
@@ -431,6 +432,8 @@ export default function DocsPage() {
           Every part of a profile traces to a system of record. Scholars shows a copy and cannot
           override the source; corrections made upstream appear here after the next refresh.
         </p>
+        <ProvenanceFlow />
+        <p>The full map, field by field:</p>
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-[640px]">
             <thead>
@@ -617,6 +620,24 @@ export default function DocsPage() {
                 <td>Scholars (this app)</td>
                 <td>On edit</td>
                 <td>Edited in-app by a center Owner/Curator</td>
+              </tr>
+              <tr>
+                <td>Honors and distinctions</td>
+                <td>Scholars (this app)</td>
+                <td>On edit</td>
+                <td>
+                  Added on your Edit my profile page, by you or a curator. Not endowed chairs, which
+                  come through your title. Shown on your profile only
+                </td>
+              </tr>
+              <tr>
+                <td>Positions the directory does not carry</td>
+                <td>Scholars (this app)</td>
+                <td>On edit</td>
+                <td>
+                  Added on your Edit my profile page: WCM roles the feed omits, such as Program
+                  Director, and positions at other institutions. Shown on your profile only
+                </td>
               </tr>
             </tbody>
           </table>
