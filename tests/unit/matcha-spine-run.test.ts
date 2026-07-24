@@ -182,6 +182,34 @@ describe("distinctiveGlossTerms (in-their-words highlight eligibility)", () => {
     expect(distinctiveGlossTerms("with the and of", ["x"])).toBe(""); // pure stopwords
   });
 
+  it("strips GENERIC biomedical framing so it can't mark common words in unrelated titles (§1 eval)", () => {
+    // The §1 acceptance eval showed 47% of highlighted tokens were generic vocabulary ("disease",
+    // "cell", "treatment"…) matching unrelated titles. Those are stripped; the sponsor's distinctive
+    // sense words survive.
+    const terms = distinctiveGlossTerms(
+      "cellular models of amyloid disease treatment response and patient outcomes",
+      ["gene therapy"],
+    ).split(" ");
+    expect(terms).toContain("amyloid"); // the distinctive sense word survives (non-vacuous)
+    for (const generic of ["cellular", "models", "disease", "treatment", "response", "patient", "outcomes"]) {
+      expect(terms).not.toContain(generic);
+    }
+    // A gloss of nothing but generic framing earns no highlight at all — no line beats a noisy one.
+    expect(distinctiveGlossTerms("novel therapeutic approaches for disease treatment", ["x"])).toBe("");
+  });
+
+  it("KEEPS domain / sense terms — the generic stoplist must not eat the sponsor's actual meaning", () => {
+    // "vascular"/"genetic" are the parent-doc's canonical distinctive words; "amyloid"/"metabolic"
+    // are domain sense. None are generic framing, so all must survive.
+    const terms = distinctiveGlossTerms(
+      "amyloid and metabolic dysfunction with genetic and vascular contributions",
+      ["cognitive dysfunction"],
+    ).split(" ");
+    for (const sense of ["amyloid", "metabolic", "genetic", "vascular"]) {
+      expect(terms).toContain(sense);
+    }
+  });
+
   it("dedups and is case-insensitive", () => {
     expect(distinctiveGlossTerms("Decline, DECLINE and decline", ["cognitive dysfunction"])).toBe(
       "decline",
