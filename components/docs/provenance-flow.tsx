@@ -64,23 +64,30 @@ function Source({ what, from }: { what: string; from: string }) {
 }
 
 const SOURCES: { what: string; from: string }[] = [
-  { what: "Name, photo", from: "WCM Web Directory" },
-  { what: "Title, department, appointments", from: "ASMS, Enterprise Directory" },
+  { what: "Name, photo, title, appointments", from: "Enterprise Directory" },
+  { what: "Primary department, education", from: "ASMS" },
   { what: "Publications", from: "PubMed, Scopus, OpenAlex" },
   { what: "Funding", from: "InfoEd, NIH RePORTER" },
   { what: "Disclosures, hospital position", from: "COI system, NewYork-Presbyterian" },
 ];
 
+/**
+ * Also upstream, and also not editable here: ReCiter and ReciterAI are separate
+ * WCM systems, not part of Scholars. Kept in their own column because the
+ * distinction they carry (computed rather than recorded) is the one the page
+ * warns is easy to confuse.
+ */
 const COMPUTED: { name: string; does: string }[] = [
   { name: "ReCiter", does: "Decides which publications are yours" },
   { name: "ReciterAI", does: "Research areas, the Impact score, and your synopses" },
 ];
 
+/** The manual layer, merged over ETL data at read time (FieldOverride + Suppression). */
 const SCHOLARS_OWNED = [
   "Your overview text",
-  "Publications you have hidden",
-  "Selected highlights",
-  "Center membership",
+  "Your Selected highlights",
+  "Anything you have hidden: publications, grants, appointments, and more",
+  "Center membership, maintained by center administrators",
 ];
 
 export function ProvenanceFlow() {
@@ -89,7 +96,7 @@ export function ProvenanceFlow() {
       <div className="grid grid-cols-1 gap-2.5 md:grid-cols-[1fr_24px_1fr_24px_1fr] md:gap-0">
         {/* 1 — where it originates */}
         <div className="grid content-start gap-2.5">
-          <ColHead>System origin</ColHead>
+          <ColHead>System of record</ColHead>
           {SOURCES.map((s) => (
             <Source key={s.what} what={s.what} from={s.from} />
           ))}
@@ -99,7 +106,7 @@ export function ProvenanceFlow() {
 
         {/* 2 — the two computed layers the page warns are easy to confuse */}
         <div className="grid content-start gap-2.5">
-          <ColHead>What Scholars works out</ColHead>
+          <ColHead>Computed by other systems</ColHead>
           {COMPUTED.map((c) => (
             <div key={c.name} className={`${CARD} bg-[#f6f7f9]`}>
               <span className={`block text-[15px] font-semibold ${ACCENT}`}>{c.name}</span>
@@ -120,9 +127,10 @@ export function ProvenanceFlow() {
             </span>
           </div>
           <div className="rounded-[10px] border border-[#c9d8ee] bg-[#f3f6fb] p-3">
-            <span className="block text-sm font-semibold">Added when the page is built</span>
+            <span className="block text-sm font-semibold">Stored in Scholars, not upstream</span>
             <span className="mt-0.5 block text-[13px] text-muted-foreground">
-              The short list Scholars stores itself, and the only part you edit here.
+              Applied over the top each time the page is built, so it survives every refresh. The
+              only part you edit here.
             </span>
             <ul className="!mt-1.5 !ml-4 text-[13px] text-muted-foreground">
               {SCHOLARS_OWNED.map((item) => (
