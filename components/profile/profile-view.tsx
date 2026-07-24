@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SidebarCard } from "@/components/profile/sidebar-card";
+import { ProfileSectionNav } from "@/components/profile/profile-section-nav";
 import { ContactEmailReveal } from "@/components/profile/contact-email-reveal";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
@@ -467,6 +468,10 @@ export async function ProfileView({ slug }: { slug: string }) {
                 </ul>
               </SidebarCard>
             ) : null}
+
+            {/* Page furniture, so it sits AFTER the person's facts rather than
+                interrupting them. Renders only when >1 section is on the page. */}
+            <ProfileSectionNav />
           </ScrollFade>
         </aside>
 
@@ -484,7 +489,7 @@ export async function ProfileView({ slug }: { slug: string }) {
           ) : null}
 
           {profile.overview ? (
-            <Section title="Overview">
+            <Section id="overview" title="Overview">
               <div
                 className="text-base leading-relaxed text-zinc-800 dark:text-zinc-200 [&_a]:text-[var(--color-accent-slate)] [&_a]:underline [&_a]:underline-offset-4 [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:mb-1"
                 dangerouslySetInnerHTML={{ __html: profile.overview }}
@@ -494,6 +499,7 @@ export async function ProfileView({ slug }: { slug: string }) {
 
           {profile.highlights.length > 0 ? (
             <Section
+              id="highlights"
               title={
                 <span className="inline-flex items-center gap-2">
                   Highlights
@@ -527,6 +533,7 @@ export async function ProfileView({ slug }: { slug: string }) {
 
           {profile.publications.length > 0 ? (
             <Section
+              id="publications"
               title="Publications"
               headingLg
               // The year range moved out of the rail: PublicationsSection groups by
@@ -563,6 +570,7 @@ export async function ProfileView({ slug }: { slug: string }) {
 
           {profile.grants.length > 0 ? (
             <Section
+              id="funding"
               title="Funding"
               headingLg
               // "N active" left the rail and became a real filter chip inside
@@ -597,6 +605,7 @@ export async function ProfileView({ slug }: { slug: string }) {
               does not render; see `sortHonors`. */}
           {honors.length > 0 ? (
             <Section
+              id="honors"
               title="Honors & Distinctions"
               headingLg
               count={{
@@ -610,6 +619,7 @@ export async function ProfileView({ slug }: { slug: string }) {
 
           {profile.clinicalTrials.length > 0 ? (
             <Section
+              id="clinical-research"
               title={
                 <>
                   Clinical research
@@ -630,6 +640,7 @@ export async function ProfileView({ slug }: { slug: string }) {
 
           {profile.technologies.length > 0 ? (
             <Section
+              id="technologies"
               title={
                 <>
                   Available technologies
@@ -659,6 +670,7 @@ export async function ProfileView({ slug }: { slug: string }) {
 
           {profile.news.length > 0 ? (
             <Section
+              id="news"
               title="News mentions"
               headingLg
               count={{
@@ -707,6 +719,7 @@ export async function ProfileView({ slug }: { slug: string }) {
             const distribution = formatMentoringDistribution(mentees);
             return (
               <Section
+                id="mentoring"
                 title={
                   <>
                     Mentoring
@@ -749,6 +762,7 @@ export async function ProfileView({ slug }: { slug: string }) {
 
           {profile.disclosures.length > 0 ? (
             <Section
+              id="external-relationships"
               title={
                 <>
                   External relationships
@@ -815,6 +829,7 @@ export async function ProfileView({ slug }: { slug: string }) {
  * `<h2>`, so headings no longer announce as "Mentoring 26 mentees".
  */
 export function Section({
+  id,
   title,
   children,
   headingLg = false,
@@ -822,6 +837,10 @@ export function Section({
   subtitle,
   headerAction,
 }: {
+  /** Stable anchor for the "On this page" rail nav (ProfileSectionNav). A
+   *  section without an `id` simply never appears in that nav. The scroll
+   *  offset matches the sticky header so a jump does not land under it. */
+  id?: string;
   title: React.ReactNode;
   children: React.ReactNode;
   headingLg?: boolean;
@@ -837,7 +856,10 @@ export function Section({
   headerAction?: React.ReactNode;
 }) {
   return (
-    <section className="pt-12 first:pt-0">
+    <section
+      id={id}
+      className="pt-12 first:pt-0 scroll-mt-[calc(var(--header-h,60px)+24px)]"
+    >
       {headingLg ? (
         <div className="mb-5">
           {/* flex-wrap + gap-y: below ~480px the rail drops under the heading
