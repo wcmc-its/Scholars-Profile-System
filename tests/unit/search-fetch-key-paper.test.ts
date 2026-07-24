@@ -41,6 +41,19 @@ vi.mock("@/lib/search", () => ({
   }),
 }));
 
+// MATCHA_GLOSS_INWORDS — the gloss has to BUCKET the key-paper cache key (`titleHtml` is part of the
+// cached VALUE), but the real cache bypasses under VITEST, so a hit/miss harness would observe
+// nothing. Capture the key instead, through the same pass-through stub `matcha-extract.test.ts`
+// uses — every other test here still runs the loader untouched.
+const capturedCacheKeys: string[] = [];
+vi.mock("@/lib/api/reason-agg-cache", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/reason-agg-cache")>()),
+  cachedReasonAgg: async (key: string, load: () => Promise<unknown>) => {
+    capturedCacheKeys.push(key);
+    return load();
+  },
+}));
+
 import { fetchKeyPaper, parseReasonTopHits, rankKeyPaperHitsByBlend } from "@/lib/api/search";
 import {
   reasonWantsKeyPaper,
@@ -278,6 +291,75 @@ describe("fetchKeyPaper (lazy key paper)", () => {
     await fetchKeyPaper({ cwid: "znoexcl1", descriptorUis: ["Dnoexcl"], contentQuery: "no-dedup-probe" });
     const bool = boolOf(captured[0].query) as { must_not?: unknown[] };
     expect(bool.must_not).toBeUndefined();
+  });
+
+  it("MATCHA_GLOSS_INWORDS — `glossTerms` marks the sponsor's phrasing, admission UNCHANGED", async () => {
+    captured.length = 0;
+    const args = {
+      cwid: "abc1234",
+      descriptorUis: ["Dadeno"],
+      contentQuery: "adenocarcinoma",
+      conceptLabel: "Adenocarcinoma",
+    };
+    await fetchKeyPaper(args);
+    await fetchKeyPaper({ ...args, glossTerms: "durable remission" });
+    const [plain, withGloss] = captured;
+    const hl = withGloss.highlight as { highlight_query: { bool: { should: unknown[] } } };
+    // A THIRD highlight clause — it neither clobbers the literal query nor the concept term.
+    expect(hl.highlight_query.bool.should).toEqual([
+      { multi_match: { query: "adenocarcinoma", fields: ["title"], operator: "or" } },
+      { match_phrase: { title: "Adenocarcinoma" } },
+      { multi_match: { query: "durable remission", fields: ["title"], operator: "or" } },
+    ]);
+    // The redesign's whole claim: a marked title is PROVABLY this scholar's paper under this
+    // concept, and that holds only if the gloss cannot touch the admission filter (author +
+    // descriptor subtree). If the gloss ever leaks into `filter`, the invariant is gone.
+    expect(boolOf(withGloss.query).filter).toEqual(boolOf(plain.query).filter);
+    // Nor the rank (`should`/`must_not`), the pool size, or the sort — highlight-only, end to end.
+    expect({ ...withGloss, highlight: null }).toEqual({ ...plain, highlight: null });
+  });
+
+  it("MATCHA_GLOSS_INWORDS — a gloss-only fetch (no literal query, no concept) still highlights", async () => {
+    captured.length = 0;
+    await fetchKeyPaper({
+      cwid: "abc1234",
+      descriptorUis: ["Dadeno"],
+      contentQuery: "",
+      glossTerms: "durable remission",
+    });
+    // The gloss must also OPEN the highlight block; without it a concept-tagged fetch whose
+    // query and label are both empty sends no `highlight` at all and can never mark anything.
+    const hl = captured[0].highlight as { highlight_query: { bool: { should: unknown[] } } };
+    expect(hl.highlight_query.bool.should).toEqual([
+      { multi_match: { query: "durable remission", fields: ["title"], operator: "or" } },
+    ]);
+  });
+
+  it("MATCHA_GLOSS_INWORDS — absent / blank / whitespace `glossTerms` ⇒ today's request", async () => {
+    captured.length = 0;
+    const args = { cwid: "abc1234", descriptorUis: ["Dadeno"], contentQuery: "adenocarcinoma" };
+    await fetchKeyPaper(args);
+    await fetchKeyPaper({ ...args, glossTerms: "" });
+    await fetchKeyPaper({ ...args, glossTerms: "   " });
+    expect(captured[1]).toEqual(captured[0]); // dark flag ⇒ byte-identical body
+    expect(captured[2]).toEqual(captured[0]); // trimmed to "" ⇒ same
+    const hl = captured[0].highlight as { highlight_query: { bool: { should: unknown[] } } };
+    expect(hl.highlight_query.bool.should).toHaveLength(1); // literal query only, no gloss clause
+  });
+
+  it("MATCHA_GLOSS_INWORDS — `glossTerms` buckets the cache key (the real cache bypasses under VITEST, so assert the key)", async () => {
+    capturedCacheKeys.length = 0;
+    const args = { cwid: "abc1234", descriptorUis: ["Dadeno"], contentQuery: "adenocarcinoma" };
+    await fetchKeyPaper(args);
+    await fetchKeyPaper({ ...args, glossTerms: "durable remission" });
+    await fetchKeyPaper({ ...args, glossTerms: "minimal residual disease" });
+    await fetchKeyPaper({ ...args, glossTerms: "   " });
+    // `titleHtml` is part of the cached value, so an unmarked call must never be served a marked
+    // result (or one marked with a DIFFERENT sponsor's words).
+    expect(capturedCacheKeys[1]).not.toBe(capturedCacheKeys[0]);
+    expect(capturedCacheKeys[2]).not.toBe(capturedCacheKeys[1]);
+    // ...and a blank gloss lands back on the pre-flag key, so the off-path cache is unchanged.
+    expect(capturedCacheKeys[3]).toBe(capturedCacheKeys[0]);
   });
 });
 

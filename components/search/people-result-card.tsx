@@ -40,6 +40,10 @@ export type KeyPaperConfig = {
   /** #1351 — resolved concept name, so a tagged key paper's title highlights the
    *  concept term (not just the literal query). Empty for a free-text-only query. */
   conceptLabel?: string;
+  /** MATCHA_GLOSS_INWORDS — the gloss's distinctive terms, so the key paper's title also marks the
+   *  sponsor's own phrasing. Matcha-only: the public search ships no gloss, so it stays undefined
+   *  there and the request is unchanged. Highlight-only — it never widens which papers are admitted. */
+  glossTerms?: string;
 };
 
 export type PeopleResultCardProps = {

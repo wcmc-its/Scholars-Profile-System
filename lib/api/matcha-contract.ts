@@ -480,19 +480,23 @@ export type MatchaSearchEvidence = {
   evidence: ResultEvidence;
   /** The scholar's total publication count — the `M` in "N of M publications". */
   pubCount: number;
-  /** MATCHA_GLOSS_INWORDS — the "in their words" fragment: a snippet of THIS scholar's own
-   *  publication-title text with the gloss's distinctive terms (the sponsor's sense words that
-   *  diverge from the canonical `term`) `<mark>`-wrapped. Makes the gloss re-ranker legible — it
-   *  shows WHERE the sponsor's phrasing ("cognitive decline") literally appears in the scholar's
-   *  work, when the visible concept label is the MeSH canonical ("cognitive dysfunction").
-   *  Honesty guardrail (non-negotiable): set ONLY from a real OpenSearch highlight fragment, so it
-   *  is absent whenever the scholar ranked up via partial/MeSH matches WITHOUT the literal word —
-   *  the renderer shows nothing rather than assert a sense the scholar never used. Absent ⇒ no line. */
-  inWords?: string;
   keyPaper: {
     descriptorUis: string[];
     contentQuery: string;
     conceptLabel?: string;
+    /** MATCHA_GLOSS_INWORDS — the gloss's DISTINCTIVE terms (the sponsor's sense words that diverge
+     *  from the canonical `term`), passed to `fetchKeyPaper` so it `<mark>`s the sponsor's own
+     *  phrasing on this scholar's papers FOR THIS CONCEPT. Makes the gloss re-ranker legible: the
+     *  officer sees "cognitive decline" marked on a real paper, while the concept label is the MeSH
+     *  canonical ("cognitive dysfunction").
+     *
+     *  Why it lives HERE and not as a person-level fragment: `fetchKeyPaper` already admits only
+     *  papers where `wcmAuthorCwids = cwid` AND `meshDescriptorUi ∈ descriptorUis`, so a marked
+     *  title is provably this scholar's work ON THIS CONCEPT. The previous design highlighted the
+     *  person-level `publicationTitles` rollup, which could only prove the word appeared SOMEWHERE
+     *  in their corpus — measured at ~50% off-concept fragments. Absent ⇒ no gloss clause ⇒ the
+     *  key-paper request is unchanged; a mark is still only ever a real OpenSearch highlight. */
+    glossTerms?: string;
   };
 };
 

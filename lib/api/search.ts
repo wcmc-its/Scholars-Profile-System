@@ -300,11 +300,6 @@ export type PeopleHit = {
    *  (`preferredName` / `areasOfInterest` / `overview`). The card renders the
    *  first as a self-evident snippet fallback when no `matchReason` was computed. */
   highlight?: string[];
-  /** MATCHA_GLOSS_INWORDS — the "in their words" fragment: the scholar's own `publicationTitles`
-   *  text with the gloss's distinctive terms `<mark>`-wrapped. Present ONLY when `glossHighlightQuery`
-   *  was passed AND a term actually matched a title; absent otherwise (never fabricated). Consumed
-   *  by the Matcha spine, not the public card. */
-  glossHighlight?: string;
   /**
    * PLAN R4 / #967 / #824-follow-up — the single "why this match" reason line the
    * card renders. A discriminated union:
@@ -645,6 +640,16 @@ export async function fetchKeyPaper(args: {
   descriptorUis: string[];
   /** The literal query, for the `<mark>` highlight and the free-text fallback filter. */
   contentQuery: string;
+  /** MATCHA_GLOSS_INWORDS — the sponsor gloss's DISTINCTIVE terms (`distinctiveGlossTerms`), so a
+   *  paper that carries the sponsor's own phrasing gets it `<mark>`-highlighted alongside the
+   *  concept. Highlight-only, like `conceptLabel` — it never changes which papers are admitted.
+   *
+   *  This is the whole point of scoping the "in their words" evidence HERE rather than on the
+   *  person-level `publicationTitles` rollup: admission is already `wcmAuthorCwids = cwid` AND
+   *  `meshDescriptorUi ∈ descriptorUis`, so a marked title is provably a paper of THIS scholar
+   *  tagged under THIS concept. The rollup could only ever say "this word appears somewhere in this
+   *  person's corpus", which measured ~50% off-concept fragments. */
+  glossTerms?: string;
   /** #1351 — the resolved concept's display name (e.g. "Pharmacogenetics"). When
    *  set, titles that carry the concept term get `<mark>`-highlighted even if the
    *  literal query isn't in the title (the common tagged-match case). */
@@ -657,6 +662,7 @@ export async function fetchKeyPaper(args: {
   const cwid = args.cwid?.trim();
   const contentQuery = args.contentQuery?.trim() ?? "";
   const conceptLabel = args.conceptLabel?.trim() ?? "";
+  const glossTerms = args.glossTerms?.trim() ?? "";
   const descriptorUis = args.descriptorUis ?? [];
   const exclude = args.exclude ?? [];
   if (!cwid) return [];
@@ -685,6 +691,11 @@ export async function fetchKeyPaper(args: {
     // #1366 — the exclude set changes the result, so it MUST bucket the cache (two
     // lines with different claimed-pmid sets must not collide on the same key).
     exclude.length > 0 ? [...exclude].sort() : null,
+    // MATCHA_GLOSS_INWORDS — the gloss changes the HIGHLIGHT (`titleHtml`), which is part of the
+    // cached value, so it must bucket the cache too. Off-flag this is a trailing `null`: not the
+    // literal pre-change key (the array gained an element), but the cache is a process-local Map
+    // that starts empty every deploy, so the miss costs one cold fetch and nothing else.
+    glossTerms.length > 0 ? `g:${glossTerms}` : null,
   ]);
 
   // The admitted SET is the bool `filter` (author + concept/free-text) — UNCHANGED
@@ -734,7 +745,11 @@ export async function fetchKeyPaper(args: {
         // (e.g. "Pharmacogenetics …") now marks it, instead of rendering plain
         // because the literal typed query ("Pharmacogenomics") isn't present.
         // Highlight-only — admission/rank unchanged.
-        ...(contentQuery.length > 0 || conceptLabel.length > 0
+        // MATCHA_GLOSS_INWORDS adds a third clause: the gloss's distinctive terms, so the
+        // sponsor's own phrasing is marked on a paper already proven to be this scholar's AND
+        // under this concept's subtree. Title-only by decision (titles are the honest short
+        // display unit); abstracts are not highlighted.
+        ...(contentQuery.length > 0 || conceptLabel.length > 0 || glossTerms.length > 0
           ? {
               highlight: {
                 fields: { title: { number_of_fragments: 0 } },
@@ -746,6 +761,9 @@ export async function fetchKeyPaper(args: {
                         : []),
                       ...(conceptLabel.length > 0
                         ? [{ match_phrase: { title: conceptLabel } }]
+                        : []),
+                      ...(glossTerms.length > 0
+                        ? [{ multi_match: { query: glossTerms, fields: ["title"], operator: "or" } }]
                         : []),
                     ],
                   },
@@ -1583,18 +1601,6 @@ export async function searchPeople(opts: {
    */
   rescoreWindow?: number;
   /**
-   * MATCHA_GLOSS_INWORDS — optional "in their words" highlight (Matcha spine). When a non-empty
-   * string, add a `publicationTitles` highlight whose `highlight_query` is THIS string (the gloss's
-   * distinctive terms — the sponsor's sense words that are NOT already the canonical term), so the
-   * hit carries back a `glossHighlight` fragment showing where the sponsor's phrasing literally
-   * appears in the scholar's OWN publication titles. `publicationTitles` is not otherwise
-   * highlighted, so this clobbers no existing fragment and adds NO round-trip — it rides the same
-   * per-cluster call the retrieval/rescore already makes. Honesty guardrail: OpenSearch returns a
-   * fragment ONLY when a term actually matched, so absent ⇒ the field is absent, never asserted.
-   * Absent/blank ⇒ empty spread ⇒ the /search body is byte-identical to today. Spine-only, per cluster.
-   */
-  glossHighlightQuery?: string;
-  /**
    * Overrides the module-private `PAGE_SIZE` (20) for THIS call's `from`/`size`, the
    * `rescore.window_size` floor, and the result's reported `pageSize`. The Matcha spine passes
    * `TERM_DEPTH` to retrieve a cluster's whole pool in ONE request instead of ≤5 paged calls — a
@@ -1629,12 +1635,6 @@ export async function searchPeople(opts: {
   // card can derive a "Matched on …" chip. Default-off ⇒ the highlight block and
   // hit emission below are byte-identical to the pre-#702 shape.
   const matchExplain = opts.matchExplain === true;
-  // MATCHA_GLOSS_INWORDS — the gloss's distinctive terms to highlight in `publicationTitles`,
-  // trimmed + presence-gated so a blank never mutates the highlight body (off-path byte-identical).
-  const glossHighlightQuery =
-    opts.glossHighlightQuery && opts.glossHighlightQuery.trim().length > 0
-      ? opts.glossHighlightQuery.trim()
-      : undefined;
   const representativePub = opts.representativePub === true;
   const includeMostRecentPub = opts.includeMostRecentPub === true;
   const includeLastName = opts.includeLastName === true;
@@ -2831,35 +2831,12 @@ export async function searchPeople(opts: {
         // ask OpenSearch for a larger single fragment instead of the default
         // ~100-char one that cuts mid-word. Off-flag ⇒ default fragmenting.
         overview: resultEvidence ? { fragment_size: 320, number_of_fragments: 1 } : {},
-        // MATCHA_GLOSS_INWORDS — the "in their words" fragment. A PER-FIELD `highlight_query` (the
-        // gloss's distinctive terms), so it highlights ONLY those, independent of the main-query
-        // highlights above — and on `publicationTitles`, which nothing else highlights, so it
-        // clobbers no existing fragment. `require_field_match:false` is irrelevant here (the query IS
-        // this field); a single bounded fragment is all the one subordinate line renders. Absent
-        // when `glossHighlightQuery` is unset ⇒ the field is not in the request ⇒ off-path byte-identical.
-        ...(glossHighlightQuery
-          ? {
-              publicationTitles: {
-                highlight_query: {
-                  match: { publicationTitles: { query: glossHighlightQuery, operator: "or" } },
-                },
-                fragment_size: 200,
-                number_of_fragments: 1,
-                // `publicationTitles` is EVERY title a scholar has, each repeated by authorship
-                // weight (search-index-docs.ts) — tens of KB for prolific authors. It has no
-                // term_vector/offsets, so the plain highlighter re-analyzes the whole field per
-                // hit; across the size=100 spine pool × up to 8 clusters that blew the OpenSearch
-                // request-path timeout (a size=100 in-VPC eval reproduced it — completes with the
-                // highlight off, times out with it on). Cap the analysed span: a match past the cap
-                // yields no fragment = UNDER-claim, the same safe direction the honesty guardrail
-                // already accepts. The high-weight (first/last-author) titles sort early, so the
-                // cap keeps the scholar's most representative work.
-                // OpenSearch spells the query-level knob `max_analyzer_offset` (the INDEX setting
-                // keeps ES's `max_analyzed_offset`); the wrong spelling 400s the highlight request.
-                max_analyzer_offset: 10000,
-              },
-            }
-          : {}),
+        // MATCHA_GLOSS_INWORDS used to highlight the gloss here, on the person-level
+        // `publicationTitles` rollup. REMOVED: that field is every title the scholar has, so a mark
+        // proved only "this word appears somewhere in this person's corpus" — ~50% of fragments
+        // cited an off-concept paper. The evidence now rides `fetchKeyPaper`, whose admission is
+        // already `wcmAuthorCwids = cwid` AND `meshDescriptorUi ∈ descendants`, making "on-concept"
+        // structural rather than measured. See docs/2026-07-24-matcha-inwords-descendants-redesign-spec.md.
       },
       // Issue #692 — when demoting, restrict highlighting to the content query
       // so stripped generics ("Research") are never <mark>-ed. Without this the
@@ -3546,18 +3523,7 @@ export async function searchPeople(opts: {
       // surfaced as the humanized-areas fallback, never a raw slug highlight).
       // The flattened fragments are the self snippet the card falls back to when
       // no `matchReason` was computed.
-      // The self-snippet fallback flattens every highlighted field EXCEPT the gloss "in their words"
-      // fragment (`publicationTitles`): that is a Matcha-only surface with its own line, and letting
-      // it leak into the People card's generic snippet would caption a scholar's paper title as their
-      // self-description. Excluded here so the flattened fallback stays byte-identical off the flag.
-      const highlight = hl
-        ? Object.entries(hl)
-            .filter(([field]) => field !== "publicationTitles")
-            .flatMap(([, frags]) => frags)
-        : undefined;
-      // MATCHA_GLOSS_INWORDS — the gloss fragment, when this call requested one AND a term matched a
-      // title (OpenSearch omits the field otherwise). Real fragment only; absent ⇒ absent (no line).
-      const glossHighlight = hl?.publicationTitles?.[0];
+      const highlight = hl ? Object.entries(hl).flatMap(([, frags]) => frags) : undefined;
       // `prov` still feeds the per-row reason (`buildMatchReason`, concept
       // fallback); it is no longer surfaced as a hit field of its own.
       const prov = provenanceOn
@@ -3606,8 +3572,6 @@ export async function searchPeople(opts: {
         ...(includeLastName ? { lastNameSort: h._source.lastNameSort ?? null } : {}),
         identityImageEndpoint: identityImageEndpoint(h._source.cwid),
         highlight,
-        // MATCHA_GLOSS_INWORDS — spread only when present so the off-path hit is byte-identical.
-        ...(glossHighlight ? { glossHighlight } : {}),
         matchReason: resolveHitMatchReason(
           h._source.cwid,
           h._source.areasOfInterest,

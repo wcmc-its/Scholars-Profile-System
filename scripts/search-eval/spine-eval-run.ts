@@ -29,6 +29,7 @@ import { createHash } from "node:crypto";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { cachedReasonAgg } from "@/lib/api/reason-agg-cache";
 import { rankResearchersForDescriptionSpine } from "@/lib/api/matcha-spine-run";
+import { fetchKeyPaper } from "@/lib/api/search";
 import { normalizeDescription } from "@/lib/api/matcha";
 import type { MatchaExtraction } from "@/lib/api/matcha-extract";
 import { glossArmEnv } from "./spine-eval-arm";
@@ -36,6 +37,11 @@ import { glossArmEnv } from "./spine-eval-arm";
 /** The arm to run: `base` (rescore off, the ablation) or `gloss-<λ>`. Echoed into the artifact AND
  *  mapped to the gloss-rescore env below — one arm per process (the memo cache has no clear). */
 const ARM = process.env.ARM ?? "default";
+
+/** How deep to measure the key-paper evidence per fixture. The card only ever shows the top of the
+ *  fused list, and each (candidate, concept) pair is one cached OpenSearch query — 10 keeps an arm
+ *  to a few hundred, not thousands. Raise only if a concept's population sample looks too thin. */
+const KEY_PAPER_EVAL_DEPTH = 10;
 
 async function main() {
   const payload = JSON.parse(readFileSync(process.argv[2], "utf8")) as {
@@ -71,7 +77,7 @@ async function main() {
   // Reproduce the staging APP's search-evidence flag env. The eval runs on the sps-etl-<env> task
   // def, which carries NONE of these (verified: its env has zero SEARCH_* flags) — so `searchPeople`
   // gates OUT all evidence (`SEARCH_RESULT_EVIDENCE` off ⇒ no `evidence`/`evidenceLines`), the spine
-  // then drops every (concept,cwid) block at `if (!hitEvidence) continue`, and inWords never attaches
+  // then drops every (concept,cwid) block at `if (!hitEvidence) continue`, so no keyPaper is emitted
   // → the artifact's `.evidence` is present but every `blocks:[]`. Staging app has all of these ON
   // (SEARCH_RESULT_EVIDENCE / _EVIDENCE_REASON_COUNTS / _PEOPLE_MATCH_AWARE_SNIPPET / _PEOPLE_CONCEPT_HINT),
   // so the measured spine must too or it isn't the shipped path. Default-on, each overridable.
@@ -90,14 +96,27 @@ async function main() {
   if (process.env.REASON_AGG_BYPASS) throw new Error("REASON_AGG_BYPASS is set — the seed cannot take");
 
   const ranked: Record<string, string[]> = {};
-  // MATCHA_GLOSS_INWORDS acceptance data — per fixture, each candidate's per-concept evidence
-  // blocks reduced to {term, inWords}. `inwords-population.jq` reads this to report each concept's
-  // population rate (populated / matched-pool). `inWords` is set ONLY from a real <mark> fragment
-  // upstream, so `!= null` here is an honest "the scholar used the gloss's word." Additive to the
-  // artifact: the dispatch's `jq '.ranked'` ignores it, so sponsor-eval.sh sees byte-identical input.
+  // MATCHA_GLOSS_INWORDS acceptance data. The evidence now lives on the LAZY key-paper fetch
+  // (`fetchKeyPaper`, admission = this scholar AND this concept's MeSH descendants), which the spine
+  // never calls — so the harness calls it per (concept, cwid) itself, bounded to the top
+  // KEY_PAPER_EVAL_DEPTH candidates so one arm stays a few hundred cached queries, not thousands.
+  // `pmid` is emitted so the §1 audit can PROVE the on-concept invariant rather than trust it;
+  // `titleHtml` is the marked title (absent ⇒ no mark ⇒ no claim) and `glossTerms` is what was asked
+  // for, so the scorer can attribute a mark to the gloss rather than to the concept/query clauses.
+  // Additive: the dispatch's `jq '.ranked'` ignores it, so sponsor-eval.sh sees identical input.
   const evidence: Record<
     string,
-    { cwid: string; rank: number; blocks: { term: string; inWords: string | null }[] }[]
+    {
+      cwid: string;
+      rank: number;
+      blocks: {
+        term: string;
+        glossTerms: string | null;
+        pmid: string | null;
+        titleHtml: string | null;
+        leadMarked: boolean;
+      }[];
+    }[]
   > = {};
   const unmeasured: { id: string; why: string }[] = [];
 
@@ -133,11 +152,27 @@ async function main() {
     }
 
     ranked[f.id] = result.candidates.map((c) => c.cwid);
-    evidence[f.id] = result.candidates.map((c, rank) => ({
-      cwid: c.cwid,
-      rank,
-      blocks: (c.searchEvidence ?? []).map((e) => ({ term: e.term, inWords: e.inWords ?? null })),
-    }));
+    evidence[f.id] = [];
+    for (const [rank, c] of result.candidates.slice(0, KEY_PAPER_EVAL_DEPTH).entries()) {
+      const blocks = [];
+      for (const e of c.searchEvidence ?? []) {
+        // The SAME call the card makes on disclosure — so the measurement is of the shipped path.
+        const pubs = await fetchKeyPaper({ cwid: c.cwid, ...e.keyPaper });
+        const marked = pubs.find((p) => p.titleHtml?.includes("<mark>")) ?? null;
+        blocks.push({
+          term: e.term,
+          glossTerms: e.keyPaper.glossTerms ?? null,
+          pmid: marked?.pmid ?? null,
+          titleHtml: marked?.titleHtml ?? null,
+          // `marked` scans all three returned pubs, but the card FACE shows only `papers[0]`
+          // (evidence-line.tsx `ArtifactLead` — the rest sit behind "+N more pubs"). Reporting only
+          // the any-of-3 rate would inflate the ship number against what an officer actually sees,
+          // so carry both: `leadMarked` is the face rate, `marked` the one-click-reachable rate.
+          leadMarked: pubs[0]?.titleHtml?.includes("<mark>") ?? false,
+        });
+      }
+      evidence[f.id].push({ cwid: c.cwid, rank, blocks });
+    }
     console.error(`  ✓ ${f.id} [${ARM}] ${result.candidates.length} candidates, ${result.concepts.length} concepts`);
   }
 
