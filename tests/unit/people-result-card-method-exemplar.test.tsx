@@ -203,12 +203,17 @@ describe("PeopleResultCard — non-method/topic evidence never fetches a method-
   });
 });
 
-describe("EvidenceLine — #1366 follow-up: de-dup empty-resolve drops the chevron (Bug A)", () => {
-  it("a line that EXCLUDES sibling pmids and resolves empty drops its chevron (no empty panel)", async () => {
+describe("EvidenceLine — #1923: de-dup empty-resolve KEEPS the chevron and explains", () => {
+  it("a line that EXCLUDES sibling pmids and resolves empty keeps its chevron and says where the papers went", async () => {
     mockFetch({ pubs: [], total: 0 });
     // A sibling line already claimed a pmid ⇒ this line fetches with a non-empty
     // `exclude` and (here) gets nothing back: its papers are all shown under the
-    // stronger sibling, so the chevron must drop rather than offer an empty panel.
+    // stronger sibling.
+    //
+    // #1923 reverses the old behaviour. Dropping the chevron avoided an empty panel by
+    // deleting the control mid-click: the row said "3 of 100 publications", the user
+    // clicked, and the chevron vanished with nothing shown. Keeping the control and
+    // naming where the papers went is the honest version.
     const claimed = new Set(["999"]);
     render(
       <EvidenceLine
@@ -225,14 +230,13 @@ describe("EvidenceLine — #1366 follow-up: de-dup empty-resolve drops the chevr
         tier="lesser"
       />,
     );
-    // chevron shows before the fetch resolves...
     fireEvent.click(screen.getByRole("button", { name: /key papers/i }));
-    // ...and once the empty resolve lands (with a non-empty exclude) it is dropped.
+    // The panel explains rather than rendering nothing...
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: /key papers/i })).toBeNull(),
+      expect(screen.getByText(/already listed above, under a stronger match/i)).toBeTruthy(),
     );
-    // No fallback link either — the evidence is honestly shown under the sibling.
-    expect(screen.queryByRole("link", { name: /view their methods/i })).toBeNull();
+    // ...and the control the user just operated is still there.
+    expect(screen.queryByRole("button", { name: /key papers/i })).not.toBeNull();
   });
 
   it("the SAME line with NO sibling exclude keeps its fallback link on empty (genuine empty)", async () => {

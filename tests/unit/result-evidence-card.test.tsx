@@ -436,11 +436,29 @@ describe("<RepresentativePapers> — the disclosure stack", () => {
     expect(screen.getByText(/finding key papers/i)).toBeTruthy();
   });
 
-  it("renders nothing once a fetch resolves with zero papers (never a dead block)", () => {
+  it("#1923 — an expanded panel NEVER renders empty; a zero-paper resolve still says something", () => {
+    // This asserted `textContent === ""`. Rendering nothing is what made the chevron a
+    // dead control: a user clicked and got silence, which reads as a broken page.
     const { container } = render(
       <RepresentativePapers papers={[]} total={0} profileHref="/p/jane#publications" status="done" />,
     );
-    expect(container.textContent).toBe("");
+    expect(container.textContent?.trim()).toMatch(/No separate papers to show for this match/i);
+  });
+
+  it("#1923 — a de-dup empty says where the papers actually went", () => {
+    const { container } = render(
+      <RepresentativePapers
+        papers={[]}
+        total={0}
+        profileHref="/p/jane#publications"
+        status="done"
+        dedupedEmpty
+      />,
+    );
+    // The papers are not missing, they are on screen under a stronger match on the same
+    // card. That is worth saying rather than hiding.
+    expect(container.textContent).toMatch(/already listed above, under a stronger match/i);
+    expect(container.textContent).not.toMatch(/No separate papers/i);
   });
 
   it("highlights a query match in a Key-paper title with the light-red pill (titleHtml)", () => {

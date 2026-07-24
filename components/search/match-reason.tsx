@@ -445,6 +445,7 @@ export function RepresentativePapers({
   status = "done",
   panelId,
   fallback,
+  dedupedEmpty = false,
   mentionNote = false,
   panelLabel,
   panelSubtitle,
@@ -474,6 +475,11 @@ export function RepresentativePapers({
    *  the badge firing guarantees the scholar has the section. Undefined for the
    *  publications key-paper path (its chevron is count-gated, so empty ⇒ nothing). */
   fallback?: { href: string; label: string };
+  /** #1923 — this line's exemplar fetch came back empty BECAUSE a higher-priority
+   *  sibling on the same card already claimed every paper (the `exclude=` de-dup).
+   *  The papers are on screen, just not here, so the panel says so instead of
+   *  rendering nothing. */
+  dedupedEmpty?: boolean;
   /** Signal-colored left rail on the panel (blue = research area, green = funding,
    *  per-kind for the rest). Defaults to the flush `pl-[1px]` = no rail. */
   railClassName?: string;
@@ -488,20 +494,30 @@ export function RepresentativePapers({
     );
   }
   if (papers.length === 0) {
-    if (status === "done" && fallback) {
-      return (
-        <div id={panelId} className="mt-1.5 pl-[1px]">
+    // #1923 — an expanded disclosure must never render nothing. Returning null here
+    // meant a user clicked a chevron and got silence, which reads as a broken page.
+    // Every branch below produces at least one line of honest text.
+    return (
+      <div id={panelId} className="mt-1.5 pl-[1px]">
+        <p className="text-[12px] italic leading-snug text-[#6f6a5e]">
+          {dedupedEmpty
+            ? // The de-dup case, and the useful one: this line's papers are not
+              // missing, they are already listed under a stronger match on this same
+              // card. Saying that is more informative than the papers would have been.
+              "These papers are already listed above, under a stronger match."
+            : "No separate papers to show for this match."}
+        </p>
+        {status === "done" && fallback ? (
           <Link
             href={fallback.href}
             onClick={(e) => e.stopPropagation()}
-            className="relative z-10 inline-block text-[12px] font-medium text-[#1f51a8] no-underline hover:underline"
+            className="relative z-10 mt-1 inline-block text-[12px] font-medium text-[#1f51a8] no-underline hover:underline"
           >
             {fallback.label} →
           </Link>
-        </div>
-      );
-    }
-    return null;
+        ) : null}
+      </div>
+    );
   }
 
   const more = total - papers.length;
