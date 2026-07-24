@@ -84,6 +84,66 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(container.innerHTML).not.toContain("rounded-[5px]");
   });
 
+  it("#1922 follow-up — a non-dim primary accents its kind word AND its count, on both phrase paths", () => {
+    // The one `--evidence-accent` is what makes the lead read as the lead. Both halves
+    // of it are pinned on both phrase builders, because the publications branch writes
+    // its count-first phrase inline instead of going through CountFirst.
+    render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "12 of 98 publications tagged",
+          term: "Melanoma",
+          count: 12,
+        }}
+        pubCount={98}
+        stacked
+      />,
+    );
+    expect(screen.getByText("Concept").className).toContain("--evidence-accent");
+    expect(screen.getByText("12").className).toContain("--evidence-accent");
+    // …and the CountFirst phrase that method/topic/funding share.
+    render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "CRISPR", tools: [], count: 4 }}
+        pubCount={98}
+        stacked
+      />,
+    );
+    expect(screen.getByText("Method").className).toContain("--evidence-accent");
+    expect(screen.getByText("4").className).toContain("--evidence-accent");
+  });
+
+  it("#1922 follow-up — a DIM primary takes no accent at all: a thin match stays faint", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "mention",
+          text: "1 of 98 publications mention",
+          term: "crispr",
+          count: 1,
+        }}
+        pubCount={98}
+        stacked
+      />,
+    );
+    expect(container.textContent).toMatch(/term match only/); // it really is the dim lead
+    expect(container.innerHTML).not.toContain("--evidence-accent");
+    // …and the CountFirst dim gate, which is a SEPARATE line from the inline one above:
+    // without this, dropping `dim ?` in CountFirst survives the whole suite green.
+    const method = render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "Mass spectrometry", tools: [], count: 1 }}
+        pubCount={538}
+        stacked
+      />,
+    );
+    expect(method.container.textContent).toMatch(/% of output/); // it really is dim
+    expect(method.container.innerHTML).not.toContain("--evidence-accent");
+  });
+
   it("#1391 — clinical primary ⇒ 'Clinical' type word + underlined specialty, NO count", () => {
     const { container } = render(
       <ResultEvidence
@@ -585,6 +645,29 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
     );
     expect(container.textContent).toMatch(/Concept/);
     expect(dotOf(container)).toBeNull();
+  });
+
+  it("#1922 follow-up — an 'Also matched' row carries NO primary accent", () => {
+    // The accent is the ONLY thing separating the lead from these rows; if it ever leaks
+    // down here the stack goes tonally flat again and we are back to #1922. Negative, for
+    // the same reason the dot guards above are.
+    const { container } = render(
+      <>
+        <ResultEvidence
+          evidence={{ kind: "method", family: "CRISPR genome editing", tools: [], count: 3 }}
+          pubCount={44}
+          tier="lesser"
+        />
+        <ResultEvidence
+          evidence={{ kind: "publications", strength: "tagged", text: "5 of 44 publications tagged", term: "Melanoma", count: 5 }}
+          pubCount={44}
+          tier="lesser"
+        />
+      </>,
+    );
+    expect(container.textContent).toMatch(/Method · CRISPR genome editing/);
+    expect(container.textContent).toMatch(/Concept · Melanoma/);
+    expect(container.innerHTML).not.toContain("--evidence-accent");
   });
 
   it("clinical lesser ⇒ label-only dot row, NO count", () => {
