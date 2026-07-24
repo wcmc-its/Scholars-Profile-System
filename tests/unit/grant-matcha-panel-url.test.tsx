@@ -9,6 +9,7 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
 
 const searchParams = { value: new URLSearchParams("") };
 
@@ -24,10 +25,22 @@ vi.mock("@/components/edit/find-researchers", () => ({
   ),
 }));
 
+/**
+ * Records every MOUNT, because the real panel's `autoRun` is a mount-only effect: one mount is
+ * one Bedrock extraction plus a retained submission row. Mounting with the wrong seed is not a
+ * cosmetic flicker, it is a billed ask against the wrong grant.
+ */
+const mounted: string[] = [];
+
 vi.mock("@/components/edit/matcha-panel", () => ({
-  MatchaPanel: ({ initialDescription }: { initialDescription?: string }) => (
-    <div data-testid="matcha-panel">{initialDescription}</div>
-  ),
+  MatchaPanel: ({ initialDescription }: { initialDescription?: string }) => {
+    useEffect(() => {
+      mounted.push(initialDescription ?? "");
+      // Empty deps mirrors the real panel's mount-only `autoRun` — that is the behaviour under test.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    return <div data-testid="matcha-panel">{initialDescription}</div>;
+  },
 }));
 
 import { GrantMatchaPanel } from "@/components/edit/grant-matcha-panel";
@@ -35,6 +48,7 @@ import { GrantMatchaPanel } from "@/components/edit/grant-matcha-panel";
 describe("GrantMatchaPanel — ?opp= URL state", () => {
   beforeEach(() => {
     searchParams.value = new URLSearchParams("");
+    mounted.length = 0;
     vi.unstubAllGlobals();
   });
   afterEach(() => vi.unstubAllGlobals());
@@ -77,5 +91,43 @@ describe("GrantMatchaPanel — ?opp= URL state", () => {
       "Outstanding New Environmental Scientist\n\nSupports early-stage investigators studying environmental exposures.",
     );
     expect(screen.queryByRole("link", { name: "browse table" })).toBeNull();
+  });
+
+  it("never mounts Matcha with the previous opportunity's seed when ?opp= changes", async () => {
+    const synopsisOf = (id: string) => `Synopsis ${id} about vascular biology and imaging.`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const id = url.split("/").pop() ?? "";
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            title: `Opportunity ${id}`,
+            sponsor: "NIH",
+            synopsis: synopsisOf(id),
+            eligibilityFlags: [],
+            eligibility: {},
+          }),
+        };
+      }),
+    );
+
+    searchParams.value = new URLSearchParams("opp=A");
+    const { rerender } = render(<GrantMatchaPanel />);
+    await waitFor(() => expect(screen.getByTestId("matcha-panel")).toBeTruthy());
+
+    searchParams.value = new URLSearchParams("opp=B");
+    rerender(<GrantMatchaPanel />);
+    await waitFor(() =>
+      expect(screen.getByTestId("matcha-panel").textContent).toContain("Opportunity B"),
+    );
+
+    // Two selections, two asks. A third entry — or an "Opportunity A" seed landing under B —
+    // means the panel mounted against stale state and billed an ask for the wrong grant.
+    expect(mounted).toEqual([
+      `Opportunity A\n\n${synopsisOf("A")}`,
+      `Opportunity B\n\n${synopsisOf("B")}`,
+    ]);
   });
 });

@@ -13,8 +13,6 @@
  * same curated-first ordering — parameterized by `hrefFor`. The selection lives in the URL
  * (`?opp=<id>`), not component state, so the page is deep-linkable and browser Back returns to
  * the table.
- *
- * Eligibility rail / per-row badges / filtered floor are PR2 — not here.
  */
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -33,10 +31,14 @@ type Selected = {
   requirements: EligibilityRequirements;
 };
 
+/**
+ * `id` is the opportunity each payload BELONGS to. It exists because `status` lags the URL by a
+ * render — see the staleness guard in the component.
+ */
 type Status =
   | { kind: "loading" }
-  | { kind: "ok"; selected: Selected }
-  | { kind: "error"; message: string };
+  | { kind: "ok"; id: string; selected: Selected }
+  | { kind: "error"; id: string; message: string };
 
 /** Build the ask exactly as find-researchers does: title + blank line + synopsis, empties dropped. */
 function buildAskSeed(title: string | null, synopsis: string | null): string {
@@ -92,7 +94,8 @@ export function GrantMatchaPanel() {
   const [status, setStatus] = useState<Status>({ kind: "loading" });
 
   useEffect(() => {
-    if (selectedId === null) return;
+    // Empty (`?opp=`) is not a selection — `get` returns "", not null, so test truthiness.
+    if (!selectedId) return;
     let active = true;
     setStatus({ kind: "loading" });
     // The list route omits synopsis; the detail route carries the full text we seed from.
@@ -115,6 +118,7 @@ export function GrantMatchaPanel() {
           askSeed
             ? {
                 kind: "ok",
+                id: selectedId,
                 selected: {
                   title: full.title,
                   sponsor: full.sponsor,
@@ -124,13 +128,18 @@ export function GrantMatchaPanel() {
               }
             : {
                 kind: "error",
+                id: selectedId,
                 message: "That opportunity has no text to match on. Pick another.",
               },
         );
       })
       .catch(() => {
         if (active) {
-          setStatus({ kind: "error", message: "Couldn't load that opportunity. Try again." });
+          setStatus({
+            kind: "error",
+            id: selectedId,
+            message: "Couldn't load that opportunity. Try again.",
+          });
         }
       });
     return () => {
@@ -138,7 +147,7 @@ export function GrantMatchaPanel() {
     };
   }, [selectedId]);
 
-  if (selectedId === null) {
+  if (!selectedId) {
     return (
       <div>
         <div className="mb-5">
@@ -152,6 +161,13 @@ export function GrantMatchaPanel() {
     );
   }
 
+  // 🔴 `status` lags the URL by one render: React commits the new `selectedId` BEFORE the fetch
+  // effect runs, so state still holds the previous opportunity. `MatchaPanel`'s auto-run is
+  // mount-only, so rendering it in that window fires a Bedrock ask seeded from the WRONG grant —
+  // and `/api/edit/matcha` retains a submission row for it even on a cache hit. Only trust a
+  // payload whose id matches the URL; anything else reads as still-loading.
+  const current = status.kind !== "loading" && status.id === selectedId ? status : null;
+
   return (
     <div>
       <Link
@@ -161,28 +177,28 @@ export function GrantMatchaPanel() {
         <ArrowLeft className="size-4" aria-hidden /> Back to opportunities
       </Link>
 
-      {status.kind === "loading" ? (
+      {current === null ? (
         <p className="text-muted-foreground text-sm">Loading opportunity…</p>
-      ) : status.kind === "error" ? (
-        <p className="text-destructive text-sm">{status.message}</p>
+      ) : current.kind === "error" ? (
+        <p className="text-destructive text-sm">{current.message}</p>
       ) : (
         <>
           <div className="mb-4 min-w-0 text-sm">
-            {status.selected.sponsor ? (
+            {current.selected.sponsor ? (
               <span className="font-semibold text-[var(--color-accent-slate)]">
-                {status.selected.sponsor}
+                {current.selected.sponsor}
                 {" · "}
               </span>
             ) : null}
             <span className="text-foreground">
-              {status.selected.title ?? "Untitled opportunity"}
+              {current.selected.title ?? "Untitled opportunity"}
             </span>
           </div>
           <MatchaPanel
-            key={selectedId}
-            initialDescription={status.selected.askSeed}
+            key={current.id}
+            initialDescription={current.selected.askSeed}
             autoRun
-            eligibility={status.selected.requirements}
+            eligibility={current.selected.requirements}
           />
         </>
       )}
