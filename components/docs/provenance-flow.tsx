@@ -91,14 +91,27 @@ const SOURCES: { what: string; from: string }[] = [
 ];
 
 /**
- * Also upstream, and also not editable here: ReCiter and ReciterAI are separate
- * WCM systems, not part of Scholars. Kept in their own column because the
- * distinction they carry (computed rather than recorded) is the one the page
- * warns is easy to confuse.
+ * Separate WCM systems, not part of Scholars, and not alike: ReCiter proposes and
+ * a person decides, while ReciterAI's output is not hand-edited. The column head
+ * therefore names what they produce rather than claiming either is automatic.
  */
 const COMPUTED: { name: string; does: string }[] = [
-  { name: "ReCiter", does: "Decides which publications are yours" },
-  { name: "ReciterAI", does: "Research areas, the Impact score, and your synopses" },
+  {
+    name: "ReCiter",
+    does: "Suggests and scores which publications are yours. You or the library team confirm or reject each one in Publication Manager.",
+  },
+  {
+    name: "ReciterAI",
+    does: "Works out your research areas, the Impact score, and your synopses. These are not hand-edited.",
+  },
+];
+
+/** Everywhere a scholar's data surfaces, not just their own profile. */
+const SURFACES = [
+  "Search and Browse",
+  "Department, division, and center pages",
+  "Research area pages",
+  "The home page Spotlight",
 ];
 
 /**
@@ -111,7 +124,7 @@ const SCHOLARS_OWNED = [
   "Your overview text",
   "Your Selected highlights",
   "Honors and awards, once approved",
-  "Anything you have hidden: publications, grants, appointments, and more",
+  "Anything you have hidden: publications, grants, appointments, and more. Hiding affects your profile, not search.",
   "Center membership, maintained by center administrators",
 ];
 
@@ -131,7 +144,7 @@ export function ProvenanceFlow() {
 
         {/* 2 — the two computed layers the page warns are easy to confuse */}
         <div className="grid content-start gap-2.5">
-          <ColHead>Worked out automatically</ColHead>
+          <ColHead>Attribution, topics, and scores</ColHead>
           {COMPUTED.map((c) => (
             <div key={c.name} className={`${CARD} bg-[#f6f7f9]`}>
               <span className={`block text-[15px] font-semibold ${ACCENT}`}>{c.name}</span>
@@ -144,12 +157,20 @@ export function ProvenanceFlow() {
 
         {/* 3 — the rendered profile, plus the one layer Scholars itself stores */}
         <div className="grid content-start gap-2.5">
-          <ColHead>What you see</ColHead>
+          <ColHead>Where it appears</ColHead>
           <div className={`${CARD} bg-[#fafbfc]`}>
             <span className="block text-[15px] font-semibold">Your profile page</span>
             <span className="mt-0.5 block text-[13px] text-muted-foreground">
               Rebuilt nightly from everything on the left. Scholars holds a copy, not the original.
             </span>
+          </div>
+          <div className={`${CARD} bg-[#fafbfc]`}>
+            <span className="block text-[15px] font-semibold">And across the rest of the site</span>
+            <ul className="!mt-1.5 !ml-4 text-[13px] text-muted-foreground">
+              {SURFACES.map((s) => (
+                <li key={s}>{s}</li>
+              ))}
+            </ul>
           </div>
           <div className="rounded-[10px] border border-[#c9d8ee] bg-[#f3f6fb] p-3">
             <span className="block text-sm font-semibold">Stored in Scholars, not upstream</span>
