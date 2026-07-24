@@ -654,6 +654,11 @@ export type MatchaPreference = {
 } & (
   | { measure: "careerStage"; stages: CareerStage[] }
   | { measure: "isClinician" }
+  /** Grant Matcha — the opportunity is ESI-targeted. SOFT by design: the extractor's
+   *  `esi_targeted` is a PRIORITY, not a gate, so this demotes non-ESI candidates and hides
+   *  nobody. Only the grant-matcha surface produces it; `extractMatchaPreferences` never does,
+   *  so `/edit/matcha` is unaffected. Reads `measures.esiEligible` (spine-hydrated). */
+  | { measure: "esiEligible" }
 );
 
 /**
@@ -706,6 +711,12 @@ export function preferenceBoost(
         break;
       case "isClinician":
         hit = m.isClinician === true;
+        break;
+      case "esiEligible":
+        // ABSENT IS NOT ZERO holds here too: a candidate whose signal was never hydrated
+        // (`/edit/matcha`, or the bespoke engine) is not shown to meet it, so she does not
+        // earn the boost — she is not scored as failing it either.
+        hit = m.esiEligible === true;
         break;
       default: {
         const unhandled: never = p;
