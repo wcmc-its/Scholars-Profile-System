@@ -144,8 +144,8 @@ export default function DocsPage() {
               profile, which routes each one to the office that owns the field.
             </li>
             <li>
-              <em>What you control here.</em> A short list: your overview text and which of your
-              publications are shown.
+              <em>What you control here.</em> A short list: your overview text, which records are
+              shown, your Selected highlights, and the honors and positions you add yourself.
             </li>
           </ul>
         </Callout>
@@ -271,20 +271,35 @@ export default function DocsPage() {
           ReciterAI.
         </p>
         <p>
-          <strong>What you can change yourself.</strong> Three things, on your Edit my profile page
-          at <code>/edit/scholar/[your CWID]</code>:
+          <strong>What you can change yourself,</strong> on your Edit my profile page at{" "}
+          <code>/edit/scholar/[your CWID]</code>:
         </p>
         <ul>
-          <li>Your overview text.</li>
+          <li>Your overview text, and your Selected highlights.</li>
           <li>
-            Which publications appear. Hide one that isn&apos;t yours, or restore one you hid. Both
-            are reversible and recorded.
+            Which records appear. Hide a publication that isn&apos;t yours, or a grant, education
+            entry, or mentee relationship, and restore any of them later. Every change is reversible
+            and recorded.
+          </li>
+          <li>
+            Honors and distinctions, and positions the directory does not carry, which you add
+            yourself because no upstream system holds them.
+          </li>
+          <li>
+            Who else may edit your profile, so an assistant or coordinator can maintain it for you.
           </li>
           <li>
             A data correction for anything else. Use Request a change, and it routes to the office
             that owns the field.
           </li>
         </ul>
+        <p>
+          The full list, with the mechanics for each, is in{" "}
+          <Link href="#control" className={LINK}>
+            What you control
+          </Link>
+          .
+        </p>
         <p>
           Your profile also has a stable web address you don&apos;t normally need to touch. A custom
           one can be arranged through the Scholars team (see{" "}
@@ -808,34 +823,50 @@ export default function DocsPage() {
         </div>
 
         <h2 id="control">What you control</h2>
-        <p>Four things are yours to do directly, on your Edit my profile page:</p>
+        <p>These are yours to do directly, on your Edit my profile page:</p>
         <ul>
           <li>
             <strong>Your overview text.</strong> The free-text statement about your work. You write
             it, and it is not derived from anything.
           </li>
           <li>
-            <strong>Hide or restore a publication.</strong> If ReCiter attributed a paper that
-            isn&apos;t yours, you can hide it as a quick fix. Hiding is reversible and recorded. It
-            affects your profile, not search: it removes a paper from your profile, which is separate
-            from whether the paper appears in search (
+            <strong>Hide or restore a record.</strong> Not just publications: you can also hide a
+            grant, an education entry, or a mentee relationship. Hiding is reversible and recorded.
+            It affects your profile, not search: it removes the record from your profile, which is
+            separate from whether it appears in search (
             <Link href="#search" className={LINK}>
               more on that below
             </Link>
-            ). The proper fix is to reject the paper in{" "}
+            ). For a publication that isn&apos;t yours, hiding is the quick fix; the proper one is to
+            reject it in{" "}
             <a href={PM} className={LINK}>
               Publication Manager
             </a>
             , which corrects the attribution at the source so it does not return on the next refresh.
           </li>
           <li>
-            <strong>Submit a data correction.</strong> For a field you cannot edit directly, use
-            Request a change and it routes to the office that owns the field.
+            <strong>Add an honor or distinction.</strong> Academy memberships, investigatorships, and
+            prizes. You or a curator enter these, because no upstream system holds them. Endowed
+            chairs are the exception: those arrive through your title and should not be added here.
+          </li>
+          <li>
+            <strong>Add a position the directory does not carry.</strong> WCM roles the feed omits,
+            such as Program Director or Head of Section, and current or past posts at other
+            institutions. Both of these show on your profile only, not in search or on department,
+            division, and center pages.
           </li>
           <li>
             <strong>Choose your Selected highlights.</strong> The small set of papers featured on
             your profile. By default these are chosen by Impact and recency; you can instead pick
             them yourself.
+          </li>
+          <li>
+            <strong>Name someone to edit on your behalf.</strong> You manage your own profile
+            editors, so an assistant or coordinator can maintain your profile for you.
+          </li>
+          <li>
+            <strong>Submit a data correction.</strong> For a field you cannot edit directly, use
+            Request a change and it routes to the office that owns the field.
           </li>
         </ul>
         <Callout variant="note" heading="Not a control, but worth knowing">
