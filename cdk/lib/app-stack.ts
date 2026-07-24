@@ -1900,6 +1900,25 @@ export class AppStack extends Stack {
         //     Resolve-time only: no reindex. Flip is env-only via cdk deploy
         //     Sps-App-<env> (CD re-rolls the image only) -- the flag-parity rule.
         SEARCH_MESH_RESOLUTION_FALLBACK: env === "staging" ? "on" : "off",
+        // #1348 -- SEARCH_MESH_RESOLVE_TOKEN_COVERAGE. Admission rule for the fallback
+        //   above: a matched window must cover a STRICT MAJORITY of the query's tokens.
+        //   Replaces the hand-curated GENERIC_DESCRIPTOR_NAMES stoplist, which fixes the
+        //   generic words already measured and is silent on the next one -- it has no
+        //   "policy", so "foreign policy" resolves to the MeSH `Policy` descriptor and
+        //   the Matcha console renders a confident `subject-tagged` badge on a
+        //   top-ranked researcher with no foreign-policy work. Genericness is not a
+        //   property of a descriptor (`Blood` is right for "blood", wrong for "blood
+        //   disorders"), and both derivable substitutes were measured and rejected:
+        //   subtree breadth is inverted (Policy/Medicine/Blood/Bacteria/Disease are all
+        //   absent from the >50-descendant "broad" set while Public Policy is in it) and
+        //   tree depth has no separating threshold (Neoplasms depth 1 = good target;
+        //   Hematologic Diseases depth 2 = the DESIRED answer for "blood disorders",
+        //   same depth as Blood, the wrong one). So the guard is query-relative.
+        //   OFF in BOTH envs pending a recall measurement: the rule also declines
+        //   legitimate narrowing ("pediatric asthma" -> Asthma is 1 of 2 tokens), which
+        //   degrades to keyword-only. Resolve-time only: no reindex. Flip is env-only
+        //   via cdk deploy Sps-App-<env> -- the flag-parity rule.
+        SEARCH_MESH_RESOLVE_TOKEN_COVERAGE: "off",
         // #1342 -- query-side morphology retry. When ON, resolveMeshDescriptor, after
         //   the exact lookup misses, retries the SINGULARIZED query ("melanomas" ->
         //   "melanoma") against the same index and, on a hit, returns the descriptor at

@@ -691,6 +691,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_MESH_RESOLVE_TOKEN_COVERAGE",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_MESH_QUERY_NORMALIZATION",
                 "Value": "on",
               },
@@ -4480,6 +4484,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_MESH_RESOLUTION_FALLBACK",
                 "Value": "on",
+              },
+              {
+                "Name": "SEARCH_MESH_RESOLVE_TOKEN_COVERAGE",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_MESH_QUERY_NORMALIZATION",

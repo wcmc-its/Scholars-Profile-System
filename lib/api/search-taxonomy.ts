@@ -51,6 +51,7 @@ import { dedupeFirstByKey } from "@/lib/api/search-ranking";
 import {
   resolveSearchSuggestMeshConcept,
   resolveMeshResolutionFallbackEnabled,
+  resolveMeshTokenCoverageEnabled,
   resolveMeshQueryNormalizationEnabled,
   resolveAcronymSenseGuardEnabled,
 } from "@/lib/api/search-flags";
@@ -1459,9 +1460,10 @@ function buildMeshResolution(
  *     chars — so a short/common word can't latch onto a homonym or generic
  *     descriptor (the measured "Seahorse → Smegmamorpha", "Patient → Patients",
  *     "Calcium → Calcium" traps). Multi-token windows accept name OR entry-term.
- *   - #1348: a single-token window is additionally blocked from resolving to a
- *     GENERIC descriptor name (`GENERIC_DESCRIPTOR_NAMES`: Medicine/Blood/…), so
- *     "AI in medicine" declines rather than mislabeling as Medicine.
+ *   - #1348 (flag-off): a single-token window is blocked from resolving to a GENERIC
+ *     descriptor name (`GENERIC_DESCRIPTOR_NAMES`: Medicine/Blood/…).
+ *   - #1348 (flag-on, `SEARCH_MESH_RESOLVE_TOKEN_COVERAGE`): the window must cover a
+ *     STRICT MAJORITY of the query's tokens — see `windowCoversMajority`.
  *   - `ambiguous` is set when ≥2 windows of the winning length resolve to DIFFERENT
  *     descriptors (the #726 floor then treats the admission conservatively).
  */
@@ -1471,10 +1473,49 @@ function buildMeshResolution(
  * too generic to be the salient concept of a multi-word query ("AI in medicine" →
  * Medicine, "blood disorders" → Blood, "gut bacteria" → Bacteria). Kept tight —
  * membership is a judgment call; this set fixes the four measured evidence rows.
+ *
+ * 🔴 SUPERSEDED by `windowCoversMajority` when `SEARCH_MESH_RESOLVE_TOKEN_COVERAGE`
+ * is on. This list is the strategy that does not scale: it fixes the rows someone
+ * measured and stays silent on the next generic word. It said nothing about
+ * "foreign policy" → `Policy`, which on the Matcha console rendered a confident
+ * `✓ subject-tagged` badge and produced the #1-ranked researcher of 365. Delete
+ * this set once the coverage rule is measured and flipped on in both envs.
  */
 const GENERIC_DESCRIPTOR_NAMES = new Set([
   "medicine", "disease", "diseases", "blood", "bacteria", "patients",
 ]);
+
+/**
+ * #1348 — the query-relative admission rule that replaces `GENERIC_DESCRIPTOR_NAMES`.
+ *
+ * A matched window must cover a STRICT MAJORITY of the query's tokens. Rationale:
+ * "generic" is NOT a property of a descriptor, so no list of descriptors — curated or
+ * derived — can express it. Both derivable signals were measured (2026-07-24) and both
+ * fail: by SUBTREE BREADTH, `Policy`/`Medicine`/`Blood`/`Bacteria`/`Disease` are all
+ * absent from the >50-descendant "broad" snapshot while `Public Policy` (154) is in it;
+ * by TREE DEPTH there is no separating threshold — `Neoplasms` is depth 1 and a fine
+ * target, `Hematologic Diseases` (the DESIRED answer for "blood disorders") is depth 2,
+ * the same depth as `Blood`, the wrong one.
+ *
+ * `Blood` is a perfectly good descriptor for the query "blood". It is wrong only
+ * RELATIVE to a query that carried more than the window matched — so the guard has to
+ * be relative too.
+ *
+ * STRICT majority (`> 1/2`), not `>= 1/2`: every measured failure is a 2-token query
+ * resolved on 1 token, which is exactly 1/2. At `>=` all of them still pass — including
+ * "AI in medicine", the case the guardrail was written for.
+ *
+ * Consequence worth knowing: for a 2-token query this admits only a 2-token window, and
+ * since `tokens.length >= 2` is required to reach here at all, a SINGLE-token window can
+ * never satisfy it. The rule therefore subsumes both flag-off single-token guardrails.
+ *
+ * Cost, accepted: legitimate narrowing declines too ("pediatric asthma" → `Asthma` is
+ * 1/2). Those degrade to keyword-only — the honest path that already behaves correctly
+ * (an unresolvable concept like "international development" falls through to it today).
+ */
+function windowCoversMajority(size: number, total: number): boolean {
+  return size * 2 > total;
+}
 
 function resolveByWindowFallback(map: MeshMap, query: string): MeshResolution | null {
   const tokens = query
@@ -1484,7 +1525,14 @@ function resolveByWindowFallback(map: MeshMap, query: string): MeshResolution | 
     .filter(Boolean);
   if (tokens.length < 2) return null; // a 1-token query already went through the exact path
 
+  // #1348 — read ONCE per resolve, not per window, so the guard can't change mid-scan.
+  const coverageGuardOn = resolveMeshTokenCoverageEnabled();
+
   for (let size = tokens.length; size >= 1; size--) {
+    // #1348 — under the coverage guard a too-short window can never win at ANY offset,
+    // so skip the whole length rather than testing each window. Also makes the loop
+    // terminate at the majority boundary instead of walking down to size 1.
+    if (coverageGuardOn && !windowCoversMajority(size, tokens.length)) break;
     // All resolving windows at this length, left-to-right.
     const hits: Array<{ row: DescriptorRow; matchedForm: string }> = [];
     for (let i = 0; i + size <= tokens.length; i++) {
@@ -1498,7 +1546,9 @@ function resolveByWindowFallback(map: MeshMap, query: string): MeshResolution | 
       if (size === 1 && top.confidence !== "exact") continue;
       // #1348 — and never to a generic single-word descriptor (Medicine/Blood/…);
       // skip so a shorter/other window resolves, else the fallback declines to null.
-      if (size === 1 && GENERIC_DESCRIPTOR_NAMES.has(key)) continue;
+      // Unreachable under `coverageGuardOn` (a 1-token window never covers a majority
+      // of a ≥2-token query); kept as the flag-OFF path, byte-identical to today.
+      if (!coverageGuardOn && size === 1 && GENERIC_DESCRIPTOR_NAMES.has(key)) continue;
       hits.push({ row: top.row, matchedForm: surface });
     }
     if (hits.length === 0) continue;
