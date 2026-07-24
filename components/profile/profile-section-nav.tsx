@@ -7,6 +7,11 @@
  * Funding → … → External relationships), and the rail is already sticky, so the
  * cheapest navigation win is a section jump-list that rides along with it.
  *
+ * Most profiles are not that. A large share of the directory is stubs that fit
+ * in a single viewport with one section or none, so this renders nothing unless
+ * the page has at least two destinations AND is actually long (see below) —
+ * navigation for a page that does not scroll is just clutter.
+ *
  * Presence is read from the DOM instead of being duplicated from ProfileView's
  * render conditions: a section opts in by passing `id` to <Section>, so one that
  * did not render has no element and drops out of this nav on its own. That is
@@ -46,8 +51,30 @@ export function ProfileSectionNav() {
   // HTML (only the publications *cluster* streams, not the section wrappers).
   useEffect(() => {
     const found = SECTIONS.filter((s) => document.getElementById(s.id));
-    // A single-entry jump-list is noise, not navigation.
-    setPresent(found.length > 1 ? found : []);
+    // Two destinations is the floor for a jump-list to mean anything.
+    if (found.length < 2) return;
+
+    const root = document.documentElement;
+    // Section count is a bad proxy for "needs navigation": a stub profile
+    // measures a single viewport (~1000px) while a two-section profile with a
+    // thousand publications runs many screens with Mentoring buried under all
+    // of them. Gate on the length itself.
+    const longEnough = () => root.scrollHeight > window.innerHeight * 2.5;
+    if (longEnough()) {
+      setPresent(found);
+      return;
+    }
+
+    // The page can still grow after mount — a year group expands, a Suspense
+    // boundary resolves. Latch on when it crosses the bar and stop watching, so
+    // the nav never blinks out again when the reader collapses something.
+    const ro = new ResizeObserver(() => {
+      if (!longEnough()) return;
+      setPresent(found);
+      ro.disconnect();
+    });
+    ro.observe(root);
+    return () => ro.disconnect();
   }, []);
 
   useEffect(() => {
