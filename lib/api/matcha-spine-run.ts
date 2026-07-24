@@ -306,6 +306,22 @@ const GLOSS_STOPWORDS = new Set([
   "prediction", "predict", "predicting", "predictive", "detection", "diagnosis", "diagnostic",
   "prevention", "monitoring", "management", "assessment", "evaluation", "novel", "potential",
   "improve", "improved", "understanding", "target", "targets", "targeted", "targeting",
+  // v2 comprehensive (§1 re-eval, 2026-07-23): the first cut left a residual tail of framing words
+  // that still marked common words in unrelated titles (biomarkers→"risk" in a surgery paper,
+  // neuroinflammation→"loss" in an astronaut paper). Generic biomedical FRAMING is a finite lexicon,
+  // so extend once, comprehensively. STILL excludes domain/sense terms (sequencing, crispr, hiv,
+  // metabolic, immune, signaling, genetic, vascular, amyloid, leukemia, …) — those ARE the sense.
+  "molecular", "imaging", "progression", "tissue", "risk", "systemic", "community", "time",
+  "derived", "primary", "resolution", "loss", "autonomic", "expression", "expressed", "expressing",
+  "regulation", "regulated", "dysregulation", "phenotype", "phenotypes", "profile", "profiles",
+  "profiling", "pathway", "pathways", "alteration", "alterations", "altered", "abnormal",
+  "abnormalities", "impairment", "impaired", "deficit", "deficits", "control", "controls", "normal",
+  "healthy", "chronic", "acute", "severe", "onset", "stage", "stages", "type", "types", "subtype",
+  "subtypes", "group", "groups", "population", "populations", "cohort", "cohorts", "sample",
+  "samples", "measure", "measures", "measurement", "quantification", "characterization",
+  "identification", "mediated", "dependent", "independent", "related", "specific", "common",
+  "overall", "total", "increased", "decreased", "elevated", "reduced", "enhanced", "activation",
+  "inhibition", "induction", "suppression", "modulation", "formation", "production", "generation",
 ]);
 
 /**
@@ -338,6 +354,18 @@ export function distinctiveGlossTerms(gloss: string, memberTerms: string[]): str
     out.push(t);
   }
   return out.join(" ");
+}
+
+/** MATCHA_GLOSS_INWORDS — tidy a raw OpenSearch highlight fragment for the "in their words" line.
+ *  `publicationTitles` repeats each title by authorship weight (search-index-docs.ts), so a
+ *  fixed-width fragment window straddles duplicate copies ("Foo. Foo. Foo.") and can span two
+ *  different titles. Keep only the FIRST sentence that carries a `<mark>` so the line shows one clean
+ *  title in the scholar's own words. Titles in the rollup end in . ? or ! (PubMed titles), so split
+ *  on those; if a title lacks terminal punctuation two may merge into one piece — still far better
+ *  than the raw ×N window, and never fabricated (the marked term is always real). Pure. */
+export function trimGlossFragment(fragment: string): string {
+  const first = fragment.split(/(?<=[.?!])\s+/).find((s) => s.includes("<mark>"));
+  return (first ?? fragment).trim();
 }
 
 /** Retrieve up to `TERM_DEPTH` scholar cwids for one cluster, in `searchPeople` rank
@@ -814,7 +842,9 @@ export async function rankResearchersForDescriptionSpine(
       // check keeps the honesty guarantee explicit): a fragment without a mark is not the sponsor's
       // word appearing in their work, so it earns no line. Absent ⇒ absent — never a placeholder.
       const inWords =
-        h.glossHighlight && h.glossHighlight.includes("<mark>") ? h.glossHighlight : undefined;
+        h.glossHighlight && h.glossHighlight.includes("<mark>")
+          ? trimGlossFragment(h.glossHighlight)
+          : undefined;
       evidenceByTermCwid.set(evidenceKey(term, h.cwid), {
         // The join key back to `contributions[].term` / `concepts[].term` — the cluster's
         // representative, the same string that keys the ranking and the wire concept.
