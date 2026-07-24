@@ -319,20 +319,34 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const engine = useSpine ? "spine" : "bespoke";
     // The retention dedup key stays the PURE paste hash (two officers running the same paste is the
     // fact the archive surfaces — regardless of what either added).
+    // Grant Matcha (§3) — the grant-matcha surface asks for eligibility signals, and ONLY when
+    // GRANT_MATCHA is on: the flag is the real boundary, never the client's word. Off ⇒ the spine
+    // hydrates no grants and the response is byte-identical to `/edit/matcha`.
+    const wantSignals = body.eligibilitySignals === true && isGrantMatchaEnabled();
+
     const engineInputHash = sponsorInputHash(normalizeDescription(description));
     const baseCacheKey = sponsorCacheKey(engineInputHash, engine);
     // The CACHE key gives the include set its OWN namespace (`…:inc:<hash>`), STRUCTURALLY distinct
     // from the base key — so no base paste can ever collide with an include search (even one whose
     // text is itself a JSON tuple), and each distinct add re-runs the engine and memoises separately.
+    // `:elig` is the SAME move for the eligibility payload: a grant-matcha response carries
+    // `measures.esiEligible`, so it must never share a cache entry with the plain matcha response
+    // for the same paste (that collision would leak signals into `/edit/matcha` or hide them here).
     const cacheKey =
-      include.length > 0
+      (include.length > 0
         ? `${baseCacheKey}:inc:${sponsorInputHash(JSON.stringify(include))}`
-        : baseCacheKey;
+        : baseCacheKey) + (wantSignals ? ":elig" : "");
     const { concepts, candidates, titleSummary, culled } =
       await cachedReasonAgg<MatchaEngineResult>(
         cacheKey,
         async () => {
-          if (useSpine) return rankResearchersForDescriptionSpine(description, { include });
+          if (useSpine)
+            return rankResearchersForDescriptionSpine(description, {
+              include,
+              // Spread, not `eligibilitySignals: wantSignals` — the plain `/edit/matcha` call must
+              // stay byte-identical down to the OPTIONS OBJECT, not merely behave identically.
+              ...(wantSignals ? { eligibilitySignals: true } : {}),
+            });
           const researchers = await rankResearchersForDescription(description);
           return { concepts: [], candidates: researchers.map(bespokeToCandidate) };
         },
