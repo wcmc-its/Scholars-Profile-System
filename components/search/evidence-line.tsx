@@ -514,12 +514,26 @@ export function EvidenceLine({
   // chevron ONLY for that de-dup case (this line actually excluded sibling pmids);
   // a genuine empty (no exclude — every family/topic pub suppressed) keeps its
   // `fallback` profile link, the existing graceful degradation.
+  //
+  // #1923 — that de-dup drop is REVERSED. Retracting the chevron does avoid an empty
+  // panel, but only by making the click destroy its own control: the row advertises
+  // "2 of 44 publications", you click, the chevron disappears and nothing opens. From
+  // the user's side that is indistinguishable from a broken page, and it is worse than
+  // the empty panel it was avoiding, because the affordance is gone too.
+  //
+  // The row keeps its chevron and the panel says where the papers went. In the de-dup
+  // case they are genuinely on screen already, under a higher-priority sibling, which
+  // is a useful thing to be told rather than a failure to hide.
+  const dedupedEmpty =
+    isLazyExemplar &&
+    exemplarStatus === "done" &&
+    exemplar.pubs.length === 0 &&
+    exemplarExcluded.current;
   const canExpand = wantsLazyKeyPaper
     ? !(keyPaperStatus === "done" && keyPapers.length === 0)
     : inlinePubs != null
       ? inlinePubs.length > 0
-      : isLazyExemplar &&
-        !(exemplarStatus === "done" && exemplar.pubs.length === 0 && exemplarExcluded.current);
+      : isLazyExemplar;
 
   const onToggle = useCallback(() => {
     if (isLazyExemplar) ensureExemplar();
@@ -637,6 +651,7 @@ export function EvidenceLine({
           status={isLazyExemplar ? exemplarStatus : wantsLazyKeyPaper ? keyPaperStatus : "done"}
           panelId={panelId}
           fallback={exemplarFallback}
+          dedupedEmpty={dedupedEmpty}
           panelLabel={panelLabel}
           panelSubtitle={panelSubtitle}
           railClassName={railClassName}
