@@ -123,7 +123,8 @@ const SURFACES = [
 const SCHOLARS_OWNED = [
   "Your overview text",
   "Your Selected highlights",
-  "Honors and awards, once approved",
+  "Honors and distinctions you or a curator add",
+  "Positions the directory does not carry: WCM roles such as Program Director, and posts at other institutions",
   "Anything you have hidden: publications, grants, appointments, and more. Hiding affects your profile, not search.",
   "Center membership, maintained by center administrators",
 ];
@@ -176,7 +177,8 @@ export function ProvenanceFlow() {
             <span className="block text-sm font-semibold">Stored in Scholars, not upstream</span>
             <span className="mt-0.5 block text-[13px] text-muted-foreground">
               Applied over the top each time the page is built, so it survives every refresh. The
-              only part you edit here.
+              only part you edit here. Honors and added positions show on your profile only, not in
+              search or on department, division, and center pages.
             </span>
             <ul className="!mt-1.5 !ml-4 text-[13px] text-muted-foreground">
               {SCHOLARS_OWNED.map((item) => (
