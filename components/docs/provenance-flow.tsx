@@ -19,30 +19,46 @@
 const ACCENT = "text-[#7d1c1c]";
 const CARD = "rounded-[10px] border border-[#d3d8de] p-3";
 
-function Chevron({ dir }: { dir: "right" | "down" }) {
+/**
+ * A shafted arrow, not a chevron. A bare ">" reads as a comparison operator
+ * rather than a direction, which is exactly how the first draft was misread.
+ */
+function Arrow({ dir }: { dir: "right" | "down" }) {
   return (
     <svg
-      viewBox="0 0 16 16"
+      viewBox="0 0 20 20"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.6"
-      className="h-4 w-4"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-5 w-5"
       aria-hidden="true"
     >
-      <path d={dir === "right" ? "M5 3l5 5-5 5" : "M3 5l5 5 5-5"} />
+      {dir === "right" ? (
+        <>
+          <path d="M3 10h13" />
+          <path d="M12 6l4 4-4 4" />
+        </>
+      ) : (
+        <>
+          <path d="M10 3v13" />
+          <path d="M6 12l4 4 4-4" />
+        </>
+      )}
     </svg>
   );
 }
 
-/** Between-column cue: a chevron on wide screens, a caret between stacked groups on narrow. */
+/** Between-column cue: rightward on wide screens, downward between stacked groups. */
 function Step() {
   return (
     <>
-      <div className="hidden items-start justify-center pt-[42px] text-muted-foreground md:flex">
-        <Chevron dir="right" />
+      <div className="hidden items-start justify-center pt-[40px] text-muted-foreground md:flex">
+        <Arrow dir="right" />
       </div>
-      <div className="flex justify-center text-muted-foreground md:hidden">
-        <Chevron dir="down" />
+      <div className="flex justify-center py-1 text-muted-foreground md:hidden">
+        <Arrow dir="down" />
       </div>
     </>
   );
@@ -64,11 +80,14 @@ function Source({ what, from }: { what: string; from: string }) {
 }
 
 const SOURCES: { what: string; from: string }[] = [
-  { what: "Name, photo, title, appointments", from: "Enterprise Directory" },
+  { what: "Name, photo, title, appointments", from: "Directory" },
   { what: "Primary department, education", from: "ASMS" },
   { what: "Publications", from: "PubMed, Scopus, OpenAlex" },
   { what: "Funding", from: "InfoEd, NIH RePORTER" },
+  { what: "Clinical research", from: "OnCore" },
+  { what: "Available technologies", from: "Center for Technology Licensing" },
   { what: "Disclosures, hospital position", from: "COI system, NewYork-Presbyterian" },
+  { what: "News mentions", from: "WCM Research news site" },
 ];
 
 /**
@@ -82,10 +101,16 @@ const COMPUTED: { name: string; does: string }[] = [
   { name: "ReciterAI", does: "Research areas, the Impact score, and your synopses" },
 ];
 
-/** The manual layer, merged over ETL data at read time (FieldOverride + Suppression). */
+/**
+ * The manual layer, merged over ETL data at read time (FieldOverride + Suppression),
+ * plus the records Scholars is itself the system of record for. Honors belong here
+ * rather than upstream: `Honor.source` defaults to CURATOR and carries an
+ * `enteredByCwid`, so they are entered here and approved via the honors queue.
+ */
 const SCHOLARS_OWNED = [
   "Your overview text",
   "Your Selected highlights",
+  "Honors and awards, once approved",
   "Anything you have hidden: publications, grants, appointments, and more",
   "Center membership, maintained by center administrators",
 ];
@@ -106,7 +131,7 @@ export function ProvenanceFlow() {
 
         {/* 2 — the two computed layers the page warns are easy to confuse */}
         <div className="grid content-start gap-2.5">
-          <ColHead>Computed by other systems</ColHead>
+          <ColHead>Worked out automatically</ColHead>
           {COMPUTED.map((c) => (
             <div key={c.name} className={`${CARD} bg-[#f6f7f9]`}>
               <span className={`block text-[15px] font-semibold ${ACCENT}`}>{c.name}</span>
