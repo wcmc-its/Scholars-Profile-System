@@ -40,7 +40,7 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(label.className).toMatch(/underline/);
   });
 
-  it("#1381 — the primary type indicator is a FILLED category dot (method = burnt umber), not a pill", () => {
+  it("#1913 — the primary type indicator is the WORD alone: no category dot, no pill", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{ kind: "method", family: "CRISPR", tools: [], count: 4 }}
@@ -48,10 +48,13 @@ describe("<ResultEvidence> — one render per kind", () => {
         stacked
       />,
     );
-    // method dot in burnt umber; the old bordered pill is gone.
-    const dots = Array.from(container.querySelectorAll("span.rounded-full")).map((d) => d.className);
-    expect(dots.some((c) => c.includes("bg-[#8B4A2F]"))).toBe(true);
+    // No dot of any hue, and the old bordered pill stays gone.
+    expect(container.querySelectorAll("span.rounded-full").length).toBe(0);
     expect(container.innerHTML).not.toContain("rounded-[5px]");
+    // and specifically none of the retired category hues survive anywhere in the row.
+    for (const hue of ["#8B4A2F", "#2563eb", "#0891b2", "#7c3aed", "#64748b", "#16a34a"]) {
+      expect(container.innerHTML).not.toContain(hue);
+    }
     // count-first: emphasized count + muted "of 98 publications used" + underlined family.
     expect(screen.getByText("Method")).toBeTruthy();
     expect(container.textContent).toMatch(/4 of 98 publications used/);
@@ -60,7 +63,7 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(fam.className).toMatch(/underline/);
   });
 
-  it("#1381 — the badged publications primary is a dot + type word, not a flavor pill", () => {
+  it("#1913 — the badged publications primary is the type word alone, no dot, no flavor pill", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{
@@ -75,8 +78,8 @@ describe("<ResultEvidence> — one render per kind", () => {
         badged
       />,
     );
-    const dots = Array.from(container.querySelectorAll("span.rounded-full")).map((d) => d.className);
-    expect(dots.some((c) => c.includes("bg-[#64748b]"))).toBe(true); // keyword dot
+    expect(container.querySelectorAll("span.rounded-full").length).toBe(0);
+    expect(container.innerHTML).not.toContain("#64748b");
     expect(screen.getByText("Keyword")).toBeTruthy();
     expect(container.innerHTML).not.toContain("rounded-[5px]");
   });
@@ -528,9 +531,11 @@ describe("<RepresentativePapers> — the disclosure stack", () => {
 });
 
 describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='lesser')", () => {
+  // #1913 — every lesser row lost its category dot. Kept as a NEGATIVE assertion so a
+  // reintroduced dot fails loudly rather than passing unnoticed.
   const dotOf = (c: HTMLElement) => c.querySelector("span.rounded-full");
 
-  it("method lesser ⇒ a FILLED dot + 'Method · family' + '· N of M publications' (no badge pill)", () => {
+  it("method lesser ⇒ 'Method · family' + '· N of M publications', no dot and no badge pill", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{ kind: "method", family: "CRISPR genome editing", tools: [], count: 3 }}
@@ -540,10 +545,10 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
     );
     expect(container.textContent).toMatch(/Method · CRISPR genome editing/);
     expect(container.textContent).toMatch(/· 3 of 44 publications/); // unit spelled out
-    expect(dotOf(container)?.className).toMatch(/bg-\[#8B4A2F\]/); // filled burnt umber = curated
+    expect(dotOf(container)).toBeNull();
   });
 
-  it("research area lesser ⇒ FILLED dot + 'Research area · label'", () => {
+  it("research area lesser ⇒ 'Research area · label', no dot", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{ kind: "topic", label: "Stem Cell & Regenerative Medicine", id: "stem", count: 2 }}
@@ -553,10 +558,10 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
     );
     expect(container.textContent).toMatch(/Research area · Stem Cell & Regenerative Medicine/);
     expect(container.textContent).toMatch(/· 2 of 44/);
-    expect(dotOf(container)?.className).toMatch(/bg-\[#2563eb\]/);
+    expect(dotOf(container)).toBeNull();
   });
 
-  it("publications:mention lesser ⇒ a FILLED grey dot + 'Keyword' (Part C — no hollow dot)", () => {
+  it("publications:mention lesser ⇒ 'Keyword', weakness carried by muted text not a dot", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{ kind: "publications", strength: "mention", text: "x", term: "crispr", count: 2 }}
@@ -565,13 +570,12 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
       />,
     );
     expect(container.textContent).toMatch(/Keyword/);
-    // #1366 follow-up Part C — the mention dot is now FILLED grey (strength carried by
-    // the muted/italic text + the MentionNote), NOT a hollow bordered dot.
-    expect(dotOf(container)?.className).toMatch(/bg-\[#64748b\]/);
-    expect(dotOf(container)?.className).not.toMatch(/border-\[1\.5px\]/);
+    // #1913 — strength is carried by the muted/italic text + the MentionNote, which is
+    // where it always actually lived; there is no dot to carry it.
+    expect(dotOf(container)).toBeNull();
   });
 
-  it("publications:tagged lesser ⇒ a FILLED dot + 'Concept'", () => {
+  it("publications:tagged lesser ⇒ 'Concept', no dot", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{ kind: "publications", strength: "tagged", text: "x", term: "Melanoma", count: 5 }}
@@ -580,7 +584,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
       />,
     );
     expect(container.textContent).toMatch(/Concept/);
-    expect(dotOf(container)?.className).toMatch(/bg-\[#7c3aed\]/); // filled = curated tag
+    expect(dotOf(container)).toBeNull();
   });
 
   it("clinical lesser ⇒ label-only dot row, NO count", () => {
@@ -679,7 +683,7 @@ describe("<RepresentativePapers> — #1366 follow-up Part A panel relabeling", (
     const sub = screen.getByText(/not from your search/i);
     // Folded inline as "· <caveat>", muted, no longer a separate italic line.
     expect(sub.textContent).toMatch(/·\s*not from your search/);
-    expect(sub.className).toMatch(/text-\[#8c8c8c\]/);
+    expect(sub.className).toMatch(/text-\[var\(--evidence-faint\)\]/);
     expect(sub.className).not.toMatch(/italic/);
   });
 
@@ -750,7 +754,8 @@ describe("<EvidenceLine> — #1366 follow-up Part A derives the panel header fro
     await waitFor(() => expect(screen.getByText("Representative papers")).toBeTruthy());
     expect(screen.getByText(/not from your search/i)).toBeTruthy();
     // Headline: the expanded research-area panel carries the blue signal rail.
-    expect(document.querySelector('[class*="border-[#2563eb]"]')).toBeTruthy();
+    // #1913 — the rail is neutral now; it ties panel to row by position, not hue.
+    expect(document.querySelector('[class*="border-[#a8a294]"]')).toBeTruthy();
   });
 
   it("single-evidence (stacked=false) keeps the legacy 'Key papers' header, not the relabel", () => {
@@ -864,7 +869,33 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the prim
     );
     // 1/538 = 0.19% → fires; the family label drops from near-black to muted grey.
     expect(container.textContent).toMatch(/· 0\.2% of output/);
-    expect(screen.getByText("Mass spectrometry").className).toMatch(/text-\[#9a958a\]/);
+    expect(screen.getByText("Mass spectrometry").className).toMatch(
+      /text-\[var\(--evidence-body\)\]/,
+    );
+  });
+
+  it("#1912 — the NON-dim phrase body renders on the AA ramp, never the retired literals", () => {
+    // The dim path had assertions; the ordinary path did not, so reverting the muted
+    // tone to the failing #8c8c8c passed the whole suite. This is that guard.
+    const { container } = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "152 of 250 publications tagged",
+          term: "Leukemia",
+          count: 152,
+        }}
+        pubCount={250}
+        stacked
+      />,
+    );
+    const muted = screen.getByText(/of 250 publications tagged/);
+    expect(muted.className).toMatch(/text-\[var\(--evidence-body\)\]/);
+    // Every tone that failed WCAG AA on this row is gone from the markup entirely.
+    for (const failing of ["#8c8c8c", "#9a958a", "#6b7280", "#bdbdbd", "#a9a399", "#c9c4ba"]) {
+      expect(container.innerHTML).not.toContain(failing);
+    }
   });
 
   it("#1907 — the cue sits OUTSIDE the truncating span, so a long phrase cannot clip it", () => {
@@ -922,12 +953,12 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the prim
         badged
       />,
     );
-    expect(screen.getByText("Keyword")).toBeTruthy(); // the type word is retained (now a dot, not a pill)
+    expect(screen.getByText("Keyword")).toBeTruthy(); // the type word is retained
     expect(container.textContent).toMatch(/· term match only/);
     // precedence: keyword-only wins; the low-coverage cue is NOT also appended.
     expect(container.textContent).not.toMatch(/% of output/);
     // dim: the reason text drops to muted grey (the term span inherits it).
-    expect(screen.getByText("crispr").className).toMatch(/text-\[#9a958a\]/);
+    expect(screen.getByText("crispr").className).toMatch(/text-\[var\(--evidence-body\)\]/);
   });
 
   it("a normal-coverage primary shows NEITHER cue and is NOT dimmed", () => {
@@ -940,8 +971,12 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the prim
     );
     // 4/98 = 4.1% ≥ 2% → no cue; the label stays near-black.
     expect(container.textContent).not.toMatch(/of output/);
-    expect(screen.getByText("Flow cytometry").className).toMatch(/text-\[#1a1a1a\]/);
-    expect(screen.getByText("Flow cytometry").className).not.toMatch(/text-\[#9a958a\]/);
+    expect(screen.getByText("Flow cytometry").className).toMatch(
+      /text-\[var\(--evidence-anchor\)\]/,
+    );
+    expect(screen.getByText("Flow cytometry").className).not.toMatch(
+      /text-\[var\(--evidence-(faint|body)\)\]/,
+    );
   });
 
   it("the single-evidence path (stacked omitted) shows NO cue and is NOT dimmed, even at low coverage", () => {
@@ -954,6 +989,8 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the prim
       />,
     );
     expect(container.textContent).not.toMatch(/of output/);
-    expect(screen.getByText("Mass spectrometry").className).not.toMatch(/text-\[#9a958a\]/);
+    expect(screen.getByText("Mass spectrometry").className).not.toMatch(
+      /text-\[var\(--evidence-faint\)\]/,
+    );
   });
 });

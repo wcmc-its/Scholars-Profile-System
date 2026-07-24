@@ -535,14 +535,30 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
     expect(screen.getByText(/Inline lesser paper/)).toBeTruthy();
   });
 
-  it("#1366 follow-up Part C — the demoted funding MENTION dot is FILLED green (bg-[#16a34a]), not bordered", () => {
+  it("#1913 — the COLLAPSED 'Also matched' chips are neutral labels, middot-separated", () => {
+    // The collapsed summary is what most users ever see; it had no colour assertion at
+    // all, so restoring a per-category hue on the chip labels passed the suite.
     mockFetch(oneGrant);
     const { container } = render(<PeopleResultCard {...base} evidenceRows hit={stackedHit()} />);
-    // expand the umbrella so the demoted funding dot renders.
+    const umbrella = screen.getByRole("button", { name: /also matched/i });
+    // Collapsed: no dots, and none of the six retired category hues anywhere.
+    expect(umbrella.querySelectorAll("span.rounded-full").length).toBe(0);
+    for (const hue of ["#8B4A2F", "#1d4ed8", "#0e7490", "#6d28d9", "#475569", "#166534"]) {
+      expect(umbrella.innerHTML).not.toContain(hue);
+    }
+    // The labels themselves still render, on the shared ramp.
+    expect(umbrella.innerHTML).toContain("var(--evidence-body)");
+  });
+
+  it("#1913 — the demoted funding row carries NO dot and no green, just the word", () => {
+    mockFetch(oneGrant);
+    const { container } = render(<PeopleResultCard {...base} evidenceRows hit={stackedHit()} />);
+    // expand the umbrella so the demoted funding row renders.
     fireEvent.click(screen.getByRole("button", { name: /also matched/i }));
-    const dots = Array.from(container.querySelectorAll("span.rounded-full")).map((d) => d.className);
-    // the funding dot is filled green; no dot uses the old hollow bordered-green style.
-    expect(dots.some((c) => c.includes("bg-[#16a34a]"))).toBe(true);
-    expect(dots.some((c) => c.includes("border-[#16a34a]"))).toBe(false);
+    expect(container.querySelectorAll("span.rounded-full").length).toBe(0);
+    expect(container.innerHTML).not.toContain("#16a34a");
+    expect(container.innerHTML).not.toContain("#166534");
+    // the label itself is what survived, and it still reads.
+    expect(screen.getAllByText("Funding").length).toBeGreaterThan(0);
   });
 });
