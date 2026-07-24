@@ -90,7 +90,6 @@ vi.mock("@/lib/api/matcha-extract", () => ({
 
 import {
   distinctiveGlossTerms,
-  trimGlossFragment,
   rankResearchersForDescriptionSpine,
 } from "@/lib/api/matcha-spine-run";
 
@@ -237,27 +236,6 @@ describe("distinctiveGlossTerms (in-their-words highlight eligibility)", () => {
   it("dedups and is case-insensitive", () => {
     expect(distinctiveGlossTerms("Decline, DECLINE and decline", ["cognitive dysfunction"])).toBe(
       "decline",
-    );
-  });
-});
-
-describe("trimGlossFragment (in-their-words fragment tidy)", () => {
-  it("collapses the weight-repeated title to one clean marked sentence", () => {
-    // publicationTitles repeats each title by authorship weight, so the raw window straddles copies.
-    const raw =
-      "<mark>Amyloid</mark> plaques in aged mice. <mark>Amyloid</mark> plaques in aged mice. <mark>Amyloid</mark> plaques in aged mice.";
-    expect(trimGlossFragment(raw)).toBe("<mark>Amyloid</mark> plaques in aged mice.");
-  });
-
-  it("keeps only the FIRST title carrying the mark when the window spans two titles", () => {
-    // A window can span a marked title and an adjacent unrelated one; show only the marked one.
-    const raw = "Renal function in dialysis. <mark>Vascular</mark> decline in aging?";
-    expect(trimGlossFragment(raw)).toBe("<mark>Vascular</mark> decline in aging?");
-  });
-
-  it("returns the fragment unchanged when it is already a single marked sentence", () => {
-    expect(trimGlossFragment("<mark>Tau</mark> pathology in the cortex.")).toBe(
-      "<mark>Tau</mark> pathology in the cortex.",
     );
   });
 });

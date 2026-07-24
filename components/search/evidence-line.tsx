@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { RepresentativePapers, type ExemplarFetchStatus } from "@/components/search/match-reason";
 import { ResultEvidence } from "@/components/search/result-evidence";
+import { highlightedTitleHtml } from "@/lib/search/highlight-title";
 import { profilePath } from "@/lib/profile-url";
 import type {
   EvidenceGrant,
@@ -234,7 +235,18 @@ function ArtifactRow({ pub }: { pub: EvidencePub }) {
           rel="noopener noreferrer"
           className="text-foreground text-sm leading-snug underline-offset-4 hover:underline"
         >
-          <PubTitle value={pub.titleHtml ?? pub.title} />
+          {/* `titleHtml` is a HIGHLIGHT fragment, so it must render through the mark-preserving
+              path — `PubTitle` sanitizes with `sanitizePubmedHtml`, whose whitelist is
+              i/em/b/strong/sup/sub, and every `<mark>` OpenSearch returned was being DELETED here.
+              That silently killed the #1351 concept-label mark on this surface, and would have
+              made MATCHA_GLOSS_INWORDS a no-op: the request and the cached fragment both change,
+              and nothing reaches the screen. Same helper, same pale-red pill, as the key-papers
+              disclosure (`RepresentativePapers` → match-reason.tsx) and the Publications tab. */}
+          {pub.titleHtml ? (
+            <span dangerouslySetInnerHTML={{ __html: highlightedTitleHtml(pub.titleHtml) }} />
+          ) : (
+            <PubTitle value={pub.title} />
+          )}
         </a>
         {pub.journal || pub.year != null || pub.role ? (
           <div className="text-muted-foreground mt-0.5 text-xs">
@@ -420,6 +432,17 @@ export function EvidenceLine({
       descriptorUis: keyPaperMentionOnly ? "" : keyPaperConfig!.descriptorUis.join(","),
       label: keyPaperMentionOnly ? "" : (keyPaperConfig!.conceptLabel ?? ""),
     });
+    // MATCHA_GLOSS_INWORDS — suppressed on the mention-only path, which is the ONE path where the
+    // redesign's invariant does not hold: `descriptorUis` is blanked just above, so admission falls
+    // back to a free-text `multi_match` over title+abstract that an ABSTRACT alone can satisfy — and
+    // mention strength fires precisely when the scholar has zero pubs carrying this concept's
+    // descriptors. Marking the sponsor's word on such a title would reintroduce, in miniature, the
+    // off-concept claim this redesign exists to kill. Everywhere else admission is already
+    // (this scholar) AND (this concept's subtree), so a mark is on-concept by construction.
+    // Omitted entirely when the flag is dark (no `glossTerms` shipped at all).
+    if (!keyPaperMentionOnly && keyPaperConfig!.glossTerms) {
+      params.set("glossTerms", keyPaperConfig!.glossTerms);
+    }
     const ex = Array.from(claimedPmids).join(",");
     if (ex) params.set("exclude", ex);
     fetch(`/api/search/key-paper?${params.toString()}`)

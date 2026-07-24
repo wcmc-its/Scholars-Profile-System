@@ -138,6 +138,55 @@ describe("PeopleResultCard — evidence-path lazy key paper (fetch on expand)", 
     );
   });
 
+  // MATCHA_GLOSS_INWORDS — the sponsor's distinctive gloss terms ride the SAME lazy fetch, so the
+  // key paper's title marks the sponsor's phrasing. The pair below pins the whole decision: sent on
+  // the tagged path (admission = this scholar AND this concept's MeSH subtree ⇒ a mark is
+  // on-concept by construction), suppressed on the mention path (descriptorUis is blanked there, so
+  // admission degrades to a free-text filter an ABSTRACT alone can satisfy — the one place a mark
+  // could land on an off-concept title, which is the exact defect this redesign exists to remove).
+  it("MATCHA_GLOSS_INWORDS — sends glossTerms on the tagged path", async () => {
+    const fetchFn = mockFetch({ pubs: [{ pmid: "1", title: "A paper", year: 2020 }] });
+    render(
+      <PeopleResultCard
+        {...props}
+        hit={taggedHit}
+        keyPaperConfig={{ ...keyPaperConfig, glossTerms: "durable remission" }}
+      />,
+    );
+
+    fireEvent.click(chevron());
+    await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(1));
+    expect(fetchFn.mock.calls[0][0]).toBe(
+      "/api/search/key-paper?cwid=abc1234&q=hiv&descriptorUis=D015658&label=HIV+Infections&glossTerms=durable+remission",
+    );
+  });
+
+  it("MATCHA_GLOSS_INWORDS — suppresses glossTerms on the mention-only path (no subtree ⇒ no claim)", async () => {
+    const mentionHit = makeHit({
+      evidence: {
+        kind: "publications",
+        strength: "mention",
+        text: "1 of 37 publications mention “hiv”",
+        count: 37,
+      },
+    });
+    const fetchFn = mockFetch({ pubs: [{ pmid: "9", title: "An HIV mention", year: 2019 }] });
+    render(
+      <PeopleResultCard
+        {...props}
+        hit={mentionHit}
+        keyPaperConfig={{ ...keyPaperConfig, glossTerms: "durable remission" }}
+      />,
+    );
+
+    fireEvent.click(chevron());
+    await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(1));
+    // Same URL as the #1357 case above — the gloss adds nothing on this path.
+    expect(fetchFn.mock.calls[0][0]).toBe(
+      "/api/search/key-paper?cwid=abc1234&q=hiv&descriptorUis=&label=",
+    );
+  });
+
   it("drops the chevron (no dead control) when the fetch resolves with 0 papers", async () => {
     mockFetch({ pubs: [] });
     render(<PeopleResultCard {...props} hit={taggedHit} keyPaperConfig={keyPaperConfig} />);

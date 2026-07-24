@@ -727,6 +727,76 @@ describe("<EvidenceLine> — #1366 follow-up Part A derives the panel header fro
     expect(screen.getByText("Key paper")).toBeTruthy();
     expect(screen.queryByText("Matching publications")).toBeNull();
   });
+
+  // MATCHA_GLOSS_INWORDS — the artifact-lead path is the ONLY consumer of `titleHtml` on the Matcha
+  // panel, and it used to render it through `PubTitle` → `sanitizePubmedHtml`, whose whitelist is
+  // i/em/b/strong/sup/sub. That DELETED every <mark>, so both the #1351 concept mark and the gloss
+  // mark were invisible: the query and the cached fragment changed and nothing reached the screen.
+  // This is the regression pin — it fails if the render ever leaves the mark-preserving path.
+  it("artifactLead keeps a <mark> in titleHtml (pale-red pill), not stripped by the sanitizer", () => {
+    const claimedPmids = new Set<string>();
+    const { container } = render(
+      <EvidenceLine
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "10 of 50 publications tagged Melanoma",
+          count: 10,
+          pubs: [
+            {
+              pmid: "1",
+              title: "Durable responses in melanoma",
+              titleHtml: "<mark>Durable</mark> responses in melanoma",
+              year: 2024,
+            },
+          ],
+        }}
+        cwid="abc1234"
+        slug="jane-doe"
+        pubCount={50}
+        q="x"
+        keyPaperConfig={null}
+        hasQuery
+        badged
+        claimedPmids={claimedPmids}
+        stacked={false}
+        tier="primary"
+        artifactLead
+      />,
+    );
+    const mark = container.querySelector("mark");
+    expect(mark?.textContent).toBe("Durable");
+    // The SAME pill the key-papers disclosure and the Publications tab use.
+    expect(mark?.getAttribute("class")).toContain("bg-[#b31b1b]/10");
+  });
+
+  it("artifactLead falls back to the sanitized plain title when there is no titleHtml", () => {
+    const claimedPmids = new Set<string>();
+    const { container } = render(
+      <EvidenceLine
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "10 of 50 publications tagged Melanoma",
+          count: 10,
+          pubs: [{ pmid: "1", title: "A paper", year: 2024 }],
+        }}
+        cwid="abc1234"
+        slug="jane-doe"
+        pubCount={50}
+        q="x"
+        keyPaperConfig={null}
+        hasQuery
+        badged
+        claimedPmids={claimedPmids}
+        stacked={false}
+        tier="primary"
+        artifactLead
+      />,
+    );
+    expect(container.querySelector("mark")).toBeNull();
+    expect(screen.getByText("A paper")).toBeTruthy();
+  });
 });
 
 describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the primary lead", () => {

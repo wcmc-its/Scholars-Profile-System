@@ -66,7 +66,6 @@ import { Download } from "lucide-react";
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { EvidenceLine } from "@/components/search/evidence-line";
-import { HighlightedSnippet } from "@/components/search/highlight-snippet";
 import type { ResultEvidence } from "@/lib/api/result-evidence";
 import { Button } from "@/components/ui/button";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
@@ -2977,28 +2976,20 @@ function ResearcherRow({
                   // whole reason this is affordable: the pool runs to ~800 and we render 100, so
                   // fetching a paper per concept per RENDERED card would be ~300 requests for a
                   // page the officer sees five rows of. The observer buys the design spec back.
+                  //
+                  // ponytail: MATCHA_GLOSS_INWORDS marks the sponsor's phrasing on the artifact
+                  // title, but nothing LABELS the mark as theirs (the redesign spec's 4th
+                  // touchpoint). Deferred, not forgotten: `titleHtml` is one opaque string whose
+                  // marks come from three merged `should` clauses (literal query, concept label,
+                  // gloss), so the client cannot attribute a mark today, and a client-side compare
+                  // against `glossTerms` would be wrong on exactly the stemmed cases the gloss
+                  // subtraction exists to handle ("decline" vs a marked "Declining"). An honest
+                  // label needs per-mark attribution — a separate highlight field on the contract.
+                  // Re-decide at the staging flip, once the §1 gate reports a non-zero population.
                   artifactLead
                   autoResolve={inView && i <= resolvedCount}
                   onResolved={() => setResolvedCount((n) => Math.max(n, i + 1))}
                 />
-                {/* MATCHA_GLOSS_INWORDS — "in their words": where the sponsor's OWN phrasing (the
-                    gloss's distinctive terms, e.g. "decline") literally appears in this scholar's
-                    publication titles, when the concept label above is the MeSH canonical
-                    ("cognitive dysfunction"). One subordinate line, below the primary lead, ONLY when
-                    a real fragment came back — absent means the scholar ranked up without the literal
-                    word, and we assert nothing. `HighlightedSnippet` strips tags + renders the marks
-                    as the same pill the card uses elsewhere, so it can't inject the source markup.
-                    ponytail: the raw 200-char title fragment; a window that spans two titles is
-                    cosmetic only — the marked term is always real. */}
-                {evidence.inWords ? (
-                  <p
-                    data-slot="matcha-in-their-words"
-                    className="text-muted-foreground mt-1 text-xs leading-snug"
-                  >
-                    <span className="font-medium">In their words: </span>
-                    <HighlightedSnippet html={evidence.inWords} />
-                  </p>
-                ) : null}
               </div>
             ))}
             {/* SUPPORTING register — the weaker matched concepts demote to a one-line row: the

@@ -43,6 +43,10 @@ export async function GET(request: NextRequest) {
   // #1351 — the resolved concept display name, so the title highlight can mark the
   // concept term (not just the literal query) on a descriptor-tagged key paper.
   const conceptLabel = (params.get("label") ?? "").slice(0, 300);
+  // MATCHA_GLOSS_INWORDS — the gloss's distinctive terms, so the title highlight also marks the
+  // sponsor's own phrasing. Same 300-char cap as the other free-text params (this route is
+  // unauthenticated and its params feed a cache key). Highlight-only: it cannot widen admission.
+  const glossTerms = (params.get("glossTerms") ?? "").slice(0, 300);
   // #1366 — pmids already shown on a sibling stacked line; dropped at the QUERY
   // level (must_not) so the panel pulls its top-N from the non-claimed pool, never
   // fetched-then-emptied (the bug the follow-up fixes).
@@ -52,6 +56,13 @@ export async function GET(request: NextRequest) {
     .filter(Boolean)
     .slice(0, 50);
 
-  const pubs = await fetchKeyPaper({ cwid, descriptorUis, contentQuery, conceptLabel, exclude });
+  const pubs = await fetchKeyPaper({
+    cwid,
+    descriptorUis,
+    contentQuery,
+    conceptLabel,
+    glossTerms,
+    exclude,
+  });
   return NextResponse.json({ pubs });
 }
