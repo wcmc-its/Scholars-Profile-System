@@ -219,9 +219,13 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
     ? "flex items-center gap-1 rounded-md border border-zinc-300 bg-white p-1 shadow-sm transition-all focus-within:border-[var(--color-accent-slate)] focus-within:ring-2 focus-within:ring-[var(--color-accent-slate)]/20"
     : "text-muted-foreground flex items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-sm focus-within:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900";
 
+  // `min-w-0`: a flex item defaults to `min-width: auto`, so the input refuses
+  // to shrink below its intrinsic size and pushes the fixed-width Search button
+  // past the viewport at narrow widths (#1902 follow-up — the hero row overflowed
+  // ~320px). `min-w-0` lets it shrink so the button stays on-screen.
   const inputClass = isHero
-    ? "flex-1 bg-transparent px-3 py-2.5 text-base text-zinc-900 outline-none placeholder:text-zinc-400"
-    : "placeholder:text-muted-foreground flex-1 bg-transparent text-zinc-900 outline-none dark:text-zinc-100";
+    ? "min-w-0 flex-1 bg-transparent px-3 py-2.5 text-base text-zinc-900 outline-none placeholder:text-zinc-400"
+    : "placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-zinc-900 outline-none dark:text-zinc-100";
 
   return (
     <div ref={containerRef} className={containerClass}>
