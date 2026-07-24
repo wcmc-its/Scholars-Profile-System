@@ -12,7 +12,11 @@
 // Keep the scientific-notation whitelist + <mark>; the indexed title may carry
 // <sub>/<sup>/<i>/<b> markup. Everything else is dropped.
 const TITLE_TAG_WHITELIST = /^(?:i|em|b|strong|sup|sub|mark)$/;
-export const MARK_CLASS = "box-decoration-clone rounded-[3px] bg-[#b31b1b]/10 px-[3px]";
+// #1909 — `-mx-[3px]` cancels the pill's own padding so it paints its breathing room
+// without consuming layout width. Without it a highlighted term that ends a title
+// pushes the following period 3px away and renders as "Acute Myeloid Leukemia .".
+export const MARK_CLASS =
+  "box-decoration-clone -mx-[3px] rounded-[3px] bg-[#b31b1b]/10 px-[3px]";
 
 export function highlightedTitleHtml(fragment: string): string {
   // 1. Keep the scientific-notation whitelist + <mark>; drop everything else.

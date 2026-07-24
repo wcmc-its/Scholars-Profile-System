@@ -2,6 +2,7 @@ import type { ResultEvidence } from "@/lib/api/result-evidence";
 import { MatchAwareReason, LesserReason, CountFirst } from "@/components/search/match-reason";
 import { HighlightedSnippet } from "@/components/search/highlight-snippet";
 import { ConceptChipRow } from "@/components/search/concept-chip-row";
+import { descendantSummary } from "@/lib/search/descendant-summary";
 
 /**
  * #1366 follow-up Part B — a PRIMARY lead whose matched-pub share of the scholar's
@@ -343,15 +344,13 @@ export function ResultEvidence({
               <span className={mention ? `font-semibold ${anchor}` : `font-semibold ${anchor} ${ENTITY_UNDERLINE}`}>
                 {evidence.term}
               </span>
-              {/* #1355 — the narrower descendant term(s) the scholar actually carries. */}
+              {/* #1355 — the narrower descendant term(s) the scholar actually carries.
+                  #1907/#1908 — middot-separated (the descriptors carry their own commas)
+                  and budgeted so the parenthetical closes instead of clipping open. */}
               {evidence.descendantTerms && evidence.descendantTerms.length > 0 ? (
                 <span className="text-[#6b7280]">
                   {" "}
-                  (matched {evidence.descendantTerms.slice(0, 2).join(", ")}
-                  {evidence.descendantTerms.length > 2
-                    ? `, +${evidence.descendantTerms.length - 2} more`
-                    : ""}
-                  )
+                  (matched {descendantSummary(evidence.descendantTerms)})
                 </span>
               ) : null}
             </>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { RepresentativePapers, type ExemplarFetchStatus } from "@/components/search/match-reason";
 import { ResultEvidence } from "@/components/search/result-evidence";
+import { DESCENDANT_SEPARATOR } from "@/lib/search/descendant-summary";
 import { highlightedTitleHtml } from "@/lib/search/highlight-title";
 import { profilePath } from "@/lib/profile-url";
 import type {
@@ -48,8 +49,12 @@ function evidenceSummary(evidence: ResultEvidenceT, pubCount: number): string {
   switch (evidence.kind) {
     case "publications": {
       const term = evidence.term ? ` ${evidence.term}` : "";
+      // #1908 — middot-separated: the descriptors are comma-inverted headings, so a
+      // comma join reads as N times more terms than matched. No budget here (unlike
+      // the two result-row surfaces): this summary wraps rather than truncating, so
+      // every term the panel claims can be shown in full.
       const desc = evidence.descendantTerms?.length
-        ? ` (matched ${evidence.descendantTerms.join(", ")})`
+        ? ` (matched ${evidence.descendantTerms.join(DESCENDANT_SEPARATOR)})`
         : "";
       return `${evidence.text}${term}${desc}`;
     }

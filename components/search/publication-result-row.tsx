@@ -6,6 +6,7 @@ import { PublicationMeta } from "@/components/publication/publication-meta";
 import { usePublicationModal } from "@/components/publication/publication-modal";
 import { MatchReason } from "@/components/search/match-reason";
 import type { PublicationHit } from "@/lib/api/search";
+import { descendantSummary } from "@/lib/search/descendant-summary";
 import { highlightedTitleHtml } from "@/lib/search/highlight-title";
 import { sanitizePubTitle } from "@/lib/utils";
 
@@ -58,16 +59,13 @@ export function PublicationResultRow({ hit }: { hit: PublicationHit }) {
           <span className="underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]">
             {hit.matchProvenance.parentTerm}
           </span>
-          {/* #1355 — the narrower descendant term(s) this publication actually carries. */}
+          {/* #1355 — the narrower descendant term(s) this publication actually carries.
+              #1907/#1908 — middot-separated and budgeted; see `descendantSummary`. */}
           {hit.matchProvenance.kind === "narrower" &&
           hit.matchProvenance.descendantTerms.length > 0 ? (
             <span className="text-[#6b7280]">
               {" "}
-              (matched {hit.matchProvenance.descendantTerms.slice(0, 2).join(", ")}
-              {hit.matchProvenance.descendantTerms.length > 2
-                ? `, +${hit.matchProvenance.descendantTerms.length - 2} more`
-                : ""}
-              )
+              (matched {descendantSummary(hit.matchProvenance.descendantTerms)})
             </span>
           ) : null}
         </MatchReason>
