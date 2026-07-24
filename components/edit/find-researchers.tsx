@@ -443,7 +443,8 @@ function facetOptions(
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
-function BrowseList({ hrefFor }: { hrefFor: (id: string) => string }) {
+/** Exported so `/edit/grant-matcha` reuses the SAME browse table rather than a second picker. */
+export function BrowseList({ hrefFor }: { hrefFor: (id: string) => string }) {
   const [includeGrantsGov, setIncludeGrantsGov] = useState(false);
   const [sort, setSort] = useState<BrowseSort>("curated");
   const [filters, setFilters] = useState<BrowseFilters>(EMPTY_BROWSE_FILTERS);
