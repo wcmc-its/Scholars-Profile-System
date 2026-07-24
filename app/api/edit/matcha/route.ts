@@ -343,7 +343,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           if (useSpine)
             return rankResearchersForDescriptionSpine(description, {
               include,
-              eligibilitySignals: wantSignals,
+              // Spread, not `eligibilitySignals: wantSignals` — the plain `/edit/matcha` call must
+              // stay byte-identical down to the OPTIONS OBJECT, not merely behave identically.
+              ...(wantSignals ? { eligibilitySignals: true } : {}),
             });
           const researchers = await rankResearchersForDescription(description);
           return { concepts: [], candidates: researchers.map(bespokeToCandidate) };
