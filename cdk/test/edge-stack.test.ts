@@ -483,17 +483,18 @@ describe("EdgeStack", () => {
         expect(defaultBehavior.OriginRequestPolicyId).toBeUndefined();
       });
 
-      it("ALB origin is HTTP-only on port 80; static-asset S3 origin uses OAC (acceptance #6, #700)", () => {
+      it("prod origin is the NetScaler VIP, HTTPS-only on 443; static-asset S3 origin uses OAC (acceptance #6, #700, #1507)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const ods = dc.Origins as Array<Record<string, unknown>>;
-        // Two origins now: the ALB (custom, fallback) + the static-asset S3
-        // bucket (OAC, primary of the /_next/static/* origin group, #700).
+        // Two origins: the NetScaler VIP (custom, HTTPS-only, #1507 cutover) +
+        // the static-asset S3 bucket (OAC, primary of /_next/static/*, #700).
         expect(ods).toHaveLength(2);
         const albOrigin = ods.find((o) => o.CustomOriginConfig !== undefined);
+        expect(albOrigin?.DomainName).toBe("cf-ns-scholars.weill.cornell.edu");
         const config = albOrigin?.CustomOriginConfig as Record<string, unknown>;
-        expect(config.OriginProtocolPolicy).toBe("http-only");
-        expect(config.HTTPPort).toBe(80);
+        expect(config.OriginProtocolPolicy).toBe("https-only");
+        expect(config.HTTPSPort).toBe(443);
         // The S3 origin is OAC-backed: it carries an OriginAccessControlId and
         // (since it's a bucket) no CustomOriginConfig.
         const s3Origin = ods.find((o) => o.CustomOriginConfig === undefined);

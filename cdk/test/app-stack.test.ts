@@ -53,10 +53,10 @@ describe("AppStack", () => {
     });
   });
 
-  // #1507 -- HTTPS origin leg. Off by default (edgeOriginCertArn ""); the
-  // default prod/staging builds still show HTTP-only :80 (asserted elsewhere).
-  // These assert the flag-on shape: a :443 listener + ingress + forward rule,
-  // added WITHOUT removing :80 (its removal is a follow-up).
+  // #1507 -- HTTPS origin leg. Now seeded for both envs (staging + prod on
+  // NetScaler), so the default builds carry the :443 origin guard. This block
+  // asserts that flag-on shape in isolation via an explicit cert override: a
+  // :443 listener + ingress + forward rule, added WITHOUT removing :80.
   describe("#1507 -- HTTPS origin leg (edgeOriginCertArn seeded)", () => {
     const CERT =
       "arn:aws:acm:us-east-1:123456789012:certificate/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
@@ -246,7 +246,7 @@ describe("AppStack", () => {
         template.resourceCountIs("AWS::ECS::Service", 1);
       });
 
-      it("creates two ALBs (one internet-facing, one internal), two target groups (one per ALB, #431 blocker #6), two listeners", () => {
+      it("creates two ALBs (one internet-facing, one internal), two target groups (one per ALB, #431 blocker #6), three listeners (:80 on both ALBs + public :443 origin guard, #1507)", () => {
         template.resourceCountIs(
           "AWS::ElasticLoadBalancingV2::LoadBalancer",
           2,
@@ -255,7 +255,7 @@ describe("AppStack", () => {
           "AWS::ElasticLoadBalancingV2::TargetGroup",
           2,
         );
-        template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 2);
+        template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 3);
 
         const lbs = template.findResources(
           "AWS::ElasticLoadBalancingV2::LoadBalancer",
@@ -1165,18 +1165,18 @@ describe("AppStack", () => {
         }
       });
 
-      it("the public ALB listener is HTTP-only :80 (HTTPS lands in B07+B14)", () => {
+      it("the public ALB has HTTP :80 + HTTPS :443 (the #1507 NetScaler origin guard); internal ALB stays HTTP :80", () => {
         const listeners = template.findResources(
           "AWS::ElasticLoadBalancingV2::Listener",
         );
-        const protocols = Object.values(listeners).map(
-          (r) => r.Properties?.Protocol as string,
-        );
-        expect(protocols.every((p) => p === "HTTP")).toBe(true);
-        const ports = Object.values(listeners).map(
-          (r) => r.Properties?.Port as number,
-        );
-        expect(ports).toEqual([80, 80]);
+        const protocols = Object.values(listeners)
+          .map((r) => r.Properties?.Protocol as string)
+          .sort();
+        expect(protocols).toEqual(["HTTP", "HTTP", "HTTPS"]);
+        const ports = Object.values(listeners)
+          .map((r) => r.Properties?.Port as number)
+          .sort((a, b) => a - b);
+        expect(ports).toEqual([80, 80, 443]);
       });
 
       it("the public ALB listener default action is a bare 403 (B07 origin-verify deny-by-default)", () => {
@@ -2023,23 +2023,24 @@ describe("AppStack", () => {
 
       // -- Category 4: standalone CfnSecurityGroupIngress count --
       //
-      // Three SG-to-SG (or CIDR) ingresses are intentionally L1 to keep
+      // Four SG-to-SG (or CIDR) ingresses are intentionally L1 to keep
       // the rules co-located with the listeners they support (see SG
-      // comment in app-stack.ts). A future PR that adds a 4th wildcard
-      // ingress (e.g. `0.0.0.0/0` to a workload SG) should fail this
-      // assertion before review.
-      it("emits exactly three standalone AWS::EC2::SecurityGroupIngress resources", () => {
-        template.resourceCountIs("AWS::EC2::SecurityGroupIngress", 3);
+      // comment in app-stack.ts). The 4th is the #1507 :443 origin-TLS
+      // ingress, seeded with the NetScaler cutover. A future PR that adds
+      // a 5th wildcard ingress (e.g. `0.0.0.0/0` to a workload SG) should
+      // fail this assertion before review.
+      it("emits exactly four standalone AWS::EC2::SecurityGroupIngress resources", () => {
+        template.resourceCountIs("AWS::EC2::SecurityGroupIngress", 4);
         const ingress = template.findResources(
           "AWS::EC2::SecurityGroupIngress",
         );
         const cidrIngressCount = Object.values(ingress).filter(
           (r) => r.Properties?.CidrIp === "0.0.0.0/0",
         ).length;
-        // Exactly one rule is allowed to use 0.0.0.0/0 (the public ALB's
-        // :80 ingress); a future addition of a wildcard rule on a
-        // workload SG must come through review.
-        expect(cidrIngressCount).toBe(1);
+        // Two rules use 0.0.0.0/0: the public ALB's :80 ingress and the
+        // #1507 :443 origin-TLS ingress. A future addition of a wildcard
+        // rule on a workload SG must come through review.
+        expect(cidrIngressCount).toBe(2);
       });
 
       // -- Category 2 (post-deploy gap): no target group spans more than
