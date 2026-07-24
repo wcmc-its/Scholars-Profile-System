@@ -296,6 +296,14 @@ const GLOSS_STOPWORDS = new Set([
   "via", "that", "this", "these", "those", "its", "their", "between", "across", "into", "onto",
   "under", "over", "is", "are", "be", "been", "which", "who", "whose", "than", "then", "also",
   "both", "each", "such", "may", "can", "not", "using", "use", "based",
+  // §1 v2 eval gaps: "through" was never listed and marked an unrelated Aplysia title; hyphen
+  // splitting turns "anti-adenovirus"/"non-malignant" into bare "anti"/"non" fragments; and plain
+  // size/novelty descriptors carry no sense of their own.
+  "through", "within", "during", "among", "amongst", "toward", "towards", "against", "about",
+  "after", "before", "while", "when", "where", "we", "our", "they", "have", "has", "had", "will",
+  "would", "should", "could", "more", "most", "less", "least", "many", "much", "some", "any", "all",
+  "other", "others", "well", "very", "often", "including", "include", "includes", "included",
+  "non", "anti", "long", "short", "new", "high", "low", "large", "small",
   // generic biomedical framing / methodology (§1 eval, 2026-07-23) — NOT domain/sense terms
   "disease", "diseases", "cell", "cells", "cellular", "treatment", "treatments", "therapy",
   "therapies", "therapeutic", "model", "models", "modeling", "role", "roles", "patient", "patients",
@@ -324,6 +332,12 @@ const GLOSS_STOPWORDS = new Set([
   "inhibition", "induction", "suppression", "modulation", "formation", "production", "generation",
 ]);
 
+/** The stoplist folded through the SAME Porter stemmer the field uses, so a morphological variant of
+ *  a stopped word cannot slip past a surface-form check and then stem-collide onto that word in a
+ *  title ("progressive" → "progress" ← "progression"). Derived, never hand-maintained: add a word
+ *  above and every variant of it is stopped too. */
+const GLOSS_STOPWORD_STEMS = new Set([...GLOSS_STOPWORDS].map((w) => stemmer(w)));
+
 /**
  * MATCHA_GLOSS_INWORDS — the gloss's DISTINCTIVE terms: its tokens minus any whose Porter STEM matches
  * a canonical concept token's stem (every cluster member), minus connective stopwords. This is the
@@ -349,7 +363,13 @@ export function distinctiveGlossTerms(gloss: string, memberTerms: string[]): str
   const seen = new Set<string>();
   const out: string[] = [];
   for (const t of tok(gloss)) {
-    if (GLOSS_STOPWORDS.has(t) || seen.has(t) || memberStems.has(stemmer(t))) continue;
+    const st = stemmer(t);
+    // Stopwords are matched by STEM as well as surface form. `publicationTitles` is Porter-stemmed
+    // at query time, so a variant the list does not name ("progressive" when "progression" is
+    // stopped) survives a surface-only check and then stem-collides onto the stopped word in a
+    // title — the §1 v2 eval still saw "progression" marked 57× for exactly this reason.
+    if (GLOSS_STOPWORDS.has(t) || GLOSS_STOPWORD_STEMS.has(st) || seen.has(t) || memberStems.has(st))
+      continue;
     seen.add(t);
     out.push(t);
   }
