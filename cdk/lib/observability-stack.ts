@@ -5,6 +5,8 @@ import * as ce from "aws-cdk-lib/aws-ce";
 import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
 import * as cwActions from "aws-cdk-lib/aws-cloudwatch-actions";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import * as events from "aws-cdk-lib/aws-events";
+import * as eventsTargets from "aws-cdk-lib/aws-events-targets";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import { SnsEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
@@ -465,6 +467,177 @@ export class SpsObservabilityStack extends Stack {
     // No direct action -- folded into the app-unavailable composite below.
 
     // ------------------------------------------------------------------
+    // Edge origin-leg probe (#1934) -- the detector for the failure the
+    // 2026-07-25 NetScaler cutover made single-point.
+    // ------------------------------------------------------------------
+    // Every alarm ABOVE reads an ALB- or ECS-side metric. After the cutover
+    // CloudFront's only dynamic origin is the NetScaler VIP, so if the VIP
+    // stops forwarding, requests never reach the ALB: RequestCount is 0, the
+    // 5xx expression's MIN_5XX_FOR_RATE_ALARM guard returns 0, targets stay
+    // healthy (the tasks are fine), and the task count is fine. All three
+    // leaves stay OK through a total user-facing outage. That is not a
+    // hypothesis -- during the 8m40s window on 2026-07-25 every 5xx metric had
+    // ZERO datapoints and the composite never transitioned.
+    //
+    // A CloudFront error-RATE alarm does not fix it either, which is why one is
+    // deliberately NOT added here: prod took roughly ONE viewer request during
+    // that window, so there was no denominator. At this traffic level a rate
+    // alarm is both blind to the outage and prone to reading a single stray 5xx
+    // as 100%. The only thing that works is a probe that makes its own traffic.
+    //
+    // The probe cannot go through the public URL: the edge WAF allows two WCM
+    // CIDRs and this Lambda egresses from an AWS address (see the Lambda's
+    // docblock). It therefore checks the origin leg directly, plus that
+    // CloudFront answers at all.
+    const originProbeLogGroup = new logs.LogGroup(this, "EdgeOriginProbeLogGroup", {
+      logGroupName: `/aws/lambda/sps-edge-origin-probe-${env}`,
+      // Short retention on purpose: this log group's REASON to exist is the
+      // Embedded Metric Format extraction, not the log lines. The metrics
+      // outlive the logs.
+      retention: logs.RetentionDays.TWO_WEEKS,
+    });
+
+    const originSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "EdgeOriginSharedSecret",
+      `scholars/${env}/edge/origin-shared-secret`,
+    );
+
+    const originProbe = new NodejsFunction(this, "EdgeOriginProbeFunction", {
+      functionName: `sps-edge-origin-probe-${env}`,
+      entry: path.join(__dirname, "../lambda/edge-origin-probe/index.ts"),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_22_X,
+      memorySize: 128,
+      // Three sequential network probes at an 8s ceiling each, plus a cold
+      // Secrets Manager fetch. 30s leaves headroom without letting a wedged
+      // socket hold the invocation open.
+      timeout: Duration.seconds(30),
+      logGroup: originProbeLogGroup,
+      environment: {
+        ENVIRONMENT: env,
+        ORIGIN_HOSTNAME: envConfig.edgeOriginHostname,
+        ORIGIN_SECRET_ARN: originSecret.secretArn,
+        // Shallow ALB health path -- one in-memory flag, no DB. A deep check
+        // here would page on a transient dependency blip that Aurora's own
+        // alarms already cover.
+        ORIGIN_HEALTH_PATH: "/api/health",
+        EDGE_URL: envConfig.edgeCustomDomain
+          ? `https://${envConfig.edgeCustomDomain}/`
+          : "",
+      },
+      bundling: {
+        externalModules: ["@aws-sdk/client-secrets-manager"],
+        sourceMap: false,
+        target: "node22",
+      },
+    });
+    originSecret.grantRead(originProbe);
+
+    // 5 minutes: fast enough that a real outage is caught inside the 15-minute
+    // alarm window below, slow enough that the origin sees ~288 synthetic
+    // requests/day rather than adding meaningful load.
+    new events.Rule(this, "EdgeOriginProbeScheduleRule", {
+      ruleName: `sps-edge-origin-probe-${env}`,
+      description: `Run the SPS edge origin-leg health probe (${env}) every 5 minutes (#1934).`,
+      schedule: events.Schedule.rate(Duration.minutes(5)),
+      targets: [new eventsTargets.LambdaFunction(originProbe)],
+    });
+
+    /**
+     * Build one of the probe's Embedded Metric Format metrics. The probe emits
+     * these on stdout; CloudWatch Logs extracts them into `SPS/Edge-{env}`.
+     *
+     * The namespace carries the env literal rather than relying on the
+     * `Environment` dimension alone, matching the log-derived-metric
+     * convention the rest of this stack uses (and the test that pins it): two
+     * envs sharing one namespace means a wrong dimension value silently mixes
+     * staging signal into a prod page.
+     *
+     * Deliberately NO `label`: setting one makes CDK render the alarm through
+     * the metric-math `Metrics` array instead of the flat
+     * Namespace/MetricName/Statistic properties, which buys nothing for a
+     * single-metric alarm and makes the template harder to assert against.
+     */
+    const probeMetric = (
+      metricName: string,
+      statistic: string,
+    ): cloudwatch.Metric =>
+      new cloudwatch.Metric({
+        namespace: `SPS/Edge-${env}`,
+        metricName,
+        dimensionsMap: { Environment: env },
+        statistic,
+        period: Duration.minutes(5),
+      });
+
+    // (4) Origin leg down. Minimum over 15 minutes so a single failed probe --
+    // a dropped socket, a task rolling out of the target group -- does not
+    // page; three consecutive failures is a real outage.
+    //
+    // treatMissingData BREACHING is deliberate and is the whole point: if the
+    // probe itself stops running, the detector is dead and that must page, not
+    // read as healthy. The 3-datapoint window also means a fresh deploy (whose
+    // first datapoint lands within 5 minutes) never trips it on cold start.
+    const originDownAlarm = new cloudwatch.Alarm(this, "EdgeOriginDownAlarm", {
+      alarmName: `sps-edge-origin-down-${env}`,
+      alarmDescription: `The CloudFront origin leg is failing (${env}): the synthetic probe could not get a 200 from the NetScaler VIP -> ALB :443 -> ECS path for 15 minutes, or the probe itself stopped reporting. The ALB/ECS alarms CANNOT see this -- if the VIP is down, requests never reach the ALB. Next: check the NetScaler VIP, the ALB :443 listener and its priority-1 X-Origin-Verify rule (a rotated secret presents identically), then the origin certificate. Backout: docs/2026-07-25-netscaler-prod-durability-handoff.md.`,
+      metric: probeMetric("OriginProbeSuccess", "Minimum"),
+      threshold: 1,
+      evaluationPeriods: 3,
+      datapointsToAlarm: 3,
+      comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+    });
+
+    // (5) CloudFront itself not answering -- DNS breakage, viewer-cert expiry,
+    // a disabled distribution. Any HTTP status counts as reachable: a WAF 403
+    // from this AWS-sourced address is the EXPECTED answer and still proves the
+    // edge is alive.
+    const edgeUnreachableAlarm = new cloudwatch.Alarm(
+      this,
+      "EdgeUnreachableAlarm",
+      {
+        alarmName: `sps-edge-unreachable-${env}`,
+        alarmDescription: `CloudFront is not answering at the public hostname (${env}) for 15 minutes: TLS or DNS failed, not merely an error status. Next: check DNS resolution for the alias, the viewer certificate's expiry, and that the distribution is enabled and Deployed.`,
+        metric: probeMetric("EdgeReachable", "Minimum"),
+        threshold: 1,
+        evaluationPeriods: 3,
+        datapointsToAlarm: 3,
+        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+      },
+    );
+
+    // (6) Origin certificate expiry. NOT a page and NOT part of the composite:
+    // this is a weeks-of-warning signal, not an outage.
+    //
+    // The origin cert is an InCommon wildcard living ON THE NETSCALER, not in
+    // ACM -- so it has no auto-renewal, no RenewalEligibility, and no AWS-side
+    // expiry event to hook. CloudFront hard-requires a valid, trusted,
+    // name-matching origin certificate, so expiry is an instant 502 for 100% of
+    // dynamic traffic. At this writing it expires 2027-01-01. 30 days is enough
+    // lead time for a rotation that depends on another team's change process.
+    const originCertExpiringAlarm = new cloudwatch.Alarm(
+      this,
+      "EdgeOriginCertExpiringAlarm",
+      {
+        alarmName: `sps-edge-origin-cert-expiring-${env}`,
+        alarmDescription: `The CloudFront origin (NetScaler VIP) certificate expires in under 30 days (${env}). It is NOT in ACM and does NOT auto-renew -- rotation is a NetScaler/network-team change. On expiry CloudFront's origin handshake fails and every dynamic request returns 502. Next: raise the rotation with the network team; the cert owner is recorded in the runbook.`,
+        metric: probeMetric("OriginCertDaysRemaining", "Minimum"),
+        threshold: 30,
+        evaluationPeriods: 1,
+        datapointsToAlarm: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+        // NOT breaching: a missed read is covered by the origin-down alarm
+        // above, and paging twice for one fault is the noise this stack's
+        // composite exists to avoid.
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      },
+    );
+    originCertExpiringAlarm.addAlarmAction(warnAction);
+
+    // ------------------------------------------------------------------
     // App-unavailable composite (cascade dedup)
     // ------------------------------------------------------------------
     // The three serving-failure symptoms above (5xx burst, zero healthy hosts,
@@ -475,12 +648,19 @@ export class SpsObservabilityStack extends Stack {
     // stay action-less (they still evaluate, feeding this composite and the
     // dashboard). Latency and cluster-red remain independent P1 alarms --
     // distinct failure modes, not part of the serving-down cascade.
+    //
+    // #1934 adds the two EDGE-side leaves. They are in the same composite
+    // because they are the same incident from the user's point of view -- the
+    // site is down -- and because an origin-leg failure cascades into nothing
+    // else, so it would otherwise page alone or, before this, not at all. The
+    // cert-expiry alarm is deliberately NOT here: it is a warn-tier signal
+    // weeks ahead of an outage, not the outage.
     const appUnavailableAlarm = new cloudwatch.CompositeAlarm(
       this,
       "AppUnavailableAlarm",
       {
         compositeAlarmName: `sps-app-unavailable-${env}`,
-        alarmDescription: `Public serving is degraded or down (${env}): one or more of 5xx-rate / zero-healthy-hosts / task-shortfall is in ALARM. Single P1 page for the serving cascade. See docs/SLOs.md. Next: open the reliability dashboard; if Aurora CPU/connections are also high, suspect DB connection-pool exhaustion; if it tracks the last deploy, roll back (DEPLOY-RUNBOOK.md).`,
+        alarmDescription: `Public serving is degraded or down (${env}): one or more of 5xx-rate / zero-healthy-hosts / task-shortfall / origin-leg-down / edge-unreachable is in ALARM. Single P1 page for the serving cascade. See docs/SLOs.md. Next: open the reliability dashboard. If ONLY the edge leaves fired, the ALB and ECS are healthy and the fault is upstream of them -- NetScaler VIP, the ALB :443 listener rule, or the origin certificate. If Aurora CPU/connections are also high, suspect DB connection-pool exhaustion; if it tracks the last deploy, roll back (DEPLOY-RUNBOOK.md).`,
         alarmRule: cloudwatch.AlarmRule.anyOf(
           cloudwatch.AlarmRule.fromAlarm(
             alb5xxAlarm,
@@ -492,6 +672,14 @@ export class SpsObservabilityStack extends Stack {
           ),
           cloudwatch.AlarmRule.fromAlarm(
             taskShortfallAlarm,
+            cloudwatch.AlarmState.ALARM,
+          ),
+          cloudwatch.AlarmRule.fromAlarm(
+            originDownAlarm,
+            cloudwatch.AlarmState.ALARM,
+          ),
+          cloudwatch.AlarmRule.fromAlarm(
+            edgeUnreachableAlarm,
             cloudwatch.AlarmState.ALARM,
           ),
         ),

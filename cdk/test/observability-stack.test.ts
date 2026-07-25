@@ -90,8 +90,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 13 CloudWatch alarms (12 platform + 1 B27 relay-errors)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 13);
+    it("creates exactly 16 CloudWatch alarms (12 platform + 1 B27 relay-errors + 3 edge)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 16);
     });
 
     it("every alarm name contains the prod env literal (Footgun #4)", () => {
@@ -99,13 +99,13 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(13);
+      expect(names).toHaveLength(16);
       for (const name of names) {
         expect(name).toMatch(/-prod$/);
       }
     });
 
-    it("alarm names cover the twelve platform surfaces plus the B27 relay-errors alarm", () => {
+    it("alarm names cover the twelve platform surfaces, the B27 relay-errors alarm, and the three #1934 edge alarms", () => {
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
@@ -121,6 +121,9 @@ describe("SpsObservabilityStack", () => {
           "sps-aurora-cpu-prod",
           "sps-db-pool-timeout-prod",
           "sps-ecs-task-shortfall-prod",
+          "sps-edge-origin-cert-expiring-prod",
+          "sps-edge-origin-down-prod",
+          "sps-edge-unreachable-prod",
           "sps-edit-authz-denied-prod",
           "sps-opensearch-breaker-prod",
           "sps-opensearch-cluster-red-prod",
@@ -140,15 +143,19 @@ describe("SpsObservabilityStack", () => {
       }
     });
 
-    it("each simple alarm has at most one action; the three composite-child alarms have none", () => {
-      // 5xx-rate / unhealthy-hosts / task-shortfall feed the app-unavailable
-      // composite and carry no direct action (so a serving cascade pages once
-      // via the composite, not three times). Every other simple alarm
-      // publishes to exactly one topic.
+    it("each simple alarm has at most one action; the five composite-child alarms have none", () => {
+      // 5xx-rate / unhealthy-hosts / task-shortfall / origin-down /
+      // edge-unreachable feed the app-unavailable composite and carry no direct
+      // action (so a serving cascade pages once via the composite, not five
+      // times). Every other simple alarm publishes to exactly one topic --
+      // including the #1934 cert-expiry alarm, which is warn-tier and
+      // deliberately NOT a composite child.
       const childNames = new Set([
         "sps-alb-5xx-rate-prod",
         "sps-alb-unhealthy-hosts-prod",
         "sps-ecs-task-shortfall-prod",
+        "sps-edge-origin-down-prod",
+        "sps-edge-unreachable-prod",
       ]);
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
       for (const r of Object.values(alarms)) {
@@ -291,9 +298,15 @@ describe("SpsObservabilityStack", () => {
         "sps-opensearch-jvm-pressure-prod": warnId,
         "sps-edit-authz-denied-prod": warnId,
         "sps-oncall-relay-errors-prod": notifyId,
+        // #1934 -- origin-cert expiry is weeks of lead time, not an outage, so
+        // it warns rather than pages and stays out of the composite.
+        "sps-edge-origin-cert-expiring-prod": warnId,
         "sps-alb-5xx-rate-prod": undefined,
         "sps-alb-unhealthy-hosts-prod": undefined,
         "sps-ecs-task-shortfall-prod": undefined,
+        // #1934 composite children -- the edge leaves page via the composite.
+        "sps-edge-origin-down-prod": undefined,
+        "sps-edge-unreachable-prod": undefined,
       };
 
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
@@ -314,8 +327,8 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      // 13 in prod; staging is 12 — it gets no ACU alarm (see the note above).
-      expect(seen).toBe(13);
+      // 16 in prod; staging is 15 — it gets no ACU alarm (see the note above).
+      expect(seen).toBe(16);
     });
 
     it("creates the app-unavailable composite that pages on the serving cascade", () => {
@@ -509,15 +522,20 @@ describe("SpsObservabilityStack", () => {
       expect(desc!).toMatch(PRINTABLE_ASCII);
     });
 
-    it("introduces exactly one log group -- the B27 relay's own log group", () => {
-      // Pre-B27 this asserted zero; the on-call relay Lambda owns its log
-      // group explicitly (rather than via NodejsFunction `logRetention`,
-      // which would inflate the Lambda + Role counts via a CFN custom
-      // resource and break the 1-Lambda assertion below).
-      template.resourceCountIs("AWS::Logs::LogGroup", 1);
+    it("introduces exactly two log groups -- the B27 relay's and the #1934 edge probe's", () => {
+      // Pre-B27 this asserted zero; each Lambda owns its log group explicitly
+      // (rather than via NodejsFunction `logRetention`, which would inflate the
+      // Lambda + Role counts via a CFN custom resource).
+      template.resourceCountIs("AWS::Logs::LogGroup", 2);
       template.hasResourceProperties("AWS::Logs::LogGroup", {
         LogGroupName: "/aws/lambda/sps-oncall-relay-prod",
         RetentionInDays: 30,
+      });
+      // Shorter retention on the probe: its reason to exist is the Embedded
+      // Metric Format extraction, and the metrics outlive the log lines.
+      template.hasResourceProperties("AWS::Logs::LogGroup", {
+        LogGroupName: "/aws/lambda/sps-edge-origin-probe-prod",
+        RetentionInDays: 14,
       });
     });
 
@@ -584,8 +602,8 @@ describe("SpsObservabilityStack", () => {
     // --------------------------------------------------------------------
     // B27 -- on-call relay Lambda + Errors alarm
     // --------------------------------------------------------------------
-    it("creates exactly one Lambda function (B27 on-call relay)", () => {
-      template.resourceCountIs("AWS::Lambda::Function", 1);
+    it("creates exactly two Lambda functions (B27 on-call relay + #1934 edge probe)", () => {
+      template.resourceCountIs("AWS::Lambda::Function", 2);
       template.hasResourceProperties("AWS::Lambda::Function", {
         FunctionName: "sps-oncall-relay-prod",
         Runtime: "nodejs22.x",
@@ -599,6 +617,84 @@ describe("SpsObservabilityStack", () => {
           },
         },
       });
+      template.hasResourceProperties("AWS::Lambda::Function", {
+        FunctionName: "sps-edge-origin-probe-prod",
+        Runtime: "nodejs22.x",
+        Handler: "index.handler",
+        Environment: {
+          Variables: {
+            ENVIRONMENT: "prod",
+            // The probe must dial the NetScaler VIP, NOT the public alias --
+            // the edge WAF would block it from an AWS source address, and the
+            // point is to exercise the origin leg the ALB alarms cannot see.
+            ORIGIN_HOSTNAME: "cf-ns-scholars.weill.cornell.edu",
+            ORIGIN_HEALTH_PATH: "/api/health",
+            EDGE_URL: "https://scholars.weill.cornell.edu/",
+            ORIGIN_SECRET_ARN: Match.anyValue(),
+          },
+        },
+      });
+    });
+
+    // --------------------------------------------------------------------
+    // #1934 -- edge origin-leg probe
+    // --------------------------------------------------------------------
+    it("the edge probe runs on a 5-minute schedule", () => {
+      template.hasResourceProperties("AWS::Events::Rule", {
+        Name: "sps-edge-origin-probe-prod",
+        ScheduleExpression: "rate(5 minutes)",
+        State: "ENABLED",
+      });
+    });
+
+    it("the origin-down alarm treats MISSING data as BREACHING", () => {
+      // Load-bearing, not a style choice: if the probe stops running there is
+      // no detector, and a dead detector must page rather than read as
+      // healthy. NOT_BREACHING here would silently restore the exact blind
+      // spot this alarm exists to close.
+      const alarms = template.findResources("AWS::CloudWatch::Alarm", {
+        Properties: { AlarmName: "sps-edge-origin-down-prod" },
+      });
+      const props = Object.values(alarms)[0]?.Properties;
+      expect(props?.TreatMissingData).toBe("breaching");
+      expect(props?.ComparisonOperator).toBe("LessThanThreshold");
+      expect(props?.Threshold).toBe(1);
+      expect(props?.EvaluationPeriods).toBe(3);
+      expect(props?.DatapointsToAlarm).toBe(3);
+      expect(props?.Namespace).toBe("SPS/Edge-prod");
+      expect(props?.MetricName).toBe("OriginProbeSuccess");
+      // Minimum, not Average: one failed probe in three must not be averaged
+      // away into a passing datapoint.
+      expect(props?.Statistic).toBe("Minimum");
+    });
+
+    it("the origin-cert alarm warns 30 days out and is NOT a composite child", () => {
+      // The origin cert is an InCommon wildcard on the NetScaler, not in ACM:
+      // no auto-renewal and no AWS-side expiry event, so this is the only
+      // warning that exists. Expiry is an instant 502 for all dynamic traffic.
+      const alarms = template.findResources("AWS::CloudWatch::Alarm", {
+        Properties: { AlarmName: "sps-edge-origin-cert-expiring-prod" },
+      });
+      const props = Object.values(alarms)[0]?.Properties;
+      expect(props?.Threshold).toBe(30);
+      expect(props?.ComparisonOperator).toBe("LessThanThreshold");
+      expect(props?.MetricName).toBe("OriginCertDaysRemaining");
+      // Warn tier -- exactly one action, and it is not the page topic.
+      expect(props?.AlarmActions).toHaveLength(1);
+    });
+
+    it("the app-unavailable composite includes both edge leaves", () => {
+      // Regression guard for the 2026-07-25 finding: the composite ORed three
+      // ALB/ECS leaves, every one of which stays OK when the NetScaler VIP
+      // stops forwarding, because the requests never reach the ALB at all.
+      const composites = template.findResources(
+        "AWS::CloudWatch::CompositeAlarm",
+      );
+      const rule = Object.values(composites)[0]?.Properties
+        ?.AlarmRule as unknown;
+      const serialized = JSON.stringify(rule);
+      expect(serialized).toContain("EdgeOriginDownAlarm");
+      expect(serialized).toContain("EdgeUnreachableAlarm");
     });
 
     it("the relay has a dead-letter queue so a dropped page stays recoverable", () => {
@@ -618,8 +714,19 @@ describe("SpsObservabilityStack", () => {
       });
     });
 
-    it("Lambda env vars carry only the secret ARN -- no URL-shaped values (T3)", () => {
-      const fns = template.findResources("AWS::Lambda::Function");
+    it("RELAY Lambda env vars carry only the secret ARN -- no URL-shaped values (T3)", () => {
+      // Scoped to the relay by FunctionName, NOT `Object.values(fns)[0]`:
+      // #1934 added a second Lambda, and index-0 selection would silently
+      // start asserting against whichever function synthesizes first.
+      //
+      // The invariant is specific to the RELAY: its Teams webhook URL is a
+      // secret and must arrive via Secrets Manager, never inlined into an env
+      // var. It does NOT generalize -- the edge probe legitimately carries the
+      // public `EDGE_URL`, which is the site's own published hostname.
+      const fns = template.findResources("AWS::Lambda::Function", {
+        Properties: { FunctionName: "sps-oncall-relay-prod" },
+      });
+      expect(Object.keys(fns)).toHaveLength(1);
       const props = Object.values(fns)[0]?.Properties as
         | { Environment?: { Variables?: Record<string, unknown> } }
         | undefined;
@@ -631,6 +738,25 @@ describe("SpsObservabilityStack", () => {
       // PR that smuggles the resolved URL into env vars by mistake).
       for (const k of Object.keys(vars)) {
         expect(k).not.toMatch(/url/i);
+      }
+    });
+
+    it("the edge probe carries no secret VALUE in its environment", () => {
+      // The probe reads the origin shared secret from Secrets Manager at
+      // runtime. Its env carries the secret's ARN only -- a resolved 64-char
+      // literal here would put the origin-guard secret in every
+      // GetFunctionConfiguration caller's reach.
+      const fns = template.findResources("AWS::Lambda::Function", {
+        Properties: { FunctionName: "sps-edge-origin-probe-prod" },
+      });
+      const vars =
+        ((Object.values(fns)[0]?.Properties as
+          | { Environment?: { Variables?: Record<string, unknown> } }
+          | undefined)?.Environment?.Variables ?? {}) as Record<string, unknown>;
+      for (const [key, value] of Object.entries(vars)) {
+        if (typeof value !== "string") continue;
+        expect(value).not.toMatch(/^[0-9a-f]{32,}$/);
+        if (/secret/i.test(key)) expect(key).toMatch(/_ARN$/);
       }
     });
 
@@ -766,13 +892,17 @@ describe("SpsObservabilityStack", () => {
       expect(actions?.[0]?.Ref).toBe(notifyLogicalId);
     });
 
-    it("Lambda function name, alarm name, OncallRelayFunctionArn output description are printable ASCII (Footgun #6)", () => {
+    it("Lambda function names, alarm name, OncallRelayFunctionArn output description are printable ASCII (Footgun #6)", () => {
+      // Every function, not `Object.values(fns)[0]` -- #1934 added a second.
       const fns = template.findResources("AWS::Lambda::Function");
-      const fnName = (Object.values(fns)[0]?.Properties as
-        | { FunctionName?: string }
-        | undefined)?.FunctionName;
-      expect(fnName).toBeDefined();
-      expect(fnName!).toMatch(PRINTABLE_ASCII);
+      const fnNames = Object.values(fns)
+        .map(
+          (r) => (r.Properties as { FunctionName?: string } | undefined)
+            ?.FunctionName,
+        )
+        .filter((n): n is string => typeof n === "string");
+      expect(fnNames).toHaveLength(2);
+      for (const fnName of fnNames) expect(fnName).toMatch(PRINTABLE_ASCII);
       const alarmName = "sps-oncall-relay-errors-prod";
       expect(alarmName).toMatch(PRINTABLE_ASCII);
       const outputs = template.findOutputs("OncallRelayFunctionArn");
@@ -854,8 +984,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 12 CloudWatch alarms (11 platform + 1 B27 relay-errors)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 12);
+    it("creates exactly 15 CloudWatch alarms (11 platform + 1 B27 relay-errors + 3 edge)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 15);
     });
 
     it("every alarm name contains the staging env literal", () => {
@@ -863,7 +993,7 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(12);
+      expect(names).toHaveLength(15);
       for (const name of names) {
         expect(name).toMatch(/-staging$/);
       }
@@ -950,9 +1080,14 @@ describe("SpsObservabilityStack", () => {
         "sps-opensearch-jvm-pressure-staging": warnId,
         "sps-edit-authz-denied-staging": warnId,
         "sps-oncall-relay-errors-staging": notifyId,
+        // #1934 -- same tiering as prod: cert expiry warns, the two edge
+        // outage leaves page through the composite.
+        "sps-edge-origin-cert-expiring-staging": warnId,
         "sps-alb-5xx-rate-staging": undefined,
         "sps-alb-unhealthy-hosts-staging": undefined,
         "sps-ecs-task-shortfall-staging": undefined,
+        "sps-edge-origin-down-staging": undefined,
+        "sps-edge-unreachable-staging": undefined,
       };
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
       let seen = 0;
@@ -972,7 +1107,7 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      expect(seen).toBe(12);
+      expect(seen).toBe(15);
     });
 
     it("creates the app-unavailable composite in staging too", () => {
@@ -983,12 +1118,25 @@ describe("SpsObservabilityStack", () => {
     });
 
     it("staging Lambda + alarm shape mirrors prod (env literal differs only)", () => {
-      template.resourceCountIs("AWS::Lambda::Function", 1);
+      template.resourceCountIs("AWS::Lambda::Function", 2);
       template.hasResourceProperties("AWS::Lambda::Function", {
         FunctionName: "sps-oncall-relay-staging",
         Runtime: "nodejs22.x",
         MemorySize: 256,
         Timeout: 10,
+      });
+      // #1934 -- the edge probe exists in staging too, pointed at STAGING's own
+      // VIP. Getting this wrong would have staging's alarm silently reporting
+      // on prod's origin leg.
+      template.hasResourceProperties("AWS::Lambda::Function", {
+        FunctionName: "sps-edge-origin-probe-staging",
+        Environment: {
+          Variables: {
+            ENVIRONMENT: "staging",
+            ORIGIN_HOSTNAME: "cf-ns-scholars-staging.weill.cornell.edu",
+            EDGE_URL: "https://scholars-staging.weill.cornell.edu/",
+          },
+        },
       });
       // IAM policy scope-check: walk the default policy and confirm the
       // staging-scoped name fragment shows up under the secrets statement.
@@ -1179,19 +1327,26 @@ describe("SpsObservabilityStack", () => {
       expect(shared).toEqual([]);
     });
 
-    it("each env's alarms read the namespace its own filter writes", () => {
+    it("each env's alarms read a namespace its own env writes", () => {
       for (const [t, env] of [
         [prod, "prod"],
         [staging, "staging"],
       ] as const) {
         const written = new Set(namespaces(t, "AWS::Logs::MetricFilter"));
         const read = namespaces(t, "AWS::CloudWatch::Alarm");
-        // Only the three log-derived alarms live under SPS/; the rest key on
-        // AWS/* namespaces and are filtered out above.
-        expect(read).toHaveLength(3);
+        // Six alarms live under SPS/: three log-derived (MetricFilter) plus
+        // the three #1934 edge alarms. The rest key on AWS/* namespaces and
+        // are filtered out above.
+        expect(read).toHaveLength(6);
         for (const n of read) {
-          expect(n).toMatch(new RegExp(`/${env}$`));
-          expect(written.has(n)).toBe(true);
+          // The invariant that matters in BOTH cases: the namespace carries
+          // this env's literal, so one env can never read the other's signal.
+          expect(n).toMatch(new RegExp(`/${env}$|-${env}$`));
+          // The edge metrics are Embedded Metric Format -- CloudWatch Logs
+          // extracts them straight from the probe's stdout, so they have no
+          // MetricFilter to match against. Every OTHER SPS/ namespace must
+          // still be written by a filter in the same template.
+          if (!n.startsWith("SPS/Edge-")) expect(written.has(n)).toBe(true);
         }
       }
     });

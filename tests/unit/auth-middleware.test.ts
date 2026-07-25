@@ -202,8 +202,10 @@ describe("middleware — runtime CSP headers (#374)", () => {
   it("redirects unauthenticated /edit to an ABSOLUTE SSO Location and attaches no CSP (regression guard)", async () => {
     // The runtime parses a middleware redirect's Location through new URL();
     // a bare relative path throws "Invalid URL" and 500s (the pre-existing
-    // /edit bug). The Location is built absolute from the Host header. A
-    // redirect also carries no CSP — it is returned directly, not wrapped.
+    // /edit bug). With no SITE_URL set (the local-dev fallback) the Location
+    // is built from the Host header — see the SITE_URL block below for the
+    // deployed behaviour. A redirect also carries no CSP — it is returned
+    // directly, not wrapped.
     const host = "scholars.weill.cornell.edu";
     const res = await middleware(
       new NextRequest(`${ORIGIN}/edit`, { headers: { host } }),
@@ -223,5 +225,78 @@ describe("middleware — runtime CSP headers (#374)", () => {
     expect(
       res.headers.get("content-security-policy-report-only"),
     ).toBeTruthy();
+  });
+});
+
+describe("middleware — absolute Location is built from SITE_URL, not the viewer Host (#1934)", () => {
+  const SITE = "https://scholars.weill.cornell.edu";
+
+  afterEach(() => {
+    delete process.env.SITE_URL;
+    delete process.env.NEXT_PUBLIC_SITE_URL;
+  });
+
+  // The defect this guards: #1931 made CloudFront forward the viewer Host on
+  // the DEFAULT (cacheable, 60s) behavior, but the cache policy does not key
+  // on Host. Any response built from Host therefore became poisonable — a
+  // request carrying the distribution's own *.cloudfront.net host seeded a
+  // cache entry the next viewer on the public alias then read, sending them to
+  // a host where their session cookies are not scoped. Reproduced in prod
+  // 2026-07-25. Reading the CONFIGURED origin removes the dependency entirely.
+
+  it("ignores a spoofed Host on the SSO redirect", async () => {
+    process.env.SITE_URL = SITE;
+    const res = await middleware(
+      new NextRequest(`${SITE}/edit`, {
+        headers: { host: "dboe1z46whvts.cloudfront.net" },
+      }),
+    );
+    expect(res.status).toBe(302);
+    const loc = res.headers.get("location")!;
+    expect(loc).toBe(`${SITE}/api/auth/saml/login?return=%2Fedit`);
+    expect(loc).not.toContain("cloudfront.net");
+  });
+
+  it("ignores a spoofed Host on a legacy VIVO 301", async () => {
+    process.env.SITE_URL = SITE;
+    // Reuse the corpus-derived anchor rather than a literal cwid, so this
+    // keeps working when the redirect set is regenerated.
+    const res = await middleware(
+      new NextRequest(`${SITE}/display/cwid-${KNOWN_CWID}`, {
+        headers: { host: "evil.example.com" },
+      }),
+    );
+    expect(res.status).toBe(301);
+    const loc = res.headers.get("location")!;
+    expect(loc).toBe(`${SITE}/scholars/by-cwid/${KNOWN_CWID}`);
+    expect(loc).not.toContain("evil.example.com");
+  });
+
+  it("strips a trailing slash on SITE_URL so the Location has no double slash", async () => {
+    process.env.SITE_URL = `${SITE}/`;
+    const res = await middleware(new NextRequest(`${SITE}/edit`));
+    expect(res.headers.get("location")).toBe(
+      `${SITE}/api/auth/saml/login?return=%2Fedit`,
+    );
+  });
+
+  it("falls back to NEXT_PUBLIC_SITE_URL, then to Host, when SITE_URL is unset", async () => {
+    process.env.NEXT_PUBLIC_SITE_URL = SITE;
+    const viaPublic = await middleware(
+      new NextRequest(`${SITE}/edit`, { headers: { host: "spoofed.example" } }),
+    );
+    expect(viaPublic.headers.get("location")).toBe(
+      `${SITE}/api/auth/saml/login?return=%2Fedit`,
+    );
+
+    // Neither var set: local dev only. Every deployed env always sets SITE_URL
+    // (cdk/lib/app-stack.ts derives it from the SAML ACS origin).
+    delete process.env.NEXT_PUBLIC_SITE_URL;
+    const viaHost = await middleware(
+      new NextRequest(`${SITE}/edit`, { headers: { host: "localhost:3002" } }),
+    );
+    expect(viaHost.headers.get("location")).toBe(
+      "https://localhost:3002/api/auth/saml/login?return=%2Fedit",
+    );
   });
 });
