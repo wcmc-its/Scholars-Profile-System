@@ -129,13 +129,17 @@ two halves:
 - **AWS WAF** attaches to the distribution: a rate-based rule (1000 req / 5 min / IP) plus
   AWS Managed Rules. The WAF topology is decided (#502): CloudFront + AWS WAF → NetScaler →
   ALB → Fargate, with the NetScaler an AWS VPX run by the WCM network team (RITM0801140,
-  prod+staging, staging-first). **Staging is cut over and live** (2026-07-21): CloudFront
-  reaches the app through the NetScaler VIP — origin leg **HTTPS-only** (an HTTP origin behind
-  the VIP's HTTP→HTTPS upgrade loops), NetScaler → ALB on **`:80`** forwarding `X-Origin-Verify`;
-  durable in CDK via the `#1507` origin-flip (PR #1852). **Prod is still pending** — its VIP
-  does not exist yet (NetScaler-team task, follow-up 2026-07-24) — so prod still points straight
-  at its ALB. A WCM-only access gate (#461) stays in place meanwhile. **Do not lift the WCM-only
-  gate until the NetScaler enforces equivalent filtering.**
+  prod+staging, staging-first). **Both environments are cut over and live** (staging 2026-07-21,
+  prod 2026-07-24): CloudFront reaches the app through the NetScaler VIP — origin leg
+  **HTTPS-only** (an HTTP origin behind the VIP's HTTP→HTTPS upgrade loops), NetScaler → ALB on
+  **`:443`** forwarding `X-Origin-Verify`; durable in CDK via the `#1507` origin-flip (PR #1852
+  staging, #1926 prod). The `:80` listener still exists in both envs but is not the live path —
+  it carries only internet-scanner noise. (Port corrected 2026-07-25: this paragraph previously
+  said staging rode `:80`; VPC flow logs across all four staging ALB ENIs plus a timed causal
+  probe showed otherwise. See #1937, which also tracks the remaining `:443` TLS-policy gap —
+  prod carries the #1929 AEAD-only pin, staging does not yet.) A WCM-only access gate (#461)
+  stays in place meanwhile. **Do not lift the WCM-only gate until the NetScaler enforces
+  equivalent filtering.**
 - **TLS:** ACM certs for `scholars[-staging].weill.cornell.edu` are provisioned and rotated
   by WCM ITS (not CDK). HSTS ships on the security-headers policy; CSP and the other headers
   are filled in by B21 ([`ADR-007`](./ADR-007-csp-script-src-strategy.md)).

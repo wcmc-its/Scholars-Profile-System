@@ -92,6 +92,8 @@ owning issues; dates from the cdk flip annotations.
 
 ## Process rules this inventory enforces
 
-1. **No prod cdk deploy without** `scripts/release/whats-shipping.sh prod` + `cdk diff` review — a prod App deploy is a release of everything above, not your change.
+1. **No cdk deploy — either env — without** `scripts/release/whats-shipping.sh <env>` + a `cdk diff Sps-App-<env>` review. A prod App deploy is a release of everything above, not your change; and staging is not exempt, because staging's origin leg is live traffic too (#1937).
+   Also run **`cdk drift Sps-App-staging Sps-App-prod`**. `cdk diff` catches code-vs-deployed lag (something merged but never deployed); `cdk drift` catches live-vs-deployed hand-edits (something changed in the console). They are different failure modes and neither implies the other.
+   *Why this rule grew a staging half:* #1929 pinned the ALB `:443` TLS policy to `ELBSecurityPolicy-TLS13-1-2-Res-PQ-2025-09` and merged, but staging was never deployed, so staging sat on the permissive `...-PQ-2025-09` (4 CBC ciphers) on what is actually its live origin leg. A synth-time assertion cannot catch this — it passes regardless of what is deployed. `cdk diff Sps-App-staging` reports it. **Honest limit: this fires only when an operator runs it. Nothing in this repo runs on a schedule with AWS credentials, so there is no continuous detection between deploys.**
 2. **No new flag without wiring** — CI (flag-parity step) fails if a consumed env key is neither in cdk nor allowlisted.
 3. **No staging-on flag without an owning issue + exit criterion** — the GAP rows above are the current debt; every new flag flip PR should name its rollout issue.
