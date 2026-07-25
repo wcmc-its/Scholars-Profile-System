@@ -1020,8 +1020,9 @@ export function resolveMeshResolutionFallbackEnabled(): boolean {
 
 /**
  * #1348 — token-coverage admission for the decompose-and-resolve fallback. When ON, a
- * matched window must cover a STRICT MAJORITY of the query's tokens, replacing the
- * hand-curated `GENERIC_DESCRIPTOR_NAMES` stoplist in `search-taxonomy.ts`.
+ * matched window must cover a STRICT MAJORITY of ITS CONJUNCT's tokens (the query split on
+ * `&` `/` `,` `and`), replacing the hand-curated `GENERIC_DESCRIPTOR_NAMES` stoplist in
+ * `search-taxonomy.ts`.
  *
  * The stoplist fixes the generic words someone already measured and is silent on the
  * next one: it does not contain "policy", so "foreign policy" resolves to the MeSH
@@ -1030,13 +1031,16 @@ export function resolveMeshResolutionFallbackEnabled(): boolean {
  * top-ranked researcher with no foreign-policy work. Genericness is not a property of a
  * descriptor — `Blood` is right for "blood" and wrong for "blood disorders" — so the
  * guard has to be query-relative. See `windowCoversMajority` for the measurements that
- * ruled out the two derivable alternatives (subtree breadth, tree depth).
+ * ruled out the two derivable alternatives (subtree breadth, tree depth), and for why the
+ * majority is per-conjunct rather than per-query (else dual-concept chips like "patient
+ * safety & quality improvement" regress).
  *
  * Default OFF (`=== "on"` opt-in): flag-off keeps the stoplist path byte-identical.
- * Known cost when ON: legitimate narrowing declines too ("pediatric asthma" → `Asthma`),
- * degrading to keyword-only. Measure recall on the 169 curated chips before flipping —
- * they resolve on the full phrase (100% coverage) so they should be unaffected, but that
- * is a prediction to verify, not an assumption to ship.
+ * Known cost when ON: legitimate single-concept narrowing declines ("pediatric asthma" →
+ * `Asthma` is 1/2), degrading to keyword-only. Measured on the 169 curated chips (07-25,
+ * local, resolver is DB-only): conjunct-relative coverage resolves 167/169 — IDENTICAL to
+ * the shipped stoplist, zero regression — while still declining free-typed latches like
+ * "foreign policy". Re-confirm on staging before flipping.
  */
 export function resolveMeshTokenCoverageEnabled(): boolean {
   return process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE === "on";

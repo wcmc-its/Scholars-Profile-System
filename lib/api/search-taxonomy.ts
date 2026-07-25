@@ -1488,7 +1488,7 @@ const GENERIC_DESCRIPTOR_NAMES = new Set([
 /**
  * #1348 — the query-relative admission rule that replaces `GENERIC_DESCRIPTOR_NAMES`.
  *
- * A matched window must cover a STRICT MAJORITY of the query's tokens. Rationale:
+ * A matched window must cover a STRICT MAJORITY of its CONJUNCT's tokens. Rationale:
  * "generic" is NOT a property of a descriptor, so no list of descriptors — curated or
  * derived — can express it. Both derivable signals were measured (2026-07-24) and both
  * fail: by SUBTREE BREADTH, `Policy`/`Medicine`/`Blood`/`Bacteria`/`Disease` are all
@@ -1501,53 +1501,89 @@ const GENERIC_DESCRIPTOR_NAMES = new Set([
  * RELATIVE to a query that carried more than the window matched — so the guard has to
  * be relative too.
  *
- * STRICT majority (`> 1/2`), not `>= 1/2`: every measured failure is a 2-token query
- * resolved on 1 token, which is exactly 1/2. At `>=` all of them still pass — including
- * "AI in medicine", the case the guardrail was written for.
+ * STRICT majority (`> 1/2`), not `>= 1/2`: `foreign policy` resolves `Policy` on 1 of 2
+ * tokens — exactly 1/2. At `>=` it (and `AI in medicine`, `blood disorders`, …) still
+ * passes; the whole class is 2-token queries matched on 1 token.
  *
- * Consequence worth knowing: for a 2-token query this admits only a 2-token window, and
- * since `tokens.length >= 2` is required to reach here at all, a SINGLE-token window can
- * never satisfy it. The rule therefore subsumes both flag-off single-token guardrails.
- *
- * Cost, accepted: legitimate narrowing declines too ("pediatric asthma" → `Asthma` is
- * 1/2). Those degrade to keyword-only — the honest path that already behaves correctly
- * (an unresolvable concept like "international development" falls through to it today).
+ * CONJUNCT-relative, not whole-query (the 07-25 local 169-chip run forced this). Measured
+ * against the whole query, this declined legitimate DUAL-concept chips: `patient safety &
+ * quality improvement` → `Patient Safety` is a correct, complete concept but only 2 of 4
+ * query tokens = 1/2, so it dropped — while `wearable devices & sensors` (2 of 3) survived
+ * purely because its second conjunct is one word. Same-shaped resolutions kept or dropped
+ * on an accident of token count. Splitting on conjunction delimiters (`&` `/` `,` `and`)
+ * first and measuring within the conjunct fixes it: `patient safety` is 2/2 of ITS conjunct
+ * (admits), `foreign policy` is a single conjunct where `policy` is 1/2 (declines). This is
+ * the fallback spec's own single-dominant-descriptor design for `&`/`/`-joined queries.
  */
 function windowCoversMajority(size: number, total: number): boolean {
   return size * 2 > total;
 }
 
-function resolveByWindowFallback(map: MeshMap, query: string): MeshResolution | null {
-  const tokens = query
+/**
+ * #1348 — split a query into conjuncts on conjunction delimiters (`&` `/` `,` `and`), each
+ * a token array. `flat()` of the result is the SAME token sequence as the pre-conjunct
+ * tokenizer (`replace(/\band\b/g," ").split(/[^a-z0-9]+/)`), because those delimiters are
+ * all either `\band\b` or non-alphanumeric — so the flag-OFF path stays byte-identical.
+ * Empty conjuncts (e.g. a trailing delimiter) are dropped.
+ */
+function queryConjuncts(query: string): string[][] {
+  return query
     .toLowerCase()
-    .replace(/\band\b/g, " ")
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
+    .split(/\s*(?:[&/,]|\band\b)\s*/)
+    .map((seg) => seg.split(/[^a-z0-9]+/).filter(Boolean))
+    .filter((seg) => seg.length > 0);
+}
+
+function resolveByWindowFallback(map: MeshMap, query: string): MeshResolution | null {
+  const conjuncts = queryConjuncts(query);
+  const tokens = conjuncts.flat();
   if (tokens.length < 2) return null; // a 1-token query already went through the exact path
+
+  // Per flat-token position: which conjunct it belongs to, and that conjunct's size — so a
+  // window's coverage is measured against ITS conjunct, not the whole query. Built always
+  // (cheap) but only READ under the coverage guard, so the flag-OFF path is unaffected.
+  const convIdx: number[] = [];
+  const convSize: number[] = [];
+  conjuncts.forEach((c, ci) =>
+    c.forEach(() => {
+      convIdx.push(ci);
+      convSize.push(c.length);
+    }),
+  );
 
   // #1348 — read ONCE per resolve, not per window, so the guard can't change mid-scan.
   const coverageGuardOn = resolveMeshTokenCoverageEnabled();
 
   for (let size = tokens.length; size >= 1; size--) {
-    // #1348 — under the coverage guard a too-short window can never win at ANY offset,
-    // so skip the whole length rather than testing each window. Also makes the loop
-    // terminate at the majority boundary instead of walking down to size 1.
-    if (coverageGuardOn && !windowCoversMajority(size, tokens.length)) break;
     // All resolving windows at this length, left-to-right.
     const hits: Array<{ row: DescriptorRow; matchedForm: string }> = [];
     for (let i = 0; i + size <= tokens.length; i++) {
       const surface = tokens.slice(i, i + size).join(" ");
       const key = normalizeForMatch(surface);
       if (key.length < (size === 1 ? 5 : 3)) continue;
+      // #1348 coverage guard — the window must lie WITHIN one conjunct and cover a strict
+      // majority of THAT conjunct's tokens. `patient safety` is 2/2 of its conjunct (admits)
+      // though only 2/4 of the query; `policy` in `foreign policy` is 1/2 of its sole
+      // conjunct (declines). A single-token window never passes: see the clamp below.
+      if (coverageGuardOn) {
+        if (convIdx[i] !== convIdx[i + size - 1]) continue; // spans a conjunct boundary
+        // Clamp the denominator to 2: a ONE-token conjunct is not self-covering. `blood` in
+        // `blood and marrow transplantation` is 1/1 of its own conjunct, so the bare rule
+        // admits it — and the generic stoplist below is inert under the guard, so nothing
+        // else stops it. Requiring >= 2 of the user's words also closes the cases no
+        // stoplist can: `policy` is not in GENERIC_DESCRIPTOR_NAMES. For size >= 2 the
+        // boundary check above forces convSize[i] >= size >= 2, so the clamp is a no-op.
+        if (!windowCoversMajority(size, Math.max(convSize[i], 2))) continue; // not a majority of its conjunct
+      }
       const cands = rankedDescriptorCandidates(map, key);
       if (cands.length === 0) continue;
       const top = cands[0];
       // Single-token windows: exact descriptor-NAME match only.
       if (size === 1 && top.confidence !== "exact") continue;
-      // #1348 — and never to a generic single-word descriptor (Medicine/Blood/…);
-      // skip so a shorter/other window resolves, else the fallback declines to null.
-      // Unreachable under `coverageGuardOn` (a 1-token window never covers a majority
-      // of a ≥2-token query); kept as the flag-OFF path, byte-identical to today.
+      // #1348 — and (flag-OFF path) never to a generic single-word descriptor (Medicine/
+      // Blood/…); skip so a shorter/other window resolves. Inert under the coverage guard,
+      // which now rejects EVERY 1-token window above; kept as the flag-OFF path,
+      // byte-identical to today.
       if (!coverageGuardOn && size === 1 && GENERIC_DESCRIPTOR_NAMES.has(key)) continue;
       hits.push({ row: top.row, matchedForm: surface });
     }

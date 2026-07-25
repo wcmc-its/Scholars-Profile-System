@@ -1725,6 +1725,83 @@ describe("resolveMeshDescriptor — #1348 token-coverage guard (SEARCH_MESH_RESO
     mockMeshFindMany.mockResolvedValue([D_RADIOMICS]);
     expect(await resolveMeshDescriptor("advanced radiomics pipeline")).toBeNull();
   });
+
+  // CONJUNCT-relative recovery (the 07-25 local 169-chip run). Two 2-token descriptors joined
+  // by `&`: "patient safety" is 2 of 4 QUERY tokens (would decline whole-query) but 2 of 2 of
+  // ITS conjunct — a complete, correct concept, so it must resolve. Without conjunct-splitting
+  // this regressed vs the shipped stoplist; `wearable devices & sensors` (2/3) survived only
+  // because its second conjunct is one word, which is the arbitrariness this fixes.
+  const D_PATIENT_SAFETY = {
+    descriptorUi: "D061214",
+    name: "Patient Safety",
+    entryTerms: [],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["N04.761.700"],
+  };
+  const D_QUALITY_IMPROVEMENT = {
+    descriptorUi: "D000073071",
+    name: "Quality Improvement",
+    entryTerms: [],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["N04.761.700.750"],
+  };
+
+  it("coverage ON: a dual-concept '&' query resolves its leftmost complete conjunct (2/2, not 2/4)", async () => {
+    process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE = "on";
+    mockMeshFindMany.mockResolvedValue([D_PATIENT_SAFETY, D_QUALITY_IMPROVEMENT]);
+    const r = await resolveMeshDescriptor("patient safety & quality improvement");
+    expect(r?.name).toBe("Patient Safety");
+    expect(r?.confidence).toBe("partial");
+    expect(r?.ambiguous).toBe(true); // both conjuncts resolve to distinct descriptors
+  });
+
+  it("coverage ON: a window may NOT span a conjunct boundary, even when it is the only match", async () => {
+    process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE = "on";
+    // Structural pin. The 2-token window "hepatic renal" is a descriptor, but it straddles the
+    // `/` between the conjuncts [acute, hepatic] and [renal, failure]. It is the ONLY window that
+    // resolves, so if the boundary check is dropped it wins — coverage-on must reject it and
+    // decline. (Four tokens, not two, so the whole query does not itself exact-match the
+    // descriptor before the fallback runs.) Leftmost-winner can't pin this: it is the sole match.
+    const D_SPANNING = {
+      descriptorUi: "D999002",
+      name: "hepatic renal", // normalizes to "hepaticrenal"; only the cross-boundary surface matches
+      entryTerms: [],
+      scopeNote: null,
+      dateRevised: null,
+      treeNumbers: ["Z01.002"],
+    };
+    mockMeshFindMany.mockResolvedValue([D_SPANNING]);
+    expect(await resolveMeshDescriptor("acute hepatic / renal failure")).toBeNull();
+  });
+
+  // A ONE-token conjunct is 1/1 of itself, so per-conjunct coverage admits it on its own —
+  // while the generic stoplist below is inert under the guard. A bare generic word then wins
+  // a query that carried far more. "Blood and Marrow Transplantation" is a real program name;
+  // the concept is the transplant, not Blood.
+  it("coverage ON: a one-token conjunct cannot resolve — 'blood and marrow transplantation' declines", async () => {
+    process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE = "on";
+    const D_BLOOD = {
+      descriptorUi: "D001769",
+      name: "Blood",
+      entryTerms: [],
+      scopeNote: null,
+      dateRevised: null,
+      treeNumbers: ["A15.145"],
+    };
+    mockMeshFindMany.mockResolvedValue([D_BLOOD]);
+    expect(await resolveMeshDescriptor("blood and marrow transplantation")).toBeNull();
+  });
+
+  // The case no stoplist can close: "policy" is absent from GENERIC_DESCRIPTOR_NAMES, so
+  // re-enabling that list under the guard is NOT an equivalent fix. This is the assertion
+  // that forecloses the "just delete the `!coverageGuardOn &&`" counter-proposal.
+  it("coverage ON: a one-token conjunct cannot resolve a NON-stoplisted generic either", async () => {
+    process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE = "on";
+    mockMeshFindMany.mockResolvedValue([D_POLICY]);
+    expect(await resolveMeshDescriptor("policy and health outcomes")).toBeNull();
+  });
 });
 
 describe("singularizeForMatch (#1342 pure helper)", () => {
