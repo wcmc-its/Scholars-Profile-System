@@ -498,6 +498,19 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
     expect(chips.className).toMatch(/opacity-55/);
   });
 
+  it("the revealed rows are INDENTED under the toggle that revealed them", () => {
+    // Without it an expanded group is a flat run of lines with nothing saying which of them
+    // the disclosure owns. `pl-4` specifically: the rows are `DisclosureRow`s carrying
+    // `-mx-2`, so a hover surface starts 8px left of its text and anything narrower would
+    // read as flush again under the pointer.
+    mockFetch(oneGrant);
+    render(<PeopleResultCard {...base} evidenceRows hit={stackedHit()} />);
+    const toggle = screen.getByRole("button", { name: /also matched/i });
+    fireEvent.click(toggle);
+    const panel = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    expect(panel.className).toMatch(/\bpl-4\b/);
+  });
+
   it("Part D collapse — the 'Also matched' summary is label + COUNT per secondary (entities still hidden)", () => {
     mockFetch(oneGrant);
     const { container } = render(<PeopleResultCard {...base} evidenceRows hit={stackedHit()} />);

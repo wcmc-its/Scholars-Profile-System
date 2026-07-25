@@ -136,13 +136,27 @@ export function ResultEvidence({
   // ("· N of M", no "publications" word). The disclosure panel is the SAME (rep
   // papers); only this summary row restyles.
   if (tier === "lesser") {
-    const lesserCount = (count: number | undefined): string | undefined =>
+    // "N of M" is a SHARE, and a share is only meaningful when the numerator answers the
+    // question the denominator frames — "how much of this scholar's output is about what I
+    // searched for". Only the publications count does. `areaCounts` and `methodFamilyCounts`
+    // are doc-precomputed at index time (`search-index-docs.ts`) and are NOT query-filtered:
+    // the AREA is picked by the query, but its 27 is the scholar's total in that area and is
+    // the same 27 whatever you searched. Framed as `27 of 529` beside `168 of 529` it reads
+    // as 5.1% vs 31.8% — "the area signal is 6× weaker" — when it is really MeSH tagging and
+    // topic assignment having different coverage. Two pipelines, one frame.
+    //
+    // So the scholar-scoped counts state a magnitude and no share. This also makes each row
+    // agree with its own collapsed chip, which never had a denominator ("Research area · 27
+    // pubs"); the expanded row was the only place the comparison was manufactured.
+    const lesserShare = (count: number | undefined): string | undefined =>
       count != null && pubCount != null ? ` · ${count} of ${pubCount} publications` : undefined;
+    const lesserOwn = (count: number | undefined): string | undefined =>
+      count != null ? ` · ${count} publication${count === 1 ? "" : "s"}` : undefined;
     switch (evidence.kind) {
       case "method":
         return (
           <LesserReason
-            suffix={lesserCount(evidence.count)}
+            suffix={lesserOwn(evidence.count)}
             canExpand={canExpand}
             expanded={expanded}
             onToggle={onToggle}
@@ -155,7 +169,7 @@ export function ResultEvidence({
       case "topic":
         return (
           <LesserReason
-            suffix={lesserCount(evidence.count)}
+            suffix={lesserOwn(evidence.count)}
             canExpand={canExpand}
             expanded={expanded}
             onToggle={onToggle}
@@ -198,7 +212,7 @@ export function ResultEvidence({
             // #1913 — no dot. A mention's weakness is carried by `weak` (muted/italic
             // text) + the MentionNote, which is where it always actually lived.
             weak={mention}
-            suffix={lesserCount(evidence.count)}
+            suffix={lesserShare(evidence.count)}
             canExpand={canExpand}
             expanded={expanded}
             onToggle={onToggle}

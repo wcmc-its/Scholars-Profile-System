@@ -743,8 +743,16 @@ export function PeopleResultCard({
                         }`}
                       />
                     </button>
+                    {/* The revealed rows are INDENTED under the toggle that revealed them —
+                        without it an expanded group is a flat run of lines with nothing
+                        saying which of them the disclosure owns.
+                        `pl-4` and not less: each row is a `DisclosureRow` carrying `-mx-2`,
+                        so its hover surface starts 8px LEFT of its text. At `pl-2` the band
+                        would begin at the panel's own left edge and the indent would read as
+                        flush again the moment the pointer landed; 16px leaves 8px of it
+                        still visible under hover. */}
                     {alsoExpanded ? (
-                      <div id={alsoPanelId} className="mt-1">
+                      <div id={alsoPanelId} className="mt-1 pl-4">
                         {secondaryRows}
                       </div>
                     ) : null}
