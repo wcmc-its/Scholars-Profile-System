@@ -971,6 +971,12 @@ export function MatchaPanel({
     return sort === "name" ? [...rows].sort((a, b) => compareByName(a.c, b.c)) : rows;
   }, [eligibleRows, sort]);
 
+  /** The ineligible floor's painted rows — the SINGLE source for what the expanded list renders, so
+   *  the truncation notice beside it can never disagree with it (the `shortlistRows` rule, applied
+   *  to a fold instead of an export). `ineligibleRows` runs to the filtered pool's size (~800), not
+   *  to `RESULT_MAX`, so above 100 this genuinely bites. */
+  const ineligibleShown = useMemo(() => ineligibleRows.slice(0, RESULT_MAX), [ineligibleRows]);
+
   // The relevance floor. Full cards for strong/good; the weak tier collapses under one bar the
   // officer can expand. Relative BY CONSTRUCTION — `fitTier` buckets each row against the TOP hit
   // (the #1 always scores share 1.0 → "strong", so this never collapses everything), so the floor
@@ -1964,11 +1970,24 @@ export function MatchaPanel({
                           </span>
                         </button>
                         {showIneligible ? (
-                          <ul className="mt-4">
-                            {ineligibleRows.slice(0, RESULT_MAX).map(({ c, rank }) => (
-                              <li key={c.cwid}>{renderResult({ c, rank, eligBadge: "filtered" })}</li>
-                            ))}
-                          </ul>
+                          <>
+                            <ul className="mt-4">
+                              {ineligibleShown.map(({ c, rank }) => (
+                                <li key={c.cwid}>
+                                  {renderResult({ c, rank, eligBadge: "filtered" })}
+                                </li>
+                              ))}
+                            </ul>
+                            {/* The bar counts the whole exclusion (that IS the number the officer
+                                needs); the list is capped by the same render bound as the main one.
+                                Say so when it bites, or the bar promises N and delivers 100. */}
+                            {ineligibleRows.length > ineligibleShown.length ? (
+                              <p className="text-muted-foreground mt-4 text-[11px]">
+                                Showing the first {ineligibleShown.length} of{" "}
+                                {ineligibleRows.length} — narrow the results to see the rest
+                              </p>
+                            ) : null}
+                          </>
                         ) : null}
                       </div>
                     ) : null}
@@ -2671,9 +2690,21 @@ function CompactRow({
   );
 }
 
-/** The provenance palette — the house green/amber tints (solid, not alpha) so the chips carry
- *  colour, not just a border. `tagged` reuses the strong-tier hue, `keyword` the position/warning
- *  hue; both already ship in `globals.css`. */
+/** The provenance palette. `keyword` carries the house amber (position/warning) tint, solid not
+ *  alpha, so the chip reads as colour rather than a border.
+ *
+ *  `tagged` is deliberately NEUTRAL, and it used to be `--apollo-green-tint`. In SPS green is a
+ *  RELIABILITY claim — after #1934 the public people card reserves it for `credential`, a fact the
+ *  label does not state, and it dropped its own `subject-tagged` pill outright. Provenance is not a
+ *  reliability claim: it says HOW the hit matched, never that it matched the ask's SENSE. The live
+ *  failure mode is on record at `cdk/lib/app-stack.ts` (the `SEARCH_MESH_RESOLVE_TOKEN_COVERAGE`
+ *  note) and was confirmed on staging 2026-07-25 — "foreign policy" resolves to the MeSH `Policy`
+ *  descriptor and returns 7 evidence blocks, 100% `tagged`, every one of them green and none of
+ *  them about foreign policy. Same probe: 565/618 blocks (91.4%) are `tagged`, and 13 of the 19
+ *  queries returning evidence are 100% `tagged` — so green was near-zero-bits where it fired, and
+ *  confidently wrong where it mattered. The chip keeps its ✓ (it still says "structured"); it stops
+ *  saying "verified". Amber is the one that earns its slot. Do NOT "harmonize" this back to green
+ *  on the grounds that the tint exists — its absence here is the decision. */
 const PROVENANCE_META: Record<
   EvidenceProvenance,
   { mark: string; label: string; title: string; className: string }
@@ -2683,8 +2714,7 @@ const PROVENANCE_META: Record<
     label: "subject-tagged",
     title:
       "Matched via a MeSH subject tag or a curated method/clinical/topic signal — structured, but not proof of the ask's specific sense.",
-    className:
-      "border-[var(--apollo-green-tint-border)] bg-[var(--apollo-green-tint)] text-[var(--apollo-green-foreground)]",
+    className: "border-border bg-muted text-muted-foreground",
   },
   keyword: {
     mark: "⚠",
