@@ -476,11 +476,36 @@ describe("EdgeStack", () => {
         }
       });
 
-      it("default behavior has NO origin request policy (acceptance #5 -- prevents cookie leak)", () => {
+      it("default behavior forwards NO cookies and NO query strings to the origin (acceptance #5 -- prevents cookie leak)", () => {
+        // Previously asserted `OriginRequestPolicyId === undefined`, i.e. no
+        // policy at all. #1930 has to attach one to forward the viewer Host
+        // (without it, middleware redirects on the legacy VIVO paths point at
+        // the origin hostname), so this now pins acceptance #5's actual
+        // intent -- nothing cookie- or query-bearing reaches the origin on the
+        // cached HTML path -- rather than the proxy of "no policy".
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
-        expect(defaultBehavior.OriginRequestPolicyId).toBeUndefined();
+        const orpRef = defaultBehavior.OriginRequestPolicyId as
+          | { Ref?: string }
+          | undefined;
+        if (orpRef === undefined) return; // no policy is still acceptable.
+
+        const logicalId = orpRef.Ref;
+        expect(logicalId).toBeDefined();
+        const orp = Object.entries(
+          template.findResources("AWS::CloudFront::OriginRequestPolicy"),
+        ).find(([id]) => id === logicalId)?.[1];
+        expect(orp).toBeDefined();
+        const cfg = (orp!.Properties as Record<string, unknown>)
+          .OriginRequestPolicyConfig as Record<string, unknown>;
+
+        expect(cfg.CookiesConfig).toEqual({ CookieBehavior: "none" });
+        expect(cfg.QueryStringsConfig).toEqual({ QueryStringBehavior: "none" });
+        // And it must NOT be a blanket all-viewer forward, which would carry
+        // cookies regardless of the two configs above.
+        const headers = cfg.HeadersConfig as Record<string, unknown>;
+        expect(headers.HeaderBehavior).toBe("whitelist");
       });
 
       it("prod origin is the NetScaler VIP, HTTPS-only on 443; static-asset S3 origin uses OAC (acceptance #6, #700, #1507)", () => {
@@ -907,6 +932,75 @@ describe("EdgeStack", () => {
         expect(staticBehavior().ResponseHeadersPolicyId).not.toEqual({
           Ref: htmlPolicyLogicalId,
         });
+      });
+    });
+
+    describe("#1930 legacy VIVO redirects need the viewer Host on the default behavior", () => {
+      // middleware.ts absoluteLocation() builds redirect Locations from the
+      // Host header. CloudFront sends the ORIGIN's hostname as Host unless the
+      // behavior forwards the viewer's, so a redirect emitted from a behavior
+      // without Host forwarding points at an unreachable host. The legacy VIVO
+      // paths (/display, /individual, /profile) match no additional behavior,
+      // so they are served by the DEFAULT behavior -- these two assertions pin
+      // both halves of that invariant.
+      it("the default behavior forwards the viewer Host and nothing else", () => {
+        const orpLogicalId = Object.entries(
+          template.findResources("AWS::CloudFront::OriginRequestPolicy"),
+        ).find(
+          ([, r]) =>
+            (
+              (r.Properties as Record<string, unknown>)
+                .OriginRequestPolicyConfig as Record<string, unknown>
+            ).Name === "sps-viewer-host-prod",
+        )?.[0];
+        expect(orpLogicalId).toBeDefined();
+
+        template.hasResourceProperties(
+          "AWS::CloudFront::OriginRequestPolicy",
+          {
+            OriginRequestPolicyConfig: Match.objectLike({
+              Name: "sps-viewer-host-prod",
+              HeadersConfig: {
+                HeaderBehavior: "whitelist",
+                Headers: ["Host"],
+              },
+              // The default behavior's cache policy sets both to `none` on
+              // purpose; this policy must not widen what reaches the origin.
+              CookiesConfig: { CookieBehavior: "none" },
+              QueryStringsConfig: { QueryStringBehavior: "none" },
+            }),
+          },
+        );
+
+        const dist = Object.values(
+          template.findResources("AWS::CloudFront::Distribution"),
+        )[0].Properties as Record<string, unknown>;
+        const dc = dist.DistributionConfig as Record<string, unknown>;
+        const defaultBehavior = dc.DefaultCacheBehavior as Record<
+          string,
+          unknown
+        >;
+        expect(defaultBehavior.OriginRequestPolicyId).toEqual({
+          Ref: orpLogicalId,
+        });
+      });
+
+      it("no additional behavior intercepts the legacy VIVO paths (they must fall through to the default)", () => {
+        const dist = Object.values(
+          template.findResources("AWS::CloudFront::Distribution"),
+        )[0].Properties as Record<string, unknown>;
+        const dc = dist.DistributionConfig as Record<string, unknown>;
+        const patterns = (
+          (dc.CacheBehaviors as Array<Record<string, unknown>>) ?? []
+        ).map((b) => b.PathPattern as string);
+
+        // If a behavior is ever added for one of these prefixes it must carry
+        // Host forwarding too, or the legacy redirects silently break again.
+        for (const prefix of ["/display", "/individual", "/profile"]) {
+          expect(
+            patterns.filter((p) => p.startsWith(prefix)),
+          ).toEqual([]);
+        }
       });
     });
 

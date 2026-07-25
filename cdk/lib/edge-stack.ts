@@ -417,6 +417,35 @@ export class EdgeStack extends Stack {
         queryStringBehavior: cloudfront.OriginRequestQueryStringBehavior.all(),
       },
     );
+    // #1930 -- forward the VIEWER's Host on the default (cached) behavior.
+    //
+    // For a custom origin CloudFront sets `Host` to the ORIGIN's domain name
+    // unless the behavior forwards the viewer's Host. `middleware.ts`
+    // (absoluteLocation) builds absolute redirect Locations from `Host`, so on
+    // the default behavior every middleware redirect pointed at the origin
+    // hostname -- unreachable in a browser. That broke the entire B14 legacy
+    // VIVO redirect set (#113): `/display/*`, `/individual/*` and `/profile/*`
+    // match no behavior below, so they are served HERE, and all ~9.8k legacy
+    // URLs 301'd to a dead host. The `/edit*` family was fine only because
+    // allViewer already forwards Host -- which is why this went unnoticed.
+    //
+    // Deliberately a minimal allowList, NOT allViewer: the default behavior is
+    // the cached HTML path and its cache policy sets cookies/query strings to
+    // `none` on purpose. cookie/queryString `none` here preserves that exactly
+    // -- this policy adds Host and nothing else. Name/comment ASCII-only (#401).
+    const viewerHostOrp = new cloudfront.OriginRequestPolicy(
+      this,
+      "ViewerHostOrp",
+      {
+        originRequestPolicyName: `sps-viewer-host-${env}`,
+        comment: `SPS (${env}) -- forward the viewer Host so middleware redirects are absolute onto the public host (#1930).`,
+        headerBehavior:
+          cloudfront.OriginRequestHeaderBehavior.allowList("Host"),
+        cookieBehavior: cloudfront.OriginRequestCookieBehavior.none(),
+        queryStringBehavior:
+          cloudfront.OriginRequestQueryStringBehavior.none(),
+      },
+    );
     // Per-path override: these uncacheable behaviors get internalViewerOrp instead
     // of plain allViewer so the on-network signal can read the viewer IP (#866).
     // Every other uncacheable behavior defaults to allViewer.
@@ -1010,6 +1039,10 @@ export class EdgeStack extends Stack {
       defaultBehavior: {
         origin,
         cachePolicy: defaultRscCache,
+        // #1930 -- see viewerHostOrp. Required for middleware redirects on the
+        // legacy VIVO paths (/display, /individual, /profile), which are served
+        // by this behavior and build their Location from the Host header.
+        originRequestPolicy: viewerHostOrp,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
         // HTML-specific headers: HSTS + a `max-age=0, must-revalidate`
         // Cache-Control override so browsers revalidate HTML and never serve a

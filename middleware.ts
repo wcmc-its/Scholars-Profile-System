@@ -66,15 +66,17 @@ const VIVO_PATH_RE = /^\/(?:display|individual|profile)\/cwid-([A-Za-z0-9._\-]+)
  * rebuild. See lib/security-headers.ts.
  *
  * Apply ONLY to document responses (`NextResponse.next()`). It must NOT wrap a
- * redirect: this middleware emits 301/302 responses with a **relative**
- * `Location` (the request host is the internal container address behind the
- * proxy, so an absolute redirect is unreachable — see the SSO branch). Setting
- * a header on an already-constructed redirect makes the edge runtime re-finalize
- * the response and re-parse that relative `Location` through `new URL()`, which
- * throws `TypeError: Invalid URL` and 500s the route (regressed `/edit` when it
- * first shipped). Redirects and bodyless 401/404s carry no document, so they
- * need no CSP anyway — return them directly. The browser gets the CSP on the
- * page it lands on, which is itself a `next()` response.
+ * redirect. Setting a header on an already-constructed redirect makes the edge
+ * runtime re-finalize the response and re-parse its `Location` through
+ * `new URL()`, which throws `TypeError: Invalid URL` and 500s the route
+ * (regressed `/edit` when it first shipped, back when Locations here were
+ * relative). Redirects and bodyless 401/404s carry no document, so they need no
+ * CSP anyway — return them directly. The browser gets the CSP on the page it
+ * lands on, which is itself a `next()` response.
+ *
+ * NB: the redirects below now emit an **absolute** `Location` via
+ * {@link absoluteLocation}; an earlier version of this comment still described
+ * them as relative.
  */
 function withSecurityHeaders(response: NextResponse): NextResponse {
   const cspHeaders = buildCspResponseHeaders({
@@ -121,6 +123,21 @@ function isGatedOrLegacyPath(pathname: string): boolean {
  * `Host` header IS the public host the viewer requested (the same value
  * `lib/edit/authz.ts` trusts for its same-origin CSRF check), so use it.
  * Falls back to the relative path only if `Host` is somehow absent.
+ *
+ * 🔴 That last claim is TRUE ONLY IF the CloudFront behavior serving the path
+ * forwards the viewer's `Host`. For a custom origin CloudFront otherwise sends
+ * the ORIGIN's hostname as `Host`, and this function then emits a Location
+ * pointing at the origin — unreachable in a browser. This is not theoretical:
+ * it broke the entire B14 legacy VIVO redirect set (#1930), because
+ * `/display`, `/individual` and `/profile` are served by the DEFAULT behavior,
+ * which had no origin-request policy. `/edit*` and `/api/edit*` were unaffected
+ * only because they use ALL_VIEWER, which forwards Host — which is exactly why
+ * the bug hid for so long.
+ *
+ * The forwarding is now pinned in `cdk/lib/edge-stack.ts` (`viewerHostOrp` on
+ * the default behavior) and asserted in `cdk/test/edge-stack.test.ts`. Any NEW
+ * gated-or-legacy prefix added to {@link isGatedOrLegacyPath} must be served by
+ * a behavior that forwards `Host`, or its redirects will break the same way.
  *
  * Scheme is always `https`: the public site is HTTPS-only (HSTS + CloudFront
  * redirect-to-https). `x-forwarded-proto` is deliberately NOT used — at the
