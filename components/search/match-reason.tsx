@@ -455,9 +455,10 @@ export function MatchAwareReason({
   //
   // Nothing narrow-only is lost. The % is a rounding of "N of M", which the phrase states
   // in full and which is present whenever `coverage` is (the callers set them from the
-  // same count/denominator pair). The pill words restate the kind column plus the phrase's
-  // own verb — "keyword only" against the `Keyword` column and "publications mention",
-  // "subject-tagged" against "publications tagged".
+  // same count/denominator pair). And the one surviving pill word restates the kind column
+  // plus the phrase's own verb — "keyword only" against the `Keyword` column and
+  // "publications mention" — which is the same redundancy that retired `subject-tagged`
+  // outright; here it costs only a narrow viewport rather than every row.
   const inner = (
     <>
       <span
