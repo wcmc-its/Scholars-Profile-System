@@ -62,11 +62,15 @@ export function descendantSummary(terms: string[], cap = 2): string {
  *
  * 48, measured in Chromium at 11.5px Inter: the narrowest layout that renders this line
  * is the expandable primary lead at the `lg` breakpoint, whose body column measures
- * 308.4px; the renderer's own "via " prefix takes 15.7px of it, and the widest real MeSH
- * descriptor text runs 5.86px/char, so 48 × 5.86 + 15.7 = 297px with ~11px to spare.
- * Wider viewports leave slack, which is the right direction for a safe-side heuristic.
- * Below `lg` the row stacks and the line is narrower still — it truncates there like any
- * long text, which is why the tail has to be inside the budget rather than trusted to fit.
+ * 308.4px, and the widest real MeSH descriptor text runs ~6.05px/char.
+ *
+ * The number no longer buys a ONE-LINE fit and is not meant to. The renderer's prefix
+ * became "matched on narrower term " (144px of the 308px, against 16px for the old
+ * "via "), which at one line would leave 27 characters — less than a single descriptor
+ * plus its tail. Rather than shrink the budget to something no real term fits, the line
+ * WRAPS: it is the last content on its own line with nothing trailing it, so a second
+ * line is the whole cost and nothing clips. 48 chars + the prefix is 434px over a 308px
+ * box, i.e. bounded at two lines, which is what this number now guarantees.
  */
 const VIA_BUDGET = 48;
 

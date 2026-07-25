@@ -403,10 +403,13 @@ export function PeopleResultCard({
   // Both degenerate to today's exact strings when the set is all-tagged or all-mention.
   const fundingLead = fundingTagged ? grantsTagged : grantsTotal;
   const fundingCount = `${Math.min(fundingLead, hit.grantCount)} of ${hit.grantCount} grants`;
+  // "· 7 mention “<q>”" read as a second, parallel claim, so a reader summed it with the
+  // lead and got a universe that looked double-counted. It is a REMAINDER —
+  // `grantsMentionOnly` is `grantsTotal - grantsTagged` — so "more" says so in the one
+  // place the reader is doing the arithmetic, and "in text" names what the other axis
+  // matched on without re-quoting a query already quoted in the clause before it.
   const fundingMentionSuffix =
-    fundingTagged && grantsMentionOnly > 0
-      ? `${grantsMentionOnly} mention “${qParam}”`
-      : null;
+    fundingTagged && grantsMentionOnly > 0 ? `${grantsMentionOnly} more mention it in text` : null;
   // #1381 follow-up — a lone demoted Funding secondary is the sole "Also matched" row:
   // the umbrella toggle is its only control (no inner chevron) and the grant records
   // render as soon as the group expands, so one click reveals funding.
@@ -476,7 +479,11 @@ export function PeopleResultCard({
             // #1913 — no dot. A literal mention's weakness is carried by `weak`
             // (muted/italic text) + the MentionNote.
             weak={!fundingTagged}
-            suffix={` · ${fundingCount}`}
+            // No `suffix` — the count is NOT a tail here. Trailing it left the row reading
+            // "Funding · tagged Ischemic Stroke · 7 more … · 8 of 25 grants", where the
+            // first clause dangles unquantified until the last one arrives and the reader
+            // retrofits it. Count first, like the promoted row's `CountFirst`, so the
+            // clauses read left to right in one pass.
             // Lone demoted secondary → no inner chevron; the "Also matched" umbrella is
             // the sole control and the records show on its one click.
             canExpand={!fundingLoneDemoted}
@@ -485,7 +492,7 @@ export function PeopleResultCard({
             panelId={fundingPanelId}
             srLabel="key funding"
           >
-            <span className="font-medium">Funding</span> ·{" "}
+            <span className="font-medium">Funding</span> · {fundingCount}{" "}
             {fundingTagged ? (
               <>
                 tagged{" "}
@@ -493,10 +500,12 @@ export function PeopleResultCard({
                   {grantConceptLabel}
                 </span>
                 {/* #1732 — same partition on the compact row. */}
-                {fundingMentionSuffix ? <> · {fundingMentionSuffix}</> : null}
+                {fundingMentionSuffix ? (
+                  <span className="text-[var(--evidence-faint)]"> · {fundingMentionSuffix}</span>
+                ) : null}
               </>
             ) : (
-              <>mentions “{qParam}”</>
+              <>mention “{qParam}”</>
             )}
           </LesserReason>
         )}
@@ -545,13 +554,16 @@ export function PeopleResultCard({
     })
     .filter((c): c is SecondaryChip => c != null);
   if (hasFunding) {
-    // The number the expanded Funding row itself leads with, so the chip and the row it
-    // summarises can never state different figures. Per #1732 it is a partition of an OR,
-    // which is fine for a one-number chip precisely because it is the same one-number
-    // claim the row makes.
+    // A COLLAPSED COUNT MUST NEVER BE SMALLER THAN WHAT OPENING IT REVEALS. This chip
+    // used `fundingLead` — the row's lead clause — to keep chip and row stating one
+    // figure. But per #1732 that lead is one HALF of a partition (8 tagged), while the
+    // panel behind the fold lists the whole matched set (8 tagged + 7 mention-only = 15),
+    // so "Funding · 8 grants" promised 8 and delivered 15. The union is the only number
+    // that describes the thing being summarised; the row underneath still breaks it into
+    // its two clauses, which is where the partition belongs.
     secondaryChips.push({
       label: SECONDARY_LABEL.funding,
-      detail: unit(Math.min(fundingLead, hit.grantCount), "grant"),
+      detail: unit(Math.min(grantsTotal, hit.grantCount), "grant"),
     });
   }
   // ponytail: 3 chips fit one line at typical widths now that each carries a count
@@ -677,14 +689,24 @@ export function PeopleResultCard({
                       <span className="shrink-0 text-[11px] font-medium text-[var(--evidence-body)]">
                         Also matched
                       </span>
-                      {!alsoExpanded ? (
+                      {
                         // Uniform fold rule — WRAPS instead of overflowing. This row had no
                         // wrap and no truncate, so on a narrow card even the old bare chips
                         // pushed the chevron out of the row; wider chips make that likely
                         // rather than latent. Wrapping degrades to a second line (tight
                         // `gap-y`, not the 10px the shorthand would give) and never clips
                         // mid-chip, which is the #1907 disease.
-                        <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-[2px] text-[12px]">
+                        //
+                        // The summary stays on EXPAND, dimmed. It used to unmount, so the
+                        // toggle collapsed to the bare words "Also matched" and the focus
+                        // ring outlined a mostly empty bar — the click target changed shape
+                        // under the pointer that had just hit it, and keyboard focus landed
+                        // on the one state where the control says least about what it
+                        // controls. Dimming keeps it a legend for the rows now underneath
+                        // it rather than a second copy of them.
+                        <span
+                          className={`flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-[2px] text-[12px] ${alsoExpanded ? "opacity-55" : ""}`}
+                        >
                           {/* #1913 — labels neutral, middot-separated. The dot-plus-
                               same-hue-word pairing is gone, and so is the false link
                               affordance the coloured labels carried. */}
@@ -712,7 +734,7 @@ export function PeopleResultCard({
                             <span className="text-[var(--evidence-faint)]">+{chipOverflow}</span>
                           ) : null}
                         </span>
-                      ) : null}
+                      }
                       <ChevronDown
                         aria-hidden
                         strokeWidth={2.5}

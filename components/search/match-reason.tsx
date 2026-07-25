@@ -324,13 +324,18 @@ export function CountFirst({
  * ΔE76 5.01 against the row-hover fill #f0eeea, so on hover the border (ΔE 12.30) is what
  * keeps the pill a distinct object. Do not "simplify" it away.
  */
-export type EvidencePillKind = "subject-tagged" | "keyword-only" | "credential";
+/** Badge the EXCEPTION, never the norm. There is no `subject-tagged` kind: it shipped in
+ *  #1933 and was cut, because it appeared on 100% of the rows in its class and so carried
+ *  zero bits — and it restated the `Concept` column three inches to its left, a concept
+ *  match being curated by definition. Same test kills any future badge that a row's own
+ *  kind column already implies.
+ *
+ *  What survives says something its label does not: `keyword only` (this is a string hit,
+ *  not a curated tag) and `credential` (board certified — not implied by `Clinical`, and
+ *  not carried by every clinical row). */
+export type EvidencePillKind = "keyword-only" | "credential";
 
 const PILL: Record<EvidencePillKind, { word: string; cls: string }> = {
-  "subject-tagged": {
-    word: "subject-tagged",
-    cls: "border-[var(--apollo-green-tint-border)] bg-[var(--apollo-green-tint)] text-[var(--apollo-green-foreground)]",
-  },
   "keyword-only": {
     word: "keyword only",
     cls: "border-[var(--apollo-amber-tint-border)] bg-[var(--apollo-amber-tint)] text-[var(--apollo-amber)]",
@@ -480,9 +485,19 @@ export function MatchAwareReason({
         </span>
         {via ? (
           <span
-            className={`mt-[2px] min-w-0 truncate text-[11.5px] ${dim ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-detail)]"}`}
+            className={`mt-[2px] min-w-0 text-[11.5px] ${dim ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-detail)]"}`}
           >
-            <span className="text-[var(--evidence-faint)]">via </span>
+            {/* "via X" made the reader infer the relationship — that the tag was a
+                NARROWER term rolling up to their query. The prefix states it instead.
+                It costs 144px of this box's measured 308px at `lg` (vs 16px for "via "),
+                which would cut the term budget from 48 chars to 27 and clip the
+                " and N related terms" tail — the one phrase saying the list is partial,
+                and the exact #1907 failure this line was built to avoid.
+                So the line WRAPS rather than truncates. It is the last content on its own
+                line with nothing trailing it, so wrapping costs a second line at worst and
+                cannot eat a sibling; VIA_BUDGET's 2-term cap bounds it there. That is why
+                the budget did not move with the copy. */}
+            <span className="text-[var(--evidence-faint)]">matched on narrower term </span>
             {via}
           </span>
         ) : null}
@@ -498,8 +513,17 @@ export function MatchAwareReason({
           sr-only text also joins the enclosing button's accessible name, which `title`
           (not announced, needs a hover) and `aria-label` on a `role=generic` span (which
           AT may ignore) both fail to do. */}
+      {/* The column reads as ONE scale, and it is not one: a keyword row's 5.2% and a
+          concept row's 4.7% are shares of the same denominator but not the same kind of
+          evidence, so ranking them against each other says the keyword scholar is the
+          better match while the mechanism says the opposite. Keyword rows therefore take
+          the faint ink — the number stays legible and comparable to other KEYWORD rows,
+          and stops competing for the eye with the curated ones.
+          This is provenance, NOT the `dim` axis, which still never touches this cell. */}
       {coverage ? (
-        <span className="hidden w-[64px] shrink-0 self-start pl-3 text-right tabular-nums text-[var(--evidence-body)] lg:block">
+        <span
+          className={`hidden w-[64px] shrink-0 self-start pl-3 text-right tabular-nums lg:block ${kind === "keyword" ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-body)]"}`}
+        >
           <span aria-hidden>{coverage}</span>
           <span className="sr-only">{coverage} of this scholar&rsquo;s output</span>
         </span>

@@ -4,7 +4,7 @@
  * (no raw slug leaks; bounded list).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ResultEvidence } from "@/components/search/result-evidence";
 import { RepresentativePapers } from "@/components/search/match-reason";
 import { EvidenceLine } from "@/components/search/evidence-line";
@@ -302,9 +302,11 @@ describe("<ResultEvidence> — one render per kind", () => {
     // line the list is not truncated, it is summarising a set. Singular for exactly one.
     // #1908 — middot-separated, not comma-separated (see the MeSH case below).
     const via = screen.getByText("Mycobiome · Virome and 1 related term");
-    // The "via " word is the RENDERER's, not the caller's (`descendantViaSummary` omits it,
-    // exactly as `descendantSummary` omits its "(matched " wrapper).
-    expect(via.textContent).toBe("via Mycobiome · Virome and 1 related term");
+    // The prefix is the RENDERER's, not the caller's (`descendantViaSummary` omits it,
+    // exactly as `descendantSummary` omits its "(matched " wrapper). It NAMES the
+    // relationship: "via X" left the reader to infer that X was a narrower term rolling up
+    // to their query, which is the one thing the line exists to say.
+    expect(via.textContent).toBe("matched on narrower term Mycobiome · Virome and 1 related term");
   });
 
   it("#1908 — comma-inverted MeSH descriptors stay countable (the separator is not a comma)", () => {
@@ -1114,22 +1116,86 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
         node = node.parentElement;
       }
     };
-    noTruncateAncestry(screen.getByText("subject-tagged"));
     const pct = screen.getByText("1.8%");
     noTruncateAncestry(pct);
-    // Both are also shrink-0, which is what actually keeps them at max-content width while
-    // the phrase absorbs the squeeze; a `truncate`-free ancestry alone would not.
-    expect(screen.getByText("subject-tagged").className).toMatch(/shrink-0/);
+    // It is also shrink-0, which is what actually keeps it at max-content width while the
+    // phrase absorbs the squeeze; a `truncate`-free ancestry alone would not.
     expect(pct.parentElement!.className).toMatch(/shrink-0/);
-    // …and the phrase they annotate still truncates.
+    // …and the phrase it annotates still truncates.
     expect(container.querySelector(".truncate")?.textContent).toMatch(/2 of 114 publications/);
-    // The via-line is the ONE element here that legitimately truncates (it is last on its
-    // own line, so a clip can only shorten its own tail). Its ANCESTRY must still be clean,
-    // or the clip would move up to a box that also holds the phrase.
+    // The pill is the other occupant of that slot and carries the same invariant. It is on
+    // the MENTION row now — `subject-tagged` was cut for badging 100% of its class — so the
+    // walk moves to the row that still has one.
+    const mention = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "mention",
+          text: "2 of 114 publications mention",
+          term: "Leukemia",
+          count: 2,
+        }}
+        pubCount={114}
+        stacked
+      />,
+    );
+    const pill = within(mention.container).getByText("keyword only");
+    let node: HTMLElement | null = pill;
+    while (node && node !== mention.container) {
+      expect(node.className).not.toMatch(/truncate/);
+      node = node.parentElement;
+    }
+    expect(pill.className).toMatch(/shrink-0/);
+    // The via-line no longer truncates at all: the longer "matched on narrower term "
+    // prefix would have clipped the " and N related terms" tail — the one phrase saying
+    // the list is partial — so the line WRAPS instead. It can afford to, being last on its
+    // own line with nothing trailing it. Its ancestry must still be clean either way, or a
+    // clip would move up to a box that also holds the phrase.
     const via = screen.getByText("Leukemia, Lymphoid and 2 related terms");
-    expect(via.className).toMatch(/truncate/);
+    expect(via.className).not.toMatch(/truncate/);
     noTruncateAncestry(via.parentElement!);
     expect(via.nextElementSibling).toBeNull(); // nothing trails it on its line
+  });
+
+  it("the % is faint on a KEYWORD row, so the gutter stops implying one scale", () => {
+    // The column invited a comparison it cannot support: a keyword row's 5.2% next to a
+    // concept row's 4.7% says the keyword scholar is the better match while the mechanism
+    // says the opposite. Same denominator, different KIND of evidence. Faint ink keeps the
+    // number legible and comparable to other keyword rows without competing for the eye
+    // with the curated ones.
+    const mention = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "mention",
+          text: "12 of 98 publications mention",
+          term: "melanoma",
+          count: 12,
+        }}
+        pubCount={98}
+        stacked
+      />,
+    );
+    expect(within(mention.container).getByText("12.2%").parentElement!.className).toContain(
+      "text-[var(--evidence-faint)]",
+    );
+
+    const tagged = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "12 of 98 publications tagged",
+          term: "Melanoma",
+          count: 12,
+        }}
+        pubCount={98}
+        stacked
+      />,
+    );
+    expect(within(tagged.container).getByText("12.2%").parentElement!.className).toContain(
+      "text-[var(--evidence-body)]",
+    );
   });
 
   it("a coverage that rounds below 0.1% displays '<0.1%' rather than a lying '0.0%'", () => {
@@ -1294,9 +1360,12 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
     expect(pillsIn(container)).toEqual([]);
   });
 
-  it("uniform fold rule — each publications strength gets its OWN pill, and not the other's", () => {
-    // Keyed to PROVENANCE. `concept` (a MeSH-expansion text variant) gets NEITHER: it is not
-    // a subject tag and not a bare keyword, so claiming either would be false.
+  it("uniform fold rule — ONLY the exception strength is badged; tagged and concept get none", () => {
+    // Keyed to PROVENANCE, and only where the badge says something the row's own kind column
+    // does not. `tagged` is the NORM on this row: it appeared on 100% of its class and
+    // restated the `Concept` label beside it, so it carries no bits and is cut. `concept`
+    // (a MeSH-expansion text variant) gets none either — it is not a subject tag and not a
+    // bare keyword, so claiming either would be false. Only `mention` earns one.
     const tagged = render(
       <ResultEvidence
         evidence={{
@@ -1310,7 +1379,7 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
         stacked
       />,
     );
-    expect(pillsIn(tagged.container)).toEqual(["subject-tagged"]);
+    expect(pillsIn(tagged.container)).toEqual([]);
 
     const mention = render(
       <ResultEvidence
@@ -1347,20 +1416,16 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
     // `--apollo-green` (#2e7d5b) is the token literally named "semantic green" and the
     // obvious pick for green pill text. It scores 4.39:1 on `--apollo-green-tint` and FAILS
     // AA at 11px. Only `--apollo-green-foreground` (6.92:1) may back this word.
+    // `credential` is the green pill now — `subject-tagged` was cut for badging the norm,
+    // and green survives on the one badge that states something its label does not.
     const { container } = render(
       <ResultEvidence
-        evidence={{
-          kind: "publications",
-          strength: "tagged",
-          text: "12 of 98 publications tagged",
-          term: "Melanoma",
-          count: 12,
-        }}
+        evidence={{ kind: "clinical", specialty: "Vascular Neurology", boardCertified: true }}
         pubCount={98}
         stacked
       />,
     );
-    const pill = screen.getByText("subject-tagged");
+    const pill = screen.getByText("credential");
     expect(pill.className).toContain("text-[var(--apollo-green-foreground)]");
     expect(pill.className).not.toContain("text-[var(--apollo-green)]");
     // the border is load-bearing (ΔE 5.01 fill-vs-row-hover); it is not decoration.
@@ -1437,7 +1502,9 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
       />,
     );
     const via = screen.getByText("Leukemia, Hairy Cell · Leukemia, Myeloid");
-    expect(via.textContent).toBe("via Leukemia, Hairy Cell · Leukemia, Myeloid");
+    expect(via.textContent).toBe(
+      "matched on narrower term Leukemia, Hairy Cell · Leukemia, Myeloid",
+    );
     // …and it is the line, not the retired parenthetical: no "(matched" anywhere.
     expect(container.textContent).not.toMatch(/\(matched/);
   });
@@ -1507,7 +1574,22 @@ describe("<ResultEvidence> — the primary lead degrades instead of collapsing o
     const pct = screen.getByText("12.2%").parentElement!;
     expect(hasToken(pct, "hidden")).toBe(true);
     expect(hasToken(pct, "lg:block")).toBe(true);
-    const pill = screen.getByText("subject-tagged");
+    // The pill rides the MENTION row now (`subject-tagged` was cut), and takes the same
+    // breakpoint: it is the other shrink-0 occupant of the slot the phrase pays for.
+    const { container } = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "mention",
+          text: "12 of 98 publications mention",
+          term: "melanoma",
+          count: 12,
+        }}
+        pubCount={98}
+        stacked
+      />,
+    );
+    const pill = within(container).getByText("keyword only");
     expect(hasToken(pill, "hidden")).toBe(true);
     expect(hasToken(pill, "lg:inline-flex")).toBe(true);
     expect(hasToken(pill, "inline-flex")).toBe(false);
