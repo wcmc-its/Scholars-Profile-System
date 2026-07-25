@@ -2711,6 +2711,13 @@ export class AppStack extends Stack {
         port: 443,
         protocol: elbv2.ApplicationProtocol.HTTPS,
         certificates: [elbv2.ListenerCertificate.fromArn(envConfig.edgeOriginCertArn)],
+        // Pinned to match the hand-made prod :443 listener created during the
+        // 2026-07-24 NetScaler cutover. CDK's default (TLS13_12_PQ) adds four
+        // CBC-mode ciphers; the restricted variant is AEAD-only (GCM +
+        // CHACHA20). Without the pin, the delete-and-recreate that adopts the
+        // manual listener into CFN would silently relax the origin-leg TLS
+        // posture, and re-relax it on every later deploy.
+        sslPolicy: elbv2.SslPolicy.TLS13_12_RES_PQ,
         defaultAction: elbv2.ListenerAction.fixedResponse(403, {
           contentType: "text/plain",
           messageBody: "Forbidden",

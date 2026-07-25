@@ -78,6 +78,11 @@ describe("AppStack", () => {
           Port: 443,
           Protocol: "HTTPS",
           Certificates: [{ CertificateArn: CERT }],
+          // Pinned, not CDK's default. The live prod listener uses the
+          // AEAD-only restricted policy; the default (TLS13_12_PQ) would add
+          // four CBC-mode ciphers. Asserted explicitly so a `jest -u` cannot
+          // silently un-pin it via the snapshot alone.
+          SslPolicy: "ELBSecurityPolicy-TLS13-1-2-Res-PQ-2025-09",
         },
       );
     });
