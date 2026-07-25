@@ -1019,6 +1019,30 @@ export function resolveMeshResolutionFallbackEnabled(): boolean {
 }
 
 /**
+ * #1348 — token-coverage admission for the decompose-and-resolve fallback. When ON, a
+ * matched window must cover a STRICT MAJORITY of the query's tokens, replacing the
+ * hand-curated `GENERIC_DESCRIPTOR_NAMES` stoplist in `search-taxonomy.ts`.
+ *
+ * The stoplist fixes the generic words someone already measured and is silent on the
+ * next one: it does not contain "policy", so "foreign policy" resolves to the MeSH
+ * `Policy` descriptor (descendants: Public Policy / Health Policy / Health Care Reform)
+ * and, on the Matcha console, renders a confident `✓ subject-tagged` badge on a
+ * top-ranked researcher with no foreign-policy work. Genericness is not a property of a
+ * descriptor — `Blood` is right for "blood" and wrong for "blood disorders" — so the
+ * guard has to be query-relative. See `windowCoversMajority` for the measurements that
+ * ruled out the two derivable alternatives (subtree breadth, tree depth).
+ *
+ * Default OFF (`=== "on"` opt-in): flag-off keeps the stoplist path byte-identical.
+ * Known cost when ON: legitimate narrowing declines too ("pediatric asthma" → `Asthma`),
+ * degrading to keyword-only. Measure recall on the 169 curated chips before flipping —
+ * they resolve on the full phrase (100% coverage) so they should be unaffected, but that
+ * is a prediction to verify, not an assumption to ship.
+ */
+export function resolveMeshTokenCoverageEnabled(): boolean {
+  return process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE === "on";
+}
+
+/**
  * #1342 — query-side morphology retry. When ON, `resolveMeshDescriptor`, after the
  * exact name / entry-term / curated-alias lookup misses, retries the SINGULARIZED
  * query ({@link singularizeForMatch}: "melanomas" → "melanoma") against the same

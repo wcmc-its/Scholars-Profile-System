@@ -1640,6 +1640,93 @@ describe("resolveMeshDescriptor — decompose-and-resolve fallback (SEARCH_MESH_
   });
 });
 
+describe("resolveMeshDescriptor — #1348 token-coverage guard (SEARCH_MESH_RESOLVE_TOKEN_COVERAGE)", () => {
+  // The descriptor the shipped GENERIC_DESCRIPTOR_NAMES stoplist does NOT contain, which
+  // is the whole point: a curated list fixes the words already measured and stays silent
+  // on the next one. Real MeSH row (D057766), whose descendants are Public Policy /
+  // Health Policy / Health Care Reform — so "foreign policy" pulls health-policy work.
+  const D_POLICY = {
+    descriptorUi: "D057766",
+    name: "Policy",
+    entryTerms: [],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["I01.655", "N03.623"],
+  };
+  const D_MATMORT = {
+    descriptorUi: "D008428",
+    name: "Maternal Mortality",
+    entryTerms: [],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["N01.224.100"],
+  };
+  const D_MORBIDITY = {
+    descriptorUi: "D009017",
+    name: "Morbidity",
+    entryTerms: [],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["N01.224.200"],
+  };
+  const D_RADIOMICS = {
+    descriptorUi: "D000095024",
+    name: "Radiomics",
+    entryTerms: [],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["L01.224.300"],
+  };
+
+  beforeEach(() => {
+    process.env.SEARCH_MESH_RESOLUTION_FALLBACK = "on";
+  });
+  afterEach(() => {
+    delete process.env.SEARCH_MESH_RESOLUTION_FALLBACK;
+    delete process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE;
+  });
+
+  // THE regression this guard exists for. Both halves matter: the first documents the
+  // live defect (the stoplist has no "policy"), the second is the fix.
+  it("coverage OFF: 'foreign policy' still mis-resolves to Policy — the stoplist gap", async () => {
+    delete process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE;
+    mockMeshFindMany.mockResolvedValue([D_POLICY]);
+    const r = await resolveMeshDescriptor("foreign policy");
+    expect(r?.name).toBe("Policy");
+    expect(r?.confidence).toBe("partial");
+  });
+
+  it("coverage ON: 'foreign policy' declines — 1 of 2 tokens is not a strict majority", async () => {
+    process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE = "on";
+    mockMeshFindMany.mockResolvedValue([D_POLICY]);
+    expect(await resolveMeshDescriptor("foreign policy")).toBeNull();
+  });
+
+  // Strictness is the load-bearing detail: at `>= 1/2` every measured failure still
+  // passes, since each is a 2-token query matched on 1 token — exactly one half.
+  it("coverage ON: a 2-token query is never resolved by a 1-token window", async () => {
+    process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE = "on";
+    mockMeshFindMany.mockResolvedValue([D_MORBIDITY]);
+    expect(await resolveMeshDescriptor("chronic morbidity")).toBeNull();
+  });
+
+  it("coverage ON: a majority window still resolves (2 of 3 tokens)", async () => {
+    process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE = "on";
+    mockMeshFindMany.mockResolvedValue([D_MATMORT, D_MORBIDITY]);
+    const r = await resolveMeshDescriptor("Maternal mortality & morbidity");
+    expect(r?.name).toBe("Maternal Mortality");
+    expect(r?.confidence).toBe("partial");
+  });
+
+  // The accepted cost, pinned so it is a decision and not a surprise: legitimate
+  // narrowing declines too. Flag-off this same query resolves (test above, line ~1613).
+  it("coverage ON: legitimate narrowing also declines (1 of 3) — the known recall cost", async () => {
+    process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE = "on";
+    mockMeshFindMany.mockResolvedValue([D_RADIOMICS]);
+    expect(await resolveMeshDescriptor("advanced radiomics pipeline")).toBeNull();
+  });
+});
+
 describe("singularizeForMatch (#1342 pure helper)", () => {
   it("strips a simple plural -s on a long-enough key", () => {
     expect(singularizeForMatch("melanomas")).toBe("melanoma");
