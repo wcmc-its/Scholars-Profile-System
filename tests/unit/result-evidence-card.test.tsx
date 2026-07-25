@@ -670,7 +670,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
   // `credential` one — this is the tier the fold reveals, not a place to re-add signals.
   const dotOf = (c: HTMLElement) => c.querySelector("span.rounded-full");
 
-  it("method lesser ⇒ 'Method · family' + '· N of M publications', no dot and no badge pill", () => {
+  it("method lesser ⇒ 'Method · family' + a MAGNITUDE, no share, no dot and no badge pill", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{ kind: "method", family: "CRISPR genome editing", tools: [], count: 3 }}
@@ -679,9 +679,45 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
       />,
     );
     expect(container.textContent).toMatch(/Method · CRISPR genome editing/);
-    expect(container.textContent).toMatch(/· 3 of 44 publications/); // unit spelled out
+    // `methodFamilyCounts` is precomputed at index time and is NOT query-filtered, so it
+    // cannot wear the "N of M" share frame the query-relative publications count wears —
+    // side by side they read as one scale and are not. Magnitude, no denominator.
+    expect(container.textContent).toMatch(/· 3 publications/);
+    expect(container.textContent).not.toMatch(/of 44/);
     expect(dotOf(container)).toBeNull();
     expect(pillsIn(container)).toEqual([]);
+  });
+
+  it("the PUBLICATIONS lesser row KEEPS its denominator — that count IS query-relative", () => {
+    // The discriminating half of the change. This numerator answers the question the
+    // denominator frames ("how much of this scholar's output is about what I searched
+    // for"), so its share is meaningful and stays. Drop this and the rule collapses into
+    // "no denominators anywhere", which loses the only honest one.
+    const { container } = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "12 of 44 publications tagged",
+          term: "Melanoma",
+          count: 12,
+        }}
+        pubCount={44}
+        tier="lesser"
+      />,
+    );
+    expect(container.textContent).toMatch(/· 12 of 44 publications/);
+  });
+
+  it("a scholar-scoped magnitude of exactly 1 says 'publication', not 'publications'", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "topic", label: "Immunology", id: "immuno", count: 1 }}
+        pubCount={44}
+        tier="lesser"
+      />,
+    );
+    expect(container.textContent).toMatch(/· 1 publication(?!s)/);
   });
 
   it("research area lesser ⇒ 'Research area · label', no dot", () => {
@@ -693,7 +729,10 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
       />,
     );
     expect(container.textContent).toMatch(/Research area · Stem Cell & Regenerative Medicine/);
-    expect(container.textContent).toMatch(/· 2 of 44/);
+    // Same as method: `areaCounts` is the scholar's total in the area, unchanged by the
+    // query that selected the area. It states a magnitude, never a share of output.
+    expect(container.textContent).toMatch(/· 2 publications/);
+    expect(container.textContent).not.toMatch(/of 44/);
     expect(dotOf(container)).toBeNull();
     expect(pillsIn(container)).toEqual([]);
   });
