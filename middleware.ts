@@ -112,32 +112,50 @@ function isGatedOrLegacyPath(pathname: string): boolean {
 }
 
 /**
- * Build an ABSOLUTE redirect `Location` for a same-origin path.
+ * Build an ABSOLUTE redirect `Location` for a same-origin path, from the
+ * CONFIGURED public origin — never from the viewer-supplied `Host` header.
  *
  * Redirect targets must be absolute: the Next runtime parses a middleware
  * redirect's `Location` through `new URL()`, which throws `TypeError: Invalid
  * URL` on a bare relative path and 500s the route (this is what broke an
  * unauthenticated `/edit` redirect). `request.nextUrl` cannot supply the base —
  * behind CloudFront -> ALB -> Fargate it carries the internal container host, so
- * an absolute redirect built from it points at an unreachable `ip-…:3000`. The
- * `Host` header IS the public host the viewer requested (the same value
- * `lib/edit/authz.ts` trusts for its same-origin CSRF check), so use it.
- * Falls back to the relative path only if `Host` is somehow absent.
+ * an absolute redirect built from it points at an unreachable `ip-…:3000`.
  *
- * 🔴 That last claim is TRUE ONLY IF the CloudFront behavior serving the path
- * forwards the viewer's `Host`. For a custom origin CloudFront otherwise sends
- * the ORIGIN's hostname as `Host`, and this function then emits a Location
- * pointing at the origin — unreachable in a browser. This is not theoretical:
- * it broke the entire B14 legacy VIVO redirect set (#1930), because
- * `/display`, `/individual` and `/profile` are served by the DEFAULT behavior,
- * which had no origin-request policy. `/edit*` and `/api/edit*` were unaffected
- * only because they use ALL_VIEWER, which forwards Host — which is exactly why
- * the bug hid for so long.
+ * History, because the obvious base is the wrong one twice over:
  *
- * The forwarding is now pinned in `cdk/lib/edge-stack.ts` (`viewerHostOrp` on
- * the default behavior) and asserted in `cdk/test/edge-stack.test.ts`. Any NEW
- * gated-or-legacy prefix added to {@link isGatedOrLegacyPath} must be served by
- * a behavior that forwards `Host`, or its redirects will break the same way.
+ * 1. This used `request.headers.get("host")`. For a custom origin CloudFront
+ *    sends the ORIGIN's hostname as `Host` unless the behavior forwards the
+ *    viewer's, so every default-behavior redirect pointed at the origin —
+ *    unreachable in a browser. That broke the entire B14 legacy VIVO redirect
+ *    set (#1930): `/display`, `/individual` and `/profile` are served by the
+ *    DEFAULT behavior, which had no origin-request policy. `/edit*` was fine
+ *    only because ALL_VIEWER forwards Host, which is why the bug hid so long.
+ *
+ * 2. #1931 fixed that by forwarding the viewer `Host` on the default behavior
+ *    (`viewerHostOrp`). But that behavior is CACHEABLE (60s) and its cache
+ *    policy does not key on `Host`, so the response became a function of an
+ *    input that is forwarded but not keyed: a request carrying the
+ *    distribution's own `*.cloudfront.net` host seeded a cache entry that the
+ *    next viewer on the public alias then read, receiving a 301/302 onto a
+ *    host where their session cookies are not scoped. Reproduced in prod
+ *    2026-07-25 (seeded at one POP, served at another — it lands in the
+ *    regional cache).
+ *
+ * Reading the configured origin closes both: the Location no longer depends on
+ * anything the viewer controls, so it is correct on every behavior regardless
+ * of which headers CloudFront forwards, and there is nothing left to poison.
+ *
+ * `SITE_URL` is a RUNTIME env var set per-env in the ECS task definition
+ * (`cdk/lib/app-stack.ts`, derived from the SAML ACS origin so the two can
+ * never disagree). It is readable here: this middleware already gates
+ * `/api/impersonation` on the runtime-only `IMPERSONATION_ENABLED` (#637).
+ * The `Host` fallback is for LOCAL DEV ONLY, where neither var is set — every
+ * deployed environment always sets `SITE_URL`.
+ *
+ * Follow-up: `viewerHostOrp` is now redundant and can be removed from
+ * `cdk/lib/edge-stack.ts` once this ships to both envs (app first, then CDK —
+ * the reverse order re-opens #1930 until the image rolls).
  *
  * Scheme is always `https`: the public site is HTTPS-only (HSTS + CloudFront
  * redirect-to-https). `x-forwarded-proto` is deliberately NOT used — at the
@@ -146,6 +164,12 @@ function isGatedOrLegacyPath(pathname: string): boolean {
  * worked because the browser upgraded it.
  */
 function absoluteLocation(request: NextRequest, pathAndQuery: string): string {
+  const configuredOrigin =
+    process.env.SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL;
+  if (configuredOrigin) {
+    return `${configuredOrigin.replace(/\/+$/, "")}${pathAndQuery}`;
+  }
+  // Local dev only — see the docblock. Never reached in a deployed env.
   const host = request.headers.get("host");
   if (!host) return pathAndQuery;
   return `https://${host}${pathAndQuery}`;
@@ -171,11 +195,11 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (vivoMatch) {
     const cwid = vivoMatch[1];
     if (cwid && VIVO_CWID_SET.has(cwid)) {
-      // Absolute Location via the Host header (see absoluteLocation): the
-      // runtime parses the target through new URL(), which rejects a relative
-      // path. cwid is regex-constrained ([A-Za-z0-9._-]) so it is safe in the
-      // header. Returned directly, NOT through withSecurityHeaders — see its
-      // doc for why mutating a redirect 500s.
+      // Absolute Location via the configured origin (see absoluteLocation):
+      // the runtime parses the target through new URL(), which rejects a
+      // relative path. cwid is regex-constrained ([A-Za-z0-9._-]) so it is safe
+      // in the header. Returned directly, NOT through withSecurityHeaders — see
+      // its doc for why mutating a redirect 500s.
       return new NextResponse(null, {
         status: 301,
         headers: {
@@ -238,9 +262,10 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     return NextResponse.redirect(devLogin, 302);
   }
 
-  // Absolute Location via the Host header (see absoluteLocation): the runtime
-  // parses the redirect target through new URL(), which 500s on a relative
-  // path. Returned directly, NOT through withSecurityHeaders — see its doc.
+  // Absolute Location via the configured origin (see absoluteLocation): the
+  // runtime parses the redirect target through new URL(), which 500s on a
+  // relative path. Returned directly, NOT through withSecurityHeaders — see its
+  // doc.
   return new NextResponse(null, {
     status: 302,
     headers: {

@@ -1024,11 +1024,21 @@ export class EdgeStack extends Stack {
     //   latency impact.
     // - enableLogging + logFilePrefix wire standard access logs to the
     //   stack-owned bucket.
-    // - The default behavior has NO origin request policy, by design:
-    //   without it CloudFront forwards only the cache-key headers
-    //   (Accept-Encoding plus the RSC headers keyed by `defaultRscCache`)
-    //   and never the Cookie header. Adding ALL_VIEWER here would leak
-    //   cookies onto the cacheable path.
+    // - The default behavior carries `viewerHostOrp` (#1930) and NOTHING
+    //   wider. STALE COMMENT WARNING: this used to read "no origin request
+    //   policy, by design" -- true until #1931. What still holds is the
+    //   reason behind it: ALL_VIEWER must never be attached here, because it
+    //   would forward cookies onto the CACHEABLE path and leak one viewer's
+    //   HTML to another. `viewerHostOrp` pins cookies/query to `none`
+    //   precisely to preserve that.
+    // - `viewerHostOrp` is now REDUNDANT and slated for removal: as of #1934
+    //   `middleware.ts` builds absolute Locations from the configured
+    //   `SITE_URL`, not from the request `Host`, so nothing on this behavior
+    //   reads the forwarded header any more. Removing it also removes the
+    //   forwarded-but-not-cache-keyed footgun that made the default behavior
+    //   Host-poisonable. Order matters: the app change must be RUNNING in an
+    //   env before the policy is dropped there, or that env regresses to
+    //   #1930 until the image rolls.
     // ------------------------------------------------------------------
     this.distribution = new cloudfront.Distribution(this, "Distribution", {
       comment: `SPS edge -- ${env}`,

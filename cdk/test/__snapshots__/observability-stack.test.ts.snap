@@ -83,7 +83,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
             "Ref": "AlarmTopicD01E77F9",
           },
         ],
-        "AlarmDescription": "Public serving is degraded or down (prod): one or more of 5xx-rate / zero-healthy-hosts / task-shortfall is in ALARM. Single P1 page for the serving cascade. See docs/SLOs.md. Next: open the reliability dashboard; if Aurora CPU/connections are also high, suspect DB connection-pool exhaustion; if it tracks the last deploy, roll back (DEPLOY-RUNBOOK.md).",
+        "AlarmDescription": "Public serving is degraded or down (prod): one or more of 5xx-rate / zero-healthy-hosts / task-shortfall / origin-leg-down / edge-unreachable is in ALARM. Single P1 page for the serving cascade. See docs/SLOs.md. Next: open the reliability dashboard. If ONLY the edge leaves fired, the ALB and ECS are healthy and the fault is upstream of them -- NetScaler VIP, the ALB :443 listener rule, or the origin certificate. If Aurora CPU/connections are also high, suspect DB connection-pool exhaustion; if it tracks the last deploy, roll back (DEPLOY-RUNBOOK.md).",
         "AlarmName": "sps-app-unavailable-prod",
         "AlarmRule": {
           "Fn::Join": [
@@ -107,6 +107,20 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
               {
                 "Fn::GetAtt": [
                   "EcsTaskShortfallAlarm951444EC",
+                  "Arn",
+                ],
+              },
+              "") OR ALARM("",
+              {
+                "Fn::GetAtt": [
+                  "EdgeOriginDownAlarm6F2DF616",
+                  "Arn",
+                ],
+              },
+              "") OR ALARM("",
+              {
+                "Fn::GetAtt": [
+                  "EdgeUnreachableAlarm8037B783",
                   "Arn",
                 ],
               },
@@ -310,6 +324,240 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         ],
         "Threshold": 0,
         "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EdgeOriginCertExpiringAlarmAE718AF1": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "The CloudFront origin (NetScaler VIP) certificate expires in under 30 days (prod). It is NOT in ACM and does NOT auto-renew -- rotation is a NetScaler/network-team change. On expiry CloudFront's origin handshake fails and every dynamic request returns 502. Next: raise the rotation with the network team; the cert owner is recorded in the runbook.",
+        "AlarmName": "sps-edge-origin-cert-expiring-prod",
+        "ComparisonOperator": "LessThanThreshold",
+        "DatapointsToAlarm": 1,
+        "Dimensions": [
+          {
+            "Name": "Environment",
+            "Value": "prod",
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "OriginCertDaysRemaining",
+        "Namespace": "SPS/Edge-prod",
+        "Period": 300,
+        "Statistic": "Minimum",
+        "Threshold": 30,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EdgeOriginDownAlarm6F2DF616": {
+      "Properties": {
+        "AlarmDescription": "The CloudFront origin leg is failing (prod): the synthetic probe could not get a 200 from the NetScaler VIP -> ALB :443 -> ECS path for 15 minutes, or the probe itself stopped reporting. The ALB/ECS alarms CANNOT see this -- if the VIP is down, requests never reach the ALB. Next: check the NetScaler VIP, the ALB :443 listener and its priority-1 X-Origin-Verify rule (a rotated secret presents identically), then the origin certificate. Backout: docs/2026-07-25-netscaler-prod-durability-handoff.md.",
+        "AlarmName": "sps-edge-origin-down-prod",
+        "ComparisonOperator": "LessThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "Environment",
+            "Value": "prod",
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "MetricName": "OriginProbeSuccess",
+        "Namespace": "SPS/Edge-prod",
+        "Period": 300,
+        "Statistic": "Minimum",
+        "Threshold": 1,
+        "TreatMissingData": "breaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EdgeOriginProbeFunctionC564A99A": {
+      "DependsOn": [
+        "EdgeOriginProbeFunctionServiceRoleDefaultPolicyC6B4E3BD",
+        "EdgeOriginProbeFunctionServiceRole6E5CE18E",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "e1a80021c5747c2e8d09002550302185c3b20d0087136e43ddb3e95e84a8456c.zip",
+        },
+        "Environment": {
+          "Variables": {
+            "EDGE_URL": "https://scholars.weill.cornell.edu/",
+            "ENVIRONMENT": "prod",
+            "ORIGIN_HEALTH_PATH": "/api/health",
+            "ORIGIN_HOSTNAME": "cf-ns-scholars.weill.cornell.edu",
+            "ORIGIN_SECRET_ARN": {
+              "Fn::Join": [
+                "",
+                [
+                  "arn:",
+                  {
+                    "Ref": "AWS::Partition",
+                  },
+                  ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret",
+                ],
+              ],
+            },
+          },
+        },
+        "FunctionName": "sps-edge-origin-probe-prod",
+        "Handler": "index.handler",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "EdgeOriginProbeLogGroupF3BD854F",
+          },
+        },
+        "MemorySize": 128,
+        "Role": {
+          "Fn::GetAtt": [
+            "EdgeOriginProbeFunctionServiceRole6E5CE18E",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 30,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "EdgeOriginProbeFunctionServiceRole6E5CE18E": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EdgeOriginProbeFunctionServiceRoleDefaultPolicyC6B4E3BD": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EdgeOriginProbeFunctionServiceRoleDefaultPolicyC6B4E3BD",
+        "Roles": [
+          {
+            "Ref": "EdgeOriginProbeFunctionServiceRole6E5CE18E",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "EdgeOriginProbeLogGroupF3BD854F": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/sps-edge-origin-probe-prod",
+        "RetentionInDays": 14,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "EdgeOriginProbeScheduleRuleAllowEventRuleSpsObservabilityprodEdgeOriginProbeFunctionF12C370C7C07EC64": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "EdgeOriginProbeFunctionC564A99A",
+            "Arn",
+          ],
+        },
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "EdgeOriginProbeScheduleRuleD14837CF",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "EdgeOriginProbeScheduleRuleD14837CF": {
+      "Properties": {
+        "Description": "Run the SPS edge origin-leg health probe (prod) every 5 minutes (#1934).",
+        "Name": "sps-edge-origin-probe-prod",
+        "ScheduleExpression": "rate(5 minutes)",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::GetAtt": [
+                "EdgeOriginProbeFunctionC564A99A",
+                "Arn",
+              ],
+            },
+            "Id": "Target0",
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
+    "EdgeUnreachableAlarm8037B783": {
+      "Properties": {
+        "AlarmDescription": "CloudFront is not answering at the public hostname (prod) for 15 minutes: TLS or DNS failed, not merely an error status. Next: check DNS resolution for the alias, the viewer certificate's expiry, and that the distribution is enabled and Deployed.",
+        "AlarmName": "sps-edge-unreachable-prod",
+        "ComparisonOperator": "LessThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "Environment",
+            "Value": "prod",
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "MetricName": "EdgeReachable",
+        "Namespace": "SPS/Edge-prod",
+        "Period": 300,
+        "Statistic": "Minimum",
+        "Threshold": 1,
+        "TreatMissingData": "breaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
@@ -1222,7 +1470,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
             "Ref": "AlarmTopicD01E77F9",
           },
         ],
-        "AlarmDescription": "Public serving is degraded or down (staging): one or more of 5xx-rate / zero-healthy-hosts / task-shortfall is in ALARM. Single P1 page for the serving cascade. See docs/SLOs.md. Next: open the reliability dashboard; if Aurora CPU/connections are also high, suspect DB connection-pool exhaustion; if it tracks the last deploy, roll back (DEPLOY-RUNBOOK.md).",
+        "AlarmDescription": "Public serving is degraded or down (staging): one or more of 5xx-rate / zero-healthy-hosts / task-shortfall / origin-leg-down / edge-unreachable is in ALARM. Single P1 page for the serving cascade. See docs/SLOs.md. Next: open the reliability dashboard. If ONLY the edge leaves fired, the ALB and ECS are healthy and the fault is upstream of them -- NetScaler VIP, the ALB :443 listener rule, or the origin certificate. If Aurora CPU/connections are also high, suspect DB connection-pool exhaustion; if it tracks the last deploy, roll back (DEPLOY-RUNBOOK.md).",
         "AlarmName": "sps-app-unavailable-staging",
         "AlarmRule": {
           "Fn::Join": [
@@ -1246,6 +1494,20 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
               {
                 "Fn::GetAtt": [
                   "EcsTaskShortfallAlarm951444EC",
+                  "Arn",
+                ],
+              },
+              "") OR ALARM("",
+              {
+                "Fn::GetAtt": [
+                  "EdgeOriginDownAlarm6F2DF616",
+                  "Arn",
+                ],
+              },
+              "") OR ALARM("",
+              {
+                "Fn::GetAtt": [
+                  "EdgeUnreachableAlarm8037B783",
                   "Arn",
                 ],
               },
@@ -1418,6 +1680,240 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         ],
         "Threshold": 0,
         "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EdgeOriginCertExpiringAlarmAE718AF1": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "The CloudFront origin (NetScaler VIP) certificate expires in under 30 days (staging). It is NOT in ACM and does NOT auto-renew -- rotation is a NetScaler/network-team change. On expiry CloudFront's origin handshake fails and every dynamic request returns 502. Next: raise the rotation with the network team; the cert owner is recorded in the runbook.",
+        "AlarmName": "sps-edge-origin-cert-expiring-staging",
+        "ComparisonOperator": "LessThanThreshold",
+        "DatapointsToAlarm": 1,
+        "Dimensions": [
+          {
+            "Name": "Environment",
+            "Value": "staging",
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "OriginCertDaysRemaining",
+        "Namespace": "SPS/Edge-staging",
+        "Period": 300,
+        "Statistic": "Minimum",
+        "Threshold": 30,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EdgeOriginDownAlarm6F2DF616": {
+      "Properties": {
+        "AlarmDescription": "The CloudFront origin leg is failing (staging): the synthetic probe could not get a 200 from the NetScaler VIP -> ALB :443 -> ECS path for 15 minutes, or the probe itself stopped reporting. The ALB/ECS alarms CANNOT see this -- if the VIP is down, requests never reach the ALB. Next: check the NetScaler VIP, the ALB :443 listener and its priority-1 X-Origin-Verify rule (a rotated secret presents identically), then the origin certificate. Backout: docs/2026-07-25-netscaler-prod-durability-handoff.md.",
+        "AlarmName": "sps-edge-origin-down-staging",
+        "ComparisonOperator": "LessThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "Environment",
+            "Value": "staging",
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "MetricName": "OriginProbeSuccess",
+        "Namespace": "SPS/Edge-staging",
+        "Period": 300,
+        "Statistic": "Minimum",
+        "Threshold": 1,
+        "TreatMissingData": "breaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EdgeOriginProbeFunctionC564A99A": {
+      "DependsOn": [
+        "EdgeOriginProbeFunctionServiceRoleDefaultPolicyC6B4E3BD",
+        "EdgeOriginProbeFunctionServiceRole6E5CE18E",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "e1a80021c5747c2e8d09002550302185c3b20d0087136e43ddb3e95e84a8456c.zip",
+        },
+        "Environment": {
+          "Variables": {
+            "EDGE_URL": "https://scholars-staging.weill.cornell.edu/",
+            "ENVIRONMENT": "staging",
+            "ORIGIN_HEALTH_PATH": "/api/health",
+            "ORIGIN_HOSTNAME": "cf-ns-scholars-staging.weill.cornell.edu",
+            "ORIGIN_SECRET_ARN": {
+              "Fn::Join": [
+                "",
+                [
+                  "arn:",
+                  {
+                    "Ref": "AWS::Partition",
+                  },
+                  ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret",
+                ],
+              ],
+            },
+          },
+        },
+        "FunctionName": "sps-edge-origin-probe-staging",
+        "Handler": "index.handler",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "EdgeOriginProbeLogGroupF3BD854F",
+          },
+        },
+        "MemorySize": 128,
+        "Role": {
+          "Fn::GetAtt": [
+            "EdgeOriginProbeFunctionServiceRole6E5CE18E",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 30,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "EdgeOriginProbeFunctionServiceRole6E5CE18E": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EdgeOriginProbeFunctionServiceRoleDefaultPolicyC6B4E3BD": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EdgeOriginProbeFunctionServiceRoleDefaultPolicyC6B4E3BD",
+        "Roles": [
+          {
+            "Ref": "EdgeOriginProbeFunctionServiceRole6E5CE18E",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "EdgeOriginProbeLogGroupF3BD854F": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/sps-edge-origin-probe-staging",
+        "RetentionInDays": 14,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "EdgeOriginProbeScheduleRuleAllowEventRuleSpsObservabilitystagingEdgeOriginProbeFunction4977CB4BA060EA57": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "EdgeOriginProbeFunctionC564A99A",
+            "Arn",
+          ],
+        },
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "EdgeOriginProbeScheduleRuleD14837CF",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "EdgeOriginProbeScheduleRuleD14837CF": {
+      "Properties": {
+        "Description": "Run the SPS edge origin-leg health probe (staging) every 5 minutes (#1934).",
+        "Name": "sps-edge-origin-probe-staging",
+        "ScheduleExpression": "rate(5 minutes)",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::GetAtt": [
+                "EdgeOriginProbeFunctionC564A99A",
+                "Arn",
+              ],
+            },
+            "Id": "Target0",
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
+    "EdgeUnreachableAlarm8037B783": {
+      "Properties": {
+        "AlarmDescription": "CloudFront is not answering at the public hostname (staging) for 15 minutes: TLS or DNS failed, not merely an error status. Next: check DNS resolution for the alias, the viewer certificate's expiry, and that the distribution is enabled and Deployed.",
+        "AlarmName": "sps-edge-unreachable-staging",
+        "ComparisonOperator": "LessThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "Environment",
+            "Value": "staging",
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "MetricName": "EdgeReachable",
+        "Namespace": "SPS/Edge-staging",
+        "Period": 300,
+        "Statistic": "Minimum",
+        "Threshold": 1,
+        "TreatMissingData": "breaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
