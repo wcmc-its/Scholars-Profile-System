@@ -256,6 +256,55 @@ const MENTION_BUCKET = [
   },
 ];
 
+// #1952 — the tagged label and the `match=concept` set gate must share ONE
+// admission predicate. The gate filters on `publicationMeshUi`, which the ETL
+// min-evidence-filters; the tagged COUNT comes from sources that do not (the
+// doc's `meshSubtreeCounts`, and the agg's raw pub count). So a scholar with one
+// middle-author paper on the concept used to read "N of M publications tagged X"
+// while `match=concept` hid them. The gate lives at the reasonCounts READ, so
+// both the doc path and the agg path are covered by these two assertions.
+describe("searchPeople — tagged label obeys the concept-set predicate (#1952)", () => {
+  const CONCEPT_UI = "D000078277";
+  const source = HITS[0]._source as Record<string, unknown>;
+  const taggedBucket = [{ key: "el1", tagged: { doc_count: 1 }, mention: { doc_count: 0 } }];
+
+  afterEach(() => {
+    delete source.publicationMeshUi;
+  });
+
+  const run = () =>
+    searchPeople({
+      q: "gun violence",
+      relevanceMode: "v3",
+      shape: "topic",
+      matchExplain: true,
+      meshDescendantUis: [CONCEPT_UI],
+      meshDescriptorName: "Gun Violence",
+      matchAwareContext: { methodFamily: null, topics: [] },
+    });
+
+  it("descriptor NOT in publicationMeshUi ⇒ the tagged count is withheld", async () => {
+    process.env[EVIDENCE] = "on";
+    mockReasonAgg.mockReturnValue(taggedBucket);
+    // HITS[0]._source carries no `publicationMeshUi` — the scholar the ETL's
+    // min-evidence gate excluded, i.e. exactly who `match=concept` hides.
+    const result = await run();
+    const ev = result.hits[0].evidence ?? result.hits[0].evidenceLines?.[0];
+    expect(ev?.kind === "publications" && ev.strength === "tagged").toBe(false);
+  });
+
+  it("descriptor IS in publicationMeshUi ⇒ the tagged count survives", async () => {
+    process.env[EVIDENCE] = "on";
+    mockReasonAgg.mockReturnValue(taggedBucket);
+    source.publicationMeshUi = [CONCEPT_UI];
+    const result = await run();
+    const lines = result.hits[0].evidenceLines ?? [result.hits[0].evidence];
+    expect(
+      lines.some((e) => e?.kind === "publications" && e.strength === "tagged"),
+    ).toBe(true);
+  });
+});
+
 describe("searchPeople — free-text publications:mention evidence (#1)", () => {
   it("flag OFF + matchExplain on + free-text query ⇒ NO reason agg, NO mention reason line", async () => {
     // No EVIDENCE flag. matchExplain on, a free-text query with no shape →

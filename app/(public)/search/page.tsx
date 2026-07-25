@@ -56,6 +56,7 @@ import {
   CONCEPT_FALLBACK_SPARSE_THRESHOLD,
 } from "@/lib/api/search-flags";
 import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
+import { isResearchMatchEvidence } from "@/lib/api/result-evidence";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
 import {
@@ -1326,6 +1327,37 @@ async function PeopleResults({
     label: deptDivLabel(b.value, deptDivLabelMap),
   }));
 
+  // #1953 — a scholar the query matched NOTHING in gets a count, not a card that
+  // deep-links into an unrelated topic. Same rule and copy as Matcha
+  // (components/edit/matcha-panel.tsx:682, :1998).
+  //
+  // `affiliation` counts as a match even though isResearchMatchEvidence says no
+  // (lib/api/result-evidence.ts:734): it renders the literal query inside the
+  // person's own org string, so the card is not evidence-free. Without this,
+  // `topic_template` swallowing the `unclassified` shape would drop every
+  // scholar whose center name contains "precision medicine" / "imaging".
+  //
+  // Gate 1 `topic_template` — the only shape that even attempts research
+  //   evidence (lib/api/search.ts applyTopicTemplate → runReasonAgg). A name,
+  //   department, or empty query is never folded.
+  // Gate 2 `scope !== "concept"` — concept scope admits grant-only scholars via
+  //   the #921 grant axis (SEARCH_PEOPLE_CONCEPT_GRANT_AXIS is on in both envs).
+  //   They carry no tagged publication by construction, so folding them would
+  //   hide exactly the people that axis exists to surface.
+  // Gate 3 `.length > 0` — fail-open. SEARCH_RESULT_EVIDENCE is a per-request
+  //   flag applied uniformly in one .map, so flag-off ⇒ no hit carries either
+  //   field ⇒ this is empty ⇒ no fold.
+  const withEvidence =
+    result.queryShape === "topic_template" && scope !== "concept"
+      ? result.hits.filter((h) =>
+          (h.evidenceLines ?? (h.evidence ? [h.evidence] : [])).some(
+            (e) => isResearchMatchEvidence(e) || e.kind === "affiliation",
+          ),
+        )
+      : [];
+  const shownHits = withEvidence.length > 0 ? withEvidence : result.hits;
+  const noEvidenceHidden = result.hits.length - shownHits.length;
+
   return (
     <>
       <FacetSidebar
@@ -1372,7 +1404,7 @@ async function PeopleResults({
           />
         ) : (
           <ul className="flex flex-col">
-            {result.hits.map((h, i) => (
+            {shownHits.map((h, i) => (
               <li key={h.cwid}>
                 <PeopleResultCardStreamed
                   hit={h}
@@ -1388,6 +1420,11 @@ async function PeopleResults({
             ))}
           </ul>
         )}
+        {noEvidenceHidden > 0 ? (
+          <p className="text-muted-foreground mt-4 text-[11px]">
+            {noEvidenceHidden} with no evidence hidden
+          </p>
+        ) : null}
         <Pagination
           page={result.page}
           total={result.total}
