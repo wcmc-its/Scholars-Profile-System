@@ -3038,6 +3038,44 @@ export async function searchPeople(opts: {
     pageCwids.length > 0 &&
     runReasonAgg &&
     opts.skipReasonAgg !== true;
+  // #1952 — the label must not claim a concept match that `match=concept` rejects.
+  // The set gate at :2157 filters on `publicationMeshUi`, which the ETL keeps only
+  // for a descriptor on >= 2 pubs or on a first/last-author pub
+  // (lib/search-index-docs.ts, the min-evidence gate). NEITHER tagged-count source
+  // applies that test — the doc count reads the threshold-free `meshSubtreeCounts`
+  // and the agg counts raw pubs — so one middle-author paper counts for the label
+  // and not for the filter, and the same scholar reads "1 of 415 publications
+  // tagged X" in `expanded` while `match=concept` hides them entirely.
+  //
+  // DELIBERATELY UNSCOPED. The filter runs only under `concept`, but the label is
+  // gated in EVERY scope — the cross-scope contradiction IS the bug. `exact` is
+  // inert (`meshDescendantUis` empty ⇒ the short-circuit below, and tagged is
+  // already 0 there: the sub-agg is omitted and the doc path is disabled).
+  //
+  // NARROWER THAN THE FILTER IN ONE CASE, on purpose: under #921's grant axis the
+  // gate at :2162-2173 is a `should` that also admits grant-matched cwids. Those
+  // are not gated in here, so a grant-admitted scholar can lose a sub-threshold pub
+  // label. That only ever under-claims, never over-claims.
+  //
+  // Gated at the READ, not the write, so `zeroTaggedCwids` below is still computed
+  // from the ungated counts. Zeroing at the write would push gated-out cwids into
+  // the mention fallback and fire a publications-index agg on searches that
+  // previously issued none — breaking the invariant stated in the next comment —
+  // and would churn `reasonAggKey`, which is built from that varying cwid subset.
+  // The trade: a gated-out scholar shows no mention line either, and falls to
+  // clinical/bio/topic/concepts evidence instead.
+  const conceptUiSet = new Set(meshDescendantUis);
+  const conceptTagged = new Set<string>(
+    conceptUiSet.size === 0
+      ? pageCwids
+      : r.hits.hits
+          .filter((h) => (h._source.publicationMeshUi ?? []).some((ui) => conceptUiSet.has(ui)))
+          .map((h) => h._source.cwid),
+  );
+  const countsFor = (cwid: string) => {
+    const c = reasonCounts.get(cwid);
+    return c && !conceptTagged.has(cwid) ? { tagged: 0, mention: c.mention } : c;
+  };
   // Search reason-from-doc — serve the tagged count from `_source.meshSubtreeCounts`
   // (O(1) lookup) and SKIP the publications-index tagged agg entirely. The
   // mention-only agg fires ONLY when the tagged count is zero for some page cwid
@@ -3301,7 +3339,7 @@ export async function searchPeople(opts: {
     // the existing `composeMatchReason` output is byte-identical.
     const reps = reasonReps.get(cwid);
     return composeMatchReason({
-      counts: reasonCounts.get(cwid),
+      counts: countsFor(cwid),
       rep: reps ? { tagged: reps.tagged?.[0], mention: reps.mention?.[0] } : undefined,
       pubCount,
       hasProvenance,
@@ -3383,7 +3421,7 @@ export async function searchPeople(opts: {
     // precedence can rank `tagged` above the bio and `mention` below it (handoff
     // §5.0C); same text format as `composeMatchReason`. Concept is the folded
     // text variant (Case F).
-    const counts = reasonCounts.get(cwid);
+    const counts = countsFor(cwid);
     const reps = reasonReps.get(cwid);
     const pub: NonNullable<Parameters<typeof selectEvidence>[0]["pub"]> = {};
     // `tagged` is only meaningful with a resolved descriptor NAME to show — guard
