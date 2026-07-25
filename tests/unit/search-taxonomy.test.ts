@@ -1775,6 +1775,33 @@ describe("resolveMeshDescriptor — #1348 token-coverage guard (SEARCH_MESH_RESO
     mockMeshFindMany.mockResolvedValue([D_SPANNING]);
     expect(await resolveMeshDescriptor("acute hepatic / renal failure")).toBeNull();
   });
+
+  // A ONE-token conjunct is 1/1 of itself, so per-conjunct coverage admits it on its own —
+  // while the generic stoplist below is inert under the guard. A bare generic word then wins
+  // a query that carried far more. "Blood and Marrow Transplantation" is a real program name;
+  // the concept is the transplant, not Blood.
+  it("coverage ON: a one-token conjunct cannot resolve — 'blood and marrow transplantation' declines", async () => {
+    process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE = "on";
+    const D_BLOOD = {
+      descriptorUi: "D001769",
+      name: "Blood",
+      entryTerms: [],
+      scopeNote: null,
+      dateRevised: null,
+      treeNumbers: ["A15.145"],
+    };
+    mockMeshFindMany.mockResolvedValue([D_BLOOD]);
+    expect(await resolveMeshDescriptor("blood and marrow transplantation")).toBeNull();
+  });
+
+  // The case no stoplist can close: "policy" is absent from GENERIC_DESCRIPTOR_NAMES, so
+  // re-enabling that list under the guard is NOT an equivalent fix. This is the assertion
+  // that forecloses the "just delete the `!coverageGuardOn &&`" counter-proposal.
+  it("coverage ON: a one-token conjunct cannot resolve a NON-stoplisted generic either", async () => {
+    process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE = "on";
+    mockMeshFindMany.mockResolvedValue([D_POLICY]);
+    expect(await resolveMeshDescriptor("policy and health outcomes")).toBeNull();
+  });
 });
 
 describe("singularizeForMatch (#1342 pure helper)", () => {

@@ -1564,10 +1564,16 @@ function resolveByWindowFallback(map: MeshMap, query: string): MeshResolution | 
       // #1348 coverage guard — the window must lie WITHIN one conjunct and cover a strict
       // majority of THAT conjunct's tokens. `patient safety` is 2/2 of its conjunct (admits)
       // though only 2/4 of the query; `policy` in `foreign policy` is 1/2 of its sole
-      // conjunct (declines). A single-token window can only pass in a 1-token conjunct.
+      // conjunct (declines). A single-token window never passes: see the clamp below.
       if (coverageGuardOn) {
         if (convIdx[i] !== convIdx[i + size - 1]) continue; // spans a conjunct boundary
-        if (!windowCoversMajority(size, convSize[i])) continue; // not a majority of its conjunct
+        // Clamp the denominator to 2: a ONE-token conjunct is not self-covering. `blood` in
+        // `blood and marrow transplantation` is 1/1 of its own conjunct, so the bare rule
+        // admits it — and the generic stoplist below is inert under the guard, so nothing
+        // else stops it. Requiring >= 2 of the user's words also closes the cases no
+        // stoplist can: `policy` is not in GENERIC_DESCRIPTOR_NAMES. For size >= 2 the
+        // boundary check above forces convSize[i] >= size >= 2, so the clamp is a no-op.
+        if (!windowCoversMajority(size, Math.max(convSize[i], 2))) continue; // not a majority of its conjunct
       }
       const cands = rankedDescriptorCandidates(map, key);
       if (cands.length === 0) continue;
@@ -1575,9 +1581,9 @@ function resolveByWindowFallback(map: MeshMap, query: string): MeshResolution | 
       // Single-token windows: exact descriptor-NAME match only.
       if (size === 1 && top.confidence !== "exact") continue;
       // #1348 — and (flag-OFF path) never to a generic single-word descriptor (Medicine/
-      // Blood/…); skip so a shorter/other window resolves. Superseded under the coverage
-      // guard (a 1-token window only passes in a 1-token conjunct, which has no larger
-      // sibling window to prefer); kept as the flag-OFF path, byte-identical to today.
+      // Blood/…); skip so a shorter/other window resolves. Inert under the coverage guard,
+      // which now rejects EVERY 1-token window above; kept as the flag-OFF path,
+      // byte-identical to today.
       if (!coverageGuardOn && size === 1 && GENERIC_DESCRIPTOR_NAMES.has(key)) continue;
       hits.push({ row: top.row, matchedForm: surface });
     }
