@@ -590,7 +590,12 @@ describe("MatchaPanel", () => {
       i < 5 ? { ...c, measures: { ...c.measures, careerStage: "early" as const } } : c,
     );
     stubFetch({ concepts: CONCEPTS, candidates: staged });
-    render(<MatchaPanel grantMatcha eligibility={{ careerStages: ["early"] }} />);
+    render(
+      <MatchaPanel
+        grantMatcha
+        eligibility={{ careerStages: ["early"], esiTargeted: false, usRequired: false }}
+      />,
+    );
     fireEvent.change(screen.getByLabelText(/the ask/i), {
       target: { value: "CAR T collaborators" },
     });
