@@ -678,7 +678,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
         tier="lesser"
       />,
     );
-    expect(container.textContent).toMatch(/Method · CRISPR genome editing/);
+    expect(container.textContent).toMatch(/Method.?CRISPR genome editing/);
     // `methodFamilyCounts` is precomputed at index time and is NOT query-filtered, so it
     // cannot wear the "N of M" share frame the query-relative publications count wears —
     // side by side they read as one scale and are not. Magnitude, no denominator.
@@ -686,6 +686,53 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
     expect(container.textContent).not.toMatch(/of 44/);
     expect(dotOf(container)).toBeNull();
     expect(pillsIn(container)).toEqual([]);
+  });
+
+  it("every lesser kind puts its label in the SAME 108px column, and the entity outside it", () => {
+    // The alignment is arithmetic, not taste: the panel's 16px indent + this 108px column +
+    // the row's 7px gap equals the primary lead's 124px column + 7px gap, which is what puts
+    // "Prostate & Urologic Cancer" at the same x as "168 of 529 publications tagged".
+    // Three things can silently break it and all three are asserted here — a kind rendering
+    // its label back inside `children`, a kind picking a different width, and a future label
+    // longer than 108px pushing its own column open. jsdom computes no layout, so this pins
+    // the class contract the Chromium measurement rests on.
+    const kinds = [
+      { evidence: { kind: "method", family: "CRISPR genome editing", tools: [], count: 3 }, word: "Method" },
+      { evidence: { kind: "topic", label: "Immunology", id: "immuno", count: 2 }, word: "Research area" },
+      { evidence: { kind: "clinical", specialty: "Cardiology", boardCertified: true }, word: "Clinical" },
+      {
+        evidence: { kind: "publications", strength: "tagged", text: "5 of 44 publications tagged", term: "Melanoma", count: 5 },
+        word: "Concept",
+      },
+    ] as const;
+    for (const { evidence, word } of kinds) {
+      const { container, unmount } = render(
+        <ResultEvidence evidence={evidence as Evidence} pubCount={44} tier="lesser" />,
+      );
+      const label = within(container).getByText(word);
+      expect(label.className, `${word} label column`).toMatch(/lg:w-\[108px\]/);
+      expect(label.className, `${word} must not shrink`).toMatch(/shrink-0/);
+      // …and the entity is a SIBLING of the column, never inside it — inside, it would ride
+      // the label's width and the column would buy nothing.
+      expect(label.textContent).toBe(word);
+      unmount();
+    }
+  });
+
+  it("the label→entity separator exists ONLY below `lg`, where there is no column", () => {
+    // With the column live the middot is noise; without it (narrow, same degradation as the
+    // lead's kind word) label and entity would read as one phrase across a 7px gap.
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "topic", label: "Immunology", id: "immuno", count: 2 }}
+        pubCount={44}
+        tier="lesser"
+      />,
+    );
+    const sep = [...container.querySelectorAll("span")].find((s) => s.textContent === "·");
+    expect(sep, "no separator rendered at all").toBeTruthy();
+    expect(sep!.className).toMatch(/lg:hidden/);
+    expect(sep!.getAttribute("aria-hidden")).toBe("true");
   });
 
   it("the PUBLICATIONS lesser row KEEPS its denominator — that count IS query-relative", () => {
@@ -728,7 +775,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
         tier="lesser"
       />,
     );
-    expect(container.textContent).toMatch(/Research area · Stem Cell & Regenerative Medicine/);
+    expect(container.textContent).toMatch(/Research area.?Stem Cell & Regenerative Medicine/);
     // Same as method: `areaCounts` is the scholar's total in the area, unchanged by the
     // query that selected the area. It states a magnitude, never a share of output.
     expect(container.textContent).toMatch(/· 2 publications/);
@@ -783,8 +830,8 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
         />
       </>,
     );
-    expect(container.textContent).toMatch(/Method · CRISPR genome editing/);
-    expect(container.textContent).toMatch(/Concept · Melanoma/);
+    expect(container.textContent).toMatch(/Method.?CRISPR genome editing/);
+    expect(container.textContent).toMatch(/Concept.?Melanoma/);
     expect(container.innerHTML).not.toContain("--evidence-accent");
   });
 
@@ -796,7 +843,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
         tier="lesser"
       />,
     );
-    expect(container.textContent).toMatch(/Clinical · Cardiology/);
+    expect(container.textContent).toMatch(/Clinical.?Cardiology/);
     expect(container.textContent).not.toMatch(/of 44/);
     expect(pillsIn(container)).toEqual([]);
   });

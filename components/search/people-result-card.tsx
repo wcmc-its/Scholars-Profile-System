@@ -476,6 +476,7 @@ export function PeopleResultCard({
           </MatchAwareReason>
         ) : (
           <LesserReason
+            label="Funding"
             // #1913 — no dot. A literal mention's weakness is carried by `weak`
             // (muted/italic text) + the MentionNote.
             weak={!fundingTagged}
@@ -492,7 +493,7 @@ export function PeopleResultCard({
             panelId={fundingPanelId}
             srLabel="key funding"
           >
-            <span className="font-medium">Funding</span> · {fundingCount}{" "}
+            {fundingCount}{" "}
             {fundingTagged ? (
               <>
                 tagged{" "}

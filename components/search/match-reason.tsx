@@ -594,6 +594,7 @@ export function MentionNote() {
  * signal always actually lived.
  */
 export function LesserReason({
+  label,
   children,
   suffix,
   pill,
@@ -604,6 +605,10 @@ export function LesserReason({
   panelId,
   srLabel = "key papers",
 }: {
+  /** The kind word ("Research area", "Clinical", "Funding", …) — its OWN column, not the
+   *  head of `children`. Required: a row without one has nothing holding the column open
+   *  and would put its entity 108px left of every sibling. */
+  label: ReactNode;
   children: ReactNode;
   /** Abbreviated "· N of M" count (no "publications" word); omitted ⇒ label-only. */
   suffix?: string;
@@ -622,11 +627,25 @@ export function LesserReason({
   panelId?: string;
   srLabel?: string;
 }) {
+  const ink = weak ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-body)]";
   const inner = (
     <>
-      <span
-        className={`min-w-0 truncate text-[12px] ${weak ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-body)]"}`}
-      >
+      {/* The kind word is a COLUMN, not a prefix. As inline text before a middot it ended
+          wherever the word ended, so the three revealed rows started their entities at three
+          different x positions — measured 40.1px apart, with nothing for the eye to run down.
+          108px is not chosen for the label, it is chosen for what follows it: the 16px panel
+          indent + 108 + the row's 7px gap equals the primary lead's 124 + 7, so "Prostate &
+          Urologic Cancer" begins at exactly the same x as "168 of 529 publications tagged".
+          The labels step in under the lead; everything right of them shares one column with it.
+          Widen the widest label past 108px and that identity breaks — see the test. */}
+      <span className={`shrink-0 text-[12px] font-medium lg:w-[108px] ${ink}`}>{label}</span>
+      {/* Below `lg` there is no column (same narrow degradation as the lead's kind word), so
+          the separator has to come back or label and entity read as one phrase across a 7px
+          gap. It exists ONLY there. */}
+      <span aria-hidden className={`shrink-0 text-[12px] lg:hidden ${ink}`}>
+        ·
+      </span>
+      <span className={`min-w-0 truncate text-[12px] ${ink}`}>
         {children}
         {suffix ? <span className="text-[var(--evidence-faint)]">{suffix}</span> : null}
       </span>
@@ -648,8 +667,11 @@ export function LesserReason({
       </div>
     );
   }
+  // `gap-[7px]`, matching `DisclosureRow`. It was 9px, which mattered for nothing while the
+  // label was inline text and misaligns the column by 2px now that it is not — the clinical
+  // row is the non-expandable one, so it would have been the single row out of line.
   return (
-    <div className="mt-1 flex min-w-0 items-center gap-[9px] py-[1px] leading-snug">{inner}</div>
+    <div className="mt-1 flex min-w-0 items-center gap-[7px] py-[1px] leading-snug">{inner}</div>
   );
 }
 
