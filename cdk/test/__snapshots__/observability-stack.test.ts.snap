@@ -372,7 +372,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         "Period": 300,
         "Statistic": "Minimum",
         "Threshold": 1,
-        "TreatMissingData": "breaching",
+        "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
@@ -384,7 +384,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "e1a80021c5747c2e8d09002550302185c3b20d0087136e43ddb3e95e84a8456c.zip",
+          "S3Key": "3adb5c98496867b70506f765faa8bddcb5239ad34717bf63e21cdba052f77f4a.zip",
         },
         "Environment": {
           "Variables": {
@@ -392,18 +392,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
             "ENVIRONMENT": "prod",
             "ORIGIN_HEALTH_PATH": "/api/health",
             "ORIGIN_HOSTNAME": "cf-ns-scholars.weill.cornell.edu",
-            "ORIGIN_SECRET_ARN": {
-              "Fn::Join": [
-                "",
-                [
-                  "arn:",
-                  {
-                    "Ref": "AWS::Partition",
-                  },
-                  ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret",
-                ],
-              ],
-            },
+            "ORIGIN_SECRET_ID": "scholars/prod/edge/origin-shared-secret",
           },
         },
         "FunctionName": "sps-edge-origin-probe-prod",
@@ -466,18 +455,32 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
                 "secretsmanager:DescribeSecret",
               ],
               "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret-??????",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret",
+                    ],
                   ],
-                ],
-              },
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret-??????",
+                    ],
+                  ],
+                },
+              ],
             },
           ],
           "Version": "2012-10-17",
@@ -539,6 +542,35 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::Events::Rule",
     },
+    "EdgeProbeStalledAlarmC0A839B7": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "The edge origin probe has not run for 15 minutes (prod), so the origin-leg alarms are blind -- they cannot distinguish a healthy origin from an unmeasured one. This is a monitoring failure, not a serving outage. Next: check the sps-edge-origin-probe-prod function's errors and its EventBridge schedule rule.",
+        "AlarmName": "sps-edge-probe-stalled-prod",
+        "ComparisonOperator": "LessThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": {
+              "Ref": "EdgeOriginProbeFunctionC564A99A",
+            },
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "MetricName": "Invocations",
+        "Namespace": "AWS/Lambda",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "breaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
     "EdgeUnreachableAlarm8037B783": {
       "Properties": {
         "AlarmDescription": "CloudFront is not answering at the public hostname (prod) for 15 minutes: TLS or DNS failed, not merely an error status. Next: check DNS resolution for the alias, the viewer certificate's expiry, and that the distribution is enabled and Deployed.",
@@ -557,7 +589,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         "Period": 300,
         "Statistic": "Minimum",
         "Threshold": 1,
-        "TreatMissingData": "breaching",
+        "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
@@ -1728,7 +1760,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         "Period": 300,
         "Statistic": "Minimum",
         "Threshold": 1,
-        "TreatMissingData": "breaching",
+        "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
@@ -1740,7 +1772,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "e1a80021c5747c2e8d09002550302185c3b20d0087136e43ddb3e95e84a8456c.zip",
+          "S3Key": "3adb5c98496867b70506f765faa8bddcb5239ad34717bf63e21cdba052f77f4a.zip",
         },
         "Environment": {
           "Variables": {
@@ -1748,18 +1780,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
             "ENVIRONMENT": "staging",
             "ORIGIN_HEALTH_PATH": "/api/health",
             "ORIGIN_HOSTNAME": "cf-ns-scholars-staging.weill.cornell.edu",
-            "ORIGIN_SECRET_ARN": {
-              "Fn::Join": [
-                "",
-                [
-                  "arn:",
-                  {
-                    "Ref": "AWS::Partition",
-                  },
-                  ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret",
-                ],
-              ],
-            },
+            "ORIGIN_SECRET_ID": "scholars/staging/edge/origin-shared-secret",
           },
         },
         "FunctionName": "sps-edge-origin-probe-staging",
@@ -1822,18 +1843,32 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
                 "secretsmanager:DescribeSecret",
               ],
               "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret-??????",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret",
+                    ],
                   ],
-                ],
-              },
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret-??????",
+                    ],
+                  ],
+                },
+              ],
             },
           ],
           "Version": "2012-10-17",
@@ -1895,6 +1930,35 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::Events::Rule",
     },
+    "EdgeProbeStalledAlarmC0A839B7": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "The edge origin probe has not run for 15 minutes (staging), so the origin-leg alarms are blind -- they cannot distinguish a healthy origin from an unmeasured one. This is a monitoring failure, not a serving outage. Next: check the sps-edge-origin-probe-staging function's errors and its EventBridge schedule rule.",
+        "AlarmName": "sps-edge-probe-stalled-staging",
+        "ComparisonOperator": "LessThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": {
+              "Ref": "EdgeOriginProbeFunctionC564A99A",
+            },
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "MetricName": "Invocations",
+        "Namespace": "AWS/Lambda",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "breaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
     "EdgeUnreachableAlarm8037B783": {
       "Properties": {
         "AlarmDescription": "CloudFront is not answering at the public hostname (staging) for 15 minutes: TLS or DNS failed, not merely an error status. Next: check DNS resolution for the alias, the viewer certificate's expiry, and that the distribution is enabled and Deployed.",
@@ -1913,7 +1977,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         "Period": 300,
         "Statistic": "Minimum",
         "Threshold": 1,
-        "TreatMissingData": "breaching",
+        "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
     },

@@ -60,19 +60,35 @@ interface ProbeMetrics {
   EdgeReachable: number;
 }
 
-let cachedSecret: string | undefined;
+/**
+ * How long a fetched secret stays cached. NOT an arbitrary number: caching for
+ * the container's whole life was a real defect. The origin shared secret is
+ * rotatable, and a rotation requires an ordered two-value overlap (add the new
+ * value to both ALB rules, flip CloudFront, drop the old). A probe holding the
+ * pre-rotation value indefinitely would start failing its health check the
+ * moment the old value is dropped and report a FALSE OUTAGE -- paging on-call
+ * for a successful rotation -- until something happened to cold-start it.
+ *
+ * 10 minutes bounds that to two probe cycles while still collapsing the
+ * common case to one Secrets Manager call per container per 10 minutes.
+ */
+const SECRET_TTL_MS = 10 * 60 * 1000;
+
+let cachedSecret: { value: string; fetchedAt: number } | undefined;
 let cachedClient: SecretsManagerClient | undefined;
 
-async function getOriginSecret(secretArn: string): Promise<string> {
-  if (cachedSecret !== undefined) return cachedSecret;
+async function getOriginSecret(secretId: string): Promise<string> {
+  if (cachedSecret && Date.now() - cachedSecret.fetchedAt < SECRET_TTL_MS) {
+    return cachedSecret.value;
+  }
   cachedClient ??= new SecretsManagerClient({});
   const res = await cachedClient.send(
-    new GetSecretValueCommand({ SecretId: secretArn }),
+    new GetSecretValueCommand({ SecretId: secretId }),
   );
   // The origin shared secret is a PLAIN string, not JSON (see secrets-stack.ts).
   const value = res.SecretString;
   if (!value) throw new Error("origin shared secret is empty");
-  cachedSecret = value;
+  cachedSecret = { value, fetchedAt: Date.now() };
   return value;
 }
 
@@ -174,15 +190,23 @@ function emit(environment: string, metrics: ProbeMetrics): void {
 export async function handler(): Promise<void> {
   const environment = process.env.ENVIRONMENT ?? "unknown";
   const originHostname = process.env.ORIGIN_HOSTNAME;
-  const secretArn = process.env.ORIGIN_SECRET_ARN;
+  // The secret NAME, not a partial ARN. `Secret.fromSecretNameV2(...).secretArn`
+  // yields an ARN with the AWS-generated 6-character suffix STRIPPED, and
+  // passing that as SecretId is the one identifier form AWS documents as
+  // unreliable: the live secret resolved fine but authorization failed against
+  // a policy that literally listed both the suffixed and suffix-less ARNs, and
+  // `iam simulate-principal-policy` said "allowed" for both. Measured on
+  // staging 2026-07-25 across a cold start. A friendly name resolves and
+  // authorizes consistently.
+  const secretId = process.env.ORIGIN_SECRET_ID;
   const healthPath = process.env.ORIGIN_HEALTH_PATH ?? "/api/health";
   const edgeUrl = process.env.EDGE_URL;
 
-  if (!originHostname || !secretArn) {
+  if (!originHostname || !secretId) {
     // Misconfiguration must be LOUD, not a silent healthy-looking 1. Emitting
     // a 0 here would also be wrong -- it would page on-call for a CDK bug.
     throw new Error(
-      "ORIGIN_HOSTNAME and ORIGIN_SECRET_ARN are required; refusing to report a health verdict",
+      "ORIGIN_HOSTNAME and ORIGIN_SECRET_ID are required; refusing to report a health verdict",
     );
   }
 
@@ -197,7 +221,7 @@ export async function handler(): Promise<void> {
   }
 
   try {
-    const secret = await getOriginSecret(secretArn);
+    const secret = await getOriginSecret(secretId);
     const { status, latencyMs } = await httpProbe(
       `https://${originHostname}${healthPath}`,
       {
