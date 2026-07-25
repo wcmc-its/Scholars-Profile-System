@@ -307,10 +307,82 @@ export function CountFirst({
   );
 }
 
+/**
+ * Uniform fold rule — the provenance pill. THREE values, and they answer "how do we know
+ * this?", never "what category is this?": a subject tag, a bare keyword hit, or a held
+ * credential. Every kind draws from the SAME two token pairs, which is the whole
+ * difference from the axis #1913 retired — that one resolved a per-CATEGORY hue in a
+ * column already naming the category, so it distinguished two values across 98% of rows.
+ *
+ * `--apollo-green-foreground`, NOT `--apollo-green`: the token literally named "semantic
+ * green" is the obvious pick for green pill text and it scores 4.39:1 on its own tint,
+ * which FAILS AA at 11px. The pair used here measures 6.92:1 (amber 5.28:1).
+ *
+ * `rounded-[3px]`, not a capsule: a pill-shaped token in a category colour is what the
+ * retired per-category dot looked like, and the shape is the part a reader recognises
+ * before the word. The 1px border is LOAD-BEARING, not trim — the green tint is only
+ * ΔE76 5.01 against the row-hover fill #f0eeea, so on hover the border (ΔE 12.30) is what
+ * keeps the pill a distinct object. Do not "simplify" it away.
+ */
+export type EvidencePillKind = "subject-tagged" | "keyword-only" | "credential";
+
+const PILL: Record<EvidencePillKind, { word: string; cls: string }> = {
+  "subject-tagged": {
+    word: "subject-tagged",
+    cls: "border-[var(--apollo-green-tint-border)] bg-[var(--apollo-green-tint)] text-[var(--apollo-green-foreground)]",
+  },
+  "keyword-only": {
+    word: "keyword only",
+    cls: "border-[var(--apollo-amber-tint-border)] bg-[var(--apollo-amber-tint)] text-[var(--apollo-amber)]",
+  },
+  credential: {
+    word: "credential",
+    cls: "border-[var(--apollo-green-tint-border)] bg-[var(--apollo-green-tint)] text-[var(--apollo-green-foreground)]",
+  },
+};
+
+/** One component so the token mapping lives in exactly one place and the `shrink-0`
+ *  contract (#1907 — see {@link MatchAwareReason}) cannot be lost at a call site.
+ *
+ *  `hideBelow` picks ONE display utility rather than appending `hidden` to the
+ *  `inline-flex` already in the string: two unprefixed utilities for the same property
+ *  resolve by generated-stylesheet order in Tailwind v4, not by class order, so which one
+ *  won would not be readable here. Base-versus-variant is the ordering that IS defined. */
+export function EvidencePill({
+  kind,
+  hideBelow,
+}: {
+  kind: EvidencePillKind;
+  /** Below which breakpoint the pill is dropped, because the line it trails cannot hold
+   *  it AND the phrase. The two rows need different answers, both measured in Chromium at
+   *  a 56px avatar + 240px facet rail: the primary lead loses its whole third column at
+   *  `lg` (see {@link MatchAwareReason}), so its pill goes with it; the lesser row is one
+   *  truncating line that only truncates at all below ~480px, where the pill costs the
+   *  phrase 73 of its 81px. Omitted ⇒ always shown. */
+  hideBelow?: "sm" | "lg";
+}) {
+  const p = PILL[kind];
+  const display =
+    hideBelow === "lg"
+      ? "hidden lg:inline-flex"
+      : hideBelow === "sm"
+        ? "hidden sm:inline-flex"
+        : "inline-flex";
+  return (
+    <span
+      className={`${display} shrink-0 items-center whitespace-nowrap rounded-[3px] border px-1.5 py-[1px] text-[11px] font-medium leading-[1.45] ${p.cls}`}
+    >
+      {p.word}
+    </span>
+  );
+}
+
 export function MatchAwareReason({
   kind,
   children,
-  cue,
+  via,
+  coverage,
+  pill,
   dim = false,
   canExpand = false,
   expanded = false,
@@ -321,9 +393,21 @@ export function MatchAwareReason({
   /** #1381 follow-up — the count-first evidence phrase, built by the caller
    *  (`ResultEvidence` / `people-result-card`) via {@link CountFirst}. */
   children: ReactNode;
-  /** #1366 follow-up Part B — an italic, muted relevance caveat appended AFTER the
-   *  phrase (e.g. " · 0.2% of output" or " · term match only"). Funding never has one. */
-  cue?: string;
+  /** Uniform fold rule — the narrower descendant term LIST (no "via" word: the copy and
+   *  the typography of the line belong to the component that owns the line, matching how
+   *  `descendantViaSummary` omits the wrapper). Renders as its own muted second line
+   *  under the phrase. It cannot ride in `children`: those go INSIDE the truncating span,
+   *  which is both a guaranteed single line and the #1907 clip by construction. */
+  via?: string;
+  /** Uniform fold rule — pre-formatted share of the scholar's output ("12.2%" / "<0.1%")
+   *  for the right-hand tabular column, which is an `lg`-and-up column (see the narrow
+   *  degradation note below). Absent ⇒ the column does not render at all (no reserved
+   *  empty cell: the chevron is `ml-auto` and the body `flex-1`, so omitting it hands 64px
+   *  back to the phrase and moves nothing) and the row drops its right pad with it. */
+  coverage?: string;
+  /** Uniform fold rule — the provenance pill trailing the phrase; `lg`-and-up like the %
+   *  column, for the same measured reason. */
+  pill?: EvidencePillKind;
   /** #1366 follow-up Part B — faint the lead (mute the type word + phrase). */
   dim?: boolean;
   /** Rep-papers disclosure — when true, trail a clickable chevron `<button>`
@@ -335,30 +419,91 @@ export function MatchAwareReason({
 }) {
   const k = PRIMARY_KIND[kind];
   // #1381 follow-up — the type word sits in a fixed-width column so the phrases align
-  // across cards; the chevron (via DisclosureRow `wide`) is pushed to the far right.
+  // across cards (from `lg` up — see NARROW DEGRADATION below); the chevron (via
+  // DisclosureRow `wide`) is pushed to the far right.
   // #1913 — the column IS the category indicator now; the dot that used to precede it
   // repeated the word's own hue and is gone. What came back is one accent, not the
   // per-category axis: every kind gets the SAME `--evidence-accent`, and only here on
   // the primary lead, so the lead separates tonally from the neutral LesserReason rows
   // instead of the whole card reading as one flat warm grey. Dim is untouched.
+  //
+  // Uniform fold rule — the row is now four flex children: the kind column, a COLUMN body
+  // (phrase + pill on line 1, the "via …" descendants on line 2), and the coverage cell.
+  // The three single-line children take `self-start` rather than the container taking
+  // `items-start`: `align-self` overrides `align-items` per item, whereas passing a second
+  // same-property utility through `className` resolves by generated-stylesheet order (not
+  // class-attribute order) in Tailwind v4, so which one won would not be readable off the
+  // JSX. The chevron stays centred on a 2-line row — the standard accordion look, and
+  // top-aligning it would mean editing `DisclosureRow`, which the compact lesser rows share.
+  //
+  // NARROW DEGRADATION — this three-column row is an `lg`-and-up layout, and everything
+  // that makes it three columns is gated on `lg`. Measured in Chromium: the fixed chrome
+  // is 124 (kind) + 7 + 7 (gaps) + 64 (% cell) + 20 + 7 (chevron) = 229px, and the card's
+  // middle grid column is only 191px at a 390px viewport and 297px at 768px (the facet
+  // rail costs 272px from `md` up, so the column is NARROWER at 768 than at 767). Every
+  // shrink-0 addition therefore lands on the one item that can shrink — flexbox
+  // distributes negative space only across non-zero shrink factors — and the phrase
+  // measured 0px wide at both widths, with the pill overlapping the % cell by 93.5px and
+  // overrunning the card's stats column. Below `lg`: the kind word takes a full line
+  // (`w-full` + a wrapping row), the % cell is dropped, and the pill goes with it. That
+  // buys the phrase 148px at 390 and 254px at 768 instead of 0.
+  //
+  // Nothing narrow-only is lost. The % is a rounding of "N of M", which the phrase states
+  // in full and which is present whenever `coverage` is (the callers set them from the
+  // same count/denominator pair). The pill words restate the kind column plus the phrase's
+  // own verb — "keyword only" against the `Keyword` column and "publications mention",
+  // "subject-tagged" against "publications tagged".
   const inner = (
     <>
       <span
-        className={`w-[124px] shrink-0 font-medium ${dim ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-accent)]"}`}
+        className={`w-full shrink-0 self-start font-medium lg:w-[124px] ${dim ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-accent)]"}`}
       >
         {k.word}
       </span>
-      {/* #1907 — the cue is a SIBLING of the truncating span, not its last child.
-          Inside it, it was the first thing the pixel-boundary clip ate: a 2-of-114
-          lead rendered dim (the "this match is thin" signal) with " · 1.8% of output"
-          (the sentence that justifies the dimming) cut off. The phrase truncates; the
-          caveat does not. */}
-      <span className="flex min-w-0 flex-1 items-baseline">
-        <span className="min-w-0 truncate">{children}</span>
-        {cue ? (
-          <span className="shrink-0 font-normal italic text-[var(--evidence-faint)]">{cue}</span>
+      {/* #1907 — anything trailing the phrase is a shrink-0 SIBLING of the truncating
+          span, never its last child. Inside it, the old relevance cue was the first thing
+          the pixel-boundary clip ate: a 2-of-114 lead rendered dim (the "this match is
+          thin" signal) with the sentence that justified the dimming cut off. The pill and
+          the coverage cell are the new occupants of that slot and inherit the invariant —
+          flexbox distributes negative space only across items with a non-zero shrink
+          factor, so the phrase is squeezed and they are laid out at max-content. The
+          via-line does carry `truncate`, but it is the last content on its own line with
+          nothing trailing it, so a clip can only shorten its own "and N related terms"
+          tail instead of eating a sibling — and `descendantViaSummary` budgets the whole
+          rendered string, tail included, against this column's measured `lg` width, so at
+          the layout this row was designed for there is nothing to shorten. Narrower than
+          `lg` the row stacks and the line does clip, like any long text. */}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="flex min-w-0 items-baseline gap-[6px]">
+          <span className="min-w-0 truncate">{children}</span>
+          {pill ? <EvidencePill kind={pill} hideBelow="lg" /> : null}
+        </span>
+        {via ? (
+          <span
+            className={`mt-[2px] min-w-0 truncate text-[11.5px] ${dim ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-detail)]"}`}
+          >
+            <span className="text-[var(--evidence-faint)]">via </span>
+            {via}
+          </span>
         ) : null}
       </span>
+      {/* Uniform fold rule — coverage is a neutral STAT in a fixed-width tabular column,
+          not a caveat: it says "8% of this scholar's output", so wherever the column fits
+          it is on for every count rather than only the thin ones, and it does NOT dim
+          (#1907's lesson verbatim — the sentence that justifies the dimming has to survive
+          it). `--evidence-body`, not the accent: the
+          accent is the kind word + the matched count (#1922/#1928), and a third accented
+          element rebuilds a legend. The visible number is `aria-hidden` with an sr-only
+          sibling carrying the unit, so a bare "8%" is never announced as a match score;
+          sr-only text also joins the enclosing button's accessible name, which `title`
+          (not announced, needs a hover) and `aria-label` on a `role=generic` span (which
+          AT may ignore) both fail to do. */}
+      {coverage ? (
+        <span className="hidden w-[64px] shrink-0 self-start pl-3 text-right tabular-nums text-[var(--evidence-body)] lg:block">
+          <span aria-hidden>{coverage}</span>
+          <span className="sr-only">{coverage} of this scholar&rsquo;s output</span>
+        </span>
+      ) : null}
     </>
   );
   if (canExpand && onToggle) {
@@ -366,6 +511,7 @@ export function MatchAwareReason({
       <div className="mt-1.5 text-[13px] leading-snug">
         <DisclosureRow
           wide
+          className="flex-wrap lg:flex-nowrap"
           expanded={expanded}
           onToggle={onToggle}
           panelId={panelId}
@@ -376,8 +522,20 @@ export function MatchAwareReason({
       </div>
     );
   }
+  // The pad that lines this row's % cell up with the expandable one's is 43px, and it is
+  // NOT just that path's chevron plus gap.
+  // `DisclosureRow` is `-mx-2 … w-full … px-2`: a block-level box with `width: 100%` and
+  // two negative inline margins is over-constrained, so CSS 2.1 §10.3.3 drops the
+  // margin-RIGHT (ltr) to solve the equation. The button therefore starts 8px left of this
+  // wrapper and ends 8px SHORT of its right edge, i.e. its content box is 16px NARROWER on
+  // the right, not wider. Measured at a 1024px viewport: the expandable row's % cell sits
+  // 43px in from the middle column's right edge (16 lost to the dropped margin + 20 chevron
+  // + 7 gap); an unpadded non-expandable row's sits at 0. Only `lg` needs the pad — below
+  // it the % cell does not render at all.
   return (
-    <div className="mt-1.5 flex w-full items-center gap-[7px] text-[13px] leading-snug">
+    <div
+      className={`mt-1.5 flex w-full flex-wrap items-center gap-[7px] text-[13px] leading-snug lg:flex-nowrap ${coverage ? "lg:pr-[43px]" : ""}`}
+    >
       {inner}
     </div>
   );
@@ -413,6 +571,7 @@ export function MentionNote() {
 export function LesserReason({
   children,
   suffix,
+  pill,
   weak = false,
   canExpand = false,
   expanded = false,
@@ -423,6 +582,13 @@ export function LesserReason({
   children: ReactNode;
   /** Abbreviated "· N of M" count (no "publications" word); omitted ⇒ label-only. */
   suffix?: string;
+  /** Uniform fold rule — the provenance pill, a shrink-0 SIBLING of the truncating span
+   *  (#1907). This is the row the fold reveals, so it is where the `credential` pill for a
+   *  board-certified clinical secondary lands. Dropped below `sm`: measured at a 320px
+   *  viewport this row's text span is 81px wide and the pill takes 73 of them, leaving 8px
+   *  of phrase. It costs the phrase nothing from ~480px up, which is why it is dropped at a
+   *  narrower breakpoint than the primary lead's pill. */
+  pill?: EvidencePillKind;
   /** Extra-muted treatment for the literal-mention rows. */
   weak?: boolean;
   canExpand?: boolean;
@@ -439,6 +605,7 @@ export function LesserReason({
         {children}
         {suffix ? <span className="text-[var(--evidence-faint)]">{suffix}</span> : null}
       </span>
+      {pill ? <EvidencePill kind={pill} hideBelow="sm" /> : null}
     </>
   );
   if (canExpand && onToggle) {

@@ -18,6 +18,19 @@ afterEach(() => {
 const renderEv = (evidence: Evidence, slug?: string) =>
   render(<ResultEvidence evidence={evidence} slug={slug} />);
 
+/**
+ * Uniform fold rule — the provenance pills, found by their shared shape.
+ *
+ * This exists because the #1913 "no pill" guards below CANNOT do it any more: every one of
+ * them is `querySelectorAll("span.rounded-full").length === 0`, and the provenance pill is
+ * `rounded-[3px]`, so all of them stay green whether a pill is present or not. Counting by
+ * shape and asserting the WORDS is what still fails loudly if a per-category pill returns
+ * — the axis #1913 retired — since a category pill would push the count past the
+ * provenance one this row is entitled to.
+ */
+const pillsIn = (c: HTMLElement): string[] =>
+  Array.from(c.querySelectorAll('span[class*="rounded-[3px]"]')).map((n) => n.textContent ?? "");
+
 describe("<ResultEvidence> — one render per kind", () => {
   it("method ⇒ Method type word + underlined family, with NO exemplar-tool trail", () => {
     renderEv({ kind: "method", family: "Single-cell RNA sequencing", tools: ["scRNA-seq", "10x"] });
@@ -55,6 +68,10 @@ describe("<ResultEvidence> — one render per kind", () => {
     for (const hue of ["#8B4A2F", "#2563eb", "#0891b2", "#7c3aed", "#64748b", "#16a34a"]) {
       expect(container.innerHTML).not.toContain(hue);
     }
+    // …and method carries NO pill of any kind: it has no `strength` field, so there is no
+    // provenance datum, and painting every non-mention lead green would resolve one value
+    // across ~98% of rows — the exact failure #1913 retired.
+    expect(pillsIn(container)).toEqual([]);
     // count-first: emphasized count + muted "of 98 publications used" + underlined family.
     expect(screen.getByText("Method")).toBeTruthy();
     expect(container.textContent).toMatch(/4 of 98 publications used/);
@@ -63,7 +80,7 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(fam.className).toMatch(/underline/);
   });
 
-  it("#1913 — the badged publications primary is the type word alone, no dot, no flavor pill", () => {
+  it("#1913 — the badged publications primary is the type word alone, no dot, no per-CATEGORY pill", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{
@@ -82,6 +99,10 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(container.innerHTML).not.toContain("#64748b");
     expect(screen.getByText("Keyword")).toBeTruthy();
     expect(container.innerHTML).not.toContain("rounded-[5px]");
+    // Uniform fold rule — this fixture DOES now carry a pill, so the guards above no longer
+    // prove "no pill" on their own. Pin the exact inventory: one PROVENANCE pill (this lead
+    // is a literal mention) and nothing else. A returning category pill fails here.
+    expect(pillsIn(container)).toEqual(["keyword only"]);
   });
 
   it("#1922 follow-up — a non-dim primary accents its kind word AND its count, on both phrase paths", () => {
@@ -129,7 +150,12 @@ describe("<ResultEvidence> — one render per kind", () => {
         stacked
       />,
     );
-    expect(container.textContent).toMatch(/term match only/); // it really is the dim lead
+    // Uniform fold rule — the two "the fixture really IS the dim lead" proofs were the cue
+    // strings, which are retired. Re-keyed onto their replacements: the amber pill for a
+    // keyword-only lead, the % column for a low-coverage one. The accent assertions below
+    // are untouched and still hold — the pill uses the apollo tokens and the % uses
+    // `--evidence-body`, so neither reintroduces the accent a dim lead must not have.
+    expect(pillsIn(container)).toEqual(["keyword only"]); // it really is the dim lead
     expect(container.innerHTML).not.toContain("--evidence-accent");
     // …and the CountFirst dim gate, which is a SEPARATE line from the inline one above:
     // without this, dropping `dim ?` in CountFirst survives the whole suite green.
@@ -140,7 +166,7 @@ describe("<ResultEvidence> — one render per kind", () => {
         stacked
       />,
     );
-    expect(method.container.textContent).toMatch(/% of output/); // it really is dim
+    expect(method.container.textContent).toMatch(/0\.2%/); // it really is dim
     expect(method.container.innerHTML).not.toContain("--evidence-accent");
   });
 
@@ -262,7 +288,7 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(term.className).toMatch(/underline/);
   });
 
-  it("#1355 — narrower descendant terms render after the concept term, capped at 2 + '+N more'", () => {
+  it("#1355 — narrower descendant terms render on the 'via' LINE, capped at 2 + a prose tail", () => {
     renderEv({
       kind: "publications",
       strength: "concept",
@@ -271,8 +297,14 @@ describe("<ResultEvidence> — one render per kind", () => {
       descendantTerms: ["Mycobiome", "Virome", "Metagenome"],
     });
     expect(screen.getByText("Microbiota").className).toMatch(/underline/);
+    // Uniform fold rule — was the inline "(matched … · +1 more)" parenthetical. Same datum,
+    // same cap, own line; the "+N more" truncation notice becomes prose because on its own
+    // line the list is not truncated, it is summarising a set. Singular for exactly one.
     // #1908 — middot-separated, not comma-separated (see the MeSH case below).
-    expect(screen.getByText(/matched Mycobiome · Virome · \+1 more/)).toBeTruthy();
+    const via = screen.getByText("Mycobiome · Virome and 1 related term");
+    // The "via " word is the RENDERER's, not the caller's (`descendantViaSummary` omits it,
+    // exactly as `descendantSummary` omits its "(matched " wrapper).
+    expect(via.textContent).toBe("via Mycobiome · Virome and 1 related term");
   });
 
   it("#1908 — comma-inverted MeSH descriptors stay countable (the separator is not a comma)", () => {
@@ -283,14 +315,15 @@ describe("<ResultEvidence> — one render per kind", () => {
       term: "Leukemia",
       count: 152,
       // Real staging data. Joined on ", " these two terms rendered as six.
-      descendantTerms: ["Leukemia, Hairy Cell", "Leukemia, Myeloid", "Leukemia, B-Cell"],
+      // Exactly two, so the SEPARATOR is on screen to be asserted: a third would push the
+      // rendered line past the via budget (see descendant-summary.test.ts) and roll the
+      // second term into the prose tail, leaving nothing joined to check.
+      descendantTerms: ["Leukemia, Hairy Cell", "Leukemia, Myeloid"],
     });
-    expect(
-      screen.getByText("(matched Leukemia, Hairy Cell · Leukemia, Myeloid · +1 more)"),
-    ).toBeTruthy();
+    expect(screen.getByText("Leukemia, Hairy Cell · Leukemia, Myeloid")).toBeTruthy();
   });
 
-  it("#1907 — an over-budget descendant list drops WHOLE terms into '+N more', closing the paren", () => {
+  it("#1907 — an over-budget descendant list drops WHOLE terms into the prose tail", () => {
     renderEv({
       kind: "publications",
       strength: "tagged",
@@ -303,11 +336,45 @@ describe("<ResultEvidence> — one render per kind", () => {
         "Leukemia, Myeloid",
       ],
     });
-    // Both shown would run 85 chars and clip mid-word at the row's pixel boundary,
-    // cutting the parenthetical open. One term survives; the rest roll up.
+    // 46 + 3 + 38 = 87 > the via-line's 72-char budget. The drop-whole-terms property
+    // survives the move to a wider box and a different budget: one term shows, the rest
+    // roll into the tail, rather than the line clipping mid-descriptor.
     expect(
-      screen.getByText("(matched Precursor Cell Lymphoblastic Leukemia-Lymphoma · +2 more)"),
+      screen.getByText("Precursor Cell Lymphoblastic Leukemia-Lymphoma and 2 related terms"),
     ).toBeTruthy();
+  });
+
+  it("uniform fold rule — NO 'via' line when the concept matched directly (no descendants)", () => {
+    // The gate is the datum's presence, nothing else. Without this, rendering the line
+    // unconditionally would ship a bare "via" prefix on every direct concept match.
+    const { container } = renderEv({
+      kind: "publications",
+      strength: "tagged",
+      text: "3 of 301 publications tagged",
+      term: "Pharmacogenetics",
+      count: 3,
+    });
+    expect(container.textContent).not.toMatch(/via/);
+  });
+
+  it("uniform fold rule — the 'via' line sits UNDER the phrase, not inside it", () => {
+    const { container } = renderEv({
+      kind: "publications",
+      strength: "tagged",
+      text: "152 of 250 publications tagged",
+      term: "Leukemia",
+      count: 152,
+      descendantTerms: ["Leukemia, Hairy Cell", "Leukemia, Myeloid"],
+    });
+    const via = screen.getByText("Leukemia, Hairy Cell · Leukemia, Myeloid");
+    const phrase = container.querySelector(".truncate");
+    // A real second line: the via-span is a SIBLING of the truncating phrase span inside a
+    // flex-col body, not a trailing child of it. If it were a child, it would be on line 1
+    // and inside the #1907 clip — which is precisely where it used to be.
+    expect(phrase).not.toBeNull();
+    expect(via.parentElement).toBe(phrase!.parentElement!.parentElement);
+    expect(via.parentElement!.className).toMatch(/flex-col/);
+    expect(via.previousElementSibling).toBe(phrase!.parentElement);
   });
 
   it("#1361 — a mention literal term is semibold but NOT underlined (underline = concept only)", () => {
@@ -593,6 +660,12 @@ describe("<RepresentativePapers> — the disclosure stack", () => {
 describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='lesser')", () => {
   // #1913 — every lesser row lost its category dot. Kept as a NEGATIVE assertion so a
   // reintroduced dot fails loudly rather than passing unnoticed.
+  //
+  // Uniform fold rule — `dotOf` alone NO LONGER PROVES "no pill": it only looks for
+  // `rounded-full`, and the provenance pill is `rounded-[3px]`, so a per-category pill in
+  // that shape would sail straight past it. Every fixture below therefore also pins its
+  // `pillsIn` inventory. Lesser rows get NO provenance pill except the clinical
+  // `credential` one — this is the tier the fold reveals, not a place to re-add signals.
   const dotOf = (c: HTMLElement) => c.querySelector("span.rounded-full");
 
   it("method lesser ⇒ 'Method · family' + '· N of M publications', no dot and no badge pill", () => {
@@ -606,6 +679,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
     expect(container.textContent).toMatch(/Method · CRISPR genome editing/);
     expect(container.textContent).toMatch(/· 3 of 44 publications/); // unit spelled out
     expect(dotOf(container)).toBeNull();
+    expect(pillsIn(container)).toEqual([]);
   });
 
   it("research area lesser ⇒ 'Research area · label', no dot", () => {
@@ -619,6 +693,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
     expect(container.textContent).toMatch(/Research area · Stem Cell & Regenerative Medicine/);
     expect(container.textContent).toMatch(/· 2 of 44/);
     expect(dotOf(container)).toBeNull();
+    expect(pillsIn(container)).toEqual([]);
   });
 
   it("publications:mention lesser ⇒ 'Keyword', weakness carried by muted text not a dot", () => {
@@ -633,6 +708,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
     // #1913 — strength is carried by the muted/italic text + the MentionNote, which is
     // where it always actually lived; there is no dot to carry it.
     expect(dotOf(container)).toBeNull();
+    expect(pillsIn(container)).toEqual([]);
   });
 
   it("publications:tagged lesser ⇒ 'Concept', no dot", () => {
@@ -645,6 +721,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
     );
     expect(container.textContent).toMatch(/Concept/);
     expect(dotOf(container)).toBeNull();
+    expect(pillsIn(container)).toEqual([]);
   });
 
   it("#1922 follow-up — an 'Also matched' row carries NO primary accent", () => {
@@ -680,6 +757,30 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
     );
     expect(container.textContent).toMatch(/Clinical · Cardiology/);
     expect(container.textContent).not.toMatch(/of 44/);
+    expect(pillsIn(container)).toEqual([]);
+  });
+
+  it("uniform fold rule — a board-certified clinical lesser row carries the 'credential' pill", () => {
+    // Decision 5 / the mockup: clinical is normally a SECONDARY, so the row the fold reveals
+    // is where the pill has to land. It is NOT `stacked`-gated — it renders a flag the
+    // evidence already carries rather than adding a new signal — and it is a shrink-0
+    // SIBLING of the truncating span, per #1907.
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "clinical", specialty: "Hematology", boardCertified: true }}
+        pubCount={44}
+        tier="lesser"
+      />,
+    );
+    expect(container.textContent).toMatch(/Board certified in Hematology/);
+    expect(pillsIn(container)).toEqual(["credential"]);
+    const pill = screen.getByText("credential");
+    expect(pill.className).toMatch(/shrink-0/);
+    let node = pill.parentElement;
+    while (node && node !== container) {
+      expect(node.className).not.toMatch(/truncate/);
+      node = node.parentElement;
+    }
   });
 
   it("a lesser row still offers the disclosure chevron when canExpand", () => {
@@ -941,8 +1042,8 @@ describe("<EvidenceLine> — #1366 follow-up Part A derives the panel header fro
   });
 });
 
-describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the primary lead", () => {
-  it("a low-coverage method primary (<2%) gets a '% of output' cue and is dimmed", () => {
+describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the primary lead", () => {
+  it("a low-coverage method primary (<2%) is still DIMMED, with the cue string gone", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{ kind: "method", family: "Mass spectrometry", tools: [], count: 1 }}
@@ -950,11 +1051,17 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the prim
         stacked
       />,
     );
-    // 1/538 = 0.19% → fires; the family label drops from near-black to muted grey.
-    expect(container.textContent).toMatch(/· 0\.2% of output/);
+    // Uniform fold rule — `dim` no longer means "a cue string exists"; it reads the same
+    // thinness test directly. 1/538 = 0.19% → still fires, and the family label still drops
+    // from near-black to muted grey. What changed is that the caveat PROSE is retired: the
+    // number moved to the always-on column, so nothing trails the phrase.
     expect(screen.getByText("Mass spectrometry").className).toMatch(
       /text-\[var\(--evidence-body\)\]/,
     );
+    expect(container.textContent).not.toMatch(/of output/);
+    expect(container.textContent).not.toMatch(/term match only/);
+    // and the percentage is on the row, as the column's value.
+    expect(screen.getByText("0.2%")).toBeTruthy();
   });
 
   it("#1912 — the NON-dim phrase body renders on the AA ramp, never the retired literals", () => {
@@ -981,7 +1088,7 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the prim
     }
   });
 
-  it("#1907 — the cue sits OUTSIDE the truncating span, so a long phrase cannot clip it", () => {
+  it("#1907 — the pill AND the % cell sit OUTSIDE the truncating span, so a long phrase cannot clip them", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{
@@ -996,32 +1103,51 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the prim
         stacked
       />,
     );
-    const cue = screen.getByText(/% of output/);
-    expect(cue.textContent).toMatch(/1\.8% of output/);
-    // The whole point: nothing between the cue and the row root may clip it. When the
-    // cue lived inside the truncating span, this row rendered dim with the sentence
+    // Uniform fold rule — the cue this guard was written for is retired, and its slot is now
+    // occupied by two elements. Both inherit the invariant, so both get the walk. When the
+    // cue lived inside the truncating span, this exact row rendered dim with the sentence
     // explaining the dimming cut off at the pixel boundary.
-    let node: HTMLElement | null = cue;
-    while (node && node !== container) {
-      expect(node.className).not.toMatch(/truncate/);
-      node = node.parentElement;
-    }
-    // …and the phrase it annotates still truncates.
+    const noTruncateAncestry = (from: HTMLElement) => {
+      let node: HTMLElement | null = from;
+      while (node && node !== container) {
+        expect(node.className).not.toMatch(/truncate/);
+        node = node.parentElement;
+      }
+    };
+    noTruncateAncestry(screen.getByText("subject-tagged"));
+    const pct = screen.getByText("1.8%");
+    noTruncateAncestry(pct);
+    // Both are also shrink-0, which is what actually keeps them at max-content width while
+    // the phrase absorbs the squeeze; a `truncate`-free ancestry alone would not.
+    expect(screen.getByText("subject-tagged").className).toMatch(/shrink-0/);
+    expect(pct.parentElement!.className).toMatch(/shrink-0/);
+    // …and the phrase they annotate still truncates.
     expect(container.querySelector(".truncate")?.textContent).toMatch(/2 of 114 publications/);
+    // The via-line is the ONE element here that legitimately truncates (it is last on its
+    // own line, so a clip can only shorten its own tail). Its ANCESTRY must still be clean,
+    // or the clip would move up to a box that also holds the phrase.
+    const via = screen.getByText("Leukemia, Lymphoid and 2 related terms");
+    expect(via.className).toMatch(/truncate/);
+    noTruncateAncestry(via.parentElement!);
+    expect(via.nextElementSibling).toBeNull(); // nothing trails it on its line
   });
 
-  it("a coverage that rounds below 0.1% displays '<0.1% of output'", () => {
-    const { container } = render(
+  it("a coverage that rounds below 0.1% displays '<0.1%' rather than a lying '0.0%'", () => {
+    render(
       <ResultEvidence
         evidence={{ kind: "method", family: "Imaging mass cytometry", tools: [], count: 1 }}
         pubCount={3000}
         stacked
       />,
     );
-    expect(container.textContent).toMatch(/<0\.1% of output/);
+    // Uniform fold rule — the visible string is the number alone; " of output" moved into
+    // the sr-only copy. A `/% of/` regex would still match that sr text, so this asserts the
+    // VISIBLE cell exactly.
+    expect(screen.getByText("<0.1%")).toBeTruthy();
+    expect(screen.getByText("<0.1% of this scholar’s output")).toBeTruthy();
   });
 
-  it("a keyword-only primary gets 'term match only', stays dimmed, KEEPS the Keyword pill, and never stacks the coverage cue", () => {
+  it("uniform fold rule — a keyword-only primary NOW SHOWS BOTH signals: the amber pill and the %", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{
@@ -1037,14 +1163,20 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the prim
       />,
     );
     expect(screen.getByText("Keyword")).toBeTruthy(); // the type word is retained
-    expect(container.textContent).toMatch(/· term match only/);
-    // precedence: keyword-only wins; the low-coverage cue is NOT also appended.
-    expect(container.textContent).not.toMatch(/% of output/);
+    // The old rule was PRECEDENCE: keyword-only beat low-coverage so the two never stacked,
+    // because only one caveat string fitted the slot. There is no shared slot now — the pill
+    // and the column are different boxes — so this lead (1/538 = 0.19%, AND a literal
+    // mention) states both facts. Deliberately inverted, not deleted: the co-existence is
+    // the behaviour change and it ships pinned.
+    expect(pillsIn(container)).toEqual(["keyword only"]);
+    expect(screen.getByText("0.2%")).toBeTruthy();
+    // …and the retired prose is gone from both slots.
+    expect(container.textContent).not.toMatch(/term match only/);
     // dim: the reason text drops to muted grey (the term span inherits it).
     expect(screen.getByText("crispr").className).toMatch(/text-\[var\(--evidence-body\)\]/);
   });
 
-  it("a normal-coverage primary shows NEITHER cue and is NOT dimmed", () => {
+  it("uniform fold rule — a normal-coverage primary is NOT dimmed but STILL shows its %", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{ kind: "method", family: "Flow cytometry", tools: [], count: 4 }}
@@ -1052,7 +1184,7 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the prim
         stacked
       />,
     );
-    // 4/98 = 4.1% ≥ 2% → no cue; the label stays near-black.
+    // 4/98 = 4.1% ≥ 2% → not dim; the label stays near-black.
     expect(container.textContent).not.toMatch(/of output/);
     expect(screen.getByText("Flow cytometry").className).toMatch(
       /text-\[var\(--evidence-anchor\)\]/,
@@ -1060,10 +1192,185 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the prim
     expect(screen.getByText("Flow cytometry").className).not.toMatch(
       /text-\[var\(--evidence-(faint|body)\)\]/,
     );
+    // THE ALWAYS-ON PATH, and the most common one. The old assertions here were negative
+    // (`not.toMatch(/of output/)`) and stayed green while the column rendered "4.1%"
+    // untested — so the whole point of decoupling coverage from the threshold shipped
+    // unpinned. The number renders, it is NOT the accent (that is reserved for the kind word
+    // + matched count), and it carries the unit for a screen reader.
+    const pct = screen.getByText("4.1%");
+    expect(pct.getAttribute("aria-hidden")).toBe("true");
+    expect(pct.parentElement!.className).toMatch(/tabular-nums/);
+    expect(pct.parentElement!.className).toMatch(/text-\[var\(--evidence-body\)\]/);
+    expect(pct.parentElement!.className).not.toMatch(/--evidence-accent/);
+    expect(screen.getByText("4.1% of this scholar’s output")).toBeTruthy();
   });
 
-  it("the single-evidence path (stacked omitted) shows NO cue and is NOT dimmed, even at low coverage", () => {
-    // Same 1/538 = 0.19% lead as the first test, but without `stacked` → the cue is
+  it("uniform fold rule — the %'s unit is sr-only and joins the disclosure button's accessible name", () => {
+    // The MECHANISM, not just the text. A bare "8%" beside a match reason reads as a match
+    // SCORE, so the unit has to be announced — and an sr-only sibling is the only one of the
+    // three candidates that always is: `title` is not announced and needs a hover, and
+    // `aria-label` on a bare span is name-from-author on `role=generic`, which AT may ignore.
+    // Being sr-only (not merely present) is what keeps it from double-printing on screen;
+    // being INSIDE the button is what puts it in the accessible name.
+    render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "Flow cytometry", tools: [], count: 4 }}
+        pubCount={98}
+        stacked
+        canExpand
+        onToggle={() => {}}
+        panelId="p"
+      />,
+    );
+    expect(screen.getByText("4.1% of this scholar’s output").className).toMatch(/sr-only/);
+    expect(
+      screen.getByRole("button", { name: /4\.1% of this scholar’s output/ }),
+    ).toBeTruthy();
+  });
+
+  it("uniform fold rule — keyword-only dims a lead that is NOT low-coverage (the arm is independent)", () => {
+    // Every other dim fixture in this file is BOTH a literal mention and under the 2%
+    // threshold, so deleting the `keywordOnly ||` arm of the predicate left the suite green.
+    // 12/98 = 12.2%, comfortably above the threshold: the only thing that can dim this lead
+    // is its provenance.
+    const { container } = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "mention",
+          text: "12 of 98 publications mention",
+          term: "crispr",
+          count: 12,
+        }}
+        pubCount={98}
+        stacked
+      />,
+    );
+    expect(screen.getByText("12.2%")).toBeTruthy(); // …and it is NOT the low-coverage arm
+    expect(screen.getByText("Keyword").className).toMatch(/text-\[var\(--evidence-faint\)\]/);
+    expect(screen.getByText("crispr").className).toMatch(/text-\[var\(--evidence-body\)\]/);
+    expect(container.innerHTML).not.toContain("--evidence-accent");
+  });
+
+  it("uniform fold rule — the % does NOT dim, so the stat that justifies the dimming survives", () => {
+    // #1907's lesson, as a token assertion: a thin lead fainting its phrase must not faint
+    // the number that explains why. This is a one-token change away from regressing.
+    render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "Mass spectrometry", tools: [], count: 1 }}
+        pubCount={538}
+        stacked
+      />,
+    );
+    expect(screen.getByText("0.2%").parentElement!.className).toMatch(
+      /text-\[var\(--evidence-body\)\]/,
+    );
+    expect(screen.getByText("0.2%").parentElement!.className).not.toMatch(/--evidence-faint/);
+  });
+
+  it("uniform fold rule — clinical has NO % column (no pub denominator) but DOES get the credential pill", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "clinical", specialty: "Cardiology", boardCertified: true }}
+        pubCount={44}
+        stacked
+      />,
+    );
+    expect(container.querySelector(".tabular-nums")).toBeNull();
+    expect(pillsIn(container)).toEqual(["credential"]);
+    // The prose stays: it names the specialty the certification is IN, which "credential"
+    // does not say.
+    expect(container.textContent).toMatch(/Board certified in Cardiology/);
+  });
+
+  it("uniform fold rule — a NOT board-certified clinical lead gets no pill", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "clinical", specialty: "Cardiology", boardCertified: false }}
+        pubCount={44}
+        stacked
+      />,
+    );
+    expect(pillsIn(container)).toEqual([]);
+  });
+
+  it("uniform fold rule — each publications strength gets its OWN pill, and not the other's", () => {
+    // Keyed to PROVENANCE. `concept` (a MeSH-expansion text variant) gets NEITHER: it is not
+    // a subject tag and not a bare keyword, so claiming either would be false.
+    const tagged = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "12 of 98 publications tagged",
+          term: "Melanoma",
+          count: 12,
+        }}
+        pubCount={98}
+        stacked
+      />,
+    );
+    expect(pillsIn(tagged.container)).toEqual(["subject-tagged"]);
+
+    const mention = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "mention",
+          text: "12 of 98 publications mention",
+          term: "melanoma",
+          count: 12,
+        }}
+        pubCount={98}
+        stacked
+      />,
+    );
+    expect(pillsIn(mention.container)).toEqual(["keyword only"]);
+
+    const concept = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "concept",
+          text: "12 of 98 publications tagged",
+          term: "Melanoma",
+          count: 12,
+        }}
+        pubCount={98}
+        stacked
+      />,
+    );
+    expect(pillsIn(concept.container)).toEqual([]);
+  });
+
+  it("uniform fold rule — the pill text uses the AA-passing green token, never the trap", () => {
+    // `--apollo-green` (#2e7d5b) is the token literally named "semantic green" and the
+    // obvious pick for green pill text. It scores 4.39:1 on `--apollo-green-tint` and FAILS
+    // AA at 11px. Only `--apollo-green-foreground` (6.92:1) may back this word.
+    const { container } = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "12 of 98 publications tagged",
+          term: "Melanoma",
+          count: 12,
+        }}
+        pubCount={98}
+        stacked
+      />,
+    );
+    const pill = screen.getByText("subject-tagged");
+    expect(pill.className).toContain("text-[var(--apollo-green-foreground)]");
+    expect(pill.className).not.toContain("text-[var(--apollo-green)]");
+    // the border is load-bearing (ΔE 5.01 fill-vs-row-hover); it is not decoration.
+    expect(pill.className).toMatch(/border-\[var\(--apollo-green-tint-border\)\]/);
+    // and a capsule would read as the retired #1913 category dot.
+    expect(container.querySelectorAll("span.rounded-full").length).toBe(0);
+  });
+
+  it("the single-evidence path (stacked omitted) gets NO % column and NO dim, even at low coverage", () => {
+    // Same 1/538 = 0.19% lead as the first test, but without `stacked` → the new signals are
     // gated off so the single-evidence render stays visually frozen (matches C/D).
     const { container } = render(
       <ResultEvidence
@@ -1072,8 +1379,205 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the prim
       />,
     );
     expect(container.textContent).not.toMatch(/of output/);
+    expect(screen.queryByText("0.2%")).toBeNull();
+    expect(container.querySelector(".tabular-nums")).toBeNull();
     expect(screen.getByText("Mass spectrometry").className).not.toMatch(
       /text-\[var\(--evidence-faint\)\]/,
     );
+  });
+
+  it("the single-evidence path gets NO publications pill either (the frozen surface)", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "12 of 98 publications tagged",
+          term: "Melanoma",
+          count: 12,
+        }}
+        pubCount={98}
+      />,
+    );
+    expect(pillsIn(container)).toEqual([]);
+  });
+
+  it("the single-evidence path gets NO credential pill either — the SAME rule as the other two", () => {
+    // `selectEvidence` DOES emit `clinical.boardCertified` on this path (lib/api/
+    // result-evidence.ts), so nothing structural withholds the pill — only the `stacked`
+    // gate does. Without it the frozen surface grew a green pill nobody had pinned.
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "clinical", specialty: "Cardiology", boardCertified: true }}
+        pubCount={44}
+      />,
+    );
+    expect(pillsIn(container)).toEqual([]);
+    // The fact survives without it — which is why gating costs nothing here.
+    expect(container.textContent).toMatch(/Board certified in Cardiology/);
+  });
+
+  it("the 'via' line IS allowed on the single-evidence path — it is a MOVE, not an addition", () => {
+    // The deliberate exception to the rule above, and the reason it is not inconsistency:
+    // every gated element is NEW, while this line is where the pre-existing "(matched X · Y)"
+    // parenthetical went. Gating it would DELETE a datum this surface already showed rather
+    // than withhold one it never had, and would leave the #1907 clip bug alive on one
+    // surface while fixing it on the other.
+    const { container } = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "152 of 250 publications tagged",
+          term: "Leukemia",
+          count: 152,
+          descendantTerms: ["Leukemia, Hairy Cell", "Leukemia, Myeloid"],
+        }}
+        pubCount={250}
+      />,
+    );
+    const via = screen.getByText("Leukemia, Hairy Cell · Leukemia, Myeloid");
+    expect(via.textContent).toBe("via Leukemia, Hairy Cell · Leukemia, Myeloid");
+    // …and it is the line, not the retired parenthetical: no "(matched" anywhere.
+    expect(container.textContent).not.toMatch(/\(matched/);
+  });
+});
+
+/**
+ * NARROW VIEWPORTS — jsdom computes no layout and evaluates no media query, so these pin
+ * the CLASS CONTRACT that the browser measurements rest on. Geometry was verified
+ * separately in Chromium against a box-model repro of these exact strings: before the
+ * responsive variants the primary lead's phrase measured 0px wide at both 390px and 768px
+ * viewports, with the pill overlapping the % cell by 93.5px and the row overrunning the
+ * card's stats column; after them the phrase measures 148px at 390 and 254px at 768, and
+ * the `lg` render is byte-identical to the approved desktop one.
+ *
+ * Each assertion below is the single class a mutation would have to remove to put that 0px
+ * back, so they are written as exact-token matches rather than substring checks.
+ */
+describe("<ResultEvidence> — the primary lead degrades instead of collapsing on narrow viewports", () => {
+  const hasToken = (el: Element, token: string) =>
+    el.className.split(/\s+/).includes(token);
+
+  const renderTagged = (extra?: Partial<Record<string, unknown>>) =>
+    render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "12 of 98 publications tagged",
+          term: "Melanoma",
+          count: 12,
+        }}
+        pubCount={98}
+        stacked
+        {...extra}
+      />,
+    );
+
+  it("the kind column is full-width below `lg` and only then the fixed 124px column", () => {
+    // 124px of fixed chrome against a 191px card middle column is what left the phrase 0px
+    // wide. Below `lg` the word takes a line of its own instead of a column.
+    const { container } = renderTagged();
+    const kind = screen.getByText("Concept");
+    expect(hasToken(kind, "w-full")).toBe(true);
+    expect(hasToken(kind, "lg:w-[124px]")).toBe(true);
+    // …and NOT both widths unprefixed: two same-property utilities resolve by
+    // generated-stylesheet order in Tailwind v4, so a bare `w-[124px]` here would make the
+    // winner unreadable off the JSX.
+    expect(hasToken(kind, "w-[124px]")).toBe(false);
+    // The full-width word only stacks if the row it sits in actually wraps.
+    const row = container.firstElementChild!;
+    expect(hasToken(row, "flex-wrap")).toBe(true);
+    expect(hasToken(row, "lg:flex-nowrap")).toBe(true);
+    expect(hasToken(row, "flex-nowrap")).toBe(false);
+  });
+
+  it("the expandable row wraps too — the disclosure button IS the flex row there", () => {
+    // The wrap has to reach `DisclosureRow`'s button, not just the non-expandable div; the
+    // expandable lead is the common case and it is the tighter of the two (chevron + gap).
+    renderTagged({ canExpand: true, onToggle: () => {}, panelId: "p" });
+    const button = screen.getByRole("button");
+    expect(hasToken(button, "flex-wrap")).toBe(true);
+    expect(hasToken(button, "lg:flex-nowrap")).toBe(true);
+  });
+
+  it("the % column and the pill are dropped below `lg`, where the row cannot hold them", () => {
+    renderTagged();
+    const pct = screen.getByText("12.2%").parentElement!;
+    expect(hasToken(pct, "hidden")).toBe(true);
+    expect(hasToken(pct, "lg:block")).toBe(true);
+    const pill = screen.getByText("subject-tagged");
+    expect(hasToken(pill, "hidden")).toBe(true);
+    expect(hasToken(pill, "lg:inline-flex")).toBe(true);
+    expect(hasToken(pill, "inline-flex")).toBe(false);
+  });
+
+  it("nothing narrow-only is lost: the phrase states the ratio the hidden % rounds", () => {
+    // The licence for hiding the column. `coverage` and the "N of M" phrase are computed
+    // from the same pair, so wherever the % renders the fraction is already on screen in
+    // full — 12 of 98 IS the 12.2%. If a future lead ever set `coverage` without a count in
+    // the phrase, this fails and the hiding stops being free.
+    const { container } = renderTagged();
+    expect(screen.getByText("12.2%")).toBeTruthy();
+    expect(container.textContent).toMatch(/12 of 98 publications tagged/);
+    // Same for the method/topic leads, which build the phrase through `CountFirst`.
+    const method = render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "Flow cytometry", tools: [], count: 4 }}
+        pubCount={98}
+        stacked
+      />,
+    );
+    expect(screen.getByText("4.1%")).toBeTruthy();
+    expect(method.container.textContent).toMatch(/4 of 98 publications used/);
+  });
+
+  it("the lesser row drops its pill at a NARROWER breakpoint — it loses less to it", () => {
+    // Not a copy of the primary rule: this row is one truncating line, and the pill only
+    // costs it anything below ~480px (measured: 73 of its 81px at a 320px viewport). Hiding
+    // it all the way to `lg` would drop it across a band where it is free.
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "clinical", specialty: "Cardiology", boardCertified: true }}
+        pubCount={44}
+        stacked
+        tier="lesser"
+      />,
+    );
+    expect(pillsIn(container)).toEqual(["credential"]);
+    const pill = screen.getByText("credential");
+    expect(hasToken(pill, "hidden")).toBe(true);
+    expect(hasToken(pill, "sm:inline-flex")).toBe(true);
+    expect(hasToken(pill, "lg:inline-flex")).toBe(false);
+  });
+
+  it("the % column's right pad is 43px and `lg`-only — the button path is NARROWER, not wider", () => {
+    // `DisclosureRow` is `-mx-2 … w-full … px-2`. A block-level box with `width: 100%` and
+    // two negative inline margins is over-constrained, so CSS 2.1 §10.3.3 drops the
+    // margin-RIGHT: the button ends 8px SHORT of this wrapper, not past it. Measured at
+    // 1024px, an expandable row's % cell sits 43px in from the middle column's right edge
+    // (16 dropped margin + 20 chevron + 7 gap); the old `pr-[27px]` counted only the last
+    // two and left the two rows 16px out of line — the opposite of what the pad is for.
+    const { container } = renderTagged();
+    const row = container.firstElementChild!;
+    expect(hasToken(row, "lg:pr-[43px]")).toBe(true);
+    expect(hasToken(row, "pr-[27px]")).toBe(false);
+    // Below `lg` there is no % cell to align, so there is nothing to pad for.
+    expect(row.className).not.toMatch(/(^|\s)pr-\[/);
+  });
+
+  it("no % cell ⇒ no pad at all: the row is not reserving space for a column it lacks", () => {
+    // Clinical has no pub denominator, so no % column — and an unconditional pad would
+    // shove its (chevron-less) row 43px left of every other one for nothing.
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "clinical", specialty: "Cardiology", boardCertified: true }}
+        pubCount={44}
+        stacked
+      />,
+    );
+    expect(container.querySelector(".tabular-nums")).toBeNull();
+    expect(container.firstElementChild!.className).not.toMatch(/pr-\[43px\]/);
   });
 });

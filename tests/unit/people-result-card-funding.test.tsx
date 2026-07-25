@@ -395,6 +395,25 @@ describe("PeopleResultCard — Funding supersedes the generic no-match fallback"
     expect(container.textContent).not.toContain("Also matched");
   });
 
+  it("uniform fold rule — the funding primary carries NO coverage %, even though it leads with a count", () => {
+    // The one kind deliberately excluded from the always-on column. Grants and pubs are
+    // different denominators, and per #1732 the funding lead number is a partition of an
+    // OR, so a "% of output" beside it would inherit that ambiguity and read as a share of
+    // something it is not a share of. Structural today (the card threads no `coverage`),
+    // which is exactly why it needs pinning — nothing else would fail if it started to.
+    mockFetch(oneGrant);
+    const { container } = render(
+      <PeopleResultCard
+        {...base}
+        evidenceRows
+        hit={makeHit({ grantMatchCount: 1, evidence: { kind: "none" } as PeopleHit["evidence"] })}
+      />,
+    );
+    expect(container.textContent).toMatch(/1 of 3 grants mention/);
+    expect(screen.queryByText(/of this scholar’s output/)).toBeNull();
+    expect(container.querySelector('span[class*="w-[64px]"]')).toBeNull();
+  });
+
   it("keeps the '— no specific match —' fallback when NO grant matched (no fetch)", async () => {
     const fetchFn = mockFetch({ grants: [] });
     render(
@@ -457,17 +476,47 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
     expect(await screen.findByText(/Pediatric trial/)).toBeTruthy();
   });
 
-  it("Part D collapse — the 'Also matched' group is a category summary line by default (counts/entities hidden)", () => {
+  it("Part D collapse — the 'Also matched' summary is label + COUNT per secondary (entities still hidden)", () => {
     mockFetch(oneGrant);
     const { container } = render(<PeopleResultCard {...base} evidenceRows hit={stackedHit()} />);
-    // the summary shows colored category labels for each secondary...
+    // Uniform fold rule — the counts are no longer withheld, so this test's stated intent
+    // ("counts hidden") is false by design and its `not.toMatch(/1 of 3 grants/)` guard was
+    // passing for the wrong reason: the chip reads "Funding · 1 grant", which is a different
+    // string entirely. Assert the copy that actually ships.
     expect(screen.getByRole("button", { name: /also matched/i })).toBeTruthy();
-    expect(screen.getByText("Research area")).toBeTruthy();
-    // ...but NOT the entities or counts (they mix denominators — see the collapse note).
+    const summary = screen.getByRole("button", { name: /also matched/i }).textContent ?? "";
+    expect(summary).toMatch(/Research area · 2 pubs/);
+    // The funding chip states the same number the expanded funding row leads with
+    // (`Math.min(fundingLead, grantCount)` = min(1, 3)), singular unit.
+    expect(summary).toMatch(/Funding · 1 grant/);
+    expect(summary).not.toMatch(/1 grants/); // pluralisation matches the card's stat column
+    // ...but still NOT the entities (an entity is what expanding reveals).
     expect(screen.queryByText(/Stem Cell & Regenerative Medicine/)).toBeNull();
     expect(container.textContent).not.toMatch(/1 of 3 grants/);
     // and the per-row disclosures are hidden until expanded.
     expect(screen.queryByRole("button", { name: /key funding/i })).toBeNull();
+  });
+
+  it("uniform fold rule — a folded chip with NO count renders as a bare label, never 'undefined pubs'", () => {
+    mockFetch(oneGrant);
+    render(
+      <PeopleResultCard
+        {...base}
+        evidenceRows
+        hit={stackedHit({
+          evidenceLines: [
+            { kind: "method", family: "CRISPR genome editing", tools: [], count: 3 },
+            // `count` is optional on method/topic/publications — the single-evidence
+            // selector never sets it — so the chip has to degrade to the label alone.
+            { kind: "topic", label: "Stem Cell & Regenerative Medicine", id: "stem" },
+          ] as PeopleHit["evidenceLines"],
+        })}
+      />,
+    );
+    const summary = screen.getByRole("button", { name: /also matched/i }).textContent ?? "";
+    expect(summary).toMatch(/Research area/);
+    expect(summary).not.toMatch(/undefined/);
+    expect(summary).not.toMatch(/Research area · \d/);
   });
 
   it("Part D collapse — expanding the summary reveals the full lesser rows", () => {

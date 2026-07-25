@@ -1,16 +1,21 @@
 import type { ResultEvidence } from "@/lib/api/result-evidence";
+import type { EvidencePillKind } from "@/components/search/match-reason";
 import { MatchAwareReason, LesserReason, CountFirst } from "@/components/search/match-reason";
 import { HighlightedSnippet } from "@/components/search/highlight-snippet";
 import { ConceptChipRow } from "@/components/search/concept-chip-row";
-import { descendantSummary } from "@/lib/search/descendant-summary";
+import { descendantViaSummary } from "@/lib/search/descendant-summary";
 
 /**
  * #1366 follow-up Part B — a PRIMARY lead whose matched-pub share of the scholar's
- * output (`count / pubCount`) falls below this gets a "· X% of output" coverage cue
- * and is fainted. Tunable. 2% structurally only fires for high-output scholars (a
- * 1-pub match needs >50 pubs to dip under it), so it self-guards against tiny
- * denominators: it separates a 1-of-538 lead (0.2%, fires) from a 4-of-98 (4.1%) or
- * 3-of-44 (6.8%) lead (don't).
+ * output (`count / pubCount`) falls below this is FAINTED. Tunable. 2% structurally only
+ * fires for high-output scholars (a 1-pub match needs >50 pubs to dip under it), so it
+ * self-guards against tiny denominators: it separates a 1-of-538 lead (0.2%, fires) from
+ * a 4-of-98 (4.1%) or 3-of-44 (6.8%) lead (don't).
+ *
+ * Uniform fold rule — this used to gate the "· X% of output" cue STRING as well. The
+ * percentage is now an always-on neutral column (see `coverage` below), so the threshold
+ * gates the dim and nothing else. The name is kept: it is still the same judgement about
+ * the same ratio.
  */
 const COVERAGE_CUE_THRESHOLD = 0.02;
 
@@ -20,9 +25,10 @@ const COVERAGE_CUE_THRESHOLD = 0.02;
 const ENTITY_UNDERLINE =
   "underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]";
 
-/** #1366 follow-up Part B — the "X.X% of output" coverage figure, rounded to one
- *  decimal; a share that rounds below 0.1% reads "<0.1%" rather than a misleading
- *  "0.0%". */
+/** #1366 follow-up Part B — the coverage figure, rounded to one decimal; a share that
+ *  rounds below 0.1% reads "<0.1%" rather than a misleading "0.0%". Uniform fold rule —
+ *  the words " of output" moved to the sr-only copy in the column, so this returns the
+ *  number alone. */
 function coveragePct(count: number, total: number): string {
   const rounded = Math.round((1000 * count) / total) / 10;
   return rounded === 0 ? "<0.1%" : `${rounded}%`;
@@ -162,6 +168,13 @@ export function ResultEvidence({
       case "clinical":
         return (
           <LesserReason
+            // Uniform fold rule — clinical is usually a SECONDARY, so this is the row the
+            // fold reveals and the one the mockup pills. The prose stays: "Board certified
+            // in X" names the specialty the certification is IN, which the pill does not.
+            // No `stacked` guard here, unlike the primary clinical lead: `tier="lesser"` is
+            // only ever passed from the card's stacked branch, so this row cannot reach the
+            // frozen single-evidence surface in the first place.
+            pill={evidence.boardCertified ? "credential" : undefined}
             canExpand={canExpand}
             expanded={expanded}
             onToggle={onToggle}
@@ -215,13 +228,22 @@ export function ResultEvidence({
     }
   }
 
-  // #1366 follow-up Part B — relevance cues on the PRIMARY lead. Two independent
-  // caveats, both also FAINT the lead (`dim`): a low-coverage cue when the matched
-  // pubs are a tiny share of the scholar's output, and a "keyword-only" type cue when
-  // the lead is a literal mention. PRECEDENCE: keyword-only wins (the stronger
-  // weakness signal); never stack both. Funding-promoted + identity-fallback primaries
-  // are handled elsewhere / have no pub coverage, so they carry no cue. Scoped to the
-  // tiered (`stacked`) context — the single-evidence path stays frozen (matches C/D).
+  // #1366 follow-up Part B — the PRIMARY lead FAINTS when the match is thin. Two
+  // independent thinness tests: the matched pubs are a tiny share of the scholar's output,
+  // or the lead is a literal mention. Funding-promoted + identity-fallback primaries are
+  // handled elsewhere / have no pub coverage, so they never dim. Scoped to the tiered
+  // (`stacked`) context — the single-evidence path stays frozen (matches C/D).
+  //
+  // Uniform fold rule — the coupling is BROKEN. `dim` was `cue != null`, i.e. the tone
+  // depended on a caveat STRING existing; the two thinness tests are unchanged but they
+  // are now read directly. The cue string is fully retired: the percentage became an
+  // always-on neutral column and "keyword only" became the amber provenance pill, so
+  // nothing is left for a lead to append to its phrase.
+  //
+  // That also drops the old PRECEDENCE rule (keyword-only beat low-coverage so the two
+  // never stacked, because only one string fitted the slot). There is no shared slot now,
+  // so a keyword-only lead that is ALSO low-coverage shows both signals — the pill and the
+  // percentage. Strictly more honest, which is why the rule disappears rather than ports.
   const primaryCount =
     evidence.kind === "method" ||
     evidence.kind === "topic" ||
@@ -234,21 +256,28 @@ export function ResultEvidence({
     pubCount > 0 &&
     primaryCount / pubCount < COVERAGE_CUE_THRESHOLD;
   const keywordOnly = evidence.kind === "publications" && evidence.strength === "mention";
-  const cue = !stacked
-    ? undefined
-    : keywordOnly
-      ? " · term match only"
-      : lowCoverage
-        ? ` · ${coveragePct(primaryCount!, pubCount!)} of output`
-        : undefined;
-  const dim = cue != null;
+  const dim = stacked && (keywordOnly || lowCoverage);
+  // Uniform fold rule — ALWAYS ON wherever there is a count, not threshold-gated: it is a
+  // stat ("8% of this scholar's output"), not a caveat, and withholding it on the leads we
+  // judged healthy is what made it read as a verdict. No count ⇒ no column, which is what
+  // silences clinical (a specialty has no pub denominator).
+  //
+  // The single-evidence path is silenced by the `stacked` gate ALONE, and that gate is not
+  // redundant: `selectEvidence` does set `count` there (lib/api/result-evidence.ts — both
+  // `count: input.pub.tagged.count` and `count: input.pub.mention.count`), so without the
+  // gate the % column would render on the frozen surface. `method`, `topic` and `concept`
+  // are the ones that arrive there without a count. Do not "simplify" the gate away.
+  const coverage =
+    stacked && primaryCount != null && pubCount != null && pubCount > 0
+      ? coveragePct(primaryCount, pubCount)
+      : undefined;
 
   switch (evidence.kind) {
     case "method":
       return (
         <MatchAwareReason
           kind="method"
-          cue={cue}
+          coverage={coverage}
           dim={dim}
           canExpand={canExpand}
           expanded={expanded}
@@ -270,7 +299,7 @@ export function ResultEvidence({
       return (
         <MatchAwareReason
           kind="topic"
-          cue={cue}
+          coverage={coverage}
           dim={dim}
           canExpand={canExpand}
           expanded={expanded}
@@ -289,10 +318,21 @@ export function ResultEvidence({
         </MatchAwareReason>
       );
     case "clinical":
-      // No count — the dotted underline (every kind but keyword) marks the specialty.
+      // No count — the dotted underline (every kind but keyword) marks the specialty, and
+      // there is no coverage column (a specialty has no pub denominator).
+      // Uniform fold rule — the `credential` pill is `stacked`-gated like the % column and
+      // the two publications pills, because it is the same kind of thing: a NEW element on
+      // a surface we froze, not a relocation of one already there. `selectEvidence` does
+      // emit `clinical.boardCertified` on the single-evidence path, so the gate is what
+      // keeps it off. The prose is what carries the fact on both paths — "Board certified
+      // in X" also names the specialty the certification is IN, which the pill does not.
+      // (The "via" line below is the one addition that is NOT gated, and deliberately: it
+      // is where the pre-existing "(matched …)" parenthetical MOVED to, so gating it would
+      // delete a datum this surface used to show rather than withhold a new one.)
       return (
         <MatchAwareReason
           kind="clinical"
+          pill={stacked && evidence.boardCertified ? "credential" : undefined}
           canExpand={canExpand}
           expanded={expanded}
           onToggle={onToggle}
@@ -318,10 +358,35 @@ export function ResultEvidence({
       // is the one accented datum, the term keeps `anchor`, and a dim lead takes none.
       const count = dim ? "text-[var(--evidence-body)]" : "text-[var(--evidence-accent)]";
       const lead = evidence.text.match(/^(\d[\d,]*)(\s[\s\S]*)$/);
+      // Uniform fold rule — the pill is keyed to PROVENANCE, never to category. `concept`
+      // gets NONE on purpose: a MeSH-expansion text variant is neither a subject tag nor a
+      // bare keyword, and claiming either would be false. Gated on `stacked` (a new signal,
+      // scoped like every other Part B addition).
+      const pill: EvidencePillKind | undefined = !stacked
+        ? undefined
+        : evidence.strength === "tagged"
+          ? "subject-tagged"
+          : evidence.strength === "mention"
+            ? "keyword-only"
+            : undefined;
       return (
         <MatchAwareReason
           kind={mention ? "keyword" : "concept"}
-          cue={cue}
+          coverage={coverage}
+          pill={pill}
+          // #1355 — the narrower descendant term(s) the scholar actually carries.
+          // Uniform fold rule — PROMOTED out of the inline "(matched X · Y)" parenthetical
+          // onto its own line under the phrase. That parenthetical was the string #1907/#1908
+          // had to budget precisely BECAUSE it sat inside the truncating span; on its own line
+          // it is no longer racing the phrase for the same pixels. Deliberately not
+          // `stacked`-gated — this relocates an existing datum rather than adding a signal,
+          // and leaving the parenthetical on the single-evidence path would keep a known clip
+          // bug alive on one surface while fixing it on the other.
+          via={
+            evidence.descendantTerms && evidence.descendantTerms.length > 0
+              ? descendantViaSummary(evidence.descendantTerms)
+              : undefined
+          }
           dim={dim}
           canExpand={canExpand}
           expanded={expanded}
@@ -345,15 +410,6 @@ export function ResultEvidence({
               <span className={mention ? `font-semibold ${anchor}` : `font-semibold ${anchor} ${ENTITY_UNDERLINE}`}>
                 {evidence.term}
               </span>
-              {/* #1355 — the narrower descendant term(s) the scholar actually carries.
-                  #1907/#1908 — middot-separated (the descriptors carry their own commas)
-                  and budgeted so the parenthetical closes instead of clipping open. */}
-              {evidence.descendantTerms && evidence.descendantTerms.length > 0 ? (
-                <span className="text-[var(--evidence-detail)]">
-                  {" "}
-                  (matched {descendantSummary(evidence.descendantTerms)})
-                </span>
-              ) : null}
             </>
           ) : null}
         </MatchAwareReason>
