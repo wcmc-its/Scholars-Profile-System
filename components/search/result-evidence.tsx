@@ -358,17 +358,14 @@ export function ResultEvidence({
       // is the one accented datum, the term keeps `anchor`, and a dim lead takes none.
       const count = dim ? "text-[var(--evidence-body)]" : "text-[var(--evidence-accent)]";
       const lead = evidence.text.match(/^(\d[\d,]*)(\s[\s\S]*)$/);
-      // Uniform fold rule — the pill is keyed to PROVENANCE, never to category. `concept`
-      // gets NONE on purpose: a MeSH-expansion text variant is neither a subject tag nor a
-      // bare keyword, and claiming either would be false. Gated on `stacked` (a new signal,
-      // scoped like every other Part B addition).
-      const pill: EvidencePillKind | undefined = !stacked
-        ? undefined
-        : evidence.strength === "tagged"
-          ? "subject-tagged"
-          : evidence.strength === "mention"
-            ? "keyword-only"
-            : undefined;
+      // Uniform fold rule — the pill is keyed to PROVENANCE, never to category, and only
+      // the EXCEPTION is badged (see {@link EvidencePillKind}). `tagged` is the norm on
+      // this row and gets none; `concept` gets none either, because a MeSH-expansion text
+      // variant is neither a subject tag nor a bare keyword and claiming either would be
+      // false. Only `mention` is badged. Gated on `stacked` (a new signal, scoped like
+      // every other Part B addition).
+      const pill: EvidencePillKind | undefined =
+        stacked && evidence.strength === "mention" ? "keyword-only" : undefined;
       return (
         <MatchAwareReason
           kind={mention ? "keyword" : "concept"}

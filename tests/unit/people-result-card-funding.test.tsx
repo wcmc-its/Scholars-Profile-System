@@ -237,14 +237,16 @@ describe("PeopleResultCard — Funding evidence row (eager count, lazy records)"
 
     // The lead number is the TAGGED count, under the "tagged" relation.
     expect(text).toMatch(/1 of 24 grants tagged/);
-    // The remainder is stated, not silently dropped.
-    expect(text).toMatch(/4 mention/);
+    // The remainder is stated, not silently dropped — and it says "MORE", because a reader
+    // who sums two parallel-looking clauses gets a universe that reads double-counted. The
+    // word is the whole fix: 4 MORE names this as the remainder it already was.
+    expect(text).toMatch(/4 more mention it in text/);
     // And the false claim is gone: the OR total is never captioned "tagged".
     expect(text).not.toMatch(/5 of 24 grants tagged/);
 
     // The clauses PARTITION the matched set: 1 tagged + 4 mention-only = 5 matched.
     const tagged = Number(text.match(/(\d+) of 24 grants tagged/)![1]);
-    const mention = Number(text.match(/(\d+) mention/)![1]);
+    const mention = Number(text.match(/(\d+) more mention it in text/)![1]);
     expect(tagged + mention).toBe(5);
   });
 
@@ -467,13 +469,33 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
     expect(screen.getByText("Method")).toBeTruthy();
     // ...and the demoted signals sit under "Also matched", collapsed by default.
     expect(screen.getByText("Also matched")).toBeTruthy();
-    // expand the umbrella → the demoted Funding dot row: "mentions 'diabetes' · N of M".
+    // expand the umbrella → the demoted Funding row, COUNT FIRST: "1 of 3 grants mention
+    // 'diabetes'". The count used to trail both clauses as a suffix, which left the
+    // relation clause dangling unquantified until the reader reached the end and
+    // retrofitted it — so this pins the ORDER, not just the presence of both parts.
     fireEvent.click(screen.getByRole("button", { name: /also matched/i }));
-    expect(container.textContent).toMatch(/mentions\s*“diabetes”/);
-    expect(container.textContent).toMatch(/1 of 3 grants/);
+    expect(container.textContent).toMatch(/1 of 3 grants\s*mention\s*“diabetes”/);
     // the demoted dot still expands to the KEY FUNDING records (fetched on this click).
     fireEvent.click(screen.getByRole("button", { name: /key funding/i }));
     expect(await screen.findByText(/Pediatric trial/)).toBeTruthy();
+  });
+
+  it("the 'Also matched' summary SURVIVES expand (dimmed) — the toggle never becomes a bare word", () => {
+    // It used to unmount on expand, so the control collapsed to the words "Also matched"
+    // and the focus ring outlined a mostly empty bar: the click target changed shape under
+    // the pointer that had just hit it, and keyboard focus landed on the one state where
+    // the control says least about what it controls.
+    mockFetch(oneGrant);
+    render(<PeopleResultCard {...base} evidenceRows hit={stackedHit()} />);
+    const toggle = screen.getByRole("button", { name: /also matched/i });
+    expect(toggle.textContent).toMatch(/Research area · 2 pubs/);
+
+    fireEvent.click(toggle);
+    const after = screen.getByRole("button", { name: /also matched/i });
+    expect(after.textContent).toMatch(/Research area · 2 pubs/);
+    // …as a legend, not a second copy of the rows now under it.
+    const chips = after.querySelector('span[class*="flex-wrap"]')!;
+    expect(chips.className).toMatch(/opacity-55/);
   });
 
   it("Part D collapse — the 'Also matched' summary is label + COUNT per secondary (entities still hidden)", () => {
@@ -486,8 +508,9 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
     expect(screen.getByRole("button", { name: /also matched/i })).toBeTruthy();
     const summary = screen.getByRole("button", { name: /also matched/i }).textContent ?? "";
     expect(summary).toMatch(/Research area · 2 pubs/);
-    // The funding chip states the same number the expanded funding row leads with
-    // (`Math.min(fundingLead, grantCount)` = min(1, 3)), singular unit.
+    // The funding chip states the UNION — the whole matched set behind the fold — not the
+    // row's lead clause. This hit is all-mention (grantMatchCount 1, no tagged count), so
+    // union and lead coincide at 1; the mixed case is pinned below.
     expect(summary).toMatch(/Funding · 1 grant/);
     expect(summary).not.toMatch(/1 grants/); // pluralisation matches the card's stat column
     // ...but still NOT the entities (an entity is what expanding reveals).
@@ -495,6 +518,44 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
     expect(container.textContent).not.toMatch(/1 of 3 grants/);
     // and the per-row disclosures are hidden until expanded.
     expect(screen.queryByRole("button", { name: /key funding/i })).toBeNull();
+  });
+
+  it("a COLLAPSED count is never smaller than what opening it reveals (the union, not the lead)", () => {
+    // The chip used the row's LEAD clause, which per #1732 is one half of a partition: 8
+    // tagged, while the panel behind the fold lists all 15 matched grants (8 tagged + 7
+    // mention-only). So "Funding · 8 grants" promised 8 and delivered 15. Only the union
+    // describes the thing the chip is summarising; the row underneath still splits it.
+    mockFetch({ grants: [] });
+    render(
+      <PeopleResultCard
+        {...base}
+        q="ischemic stroke"
+        evidenceRows
+        keyPaperConfig={{
+          descriptorUis: ["D002544"],
+          contentQuery: "ischemic stroke",
+          conceptLabel: "Ischemic Stroke",
+        }}
+        hit={makeHit({
+          grantMatchCount: 15,
+          grantMatchTaggedCount: 8,
+          grantCount: 25,
+          evidenceLines: [
+            { kind: "method", family: "CRISPR genome editing", tools: [], count: 3 },
+          ] as PeopleHit["evidenceLines"],
+        })}
+      />,
+    );
+    const summary = screen.getByRole("button", { name: /also matched/i }).textContent ?? "";
+    expect(summary).toMatch(/Funding · 15 grants/);
+    expect(summary).not.toMatch(/Funding · 8 grants/);
+
+    // …and the row it summarises still partitions that 15 into its two clauses, count
+    // first, with the remainder named as a remainder.
+    fireEvent.click(screen.getByRole("button", { name: /also matched/i }));
+    const row = document.body.textContent ?? "";
+    expect(row).toMatch(/8 of 25 grants\s*tagged/);
+    expect(row).toMatch(/7 more mention it in text/);
   });
 
   it("uniform fold rule — a folded chip with NO count renders as a bare label, never 'undefined pubs'", () => {
@@ -545,13 +606,13 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
     // ONE secondary (the funding dot; the method badge is the primary) still collapses
     // under the "Also matched" umbrella — the summary shows, the detail is hidden.
     expect(screen.getByRole("button", { name: /also matched/i })).toBeTruthy();
-    expect(screen.queryByText(/mentions\s*“diabetes”/)).toBeNull();
+    expect(screen.queryByText(/mention\s*“diabetes”/)).toBeNull();
     expect(screen.queryByText(/Pediatric trial/)).toBeNull();
     // and there is NO separate inner "key funding" chevron — the umbrella is the sole
     // control, so ONE click on it reveals the grant records directly (fetched now).
     expect(screen.queryByRole("button", { name: /key funding/i })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /also matched/i }));
-    expect(screen.getByText(/mentions\s*“diabetes”/)).toBeTruthy();
+    expect(screen.getByText(/mention\s*“diabetes”/)).toBeTruthy();
     expect(await screen.findByText(/Pediatric trial/)).toBeTruthy();
   });
 
