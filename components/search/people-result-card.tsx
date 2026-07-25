@@ -82,6 +82,19 @@ const SECONDARY_LABEL: Record<string, string> = {
   funding: "Funding",
 };
 
+/** Uniform fold rule — a folded secondary is now a LABEL plus a subordinate detail
+ *  ("Research area · 11 pubs"), so the count can be muted against the label instead of
+ *  competing with it. `detail` null ⇒ a bare label, which is what an absent count must
+ *  render as: `count` is optional on method/topic/publications, and "Method · undefined
+ *  pubs" has to be unreachable. */
+type SecondaryChip = { label: string; detail: string | null };
+
+/** Same pluralisation rule as the card's own right-hand stat column (`pubLabel` /
+ *  `grantLabel`), deliberately — the two numbers on one card must never disagree about
+ *  grammar. */
+const unit = (n: number | undefined, word: "pub" | "grant"): string | null =>
+  n == null ? null : `${n} ${word}${n === 1 ? "" : "s"}`;
+
 /**
  * Smaller, lower-contrast version of the role tag — the previous variant
  * competed visually with the title underneath at the same line. Loses the
@@ -499,21 +512,54 @@ export function PeopleResultCard({
       </>
     ) : null;
 
-  // #1366 follow-up Part D collapse — category label per secondary, NO counts / NO
-  // entities: the counts mix denominators (pub-share vs grant-share), so a bare count
-  // line would invert real strength. The only count on the card stays the primary's
-  // single-denominator fraction; expanding reveals the full lesser rows.
-  const secondaryChips = lesserLines
-    .map((ev) =>
-      ev.kind === "publications"
-        ? SECONDARY_LABEL[ev.strength === "mention" ? "keyword" : "concept"]
-        : SECONDARY_LABEL[ev.kind],
-    )
-    .filter((label): label is string => Boolean(label));
-  if (hasFunding) secondaryChips.push(SECONDARY_LABEL.funding);
-  // ponytail: 4 chips fit one line at typical widths; more collapse to "+N". Bump the
-  // cap if cards routinely carry more secondaries.
-  const shownChips = secondaryChips.slice(0, 4);
+  // #1366 follow-up Part D collapse — one chip per secondary, entities still hidden
+  // (expanding reveals the full lesser rows).
+  //
+  // Uniform fold rule — the chips now CARRY THEIR COUNTS. The old note here said counts
+  // were withheld because they mix denominators (pub-share vs grant-share) and a bare
+  // count line would invert real strength. That reasoning is why the count is a muted tail
+  // on a chip that names its own unit — "Research area · 11 pubs · Funding · 1 grant" —
+  // rather than a run of naked numbers: every number states what it counts, so there is
+  // nothing to mistake one denominator for.
+  const secondaryChips: SecondaryChip[] = lesserLines
+    .map<SecondaryChip | null>((ev) => {
+      switch (ev.kind) {
+        case "method":
+          return { label: SECONDARY_LABEL.method, detail: unit(ev.count, "pub") };
+        case "topic":
+          return { label: SECONDARY_LABEL.topic, detail: unit(ev.count, "pub") };
+        case "publications":
+          return {
+            label: SECONDARY_LABEL[ev.strength === "mention" ? "keyword" : "concept"],
+            detail: unit(ev.count, "pub"),
+          };
+        case "clinical":
+          return {
+            label: SECONDARY_LABEL.clinical,
+            detail: ev.boardCertified ? "board certified" : null,
+          };
+        default:
+          // Identity kinds (concepts/areas/none) are always solo ⇒ never lesser.
+          return null;
+      }
+    })
+    .filter((c): c is SecondaryChip => c != null);
+  if (hasFunding) {
+    // The number the expanded Funding row itself leads with, so the chip and the row it
+    // summarises can never state different figures. Per #1732 it is a partition of an OR,
+    // which is fine for a one-number chip precisely because it is the same one-number
+    // claim the row makes.
+    secondaryChips.push({
+      label: SECONDARY_LABEL.funding,
+      detail: unit(Math.min(fundingLead, hit.grantCount), "grant"),
+    });
+  }
+  // ponytail: 3 chips fit one line at typical widths now that each carries a count
+  // ("Research area" 13 chars → "Research area · 11 pubs" 23), which is the same property
+  // the cap of 4 encoded for bare labels; more collapse to "+N". Realistic secondary
+  // counts are 2–3 (`selectEvidenceLines` emits at most one line per kind, plus funding),
+  // so this rarely bites. Bump it if cards routinely carry more.
+  const shownChips = secondaryChips.slice(0, 3);
   const chipOverflow = secondaryChips.length - shownChips.length;
 
   // The demoted "Also matched" rows — the lesser stacked lines + the (demoted) Funding
@@ -632,19 +678,33 @@ export function PeopleResultCard({
                         Also matched
                       </span>
                       {!alsoExpanded ? (
-                        <span className="flex min-w-0 items-center gap-2.5 text-[12px]">
-                          {/* #1913 — labels only, middot-separated. The dot-plus-
+                        // Uniform fold rule — WRAPS instead of overflowing. This row had no
+                        // wrap and no truncate, so on a narrow card even the old bare chips
+                        // pushed the chevron out of the row; wider chips make that likely
+                        // rather than latent. Wrapping degrades to a second line (tight
+                        // `gap-y`, not the 10px the shorthand would give) and never clips
+                        // mid-chip, which is the #1907 disease.
+                        <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-[2px] text-[12px]">
+                          {/* #1913 — labels neutral, middot-separated. The dot-plus-
                               same-hue-word pairing is gone, and so is the false link
                               affordance the coloured labels carried. */}
-                          {shownChips.map((label, i) => (
+                          {shownChips.map((c, i) => (
                             <span key={i} className="inline-flex items-center gap-2.5">
                               {i > 0 ? (
                                 <span aria-hidden className="text-[var(--evidence-faint)]">
                                   ·
                                 </span>
                               ) : null}
-                              <span className="font-medium text-[var(--evidence-body)]">
-                                {label}
+                              <span>
+                                <span className="font-medium text-[var(--evidence-body)]">
+                                  {c.label}
+                                </span>
+                                {c.detail ? (
+                                  <span className="text-[var(--evidence-faint)]">
+                                    {" · "}
+                                    {c.detail}
+                                  </span>
+                                ) : null}
                               </span>
                             </span>
                           ))}
