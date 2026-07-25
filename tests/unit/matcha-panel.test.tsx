@@ -581,6 +581,33 @@ describe("MatchaPanel", () => {
     expect(screen.getByText(/Top 100 of 120 researchers/)).toBeTruthy();
   });
 
+  it("the eligibility floor's count describes what opening it reveals", async () => {
+    // The render cap bites the ineligible floor too, and only there does the bar state a number
+    // the list must honour. Five candidates carry the required stage; the other 115 carry none
+    // (absent FAILS the gate), so the bar promises 115 while the cap paints 100. Drop the notice
+    // and the officer is told 15 people exist that no interaction can reach.
+    const staged = POOL.map((c, i) =>
+      i < 5 ? { ...c, measures: { ...c.measures, careerStage: "early" as const } } : c,
+    );
+    stubFetch({ concepts: CONCEPTS, candidates: staged });
+    render(
+      <MatchaPanel
+        grantMatcha
+        eligibility={{ careerStages: ["early"], esiTargeted: false, usRequired: false }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/the ask/i), {
+      target: { value: "CAR T collaborators" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+
+    const bar = await screen.findByRole("button", { name: /115 researchers filtered out/ });
+    fireEvent.click(bar);
+    const floor = document.querySelector('[data-slot="matcha-elig-floor"]')!;
+    expect(floor.querySelectorAll("ul > li")).toHaveLength(100);
+    expect(floor.textContent).toContain("Showing the first 100 of 115");
+  });
+
   it("exports every row the filters matched, not just the hundred on screen", async () => {
     await renderAndSearchPool();
 
