@@ -90,8 +90,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 16 CloudWatch alarms (12 platform + 1 B27 relay-errors + 3 edge)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 16);
+    it("creates exactly 17 CloudWatch alarms (12 platform + 1 B27 relay-errors + 4 edge)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 17);
     });
 
     it("every alarm name contains the prod env literal (Footgun #4)", () => {
@@ -99,13 +99,13 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(16);
+      expect(names).toHaveLength(17);
       for (const name of names) {
         expect(name).toMatch(/-prod$/);
       }
     });
 
-    it("alarm names cover the twelve platform surfaces, the B27 relay-errors alarm, and the three #1934 edge alarms", () => {
+    it("alarm names cover the twelve platform surfaces, the B27 relay-errors alarm, and the four #1934 edge alarms", () => {
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
@@ -123,6 +123,7 @@ describe("SpsObservabilityStack", () => {
           "sps-ecs-task-shortfall-prod",
           "sps-edge-origin-cert-expiring-prod",
           "sps-edge-origin-down-prod",
+          "sps-edge-probe-stalled-prod",
           "sps-edge-unreachable-prod",
           "sps-edit-authz-denied-prod",
           "sps-opensearch-breaker-prod",
@@ -301,6 +302,8 @@ describe("SpsObservabilityStack", () => {
         // #1934 -- origin-cert expiry is weeks of lead time, not an outage, so
         // it warns rather than pages and stays out of the composite.
         "sps-edge-origin-cert-expiring-prod": warnId,
+        // The dead-detector signal: a monitoring failure, not a serving outage.
+        "sps-edge-probe-stalled-prod": warnId,
         "sps-alb-5xx-rate-prod": undefined,
         "sps-alb-unhealthy-hosts-prod": undefined,
         "sps-ecs-task-shortfall-prod": undefined,
@@ -327,8 +330,8 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      // 16 in prod; staging is 15 — it gets no ACU alarm (see the note above).
-      expect(seen).toBe(16);
+      // 17 in prod; staging is 16 — it gets no ACU alarm (see the note above).
+      expect(seen).toBe(17);
     });
 
     it("creates the app-unavailable composite that pages on the serving cascade", () => {
@@ -630,7 +633,7 @@ describe("SpsObservabilityStack", () => {
             ORIGIN_HOSTNAME: "cf-ns-scholars.weill.cornell.edu",
             ORIGIN_HEALTH_PATH: "/api/health",
             EDGE_URL: "https://scholars.weill.cornell.edu/",
-            ORIGIN_SECRET_ARN: Match.anyValue(),
+            ORIGIN_SECRET_ID: "scholars/prod/edge/origin-shared-secret",
           },
         },
       });
@@ -647,16 +650,19 @@ describe("SpsObservabilityStack", () => {
       });
     });
 
-    it("the origin-down alarm treats MISSING data as BREACHING", () => {
-      // Load-bearing, not a style choice: if the probe stops running there is
-      // no detector, and a dead detector must page rather than read as
-      // healthy. NOT_BREACHING here would silently restore the exact blind
-      // spot this alarm exists to close.
+    it("the origin-down alarm does NOT treat missing data as breaching", () => {
+      // Regression guard for a real false page on 2026-07-25. This alarm
+      // originally used BREACHING to catch a dead probe, but CloudWatch
+      // evaluates a new alarm's whole window immediately, so all three
+      // not-yet-existent datapoints counted as breaches and it went ALARM ten
+      // seconds after creation on a healthy system -- paging through the
+      // composite. The dead-probe signal lives in sps-edge-probe-stalled-<env>
+      // instead, which is warn-tier and outside the composite.
       const alarms = template.findResources("AWS::CloudWatch::Alarm", {
         Properties: { AlarmName: "sps-edge-origin-down-prod" },
       });
       const props = Object.values(alarms)[0]?.Properties;
-      expect(props?.TreatMissingData).toBe("breaching");
+      expect(props?.TreatMissingData).toBe("notBreaching");
       expect(props?.ComparisonOperator).toBe("LessThanThreshold");
       expect(props?.Threshold).toBe(1);
       expect(props?.EvaluationPeriods).toBe(3);
@@ -666,6 +672,30 @@ describe("SpsObservabilityStack", () => {
       // Minimum, not Average: one failed probe in three must not be averaged
       // away into a passing datapoint.
       expect(props?.Statistic).toBe("Minimum");
+    });
+
+    it("the dead-detector signal is warn-tier and OUTSIDE the composite", () => {
+      // The half of the original BREACHING intent that survives. It keys on
+      // Lambda Invocations -- the thing that actually goes missing when the
+      // probe dies -- rather than on a missing OriginProbeSuccess, which is
+      // indistinguishable from an origin that is merely down.
+      const alarms = template.findResources("AWS::CloudWatch::Alarm", {
+        Properties: { AlarmName: "sps-edge-probe-stalled-prod" },
+      });
+      const props = Object.values(alarms)[0]?.Properties;
+      expect(props?.Namespace).toBe("AWS/Lambda");
+      expect(props?.MetricName).toBe("Invocations");
+      expect(props?.TreatMissingData).toBe("breaching");
+      expect(props?.AlarmActions).toHaveLength(1);
+      // Must NOT be a composite child -- a monitoring failure is not a
+      // serving outage, and conflating them is what caused the false page.
+      const composites = template.findResources(
+        "AWS::CloudWatch::CompositeAlarm",
+      );
+      const rule = JSON.stringify(
+        Object.values(composites)[0]?.Properties?.AlarmRule as unknown,
+      );
+      expect(rule).not.toContain("EdgeProbeStalledAlarm");
     });
 
     it("the origin-cert alarm warns 30 days out and is NOT a composite child", () => {
@@ -756,7 +786,7 @@ describe("SpsObservabilityStack", () => {
       for (const [key, value] of Object.entries(vars)) {
         if (typeof value !== "string") continue;
         expect(value).not.toMatch(/^[0-9a-f]{32,}$/);
-        if (/secret/i.test(key)) expect(key).toMatch(/_ARN$/);
+        if (/secret/i.test(key)) expect(key).toMatch(/_(ARN|ID)$/);
       }
     });
 
@@ -984,8 +1014,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 15 CloudWatch alarms (11 platform + 1 B27 relay-errors + 3 edge)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 15);
+    it("creates exactly 16 CloudWatch alarms (11 platform + 1 B27 relay-errors + 4 edge)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 16);
     });
 
     it("every alarm name contains the staging env literal", () => {
@@ -993,7 +1023,7 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(15);
+      expect(names).toHaveLength(16);
       for (const name of names) {
         expect(name).toMatch(/-staging$/);
       }
@@ -1083,6 +1113,7 @@ describe("SpsObservabilityStack", () => {
         // #1934 -- same tiering as prod: cert expiry warns, the two edge
         // outage leaves page through the composite.
         "sps-edge-origin-cert-expiring-staging": warnId,
+        "sps-edge-probe-stalled-staging": warnId,
         "sps-alb-5xx-rate-staging": undefined,
         "sps-alb-unhealthy-hosts-staging": undefined,
         "sps-ecs-task-shortfall-staging": undefined,
@@ -1107,7 +1138,7 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      expect(seen).toBe(15);
+      expect(seen).toBe(16);
     });
 
     it("creates the app-unavailable composite in staging too", () => {
@@ -1335,7 +1366,7 @@ describe("SpsObservabilityStack", () => {
         const written = new Set(namespaces(t, "AWS::Logs::MetricFilter"));
         const read = namespaces(t, "AWS::CloudWatch::Alarm");
         // Six alarms live under SPS/: three log-derived (MetricFilter) plus
-        // the three #1934 edge alarms. The rest key on AWS/* namespaces and
+        // the four #1934 edge alarms. The rest key on AWS/* namespaces and
         // are filtered out above.
         expect(read).toHaveLength(6);
         for (const n of read) {

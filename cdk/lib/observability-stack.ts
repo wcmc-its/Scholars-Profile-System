@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { CfnOutput, Duration, Stack, type StackProps } from "aws-cdk-lib";
+import { ArnFormat, CfnOutput, Duration, Stack, type StackProps } from "aws-cdk-lib";
 import * as budgets from "aws-cdk-lib/aws-budgets";
 import * as ce from "aws-cdk-lib/aws-ce";
 import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
@@ -497,11 +497,12 @@ export class SpsObservabilityStack extends Stack {
       retention: logs.RetentionDays.TWO_WEEKS,
     });
 
-    const originSecret = secretsmanager.Secret.fromSecretNameV2(
-      this,
-      "EdgeOriginSharedSecret",
-      `scholars/${env}/edge/origin-shared-secret`,
-    );
+    // Deliberately NO `Secret.fromSecretNameV2` import here. It buys nothing
+    // once the probe addresses the secret by name: its `.secretArn` is the
+    // suffix-less partial ARN that broke authorization, and its `grantRead`
+    // renders only the `-??????` form. Both the identifier and the grant are
+    // spelled out explicitly below so neither can drift back.
+    const originSecretName = `scholars/${env}/edge/origin-shared-secret`;
 
     const originProbe = new NodejsFunction(this, "EdgeOriginProbeFunction", {
       functionName: `sps-edge-origin-probe-${env}`,
@@ -517,7 +518,10 @@ export class SpsObservabilityStack extends Stack {
       environment: {
         ENVIRONMENT: env,
         ORIGIN_HOSTNAME: envConfig.edgeOriginHostname,
-        ORIGIN_SECRET_ARN: originSecret.secretArn,
+        // The NAME, not `originSecret.secretArn` -- that property strips the
+        // AWS-generated suffix, and a partial ARN is the one SecretId form that
+        // fails authorization here (see the Lambda's comment).
+        ORIGIN_SECRET_ID: originSecretName,
         // Shallow ALB health path -- one in-memory flag, no DB. A deep check
         // here would page on a transient dependency blip that Aurora's own
         // alarms already cover.
@@ -532,7 +536,33 @@ export class SpsObservabilityStack extends Stack {
         target: "node22",
       },
     });
-    originSecret.grantRead(originProbe);
+    // NOT `originSecret.grantRead(...)`. That renders the resource as the
+    // `-??????` suffix form only, and the deploy on 2026-07-25 proved it is not
+    // enough: the live secret DOES carry an AWS-generated suffix, but
+    // `fromSecretNameV2(...).secretArn` hands the Lambda the SUFFIX-LESS partial
+    // ARN, and Secrets Manager authorizes against the identifier the CALLER
+    // supplied rather than the resolved secret. So the wildcard never matched
+    // and every probe run died with AccessDeniedException -- which the probe
+    // dutifully reported as OriginProbeSuccess=0, i.e. a false outage page ~15
+    // minutes later.
+    //
+    // Grant BOTH forms rather than depending on which identifier the SDK sends.
+    // This is also correct if the secret is ever recreated without a suffix.
+    const originSecretArnBase = Stack.of(this).formatArn({
+      service: "secretsmanager",
+      resource: "secret",
+      resourceName: originSecretName,
+      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+    });
+    originProbe.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret",
+        ],
+        resources: [originSecretArnBase, `${originSecretArnBase}-??????`],
+      }),
+    );
 
     // 5 minutes: fast enough that a real outage is caught inside the 15-minute
     // alarm window below, slow enough that the origin sees ~288 synthetic
@@ -575,10 +605,23 @@ export class SpsObservabilityStack extends Stack {
     // a dropped socket, a task rolling out of the target group -- does not
     // page; three consecutive failures is a real outage.
     //
-    // treatMissingData BREACHING is deliberate and is the whole point: if the
-    // probe itself stops running, the detector is dead and that must page, not
-    // read as healthy. The 3-datapoint window also means a fresh deploy (whose
-    // first datapoint lands within 5 minutes) never trips it on cold start.
+    // treatMissingData is NOT_BREACHING, and the reasoning that first put
+    // BREACHING here was wrong in a way worth recording. The intent was right --
+    // a probe that stops running is a dead detector and must not read as
+    // healthy -- but the mechanism was not: CloudWatch evaluates a newly
+    // created alarm against its whole window IMMEDIATELY, and with BREACHING
+    // every one of the three not-yet-existent datapoints counts as a breach. So
+    // the alarm went ALARM seconds after creation, on a healthy system, and
+    // paged through the composite. Measured on the staging deploy 2026-07-25:
+    // created 17:58:11, ALARM 17:58:21. The 3-datapoint window does NOT defer
+    // that, because the periods are treated as breaching rather than pending.
+    //
+    // The dead-detector signal is real and is kept -- moved to its own
+    // warn-tier alarm on the probe's Invocations below, which is the thing that
+    // actually goes missing when the detector dies. That separation is also
+    // better on its own terms: "the origin is down" and "our monitoring broke"
+    // are different incidents with different runbooks, and only the first
+    // should wake someone as a serving outage.
     const originDownAlarm = new cloudwatch.Alarm(this, "EdgeOriginDownAlarm", {
       alarmName: `sps-edge-origin-down-${env}`,
       alarmDescription: `The CloudFront origin leg is failing (${env}): the synthetic probe could not get a 200 from the NetScaler VIP -> ALB :443 -> ECS path for 15 minutes, or the probe itself stopped reporting. The ALB/ECS alarms CANNOT see this -- if the VIP is down, requests never reach the ALB. Next: check the NetScaler VIP, the ALB :443 listener and its priority-1 X-Origin-Verify rule (a rotated secret presents identically), then the origin certificate. Backout: docs/2026-07-25-netscaler-prod-durability-handoff.md.`,
@@ -587,7 +630,7 @@ export class SpsObservabilityStack extends Stack {
       evaluationPeriods: 3,
       datapointsToAlarm: 3,
       comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
-      treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
 
     // (5) CloudFront itself not answering -- DNS breakage, viewer-cert expiry,
@@ -605,7 +648,8 @@ export class SpsObservabilityStack extends Stack {
         evaluationPeriods: 3,
         datapointsToAlarm: 3,
         comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
-        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+        // Same reasoning as the origin-down alarm above.
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       },
     );
 
@@ -636,6 +680,37 @@ export class SpsObservabilityStack extends Stack {
       },
     );
     originCertExpiringAlarm.addAlarmAction(warnAction);
+
+    // (7) The detector itself stopped running. This is the half of the original
+    // BREACHING intent that survives -- and `Invocations` is the honest metric
+    // for it, because it is what actually goes missing when the probe dies
+    // (a broken schedule, a throttle, a bad deploy), whereas a missing
+    // OriginProbeSuccess is indistinguishable from an origin that is merely
+    // down.
+    //
+    // Warn tier and NOT a composite child, deliberately: "our monitoring broke"
+    // is not "the site is down", and conflating them is what produced a false
+    // serving-outage page on 2026-07-25. It fires once briefly on first deploy
+    // (no datapoints yet) and self-clears within a period -- acceptable on the
+    // warn channel, unacceptable on the page channel, which is precisely why it
+    // sits here.
+    const probeStalledAlarm = new cloudwatch.Alarm(this, "EdgeProbeStalledAlarm", {
+      alarmName: `sps-edge-probe-stalled-${env}`,
+      alarmDescription: `The edge origin probe has not run for 15 minutes (${env}), so the origin-leg alarms are blind -- they cannot distinguish a healthy origin from an unmeasured one. This is a monitoring failure, not a serving outage. Next: check the sps-edge-origin-probe-${env} function's errors and its EventBridge schedule rule.`,
+      metric: new cloudwatch.Metric({
+        namespace: "AWS/Lambda",
+        metricName: "Invocations",
+        dimensionsMap: { FunctionName: originProbe.functionName },
+        statistic: "Sum",
+        period: Duration.minutes(5),
+      }),
+      threshold: 1,
+      evaluationPeriods: 3,
+      datapointsToAlarm: 3,
+      comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+    });
+    probeStalledAlarm.addAlarmAction(warnAction);
 
     // ------------------------------------------------------------------
     // App-unavailable composite (cascade dedup)
