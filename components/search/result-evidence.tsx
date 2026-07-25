@@ -156,26 +156,26 @@ export function ResultEvidence({
       case "method":
         return (
           <LesserReason
+            label="Method"
             suffix={lesserOwn(evidence.count)}
             canExpand={canExpand}
             expanded={expanded}
             onToggle={onToggle}
             panelId={panelId}
           >
-            <span className="font-medium">Method</span> ·{" "}
             <span className={`font-[450] text-[var(--evidence-anchor)] ${ENTITY_UNDERLINE}`}>{evidence.family}</span>
           </LesserReason>
         );
       case "topic":
         return (
           <LesserReason
+            label="Research area"
             suffix={lesserOwn(evidence.count)}
             canExpand={canExpand}
             expanded={expanded}
             onToggle={onToggle}
             panelId={panelId}
           >
-            <span className="font-medium">Research area</span> ·{" "}
             <span className={`font-[450] text-[var(--evidence-anchor)] ${ENTITY_UNDERLINE}`}>{evidence.label}</span>
           </LesserReason>
         );
@@ -188,13 +188,13 @@ export function ResultEvidence({
             // No `stacked` guard here, unlike the primary clinical lead: `tier="lesser"` is
             // only ever passed from the card's stacked branch, so this row cannot reach the
             // frozen single-evidence surface in the first place.
+            label="Clinical"
             pill={evidence.boardCertified ? "credential" : undefined}
             canExpand={canExpand}
             expanded={expanded}
             onToggle={onToggle}
             panelId={panelId}
           >
-            <span className="font-medium">Clinical</span> ·{" "}
             {evidence.boardCertified ? (
               <>
                 Board certified in{" "}
@@ -211,6 +211,7 @@ export function ResultEvidence({
           <LesserReason
             // #1913 — no dot. A mention's weakness is carried by `weak` (muted/italic
             // text) + the MentionNote, which is where it always actually lived.
+            label={mention ? "Keyword" : "Concept"}
             weak={mention}
             suffix={lesserShare(evidence.count)}
             canExpand={canExpand}
@@ -218,10 +219,8 @@ export function ResultEvidence({
             onToggle={onToggle}
             panelId={panelId}
           >
-            <span className="font-medium">{mention ? "Keyword" : "Concept"}</span>
             {evidence.term ? (
               <>
-                {" · "}
                 <span
                   className={
                     mention
