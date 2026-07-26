@@ -53,8 +53,21 @@ function evidenceSummary(evidence: ResultEvidenceT, pubCount: number): string {
       // comma join reads as N times more terms than matched. No budget here (unlike
       // the two result-row surfaces): this summary wraps rather than truncating, so
       // every term the panel claims can be shown in full.
+      //
+      // #1958 — the verb branches on `alsoParent` for the reason #1955 gives. The
+      // provenance takes its `narrower` shape whenever the scholar CARRIES a descendant,
+      // not when the match came THROUGH one, so a bare "matched X" asserts a route the
+      // producer never established — and the count this parenthetical hangs off spans the
+      // whole subtree, so the two halves of the sentence describe different sets. When the
+      // parent is held too, the honest claim is containment, not route. "also tagged"
+      // rather than "also includes": it echoes `text`'s own verb ("N of M publications
+      // tagged"), so the subject is the scholar's publications and not the descriptor that
+      // precedes it — a descriptor cannot tag anything, so the taxonomy misreading is
+      // unavailable. Same pair as the People card, deliberately: the two surfaces differ in
+      // STRUCTURE (no kind column, one plain sentence, no width budget), not in vocabulary
+      // for the same fact.
       const desc = evidence.descendantTerms?.length
-        ? ` (matched ${evidence.descendantTerms.join(DESCENDANT_SEPARATOR)})`
+        ? ` (${evidence.alsoParent ? "also tagged" : "matched"} ${evidence.descendantTerms.join(DESCENDANT_SEPARATOR)})`
         : "";
       return `${evidence.text}${term}${desc}`;
     }
