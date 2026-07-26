@@ -3434,11 +3434,18 @@ export async function searchPeople(opts: {
     // quoted, not a resolved term).
     const narrowerTerms =
       prov?.kind === "narrower" ? prov.descendantTerms : undefined;
+    // #1955 — travels WITH the terms, on the same object, because the via-line's
+    // wording is a function of the pair: the terms say WHICH descendants, this says
+    // whether the parent tag is there too, and only the renderer that has both can
+    // word the line truthfully. Never re-derived downstream.
+    const alsoParent = prov?.kind === "narrower" ? prov.alsoParent : false;
     if (counts && counts.tagged > 0 && provenanceParent.length > 0)
       pub.tagged = {
         text: `${Math.min(counts.tagged, pubCount)} of ${pubCount} publications tagged`,
         term: provenanceParent,
-        ...(narrowerTerms && narrowerTerms.length > 0 ? { descendantTerms: narrowerTerms } : {}),
+        ...(narrowerTerms && narrowerTerms.length > 0
+          ? { descendantTerms: narrowerTerms, alsoParent }
+          : {}),
         count: Math.min(counts.tagged, pubCount),
         ...(reps?.tagged && reps.tagged.length > 0 ? { pubs: reps.tagged } : {}),
       };
@@ -3456,7 +3463,9 @@ export async function searchPeople(opts: {
       pub.concept = {
         text: `via related concept`,
         term: provenanceParent,
-        ...(narrowerTerms && narrowerTerms.length > 0 ? { descendantTerms: narrowerTerms } : {}),
+        ...(narrowerTerms && narrowerTerms.length > 0
+          ? { descendantTerms: narrowerTerms, alsoParent }
+          : {}),
       };
 
     // Bounded research-areas hint — score-desc (areasOfInterest is already

@@ -42,6 +42,21 @@ vi.mock("@/lib/profile/methods-lens-flags", () => ({
   isMethodsFamilyDefinitionsOn: () => false,
 }));
 
+// #1955 — the descendant-LABEL lookup is the one step of the provenance path that
+// reaches Prisma (`descriptorLabelsForUis` → `getMeshMap` → `prisma.meshDescriptor`),
+// which the `@/lib/db` mock above does not carry. Stub just that export so the terms are
+// real names instead of the UI-code fallback a fail-closed empty map would force — the
+// assertions below should not be reading through an error branch. Everything else in the
+// module passes through unchanged. The UI literal is inlined because a `vi.mock` factory
+// runs before this file's own consts are initialized.
+vi.mock("@/lib/api/search-taxonomy", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/search-taxonomy")>();
+  return {
+    ...actual,
+    descriptorLabelsForUis: async () => new Map([["D000072761", "Mycobiome"]]),
+  };
+});
+
 // One scholar with SIX areas (to exercise the N=4 cap), one with the method.
 const HITS = [
   {
@@ -63,6 +78,12 @@ const HITS = [
     highlight: undefined,
   },
 ];
+
+// #1955 — per-test `_source` patch for the single hit above. The MeSH provenance
+// path keys off `publicationMeshUi` (and, on the reason-from-doc route,
+// `meshSubtreeCounts`), neither of which the base fixture has any reason to carry.
+// Reset to `{}` in `beforeEach`, so every test that doesn't set it sees today's hit.
+let hitSourcePatch: Record<string, unknown> = {};
 
 vi.mock("@/lib/search", () => ({
   PEOPLE_INDEX: "scholars-people",
@@ -95,7 +116,10 @@ vi.mock("@/lib/search", () => ({
       }
       return {
         body: {
-          hits: { total: { value: 1 }, hits: HITS },
+          hits: {
+            total: { value: 1 },
+            hits: HITS.map((h) => ({ ...h, _source: { ...h._source, ...hitSourcePatch } })),
+          },
           aggregations: {
             deptDivs: { keys: { buckets: [] } },
             personTypes: { keys: { buckets: [] } },
@@ -131,6 +155,7 @@ beforeEach(() => {
   mockSensitivityOverlayFindMany.mockReset().mockResolvedValue([]);
   mockSearch.mockReset();
   mockReasonAgg.mockReset().mockReturnValue([]);
+  hitSourcePatch = {};
   delete process.env[MATCH_AWARE];
 });
 
@@ -404,5 +429,85 @@ describe("searchPeople — free-text publications:mention evidence (#1)", () => 
     // The list still gets its hits (the reason line streams in separately).
     expect(result.hits.length).toBe(1);
     expect(result.hits[0].cwid).toBe("el1");
+  });
+});
+
+// #1955 — `alsoParent` reaches the card ONLY because `lib/api/search.ts` attaches it to
+// the two `SelectEvidenceInput` spreads it builds (`pub.tagged` and `pub.concept`).
+// Nothing else in the suite crosses that hop: delete the field from those two spreads and
+// every other test stays green while the renderer emits "matched on narrower term " for
+// 100% of scholars — #1955 silently unfixed, green CI. This block is that hop's coverage,
+// asserted on what `searchPeople` actually emits rather than on the pure selectors.
+const MICROBIOTA = "D064307"; // the resolved parent descriptor
+const MYCOBIOME = "D000072761"; // a strict descendant of it
+
+type PeopleSearchHit = Awaited<ReturnType<typeof searchPeople>>["hits"][number];
+/** The card's LEAD evidence, whichever shape the stacked-lines flag emitted. */
+const leadEvidence = (hit: PeopleSearchHit) => hit.evidenceLines?.[0] ?? hit.evidence;
+
+/** One concept search over the fixture scholar, with `_source` patched per case. */
+async function leadEvidenceFor(source: Record<string, unknown>) {
+  process.env[EVIDENCE] = "on";
+  hitSourcePatch = source;
+  const result = await searchPeople({
+    q: "microbiome",
+    relevanceMode: "v3",
+    shape: "topic", // arms `applyTopicTemplate`, without which there is no provenance
+    matchExplain: true,
+    // Doc-sourced tagged count (`meshSubtreeCounts[meshDescriptorUi]`), so the "N of M
+    // publications tagged" lead needs no publications-index agg mock at all.
+    reasonFromDoc: true,
+    meshDescriptorUi: MICROBIOTA,
+    meshDescriptorName: "Microbiota",
+    // >1 entry is what arms `provenanceOn`; [0] is the parent by invariant.
+    meshDescendantUis: [MICROBIOTA, MYCOBIOME],
+    matchAwareContext: { methodFamily: null, topics: [] },
+  });
+  return leadEvidence(result.hits[0]);
+}
+
+describe("searchPeople — #1955 `alsoParent` survives the hop into the evidence input", () => {
+  it("parent AND descendant tagged ⇒ `alsoParent: true` on the counted `tagged` lead", async () => {
+    const ev = await leadEvidenceFor({
+      publicationMeshUi: [MICROBIOTA, MYCOBIOME],
+      meshSubtreeCounts: { [MICROBIOTA]: 12 },
+    });
+    // The whole point of the field: this scholar carries the parent tag too, so the card
+    // may say "also tagged Mycobiome" instead of claiming a route through the descendant.
+    expect(ev).toMatchObject({
+      kind: "publications",
+      strength: "tagged",
+      text: "12 of 200 publications tagged",
+      term: "Microbiota",
+      descendantTerms: ["Mycobiome"],
+      alsoParent: true,
+    });
+  });
+
+  it("descendant ONLY ⇒ `alsoParent: false` on the same lead", async () => {
+    const ev = await leadEvidenceFor({
+      publicationMeshUi: [MYCOBIOME],
+      meshSubtreeCounts: { [MICROBIOTA]: 12 },
+    });
+    expect(ev).toMatchObject({
+      strength: "tagged",
+      descendantTerms: ["Mycobiome"],
+      alsoParent: false,
+    });
+  });
+
+  it("the uncounted `concept` lead carries it too — the SECOND spread in search.ts", async () => {
+    // No `meshSubtreeCounts` ⇒ tagged count 0 ⇒ the lead falls through to "via related
+    // concept", which is the other place `search.ts` attaches the flag and the variant
+    // where the wording has no count to lean on.
+    const ev = await leadEvidenceFor({ publicationMeshUi: [MICROBIOTA, MYCOBIOME] });
+    expect(ev).toMatchObject({
+      kind: "publications",
+      strength: "concept",
+      text: "via related concept",
+      term: "Microbiota",
+      descendantTerms: ["Mycobiome"],
+      alsoParent: true,
+    });
   });
 });

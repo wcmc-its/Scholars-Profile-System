@@ -205,6 +205,27 @@ describe("selectEvidence — precedence (handoff §4 principle 2)", () => {
     });
   });
 
+  it("#1955 — `alsoParent` rides through with `descendantTerms` on every emit site", () => {
+    // The middle hop of the plumbing, and the one where a new field silently disappears:
+    // three separate object literals rebuild the publications evidence (tagged + concept
+    // here, tagged again in `selectEvidenceLines`), and the People card's via-line cannot
+    // word itself without the flag. Absent upstream ⇒ `false`, i.e. the narrower-route
+    // wording — never dropped, so the renderer is never left re-deriving it.
+    const descendantTerms = ["Mycobiome"];
+    const tagged = selectEvidence({
+      pub: { tagged: { text: "5 of 9 tagged", term: "Microbiota", descendantTerms, alsoParent: true, count: 5 } },
+    });
+    expect(tagged).toMatchObject({ descendantTerms, alsoParent: true });
+    const concept = selectEvidence({
+      pub: { concept: { text: "via related concept", term: "Microbiota", descendantTerms } },
+    });
+    expect(concept).toMatchObject({ descendantTerms, alsoParent: false });
+    const [line] = selectEvidenceLines({
+      pub: { tagged: { text: "5 of 9 tagged", term: "Microbiota", descendantTerms, alsoParent: true, count: 5 } },
+    });
+    expect(line).toMatchObject({ descendantTerms, alsoParent: true });
+  });
+
   it("omits `pubs` (but always sets `count`) when the rep-pub list is empty", () => {
     const tagged = selectEvidence({ pub: { tagged: { text: "5 of 9 tagged X", count: 5, pubs: [] } } });
     expect(tagged).toEqual({ kind: "publications", strength: "tagged", text: "5 of 9 tagged X", count: 5 });

@@ -64,13 +64,21 @@ export function descendantSummary(terms: string[], cap = 2): string {
  * is the expandable primary lead at the `lg` breakpoint, whose body column measures
  * 308.4px, and the widest real MeSH descriptor text runs ~6.05px/char.
  *
- * The number no longer buys a ONE-LINE fit and is not meant to. The renderer's prefix
- * became "matched on narrower term " (144px of the 308px, against 16px for the old
+ * The number no longer buys a ONE-LINE fit and is not meant to. It is measured against the
+ * renderer's prefix "matched on narrower term " (144px of the 308px, against 16px for the old
  * "via "), which at one line would leave 27 characters — less than a single descriptor
  * plus its tail. Rather than shrink the budget to something no real term fits, the line
  * WRAPS: it is the last content on its own line with nothing trailing it, so a second
  * line is the whole cost and nothing clips. 48 chars + the prefix is 434px over a 308px
  * box, i.e. bounded at two lines, which is what this number now guarantees.
+ *
+ * #1955 made that prefix VARIABLE-WIDTH: the shorter "also tagged " renders for a scholar
+ * who also carries the parent descriptor, "matched on narrower term " for one who does not.
+ * The budget stays measured against the LONGER of the two — which is also the common one
+ * (measured on staging, only 28.8% of the scholars this line renders for carry the parent) —
+ * so the two-line bound above holds for both. Do NOT re-tighten it on the strength of the
+ * shorter string: that would put the majority render back over the box, and the WRAP is what
+ * fixed the #1907 tail clip in the first place.
  */
 const VIA_BUDGET = 48;
 

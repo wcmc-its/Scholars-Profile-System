@@ -228,6 +228,10 @@ describe("searchPublications MeSH match provenance (#707)", () => {
       kind: "narrower",
       parentTerm: "Breast Neoplasms",
       descendantTerms: ["Carcinoma, Ductal, Breast"],
+      // #1955 — the pub carries the descendant and NOT "Breast Neoplasms" itself. The
+      // Publications row reads only `descendantTerms` for its "(matched X)" parenthetical,
+      // so the flag changes nothing here; it is pinned so the shape stays honest.
+      alsoParent: false,
     });
   });
 

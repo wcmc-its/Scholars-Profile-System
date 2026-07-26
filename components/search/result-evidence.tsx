@@ -392,9 +392,17 @@ export function ResultEvidence({
           // `stacked`-gated — this relocates an existing datum rather than adding a signal,
           // and leaving the parenthetical on the single-evidence path would keep a known clip
           // bug alive on one surface while fixing it on the other.
+          // #1955 — the summary and the parent flag go over as ONE prop because the line's
+          // wording depends on both; splitting them into sibling props would let a caller
+          // ship the terms without the fact that words them. `alsoParent` absent (an older
+          // response, or a producer that never set it) reads as false, which is the
+          // narrower-route wording — the pre-#1955 string, and the majority case.
           via={
             evidence.descendantTerms && evidence.descendantTerms.length > 0
-              ? descendantViaSummary(evidence.descendantTerms)
+              ? {
+                  terms: descendantViaSummary(evidence.descendantTerms),
+                  alsoParent: evidence.alsoParent === true,
+                }
               : undefined
           }
           dim={dim}

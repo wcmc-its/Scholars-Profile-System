@@ -43,7 +43,12 @@ describe("computeMatchProvenance — narrower terms (#688)", () => {
         parentTerm: "Microbiota",
         labels: LABELS,
       }),
-    ).toEqual({ kind: "narrower", parentTerm: "Microbiota", descendantTerms: ["Mycobiome"] });
+    ).toEqual({
+      kind: "narrower",
+      parentTerm: "Microbiota",
+      descendantTerms: ["Mycobiome"],
+      alsoParent: false,
+    });
   });
 
   it("returns multiple narrower terms in tree-walk order, dropping unrelated UIs", () => {
@@ -59,10 +64,14 @@ describe("computeMatchProvenance — narrower terms (#688)", () => {
       parentTerm: "Microbiota",
       // Mycobiome precedes Virome in descendantUis order, regardless of input order.
       descendantTerms: ["Mycobiome", "Virome"],
+      alsoParent: false,
     });
   });
 
   it("prefers the narrower framing when the scholar carries BOTH the parent and a descendant", () => {
+    // #1955 — the BRANCH is unchanged (narrower is still the more specific display); what is
+    // new is that the result now says the parent tag is there too, so a renderer does not
+    // have to claim a route through the descendant that nobody computed.
     expect(
       computeMatchProvenance({
         publicationMeshUi: [MICROBIOTA, "D000072761"], // parent + Mycobiome
@@ -70,7 +79,35 @@ describe("computeMatchProvenance — narrower terms (#688)", () => {
         parentTerm: "Microbiota",
         labels: LABELS,
       }),
-    ).toEqual({ kind: "narrower", parentTerm: "Microbiota", descendantTerms: ["Mycobiome"] });
+    ).toEqual({
+      kind: "narrower",
+      parentTerm: "Microbiota",
+      descendantTerms: ["Mycobiome"],
+      alsoParent: true,
+    });
+  });
+
+  it("#1955 — the SAME descendant differs only in `alsoParent` when the parent is held", () => {
+    // The distinction the copy rests on, pinned directly rather than inferred from two
+    // tests that also differ in their term lists. Identical descendant, identical labels;
+    // the only input difference is the parent UI, and the only output difference must be
+    // the flag — if the branch or the terms moved with it, the renderer would be choosing
+    // its wording off something other than "does this scholar carry the parent".
+    const withoutParent = computeMatchProvenance({
+      publicationMeshUi: ["D000072761"], // Mycobiome only
+      descendantUis: DESCENDANTS,
+      parentTerm: "Microbiota",
+      labels: LABELS,
+    });
+    const withParent = computeMatchProvenance({
+      publicationMeshUi: [MICROBIOTA, "D000072761"], // + the parent
+      descendantUis: DESCENDANTS,
+      parentTerm: "Microbiota",
+      labels: LABELS,
+    });
+    expect(withoutParent).toEqual({ ...withParent, alsoParent: false });
+    expect(withoutParent).toMatchObject({ kind: "narrower", alsoParent: false });
+    expect(withParent).toMatchObject({ kind: "narrower", alsoParent: true });
   });
 
   it("falls back to the UI code when a label is missing", () => {
@@ -81,7 +118,12 @@ describe("computeMatchProvenance — narrower terms (#688)", () => {
         parentTerm: "Microbiota",
         labels: new Map(), // no labels resolved
       }),
-    ).toEqual({ kind: "narrower", parentTerm: "Microbiota", descendantTerms: ["D000072761"] });
+    ).toEqual({
+      kind: "narrower",
+      parentTerm: "Microbiota",
+      descendantTerms: ["D000072761"],
+      alsoParent: false,
+    });
   });
 });
 
