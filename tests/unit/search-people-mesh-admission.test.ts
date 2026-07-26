@@ -272,8 +272,35 @@ describe("people-index MeSH concept admission — SPEC #726", () => {
       const wrapped = (must[0] as { bool: { minimum_should_match: number } }).bool;
       expect(wrapped.minimum_should_match).toBe(1);
       expect(admissionTerms(fullBody())).toEqual({
-        terms: { publicationMeshUi: DESCENDANTS, boost: 0.1 }, // exact admit weight
+        terms: { publicationMeshUi: DESCENDANTS, boost: 0.1, _name: "meshAdmit" }, // exact admit weight
       });
+    });
+
+    // #1952 — BOTH arms carry a name. The lexical one is what lets the reason gate
+    // tell a genuine lexical hit from a mesh-only admit; naming the mesh arm too
+    // means msm:1 guarantees every admitted hit matched a NAMED clause, so an empty
+    // `matched_queries` is distinguishable from "mesh-only" and the gate fails open.
+    it("names BOTH arms of the escalated should, and preserves the lexical clause", async () => {
+      lexical.total = 3;
+      await searchPeople({
+        ...baseTopicOpts,
+        meshMatchTier: "exact",
+        meshAmbiguous: false,
+        meshMatchedFormLength: 8,
+      });
+
+      const should = (topicMust(fullBody())[0] as { bool: { should: Record<string, unknown>[] } })
+        .bool.should;
+      expect(should).toHaveLength(2);
+      const lexArm = should[0] as {
+        bool: { _name: string; minimum_should_match: number; should: Record<string, unknown>[] };
+      };
+      expect(lexArm.bool._name).toBe("lexicalAdmit");
+      expect(lexArm.bool.minimum_should_match).toBe(1);
+      // The original lexical clause is carried through untouched — same matching,
+      // same score, it just sits inside a named wrapper now.
+      expect(lexArm.bool.should).toHaveLength(1);
+      expect(lexArm.bool.should[0]).toHaveProperty("multi_match");
     });
 
     it("orders the admission by match-type trust (entry → 0.7)", async () => {
@@ -285,7 +312,7 @@ describe("people-index MeSH concept admission — SPEC #726", () => {
         meshMatchedFormLength: 7,
       });
       expect(admissionTerms(fullBody())).toEqual({
-        terms: { publicationMeshUi: DESCENDANTS, boost: 0.03 },
+        terms: { publicationMeshUi: DESCENDANTS, boost: 0.03, _name: "meshAdmit" },
       });
     });
   });
@@ -343,7 +370,7 @@ describe("people-index MeSH concept admission — SPEC #726", () => {
       // The floor guards on ambiguity/length, never on anchor status — so an
       // unanchored entry-term on an empty page is exactly the case we admit.
       expect(admissionTerms(fullBody())).toEqual({
-        terms: { publicationMeshUi: DESCENDANTS, boost: 0.03 },
+        terms: { publicationMeshUi: DESCENDANTS, boost: 0.03, _name: "meshAdmit" },
       });
     });
   });
@@ -382,7 +409,7 @@ describe("people-index MeSH concept admission — SPEC #726", () => {
       // The size:0 badge query (built AFTER the escalation mutation) counts the
       // same admitted predicate the full list would return.
       expect(admissionInMust(topicMustFromCount(countOnlyBody()))).toEqual({
-        terms: { publicationMeshUi: DESCENDANTS, boost: 0.1 },
+        terms: { publicationMeshUi: DESCENDANTS, boost: 0.1, _name: "meshAdmit" },
       });
     });
 
