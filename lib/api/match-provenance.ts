@@ -43,6 +43,41 @@ export type MatchProvenance =
        * includes the parent itself. Always non-empty for this variant.
        */
       descendantTerms: string[];
+      /**
+       * #1955 — is the resolved parent descriptor ALSO present in the
+       * `publicationMeshUi` set this call was given?
+       *
+       * It does NOT decide the branch. This variant is still preferred whenever a
+       * descendant is present, because naming the narrower term is the more
+       * specific display — that behaviour is unchanged. The field exists because
+       * the branch fires on the scholar CARRYING a descendant, not on the match
+       * having come THROUGH one, so a renderer that says "matched on narrower
+       * term" asserts a route nobody computed for the scholar tagged with both.
+       *
+       * The two values are NOT symmetric. Read each as exactly what the predicate
+       * computes:
+       *   `true`  ⇒ the parent tag is PRESENT. Sound — membership in
+       *             `publicationMeshUi` implies the tag exists.
+       *   `false` ⇒ the parent tag is absent FROM THE INDEXED SET, which is weaker
+       *             than absent. `publicationMeshUi` is min-evidence filtered when
+       *             the people-doc is built (`lib/search-index-docs.ts` skips a
+       *             descriptor unless `agg.distinctPubs >= 2 || agg.hasFirstOrLast`),
+       *             so a scholar whose parent descriptor sits on exactly ONE
+       *             middle-author publication carries the tag and is still missing
+       *             from this input. Compounding it, the People lead line's N is
+       *             served ungated FOR THIS COHORT — #1952's `countsFor` zeroes the
+       *             tagged count only for a scholar carrying no in-subtree UI, and
+       *             the narrower branch guarantees one — while `meshSubtreeCounts`
+       *             itself counts every kept pub with no threshold. So that same
+       *             below-threshold publication IS inside the "N of M publications
+       *             tagged <parent>" it renders under. For that cohort
+       *             the narrower-route wording remains an over-claim: bounded, named,
+       *             and UNFIXED here. Closing it needs a second data source, which is
+       *             a separate issue — not a change to this predicate.
+       *
+       * Consumers use it to pick copy that holds, not to re-rank.
+       */
+      alsoParent: boolean;
     }
   | {
       kind: "concept";
@@ -87,7 +122,15 @@ export function computeMatchProvenance(opts: {
   const matchedUis = descendantUis.slice(1).filter((ui) => have.has(ui));
   if (matchedUis.length > 0) {
     const descendantTerms = matchedUis.map((ui) => labels.get(ui) ?? ui);
-    return { kind: "narrower", parentTerm, descendantTerms };
+    // #1955 — the same parent test the `concept` branch runs below, evaluated here
+    // as well. It settles the WORDING, never the branch: a scholar carrying both
+    // still reads as `narrower`, exactly as before.
+    return {
+      kind: "narrower",
+      parentTerm,
+      descendantTerms,
+      alsoParent: have.has(descendantUis[0]),
+    };
   }
 
   // #702 — no narrower term, but the scholar is tagged with the resolved

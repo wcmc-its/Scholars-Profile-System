@@ -305,8 +305,52 @@ describe("<ResultEvidence> — one render per kind", () => {
     // The prefix is the RENDERER's, not the caller's (`descendantViaSummary` omits it,
     // exactly as `descendantSummary` omits its "(matched " wrapper). It NAMES the
     // relationship: "via X" left the reader to infer that X was a narrower term rolling up
-    // to their query, which is the one thing the line exists to say.
+    // to their query, which is the one thing the line exists to say. #1955 kept that
+    // property and scoped the claim to where it holds — no `alsoParent` here, so the parent
+    // tag is absent from this scholar's INDEXED descriptor set (weaker than absent; see the
+    // min-evidence caveat on `MatchProvenance.alsoParent`).
     expect(via.textContent).toBe("matched on narrower term Mycobiome · Virome and 1 related term");
+  });
+
+  it("#1955 — a scholar who ALSO carries the parent gets the additive wording instead", () => {
+    // The other half of the same line, and the reason it is two strings rather than one.
+    // Same shape as the test above, one field different. "matched on narrower term" would
+    // over-claim here (`computeMatchProvenance` prefers the narrower framing on CARRYING a
+    // descendant, so it cannot know the match came through one).
+    // The verb is load-bearing. Read the assembled card: line 1 ends on the styled TERM, so
+    // a subjectless second line takes THAT as its antecedent — "also includes" would say
+    // "Leukemia also includes Leukemia, Hairy Cell", a fact about the MeSH tree that is
+    // equally true of every scholar on the page. "also tagged" echoes line 1's own verb, so
+    // the subject is this scholar's publications, and it claims presence without claiming
+    // proportion (nothing splits the 152 between parent- and descendant-tagged pubs).
+    renderEv({
+      kind: "publications",
+      strength: "tagged",
+      text: "152 of 250 publications tagged",
+      term: "Leukemia",
+      count: 152,
+      descendantTerms: ["Leukemia, Hairy Cell", "Leukemia, Myeloid"],
+      alsoParent: true,
+    });
+    const via = screen.getByText("Leukemia, Hairy Cell · Leukemia, Myeloid");
+    expect(via.textContent).toBe("also tagged Leukemia, Hairy Cell · Leukemia, Myeloid");
+  });
+
+  it("#1955 — the additive wording still predicates of the SCHOLAR on the uncounted `concept` lead", () => {
+    // The harder of the two leads: "via related concept Leukemia" carries no count and no
+    // publication set, so a taxonomy reading of the second line would be the only one on
+    // offer — which is exactly what sank "also includes". "tagged" is not a relation one
+    // descriptor can bear to another, so the sentence still resolves to the scholar.
+    renderEv({
+      kind: "publications",
+      strength: "concept",
+      text: "via related concept",
+      term: "Leukemia",
+      descendantTerms: ["Leukemia, Hairy Cell", "Leukemia, Myeloid"],
+      alsoParent: true,
+    });
+    const via = screen.getByText("Leukemia, Hairy Cell · Leukemia, Myeloid");
+    expect(via.textContent).toBe("also tagged Leukemia, Hairy Cell · Leukemia, Myeloid");
   });
 
   it("#1908 — comma-inverted MeSH descriptors stay countable (the separator is not a comma)", () => {
@@ -1233,10 +1277,11 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
     }
     expect(pill.className).toMatch(/shrink-0/);
     // The via-line no longer truncates at all: the longer "matched on narrower term "
-    // prefix would have clipped the " and N related terms" tail — the one phrase saying
-    // the list is partial — so the line WRAPS instead. It can afford to, being last on its
-    // own line with nothing trailing it. Its ancestry must still be clean either way, or a
-    // clip would move up to a box that also holds the phrase.
+    // prefix — the one #1955 kept for the majority case, and the one VIA_BUDGET is measured
+    // against — would have clipped the " and N related terms" tail, the one phrase saying
+    // the list is partial, so the line WRAPS instead. It can afford to, being last on its
+    // own line with nothing trailing it. Its ancestry must still be clean under either
+    // prefix, or a clip would move up to a box that also holds the phrase.
     const via = screen.getByText("Leukemia, Lymphoid and 2 related terms");
     expect(via.className).not.toMatch(/truncate/);
     noTruncateAncestry(via.parentElement!);

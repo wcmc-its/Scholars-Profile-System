@@ -128,6 +128,18 @@ export type ResultEvidence =
        *  when the resolved concept matched via a strictly-narrower term. Rendered
        *  as "(matched X, Y)" after the term. Absent on a direct concept match. */
       descendantTerms?: string[];
+      /** #1955 — whether the resolved parent descriptor is ALSO present in the
+       *  scholar's indexed descriptor set, carried alongside {@link descendantTerms}
+       *  (never without it) so the People card can word its via-line: additive
+       *  ("also tagged") when the parent tag is present, the narrower-route wording
+       *  otherwise. NOT symmetric — `false` means absent from the INDEXED set, which
+       *  the min-evidence gate in `lib/search-index-docs.ts` makes weaker than absent;
+       *  the same field on `MatchProvenance` names the bounded, unfixed residual.
+       *  Optional so the other `ResultEvidence`-shaped consumer — `evidenceSummary` in
+       *  `components/search/evidence-line.tsx`, which builds its `(matched X · Y)`
+       *  parenthetical from `descendantTerms` alone — is untouched; absent is read as
+       *  `false`, i.e. the pre-#1955 wording. */
+      alsoParent?: boolean;
       pubs?: EvidencePub[];
       count?: number;
     }
@@ -386,9 +398,18 @@ export type SelectEvidenceInput = {
    *  already built; any one may be absent). `count` is the numeric "N" (the
    *  `+N more` math), `pubs` up to 3 representative papers for the disclosure. */
   pub?: {
-    tagged?: { text: string; term?: string; descendantTerms?: string[]; count: number; pubs?: EvidencePub[] };
+    tagged?: {
+      text: string;
+      term?: string;
+      descendantTerms?: string[];
+      /** #1955 — rides with `descendantTerms` (see the same field on
+       *  {@link ResultEvidence}); forwarded verbatim, never re-derived. */
+      alsoParent?: boolean;
+      count: number;
+      pubs?: EvidencePub[];
+    };
     mention?: { text: string; term?: string; count: number; pubs?: EvidencePub[] };
-    concept?: { text: string; term?: string; descendantTerms?: string[] };
+    concept?: { text: string; term?: string; descendantTerms?: string[]; alsoParent?: boolean };
   };
   /** Resolved clinical specialty — exact tier only. Caller ran
    *  {@link clinicalExactMatch} against the hit's `_source` clinical fields; pass
@@ -529,7 +550,10 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
       text: input.pub.tagged.text,
       ...(input.pub.tagged.term ? { term: input.pub.tagged.term } : {}),
       ...(input.pub.tagged.descendantTerms && input.pub.tagged.descendantTerms.length > 0
-        ? { descendantTerms: input.pub.tagged.descendantTerms }
+        ? {
+            descendantTerms: input.pub.tagged.descendantTerms,
+            alsoParent: input.pub.tagged.alsoParent === true,
+          }
         : {}),
       ...(input.pub.tagged.pubs && input.pub.tagged.pubs.length > 0 ? { pubs: input.pub.tagged.pubs } : {}),
       count: input.pub.tagged.count,
@@ -542,7 +566,10 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
       text: input.pub.concept.text,
       ...(input.pub.concept.term ? { term: input.pub.concept.term } : {}),
       ...(input.pub.concept.descendantTerms && input.pub.concept.descendantTerms.length > 0
-        ? { descendantTerms: input.pub.concept.descendantTerms }
+        ? {
+            descendantTerms: input.pub.concept.descendantTerms,
+            alsoParent: input.pub.concept.alsoParent === true,
+          }
         : {}),
     };
   // 6 — selfDescription (bio) — ONLY when the bio covered the WHOLE query (a
@@ -624,7 +651,10 @@ export function selectEvidenceLines(input: SelectEvidenceInput): ResultEvidence[
       text: input.pub.tagged.text,
       ...(input.pub.tagged.term ? { term: input.pub.tagged.term } : {}),
       ...(input.pub.tagged.descendantTerms && input.pub.tagged.descendantTerms.length > 0
-        ? { descendantTerms: input.pub.tagged.descendantTerms }
+        ? {
+            descendantTerms: input.pub.tagged.descendantTerms,
+            alsoParent: input.pub.tagged.alsoParent === true,
+          }
         : {}),
       ...(input.pub.tagged.pubs && input.pub.tagged.pubs.length > 0 ? { pubs: input.pub.tagged.pubs } : {}),
       count: input.pub.tagged.count,

@@ -402,8 +402,13 @@ export function MatchAwareReason({
    *  the typography of the line belong to the component that owns the line, matching how
    *  `descendantViaSummary` omits the wrapper). Renders as its own muted second line
    *  under the phrase. It cannot ride in `children`: those go INSIDE the truncating span,
-   *  which is both a guaranteed single line and the #1907 clip by construction. */
-  via?: string;
+   *  which is both a guaranteed single line and the #1907 clip by construction.
+   *
+   *  #1955 — `terms` is that list; `alsoParent` says whether the scholar ALSO carries the
+   *  parent descriptor the list rolls up to, which is what selects the prefix below. It is
+   *  a field of this object rather than a prop of its own precisely because the prefix is
+   *  unsayable without it. */
+  via?: { terms: string; alsoParent: boolean };
   /** Uniform fold rule — pre-formatted share of the scholar's output ("12.2%" / "<0.1%")
    *  for the right-hand tabular column, which is an `lg`-and-up column (see the narrow
    *  degradation note below). Absent ⇒ the column does not render at all (no reserved
@@ -473,12 +478,12 @@ export function MatchAwareReason({
           the coverage cell are the new occupants of that slot and inherit the invariant —
           flexbox distributes negative space only across items with a non-zero shrink
           factor, so the phrase is squeezed and they are laid out at max-content. The
-          via-line does carry `truncate`, but it is the last content on its own line with
-          nothing trailing it, so a clip can only shorten its own "and N related terms"
-          tail instead of eating a sibling — and `descendantViaSummary` budgets the whole
+          via-line does NOT carry `truncate` (pinned by result-evidence-card.test.tsx): it is
+          the last content on its own line with nothing trailing it, so it wraps rather than
+          clipping and can never eat a sibling — and `descendantViaSummary` budgets the whole
           rendered string, tail included, against this column's measured `lg` width, so at
-          the layout this row was designed for there is nothing to shorten. Narrower than
-          `lg` the row stacks and the line does clip, like any long text. */}
+          the layout this row was designed for it does not wrap either. Narrower than `lg`
+          the row stacks and the line wraps, like any long text. */}
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-baseline gap-[6px]">
           <span className="min-w-0 truncate">{children}</span>
@@ -488,18 +493,45 @@ export function MatchAwareReason({
           <span
             className={`mt-[2px] min-w-0 text-[11.5px] ${dim ? "text-[var(--evidence-faint)]" : "text-[var(--evidence-detail)]"}`}
           >
-            {/* "via X" made the reader infer the relationship — that the tag was a
-                NARROWER term rolling up to their query. The prefix states it instead.
-                It costs 144px of this box's measured 308px at `lg` (vs 16px for "via "),
-                which would cut the term budget from 48 chars to 27 and clip the
-                " and N related terms" tail — the one phrase saying the list is partial,
-                and the exact #1907 failure this line was built to avoid.
-                So the line WRAPS rather than truncates. It is the last content on its own
-                line with nothing trailing it, so wrapping costs a second line at worst and
-                cannot eat a sibling; VIA_BUDGET's 2-term cap bounds it there. That is why
-                the budget did not move with the copy. */}
-            <span className="text-[var(--evidence-faint)]">matched on narrower term </span>
-            {via}
+            {/* "via X" made the reader infer the relationship — that the tag was a NARROWER
+                term rolling up to their query. Naming it was right; naming it ONE way was
+                not. "matched on narrower term" over-claimed, because
+                `computeMatchProvenance` takes its `narrower` branch on the scholar CARRYING
+                a descendant, not on the match having come through one — so the scholar
+                tagged with both parent and child read as routed through the child (#1955).
+                The provenance now carries `alsoParent`, and the two wordings it selects are
+                NOT symmetric, because the predicate behind them is not:
+                  true  — the parent tag IS in the scholar's indexed descriptor set, so the
+                          descendants are additional to it and the additive wording holds.
+                  false — the parent tag is absent FROM THAT INDEXED SET, which is weaker
+                          than absent. `publicationMeshUi` is min-evidence filtered when the
+                          people-doc is built (lib/search-index-docs.ts skips a descriptor
+                          unless it appears on ≥2 pubs or on a first/last-author one), so a
+                          scholar carrying the parent on exactly one middle-author paper is
+                          missing from the field and still reads "matched on narrower term".
+                          That cohort is a bounded over-claim and it is UNFIXED here: closing
+                          it needs a second data source, which is a separate issue.
+                Two strings still earn the branch — measured on staging against that same
+                indexed field, only 28.8% of the scholars this line renders for carry the
+                parent too.
+                "also tagged", not "also includes": the subject a reader supplies for a
+                subjectless clause is the nearest preceding noun phrase, and on this card
+                that is the styled TERM that ENDS line 1. "also includes" therefore reads as
+                a statement about the MeSH tree ("Leukemia also includes Leukemia, Hairy
+                Cell") — true of every scholar on the page, and so a claim about none of
+                them. Worse on the `concept` lead, which has no count and no publication set
+                for any other reading to attach to. "tagged" echoes line 1's own verb, so the
+                antecedent becomes this scholar's publications, and it asserts presence
+                without asserting proportion — which it must, since nothing here splits line
+                1's N between parent-tagged and descendant-tagged pubs.
+                The line WRAPS rather than truncates either way. It is the last content on
+                its own line with nothing trailing it, so wrapping costs a second line at
+                worst and cannot eat a sibling; VIA_BUDGET's 2-term cap bounds it there,
+                measured against the longer prefix. That is why the budget did not move. */}
+            <span className="text-[var(--evidence-faint)]">
+              {via.alsoParent ? "also tagged " : "matched on narrower term "}
+            </span>
+            {via.terms}
           </span>
         ) : null}
       </span>
