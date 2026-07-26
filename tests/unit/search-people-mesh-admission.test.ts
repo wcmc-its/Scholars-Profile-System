@@ -34,7 +34,7 @@ const capturedBodies: Array<Record<string, unknown>> = [];
 // size:0 pre-count query).
 const lexical = vi.hoisted(() => ({ total: 1 }));
 // #1951 — cwids returned by the exact-word literal-text lookups; set per test.
-const exactCwids = vi.hoisted(() => ({ buckets: [] as string[] }));
+const exactCwids = vi.hoisted(() => ({ buckets: [] as string[], sumOther: 0 }));
 
 vi.mock("@/lib/search", () => ({
   PEOPLE_INDEX: "scholars-people",
@@ -86,7 +86,12 @@ vi.mock("@/lib/search", () => ({
         return {
           body: {
             hits: { total: { value: 0 }, hits: [] },
-            aggregations: { cwids: { buckets: exactCwids.buckets.map((key) => ({ key })) } },
+            aggregations: {
+              cwids: {
+                buckets: exactCwids.buckets.map((key) => ({ key })),
+                sum_other_doc_count: exactCwids.sumOther,
+              },
+            },
           },
         };
       }
@@ -236,6 +241,7 @@ describe("people-index MeSH concept admission — SPEC #726", () => {
     process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT = "on";
     capturedBodies.length = 0;
     exactCwids.buckets = []; // #1951 — per-test literal-match cwids
+    exactCwids.sumOther = 0; // no agg truncation unless a test asks for it
     lexical.total = 1;
     groupByMock.mockResolvedValue([]);
   });
@@ -405,6 +411,32 @@ describe("people-index MeSH concept admission — SPEC #726", () => {
         expect(
           ((l.aggs as { cwids: { terms: { size: number } } }).cwids.terms.size),
         ).toBe(5000);
+      }
+    });
+
+    // The cap is a SILENT truncation: a terms agg keeps the highest-doc_count buckets,
+    // so a query broader than 5000 cwids drops the tail scholars whose single matching
+    // paper is their only evidence. `sum_other_doc_count` is the only signal that it
+    // happened — assert both directions so the warn can't rot into always/never firing.
+    it("warns only when the cwid agg was actually truncated", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        exactCwids.buckets = ["aaa1001"];
+        exactCwids.sumOther = 0;
+        await searchPeople(exactOpts);
+        expect(warn).not.toHaveBeenCalled();
+
+        exactCwids.sumOther = 17;
+        await searchPeople(exactOpts);
+        const events = warn.mock.calls.map((c) => JSON.parse(String(c[0])));
+        expect(events.length).toBeGreaterThan(0);
+        expect(events[0]).toMatchObject({
+          event: "exact_word_cwid_cap_hit",
+          cap: 5000,
+          droppedDocs: 17,
+        });
+      } finally {
+        warn.mockRestore();
       }
     });
 
