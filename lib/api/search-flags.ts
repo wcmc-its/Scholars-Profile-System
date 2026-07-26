@@ -1036,24 +1036,36 @@ export function resolveMeshResolutionFallbackEnabled(): boolean {
  * safety & quality improvement" regress).
  *
  * Default OFF (`=== "on"` opt-in): flag-off keeps the stoplist path byte-identical.
- * STAGING ON 2026-07-25 to soak; PROD still OFF.
+ * OFF in BOTH envs. Flipped ON in staging 2026-07-26 and reverted the same day.
  *
- * Chip recall re-measured against the canonical MeSH map AFTER the one-token-conjunct
- * clamp: 167/169 with a **per-chip diff of zero** vs the shipped stoplist — same
- * descriptors, same confidence tiers, same 2 unresolved (`Cancer epigenetics`,
- * `Real-world evidence`, neither a resolver defect). Curated chips are unaffected either
- * way, so the chip set measures none of this flag's real cost.
+ * MEASURED A/B on the DEPLOYED staging index — same host, same data, only this flag
+ * differing (earlier numbers in this docblock came from a LOCAL MeSH map and did not
+ * transfer). Resolution rate on 35 free-typed queries: **33/35 OFF → 22/35 ON**.
  *
- * That cost is on FREE-TYPED queries, and it is the whole trade. A descriptor must be
- * named by ≥ 2 of the user's words, so `<one word> and|,|&|/ <one word>` stops resolving
- * and degrades to keyword-only: "diabetes and obesity", "cancer and aging", "sepsis and
- * inflammation", "obesity, hypertension" — plus two resolutions that were GOOD ("policy
- * and health outcomes" → Health Policy, "blood and marrow transplantation" →
- * Transplantation). What it buys: "foreign policy" → `Policy` and "chronic fatigue" →
- * `Fatigue` stop latching. Owner-accepted on that measured trade.
+ *   ELEVEN lost a resolution — `pediatric asthma` → Asthma, `cancer immunotherapy` →
+ *   Immunotherapy, `machine learning in medicine` → Machine Learning, `sleep and
+ *   cognition` → Sleep, `blood and marrow transplantation` → Transplantation,
+ *   `diabetes and obesity` / `obesity and diabetes` / `obesity, hypertension` → Obesity,
+ *   `cancer and aging` → Aging, `sepsis and inflammation` → Sepsis.
+ *   ONE got WORSE — `policy and health outcomes`: Health Policy → **Policy**. The guard
+ *   rejects the good cross-conjunct window, then admits the bad single-token one.
+ *   ONE trap closed — `foreign policy` → Policy.
+ *   `chronic fatigue` → Fatigue is UNCHANGED: an exact `byForm` match never reaches this
+ *   fallback, so it was never in scope for this flag.
+ *
+ * The 169 curated chips are byte-identical either way (entry-term 85 / exact 69 /
+ * partial 12 / unmapped 2 / one 302). That is exactly why the chip set is the WRONG
+ * instrument here — it measures none of the cost above.
+ *
+ * Requiring ≥ 2 of the user's words is too blunt: the single-token resolution is correct
+ * far more often than it is wrong. The per-conjunct rule itself is sound and is what
+ * fixes the chips; the open design question (#1348) is handling the one-token case by
+ * SCORING rather than rejecting, so a generic latch cannot earn a confident
+ * `subject-tagged` badge.
  *
  * Bare single-word queries are NOT affected — they match `byForm` directly and never
- * reach this fallback.
+ * reach this fallback. And prod runs `SEARCH_MESH_RESOLUTION_FALLBACK=off`, so this
+ * guard is a no-op there regardless.
  */
 export function resolveMeshTokenCoverageEnabled(): boolean {
   return process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE === "on";
