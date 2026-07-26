@@ -410,7 +410,7 @@ describe("people-index MeSH concept admission — SPEC #726", () => {
         expect(mm.operator).toBe("and");
         expect(
           ((l.aggs as { cwids: { terms: { size: number } } }).cwids.terms.size),
-        ).toBe(5000);
+        ).toBe(25_000); // #1973 — CWID_AGG_CAP, above the ~8.7k scholar ceiling
       }
     });
 
@@ -432,7 +432,7 @@ describe("people-index MeSH concept admission — SPEC #726", () => {
         expect(events.length).toBeGreaterThan(0);
         expect(events[0]).toMatchObject({
           event: "exact_word_cwid_cap_hit",
-          cap: 5000,
+          cap: 25_000,
           droppedDocs: 17,
         });
       } finally {

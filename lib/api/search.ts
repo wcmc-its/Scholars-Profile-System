@@ -1143,6 +1143,25 @@ function demoteScoringClause(opts: {
 }
 
 /**
+ * #1973 — bucket cap shared by both `cwids` terms aggs below.
+ *
+ * Both aggs collect WCM scholar cwids, so their bucket count cannot exceed the number of
+ * scholars in the corpus — ~8,742 as of 2026-07-26, and a slow-growing figure. The old
+ * 5,000 sat BELOW that ceiling, which made truncation reachable by construction, and it
+ * was measured firing on deployed staging the day #1971 made it observable: `patients`
+ * dropped 132 docs and `study` dropped 358. Because a terms agg keeps the
+ * HIGHEST-doc_count buckets, the dropped cwids are the lowest-count ones — precisely the
+ * scholars whose single matching paper is their only evidence.
+ *
+ * Set above the corpus ceiling with room to grow, so truncation stops being a live
+ * failure mode rather than something we monitor. `cwidBucketsOrWarn` still reports it,
+ * which now means "the corpus outgrew this constant" instead of "a broad query ran".
+ * ponytail: one constant, not agg pagination — the ceiling is bounded and small, so
+ * composite-agg paging would be machinery for a problem this removes outright.
+ */
+const CWID_AGG_CAP = 25_000;
+
+/**
  * #921 — concept-scope grant axis. The People index carries no grant MeSH, so
  * to include scholars FUNDED on a concept (not only those who PUBLISHED on it)
  * we ask the Funding index which WCM investigators hold a grant whose concept
@@ -1151,7 +1170,7 @@ function demoteScoringClause(opts: {
  * query. Size-capped: a concept broader than the cap undercounts the union,
  * acceptable for a dark count-oriented feature (no silent ranking change).
  */
-const GRANT_AXIS_CWID_CAP = 5000;
+const GRANT_AXIS_CWID_CAP = CWID_AGG_CAP;
 
 /**
  * Read a size-capped `cwids` terms agg, warning when OpenSearch actually TRUNCATED it.
@@ -1223,7 +1242,7 @@ async function collectGrantMatchedCwids(descendantUis: string[]): Promise<string
  * broader than the cap undercuts the union rather than silently reordering.
  * Both run ONLY under `exact` scope, so every other scope is byte-identical.
  */
-const EXACT_WORD_CWID_CAP = 5000;
+const EXACT_WORD_CWID_CAP = CWID_AGG_CAP;
 
 async function collectCwidsByLiteralText(
   index: string,
