@@ -1165,6 +1165,63 @@ async function collectGrantMatchedCwids(descendantUis: string[]): Promise<string
 }
 
 /**
+ * #1951 — `Exact word` scope. The control presented as a precision lever but
+ * returned the identical set as the default: it only ever downgraded evidence
+ * labels, because `exact` merely withholds the resolved descriptor (no concept
+ * expansion) and the topic must-clause still admits on `publicationMesh`
+ * (concept LABELS, not the scholar's words) and on identity fields.
+ *
+ * "Exact word" now means what it says: the query's words literally appear in the
+ * scholar's own work. Three sources, per the owner's call — a publication, a
+ * grant, or the clinical profile. Publications and grants live in their own
+ * indexes, so each needs one capped `size:0` cwid lookup; the clinical profile is
+ * on the people doc and rides the main query with no extra hop.
+ *
+ * `operator: "and"` on both: every query word must be present. Same
+ * size-capped-agg shape as {@link collectGrantMatchedCwids} (#921); a query
+ * broader than the cap undercuts the union rather than silently reordering.
+ * Both run ONLY under `exact` scope, so every other scope is byte-identical.
+ */
+const EXACT_WORD_CWID_CAP = 5000;
+
+async function collectCwidsByLiteralText(
+  index: string,
+  cwidField: string,
+  fields: string[],
+  query: string,
+): Promise<string[]> {
+  if (query.trim().length === 0) return [];
+  const resp = await searchClient().search({
+    index,
+    body: {
+      size: 0,
+      query: {
+        bool: {
+          must: [
+            {
+              multi_match: {
+                query,
+                fields,
+                type: "cross_fields",
+                operator: "and",
+              },
+            },
+          ],
+        },
+      },
+      aggs: { cwids: { terms: { field: cwidField, size: EXACT_WORD_CWID_CAP } } },
+    } as object,
+  });
+  const buckets =
+    (
+      resp.body as unknown as {
+        aggregations?: { cwids?: { buckets?: Array<{ key: string }> } };
+      }
+    ).aggregations?.cwids?.buckets ?? [];
+  return buckets.map((b) => b.key);
+}
+
+/**
  * Per-pmid BM25 relevance for a compiled grant query (`[{ q, w }]` weighted terms),
  * normalized to [0,1] by ÷ this query's own max — OS `_score` is NOT cross-query
  * comparable, so the normalization is encapsulated here and callers only ever see the
@@ -2281,6 +2338,73 @@ export async function searchPeople(opts: {
       },
     ];
   };
+
+  // #1951 — `Exact word` actually narrows now. Previously this scope only withheld
+  // the resolved descriptor, so the topic must-clause still admitted on
+  // `publicationMesh` (concept LABELS, not the scholar's words), on identity fields
+  // (name / title / department), and on the `publicationTitles` BLOB — where "gun"
+  // in one paper and "violence" in another read as a match for "gun violence". Net
+  // effect was a control that changed evidence labels without changing who was
+  // returned.
+  //
+  // Now: admit a scholar iff the query's words literally appear in their own work —
+  // in ONE publication, in ONE grant, or in their clinical/self-described profile.
+  // The first two are per-document (a real literal match, not a blob coincidence)
+  // and cost one capped cwid lookup each; the third rides the people doc with no
+  // extra hop. `operator: "and"` throughout: every word must be present.
+  //
+  // Topic-shape only. On a name or department query the scope control is not a
+  // meaningful lever and the shape carries no research evidence, so those bodies
+  // stay byte-identical.
+  const exactWordNarrowing =
+    applyTopicTemplate && opts.scope === "exact" && trimmed.length > 0;
+  const [exactPubCwids, exactGrantCwids] = exactWordNarrowing
+    ? await Promise.all([
+        collectCwidsByLiteralText(
+          PUBLICATIONS_INDEX,
+          "wcmAuthorCwids",
+          ["title^4", "abstract^1"],
+          trimmed,
+        ),
+        collectCwidsByLiteralText(
+          FUNDING_INDEX,
+          "wcmInvestigatorCwids",
+          ["title^4", "abstract^1", "keywordsText^1"],
+          trimmed,
+        ),
+      ])
+    : [[], []];
+  if (exactWordNarrowing) {
+    const topicBool = (
+      queryBranch as { bool: { must: Record<string, unknown>[] } }
+    ).bool;
+    topicBool.must = [
+      {
+        bool: {
+          should: [
+            ...(exactPubCwids.length > 0 ? [{ terms: { cwid: exactPubCwids } }] : []),
+            ...(exactGrantCwids.length > 0 ? [{ terms: { cwid: exactGrantCwids } }] : []),
+            // The scholar's own words on the people doc. `publicationMesh` is
+            // deliberately absent — a MeSH label is the concept, not the wording.
+            {
+              multi_match: {
+                query: trimmed,
+                fields: [
+                  "overview^2",
+                  "areasOfInterest^3",
+                  "clinicalSpecialties^2",
+                  "clinicalExpertise^2",
+                ],
+                type: "cross_fields",
+                operator: "and",
+              },
+            },
+          ],
+          minimum_should_match: 1,
+        },
+      },
+    ];
+  }
 
   // B2 — SEARCH_PEOPLE_CONCEPT_PRECOUNT (#1414 default OFF = the reorder; `=on`
   // opts into the dedicated pre-count path).
