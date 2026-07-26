@@ -1921,21 +1921,35 @@ export class AppStack extends Stack {
         //   latches the stoplist does not have ("AI and medicine" -> Medicine, "blood and
         //   marrow transplantation" -> Blood).
         //
-        //   STAGING ON to soak + measure; PROD OFF pending eval. Chip recall re-measured
-        //   post-clamp against the canonical MeSH map: 167/169 with a PER-CHIP DIFF OF ZERO
-        //   vs the shipped stoplist (same descriptors, same confidence, same 2 unresolved),
-        //   so curated chips are unaffected either way. The cost is on free-typed queries
-        //   and is real: a descriptor must now be named by >= 2 of the user's words, so
-        //   "diabetes and obesity", "cancer and aging", "sepsis and inflammation" and
-        //   "obesity, hypertension" stop resolving and degrade to keyword-only, as do two
-        //   good resolutions ("policy and health outcomes" -> Health Policy, "blood and
-        //   marrow transplantation" -> Transplantation). That buys "foreign policy" ->
-        //   Policy and "chronic fatigue" -> Fatigue no longer latching. Owner-accepted
-        //   2026-07-25 on that measured trade. Bare single-word queries are unaffected --
-        //   they match `byForm` directly and never reach this fallback.
+        //   OFF in BOTH envs. It was flipped ON in staging on 2026-07-26 and reverted the
+        //   same day after an A/B on the DEPLOYED index -- same host, same data, only this
+        //   flag differing. Resolution rate fell 33/35 -> 22/35 on free-typed queries:
+        //   ELEVEN lost a resolution (`pediatric asthma` -> Asthma, `cancer immunotherapy`
+        //   -> Immunotherapy, `machine learning in medicine` -> Machine Learning, `sleep and
+        //   cognition` -> Sleep, `blood and marrow transplantation` -> Transplantation,
+        //   `diabetes and obesity` / `obesity and diabetes` / `obesity, hypertension` ->
+        //   Obesity, `cancer and aging` -> Aging, `sepsis and inflammation` -> Sepsis), ONE
+        //   got worse (`policy and health outcomes`: Health Policy -> Policy, i.e. the guard
+        //   rejects the good cross-conjunct window then admits the bad single-token one),
+        //   and exactly ONE trap closed (`foreign policy` -> Policy). `chronic fatigue` ->
+        //   Fatigue is UNCHANGED by this flag -- an exact `byForm` match never reaches the
+        //   fallback, so it was never in scope.
+        //
+        //   The 169 curated chips are byte-identical either way (entry-term 85 / exact 69 /
+        //   partial 12 / unmapped 2 / one 302), which is precisely why the chip set is the
+        //   WRONG instrument for this flag: it measures none of the cost above.
+        //
+        //   Requiring >= 2 of the user's words is too blunt -- the single-token resolution
+        //   is correct far more often than it is wrong. The per-conjunct rule itself is
+        //   sound (it is what fixes the chips, measurably harmless); the open design
+        //   question is handling the one-token case by SCORING rather than rejecting, so a
+        //   generic latch cannot earn a confident `subject-tagged` badge. See #1348.
+        //
+        //   NOTE: prod runs SEARCH_MESH_RESOLUTION_FALLBACK=off, so this guard is a NO-OP
+        //   in prod regardless -- the prod-facing decision is about the fallback flag.
         //   Resolve-time only: no reindex. Flip is env-only via cdk deploy
         //   Sps-App-<env> -- the flag-parity rule.
-        SEARCH_MESH_RESOLVE_TOKEN_COVERAGE: env === "staging" ? "on" : "off",
+        SEARCH_MESH_RESOLVE_TOKEN_COVERAGE: "off",
         // #1342 -- query-side morphology retry. When ON, resolveMeshDescriptor, after
         //   the exact lookup misses, retries the SINGULARIZED query ("melanomas" ->
         //   "melanoma") against the same index and, on a hit, returns the descriptor at
