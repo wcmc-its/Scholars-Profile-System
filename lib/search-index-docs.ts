@@ -924,13 +924,19 @@ export async function buildPeopleDoc(
     publicationMeshUi.push(ui);
   }
 
-  // #1959 — the descriptors the gate above DROPPED, narrowed to the only ones a
-  // consumer can ever consult: those that are an ANCESTOR of a surviving
-  // descriptor. `computeMatchProvenance`'s `alsoParent` asks exactly one
-  // question — "is the resolved parent tagged?" — and it only asks it when a
-  // descendant of that parent survived the gate, so a dropped ancestor of a kept
-  // UI is lossless for that predicate while the full dropped set (the long tail
-  // of one-off middle-author descriptors) is not worth the `_source` bytes.
+  // #1959 — the descriptors the gate above DROPPED, narrowed to those that are an
+  // ANCESTOR of a surviving descriptor. `computeMatchProvenance`'s `alsoParent`
+  // asks exactly one question — "is `descendantUis[0]` tagged?" — and for every
+  // caller that passes ONE descriptor's `[self, ...descendants]` (the search and
+  // API routes, i.e. the surface #1959 was measured on) the branch only fires when
+  // a tree descendant of that parent survived the gate, so a dropped ancestor of a
+  // kept UI is lossless there, while the full dropped set (the long tail of
+  // one-off middle-author descriptors) is not worth the `_source` bytes.
+  // `lib/api/matcha-spine-run.ts` instead passes a UNION over a merged cluster,
+  // where `[0]` is the cluster representative and need not be an ancestor of the
+  // descendant that fired — that caller keeps today's gated-only answer for the
+  // sibling case, which is the pre-existing union-representative mismatch, not
+  // this gate.
   // Absent entirely when `meshAncestors` wasn't passed (same degradation as
   // `meshSubtreeCounts`); OMIT-on-empty otherwise.
   const publicationMeshUiBelowThreshold: string[] = [];

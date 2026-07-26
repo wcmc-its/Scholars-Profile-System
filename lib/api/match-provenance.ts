@@ -68,7 +68,10 @@ export type MatchProvenance =
        * may be NAMED.
        *
        * On an index built before that field existed it is absent, and this
-       * degrades to the old gated-only answer.
+       * degrades to the old gated-only answer. Same for the one caller that passes
+       * a UNION over a merged cluster (`lib/api/matcha-spine-run.ts`): the emitted
+       * set carries ancestors of kept descriptors, so a cluster representative that
+       * is a SIBLING of the descendant that fired is not in it.
        *
        * Consumers use it to pick copy that holds, not to re-rank.
        */

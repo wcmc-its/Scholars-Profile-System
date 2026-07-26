@@ -610,6 +610,16 @@ describe("searchPeople — #1959 the below-gate parent set survives both hops", 
     expect(body._source).toContain("publicationMeshUiBelowThreshold");
   });
 
+  it("does NOT request it when no concept resolved — every other search keeps today's shape", async () => {
+    process.env[EVIDENCE] = "on";
+    await searchPeople({ q: "microbiome", relevanceMode: "v3" }); // no topic template, no descendants
+    const peopleCall = mockSearch.mock.calls.find(
+      ([a]) => (a as { index?: string })?.index !== PUBLICATIONS_INDEX,
+    );
+    const body = (peopleCall?.[0] as { body: { _source: string[] } }).body;
+    expect(body._source).not.toContain("publicationMeshUiBelowThreshold");
+  });
+
   it("still reads `alsoParent: false` on a pre-rebuild doc that lacks the field", async () => {
     const ev = await leadEvidenceFor({
       publicationMeshUi: [MYCOBIOME],
