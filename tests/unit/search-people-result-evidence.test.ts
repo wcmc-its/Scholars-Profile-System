@@ -575,3 +575,46 @@ describe("searchPeople — #1955 `alsoParent` survives the hop into the evidence
     });
   });
 });
+
+// #1959 — the below-gate parent set crosses TWO hops in `lib/api/search.ts` that no
+// pure test can see: the `_source` include-list entry that ships the field, and the
+// `belowThresholdMeshUi` argument that hands it to `computeMatchProvenance`. Delete
+// either and the fix is a silent no-op with the whole suite green — the #1957 failure
+// mode. This block is that coverage, asserted on what `searchPeople` emits and requests.
+describe("searchPeople — #1959 the below-gate parent set survives both hops", () => {
+  it("descendant kept + parent BELOW THE GATE ⇒ `alsoParent: true`", async () => {
+    // The measured cohort: the parent sits on one middle-author pub, so the people-doc
+    // gate dropped it from `publicationMeshUi` — while `meshSubtreeCounts` (ungated)
+    // still counts that pub in the "12 of 200 tagged under Microbiota" lead.
+    const ev = await leadEvidenceFor({
+      publicationMeshUi: [MYCOBIOME],
+      publicationMeshUiBelowThreshold: [MICROBIOTA],
+      meshSubtreeCounts: { [MICROBIOTA]: 12 },
+    });
+    expect(ev).toMatchObject({
+      kind: "publications",
+      strength: "tagged",
+      text: "12 of 200 publications tagged under",
+      term: "Microbiota",
+      descendantTerms: ["Mycobiome"],
+      alsoParent: true,
+    });
+  });
+
+  it("requests the field in the people `_source` when a concept resolved", async () => {
+    await leadEvidenceFor({ publicationMeshUi: [MYCOBIOME] });
+    const peopleCall = mockSearch.mock.calls.find(
+      ([a]) => (a as { index?: string })?.index !== PUBLICATIONS_INDEX,
+    );
+    const body = (peopleCall?.[0] as { body: { _source: string[] } }).body;
+    expect(body._source).toContain("publicationMeshUiBelowThreshold");
+  });
+
+  it("still reads `alsoParent: false` on a pre-rebuild doc that lacks the field", async () => {
+    const ev = await leadEvidenceFor({
+      publicationMeshUi: [MYCOBIOME],
+      meshSubtreeCounts: { [MICROBIOTA]: 12 },
+    });
+    expect(ev).toMatchObject({ strength: "tagged", alsoParent: false });
+  });
+});
