@@ -1916,13 +1916,26 @@ export class AppStack extends Stack {
         //   DESIRED answer for "blood disorders", same depth as Blood, the wrong one). So
         //   the guard is query-relative, and per-CONJUNCT so dual-concept queries
         //   ("patient safety & quality improvement") still resolve their leftmost complete
-        //   concept. OFF in BOTH envs pending staging confirmation: measured on the 169
-        //   curated chips (local, resolver is DB-only) it resolves 167/169 -- identical to
-        //   the stoplist, zero regression -- while still declining "foreign policy". The
-        //   only cost is single-concept narrowing ("pediatric asthma" -> Asthma is 1/2),
-        //   which degrades to keyword-only. Resolve-time only: no reindex. Flip is env-only
-        //   via cdk deploy Sps-App-<env> -- the flag-parity rule.
-        SEARCH_MESH_RESOLVE_TOKEN_COVERAGE: "off",
+        //   concept, plus (#1932 review follow-up) a clamp so a ONE-token conjunct cannot
+        //   carry the resolution on its own -- without it the guard shipped NEW generic
+        //   latches the stoplist does not have ("AI and medicine" -> Medicine, "blood and
+        //   marrow transplantation" -> Blood).
+        //
+        //   STAGING ON to soak + measure; PROD OFF pending eval. Chip recall re-measured
+        //   post-clamp against the canonical MeSH map: 167/169 with a PER-CHIP DIFF OF ZERO
+        //   vs the shipped stoplist (same descriptors, same confidence, same 2 unresolved),
+        //   so curated chips are unaffected either way. The cost is on free-typed queries
+        //   and is real: a descriptor must now be named by >= 2 of the user's words, so
+        //   "diabetes and obesity", "cancer and aging", "sepsis and inflammation" and
+        //   "obesity, hypertension" stop resolving and degrade to keyword-only, as do two
+        //   good resolutions ("policy and health outcomes" -> Health Policy, "blood and
+        //   marrow transplantation" -> Transplantation). That buys "foreign policy" ->
+        //   Policy and "chronic fatigue" -> Fatigue no longer latching. Owner-accepted
+        //   2026-07-25 on that measured trade. Bare single-word queries are unaffected --
+        //   they match `byForm` directly and never reach this fallback.
+        //   Resolve-time only: no reindex. Flip is env-only via cdk deploy
+        //   Sps-App-<env> -- the flag-parity rule.
+        SEARCH_MESH_RESOLVE_TOKEN_COVERAGE: env === "staging" ? "on" : "off",
         // #1342 -- query-side morphology retry. When ON, resolveMeshDescriptor, after
         //   the exact lookup misses, retries the SINGULARIZED query ("melanomas" ->
         //   "melanoma") against the same index and, on a hit, returns the descriptor at
