@@ -785,6 +785,36 @@ export function meshMatchTier(
   return anchorCount > 0 ? "anchored-entry" : "entry";
 }
 
+/**
+ * #1972 — order a resolution's confidence so callers can ask "is this one better?".
+ * `null` (no resolution) is 0, so an unresolved query ranks below every resolution.
+ *
+ * Exists for the #692 generic-strip retry. That retry is gated on the full query having
+ * MISSED, but `partial` — the decompose-and-resolve guess stamped by the window fallback
+ * (`SEARCH_MESH_RESOLUTION_FALLBACK`) — is not a miss, so turning the fallback on
+ * SUPPRESSED the retry and pre-empted a better answer. Measured 2026-07-26 over 35
+ * free-typed queries, fallback off vs on: 16 gained, but 3 DEMOTED — `chronic fatigue`
+ * resolved `Fatigue` at `exact` with the fallback off (strip `chronic`, resolve
+ * `fatigue`) and only `partial` with it on. Same descriptor, a 10x lower
+ * `MESH_ADMIT_WEIGHT`, and an identical confident "N of M publications tagged" line
+ * either way — so nothing surfaced the downgrade.
+ *
+ * A verbatim match (`exact`/`entry-term`) still suppresses the retry: that is #692
+ * §4.1's deliberate full-query-first rule, which protects descriptors built from filler
+ * words ("gene therapy", "clinical trial").
+ */
+export function meshConfidenceRank(
+  confidence: "exact" | "entry-term" | "partial" | null | undefined,
+): number {
+  if (confidence === "exact") return 3;
+  if (confidence === "entry-term") return 2;
+  if (confidence === "partial") return 1;
+  return 0;
+}
+
+/** #1972 — a resolution weaker than a verbatim match must not suppress the #692 retry. */
+export const MESH_RANK_VERBATIM = 2;
+
 // #1254 — concept-only ADMIT weights sit in a deliberate sub-BM25 band. A doc
 // admitted by concept expansion alone (no lexical hit) scores ONLY this constant
 // (the admit `terms` clause is constant-score), so it must stay small enough that

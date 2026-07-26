@@ -8,7 +8,12 @@ import {
   type PeopleSort,
   type PublicationsSort,
 } from "@/lib/api/search";
-import { meshMatchTier, AREA_BOOST_TOP_N } from "@/lib/search";
+import {
+  meshMatchTier,
+  meshConfidenceRank,
+  MESH_RANK_VERBATIM,
+  AREA_BOOST_TOP_N,
+} from "@/lib/search";
 import { getAreaScholarConcentration } from "@/lib/api/topics";
 import {
   searchFunding,
@@ -123,8 +128,13 @@ async function handleSearch(request: NextRequest) {
     // MeSH-resolving, this retry can resolve a descriptor the people/SSR path
     // would not. Strictly more-resolved for branches that only consume the
     // descriptor; accepted to keep this path off the candidate/count queries.
-    if (genericStripped && mesh === null) {
-      mesh = await resolveMeshDescriptor(contentQuery);
+    // #1972 — same rule as the full path below: a `partial` is the window fallback's
+    // guess, not a resolution, so it must not count as "already resolved" here.
+    if (genericStripped && meshConfidenceRank(mesh?.confidence) < MESH_RANK_VERBATIM) {
+      const retry = await resolveMeshDescriptor(contentQuery);
+      if (meshConfidenceRank(retry?.confidence) > meshConfidenceRank(mesh?.confidence)) {
+        mesh = retry;
+      }
     }
     taxonomyMatch = { state: "none", meshResolution: mesh };
   } else {
@@ -133,13 +143,23 @@ async function handleSearch(request: NextRequest) {
     // match AND no MeSH descriptor) retry against the stripped content query.
     // Full-first protects descriptors built from filler ("gene therapy",
     // "clinical trial") — those resolve on the first call and never reach here.
+    // #1972 — a `partial` does NOT count as resolved here. Letting it satisfy this guard
+    // suppressed the retry entirely whenever SEARCH_MESH_RESOLUTION_FALLBACK was on,
+    // demoting queries whose stripped form resolves verbatim ("chronic fatigue" → strip
+    // `chronic` → `fatigue` → exact).
     if (
       genericStripped &&
       taxonomyMatch.state === "none" &&
-      taxonomyMatch.meshResolution === null
+      meshConfidenceRank(taxonomyMatch.meshResolution?.confidence) < MESH_RANK_VERBATIM
     ) {
       const retry = await matchQueryToTaxonomy(contentQuery);
-      if (retry.state === "matches" || retry.meshResolution !== null) {
+      // Strictly better only — a curated topic match, or a higher-confidence descriptor.
+      // A second `partial` must not churn the answer.
+      if (
+        retry.state === "matches" ||
+        meshConfidenceRank(retry.meshResolution?.confidence) >
+          meshConfidenceRank(taxonomyMatch.meshResolution?.confidence)
+      ) {
         taxonomyMatch = retry;
       }
     }
