@@ -413,14 +413,44 @@ describe("<ResultEvidence> — one render per kind", () => {
       descendantTerms: ["Leukemia, Hairy Cell", "Leukemia, Myeloid"],
     });
     const via = screen.getByText("Leukemia, Hairy Cell · Leukemia, Myeloid");
-    const phrase = container.querySelector(".truncate");
-    // A real second line: the via-span is a SIBLING of the truncating phrase span inside a
-    // flex-col body, not a trailing child of it. If it were a child, it would be on line 1
-    // and inside the #1907 clip — which is precisely where it used to be.
+    // #1963 — located as the first child of the baseline row rather than by `.truncate`,
+    // which the phrase no longer carries. Deliberately NOT derived from `via`: the point of
+    // this test is where `via` sits relative to the phrase, so deriving one from the other
+    // would make the assertion circular.
+    const phrase = container.querySelector(".items-baseline")?.firstElementChild ?? null;
+    // A real second line: the via-span is a SIBLING of the phrase span inside a flex-col
+    // body, not a trailing child of it. If it were a child, it would be on line 1 and
+    // inside the #1907 clip — which is precisely where it used to be.
     expect(phrase).not.toBeNull();
+    expect(phrase!.textContent).toMatch(/^152 of 250 publications tagged/);
     expect(via.parentElement).toBe(phrase!.parentElement!.parentElement);
     expect(via.parentElement!.className).toMatch(/flex-col/);
     expect(via.previousElementSibling).toBe(phrase!.parentElement);
+  });
+
+  it("#1963 — the phrase WRAPS rather than clipping, so a long concept term keeps its tail", () => {
+    // The clip did not shorten the label, it renamed the disease: measured on staging,
+    // `Precursor Cell Lymphoblastic Leukemia-Lymphoma` rendered as
+    // `…Precursor Cell Lymphoblastic Leukemia…` at 1138px (6 of 6 cards) and every one of
+    // 20 cards clipped at 433px. MeSH names are comma- and hyphen-inverted, so the part
+    // that disambiguates them is the part a tail-clip takes.
+    const { container } = renderEv({
+      kind: "publications",
+      strength: "tagged",
+      text: "6 of 250 publications tagged",
+      term: "Precursor Cell Lymphoblastic Leukemia-Lymphoma",
+      count: 6,
+    });
+    const phrase = container.querySelector(".items-baseline")!.firstElementChild as HTMLElement;
+    // jsdom has no layout, so the clip itself is unobservable here — what IS observable, and
+    // what caused it, is the class. `truncate` is overflow-hidden + nowrap + ellipsis; absent
+    // it, the phrase wraps and the tail survives at every width.
+    expect(phrase.className).not.toMatch(/truncate/);
+    // The whole term reaches the DOM — nothing upstream is pre-shortening it.
+    expect(phrase.textContent).toContain("Precursor Cell Lymphoblastic Leukemia-Lymphoma");
+    // …and the #1907 invariant still holds: the phrase is the item that yields, so the
+    // trailing occupants keep max-content. It yields by wrapping now instead of hiding.
+    expect(phrase.className).toMatch(/min-w-0/);
   });
 
   it("#1361 — a mention literal term is semibold but NOT underlined (underline = concept only)", () => {
@@ -1251,8 +1281,16 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
     // It is also shrink-0, which is what actually keeps it at max-content width while the
     // phrase absorbs the squeeze; a `truncate`-free ancestry alone would not.
     expect(pct.parentElement!.className).toMatch(/shrink-0/);
-    // …and the phrase it annotates still truncates.
-    expect(container.querySelector(".truncate")?.textContent).toMatch(/2 of 114 publications/);
+    // #1963 — …and the phrase it annotates absorbs that squeeze by WRAPPING, not by hiding
+    // its tail. The invariant this test guards is that the shrink-0 occupants keep
+    // max-content while the phrase yields; it never required the yielding to be a clip, and
+    // a clip here ate the concept term (MeSH names put the disambiguating part last, so
+    // "Leukemia-Lymphoma" clipped to "Leukemia" — a different disease). The phrase must
+    // therefore be truncate-free too, and it is now the ONLY thing on the card that yields.
+    const phrase = container.querySelector(".items-baseline")?.firstElementChild as HTMLElement;
+    expect(phrase.textContent).toMatch(/2 of 114 publications/);
+    expect(phrase.className).not.toMatch(/truncate/);
+    noTruncateAncestry(phrase);
     // The pill is the other occupant of that slot and carries the same invariant. It is on
     // the MENTION row now — `subject-tagged` was cut for badging 100% of its class — so the
     // walk moves to the row that still has one.
