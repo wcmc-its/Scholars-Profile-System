@@ -1153,6 +1153,38 @@ function demoteScoringClause(opts: {
  */
 const GRANT_AXIS_CWID_CAP = 5000;
 
+/**
+ * Read a size-capped `cwids` terms agg, warning when OpenSearch actually TRUNCATED it.
+ *
+ * Both callers below cap the agg at 5000 to bound the response, and a terms agg keeps
+ * the HIGHEST-doc_count buckets — so a query broader than the cap silently drops the
+ * lowest-count cwids: exactly the tail scholars whose single matching paper or grant is
+ * their only evidence. Measured 2026-07-26 against deployed staging (`exact` scope): the
+ * broadest single-word queries reach 3,841 matching scholars over an 8,742-scholar
+ * corpus, so the cap sits well inside the reachable range. The prior "largest observed
+ * was 36" was a narrow-query sampling artifact, not a headroom measurement.
+ *
+ * `sum_other_doc_count` is OpenSearch's own exact truncation signal (0 ⇒ nothing was
+ * dropped), so this cannot false-positive the way a `buckets.length === cap` test can.
+ * ponytail: log-only — it makes the truncation observable. Raise the cap or paginate the
+ * agg only if this actually fires.
+ */
+function cwidBucketsOrWarn(
+  body: unknown,
+  o: { event: string; index: string; cap: number },
+): string[] {
+  const agg = (
+    body as {
+      aggregations?: {
+        cwids?: { buckets?: Array<{ key: string }>; sum_other_doc_count?: number };
+      };
+    }
+  ).aggregations?.cwids;
+  const droppedDocs = agg?.sum_other_doc_count ?? 0;
+  if (droppedDocs > 0) console.warn(JSON.stringify({ ...o, droppedDocs }));
+  return (agg?.buckets ?? []).map((b) => b.key);
+}
+
 async function collectGrantMatchedCwids(descendantUis: string[]): Promise<string[]> {
   if (descendantUis.length === 0) return [];
   const meshGateField = resolveFundingMeshGateField();
@@ -1166,13 +1198,11 @@ async function collectGrantMatchedCwids(descendantUis: string[]): Promise<string
       },
     } as object,
   });
-  const buckets =
-    (
-      resp.body as unknown as {
-        aggregations?: { cwids?: { buckets?: Array<{ key: string }> } };
-      }
-    ).aggregations?.cwids?.buckets ?? [];
-  return buckets.map((b) => b.key);
+  return cwidBucketsOrWarn(resp.body, {
+    event: "grant_axis_cwid_cap_hit",
+    index: FUNDING_INDEX,
+    cap: GRANT_AXIS_CWID_CAP,
+  });
 }
 
 /**
@@ -1223,13 +1253,11 @@ async function collectCwidsByLiteralText(
       aggs: { cwids: { terms: { field: cwidField, size: EXACT_WORD_CWID_CAP } } },
     } as object,
   });
-  const buckets =
-    (
-      resp.body as unknown as {
-        aggregations?: { cwids?: { buckets?: Array<{ key: string }> } };
-      }
-    ).aggregations?.cwids?.buckets ?? [];
-  return buckets.map((b) => b.key);
+  return cwidBucketsOrWarn(resp.body, {
+    event: "exact_word_cwid_cap_hit",
+    index,
+    cap: EXACT_WORD_CWID_CAP,
+  });
 }
 
 /**
