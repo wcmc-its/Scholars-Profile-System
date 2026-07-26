@@ -2884,6 +2884,11 @@ export async function searchPeople(opts: {
       "grantCount",
       "hasActiveGrants",
       "publicationMeshUi",
+      // #1959 — the gate-dropped ancestors of the field above, requested ONLY when
+      // a descriptor with descendants resolved (the necessary condition for the
+      // provenance `narrower` branch, and so for the only predicate that reads
+      // it), so every other search keeps today's `_source` shape.
+      ...(meshDescendantUis.length > 1 ? ["publicationMeshUiBelowThreshold"] : []),
       // #824 follow-up — the topic-slug rollup, returned ONLY when the
       // match-aware snippet flag is on, so the topic-reason match and the
       // humanized-areas fallback can read the scholar's areas without a highlight
@@ -3077,6 +3082,12 @@ export async function searchPeople(opts: {
       // in the ETL). Read only for the match-provenance path; the field is
       // already in `_source` (no `_source` include-list trims it).
       publicationMeshUi?: string[];
+      // #1959 — the descriptors the people-doc min-evidence gate dropped from the
+      // field above, narrowed to ancestors of a surviving one. Present only when a
+      // descriptor with descendants resolved (added to `_source` above) AND the
+      // index has been rebuilt since the field shipped; `alsoParent` degrades to
+      // the gated-only answer while it is absent.
+      publicationMeshUiBelowThreshold?: string[];
       // #824 follow-up — space-joined topic SLUGS (e.g. "single_cell_spatial_biology
       // cell_molecular_biology"). Present only when the match-aware snippet flag
       // is on (added to `_source` above); drives the topic-reason match and the
@@ -3778,6 +3789,7 @@ export async function searchPeople(opts: {
       const prov = provenanceOn
         ? computeMatchProvenance({
             publicationMeshUi: h._source.publicationMeshUi,
+            belowThresholdMeshUi: h._source.publicationMeshUiBelowThreshold,
             descendantUis: meshDescendantUis,
             parentTerm: provenanceParent,
             labels: provenanceLabels,

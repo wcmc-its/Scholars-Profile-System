@@ -924,6 +924,29 @@ export async function buildPeopleDoc(
     publicationMeshUi.push(ui);
   }
 
+  // #1959 — the descriptors the gate above DROPPED, narrowed to the only ones a
+  // consumer can ever consult: those that are an ANCESTOR of a surviving
+  // descriptor. `computeMatchProvenance`'s `alsoParent` asks exactly one
+  // question — "is the resolved parent tagged?" — and it only asks it when a
+  // descendant of that parent survived the gate, so a dropped ancestor of a kept
+  // UI is lossless for that predicate while the full dropped set (the long tail
+  // of one-off middle-author descriptors) is not worth the `_source` bytes.
+  // Absent entirely when `meshAncestors` wasn't passed (same degradation as
+  // `meshSubtreeCounts`); OMIT-on-empty otherwise.
+  const publicationMeshUiBelowThreshold: string[] = [];
+  if (meshAncestors) {
+    const keptAncestors = new Set<string>();
+    for (const ui of publicationMeshUi) {
+      const tns = meshAncestors.treeNumbersByUi.get(ui) ?? [];
+      for (const a of ancestorUisFor(meshAncestors.index, ui, tns)) keptAncestors.add(a);
+    }
+    const kept = new Set(publicationMeshUi);
+    for (const ui of uiAgg.keys()) {
+      if (kept.has(ui)) continue;
+      if (keptAncestors.has(ui)) publicationMeshUiBelowThreshold.push(ui);
+    }
+  }
+
   // CONTRACT A — top-8 MeSH descriptor labels by distinct-pub frequency
   // (count DESC, then label ASC). OMIT-on-empty: scholars with no MeSH on any
   // visible pub write nothing for this field (mirrors `publicationMeshUi`).
@@ -1327,6 +1350,11 @@ export async function buildPeopleDoc(
     // with no surviving descriptor write nothing, so `_source` consumers and the
     // `terms` filter distinguish "no signal" from "[]".
     ...(publicationMeshUi.length > 0 ? { publicationMeshUi } : {}),
+    // #1959 — source-only companion to the field above: the gate-dropped
+    // ancestors of kept descriptors, so `alsoParent` can distinguish "the parent
+    // tag is absent" from "the parent tag is below the min-evidence gate".
+    // Never filtered or aggregated on. OMIT-on-empty.
+    ...(publicationMeshUiBelowThreshold.length > 0 ? { publicationMeshUiBelowThreshold } : {}),
     // D-exact (search reason-from-doc) — per-concept distinct-pub counts the
     // People reason line reads at query time (O(1) lookup by resolved concept UI),
     // taking the publications-index reason agg off the search path. OMIT-on-empty

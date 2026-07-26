@@ -243,6 +243,14 @@ export const peopleIndexMapping = {
       // express. Same field intent as the publications index `meshDescriptorUi`.
       // OMITTED on scholars with no surviving descriptor (omit-on-empty).
       publicationMeshUi: { type: "keyword" },
+      // #1959 — the descriptors the min-evidence gate dropped from the field
+      // above, narrowed to ancestors of a surviving descriptor. STORED, NOT
+      // INDEXED (`object` + `enabled: false`): it is only ever read back via
+      // `_source` so `alsoParent` can tell "absent" from "below the gate", never
+      // filtered or aggregated on, so indexing it would only cost index size.
+      // Note the gotcha this shares with the other `enabled: false` fields —
+      // readable via `_source`, INVISIBLE to `exists` queries.
+      publicationMeshUiBelowThreshold: { type: "object", enabled: false },
       // Issue #21 — concatenated abstract text from each scholar's
       // confirmed publications. ONE copy per paper (no authorship-position
       // repetition); abstracts are 50-200x longer than titles, so the

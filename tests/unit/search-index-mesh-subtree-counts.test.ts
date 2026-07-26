@@ -192,3 +192,82 @@ describe("buildPeopleDoc — meshSubtreeCounts (D-exact)", () => {
     expect(counts.Dadeno).toBeUndefined();
   });
 });
+
+// #1959 — every pub built by `scholarWithPubs` is MIDDLE-author (isFirst/isLast
+// false), so a descriptor on exactly one pub is dropped by the min-evidence gate
+// (`distinctPubs < 2 && !hasFirstOrLast`). That is the cohort: the card counted the
+// pub in the ungated `meshSubtreeCounts` while `alsoParent` denied the tag existed.
+describe("buildPeopleDoc — publicationMeshUiBelowThreshold (#1959)", () => {
+  type Doc = { publicationMeshUi?: string[]; publicationMeshUiBelowThreshold?: string[] };
+
+  it("emits a dropped ANCESTOR of a surviving descriptor", async () => {
+    const ctx = await meshAncestors();
+    // Dadeno on 2 pubs -> survives. Dneo (its ancestor) on 1 middle-author pub -> dropped.
+    const doc = (await buildPeopleDoc(
+      scholarWithPubs([
+        [{ ui: "Dneo", label: "Neoplasms" }],
+        [{ ui: "Dadeno", label: "Adenocarcinoma" }],
+        [{ ui: "Dadeno", label: "Adenocarcinoma" }],
+      ]),
+      mockClient(),
+      NO_SUP,
+      undefined,
+      ctx,
+    )) as Doc;
+
+    expect(doc.publicationMeshUi).toEqual(["Dadeno"]);
+    expect(doc.publicationMeshUiBelowThreshold).toEqual(["Dneo"]);
+    // The pub the old `alsoParent: false` denied is inside the ungated count.
+    expect((doc as { meshSubtreeCounts: Record<string, number> }).meshSubtreeCounts.Dneo).toBe(3);
+  });
+
+  it("drops a below-gate descriptor that is NOT an ancestor of a surviving one", async () => {
+    const ctx = await meshAncestors();
+    // Dcyst is a SIBLING of Dadeno — nothing `alsoParent` can ever consult.
+    const doc = (await buildPeopleDoc(
+      scholarWithPubs([
+        [{ ui: "Dcyst", label: "Cystadenocarcinoma" }],
+        [{ ui: "Dadeno", label: "Adenocarcinoma" }],
+        [{ ui: "Dadeno", label: "Adenocarcinoma" }],
+      ]),
+      mockClient(),
+      NO_SUP,
+      undefined,
+      ctx,
+    )) as Doc;
+
+    expect(doc.publicationMeshUi).toEqual(["Dadeno"]);
+    expect(doc).not.toHaveProperty("publicationMeshUiBelowThreshold");
+  });
+
+  it("omits the field when nothing was dropped", async () => {
+    const ctx = await meshAncestors();
+    const doc = (await buildPeopleDoc(
+      scholarWithPubs([
+        [{ ui: "Dadeno", label: "Adenocarcinoma" }],
+        [{ ui: "Dadeno", label: "Adenocarcinoma" }],
+      ]),
+      mockClient(),
+      NO_SUP,
+      undefined,
+      ctx,
+    )) as Doc;
+
+    expect(doc.publicationMeshUi).toEqual(["Dadeno"]);
+    expect(doc).not.toHaveProperty("publicationMeshUiBelowThreshold");
+  });
+
+  it("omits the field entirely when no ancestor context is passed", async () => {
+    const doc = (await buildPeopleDoc(
+      scholarWithPubs([
+        [{ ui: "Dneo", label: "Neoplasms" }],
+        [{ ui: "Dadeno", label: "Adenocarcinoma" }],
+        [{ ui: "Dadeno", label: "Adenocarcinoma" }],
+      ]),
+      mockClient(),
+      NO_SUP,
+    )) as Record<string, unknown>;
+
+    expect(doc).not.toHaveProperty("publicationMeshUiBelowThreshold");
+  });
+});
