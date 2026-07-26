@@ -2378,7 +2378,15 @@ export async function searchPeople(opts: {
     const topicBool = (
       queryBranch as { bool: { must: Record<string, unknown>[] } }
     ).bool;
+    // ADDED to the lexical clause, never replacing it. `exact` is a narrowing of
+    // the default set, so it must stay a SUBSET of it — the literal-match arms are
+    // an extra conjunct, not an alternative admission path. Replacing the must
+    // instead made `exact` BROADER than the default (measured on staging:
+    // `climate` 50 -> 142, `food insecurity` 34 -> 77), because the
+    // publications-index lookup returns every author of every matching paper,
+    // which is a superset of what the people-doc lexical clause admits.
     topicBool.must = [
+      ...topicBool.must,
       {
         bool: {
           should: [

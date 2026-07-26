@@ -340,11 +340,29 @@ describe("people-index MeSH concept admission — SPEC #726", () => {
   describe("exact-word narrowing (#1951)", () => {
     const exactOpts = { ...baseTopicOpts, scope: "exact" as const };
 
-    /** The narrowing bool that replaces the topic must under `exact`. */
+    /** The narrowing bool ADDED to the topic must under `exact` (the last conjunct). */
     function narrowingShould(): Record<string, unknown>[] {
       const must = topicMust(fullBody());
-      return (must[0] as { bool: { should: Record<string, unknown>[] } }).bool.should;
+      const last = must[must.length - 1] as { bool: { should: Record<string, unknown>[] } };
+      return last.bool.should;
     }
+
+    // The regression that shipped and had to be reverted: the narrowing REPLACED
+    // the lexical clause instead of being AND-ed with it, which made `exact`
+    // BROADER than the default (staging: climate 50 -> 142, food insecurity
+    // 34 -> 77) because the publications lookup returns every author of every
+    // matching paper — a superset of what the people-doc clause admits.
+    it("ADDS to the lexical clause — exact must stay a SUBSET of the default", async () => {
+      exactCwids.buckets = ["aaa1001"];
+      await searchPeople(exactOpts);
+      const must = topicMust(fullBody());
+      // the original lexical clause survives as its own conjunct…
+      expect(must.length).toBeGreaterThanOrEqual(2);
+      expect(must[0]).toHaveProperty("multi_match");
+      // …and the literal-match arms are an ADDITIONAL requirement, not an
+      // alternative admission path.
+      expect(must[must.length - 1]).toHaveProperty("bool.minimum_should_match", 1);
+    });
 
     it("admits on a literal publication OR grant OR clinical match, not on concept labels", async () => {
       exactCwids.buckets = ["aaa1001", "bbb2002"];
