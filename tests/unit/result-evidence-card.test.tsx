@@ -453,6 +453,22 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(phrase.className).toMatch(/min-w-0/);
   });
 
+  it("#1960 — the prefix and the term assemble into one sentence, with the space", () => {
+    // `text` is only the PREFIX and `term` is a separate styled span, so the sentence the
+    // reader sees exists only after the renderer joins them. Nothing asserted that join,
+    // which is how "tagged under" + "Melanoma" could have shipped as "tagged underMelanoma"
+    // — a defect invisible to every builder-side test, since each pins its own half.
+    const { container } = renderEv({
+      kind: "publications",
+      strength: "tagged",
+      text: "12 of 98 publications tagged under",
+      term: "Melanoma",
+      count: 12,
+    });
+    const phrase = container.querySelector(".items-baseline")!.firstElementChild as HTMLElement;
+    expect(phrase.textContent).toBe("12 of 98 publications tagged under Melanoma");
+  });
+
   it("#1361 — a mention literal term is semibold but NOT underlined (underline = concept only)", () => {
     renderEv({
       kind: "publications",

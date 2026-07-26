@@ -58,7 +58,7 @@ describe("reason-from-doc vs agg parity (identical matchReason text)", () => {
     expect(reasonFor(docCount)).toEqual(reasonFor(aggCount));
     expect(reasonFor(docCount)).toEqual({
       icon: "publications",
-      text: "14 of 372 publications tagged HIV",
+      text: "14 of 372 publications tagged under HIV",
     });
   });
 
@@ -81,7 +81,7 @@ describe("reason-from-doc vs agg parity (identical matchReason text)", () => {
       provenanceParent: "HIV",
       contentQuery: "hiv",
     });
-    expect(r?.text).toBe("372 of 372 publications tagged HIV");
+    expect(r?.text).toBe("372 of 372 publications tagged under HIV");
   });
 });
 
@@ -112,7 +112,34 @@ describe("reason-from-doc broad-concept divergence (intentional, more accurate)"
     // Legacy capped agg would have shown a smaller "N" here; the doc path is exact.
     expect(reason).toEqual({
       icon: "publications",
-      text: "1626 of 2072 publications tagged Neoplasms",
+      text: "1626 of 2072 publications tagged under Neoplasms",
     });
+  });
+
+  it("#1960 — the label says 'under' because the count is a SUBTREE total, not a tag count", () => {
+    // This is the honesty guard, and it is worth stating as its own case because the
+    // wording and the number are load-bearing for each other. `meshSubtreeCounts` is
+    // folded up each publication's full ancestor chain, so the value under a parent's UI
+    // counts every pub tagged with that descriptor OR any narrower one. A scholar can
+    // therefore have a large N here while carrying the parent tag on nothing at all —
+    // measured on staging, 71% of the scholars this line renders for carry no parent tag.
+    // "tagged Neoplasms" asserted all 1626 held that exact tag. "tagged under Neoplasms"
+    // is true whether they hold the parent, only descendants, or both.
+    const subtreeTotal = taggedCountFromDoc({ D009369: 1626 }, "D009369");
+    const reason = composeMatchReason({
+      counts: { tagged: subtreeTotal, mention: 0 },
+      rep: undefined,
+      pubCount: 2072,
+      hasProvenance: true,
+      provenanceParent: "Neoplasms",
+      contentQuery: "cancer",
+    });
+    expect(reason?.text).toContain("tagged under Neoplasms");
+    // The bare form is the over-claim this issue retired — it must not survive anywhere
+    // in the sentence.
+    expect(reason?.text).not.toMatch(/tagged Neoplasms/);
+    // `under` must not displace `tagged`: the via-line's "also tagged X" takes its subject
+    // by echoing this verb (#1955/#1957), so dropping it would strand that line's grammar.
+    expect(reason?.text).toContain("publications tagged");
   });
 });

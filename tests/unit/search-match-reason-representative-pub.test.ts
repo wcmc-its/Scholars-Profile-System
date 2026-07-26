@@ -150,7 +150,7 @@ describe("composeMatchReason (#967)", () => {
     });
     expect(r).toEqual({
       icon: "publications",
-      text: "14 of 372 publications tagged HIV",
+      text: "14 of 372 publications tagged under HIV",
       pub: repTagged,
     });
   });
@@ -164,7 +164,7 @@ describe("composeMatchReason (#967)", () => {
       provenanceParent: "HIV",
       contentQuery: "hiv",
     });
-    expect(r?.text).toBe("372 of 372 publications tagged HIV");
+    expect(r?.text).toBe("372 of 372 publications tagged under HIV");
   });
 
   it("falls through to mention (with its pub) when there are no tagged pubs", () => {
@@ -192,7 +192,7 @@ describe("composeMatchReason (#967)", () => {
       provenanceParent: "HIV",
       contentQuery: "hiv",
     });
-    expect(r).toEqual({ icon: "publications", text: "14 of 372 publications tagged HIV" });
+    expect(r).toEqual({ icon: "publications", text: "14 of 372 publications tagged under HIV" });
     expect(r?.pub).toBeUndefined();
   });
 
