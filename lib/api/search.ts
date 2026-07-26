@@ -133,6 +133,13 @@ import type { PeopleQueryShape as PeopleQueryClassification } from "@/lib/api/pe
 
 const PAGE_SIZE = 20;
 
+// #1952 — named-query tags on the two arms of the concept-escalation `should`.
+// Read back from each hit's `matched_queries` so the reason gate can tell a
+// lexical hit from a mesh-only admit. Exported for the tests that assert the
+// emitted query shape.
+export const LEXICAL_ADMIT_CLAUSE = "lexicalAdmit";
+export const MESH_ADMIT_CLAUSE = "meshAdmit";
+
 // #1881 — Topic id→label map for the humanized research-areas fallback. It is
 // deploy-stable reference data loaded on every match-aware people search;
 // `searchPeople` runs up to 2× per SSR render, so react `cache()` collapses the
@@ -2230,19 +2237,42 @@ export async function searchPeople(opts: {
   // reference queryBranch, so this single mutation is reflected in every body
   // that carries the topic clause — the count-only badge and the full search
   // share the admitted set however the gate was sourced.
+  // #1952 — escalation relaxes the lexical clause to a `should`, so a scholar with
+  // NO lexical match is admitted on the tag alone. `match=concept` never relaxes
+  // that clause, so those admits are absent there — and the tagged label must not
+  // claim a match the concept scope rejects. Naming both sides lets the reason gate
+  // below tell a genuine lexical hit from a mesh-only admit.
+  //
+  // BOTH are named on purpose. `minimum_should_match: 1` guarantees every admitted
+  // hit matched at least one NAMED clause, so an EMPTY `matched_queries` can only
+  // mean named-query reporting did not survive the outer `function_score` wrapper —
+  // which lets the gate detect that per hit and fail open instead of silently
+  // zeroing every tagged label on the sparse path.
+  let conceptEscalated = false;
   const applyConceptEscalation = () => {
     const topicBool = (
       queryBranch as { bool: { must: Record<string, unknown>[] } }
     ).bool;
+    conceptEscalated = true;
     topicBool.must = [
       {
         bool: {
           should: [
-            ...topicBool.must,
+            // `must` is the single topic clause (the multi_match / demote wrapper),
+            // so `should` + msm:1 here is exactly the previous spread — same
+            // matching, same score — it just carries a name now.
+            {
+              bool: {
+                should: topicBool.must,
+                minimum_should_match: 1,
+                _name: LEXICAL_ADMIT_CLAUSE,
+              },
+            },
             {
               terms: {
                 publicationMeshUi: meshDescendantUis,
                 boost: MESH_ADMIT_WEIGHT[meshTier],
+                _name: MESH_ADMIT_CLAUSE,
               },
             },
           ],
@@ -2885,6 +2915,9 @@ export async function searchPeople(opts: {
 
   type Hit = {
     _score?: number; // #1329 — surfaced raw onto PeopleHit.relevanceScore.
+    // #1952 — carries LEXICAL_ADMIT_CLAUSE / MESH_ADMIT_CLAUSE when the concept
+    // escalation fired. Absent on every non-escalated search (nothing is named).
+    matched_queries?: string[];
     _source: {
       cwid: string;
       slug: string;
@@ -3064,12 +3097,34 @@ export async function searchPeople(opts: {
   // and would churn `reasonAggKey`, which is built from that varying cwid subset.
   // The trade: a gated-out scholar shows no mention line either, and falls to
   // clinical/bio/topic/concepts evidence instead.
+  //
+  // The concept set is `lexical-must ∩ publicationMeshUi`, so BOTH halves are
+  // tested. Testing only the tag left a residual: under #726's escalate-on-sparse
+  // admission a scholar with NO lexical match is admitted on the tag alone, passes
+  // the tag test (they really do carry it), and keeps the label — while
+  // `match=concept`, which never relaxes the lexical clause, excludes them. Those
+  // admits score in a deliberate sub-BM25 band, so they cluster at the ranking
+  // tail; measured on `climate`, 13 of 50.
   const conceptUiSet = new Set(meshDescendantUis);
+  const isLexicalAdmit = (h: Hit) => {
+    if (!conceptEscalated) return true; // nothing named ⇒ every hit is a lexical hit
+    const names = h.matched_queries ?? [];
+    // msm:1 over two NAMED arms ⇒ an admitted hit always matched a named clause.
+    // An empty list therefore means named-query reporting did not survive the
+    // outer function_score wrapper, not that the hit is a mesh-only admit. Fail
+    // open: keep today's behaviour rather than zero every tagged label.
+    if (names.length === 0) return true;
+    return names.includes(LEXICAL_ADMIT_CLAUSE);
+  };
   const conceptTagged = new Set<string>(
     conceptUiSet.size === 0
       ? pageCwids
       : r.hits.hits
-          .filter((h) => (h._source.publicationMeshUi ?? []).some((ui) => conceptUiSet.has(ui)))
+          .filter(
+            (h) =>
+              isLexicalAdmit(h) &&
+              (h._source.publicationMeshUi ?? []).some((ui) => conceptUiSet.has(ui)),
+          )
           .map((h) => h._source.cwid),
   );
   const countsFor = (cwid: string) => {

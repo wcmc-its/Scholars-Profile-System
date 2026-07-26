@@ -328,6 +328,70 @@ describe("searchPeople — tagged label obeys the concept-set predicate (#1952)"
       lines.some((e) => e?.kind === "publications" && e.strength === "tagged"),
     ).toBe(true);
   });
+
+  // The residual after the first fix. #726's escalate-on-sparse admission ORs the
+  // descendant-UI terms clause INTO the lexical must, so a scholar with NO lexical
+  // match is admitted on the tag alone. They genuinely carry the tag, so the tag
+  // half of the predicate passes — but `match=concept` never relaxes the lexical
+  // clause, so it excludes them, and the label claimed a match the filter rejects.
+  // Escalation names both arms; the gate reads `matched_queries` to tell them apart.
+  describe("escalation admits (#726) — the lexical half of the predicate", () => {
+    const hit = HITS[0] as Record<string, unknown>;
+
+    afterEach(() => {
+      delete hit.matched_queries;
+    });
+
+    // Escalation needs meshConceptEligible: an unambiguous resolution whose matched
+    // form clears MESH_MIN_MATCHED_FORM_LEN, on a topic template, outside concept
+    // scope — plus a sparse lexical total (the mock returns 1, well under 50).
+    const runEscalated = () =>
+      searchPeople({
+        q: "gun violence",
+        relevanceMode: "v3",
+        shape: "topic",
+        matchExplain: true,
+        meshDescendantUis: [CONCEPT_UI],
+        meshDescriptorName: "Gun Violence",
+        meshMatchTier: "exact",
+        meshAmbiguous: false,
+        meshMatchedFormLength: 12,
+        matchAwareContext: { methodFamily: null, topics: [] },
+      });
+
+    const taggedSurvives = (r: Awaited<ReturnType<typeof searchPeople>>) => {
+      const lines = r.hits[0].evidenceLines ?? [r.hits[0].evidence];
+      return lines.some((e) => e?.kind === "publications" && e.strength === "tagged");
+    };
+
+    it("mesh-ONLY admit (no lexical match) ⇒ the tagged count is withheld", async () => {
+      process.env[EVIDENCE] = "on";
+      mockReasonAgg.mockReturnValue(taggedBucket);
+      source.publicationMeshUi = [CONCEPT_UI]; // carries the tag — passes the tag half
+      hit.matched_queries = ["meshAdmit"]; // …but matched no lexical clause
+      expect(taggedSurvives(await runEscalated())).toBe(false);
+    });
+
+    it("lexical admit that also carries the tag ⇒ the tagged count survives", async () => {
+      process.env[EVIDENCE] = "on";
+      mockReasonAgg.mockReturnValue(taggedBucket);
+      source.publicationMeshUi = [CONCEPT_UI];
+      hit.matched_queries = ["lexicalAdmit", "meshAdmit"];
+      expect(taggedSurvives(await runEscalated())).toBe(true);
+    });
+
+    // Fail-open. msm:1 over two NAMED arms means an admitted hit always matched a
+    // named clause, so an empty list can only mean named-query reporting did not
+    // survive the outer function_score wrapper. Degrade to today's behaviour rather
+    // than silently zero every tagged label on the sparse path.
+    it("named-query reporting absent ⇒ fails OPEN, not closed", async () => {
+      process.env[EVIDENCE] = "on";
+      mockReasonAgg.mockReturnValue(taggedBucket);
+      source.publicationMeshUi = [CONCEPT_UI];
+      // no `matched_queries` on the hit at all
+      expect(taggedSurvives(await runEscalated())).toBe(true);
+    });
+  });
 });
 
 describe("searchPeople — free-text publications:mention evidence (#1)", () => {
