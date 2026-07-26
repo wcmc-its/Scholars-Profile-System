@@ -4554,7 +4554,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_MESH_RESOLVE_TOKEN_COVERAGE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_MESH_QUERY_NORMALIZATION",

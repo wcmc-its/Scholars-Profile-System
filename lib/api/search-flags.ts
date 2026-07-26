@@ -1036,11 +1036,24 @@ export function resolveMeshResolutionFallbackEnabled(): boolean {
  * safety & quality improvement" regress).
  *
  * Default OFF (`=== "on"` opt-in): flag-off keeps the stoplist path byte-identical.
- * Known cost when ON: legitimate single-concept narrowing declines ("pediatric asthma" →
- * `Asthma` is 1/2), degrading to keyword-only. Measured on the 169 curated chips (07-25,
- * local, resolver is DB-only): conjunct-relative coverage resolves 167/169 — IDENTICAL to
- * the shipped stoplist, zero regression — while still declining free-typed latches like
- * "foreign policy". Re-confirm on staging before flipping.
+ * STAGING ON 2026-07-25 to soak; PROD still OFF.
+ *
+ * Chip recall re-measured against the canonical MeSH map AFTER the one-token-conjunct
+ * clamp: 167/169 with a **per-chip diff of zero** vs the shipped stoplist — same
+ * descriptors, same confidence tiers, same 2 unresolved (`Cancer epigenetics`,
+ * `Real-world evidence`, neither a resolver defect). Curated chips are unaffected either
+ * way, so the chip set measures none of this flag's real cost.
+ *
+ * That cost is on FREE-TYPED queries, and it is the whole trade. A descriptor must be
+ * named by ≥ 2 of the user's words, so `<one word> and|,|&|/ <one word>` stops resolving
+ * and degrades to keyword-only: "diabetes and obesity", "cancer and aging", "sepsis and
+ * inflammation", "obesity, hypertension" — plus two resolutions that were GOOD ("policy
+ * and health outcomes" → Health Policy, "blood and marrow transplantation" →
+ * Transplantation). What it buys: "foreign policy" → `Policy` and "chronic fatigue" →
+ * `Fatigue` stop latching. Owner-accepted on that measured trade.
+ *
+ * Bare single-word queries are NOT affected — they match `byForm` directly and never
+ * reach this fallback.
  */
 export function resolveMeshTokenCoverageEnabled(): boolean {
   return process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE === "on";
