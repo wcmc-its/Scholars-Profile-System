@@ -27,6 +27,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { MatchaPanel } from "@/components/edit/matcha-panel";
 import { conceptWeight } from "@/lib/api/matcha-contract";
+import type { ResultEvidence as ResultEvidenceT } from "@/lib/api/result-evidence";
 import type {
   CulledConcept,
   GrantCandidate,
@@ -1041,6 +1042,69 @@ describe("MatchaPanel", () => {
       .pop();
     expect(line).toBeTruthy();
     expect(line!.textContent).toContain("MeSH:Immuno-oncology");
+  });
+
+  // #1958 — the parenthetical's verb is a CLAIM, and until now it was the same claim in both
+  // cases. `computeMatchProvenance` takes its `narrower` shape whenever the scholar carries a
+  // descendant, never checking the parent, so "matched X" asserted a route nobody computed —
+  // the #1955 defect, on the surface an officer picks names off. Both branches are pinned on
+  // the assembled sentence, because the bug is how the two halves read TOGETHER: the count
+  // spans the whole subtree while the parenthetical names only part of it.
+  async function evidenceSentenceFor(alsoParent: boolean | undefined): Promise<string> {
+    const base = searchEvidence("Immuno-oncology", 142);
+    // Built as the `publications` variant explicitly rather than spread from the union —
+    // `ResultEvidence` has variants with no `descendantTerms`, so a spread widens and fails
+    // to narrow.
+    const evidence: ResultEvidenceT = {
+      kind: "publications",
+      strength: "tagged",
+      text: "142 of 210 publications tagged",
+      term: "MeSH:Immuno-oncology",
+      count: 142,
+      descendantTerms: ["Immunotherapy, Adoptive"],
+      ...(alsoParent === undefined ? {} : { alsoParent }),
+    };
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          fusedScore: 0.9,
+          contributions: [{ term: "Immuno-oncology", rank: 1 }],
+          searchEvidence: [{ ...base, evidence }],
+        }),
+      ],
+    });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+    const line = screen
+      .getAllByText((_t, el) => /142 of 210 publications tagged/.test(el?.textContent ?? ""))
+      .pop();
+    expect(line).toBeTruthy();
+    return line!.textContent ?? "";
+  }
+
+  it("says 'matched' only when the scholar does NOT carry the parent — the route really is the descendant", async () => {
+    const sentence = await evidenceSentenceFor(false);
+    expect(sentence).toContain("(matched Immunotherapy, Adoptive)");
+    expect(sentence).not.toContain("also tagged");
+  });
+
+  it("says 'also tagged', NOT 'matched', when the scholar carries the parent too", async () => {
+    const sentence = await evidenceSentenceFor(true);
+    expect(sentence).toContain("(also tagged Immunotherapy, Adoptive)");
+    // The whole point: the unfounded route claim is gone for this cohort.
+    expect(sentence).not.toMatch(/\(matched/);
+  });
+
+  it("falls back to the route wording when the field is absent, not to a containment claim", async () => {
+    // An older cached spine payload predates `alsoParent`. Absent must degrade to the
+    // pre-#1958 string rather than silently asserting the scholar holds the parent.
+    const sentence = await evidenceSentenceFor(undefined);
+    expect(sentence).toContain("(matched Immunotherapy, Adoptive)");
   });
 
   it("renders ONE block per matched concept, captioned with the concept it answers for", async () => {
