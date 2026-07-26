@@ -72,7 +72,12 @@ import {
   type PublicationsSort,
   type SearchFacetBucket,
 } from "@/lib/api/search";
-import { meshMatchTier, AREA_BOOST_TOP_N } from "@/lib/search";
+import {
+  meshMatchTier,
+  meshConfidenceRank,
+  MESH_RANK_VERBATIM,
+  AREA_BOOST_TOP_N,
+} from "@/lib/search";
 import { getAreaScholarConcentration } from "@/lib/api/topics";
 import {
   searchFunding,
@@ -246,13 +251,21 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // Issue #692 §4.1 — full query first; only on a complete MISS (no curated
   // match AND no MeSH descriptor) retry against the stripped content query.
   // Full-first protects descriptors built from filler ("gene therapy").
+  // #1972 — a `partial` does NOT count as resolved here (mirrors /api/search). It is the
+  // window fallback's guess, and letting it satisfy this guard suppressed the retry
+  // whenever SEARCH_MESH_RESOLUTION_FALLBACK was on.
   if (
     genericStripped &&
     taxonomyMatch.state === "none" &&
-    taxonomyMatch.meshResolution === null
+    meshConfidenceRank(taxonomyMatch.meshResolution?.confidence) < MESH_RANK_VERBATIM
   ) {
     const retry = await matchQueryToTaxonomy(contentQuery);
-    if (retry.state === "matches" || retry.meshResolution !== null) {
+    // Strictly better only; a second `partial` must not churn the answer.
+    if (
+      retry.state === "matches" ||
+      meshConfidenceRank(retry.meshResolution?.confidence) >
+        meshConfidenceRank(taxonomyMatch.meshResolution?.confidence)
+    ) {
       taxonomyMatch = retry;
     }
   }
