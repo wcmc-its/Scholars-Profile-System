@@ -33,10 +33,13 @@ const capturedBodies: Array<Record<string, unknown>> = [];
 // escalate/count-gate decision (the real OpenSearch returns this from the
 // size:0 pre-count query).
 const lexical = vi.hoisted(() => ({ total: 1 }));
+// #1951 — cwids returned by the exact-word literal-text lookups; set per test.
+const exactCwids = vi.hoisted(() => ({ buckets: [] as string[] }));
 
 vi.mock("@/lib/search", () => ({
   PEOPLE_INDEX: "scholars-people",
   PUBLICATIONS_INDEX: "scholars-publications",
+  FUNDING_INDEX: "scholars-funding",
   PEOPLE_FIELD_BOOSTS: ["preferredName^10", "publicationAbstracts^0.3"],
   PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS: [
     "preferredName^10",
@@ -76,6 +79,17 @@ vi.mock("@/lib/search", () => ({
   searchClient: () => ({
     async search(req: { body: Record<string, unknown> }) {
       capturedBodies.push(req.body);
+      // #1951 — the exact-word cwid lookups (publications + funding) are the only
+      // queries asking for a `cwids` terms agg; answer them from `exactCwids`.
+      const aggs = req.body.aggs as { cwids?: unknown } | undefined;
+      if (aggs && "cwids" in aggs) {
+        return {
+          body: {
+            hits: { total: { value: 0 }, hits: [] },
+            aggregations: { cwids: { buckets: exactCwids.buckets.map((key) => ({ key })) } },
+          },
+        };
+      }
       // The lexical pre-count is the only bare size:0 query (no aggs); the
       // facet/funded aggs and the count-only badge are not exercised here.
       const isPreCount = req.body.size === 0 && !("aggs" in req.body);
@@ -221,6 +235,7 @@ describe("people-index MeSH concept admission — SPEC #726", () => {
     // search-people-concept-precount.test.ts.
     process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT = "on";
     capturedBodies.length = 0;
+    exactCwids.buckets = []; // #1951 — per-test literal-match cwids
     lexical.total = 1;
     groupByMock.mockResolvedValue([]);
   });
@@ -314,6 +329,85 @@ describe("people-index MeSH concept admission — SPEC #726", () => {
       expect(admissionTerms(fullBody())).toEqual({
         terms: { publicationMeshUi: DESCENDANTS, boost: 0.03, _name: "meshAdmit" },
       });
+    });
+  });
+
+  // #1951 — `Exact word` presented as a precision lever but returned the identical
+  // set as the default (measured on staging: q=gun violence, 6 vs 6, including
+  // three rows rendering "no specific match"). It only downgraded evidence labels.
+  // It now admits a scholar iff the query's words literally appear in their own
+  // work: one publication, one grant, or their clinical / self-described profile.
+  describe("exact-word narrowing (#1951)", () => {
+    const exactOpts = { ...baseTopicOpts, scope: "exact" as const };
+
+    /** The narrowing bool that replaces the topic must under `exact`. */
+    function narrowingShould(): Record<string, unknown>[] {
+      const must = topicMust(fullBody());
+      return (must[0] as { bool: { should: Record<string, unknown>[] } }).bool.should;
+    }
+
+    it("admits on a literal publication OR grant OR clinical match, not on concept labels", async () => {
+      exactCwids.buckets = ["aaa1001", "bbb2002"];
+      await searchPeople(exactOpts);
+
+      const should = narrowingShould();
+      // two cwid arms (publications, funding) + the people-doc own-words arm
+      expect(should).toHaveLength(3);
+      const cwidArms = should.filter((c) => "terms" in c);
+      expect(cwidArms).toHaveLength(2);
+      expect(cwidArms[0]).toEqual({ terms: { cwid: ["aaa1001", "bbb2002"] } });
+
+      const ownWords = should.find((c) => "multi_match" in c) as {
+        multi_match: { fields: string[]; operator: string };
+      };
+      // Every word must be present — that is what "exact word" claims.
+      expect(ownWords.multi_match.operator).toBe("and");
+      // A MeSH label is the concept, not the scholar's wording; identity fields are
+      // not their work. Both admitted rows under the old behaviour.
+      const joined = ownWords.multi_match.fields.join(" ");
+      expect(joined).not.toContain("publicationMesh");
+      expect(joined).not.toContain("preferredName");
+      expect(joined).not.toContain("primaryDepartment");
+      expect(joined).toContain("clinicalExpertise");
+    });
+
+    it("issues one capped cwid lookup against publications AND one against funding", async () => {
+      exactCwids.buckets = ["aaa1001"];
+      await searchPeople(exactOpts);
+      const lookups = capturedBodies.filter(
+        (b) => (b.aggs as { cwids?: unknown } | undefined)?.cwids !== undefined,
+      );
+      expect(lookups).toHaveLength(2);
+      for (const l of lookups) {
+        const mm = (
+          (l.query as { bool: { must: Record<string, unknown>[] } }).bool
+            .must[0] as { multi_match: { operator: string } }
+        ).multi_match;
+        expect(mm.operator).toBe("and");
+        expect(
+          ((l.aggs as { cwids: { terms: { size: number } } }).cwids.terms.size),
+        ).toBe(5000);
+      }
+    });
+
+    it("a lookup that matches nothing still leaves the own-words arm (no empty terms clause)", async () => {
+      exactCwids.buckets = [];
+      await searchPeople(exactOpts);
+      const should = narrowingShould();
+      expect(should).toHaveLength(1);
+      expect(should[0]).toHaveProperty("multi_match");
+    });
+
+    // The whole point of the control: it must NOT touch any other scope.
+    it("does NOT narrow the default scope — no lookups, topic must unchanged", async () => {
+      exactCwids.buckets = ["aaa1001"];
+      await searchPeople(baseTopicOpts);
+      expect(
+        capturedBodies.filter(
+          (b) => (b.aggs as { cwids?: unknown } | undefined)?.cwids !== undefined,
+        ),
+      ).toHaveLength(0);
+      expect(topicMust(fullBody())[0]).toHaveProperty("multi_match");
     });
   });
 
