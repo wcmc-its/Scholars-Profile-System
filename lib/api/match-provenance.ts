@@ -54,26 +54,24 @@ export type MatchProvenance =
        * having come THROUGH one, so a renderer that says "matched on narrower
        * term" asserts a route nobody computed for the scholar tagged with both.
        *
-       * The two values are NOT symmetric. Read each as exactly what the predicate
-       * computes:
-       *   `true`  ⇒ the parent tag is PRESENT. Sound — membership in
-       *             `publicationMeshUi` implies the tag exists.
-       *   `false` ⇒ the parent tag is absent FROM THE INDEXED SET, which is weaker
-       *             than absent. `publicationMeshUi` is min-evidence filtered when
-       *             the people-doc is built (`lib/search-index-docs.ts` skips a
-       *             descriptor unless `agg.distinctPubs >= 2 || agg.hasFirstOrLast`),
-       *             so a scholar whose parent descriptor sits on exactly ONE
-       *             middle-author publication carries the tag and is still missing
-       *             from this input. Compounding it, the People lead line's N is
-       *             served ungated FOR THIS COHORT — #1952's `countsFor` zeroes the
-       *             tagged count only for a scholar carrying no in-subtree UI, and
-       *             the narrower branch guarantees one — while `meshSubtreeCounts`
-       *             itself counts every kept pub with no threshold. So that same
-       *             below-threshold publication IS inside the "N of M publications
-       *             tagged <parent>" it renders under. For that cohort
-       *             the narrower-route wording remains an over-claim: bounded, named,
-       *             and UNFIXED here. Closing it needs a second data source, which is
-       *             a separate issue — not a change to this predicate.
+       * #1959 — the predicate reads BOTH people-doc descriptor sets, so `false`
+       * now means absent, not merely below the gate. `publicationMeshUi` is
+       * min-evidence filtered when the people-doc is built
+       * (`lib/search-index-docs.ts` skips a descriptor unless
+       * `agg.distinctPubs >= 2 || agg.hasFirstOrLast`), which used to make a
+       * scholar whose parent descriptor sits on exactly ONE middle-author
+       * publication read as untagged — 16.2% of this variant's renders, measured
+       * over all 9,432 active scholars × 10 concepts on staging. Those dropped
+       * descriptors now arrive as `publicationMeshUiBelowThreshold` and are
+       * consulted here, and ONLY here: the branch predicate above still reads the
+       * gated set alone, so the min-evidence rule keeps deciding which descendants
+       * may be NAMED.
+       *
+       * On an index built before that field existed it is absent, and this
+       * degrades to the old gated-only answer. Same for the one caller that passes
+       * a UNION over a merged cluster (`lib/api/matcha-spine-run.ts`): the emitted
+       * set carries ancestors of kept descriptors, so a cluster representative that
+       * is a SIBLING of the descendant that fired is not in it.
        *
        * Consumers use it to pick copy that holds, not to re-rank.
        */
@@ -101,17 +99,21 @@ export type MatchProvenance =
  * descriptor match.
  *
  * @param publicationMeshUi  the scholar's descriptor UIs (`_source.publicationMeshUi`)
+ * @param belowThresholdMeshUi  #1959 — the gate-dropped ancestors of those UIs
+ *   (`_source.publicationMeshUiBelowThreshold`). Read ONLY by `alsoParent`; absent
+ *   on an index built before the field existed.
  * @param descendantUis      resolved descriptor's `[self, ...descendants]` (invariant: `[0]` is the parent)
  * @param parentTerm         resolved descriptor's display name
  * @param labels             descendant-UI → display-name map (parent may be absent)
  */
 export function computeMatchProvenance(opts: {
   publicationMeshUi: string[] | undefined;
+  belowThresholdMeshUi?: string[] | undefined;
   descendantUis: string[];
   parentTerm: string;
   labels: Map<string, string>;
 }): MatchProvenance | undefined {
-  const { publicationMeshUi, descendantUis, parentTerm, labels } = opts;
+  const { publicationMeshUi, belowThresholdMeshUi, descendantUis, parentTerm, labels } = opts;
   if (!publicationMeshUi || publicationMeshUi.length === 0) return undefined;
   if (descendantUis.length === 0) return undefined; // no descriptor resolved
 
@@ -125,11 +127,15 @@ export function computeMatchProvenance(opts: {
     // #1955 — the same parent test the `concept` branch runs below, evaluated here
     // as well. It settles the WORDING, never the branch: a scholar carrying both
     // still reads as `narrower`, exactly as before.
+    // #1959 — widened to the below-gate set. Deliberately NOT applied to the
+    // `concept` branch below: that branch decides whether a match is explained at
+    // all, and the attribution boost it explains filters on the gated set only.
     return {
       kind: "narrower",
       parentTerm,
       descendantTerms,
-      alsoParent: have.has(descendantUis[0]),
+      alsoParent:
+        have.has(descendantUis[0]) || (belowThresholdMeshUi?.includes(descendantUis[0]) ?? false),
     };
   }
 

@@ -924,6 +924,35 @@ export async function buildPeopleDoc(
     publicationMeshUi.push(ui);
   }
 
+  // #1959 — the descriptors the gate above DROPPED, narrowed to those that are an
+  // ANCESTOR of a surviving descriptor. `computeMatchProvenance`'s `alsoParent`
+  // asks exactly one question — "is `descendantUis[0]` tagged?" — and for every
+  // caller that passes ONE descriptor's `[self, ...descendants]` (the search and
+  // API routes, i.e. the surface #1959 was measured on) the branch only fires when
+  // a tree descendant of that parent survived the gate, so a dropped ancestor of a
+  // kept UI is lossless there, while the full dropped set (the long tail of
+  // one-off middle-author descriptors) is not worth the `_source` bytes.
+  // `lib/api/matcha-spine-run.ts` instead passes a UNION over a merged cluster,
+  // where `[0]` is the cluster representative and need not be an ancestor of the
+  // descendant that fired — that caller keeps today's gated-only answer for the
+  // sibling case, which is the pre-existing union-representative mismatch, not
+  // this gate.
+  // Absent entirely when `meshAncestors` wasn't passed (same degradation as
+  // `meshSubtreeCounts`); OMIT-on-empty otherwise.
+  const publicationMeshUiBelowThreshold: string[] = [];
+  if (meshAncestors) {
+    const keptAncestors = new Set<string>();
+    for (const ui of publicationMeshUi) {
+      const tns = meshAncestors.treeNumbersByUi.get(ui) ?? [];
+      for (const a of ancestorUisFor(meshAncestors.index, ui, tns)) keptAncestors.add(a);
+    }
+    const kept = new Set(publicationMeshUi);
+    for (const ui of uiAgg.keys()) {
+      if (kept.has(ui)) continue;
+      if (keptAncestors.has(ui)) publicationMeshUiBelowThreshold.push(ui);
+    }
+  }
+
   // CONTRACT A — top-8 MeSH descriptor labels by distinct-pub frequency
   // (count DESC, then label ASC). OMIT-on-empty: scholars with no MeSH on any
   // visible pub write nothing for this field (mirrors `publicationMeshUi`).
@@ -1327,6 +1356,11 @@ export async function buildPeopleDoc(
     // with no surviving descriptor write nothing, so `_source` consumers and the
     // `terms` filter distinguish "no signal" from "[]".
     ...(publicationMeshUi.length > 0 ? { publicationMeshUi } : {}),
+    // #1959 — source-only companion to the field above: the gate-dropped
+    // ancestors of kept descriptors, so `alsoParent` can distinguish "the parent
+    // tag is absent" from "the parent tag is below the min-evidence gate".
+    // Never filtered or aggregated on. OMIT-on-empty.
+    ...(publicationMeshUiBelowThreshold.length > 0 ? { publicationMeshUiBelowThreshold } : {}),
     // D-exact (search reason-from-doc) — per-concept distinct-pub counts the
     // People reason line reads at query time (O(1) lookup by resolved concept UI),
     // taking the publications-index reason agg off the search path. OMIT-on-empty

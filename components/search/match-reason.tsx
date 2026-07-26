@@ -514,17 +514,21 @@ export function MatchAwareReason({
                 NOT symmetric, because the predicate behind them is not:
                   true  — the parent tag IS in the scholar's indexed descriptor set, so the
                           descendants are additional to it and the additive wording holds.
-                  false — the parent tag is absent FROM THAT INDEXED SET, which is weaker
-                          than absent. `publicationMeshUi` is min-evidence filtered when the
-                          people-doc is built (lib/search-index-docs.ts skips a descriptor
-                          unless it appears on ≥2 pubs or on a first/last-author one), so a
-                          scholar carrying the parent on exactly one middle-author paper is
-                          missing from the field and still reads "matched on narrower term".
-                          That cohort is a bounded over-claim and it is UNFIXED here: closing
-                          it needs a second data source, which is a separate issue.
-                Two strings still earn the branch — measured on staging against that same
-                indexed field, only 28.8% of the scholars this line renders for carry the
-                parent too.
+                  false — the parent tag is absent. It used to mean only "absent from that
+                          INDEXED set," which was weaker: `publicationMeshUi` is min-evidence
+                          filtered when the people-doc is built (lib/search-index-docs.ts
+                          skips a descriptor unless it appears on ≥2 pubs or on a
+                          first/last-author one), so a scholar carrying the parent on exactly
+                          one middle-author paper was missing from the field and read
+                          "matched on narrower term" — 16.2% of this line's renders. #1959
+                          closed that: the doc also emits the gate-dropped ancestors of kept
+                          descriptors, and `alsoParent` consults both sets. A doc not yet
+                          rebuilt since that shipped lacks the field and reverts to the old
+                          gated-only answer.
+                Two strings still earn the branch — 28.8% of the scholars this line renders
+                for carried the parent when measured against the gated field alone, so the
+                post-#1959 share is that plus the cohort above, to be re-measured on a
+                rebuilt index.
                 "also tagged", not "also includes": the subject a reader supplies for a
                 subjectless clause is the nearest preceding noun phrase, and on this card
                 that is the styled TERM that ENDS line 1. "also includes" therefore reads as

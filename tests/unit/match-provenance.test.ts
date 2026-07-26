@@ -127,6 +127,67 @@ describe("computeMatchProvenance — narrower terms (#688)", () => {
   });
 });
 
+describe("computeMatchProvenance — below-gate parent presence (#1959)", () => {
+  // The cohort: the parent sits on exactly ONE middle-author pub, so the people-doc
+  // min-evidence gate drops it from `publicationMeshUi` while the lead line's
+  // ungated `meshSubtreeCounts` still counts that same pub. The dropped ancestor
+  // arrives separately, and `alsoParent` must read it.
+  const base = {
+    publicationMeshUi: ["D000072761"], // Mycobiome survived the gate
+    descendantUis: DESCENDANTS,
+    parentTerm: "Microbiota",
+    labels: LABELS,
+  };
+
+  it("reads the parent as PRESENT when only the below-gate set holds it", () => {
+    expect(
+      computeMatchProvenance({ ...base, belowThresholdMeshUi: [MICROBIOTA] }),
+    ).toMatchObject({ kind: "narrower", descendantTerms: ["Mycobiome"], alsoParent: true });
+  });
+
+  it("degrades to the gated-only answer when the field is absent (pre-rebuild index)", () => {
+    expect(computeMatchProvenance(base)).toMatchObject({ alsoParent: false });
+    expect(computeMatchProvenance({ ...base, belowThresholdMeshUi: undefined })).toMatchObject({
+      alsoParent: false,
+    });
+  });
+
+  it("stays false when the below-gate set holds something else", () => {
+    expect(
+      computeMatchProvenance({ ...base, belowThresholdMeshUi: ["D012345", "D000083422"] }),
+    ).toMatchObject({ alsoParent: false });
+  });
+
+  it("does NOT widen the branch predicate — a below-gate DESCENDANT cannot be named", () => {
+    // Only the parent test may consult the below-gate set. If the `narrower`
+    // predicate read it too, the min-evidence rule would silently stop deciding
+    // which descendants get named, so this must stay a `concept` match.
+    expect(
+      computeMatchProvenance({
+        publicationMeshUi: [MICROBIOTA],
+        belowThresholdMeshUi: ["D000072761"], // Mycobiome, below the gate
+        descendantUis: DESCENDANTS,
+        parentTerm: "Microbiota",
+        labels: LABELS,
+      }),
+    ).toEqual({ kind: "concept", parentTerm: "Microbiota" });
+  });
+
+  it("does NOT invent an explanation from the below-gate set alone", () => {
+    // The attribution boost filters the GATED set, so a scholar present only in
+    // the below-gate set was never boosted — there is nothing to explain.
+    expect(
+      computeMatchProvenance({
+        publicationMeshUi: undefined,
+        belowThresholdMeshUi: [MICROBIOTA, "D000072761"],
+        descendantUis: DESCENDANTS,
+        parentTerm: "Microbiota",
+        labels: LABELS,
+      }),
+    ).toBeUndefined();
+  });
+});
+
 describe("computeMatchProvenance — direct concept match (#702)", () => {
   it("explains a direct descriptor match the scholar is tagged with", () => {
     expect(
