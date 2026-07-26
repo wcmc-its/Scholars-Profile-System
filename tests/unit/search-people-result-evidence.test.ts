@@ -541,7 +541,7 @@ describe("searchPeople — #1955 `alsoParent` survives the hop into the evidence
     expect(ev).toMatchObject({
       kind: "publications",
       strength: "tagged",
-      text: "12 of 200 publications tagged",
+      text: "12 of 200 publications tagged under",
       term: "Microbiota",
       descendantTerms: ["Mycobiome"],
       alsoParent: true,

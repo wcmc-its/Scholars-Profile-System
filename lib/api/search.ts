@@ -557,7 +557,18 @@ export function composeMatchReason(args: {
   if (c && c.tagged > 0)
     return {
       icon: "publications",
-      text: `${Math.min(c.tagged, pubCount)} of ${pubCount} publications tagged ${provenanceParent}`,
+      // #1960 — "tagged UNDER X", not "tagged X". The count is a SUBTREE total:
+      // `taggedCountFromDoc` reads `meshSubtreeCounts[resolvedConceptUi]`, which the
+      // people-doc builder folds up each pub's full ancestor chain, so it counts every
+      // publication tagged with the resolved descriptor OR any narrower one. Naming only
+      // the parent asserted that all N carry that exact tag, and measured on staging 71%
+      // of the scholars this renders for carry no parent tag at all — so for most of them
+      // the sentence named a tag none of the counted publications held.
+      // "under" rather than "or a narrower term": it keeps the phrase's own verb (`tagged`),
+      // which the via-line's "also tagged X" depends on for its subject (#1955/#1957), and
+      // it does not repeat "narrower term" on the line directly above one that already says
+      // it in the ~71% case. Width is not a constraint here since #1963 made the phrase wrap.
+      text: `${Math.min(c.tagged, pubCount)} of ${pubCount} publications tagged under ${provenanceParent}`,
       ...(rep?.tagged ? { pub: rep.tagged } : {}),
     };
   if (c && c.mention > 0)
@@ -3620,7 +3631,11 @@ export async function searchPeople(opts: {
     const alsoParent = prov?.kind === "narrower" ? prov.alsoParent : false;
     if (counts && counts.tagged > 0 && provenanceParent.length > 0)
       pub.tagged = {
-        text: `${Math.min(counts.tagged, pubCount)} of ${pubCount} publications tagged`,
+        // #1960 — the prefix ends "tagged under" because `term` is appended to it by the
+        // renderer with a leading space. Same reasoning as `composeMatchReason` above: the
+        // count is the folded SUBTREE total, so naming the bare parent over-claimed which
+        // tag the counted publications carry.
+        text: `${Math.min(counts.tagged, pubCount)} of ${pubCount} publications tagged under`,
         term: provenanceParent,
         ...(narrowerTerms && narrowerTerms.length > 0
           ? { descendantTerms: narrowerTerms, alsoParent }
