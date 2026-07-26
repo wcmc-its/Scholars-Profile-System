@@ -471,22 +471,33 @@ export function MatchAwareReason({
       >
         {k.word}
       </span>
-      {/* #1907 — anything trailing the phrase is a shrink-0 SIBLING of the truncating
-          span, never its last child. Inside it, the old relevance cue was the first thing
-          the pixel-boundary clip ate: a 2-of-114 lead rendered dim (the "this match is
-          thin" signal) with the sentence that justified the dimming cut off. The pill and
-          the coverage cell are the new occupants of that slot and inherit the invariant —
-          flexbox distributes negative space only across items with a non-zero shrink
-          factor, so the phrase is squeezed and they are laid out at max-content. The
-          via-line does NOT carry `truncate` (pinned by result-evidence-card.test.tsx): it is
-          the last content on its own line with nothing trailing it, so it wraps rather than
-          clipping and can never eat a sibling — and `descendantViaSummary` budgets the whole
-          rendered string, tail included, against this column's measured `lg` width, so at
-          the layout this row was designed for it does not wrap either. Narrower than `lg`
-          the row stacks and the line wraps, like any long text. */}
+      {/* #1907 — anything trailing the phrase is a shrink-0 SIBLING of it, never its last
+          child. Inside it, the old relevance cue was the first thing the pixel-boundary clip
+          ate: a 2-of-114 lead rendered dim (the "this match is thin" signal) with the
+          sentence that justified the dimming cut off. The pill and the coverage cell are the
+          new occupants of that slot and inherit the invariant — flexbox distributes negative
+          space only across items with a non-zero shrink factor, so the phrase absorbs the
+          squeeze and they are laid out at max-content.
+
+          #1963 — the phrase absorbs it by WRAPPING, not by truncating. It used to carry
+          `truncate`, and the invariant above says only that the phrase yields; it never
+          required the yielding to hide text. Hiding it was actively wrong here, because what
+          overflows is the TAIL and the tail is the concept term — and MeSH names are comma-
+          and hyphen-inverted, so the disambiguating part is last. Measured on staging:
+          `Precursor Cell Lymphoblastic Leukemia-Lymphoma` rendered as
+          `…Precursor Cell Lymphoblastic Leukemia…` at a 1138px viewport (6 of 6 cards), which
+          does not shorten the label but RENAMES the disease; at 433px every one of 20 cards
+          clipped, one down to `…publications tagged P`. `Magnetic Resonance Imaging` fit at
+          desktop with ~0px to spare and clipped 8 of 8 below `lg`. Wrapping instead: 0 of 20
+          clipped at 433px (3 lines) and 0 of 6 at 1138px (2 lines), with the coverage cell
+          unmoved and unchanged in width, and page horizontal overflow identical before and
+          after (3px, pre-existing). Same treatment the via-line below already gets, and for
+          the same reason — this is the one line on the card whose tail must survive.
+          A shrink-0 sibling can still never be eaten: the phrase yields horizontally by
+          taking a line, so the pill and % cell keep max-content either way. */}
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-baseline gap-[6px]">
-          <span className="min-w-0 truncate">{children}</span>
+          <span className="min-w-0">{children}</span>
           {pill ? <EvidencePill kind={pill} hideBelow="lg" /> : null}
         </span>
         {via ? (
