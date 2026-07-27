@@ -17,16 +17,28 @@ import { reportNavWatchdog } from "@/lib/analytics/nav-watchdog";
 import { cn } from "@/lib/utils";
 
 /**
- * #1017 deploy-cutover skew watchdog (mirrors components/search/autocomplete.tsx).
- * During the ~1-minute deployment cutover a facet/tab/sort/pagination soft-nav
- * can get an RSC 200 the client never commits: isPending stays true and the URL
- * never moves. #931's deployment-skew hard-reload fallback doesn't fire here.
- * The watchdog arms a timer on every navigate(); if it's still pending and the
- * URL hasn't moved when it fires, it forces a hard navigation to the intended
- * href. A successful soft-nav moves the URL (and clears isPending), so the
+ * Hung-navigation watchdog (#1017, #1995; mirrors components/search/autocomplete.tsx).
+ * The signature, whatever the cause: a facet/tab/sort/pagination soft-nav gets
+ * an RSC 200 the client never commits — the navigation stays pending and the URL
+ * never moves. #1017 saw it during the ~1-minute deployment cutover, where
+ * #931's deployment-skew hard-reload fallback doesn't fire; #1995 measured the
+ * same signature in steady state with no deploy in flight (one RSC fetch that
+ * completed in 193-240 ms, zero main-thread long tasks, `history.pushState`
+ * never called, still hung at 65 s). So the watchdog keys on the observable
+ * signature rather than on a presumed cause: it arms a timer on every
+ * navigate(); if the URL still hasn't moved when it fires, it forces a hard
+ * navigation to the intended href. A successful soft-nav moves the URL (and
+ * clears isPending, which disarms the timer in the effect below), so the
  * watchdog no-ops.
+ *
+ * This is a MITIGATION, not a cure — it bounds an indefinite hang at a hard
+ * reload. The intermittent App Router commit failure behind #1995 is still open.
+ *
+ * 2500 ms, down from #1017's 7000: the origin answers this navigation in ~0.25 s
+ * (measured against prod, #1995), so 2.5 s is ~10x headroom over a healthy round
+ * trip.
  */
-const NAV_WATCHDOG_MS = 7000;
+const NAV_WATCHDOG_MS = 2500;
 
 /**
  * Shared stale-while-revalidate navigation for /search (issue #294 follow-up
@@ -56,12 +68,10 @@ export function SearchTransitionProvider({ children }: { children: ReactNode }) 
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
-  // #1017 watchdog plumbing. Read the latest isPending from a ref inside the
-  // timer (a captured closure would be stale), keep the timer id in a ref so a
-  // rapid re-navigate clears the prior one, and clear it once the transition
-  // resolves / on unmount so a fast success leaves no lingering timer.
-  const isPendingRef = useRef(isPending);
-  isPendingRef.current = isPending;
+  // #1017 watchdog plumbing. Keep the timer id in a ref so a rapid re-navigate
+  // clears the prior one, and clear it once the transition resolves / on unmount
+  // so a fast success leaves no lingering timer. That effect-driven disarm is
+  // now the only pending signal the watchdog trusts — see the guard below.
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -107,15 +117,25 @@ export function SearchTransitionProvider({ children }: { children: ReactNode }) 
         // (facets / sort / mode tabs). Pagination omits `scroll: false`, so it
         // stays disarmed and keeps the conventional scroll-to-top on page change.
         restoreYRef.current = options?.scroll === false ? window.scrollY : null;
+        // #1017 / #1995: arm a hard-navigation fallback for a soft-nav that
+        // never commits. Read the URL BEFORE the push so a navigation that
+        // commits promptly can't be mistaken for a frozen one.
+        const startHref = window.location.href;
         startTransition(() => {
           router.push(href, options);
         });
-        // #1017: arm a hard-navigation fallback for a hung deploy-cutover soft-nav.
         if (watchdogRef.current) clearTimeout(watchdogRef.current);
-        const startHref = window.location.href;
         watchdogRef.current = setTimeout(() => {
           watchdogRef.current = null;
-          if (isPendingRef.current && window.location.href === startHref) {
+          // #1995: the guard reads ONLY the BOM. It used to also require an
+          // `isPendingRef` written during render, but React writes that ref on
+          // renders that never commit, so it read false while the committed DOM
+          // still said aria-busy — the watchdog no-opped through the exact hang
+          // it exists for (0 recoveries in 4 of 5 observed firings). The
+          // [isPending] effect above already disarms this timer when the
+          // transition resolves, and effects only run on committed renders, so
+          // that is the trustworthy half of the old condition.
+          if (window.location.href === startHref) {
             // Observe-only telemetry (never blocks the recovery nav) so the
             // firing rate can be tuned — #1017.
             reportNavWatchdog("search_results", NAV_WATCHDOG_MS);
