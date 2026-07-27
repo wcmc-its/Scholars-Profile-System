@@ -3248,6 +3248,10 @@ export async function searchPeople(opts: {
     applyTopicTemplate &&
     meshDescendantUis.length > 1 &&
     (opts.meshDescriptorName?.length ?? 0) > 0;
+  // `provenanceUis`, not the boost set: only these UIs can ever be named, so resolving
+  // labels for a cluster union would be wasted lookups. Output-identical either way —
+  // `computeMatchProvenance` reads the map only for UIs it already matched — so this is
+  // a cost choice with no test that can distinguish it.
   const provenanceLabels = provenanceOn
     ? await descriptorLabelsForUis(provenanceUis)
     : new Map<string, string>();
