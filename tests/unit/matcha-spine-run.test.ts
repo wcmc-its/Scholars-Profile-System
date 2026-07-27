@@ -1699,3 +1699,55 @@ describe("MATCHA_GLOSS_RERANK — gloss rescore threading", () => {
     expect("rescoreQuery" in mockSearchPeople.mock.calls[0][0]).toBe(false);
   });
 });
+
+// #1977 — the cluster union may drive the BOOST but must not drive the WORDING.
+// `mergeTermClusters` picks the cluster's EARLIEST member as representative, not its
+// broadest, and merges on subsumption in either direction (also on Jaccard, also
+// transitively). So the union routinely holds the representative's SIBLINGS, and
+// `computeMatchProvenance` would label one of those a "narrower term of <rep>" while the
+// lead count beside it is the rep's own subtree and excludes those papers.
+describe("rankResearchersForDescriptionSpine — provenance set is the REP's subtree, not the union (#1977)", () => {
+  it("sends the union as the boost and the rep's own subtree as the provenance set", async () => {
+    // Narrow term FIRST, so the representative is the subsumed member — the reverse
+    // subsumption `related()` accepts and the order the model controls.
+    mockExtractSponsorConcepts.mockResolvedValue([
+      { term: "hairy cell leukemia", kind: "concept", centrality: 1.0 },
+      { term: "leukemia", kind: "concept", centrality: 0.9 },
+    ]);
+    const HAIRY = ["D_hairy"];
+    const LEUK = ["D_leuk", "D_hairy", "D_aml"]; // AML is a SIBLING of hairy cell
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) =>
+      q === "hairy cell leukemia" ? meshRes("D_hairy", HAIRY) : meshRes("D_leuk", LEUK),
+    );
+    mockSearchPeople.mockImplementation(async () => people(["p"]));
+
+    await rankResearchersForDescriptionSpine("leukemia paste");
+
+    // ONE call — the two phrasings collapsed into a single cluster.
+    expect(mockSearchPeople.mock.calls).toHaveLength(1);
+    const call = mockSearchPeople.mock.calls[0][0];
+    // The rep is the earliest member, so the card is framed as hairy cell leukemia...
+    expect(call.meshDescriptorName).toBe("D_hairy");
+    // ...the boost still spans the merged synonyms, INCLUDING the sibling...
+    expect(call.meshDescendantUis).toEqual(expect.arrayContaining(["D_hairy", "D_leuk", "D_aml"]));
+    // ...but the provenance may only see the rep's own subtree, so the sibling can never
+    // be named as a narrower term of it.
+    expect(call.meshProvenanceUis).toEqual(HAIRY);
+    expect(call.meshProvenanceUis).not.toContain("D_aml");
+  });
+
+  it("a single-member cluster passes its own set as both (no behavior change)", async () => {
+    mockExtractSponsorConcepts.mockResolvedValue([
+      { term: "microbiota", kind: "concept", centrality: 1.0 },
+    ]);
+    const SET = ["D_microbiota", "D_mycobiome"];
+    mockMatchQueryToTaxonomy.mockImplementation(async () => meshRes("D_microbiota", SET));
+    mockSearchPeople.mockImplementation(async () => people(["p"]));
+
+    await rankResearchersForDescriptionSpine("microbiota paste");
+
+    const call = mockSearchPeople.mock.calls[0][0];
+    expect(call.meshDescendantUis).toEqual(SET);
+    expect(call.meshProvenanceUis).toEqual(SET);
+  });
+});
