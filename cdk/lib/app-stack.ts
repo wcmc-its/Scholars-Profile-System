@@ -1292,13 +1292,22 @@ export class AppStack extends Stack {
         // payload returns [] when off and the section is presence-gated (hidden when
         // a scholar has no mentions), so a scholar with none is unaffected either
         // way. Dark-launched staging-first; flip prod once the seed lands.
-        NEWS_MENTIONS_SECTION: env === "staging" ? "on" : "off",
+        // PROD-ON 2026-07-27 — the seed landed: a NEWS_BACKFILL=1 operator run against
+        // the live feed ingested 870 articles → 1,595 mentions, of which 1,112 are
+        // published/renderable across 476 scholars (the remaining 483 are NAME-matched
+        // and correctly sit pending in the review queue below). Prod now carries 4.8x
+        // staging's renderable count. TaskNewsWeekly was also deployed to the prod
+        // weekly the same day, so this stays fresh instead of decaying to a one-off.
+        NEWS_MENTIONS_SECTION: "on",
         // NEWS_APPROVAL_QUEUE — the /edit/news-queue comms surface + its decision
         // endpoint; off ⇒ both 404 and the subnav tab is hidden. Reviewer audience
         // is superusers + external comms (the comms_steward role). Takes effect ONLY
         // on a manual `cdk deploy --exclusively Sps-App-<env>` — the CD pipeline
         // re-rolls the image and never deploys CDK.
-        NEWS_APPROVAL_QUEUE: env === "staging" ? "on" : "off",
+        // PROD-ON 2026-07-27, together with NEWS_MENTIONS_SECTION above: the backfill
+        // left 483 NAME-matched mentions pending, so the queue opens with real triage
+        // work rather than empty. Without it those 483 have no path to publication.
+        NEWS_APPROVAL_QUEUE: "on",
         // CONSOLE_SUBNAV_GROUPED — collapses the /edit console sub-nav's 14
         // role-gated tabs into two tiers: Profiles · Org units · Queues ·
         // Registries · Insights · Tools, with the active group's members on a
