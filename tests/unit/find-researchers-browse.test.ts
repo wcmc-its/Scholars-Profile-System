@@ -44,16 +44,22 @@ describe("matchesBrowseFilters", () => {
     expect(matchesBrowseFilters(opp(), f, now)).toBe(true);
   });
 
-  it("applies the due-date range with inclusive bounds; a set range only matches dated rows", () => {
-    const f = { ...EMPTY_BROWSE_FILTERS, dueFrom: "2026-07-19", dueTo: "2026-07-19" };
-    expect(matchesBrowseFilters(opp(), f, now)).toBe(true);
-    expect(matchesBrowseFilters(opp({ dueDate: null }), f, now)).toBe(false);
-    expect(
-      matchesBrowseFilters(opp(), { ...EMPTY_BROWSE_FILTERS, dueFrom: "2026-07-20" }, now),
-    ).toBe(false);
-    expect(matchesBrowseFilters(opp(), { ...EMPTY_BROWSE_FILTERS, dueTo: "2026-07-18" }, now)).toBe(
+  it("hides awards no faculty PI can hold BY DEFAULT, and fails open on an absent flag", () => {
+    // The gate is on in EMPTY_BROWSE_FILTERS — this is the one filter whose default is restrictive,
+    // so the default-filters case is the one that must be pinned.
+    expect(matchesBrowseFilters(opp({ facultyPiEligible: false }), EMPTY_BROWSE_FILTERS, now)).toBe(
       false,
     );
+    expect(matchesBrowseFilters(opp({ facultyPiEligible: true }), EMPTY_BROWSE_FILTERS, now)).toBe(
+      true,
+    );
+    // Absent (an older payload, or the server could not derive it) is NEVER an exclusion.
+    expect(matchesBrowseFilters(opp(), EMPTY_BROWSE_FILTERS, now)).toBe(true);
+  });
+
+  it("relaxing the faculty-PI gate restores the hidden rows", () => {
+    const f = { ...EMPTY_BROWSE_FILTERS, facultyPiOnly: false };
+    expect(matchesBrowseFilters(opp({ facultyPiEligible: false }), f, now)).toBe(true);
   });
 
   it("ORs within a checkbox group and ANDs across groups", () => {

@@ -14,6 +14,7 @@ import { apiError } from "@/lib/api/error-response";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { asPrestige } from "@/lib/funding/prestige";
+import { facultyPiMayHold } from "@/lib/funding/screening";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +63,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       isHonorific: true,
       awardCeiling: true,
       awardFloor: true,
+      // Read to DERIVE `facultyPiEligible` below; never returned — a per-row eligibility map is
+      // ~500 rows of JSON the browse has no use for.
+      eligibilityFlags: true,
+      eligibility: true,
     },
   });
 
@@ -79,10 +84,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return (a.title ?? "").localeCompare(b.title ?? "");
   });
   // BigInt award fields → number for JSON (mirrors the detail route).
-  const opportunities = rows.slice(0, limit).map((r) => ({
+  const opportunities = rows.slice(0, limit).map(({ eligibility, eligibilityFlags, ...r }) => ({
     ...r,
     awardCeiling: r.awardCeiling == null ? null : Number(r.awardCeiling),
     awardFloor: r.awardFloor == null ? null : Number(r.awardFloor),
+    // Screening spec §3.1 — false means no WCM faculty PI can hold this award (13.2% of the
+    // corpus). The browse gates on it by default; the flag is fail-open, so absent data is `true`.
+    facultyPiEligible: facultyPiMayHold(eligibilityFlags, eligibility),
   }));
 
   return NextResponse.json({ count: opportunities.length, opportunities });

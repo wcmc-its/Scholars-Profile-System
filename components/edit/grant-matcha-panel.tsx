@@ -22,6 +22,7 @@ import { ArrowLeft } from "lucide-react";
 import { BrowseList } from "@/components/edit/find-researchers";
 import { MatchaPanel, type EligibilityRequirements } from "@/components/edit/matcha-panel";
 import type { CareerStage } from "@/lib/career-stage";
+import { careerStagesOf, facultyPiMayHold, isTopicAgnostic } from "@/lib/funding/screening";
 
 type Selected = {
   title: string | null;
@@ -29,6 +30,8 @@ type Selected = {
   askSeed: string;
   /** Derived once per fetched opportunity, so the panel's memo deps stay referentially stable. */
   requirements: EligibilityRequirements;
+  /** Why ranking researchers on this award will not work — null when it will. See `askNote`. */
+  note: string | null;
 };
 
 /**
@@ -47,6 +50,40 @@ function buildAskSeed(title: string | null, synopsis: string | null): string {
 
 /** Faculty maps to the three post-training stages; `careerStageBucket` has no "faculty" bucket. */
 const FACULTY_STAGES: readonly CareerStage[] = ["early", "mid", "senior"];
+
+/**
+ * Say up front why this opportunity will not rank researchers, instead of spending a Sonnet call
+ * to produce a page the officer has to interpret.
+ *
+ * Both cases are opportunity-level facts (screening spec §3.1 and §4), knowable before the ask
+ * runs, and both currently surface as the SAME misleading picture: #1918's award that no faculty
+ * can hold drops everyone into the eligibility floor, and #1919's topic-agnostic RM1 renders "No
+ * researchers matched this description." Each reads as "Weill Cornell has nobody for this", which
+ * is false in both cases.
+ *
+ * A note SUPPRESSES the auto-run, it does not block the ask — the seeded text stays in the
+ * textarea and the officer can still run it (the relaxation §6 asks for, at the ask level).
+ */
+export function askNote(full: {
+  eligibilityFlags?: unknown;
+  eligibility?: unknown;
+  primaryTopicId?: string | null;
+  meshDescriptorUi?: unknown;
+}): string | null {
+  if (!facultyPiMayHold(full.eligibilityFlags, full.eligibility)) {
+    // §6: name the rule AND the field value that triggered it.
+    const stages = careerStagesOf(full.eligibility)
+      .map((s) => s.replace(/_/g, " "))
+      .join(", ");
+    return `No Weill Cornell faculty PI can hold this award${
+      stages ? ` — its eligibility names ${stages} only` : ""
+    }. Ranking faculty against it will mostly fill the filtered-out floor.`;
+  }
+  if (isTopicAgnostic(full)) {
+    return "This award is not topic-specific — it names a funding mechanism rather than a research area, so there is no science to rank researchers on. Run it anyway if you want to see what the extractor finds.";
+  }
+  return null;
+}
 
 function asStringArray(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
@@ -111,6 +148,8 @@ export function GrantMatchaPanel() {
           synopsis: string | null;
           eligibilityFlags?: unknown;
           eligibility?: unknown;
+          primaryTopicId?: string | null;
+          meshDescriptorUi?: unknown;
         };
         if (!active) return;
         const askSeed = buildAskSeed(full.title, full.synopsis);
@@ -124,6 +163,7 @@ export function GrantMatchaPanel() {
                   sponsor: full.sponsor,
                   askSeed,
                   requirements: requirementsFrom(full.eligibilityFlags, full.eligibility),
+                  note: askNote(full),
                 },
               }
             : {
@@ -194,10 +234,17 @@ export function GrantMatchaPanel() {
               {current.selected.title ?? "Untitled opportunity"}
             </span>
           </div>
+          {current.selected.note ? (
+            <p className="border-apollo-border bg-apollo-surface-2 text-foreground/90 mb-4 rounded-md border px-3 py-2 text-sm">
+              {current.selected.note}
+            </p>
+          ) : null}
           <MatchaPanel
             key={current.id}
             initialDescription={current.selected.askSeed}
-            autoRun
+            // A stated reason not to rank replaces the auto-run: the ask is seeded and waiting,
+            // but no Bedrock call is billed for a question we already know the answer to.
+            autoRun={current.selected.note === null}
             eligibility={current.selected.requirements}
           />
         </>
