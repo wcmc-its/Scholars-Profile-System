@@ -415,6 +415,12 @@ async function retrieveCluster(
     // Attribution boost spans the merged synonyms; the signals below graduate its
     // weight and are only read on the topic shape (absent ⇒ boost dropped).
     meshDescendantUis: descendantUis.length > 0 ? descendantUis : undefined,
+    // #1977 — the boost above spans the cluster UNION; the WORDING must not. The
+    // representative is the cluster's earliest member, not its broadest, so the union
+    // routinely carries the rep's siblings — and naming one of those a "narrower term
+    // of <rep>" is false, while the lead count it hangs off is the rep's subtree and
+    // excludes those papers. Provenance therefore reads the rep's own subtree only.
+    meshProvenanceUis: rep?.descendantUis,
     meshMatchTier: rep
       ? meshMatchTier(rep.confidence, rep.curatedTopicAnchors.length)
       : undefined,

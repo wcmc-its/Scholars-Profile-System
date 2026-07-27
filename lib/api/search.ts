@@ -1489,6 +1489,25 @@ export async function searchPeople(opts: {
    */
   meshDescendantUis?: string[];
   /**
+   * #1977 — the descendant set the match PROVENANCE reads, when it must differ from
+   * the one above. Same shape and same invariant: `[self, ...descendants]` of ONE
+   * descriptor, `[0]` being the descriptor `meshDescriptorName` names.
+   *
+   * It exists because the two sets answer different questions. `meshDescendantUis`
+   * decides what the attribution boost RANKS, and the matcha spine deliberately
+   * widens it to a cluster UNION so the boost spans merged synonyms. The provenance
+   * decides what the card CALLS the match, and `computeMatchProvenance` labels
+   * everything past `[0]` a "narrower term" of `meshDescriptorName` — a claim the
+   * union cannot support, since the cluster representative is its earliest member
+   * rather than its broadest, so the union routinely holds the representative's
+   * SIBLINGS (see `mergeTermClusters`: it merges on subsumption in either direction,
+   * on Jaccard ≥ τ, and transitively).
+   *
+   * Defaults to `meshDescendantUis`, so a caller with one resolved descriptor — every
+   * public search route — is byte-identical and need not pass it.
+   */
+  meshProvenanceUis?: string[];
+  /**
    * #1836 — the query descriptor's ANCESTOR tree-number closure
    * (`meshResolution.ancestorTreeNumbers`), passed only when
    * SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR is on. Drives the cap-free clinical
@@ -3214,12 +3233,27 @@ export async function searchPeople(opts: {
   // the descriptor's display name to frame the "… narrower term of {name}"
   // string. Labels for the whole descendant set are resolved once, then
   // intersected per hit by `computeMatchProvenance`.
+  //
+  // #1977 — the provenance reads `meshProvenanceUis` when the caller distinguishes
+  // it: the wording must be computed against ONE descriptor's subtree, even when the
+  // boost above ranks on a wider union. Defaults to the boost set, so every
+  // single-descriptor caller is unchanged.
+  // The GATE deliberately still reads `meshDescendantUis`. Narrowing it to the
+  // provenance set would also suppress the `concept` variant for a cluster whose
+  // representative happens to be a leaf — an explanation that is correct and that the
+  // union has nothing to do with. Only the descendant NAMING was wrong, so only the
+  // set handed to `computeMatchProvenance` moves.
+  const provenanceUis = opts.meshProvenanceUis ?? meshDescendantUis;
   const provenanceOn =
     applyTopicTemplate &&
     meshDescendantUis.length > 1 &&
     (opts.meshDescriptorName?.length ?? 0) > 0;
+  // `provenanceUis`, not the boost set: only these UIs can ever be named, so resolving
+  // labels for a cluster union would be wasted lookups. Output-identical either way —
+  // `computeMatchProvenance` reads the map only for UIs it already matched — so this is
+  // a cost choice with no test that can distinguish it.
   const provenanceLabels = provenanceOn
-    ? await descriptorLabelsForUis(meshDescendantUis)
+    ? await descriptorLabelsForUis(provenanceUis)
     : new Map<string, string>();
   const provenanceParent = opts.meshDescriptorName ?? "";
 
@@ -3837,7 +3871,8 @@ export async function searchPeople(opts: {
         ? computeMatchProvenance({
             publicationMeshUi: h._source.publicationMeshUi,
             belowThresholdMeshUi: h._source.publicationMeshUiBelowThreshold,
-            descendantUis: meshDescendantUis,
+            // #1977 — ONE descriptor's subtree, never the boost's cluster union.
+            descendantUis: provenanceUis,
             parentTerm: provenanceParent,
             labels: provenanceLabels,
           })

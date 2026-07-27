@@ -509,8 +509,13 @@ type PeopleSearchHit = Awaited<ReturnType<typeof searchPeople>>["hits"][number];
 /** The card's LEAD evidence, whichever shape the stacked-lines flag emitted. */
 const leadEvidence = (hit: PeopleSearchHit) => hit.evidenceLines?.[0] ?? hit.evidence;
 
-/** One concept search over the fixture scholar, with `_source` patched per case. */
-async function leadEvidenceFor(source: Record<string, unknown>) {
+/** One concept search over the fixture scholar, with `_source` patched per case.
+ *  `extra` overrides the search args (#1977 needs a boost set that differs from the
+ *  provenance set). */
+async function leadEvidenceFor(
+  source: Record<string, unknown>,
+  extra: Record<string, unknown> = {},
+) {
   process.env[EVIDENCE] = "on";
   hitSourcePatch = source;
   const result = await searchPeople({
@@ -526,6 +531,7 @@ async function leadEvidenceFor(source: Record<string, unknown>) {
     // >1 entry is what arms `provenanceOn`; [0] is the parent by invariant.
     meshDescendantUis: [MICROBIOTA, MYCOBIOME],
     matchAwareContext: { methodFamily: null, topics: [] },
+    ...extra,
   });
   return leadEvidence(result.hits[0]);
 }
@@ -626,5 +632,53 @@ describe("searchPeople — #1959 the below-gate parent set survives both hops", 
       meshSubtreeCounts: { [MICROBIOTA]: 12 },
     });
     expect(ev).toMatchObject({ strength: "tagged", alsoParent: false });
+  });
+});
+
+// #1977 — the matcha spine widens `meshDescendantUis` to a cluster UNION so the boost
+// spans merged synonyms, but the representative is the cluster's EARLIEST member, not its
+// broadest. Everything past `[0]` gets rendered as a "narrower term" of the rep, so a
+// sibling in the union becomes a false claim — beside a lead count that is the rep's own
+// subtree and excludes those very papers. `meshProvenanceUis` keeps the two apart.
+describe("searchPeople — #1977 provenance reads its own set, not the boost union", () => {
+  const SIBLING = "D007943"; // in the union via a merged synonym; NOT under Microbiota
+  /** `descendantTerms` off whichever evidence variant arrived — only `publications`
+   *  declares it, and the point of these tests is that it must not be populated. */
+  const descTerms = (ev: unknown) => (ev as { descendantTerms?: string[] })?.descendantTerms;
+
+  it("does NOT name a union sibling as a narrower term", async () => {
+    const ev = await leadEvidenceFor(
+      { publicationMeshUi: [SIBLING], meshSubtreeCounts: { [MICROBIOTA]: 12 } },
+      {
+        meshDescendantUis: [MICROBIOTA, SIBLING], // boost spans the cluster
+        meshProvenanceUis: [MICROBIOTA, MYCOBIOME], // wording sees the rep's subtree only
+      },
+    );
+    // The scholar carries nothing in the rep's subtree, so there is no narrower term to
+    // name and no parent tag either — the honest output names neither. Pre-fix this read
+    // `descendantTerms: ["D007943"]`, i.e. a sibling billed as narrower than Microbiota.
+    expect(descTerms(ev)).toBeUndefined();
+  });
+
+  it("still names a REAL descendant of the rep when the scholar carries one", async () => {
+    const ev = await leadEvidenceFor(
+      { publicationMeshUi: [MYCOBIOME, SIBLING], meshSubtreeCounts: { [MICROBIOTA]: 12 } },
+      { meshDescendantUis: [MICROBIOTA, MYCOBIOME, SIBLING], meshProvenanceUis: [MICROBIOTA, MYCOBIOME] },
+    );
+    expect(ev).toMatchObject({ strength: "tagged", term: "Microbiota", alsoParent: false });
+    // The sibling is carried and is in the boost set, but only the true descendant is named.
+    expect(descTerms(ev)).toEqual(["Mycobiome"]);
+  });
+
+  it("a LEAF rep names nothing, but keeps its own direct-match explanation", async () => {
+    // Surfaced by a surviving mutation: narrowing the provenance GATE to the rep's set
+    // would also kill the `concept` variant here, which is correct and has nothing to do
+    // with the union. So the gate still reads the boost set; only the naming moved.
+    const ev = await leadEvidenceFor(
+      { publicationMeshUi: [MICROBIOTA] }, // carries the rep itself, no subtree count
+      { meshDescendantUis: [MICROBIOTA, MYCOBIOME, SIBLING], meshProvenanceUis: [MICROBIOTA] },
+    );
+    expect(ev).toMatchObject({ kind: "publications", strength: "concept", term: "Microbiota" });
+    expect(descTerms(ev)).toBeUndefined();
   });
 });
