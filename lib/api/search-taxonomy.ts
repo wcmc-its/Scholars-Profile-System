@@ -59,6 +59,7 @@ import {
   isMethodPagesEnabled,
   isMethodFamilySynonymsEnabled,
 } from "@/lib/profile/methods-lens-flags";
+import { isAllDeprioritized } from "@/lib/api/deprioritized-terms";
 import { familySynonymKeys } from "@/lib/methods/family-synonyms";
 import {
   loadFamilyOverlayGate,
@@ -1584,7 +1585,39 @@ function resolveByWindowFallback(map: MeshMap, query: string): MeshResolution | 
       // Blood/…); skip so a shorter/other window resolves. Inert under the coverage guard,
       // which now rejects EVERY 1-token window above; kept as the flag-OFF path,
       // byte-identical to today.
-      if (!coverageGuardOn && size === 1 && GENERIC_DESCRIPTOR_NAMES.has(key)) continue;
+      //
+      // #1982 — the same rejection, DERIVED rather than hand-listed. A one-token window
+      // whose token is a deprioritized filler term must not latch: those words are the
+      // project's existing curated judgement of "carries no topical meaning", and 29 of
+      // them are ALSO exact MeSH descriptor names (measured against the deployed map
+      // 2026-07-27) — Research, Biology, Diagnosis, Mortality, Prevalence, Safety,
+      // Metabolism, Growth, Incidence, Morbidity, Prognosis, Knowledge, Methods, Review,
+      // Editorial, Letter, Dataset, Observation, Association, Genes, Genome, Proteins,
+      // Tissues, Cells, Syndrome, Health, Disease, Medicine, Patients.
+      //
+      // This is the failure `GENERIC_DESCRIPTOR_NAMES`' own docblock predicts: it lists 6
+      // words and "stays silent on the next generic word". It covers 4 of the 29. So
+      // `cancer research` resolved `Research`/partial and `tumor biology` resolved
+      // `Biology`/partial — rendered to the user as a confident "N of M publications
+      // tagged under Research" (#1348 Q1).
+      //
+      // NOT the reverted #1969 rule. That rejected EVERY one-token window and cost 11 real
+      // resolutions (`pediatric asthma` → Asthma, `sleep and cognition` → Sleep, `cancer
+      // immunotherapy` → Immunotherapy). Every one of those 11 windows is a CONTENT token,
+      // so none is touched here — verified term by term. This also does NOT close `foreign
+      // policy` → `Policy`: `policy` is not a filler word, and that trap remains #1348's
+      // open problem. Genericness is still not a property of a descriptor — this
+      // classifies the QUERY TOKEN, a different axis.
+      //
+      // `blood` and `bacteria` are NOT in the deprioritized list, so the hand-list is
+      // still required for the two #1348 traps it uniquely covers. Union, not swap.
+      if (
+        !coverageGuardOn &&
+        size === 1 &&
+        (GENERIC_DESCRIPTOR_NAMES.has(key) || isAllDeprioritized(surface))
+      ) {
+        continue;
+      }
       hits.push({ row: top.row, matchedForm: surface });
     }
     if (hits.length === 0) continue;

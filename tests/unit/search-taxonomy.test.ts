@@ -1640,6 +1640,74 @@ describe("resolveMeshDescriptor — decompose-and-resolve fallback (SEARCH_MESH_
   });
 });
 
+/**
+ * #1982 — a one-token window may not latch onto a DEPRIORITIZED filler term. 29 of the
+ * 257 terms in `data/search/deprioritized-terms.json` are also exact MeSH descriptor
+ * names (measured against the deployed map 2026-07-27), and `GENERIC_DESCRIPTOR_NAMES`
+ * lists 6 words and covers only 4 of them — the "stays silent on the next generic word"
+ * failure its own docblock predicts.
+ *
+ * This is NOT the reverted #1969 rule, which rejected EVERY one-token window and cost 11
+ * real resolutions. Those 11 windows are all CONTENT tokens; the last test pins that.
+ */
+describe("resolveMeshDescriptor — #1982 filler-token windows must not latch", () => {
+  const D_RESEARCH = {
+    descriptorUi: "D012106",
+    name: "Research",
+    entryTerms: [],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["H01.770"],
+  };
+  const D_NEOPLASMS = {
+    descriptorUi: "D009369",
+    name: "Neoplasms",
+    entryTerms: ["Cancer"],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["C04"],
+  };
+  const D_ASTHMA = {
+    descriptorUi: "D001249",
+    name: "Asthma",
+    entryTerms: [],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["C08.127.108"],
+  };
+
+  beforeEach(() => {
+    process.env.SEARCH_MESH_RESOLUTION_FALLBACK = "on";
+    delete process.env.SEARCH_MESH_RESOLVE_TOKEN_COVERAGE;
+  });
+  afterEach(() => {
+    delete process.env.SEARCH_MESH_RESOLUTION_FALLBACK;
+  });
+
+  it("declines `cancer research` rather than resolving the filler window to Research", async () => {
+    // `cancer` is an ENTRY TERM, and the size-1 arm needs an exact descriptor NAME — so
+    // before #1982 the only window that could win was the filler `research`.
+    mockMeshFindMany.mockResolvedValue([D_RESEARCH, D_NEOPLASMS]);
+    expect(await resolveMeshDescriptor("cancer research")).toBeNull();
+  });
+
+  it("declines every filler window, so nothing resolves to Biology/Diagnosis/Safety", async () => {
+    mockMeshFindMany.mockResolvedValue([D_RESEARCH]);
+    for (const q of ["tumor research", "microbiome research", "vaccine research"]) {
+      expect(await resolveMeshDescriptor(q)).toBeNull();
+    }
+  });
+
+  it("🔴 does NOT cost the 11 resolutions the #1969 coverage guard lost", async () => {
+    // `asthma` is a CONTENT token, so a one-token window on it still resolves. This is
+    // the whole difference from the reverted rule.
+    mockMeshFindMany.mockResolvedValue([D_ASTHMA]);
+    const r = await resolveMeshDescriptor("pediatric asthma");
+    expect(r?.name).toBe("Asthma");
+    expect(r?.confidence).toBe("partial");
+  });
+});
+
 describe("resolveMeshDescriptor — #1348 token-coverage guard (SEARCH_MESH_RESOLVE_TOKEN_COVERAGE)", () => {
   // The descriptor the shipped GENERIC_DESCRIPTOR_NAMES stoplist does NOT contain, which
   // is the whole point: a curated list fixes the words already measured and stays silent
