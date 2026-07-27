@@ -23,8 +23,14 @@
  *    carrying pathname/search/href (submit() and the pre-fill effect read those)
  *    and restore the original in afterEach.
  *
- * Fake timers drive the 7s watchdog; the watchdog's setState/location side
- * effect is flushed inside act() (await act(async () => advanceTimersByTimeAsync)).
+ * Fake timers drive the watchdog; the watchdog's setState/location side effect
+ * is flushed inside act() (await act(async () => advanceTimersByTimeAsync)).
+ *
+ * #1995 split the two surfaces apart. SearchTransitionProvider now fires at
+ * 2500ms and its guard reads ONLY the URL: the isPending ref it used to also
+ * require was written during render, and React writes it on renders that never
+ * commit, so it read false through the very hang it was meant to catch. The
+ * autocomplete surface below is unchanged (7000ms, pending ref + URL).
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
@@ -329,7 +335,7 @@ describe("#1017 navigation watchdog — SearchTransitionProvider.navigate()", ()
   // The provider owns the shared transition used by facet/tab/sort/pagination
   // TransitionLinks. A tiny consumer exercises navigate() through the same
   // watchdog code path.
-  it("HANG via provider navigate → hard-navigates to the facet href after 7s", async () => {
+  it("HANG via provider navigate → hard-navigates to the tab href after 2.5s", async () => {
     h.start = (cb: () => void) => cb();
     h.pending = true;
     const { assign } = stubLocation(
@@ -353,12 +359,25 @@ describe("#1017 navigation watchdog — SearchTransitionProvider.navigate()", ()
     expect(pushMock).toHaveBeenCalledWith("/search?q=cancer&type=publications", undefined);
     expect(assign).not.toHaveBeenCalled();
 
-    await settle(7100);
+    // Just shy of the 2500ms threshold: nothing yet.
+    await settle(2400);
+    expect(assign).not.toHaveBeenCalled();
+
+    await settle(200);
     expect(assign).toHaveBeenCalledTimes(1);
     expect(assign).toHaveBeenCalledWith("/search?q=cancer&type=publications");
   });
 
-  it("RESOLVED via provider navigate → no hard nav", async () => {
+  it("#1995 POISONED PENDING FLAG → still recovers: pending reads false, URL frozen, timer fires", async () => {
+    // The #1995 hang: the committed DOM shows aria-busy (the transition really
+    // is pending) but `isPendingRef`, assigned during render, was overwritten
+    // with false by renders React threw away. jsdom can't produce a render that
+    // never commits, so we model that hang's only consequence for the guard —
+    // the pending flag it consulted reads FALSE while the navigation has not
+    // landed (push fired, URL frozen). Under the old
+    // `isPendingRef.current && href === startHref` guard this is the exact
+    // no-op measured in prod: 0 assign calls, hung forever. The URL-only guard
+    // recovers.
     h.start = (cb: () => void) => cb();
     h.pending = false;
     const { assign } = stubLocation(
@@ -366,6 +385,38 @@ describe("#1017 navigation watchdog — SearchTransitionProvider.navigate()", ()
       "/search",
       "?q=cancer",
     );
+
+    const { SearchTransitionProvider, TransitionLink } = await import(
+      "@/components/search/transition-link"
+    );
+
+    render(
+      <SearchTransitionProvider>
+        <TransitionLink href="/search?q=cancer&type=publications">Publications</TransitionLink>
+      </SearchTransitionProvider>,
+    );
+
+    fireEvent.click(screen.getByText("Publications"));
+    expect(pushMock).toHaveBeenCalledWith("/search?q=cancer&type=publications", undefined);
+
+    await settle(2600);
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(assign).toHaveBeenCalledWith("/search?q=cancer&type=publications");
+  });
+
+  it("RESOLVED via provider navigate → no hard nav (the committed push moves the URL)", async () => {
+    h.start = (cb: () => void) => cb();
+    h.pending = false;
+    const { assign } = stubLocation(
+      "https://scholars-staging.weill.cornell.edu/search?q=cancer",
+      "/search",
+      "?q=cancer",
+    );
+    // A soft-nav that commits moves the URL — that IS what the guard reads now,
+    // so model it rather than relying on the pending flag the hang poisons.
+    pushMock.mockImplementationOnce((to: string) => {
+      window.location.href = `https://scholars-staging.weill.cornell.edu${to}`;
+    });
 
     const { SearchTransitionProvider, TransitionLink } = await import(
       "@/components/search/transition-link"
@@ -458,11 +509,11 @@ describe("#1017 navigation watchdog — SearchTransitionProvider.navigate()", ()
     );
 
     fireEvent.click(screen.getByText("Publications"));
-    await settle(3000);
+    await settle(1000);
     fireEvent.click(screen.getByText("Grants"));
-    // First timer (armed t=0) would fire at 7000 if not cleared; second (armed
-    // t=3000) fires at 10000. Total elapsed 3000 + 7000 = 10000.
-    await settle(7000);
+    // First timer (armed t=0) would fire at 2500 if not cleared; second (armed
+    // t=1000) fires at 3500. Total elapsed 1000 + 2500 = 3500.
+    await settle(2500);
     expect(assign).toHaveBeenCalledTimes(1);
     expect(assign).toHaveBeenCalledWith("/search?q=cancer&type=grants");
   });
