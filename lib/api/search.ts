@@ -3238,9 +3238,16 @@ export async function searchPeople(opts: {
   // it: the wording must be computed against ONE descriptor's subtree, even when the
   // boost above ranks on a wider union. Defaults to the boost set, so every
   // single-descriptor caller is unchanged.
+  // The GATE deliberately still reads `meshDescendantUis`. Narrowing it to the
+  // provenance set would also suppress the `concept` variant for a cluster whose
+  // representative happens to be a leaf — an explanation that is correct and that the
+  // union has nothing to do with. Only the descendant NAMING was wrong, so only the
+  // set handed to `computeMatchProvenance` moves.
   const provenanceUis = opts.meshProvenanceUis ?? meshDescendantUis;
   const provenanceOn =
-    applyTopicTemplate && provenanceUis.length > 1 && (opts.meshDescriptorName?.length ?? 0) > 0;
+    applyTopicTemplate &&
+    meshDescendantUis.length > 1 &&
+    (opts.meshDescriptorName?.length ?? 0) > 0;
   const provenanceLabels = provenanceOn
     ? await descriptorLabelsForUis(provenanceUis)
     : new Map<string, string>();

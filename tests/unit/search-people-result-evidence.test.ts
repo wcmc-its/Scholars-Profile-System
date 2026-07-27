@@ -670,13 +670,15 @@ describe("searchPeople — #1977 provenance reads its own set, not the boost uni
     expect(descTerms(ev)).toEqual(["Mycobiome"]);
   });
 
-  it("a leaf rep disarms provenance even when the union is large", async () => {
-    // `provenanceOn` keys off the PROVENANCE set's length now. A rep with no descendants
-    // has nothing narrower to name, however wide the cluster around it is.
+  it("a LEAF rep names nothing, but keeps its own direct-match explanation", async () => {
+    // Surfaced by a surviving mutation: narrowing the provenance GATE to the rep's set
+    // would also kill the `concept` variant here, which is correct and has nothing to do
+    // with the union. So the gate still reads the boost set; only the naming moved.
     const ev = await leadEvidenceFor(
-      { publicationMeshUi: [MYCOBIOME], meshSubtreeCounts: { [MICROBIOTA]: 12 } },
+      { publicationMeshUi: [MICROBIOTA] }, // carries the rep itself, no subtree count
       { meshDescendantUis: [MICROBIOTA, MYCOBIOME, SIBLING], meshProvenanceUis: [MICROBIOTA] },
     );
+    expect(ev).toMatchObject({ kind: "publications", strength: "concept", term: "Microbiota" });
     expect(descTerms(ev)).toBeUndefined();
   });
 });
