@@ -5,7 +5,7 @@
  * suite for a rarity axis nothing called — which is exactly what made the dead code
  * survive review. See `sponsor-match-contract.ts` (`weightFactor`).
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyIncludes,
   culledTerms,
@@ -70,6 +70,40 @@ describe("mergeTermClusters (§5a redundant-phrasing dedup)", () => {
     const clusters = mergeTermClusters(withEmpty, 0.6);
     expect(clusters).toHaveLength(2);
     expect(clusters.find((c) => c.members.includes("unresolvable"))!.members).toEqual(["unresolvable"]);
+  });
+
+  // #1977 — dark, an eval arm only. The representative is not just a caption: `kind` follows it
+  // into `weightFactor`, so a MIXED-KIND cluster changes its fusion weight too. That coupling is
+  // why the arm is measured rather than flipped.
+  describe("MATCHA_BROAD_REP (#1977 eval arm)", () => {
+    // A subsumption merge where the NARROW member is first — the case the flag exists for.
+    const subsumed: ClusterTerm[] = [
+      { term: "flow cytometry", descendantUis: ["D005434"], centrality: 0.6, kind: "method" },
+      { term: "cytometry", descendantUis: ["D005434", "D016175", "D002454"], centrality: 0.5, kind: "concept" },
+    ];
+
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("off (default): the representative is the earliest member — the narrow one — and its kind", () => {
+      const [c] = mergeTermClusters(subsumed, 0.6);
+      expect(c.members).toEqual(["flow cytometry", "cytometry"]);
+      expect(c.kind).toBe("method");
+    });
+
+    it("on: promotes the broadest member to representative, and `kind` follows it", () => {
+      vi.stubEnv("MATCHA_BROAD_REP", "on");
+      const [c] = mergeTermClusters(subsumed, 0.6);
+      expect(c.members).toEqual(["cytometry", "flow cytometry"]);
+      expect(c.kind).toBe("concept");
+      // The whole union is now inside the rep's own subtree — the coherence property being bought.
+      expect(new Set(c.descendantUis)).toEqual(new Set(subsumed[1].descendantUis));
+    });
+
+    it("on: a size tie keeps the earliest member, so equal-resolution clusters are arm-identical", () => {
+      vi.stubEnv("MATCHA_BROAD_REP", "on");
+      // cancer and oncology resolve to the same 3 descriptors; leukemia to 1.
+      expect(mergeTermClusters(terms, 0.6)[0].members).toEqual(["cancer", "oncology", "leukemia"]);
+    });
   });
 });
 

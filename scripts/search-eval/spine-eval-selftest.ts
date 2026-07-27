@@ -12,7 +12,7 @@ import { cachedReasonAgg } from "@/lib/api/reason-agg-cache";
 import { extractMatchaConcepts, type MatchaExtraction } from "@/lib/api/matcha-extract";
 import { normalizeDescription } from "@/lib/api/matcha";
 import { PINNED_MODEL } from "./spine-eval-extract";
-import { glossArmEnv } from "./spine-eval-arm";
+import { glossArmEnv, repArmEnv } from "./spine-eval-arm";
 
 // A term no extractor would ever emit — if we get it back, the value came from OUR seed and
 // nothing else. Bedrock is never reached, so this also passes with no AWS credentials.
@@ -48,6 +48,14 @@ async function main() {
   assert.deepEqual(glossArmEnv("gloss-0.5"), { MATCHA_GLOSS_RERANK: "on", MATCHA_GLOSS_RERANK_LAMBDA: "0.5" });
   assert.deepEqual(glossArmEnv("gloss-1.0"), { MATCHA_GLOSS_RERANK: "on", MATCHA_GLOSS_RERANK_LAMBDA: "1.0" });
   console.log("✓ arm→env: base leaves the rescore off; gloss-<λ> turns it on at λ");
+
+  // 4. Same guard for the #1977 rep arm, and the two mappings must not collide: `broadrep` must
+  // leave the rescore off and `base` must leave the rep rule at today's default, or the paired
+  // diff would be measuring both changes at once.
+  assert.deepEqual(repArmEnv("base"), {}, "base arm must keep the earliest-member rep");
+  assert.deepEqual(repArmEnv("broadrep"), { MATCHA_BROAD_REP: "on" });
+  assert.deepEqual(glossArmEnv("broadrep"), {}, "the rep arm must not also move the rescore");
+  console.log("✓ arm→env: base keeps the earliest-member rep; broadrep switches it, rescore untouched");
 
   console.log("\nALL SELF-CHECKS PASSED — safe to dispatch");
 }
