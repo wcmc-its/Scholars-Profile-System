@@ -119,6 +119,8 @@ type OpportunityListItem = {
   isHonorific?: boolean | null;
   awardCeiling?: number | null;
   awardFloor?: number | null;
+  /** Screening spec §3.1, derived server-side. Absent counts as eligible (fail open). */
+  facultyPiEligible?: boolean;
 };
 
 type MatchingTopic = { topicId: string; label: string; score: number };
@@ -377,9 +379,8 @@ export type BrowseFilters = {
   q: string;
   /** Hide opportunities whose due day is fully behind us (undated stay visible). */
   openOnly: boolean;
-  /** Due-date range, `yyyy-mm-dd` or "" — a set range only matches dated opportunities. */
-  dueFrom: string;
-  dueTo: string;
+  /** Screening spec §3.1 — hide awards no WCM faculty PI can hold. ON by default, relaxable. */
+  facultyPiOnly: boolean;
   sponsors: ReadonlySet<string>;
   mechanisms: ReadonlySet<string>;
 };
@@ -387,8 +388,7 @@ export type BrowseFilters = {
 export const EMPTY_BROWSE_FILTERS: BrowseFilters = {
   q: "",
   openOnly: false,
-  dueFrom: "",
-  dueTo: "",
+  facultyPiOnly: true,
   sponsors: new Set(),
   mechanisms: new Set(),
 };
@@ -413,13 +413,8 @@ export function matchesBrowseFilters(
     return false;
   }
   if (f.openOnly && dueUrgency(o.dueDate, now) === "past") return false;
-  if (f.dueFrom || f.dueTo) {
-    const t = o.dueDate ? new Date(o.dueDate).getTime() : NaN;
-    if (Number.isNaN(t)) return false;
-    // Date-only strings parse as midnight UTC on both sides, so bounds are inclusive.
-    if (f.dueFrom && t < Date.parse(f.dueFrom)) return false;
-    if (f.dueTo && t > Date.parse(f.dueTo)) return false;
-  }
+  // Fail open: only an explicit `false` (the server derived the §3.1 gate and it failed) hides a row.
+  if (f.facultyPiOnly && o.facultyPiEligible === false) return false;
   if (skip !== "sponsors" && f.sponsors.size > 0 && !f.sponsors.has(o.sponsor ?? "")) return false;
   if (skip !== "mechanisms" && f.mechanisms.size > 0 && !f.mechanisms.has(o.mechanism ?? "")) {
     return false;
@@ -488,6 +483,12 @@ export function BrowseList({ hrefFor }: { hrefFor: (id: string) => string }) {
   const all = status.kind === "ok" ? status.opportunities : [];
   const now = Date.now();
   let shown = all.filter((o) => matchesBrowseFilters(o, filters, now));
+  // Screening spec §6: the counterfactual is explicit. How many rows the faculty-PI gate is
+  // holding back RIGHT NOW, under the rest of the current filters — not the corpus-wide 13.2%.
+  const gateHides = filters.facultyPiOnly
+    ? all.filter((o) => matchesBrowseFilters(o, { ...filters, facultyPiOnly: false }, now)).length -
+      shown.length
+    : 0;
   if (sort === "deadline") {
     // Soonest first; undated (rolling) opportunities trail.
     shown = [...shown].sort((a, b) => {
@@ -540,6 +541,35 @@ export function BrowseList({ hrefFor }: { hrefFor: (id: string) => string }) {
             <>
               <p className="text-muted-foreground mb-2 text-xs">
                 {shown.length} opportunit{shown.length === 1 ? "y" : "ies"}
+                {/* The relax control lives ON the counterfactual rather than in the rail: the
+                    sentence that admits rows are hidden is exactly where the officer wants the
+                    control that reveals them. */}
+                {gateHides > 0 ? (
+                  <>
+                    {" · "}
+                    {gateHides} hidden — no Weill Cornell faculty PI can hold{" "}
+                    {gateHides === 1 ? "it" : "them"}{" "}
+                    <button
+                      type="button"
+                      onClick={() => setFilters((f) => ({ ...f, facultyPiOnly: false }))}
+                      className="text-[var(--color-accent-slate)] hover:underline"
+                    >
+                      show
+                    </button>
+                  </>
+                ) : null}
+                {!filters.facultyPiOnly ? (
+                  <>
+                    {" · "}
+                    <button
+                      type="button"
+                      onClick={() => setFilters((f) => ({ ...f, facultyPiOnly: true }))}
+                      className="text-[var(--color-accent-slate)] hover:underline"
+                    >
+                      hide awards no faculty PI can hold
+                    </button>
+                  </>
+                ) : null}
               </p>
               {/* The wrapping border + radius IS the boundary between the page
                   and the table surface; `overflow-x-auto` both clips the thead
@@ -593,11 +623,13 @@ export function BrowseList({ hrefFor }: { hrefFor: (id: string) => string }) {
   );
 }
 
-const dateInputClass =
-  "border-border h-9 w-full rounded-md border bg-background px-2 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]";
-
-// Duke-style right-rail filters: availability, deadline range, then checkbox
-// facet groups with counts. All client-side over the fetched corpus.
+// Duke-style right-rail filters: availability, then checkbox facet groups with
+// counts. All client-side over the fetched corpus.
+//
+// 🔴 The deadline-range inputs that used to sit here were DELETED (#1920): `dueDate` is null on
+// 99.0% of the corpus, and the range test rejects an undated row, so setting either bound
+// silently hid almost everything while appearing to narrow. A filter over a field that does not
+// exist is worse than no filter. Restore it when typed deadline extraction lands, not before.
 function FilterRail({
   filters,
   setFilters,
@@ -615,8 +647,7 @@ function FilterRail({
 }) {
   const active =
     filters.openOnly ||
-    filters.dueFrom !== "" ||
-    filters.dueTo !== "" ||
+    !filters.facultyPiOnly ||
     filters.sponsors.size > 0 ||
     filters.mechanisms.size > 0;
 
@@ -669,28 +700,6 @@ function FilterRail({
             {label}
           </label>
         ))}
-      </fieldset>
-
-      <fieldset className="space-y-1.5">
-        <legend className="mb-1.5 text-sm font-medium">Deadline</legend>
-        <label className="block text-xs">
-          <span className="text-muted-foreground">From</span>
-          <input
-            type="date"
-            value={filters.dueFrom}
-            onChange={(e) => setFilters((f) => ({ ...f, dueFrom: e.target.value }))}
-            className={dateInputClass}
-          />
-        </label>
-        <label className="block text-xs">
-          <span className="text-muted-foreground">To</span>
-          <input
-            type="date"
-            value={filters.dueTo}
-            onChange={(e) => setFilters((f) => ({ ...f, dueTo: e.target.value }))}
-            className={dateInputClass}
-          />
-        </label>
       </fieldset>
 
       <FacetGroup
