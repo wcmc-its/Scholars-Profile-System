@@ -1292,13 +1292,22 @@ export class AppStack extends Stack {
         // payload returns [] when off and the section is presence-gated (hidden when
         // a scholar has no mentions), so a scholar with none is unaffected either
         // way. Dark-launched staging-first; flip prod once the seed lands.
-        NEWS_MENTIONS_SECTION: env === "staging" ? "on" : "off",
+        // PROD-ON 2026-07-27 — the seed landed: a NEWS_BACKFILL=1 operator run against
+        // the live feed ingested 870 articles → 1,595 mentions, of which 1,112 are
+        // published/renderable across 476 scholars (the remaining 483 are NAME-matched
+        // and correctly sit pending in the review queue below). Prod now carries 4.8x
+        // staging's renderable count. TaskNewsWeekly was also deployed to the prod
+        // weekly the same day, so this stays fresh instead of decaying to a one-off.
+        NEWS_MENTIONS_SECTION: "on",
         // NEWS_APPROVAL_QUEUE — the /edit/news-queue comms surface + its decision
         // endpoint; off ⇒ both 404 and the subnav tab is hidden. Reviewer audience
         // is superusers + external comms (the comms_steward role). Takes effect ONLY
         // on a manual `cdk deploy --exclusively Sps-App-<env>` — the CD pipeline
         // re-rolls the image and never deploys CDK.
-        NEWS_APPROVAL_QUEUE: env === "staging" ? "on" : "off",
+        // PROD-ON 2026-07-27, together with NEWS_MENTIONS_SECTION above: the backfill
+        // left 483 NAME-matched mentions pending, so the queue opens with real triage
+        // work rather than empty. Without it those 483 have no path to publication.
+        NEWS_APPROVAL_QUEUE: "on",
         // CONSOLE_SUBNAV_GROUPED — collapses the /edit console sub-nav's 14
         // role-gated tabs into two tiers: Profiles · Org units · Queues ·
         // Registries · Insights · Tools, with the active group's members on a
@@ -1367,10 +1376,15 @@ export class AppStack extends Stack {
         // isGrantMatchaEnabled() (=== "on"); a strict, reversible add — flag-off keeps the existing
         // topic-vector view as the only engine, and the surface stays admin-only regardless.
         // DEPENDS ON MATCHA (on in both envs): the modes POST to /api/edit/matcha, which 404s when
-        // MATCHA is off. STAGING-ON for the eyeball/probe of the seeded ask-card + grant-card UX;
-        // prod held OFF — the grant corpus is staging-only (pending ReciterAI#269), alongside
-        // SELF_EDIT_GRANT_RECS above.
-        GRANT_MATCHA: env === "staging" ? "on" : "off",
+        // MATCHA is off. Staging-soaked since 2026-07-22 (#1872), owner-approved on the eyeball
+        // 2026-07-24 (#1906).
+        // PROD-ON since 2026-07-27. The prior "grant corpus is staging-only (pending ReciterAI#269)"
+        // hold was STALE — measured that day, `opportunity` holds 1,122 rows in prod vs 1,151 in
+        // staging (97.5% parity), so the picker is data-backed in both envs. Blast radius stays
+        // small regardless: the page gate is isMatchaEnabled() && isGrantMatchaEnabled() &&
+        // (superuser||developer), and there is still no nav tab — /edit/grant-matcha is URL-only.
+        // ⚠ Each ask bills a Bedrock Sonnet call (no cheap model on SPS), bounded by admin-only access.
+        GRANT_MATCHA: "on",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
