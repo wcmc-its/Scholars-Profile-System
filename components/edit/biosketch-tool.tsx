@@ -31,6 +31,7 @@ import {
   type BiosketchGenerateResult,
 } from "@/components/edit/biosketch-result-card";
 import { BiosketchProgress } from "@/components/edit/biosketch-progress";
+import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -60,6 +61,7 @@ const MISSING_INPUTS =
 const FAILED = "We couldn't generate a biosketch just now. Please try again.";
 const DEBUG_FAILED = "We couldn't assemble the prompt payload just now. Please try again.";
 const SUGGEST_FAILED = "We couldn't find matching publications just now. Please try again.";
+const DELETE_FAILED = "We couldn't delete that draft just now. Please try again.";
 
 export type BiosketchToolProps = {
   /** The scholar the biosketch is generated for (self cwid or the delegated `[cwid]`). */
@@ -114,6 +116,11 @@ export function BiosketchTool({
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<BiosketchGenerateResult | null>(null);
   const [generations, setGenerations] = React.useState<BiosketchGenerationItem[]>([]);
+  // #1992 — the history row a delete is being confirmed for, or null. A delete is unrecoverable
+  // (the run is hard-deleted server side), so it goes through the house `ConfirmDialog`, where
+  // Cancel — not the destructive button — is the focused default.
+  const [pendingDelete, setPendingDelete] = React.useState<BiosketchGenerationItem | null>(null);
+  const [isDeleting, setIsDeleting] = React.useState(false);
 
   // #1569 — the two tool modes: the AI generator (default) and the DETERMINISTIC
   // "write your own statement → suggested publications" mode (no model call).
@@ -309,6 +316,43 @@ export function BiosketchTool({
     });
   }
 
+  /**
+   * #1992 — prune one run from the history, once the confirm dialog says so. The server
+   * hard-deletes the row and audits the deletion, so there is no undo.
+   *
+   * The row leaves local state immediately (no refetch — the list is already exact), and if the
+   * result card is SHOWING that run it is cleared too: a draft on screen that no longer exists
+   * would invite a copy out of a record we just said was gone. A 404 takes the same path — the
+   * route answers it when the run is ALREADY gone (a retry, a second tab), which is the outcome
+   * asked for. Anything else surfaces in the shared error alert and keeps the row.
+   */
+  async function deleteGeneration(gen: BiosketchGenerationItem) {
+    if (isGenerating || isDeleting) return;
+    setIsDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/edit/biosketch/generations", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ generationId: gen.id }),
+      });
+      if (!res.ok && res.status !== 404) {
+        setError(DELETE_FAILED);
+        return;
+      }
+      setGenerations((prev) => prev.filter((g) => g.id !== gen.id));
+      setResult((prev) => (prev && prev.generationId === gen.id ? null : prev));
+    } catch {
+      setError(DELETE_FAILED);
+    } finally {
+      setIsDeleting(false);
+      // Close either way — the error alert lives in the card behind the (modal) dialog, so a
+      // failure that left it open would hide the message it just wrote.
+      setPendingDelete(null);
+    }
+  }
+
   /** One history row. Shared by both mode sections; the section heading carries the
    *  mode, so only Contributions repeats its entry count here. */
   function renderGenRow(gen: BiosketchGenerationItem) {
@@ -356,6 +400,19 @@ export function BiosketchTool({
             data-testid={`biosketch-version-use-settings-${gen.id}`}
           >
             Use these settings
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setPendingDelete(gen)}
+            disabled={isGenerating || isDeleting}
+            // The row's visible text is a version/model line plus a date — nothing that names
+            // the artifact — so the button says what it destroys in its accessible name.
+            aria-label={`Delete the ${describeGen(gen)}`}
+            data-testid={`biosketch-version-delete-${gen.id}`}
+          >
+            Delete
           </Button>
         </div>
       </li>
@@ -459,10 +516,15 @@ export function BiosketchTool({
             </span>
           </div>
 
-          {/* #1569 — the AI-content warning at the generate action (the second placement is at
-              the top of the result card). Shown for the whole generate flow so it is seen before
-              any content exists to copy. */}
-          <BiosketchAiWarning />
+          {/* #1569 / #1990 — exactly ONE AI-content warning is on screen at any time. This one
+              carries the caution while no draft exists, so it is read before there is anything to
+              copy; the moment a result lands (a fresh generation OR a history row opened with
+              "View draft") it hands off to the identical warning at the top of the result card,
+              which sits directly above Copy / Download — the point where the text actually leaves
+              the app. Both placements used to render unconditionally, and because they are
+              adjacent siblings the pair was co-visible from the first draft onward, which reads
+              as boilerplate rather than as a caution. */}
+          {!result && <BiosketchAiWarning />}
 
           {isGenerating && progress && (
             <BiosketchProgress state={progress} mode={params.mode} elapsedMs={elapsedMs} />
@@ -536,8 +598,33 @@ export function BiosketchTool({
           {suggestions && <BiosketchSuggestedPubsCard pubs={suggestions} />}
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+        title="Delete this draft?"
+        description={
+          pendingDelete
+            ? `The ${describeGen(pendingDelete)} will be erased. It won't be recoverable — we keep no copy once it's deleted.`
+            : ""
+        }
+        reasonMode="none"
+        confirmLabel="Delete draft"
+        confirmVariant="destructive"
+        onConfirm={() => (pendingDelete ? deleteGeneration(pendingDelete) : Promise.resolve())}
+      />
     </div>
   );
+}
+
+/** What a history row IS, in words — the noun plus the date. The row's own text is a
+ *  version/model line, so this is what names the artifact in the delete button's accessible
+ *  name and in the confirm dialog. */
+function describeGen(gen: BiosketchGenerationItem): string {
+  const noun = gen.mode === "personal_statement" ? "personal statement" : "contributions draft";
+  return `${noun} generated ${formatGenDate(gen.createdAt)}`;
 }
 
 /** A history row's timestamp as a short, locale date (audit "when"). Falls back

@@ -162,7 +162,17 @@ export type AuditAction =
    *  status/showOnProfile transition. The etl/news ingest writes directly and is
    *  NOT audited (like every ETL). Requires the `scholars_audit` action ENUM be
    *  extended — see `scripts/sql/audit-log.sql`. */
-  | "news_mention_update";
+  | "news_mention_update"
+  /** a scholar / curator / proxy / unit-admin pruned one biosketch generation
+   *  run from the /edit "Earlier biosketches" history (#1992). The run is
+   *  HARD-deleted, so this row is the only surviving trace — the policy is in
+   *  `app/api/edit/biosketch/generations/route.ts`.
+   *  `targetEntityType='biosketch_generation'`, `targetEntityId` is the row
+   *  `id`; `beforeValues` identifies the run (`generatedAsCwid` is the overlay
+   *  the GENERATION ran under, not this delete's) and never its prose. Requires
+   *  the `scholars_audit` action ENUM be extended — see
+   *  `scripts/sql/audit-log.sql`. */
+  | "biosketch_generation_delete";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -205,7 +215,11 @@ export type AuditEntityType =
   /** a news mention curated on /edit (docs/2026-07-18-news-mentions-plan.md) —
    *  approve/reject in the queue, or hide / "not me" on the profile;
    *  `targetEntityId` is the `news_mention.id`. */
-  | "news_mention";
+  | "news_mention"
+  /** one biosketch generation run erased from the /edit history (#1992);
+   *  `targetEntityId` is the (already deleted) `biosketch_generation.id`, so it
+   *  names WHAT was erased rather than something to look up. */
+  | "biosketch_generation";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

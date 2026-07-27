@@ -543,6 +543,31 @@ export function MatchaPanel({
   ) {
     if (pending || text.trim().length === 0) return;
     setStatus({ kind: "loading" });
+    // #1991 — THE ASK IS SNAPSHOTTED AT SUBMIT, NOT AT RESOLVE. The card above the results answers
+    // "what are we ranking?", and it was answering with the last thing FOUND: everything below moved
+    // only inside `r.ok`, so for the whole in-flight window a replay from Recent left the previous
+    // sponsor's prose, handle and highlights standing over a skeletoned list.
+    //
+    // The response-derived halves travel with the text because each is a fact about the run that
+    // just ENDED — carried onto new text they would mark words that never produced them, or (for
+    // `included`) force-pin the previous sponsor's concept into a ranking of this one's.
+    //
+    // Guarded on the text actually CHANGING, which leaves the re-run paths byte-identical: the
+    // Re-run button and an added culled chip both pass `matchedText` straight back in, so the guard
+    // is false and cannot clobber the `included` set `addCulled` has just written.
+    //
+    // Not done by gating `showAskCard` on `pending`: that swaps a committed ask back to the
+    // textarea mid-run and back again, a layout jump for a paste nobody asked to edit.
+    if (text !== matchedText) {
+      setMatchedText(text);
+      setConcepts([]);
+      setCulled([]);
+      setIncluded([]);
+      setTitleSummary(undefined);
+      setPreferences([]);
+      setActivePrefs(new Set());
+      setShowFullText(false); // D11 — a new paste starts clamped
+    }
     try {
       const r = await fetch("/api/edit/matcha", {
         method: "POST",
