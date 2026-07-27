@@ -64,10 +64,12 @@ function related(a: Set<string>, b: Set<string>, tau: number): boolean {
  * the NARROW one, so the cluster is retrieved on the whole union but displayed and counted under
  * its narrowest member's identity: `retrieveCluster` names `rep.name` and the card's N is
  * `meshSubtreeCounts[rep.descriptorUi]`, so a scholar admitted via the broad member scores N = 0
- * against the label shown. The broadest member makes the union a subset of the rep's own subtree,
- * so name and count agree by construction. It is not a pure display change — `kind` follows the
- * representative and feeds `weightFactor` — which is why it is gated and measured, not just
- * flipped. The gold cannot show the coherence benefit; the eval is a ranking-regression gate.
+ * against the label shown. The broadest member makes the union a subset of the rep's own subtree —
+ * but ONLY for a SUBSUMPTION merge. A Jaccard merge is non-nested by definition, so no member's
+ * subtree contains the union and this buys nothing there; #1978 rejected the rule partly on that
+ * ground. It is also not a pure display change — `kind` follows the representative and feeds
+ * `weightFactor` — which is why it is gated and measured, not just flipped. The gold cannot show
+ * the coherence benefit either way; the eval is a ranking-regression gate, not a proof of benefit.
  *
  * Read PER CALL, not captured at module load: `spine-eval-run.ts` applies the arm's env inside
  * `main()`, after this module is imported, so a module-level const would make the variant arm a
