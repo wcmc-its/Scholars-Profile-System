@@ -1,12 +1,10 @@
 /**
  * Route tests for `DELETE /api/edit/biosketch/generations` (#1992) — pruning one biosketch
- * generation run out of the /edit history.
- *
- * The run is HARD-deleted, so what these pin is the pair of things that make that safe: the
- * authorization key is the ROW'S OWN `cwid` (read back first — nothing in the request body names
- * a scholar, so there is no target to aim at one you may not touch), and the delete + the B03
- * audit row land in ONE transaction, with `beforeValues` carrying the run's identity and none of
- * the drafted prose.
+ * generation run out of the /edit history. The policy behind the hard delete is documented in
+ * the route; these pin the three things that make it safe: the authorization key is the ROW'S OWN
+ * `cwid` (nothing in the request body names a scholar), the found-vs-gone verdict is the WRITER'S,
+ * and the delete + the B03 audit row land in ONE transaction with `beforeValues` carrying the
+ * run's identity and none of the drafted prose.
  *
  * `authorizeOverviewWrite` is mocked so the `entityId` it is handed can be asserted exactly —
  * that argument IS the security property. The mock harness otherwise mirrors
@@ -21,7 +19,7 @@ const {
   mockAuthorizeOverviewWrite,
   mockGenerationFindUnique,
   mockTransaction,
-  mockTxGenerationDelete,
+  mockTxGenerationDeleteMany,
   mockTxExecuteRaw,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
@@ -29,7 +27,7 @@ const {
   mockAuthorizeOverviewWrite: vi.fn(),
   mockGenerationFindUnique: vi.fn(),
   mockTransaction: vi.fn(),
-  mockTxGenerationDelete: vi.fn(),
+  mockTxGenerationDeleteMany: vi.fn(),
   mockTxExecuteRaw: vi.fn(),
 }));
 
@@ -62,7 +60,7 @@ import { DELETE } from "@/app/api/edit/biosketch/generations/route";
 const SELF = { cwid: "abc1001", isSuperuser: false, isCommsSteward: false };
 
 const fakeTx = {
-  biosketchGeneration: { delete: mockTxGenerationDelete },
+  biosketchGeneration: { deleteMany: mockTxGenerationDeleteMany },
   $executeRaw: mockTxExecuteRaw,
 };
 
@@ -102,7 +100,7 @@ beforeEach(() => {
   mockAuthorizeOverviewWrite.mockResolvedValue({ ok: true, viaUnitAdminUnit: null });
   mockGenerationFindUnique.mockResolvedValue(run("abc1001"));
   mockTransaction.mockImplementation(async (cb: (tx: typeof fakeTx) => unknown) => cb(fakeTx));
-  mockTxGenerationDelete.mockResolvedValue({});
+  mockTxGenerationDeleteMany.mockResolvedValue({ count: 1 });
   mockTxExecuteRaw.mockResolvedValue(1);
 });
 
@@ -153,6 +151,18 @@ describe("DELETE /api/edit/biosketch/generations", () => {
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
+  it("404s — not 500 — when the READER still sees the row but the WRITER deletes nothing", async () => {
+    // The replication window: a retry lands while the replica still carries the row the first
+    // request already deleted on the writer. The reader answers "found", so the whole delete
+    // branch runs; only the writer's own count can tell the truth.
+    mockTxGenerationDeleteMany.mockResolvedValue({ count: 0 });
+    const res = await DELETE(del({ generationId: "gen-1" }));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "not_found" });
+    // And no audit row for a delete that erased nothing — the transaction rolled back.
+    expect(mockTxExecuteRaw).not.toHaveBeenCalled();
+  });
+
   it("authorizes against the ROW'S OWN cwid, never anything in the body", async () => {
     // The body carries a `cwid` the caller DOES own; the row belongs to someone else. If the
     // route ever keyed off the body, this would be allowed.
@@ -173,7 +183,7 @@ describe("DELETE /api/edit/biosketch/generations", () => {
     expect(mockTransaction).toHaveBeenCalledTimes(1);
     // Keyed on the row id — one run, not every run of the same settings (cf. the Matcha DELETE,
     // which fans out over the paste hash because the PASTE is what the officer names there).
-    expect(mockTxGenerationDelete).toHaveBeenCalledWith({ where: { id: "gen-1" } });
+    expect(mockTxGenerationDeleteMany).toHaveBeenCalledWith({ where: { id: "gen-1" } });
   });
 
   it("appends exactly one B03 audit row, inside the same transaction", async () => {
@@ -197,9 +207,12 @@ describe("DELETE /api/edit/biosketch/generations", () => {
       promptVersion: "v7",
       entryCount: 2,
       createdByCwid: "abc1001",
-      impersonatedCwid: null,
+      generatedAsCwid: null,
       createdAt: "2026-07-20T12:00:00.000Z",
     });
+    // NOT `impersonatedCwid`: the audit row's own column of that name is the overlay THIS DELETE
+    // ran under, and one record cannot name two different actors the same way.
+    expect(before).not.toHaveProperty("impersonatedCwid");
     // The narrative is the thing the scholar asked us to stop keeping — re-persisting it in an
     // append-only log would defeat the delete.
     expect(JSON.stringify(before)).not.toContain("resistance program");

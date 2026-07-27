@@ -2,9 +2,10 @@
  * #1992 — the per-row Delete on the /edit "Earlier biosketches" history panel.
  *
  * The server hard-deletes the run, so the two things worth pinning client-side are the guard and
- * the cleanup: one click must NOT fire the request (the button arms itself first — there is no
- * undo behind it), and once the row is gone nothing on screen may still be showing it. A failed
- * delete keeps the row and says so, rather than optimistically dropping a run that still exists.
+ * the cleanup: the row's button opens the house `ConfirmDialog` and sends nothing until the
+ * dialog's own destructive button is pressed, and once the row is gone nothing on screen may still
+ * be showing it. A failed delete keeps the row and says so; a 404 does NOT, because "already gone"
+ * is the outcome the actor asked for.
  *
  * Native DOM assertions (no jest-dom in `tests/setup.ts`): counts, textContent, toBeNull().
  */
@@ -43,23 +44,25 @@ const GENERATIONS = [
 ];
 
 const originalFetch = globalThis.fetch;
-/** Whether the DELETE endpoint answers ok — flipped by the failure case. */
-let deleteOk = true;
+/** What the DELETE endpoint answers — flipped by the failure / already-gone cases. */
+let deleteStatus = 200;
 
 /** Every DELETE the component sent, in order. */
 let deletes: Array<Record<string, unknown>>;
 
 beforeEach(() => {
-  deleteOk = true;
+  deleteStatus = 200;
   deletes = [];
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     if (url.includes("/api/edit/biosketch/generations")) {
       if (init?.method === "DELETE") {
         deletes.push(JSON.parse(String(init.body)));
-        return deleteOk
+        return deleteStatus === 200
           ? new Response(JSON.stringify({ ok: true, deleted: "gen-1" }), { status: 200 })
-          : new Response(JSON.stringify({ ok: false, error: "write_failed" }), { status: 500 });
+          : new Response(JSON.stringify({ ok: false, error: "write_failed" }), {
+              status: deleteStatus,
+            });
       }
       return new Response(JSON.stringify({ ok: true, generations: GENERATIONS }), { status: 200 });
     }
@@ -76,25 +79,35 @@ function renderTool() {
   return render(<BiosketchTool entityId="scholar1" canSeeCost={false} model="model-id" />);
 }
 
+/** The dialog's own destructive button — never the row's. */
+function confirmButton() {
+  return screen.getByRole("button", { name: "Delete draft" });
+}
+
+/** Open the confirm dialog from a history row and wait for it to mount. */
+async function openConfirm(id: string) {
+  fireEvent.click(await screen.findByTestId(`biosketch-version-delete-${id}`));
+  await screen.findByRole("button", { name: "Delete draft" });
+}
+
 describe("BiosketchTool — delete a history row (#1992)", () => {
-  it("arms on the first click and only sends the DELETE on the second", async () => {
+  it("opens the confirm dialog and sends nothing until it is confirmed", async () => {
     renderTool();
-    const button = await screen.findByTestId("biosketch-version-delete-gen-1");
+    const row = await screen.findByTestId("biosketch-version-delete-gen-1");
     // The row's visible text is a version/model line and a date, so the accessible name is what
     // says which artifact is about to go.
-    expect(button.getAttribute("aria-label")).toBe(
+    expect(row.getAttribute("aria-label")).toBe(
       "Delete the contributions draft generated Jul 20, 2026",
     );
 
-    fireEvent.click(button);
-    expect(button.textContent).toContain("Confirm");
-    expect(button.getAttribute("aria-label")).toBe(
-      "Confirm deleting the contributions draft generated Jul 20, 2026",
-    );
+    fireEvent.click(row);
+    // The dialog names the same artifact, and no request has left yet.
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain("contributions draft generated Jul 20, 2026");
     expect(deletes).toHaveLength(0);
     expect(screen.queryByTestId("biosketch-version-gen-1")).not.toBeNull();
 
-    fireEvent.click(button);
+    fireEvent.click(confirmButton());
     await waitFor(() => expect(deletes).toHaveLength(1));
     expect(deletes[0]).toEqual({ generationId: "gen-1" });
     // The row leaves local state; its sibling is untouched.
@@ -102,20 +115,27 @@ describe("BiosketchTool — delete a history row (#1992)", () => {
     expect(screen.queryByTestId("biosketch-version-gen-2")).not.toBeNull();
   });
 
-  it("arming a second row disarms the first, so a stray click never deletes", async () => {
+  it("Cancel closes the dialog, deletes nothing, and leaves the row", async () => {
     renderTool();
-    const first = await screen.findByTestId("biosketch-version-delete-gen-1");
-    const second = await screen.findByTestId("biosketch-version-delete-gen-2");
+    await openConfirm("gen-1");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-    fireEvent.click(first);
-    expect(first.textContent).toContain("Confirm");
-    fireEvent.click(second);
-    expect(second.textContent).toContain("Confirm");
-    expect(first.textContent).toContain("Delete");
-
-    // The now-disarmed first row re-arms instead of firing.
-    fireEvent.click(first);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(deletes).toHaveLength(0);
+    expect(screen.queryByTestId("biosketch-version-gen-1")).not.toBeNull();
+  });
+
+  it("confirms against the row the actor opened it from, not the first one", async () => {
+    renderTool();
+    await openConfirm("gen-2");
+    expect(screen.getByRole("dialog").textContent).toContain(
+      "contributions draft generated Jul 18, 2026",
+    );
+
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(deletes).toEqual([{ generationId: "gen-2" }]));
+    await waitFor(() => expect(screen.queryByTestId("biosketch-version-gen-2")).toBeNull());
+    expect(screen.queryByTestId("biosketch-version-gen-1")).not.toBeNull();
   });
 
   it("clears the result card when the deleted run is the one on screen", async () => {
@@ -123,9 +143,8 @@ describe("BiosketchTool — delete a history row (#1992)", () => {
     fireEvent.click(await screen.findByTestId("biosketch-version-view-gen-1"));
     expect(await screen.findByTestId("biosketch-result")).not.toBeNull();
 
-    const button = screen.getByTestId("biosketch-version-delete-gen-1");
-    fireEvent.click(button);
-    fireEvent.click(button);
+    await openConfirm("gen-1");
+    fireEvent.click(confirmButton());
 
     // A draft that no longer exists must not stay on screen above a Copy button.
     await waitFor(() => expect(screen.queryByTestId("biosketch-result")).toBeNull());
@@ -136,25 +155,36 @@ describe("BiosketchTool — delete a history row (#1992)", () => {
     fireEvent.click(await screen.findByTestId("biosketch-version-view-gen-2"));
     expect(await screen.findByTestId("biosketch-result")).not.toBeNull();
 
-    const button = screen.getByTestId("biosketch-version-delete-gen-1");
-    fireEvent.click(button);
-    fireEvent.click(button);
+    await openConfirm("gen-1");
+    fireEvent.click(confirmButton());
 
     await waitFor(() => expect(screen.queryByTestId("biosketch-version-gen-1")).toBeNull());
     expect(screen.queryByTestId("biosketch-result")).not.toBeNull();
   });
 
   it("surfaces a failed delete in the shared error alert and keeps the row", async () => {
-    deleteOk = false;
+    deleteStatus = 500;
     renderTool();
-    const button = await screen.findByTestId("biosketch-version-delete-gen-1");
-    fireEvent.click(button);
-    fireEvent.click(button);
+    await openConfirm("gen-1");
+    fireEvent.click(confirmButton());
 
     const alert = await screen.findByTestId("biosketch-error");
     expect(alert.textContent).toContain("We couldn't delete that draft just now.");
     expect(screen.queryByTestId("biosketch-version-gen-1")).not.toBeNull();
-    // Disarmed again — a retry costs two clicks, exactly like the first attempt.
-    expect(button.textContent).toContain("Delete");
+    // The dialog closes either way — it is modal, so leaving it open would cover the alert it
+    // just caused.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("treats a 404 as the outcome asked for — the row goes, no error", async () => {
+    // The route answers 404 when the run is already gone (a retry, or a second tab got there
+    // first). Reporting that as a failure would keep rendering a run that no longer exists.
+    deleteStatus = 404;
+    renderTool();
+    await openConfirm("gen-1");
+    fireEvent.click(confirmButton());
+
+    await waitFor(() => expect(screen.queryByTestId("biosketch-version-gen-1")).toBeNull());
+    expect(screen.queryByTestId("biosketch-error")).toBeNull();
   });
 });

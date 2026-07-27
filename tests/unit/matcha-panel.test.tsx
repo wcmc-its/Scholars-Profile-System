@@ -2711,6 +2711,71 @@ describe("MatchaPanel", () => {
     expect(document.querySelector('[data-slot="matcha-ask"]')).toBeTruthy();
   });
 
+  it("#1991 — a FAILED replay resets `included`, so the next Re-run can't force-pin the previous ask's term", async () => {
+    // The snapshot advances `matchedText` on a run that then FAILS. `included` is reset only inside
+    // `r.ok`, so without the same treatment the two describe DIFFERENT asks: the header names B
+    // while the force-include list still holds A's culled term. The ask card ignores `status`, so
+    // Re-run is right there — and because it passes `include`, the `r.ok` reset can never fire to
+    // undo it. It sticks to every later re-run.
+    const CULLED_TAIL: CulledConcept[] = [{ term: "organoids", kind: "method", centrality: 0.5 }];
+    let posts = 0;
+    const fetchMock = vi.fn(async (_url: string, init?: { method?: string }) => {
+      if ((init?.method ?? "GET") !== "POST") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            scope: "own",
+            submissions: [
+              {
+                id: "s1",
+                description: "We fund cardiac fibrosis work.",
+                title: "cardiac fibrosis",
+                engine: "spine",
+                candidateCount: 12,
+                submittedByName: "Dana Ellis",
+                createdAt: "2026-07-13T10:00:00.000Z",
+              },
+            ],
+          }),
+        };
+      }
+      posts += 1;
+      if (posts === 3) return { ok: false, status: 500, json: async () => ({}) }; // the replay
+      return {
+        ok: true,
+        json: async () => ({ ok: true, concepts: CONCEPTS, candidates: THREE, culled: CULLED_TAIL }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), {
+      target: { value: "We fund immunotherapy research." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    // Sponsor A: the officer force-includes one of A's culled terms.
+    fireEvent.click(screen.getByRole("button", { name: "Add organoids to the search" }));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(2));
+
+    // Sponsor B replayed from Recent — and its POST fails, so nothing inside `r.ok` runs.
+    fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
+    fireEvent.click(await screen.findByText("cardiac fibrosis"));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(3));
+    await screen.findByText(/Couldn.t rank researchers/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Re-run match" }));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(4));
+    const sent = fetchMock.mock.calls.filter(
+      (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
+    );
+    const body = JSON.parse(String((sent[sent.length - 1][1] as { body: string }).body));
+    expect(body.description).toBe("We fund cardiac fibrosis work.");
+    expect(body.include).toEqual([]); // A's term must not ride into B's ranking
+  });
+
   describe("history scope (§9) and the submitter (§10)", () => {
     function submission(over: Partial<Submission> = {}): Submission {
       return {

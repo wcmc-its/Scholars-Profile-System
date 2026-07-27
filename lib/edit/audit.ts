@@ -163,18 +163,14 @@ export type AuditAction =
    *  NOT audited (like every ETL). Requires the `scholars_audit` action ENUM be
    *  extended — see `scripts/sql/audit-log.sql`. */
   | "news_mention_update"
-  /** a scholar / curator / proxy / unit-admin (or superuser) DELETED one
-   *  biosketch generation run from the /edit "Earlier biosketches" history
-   *  (#1992). The run is HARD-deleted — no `deletedAt`, no tombstone — so this
-   *  audit row is the ONLY surviving record that the draft ever existed, which
-   *  is why the deletion is logged at all: `biosketch_generation` carries
-   *  `created_by_cwid` / `impersonated_cwid` as the accountability trail for
-   *  AI-drafted NIH prose, and a delegate may erase a scholar's runs.
+  /** a scholar / curator / proxy / unit-admin pruned one biosketch generation
+   *  run from the /edit "Earlier biosketches" history (#1992). The run is
+   *  HARD-deleted, so this row is the only surviving trace — the policy is in
+   *  `app/api/edit/biosketch/generations/route.ts`.
    *  `targetEntityType='biosketch_generation'`, `targetEntityId` is the row
-   *  `id`; `beforeValues` carries only what IDENTIFIES the erased run (mode,
-   *  prompt version, model, entry count, when, who ran it) and NEVER the
-   *  generated narrative — the whole point of the delete is that the prose is
-   *  gone. Requires the `scholars_audit` action ENUM be extended — see
+   *  `id`; `beforeValues` identifies the run (`generatedAsCwid` is the overlay
+   *  the GENERATION ran under, not this delete's) and never its prose. Requires
+   *  the `scholars_audit` action ENUM be extended — see
    *  `scripts/sql/audit-log.sql`. */
   | "biosketch_generation_delete";
 
@@ -221,9 +217,8 @@ export type AuditEntityType =
    *  `targetEntityId` is the `news_mention.id`. */
   | "news_mention"
   /** one biosketch generation run erased from the /edit history (#1992);
-   *  `targetEntityId` is the `biosketch_generation.id`. The row itself is gone
-   *  by the time the audit row commits, so this (type, id) pair resolves to
-   *  nothing — by design: it names WHAT was erased, not something to look up. */
+   *  `targetEntityId` is the (already deleted) `biosketch_generation.id`, so it
+   *  names WHAT was erased rather than something to look up. */
   | "biosketch_generation";
 
 /** One audit row, before the DB assigns its `id`. */

@@ -84,6 +84,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 /**
+ * Thrown out of the delete transaction when the writer finds no row to delete, so the transaction
+ * rolls back (no audit row claiming a deletion that erased nothing) and the handler answers the
+ * contract's `404`, not a `500`. The reader's earlier `findUnique` cannot settle this: a retry
+ * inside the replication window sees the row on the replica and none on the writer.
+ */
+class AlreadyGone extends Error {}
+
+/**
  * DELETE `{ generationId }` — erase one generation run from the history (#1992).
  *
  * History grew forever with no way to prune it, so a scholar who ran a dozen exploratory drafts
@@ -107,7 +115,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
  *
  * AUTHORIZATION IS KEYED ON THE ROW'S OWN `cwid`, read back before the predicate runs — never a
  * caller-supplied target. Nothing in the request body names a scholar, so there is no target to
- * aim: an actor can only delete a run belonging to someone they may already edit.
+ * aim: an actor can only delete a run belonging to someone they may already edit. That read is on
+ * the READER, which is fine for a predicate input; the found-vs-gone VERDICT is not, so it is
+ * re-decided inside the transaction on the writer (see {@link AlreadyGone}).
  */
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
   // Flag first — a dormant feature 404s before any session or DB work (as GET does).
@@ -153,8 +163,12 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     logEditFailure(`${PATH}#delete`, err);
     return editError(500, "read_failed");
   }
-  // Already gone is the 404 the client expects on a double-click or a retry, not a 500 — and it
-  // is also what a caller probing another scholar's id sees, which tells them nothing.
+  // Already gone is the 404 the client expects on a double-click or a retry, not a 500. It is NOT
+  // an existence oracle guard, and does not pretend to be: a real id the caller may not touch
+  // answers 403 below, an unknown one 404 here, so the pair DOES distinguish the two. That is the
+  // repo's idiom — 403-on-deny is what `logEditDenial` exists to record — and the trade is
+  // acceptable because the ids are opaque cuids that appear only in the owner's own history, so
+  // the most a caller can learn is that an id they already hold is live.
   if (!row) return editError(404, "not_found");
 
   const authz = await authorizeOverviewWrite({
@@ -178,7 +192,10 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const deleted = row;
   try {
     await db.write.$transaction(async (tx) => {
-      await tx.biosketchGeneration.delete({ where: { id: deleted.id } });
+      // `deleteMany`, not `delete`: it reports a count instead of throwing, which is what makes
+      // the writer — not the replica read above — the authority on whether there was a run here.
+      const { count } = await tx.biosketchGeneration.deleteMany({ where: { id: deleted.id } });
+      if (count === 0) throw new AlreadyGone();
       await appendAuditRow(tx, {
         actorCwid: realCwid,
         impersonatedCwid,
@@ -195,7 +212,10 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
           promptVersion: deleted.promptVersion,
           entryCount: coerceEntries(deleted.entries).length,
           createdByCwid: deleted.createdByCwid,
-          impersonatedCwid: deleted.impersonatedCwid,
+          // NOT `impersonatedCwid` — the row's own `impersonated_cwid` COLUMN already means the
+          // overlay THIS DELETE ran under. Two different actors cannot share one name inside the
+          // record that is the only surviving trace of the run.
+          generatedAsCwid: deleted.impersonatedCwid,
           createdAt: deleted.createdAt.toISOString(),
           // Amendment 4 — a unit-admin curator's edit records the unit it rode in on.
           ...(authz.viaUnitAdminUnit
@@ -212,6 +232,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
       });
     });
   } catch (err) {
+    if (err instanceof AlreadyGone) return editError(404, "not_found");
     logEditFailure(`${PATH}#delete`, err);
     return editError(500, "write_failed");
   }
