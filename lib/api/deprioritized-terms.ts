@@ -75,6 +75,36 @@ export function stripDeprioritized(query: string): {
   return { contentQuery: kept.join(" "), removed };
 }
 
+/**
+ * #1972 — is every token of `text` a deprioritized filler term?
+ *
+ * Used to judge whether a `partial` MeSH resolution is worth protecting from the #692
+ * §4.1 strip retry. The window fallback stamps `partial` on the longest contiguous window
+ * of the query that resolved, and its size-1 arm requires an exact descriptor NAME
+ * (search-taxonomy.ts:1582) — so for `cancer research` the lay token `cancer` (an entry
+ * term) is skipped and the FILLER token `research` wins, giving `Research`/partial. That
+ * window carries none of the query's meaning and must not block the retry that recovers
+ * `Neoplasms`. A window holding real content (`stem cells`, `kidney disease`) must.
+ *
+ * NOTE this cannot be derived from `stripDeprioritized().removed`: the never-strip-to-empty
+ * rule above returns `removed: []` for an all-filler string, identically to an all-content
+ * one.
+ *
+ * ⚠ `matchedForm` has TWO provenances. The window fallback sets it to the matched QUERY
+ * WINDOW (search-taxonomy.ts:1596) — user tokens, which is what this predicate is really
+ * about. The #1342 singularize retry sets it to the matched DESCRIPTOR form
+ * (search-taxonomy.ts:1386-1391), so for that provenance this reads a descriptor surface
+ * form instead. It degrades the right way (a descriptor whose own name is nothing but
+ * filler is a weak interpretation too), but it is not the same question, so don't extend
+ * this predicate to new callers without re-checking which provenance they see.
+ */
+export function isAllDeprioritized(text: string): boolean {
+  const { default: set } = loadDeprioritizedSet();
+  const tokens = text.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return false;
+  return tokens.every((token) => set.has(normalizeForMatch(token)));
+}
+
 /** @internal — test-only hook. Resets the module-level set cache. */
 export function _resetDeprioritizedCacheForTests(): void {
   cache = null;

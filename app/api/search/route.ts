@@ -12,6 +12,7 @@ import {
   meshMatchTier,
   meshConfidenceRank,
   MESH_RANK_VERBATIM,
+  meshRetryIsSameDescriptorUpgrade,
   AREA_BOOST_TOP_N,
 } from "@/lib/search";
 import { getAreaScholarConcentration } from "@/lib/api/topics";
@@ -28,7 +29,10 @@ import {
   buildMatchAwareContext,
   type TaxonomyMatchResult,
 } from "@/lib/api/search-taxonomy";
-import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
+import {
+  stripDeprioritized,
+  isAllDeprioritized,
+} from "@/lib/api/deprioritized-terms";
 import {
   parseScopeParam,
   scopeToMeshParams,
@@ -129,10 +133,16 @@ async function handleSearch(request: NextRequest) {
     // would not. Strictly more-resolved for branches that only consume the
     // descriptor; accepted to keep this path off the candidate/count queries.
     // #1972 — same rule as the full path below: a `partial` is the window fallback's
-    // guess, not a resolution, so it must not count as "already resolved" here.
+    // guess, not a resolution, so it must not count as "already resolved" here. But a
+    // retry may only RAISE THE CONFIDENCE of the descriptor the full query already
+    // picked — never swap the concept. See `meshRetryIsSameDescriptorUpgrade`.
     if (genericStripped && meshConfidenceRank(mesh?.confidence) < MESH_RANK_VERBATIM) {
       const retry = await resolveMeshDescriptor(contentQuery);
-      if (meshConfidenceRank(retry?.confidence) > meshConfidenceRank(mesh?.confidence)) {
+      if (mesh === null || isAllDeprioritized(mesh.matchedForm)) {
+        if (meshConfidenceRank(retry?.confidence) > meshConfidenceRank(mesh?.confidence)) {
+          mesh = retry;
+        }
+      } else if (meshRetryIsSameDescriptorUpgrade(mesh, retry)) {
         mesh = retry;
       }
     }
@@ -153,14 +163,25 @@ async function handleSearch(request: NextRequest) {
       meshConfidenceRank(taxonomyMatch.meshResolution?.confidence) < MESH_RANK_VERBATIM
     ) {
       const retry = await matchQueryToTaxonomy(contentQuery);
-      // Strictly better only — a curated topic match, or a higher-confidence descriptor.
-      // A second `partial` must not churn the answer.
-      if (
-        retry.state === "matches" ||
-        meshConfidenceRank(retry.meshResolution?.confidence) >
-          meshConfidenceRank(taxonomyMatch.meshResolution?.confidence)
+      const current = taxonomyMatch.meshResolution;
+      if (current === null || isAllDeprioritized(current.matchedForm)) {
+        // Nothing resolved, or the window that resolved was pure filler and carries none
+        // of the query's meaning (`cancer research` → `Research`). Pre-#1972 behavior.
+        if (
+          retry.state === "matches" ||
+          meshConfidenceRank(retry.meshResolution?.confidence) >
+            meshConfidenceRank(current?.confidence)
+        ) {
+          taxonomyMatch = retry;
+        }
+      } else if (
+        // #1972 — the window held real content, so it IS an interpretation. The retry
+        // resolves a shorter query, so adopting it wholesale swaps the concept: measured,
+        // that demotes `Stem Cells` → `Microscopy, Electron, Scanning Transmission` and
+        // `Kidney Diseases` → `Kidney`. Take the confidence, keep the concept.
+        meshRetryIsSameDescriptorUpgrade(current, retry.meshResolution)
       ) {
-        taxonomyMatch = retry;
+        taxonomyMatch = { ...taxonomyMatch, meshResolution: retry.meshResolution };
       }
     }
   }
