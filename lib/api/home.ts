@@ -11,7 +11,8 @@
  * boundary; see threat T-02-07-01).
  *
  * Schema shape: candidate (e) per 02-SCHEMA-DECISION.md.
- *   - `topic` table contains 68 rows — ALL parents (no parentId column).
+ *   - `topic` table holds ALL parents, one row each (no parentId column). Its
+ *     row count tracks the ReciterAI taxonomy and is not a constant.
  *   - `publication_topic` holds (pmid, cwid, parent_topic_id) triples with
  *     subtopic data embedded (`primary_subtopic_id`, `subtopic_ids`).
  *   - Subtopics ARE first-class entities (Phase 8 / HIERARCHY-05): the
@@ -479,10 +480,12 @@ void SPOTLIGHT_TARGET; // producer ceiling (max cards per publish); documented, 
 // ---------------------------------------------------------------------------
 
 /**
- * All 68 parents with active-scholar counts (D-03). Never hidden — Browse
- * grid always renders all 68 parents. If <68 rows exist, that's a data-layer
- * bug, not a sparse-state condition (D-12). Returns [] in that case (UI
- * renders the "Research areas temporarily unavailable" error state).
+ * Every parent topic with active-scholar counts (D-03). Never hidden — the
+ * Browse grid renders the whole `topic` catalog at whatever size it currently
+ * is (67 under taxonomy_v2; the count moves whenever ReciterAI adds or retires
+ * a parent, so do NOT hard-code it). Only an EMPTY catalog is a data-layer bug
+ * rather than a sparse-state condition (D-12); we return [] in that case and
+ * the UI renders the "Research areas temporarily unavailable" error state.
  *
  * Under candidate (e) every Topic row IS a parent — no `parentId IS NULL`
  * filter needed. Active-scholar count is computed on demand via raw SQL

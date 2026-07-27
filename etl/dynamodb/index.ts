@@ -3,7 +3,8 @@
  *
  * Four projection blocks land ReCiterAI ground truth into MySQL:
  *
- *   1. TAXONOMY#  → topic                  (68 rows; parent topic catalog)
+ *   1. TAXONOMY#  → topic                  (parent topic catalog; Block 1 logs the
+ *                                          live row count and warns off the expected one)
  *   2. TOPIC#     → publication_topic      (~78,103 rows; per-pub × scholar × parent_topic triples)
  *   3. FACULTY#   → topic_assignment       (Q6 minimal projection — preserved unchanged)
  *   4. IMPACT#    → publication             (issue #316; global per-pmid impact score + GPT justification)
