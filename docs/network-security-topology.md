@@ -136,8 +136,8 @@ two halves:
   staging, #1926 prod). The `:80` listener still exists in both envs but is not the live path —
   it carries only internet-scanner noise. (Port corrected 2026-07-25: this paragraph previously
   said staging rode `:80`; VPC flow logs across all four staging ALB ENIs plus a timed causal
-  probe showed otherwise. See #1937, which also tracks the remaining `:443` TLS-policy gap —
-  prod carries the #1929 AEAD-only pin, staging does not yet.) A WCM-only access gate (#461)
+  probe showed otherwise. See #1937, which also closed the `:443` TLS-policy gap — both envs
+  now carry the #1929 AEAD-only pin, staging deployed 2026-07-27.) A WCM-only access gate (#461)
   stays in place meanwhile. **Do not lift the WCM-only gate until the NetScaler enforces
   equivalent filtering.**
 - **TLS:** ACM certs for `scholars[-staging].weill.cornell.edu` are provisioned and rotated

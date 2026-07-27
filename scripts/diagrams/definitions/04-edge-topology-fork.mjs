@@ -36,7 +36,7 @@ const nodes = {
   plan:  { x: 632, y: 340, w: 696, h: 108, kind: "good", title: "Prod — cut over & live (2026-07-24)",
            sub: ["Same shape as staging: VIP origin HTTPS-only, all 34 behaviours + default repointed.",
                  "Prod VIP stood up by the WCM network team (RITM0801140); dials the ALB on :443.",
-                 "Durable in CDK via #1926. Its :443 listener carries the #1929 TLS pin; staging does not yet — #1937."] },
+                 "Durable in CDK via #1926. Both envs' :443 now carry the #1929 AEAD-only TLS pin (#1937, 2026-07-27)."] },
 };
 
 const groups = [
@@ -56,7 +56,7 @@ const decos = [
   `<text x="40" y="74" font-size="22" font-weight="800" fill="#1f2933">Live (both envs): CloudFront + WAF → NetScaler → ALB → Fargate</text>`,
   `<rect x="1204" y="34" width="156" height="28" rx="14" fill="#f3eeff" stroke="#d6c9f0"/><text x="1282" y="52" font-size="11" font-weight="700" fill="#6a40c9" text-anchor="middle">BOTH ENVS LIVE</text>`,
   `<text x="64" y="150" font-size="11.5" fill="#6b7280">Origin leg HTTPS-only · NetScaler → ALB on :443 forwarding X-Origin-Verify</text>`,
-  `<text x="632" y="150" font-size="11.5" fill="#6b7280">Same shape in both envs; the open delta is the :443 TLS policy (#1937)</text>`,
+  `<text x="632" y="150" font-size="11.5" fill="#6b7280">Same shape in both envs; :443 TLS policy now at parity (#1937)</text>`,
   `<rect x="40" y="548" width="1320" height="46" rx="8" fill="#fbf7f0" stroke="#ece2cf"/>`,
   `<text x="58" y="568" font-size="11" fill="#5b4a20">#461 WCM-only WAF gate stays until NetScaler enforces equivalent filtering · :443 is the live origin leg in BOTH envs; the :80 listener remains but takes only scanner noise.</text>`,
   `<text x="58" y="585" font-size="11" fill="#5b4a20">Do not deploy the Edge stack (either env) until #1856 — its WAF allow-list sources a missing SSM param, so a deploy would strip the live IPSet.</text>`,
@@ -77,8 +77,8 @@ export const meta = {
     "<b>X-Origin-Verify</b> header CloudFront injects. Durable in CDK via the #1507 origin-flip " +
     "(PR #1852 staging, #1926 prod). <b>Port corrected 2026-07-25</b> — this view previously said <b>:80</b> " +
     "and called the ALB <code>:443</code> listener an unused guard; re-measurement (VPC flow logs + a timed " +
-    "causal probe) showed <code>:443</code> is the live leg in both envs. The one remaining delta is the " +
-    "<code>:443</code> TLS policy: prod carries the #1929 AEAD-only pin, staging does not yet (<b>#1937</b>).",
+    "causal probe) showed <code>:443</code> is the live leg in both envs. The <code>:443</code> TLS policy is " +
+    "now at <b>parity</b> — both envs carry the #1929 AEAD-only pin, staging deployed 2026-07-27 (<b>#1937</b>).",
   legend: [
     { fill: "#f1f3f5", stroke: "#adb5bd", label: "Internet / on-prem" },
     { fill: "#fbeaea", stroke: "#7d1c1c", label: "CloudFront + WAF (kept)" },
