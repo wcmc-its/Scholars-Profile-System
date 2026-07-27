@@ -210,6 +210,10 @@ function educationRows(p: ProfilePayload, pops: PopsEnrichment | null): SourcedR
       "education",
     );
   }
+  // #1997 — no `hideEducationYears` gate here, by decision: the hide is a
+  // PUBLIC-profile control and the CV is a private, write-authorized download
+  // into a template with its own Year column. The routes load the payload with
+  // `includeHiddenEducationYears`, so both sources keep their years together.
   for (const d of pops?.degrees ?? []) add(d.degree, d.institution, d.year ?? "", "pops");
   return rows;
 }

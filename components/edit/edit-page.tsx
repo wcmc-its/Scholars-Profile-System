@@ -1165,6 +1165,10 @@ function renderPanel(
           mode={voiceMode}
           scholarName={scholarName}
           educations={ctx.educations}
+          // #1997 — the graduation-year switch is a section-visibility override,
+          // so its current state rides the same `hiddenSections` array the
+          // Visibility card's Sections panel reads.
+          hideYears={ctx.scholar.hiddenSections.includes("hideEducationYears")}
         />
       );
     case "mentees":

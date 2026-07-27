@@ -42,7 +42,7 @@ The audit trail every action writes is in [`b03-audit-log.md`](./b03-audit-log.m
 | **Overview / bio** | Yes — clear it (empty `field_override`) | n/a (single field) |
 | **Publications** | Only by hiding every authorship | Yes — per author, or whole-pub takedown |
 | **Funding / grants** | **Yes — `hideFunding` toggle** (or hide every investigator role) | Yes — per grant row |
-| **Education** | **Yes — `hideEducation` toggle** (or hide every entry) | Yes |
+| **Education** | **Yes — `hideEducation` toggle** (or hide every entry) | Yes — plus `hideEducationYears`, which keeps every entry but drops its graduation year |
 | **Centers** | **Yes — `hideCenters` toggle** | No — reverse of the center roster |
 | **Postdoctoral Mentor** | **Yes — `hidePostdocMentor` toggle** | n/a (single card) |
 | **Mentoring (mentees)** | **Yes — `hideMentoring` toggle** (or hide every relationship) | Yes — per relationship |
@@ -68,7 +68,7 @@ on their own.
 |---|---|---|---|---|
 | **Suppression** | `suppression` (row with `revoked_at IS NULL`) | One record, or one contributor on a record, or the whole scholar | Yes (set `revoked_at`) | Self / superuser / unit admin / proxy via `/edit` |
 | **Field override (bio)** | `field_override`, `field_name='overview'`, empty `value` | The Overview/bio text | Yes (delete/replace the override) | Self / superuser via `/edit` |
-| **Section visibility** | `field_override`, `field_name IN (hideMentoring, hideEducation, hideFunding, hideCenters, hidePostdocMentor, hideClinicalTrials, hideMethods)`, `value='true'` | One **whole profile section** (display-only — stays searchable) | Yes (set `value='false'`, or delete the row) | Self / superuser / unit admin / proxy via `/edit` |
+| **Section visibility** | `field_override`, `field_name IN (hideMentoring, hideEducation, hideEducationYears, hideFunding, hideCenters, hidePostdocMentor, hideClinicalTrials, hideMethods)`, `value='true'` | One **whole profile section** (display-only — stays searchable) — except `hideEducationYears`, which hides no section, only the graduation year on each Education entry | Yes (set `value='false'`, or delete the row) | Self / superuser / unit admin / proxy via `/edit` |
 | **Methods-lens overlays** | `family_suppression_overlay`, `family_sensitivity_overlay` | A method **family**, by `(supercategory, family_label)` | Yes (remove the overlay row) | Editorial — loaded by ETL, no `/edit` control |
 | **Soft-delete** | `scholar.deleted_at` (not null) | The whole scholar (departure) | Within the 60-day window, before purge | ETL / departure process — *not a hiding choice* |
 
@@ -153,6 +153,7 @@ boolean `field_override` on the scholar:
 |---|---|---|
 | `hideMentoring` | Mentoring (mentees) | main column |
 | `hideEducation` | Education | sidebar |
+| `hideEducationYears` | Education — the **graduation year only**, entries stay (managed on the Education card, not the Sections panel). Public surfaces only: the scholar's own CV `.docx` export keeps the years | sidebar |
 | `hideFunding` | Funding / Grants | main column |
 | `hideCenters` | Centers | sidebar |
 | `hidePostdocMentor` | Postdoctoral Mentor | sidebar |

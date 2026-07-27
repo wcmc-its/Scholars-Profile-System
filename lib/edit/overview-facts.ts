@@ -573,7 +573,7 @@ async function loadTopicRationaleByPmid(
 export async function assembleOverviewFacts(
   cwid: string,
   selection?: OverviewSelection,
-  opts?: { deltas?: OverviewSelectionDeltas },
+  opts?: { deltas?: OverviewSelectionDeltas; includeHiddenEducationYears?: boolean },
 ): Promise<OverviewFacts | null> {
   const scholar = await db.read.scholar.findUnique({
     where: { cwid },
@@ -600,6 +600,7 @@ export async function assembleOverviewFacts(
     topics,
     educationCandidates,
     titleCandidates,
+    hideEducationYearsRow,
   ] = await Promise.all([
     loadScoredCandidatePublications(cwid),
     loadActiveFunding(cwid),
@@ -612,7 +613,22 @@ export async function assembleOverviewFacts(
     // what the drawer marks "included".
     loadOverviewEducationCandidates(cwid),
     loadOverviewTitleCandidates(cwid),
+    // #1997 — the graduation-year hide, read the same way the profile payload
+    // reads its section-visibility overrides (only a "true" row hides). The bio
+    // is a public field, so by default a hidden year must never reach the model;
+    // the CV route opts out via `includeHiddenEducationYears` so its §15 prose
+    // may state the same years its Academic Degrees table prints.
+    db.read.fieldOverride.findFirst({
+      where: {
+        entityType: "scholar",
+        entityId: cwid,
+        fieldName: "hideEducationYears",
+        value: "true",
+      },
+      select: { id: true },
+    }),
   ]);
+  const hideEducationYears = hideEducationYearsRow !== null && !opts?.includeHiddenEducationYears;
 
   // Resolve the effective selection. Explicit picks are ownership-filtered to the
   // candidate pools (validity + IDOR safety); an empty selection falls back to the
@@ -788,7 +804,12 @@ export async function assembleOverviewFacts(
   );
   let education = educationCandidates
     .filter((e) => effectiveEducationIds.has(e.id))
-    .map((e) => ({ degree: e.degree, institution: e.institution, field: e.field, year: e.year }));
+    .map((e) => ({
+      degree: e.degree,
+      institution: e.institution,
+      field: e.field,
+      year: hideEducationYears ? null : e.year,
+    }));
   // Defensive empty-tier fallback: if the degree classifier recognized nothing as
   // featured AND the scholar made no education choice, emit every row rather than
   // silently drop all education — a degree string the heuristic doesn't yet know
@@ -801,7 +822,7 @@ export async function assembleOverviewFacts(
       degree: e.degree,
       institution: e.institution,
       field: e.field,
-      year: e.year,
+      year: hideEducationYears ? null : e.year,
     }));
   }
 

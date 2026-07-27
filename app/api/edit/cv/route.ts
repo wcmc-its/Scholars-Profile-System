@@ -2,7 +2,8 @@
  * POST /api/edit/cv (scholar-CV generator, `docs/scholar-cv-generator-spec.md`).
  *
  * Assembles the scholar's structured data — the suppression-honoring public
- * `ProfilePayload`, the full `Publication` rows for the bibliography, FERPA-
+ * `ProfilePayload` (minus the #1997 education-year strip, a public-profile-only
+ * control), the full `Publication` rows for the bibliography, FERPA-
  * filtered mentees, and (clinical faculty only) POPS enrichment — generates the
  * §15 research-activities paragraph ANEW via the overview/Bedrock path, then
  * reconstructs the WCM faculty CV in code (`buildWcmCv`) and streams it back as a
@@ -162,14 +163,24 @@ export async function POST(request: NextRequest): Promise<Response> {
       select: { slug: true },
     });
     if (!scholar) return editError(404, "scholar_not_found", "entityId");
-    profile = await getScholarFullProfileBySlug(scholar.slug);
+    // #1997 — `hideEducationYears` is a PUBLIC-profile control, so this private,
+    // write-authorized export opts out of the strip and keeps the graduation
+    // years (the WCM template has a dedicated Year column). Every other payload
+    // consumer omits the option and gets the stripped, public-safe shape.
+    profile = await getScholarFullProfileBySlug(scholar.slug, undefined, {
+      includeHiddenEducationYears: true,
+    });
     if (!profile) return editError(404, "scholar_not_found", "entityId");
 
     // M1 feedstock — the scholar's standing curation (empty posted selection ⇒
     // the assembler default) plus the durable three-state deltas, exactly as the
-    // biosketch/overview generate routes assemble it.
+    // biosketch/overview generate routes assemble it. Same #1997 opt-out, so the
+    // §15 prose is not year-blind while the §B1 table prints years.
     const deltas = await loadOverviewSelectionDeltas(entityId);
-    facts = await assembleOverviewFacts(entityId, normalizeOverviewSelection({}), { deltas });
+    facts = await assembleOverviewFacts(entityId, normalizeOverviewSelection({}), {
+      deltas,
+      includeHiddenEducationYears: true,
+    });
     if (!facts) return editError(404, "scholar_not_found", "entityId");
 
     // POPS enrichment — clinical faculty only, zero-persist, best-effort.
