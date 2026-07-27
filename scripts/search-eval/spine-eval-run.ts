@@ -89,11 +89,22 @@ async function main() {
   // → the artifact's `.evidence` is present but every `blocks:[]`. Staging app has all of these ON
   // (SEARCH_RESULT_EVIDENCE / _EVIDENCE_REASON_COUNTS / _PEOPLE_MATCH_AWARE_SNIPPET / _PEOPLE_CONCEPT_HINT),
   // so the measured spine must too or it isn't the shipped path. Default-on, each overridable.
+  //
+  // SEARCH_PEOPLE_PHRASE_BOOST joined that list for #1977. It was missing, and by the paragraph
+  // above it should never have been: it is `on` in BOTH deployed envs (app-stack.ts, prod flipped
+  // 2026-07-07 #1344) while the etl task def carries no SEARCH_* at all, so every arm run before
+  // this measured a spine with NO `match_phrase` clauses — not the shipped path. It matters
+  // acutely for the rep arm: `clusterQuery = cluster.members.join(" ")` and the phrase clauses are
+  // ORDER-SENSITIVE (`publicationTitles` slop 8, `areasOfInterest` slop 4), so promoting the
+  // representative to `members[0]` moves the very string they score. Left off, the eval would be
+  // blind to the retrieval half of the change it exists to gate. Absolute nDCG is therefore NOT
+  // comparable to arms run before this line; the PAIRED within-draw difference is unaffected.
   for (const f of [
     "SEARCH_RESULT_EVIDENCE",
     "SEARCH_EVIDENCE_REASON_COUNTS",
     "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
     "SEARCH_PEOPLE_CONCEPT_HINT",
+    "SEARCH_PEOPLE_PHRASE_BOOST",
   ]) {
     if (process.env[f] == null) process.env[f] = "on";
   }

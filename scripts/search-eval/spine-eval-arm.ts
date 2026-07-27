@@ -14,7 +14,7 @@ export function glossArmEnv(
   return {}; // base — or any non-gloss arm — leaves the rescore off
 }
 
-// Arm → env for the #1977 cluster-representative A/B (docs/2026-07-27-1977-cluster-representative-eval-handoff.md).
+// Arm → env for the #1977 cluster-representative A/B.
 // `broadrep` makes `mergeTermClusters` pick each cluster's BROADEST member as the representative;
 // every other arm leaves today's rule (earliest member) in place. Lives beside `glossArmEnv` for the
 // same load-bearing reason: if the control and the variant silently produced the same env, the run
