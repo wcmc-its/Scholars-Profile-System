@@ -456,7 +456,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "GRANT_MATCHA",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",

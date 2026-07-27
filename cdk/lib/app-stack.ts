@@ -1367,10 +1367,15 @@ export class AppStack extends Stack {
         // isGrantMatchaEnabled() (=== "on"); a strict, reversible add — flag-off keeps the existing
         // topic-vector view as the only engine, and the surface stays admin-only regardless.
         // DEPENDS ON MATCHA (on in both envs): the modes POST to /api/edit/matcha, which 404s when
-        // MATCHA is off. STAGING-ON for the eyeball/probe of the seeded ask-card + grant-card UX;
-        // prod held OFF — the grant corpus is staging-only (pending ReciterAI#269), alongside
-        // SELF_EDIT_GRANT_RECS above.
-        GRANT_MATCHA: env === "staging" ? "on" : "off",
+        // MATCHA is off. Staging-soaked since 2026-07-22 (#1872), owner-approved on the eyeball
+        // 2026-07-24 (#1906).
+        // PROD-ON since 2026-07-27. The prior "grant corpus is staging-only (pending ReciterAI#269)"
+        // hold was STALE — measured that day, `opportunity` holds 1,122 rows in prod vs 1,151 in
+        // staging (97.5% parity), so the picker is data-backed in both envs. Blast radius stays
+        // small regardless: the page gate is isMatchaEnabled() && isGrantMatchaEnabled() &&
+        // (superuser||developer), and there is still no nav tab — /edit/grant-matcha is URL-only.
+        // ⚠ Each ask bills a Bedrock Sonnet call (no cheap model on SPS), bounded by admin-only access.
+        GRANT_MATCHA: "on",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
