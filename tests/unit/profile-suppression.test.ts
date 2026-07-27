@@ -310,6 +310,40 @@ describe("getScholarFullProfileBySlug — section visibility", () => {
     expect(payload?.hiddenSections).toContain("hideEducation");
   });
 
+  it("keeps the Education entries but strips their year when hideEducationYears is set", async () => {
+    mockScholarFindFirst.mockResolvedValue({
+      ...scholarRow(),
+      educations: [education("EDU-1", "MD"), education("EDU-2", "PhD")],
+    });
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
+    mockFieldOverrideFindMany.mockResolvedValue([{ fieldName: "hideEducationYears" }]);
+    const payload = await getScholarFullProfileBySlug("owner-one");
+    // #1997 — the entries survive intact; only the year (fixture: 2010) is gone,
+    // and it is gone from the PAYLOAD, so it never reaches the client.
+    expect((payload?.educations ?? []).map((e) => e.degree)).toEqual(["MD", "PhD"]);
+    expect((payload?.educations ?? []).map((e) => e.institution)).toEqual(["Inst", "Inst"]);
+    expect((payload?.educations ?? []).map((e) => e.year)).toEqual([null, null]);
+  });
+
+  it("keeps the education years for includeHiddenEducationYears (the CV path, #1997)", async () => {
+    mockScholarFindFirst.mockResolvedValue({
+      ...scholarRow(),
+      educations: [education("EDU-1", "MD"), education("EDU-2", "PhD")],
+    });
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
+    mockFieldOverrideFindMany.mockResolvedValue([{ fieldName: "hideEducationYears" }]);
+    const payload = await getScholarFullProfileBySlug("owner-one", undefined, {
+      includeHiddenEducationYears: true,
+    });
+    // The opt-out the CV routes take: same override set, years intact. The hide
+    // is a public-profile control, and the CV is a private, write-authorized
+    // download into a template with its own Year column.
+    expect((payload?.educations ?? []).map((e) => e.year)).toEqual([2010, 2010]);
+    // The override is still reported — the CV opted out of the strip, not out of
+    // knowing the scholar made the choice.
+    expect(payload?.hiddenSections).toContain("hideEducationYears");
+  });
+
   it("empties Funding and surfaces hideMentoring while keeping Education visible", async () => {
     mockScholarFindFirst.mockResolvedValue({
       ...scholarRow(),

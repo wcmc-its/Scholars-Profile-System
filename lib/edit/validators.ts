@@ -32,7 +32,7 @@ import { isChairTitleFor } from "@/lib/leadership";
 import { isNameBasedSlug, RESERVED_SLUGS } from "@/lib/slug";
 
 /**
- * The eight per-scholar SECTION-VISIBILITY keys (`section-visibility-spec.md`).
+ * The per-scholar SECTION-VISIBILITY keys (`section-visibility-spec.md`).
  * Each is a boolean `field_override(scholar, <key>)`: value `"true"` hides the
  * whole profile section, absent (or `"false"`, or a revoked row) shows it. This
  * is the middle hide tier between per-record `suppression` and whole-profile
@@ -47,10 +47,17 @@ import { isNameBasedSlug, RESERVED_SLUGS } from "@/lib/slug";
  *
  * COI/Disclosures is deliberately NOT hideable (compliance-mandated public), so
  * `hideDisclosures` is intentionally absent — the route rejects it `400`.
+ *
+ * `hideEducationYears` (#1997) is the one key that hides no section: the
+ * Education entries stay, and only each entry's graduation year is stripped at
+ * the payload boundary (`lib/api/profile.ts`). It rides this list to reuse the
+ * boolean write / authz / audit path, and is deliberately absent from the
+ * Visibility card's Sections panel — its switch lives on the Education panel.
  */
 export const SECTION_VISIBILITY_FIELDS = [
   "hideMentoring",
   "hideEducation",
+  "hideEducationYears",
   "hideFunding",
   "hideCenters",
   "hidePostdocMentor",
@@ -70,7 +77,7 @@ export function isSectionVisibilityField(value: string): value is SectionVisibil
  * The scholar `field_override.fieldName` allowlist. `overview` + `slug` are the
  * v1 set (`self-edit-spec.md`); `selectedHighlightPmids` is the #836 opt-in
  * manual Highlights override (a JSON array of PMIDs), gated by the
- * `SELF_EDIT_MANUAL_HIGHLIGHTS` flag at the route; the eight
+ * `SELF_EDIT_MANUAL_HIGHLIGHTS` flag at the route; the
  * `SECTION_VISIBILITY_FIELDS` are the section-visibility booleans. The allowlist
  * only narrows the field name; per-field validation + flags govern acceptance.
  */

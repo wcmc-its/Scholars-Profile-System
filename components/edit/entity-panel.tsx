@@ -91,6 +91,9 @@ export type EntityPanelProps<T extends EntityRow> = {
    *  differs from the panel's (a RePORTER grant routes differently than an
    *  InfoEd one). Defaults to the panel attribute for every row. */
   getRequestAttribute?: (e: T) => RequestAttribute;
+  /** A panel-wide control rendered between the count line and the list
+   *  (Education's #1997 graduation-year switch). */
+  aboveList?: React.ReactNode;
   /** `data-slot` for tests (e.g. "appointments-panel"). */
   slot: string;
 };
@@ -116,6 +119,7 @@ export function EntityPanel<T extends EntityRow>({
   filterable = false,
   sourceLabel,
   getRequestAttribute,
+  aboveList,
   slot,
 }: EntityPanelProps<T>) {
   const [list, setList] = React.useState<T[]>([...entities]);
@@ -304,6 +308,8 @@ export function EntityPanel<T extends EntityRow>({
           />
         )}
       </div>
+
+      {aboveList}
 
       {totalCount === 0 ? (
         <p className="text-muted-foreground text-sm">{copy.empty}</p>

@@ -100,6 +100,7 @@ function baseProfile(over: Partial<ProfilePayload>): ProfilePayload {
     highlights: [],
     publications: [],
     postdoctoralMentor: null,
+    hiddenSections: [],
     ...over,
   };
   return p as ProfilePayload;
@@ -523,6 +524,22 @@ describe("cvOutline — document-ordered CV preview", () => {
         .join(" ");
     expect(textsBySource("education")).toContain("MIT"); // p.educations → ASMS/ED
     expect(textsBySource("pops")).toContain("Columbia University"); // pops.degrees → POPS
+  });
+
+  it("keeps BOTH sources' degree years in B1 even when hideEducationYears is set (#1997)", () => {
+    // The hide is a PUBLIC-profile control; the CV is the scholar's own private
+    // download. The routes load the payload with `includeHiddenEducationYears`,
+    // so the Scholars row keeps 2008 — and the POPS row, a SECOND source, must
+    // not be gated either, or the CV prints half its years.
+    const profile = baseProfile({
+      hiddenSections: ["hideEducationYears"],
+      educations: [{ degree: "PhD", institution: "MIT", year: 2008, field: "Biology" }],
+    });
+    const b1 = entryOf(cvOutline({ profile, mentees: [], pops: clinicalInput.pops }), "B", "B1");
+    expect(b1.items.map((i) => i.text)).toEqual([
+      "PhD (Biology) — MIT — (2008)",
+      "MD — Columbia University — (2005)",
+    ]);
   });
 
   it("badges uniform sections with their system of record", () => {

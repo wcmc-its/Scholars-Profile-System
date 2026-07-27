@@ -5,7 +5,7 @@
  * tested elsewhere; this is the rail + routing + role-parity wiring.
  */
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
@@ -314,6 +314,32 @@ describe("EditPage router — the Apollo shell + rail", () => {
     render(<EditPage ctx={ctx} mode="self" attr="education" />);
     expect(document.querySelector('[data-slot="education-panel"]')).not.toBeNull();
     expect(screen.getByTestId("education-row-edu-1")).toBeTruthy();
+  });
+
+  // #1997 — the graduation-year switch is the ONLY writer of `hideEducationYears`.
+  it("the Education panel's years switch POSTs the hideEducationYears override", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    try {
+      render(<EditPage ctx={ctx} mode="self" attr="education" />);
+      // The switch reads "Show graduation years", so clicking it OFF hides them.
+      fireEvent.click(screen.getByTestId("education-years-toggle"));
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      const [url, opts] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe("/api/edit/field");
+      expect(JSON.parse(opts.body as string)).toEqual({
+        entityType: "scholar",
+        entityId: "self01",
+        fieldName: "hideEducationYears",
+        value: "true",
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it("?attr=name-title renders the read-only panel with Request a Change", () => {

@@ -14,6 +14,7 @@ Seven hideable units, each a boolean per-scholar override:
 |-----|---------|------------------|
 | `hideMentoring` | Mentoring (mentees) | main — `mentoring-section.tsx` |
 | `hideEducation` | Education | sidebar — `profile-view.tsx:370` |
+| `hideEducationYears` | Education — graduation year only (#1997); entries stay | sidebar — stripped in `lib/api/profile.ts`; PUBLIC surfaces only, the CV export opts out |
 | `hideFunding` | Funding / Grants | main — `profile-view.tsx:482` |
 | `hideCenters` | Centers | sidebar — `profile-view.tsx:338` |
 | `hidePostdocMentor` | Postdoctoral Mentor | sidebar — `profile-view.tsx:269` |

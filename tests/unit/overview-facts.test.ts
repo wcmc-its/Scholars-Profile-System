@@ -24,6 +24,7 @@ const {
   mockDivisionFindMany,
   mockCenterFindMany,
   mockCenterProgramLeaderFindMany,
+  mockFieldOverrideFindFirst,
 } = vi.hoisted(() => ({
   mockScholarFindUnique: vi.fn(),
   mockPubAuthorFindMany: vi.fn(),
@@ -40,6 +41,7 @@ const {
   mockDivisionFindMany: vi.fn(),
   mockCenterFindMany: vi.fn(),
   mockCenterProgramLeaderFindMany: vi.fn(),
+  mockFieldOverrideFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -63,6 +65,8 @@ vi.mock("@/lib/db", () => ({
       division: { findMany: mockDivisionFindMany },
       center: { findMany: mockCenterFindMany },
       centerProgramLeader: { findMany: mockCenterProgramLeaderFindMany },
+      // #1997 — the scholar's `hideEducationYears` section-visibility override.
+      fieldOverride: { findFirst: mockFieldOverrideFindFirst },
     },
   },
 }));
@@ -204,6 +208,7 @@ beforeEach(() => {
   mockDivisionFindMany.mockResolvedValue([]);
   mockCenterFindMany.mockResolvedValue([]);
   mockCenterProgramLeaderFindMany.mockResolvedValue([]);
+  mockFieldOverrideFindFirst.mockResolvedValue(null);
 });
 
 /** A `scholar_family.findMany` row, as the #799 rollup returns it. */
@@ -633,6 +638,30 @@ describe("assembleOverviewFacts — education (#742 §7, delta-filtered) & exist
     expect(facts?.education.map((e) => e.degree).sort()).toEqual([
       "Certificate in Bioinformatics",
       "M.D.",
+    ]);
+  });
+
+  it("carries no education year when the scholar set hideEducationYears (#1997)", async () => {
+    mockEducationFindMany.mockResolvedValue([eduRow("e1", "M.D.", { year: 2008 })]);
+    mockFieldOverrideFindFirst.mockResolvedValue({ id: "fo1" });
+    const facts = await assembleOverviewFacts("self01");
+    // The bio is a public field, so a year the scholar hid must never reach the
+    // model — the degree and institution still do.
+    expect(facts?.education).toEqual([
+      { degree: "M.D.", institution: "Cornell University", field: null, year: null },
+    ]);
+  });
+
+  it("carries the year for includeHiddenEducationYears (the CV's §15 prose, #1997)", async () => {
+    mockEducationFindMany.mockResolvedValue([eduRow("e1", "M.D.", { year: 2008 })]);
+    mockFieldOverrideFindFirst.mockResolvedValue({ id: "fo1" });
+    const facts = await assembleOverviewFacts("self01", undefined, {
+      includeHiddenEducationYears: true,
+    });
+    // Same override row, opted out: the CV route generates §15 from these facts
+    // and its §B1 table prints the years, so the prose must not be year-blind.
+    expect(facts?.education).toEqual([
+      { degree: "M.D.", institution: "Cornell University", field: null, year: 2008 },
     ]);
   });
 

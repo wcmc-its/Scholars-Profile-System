@@ -722,7 +722,9 @@ export type ProfilePayload = {
    *  is already emptied above when hidden, so nothing leaks; this array is
    *  surfaced for the two the render body still gates itself — `hideMentoring`
    *  (skip the separate live mentee fetch) and `hideMethods` (also suppress the
-   *  audience-gated sensitive-family reveal). Empty for a fully-public profile. */
+   *  audience-gated sensitive-family reveal). `hideEducationYears` may also
+   *  appear; it strips the year off each education entry rather than hiding a
+   *  section, and needs no render gate. Empty for a fully-public profile. */
   hiddenSections: string[];
 };
 
@@ -844,7 +846,15 @@ export function isActiveTrialStatus(status: string | null): boolean {
 }
 
 export const getScholarFullProfileBySlug = cache(
-  async (slug: string, now: Date = new Date()): Promise<ProfilePayload | null> => {
+  async (
+    slug: string,
+    now: Date = new Date(),
+    /** #1997 — opt OUT of the `hideEducationYears` strip. The hide is a PUBLIC-
+     *  profile control, so the private, write-authorized CV export keeps the
+     *  graduation years. Defaults to the stripped payload: a caller that forgets
+     *  this cannot leak a year, only a caller that asks for one gets it. */
+    opts?: { includeHiddenEducationYears?: boolean },
+  ): Promise<ProfilePayload | null> => {
     const scholar = await prisma.scholar.findFirst({
       where: { slug, deletedAt: null, status: "active" },
       include: {
@@ -1423,7 +1433,13 @@ export const getScholarFullProfileBySlug = cache(
         organization: h.organization,
         year: h.year,
       })),
-      // section-visibility — `hideEducation` drops the whole Education section.
+      // section-visibility — `hideEducation` drops the whole Education section;
+      // `hideEducationYears` (#1997) keeps the entries but drops the graduation
+      // year (a degree year discloses approximate age). Stripped HERE, at the
+      // payload boundary, so the year never reaches the client on the public
+      // path — hiding it in JSX would still ship it in the RSC payload. The CV
+      // export opts out (`includeHiddenEducationYears`): the hide governs the
+      // public profile, not the scholar's own private download.
       educations: hiddenSections.has("hideEducation")
         ? []
         : scholar.educations
@@ -1432,7 +1448,10 @@ export const getScholarFullProfileBySlug = cache(
             .map((e) => ({
               degree: e.degree,
               institution: e.institution,
-              year: e.year,
+              year:
+                hiddenSections.has("hideEducationYears") && !opts?.includeHiddenEducationYears
+                  ? null
+                  : e.year,
               field: e.field,
             })),
       // Issue #78 — runtime canonicalization fallback. When the stored

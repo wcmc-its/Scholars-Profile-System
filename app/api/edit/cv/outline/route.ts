@@ -60,7 +60,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       select: { slug: true },
     });
     if (!scholar) return editError(404, "scholar_not_found", "cwid");
-    const profile = await getScholarFullProfileBySlug(scholar.slug);
+    // #1997 — the same opt-out the download takes: the outline must show the
+    // graduation years the .docx will print, or the preview lies about it.
+    const profile = await getScholarFullProfileBySlug(scholar.slug, undefined, {
+      includeHiddenEducationYears: true,
+    });
     if (!profile) return editError(404, "scholar_not_found", "cwid");
 
     // POPS — clinical faculty only, best-effort (a failure just drops clinical rows).

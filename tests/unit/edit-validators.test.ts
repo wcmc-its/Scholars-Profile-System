@@ -55,10 +55,13 @@ describe("isEditableField", () => {
 // ---------------------------------------------------------------------------
 
 describe("section visibility", () => {
-  it("SECTION_VISIBILITY_FIELDS lists exactly the nine hideable sections", () => {
+  it("SECTION_VISIBILITY_FIELDS lists the nine hideable sections + hideEducationYears", () => {
     expect([...SECTION_VISIBILITY_FIELDS]).toEqual([
       "hideMentoring",
       "hideEducation",
+      // #1997 — hides no section: the Education entries stay, the year is
+      // stripped. It rides this list for the boolean write / authz / audit path.
+      "hideEducationYears",
       "hideFunding",
       "hideCenters",
       "hidePostdocMentor",
@@ -69,7 +72,7 @@ describe("section visibility", () => {
     ]);
   });
 
-  it("isSectionVisibilityField narrows only the nine keys", () => {
+  it("isSectionVisibilityField narrows only the allowlisted keys", () => {
     for (const f of SECTION_VISIBILITY_FIELDS) {
       expect(isSectionVisibilityField(f)).toBe(true);
     }
@@ -77,6 +80,8 @@ describe("section visibility", () => {
     expect(isSectionVisibilityField("hideTechnologies")).toBe(true);
     // The news section-hide key narrows in.
     expect(isSectionVisibilityField("hideNews")).toBe(true);
+    // The #1997 graduation-year key narrows in (same boolean write path).
+    expect(isSectionVisibilityField("hideEducationYears")).toBe(true);
     for (const f of ["overview", "slug", "hideDisclosures", "hidePublications", ""]) {
       expect(isSectionVisibilityField(f)).toBe(false);
     }
