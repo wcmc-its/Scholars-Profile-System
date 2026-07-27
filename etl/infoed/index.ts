@@ -25,6 +25,12 @@
  *   CoInvestigatorRole                -> 'Co-I'
  *   KeyPersonnelRole                  -> 'Key Personnel'
  *
+ * 'Co-PI' means a non-contact PD/PI, i.e. an NIH multiple-PI: InfoEd's
+ * `Primary_PI_Flag` is `proppds.first_pd`, which marks the CONTACT PI only, so
+ * every other PD/PI on a multi-PI award lands here. Downstream, `Co-PI` is a PI
+ * (lib/api/data-quality.ts PI_ROLES) and two PI-ish CWIDs on one award raise
+ * `isMultiPi`, which is what paints the "Multi-PI" pill and search facet.
+ *
  * Funder = Orig_Sponsor (the original funding agency). Subward_Sponsor is
  * appended in parens when present (so the user sees "NIH (via Columbia)" etc.).
  *
@@ -55,6 +61,9 @@ type GrantRow = {
 
 const INSERT_BATCH = 1000;
 
+/// Every literal the CONSOLIDATED_QUERY CASE can emit must have an entry here,
+/// or `ROLE_MAP[r.Role] ?? "Key Personnel"` silently demotes it — the same
+/// silent-demotion failure mode that published MPIs as Key Personnel.
 const ROLE_MAP: Record<string, string> = {
   PrincipalInvestigatorRole: "PI",
   PrincipalInvestigatorSubawardRole: "PI-Subaward",
@@ -141,7 +150,17 @@ SELECT DISTINCT
   CASE
     WHEN z.Sponsor = z.Orig_Sponsor AND z.Primary_PI_Flag = 'Y' THEN 'PrincipalInvestigatorRole'
     WHEN z.Sponsor <> z.Orig_Sponsor AND z.Primary_PI_Flag = 'Y' THEN 'PrincipalInvestigatorSubawardRole'
-    WHEN z.Sponsor <> z.Orig_Sponsor AND z.Role_Category LIKE '%PI' THEN 'CoPrincipalInvestigatorRole'
+    -- A non-contact PD/PI (Primary_PI_Flag = 'N', Role_Category = 'PI') is an NIH
+    -- multiple-PI. This branch used to require Sponsor <> Orig_Sponsor, so it only
+    -- fired on subawards: an MPI on a DIRECT award missed every branch above and
+    -- fell through to ELSE, landing as 'Key Personnel'. Verified against a raw
+    -- InfoEd extract: R01 NS126342 and R01 NS136423 both carry
+    -- Role_Description = 'PD/PI' with Primary_PI_Flag = 'N' and were published as
+    -- Key Personnel, while the same investigator's contact-PI award (R01
+    -- AG083949) published as PI. LIKE '%PI' only ever matches Role_Category =
+    -- 'PI' ('PI Subaward' / 'PI Subproject' don't end in "PI"), so this branch
+    -- stays scoped to PD/PIs and the Co-I branch below stays reachable.
+    WHEN z.Role_Category LIKE '%PI' THEN 'CoPrincipalInvestigatorRole'
     WHEN z.Role_Category LIKE '%Co-investigator' THEN 'CoInvestigatorRole'
     ELSE 'KeyPersonnelRole'
   END AS Role
