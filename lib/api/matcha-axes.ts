@@ -58,6 +58,20 @@ function related(a: Set<string>, b: Set<string>, tau: number): boolean {
  * is possible in principle and follows the representative rather than a vote; a
  * majority rule here would let the rail's Concept/Method panel disagree with the name
  * the cluster is displayed under.
+ *
+ * `MATCHA_BROAD_REP=on` (dark; an eval arm only — #1977) picks the member with the LARGEST
+ * descriptor set instead of the earliest. Under a SUBSUMPTION merge the earliest member can be
+ * the NARROW one, so the cluster is retrieved on the whole union but displayed and counted under
+ * its narrowest member's identity: `retrieveCluster` names `rep.name` and the card's N is
+ * `meshSubtreeCounts[rep.descriptorUi]`, so a scholar admitted via the broad member scores N = 0
+ * against the label shown. The broadest member makes the union a subset of the rep's own subtree,
+ * so name and count agree by construction. It is not a pure display change — `kind` follows the
+ * representative and feeds `weightFactor` — which is why it is gated and measured, not just
+ * flipped. The gold cannot show the coherence benefit; the eval is a ranking-regression gate.
+ *
+ * Read PER CALL, not captured at module load: `spine-eval-run.ts` applies the arm's env inside
+ * `main()`, after this module is imported, so a module-level const would make the variant arm a
+ * silent no-op and the eval would read as "the rep rule had no effect".
  */
 export function mergeTermClusters(terms: ClusterTerm[], tau: number): TermCluster[] {
   const sets = terms.map((t) => new Set(t.descendantUis));
@@ -80,14 +94,25 @@ export function mergeTermClusters(terms: ClusterTerm[], tau: number): TermCluste
     .map((idxs) => {
       const uni = new Set<string>();
       let centrality = 0;
-      const members: string[] = [];
       for (const i of idxs) {
-        members.push(terms[i].term);
         centrality = Math.max(centrality, terms[i].centrality);
         for (const u of terms[i].descendantUis) uni.add(u);
       }
-      // `idxs` is ascending, so idxs[0] is the earliest member — the representative.
-      return { members, descendantUis: [...uni], centrality, kind: terms[idxs[0]].kind };
+      // `idxs` is ascending, so idxs[0] is the earliest member — the representative. `>` (not `>=`)
+      // keeps the earliest member on a size tie, so the broad-rep arm is deterministic too and a
+      // cluster whose members all resolve alike is byte-identical between arms.
+      const rep =
+        process.env.MATCHA_BROAD_REP === "on"
+          ? idxs.reduce((a, b) =>
+              terms[b].descendantUis.length > terms[a].descendantUis.length ? b : a,
+            )
+          : idxs[0];
+      // Representative first — `members[0]` IS the cluster identity downstream (the wire
+      // `concept.term`, the include chips, the culled tail). Default: rep === idxs[0], so the
+      // order is unchanged.
+      const ordered = rep === idxs[0] ? idxs : [rep, ...idxs.filter((i) => i !== rep)];
+      const members = ordered.map((i) => terms[i].term);
+      return { members, descendantUis: [...uni], centrality, kind: terms[rep].kind };
     });
 }
 

@@ -32,7 +32,7 @@ import { rankResearchersForDescriptionSpine } from "@/lib/api/matcha-spine-run";
 import { fetchKeyPaper } from "@/lib/api/search";
 import { normalizeDescription } from "@/lib/api/matcha";
 import type { MatchaExtraction } from "@/lib/api/matcha-extract";
-import { glossArmEnv } from "./spine-eval-arm";
+import { glossArmEnv, repArmEnv } from "./spine-eval-arm";
 
 /** The arm to run: `base` (rescore off, the ablation) or `gloss-<λ>`. Echoed into the artifact AND
  *  mapped to the gloss-rescore env below — one arm per process (the memo cache has no clear). */
@@ -64,6 +64,14 @@ async function main() {
     delete process.env.MATCHA_GLOSS_RERANK;
   }
   console.error(`arm=${ARM} MATCHA_GLOSS_RERANK=${process.env.MATCHA_GLOSS_RERANK ?? "(off)"} λ=${process.env.MATCHA_GLOSS_RERANK_LAMBDA ?? "-"}`);
+
+  // #1977 rep arm, applied the same way and for the same reason: `mergeTermClusters` reads
+  // MATCHA_BROAD_REP per call, so it must be set before the first fixture. Explicit delete on every
+  // other arm so a stray inherited value can't leak the variant into the control.
+  const repEnv = repArmEnv(ARM);
+  if (repEnv.MATCHA_BROAD_REP) process.env.MATCHA_BROAD_REP = repEnv.MATCHA_BROAD_REP;
+  else delete process.env.MATCHA_BROAD_REP;
+  console.error(`arm=${ARM} MATCHA_BROAD_REP=${process.env.MATCHA_BROAD_REP ?? "(off)"}`);
 
   // MATCHA_GLOSS_INWORDS — default ON so every arm emits the "in their words" evidence the §1
   // acceptance measurement counts (docs/2026-07-23-matcha-inwords-merged-next-steps-handoff.md).
