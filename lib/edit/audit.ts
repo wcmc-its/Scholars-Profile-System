@@ -162,7 +162,21 @@ export type AuditAction =
    *  status/showOnProfile transition. The etl/news ingest writes directly and is
    *  NOT audited (like every ETL). Requires the `scholars_audit` action ENUM be
    *  extended — see `scripts/sql/audit-log.sql`. */
-  | "news_mention_update";
+  | "news_mention_update"
+  /** a scholar / curator / proxy / unit-admin (or superuser) DELETED one
+   *  biosketch generation run from the /edit "Earlier biosketches" history
+   *  (#1992). The run is HARD-deleted — no `deletedAt`, no tombstone — so this
+   *  audit row is the ONLY surviving record that the draft ever existed, which
+   *  is why the deletion is logged at all: `biosketch_generation` carries
+   *  `created_by_cwid` / `impersonated_cwid` as the accountability trail for
+   *  AI-drafted NIH prose, and a delegate may erase a scholar's runs.
+   *  `targetEntityType='biosketch_generation'`, `targetEntityId` is the row
+   *  `id`; `beforeValues` carries only what IDENTIFIES the erased run (mode,
+   *  prompt version, model, entry count, when, who ran it) and NEVER the
+   *  generated narrative — the whole point of the delete is that the prose is
+   *  gone. Requires the `scholars_audit` action ENUM be extended — see
+   *  `scripts/sql/audit-log.sql`. */
+  | "biosketch_generation_delete";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -205,7 +219,12 @@ export type AuditEntityType =
   /** a news mention curated on /edit (docs/2026-07-18-news-mentions-plan.md) —
    *  approve/reject in the queue, or hide / "not me" on the profile;
    *  `targetEntityId` is the `news_mention.id`. */
-  | "news_mention";
+  | "news_mention"
+  /** one biosketch generation run erased from the /edit history (#1992);
+   *  `targetEntityId` is the `biosketch_generation.id`. The row itself is gone
+   *  by the time the audit row commits, so this (type, id) pair resolves to
+   *  nothing — by design: it names WHAT was erased, not something to look up. */
+  | "biosketch_generation";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {
