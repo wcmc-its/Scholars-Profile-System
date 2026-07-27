@@ -2642,6 +2642,75 @@ describe("MatchaPanel", () => {
     expect(screen.queryByRole("button", { name: "Show original ▾" })).toBeNull();
   });
 
+  it("#1991 — while a replay is IN FLIGHT the ask card shows the new paste, not the last one", async () => {
+    // The replay is the reproduction, because it is the one path that changes the searched text
+    // while the read-only card is already on screen (`editing` is false, so Edit-paste→submit
+    // shows the textarea instead). The card used to keep painting the PREVIOUS sponsor's words —
+    // and its handle, and its highlights — for the whole request, over a skeletoned result list.
+    let releaseReplay: () => void = () => {};
+    const replayLands = new Promise<void>((resolve) => {
+      releaseReplay = resolve;
+    });
+    let posts = 0;
+    const fetchMock = vi.fn(async (_url: string, init?: { method?: string }) => {
+      if ((init?.method ?? "GET") !== "POST") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            scope: "own",
+            submissions: [
+              {
+                id: "s1",
+                description: "We fund cardiac fibrosis work.",
+                title: "cardiac fibrosis",
+                engine: "spine",
+                candidateCount: 12,
+                submittedByName: "Dana Ellis",
+                createdAt: "2026-07-13T10:00:00.000Z",
+              },
+            ],
+          }),
+        };
+      }
+      posts += 1;
+      // The REPLAY's POST hangs until this test lets it land. That window is the whole bug.
+      if (posts > 1) await replayLands;
+      return { ok: true, json: async () => ({ ok: true, concepts: CONCEPTS, candidates: THREE }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), {
+      target: { value: "We fund immunotherapy research." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    const quote = () => document.querySelector('[data-slot="matcha-ask-quote"]')?.textContent ?? "";
+    expect(quote()).toBe("We fund immunotherapy research.");
+    expect(document.querySelector('[data-slot="matcha-ask-mark"]')).toBeTruthy();
+
+    // Replay a DIFFERENT saved ask; its response never arrives.
+    fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
+    fireEvent.click(await screen.findByText("cardiac fibrosis"));
+    await screen.findByText(/Ranking researchers/);
+
+    // The header names what is BEING searched, and nothing of the previous ask survives beside it:
+    // not its prose, not its marks (spans from a run that has not happened yet), not its handle.
+    expect(quote()).toBe("We fund cardiac fibrosis work.");
+    expect(quote()).not.toContain("immunotherapy");
+    expect(document.querySelector('[data-slot="matcha-ask-mark"]')).toBeNull();
+    expect(document.querySelector('[data-slot="matcha-ask"]')).toBeNull();
+
+    // …and the card is whole again when the run lands: same paste, handle restored from the
+    // response's concepts.
+    releaseReplay();
+    await screen.findByText("Alice Alpha");
+    expect(quote()).toBe("We fund cardiac fibrosis work.");
+    expect(document.querySelector('[data-slot="matcha-ask"]')).toBeTruthy();
+  });
+
   describe("history scope (§9) and the submitter (§10)", () => {
     function submission(over: Partial<Submission> = {}): Submission {
       return {

@@ -543,6 +543,38 @@ export function MatchaPanel({
   ) {
     if (pending || text.trim().length === 0) return;
     setStatus({ kind: "loading" });
+    // #1991 — THE ASK IS SNAPSHOTTED AT SUBMIT, NOT AT RESOLVE. The card above the results answers
+    // "what are we ranking?", and it was answering with the last thing FOUND: `matchedText` and the
+    // state the card derives from moved only inside `r.ok`, so for the whole in-flight window a
+    // replay from Recent left the previous sponsor's prose, handle and highlights standing over a
+    // skeletoned list. A header that names the wrong ask is worse than no header.
+    //
+    // The response-derived halves travel with the text because each is a fact about the run that
+    // just ENDED: `concepts` are the highlight spans, `titleSummary` the handle, the preference
+    // pair the "· Early-career" chips. Carried onto new text they would mark words that never
+    // produced them. `culled` goes too — the chips derive from it AND `concepts`. Cleared,
+    // `markPaste` returns one unmarked segment and `askTitleFrom` returns undefined, so the card
+    // renders the new paste plain and drops its <h2> until the run lands; both are already guarded.
+    //
+    // Guarded on the text actually CHANGING, which leaves the re-run paths byte-identical: the
+    // Re-run button and an added culled chip both pass `matchedText` straight back in, so the marks
+    // on screen are already this text's marks and blanking them would be a flicker with nothing
+    // behind it. `included` is deliberately NOT cleared — an add re-run's handler has just written
+    // the new set (see `addCulled`), and this would clobber it.
+    //
+    // NOT done by gating `showAskCard` on `pending`: that swaps a committed ask back to the
+    // textarea mid-run and back again, a layout jump for a paste nobody asked to edit. The `r.ok`
+    // branches below re-set `matchedText`/`showFullText` to these same values — a React bail-out,
+    // and each branch stays readable on its own.
+    if (text !== matchedText) {
+      setMatchedText(text);
+      setConcepts([]);
+      setCulled([]);
+      setTitleSummary(undefined);
+      setPreferences([]);
+      setActivePrefs(new Set());
+      setShowFullText(false); // D11 — a new paste starts clamped
+    }
     try {
       const r = await fetch("/api/edit/matcha", {
         method: "POST",
