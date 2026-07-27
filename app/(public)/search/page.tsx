@@ -55,7 +55,10 @@ import {
   CONCEPT_FALLBACK_CAP,
   CONCEPT_FALLBACK_SPARSE_THRESHOLD,
 } from "@/lib/api/search-flags";
-import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
+import {
+  stripDeprioritized,
+  isAllDeprioritized,
+} from "@/lib/api/deprioritized-terms";
 import { isResearchMatchEvidence } from "@/lib/api/result-evidence";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
@@ -76,6 +79,7 @@ import {
   meshMatchTier,
   meshConfidenceRank,
   MESH_RANK_VERBATIM,
+  meshRetryIsSameDescriptorUpgrade,
   AREA_BOOST_TOP_N,
 } from "@/lib/search";
 import { getAreaScholarConcentration } from "@/lib/api/topics";
@@ -260,13 +264,22 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
     meshConfidenceRank(taxonomyMatch.meshResolution?.confidence) < MESH_RANK_VERBATIM
   ) {
     const retry = await matchQueryToTaxonomy(contentQuery);
-    // Strictly better only; a second `partial` must not churn the answer.
-    if (
-      retry.state === "matches" ||
-      meshConfidenceRank(retry.meshResolution?.confidence) >
-        meshConfidenceRank(taxonomyMatch.meshResolution?.confidence)
+    const current = taxonomyMatch.meshResolution;
+    if (current === null || isAllDeprioritized(current.matchedForm)) {
+      // Nothing resolved, or the resolved window was pure filler. Pre-#1972 behavior.
+      if (
+        retry.state === "matches" ||
+        meshConfidenceRank(retry.meshResolution?.confidence) >
+          meshConfidenceRank(current?.confidence)
+      ) {
+        taxonomyMatch = retry;
+      }
+    } else if (
+      // #1972 — the window held real content, so a retry on the stripped query may only
+      // raise its CONFIDENCE, never swap the concept (mirrors /api/search).
+      meshRetryIsSameDescriptorUpgrade(current, retry.meshResolution)
     ) {
-      taxonomyMatch = retry;
+      taxonomyMatch = { ...taxonomyMatch, meshResolution: retry.meshResolution };
     }
   }
 

@@ -823,6 +823,52 @@ export function meshConfidenceRank(
 /** #1972 — a resolution weaker than a verbatim match must not suppress the #692 retry. */
 export const MESH_RANK_VERBATIM = 2;
 
+/**
+ * #1972 — may a #692 generic-strip retry REPLACE a resolution the full query already
+ * produced? Only when it names the SAME descriptor at a strictly higher confidence.
+ *
+ * The retry resolves a SHORTER query, so it can land on a different descriptor than the
+ * full query did. Letting it is a concept SWAP, not an upgrade — and the deprioritized
+ * list contains the very tokens that carry the medical sense (`disease`, `cells`,
+ * `patients`). Measured on deployed staging over 122 `<topic> <generic modifier>`
+ * queries, comparing the guard with and without this constraint:
+ *
+ *   49  same descriptor, higher tier  — `Asthma`/partial → `Asthma`/exact
+ *    9  concept swap, all worse       — `stem cells effects` strips BOTH `cells` and
+ *                                       `effects`, leaving `stem`, which resolves to
+ *                                       `Microscopy, Electron, Scanning Transmission`;
+ *                                       `kidney disease effects` → `Kidney` (the organ);
+ *                                       `health policy effects` → `Policy`
+ *
+ * Confidence-only upgrades are exactly the 49 and none of the 9. They are also safe by
+ * construction for a curated-matched query, since the descriptor cannot change.
+ *
+ * 🔴 This rule applies ONLY when the matched window carried real content. Callers must
+ * first check `isAllDeprioritized(current.matchedForm)`: the window fallback's size-1 arm
+ * requires an exact descriptor NAME, so a lay entry-term topic loses to a filler token
+ * that happens to be one — `cancer research` resolves `Research`/partial, `vaccine safety`
+ * resolves `Safety`/partial, `diabetes prevalence` resolves `Prevalence`/partial (all
+ * measured on staging with the retry neutralised). Those windows carry none of the query's
+ * meaning, and the retry that recovers `Neoplasms` / `Vaccines` / `Diabetes Mellitus` is
+ * the thing keeping head queries correct today. Applying descriptor-equality there would
+ * pin them to the filler descriptor.
+ *
+ * When the full query resolved NOTHING there is no concept to protect and any resolution
+ * beats none — callers keep their pre-#1972 behavior on that arm too.
+ */
+export function meshRetryIsSameDescriptorUpgrade(
+  current: | { descriptorUi: string; confidence: "exact" | "entry-term" | "partial" }
+    | null
+    | undefined,
+  retry: | { descriptorUi: string; confidence: "exact" | "entry-term" | "partial" }
+    | null
+    | undefined,
+): boolean {
+  if (!current || !retry) return false;
+  if (retry.descriptorUi !== current.descriptorUi) return false;
+  return meshConfidenceRank(retry.confidence) > meshConfidenceRank(current.confidence);
+}
+
 // #1254 — concept-only ADMIT weights sit in a deliberate sub-BM25 band. A doc
 // admitted by concept expansion alone (no lexical hit) scores ONLY this constant
 // (the admit `terms` clause is constant-score), so it must stay small enough that
