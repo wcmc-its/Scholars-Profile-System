@@ -1851,6 +1851,17 @@ export class AppStack extends Stack {
         // prereq; flip is env-only via cdk deploy Sps-App-<env> (CD re-rolls the
         // image only) -- the flag-parity rule.
         SEARCH_SHELL_STREAMING: "on", // Prod flipped 2026-07-07 (#861; no data prereq).
+        // #1995 -- ROOT-CAUSE EXPERIMENT, not a feature. Renders the three /search
+        // mode tabs (Scholars / Publications / Funding) as a plain next/link <Link>
+        // instead of a TransitionLink, so a tab switch never routes through the
+        // shared useTransition. Isolates the tab path: facet / sort / pagination
+        // links keep the transition. resolveSearchPlainLinkTabs reads === "on".
+        // STAGING ON / PROD OFF on purpose -- that split IS the A/B (staging plain
+        // vs prod transition) for the intermittent commit hang; the #2002 watchdog
+        // stays in both arms. Render-identical either way (only the click handler
+        // differs). Flip is env-only via cdk deploy Sps-App-<env> (CD re-rolls the
+        // image only) -- the flag-parity rule.
+        SEARCH_PLAIN_LINK_TABS: env === "staging" ? "on" : "off",
         // #878 -- MeSH-concept rows in the autocomplete dropdown. Reuses the
         // results-page MeSH resolver (getMeshMap().byForm: descriptor names + NLM
         // entry terms + #642 aliases) so the dropdown surfaces a "Flow Cytometry

@@ -50,6 +50,7 @@ import {
   resolvePublicationMeshOnlyFilter,
   resolveConceptFallbackSparseEnabled,
   resolveSearchShellStreaming,
+  resolveSearchPlainLinkTabs,
   resolveSearchEvidenceRows,
   computeConceptFallback,
   CONCEPT_FALLBACK_CAP,
@@ -805,6 +806,11 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
     }),
   );
 
+  // SEARCH_PLAIN_LINK_TABS (#1995) — a server env var, so it is resolved HERE in
+  // the server component and threaded to the tabs as a boolean prop; ModeTab
+  // renders the client TransitionLink, which cannot read process.env itself.
+  const plainLinkTabs = resolveSearchPlainLinkTabs();
+
   return (
     <>
       <SearchMeta q={q} taxonomyMatch={taxonomyMatch} />
@@ -830,6 +836,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           pubCount={pubsResult.total}
           fundingCount={fundingResult.total}
           scope={scope}
+          plainLinks={plainLinkTabs}
         />
         {showAZ && azBuckets ? (
           <div className="mx-auto max-w-[1280px] px-6 pt-6">
@@ -1002,6 +1009,7 @@ function ModeTabs({
   pubCount,
   fundingCount,
   scope,
+  plainLinks,
 }: {
   q: string;
   activeType: string;
@@ -1009,6 +1017,8 @@ function ModeTabs({
   pubCount: number;
   fundingCount: number;
   scope: Scope;
+  /** #1995 SEARCH_PLAIN_LINK_TABS — tabs only, bypassing the shared transition. */
+  plainLinks: boolean;
 }) {
   // Carry the active match-scope across tab switches (default `expanded` omitted).
   const tabHref = (t: string) => {
@@ -1026,18 +1036,21 @@ function ModeTabs({
         label="Scholars"
         count={peopleCount}
         active={activeType === "people"}
+        plain={plainLinks}
       />
       <ModeTab
         href={pubHref}
         label="Publications"
         count={pubCount}
         active={activeType === "publications"}
+        plain={plainLinks}
       />
       <ModeTab
         href={fundingHref}
         label="Funding"
         count={fundingCount}
         active={activeType === "funding"}
+        plain={plainLinks}
       />
     </nav>
   );
@@ -1049,17 +1062,20 @@ function ModeTab({
   count,
   active,
   title,
+  plain,
 }: {
   href: string;
   label: string;
   count: number;
   active: boolean;
   title?: string;
+  plain?: boolean;
 }) {
   return (
     <Link
       href={href}
       scroll={false}
+      plain={plain}
       title={title}
       className={`-mb-px inline-flex h-[42px] items-center gap-2 border-b-2 px-4 text-[13px] transition-colors ${
         active
