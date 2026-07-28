@@ -13,6 +13,7 @@ import {
   meshConfidenceRank,
   MESH_RANK_VERBATIM,
   meshRetryIsSameDescriptorUpgrade,
+  meshStripRemovedAtMostHalf,
   AREA_BOOST_TOP_N,
 } from "@/lib/search";
 import { getAreaScholarConcentration } from "@/lib/api/topics";
@@ -116,6 +117,13 @@ async function handleSearch(request: NextRequest) {
   const { contentQuery, removed: genericRemoved } = stripDeprioritized(q);
   const genericStripped = genericTermMode !== "off" && genericRemoved.length > 0;
   const genericDemote = genericTermMode === "on" && genericRemoved.length > 0;
+  // #1980 — did the strip keep enough of the query for its result to be adopted when
+  // NOTHING resolved? Counted off `q` rather than `contentQuery` so the denominator is
+  // what the user actually typed, independent of `stripDeprioritized`'s internals.
+  const stripKeptEnough = meshStripRemovedAtMostHalf(
+    genericRemoved.length,
+    q.trim().split(/\s+/).filter(Boolean).length,
+  );
 
   const meshOnlyResolution = type === "publications" || type === "funding";
   const taxonomyStart = Date.now();
@@ -139,7 +147,13 @@ async function handleSearch(request: NextRequest) {
     if (genericStripped && meshConfidenceRank(mesh?.confidence) < MESH_RANK_VERBATIM) {
       const retry = await resolveMeshDescriptor(contentQuery);
       if (mesh === null || isAllDeprioritized(mesh.matchedForm)) {
-        if (meshConfidenceRank(retry?.confidence) > meshConfidenceRank(mesh?.confidence)) {
+        // #1980 — nothing to compare the retry against on this arm, so an over-aggressive
+        // strip is adopted whatever it names. Require the strip to have kept at least half
+        // the typed tokens.
+        if (
+          stripKeptEnough &&
+          meshConfidenceRank(retry?.confidence) > meshConfidenceRank(mesh?.confidence)
+        ) {
           mesh = retry;
         }
       } else if (meshRetryIsSameDescriptorUpgrade(mesh, retry)) {
@@ -167,10 +181,16 @@ async function handleSearch(request: NextRequest) {
       if (current === null || isAllDeprioritized(current.matchedForm)) {
         // Nothing resolved, or the window that resolved was pure filler and carries none
         // of the query's meaning (`cancer research` → `Research`). Pre-#1972 behavior.
+        // #1980 — same unguarded arm as the mesh-only path above. Gates the WHOLE
+        // adoption, not just its MeSH half: `taxonomyMatch = retry` also swaps in the
+        // curated match, and a strip destructive enough to ruin the descriptor makes the
+        // curated reading of the same wreckage equally suspect. Conservative on purpose —
+        // measurement can relax it to the MeSH arm alone.
         if (
-          retry.state === "matches" ||
-          meshConfidenceRank(retry.meshResolution?.confidence) >
-            meshConfidenceRank(current?.confidence)
+          stripKeptEnough &&
+          (retry.state === "matches" ||
+            meshConfidenceRank(retry.meshResolution?.confidence) >
+              meshConfidenceRank(current?.confidence))
         ) {
           taxonomyMatch = retry;
         }
