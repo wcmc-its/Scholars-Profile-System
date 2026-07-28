@@ -693,11 +693,18 @@ export function selectEvidenceLines(input: SelectEvidenceInput): ResultEvidence[
   // `methodFamilyCounts` map ⇒ no `method.count` ⇒ nothing to compare, and inferring
   // an order from an absent number is exactly the fabrication this change exists to
   // remove. Missing either side ⇒ today's method-first order, unchanged.
+  // A TIE GOES TO THE TAGGED CONCEPT (`<=`, not `<`). Measured on staging: Szilard Kiss
+  // matched `gene therapy` with method 3 and tagged 3, so a strict `<` left the method
+  // line leading — advertising 3 AAV-vector papers as the reason, while the concept the
+  // user actually typed sat in "Also matched" at the same magnitude. When the two counts
+  // say the same thing, the tiebreak should go to the line whose denominator means the
+  // same on every card (`pubCount`) and whose subject IS the query's descriptor; a method
+  // family is a research-reagent detail underneath it.
   const methodCount = input.method?.count;
   const taggedCount = input.pub?.tagged?.count;
-  const taggedOutnumbersMethod =
-    methodCount != null && taggedCount != null && methodCount < taggedCount;
-  if (methodLine && taggedLine && taggedOutnumbersMethod) {
+  const taggedAtLeastMethod =
+    methodCount != null && taggedCount != null && methodCount <= taggedCount;
+  if (methodLine && taggedLine && taggedAtLeastMethod) {
     lines.push(taggedLine, methodLine);
   } else {
     if (methodLine) lines.push(methodLine);

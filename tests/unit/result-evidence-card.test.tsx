@@ -166,17 +166,18 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(container.innerHTML).not.toContain("--evidence-accent");
     // …and the CountFirst dim gate, which is a SEPARATE line from the inline one above:
     // without this, dropping `dim ?` in CountFirst survives the whole suite green.
-    const method = render(
+    // `topic`, not `method`: this exercises the CountFirst dim gate, and a method line no
+    // longer renders a % (its denominator is not this column's kind), so it could not carry
+    // the "it really is dim" assertion. Topic goes through the same CountFirst path.
+    const topic = render(
       <ResultEvidence
-        evidence={{ kind: "method", family: "Mass spectrometry", tools: [], count: 1 }}
+        evidence={{ kind: "topic", label: "Mass spectrometry", id: "mass_spec", count: 1 }}
         pubCount={538}
-        // 1 of 538 METHOD-INDEXED pubs — the % and the dim both read this, not `pubCount`.
-        methodPubCount={538}
         stacked
       />,
     );
-    expect(method.container.textContent).toMatch(/0\.2%/); // it really is dim
-    expect(method.container.innerHTML).not.toContain("--evidence-accent");
+    expect(topic.container.textContent).toMatch(/0\.2%/); // it really is dim
+    expect(topic.container.innerHTML).not.toContain("--evidence-accent");
   });
 
   it("#1391 — clinical primary ⇒ 'Clinical' type word + underlined specialty, NO count", () => {
@@ -1294,8 +1295,34 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
     );
     expect(container.textContent).not.toMatch(/of output/);
     expect(container.textContent).not.toMatch(/term match only/);
-    // and the percentage is on the row, as the column's value.
-    expect(screen.getByText("0.2%")).toBeTruthy();
+    // …and the percentage is NOT on the row. The dim still reads `methodPubCount` (a
+    // within-card judgement — "is this lead thin?" — with no cross-card frame), but the
+    // COLUMN is a cross-card comparison device and takes only `pubCount`-based shares. Same
+    // number, two uses, one of them safe. See the `coverage` comment in result-evidence.tsx.
+    expect(container.querySelector(".tabular-nums")).toBeNull();
+    expect(container.textContent).not.toMatch(/%/);
+  });
+
+  it("a method primary NEVER puts a % in the shared column, however healthy its coverage", () => {
+    // The regression this pins, measured on staging for `gene therapy`: Crystal led Concept
+    // 140/923 = 15.2%, Kiss led Method 3/13 = 23.1%, Kaplitt led Concept 34/151 = 22.5%.
+    // The column is one fixed cell per card, so it reads as one scale — and it announced
+    // that Kiss's THREE publications beat Crystal's HUNDRED AND FORTY. A method share is a
+    // share of the method-indexed pool, not of output, so it does not belong in that column.
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "AAV gene-therapy vectors", tools: [], count: 3 }}
+        pubCount={157}
+        methodPubCount={13} // 3/13 = 23.1% — healthy, and still not column material
+        stacked
+      />,
+    );
+    expect(container.querySelector(".tabular-nums")).toBeNull();
+    expect(container.textContent).not.toMatch(/23\.1%/);
+    expect(container.textContent).not.toMatch(/of this scholar’s output/);
+    // The ratio is NOT lost — it moves into the sentence, where the base is stated in words
+    // and cannot be read off against a neighbouring card's cell.
+    expect(container.textContent).toMatch(/3 of 13 method-indexed publications used/);
   });
 
   it("#1912 — the NON-dim phrase body renders on the AA ramp, never the retired literals", () => {
@@ -1442,9 +1469,8 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
   it("a coverage that rounds below 0.1% displays '<0.1%' rather than a lying '0.0%'", () => {
     render(
       <ResultEvidence
-        evidence={{ kind: "method", family: "Imaging mass cytometry", tools: [], count: 1 }}
+        evidence={{ kind: "topic", label: "Imaging mass cytometry", id: "imc", count: 1 }}
         pubCount={3000}
-        methodPubCount={3000}
         stacked
       />,
     );
@@ -1487,9 +1513,8 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
   it("uniform fold rule — a normal-coverage primary is NOT dimmed but STILL shows its %", () => {
     const { container } = render(
       <ResultEvidence
-        evidence={{ kind: "method", family: "Flow cytometry", tools: [], count: 4 }}
+        evidence={{ kind: "topic", label: "Flow cytometry", id: "flow_cyt", count: 4 }}
         pubCount={98}
-        methodPubCount={98}
         stacked
       />,
     );
@@ -1523,9 +1548,8 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
     // being INSIDE the button is what puts it in the accessible name.
     render(
       <ResultEvidence
-        evidence={{ kind: "method", family: "Flow cytometry", tools: [], count: 4 }}
+        evidence={{ kind: "topic", label: "Flow cytometry", id: "flow_cyt", count: 4 }}
         pubCount={98}
-        methodPubCount={98}
         stacked
         canExpand
         onToggle={() => {}}
@@ -1567,9 +1591,8 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
     // the number that explains why. This is a one-token change away from regressing.
     render(
       <ResultEvidence
-        evidence={{ kind: "method", family: "Mass spectrometry", tools: [], count: 1 }}
+        evidence={{ kind: "topic", label: "Mass spectrometry", id: "mass_spec", count: 1 }}
         pubCount={538}
-        methodPubCount={538}
         stacked
       />,
     );
@@ -1851,19 +1874,28 @@ describe("<ResultEvidence> — the primary lead degrades instead of collapsing o
     const { container } = renderTagged();
     expect(screen.getByText("12.2%")).toBeTruthy();
     expect(container.textContent).toMatch(/12 of 98 publications tagged/);
-    // Same for the method/topic leads, which build the phrase through `CountFirst`. The
-    // licence is stronger for method, not weaker: the % and the "of M" are computed from
-    // the SAME `methodPubCount`, so they are absent together and present together — the
-    // hidden column can never round a ratio the phrase does not also state.
-    const method = render(
+    // Same for the topic lead, which builds its phrase through `CountFirst`.
+    const topic = render(
       <ResultEvidence
-        evidence={{ kind: "method", family: "Flow cytometry", tools: [], count: 4 }}
+        evidence={{ kind: "topic", label: "Flow cytometry", id: "flow_cyt", count: 4 }}
         pubCount={98}
-        methodPubCount={98}
         stacked
       />,
     );
     expect(screen.getByText("4.1%")).toBeTruthy();
+    expect(topic.container.textContent).toMatch(/4 of 98 publications in/);
+    // METHOD is licensed differently and more strongly: it renders NO column at all, so
+    // there is no hidden ratio to lose on a narrow viewport. Its share lives only in the
+    // sentence, at every width.
+    const method = render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "Flow cytometry", tools: [], count: 4 }}
+        pubCount={900}
+        methodPubCount={98}
+        stacked
+      />,
+    );
+    expect(method.container.querySelector(".tabular-nums")).toBeNull();
     expect(method.container.textContent).toMatch(/4 of 98 method-indexed publications used/);
   });
 

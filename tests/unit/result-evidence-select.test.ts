@@ -965,10 +965,17 @@ describe("selectEvidenceLines — method ⇄ tagged order by magnitude", () => {
     expect(kinds(withCounts(11))).toEqual(["pub:tagged", "method", "topic"]);
   });
 
-  it("method.count >= tagged.count ⇒ method stays first (today's order)", () => {
+  it("method.count > tagged.count ⇒ method stays first", () => {
     expect(kinds(withCounts(200))).toEqual(["method", "pub:tagged", "topic"]);
-    // EQUAL is not "outnumbers" — a tie must not disturb the shipped order.
-    expect(kinds(withCounts(140))).toEqual(["method", "pub:tagged", "topic"]);
+  });
+
+  it("a TIE goes to the tagged concept, not to method", () => {
+    // Measured on staging: Szilard Kiss matched `gene therapy` with method 3 and tagged 3,
+    // and a strict `<` left the method line leading — advertising 3 AAV-vector papers while
+    // the descriptor the user actually typed sat in "Also matched" at the same magnitude.
+    // When the counts say the same thing, the tiebreak goes to the line whose denominator
+    // means the same on every card and whose subject IS the query's concept.
+    expect(kinds(withCounts(140))).toEqual(["pub:tagged", "method", "topic"]);
   });
 
   it("method.count MISSING ⇒ order unchanged — an absent number decides nothing", () => {

@@ -318,8 +318,29 @@ export function ResultEvidence({
   // `count: input.pub.tagged.count` and `count: input.pub.mention.count`), so without the
   // gate the % column would render on the frozen surface. `method`, `topic` and `concept`
   // are the ones that arrive there without a count. Do not "simplify" the gate away.
+  // …BUT A METHOD LINE PUTS NOTHING IN THIS COLUMN. The column is a FIXED cell in the
+  // same position, size and typeface on every card, which makes it a CROSS-CARD
+  // comparison device whether or not it was meant as one — a searcher scans it down the
+  // page. That only works if every cell divides by the same KIND of denominator. Method's
+  // is the method-indexed pool; every other kind's is `pubCount`. Measured on staging for
+  // `gene therapy`: Crystal led Concept 140/923 = 15.2%, Kiss led Method 3/13 = 23.1%,
+  // Kaplitt led Concept 34/151 = 22.5% — so the column announced that Kiss's THREE
+  // publications beat Crystal's HUNDRED AND FORTY. Two pipelines, one frame, again.
+  //
+  // The share is not lost, it moves into the sentence, where the base is stated in words
+  // ("3 of 13 method-indexed publications") and cannot be read off against a neighbour's
+  // cell. Withholding the cell is the honest option because this column's own contract,
+  // stated above, is "% of this scholar's OUTPUT" — which a method ratio is not.
+  //
+  // `lowCoverage` above deliberately KEEPS the method denominator: dimming asks "is this
+  // lead thin?", which is a within-card judgement with no cross-card frame, and 3 of 13
+  // method-indexed is genuinely not thin. Same number, two uses, only one of them safe.
   const coverage =
-    stacked && primaryCount != null && denominator != null && denominator > 0
+    stacked &&
+    evidence.kind !== "method" &&
+    primaryCount != null &&
+    denominator != null &&
+    denominator > 0
       ? coveragePct(primaryCount, denominator)
       : undefined;
 
