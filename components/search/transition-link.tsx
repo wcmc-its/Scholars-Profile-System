@@ -164,14 +164,6 @@ export function SearchTransitionProvider({ children }: { children: ReactNode }) 
 
 type TransitionLinkProps = Omit<ComponentProps<typeof Link>, "href"> & {
   href: string;
-  /**
-   * #1995 experiment (SEARCH_PLAIN_LINK_TABS, server-resolved and threaded in
-   * from the /search page). Renders a plain next/link <Link> — the click is left
-   * to Next's own handler, so this link never touches the shared transition or
-   * router.push. Set only on the three mode tabs; facet / sort / pagination
-   * links leave it unset.
-   */
-  plain?: boolean;
 };
 
 /**
@@ -181,7 +173,7 @@ type TransitionLinkProps = Omit<ComponentProps<typeof Link>, "href"> & {
  * SearchTransitionProvider it still navigates — just without shared pending
  * state.
  */
-export function TransitionLink({ href, onClick, scroll, plain, ...rest }: TransitionLinkProps) {
+export function TransitionLink({ href, onClick, scroll, ...rest }: TransitionLinkProps) {
   const ctx = useContext(SearchTransitionContext);
   const router = useRouter();
 
@@ -196,5 +188,5 @@ export function TransitionLink({ href, onClick, scroll, plain, ...rest }: Transi
     else router.push(href, options);
   }
 
-  return <Link href={href} scroll={scroll} onClick={plain ? onClick : handleClick} {...rest} />;
+  return <Link href={href} scroll={scroll} onClick={handleClick} {...rest} />;
 }

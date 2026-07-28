@@ -20,7 +20,6 @@ import {
   resolvePeopleMethodFamilyBoost,
   resolvePeopleMethodContextBoost,
   resolveSearchShellStreaming,
-  resolveSearchPlainLinkTabs,
   resolveSearchPeopleDivisionShape,
   resolveSearchPeopleFacultyProminence,
   resolvePeopleTopicPhraseBoost,
@@ -509,30 +508,6 @@ describe("resolveSearchShellStreaming (#861)", () => {
     expect(resolveSearchShellStreaming()).toBe(false);
     process.env.SEARCH_SHELL_STREAMING = "";
     expect(resolveSearchShellStreaming()).toBe(false);
-  });
-});
-
-describe("resolveSearchPlainLinkTabs (#1995)", () => {
-  const original = process.env.SEARCH_PLAIN_LINK_TABS;
-  beforeEach(() => {
-    delete process.env.SEARCH_PLAIN_LINK_TABS;
-  });
-  afterEach(() => {
-    if (original === undefined) delete process.env.SEARCH_PLAIN_LINK_TABS;
-    else process.env.SEARCH_PLAIN_LINK_TABS = original;
-  });
-
-  it("defaults to false when unset (tabs keep today's TransitionLink)", () => {
-    expect(resolveSearchPlainLinkTabs()).toBe(false);
-  });
-
-  it("is true only for exactly 'on'", () => {
-    process.env.SEARCH_PLAIN_LINK_TABS = "on";
-    expect(resolveSearchPlainLinkTabs()).toBe(true);
-    process.env.SEARCH_PLAIN_LINK_TABS = "ON";
-    expect(resolveSearchPlainLinkTabs()).toBe(false);
-    process.env.SEARCH_PLAIN_LINK_TABS = "off";
-    expect(resolveSearchPlainLinkTabs()).toBe(false);
   });
 });
 

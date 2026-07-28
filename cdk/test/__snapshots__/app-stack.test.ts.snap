@@ -675,10 +675,6 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
-                "Name": "SEARCH_PLAIN_LINK_TABS",
-                "Value": "off",
-              },
-              {
                 "Name": "SEARCH_SUGGEST_MESH_CONCEPT",
                 "Value": "off",
               },
@@ -4538,10 +4534,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_SHELL_STREAMING",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_PLAIN_LINK_TABS",
                 "Value": "on",
               },
               {
