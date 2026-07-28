@@ -62,6 +62,7 @@ const CONSOLE_LINK_ICON: Record<ConsoleLink["id"], LucideIcon> = {
   "manage-profiles": UsersIcon,
   methods: FlaskConicalIcon,
   units: Building2Icon,
+  "scoped-scholars": UsersIcon,
 };
 
 export type AccountMenuProps = {

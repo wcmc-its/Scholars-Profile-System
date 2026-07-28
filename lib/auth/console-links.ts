@@ -23,8 +23,11 @@
  *     URL registry / Administrators / Method Families / Funding matcher), so the
  *     dropdown stays short — it routes them to the console, not to every tab.
  *   - **comms_steward** (not a superuser) → "Method Families" (`/edit/methods`).
- *   - **Unit Owner / Curator** (not a superuser) → "Units you manage"
- *     (`/edit/units`).
+ *   - **Unit Owner / Curator** (not a superuser) → "Scholars you can edit"
+ *     (`/edit/data-quality`, their unit-scoped roster) then "Org units"
+ *     (`/edit/units`). People first: the roster is what they sign in to do, and
+ *     it was previously reachable only as a tab *inside* `/edit/units` under a
+ *     name ("Data quality") that reads as an admin metric, not as their people.
  *
  * A viewer holding several non-superuser roles gets several links. The list is
  * profile-independent: a steward or unit admin with no `Scholar` row still gets
@@ -34,7 +37,7 @@
 /** One console destination the viewer may open, rendered as a dropdown row. */
 export type ConsoleLink = {
   /** Stable id — drives the React key, the row `data-testid`, and the icon map. */
-  id: "manage-profiles" | "methods" | "units";
+  id: "manage-profiles" | "methods" | "units" | "scoped-scholars";
   label: string;
   href: string;
 };
@@ -53,6 +56,11 @@ export type ConsoleLinkVerdicts = {
   /** The viewer holds ≥1 direct `unit_admin` grant
    *  (`loadManageableUnits(...).total > 0`). */
   managesUnits: boolean;
+  /** `EDIT_DATA_QUALITY_DASHBOARD` on AND the viewer holds ≥1 `unit_admin`
+   *  grant — i.e. `/edit/data-quality` will render them a non-empty, scoped
+   *  roster rather than 404. The flag is folded in by the caller (this module
+   *  stays env-free), exactly as `canManageMethods` folds in COMMS_STEWARD. */
+  canBrowseScopedScholars: boolean;
 };
 
 /**
@@ -81,6 +89,15 @@ export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
   } else {
     if (v.canManageMethods) {
       links.push({ id: "methods", label: "Method families", href: "/edit/methods" });
+    }
+    // PEOPLE BEFORE UNITS. A unit Owner/Curator's own words for what they came to
+    // do are "the people I edit", not "the org unit I administer" — and until this
+    // row existed their only door was "Org units", from which the scoped roster is
+    // a tab named "Data quality". The surface is unchanged (`/edit/data-quality`
+    // already scopes to the viewer's units and deep-links each row into
+    // `/edit/scholar/[cwid]`); this just names it after what it is to them.
+    if (v.canBrowseScopedScholars) {
+      links.push({ id: "scoped-scholars", label: "Scholars you can edit", href: "/edit/data-quality" });
     }
     if (v.managesUnits) {
       links.push({ id: "units", label: "Org units", href: "/edit/units" });

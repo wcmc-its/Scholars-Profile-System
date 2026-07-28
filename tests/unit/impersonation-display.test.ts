@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   pickDisplayGrant,
+  summarizeUnitAdminGrants,
   resolveImpersonationDisplay,
   type ImpersonationDisplayClient,
 } from "@/lib/edit/impersonation-display";
@@ -102,5 +103,78 @@ describe("resolveImpersonationDisplay", () => {
       "Home Dept",
     );
     expect(out).toEqual({ role: "owner", unitKind: "division", unit: "Home Dept" });
+  });
+});
+
+/**
+ * The unit-admin pass of `/api/impersonation/candidates`: a superuser searching
+ * "View as" for an org-unit administrator who has NO `Scholar` row of their own.
+ * Before this, the route enumerated `Scholar` rows only (plus a comms_steward
+ * allowlist), so an administrative-staff curator — a real prod case, adm001 on
+ * Pediatrics — was unfindable no matter what was typed.
+ */
+describe("summarizeUnitAdminGrants", () => {
+  const row = (
+    cwid: string,
+    entityType: string,
+    entityId: string,
+    role: "owner" | "curator" = "curator",
+    granteeName: string | null = null,
+  ) => ({ cwid, granteeName, entityType, entityId, role });
+
+  it("reduces several grants for one person to a single most-privileged subject", () => {
+    const out = summarizeUnitAdminGrants([
+      row("adm001", "department", "DEPT1", "curator", "Alex Rivera"),
+      row("adm001", "center", "CTSC", "owner"),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].cwid).toBe("adm001");
+    expect(out[0].granteeName).toBe("Alex Rivera");
+    // owner beats curator regardless of row order.
+    expect(out[0].top).toEqual({ role: "owner", entityType: "center", entityId: "CTSC" });
+  });
+
+  it("keeps a granteeName found on a LATER row (the first may predate the ED pull)", () => {
+    const out = summarizeUnitAdminGrants([
+      row("adm001", "department", "DEPT1"),
+      row("adm001", "division", "DIV1", "curator", "Alex Rivera"),
+    ]);
+    expect(out[0].granteeName).toBe("Alex Rivera");
+  });
+
+  it("excludes anyone the scholar pass already emitted, case-insensitively", () => {
+    const out = summarizeUnitAdminGrants(
+      [row("ABC123", "department", "DEPT1"), row("xyz789", "division", "DIV1")],
+      new Set(["abc123"]),
+    );
+    expect(out.map((s) => s.cwid)).toEqual(["xyz789"]);
+  });
+
+  it("groups case-variant CWIDs as ONE person, preserving the stored casing", () => {
+    const out = summarizeUnitAdminGrants([
+      row("ADM001", "department", "DEPT1"),
+      row("adm001", "division", "DIV1"),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].cwid).toBe("ADM001");
+  });
+
+  it("reports top=null for a grant on no org unit, so the route can drop them", () => {
+    const out = summarizeUnitAdminGrants([row("odd001", "scholar", "someone")]);
+    expect(out[0].top).toBeNull();
+  });
+
+  it("is stable in first-appearance order (the popover must not reshuffle)", () => {
+    const out = summarizeUnitAdminGrants([
+      row("ccc", "department", "A"),
+      row("aaa", "department", "B"),
+      row("bbb", "department", "C"),
+      row("aaa", "center", "D", "owner"),
+    ]);
+    expect(out.map((s) => s.cwid)).toEqual(["ccc", "aaa", "bbb"]);
+  });
+
+  it("returns [] for no rows", () => {
+    expect(summarizeUnitAdminGrants([])).toEqual([]);
   });
 });

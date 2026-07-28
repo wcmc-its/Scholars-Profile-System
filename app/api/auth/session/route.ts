@@ -6,10 +6,12 @@ import { isCommsSteward, isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { buildConsoleLinks, type ConsoleLink } from "@/lib/auth/console-links";
 import { impersonationActive } from "@/lib/auth/effective-identity";
 import {
+  pickDisplayGrant,
   resolveImpersonationDisplay,
   type ImpersonationUnitKind,
 } from "@/lib/edit/impersonation-display";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
+import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { db } from "@/lib/db";
 
 /**
@@ -123,14 +125,20 @@ export async function GET(): Promise<NextResponse> {
       isSuperuser: true,
       canManageMethods: false,
       managesUnits: false,
+      canBrowseScopedScholars: false,
     });
   } else {
     const commsSteward = await isCommsSteward(session.cwid).catch(() => false);
     const manageable = await loadManageableUnits(session.cwid, db.read).catch(() => null);
+    const managesUnits = manageable !== null && manageable.total > 0;
     consoleLinks = buildConsoleLinks({
       isSuperuser: false,
       canManageMethods: isMethodsTabVisible({ isSuperuser: false, isCommsSteward: commsSteward }),
-      managesUnits: manageable !== null && manageable.total > 0,
+      managesUnits,
+      // Same grants that earn the "Org units" row also earn the scoped roster,
+      // so this costs no extra lookup — only the flag, folded in here to keep
+      // `buildConsoleLinks` env-free. Flag off ⇒ the route 404s ⇒ no row.
+      canBrowseScopedScholars: isDataQualityDashboardEnabled() && managesUnits,
     });
   }
 
@@ -182,6 +190,45 @@ export async function GET(): Promise<NextResponse> {
         unit: null,
         startedAt: session.impersonating.startedAt,
       };
+    } else {
+      // A profile-less ORG-UNIT admin target (#540 / Amendment 4) — the same
+      // stranding hazard the steward branch above exists to prevent, for the
+      // other role that legitimately has no Scholar row. Leaving this null would
+      // render no amber banner and therefore no "Return to my view" exit, so the
+      // superuser would be silently stuck acting as someone else until the TTL
+      // expired. Name/unit come from `resolveImpersonationDisplay`'s own inputs:
+      // the grant rows (`granteeName` for the human, resolved at ed-admins pull
+      // time since the app runtime cannot reach LDAP, #443).
+      const grants = await db.read.unitAdmin
+        .findMany({
+          where: { cwid: targetCwid },
+          select: { granteeName: true, entityType: true, entityId: true, role: true },
+        })
+        .catch(
+          () =>
+            [] as Array<{
+              granteeName: string | null;
+              entityType: string;
+              entityId: string;
+              role: "owner" | "curator";
+            }>,
+        );
+      const top = pickDisplayGrant(grants);
+      if (top) {
+        const display = await resolveImpersonationDisplay(targetCwid, db.read, null).catch(() => ({
+          role: top.role,
+          unitKind: top.entityType as ImpersonationUnitKind | null,
+          unit: null as string | null,
+        }));
+        impersonating = {
+          targetCwid,
+          targetName: grants.find((g) => g.granteeName)?.granteeName ?? targetCwid,
+          role: display.role,
+          unitKind: display.unitKind,
+          unit: display.unit,
+          startedAt: session.impersonating.startedAt,
+        };
+      }
     }
     // else: the target vanished (departed / invalid) — leave `impersonating`
     // null, exactly as before.

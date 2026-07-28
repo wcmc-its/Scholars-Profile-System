@@ -90,6 +90,67 @@ export function pickDisplayGrant(
   })[0];
 }
 
+/** One profile-less unit administrator, reduced from their `unit_admin` rows. */
+export type UnitAdminSubject = {
+  /** As stored (original case) — the display/POST value, not the dedupe key. */
+  cwid: string;
+  /** `UnitAdmin.granteeName` from any of their rows, or `null` if none carries
+   *  one (the ed-admins pull had no LDAP reachability yet — #443). */
+  granteeName: string | null;
+  /** Their most-privileged org-unit grant; `null` if they hold none. */
+  top: DisplayGrant | null;
+};
+
+/**
+ * Reduce raw `unit_admin` rows to ONE subject per CWID — the shared core of the
+ * candidates route's unit-admin pass (a superuser searching "View as" for an
+ * administrator who has no `Scholar` row of their own).
+ *
+ * Case-insensitive on CWID, since `unit_admin.cwid`, `scholar.cwid` and the
+ * session CWID are not guaranteed to agree on case; `exclude` is matched on the
+ * same lowercased key so an admin already listed by the scholar pass is not
+ * emitted twice. Order is stable (first appearance) so the popover does not
+ * reshuffle between identical queries. Pure — no I/O — so the grouping rule is
+ * testable without stubbing Prisma or LDAP.
+ */
+export function summarizeUnitAdminGrants(
+  rows: ReadonlyArray<{
+    cwid: string;
+    granteeName: string | null;
+    entityType: string;
+    entityId: string;
+    role: "owner" | "curator";
+  }>,
+  exclude: ReadonlySet<string> = new Set(),
+): UnitAdminSubject[] {
+  const excluded = new Set([...exclude].map((c) => c.toLowerCase()));
+  const order: string[] = [];
+  const grouped = new Map<string, { cwid: string; granteeName: string | null; rows: typeof rows }>();
+  for (const row of rows) {
+    const key = row.cwid.toLowerCase();
+    if (excluded.has(key)) continue;
+    const existing = grouped.get(key);
+    if (existing) {
+      (existing.rows as Array<(typeof rows)[number]>).push(row);
+      existing.granteeName ??= row.granteeName;
+    } else {
+      order.push(key);
+      grouped.set(key, { cwid: row.cwid, granteeName: row.granteeName, rows: [row] });
+    }
+  }
+  return order.map((key) => {
+    const g = grouped.get(key)!;
+    // `pickDisplayGrant` returns the winning ROW as-is, which here still carries
+    // `cwid`/`granteeName`; narrow it to exactly the three `DisplayGrant` fields
+    // so the extras can never ride along into a response body.
+    const won = pickDisplayGrant(g.rows);
+    const top: DisplayGrant | null = won
+      ? { role: won.role, entityType: won.entityType, entityId: won.entityId }
+      : null;
+    return { cwid: g.cwid, granteeName: g.granteeName, top };
+  });
+}
+
 async function resolveUnitName(
   client: ImpersonationDisplayClient,
   kind: ImpersonationUnitKind,
