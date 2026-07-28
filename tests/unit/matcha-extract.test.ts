@@ -283,7 +283,7 @@ describe("extractMatchaConcepts", () => {
       };
     };
 
-    it("unwraps a JSON-string `concepts` into the array it should have been", async () => {
+    it("shape 1: unwraps a quoted ARRAY into the array it should have been", async () => {
       const schema = await capturedSchema();
       const parsed = schema.parse({
         concepts: JSON.stringify([
@@ -296,6 +296,20 @@ describe("extractMatchaConcepts", () => {
         "clinical decision support systems",
         "machine learning",
       ]);
+    });
+
+    // The shape that made the first fix only half a fix. Verbatim structure of a live Bedrock
+    // response: the model put the whole object BODY inside the string, so the string is not valid
+    // JSON on its own — only as the tail of an object. Handling shape 1 alone measured 4/10 -> 6/10
+    // against real Bedrock; both shapes took it to 10/10.
+    it("shape 2: re-wraps a quoted object BODY, recovering titleSummary too", async () => {
+      const schema = await capturedSchema();
+      const parsed = schema.parse({
+        concepts:
+          '[\n  {\n    "term": "clinical decision support systems",\n    "kind": "method",\n    "centrality": 1.0\n  }\n],\n"titleSummary": "machine learning and AI for clinical decision support"',
+      }) as { concepts: { term: string }[]; titleSummary?: string };
+      expect(parsed.concepts.map((c) => c.term)).toEqual(["clinical decision support systems"]);
+      expect(parsed.titleSummary).toBe("machine learning and AI for clinical decision support");
     });
 
     it("still accepts a plain array — the normal path is untouched", async () => {
