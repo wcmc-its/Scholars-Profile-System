@@ -375,13 +375,12 @@ describe("manual-only mentee co-pubs from local Aurora (#2011)", () => {
     ];
   }
 
-  function publications(): unknown[] {
-    const years: Record<string, number> = { "3001": 2023, "3002": 2021, "3003": 2019, "3004": 2018 };
-    return SHARED.map((pmid) => ({
+  function pub(pmid: string, year: number): unknown {
+    return {
       pmid,
       title: `Paper ${pmid}`,
       journal: "J Synth",
-      year: years[pmid],
+      year,
       doi: null,
       pmcid: null,
       volume: null,
@@ -390,7 +389,22 @@ describe("manual-only mentee co-pubs from local Aurora (#2011)", () => {
       citationCount: 7,
       abstract: null,
       fullAuthorsString: "Ellis R, Okafor S",
-    }));
+    };
+  }
+
+  /** The SHARED four PLUS the two solo pmids. Hydrating the solo ones too is
+   *  deliberate: if the publication fixture covered only the intersection, a
+   *  broken intersection would still yield 4 rows here and the test would pass
+   *  on the fixture's shape rather than on the logic. */
+  function publications(): unknown[] {
+    return [
+      pub("3001", 2023),
+      pub("3002", 2021),
+      pub("3003", 2019),
+      pub("3004", 2018),
+      pub("3999", 2022),
+      pub("3888", 2020),
+    ];
   }
 
   /** `suppression.findMany` serves two callers with one accessor — the
@@ -509,6 +523,12 @@ describe("manual-only mentee co-pubs from local Aurora (#2011)", () => {
       { cwid: MENTOR, pmid: "SCOPUS:105037533819" },
       { cwid: MANUAL, pmid: "SCOPUS:105037533819" },
     ] as never);
+    // The publication row must exist too, or the guard is never reached and this
+    // test passes on a missing fixture instead of on the guard.
+    publicationFindMany.mockResolvedValue([
+      pub("3001", 2023),
+      pub("SCOPUS:105037533819", 2022),
+    ] as never);
 
     const page = await getCoPublications(MENTOR, MANUAL, { manualOnly: true });
 
@@ -537,6 +557,20 @@ describe("manual-only mentee co-pubs from local Aurora (#2011)", () => {
 
   it("still 404s a cwid the mentor never entered — the gate is not weakened", async () => {
     expect(await getMentorMenteePair(MENTOR, "nope999")).toBeNull();
+  });
+
+  it("serves the same rows for a MIXED-CASE url segment the 404 gate already admits", async () => {
+    // Stored cwids are lowercase and nothing normalizes the URL segment, so the
+    // pair gate accepts /co-pubs/MAN2001. The co-pub lookup has to accept it
+    // too, or the page renders its heading over an empty list. MySQL's ci
+    // collation matches the row but returns the STORED spelling, so the JS-side
+    // grouping is where the two can drift.
+    const upper = MANUAL.toUpperCase();
+    const pair = await getMentorMenteePair(MENTOR, upper);
+    expect(pair?.manualOnly).toBe(true);
+
+    const page = await getCoPublications(MENTOR, upper, { manualOnly: true });
+    expect(page.map((p) => p.pmid)).toEqual([3001, 3002, 3003, 3004]);
   });
 
   it("reports manualOnly FALSE once a source also carries the cwid, keeping it on the bridge", async () => {

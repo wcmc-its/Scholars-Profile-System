@@ -324,7 +324,9 @@ async function localCoPublications(
   menteeCwids: string[],
 ): Promise<Map<string, CoPublicationFull[]>> {
   const out = new Map<string, CoPublicationFull[]>();
-  const targets = [...new Set(menteeCwids)].filter((c) => c && c !== mentorCwid);
+  const targets = [...new Set(menteeCwids)].filter(
+    (c) => c && c.toLowerCase() !== mentorCwid.toLowerCase(),
+  );
   if (!mentorCwid || targets.length === 0) return out;
 
   try {
@@ -335,20 +337,31 @@ async function localCoPublications(
       where: { cwid: { in: [mentorCwid, ...targets] }, isConfirmed: true },
       select: { cwid: true, pmid: true },
     });
+    // Key the grouping case-INSENSITIVELY. The `IN (...)` filter matches under
+    // MySQL's utf8mb4_unicode_ci collation but returns the STORED spelling, so a
+    // Map keyed on the row's cwid and read with the caller's string silently
+    // misses whenever they differ in case — and they can: `getMentorMenteePair`
+    // admits a mixed-case URL segment (nothing normalizes it on the way in), so
+    // /co-pubs/ABC1001 would resolve its heading and then render zero rows.
+    // `out` and `sharedByCwid` stay keyed on the CALLER's string, because
+    // `getMenteesForMentor` looks results up by its own chip cwid.
     const pmidsByCwid = new Map<string, Set<string>>();
     for (const r of rows) {
       if (!r.cwid) continue;
-      let set = pmidsByCwid.get(r.cwid);
-      if (!set) pmidsByCwid.set(r.cwid, (set = new Set<string>()));
+      const key = r.cwid.toLowerCase();
+      let set = pmidsByCwid.get(key);
+      if (!set) pmidsByCwid.set(key, (set = new Set<string>()));
       set.add(r.pmid);
     }
-    const mentorPmids = pmidsByCwid.get(mentorCwid);
+    const mentorPmids = pmidsByCwid.get(mentorCwid.toLowerCase());
     if (!mentorPmids || mentorPmids.size === 0) return out;
 
     const sharedByCwid = new Map<string, string[]>();
     const allShared = new Set<string>();
     for (const cwid of targets) {
-      const shared = [...(pmidsByCwid.get(cwid) ?? [])].filter((p) => mentorPmids.has(p));
+      const shared = [...(pmidsByCwid.get(cwid.toLowerCase()) ?? [])].filter((p) =>
+        mentorPmids.has(p),
+      );
       if (shared.length === 0) continue;
       sharedByCwid.set(cwid, shared);
       for (const p of shared) allShared.add(p);
