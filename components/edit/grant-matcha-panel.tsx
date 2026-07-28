@@ -65,7 +65,10 @@ const FACULTY_STAGES: readonly CareerStage[] = ["early", "mid", "senior"];
  * 🔴 #1919's topic-agnostic case is deliberately NOT here — the signal it proposed does not exist
  * in the corpus. See the note in `lib/funding/screening.ts`.
  */
-export function askNote(full: { eligibilityFlags?: unknown; eligibility?: unknown }): string | null {
+export function askNote(full: {
+  eligibilityFlags?: unknown;
+  eligibility?: unknown;
+}): string | null {
   if (!facultyPiMayHold(full.eligibilityFlags, full.eligibility)) {
     // §6: name the rule AND the field value that triggered it.
     const stages = careerStagesOf(full.eligibility)
@@ -94,6 +97,7 @@ function asStringArray(v: unknown): string[] {
 export function requirementsFrom(
   eligibilityFlags: unknown,
   eligibility: unknown,
+  eligibilityRaw?: unknown,
 ): EligibilityRequirements {
   const flags = asStringArray(eligibilityFlags);
   const map =
@@ -107,10 +111,16 @@ export function requirementsFrom(
   if (flags.includes("faculty_eligible")) allowed.push(...FACULTY_STAGES);
   if (flags.includes("postdoc_eligible")) allowed.push("postdoc");
 
+  // The sponsor's own eligibility wording, so the rail can cite what the stage list came from.
+  // Usually a short semicolon list ("Faculty Member; Postdoctoral | United States"); the rail
+  // clamps it, so no length cap here. Blank when the column is empty — never a fabricated source.
+  const source = typeof eligibilityRaw === "string" ? eligibilityRaw.trim() : "";
+
   return {
     // An empty allowed set would hide EVERYONE off malformed data, so it degrades to "no axis"
     // rather than to an empty page — a filter that can only filter everything is worse than none.
     careerStages: restricts && allowed.length > 0 ? allowed : null,
+    stageSource: source || null,
     esiTargeted: map.esi_targeted === true,
     usRequired: map.us_citizen_or_permanent_resident_required === true,
   };
@@ -141,6 +151,7 @@ export function GrantMatchaPanel() {
           synopsis: string | null;
           eligibilityFlags?: unknown;
           eligibility?: unknown;
+          eligibilityRaw?: unknown;
         };
         if (!active) return;
         const askSeed = buildAskSeed(full.title, full.synopsis);
@@ -153,7 +164,11 @@ export function GrantMatchaPanel() {
                   title: full.title,
                   sponsor: full.sponsor,
                   askSeed,
-                  requirements: requirementsFrom(full.eligibilityFlags, full.eligibility),
+                  requirements: requirementsFrom(
+                    full.eligibilityFlags,
+                    full.eligibility,
+                    full.eligibilityRaw,
+                  ),
                   note: askNote(full),
                 },
               }

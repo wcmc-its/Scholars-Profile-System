@@ -323,6 +323,16 @@ function downloadCsv(filename: string, csv: string) {
 export type EligibilityRequirements = {
   /** Stages the opportunity admits. `null` ⇒ unrestricted ⇒ no career-stage axis. */
   careerStages: readonly CareerStage[] | null;
+  /**
+   * The sponsor's OWN eligibility wording, verbatim, so the axis can cite what produced it.
+   *
+   * 🔴 Without this the rail states "Required: Early career · Mid career · Senior · Postdoc" —
+   * SPS's internal stage vocabulary — over an opportunity whose SYNOPSIS never mentions career
+   * stage, because the eligibility text lives in a different column that nothing renders. It reads
+   * as a requirement the matcher invented. It is not: `spin:095001` carries "Physician or Medical
+   * Professional; Faculty Member; Researcher or Investigator; Postdoctoral".
+   */
+  stageSource?: string | null;
   esiTargeted: boolean;
   usRequired: boolean;
 };
@@ -1595,6 +1605,19 @@ export function MatchaPanel({
                                     .join(" · ")}`
                                 : "Relaxed — ineligible researchers are shown, badged"}
                             </span>
+                            {/* Cite the sponsor, not just our mapping of it. The stage list is
+                                SPS's vocabulary; this is the text it was derived from, and it is
+                                usually absent from the synopsis on screen — so without it the axis
+                                reads as a requirement nobody stated. */}
+                            {eligibility.stageSource ? (
+                              <span
+                                className="text-muted-foreground/80 mt-0.5 block line-clamp-2 text-xs italic leading-snug"
+                                title={eligibility.stageSource}
+                              >
+                                Opportunity&rsquo;s eligibility: &ldquo;{eligibility.stageSource}
+                                &rdquo;
+                              </span>
+                            ) : null}
                           </span>
                         </label>
                       </div>

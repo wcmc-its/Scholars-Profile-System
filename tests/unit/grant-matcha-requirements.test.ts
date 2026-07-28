@@ -25,6 +25,30 @@ describe("requirementsFrom", () => {
     expect(r.careerStages).toEqual(["early", "mid", "senior"]);
   });
 
+  it("carries the sponsor's own eligibility wording so the axis can cite it", () => {
+    // The stage list is SPS vocabulary; without the source the rail states a requirement over an
+    // opportunity whose SYNOPSIS never mentions career stage (spin:095001, reported 2026-07-28).
+    const r = requirementsFrom(
+      ["us_eligible", "faculty_eligible", "postdoc_eligible"],
+      { career_stages: ["any_faculty", "clinician", "postdoc"] },
+      "  Physician or Medical Professional; Faculty Member; Postdoctoral | United States  ",
+    );
+    expect(r.careerStages).toEqual(["early", "mid", "senior", "postdoc"]);
+    expect(r.stageSource).toBe(
+      "Physician or Medical Professional; Faculty Member; Postdoctoral | United States",
+    );
+  });
+
+  it("never fabricates a source — an absent or blank eligibilityRaw stays null", () => {
+    expect(requirementsFrom(["faculty_eligible"], { career_stages: ["any_faculty"] }).stageSource).toBeNull();
+    expect(
+      requirementsFrom(["faculty_eligible"], { career_stages: ["any_faculty"] }, "   ").stageSource,
+    ).toBeNull();
+    expect(
+      requirementsFrom(["faculty_eligible"], { career_stages: ["any_faculty"] }, 42).stageSource,
+    ).toBeNull();
+  });
+
   it("maps a student-only opportunity to the grad stage", () => {
     const r = requirementsFrom(["student_only"], { career_stages: ["graduate_student"] });
     expect(r.careerStages).toEqual(["grad"]);
@@ -56,6 +80,7 @@ describe("requirementsFrom", () => {
   it("survives absent/malformed json without throwing", () => {
     expect(requirementsFrom(null, null)).toEqual({
       careerStages: null,
+      stageSource: null,
       esiTargeted: false,
       usRequired: false,
     });
