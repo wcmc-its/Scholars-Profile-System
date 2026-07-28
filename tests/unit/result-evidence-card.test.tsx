@@ -1325,6 +1325,30 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
     expect(container.textContent).toMatch(/3 of 13 method-indexed publications used/);
   });
 
+  it("the method DIM measures against the method-indexed pool, NOT pubCount", () => {
+    // Mutation-found gap: with the % column gone, `lowCoverage` is the ONLY remaining reader
+    // of the method denominator, and every other fixture here sets methodPubCount ===
+    // pubCount, so swapping one for the other stayed green across the whole suite.
+    //
+    // These are Kiss's real staging numbers, chosen because the two denominators DISAGREE:
+    //   3/13  = 23.1% ≥ 2% → healthy, no dim   ← correct
+    //   3/157 =  1.9% <  2% → dim              ← the original defect, in miniature
+    // Method extraction is post-2020 by design, so measuring the dim against total output
+    // is exactly what greyed out Crystal's strongest signal at 1.2%. A method lead that is
+    // healthy within its own eligible pool must keep its accent.
+    render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "AAV gene-therapy vectors", tools: [], count: 3 }}
+        pubCount={157}
+        methodPubCount={13}
+        stacked
+      />,
+    );
+    const family = screen.getByText("AAV gene-therapy vectors");
+    expect(family.className).toMatch(/text-\[var\(--evidence-anchor\)\]/);
+    expect(family.className).not.toMatch(/text-\[var\(--evidence-(faint|body)\)\]/);
+  });
+
   it("#1912 — the NON-dim phrase body renders on the AA ramp, never the retired literals", () => {
     // The dim path had assertions; the ordinary path did not, so reverting the muted
     // tone to the failing #8c8c8c passed the whole suite. This is that guard.
