@@ -80,6 +80,28 @@ describe("projectFromRows", () => {
     expect(doc.department).toBe("Medicine");
   });
 
+  it("flags Multi-PI when the second PI is a Co-PI", () => {
+    // Co-PI is InfoEd's non-contact PD/PI, i.e. the other principal
+    // investigator on an NIH multiple-PI award. This is the shape Multi-PI
+    // exists to mark, and the one it used to miss: piCwids counted only
+    // PI / PI-Subaward, so it never reached 2 and the facet was always 0.
+    const doc = projectFromRows([
+      makeRow({ cwid: "alice", role: "PI", scholar: SCHOLAR_A }),
+      makeRow({ cwid: "bob", role: "Co-PI", scholar: SCHOLAR_B }),
+    ])!;
+    expect(doc.isMultiPi).toBe(true);
+    // Co-PI buckets as PI, not Co-I — an MPI is a principal investigator.
+    expect(new Set(doc.roles)).toEqual(new Set(["PI", "Multi-PI"]));
+  });
+
+  it("does not count one scholar's PI and Co-PI rows as Multi-PI", () => {
+    const doc = projectFromRows([
+      makeRow({ cwid: "alice", role: "PI", scholar: SCHOLAR_A }),
+      makeRow({ cwid: "alice", role: "Co-PI", scholar: SCHOLAR_A }),
+    ])!;
+    expect(doc.isMultiPi).toBe(false);
+  });
+
   it("orders people lead-PI first, then Co-PI, then Co-I", () => {
     const doc = projectFromRows([
       makeRow({ cwid: "carol", role: "Co-I", scholar: SCHOLAR_C }),

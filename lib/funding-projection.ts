@@ -280,8 +280,8 @@ export function groupGrantsByProject<
 /** Per-row role bucket — Multi-PI is a project-level fact (≥2 PI rows on
  *  the same account number) and gets layered in by the caller. */
 export function rowRoleBucket(role: string): "PI" | "Co-I" | null {
-  if (role === "PI" || role === "PI-Subaward") return "PI";
-  if (role === "Co-I" || role === "Co-PI") return "Co-I";
+  if (role === "PI" || role === "PI-Subaward" || role === "Co-PI") return "PI";
+  if (role === "Co-I") return "Co-I";
   return null;
 }
 
@@ -409,12 +409,20 @@ export function projectFromRows(
   // when the project has ≥2 DISTINCT scholars in PI role. Counting raw
   // rows would over-flag false-Multi-PI on grants where one PI has
   // multiple Account_Numbers (cf. dedupe block above).
+  //
+  // `Co-PI` counts as a PI here: it is InfoEd's non-contact PD/PI, i.e. the
+  // other principal investigator on an NIH multiple-PI award. Excluding it
+  // meant `piCwids` never reached 2 on exactly the awards Multi-PI exists to
+  // mark, so the facet was structurally always 0. Matches PI_ROLES in
+  // lib/api/data-quality.ts and isPiRole in lib/api/dept-lists.ts.
   const roles = new Set<string>();
   const piCwids = new Set<string>();
   for (const r of dedupedRows) {
     const bucket = rowRoleBucket(r.role);
     if (bucket) roles.add(bucket);
-    if (r.role === "PI" || r.role === "PI-Subaward") piCwids.add(r.cwid);
+    if (r.role === "PI" || r.role === "PI-Subaward" || r.role === "Co-PI") {
+      piCwids.add(r.cwid);
+    }
   }
   const isMultiPi = piCwids.size >= 2;
   if (isMultiPi) roles.add("Multi-PI");
