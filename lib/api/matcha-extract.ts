@@ -134,24 +134,66 @@ function sponsorBedrock() {
  *  model can always satisfy, and an unrecognized string has no sensible clamp (silently
  *  defaulting a garbage kind to "concept" would hide a broken prompt). `sanitizeConcepts`
  *  still defaults a missing kind, for the dictionary-fallback path that has no LLM at all. */
-const ConceptsSchema = z.object({
-  concepts: z.array(
-    z.object({
-      term: z.string(),
-      kind: z.enum(["concept", "method"]),
-      centrality: z.number(),
-      // `nullish`, like titleSummary: a concept that stands alone has no gloss, and a model that
-      // omits it must clean to undefined rather than fail the whole extraction. `sanitizeConcepts`
-      // enforces the length cap and drops empties.
-      gloss: z.string().nullish(),
-    }),
-  ),
-  /** A short search handle written in the SAME call as the concepts — the essence of the
-   *  funder's ask, org-prefixed when the paste names one. `nullish` (not required) so a model
-   *  that omits it, or a description that names no concept, cleans to `undefined` rather than
-   *  failing the whole extraction; `sanitizeTitleSummary` enforces the length/format contract. */
-  titleSummary: z.string().nullish(),
-});
+/**
+ * Repair a response the model serialised one level too deep (#1984).
+ *
+ * Sonnet intermittently returns a complete, well-formed answer with `concepts` as a JSON *string*
+ * instead of an array. Zod rejected it, `generateObject` threw, and `extractMatchaConcepts`
+ * degraded to `{ concepts: [] }` — sending the caller to the v1 dictionary extractor, so the user
+ * got a 200 with quietly worse matching and a `console.warn` was the only trace.
+ *
+ * TWO shapes were observed against live Bedrock on the same paste, and handling only the first
+ * fixes only half the failures (measured: 4/10 → 6/10, then 6/10 → 10/10 with both):
+ *
+ *   {"concepts": "[ … ]"}                              the ARRAY, quoted
+ *   {"concepts": "[ … ],\n\"titleSummary\": \" … \""}  the whole object BODY, quoted
+ *
+ * The second is why parsing the string alone is not enough — it is not valid JSON on its own, only
+ * as the tail of an object. Re-wrapping it recovers `titleSummary` as well as the concepts.
+ *
+ * Widening the envelope, never the contract: a non-string `concepts` passes through untouched, and
+ * a string neither attempt can parse is returned unchanged so it fails validation exactly as
+ * before. A retry is the wrong tool — it re-rolls the same odds at the price of another call.
+ */
+const repairStringifiedBody = (v: unknown): unknown => {
+  if (typeof v !== "object" || v === null) return v;
+  const obj = v as Record<string, unknown>;
+  if (typeof obj.concepts !== "string") return v;
+  for (const text of [obj.concepts, `{"concepts":${obj.concepts}}`]) {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (Array.isArray(parsed)) return { ...obj, concepts: parsed };
+      if (parsed && typeof parsed === "object" && Array.isArray((parsed as { concepts?: unknown }).concepts)) {
+        return { ...obj, ...(parsed as object) };
+      }
+    } catch {
+      // not this shape — fall through to the next candidate
+    }
+  }
+  return v;
+};
+
+const ConceptsSchema = z.preprocess(
+  repairStringifiedBody,
+  z.object({
+    concepts: z.array(
+      z.object({
+        term: z.string(),
+        kind: z.enum(["concept", "method"]),
+        centrality: z.number(),
+        // `nullish`, like titleSummary: a concept that stands alone has no gloss, and a model that
+        // omits it must clean to undefined rather than fail the whole extraction. `sanitizeConcepts`
+        // enforces the length cap and drops empties.
+        gloss: z.string().nullish(),
+      }),
+    ),
+    /** A short search handle written in the SAME call as the concepts — the essence of the
+     *  funder's ask, org-prefixed when the paste names one. `nullish` (not required) so a model
+     *  that omits it, or a description that names no concept, cleans to `undefined` rather than
+     *  failing the whole extraction; `sanitizeTitleSummary` enforces the length/format contract. */
+    titleSummary: z.string().nullish(),
+  }),
+);
 
 const EXTRACT_SYSTEM_PROMPT = [
   "You extract the distinct research CONCEPTS a description is about — for matching against a",

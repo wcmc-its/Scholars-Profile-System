@@ -267,4 +267,68 @@ describe("extractMatchaConcepts", () => {
       expect(shouldCache({ concepts: [{ term: "als" }] })).toBe(true);
     });
   });
+
+  // #1984 — the model intermittently serialises `concepts` as a JSON STRING rather than an array
+  // (measured: 6 of 10 draws on one paste shape). Before the preprocess, zod rejected an otherwise
+  // complete answer, generateObject threw, and the caller fell through to the v1 dictionary
+  // extractor — a 200 with quietly worse matching. These assert the REAL schema, pulled off the
+  // captured call args, because `generateObject` is mocked and never validates anything itself.
+  describe("the response schema tolerates a stringified `concepts` (#1984)", () => {
+    const capturedSchema = async () => {
+      mockGenerateObject.mockResolvedValue(objectWith([{ term: "als", centrality: 1 }]));
+      await extractMatchaConcepts("prose");
+      return mockGenerateObject.mock.calls[0][0].schema as {
+        parse: (v: unknown) => { concepts: { term: string }[] };
+        safeParse: (v: unknown) => { success: boolean };
+      };
+    };
+
+    it("shape 1: unwraps a quoted ARRAY into the array it should have been", async () => {
+      const schema = await capturedSchema();
+      const parsed = schema.parse({
+        concepts: JSON.stringify([
+          { term: "clinical decision support systems", kind: "method", centrality: 1 },
+          { term: "machine learning", kind: "method", centrality: 0.75, gloss: "clinical prediction" },
+        ]),
+        titleSummary: "machine learning for clinical decision support",
+      });
+      expect(parsed.concepts.map((c) => c.term)).toEqual([
+        "clinical decision support systems",
+        "machine learning",
+      ]);
+    });
+
+    // The shape that made the first fix only half a fix. Verbatim structure of a live Bedrock
+    // response: the model put the whole object BODY inside the string, so the string is not valid
+    // JSON on its own — only as the tail of an object. Handling shape 1 alone measured 4/10 -> 6/10
+    // against real Bedrock; both shapes took it to 10/10.
+    it("shape 2: re-wraps a quoted object BODY, recovering titleSummary too", async () => {
+      const schema = await capturedSchema();
+      const parsed = schema.parse({
+        concepts:
+          '[\n  {\n    "term": "clinical decision support systems",\n    "kind": "method",\n    "centrality": 1.0\n  }\n],\n"titleSummary": "machine learning and AI for clinical decision support"',
+      }) as { concepts: { term: string }[]; titleSummary?: string };
+      expect(parsed.concepts.map((c) => c.term)).toEqual(["clinical decision support systems"]);
+      expect(parsed.titleSummary).toBe("machine learning and AI for clinical decision support");
+    });
+
+    it("still accepts a plain array — the normal path is untouched", async () => {
+      const schema = await capturedSchema();
+      expect(
+        schema.parse({ concepts: [{ term: "als", kind: "concept", centrality: 1 }] }).concepts,
+      ).toHaveLength(1);
+    });
+
+    it("does NOT widen the contract: unparseable, or valid JSON of the wrong shape, still fails", async () => {
+      const schema = await capturedSchema();
+      // Not JSON at all — returned unchanged, so the array check rejects it as before.
+      expect(schema.safeParse({ concepts: "not json at all" }).success).toBe(false);
+      // Parses, but a concept is missing the required `kind`.
+      expect(
+        schema.safeParse({ concepts: JSON.stringify([{ term: "als", centrality: 1 }]) }).success,
+      ).toBe(false);
+      // Parses to a non-array.
+      expect(schema.safeParse({ concepts: JSON.stringify({ term: "als" }) }).success).toBe(false);
+    });
+  });
 });
