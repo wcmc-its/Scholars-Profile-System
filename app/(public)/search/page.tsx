@@ -1699,6 +1699,17 @@ async function PublicationsResults({
       }
     });
 
+  // #1995 — every unselected bucket's toggle URL is this prefix plus the
+  // bucket's own url-encoded value, so shipping 500 near-identical hrefs per
+  // facet was ~25% of the flight payload. Send the prefix once; the facet
+  // client components append the value they already have.
+  const appendBase = (axis: string) =>
+    buildUrl((sp) => {
+      const current = sp.getAll(axis);
+      sp.delete(axis);
+      for (const v of current) sp.append(axis, v);
+    }) + `&${axis}=`;
+
   const removeMulti = (axis: string, value: string) =>
     buildUrl((sp) => {
       const current = sp.getAll(axis);
@@ -1789,36 +1800,46 @@ async function PublicationsResults({
   }
 
   // Pre-compute journal facet items server-side: the JournalFacet client
-  // component can't accept a function prop for toggleHref, so we resolve
-  // each row's URL here and pass plain data. Active values are pulled to
-  // the head so they survive the Show-all cutoff.
+  // component can't accept a function prop for toggleHref, so we pass plain
+  // data (and, per #1995, a single `appendBase` prefix instead of one URL per
+  // bucket). Active values are pulled to the head so they survive the
+  // Show-all cutoff.
   const journalItems: import("@/components/search/journal-facet").JournalFacetItem[] = (() => {
     const active: typeof result.facets.journals = [];
     const rest: typeof result.facets.journals = [];
     for (const j of result.facets.journals) {
       (journal.includes(j.value) ? active : rest).push(j);
     }
-    return [...active, ...rest].map((j) => ({
-      value: j.value,
-      count: j.count,
-      isActive: journal.includes(j.value),
-      toggleHref: toggleHref("journal", j.value),
-    }));
+    return [...active, ...rest].map((j) => {
+      const isActive = journal.includes(j.value);
+      return {
+        value: j.value,
+        count: j.count,
+        isActive,
+        // #1995 — only a selected bucket needs an explicit href (removal is
+        // not derivable); the rest come from `appendBase` in the browser.
+        ...(isActive ? { toggleHref: toggleHref("journal", j.value) } : null),
+      };
+    });
   })();
 
   // Issue #88 — same precompute pattern for the Author facet. Buckets
   // already arrive count-desc with active selections appended; we just
-  // resolve toggleHref + isActive per row. The client component handles
-  // pinning, sort toggle, and typeahead — server only ships data.
+  // resolve isActive per row. The client component handles pinning, sort
+  // toggle, and typeahead — server only ships data.
   const authorItems: import("@/components/search/author-facet").AuthorFacetItem[] =
-    result.facets.wcmAuthors.map((a) => ({
-      cwid: a.cwid,
-      displayName: a.displayName,
-      slug: a.slug,
-      count: a.count,
-      isActive: wcmAuthor.includes(a.cwid),
-      toggleHref: toggleHref("wcmAuthor", a.cwid),
-    }));
+    result.facets.wcmAuthors.map((a) => {
+      const isActive = wcmAuthor.includes(a.cwid);
+      return {
+        cwid: a.cwid,
+        displayName: a.displayName,
+        count: a.count,
+        isActive,
+        // #1995 — see the journal facet above: unselected buckets derive their
+        // href from `appendBase` + cwid rather than shipping one each.
+        ...(isActive ? { toggleHref: toggleHref("wcmAuthor", a.cwid) } : null),
+      };
+    });
 
   // Issue #837 — Department facet items. Resolve each bucket's display label
   // and pull active selections to the head so they survive the collapse
@@ -1869,6 +1890,7 @@ async function PublicationsResults({
         activeMentoringProgram={mentoringProgram}
         mentoringProgramCounts={result.facets.mentoringPrograms}
         toggleHref={toggleHref}
+        appendBase={appendBase}
         buildHref={(overrides) =>
           buildUrl((sp) => {
             for (const [k, v] of Object.entries(overrides)) {
@@ -2862,6 +2884,7 @@ function FacetSidebarPubs({
   activeMentoringProgram,
   mentoringProgramCounts,
   toggleHref,
+  appendBase,
   buildHref,
   meshOnlyFilterEnabled,
   meshOnly,
@@ -2891,6 +2914,9 @@ function FacetSidebarPubs({
   activeMentoringProgram: Array<"md" | "mdphd" | "phd" | "postdoc" | "ecr">;
   mentoringProgramCounts: Record<"md" | "mdphd" | "phd" | "postdoc" | "ecr", number>;
   toggleHref: (axis: string, value: string) => string;
+  /** #1995 — href prefix an unselected bucket appends its own value to, so the
+   *  journal/author facets don't ship 500 fully-resolved URLs each. */
+  appendBase: (axis: string) => string;
   buildHref: (overrides: Record<string, string>) => string;
   /** Issue #396 — whether the "Show only MeSH-tagged matches" toggle renders
    *  (the `SEARCH_PUB_MESH_ONLY_FILTER` flag). */
@@ -2959,7 +2985,11 @@ function FacetSidebarPubs({
           per spec: the two authorship axes are conceptually paired and
           users combine them ("first-author papers by Wolf"). */}
       {authorItems.length > 0 ? (
-        <AuthorFacet items={authorItems} totalDistinct={authorTotalDistinct} />
+        <AuthorFacet
+          items={authorItems}
+          totalDistinct={authorTotalDistinct}
+          appendBase={appendBase("wcmAuthor")}
+        />
       ) : null}
 
       {/* Issue #837 — Department facet (WCM-author department). Renders only
@@ -3009,7 +3039,9 @@ function FacetSidebarPubs({
         </FacetGroup>
       ) : null}
 
-      {journalItems.length > 0 ? <JournalFacet items={journalItems} /> : null}
+      {journalItems.length > 0 ? (
+        <JournalFacet items={journalItems} appendBase={appendBase("journal")} />
+      ) : null}
 
       {/* Mentoring activity — multi-select on mentee program at time of
           mentorship. Restricts results to publications co-authored between a

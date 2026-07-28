@@ -1011,13 +1011,14 @@ export type PublicationHit = {
    */
   impactJustification: string | null;
   /**
-   * Issue #288 PR-A — plain-text article abstract sourced from
-   * `Publication.abstract` via the OS `_source` payload (the search-index
-   * ETL writes it on the per-pub doc; see etl/search-index/index.ts).
-   * Null when the publication has no abstract or the ETL wrote an empty
-   * string. Rendered inline via `<AbstractDisclosure>` on the row.
+   * Issue #288 PR-A — whether `Publication.abstract` is non-empty on the OS
+   * `_source` payload (the search-index ETL writes it on the per-pub doc; see
+   * etl/search-index/index.ts). #1995 — the text itself is no longer shipped:
+   * 20 abstracts were ~11% of the results-page flight payload, so the row
+   * passes this to `PublicationMeta`'s `lazyAbstract` (#1537) and the text is
+   * fetched from `/api/publications/[pmid]` on first open instead.
    */
-  abstract: string | null;
+  hasAbstract: boolean;
   /**
    * Issue #707 — the publications twin of `PeopleHit.matchProvenance` (#688).
    * Present only when `SEARCH_PUB_MATCH_PROVENANCE` is on, the topic query
@@ -5256,10 +5257,8 @@ export async function searchPublications(opts: {
         impactScore,
         conceptImpactScore,
         impactJustification,
-        abstract:
-          typeof h._source.abstract === "string" && h._source.abstract.length > 0
-            ? h._source.abstract
-            : null,
+        hasAbstract:
+          typeof h._source.abstract === "string" && h._source.abstract.length > 0,
         matchProvenance: pubProvenanceOn
           ? computeMatchProvenance({
               publicationMeshUi: h._source.meshDescriptorUi,

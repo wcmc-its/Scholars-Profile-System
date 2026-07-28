@@ -41,7 +41,7 @@ function makeHit(pmid: string): PublicationHit {
     impactScore: null,
     conceptImpactScore: null,
     impactJustification: null,
-    abstract: null,
+    hasAbstract: false,
   };
 }
 

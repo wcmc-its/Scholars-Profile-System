@@ -12,30 +12,38 @@ const EXPANDED_VISIBLE = 50;
 /**
  * Issue #88 — Author facet on the Publications-tab left rail.
  *
- * Buckets arrive pre-hydrated from the server (display name, slug) so the
- * client only handles UI: typeahead, sort toggle, pinned selections, "Show
- * all" expansion. #1410 — the avatar endpoint is no longer shipped per bucket;
- * `HeadshotAvatar` derives it from `cwid`. URLs are precomputed server-side
- * (Next.js can't pass functions Server → Client) — we toggle by navigating
- * to the resolved href.
+ * Buckets arrive pre-hydrated from the server (display name) so the client
+ * only handles UI: typeahead, sort toggle, pinned selections, "Show all"
+ * expansion. #1410 — the avatar endpoint is no longer shipped per bucket;
+ * `HeadshotAvatar` derives it from `cwid`. #1995 — nor is the toggle URL:
+ * unselected buckets append their own cwid to `appendBase` (Next.js can't
+ * pass functions Server → Client, so the server ships the prefix).
  */
 export type AuthorFacetItem = {
   cwid: string;
   displayName: string;
-  slug: string;
   count: number;
   isActive: boolean;
-  toggleHref: string;
+  /** #1995 — selected buckets only; their href removes the value instead of
+   *  appending it, which isn't derivable from `appendBase`. */
+  toggleHref?: string;
 };
 
 type SortMode = "count" | "name";
 
+/** Encode one value exactly as `URLSearchParams.toString()` did server-side
+ *  (space → `+`), so the derived href is byte-identical to the old one. */
+const encodeValue = (v: string) =>
+  new URLSearchParams({ v }).toString().slice("v=".length);
+
 export function AuthorFacet({
   items,
   totalDistinct,
+  appendBase,
 }: {
   items: AuthorFacetItem[];
   totalDistinct: number;
+  appendBase: string;
 }) {
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
@@ -118,7 +126,7 @@ export function AuthorFacet({
         <>
           <ul className="m-0 flex list-none flex-col p-0">
             {selected.map((a) => (
-              <AuthorRow key={a.cwid} author={a} />
+              <AuthorRow key={a.cwid} author={a} appendBase={appendBase} />
             ))}
           </ul>
           <hr className="my-2 border-[#e3e2dd]" />
@@ -127,7 +135,7 @@ export function AuthorFacet({
 
       <ul className="m-0 flex list-none flex-col p-0">
         {visible.map((a) => (
-          <AuthorRow key={a.cwid} author={a} />
+          <AuthorRow key={a.cwid} author={a} appendBase={appendBase} />
         ))}
       </ul>
 
@@ -160,22 +168,29 @@ function lastNameKey(displayName: string): string {
   return (tokens[tokens.length - 1] ?? "").toLowerCase();
 }
 
-function AuthorRow({ author }: { author: AuthorFacetItem }) {
+function AuthorRow({
+  author,
+  appendBase,
+}: {
+  author: AuthorFacetItem;
+  appendBase: string;
+}) {
   const lastNameForAction = lastNameKey(author.displayName);
   const primaryLabel = author.isActive
     ? `Remove ${lastNameForAction || "filter"}`
     : `Filter by ${capitalize(lastNameForAction) || "author"}`;
+  const href = author.toggleHref ?? appendBase + encodeValue(author.cwid);
   return (
     <li className="py-1 leading-[1.4]">
       <PersonPopover
         cwid={author.cwid}
         surface="facet"
         filterMatchCount={author.count}
-        primaryActionHref={author.toggleHref}
+        primaryActionHref={href}
         primaryActionLabel={primaryLabel}
       >
         <Link
-          href={author.toggleHref}
+          href={href}
           scroll={false}
           className="flex items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
         >

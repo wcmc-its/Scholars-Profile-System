@@ -16,8 +16,12 @@ vi.mock("@/components/publication/author-chip-row", () => ({
     <div data-testid="chip-row">{authors.length} chips</div>
   ),
 }));
+const metaProps: Record<string, unknown>[] = [];
 vi.mock("@/components/publication/publication-meta", () => ({
-  PublicationMeta: () => <div data-testid="meta" />,
+  PublicationMeta: (props: Record<string, unknown>) => {
+    metaProps.push(props);
+    return <div data-testid="meta" />;
+  },
 }));
 
 import { PublicationResultRow } from "@/components/search/publication-result-row";
@@ -40,7 +44,7 @@ function makeHit(overrides: Partial<PublicationHit>): PublicationHit {
     impactScore: null,
     conceptImpactScore: null,
     impactJustification: null,
-    abstract: null,
+    hasAbstract: false,
     ...overrides,
   };
 }
@@ -83,5 +87,22 @@ describe("PublicationResultRow — #718 author fallback", () => {
       />,
     );
     expect(screen.getByTestId("chip-row").textContent).toBe("1 chips");
+  });
+});
+
+// #1995 — the abstract text is no longer on the hit (it was ~11% of the
+// results-page flight payload); the row asks PublicationMeta to lazy-fetch it.
+describe("PublicationResultRow — lazy abstract wiring (#1995)", () => {
+  it("passes lazyAbstract from hasAbstract and never an eager abstract", () => {
+    metaProps.length = 0;
+    render(<PublicationResultRow hit={makeHit({ hasAbstract: true })} />);
+    expect(metaProps.at(-1)).toMatchObject({ lazyAbstract: true, pmid: "39406234" });
+    expect(metaProps.at(-1)).not.toHaveProperty("abstract");
+  });
+
+  it("leaves lazyAbstract false when the publication has no abstract", () => {
+    metaProps.length = 0;
+    render(<PublicationResultRow hit={makeHit({ hasAbstract: false })} />);
+    expect(metaProps.at(-1)).toMatchObject({ lazyAbstract: false });
   });
 });
