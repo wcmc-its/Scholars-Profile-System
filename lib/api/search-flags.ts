@@ -930,28 +930,6 @@ export function resolveSearchShellStreaming(): boolean {
 }
 
 /**
- * Issue #1995 — root-cause EXPERIMENT for the intermittent App Router commit
- * hang on /search mode-tab clicks. The measured signature: the RSC fetch
- * succeeds in ~200 ms, the main thread is idle, `history.pushState` is never
- * called, and the shared `useTransition` in components/search/transition-link.tsx
- * stays pending forever. Every /search link is a `TransitionLink` today, so the
- * hypothesis — that routing a TAB switch through the shared transition is what
- * breaks the commit — cannot be tested without a code change. When on, the three
- * mode tabs (Scholars / Publications / Funding) render as a plain `next/link`
- * <Link>: no shared transition, no `router.push` interception. Facet / sort /
- * pagination links keep the TransitionLink path, so the tab path is isolated.
- *
- * Render-identical (same href, classes, and markup) — only the click handling
- * differs, so flag-off is byte-identical to today. Default OFF
- * (`SEARCH_PLAIN_LINK_TABS=on` enables) — an `=== "on"` opt-in gate. Wired
- * per-env in `cdk/lib/app-stack.ts` (staging-on / prod-off) so the A/B runs
- * staging-vs-prod; this is a diagnostic lever, not a shipped feature.
- */
-export function resolveSearchPlainLinkTabs(): boolean {
-  return process.env.SEARCH_PLAIN_LINK_TABS === "on";
-}
-
-/**
  * Issue #878 — MeSH-concept rows in the autocomplete dropdown. The search
  * RESULTS page already resolves MeSH (`resolveMeshDescriptor`), but the
  * `suggestEntities` dropdown is pure `contains` matching and never sees the
