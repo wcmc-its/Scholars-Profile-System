@@ -62,20 +62,29 @@ const ALLOW: AuthzResult = { ok: true };
 // ---------------------------------------------------------------------------
 
 /**
- * `POST /api/edit/field`. Two fields are editable by the scholar themselves OR a
- * superuser: `overview` (#844 — admins author any scholar's bio) and
+ * `POST /api/edit/field`. Three fields are editable by the scholar themselves OR
+ * a superuser: `overview` (#844 — admins author any scholar's bio),
  * `selectedHighlightPmids` (#836 — a superuser may curate any scholar's manual
  * Highlights; the operator rule is that a superuser is unrestricted on the edit
- * surface, so the original self-only scope was lifted). `slug` is superuser-only.
- * The broad admin field-editing of any OTHER (not-yet-allowlisted) field stays
- * deferred — this self-OR-superuser branch is scoped to exactly these two names.
+ * surface, so the original self-only scope was lifted), and `manualMentees`
+ * (#2011 — the mentor's hand-entered mentee list, same self-or-curator posture).
+ * `slug` is superuser-only. The broad admin field-editing of any OTHER
+ * (not-yet-allowlisted) field stays deferred — this self-OR-superuser branch is
+ * scoped to exactly these three names.
  */
 export function authorizeFieldEdit(
   session: EditSession,
-  target: { entityId: string; fieldName: "overview" | "slug" | "selectedHighlightPmids" },
+  target: {
+    entityId: string;
+    fieldName: "overview" | "slug" | "selectedHighlightPmids" | "manualMentees";
+  },
 ): AuthzResult {
-  if (target.fieldName === "overview" || target.fieldName === "selectedHighlightPmids") {
-    // Self OR superuser OR comms_steward — scoped to these two fields. A
+  if (
+    target.fieldName === "overview" ||
+    target.fieldName === "selectedHighlightPmids" ||
+    target.fieldName === "manualMentees"
+  ) {
+    // Self OR superuser OR comms_steward — scoped to these three fields. A
     // comms_steward edits any scholar's narrative (superuser profile parity,
     // comms-steward-profile-editing-spec.md §3b); the deferred broad-admin
     // widening must still not leak to other fields via this branch.

@@ -66,6 +66,7 @@ import {
   validateSlugFormat,
   validateUnitFieldValue,
 } from "@/lib/edit/validators";
+import { validateManualMentees } from "@/lib/edit/manual-mentee";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import { isNameBasedSlug, reconcileScholarSlug } from "@/lib/slug";
 
@@ -173,9 +174,14 @@ async function handleScholarFieldEdit(params: {
   if (fieldName === "selectedHighlightPmids" && !isManualHighlightsEnabled()) {
     return editError(400, "invalid_field", "fieldName");
   }
-  // `selectedHighlightPmids` carries a JSON array value; every other scholar
-  // field is a string. The per-field validation below enforces the precise shape.
-  if (fieldName !== "selectedHighlightPmids" && typeof value !== "string") {
+  // `selectedHighlightPmids` (#836) and `manualMentees` (#2011) carry JSON array
+  // values; every other scholar field is a string. The per-field validation
+  // below enforces the precise shape.
+  if (
+    fieldName !== "selectedHighlightPmids" &&
+    fieldName !== "manualMentees" &&
+    typeof value !== "string"
+  ) {
     return editError(400, "invalid_value", "value");
   }
 
@@ -236,6 +242,14 @@ async function handleScholarFieldEdit(params: {
     // of (`pickManualHighlights`), and the edit UI only offers the scholar's own
     // publications, so a well-behaved client never sends an out-of-set pmid.
     const result = validateSelectedHighlightPmids(value);
+    if (!result.ok) return editError(400, result.error, "value");
+    storedValue = JSON.stringify(result.value);
+  } else if (fieldName === "manualMentees") {
+    // #2011 — mentees no source system recorded. Shape-validated only: `cwid` is
+    // optional and format-checked but NOT existence-checked (alumni legitimately
+    // hold a CWID with no local Scholar row — the common case here). The read
+    // path degrades on its own when nothing resolves.
+    const result = validateManualMentees(value);
     if (!result.ok) return editError(400, result.error, "value");
     storedValue = JSON.stringify(result.value);
   } else if (isSectionVisibilityField(fieldName)) {
@@ -385,13 +399,14 @@ async function handleScholarFieldEdit(params: {
     );
   }
 
-  // A changed `overview`, `selectedHighlightPmids` (#836), or a section-visibility
-  // toggle all alter the public profile page, so revalidate its canonical path.
-  // `slug` changes don't flip the URL until the next etl/ed run, so they need no
-  // revalidation here.
+  // A changed `overview`, `selectedHighlightPmids` (#836), `manualMentees`
+  // (#2011), or a section-visibility toggle all alter the public profile page, so
+  // revalidate its canonical path. `slug` changes don't flip the URL until the
+  // next etl/ed run, so they need no revalidation here.
   if (
     fieldName === "overview" ||
     fieldName === "selectedHighlightPmids" ||
+    fieldName === "manualMentees" ||
     isSectionVisibilityField(fieldName)
   ) {
     const [profile] = await resolveAffectedProfiles("scholar", entityId, null);

@@ -47,6 +47,9 @@ vi.mock("@/lib/db", () => ({
     scholar: { findMany: scholarFindMany },
     menteeCopublication: { findMany: menteeCopubFindMany, findFirst: menteeCopubFindFirst },
     aocMentee: { findMany: aocMenteeFindMany },
+    // #2011 — the mentee union now also reads the mentor's manual entries.
+    // No override row for these fixtures: sourced mentees only.
+    fieldOverride: { findUnique: async () => null },
   },
 }));
 

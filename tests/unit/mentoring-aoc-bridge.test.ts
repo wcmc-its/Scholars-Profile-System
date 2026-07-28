@@ -68,6 +68,9 @@ vi.mock("@/lib/db", () => ({
     aocMentee: { findMany: aocMenteeFindMany, findFirst: aocMenteeFindFirst },
     // #160 follow-up — getMentorMenteePair now reads the mentee-hide set.
     suppression: { findMany: async () => [] },
+    // #2011 — the mentee union now also reads the mentor's manual entries.
+    // No override row for these fixtures: sourced mentees only.
+    fieldOverride: { findUnique: async () => null },
   },
 }));
 

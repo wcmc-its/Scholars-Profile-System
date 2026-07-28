@@ -59,6 +59,11 @@ vi.mock("@/lib/db", () => ({
     aocMentee: { findMany: aocMenteeFindMany, findFirst: aocMenteeFindFirst },
     menteeCopublicationPub: { findMany: menteeCopubPubFindMany },
     suppression: { findMany: suppressionFindMany },
+    // #2011 — the mentee union now also reads the mentor's manual entries.
+    // No override row for these fixtures: sourced mentees only. Without this
+    // accessor the read throws and its logged failure inflates the
+    // console.error count the DE-SILENCE case below asserts on.
+    fieldOverride: { findUnique: async () => null },
     publicationAuthor: { findMany: publicationAuthorFindMany },
   },
 }));
