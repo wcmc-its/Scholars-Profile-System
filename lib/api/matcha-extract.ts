@@ -134,17 +134,42 @@ function sponsorBedrock() {
  *  model can always satisfy, and an unrecognized string has no sensible clamp (silently
  *  defaulting a garbage kind to "concept" would hide a broken prompt). `sanitizeConcepts`
  *  still defaults a missing kind, for the dictionary-fallback path that has no LLM at all. */
+/**
+ * Unwrap a value the model serialised one level too deep (#1984).
+ *
+ * Sonnet intermittently returns `concepts` as a JSON *string* rather than an array — a complete,
+ * well-formed 15-concept answer, just quoted. Zod rejected it, `generateObject` threw, and
+ * `extractMatchaConcepts` degraded to `{ concepts: [] }`, sending the caller to the v1 dictionary
+ * extractor: a 200 response with quietly worse matching and a `console.warn` as the only trace.
+ * Measured across 10 draws of the same 15 pastes, one paste shape failed this way 6 times out of 10.
+ *
+ * Widening the envelope, never the contract: anything that is not a string passes through, and a
+ * string that does not parse is returned unchanged so it still fails validation exactly as before.
+ * A retry is the wrong tool here — it re-rolls the same ~60% at the price of another Sonnet call.
+ */
+const unwrapStringified = (v: unknown): unknown => {
+  if (typeof v !== "string") return v;
+  try {
+    return JSON.parse(v);
+  } catch {
+    return v; // not JSON — let the schema reject it and say why
+  }
+};
+
 const ConceptsSchema = z.object({
-  concepts: z.array(
-    z.object({
-      term: z.string(),
-      kind: z.enum(["concept", "method"]),
-      centrality: z.number(),
-      // `nullish`, like titleSummary: a concept that stands alone has no gloss, and a model that
-      // omits it must clean to undefined rather than fail the whole extraction. `sanitizeConcepts`
-      // enforces the length cap and drops empties.
-      gloss: z.string().nullish(),
-    }),
+  concepts: z.preprocess(
+    unwrapStringified,
+    z.array(
+      z.object({
+        term: z.string(),
+        kind: z.enum(["concept", "method"]),
+        centrality: z.number(),
+        // `nullish`, like titleSummary: a concept that stands alone has no gloss, and a model that
+        // omits it must clean to undefined rather than fail the whole extraction. `sanitizeConcepts`
+        // enforces the length cap and drops empties.
+        gloss: z.string().nullish(),
+      }),
+    ),
   ),
   /** A short search handle written in the SAME call as the concepts — the essence of the
    *  funder's ask, org-prefixed when the paste names one. `nullish` (not required) so a model
