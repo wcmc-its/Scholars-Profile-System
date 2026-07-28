@@ -106,14 +106,7 @@ export default async function EditDataQualityPage({
       unitsTab
       dataQualityTab={0}
     >
-        {/* The heading names the page after what it is TO THIS VIEWER: a global
-            editor came for the org-wide gap report; a unit Owner/Curator came
-            for their people, via the "Scholars you can edit" dropdown row, and a
-            heading reading "Data quality" would not confirm they had arrived.
-            The body copy below already forks on the same `scope.all`. */}
-        <h1 className="mb-1 text-xl font-semibold">
-          {scope.all ? "Data quality" : "Scholars you can edit"}
-        </h1>
+        <h1 className="mb-1 text-xl font-semibold">Data quality</h1>
         <p className="text-muted-foreground mb-6 text-sm">
           {scope.all
             ? "Every scholar, most prominent first, with their profile gaps — missing headshot or overview, and unreviewed conflict-of-interest suggestions."

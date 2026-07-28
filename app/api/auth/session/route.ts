@@ -125,7 +125,7 @@ export async function GET(): Promise<NextResponse> {
       isSuperuser: true,
       canManageMethods: false,
       managesUnits: false,
-      canBrowseScopedScholars: false,
+      canBrowseDataQuality: false,
     });
   } else {
     const commsSteward = await isCommsSteward(session.cwid).catch(() => false);
@@ -135,10 +135,10 @@ export async function GET(): Promise<NextResponse> {
       isSuperuser: false,
       canManageMethods: isMethodsTabVisible({ isSuperuser: false, isCommsSteward: commsSteward }),
       managesUnits,
-      // Same grants that earn the "Org units" row also earn the scoped roster,
-      // so this costs no extra lookup — only the flag, folded in here to keep
-      // `buildConsoleLinks` env-free. Flag off ⇒ the route 404s ⇒ no row.
-      canBrowseScopedScholars: isDataQualityDashboardEnabled() && managesUnits,
+      // Same grants that earn the "Profiles" and "Org units" rows also earn the
+      // gap report, so this costs no extra lookup — only the flag, folded in
+      // here to keep `buildConsoleLinks` env-free. Flag off ⇒ route 404s ⇒ no row.
+      canBrowseDataQuality: isDataQualityDashboardEnabled() && managesUnits,
     });
   }
 

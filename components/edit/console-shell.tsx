@@ -21,6 +21,7 @@ export function ConsoleShell({
   session,
   pendingSlugRequests,
   pendingHonors,
+  profilesTab,
   unitsTab,
   dataQualityTab,
   administratorsTab,
@@ -40,6 +41,10 @@ export function ConsoleShell({
    * Owner/Curator need these — administrators, data-quality, units, usage — and
    * each resolves them from the viewer's grants exactly as it did before.
    */
+  /** B3 — the Profiles roster now admits a scope-filtered unit Owner/Curator,
+   *  who is neither a superuser nor a steward, so the tab needs the same
+   *  per-page override the other unit-admin surfaces already have. */
+  profilesTab?: boolean;
   unitsTab?: boolean;
   dataQualityTab?: number | null;
   administratorsTab?: number | null;
@@ -47,6 +52,7 @@ export function ConsoleShell({
   children: React.ReactNode;
 }) {
   const tabs = deriveConsoleTabs(session);
+  if (profilesTab !== undefined) tabs.profilesTab = tabs.profilesTab || profilesTab;
   if (unitsTab !== undefined) tabs.unitsTab = unitsTab;
   if (dataQualityTab !== undefined) tabs.dataQualityTab = dataQualityTab;
   if (administratorsTab !== undefined) tabs.administratorsTab = administratorsTab;

@@ -156,6 +156,76 @@ describe("loadEditRoster — filters", () => {
     expect(and[0].OR[0].deptCode.in).toEqual([]);
   });
 
+  // B3, center half. A center has no scholar column, so scope resolves through
+  // membership; `centerMembership` is stubbed per-test since the base fake has
+  // only `scholar`.
+  function withCenters(c: FakeClient, rows: unknown[]) {
+    (c as unknown as Record<string, unknown>).centerMembership = {
+      findMany: vi.fn().mockResolvedValue(rows),
+    };
+    return c;
+  }
+  const member = (cwid: string, startDate: Date | null = null, endDate: Date | null = null) => ({
+    cwid,
+    startDate,
+    endDate,
+  });
+
+  it("scopeCenterCodes ORs current center members into the SAME scope group", async () => {
+    const c = withCenters(fakeClient(), [member("ctr001"), member("ctr002")]);
+    await loadEditRoster(
+      { unitCodeScope: ["DEPT_MED"], scopeCenterCodes: ["MEYER"] },
+      asClient(c),
+    );
+    const and = c.scholar.findMany.mock.calls[0][0].where.AND;
+    // Union, not intersection: a dept scholar OR a center member is in scope.
+    expect(and[0].OR).toEqual([
+      { deptCode: { in: ["DEPT_MED"] } },
+      { divCode: { in: ["DEPT_MED"] } },
+      { cwid: { in: ["ctr001", "ctr002"] } },
+    ]);
+  });
+
+  it("excludes pending and expired center memberships from scope", async () => {
+    const future = new Date(Date.now() + 86_400_000 * 30);
+    const past = new Date(Date.now() - 86_400_000 * 30);
+    const c = withCenters(fakeClient(), [
+      member("current01"),
+      member("pending01", future),
+      member("expired01", null, past),
+    ]);
+    await loadEditRoster({ unitCodeScope: [], scopeCenterCodes: ["MEYER"] }, asClient(c));
+    const and = c.scholar.findMany.mock.calls[0][0].where.AND;
+    expect(and[0].OR.at(-1)).toEqual({ cwid: { in: ["current01"] } });
+  });
+
+  // The trap this pins: an empty `OR: []` is VACUOUSLY TRUE in Prisma, so a
+  // center-only admin whose center has no current members would have seen EVERY
+  // scholar in the institution rather than none.
+  it("a center-only admin with no current members matches NOTHING, not everything", async () => {
+    const c = withCenters(fakeClient(), []);
+    await loadEditRoster({ scopeCenterCodes: ["EMPTY_CTR"] }, asClient(c));
+    const and = c.scholar.findMany.mock.calls[0][0].where.AND;
+    expect(and).toEqual([{ cwid: { in: [] } }]);
+    expect(and[0].OR).toBeUndefined();
+  });
+
+  it("dedupes a CWID that is a member of two managed centers", async () => {
+    const c = withCenters(fakeClient(), [member("dup001"), member("dup001")]);
+    await loadEditRoster({ scopeCenterCodes: ["A", "B"] }, asClient(c));
+    const and = c.scholar.findMany.mock.calls[0][0].where.AND;
+    expect(and[0].OR).toEqual([{ cwid: { in: ["dup001"] } }]);
+  });
+
+  it("a superuser (no scope keys at all) issues no membership read and no scope clause", async () => {
+    const c = withCenters(fakeClient(), [member("ctr001")]);
+    await loadEditRoster({}, asClient(c));
+    expect(c.scholar.findMany.mock.calls[0][0].where.AND).toBeUndefined();
+    expect(
+      (c as unknown as { centerMembership: { findMany: AnyMock } }).centerMembership.findMany,
+    ).not.toHaveBeenCalled();
+  });
+
   it("roleCategory (person type) filters where.roleCategory", async () => {
     const c = fakeClient();
     await loadEditRoster({ roleCategory: "full_time_faculty" }, asClient(c));

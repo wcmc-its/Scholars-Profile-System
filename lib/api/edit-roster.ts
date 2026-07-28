@@ -72,6 +72,14 @@ export type EditRosterOptions = {
    * resolved — this column-based filter covers dept + division.
    */
   unitCodeScope?: readonly string[];
+  /**
+   * Org-unit-admin scope (B3), center half: center codes the admin manages. A
+   * center has no scholar column, so membership is resolved to CWIDs (current
+   * by date) and OR'd into the SAME scope group as `unitCodeScope` — a center
+   * admin's people are in scope *in addition to* any dept/division they hold,
+   * never intersected with them. Omit for a superuser.
+   */
+  scopeCenterCodes?: readonly string[];
   /** Page size (default 50, capped at 200). */
   limit?: number;
   /** Page offset (default 0). */
@@ -87,7 +95,10 @@ export type EditRosterResult = {
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
-function buildWhere(opts: EditRosterOptions): Prisma.ScholarWhereInput {
+function buildWhere(
+  opts: EditRosterOptions,
+  scopeCenterCwids: readonly string[] = [],
+): Prisma.ScholarWhereInput {
   const where: Prisma.ScholarWhereInput = { deletedAt: null };
   // Independent OR-groups compose here so none clobbers another (the name search
   // and the unit scope are both OR-groups AND'd together).
@@ -117,12 +128,22 @@ function buildWhere(opts: EditRosterOptions): Prisma.ScholarWhereInput {
     where.divCode = unit.code;
   }
 
-  if (opts.unitCodeScope) {
-    // In-scope iff the scholar's dept or division is one the admin manages. An
-    // empty scope → `in: []` → no rows.
-    and.push({
-      OR: [{ deptCode: { in: [...opts.unitCodeScope] } }, { divCode: { in: [...opts.unitCodeScope] } }],
-    });
+  if (opts.unitCodeScope || opts.scopeCenterCodes) {
+    // In-scope iff the scholar's dept or division is one the admin manages, OR
+    // they are a current member of a center the admin manages. An admin with no
+    // units at all → every arm `in: []` → no rows (fail-closed).
+    const scopeOr: Prisma.ScholarWhereInput[] = [];
+    if (opts.unitCodeScope) {
+      scopeOr.push(
+        { deptCode: { in: [...opts.unitCodeScope] } },
+        { divCode: { in: [...opts.unitCodeScope] } },
+      );
+    }
+    if (scopeCenterCwids.length > 0) scopeOr.push({ cwid: { in: [...scopeCenterCwids] } });
+    // An admin holding ONLY centers, none of which have current members, must
+    // still match nothing rather than everything — an empty `OR: []` would be
+    // vacuously true in Prisma, so pin it closed explicitly.
+    and.push(scopeOr.length > 0 ? { OR: scopeOr } : { cwid: { in: [] } });
   }
 
   if (and.length > 0) where.AND = and;
@@ -138,7 +159,22 @@ export async function loadEditRoster(
   opts: EditRosterOptions,
   client: EditRosterClient,
 ): Promise<EditRosterResult> {
-  const where = buildWhere(opts);
+  // Center SCOPE membership must resolve before the where clause is built (the
+  // center *filter* below is a separate, narrowing concern and stays where it
+  // was). Reuses the same date predicate, so a pending or expired membership
+  // confers nothing here either.
+  const scopeCenterCwids = opts.scopeCenterCodes?.length
+    ? [
+        ...new Set(
+          (
+            await Promise.all(
+              opts.scopeCenterCodes.map((code) => activeCenterMemberCwids(code, client)),
+            )
+          ).flat(),
+        ),
+      ]
+    : [];
+  const where = buildWhere(opts, scopeCenterCwids);
 
   // Center org-unit filter: restrict to CWIDs whose membership is active *by
   // date* today. The visibility / search / role filters from `buildWhere` still

@@ -14,10 +14,16 @@ const {
   mockRedirect,
   mockRoster,
   mockForbidden,
+  mockUnitAdminFindMany,
+  mockDivisionFindMany,
+  mockCenterProxyEnabled,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockLoadEditRoster: vi.fn(),
   mockLoadRosterFacets: vi.fn(),
+  mockUnitAdminFindMany: vi.fn(),
+  mockDivisionFindMany: vi.fn(),
+  mockCenterProxyEnabled: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`__REDIRECT__:${url}`);
   }),
@@ -33,6 +39,9 @@ vi.mock("@/lib/auth/effective-identity", () => ({
 vi.mock("@/lib/api/edit-roster", () => ({
   loadEditRoster: mockLoadEditRoster,
   loadRosterFacets: mockLoadRosterFacets,
+}));
+vi.mock("@/lib/edit/unit-admin-center-proxy", () => ({
+  isUnitAdminCenterProxyEnabled: mockCenterProxyEnabled,
 }));
 vi.mock("@/components/edit/profiles-roster", () => ({ ProfilesRoster: mockRoster }));
 vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: mockForbidden }));
@@ -53,7 +62,17 @@ vi.mock("@/components/edit/view-as-button", () => ({
   ),
 }));
 vi.mock("@/lib/db", () => ({
-  db: { read: { scholar: { findUnique: vi.fn().mockResolvedValue(null) } }, write: {} },
+  db: {
+    read: {
+      scholar: { findUnique: vi.fn().mockResolvedValue(null) },
+      // B3 — the page resolves the viewer's unit scope on every GET via the real
+      // `loadDataQualityScope`, so the grant + cascade reads must be stubbed.
+      // Default: no grants (a plain scholar), which each test overrides.
+      unitAdmin: { findMany: mockUnitAdminFindMany },
+      division: { findMany: mockDivisionFindMany },
+    },
+    write: {},
+  },
 }));
 
 import EditScholarsPage from "@/app/edit/scholars/page";
@@ -64,6 +83,8 @@ const sp = (o: Record<string, string> = {}) => Promise.resolve(o);
 
 const ADMIN = { cwid: "adm001", isSuperuser: true };
 const SELF = { cwid: "self01", isSuperuser: false };
+/** A unit Owner/Curator: no global role, admitted only by their grants (B3). */
+const CURATOR = { cwid: "cur001", isSuperuser: false, isCommsSteward: false };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -75,6 +96,12 @@ beforeEach(() => {
     centers: [],
     roleCategories: [],
   });
+  // Default: the viewer holds no unit grants → empty scope → Forbidden unless
+  // they are a superuser / comms_steward.
+  mockUnitAdminFindMany.mockResolvedValue([]);
+  mockDivisionFindMany.mockResolvedValue([]);
+  // Matches prod, where the flag is on.
+  mockCenterProxyEnabled.mockReturnValue(true);
 });
 
 describe("/edit/scholars — authorization", () => {
@@ -93,6 +120,76 @@ describe("/edit/scholars — authorization", () => {
     expect(mockLoadEditRoster).not.toHaveBeenCalled();
     // requireSuperuserGet emits the denial line.
     expect(console.warn).toHaveBeenCalled();
+  });
+
+  // B3 — the org-unit-admin tier. Before this the roster was superuser/steward
+  // only, so a department curator had no way to FIND the scholars they were
+  // already authorized to edit (Amendment 4 grants them the per-scholar editor).
+  it("unit Owner/Curator → admitted, and the query is SCOPE-FILTERED to their units", async () => {
+    mockGetEditSession.mockResolvedValue(CURATOR);
+    mockUnitAdminFindMany.mockResolvedValue([
+      { entityType: "department", entityId: "DEPT1" },
+      { entityType: "center", entityId: "CTR1" },
+    ]);
+    // The dept→division cascade: managing a department reaches its divisions.
+    mockDivisionFindMany.mockResolvedValue([{ code: "DIV1" }, { code: "DIV2" }]);
+
+    const result = asEl(await EditScholarsPage({ searchParams: sp() }));
+    expect(result.type).not.toBe(mockForbidden);
+
+    const opts = mockLoadEditRoster.mock.calls[0][0];
+    expect(opts.unitCodeScope.sort()).toEqual(["DEPT1", "DIV1", "DIV2"]);
+    // UNIT_ADMIN_CENTER_PROXY is on in this env (see the vi.mock above), matching
+    // prod; with it off the centers must drop out — see the next case.
+    expect(opts.scopeCenterCodes).toEqual(["CTR1"]);
+  });
+
+  // The roster must never list someone the per-scholar editor would refuse.
+  it("drops center scope when UNIT_ADMIN_CENTER_PROXY is off (no listed-but-403 rows)", async () => {
+    mockCenterProxyEnabled.mockReturnValue(false);
+    mockGetEditSession.mockResolvedValue(CURATOR);
+    mockUnitAdminFindMany.mockResolvedValue([
+      { entityType: "department", entityId: "DEPT1" },
+      { entityType: "center", entityId: "CTR1" },
+    ]);
+    await EditScholarsPage({ searchParams: sp() });
+    expect(mockLoadEditRoster.mock.calls[0][0].scopeCenterCodes).toBeUndefined();
+  });
+
+  it("a superuser is NOT scope-filtered (sees everyone, as before)", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    await EditScholarsPage({ searchParams: sp() });
+    const opts = mockLoadEditRoster.mock.calls[0][0];
+    expect(opts.unitCodeScope).toBeUndefined();
+    expect(opts.scopeCenterCodes).toBeUndefined();
+  });
+
+  it("narrows the org-unit filter dropdowns to the curator's own scope", async () => {
+    mockGetEditSession.mockResolvedValue(CURATOR);
+    mockUnitAdminFindMany.mockResolvedValue([{ entityType: "department", entityId: "DEPT1" }]);
+    mockDivisionFindMany.mockResolvedValue([{ code: "DIV1" }]);
+    mockLoadRosterFacets.mockResolvedValue({
+      departments: [{ code: "DEPT1", name: "Mine" }, { code: "DEPT9", name: "Theirs" }],
+      divisions: [{ code: "DIV1", name: "Mine div" }, { code: "DIV9", name: "Theirs div" }],
+      centers: [{ code: "CTR9", name: "Not mine" }],
+      roleCategories: [{ value: "full_time_faculty", label: "Full-time faculty" }],
+    });
+
+    const result = asEl(await EditScholarsPage({ searchParams: sp() }));
+    const roster = asEl(result.props.children);
+    const facets = roster.props.facets as Record<string, unknown[]>;
+    expect(facets.departments).toEqual([{ code: "DEPT1", name: "Mine" }]);
+    expect(facets.divisions).toEqual([{ code: "DIV1", name: "Mine div" }]);
+    expect(facets.centers).toEqual([]);
+    // Person type is not unit-specific — it stays whole.
+    expect(facets.roleCategories).toHaveLength(1);
+  });
+
+  it("a curator never gets the superuser 'View as' affordance", async () => {
+    mockGetEditSession.mockResolvedValue(CURATOR);
+    mockUnitAdminFindMany.mockResolvedValue([{ entityType: "department", entityId: "DEPT1" }]);
+    const result = asEl(await EditScholarsPage({ searchParams: sp() }));
+    expect(asEl(result.props.children).props.canImpersonate).toBe(false);
   });
 
   it("superuser → renders the roster from a roster query", async () => {

@@ -13,7 +13,7 @@ describe("buildConsoleLinks", () => {
       isSuperuser: true,
       canManageMethods: false,
       managesUnits: false,
-      canBrowseScopedScholars: false,
+      canBrowseDataQuality: false,
     });
     expect(links).toEqual([
       { id: "manage-profiles", label: "Admin console", href: "/edit/scholars" },
@@ -25,7 +25,7 @@ describe("buildConsoleLinks", () => {
       isSuperuser: true,
       canManageMethods: true,
       managesUnits: true,
-      canBrowseScopedScholars: false,
+      canBrowseDataQuality: false,
     });
     expect(links.map((l) => l.id)).toEqual(["manage-profiles"]);
   });
@@ -35,73 +35,87 @@ describe("buildConsoleLinks", () => {
       isSuperuser: false,
       canManageMethods: true,
       managesUnits: false,
-      canBrowseScopedScholars: false,
+      canBrowseDataQuality: false,
     });
     expect(links).toEqual([
       { id: "methods", label: "Method families", href: "/edit/methods" },
     ]);
   });
 
-  it("unit Owner/Curator (not a superuser) → 'Org units'", () => {
-    const links = buildConsoleLinks({
-      isSuperuser: false,
-      canManageMethods: false,
-      managesUnits: true,
-      canBrowseScopedScholars: false,
-    });
-    expect(links).toEqual([
-      { id: "units", label: "Org units", href: "/edit/units" },
-    ]);
-  });
-
-  // The prod complaint this row exists to answer: a department curator signed
+  // The prod complaint these rows exist to answer: a department curator signed
   // in, saw ONLY "Org units", and reported they could not see the people they
-  // are supposed to edit — though `/edit/data-quality` had been scoping several
-  // hundred of them to that account the whole time, reachable only as a tab
-  // inside /edit/units named "Data quality".
-  it("unit Owner/Curator with the dashboard on → 'Scholars you can edit' BEFORE 'Org units'", () => {
+  // are supposed to edit. `/edit/scholars` is the roster that answers that, and
+  // it is named "Profiles" for every role — so the row, the tab, and the page
+  // heading all agree.
+  it("unit Owner/Curator (not a superuser) → 'Profiles' BEFORE 'Org units'", () => {
     const links = buildConsoleLinks({
       isSuperuser: false,
       canManageMethods: false,
       managesUnits: true,
-      canBrowseScopedScholars: true,
+      canBrowseDataQuality: false,
     });
     expect(links).toEqual([
-      { id: "scoped-scholars", label: "Scholars you can edit", href: "/edit/data-quality" },
+      { id: "profiles", label: "Profiles", href: "/edit/scholars" },
       { id: "units", label: "Org units", href: "/edit/units" },
     ]);
   });
 
-  it("dashboard flag off → no scoped-scholars row (the route would 404)", () => {
+  it("unit Owner/Curator with the dashboard on → Profiles, Data quality, Org units", () => {
     const links = buildConsoleLinks({
       isSuperuser: false,
       canManageMethods: false,
       managesUnits: true,
-      canBrowseScopedScholars: false,
+      canBrowseDataQuality: true,
     });
-    expect(links.map((l) => l.id)).toEqual(["units"]);
+    expect(links).toEqual([
+      { id: "profiles", label: "Profiles", href: "/edit/scholars" },
+      { id: "data-quality", label: "Data quality", href: "/edit/data-quality" },
+      { id: "units", label: "Org units", href: "/edit/units" },
+    ]);
   });
 
-  it("superuser → still only 'Admin console', never a scoped-scholars row", () => {
-    // A superuser's roster is the unscoped /edit/scholars; the scoped dashboard
-    // would be a redundant, narrower door.
+  it("dashboard flag off → Profiles survives, only Data quality drops (it would 404)", () => {
+    const links = buildConsoleLinks({
+      isSuperuser: false,
+      canManageMethods: false,
+      managesUnits: true,
+      canBrowseDataQuality: false,
+    });
+    expect(links.map((l) => l.id)).toEqual(["profiles", "units"]);
+  });
+
+  it("a grantless viewer never gets Profiles, even with the dashboard flag on", () => {
+    // `canBrowseDataQuality` folds in `managesUnits`, so this combination should
+    // not arise — pinned anyway: the roster row keys on the GRANT, not the flag.
+    const links = buildConsoleLinks({
+      isSuperuser: false,
+      canManageMethods: false,
+      managesUnits: false,
+      canBrowseDataQuality: true,
+    });
+    expect(links.map((l) => l.id)).toEqual(["data-quality"]);
+  });
+
+  it("superuser → still only 'Admin console', never the scoped rows", () => {
+    // A superuser's roster is the same /edit/scholars, unscoped, reached via
+    // "Admin console"; a second row for it would be a redundant door.
     const links = buildConsoleLinks({
       isSuperuser: true,
       canManageMethods: true,
       managesUnits: true,
-      canBrowseScopedScholars: true,
+      canBrowseDataQuality: true,
     });
     expect(links.map((l) => l.id)).toEqual(["manage-profiles"]);
   });
 
-  it("steward AND unit admin → both, methods before units", () => {
+  it("steward AND unit admin → methods, profiles, units", () => {
     const links = buildConsoleLinks({
       isSuperuser: false,
       canManageMethods: true,
       managesUnits: true,
-      canBrowseScopedScholars: false,
+      canBrowseDataQuality: false,
     });
-    expect(links.map((l) => l.id)).toEqual(["methods", "units"]);
+    expect(links.map((l) => l.id)).toEqual(["methods", "profiles", "units"]);
   });
 
   it("plain scholar (no privileged role) → no console section", () => {
@@ -109,7 +123,7 @@ describe("buildConsoleLinks", () => {
       isSuperuser: false,
       canManageMethods: false,
       managesUnits: false,
-      canBrowseScopedScholars: false,
+      canBrowseDataQuality: false,
     });
     expect(links).toEqual([]);
   });
@@ -121,7 +135,7 @@ describe("buildConsoleLinks", () => {
       isSuperuser: false,
       canManageMethods: false,
       managesUnits: false,
-      canBrowseScopedScholars: false,
+      canBrowseDataQuality: false,
     });
     expect(links).toEqual([]);
   });
@@ -130,9 +144,9 @@ describe("buildConsoleLinks", () => {
   // in-console AdminSubnav (`/edit/find-researchers`). The dropdown never carries it.
   it("never surfaces a find-researchers / Funding-matcher row, for any viewer", () => {
     const matrices = [
-      { isSuperuser: true, canManageMethods: false, managesUnits: false, canBrowseScopedScholars: false },
-      { isSuperuser: true, canManageMethods: true, managesUnits: true, canBrowseScopedScholars: true },
-      { isSuperuser: false, canManageMethods: true, managesUnits: true, canBrowseScopedScholars: true },
+      { isSuperuser: true, canManageMethods: false, managesUnits: false, canBrowseDataQuality: false },
+      { isSuperuser: true, canManageMethods: true, managesUnits: true, canBrowseDataQuality: true },
+      { isSuperuser: false, canManageMethods: true, managesUnits: true, canBrowseDataQuality: true },
     ];
     for (const v of matrices) {
       expect(buildConsoleLinks(v).some((l) => l.href === "/edit/find-researchers")).toBe(false);
