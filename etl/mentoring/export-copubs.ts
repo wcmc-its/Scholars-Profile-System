@@ -36,17 +36,24 @@
  *      suppression at request time). One object per (mentor, mentee) with ≥1 pub:
  *        { mentorCwid, menteeCwid, pubs: CoPublicationFull[] }
  *
- * Mentor→mentee pairs come from the SAME four sources `getMenteesForMentor`
- * uses: `reporting_students_mentors` (ReciterDB) + `phd_mentor_relationship` +
- * `postdoc_mentor_relationship` + the `manualMentees` field-override (#2011) —
- * the env's Aurora, so run this where BOTH the local Aurora has the relationship
+ * Mentor→mentee pairs come from THREE sources: `reporting_students_mentors`
+ * (ReciterDB) + `phd_mentor_relationship` + `postdoc_mentor_relationship` (the
+ * env's Aurora — so run this where BOTH the local Aurora has the relationship
  * tables AND ReciterDB is reachable; the local dev DB mirrors the deployed
- * schema and is kept current by the ETLs.
+ * schema and is kept current by the ETLs).
  *
  * Keep that list in lockstep with `getMenteesForMentor`. Where
  * MENTORING_COPUB_BRIDGE is on, these products are the app's ONLY co-pub source,
  * so a source the read path renders but this export skips shows up as a silent,
  * indistinguishable-from-real zero on every co-pub surface.
+ *
+ * The ONE deliberate exception is the `manualMentees` field-override (#2011).
+ * A hand-entered mentee is resolved at READ TIME from the env's own Aurora, and
+ * `getMenteesForMentor` / `getCoPublications` compute its co-pubs there — never
+ * from these products. It is intentionally NOT a pair source here; do not add it
+ * back. Doing so gives those pairs two sources that drift apart, and the export
+ * cannot be run from anywhere that has both the field-override rows and
+ * ReciterDB in reach anyway.
  *
  * Env (AWS default credential chain — never hardcode keys):
  *   MENTORING_COPUBS_BUCKET   (default ARTIFACTS_BUCKET, else wcmc-reciterai-artifacts)
@@ -65,7 +72,6 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { writeFileSync } from "node:fs";
 import { db, disconnect } from "../../lib/db";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
-import { manualMenteePairs } from "@/lib/edit/manual-mentee";
 import type {
   CoPublication,
   CoPublicationAuthor,
@@ -154,24 +160,12 @@ async function loadMentorMenteePairs(): Promise<Map<string, Set<string>>> {
   for (const r of aoc) add(r.mentorCWID, r.studentCWID);
 
   // Local Aurora relationship tables.
-  const [phd, postdoc, manual] = await Promise.all([
+  const [phd, postdoc] = await Promise.all([
     db.read.phdMentorRelationship.findMany({ select: { mentorCwid: true, menteeCwid: true } }),
     db.read.postdocMentorRelationship.findMany({ select: { mentorCwid: true, menteeCwid: true } }),
-    // #2011 — mentor-entered mentees. A FOURTH pair source, and the reason this
-    // export can't just read the three relationship tables any more: where
-    // MENTORING_COPUB_BRIDGE is on (staging + prod), these bridge products are
-    // the ONLY co-pub source the app has, so a pair missing here renders as a
-    // genuine zero — no badge, no chip preview, no /co-pubs page — even when the
-    // two demonstrably co-authored. Entries without a `cwid` contribute nothing
-    // and are skipped: with no identifier there is nothing to join on.
-    db.read.fieldOverride.findMany({
-      where: { entityType: "scholar", fieldName: "manualMentees" },
-      select: { entityId: true, value: true },
-    }),
   ]);
   for (const r of phd) add(r.mentorCwid, r.menteeCwid);
   for (const r of postdoc) add(r.mentorCwid, r.menteeCwid);
-  for (const p of manualMenteePairs(manual)) add(p.mentorCwid, p.menteeCwid);
 
   return byMentor;
 }

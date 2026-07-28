@@ -258,6 +258,159 @@ async function loadAocRows(mentorCwid: string): Promise<AocRow[]> {
   }
 }
 
+/** Local `publication.pmid` is a VarChar and carries source-prefixed ids for
+ *  non-PubMed records (e.g. "SCOPUS:105037533819"); `CoPublicationFull.pmid` is
+ *  a number. Drop anything that isn't a plain PubMed id rather than emit NaN. */
+function parsePmid(pmid: string): number | null {
+  if (!/^\d{1,16}$/.test(pmid)) return null;
+  const n = Number(pmid);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * ponytail: the local corpus has no per-pmid author TABLE. `publication_author`
+ * holds WCM CWIDs only (the reciter ETL skips every author outside the ingestion
+ * set), so it cannot produce the full byline a citation needs. `fullAuthorsString`
+ * IS that byline — rank-ordered and already in "Lastname II" Vancouver form, so
+ * each token is the rendered author verbatim.
+ *
+ * `personIdentifier` is left null throughout, which costs the co-author profile
+ * links on the page and the bold mentor/mentee runs in the DOCX. Recovering it
+ * means joining a token index back to `publication_author.position`, and the ETL's
+ * `composeAuthorString` DROPS surname-less rows — so the two sequences can shift
+ * apart silently and bold the wrong person. A missing link degrades; a wrong one
+ * misattributes. Attach CWIDs by rank if linked co-authors are ever asked for,
+ * and verify the shift case first.
+ */
+function localAuthors(fullAuthorsString: string | null): CoPublicationAuthor[] {
+  if (!fullAuthorsString) return [];
+  return fullAuthorsString
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .map((lastName, i) => ({
+      rank: i + 1,
+      lastName,
+      firstName: null,
+      personIdentifier: null,
+    }));
+}
+
+/**
+ * #2011 follow-up — co-publications for MANUAL-ONLY mentees, computed from the
+ * env's OWN Aurora at request time. RAW (pre-suppression), exactly like
+ * {@link fetchCoPublicationsRaw}; the caller applies suppression.
+ *
+ * These mentees are in no ETL relationship table, so the co-pub bridge has no
+ * rows for them and never will — the bridge export is deliberately NOT a fourth
+ * pair source (see `etl/mentoring/export-copubs.ts`). The bridge exists because
+ * co-pubs across ~1000 mentors are expensive and most SOURCED mentees are
+ * unlinked alumni absent from local tables. Neither applies here: a manual
+ * mentee worth showing co-pubs for is one the mentor gave a CWID, and a CWID
+ * resolving to a WCM profile is by definition in local `Scholar` /
+ * `publication_author`. So this is a set intersection on two indexed columns
+ * (`@@index([cwid, isConfirmed])`), for a handful of people, per request — and
+ * no ETL run is ever required for a manual mentee to light up.
+ *
+ * Accepted limitation: a manual mentee whose CWID has no local authorship rows
+ * (the unlinked-alumnus case) gets zero. They get zero today too, so this is
+ * strictly better than the status quo, just short of what ReciterDB would return.
+ *
+ * Fail-soft to an empty map with a logged error, matching the bridge/live path's
+ * historical `.catch(() => [])` — a co-pub read must not take down a profile.
+ */
+async function localCoPublications(
+  mentorCwid: string,
+  menteeCwids: string[],
+): Promise<Map<string, CoPublicationFull[]>> {
+  const out = new Map<string, CoPublicationFull[]>();
+  const targets = [...new Set(menteeCwids)].filter((c) => c && c !== mentorCwid);
+  if (!mentorCwid || targets.length === 0) return out;
+
+  try {
+    // One indexed read covers the mentor and every mentee; intersect in memory.
+    // `publication_author` has no unique key on (pmid, cwid), so collect into a
+    // Set rather than trusting row counts.
+    const rows = await prisma.publicationAuthor.findMany({
+      where: { cwid: { in: [mentorCwid, ...targets] }, isConfirmed: true },
+      select: { cwid: true, pmid: true },
+    });
+    const pmidsByCwid = new Map<string, Set<string>>();
+    for (const r of rows) {
+      if (!r.cwid) continue;
+      let set = pmidsByCwid.get(r.cwid);
+      if (!set) pmidsByCwid.set(r.cwid, (set = new Set<string>()));
+      set.add(r.pmid);
+    }
+    const mentorPmids = pmidsByCwid.get(mentorCwid);
+    if (!mentorPmids || mentorPmids.size === 0) return out;
+
+    const sharedByCwid = new Map<string, string[]>();
+    const allShared = new Set<string>();
+    for (const cwid of targets) {
+      const shared = [...(pmidsByCwid.get(cwid) ?? [])].filter((p) => mentorPmids.has(p));
+      if (shared.length === 0) continue;
+      sharedByCwid.set(cwid, shared);
+      for (const p of shared) allShared.add(p);
+    }
+    if (allShared.size === 0) return out;
+
+    const pubs = await prisma.publication.findMany({
+      where: { pmid: { in: [...allShared] } },
+      select: {
+        pmid: true,
+        title: true,
+        journal: true,
+        year: true,
+        doi: true,
+        pmcid: true,
+        volume: true,
+        issue: true,
+        pages: true,
+        citationCount: true,
+        abstract: true,
+        fullAuthorsString: true,
+      },
+    });
+    const byPmid = new Map<string, CoPublicationFull>();
+    for (const p of pubs) {
+      const pmid = parsePmid(p.pmid);
+      if (pmid === null) continue;
+      byPmid.set(p.pmid, {
+        pmid,
+        title: p.title,
+        journal: p.journal,
+        year: p.year,
+        doi: p.doi,
+        pmcid: p.pmcid,
+        volume: p.volume,
+        issue: p.issue,
+        pages: p.pages,
+        citationCount: p.citationCount,
+        abstract: p.abstract,
+        authors: localAuthors(p.fullAuthorsString),
+      });
+    }
+
+    for (const [cwid, shared] of sharedByCwid) {
+      // Newest first, pmid desc as tiebreaker — the same order both ReciterDB
+      // paths use, so the preview and the page agree row for row.
+      const list = shared
+        .map((p) => byPmid.get(p))
+        .filter((p): p is CoPublicationFull => p !== undefined)
+        .sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || b.pmid - a.pmid);
+      if (list.length > 0) out.set(cwid, list);
+    }
+    return out;
+  } catch (err) {
+    console.error(
+      `[mentoring] local co-pub computation failed for mentor ${mentorCwid}`,
+      err,
+    );
+    return out;
+  }
+}
+
 /**
  * Returns all known mentees for the given mentor CWID. Multiple AOC project
  * rows for the same student are collapsed to a single chip.
@@ -458,16 +611,22 @@ export async function getMenteesForMentor(
   });
 
   const cwids = [...byCwid.keys()];
-  // #2011 — a synthetic `manual:N` id is a dead parameter in the live
-  // `IN (...)` clause and in the bridge read, so drop it before either.
+  // Split the roster by PROVENANCE — the same predicate `MenteeChip.manualOnly`
+  // reports. An ETL-sourced mentee goes to the co-pub bridge/live source; a
+  // manual-only one goes to the local computation below, because the bridge has
+  // no rows for it and never will (it is deliberately not a pair source in
+  // `etl/mentoring/export-copubs.ts`). Asking the bridge anyway would return a
+  // zero indistinguishable from a real one.
   //
-  // Filter on the prefix WE mint, NOT on `isCwid`: source ids come from
-  // Jenzabar / ED / ReciterDB and are not ours to validate. An `isCwid`
-  // allowlist here silently drops any source id that doesn't match the
-  // pattern (caught by mentoring-copub-source.test.ts, whose `m1` fixture is
-  // below the 3-char minimum) — a co-pub count regression wearing a tidier
-  // predicate.
-  const sourceCwids = cwids.filter((c) => !isManualMenteeId(c));
+  // Filter on PROVENANCE, never on `isCwid`: source ids come from Jenzabar / ED
+  // / ReciterDB and are not ours to validate. An `isCwid` allowlist here
+  // silently drops any source id that doesn't match the pattern (caught by
+  // mentoring-copub-source.test.ts, whose `m1` fixture is below the 3-char
+  // minimum) — a co-pub count regression wearing a tidier predicate.
+  const sourceCwids = cwids.filter((c) => sourcedCwids.has(c));
+  // #2011 — a synthetic `manual:N` id has no identifier to join on, so it can
+  // never have co-publications; drop it from the local ask too.
+  const manualOnlyCwids = cwids.filter((c) => !sourcedCwids.has(c) && !isManualMenteeId(c));
 
   // Issue #195 — Resolve program names. Precedence: ED `student_phd_program`
   // beats Jenzabar `phd_mentor_relationship.major_desc` (ED is the
@@ -528,10 +687,11 @@ export async function getMenteesForMentor(
     // Skip both co-pub sources — the caller doesn't render counts (#955 #5). The
     // dark-pmid suppression below no-ops on the empty preview map.
   } else if (sourceCwids.length === 0) {
-    // #2011 — every mentee is a manual entry with no CWID, so there is nothing to
-    // ask either source. Zero co-pubs is a FACT here, not an outage, so mark the
-    // source available: `false` would make callers suppress the badges as though
-    // ReciterDB were down. This also guards the live path below, whose
+    // #2011 — no ETL source contributed a mentee, so there is nothing to ask
+    // either co-pub source. Zero co-pubs is a FACT here, not an outage, so mark
+    // the source available: `false` would make callers suppress the badges as
+    // though ReciterDB were down — including the badges the local computation
+    // below is about to fill. This also guards the live path, whose
     // `IN (${...join(",")})` is malformed SQL on an empty list.
     copubSourceAvailable = true;
   } else if (process.env.MENTORING_COPUB_BRIDGE === "on") {
@@ -614,6 +774,36 @@ export async function getMenteesForMentor(
         err,
       );
     });
+  }
+
+  // #2011 follow-up — MANUAL-ONLY mentees reach neither co-pub source above, so
+  // compute theirs from the env's own Aurora. Written into the SAME two maps,
+  // and deliberately BEFORE the dark-pmid pass below, so they inherit publication
+  // suppression for free; computing after that pass would publish suppressed
+  // pmids into the preview.
+  //
+  // `copubSourceAvailable` is left alone here on purpose. Where no ETL source
+  // contributed anyone, the branch above has already set it true. Where sourced
+  // mentees DO exist and their bridge/live read failed, the flag is reporting a
+  // real outage for those chips — one flag covers the whole result, so forcing it
+  // true would dress an outage up as a set of honest zeros.
+  if (includeCopubs && manualOnlyCwids.length > 0) {
+    const local = await localCoPublications(mentorCwid, manualOnlyCwids);
+    for (const [cwid, pubs] of local) {
+      copubCountByCwid.set(cwid, pubs.length);
+      // Top 3, same order the bridge preview uses (#185). One source for both the
+      // badge and the page: the count IS this list's length, so the two cannot
+      // drift apart the way a separately-exported count can.
+      copubPreviewByCwid.set(
+        cwid,
+        pubs.slice(0, 3).map(({ pmid, title, journal, year }) => ({
+          pmid,
+          title,
+          journal,
+          year,
+        })),
+      );
+    }
   }
 
   // Issue #443/#185 — dark-pmid suppression of the badge count + chip preview.
@@ -903,6 +1093,12 @@ async function fetchCoPublicationsRaw(
  * publication suppression (#356) is re-applied on BOTH paths via
  * {@link applyCoPubSuppression}, since the bridge stores pre-suppression rows.
  *
+ * #2011 follow-up — `options.manualOnly` routes a MANUAL-ONLY mentee to
+ * {@link localCoPublications} instead, computed from the env's own Aurora. The
+ * discriminator is free: `MenteeChip.manualOnly` and `getMentorMenteePair` both
+ * already report it, and every caller has one of the two in hand. It defaults
+ * false, so a sourced mentee's path is bit-for-bit unchanged.
+ *
  * Returns an empty array when no co-authored publications exist — drift
  * is possible between this query and the badge count (e.g. an alumnus
  * mentee is in the count query but not in the author-list table for a
@@ -911,10 +1107,13 @@ async function fetchCoPublicationsRaw(
 export async function getCoPublications(
   mentorCwid: string,
   menteeCwid: string,
+  options?: { manualOnly?: boolean },
 ): Promise<CoPublicationFull[]> {
   if (!mentorCwid || !menteeCwid || mentorCwid === menteeCwid) return [];
 
-  const raw = await fetchCoPublicationsRaw(mentorCwid, menteeCwid);
+  const raw = options?.manualOnly
+    ? (await localCoPublications(mentorCwid, [menteeCwid])).get(menteeCwid) ?? []
+    : await fetchCoPublicationsRaw(mentorCwid, menteeCwid);
   try {
     return await applyCoPubSuppression(raw);
   } catch (err) {
@@ -935,11 +1134,17 @@ export async function getCoPublications(
  * mentees and returns mentor + mentee display names. Used by the co-pubs
  * page (#184) to 404 on stray URLs. Returns `null` when the relationship
  * doesn't exist in `reporting_students_mentors`.
+ *
+ * #2011 follow-up — a HAND-ENTERED mentee is a recorded mentee too, so the
+ * `manualMentees` field-override is a fourth thing consulted here; without it a
+ * manual mentee's chip would advertise co-pubs and link to a hard 404. The
+ * returned `manualOnly` is the discriminator `getCoPublications` needs, computed
+ * from reads this function already had to do.
  */
 export async function getMentorMenteePair(
   mentorCwid: string,
   menteeCwid: string,
-): Promise<{ mentorName: string; menteeName: string } | null> {
+): Promise<{ mentorName: string; menteeName: string; manualOnly: boolean } | null> {
   if (!mentorCwid || !menteeCwid) return null;
 
   // Look in all three sources — AOC (ReCiterDB), Jenzabar PhD, and postdoc
@@ -980,7 +1185,7 @@ export async function getMentorMenteePair(
       return [];
     }
   };
-  const [aocRows, jenzabarRow, postdocRow, hiddenMentees] = await Promise.all([
+  const [aocRows, jenzabarRow, postdocRow, manualRows, hiddenMentees] = await Promise.all([
     loadAocPairRows(),
     prisma.phdMentorRelationship.findFirst({
       where: { mentorCwid, menteeCwid },
@@ -990,13 +1195,28 @@ export async function getMentorMenteePair(
       where: { mentorCwid, menteeCwid },
       select: { menteeFirstName: true, menteeLastName: true },
     }),
+    // #2011 — best-effort, matching `getMenteesForMentor`: a field-override read
+    // failure must not 404 a page the three ETL sources can still back.
+    getManualMentees(mentorCwid, prisma).catch((err) => {
+      console.error(`[mentoring] manual mentee read failed for mentor ${mentorCwid}`, err);
+      return [];
+    }),
     loadHiddenMenteeSet(mentorCwid),
   ]);
-  if (aocRows.length === 0 && !jenzabarRow && !postdocRow) return null;
+  // Stored cwids are lowercased on write; the URL segment is not normalized
+  // anywhere on the way in, so compare case-insensitively — the three sourced
+  // lookups above get that from MySQL's collation for free.
+  const wanted = menteeCwid.toLowerCase();
+  const manualRow = manualRows.find((m) => m.cwid?.toLowerCase() === wanted) ?? null;
+  if (aocRows.length === 0 && !jenzabarRow && !postdocRow && !manualRow) return null;
   // #160 follow-up — this validator is the shared 404 gate for the per-mentee
   // co-pubs page and its export route; a mentor-hidden mentee must 404 there
   // exactly like a stray URL, mirroring the profile Mentoring section.
   if (hiddenMentees.has(menteeCwid)) return null;
+  // Same rule the chip uses: manual-only means NO ETL source contributed, not
+  // "has a hand-entered record". A mentee both hand-entered and sourced is
+  // sourced, and keeps the bridge/live co-pub path.
+  const manualOnly = aocRows.length === 0 && !jenzabarRow && !postdocRow;
 
   const first =
     aocRows[0]?.studentFirstName ??
@@ -1008,7 +1228,10 @@ export async function getMentorMenteePair(
     jenzabarRow?.menteeLastName ??
     postdocRow?.menteeLastName ??
     null;
-  const menteeName = [first, last].filter(Boolean).join(" ").trim() || menteeCwid;
+  // A sourced record wins the display name; `ManualMentee` carries one
+  // undivided `name`, so it is the fallback rather than a first/last part.
+  const menteeName =
+    [first, last].filter(Boolean).join(" ").trim() || manualRow?.name || menteeCwid;
 
   // Mentor display name comes from the local Scholar table; the mentor
   // is on a scholar profile page so they're always present there.
@@ -1020,7 +1243,7 @@ export async function getMentorMenteePair(
     ? formatPublishedName(mentor.preferredName, mentor.postnominal)
     : mentorCwid;
 
-  return { mentorName, menteeName };
+  return { mentorName, menteeName, manualOnly };
 }
 
 /** One (mentee, publication) tie for the mentor-level rollup at
@@ -1135,7 +1358,10 @@ export async function getAllMentorCoPublications(
   const pubsByCwid = new Map<string, CoPublicationFull[]>();
   await Promise.all(
     menteesWithCopubs.map(async (m) => {
-      const pubs = await getCoPublications(mentorCwid, m.cwid);
+      // #2011 follow-up — carry the chip's own provenance through, so the rollup
+      // reads the same source that produced its badge count. Passing it is what
+      // keeps the three surfaces from disagreeing.
+      const pubs = await getCoPublications(mentorCwid, m.cwid, { manualOnly: m.manualOnly });
       pubsByCwid.set(m.cwid, pubs);
     }),
   );
