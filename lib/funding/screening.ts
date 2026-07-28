@@ -67,19 +67,18 @@ export function facultyPiMayHold(eligibilityFlags: unknown, eligibility: unknown
 }
 
 /**
- * Spec §4 / #1919 — the award names a funding MECHANISM rather than a research area, so concept
- * fan-out has nothing to match on and returns an empty page that reads as "WCM has no suitable
- * researchers". NIGMS RM1 is the type case: real, fundable, $1.5M/yr, and topically empty.
+ * 🔴 #1919's topic-agnostic detector was REMOVED here, measured against staging 2026-07-27.
+ * Neither half of the proposed signal survives the data:
  *
- * The signal is the opportunity's own classification, not its prose — an earlier boilerplate-share
- * metric UNDER-detects this, because mechanism prose ("the scope of some scientific problems…")
- * counts as scientific to a sentence classifier.
+ * - "no MeSH anchor" carries ZERO information — `mesh_descriptor_ui` is a JSON-scalar null on
+ *   every row of the corpus (0 of 333 clickable rows hold a real array), so the test is true
+ *   everywhere. See the JSON-null trap: `JSON_TYPE(col)='ARRAY'` is the only honest populated test.
+ * - `primary_topic_id = 'research_infrastructure_workforce'` alone hits 83 of 333 rows (24.9%),
+ *   and reading them shows it is not the "no science to rank on" class at all: Sloan Research
+ *   Fellowships, ACS Mentored Research Grants, AHA institutional awards, K-bridge career
+ *   development. Those rank fine.
+ *
+ * Telling an officer a quarter of the corpus has no science in it — and suppressing the ask on all
+ * of it — is a worse failure than the blank page #1919 reported. A real detector needs a signal
+ * that separates the NIGMS RM1 from a Sloan Fellowship; the topic taxonomy does not carry one.
  */
-export function isTopicAgnostic(opportunity: {
-  primaryTopicId?: string | null;
-  meshDescriptorUi?: unknown;
-}): boolean {
-  const mesh = opportunity.meshDescriptorUi;
-  const hasAnchor = Array.isArray(mesh) ? mesh.length > 0 : mesh != null;
-  return !hasAnchor && opportunity.primaryTopicId === "research_infrastructure_workforce";
-}

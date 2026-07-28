@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { facultyPiMayHold, isTopicAgnostic } from "@/lib/funding/screening";
+import { facultyPiMayHold } from "@/lib/funding/screening";
 
 const NO_FLAGS = ["us_eligible"];
 
@@ -47,30 +47,5 @@ describe("facultyPiMayHold", () => {
         career_stages: ["graduate_student"],
       }),
     ).toBe(true);
-  });
-});
-
-describe("isTopicAgnostic", () => {
-  it("flags the NIGMS RM1 shape: an infrastructure/workforce topic with no MeSH anchor", () => {
-    expect(
-      isTopicAgnostic({
-        primaryTopicId: "research_infrastructure_workforce",
-        meshDescriptorUi: null,
-      }),
-    ).toBe(true);
-    expect(
-      isTopicAgnostic({ primaryTopicId: "research_infrastructure_workforce", meshDescriptorUi: [] }),
-    ).toBe(true);
-  });
-
-  it("does not flag an award that carries a MeSH anchor, or any other topic", () => {
-    expect(
-      isTopicAgnostic({
-        primaryTopicId: "research_infrastructure_workforce",
-        meshDescriptorUi: ["D009369"],
-      }),
-    ).toBe(false);
-    expect(isTopicAgnostic({ primaryTopicId: "cancer_biology", meshDescriptorUi: null })).toBe(false);
-    expect(isTopicAgnostic({ primaryTopicId: null, meshDescriptorUi: null })).toBe(false);
   });
 });

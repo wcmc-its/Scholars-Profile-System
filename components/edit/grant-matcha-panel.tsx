@@ -22,7 +22,7 @@ import { ArrowLeft } from "lucide-react";
 import { BrowseList } from "@/components/edit/find-researchers";
 import { MatchaPanel, type EligibilityRequirements } from "@/components/edit/matcha-panel";
 import type { CareerStage } from "@/lib/career-stage";
-import { careerStagesOf, facultyPiMayHold, isTopicAgnostic } from "@/lib/funding/screening";
+import { careerStagesOf, facultyPiMayHold } from "@/lib/funding/screening";
 
 type Selected = {
   title: string | null;
@@ -55,21 +55,17 @@ const FACULTY_STAGES: readonly CareerStage[] = ["early", "mid", "senior"];
  * Say up front why this opportunity will not rank researchers, instead of spending a Sonnet call
  * to produce a page the officer has to interpret.
  *
- * Both cases are opportunity-level facts (screening spec §3.1 and §4), knowable before the ask
- * runs, and both currently surface as the SAME misleading picture: #1918's award that no faculty
- * can hold drops everyone into the eligibility floor, and #1919's topic-agnostic RM1 renders "No
- * researchers matched this description." Each reads as "Weill Cornell has nobody for this", which
- * is false in both cases.
+ * This is an opportunity-level fact (screening spec §3.1), knowable before the ask runs: an award
+ * no faculty PI can hold drops everyone into the eligibility floor, which reads as "Weill Cornell
+ * has nobody for this" when the truth is "this award is not for faculty."
  *
  * A note SUPPRESSES the auto-run, it does not block the ask — the seeded text stays in the
  * textarea and the officer can still run it (the relaxation §6 asks for, at the ask level).
+ *
+ * 🔴 #1919's topic-agnostic case is deliberately NOT here — the signal it proposed does not exist
+ * in the corpus. See the note in `lib/funding/screening.ts`.
  */
-export function askNote(full: {
-  eligibilityFlags?: unknown;
-  eligibility?: unknown;
-  primaryTopicId?: string | null;
-  meshDescriptorUi?: unknown;
-}): string | null {
+export function askNote(full: { eligibilityFlags?: unknown; eligibility?: unknown }): string | null {
   if (!facultyPiMayHold(full.eligibilityFlags, full.eligibility)) {
     // §6: name the rule AND the field value that triggered it.
     const stages = careerStagesOf(full.eligibility)
@@ -78,9 +74,6 @@ export function askNote(full: {
     return `No Weill Cornell faculty PI can hold this award${
       stages ? ` — its eligibility names ${stages} only` : ""
     }. Ranking faculty against it will mostly fill the filtered-out floor.`;
-  }
-  if (isTopicAgnostic(full)) {
-    return "This award is not topic-specific — it names a funding mechanism rather than a research area, so there is no science to rank researchers on. Run it anyway if you want to see what the extractor finds.";
   }
   return null;
 }
@@ -148,8 +141,6 @@ export function GrantMatchaPanel() {
           synopsis: string | null;
           eligibilityFlags?: unknown;
           eligibility?: unknown;
-          primaryTopicId?: string | null;
-          meshDescriptorUi?: unknown;
         };
         if (!active) return;
         const askSeed = buildAskSeed(full.title, full.synopsis);
