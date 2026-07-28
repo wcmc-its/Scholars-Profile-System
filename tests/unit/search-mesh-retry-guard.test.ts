@@ -72,6 +72,12 @@ const RESOLUTIONS: Record<string, ReturnType<typeof mesh> | null> = {
   // The retry resolves the bare token `stem` and MUST NOT replace it.
   "stem cells effects": mesh("D013234", "Stem Cells", "stem cells", "partial"),
   stem: mesh("D018112", "Microscopy, Electron, Scanning Transmission", "stem", "entry-term"),
+  // #1980 — the PROD shape. Prod runs SEARCH_MESH_RESOLUTION_FALLBACK=off, so a query
+  // like these resolves to NOTHING (absent from this map ⇒ the mock returns null) and
+  // control takes the `current === null` arm, which #1972 leaves unguarded. Only the
+  // stripped forms resolve.
+  kidney: mesh("D007668", "Kidney", "kidney", "exact"),
+  asthma: mesh("D001249", "Asthma", "asthma", "exact"),
 };
 
 vi.mock("@/lib/api/search-taxonomy", async (importOriginal) => {
@@ -119,6 +125,42 @@ describe("#1972 — the strip retry may replace a FILLER window but not a CONTEN
       // Not "Microscopy, Electron, Scanning Transmission", which is what the bare
       // token `stem` resolves to and what an unguarded retry would adopt.
       expect(i.conceptLabel).not.toMatch(/Microscopy/);
+    });
+  }
+});
+
+/**
+ * #1980 — the arm #1972 leaves open: the full query resolved NOTHING, so there is no
+ * incumbent concept to protect and the retry is adopted whatever it names.
+ *
+ * This is the PROD configuration, and it is why the `stem cells effects` case above is
+ * green while prod serves "Microscopy, Electron, Scanning Transmission": that fixture
+ * gives the full query a `partial` resolution, which only exists when
+ * SEARCH_MESH_RESOLUTION_FALLBACK is ON. Prod runs it off, the full query returns null,
+ * and this arm — not the same-descriptor arm — is the one that fires.
+ */
+describe("#1980 — an over-aggressive strip may not be adopted on the null arm", () => {
+  beforeEach(() => {
+    process.env.SEARCH_GENERIC_TERM_DEMOTE = "resolve";
+  });
+  afterEach(() => {
+    delete process.env.SEARCH_GENERIC_TERM_DEMOTE;
+    vi.resetModules();
+  });
+
+  for (const type of ["people", "publications"] as const) {
+    it(`${type}: 2-of-3 tokens stripped is REJECTED — kidney disease effects stays unresolved`, async () => {
+      const i = await conceptFor("kidney disease effects", type);
+      // Without the guard the bare token `kidney` is adopted and the card states, with no
+      // hedging, that the results are about the ORGAN rather than Kidney Diseases.
+      expect(i.conceptLabel ?? null).toBeNull();
+    });
+
+    it(`${type}: 1-of-2 tokens stripped is still ADMITTED — asthma patients → Asthma`, async () => {
+      const i = await conceptFor("asthma patients", type);
+      // The 2→1 class is #1972's 49 measured same-descriptor wins; the guard counts what
+      // was REMOVED precisely so this stays admitted.
+      expect(i.conceptLabel).toBe("Asthma");
     });
   }
 });

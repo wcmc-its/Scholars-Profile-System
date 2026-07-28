@@ -824,6 +824,50 @@ export function meshConfidenceRank(
 export const MESH_RANK_VERBATIM = 2;
 
 /**
+ * #1980 — may a #692 generic-strip retry be adopted on the arm where the full query
+ * resolved NOTHING? Only when the strip removed at most HALF the query's tokens.
+ *
+ * That arm is otherwise unguarded. `meshRetryIsSameDescriptorUpgrade` protects the case
+ * where a concept already exists, but when nothing resolved there is no incumbent to
+ * compare against, so the retry is adopted whatever it names.
+ * `data/search/deprioritized-terms.json` contains the head nouns (`cells`, `disease`,
+ * `health`, `patients`) while the words carrying the subject (`stem`, `kidney`, `policy`)
+ * do not — so a 3-token query can strip to a bare token whose sense is unrelated to what
+ * the user typed, and the retry then states it with no hedging.
+ *
+ * Measured in prod 2026-07-27, identically on the people AND publications branches:
+ *
+ *   stem cells effects      → `stem`   → Microscopy, Electron, Scanning Transmission
+ *   kidney disease effects  → `kidney` → Kidney (the organ), not Kidney Diseases
+ *   health policy effects   → `policy` → Policy, not Health Policy
+ *
+ * All three strip 2 of 3 tokens. The rule counts what was REMOVED, not what SURVIVED:
+ * a survivor-majority rule would also reject the 2→1 strips #1972 measured as wins
+ * (`asthma patients` → `Asthma`, `chronic fatigue` → `Fatigue`; 49 of them), because one
+ * surviving token out of two is not a majority either. Removing exactly half is that
+ * whole 2→1 class, and it stays admitted.
+ *
+ * Verified against the real `stripDeprioritized` (2026-07-27) — this closes 4 of the 6
+ * rows #1980 tabulated and leaves two, which strip only half their tokens and so are out
+ * of reach of a token-budget rule:
+ *
+ *   public health policy              → `public policy`   (1/3) → Public Policy
+ *   coronary artery disease patients  → `coronary artery` (2/4) → Coronary Vessels
+ *
+ * Those need #1980's fix (2) (reject a retry whose descriptor is token-disjoint from the
+ * typed query) or the longest-span window fallback, and are deliberately left open here.
+ *
+ * Deliberately does NOT gate the same-descriptor-upgrade arm: that one cannot swap the
+ * concept, so how much was stripped to reach it does not matter.
+ */
+export function meshStripRemovedAtMostHalf(
+  removedCount: number,
+  totalCount: number,
+): boolean {
+  return removedCount * 2 <= totalCount;
+}
+
+/**
  * #1972 — may a #692 generic-strip retry REPLACE a resolution the full query already
  * produced? Only when it names the SAME descriptor at a strictly higher confidence.
  *
