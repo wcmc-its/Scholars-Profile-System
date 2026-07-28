@@ -117,6 +117,8 @@ function mentee(over: Partial<MenteeChip>): MenteeChip {
     copublicationCount: 0,
     copublicationPreview: [],
     identityImageEndpoint: "",
+    // #2011 — a sourced mentee by default; the CV renders both kinds identically.
+    manualOnly: false,
     scholar: null,
     ...over,
   };

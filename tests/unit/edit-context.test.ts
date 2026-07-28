@@ -158,13 +158,35 @@ describe("loadEditContext — boundary cases", () => {
     );
   });
 
-  it("#2011 keeps a CWID-less manual mentee OUT of the hide-only panel", async () => {
-    // The union hands back both; a manual entry is deleted from the mentor's own
-    // list, not suppressed, so offering "hide" on that row is the wrong verb.
+  it("#2011 keeps hand-entered mentees OUT of the hide-only panel — including one with a real CWID", async () => {
+    // The panel speaks for the source systems: it says "Source: Jenzabar or
+    // Employee Central" and offers "Request a change". A hand-entered mentee
+    // listed there is a false provenance claim pointing at a record that does
+    // not exist. `evs2008` is the case the first cut missed — a real-looking
+    // cwid, so an id-shape filter let it through and the mentee appeared twice.
     vi.mocked(getMenteesForMentor).mockResolvedValueOnce({
       mentees: [
-        { cwid: "m1", fullName: "Jordan Mentee", programName: "Immunology", programType: "PhD" },
-        { cwid: "manual:0", fullName: "Rowan Ellis", programName: "Visiting", programType: null },
+        {
+          cwid: "m1",
+          fullName: "Jordan Mentee",
+          programName: "Immunology",
+          programType: "PhD",
+          manualOnly: false,
+        },
+        {
+          cwid: "manual:0",
+          fullName: "Rowan Ellis",
+          programName: "Visiting",
+          programType: null,
+          manualOnly: true,
+        },
+        {
+          cwid: "evs2008",
+          fullName: "Evan Sholle",
+          programName: "Visiting Student",
+          programType: null,
+          manualOnly: true,
+        },
       ],
       copubSourceAvailable: true,
     } as never);
@@ -175,6 +197,30 @@ describe("loadEditContext — boundary cases", () => {
 
     expect(ctx!.mentees).toHaveLength(1);
     expect(ctx!.mentees[0].externalId).toBe(`${SELF}:m1`);
+  });
+
+  it("#2011 KEEPS a hand-entered mentee the source system also carries", async () => {
+    // Once Jenzabar/ED carries them the source record is real and authoritative,
+    // so the sourced panel owns it and "Request a change" is honest again.
+    vi.mocked(getMenteesForMentor).mockResolvedValueOnce({
+      mentees: [
+        {
+          cwid: "evs2008",
+          fullName: "Evan Sholle",
+          programName: "Immunology",
+          programType: "PhD",
+          manualOnly: false,
+        },
+      ],
+      copubSourceAvailable: true,
+    } as never);
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+
+    const ctx = await loadEditContext(SELF, asClient(c));
+
+    expect(ctx!.mentees).toHaveLength(1);
+    expect(ctx!.mentees[0].externalId).toBe(`${SELF}:evs2008`);
   });
 });
 
@@ -839,11 +885,15 @@ describe("loadEditContext — mentees (suppressible)", () => {
     fullName: string;
     programName: string | null;
     programType: string | null;
+    manualOnly: boolean;
   }> = {}) => ({
     cwid: over.cwid ?? "mentee9",
     fullName: over.fullName ?? "Jordan Mentee",
     programName: over.programName ?? null,
     programType: over.programType ?? null,
+    // #2011 — these fixtures are SOURCED mentees; the hand-entered case has its
+    // own test in the default-loader block above.
+    manualOnly: over.manualOnly ?? false,
   });
 
   it("annotates a shown mentee with the {cwid}:{menteeCwid} externalId", async () => {
