@@ -81,3 +81,46 @@ describe("SearchTransitionProvider scroll preservation", () => {
     expect(scrollToSpy).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * #1995 root-cause experiment — SEARCH_PLAIN_LINK_TABS. The flag is resolved on
+ * the server in app/(public)/search/page.tsx and threaded to the three mode tabs
+ * as `plain`; nothing else on /search passes it. With `plain` the link's own
+ * click handler is gone entirely, so the click reaches next/link and never
+ * touches the shared transition or `router.push` — which is exactly the arm the
+ * A/B needs. (next/link no-ops here: `if (!router) return` — there is no
+ * AppRouterContext in the test tree.)
+ */
+describe("TransitionLink plain (SEARCH_PLAIN_LINK_TABS, #1995)", () => {
+  it("bypasses the shared transition when plain is set (flag ON — plain next/link)", () => {
+    const { getByText } = render(
+      <SearchTransitionProvider>
+        <TransitionLink href="/search?q=x&type=publications" scroll={false} plain>
+          Publications
+        </TransitionLink>
+      </SearchTransitionProvider>,
+    );
+
+    // fireEvent returns false when the event was canceled: nothing called
+    // preventDefault here, so next/link owns the navigation. (The uncancelled
+    // click also makes jsdom try to follow the <a> — that deferred "Not
+    // implemented: navigation" stderr is the proof, not a failure.)
+    expect(fireEvent.click(getByText("Publications"))).toBe(true);
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("routes through the shared transition without plain (flag OFF — today's tabs)", async () => {
+    const { getByText } = render(
+      <SearchTransitionProvider>
+        <TransitionLink href="/search?q=x&type=publications" scroll={false}>
+          Publications
+        </TransitionLink>
+      </SearchTransitionProvider>,
+    );
+
+    expect(fireEvent.click(getByText("Publications"))).toBe(false);
+    await waitFor(() =>
+      expect(push).toHaveBeenCalledWith("/search?q=x&type=publications", { scroll: false }),
+    );
+  });
+});
