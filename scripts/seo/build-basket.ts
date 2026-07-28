@@ -42,7 +42,7 @@ import "dotenv/config";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { prisma } from "@/lib/db";
+import { disconnect, prisma } from "@/lib/db";
 import type { Basket, BasketQuery, BasketTarget } from "@/lib/seo/rank-basket";
 
 const DATA_DIR = path.resolve(process.cwd(), "data", "seo");
@@ -406,11 +406,11 @@ async function main(): Promise<void> {
   }, {});
   const typeSummary = Object.entries(byType).map(([t, n]) => `${n} ${t}`).join(", ");
   console.log(`[seo:basket] mode=${args.mode}: wrote ${basket.queries.length} queries (${typeSummary}) to ${args.out}`);
-  await prisma.$disconnect();
+  await disconnect();
 }
 
 main().catch(async (err) => {
   console.error(err);
-  await prisma.$disconnect().catch(() => {});
+  await disconnect().catch(() => {});
   process.exit(1);
 });

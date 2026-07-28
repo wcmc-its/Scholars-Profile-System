@@ -31,9 +31,19 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(__dirname, "../..");
+/**
+ * Every pattern below matches plain source text, so a comment that merely
+ * MENTIONS a pool reads as a real use. `etl/family-suppression/index.ts` has a
+ * doc comment explaining why it does NOT query `db.read`, which is enough to
+ * convict it. Strip block comments and whole-line `//` before matching; a
+ * trailing `//` is left alone so `https://` inside a string literal survives.
+ */
+const stripComments = (s: string) =>
+  s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
 const cache = new Map<string, string>();
 const read = (f: string) => {
-  if (!cache.has(f)) cache.set(f, readFileSync(f, "utf8"));
+  if (!cache.has(f)) cache.set(f, stripComments(readFileSync(f, "utf8")));
   return cache.get(f)!;
 };
 
@@ -65,20 +75,53 @@ function moduleGraph(entry: string): string[] {
   return [...seen];
 }
 
-const importsFromDb = (src: string, name: string) =>
-  new RegExp(`import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from\\s*["'][^"']*lib/db["']`).test(src);
+/**
+ * Static `import { X } from ".../lib/db"` OR the dynamic
+ * `const { X } = await import(".../lib/db")` form. Matching only the static one
+ * left a hole: a file that closes its pools via a lazy import scored "closes
+ * nothing" and was exempted outright, so the guard could not regress-proof it.
+ */
+const importsFromDb = (src: string, name: string) => {
+  const named = `\\{[^}]*\\b${name}\\b[^}]*\\}`;
+  return new RegExp(
+    `(?:import\\s*${named}\\s*from|${named}\\s*=\\s*await\\s+import\\s*\\()\\s*["'][^"']*lib/db["']`,
+  ).test(src);
+};
 
-/** Does this module issue a query against the reader pool (either alias)? */
+/**
+ * Does this module reach the reader pool (either alias)?
+ *
+ * Matches bare `db.read`, not just `db.read.` — a client is just as opened when
+ * it is PASSED somewhere as when a method is called on it. `2026-06-10-import-
+ * unit-curation.ts` does `runAuditQueryC(db.read)`, which a trailing-dot pattern
+ * misses entirely, and that file leaked the reader in exactly that shape.
+ */
 const touchesReader = (f: string) => {
   const s = read(f);
-  return /\bdb\.read\./.test(s) || (importsFromDb(s, "prisma") && /\bprisma\.\w/.test(s));
+  return /\bdb\.read\b/.test(s) || (importsFromDb(s, "prisma") && /\bprisma\.\w/.test(s));
 };
-const touchesWriter = (f: string) => /\bdb\.write\./.test(read(f));
+const touchesWriter = (f: string) => /\bdb\.write\b/.test(read(f));
 
-const entrypoints = readdirSync(path.join(ROOT, "etl"), { withFileTypes: true })
-  .filter((d) => d.isDirectory())
-  .map((d) => path.join(ROOT, "etl", d.name, "index.ts"))
-  .filter(existsSync);
+/**
+ * Every .ts under etl/ and scripts/, not just `etl/<dir>/index.ts` (#2009).
+ * The narrow glob covered exactly the nightly/weekly chains — the watched ones.
+ * It could not see `etl/honors/import-honors-seed.ts`, which leaked the reader
+ * and left six sps-etl-prod tasks RUNNING for hours on 2026-07-27, nor the
+ * operator-run one-offs under scripts/backfills/. Non-entrypoints need no
+ * filtering here: a library disconnects nothing, so the `disconnectsAnything`
+ * early-return below already exempts it.
+ */
+const walk = (dir: string): string[] =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((d) => {
+    const p = path.join(dir, d.name);
+    if (d.isDirectory()) return d.name === "node_modules" ? [] : walk(p);
+    return d.name.endsWith(".ts") && !d.name.endsWith(".test.ts") ? [p] : [];
+  });
+
+const entrypoints = [path.join(ROOT, "etl"), path.join(ROOT, "scripts")]
+  .filter(existsSync)
+  .flatMap(walk)
+  .sort();
 
 describe("ETL entrypoints close every pool they open", () => {
   it("finds the ETL entrypoints", () => {
@@ -96,7 +139,10 @@ describe("ETL entrypoints close every pool they open", () => {
       usesHelper || /db\.read\.\$disconnect/.test(src) || /\bprisma\.\$disconnect/.test(src);
     const closesWriter = usesHelper || /db\.write\.\$disconnect/.test(src);
 
-    const graph = moduleGraph(entry);
+    // lib/db.ts DEFINES the clients — its own `new Set([db.write, db.read])`
+    // inside disconnect() is not a consumer touching a pool, and it sits in
+    // every graph, so leaving it in makes all 188 entrypoints look guilty.
+    const graph = moduleGraph(entry).filter((f) => f !== path.join(ROOT, "lib", "db.ts"));
     const leaks: string[] = [];
     if (graph.some(touchesReader) && !closesReader) leaks.push("reader (db.read / prisma)");
     if (graph.some(touchesWriter) && !closesWriter) leaks.push("writer (db.write)");

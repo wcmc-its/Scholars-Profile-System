@@ -20,7 +20,7 @@
 import "dotenv/config";
 import { promises as fs } from "node:fs";
 
-import { prisma } from "@/lib/db";
+import { disconnect, prisma } from "@/lib/db";
 import { canonicalProfilePath } from "@/lib/profile-url";
 import { siteBaseUrl } from "@/lib/sitemap";
 
@@ -72,11 +72,11 @@ async function main(): Promise<void> {
     process.stdout.write(body);
   }
 
-  await prisma.$disconnect();
+  await disconnect();
 }
 
 main().catch(async (err) => {
   console.error(err);
-  await prisma.$disconnect();
+  await disconnect();
   process.exit(1);
 });

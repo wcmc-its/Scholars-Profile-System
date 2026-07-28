@@ -72,6 +72,37 @@ export function parseSeedRows(input: unknown): { rows: SeedRow[]; errors: string
   return { rows, errors };
 }
 
+/**
+ * Fold a key part the way the DB compares it. `honor` is utf8mb4_unicode_ci, so
+ * the upsert's WHERE treats "Fellow"/"fellow" and "Société"/"Societe" as equal.
+ * A byte-exact JS key would score those pairs 0 while the DB merges them —
+ * exactly the undercount this gate exists to end. (Trailing space needs no
+ * handling: parseSeedRows already trims.)
+ *
+ * ponytail: NFD + lowercase covers case and Latin accents, not every UCA
+ * equivalence (utf8mb4_unicode_ci also folds ß = ss). If that ever matters, do
+ * the dedup as a GROUP BY in the DB instead of in JS.
+ */
+const collationFold = (s: string) => s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+
+/**
+ * Rows whose (cwid, organization, name) repeats an EARLIER row (#2010). The
+ * upsert key excludes `year` on purpose (#1761), so two input rows sharing the
+ * triple are not two honors — the second overwrites the first and is counted as
+ * an ordinary "updated". Returns how many rows merge away: summed over each
+ * duplicated key, (occurrences - 1). Zero means the file is one row per honor.
+ */
+export function countMergingRows(rows: SeedRow[]): number {
+  const seen = new Set<string>();
+  let merging = 0;
+  for (const r of rows) {
+    const key = JSON.stringify([r.cwid, r.organization, r.name].map(collationFold));
+    if (seen.has(key)) merging += 1;
+    else seen.add(key);
+  }
+  return merging;
+}
+
 /** The seed may set status only while the row is still pending. */
 export function statusOnUpdate(
   existing: SeedRow["status"],

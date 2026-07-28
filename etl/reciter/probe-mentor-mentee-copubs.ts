@@ -18,7 +18,7 @@
  */
 import "dotenv/config";
 import { withReciterConnection, closeReciterPool } from "@/lib/sources/reciterdb";
-import { prisma } from "@/lib/db";
+import { prisma, disconnect } from "@/lib/db";
 
 type PairRow = { mentor_cwid: string; mentee_cwid: string; n: number };
 
@@ -95,12 +95,12 @@ async function main() {
   );
 
   await closeReciterPool();
-  await prisma.$disconnect();
+  await disconnect();
 }
 
 main().catch(async (err) => {
   console.error(err);
   await closeReciterPool();
-  await prisma.$disconnect();
+  await disconnect();
   process.exit(1);
 });

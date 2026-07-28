@@ -246,7 +246,7 @@ const main = async () => {
 
   // Imported lazily so the structural BackfillDb type stays the contract and the
   // unit tests never load the real client.
-  const { db } = await import("../../lib/db");
+  const { db, disconnect } = await import("../../lib/db");
   const { runAuditQueryC, runAuditQueryE } = await import("./audit-unit-curation");
 
   const fixture = await fixtureLoadCenters(db.write as unknown as BackfillDb, opts);
@@ -283,7 +283,7 @@ const main = async () => {
       `manualUnits=${result.auditC.length}, manualRosterRows=${result.auditE.length}.`,
   );
 
-  await db.write.$disconnect();
+  await disconnect();
 };
 
 // Run only when invoked directly (not when imported by the unit test).

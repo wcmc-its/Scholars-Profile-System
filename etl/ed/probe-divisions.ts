@@ -20,7 +20,7 @@
  * Read-only — does not modify any DB or LDAP state.
  */
 import "dotenv/config";
-import { prisma } from "../../lib/db";
+import { disconnect, prisma } from "../../lib/db";
 import {
   type ChiefVerdict,
   detectDivisionChief,
@@ -205,7 +205,7 @@ async function main() {
     `  Path B usable (HIGH+MEDIUM): ${usable}/${total} (${total > 0 ? ((usable / total) * 100).toFixed(0) : 0}%)`,
   );
 
-  await prisma.$disconnect();
+  await disconnect();
 }
 
 main().catch((e) => {

@@ -21,7 +21,7 @@
  */
 import { createWriteStream } from "node:fs";
 
-import { db } from "../../lib/db";
+import { db, disconnect } from "../../lib/db";
 import { loadCoiInputs } from "@/lib/coi-gap/compute";
 import { diagnoseScholar, summarize, type DiagnosticRow } from "@/lib/coi-gap/diagnose";
 
@@ -98,5 +98,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await db.read.$disconnect();
+    await disconnect();
   });

@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { disconnect, prisma } from "@/lib/db";
 import { getMenteesForMentor } from "@/lib/api/mentoring";
 (async () => {
   const candidates: { cwid: string; slug: string; preferredName: string }[] = await prisma.$queryRawUnsafe(`
@@ -14,5 +14,5 @@ import { getMenteesForMentor } from "@/lib/api/mentoring";
       console.log(`${mentees.length} ${c.slug} (${c.preferredName})`);
     }
   }
-  await prisma.$disconnect();
+  await disconnect();
 })();

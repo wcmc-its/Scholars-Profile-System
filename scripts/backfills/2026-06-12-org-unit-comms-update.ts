@@ -38,7 +38,7 @@
  */
 import "dotenv/config";
 import { pathToFileURL } from "node:url";
-import { db } from "../../lib/db";
+import { db, disconnect } from "../../lib/db";
 import { DEPARTMENT_NAMES } from "../../lib/department-names";
 import { CENTERS } from "../../prisma/center-seed-data";
 
@@ -268,7 +268,7 @@ async function run(dryRun: boolean) {
 const main = async () => {
   const dryRun = process.argv.slice(2).includes("--dry-run");
   await run(dryRun);
-  await db.write.$disconnect();
+  await disconnect();
 };
 
 const invokedDirectly =
