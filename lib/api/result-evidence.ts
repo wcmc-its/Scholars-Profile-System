@@ -623,6 +623,9 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
  * matched research area — each appear as their OWN line when present (a scholar
  * can match on more than one). `mention` (keyword) is the fallback shown ONLY
  * when none of the three fired; `clinical` is an INDEPENDENT label-only line.
+ * Order is method → tagged concept → research area, with ONE exception: a method
+ * lead whose count the tagged lead outnumbers swaps with it (see the comment on
+ * the swap — a targeted two-way comparison, never a sort).
  * When NONE of those fire, it falls back to the single {@link selectEvidence}
  * tail (concept-text / bio / affiliation / identity hints / honest-empty) so a
  * card never loses its existing evidence.
@@ -635,30 +638,71 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
 export function selectEvidenceLines(input: SelectEvidenceInput): ResultEvidence[] {
   const lines: ResultEvidence[] = [];
   // 1 — method (first-class)
-  if (input.method)
-    lines.push({
-      kind: "method",
-      family: input.method.family,
-      tools: input.method.tools,
-      ...(input.method.count != null ? { count: input.method.count } : {}),
-    });
+  const methodLine: ResultEvidence | undefined = input.method
+    ? {
+        kind: "method",
+        family: input.method.family,
+        tools: input.method.tools,
+        ...(input.method.count != null ? { count: input.method.count } : {}),
+      }
+    : undefined;
   // 2 — concept: a DIRECT subject/MeSH tagged hit (the counted `tagged` variant;
   // the weaker `concept` text variant stays in the single-tail fallback below).
-  if (input.pub?.tagged)
-    lines.push({
-      kind: "publications",
-      strength: "tagged",
-      text: input.pub.tagged.text,
-      ...(input.pub.tagged.term ? { term: input.pub.tagged.term } : {}),
-      ...(input.pub.tagged.descendantTerms && input.pub.tagged.descendantTerms.length > 0
-        ? {
-            descendantTerms: input.pub.tagged.descendantTerms,
-            alsoParent: input.pub.tagged.alsoParent === true,
-          }
-        : {}),
-      ...(input.pub.tagged.pubs && input.pub.tagged.pubs.length > 0 ? { pubs: input.pub.tagged.pubs } : {}),
-      count: input.pub.tagged.count,
-    });
+  const taggedLine: ResultEvidence | undefined = input.pub?.tagged
+    ? {
+        kind: "publications",
+        strength: "tagged",
+        text: input.pub.tagged.text,
+        ...(input.pub.tagged.term ? { term: input.pub.tagged.term } : {}),
+        ...(input.pub.tagged.descendantTerms && input.pub.tagged.descendantTerms.length > 0
+          ? {
+              descendantTerms: input.pub.tagged.descendantTerms,
+              alsoParent: input.pub.tagged.alsoParent === true,
+            }
+          : {}),
+        ...(input.pub.tagged.pubs && input.pub.tagged.pubs.length > 0
+          ? { pubs: input.pub.tagged.pubs }
+          : {}),
+        count: input.pub.tagged.count,
+      }
+    : undefined;
+  // 1⇄2 — THE ONE ORDERING EXCEPTION: a method lead that the tagged lead
+  // OUTNUMBERS gives up the primary slot to it.
+  //
+  // Method was unconditionally first, which buried the stronger signal whenever a
+  // scholar's method footprint was the smaller of the two. Measured in prod on
+  // `rgcryst`: the card led with "11 … AAV (method)" while "140 … Genetic Therapy
+  // (tagged concept)" — the same scholar, 12.7× the publications — was folded into
+  // "Also matched". The primary slot is the one thing on the card a searcher reads,
+  // so ordering it by fiat rather than by magnitude is the card stating the weaker
+  // case for its own result.
+  //
+  // A TWO-WAY COMPARISON, NOT A SORT, and deliberately so. The `tier === "lesser"`
+  // block in `components/search/result-evidence.tsx` argues at length that these
+  // counts come from DIFFERENT pipelines ("two pipelines, one frame") and that
+  // framing them against a shared denominator manufactures a comparison — which is
+  // why the lesser rows print magnitudes and no shares. That argument still stands
+  // for `topic`: `areaCounts` is doc-precomputed and NOT query-filtered, so its N is
+  // the scholar's total in that area whatever you searched, and it stays in slot 3
+  // untouched. These two are the pair that IS comparable: both are distinct-
+  // PUBLICATION counts over the SAME scholar, and `countOf` in `lib/api/search.ts`
+  // clamps both to that scholar's `pubCount`, so "which of these two matched more of
+  // this person's papers" is a question the data can answer.
+  //
+  // Both counts must be PRESENT. A not-yet-reindexed doc carries no
+  // `methodFamilyCounts` map ⇒ no `method.count` ⇒ nothing to compare, and inferring
+  // an order from an absent number is exactly the fabrication this change exists to
+  // remove. Missing either side ⇒ today's method-first order, unchanged.
+  const methodCount = input.method?.count;
+  const taggedCount = input.pub?.tagged?.count;
+  const taggedOutnumbersMethod =
+    methodCount != null && taggedCount != null && methodCount < taggedCount;
+  if (methodLine && taggedLine && taggedOutnumbersMethod) {
+    lines.push(taggedLine, methodLine);
+  } else {
+    if (methodLine) lines.push(methodLine);
+    if (taggedLine) lines.push(taggedLine);
+  }
   // 3 — research area (first-class peer line; demoted-below-all in the single path)
   if (input.topic)
     lines.push({

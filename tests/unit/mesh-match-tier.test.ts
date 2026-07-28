@@ -3,6 +3,11 @@
  * by the decompose-and-resolve fallback (SEARCH_MESH_RESOLUTION_FALLBACK). The key
  * safety invariant: a `partial` (interpreted) match admits/attributes strictly
  * BENEATH every verbatim tier, so a fallback guess can never out-rank a real match.
+ *
+ * Also covers entry-term tier parity (SEARCH_MESH_ENTRY_TIER_PARITY): a FULL-QUERY
+ * entry-term hit is a verbatim match and earns the `exact` tier, so two spellings of
+ * one descriptor stop scoring differently — while a partial-coverage entry-term hit
+ * (the #692 generic-strip retry) does not.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -14,6 +19,7 @@ import {
   MESH_ATTRIBUTION_WEIGHT,
 } from "@/lib/search";
 import { isAllDeprioritized } from "@/lib/api/deprioritized-terms";
+import { isFullQueryMeshMatch } from "@/lib/api/normalize";
 
 describe("meshMatchTier", () => {
   it("maps confidence → tier", () => {
@@ -23,6 +29,80 @@ describe("meshMatchTier", () => {
     expect(meshMatchTier("partial", 0)).toBe("partial");
     // anchors are irrelevant once the confidence is partial
     expect(meshMatchTier("partial", 5)).toBe("partial");
+  });
+});
+
+/**
+ * Entry-term tier parity (`SEARCH_MESH_ENTRY_TIER_PARITY`) — measured on prod
+ * 2026-07-27:
+ * `gene therapy` and `genetic therapy` resolve to the SAME descriptor (`Genetic
+ * Therapy`, D015316) and score differently — entry-term (attribution 1.15 / admit
+ * 0.03, 921 scholars) vs exact (1.5 / 0.1, 848 scholars), only 2 of the top 6
+ * scholars in common. When the user's WHOLE query IS the entry term, the match is
+ * verbatim and must earn the verbatim tier.
+ *
+ * 🔴 These explicit mappings are the ONLY coverage of the promotion. The "MESH weight
+ * ladders" suite below asserts weight ORDER (partial < entry < anchored-entry < exact),
+ * which is untouched by a tier PROMOTION — it would stay green if `fullQueryMatch` were
+ * dropped on the floor, or wired backwards. Order tests cannot catch this class of bug.
+ */
+describe("meshMatchTier — entry-term tier parity", () => {
+  it("promotes a FULL-QUERY entry-term match to the exact tier", () => {
+    expect(meshMatchTier("entry-term", 0, { fullQueryMatch: true })).toBe("exact");
+  });
+
+  it("leaves a non-full-query entry-term match on the floor tier", () => {
+    // The #692 generic-strip retry arm: entry-term, but resolved from the STRIPPED
+    // query, so it covers only part of what the user typed.
+    expect(meshMatchTier("entry-term", 0, { fullQueryMatch: false })).toBe("entry");
+  });
+
+  it("ignores anchorCount once the query matched in full", () => {
+    // The defect was that a curated anchor — a fact about human curation, not about the
+    // match — decided the weight. Full-query parity has to override it, not tie-break.
+    expect(meshMatchTier("entry-term", 2, { fullQueryMatch: true })).toBe("exact");
+  });
+
+  it("keeps `anchored-entry` reachable — it is NOT dead code", () => {
+    // Flag-off (opts omitted) and the retry-derived case both land here.
+    expect(meshMatchTier("entry-term", 2)).toBe("anchored-entry");
+  });
+
+  it("never promotes a `partial` — an interpretation is not a verbatim match", () => {
+    // The window fallback and the #1342 singularize retry both stamp `partial`; if either
+    // could be promoted, a decompose-and-resolve GUESS would attribute like a real match.
+    expect(meshMatchTier("partial", 0, { fullQueryMatch: true })).toBe("partial");
+    expect(meshMatchTier("partial", 5, { fullQueryMatch: true })).toBe("partial");
+  });
+});
+
+/**
+ * The predicate the four call sites (`/api/search`, the SSR search page, the Matcha
+ * spine, the Recall@3 dryrun) feed into `fullQueryMatch`. It is factored into one helper
+ * precisely so those four cannot drift — a divergence between the route and the SSR page
+ * is the badge-count ≠ result-list class of bug.
+ */
+describe("isFullQueryMeshMatch (what may be promoted)", () => {
+  it("matches when query and matched form agree AFTER normalization", () => {
+    expect(isFullQueryMeshMatch("gene therapy", "Gene Therapy")).toBe(true);
+    expect(isFullQueryMeshMatch("  Genetic Therapy  ", "Genetic Therapy")).toBe(true);
+    // normalizeForMatch strips punctuation and the connector "and"
+    expect(isFullQueryMeshMatch("cardio-oncology", "Cardio Oncology")).toBe(true);
+  });
+
+  it("REJECTS a stripped/subset query — the #692 retry must not be promoted", () => {
+    // `contentQuery` is a token SUBSET of what the user typed. Comparing against it
+    // instead of the user's query is exactly what would manufacture verbatim confidence.
+    expect(isFullQueryMeshMatch("gene therapy research", "gene therapy")).toBe(false);
+    expect(isFullQueryMeshMatch("pediatric asthma", "Asthma")).toBe(false);
+  });
+
+  it("REJECTS a different concept, and never reads empty as parity", () => {
+    expect(isFullQueryMeshMatch("gene therapy", "Genetics")).toBe(false);
+    // The resolver has a 3-char floor, so a query normalizing to "" resolved nothing;
+    // `"" === ""` must not read as a full-query match.
+    expect(isFullQueryMeshMatch("", "")).toBe(false);
+    expect(isFullQueryMeshMatch("   ", "")).toBe(false);
   });
 });
 

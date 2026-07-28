@@ -64,6 +64,8 @@ import { deriveGrantSignals } from "@/lib/api/match-researchers";
 import { isResearchMatchEvidence } from "@/lib/api/result-evidence";
 import { searchPeople, type PeopleHit } from "@/lib/api/search";
 import { meshMatchTier } from "@/lib/search";
+import { isFullQueryMeshMatch } from "@/lib/api/normalize";
+import { resolveMeshEntryTierParityEnabled } from "@/lib/api/search-flags";
 // Porter stemmer (reference impl) — matches the field's ES english stemmer closely enough that a
 // gloss term is dropped iff it stem-collides with the canonical concept (see distinctiveGlossTerms).
 import { stemmer } from "stemmer";
@@ -422,7 +424,18 @@ async function retrieveCluster(
     // excludes those papers. Provenance therefore reads the rep's own subtree only.
     meshProvenanceUis: rep?.descendantUis,
     meshMatchTier: rep
-      ? meshMatchTier(rep.confidence, rep.curatedTopicAnchors.length)
+      ? meshMatchTier(rep.confidence, rep.curatedTopicAnchors.length, {
+          // Entry-term tier parity (`SEARCH_MESH_ENTRY_TIER_PARITY`, default OFF) — the
+          // same promotion /search applies, so a cluster whose query IS a descriptor's
+          // entry term is weighted like one whose query is the descriptor's name. Without
+          // it the spine inherits the defect: two paraphrases of one concept ("gene
+          // therapy" vs "genetic therapy") fuse at different attribution weights and
+          // reorder the candidate list. Compared against `clusterQuery` — the string this
+          // call actually retrieves on, and the one `rep` was resolved from.
+          fullQueryMatch:
+            resolveMeshEntryTierParityEnabled() &&
+            isFullQueryMeshMatch(clusterQuery, rep.matchedForm),
+        })
       : undefined,
     meshAmbiguous: rep?.ambiguous,
     meshMatchedFormLength: rep?.matchedForm.length,

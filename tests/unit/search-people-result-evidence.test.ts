@@ -135,7 +135,8 @@ vi.mock("@/lib/search", () => ({
   }),
 }));
 
-import { searchPeople } from "@/lib/api/search";
+import { searchPeople, methodIndexedPubCounts } from "@/lib/api/search";
+import { familyOverlayKey, type FamilyOverlayGate } from "@/lib/api/methods-overlay";
 
 const EVIDENCE = "SEARCH_RESULT_EVIDENCE";
 const MATCH_AWARE = "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET";
@@ -680,5 +681,225 @@ describe("searchPeople — #1977 provenance reads its own set, not the boost uni
     );
     expect(ev).toMatchObject({ kind: "publications", strength: "concept", term: "Microbiota" });
     expect(descTerms(ev)).toBeUndefined();
+  });
+});
+
+/**
+ * The METHOD line's denominator (`methodPubCount`).
+ *
+ * The line read "11 of 923 publications used AAV gene-therapy vectors" with a 1.2% share,
+ * where 923 is the scholar's TOTAL authored output. Method extraction covers 2020+ BY
+ * DESIGN, so the numerator was drawn from a ~27-paper eligible pool and divided by a
+ * 923-paper one — and at 1.2% the card's low-coverage rule then dimmed the scholar's
+ * strongest signal. The honest line is "11 of 27 method-indexed publications", i.e. 41%.
+ *
+ * SPS stores no method-eligible count anywhere, so it is folded at query time from the
+ * union of `ScholarFamily.pmids` over the scholar's publicly-visible families. The union
+ * is load-bearing twice over: a SUM of `pmidCount` would double-count a paper that puts a
+ * scholar in two families, and a MISSING `pmids` (the column is nullable and backfilled by
+ * the full-replace ETL) must yield no denominator at all rather than a low one — a low
+ * denominator INFLATES the percentage, which is worse than the bug it replaces.
+ */
+describe("methodIndexedPubCounts — the method line's denominator", () => {
+  const OPEN: FamilyOverlayGate = { suppressed: new Set(), sensitive: new Set() };
+  const row = (cwid: string, familyLabel: string, pmids: unknown, supercategory = "sequencing") => ({
+    cwid,
+    supercategory,
+    familyLabel,
+    pmids,
+  });
+
+  it("unions pmids across a scholar's families — a shared paper counts ONCE", () => {
+    const counts = methodIndexedPubCounts(
+      [
+        row("el1", "Single-cell RNA sequencing", ["1", "2", "3"]),
+        row("el1", "Confocal microscopy", ["3", "4"], "imaging"),
+      ],
+      OPEN,
+    );
+    // 4, not 5: pmid 3 puts this scholar in both families and is ONE publication.
+    expect(counts.get("el1")).toBe(4);
+  });
+
+  it("a NULL pmids on a gate-visible family ⇒ NO denominator for that scholar", () => {
+    // THE RULE THIS BLOCK EXISTS FOR. Returning 3 here would state a share against a pool
+    // we know is incomplete, and a small denominator makes a thin match look like a
+    // headline. The card degrades to the count alone instead — less, not wrong.
+    const counts = methodIndexedPubCounts(
+      [
+        row("el1", "Single-cell RNA sequencing", ["1", "2", "3"]),
+        row("el1", "Confocal microscopy", null, "imaging"),
+      ],
+      OPEN,
+    );
+    expect(counts.has("el1")).toBe(false);
+  });
+
+  it("a non-array pmids is UNKNOWN too, never empty", () => {
+    // A JSON column can hold an object or a string as easily as an array. `Array.isArray`
+    // is the only shape that can be counted; everything else is unknown, not zero.
+    for (const bad of [{}, "1,2,3", 3, undefined]) {
+      expect(methodIndexedPubCounts([row("el1", "F", bad)], OPEN).has("el1")).toBe(false);
+    }
+  });
+
+  it("one scholar's unknown does not poison another's", () => {
+    const counts = methodIndexedPubCounts([row("el1", "F", null), row("bo2", "F", ["1", "2"])], OPEN);
+    expect(counts.has("el1")).toBe(false);
+    expect(counts.get("bo2")).toBe(2);
+  });
+
+  it("a suppressed / sensitive family contributes NOTHING — not even to the denominator", () => {
+    // An overlay-gated family must not surface on a public cross-scholar surface, and a
+    // denominator IS a disclosure: a pool larger than the visible families account for
+    // says a hidden family exists.
+    const gate: FamilyOverlayGate = {
+      suppressed: new Set([familyOverlayKey("sequencing", "Suppressed family")]),
+      sensitive: new Set([familyOverlayKey("imaging", "Sensitive family")]),
+    };
+    const counts = methodIndexedPubCounts(
+      [
+        row("el1", "Single-cell RNA sequencing", ["1", "2"]),
+        row("el1", "Suppressed family", ["3", "4"]),
+        row("el1", "Sensitive family", ["5", "6"], "imaging"),
+      ],
+      gate,
+    );
+    expect(counts.get("el1")).toBe(2);
+  });
+
+  it("a suppressed family with a NULL pmids does not make the scholar unknown", () => {
+    // The gate check runs FIRST. A row we are not allowed to read cannot be the reason we
+    // withhold a denominator the visible rows fully account for.
+    const gate: FamilyOverlayGate = {
+      suppressed: new Set([familyOverlayKey("sequencing", "Suppressed family")]),
+      sensitive: new Set<string>(),
+    };
+    const counts = methodIndexedPubCounts(
+      [row("el1", "Single-cell RNA sequencing", ["1", "2"]), row("el1", "Suppressed family", null)],
+      gate,
+    );
+    expect(counts.get("el1")).toBe(2);
+  });
+
+  it("an EMPTY union is not a denominator — a 0 would divide the share", () => {
+    expect(methodIndexedPubCounts([row("el1", "F", [])], OPEN).has("el1")).toBe(false);
+  });
+
+  it("numeric and string pmids are the SAME publication", () => {
+    // The artifact writes PMIDs as JSON numbers in some loads and strings in others; a Set
+    // keyed on the raw value would count 33144353 twice and overstate the pool.
+    expect(methodIndexedPubCounts([row("el1", "F", [33144353, "33144353"])], OPEN).get("el1")).toBe(1);
+  });
+
+  it("no rows ⇒ an empty map, never a zero entry", () => {
+    expect(methodIndexedPubCounts([], OPEN).size).toBe(0);
+  });
+});
+
+describe("searchPeople — methodPubCount on the hit", () => {
+  /** Per-call routing: the DENOMINATOR query is the one that selects `pmids`. */
+  const routeFamilyQueries = (familyRows: unknown[], memberRows: unknown[]) =>
+    mockScholarFamilyFindMany.mockImplementation((args: { select?: Record<string, unknown> }) =>
+      Promise.resolve(args?.select?.pmids ? memberRows : familyRows),
+    );
+
+  const runWithFamily = () =>
+    searchPeople({
+      q: "single cell rna sequencing",
+      relevanceMode: "v3",
+      shape: "topic",
+      matchAwareContext: { methodFamily: FAMILY, topics: [] },
+    });
+
+  const METHOD_ROW = { cwid: "el1", familyLabel: "Single-cell RNA sequencing", exemplarTools: [] };
+
+  it("emits the UNION of the scholar's visible families, NOT their pubCount", async () => {
+    process.env[EVIDENCE] = "on";
+    routeFamilyQueries(
+      [METHOD_ROW],
+      [
+        {
+          cwid: "el1",
+          supercategory: "sequencing",
+          familyLabel: "Single-cell RNA sequencing",
+          pmids: ["1", "2", "3"],
+        },
+        { cwid: "el1", supercategory: "imaging", familyLabel: "Confocal microscopy", pmids: ["3", "4"] },
+      ],
+    );
+    const result = await runWithFamily();
+    // The fixture scholar authored 200 publications; 4 of them are method-indexed.
+    expect(result.hits[0].pubCount).toBe(200);
+    expect(result.hits[0].methodPubCount).toBe(4);
+  });
+
+  it("a NULL pmids anywhere ⇒ the field is ABSENT, never a partial count", async () => {
+    process.env[EVIDENCE] = "on";
+    routeFamilyQueries(
+      [METHOD_ROW],
+      [
+        {
+          cwid: "el1",
+          supercategory: "sequencing",
+          familyLabel: "Single-cell RNA sequencing",
+          pmids: ["1", "2", "3"],
+        },
+        { cwid: "el1", supercategory: "imaging", familyLabel: "Confocal microscopy", pmids: null },
+      ],
+    );
+    const result = await runWithFamily();
+    expect(result.hits[0].methodPubCount).toBeUndefined();
+  });
+
+  it("nobody on the page is in the resolved family ⇒ NO denominator query is issued", async () => {
+    // The whole point of gating it: a page with no method line must cost exactly what it
+    // costs today. If this regresses, every people search pays for a query it cannot use.
+    process.env[EVIDENCE] = "on";
+    mockScholarFamilyFindMany.mockResolvedValue([]);
+    const result = await runWithFamily();
+    expect(mockScholarFamilyFindMany).toHaveBeenCalledTimes(1);
+    expect(mockScholarFamilyFindMany.mock.calls[0][0].select.pmids).toBeUndefined();
+    expect(result.hits[0].methodPubCount).toBeUndefined();
+  });
+
+  it("no method family resolved ⇒ no query and no field", async () => {
+    process.env[EVIDENCE] = "on";
+    const result = await searchPeople({
+      q: "single cell spatial biology",
+      relevanceMode: "v3",
+      shape: "topic",
+      matchAwareContext: {
+        methodFamily: null,
+        topics: [{ slug: "single_cell_spatial_biology", label: "Single-cell & spatial biology" }],
+      },
+    });
+    expect(mockScholarFamilyFindMany).not.toHaveBeenCalled();
+    expect(result.hits[0].methodPubCount).toBeUndefined();
+  });
+
+  it("the denominator query is scoped to the page and to LIVE scholars, not to the family", async () => {
+    process.env[EVIDENCE] = "on";
+    routeFamilyQueries(
+      [METHOD_ROW],
+      [
+        {
+          cwid: "el1",
+          supercategory: "sequencing",
+          familyLabel: "Single-cell RNA sequencing",
+          pmids: ["1"],
+        },
+      ],
+    );
+    await runWithFamily();
+    const call = mockScholarFamilyFindMany.mock.calls.find((c) => c[0]?.select?.pmids);
+    expect(call).toBeTruthy();
+    const where = call![0].where;
+    expect(where.cwid).toEqual({ in: ["el1"] });
+    expect(where.scholar).toEqual({ deletedAt: null, status: "active" });
+    // NOT filtered to the resolved family: `methodFamily` narrows the NUMERATOR, while the
+    // denominator answers "how much of this scholar's output is method-indexed AT ALL".
+    expect(where.familyLabel).toBeUndefined();
+    expect(where.supercategory).toBeUndefined();
   });
 });

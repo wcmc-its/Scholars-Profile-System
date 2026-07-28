@@ -766,15 +766,41 @@ export const PEOPLE_TOPIC_ABSTRACTS_BOOST = 0.5;
  * maximizer). Relevance rewards the *type* of match so weaker concept matches
  * rank below the precise lexical ones rather than diluting the top:
  *
- *   tier            from                                      trust
- *   exact           query == descriptor name                  highest
- *   anchored-entry  entry-term hit + a curated topic anchor   medium
- *   entry           entry-term hit, no anchor                 lowest (floor)
+ *   tier            from                                         trust
+ *   exact           the WHOLE query matched a surface form of    highest
+ *                   the descriptor — its name, or (parity flag
+ *                   on) one of its entry terms
+ *   anchored-entry  entry-term hit + a curated topic anchor      medium
+ *   entry           entry-term hit, no anchor                    lowest (floor)
  *
  * `MESH_ADMIT_WEIGHT` is the `terms`-clause boost for concept-only admission;
  * concept-only docs carry ~0 BM25 and already sort beneath lexical hits, so the
  * weight just orders them by trust. `MESH_ATTRIBUTION_WEIGHT` graduates the
  * former flat ×1.5 attribution `function_score` by the same ladder.
+ *
+ * ENTRY-TERM TIER PARITY (`SEARCH_MESH_ENTRY_TIER_PARITY`, default OFF). "exact" used
+ * to mean literally `query == descriptor name`, which made the tier a property of NLM's
+ * choice of preferred label rather than of the match. Measured on prod 2026-07-27:
+ * `gene therapy` and
+ * `genetic therapy` resolve to the SAME descriptor (`Genetic Therapy`, D015316) and score
+ * differently — entry-term (attribution 1.15 / admit 0.03, 921 scholars) vs exact
+ * (1.5 / 0.1, 848 scholars), with only 2 of the top 6 scholars in common. Two spellings of
+ * one concept, two different answers. So when the user's WHOLE query IS the entry term
+ * (`isFullQueryMeshMatch`), the match is verbatim and earns the verbatim tier.
+ *
+ * `anchored-entry` is NOT dead code once parity is on. It still fires for an entry-term
+ * resolution the user did not type in full — specifically the #692 generic-strip retry,
+ * which re-resolves the STRIPPED `contentQuery` and can return an entry-term match that
+ * covers all of the stripped query but only part of what the user typed. That is an
+ * interpretation, not a verbatim hit, so it keeps the medium/floor tiers and the curated
+ * anchor keeps deciding between them.
+ *
+ * The promotion is deliberately NOT done by rewriting `confidence` in the resolver:
+ * `confidence` is read in ~8 other places (candidate sort, the #1346 acronym sense guard,
+ * the fallback's single-token gate, `meshConfidenceRank`'s retry suppression,
+ * `meshRetryIsSameDescriptorUpgrade`, the autocomplete subtitle, and the PUBLIC
+ * `meshConfidence` field on `SearchInterpretation` plus both `search_query` log lines),
+ * several of which would silently invert. The tier is the only thing that should move.
  */
 // `partial` (lowest, below `entry`) is the decompose-and-resolve fallback tier
 // (`SEARCH_MESH_RESOLUTION_FALLBACK`): the query did not match a descriptor
@@ -787,9 +813,19 @@ export type MeshMatchTier = "exact" | "anchored-entry" | "entry" | "partial";
 export function meshMatchTier(
   confidence: "exact" | "entry-term" | "partial",
   anchorCount: number,
+  // Optional so every existing call site — and the bare `vi.mock("@/lib/search")`
+  // factories that stub this function — keeps compiling; omitted ⇒ pre-parity behavior.
+  // Callers compute it as `parityFlagOn && isFullQueryMeshMatch(userQuery, matchedForm)`,
+  // and must compare against the USER's query, never the #692-stripped `contentQuery`.
+  opts?: { fullQueryMatch?: boolean },
 ): MeshMatchTier {
   if (confidence === "partial") return "partial";
   if (confidence === "exact") return "exact";
+  // A verbatim entry-term hit is a verbatim match — see ENTRY-TERM TIER PARITY above.
+  // Checked before the anchor test on purpose: once the whole query matched, whether a
+  // human happened to curate a topic anchor for this descriptor is not evidence about
+  // the match, and letting it downgrade a full-query hit is the original defect.
+  if (opts?.fullQueryMatch) return "exact";
   return anchorCount > 0 ? "anchored-entry" : "entry";
 }
 

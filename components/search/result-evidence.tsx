@@ -16,6 +16,18 @@ import { descendantViaSummary } from "@/lib/search/descendant-summary";
  * percentage is now an always-on neutral column (see `coverage` below), so the threshold
  * gates the dim and nothing else. The name is kept: it is still the same judgement about
  * the same ratio.
+ *
+ * A METHOD LEAD IS MEASURED AGAINST A DIFFERENT POOL. Method extraction covers 2020+ BY
+ * DESIGN, so a method numerator is drawn from the scholar's method-INDEXED publications
+ * and not from `pubCount`. Dividing it by `pubCount` produced "11 of 923 … · 1.2%" for a
+ * scholar with 27 method-indexed papers — an honest 41% — and at 1.2% this threshold then
+ * dimmed their single strongest signal. Both the share and the dim now use
+ * `methodPubCount` for method lines (see `denominator` below); no other kind changes.
+ *
+ * Note what is NOT here: a method EXEMPTION from the dim. With the right denominator the
+ * dim simply stops firing on its own, and a method match that is genuinely thin against
+ * its own eligible pool still deserves to be faint. The bug was the arithmetic, not the
+ * judgement.
  */
 const COVERAGE_CUE_THRESHOLD = 0.02;
 
@@ -91,6 +103,7 @@ export function ResultEvidence({
   hasQuery = true,
   slug,
   pubCount,
+  methodPubCount,
   stacked = false,
   tier = "primary",
 }: {
@@ -120,6 +133,14 @@ export function ResultEvidence({
    *  to render the "· N of M publications" suffix on method/area lines. Absent ⇒
    *  no suffix (the single-evidence path passes no count, so this stays label-only). */
   pubCount?: number;
+  /** The scholar's method-INDEXED publication count (`PeopleHit.methodPubCount`) — the
+   *  denominator a METHOD line's "N of M" and its % column are measured against, because
+   *  method extraction is post-2020 by design and `pubCount` is the whole career. Read
+   *  ONLY for `evidence.kind === "method"`; every other kind keeps `pubCount` verbatim.
+   *  Absent ⇒ the method line prints the count alone ("11 publications used …") with no
+   *  "of M" and no % column. Do NOT fall back to `pubCount` here — that fallback IS the
+   *  bug, and a wrong share reads as a verdict on the scholar. */
+  methodPubCount?: number;
   /** #1366 follow-up — true only in the tiered (`evidenceLines`) context. The Part B
    *  relevance cues are scoped to it so the single-evidence path stays visually frozen,
    *  matching the `stacked`-gated C/D tiering and Part A's panel relabel. */
@@ -263,11 +284,28 @@ export function ResultEvidence({
     evidence.kind === "publications"
       ? evidence.count
       : undefined;
+  // THE DENOMINATOR THIS LEAD'S SHARE IS ACTUALLY A SHARE OF. Everything but `method`
+  // measures against `pubCount`, verbatim and unchanged. A method count is drawn from the
+  // scholar's method-INDEXED publications (extraction is post-2020 by design), so it is
+  // measured against `methodPubCount` — and when the server could not compute that union
+  // exactly it is UNDEFINED, which silences the "of M" clause and the % column together.
+  // The two must move as one: a % with no fraction beside it is the unaccountable number
+  // #1907's lesson is about, and a fraction against a pool the numerator did not come from
+  // is the bug this fixes. Never `methodPubCount ?? pubCount`.
+  //
+  // The `tier === "lesser"` block above already made this argument and acted on it: it
+  // gives method/topic `lesserOwn` (a magnitude, "· 3 publications") instead of
+  // `lesserShare`, on the grounds that those counts and `pubCount` are "two pipelines, one
+  // frame". The PRIMARY row was the last place still framing them together — and the one
+  // place a searcher actually reads. The lesser rows answered it by withholding the share;
+  // the primary row can now state it, because there is a denominator the numerator came
+  // from.
+  const denominator = evidence.kind === "method" ? methodPubCount : pubCount;
   const lowCoverage =
     primaryCount != null &&
-    pubCount != null &&
-    pubCount > 0 &&
-    primaryCount / pubCount < COVERAGE_CUE_THRESHOLD;
+    denominator != null &&
+    denominator > 0 &&
+    primaryCount / denominator < COVERAGE_CUE_THRESHOLD;
   const keywordOnly = evidence.kind === "publications" && evidence.strength === "mention";
   const dim = stacked && (keywordOnly || lowCoverage);
   // Uniform fold rule — ALWAYS ON wherever there is a count, not threshold-gated: it is a
@@ -281,8 +319,8 @@ export function ResultEvidence({
   // gate the % column would render on the frozen surface. `method`, `topic` and `concept`
   // are the ones that arrive there without a count. Do not "simplify" the gate away.
   const coverage =
-    stacked && primaryCount != null && pubCount != null && pubCount > 0
-      ? coveragePct(primaryCount, pubCount)
+    stacked && primaryCount != null && denominator != null && denominator > 0
+      ? coveragePct(primaryCount, denominator)
       : undefined;
 
   switch (evidence.kind) {
@@ -297,10 +335,17 @@ export function ResultEvidence({
           onToggle={onToggle}
           panelId={panelId}
         >
+          {/* "method-indexed publications", not "publications": the M is the size of the
+              pool method extraction actually covers (post-2020 by design), so calling it
+              "publications" would put the scholar's whole career behind a number that is
+              only a slice of it — the same over-claim in the opposite direction. When
+              `methodPubCount` is absent `CountFirst` drops the "of M" clause and keeps the
+              count, so the line reads "11 publications used AAV gene-therapy vectors" —
+              the word "method-indexed" goes with the denominator it qualifies. */}
           <CountFirst
             n={evidence.count}
-            m={pubCount}
-            thing="publications"
+            m={methodPubCount}
+            thing={methodPubCount != null ? "method-indexed publications" : "publications"}
             relation="used"
             entity={evidence.family}
             underline

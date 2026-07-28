@@ -49,12 +49,14 @@ import {
   resolvePublicationDepartmentFilter,
   resolvePublicationMeshOnlyFilter,
   resolveConceptFallbackSparseEnabled,
+  resolveMeshEntryTierParityEnabled,
   resolveSearchShellStreaming,
   resolveSearchEvidenceRows,
   computeConceptFallback,
   CONCEPT_FALLBACK_CAP,
   CONCEPT_FALLBACK_SPARSE_THRESHOLD,
 } from "@/lib/api/search-flags";
+import { isFullQueryMeshMatch } from "@/lib/api/normalize";
 import {
   stripDeprioritized,
   isAllDeprioritized,
@@ -319,6 +321,26 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
     ? meshMatchTier(
         effectiveMeshResolution.confidence,
         effectiveMeshResolution.curatedTopicAnchors.length,
+        {
+          // Entry-term tier parity (`SEARCH_MESH_ENTRY_TIER_PARITY`, default OFF): a
+          // verbatim entry-term hit ("gene therapy" → the `Genetic Therapy` entry term)
+          // earns the same tier as the descriptor name, so two spellings of one concept
+          // stop scoring differently. See `meshMatchTier`'s docblock for the prod numbers.
+          //
+          // 🔴 The operand is `q`, the USER's query — NOT `contentQuery`. The #692
+          // generic-strip retry above may have re-resolved the stripped query, and its
+          // `matchedForm` can be full-coverage of THAT while covering only part of what
+          // the user typed; promoting it would manufacture verbatim confidence.
+          //
+          // This predicate must stay identical to the one on `meshTier` in
+          // `app/api/search/route.ts`. This single `meshTier` feeds BOTH the badge-count
+          // `searchPeople` and the streamed full search below — keep it that way, and keep
+          // it in step with the route, or the badge count stops agreeing with the list it
+          // labels for the identical request.
+          fullQueryMatch:
+            resolveMeshEntryTierParityEnabled() &&
+            isFullQueryMeshMatch(q, effectiveMeshResolution.matchedForm),
+        },
       )
     : undefined;
   // §5 / §7.1 — chip mode discriminator. Single source of truth shared with

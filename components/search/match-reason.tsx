@@ -257,6 +257,15 @@ const PRIMARY_KIND: Record<
  * subtle dotted underline for every kind EXCEPT a literal keyword/mention (`underline`).
  * When there is no count (the single-evidence path, or clinical) it renders the entity
  * alone. `dim` faints the whole phrase for a low-relevance lead.
+ *
+ * `n` WITHOUT `m` is its own shape, and it used to be unreachable. The gate was
+ * `n != null && m != null`, so an absent denominator dropped the whole clause INCLUDING
+ * the count — the caller lost a datum it had in order to withhold one it did not. That
+ * became reachable when the method lead started measuring against `methodPubCount`, which
+ * the server omits whenever it cannot state the union exactly: the honest render there is
+ * "11 publications used AAV gene-therapy vectors" — magnitude, no share — which is the
+ * SAME shape the "Also matched" rows already take via `lesserOwn`. Every existing caller
+ * passes `n` and `m` together (or neither), so their output is unchanged.
  */
 export function CountFirst({
   n,
@@ -283,14 +292,17 @@ export function CountFirst({
   // `anchor`, because two accents in one line is a legend again. A dim lead takes no
   // accent at all — a thin match must stay faint (the #1366 honesty signal).
   const count = dim ? "text-[var(--evidence-body)]" : "text-[var(--evidence-accent)]";
-  const hasCount = n != null && m != null;
+  const hasCount = n != null;
+  // The "of M" clause is a SEPARATE question from whether there is a count at all.
+  const hasTotal = hasCount && m != null;
   return (
     <>
       {hasCount ? (
         <>
           <span className={`font-semibold ${count}`}>{n}</span>{" "}
           <span className={muted}>
-            of {m} {thing} {relation}{" "}
+            {hasTotal ? <>of {m} </> : null}
+            {thing} {relation}{" "}
           </span>
         </>
       ) : null}

@@ -28,6 +28,36 @@ export function normalizeForMatch(s: string): string {
 }
 
 /**
+ * Entry-term tier parity (#726 ladder amendment; measured on prod 2026-07-27) — did
+ * the user's WHOLE query match the surface form the MeSH resolver latched onto?
+ *
+ * The tier ladder in `lib/search.ts` needs this to tell a VERBATIM entry-term hit
+ * ("gene therapy" → the `Genetic Therapy` entry term of the same name) apart from an
+ * entry-term hit that only covers PART of what the user typed. `resolveMeshDescriptor`'s
+ * full-query branch stamps `confidence: "entry-term"` with a `matchedForm` that is, by
+ * construction, normalization-equal to the query; the #692 generic-strip retry re-resolves
+ * the STRIPPED `contentQuery`, so its `matchedForm` covers a token SUBSET of the query and
+ * this returns false. That distinction is the whole guard — see `meshMatchTier`.
+ *
+ * Lives here, not next to `meshMatchTier` in `lib/search.ts`, on purpose: 33 suites
+ * replace `@/lib/search` wholesale with a `vi.mock` factory, so a NEW export there is
+ * `undefined` inside them. `lib/api/matcha-spine-run.ts` — one of this helper's four
+ * callers — is tested exactly that way (`tests/unit/matcha-spine-run.test.ts` stubs the
+ * module with `{ meshMatchTier }` alone), so importing from there would throw at call
+ * time. This module is mocked nowhere and already owns the normalization both sides of
+ * the comparison must share. One helper, not four hand-copied predicates: a divergence
+ * between `route.ts` and `page.tsx` is the badge-count ≠ result-list class of bug.
+ *
+ * An empty normalization never counts as a match: the resolver has a 3-char floor, so a
+ * query that normalizes to "" resolved nothing, and `"" === ""` must not read as parity.
+ */
+export function isFullQueryMeshMatch(query: string, matchedForm: string): boolean {
+  const normalizedQuery = normalizeForMatch(query);
+  if (normalizedQuery.length === 0) return false;
+  return normalizedQuery === normalizeForMatch(matchedForm);
+}
+
+/**
  * #1342 — conservative English singularizer for an ALREADY-normalized key (the
  * output of {@link normalizeForMatch}: lowercase, alnum-only, so a possessive
  * 's is just a trailing s here). Lets the MeSH resolver retry a plural/possessive

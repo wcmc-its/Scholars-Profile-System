@@ -1072,6 +1072,48 @@ export function resolveMeshTokenCoverageEnabled(): boolean {
 }
 
 /**
+ * Entry-term tier parity. When ON, `meshMatchTier` promotes an entry-term resolution to
+ * the `exact` tier IF the user's WHOLE query is the entry term that matched
+ * (`isFullQueryMeshMatch`, `@/lib/api/normalize`). Same descriptor ⇒ same tier ⇒ same
+ * `MESH_ADMIT_WEIGHT` / `MESH_ATTRIBUTION_WEIGHT`, so two spellings of one concept stop
+ * returning two different answers.
+ *
+ * The defect, measured on PROD 2026-07-27. `gene therapy` and
+ * `genetic therapy` both resolve to `Genetic Therapy` (D015316):
+ *
+ *   query             tier        attribution  admit  scholars
+ *   gene therapy      entry-term  1.15         0.03   921
+ *   genetic therapy   exact       1.5          0.1    848
+ *
+ * Only 2 of the top 6 scholars overlap. Pre-parity, the tier came from
+ * `anchorCount > 0 ? "anchored-entry" : "entry"` — i.e. from whether a human had curated
+ * a topic anchor for the descriptor, which says nothing about how well the query matched.
+ * NLM's choice of preferred label was deciding the weight.
+ *
+ * Flag-invariant with respect to the two neighbouring resolver flags above: `entry-term`
+ * is stamped in exactly ONE place (`rankedDescriptorCandidates`) and survives to a
+ * returned resolution only via `resolveMeshDescriptor`'s FULL-QUERY branch. Both the
+ * window fallback (`SEARCH_MESH_RESOLUTION_FALLBACK`) and the #1342 singularize retry
+ * live behind the `candidates.length === 0` miss branch and overwrite the confidence with
+ * `partial`, which this rule never promotes. So the promotion cannot compound with either.
+ *
+ * The one path that can hand back an entry-term match that is NOT full-coverage of what
+ * the user typed is the #692 generic-strip retry (`app/api/search/route.ts`,
+ * `app/(public)/search/page.tsx`): it re-resolves the STRIPPED `contentQuery`. Callers
+ * therefore compare against the USER's query — comparing against `contentQuery` would
+ * promote exactly the case this must exclude.
+ *
+ * Default OFF (`=== "on"` opt-in): flag-off leaves every tier byte-identical. Not
+ * byte-identical when ON — it moves attribution 1.15 → 1.5 (1.3 → 1.5 where the
+ * descriptor carries a curated anchor) and admit 0.03 → 0.1 on EVERY full-query
+ * entry-term topical search, not just the two above, so it REORDERS live results.
+ * Resolve-time only: no reindex. Staging-first; prod is a product decision.
+ */
+export function resolveMeshEntryTierParityEnabled(): boolean {
+  return process.env.SEARCH_MESH_ENTRY_TIER_PARITY === "on";
+}
+
+/**
  * #1342 — query-side morphology retry. When ON, `resolveMeshDescriptor`, after the
  * exact name / entry-term / curated-alias lookup misses, retries the SINGULARIZED
  * query ({@link singularizeForMatch}: "melanomas" → "melanoma") against the same
