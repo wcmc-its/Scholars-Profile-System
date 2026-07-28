@@ -34,6 +34,7 @@ const {
   scholarFindUnique,
   phdFindFirst,
   postdocFindFirst,
+  queryRawTagged,
   fieldOverrideFindUnique,
 } = vi.hoisted(() => ({
   phdFindMany: vi.fn(async () => [] as unknown[]),
@@ -51,6 +52,7 @@ const {
   scholarFindUnique: vi.fn(async () => null as unknown),
   phdFindFirst: vi.fn(async () => null as unknown),
   postdocFindFirst: vi.fn(async () => null as unknown),
+  queryRawTagged: vi.fn(async () => [] as unknown[]),
   fieldOverrideFindUnique: vi.fn(async () => null as unknown),
 }));
 
@@ -68,6 +70,9 @@ vi.mock("@/lib/db", () => ({
     publicationAuthor: { findMany: publicationAuthorFindMany },
     publication: { findMany: publicationFindMany },
     fieldOverride: { findUnique: fieldOverrideFindUnique },
+    // The popover's co-pub summary reaches publication_author through a tagged
+    // template rather than the query builder — see the parity test below.
+    $queryRaw: queryRawTagged,
   },
 }));
 
@@ -77,6 +82,7 @@ import {
   getMentorMenteePair,
   getMenteesForMentor,
 } from "@/lib/api/mentoring";
+import { fetchCoPubsSummary } from "@/lib/api/popover-context";
 import { MAX_MANUAL_MENTEES, validateManualMentees } from "@/lib/edit/manual-mentee";
 
 const MENTOR = "abc1001";
@@ -433,6 +439,30 @@ describe("manual-only mentee co-pubs from local Aurora (#2011)", () => {
     suppress([]);
     publicationAuthorFindMany.mockResolvedValue(authorships() as never);
     publicationFindMany.mockResolvedValue(publications() as never);
+    // Serve the popover's raw self-join from the SAME fixture the query-builder
+    // path reads. Feeding the two paths different canned answers would make the
+    // parity test below compare two constants instead of two implementations.
+    queryRawTagged.mockImplementation((async (
+      _sql: TemplateStringsArray,
+      target: string,
+      context: string,
+    ) => {
+      const rows = authorships();
+      const yearByPmid = new Map(
+        (publications() as Array<{ pmid: string; year: number }>).map((p) => [p.pmid, p.year]),
+      );
+      const contextPmids = new Set(
+        rows.filter((r) => r.cwid === context).map((r) => r.pmid),
+      );
+      return rows
+        .filter((r) => r.cwid === target && contextPmids.has(r.pmid))
+        .map((r) => ({
+          pmid: r.pmid,
+          year: yearByPmid.get(r.pmid) ?? null,
+          is_first: 0,
+          is_last: 0,
+        }));
+    }) as never);
     storeManual([{ name: "Sam Okafor", cwid: MANUAL }]);
   });
 
@@ -462,6 +492,32 @@ describe("manual-only mentee co-pubs from local Aurora (#2011)", () => {
     const pmids = await getCoPublications(MENTOR, MANUAL, { manualOnly: true });
     expect(mentees[0].copublicationCount).toBe(SHARED.length);
     expect(pmids.map((p) => String(p.pmid)).sort()).toEqual([...SHARED].sort());
+  });
+
+  it("agrees with the popover's own local intersection — two queries, one answer", async () => {
+    // There are now TWO local mentor-mentee intersections in the tree:
+    // `fetchCoPubsSummary` (lib/api/popover-context.ts, a raw self-join, powering
+    // the hover card) and `localCoPublications` (the query-builder path added
+    // here, powering the chip badge, the /co-pubs page and the rollup). They are
+    // not interchangeable — the popover wants {count, mostRecentYear, roles} and
+    // the chip wants full publication rows — so the duplication is deliberate.
+    // What is NOT acceptable is the two disagreeing about the same pair, which is
+    // exactly what staging showed before this change: hover card 29, badge 0.
+    //
+    // ponytail: the raw-SQL mock encodes the popover query's semantics, so this
+    // catches drift in `localCoPublications` but NOT a change to the popover's
+    // own SQL. Pin them to real rows in an integration test if that side starts
+    // moving. One known-and-tolerated difference: `fetchCoPubsSummary` counts
+    // `rows.length` while this path dedupes by pmid — identical unless
+    // publication_author ever holds duplicate (pmid, cwid) rows, which it has no
+    // unique key to prevent and the reciter ETL does not produce.
+    const { mentees } = await getMenteesForMentor(MENTOR);
+    const summary = await fetchCoPubsSummary(MANUAL, MENTOR);
+
+    expect(summary.count).toBe(mentees[0].copublicationCount);
+    // Pin the absolute number too — a bare equality assertion is satisfied by
+    // both paths returning 0, which is the failure this test exists to catch.
+    expect(summary.count).toBe(SHARED.length);
   });
 
   it("badge count, per-mentee page, and rollup are the SAME list — the divergence this feature risks", async () => {
