@@ -18,7 +18,7 @@
  *   npm run etl:reciter-rcr:import -- --dry-run    # parse + intersect + count, no DB writes
  */
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { db } from "../../lib/db";
+import { db, disconnect } from "../../lib/db";
 import { chunks, parseRcrNdjson, type RcrRow } from "./shared";
 
 /** Concurrent per-pmid updates per batch — modest so the connection pool isn't swamped. */
@@ -118,5 +118,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await db.write.$disconnect();
+    await disconnect();
   });

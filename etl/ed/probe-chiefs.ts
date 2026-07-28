@@ -19,7 +19,7 @@
  * Read-only — does not modify any DB or LDAP state.
  */
 import "dotenv/config";
-import { prisma } from "../../lib/db";
+import { disconnect, prisma } from "../../lib/db";
 import {
   collapseEmployeeRecordsByCwid,
   fetchActiveEmployeeRecords,
@@ -126,7 +126,7 @@ async function main() {
     console.log("  → Path B not viable. Rely on Path C overrides only (set SCHOLARS_DISABLE_CHIEF_DETECTION=true).");
   }
 
-  await prisma.$disconnect();
+  await disconnect();
 }
 
 main().catch((e) => {

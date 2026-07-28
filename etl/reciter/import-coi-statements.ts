@@ -29,7 +29,7 @@
  *   npm run etl:reciter:import-coi-statements -- --key <key> --dry-run   # parse only
  */
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
-import { db } from "../../lib/db";
+import { db, disconnect } from "../../lib/db";
 
 const BUCKET =
   process.env.COI_STATEMENTS_BUCKET ?? process.env.ARTIFACTS_BUCKET ?? "wcmc-reciterai-artifacts";
@@ -158,5 +158,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await db.write.$disconnect();
+    await disconnect();
   });

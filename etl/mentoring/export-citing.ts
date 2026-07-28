@@ -37,7 +37,7 @@
  */
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { writeFileSync } from "node:fs";
-import { db } from "../../lib/db";
+import { db, disconnect } from "../../lib/db";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 
 const BUCKET =
@@ -231,6 +231,6 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await db.read.$disconnect();
+    await disconnect();
     await closeReciterPool();
   });

@@ -18,7 +18,7 @@
  * (run `npm run etl:mesh` if `SELECT COUNT(*) FROM mesh_descriptor` is ~0)
  * and `grant.keywords` populated (issue #291).
  */
-import { prisma } from "../../lib/db";
+import { prisma, disconnect } from "../../lib/db";
 import { resolveMeshDescriptor, normalizeForMatch } from "@/lib/api/search-taxonomy";
 
 /** Mirrors MIN_QUERY_LEN in `lib/api/search-taxonomy.ts` — the resolver
@@ -189,5 +189,5 @@ main()
     process.exitCode = 1;
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await disconnect();
   });

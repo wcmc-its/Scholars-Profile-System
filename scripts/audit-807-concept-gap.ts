@@ -31,7 +31,7 @@
  *   DATABASE_URL='mysql://paulalbert@localhost/scholars?socketPath=/tmp/mysql.sock' \
  *     npx tsx scripts/audit-807-concept-gap.ts crispr
  */
-import { prisma } from "@/lib/db";
+import { prisma, disconnect } from "@/lib/db";
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 import { searchClient, PEOPLE_INDEX, PUBLICATIONS_INDEX } from "@/lib/search";
 
@@ -179,7 +179,7 @@ async function main() {
   console.log(`  re-filtered against live Scholar status — the rendered chip list can be`);
   console.log(`  smaller. Report mechanism + ratio, not literals.`);
 
-  await prisma.$disconnect();
+  await disconnect();
 }
 
 main().catch((e) => {

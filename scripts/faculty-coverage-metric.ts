@@ -24,7 +24,7 @@
  * env where the methods-lens backfill has run (staging yes; prod not yet) — the
  * "WITHOUT methods-lens" union shows what an env without it surfaces.
  */
-import { prisma } from "@/lib/db";
+import { disconnect, prisma } from "@/lib/db";
 import {
   isAuthorHidden,
   loadPublicationSuppressions,
@@ -221,4 +221,4 @@ main()
     console.error(e);
     process.exitCode = 1;
   })
-  .finally(() => prisma.$disconnect());
+  .finally(() => disconnect());

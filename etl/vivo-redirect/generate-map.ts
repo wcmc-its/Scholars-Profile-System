@@ -43,7 +43,7 @@
 
 import { writeFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { prisma } from "../../lib/db";
+import { prisma, disconnect } from "../../lib/db";
 
 const DEFAULT_BASE_URL = "https://scholars.weill.cornell.edu";
 const DEFAULT_OUTPUT_PATH = path.join(
@@ -338,7 +338,7 @@ export async function main(): Promise<void> {
       `(of ${orgEntries.length} trafficked; the rest unresolved → 404) to ${orgOutputPath}`,
   );
 
-  await prisma.$disconnect();
+  await disconnect();
 }
 
 // Allow `tsx etl/vivo-redirect/generate-map.ts` to run main();

@@ -4,7 +4,7 @@
  *
  * Usage: `npm run etl:gates:probe`
  */
-import { prisma } from "../../lib/db";
+import { disconnect, prisma } from "../../lib/db";
 import { gatesGrantId } from "@/lib/award-number";
 import { fetchGatesGrants } from "./fetcher";
 
@@ -77,5 +77,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await disconnect();
   });

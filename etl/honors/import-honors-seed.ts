@@ -9,11 +9,16 @@
  *      Any validation error aborts before the first write — fix the file.
  *   2. FK-gate: rows whose cwid has no `Scholar` are skipped + counted (misses
  *      are cheap; a mismatched write is not). `Honor.cwid` is NOT NULL + FK.
- *   3. Idempotent upsert keyed on (cwid, organization, name) — the key excludes
+ *   3. Key-gate: importable rows repeating an EARLIER row's (cwid,
+ *      organization, name) are counted and warned about — the later row
+ *      overwrites the earlier one, so the DB gains fewer rows than the file
+ *      holds and the merge is otherwise indistinguishable from an ordinary
+ *      "updated" (#2010). Warn only; the import still runs.
+ *   4. Idempotent upsert keyed on (cwid, organization, name) — the key excludes
  *      `year` deliberately so a year correction updates in place (#1761).
  *      Status obeys `statusOnUpdate`: only a still-`pending` row accepts the
  *      file's status — a curator's queue decision survives any re-run.
- *   4. Record the run in `etl_run` under source="HonorsSeed-Import".
+ *   5. Record the run in `etl_run` under source="HonorsSeed-Import".
  *
  * Operator-run in-VPC (`run-task` on the env's sps-etl task), NOT part of
  * etl/orchestrate.ts — the seed changes only when the curated file does.
@@ -25,8 +30,8 @@
  *   npm run etl:honors:import-seed
  */
 import { readFileSync } from "node:fs";
-import { db } from "@/lib/db";
-import { parseSeedRows, statusOnUpdate } from "./seed-rows";
+import { db, disconnect } from "@/lib/db";
+import { countMergingRows, parseSeedRows, statusOnUpdate } from "./seed-rows";
 
 const dryRun = process.argv.includes("--dry-run");
 
@@ -58,6 +63,15 @@ async function main() {
     `FK gate: ${importable.length}/${rows.length} rows importable; ` +
       `${missing.length} cwid(s) absent from scholar: ${missing.join(", ") || "—"}`,
   );
+
+  const merging = countMergingRows(importable);
+  if (merging) {
+    console.warn(
+      `Key gate: ${merging}/${importable.length} importable rows repeat an earlier row's ` +
+        `(cwid, organization, name) and will merge into it; ` +
+        `expect ${importable.length - merging} honor row(s), not ${importable.length}`,
+    );
+  }
 
   if (dryRun) {
     console.log("DRY-RUN: parsed + validated only, no DB writes.");
@@ -125,6 +139,4 @@ main()
     console.error(err);
     process.exit(1);
   })
-  .finally(async () => {
-    await db.write.$disconnect();
-  });
+  .finally(disconnect);

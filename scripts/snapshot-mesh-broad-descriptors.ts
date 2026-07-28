@@ -8,7 +8,7 @@
  *
  * Run: `tsx scripts/snapshot-mesh-broad-descriptors.ts`
  */
-import { prisma } from "@/lib/db";
+import { disconnect, prisma } from "@/lib/db";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -141,7 +141,7 @@ async function main() {
       `  ${b.descriptorUi}  ${b.name.padEnd(50)}  true=${b.descendantCountTrue}  capped=${b.descendantCount}`,
     );
   }
-  await prisma.$disconnect();
+  await disconnect();
 }
 
 main().catch((e) => {

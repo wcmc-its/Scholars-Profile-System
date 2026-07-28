@@ -5,7 +5,7 @@
  *
  * Usage: `npm run etl:nsf:probe`
  */
-import { prisma } from "../../lib/db";
+import { prisma, disconnect } from "../../lib/db";
 import { nsfAwardId } from "@/lib/award-number";
 import { fetchNsfAward } from "./fetcher";
 
@@ -76,5 +76,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await disconnect();
   });

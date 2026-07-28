@@ -21,7 +21,7 @@
  */
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
-import { prisma } from "../../lib/db";
+import { disconnect, prisma } from "../../lib/db";
 
 const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
@@ -147,5 +147,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await disconnect();
   });
