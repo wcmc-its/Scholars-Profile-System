@@ -1605,6 +1605,18 @@ export function MatchaPanel({
                                     .join(" · ")}`
                                 : "Relaxed — ineligible researchers are shown, badged"}
                             </span>
+                            {/* A checked hard filter that removes nobody is indistinguishable from
+                                a broken one: the pool reads "160 → 160", every row badges Eligible,
+                                and nothing says whether the gate ran. It usually HAS run and found
+                                nothing to drop — most ranked pools are faculty, and this axis only
+                                excludes students. Say so, rather than leaving the officer to guess.
+                                (The gate itself is covered by the floor tests: absent or
+                                out-of-set stages ARE dropped.) */}
+                            {stageGateOn && ineligibleRows.length === 0 ? (
+                              <span className="text-muted-foreground/80 block text-xs leading-snug">
+                                Nobody in these results is excluded by it.
+                              </span>
+                            ) : null}
                             {/* Cite the sponsor, not just our mapping of it. The stage list is
                                 SPS's vocabulary; this is the text it was derived from, and it is
                                 usually absent from the synopsis on screen — so without it the axis

@@ -626,6 +626,43 @@ describe("MatchaPanel", () => {
     expect(floor.textContent).toContain("Showing the first 100 of 115");
   });
 
+  it("a hard gate that excludes nobody SAYS so — otherwise it reads as broken", async () => {
+    // Reported from staging 2026-07-28: the box is checked, the pool reads "160 → 160", every row
+    // badges Eligible, and nothing distinguishes "ran and dropped no one" from "did not run".
+    const staged = POOL.map((c) => ({ ...c, measures: { ...c.measures, careerStage: "early" as const } }));
+    stubFetch({ concepts: CONCEPTS, candidates: staged });
+    render(
+      <MatchaPanel
+        grantMatcha
+        eligibility={{ careerStages: ["early"], esiTargeted: false, usRequired: false }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T collaborators" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+
+    expect(await screen.findByText(/Nobody in these results is excluded by it/)).toBeTruthy();
+    // …and it must NOT claim that when the gate is actually dropping people.
+    expect(screen.queryByRole("button", { name: /researchers filtered out/ })).toBeNull();
+  });
+
+  it("says nothing about exclusions when the gate IS dropping people", async () => {
+    const staged = POOL.map((c, i) =>
+      i < 5 ? { ...c, measures: { ...c.measures, careerStage: "early" as const } } : c,
+    );
+    stubFetch({ concepts: CONCEPTS, candidates: staged });
+    render(
+      <MatchaPanel
+        grantMatcha
+        eligibility={{ careerStages: ["early"], esiTargeted: false, usRequired: false }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T collaborators" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+
+    await screen.findByRole("button", { name: /115 researchers filtered out/ });
+    expect(screen.queryByText(/Nobody in these results is excluded by it/)).toBeNull();
+  });
+
   it("exports every row the filters matched, not just the hundred on screen", async () => {
     await renderAndSearchPool();
 
