@@ -32,7 +32,7 @@ import { rankResearchersForDescriptionSpine } from "@/lib/api/matcha-spine-run";
 import { fetchKeyPaper } from "@/lib/api/search";
 import { normalizeDescription } from "@/lib/api/matcha";
 import type { MatchaExtraction } from "@/lib/api/matcha-extract";
-import { glossArmEnv, repArmEnv } from "./spine-eval-arm";
+import { glossArmEnv } from "./spine-eval-arm";
 
 /** The arm to run: `base` (rescore off, the ablation) or `gloss-<λ>`. Echoed into the artifact AND
  *  mapped to the gloss-rescore env below — one arm per process (the memo cache has no clear). */
@@ -65,14 +65,6 @@ async function main() {
   }
   console.error(`arm=${ARM} MATCHA_GLOSS_RERANK=${process.env.MATCHA_GLOSS_RERANK ?? "(off)"} λ=${process.env.MATCHA_GLOSS_RERANK_LAMBDA ?? "-"}`);
 
-  // #1977 rep arm, applied the same way and for the same reason: `mergeTermClusters` reads
-  // MATCHA_BROAD_REP per call, so it must be set before the first fixture. Explicit delete on every
-  // other arm so a stray inherited value can't leak the variant into the control.
-  const repEnv = repArmEnv(ARM);
-  if (repEnv.MATCHA_BROAD_REP) process.env.MATCHA_BROAD_REP = repEnv.MATCHA_BROAD_REP;
-  else delete process.env.MATCHA_BROAD_REP;
-  console.error(`arm=${ARM} MATCHA_BROAD_REP=${process.env.MATCHA_BROAD_REP ?? "(off)"}`);
-
   // MATCHA_GLOSS_INWORDS — default ON so every arm emits the "in their words" evidence the §1
   // acceptance measurement counts (docs/2026-07-23-matcha-inwords-merged-next-steps-handoff.md).
   // It is a per-field highlight_query (search.ts): it computes highlights on hits the base query
@@ -90,14 +82,13 @@ async function main() {
   // (SEARCH_RESULT_EVIDENCE / _EVIDENCE_REASON_COUNTS / _PEOPLE_MATCH_AWARE_SNIPPET / _PEOPLE_CONCEPT_HINT),
   // so the measured spine must too or it isn't the shipped path. Default-on, each overridable.
   //
-  // SEARCH_PEOPLE_PHRASE_BOOST joined that list for #1977. It was missing, and by the paragraph
+  // SEARCH_PEOPLE_PHRASE_BOOST joined that list on 2026-07-27. It was missing, and by the paragraph
   // above it should never have been: it is `on` in BOTH deployed envs (app-stack.ts, prod flipped
   // 2026-07-07 #1344) while the etl task def carries no SEARCH_* at all, so every arm run before
-  // this measured a spine with NO `match_phrase` clauses — not the shipped path. It matters
-  // acutely for the rep arm: `clusterQuery = cluster.members.join(" ")` and the phrase clauses are
-  // ORDER-SENSITIVE (`publicationTitles` slop 8, `areasOfInterest` slop 4), so promoting the
-  // representative to `members[0]` moves the very string they score. Left off, the eval would be
-  // blind to the retrieval half of the change it exists to gate. Absolute nDCG is therefore NOT
+  // this measured a spine with NO `match_phrase` clauses — not the shipped path. The clauses are
+  // ORDER-SENSITIVE (`publicationTitles` slop 8, `areasOfInterest` slop 4) and score
+  // `clusterQuery = cluster.members.join(" ")`, so any arm that touches clustering, cluster
+  // membership, or member order is measured blind without them. Absolute nDCG is therefore NOT
   // comparable to arms run before this line; the PAIRED within-draw difference is unaffected.
   for (const f of [
     "SEARCH_RESULT_EVIDENCE",
