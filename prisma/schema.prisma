@@ -113,6 +113,7 @@ model Scholar {
   profileAppointments  ProfileAppointment[]
   honors               Honor[]
   grants               Grant[]
+  grantDateGaps        GrantDateGap[]
   authorships          PublicationAuthor[]
   topicAssignments     TopicAssignment[]
   publicationScores    PublicationScore[]
@@ -751,6 +752,13 @@ model Grant {
   /// Populated from InfoEd CONSOLIDATED_QUERY's Award_Number column.
   awardNumber     String?  @map("award_number") @db.VarChar(128)
   source          String   @default("InfoEd") @db.VarChar(32)
+  /// #2020 — provenance of `startDate`/`endDate`, NOT of the grant itself
+  /// (that is `source`). 'infoed' when InfoEd supplied the project period;
+  /// 'reporter' when InfoEd carried none and the period was adopted from
+  /// `reciterdb.grant_reporter_project` by core project number. A derived
+  /// period must never be mistaken for an authoritative one — the matching
+  /// `GrantDateGap` row stays OPEN so the InfoEd record still gets fixed.
+  datesSource     String   @default("infoed") @map("dates_source") @db.VarChar(16)
   lastRefreshedAt DateTime @default(now()) @map("last_refreshed_at")
 
   /// Issue #78 — InfoEd `program_type`. Possible values: Grant, Contract
@@ -835,6 +843,69 @@ model Grant {
   @@index([programType])
   @@index([applId])
   @@map("grant")
+}
+
+/// #2020 — an InfoEd award that carries NO project period on any of its
+/// records, so `etl/infoed` cannot build a `Grant` row for it (`startDate` /
+/// `endDate` are non-null in this schema, and the active/expired split,
+/// `isRecentlyCompleted` and every recency signal key on them; a fabricated
+/// date is worse than a missing grant because it fails silently).
+///
+/// Measured 2026-07-28: 4,244 of 17,954 eligible (cwid, account) pairs are
+/// dropped this way, ~850 of them carrying a sponsor award number — i.e.
+/// funded awards rendering nowhere. Only ~358 can be recovered from RePORTER;
+/// the rest are non-NIH and can ONLY be fixed by OSRA correcting the source.
+///
+/// So this table is a WORKLIST, not a log. It mirrors `CoiGapCandidate`'s
+/// lifecycle deliberately: without durable dismissals and auto-resolution the
+/// same rows resurface every run and the recipient stops reading it.
+///
+/// Note there is intentionally NO relation to `Grant` — the whole point is
+/// that no `Grant` row exists (or, when backfilled, that the row exists on a
+/// derived period while the SOURCE is still wrong).
+model GrantDateGap {
+  id            String  @id @default(uuid()) @db.VarChar(64)
+  cwid          String  @db.VarChar(32)
+  scholar       Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  /// InfoEd `Account_Number` — what OSRA needs to find the record.
+  accountNumber String  @map("account_number") @db.VarChar(64)
+  /// `INFOED-{account}-{cwid}` — the same identity the `Grant` row would
+  /// carry, so a gap and its eventual grant are joinable.
+  externalId    String  @unique @map("external_id") @db.VarChar(128)
+  awardNumber   String? @map("award_number") @db.VarChar(128)
+  sponsor       String? @db.VarChar(255)
+  /// InfoEd `Project_Status`: Active Award | Expired Award | In Process.
+  /// Drives triage — an undated ACTIVE award is what a faculty member notices.
+  projectStatus String  @map("project_status") @db.VarChar(64)
+  programType   String  @map("program_type") @db.VarChar(64)
+  unitName      String? @map("unit_name") @db.VarChar(255)
+  /// Which side is missing: 'start' | 'end' | 'both'.
+  missingField  String  @map("missing_field") @db.VarChar(8)
+
+  /// Lifecycle:
+  ///   open       — undated in InfoEd, nothing to backfill; grant is invisible.
+  ///   backfilled — undated in InfoEd, period adopted from RePORTER. The grant
+  ///                RENDERS, but the source is still wrong, so this stays open
+  ///                for OSRA. Never auto-resolve on backfill.
+  ///   resolved   — InfoEd now supplies a period. Set by the ETL, not a human.
+  ///   dismissed  — terminal, never re-surfaced. For records that legitimately
+  ///                have no period (some MTAs / master agreements).
+  status          String    @default("open") @db.VarChar(16)
+  /// 'reporter' when the period came from `grant_reporter_project`. Null
+  /// otherwise. Mirrors `Grant.datesSource` for the row we wrote.
+  backfillSource  String?   @map("backfill_source") @db.VarChar(16)
+  /// How long this award has been undated — the number that moves a
+  /// data-quality conversation.
+  firstSeenAt     DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt      DateTime  @default(now()) @map("last_seen_at")
+  resolvedAt      DateTime? @map("resolved_at")
+  dismissedAt     DateTime? @map("dismissed_at")
+  dismissedBy     String?   @map("dismissed_by") @db.VarChar(32)
+  dismissalReason String?   @map("dismissal_reason") @db.VarChar(255)
+
+  @@index([status, projectStatus])
+  @@index([cwid])
+  @@map("grant_date_gap")
 }
 
 /// Publications are global (shared across authors). Keyed by PMID.
