@@ -34,7 +34,7 @@ import {
   getSelectedHighlightPmids,
 } from "@/lib/api/manual-layer";
 import { getMenteesForMentor } from "@/lib/api/mentoring";
-import { type ManualMentee, isManualMenteeId } from "@/lib/edit/manual-mentee";
+import type { ManualMentee } from "@/lib/edit/manual-mentee";
 import { rankForSelectedHighlights } from "@/lib/ranking";
 import { MAX_SELECTED_HIGHLIGHTS, SECTION_VISIBILITY_FIELDS } from "@/lib/edit/validators";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
@@ -636,6 +636,9 @@ export type EditContextMenteeSource = {
   fullName: string;
   programName: string | null;
   programType: string | null;
+  /** #2011 — no ETL source contributed this mentee; the mentor typed it in.
+   *  Filtered out of the hide-only panel, which speaks for the source systems. */
+  manualOnly: boolean;
 };
 export type LoadMentees = (mentorCwid: string) => Promise<EditContextMenteeSource[]>;
 
@@ -655,22 +658,26 @@ const defaultLoadMentees: LoadMentees = async (mentorCwid) => {
   });
   return (
     mentees
-      // #2011 — a CWID-less manual entry is DELETED from the mentor's own list,
-      // not suppressed, so it has no business in the hide-only panel; offering
-      // both actions on one row only invites hiding a row that should be
-      // removed. Sourced mentees are unaffected.
+      // #2011 — a hand-entered mentee is DELETED from the mentor's own list, not
+      // suppressed, so it has no business in the hide-only panel.
       //
-      // ponytail: filters on the synthetic id only. A manual entry that DOES
-      // carry a CWID stays in the hide list as well as the manual list — from
-      // out here it is indistinguishable from a sourced mentee, and hiding it
-      // is a coherent action either way. Thread a provenance flag out of
-      // `getMenteesForMentor` if that double-listing ever confuses anyone.
-      .filter((m) => !isManualMenteeId(m.cwid))
+      // Filters on PROVENANCE (`manualOnly`), not on the synthetic-id shape. The
+      // first cut tested the id and so only caught CWID-less entries: a mentee
+      // hand-entered WITH a real CWID carries a real-looking id, stayed in both
+      // lists, and the sourced panel then asserted "Source: Jenzabar or Employee
+      // Central" over a record that exists in neither — with a "Request a change"
+      // link inviting a correction against nothing. Duplication was the visible
+      // symptom; the false provenance claim was the actual defect.
+      //
+      // A hand-entered CWID that a source ALSO carries has `manualOnly === false`
+      // and correctly stays here: at that point the source record is real.
+      .filter((m) => !m.manualOnly)
       .map((m) => ({
         cwid: m.cwid,
         fullName: m.fullName,
         programName: m.programName,
         programType: m.programType,
+        manualOnly: m.manualOnly,
       }))
   );
 };

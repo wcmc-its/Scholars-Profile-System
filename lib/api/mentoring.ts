@@ -139,6 +139,22 @@ export type MenteeChip = {
    *  returns 404, so passing the constructed URL here is safe even for
    *  mentees who do not appear in our Scholar table. */
   identityImageEndpoint: string;
+  /**
+   * #2011 — `true` when NO ETL source contributed this mentee: it is on the
+   * profile only because the mentor entered it by hand.
+   *
+   * NOT the same as "has a synthetic `manual:N` cwid". A mentor can hand-enter a
+   * mentee WITH a real CWID who is in no source system — that chip carries a
+   * real cwid and is otherwise indistinguishable from a sourced one, which is
+   * exactly the case that made the /edit Mentees tab list the same person twice:
+   * once as editable, once under "Source: Jenzabar or Employee Central" with a
+   * "Request a change" link pointing at a record that does not exist there.
+   *
+   * `false` when any source contributed, INCLUDING a hand-entered CWID that also
+   * turns up in Jenzabar/ED later — at that point the source record is real and
+   * authoritative, and the sourced panel should own it.
+   */
+  manualOnly: boolean;
   /** Populated when the mentee exists in our local Scholar table. Drives whether
    *  the chip is rendered as a link to a profile page. Per spec, alumni do not
    *  get profiles — those entries render as unlinked. */
@@ -383,6 +399,14 @@ export async function getMenteesForMentor(
       }
     }
   };
+  // #2011 — every cwid an ETL SOURCE contributed, so a hand-entered mentee that
+  // no source knows can be told apart from one that a source also carries. The
+  // three loops below fill it; the manual loop deliberately does not.
+  const sourcedCwids = new Set<string>();
+  for (const r of aocRows) sourcedCwids.add(r.studentCWID);
+  for (const r of jenzabarRows) sourcedCwids.add(r.menteeCwid);
+  for (const r of postdocRows) sourcedCwids.add(r.menteeCwid);
+
   for (const r of aocRows) {
     upsert(
       r.studentCWID,
@@ -660,6 +684,7 @@ export async function getMenteesForMentor(
       // SOURCED id keeps its endpoint even if oddly shaped — that request is
       // the pre-existing behaviour and not ours to second-guess.
       identityImageEndpoint: isManualMenteeId(c.cwid) ? "" : identityImageEndpoint(c.cwid),
+      manualOnly: !sourcedCwids.has(c.cwid),
       scholar: s
         ? {
             slug: s.slug,

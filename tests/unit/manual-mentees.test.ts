@@ -265,6 +265,48 @@ describe("getMenteesForMentor — manual mentees (#2011)", () => {
     expect(capturedParams.some((p) => String(p).startsWith("manual:"))).toBe(false);
   });
 
+  it("flags a hand-entered mentee as manualOnly — even when it carries a real CWID", async () => {
+    // The /edit hide-only panel filters on this, and it is the ONLY signal that
+    // separates a hand-entered mentee with a real cwid from a sourced one.
+    phdFindMany.mockResolvedValue([
+      {
+        menteeCwid: "rel2002",
+        menteeFirstName: "Rowan",
+        menteeLastName: "Ellis",
+        conferralYear: 2021,
+        programType: "PhD",
+        majorDesc: null,
+      },
+    ]);
+    storeManual([{ name: "Evan Sholle", cwid: "evs2008" }, { name: "No Cwid Here" }]);
+
+    const { mentees } = await getMenteesForMentor(MENTOR);
+    const by = Object.fromEntries(mentees.map((m) => [m.fullName, m.manualOnly]));
+
+    expect(by["Rowan Ellis"]).toBe(false); // Jenzabar contributed it
+    expect(by["Evan Sholle"]).toBe(true); // real cwid, but no source has it
+    expect(by["No Cwid Here"]).toBe(true);
+  });
+
+  it("clears manualOnly once a source ALSO carries the hand-entered cwid", async () => {
+    phdFindMany.mockResolvedValue([
+      {
+        menteeCwid: "evs2008",
+        menteeFirstName: "Evan",
+        menteeLastName: "Sholle",
+        conferralYear: 2021,
+        programType: "PhD",
+        majorDesc: null,
+      },
+    ]);
+    storeManual([{ name: "E. Sholle", cwid: "evs2008" }]);
+
+    const { mentees } = await getMenteesForMentor(MENTOR);
+
+    expect(mentees).toHaveLength(1);
+    expect(mentees[0].manualOnly).toBe(false);
+  });
+
   it("degrades to the sourced roster when the manual read throws", async () => {
     phdFindMany.mockResolvedValue([
       {
