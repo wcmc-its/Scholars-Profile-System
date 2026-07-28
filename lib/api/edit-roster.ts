@@ -24,7 +24,10 @@ import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 
 /** The Prisma surface the roster query needs — a client or tx satisfies it.
  *  `centerMembership` is read only for the center org-unit filter. */
-type EditRosterClient = Pick<PrismaClient, "scholar" | "centerMembership">;
+type EditRosterClient = Pick<
+  PrismaClient,
+  "scholar" | "centerMembership" | "divisionMembership"
+>;
 
 /** The Prisma surface the facet loader needs (the filter dropdown option lists). */
 type RosterFacetClient = Pick<PrismaClient, "scholar" | "department" | "division" | "center">;
@@ -72,6 +75,14 @@ export type EditRosterOptions = {
    * resolved — this column-based filter covers dept + division.
    */
   unitCodeScope?: readonly string[];
+  /**
+   * Org-unit-admin scope (B3), center half: center codes the admin manages. A
+   * center has no scholar column, so membership is resolved to CWIDs (current
+   * by date) and OR'd into the SAME scope group as `unitCodeScope` — a center
+   * admin's people are in scope *in addition to* any dept/division they hold,
+   * never intersected with them. Omit for a superuser.
+   */
+  scopeCenterCodes?: readonly string[];
   /** Page size (default 50, capped at 200). */
   limit?: number;
   /** Page offset (default 0). */
@@ -87,7 +98,11 @@ export type EditRosterResult = {
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
-function buildWhere(opts: EditRosterOptions): Prisma.ScholarWhereInput {
+function buildWhere(
+  opts: EditRosterOptions,
+  scopeCenterCwids: readonly string[] = [],
+  scopeRosterCwids: readonly string[] = [],
+): Prisma.ScholarWhereInput {
   const where: Prisma.ScholarWhereInput = { deletedAt: null };
   // Independent OR-groups compose here so none clobbers another (the name search
   // and the unit scope are both OR-groups AND'd together).
@@ -117,12 +132,26 @@ function buildWhere(opts: EditRosterOptions): Prisma.ScholarWhereInput {
     where.divCode = unit.code;
   }
 
-  if (opts.unitCodeScope) {
-    // In-scope iff the scholar's dept or division is one the admin manages. An
-    // empty scope → `in: []` → no rows.
-    and.push({
-      OR: [{ deptCode: { in: [...opts.unitCodeScope] } }, { divCode: { in: [...opts.unitCodeScope] } }],
-    });
+  if (opts.unitCodeScope || opts.scopeCenterCodes) {
+    // In-scope iff the scholar's dept or division is one the admin manages, OR
+    // they sit on a managed division's manual roster, OR they are a current
+    // member of a managed center. These four arms are exactly the membership
+    // Amendment 4 uses to decide editability, so the roster lists precisely the
+    // people the per-scholar editor will open. An admin with no units at all →
+    // every arm `in: []` → no rows (fail-closed).
+    const scopeOr: Prisma.ScholarWhereInput[] = [];
+    if (opts.unitCodeScope) {
+      scopeOr.push(
+        { deptCode: { in: [...opts.unitCodeScope] } },
+        { divCode: { in: [...opts.unitCodeScope] } },
+      );
+    }
+    const membershipCwids = [...new Set([...scopeRosterCwids, ...scopeCenterCwids])];
+    if (membershipCwids.length > 0) scopeOr.push({ cwid: { in: membershipCwids } });
+    // An admin holding ONLY centers, none of which have current members, must
+    // still match nothing rather than everything — an empty `OR: []` would be
+    // vacuously true in Prisma, so pin it closed explicitly.
+    and.push(scopeOr.length > 0 ? { OR: scopeOr } : { cwid: { in: [] } });
   }
 
   if (and.length > 0) where.AND = and;
@@ -138,7 +167,32 @@ export async function loadEditRoster(
   opts: EditRosterOptions,
   client: EditRosterClient,
 ): Promise<EditRosterResult> {
-  const where = buildWhere(opts);
+  // Center SCOPE membership must resolve before the where clause is built (the
+  // center *filter* below is a separate, narrowing concern and stays where it
+  // was). Reuses the same date predicate, so a pending or expired membership
+  // confers nothing here either.
+  const [scopeCenterCwids, scopeRosterCwids] = await Promise.all([
+    opts.scopeCenterCodes?.length
+      ? Promise.all(
+          opts.scopeCenterCodes.map((code) => activeCenterMemberCwids(code, client)),
+        ).then((lists) => [...new Set(lists.flat())])
+      : Promise.resolve([] as string[]),
+    // Manual DIVISION-roster membership. Amendment 4 derives a scholar's units as
+    // deptCode ∪ divCode ∪ `DivisionMembership`, so a roster-only member IS
+    // editable by that division's admin — but the column match above cannot see
+    // them, which left the roster under-listing people it then let you edit.
+    // Passing the whole `unitCodeScope` (departments included) is harmless: a
+    // department code simply never appears as a `divisionCode`.
+    opts.unitCodeScope?.length
+      ? client.divisionMembership
+          .findMany({
+            where: { divisionCode: { in: [...opts.unitCodeScope] } },
+            select: { cwid: true },
+          })
+          .then((rows) => [...new Set(rows.map((r) => r.cwid))])
+      : Promise.resolve([] as string[]),
+  ]);
+  const where = buildWhere(opts, scopeCenterCwids, scopeRosterCwids);
 
   // Center org-unit filter: restrict to CWIDs whose membership is active *by
   // date* today. The visibility / search / role filters from `buildWhere` still

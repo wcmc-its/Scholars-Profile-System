@@ -34,7 +34,11 @@ import { getSession } from "@/lib/auth/session-server";
 import { canImpersonate } from "@/lib/auth/effective-identity";
 import { isSuperuser } from "@/lib/auth/superuser";
 import { listCommsStewardCwids } from "@/lib/auth/comms-steward";
-import { pickDisplayGrant, type ImpersonationUnitKind } from "@/lib/edit/impersonation-display";
+import {
+  pickDisplayGrant,
+  summarizeUnitAdminGrants,
+  type ImpersonationUnitKind,
+} from "@/lib/edit/impersonation-display";
 import { buildScholarNameClauses } from "@/lib/api/scholar-name-search";
 import { db } from "@/lib/db";
 
@@ -287,6 +291,127 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           role: "comms_steward",
           unitKind: null,
           unit: null,
+        });
+      });
+    }
+  }
+
+  // Unit-admin candidates with NO `Scholar` row (#540 / Amendment 4 grants). An
+  // org-unit Owner/Curator is very often administrative staff rather than
+  // faculty, so the scholar query above cannot see them at all — the same
+  // profile-less shape the steward pass handles, and the reason a real prod
+  // curator was unfindable in the switcher. Omitting them hid exactly the
+  // identity a superuser most needs to preview: the person who filed the ticket.
+  //
+  // Unlike the steward pass this runs under EVERY chip, not just `all` — a unit
+  // admin genuinely has a `unitKind`, so "Department" must list department
+  // admins whether or not they happen to hold a profile. Each still passes R2
+  // (superusers dropped, fail-closed) and the `q` filter.
+  {
+    const emitted = new Set(candidates.map((c) => c.cwid.toLowerCase()));
+    // ponytail: one bounded scan — `q`-filtered in SQL and capped at 4× the page
+    // so someone holding several grants still fits. If a real search ever
+    // truncates, raise the multiplier; a cursor would be machinery for a
+    // ≤50-row popover.
+    // `entityType` widens to `string` here on purpose — `pickDisplayGrant` takes
+    // it as such and filters the non-unit kinds out itself, so the route never
+    // re-encodes which `EntityType`s are org units.
+    const adminRows: Array<{
+      cwid: string;
+      granteeName: string | null;
+      entityType: string;
+      entityId: string;
+      role: "owner" | "curator";
+    }> = await db.read.unitAdmin
+      .findMany({
+        where: q ? { OR: [{ cwid: { contains: q } }, { granteeName: { contains: q } }] } : {},
+        select: { cwid: true, granteeName: true, entityType: true, entityId: true, role: true },
+        take: CANDIDATE_LIMIT * 4,
+      })
+      .catch(() => []);
+
+    // One subject per person, classified by the SAME `pickDisplayGrant` the
+    // scholar pass and the probe use, so an admin gets an identical role/unit
+    // label on whichever path surfaces them. Drops anyone the scholar pass
+    // already emitted.
+    const subjects = summarizeUnitAdminGrants(adminRows, emitted).filter((s) => s.top !== null);
+
+    if (subjects.length > 0) {
+      const adminCwids = subjects.map((s) => s.cwid.toLowerCase());
+      // A grant-holder MAY still have a profile that fell outside the scholar
+      // page's 50 rows; resolve it so they get their real name + slug rather
+      // than a degraded duplicate (mirrors the steward pass's `profiles` read).
+      const [profiles, adminSuperuserFlags] = await Promise.all([
+        db.read.scholar
+          .findMany({
+            where: { cwid: { in: adminCwids }, deletedAt: null },
+            select: { cwid: true, preferredName: true, slug: true },
+          })
+          .catch(() => [] as Array<{ cwid: string; preferredName: string; slug: string }>),
+        // R2 — fail-closed (error ⇒ exclude), same rule as both passes above.
+        Promise.all(adminCwids.map((c) => isSuperuser(c).catch(() => true))),
+      ]);
+      const profileByCwid = new Map(profiles.map((p) => [p.cwid.toLowerCase(), p]));
+
+      // Unit display names for any code the scholar pass didn't already resolve.
+      const extraCodes: Record<ImpersonationUnitKind, Set<string>> = {
+        department: new Set(),
+        division: new Set(),
+        center: new Set(),
+      };
+      for (const s of subjects) {
+        const top = s.top!; // non-null: filtered above
+        if (!nameMaps[top.entityType].has(top.entityId)) {
+          extraCodes[top.entityType].add(top.entityId);
+        }
+      }
+      const [xDept, xDiv, xCenter] = await Promise.all([
+        unitNameMap(
+          (codes) =>
+            db.read.department.findMany({
+              where: { code: { in: codes } },
+              select: { code: true, name: true },
+            }),
+          extraCodes.department,
+        ),
+        unitNameMap(
+          (codes) =>
+            db.read.division.findMany({
+              where: { code: { in: codes } },
+              select: { code: true, name: true },
+            }),
+          extraCodes.division,
+        ),
+        unitNameMap(
+          (codes) =>
+            db.read.center.findMany({
+              where: { code: { in: codes } },
+              select: { code: true, name: true },
+            }),
+          extraCodes.center,
+        ),
+      ]);
+      for (const [code, name] of xDept) nameMaps.department.set(code, name);
+      for (const [code, name] of xDiv) nameMaps.division.set(code, name);
+      for (const [code, name] of xCenter) nameMaps.center.set(code, name);
+
+      subjects.forEach((s, i) => {
+        if (adminSuperuserFlags[i]) return; // R2 — not assumable
+        const top = s.top!; // non-null: filtered above
+        if (kindFilter !== "all" && (kindFilter === "scholar" || top.entityType !== kindFilter)) {
+          return;
+        }
+        const profile = profileByCwid.get(s.cwid.toLowerCase());
+        candidates.push({
+          cwid: profile?.cwid ?? s.cwid,
+          // `granteeName` is populated by the ed-admins pull (the app runtime
+          // cannot reach LDAP, #443); a grant predating that shows the bare CWID,
+          // which the `q` filter still matches — degraded, never missing.
+          preferredName: profile?.preferredName ?? s.granteeName ?? s.cwid,
+          slug: profile?.slug ?? null,
+          role: top.role,
+          unitKind: top.entityType,
+          unit: nameMaps[top.entityType].get(top.entityId) ?? null,
         });
       });
     }

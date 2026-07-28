@@ -122,7 +122,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     .findFirst({ where: { cwid: targetCwid, deletedAt: null }, select: { cwid: true } })
     .catch(() => null);
   const targetIsSteward = target ? false : await isCommsSteward(targetCwid).catch(() => false);
-  if (!target && !targetIsSteward) return editError(404, "target_not_found", "targetCwid");
+  // …OR an org-unit Owner/Curator with no Scholar row of their own (#540 /
+  // Amendment 4). Same reasoning as the steward branch and the same absence of
+  // escalation: a superuser already outranks every unit grant, so previewing one
+  // is strictly narrower, and R2 below still rejects a superuser target. Without
+  // this the switcher could LIST such an admin and then 404 on the click.
+  const targetIsUnitAdmin =
+    target || targetIsSteward
+      ? false
+      : await db.read.unitAdmin
+          .findFirst({ where: { cwid: targetCwid }, select: { cwid: true } })
+          .then((row) => row !== null)
+          .catch(() => false);
+  if (!target && !targetIsSteward && !targetIsUnitAdmin) {
+    return editError(404, "target_not_found", "targetCwid");
+  }
 
   // R2 — down-only escalation guard. Rejects a target who is themselves a
   // superuser (no lateral admin→admin). Stable reason for the UI / log triage.

@@ -23,8 +23,12 @@
  *     URL registry / Administrators / Method Families / Funding matcher), so the
  *     dropdown stays short — it routes them to the console, not to every tab.
  *   - **comms_steward** (not a superuser) → "Method Families" (`/edit/methods`).
- *   - **Unit Owner / Curator** (not a superuser) → "Units you manage"
- *     (`/edit/units`).
+ *   - **Unit Owner / Curator** (not a superuser) → "Profiles" (`/edit/scholars`,
+ *     scope-filtered to their units — B3), then "Data quality"
+ *     (`/edit/data-quality`, the same people through a gap lens), then "Org
+ *     units" (`/edit/units`). People first: the roster is what they sign in to
+ *     do, and it was previously not linked at all — `/edit/scholars` was
+ *     superuser-gated, so their only door was "Org units".
  *
  * A viewer holding several non-superuser roles gets several links. The list is
  * profile-independent: a steward or unit admin with no `Scholar` row still gets
@@ -34,7 +38,7 @@
 /** One console destination the viewer may open, rendered as a dropdown row. */
 export type ConsoleLink = {
   /** Stable id — drives the React key, the row `data-testid`, and the icon map. */
-  id: "manage-profiles" | "methods" | "units";
+  id: "manage-profiles" | "methods" | "units" | "profiles" | "data-quality";
   label: string;
   href: string;
 };
@@ -53,6 +57,11 @@ export type ConsoleLinkVerdicts = {
   /** The viewer holds ≥1 direct `unit_admin` grant
    *  (`loadManageableUnits(...).total > 0`). */
   managesUnits: boolean;
+  /** `EDIT_DATA_QUALITY_DASHBOARD` on AND the viewer holds ≥1 `unit_admin`
+   *  grant — i.e. `/edit/data-quality` will render them a scoped gap report
+   *  rather than 404. The flag is folded in by the caller (this module stays
+   *  env-free), exactly as `canManageMethods` folds in COMMS_STEWARD. */
+  canBrowseDataQuality: boolean;
 };
 
 /**
@@ -81,6 +90,19 @@ export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
   } else {
     if (v.canManageMethods) {
       links.push({ id: "methods", label: "Method families", href: "/edit/methods" });
+    }
+    // PEOPLE BEFORE UNITS. A unit Owner/Curator's own words for what they came
+    // to do are "the people I edit", not "the org unit I administer" — and until
+    // this row existed their only door was "Org units". Same destination and
+    // same NAME every other role uses for it, so the surface reads identically
+    // whoever opens it; the roster itself is scope-filtered server-side (B3).
+    if (v.managesUnits) {
+      links.push({ id: "profiles", label: "Profiles", href: "/edit/scholars" });
+    }
+    // The gap report is a SECOND, narrower view of the same people — kept as its
+    // own row under its own name rather than masquerading as the roster.
+    if (v.canBrowseDataQuality) {
+      links.push({ id: "data-quality", label: "Data quality", href: "/edit/data-quality" });
     }
     if (v.managesUnits) {
       links.push({ id: "units", label: "Org units", href: "/edit/units" });
