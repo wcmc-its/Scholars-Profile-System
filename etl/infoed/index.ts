@@ -40,8 +40,14 @@ import { db } from "../../lib/db";
 import { assertPruneVolume } from "../../lib/etl-guard";
 import { closeInfoedPool, getInfoedPool } from "@/lib/sources/mssql-infoed";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
-import { parseNihAward } from "@/lib/award-number";
+import { coreProjectNum, parseNihAward } from "@/lib/award-number";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
+import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
+import {
+  type GapStatus,
+  missingField,
+  nextGapStatus,
+} from "@/lib/grant-date-gap";
 
 type GrantRow = {
   CWID: string | null;
@@ -57,6 +63,9 @@ type GrantRow = {
   Subward_Sponsor: string | null;
   spon_code: string | null;
   Role: string;
+  /// #2020 — 'Active Award' | 'Expired Award' | 'In Process'. Only consumed by
+  /// the undated-award worklist; the Grant row itself derives status from dates.
+  Project_Status: string | null;
 };
 
 const INSERT_BATCH = 1000;
@@ -75,6 +84,71 @@ const ROLE_MAP: Record<string, string> = {
 function chunks<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+/** An InfoEd row paired with where its project period came from. */
+type Prepared = { row: GrantRow; datesSource: "infoed" | "reporter" };
+
+/**
+ * #2020 — project periods from `reciterdb.grant_reporter_project`, keyed by
+ * core project number, for awards InfoEd left undated.
+ *
+ * Same join `etl/reporter` already uses for abstracts/applId. It has to happen
+ * HERE rather than in that ETL because an undated award never becomes a `Grant`
+ * row at all, so there is nothing downstream for the enrichment pass to attach to.
+ *
+ * Measured coverage (2026-07-28): 358 of 852 undated funded awards, 35 of 159
+ * active ones. The remainder are non-NIH — RePORTER cannot help and only a
+ * correction in InfoEd can.
+ */
+async function loadReporterPeriods(
+  rows: GrantRow[],
+): Promise<Map<string, { start: Date; end: Date }>> {
+  const out = new Map<string, { start: Date; end: Date }>();
+  const cores = [
+    ...new Set(
+      rows
+        .map((r) => coreProjectNum(r.Award_Number))
+        .filter((c): c is string => c !== null),
+    ),
+  ];
+  if (cores.length === 0) return out;
+
+  try {
+    await withReciterConnection(async (conn) => {
+      for (const batch of chunks(cores, 500)) {
+        const placeholders = batch.map(() => "?").join(",");
+        const res = (await conn.query(
+          `SELECT core_project_num,
+                  MIN(project_start_date) AS s,
+                  MAX(project_end_date)   AS e
+             FROM grant_reporter_project
+            WHERE project_start_date IS NOT NULL
+              AND project_end_date   IS NOT NULL
+              AND core_project_num IN (${placeholders})
+            GROUP BY core_project_num`,
+          batch,
+        )) as Array<{ core_project_num: string; s: Date | null; e: Date | null }>;
+        for (const r of res) {
+          if (!r.core_project_num || !r.s || !r.e) continue;
+          out.set(r.core_project_num.toUpperCase(), {
+            start: new Date(r.s),
+            end: new Date(r.e),
+          });
+        }
+      }
+    });
+  } catch (err) {
+    // Degrade to the PRE-EXISTING behaviour (drop the row) — never to a wrong
+    // date. Loud, because a silent skip is indistinguishable from RePORTER
+    // genuinely having no coverage, and the two call for different responses.
+    console.warn(
+      `[InfoEd] RePORTER period lookup failed — no backfill this run: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
   return out;
 }
 
@@ -144,7 +218,7 @@ WITH infoed_all AS (
 SELECT DISTINCT
   v.CWID, v.Account_Number, x.Award_Number, y.begin_date, z.end_date,
   REPLACE(REPLACE(REPLACE(z.proj_title, CHAR(13), ' '), CHAR(10), ' '), '    ', '') AS proj_title,
-  z.unit_name, z.int_unit_code, z.program_type, z.Orig_Sponsor,
+  z.unit_name, z.int_unit_code, z.program_type, z.Orig_Sponsor, z.Project_Status,
   CASE WHEN z.Sponsor = z.Orig_Sponsor THEN NULL ELSE z.Sponsor END AS Subward_Sponsor,
   z.spon_code,
   CASE
@@ -180,7 +254,11 @@ LEFT JOIN (
     -- exclusion the schema documents. Aggregate only over the types we keep.
     MIN(CASE WHEN program_type <> 'Contract without funding' THEN program_type END) AS program_type,
     MIN(unit_name) AS unit_name, MIN(int_unit_code) AS int_unit_code,
-    MAX(Primary_PI_Flag) AS Primary_PI_Flag, MIN(role_category) AS Role_Category
+    MAX(Primary_PI_Flag) AS Primary_PI_Flag, MIN(role_category) AS Role_Category,
+    -- #2020 — triage field for the undated-award worklist. MIN() so an account
+    -- mixing statuses reports 'Active Award' ('A' sorts before 'E' and 'I'):
+    -- an undated ACTIVE award is the one a faculty member notices missing.
+    MIN(Project_Status) AS Project_Status
   FROM infoed_all GROUP BY cwid, Account_Number
 ) AS z
   ON z.cwid = v.cwid AND z.Account_Number = v.Account_Number
@@ -188,6 +266,92 @@ WHERE v.unit_name IS NOT NULL
   AND v.program_type <> 'Contract without funding'
 ORDER BY v.CWID, v.Account_Number;
 `;
+
+/**
+ * #2020 — reconcile the undated-award worklist.
+ *
+ * Upserts a `GrantDateGap` for every award InfoEd left without a project
+ * period, and auto-resolves any previously-recorded gap the source has since
+ * fixed. Dismissals are never overwritten.
+ *
+ * A gap that disappears from the feed entirely (award withdrawn, CWID
+ * deactivated) also lands in `resolved` — from the worklist's point of view it
+ * no longer needs OSRA action either way, and `lastSeenAt` distinguishes the
+ * two cases for anyone auditing later.
+ */
+async function reconcileDateGaps(
+  undated: GrantRow[],
+  backfilledIds: Set<string>,
+): Promise<void> {
+  const now = new Date();
+  const existing = await db.write.grantDateGap.findMany({
+    select: { externalId: true, status: true },
+  });
+  const statusByExternalId = new Map<string, GapStatus>(
+    existing.map((g) => [g.externalId, g.status as GapStatus]),
+  );
+
+  const seen = new Set<string>();
+  let opened = 0;
+  let backfilledCount = 0;
+
+  for (const r of undated) {
+    const externalId = `INFOED-${r.Account_Number}-${r.CWID}`;
+    // The consolidated query yields one row per (cwid, account) after the outer
+    // DISTINCT, but guard anyway — a duplicate would double-count the log line.
+    if (seen.has(externalId)) continue;
+    seen.add(externalId);
+
+    const wasBackfilled = backfilledIds.has(externalId);
+    const status = nextGapStatus(statusByExternalId.get(externalId) ?? null, {
+      stillUndated: true,
+      backfilled: wasBackfilled,
+    });
+    if (status === "open") opened++;
+    if (status === "backfilled") backfilledCount++;
+
+    const shared = {
+      cwid: r.CWID!,
+      accountNumber: r.Account_Number,
+      awardNumber: r.Award_Number?.trim() || null,
+      sponsor: r.Orig_Sponsor?.trim() || null,
+      projectStatus: r.Project_Status?.trim() || "(unknown)",
+      programType: r.program_type?.trim() || "Grant",
+      unitName: r.unit_name?.trim() || null,
+      missingField: missingField(r.begin_date, r.end_date) ?? "both",
+      status,
+      backfillSource: wasBackfilled ? "reporter" : null,
+      lastSeenAt: now,
+    };
+
+    await db.write.grantDateGap.upsert({
+      where: { externalId },
+      create: { externalId, ...shared },
+      // firstSeenAt is deliberately absent from the update — "how long has this
+      // been undated" is the number that moves a data-quality conversation, and
+      // it only means that if it survives every subsequent run.
+      update: shared,
+    });
+  }
+
+  const stale = existing.filter(
+    (g) =>
+      !seen.has(g.externalId) &&
+      g.status !== "dismissed" &&
+      g.status !== "resolved",
+  );
+  if (stale.length > 0) {
+    await db.write.grantDateGap.updateMany({
+      where: { externalId: { in: stale.map((g) => g.externalId) } },
+      data: { status: "resolved", resolvedAt: now, lastSeenAt: now },
+    });
+  }
+
+  console.log(
+    `Date-gap worklist: ${opened} open, ${backfilledCount} backfilled (source still wrong), ` +
+      `${stale.length} newly resolved.`,
+  );
+}
 
 async function main() {
   const start = Date.now();
@@ -212,20 +376,49 @@ async function main() {
     const rows = result.recordset as GrantRow[];
     console.log(`InfoEd returned ${rows.length} grant rows in ${queryElapsed}s.`);
 
-    // Filter to our active CWIDs and rows with non-null start/end dates
-    // (per spec line 125 — exclude grants without project period set).
-    const filtered = rows.filter(
-      (r) =>
-        r.CWID !== null &&
-        ourCwidSet.has(r.CWID) &&
-        r.begin_date !== null &&
-        r.end_date !== null,
+    // Filter to our active CWIDs, then split on whether InfoEd gave us a
+    // project period. #2020 — these two losses used to share one predicate and
+    // one post-filter total, so a 23.6% drop was invisible in the run log.
+    const ours = rows.filter((r) => r.CWID !== null && ourCwidSet.has(r.CWID));
+    const dated = ours.filter(
+      (r) => r.begin_date !== null && r.end_date !== null,
     );
+    const undated = ours.filter(
+      (r) => r.begin_date === null || r.end_date === null,
+    );
+    const undatedFunded = undated.filter((r) => r.Award_Number?.trim()).length;
     console.log(
-      `After filtering to active CWIDs + non-null dates: ${filtered.length} grants.`,
+      `Rows for active CWIDs: ${ours.length} (with project period ${dated.length}, ` +
+        `without ${undated.length}, of which ${undatedFunded} carry an award number).`,
     );
 
-    const inserts = filtered.map((r) => {
+    // Adopt a period from RePORTER where one exists. This makes the grant
+    // RENDER; it does not make InfoEd correct. Every undated award is recorded
+    // as a gap below whether or not it was backfilled — see GrantDateGap.
+    const periods = await loadReporterPeriods(undated);
+    const prepared: Prepared[] = dated.map((row) => ({
+      row,
+      datesSource: "infoed" as const,
+    }));
+    const backfilledIds = new Set<string>();
+    for (const row of undated) {
+      const period = periods.get(coreProjectNum(row.Award_Number) ?? "");
+      if (!period) continue;
+      backfilledIds.add(`INFOED-${row.Account_Number}-${row.CWID}`);
+      prepared.push({
+        row: { ...row, begin_date: period.start, end_date: period.end },
+        datesSource: "reporter",
+      });
+    }
+    console.log(
+      `Backfilled ${backfilledIds.size} of ${undated.length} undated awards from RePORTER; ` +
+        `${undated.length - backfilledIds.size} remain invisible pending an InfoEd fix.`,
+    );
+    console.log(
+      `After filtering to active CWIDs + non-null dates: ${prepared.length} grants.`,
+    );
+
+    const inserts = prepared.map(({ row: r, datesSource }) => {
       const role = ROLE_MAP[r.Role] ?? "Key Personnel";
 
       // Issue #78 F6 — prime is Orig_Sponsor (always populated when this row
@@ -255,6 +448,7 @@ async function main() {
         externalId: `INFOED-${r.Account_Number}-${r.CWID}`,
         awardNumber: r.Award_Number?.trim() || null,
         source: "InfoEd",
+        datesSource,
         programType: r.program_type?.trim() || "Grant",
         primeSponsor: canonicalizeSponsor(primeRaw),
         primeSponsorRaw: primeRaw,
@@ -276,6 +470,7 @@ async function main() {
       select: {
         externalId: true, cwid: true, title: true, role: true, funder: true,
         startDate: true, endDate: true, awardNumber: true, source: true,
+        datesSource: true,
         programType: true, primeSponsor: true, primeSponsorRaw: true,
         directSponsor: true, directSponsorRaw: true, mechanism: true,
         nihIc: true, isSubaward: true,
@@ -289,7 +484,7 @@ async function main() {
           g.cwid, g.title, g.role, g.funder,
           g.startDate.toISOString().slice(0, 10),
           g.endDate.toISOString().slice(0, 10),
-          g.awardNumber, g.source, g.programType, g.primeSponsor,
+          g.awardNumber, g.source, g.datesSource, g.programType, g.primeSponsor,
           g.primeSponsorRaw, g.directSponsor, g.directSponsorRaw,
           g.mechanism, g.nihIc, g.isSubaward,
         ]),
@@ -336,6 +531,8 @@ async function main() {
       `Grant reconcile complete: +${plan.toCreate.length} ~${plan.toUpdate.length} -${tombstoned}`,
     );
 
+    await reconcileDateGaps(undated, backfilledIds);
+
     await db.write.etlRun.update({
       where: { id: run.id },
       data: {
@@ -368,4 +565,5 @@ main()
   .finally(async () => {
     await db.write.$disconnect();
     await closeInfoedPool();
+    await closeReciterPool();
   });
