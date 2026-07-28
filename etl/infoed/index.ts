@@ -314,6 +314,10 @@ async function reconcileDateGaps(
       cwid: r.CWID!,
       accountNumber: r.Account_Number,
       awardNumber: r.Award_Number?.trim() || null,
+      // The only recognizable identifier on the ~74% of these that carry no
+      // award number. Unlike the Grant row, no "(untitled …)" placeholder —
+      // a genuinely untitled InfoEd record is a finding, not a rendering problem.
+      title: r.proj_title?.trim() || null,
       sponsor: r.Orig_Sponsor?.trim() || null,
       projectStatus: r.Project_Status?.trim() || "(unknown)",
       programType: r.program_type?.trim() || "Grant",

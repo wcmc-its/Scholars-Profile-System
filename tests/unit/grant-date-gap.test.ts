@@ -107,6 +107,7 @@ describe("toCsv", () => {
     scholarName: "Test Scholar",
     accountNumber: "0000000001",
     awardNumber: "R01 CA123456",
+    title: "A study of things",
     sponsor: "NCI",
     projectStatus: "Expired Award",
     programType: "Grant",
@@ -137,8 +138,22 @@ describe("toCsv", () => {
 
   it("emits a header even with no rows", () => {
     expect(toCsv([])).toBe(
-      "cwid,scholar_name,account_number,award_number,sponsor,project_status," +
+      "cwid,scholar_name,account_number,award_number,title,sponsor,project_status," +
         "program_type,unit_name,missing_field,gap_status,backfill_source,first_seen,days_open",
+    );
+  });
+
+  it("quotes a title containing a comma so the row stays aligned", () => {
+    // Grant titles are the most comma-dense field in the file, and 74% of these
+    // awards have no award number — a row that shifts by one column is a row
+    // nobody can act on.
+    const csv = toCsv([row({ title: "Aging, synapses, and disease" })]);
+    expect(csv).toContain('"Aging, synapses, and disease"');
+    expect(csv.split("\n")).toHaveLength(2);
+    // Parsed CSV-aware, the row still has exactly the header's field count.
+    const fields = csv.split("\n")[1].match(/("([^"]|"")*"|[^,]*)(,|$)/g) ?? [];
+    expect(fields.filter((f) => f.endsWith(",")).length + 1).toBe(
+      csv.split("\n")[0].split(",").length,
     );
   });
 

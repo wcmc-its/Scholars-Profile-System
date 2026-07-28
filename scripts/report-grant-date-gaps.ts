@@ -37,6 +37,7 @@ async function main(): Promise<void> {
     scholarName: g.scholar.preferredName,
     accountNumber: g.accountNumber,
     awardNumber: g.awardNumber,
+    title: g.title,
     sponsor: g.sponsor,
     projectStatus: g.projectStatus,
     programType: g.programType,
