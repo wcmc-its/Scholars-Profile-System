@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { editOkStream } from "@/lib/edit/request";
+import { HEARTBEAT_LINE, editOkStream } from "@/lib/edit/request";
 
 async function lines(res: Response): Promise<Record<string, unknown>[]> {
   const text = await res.text();
@@ -50,6 +50,16 @@ describe("editOkStream — NDJSON contract", () => {
     expect(await lines(res)).toEqual([{ type: "result", ok: false, error: "mapped" }]);
   });
 
+  // #2036: a one-byte heartbeat never reached CloudFront — some hop between Fargate and the CDN
+  // withheld it, so the 30s origin-read timeout fired and the viewer's HTTP/2 stream was reset.
+  // Both properties matter: the line must be BIG enough to push past a proxy write buffer, and it
+  // must still trim to empty so every reader skips it.
+  it("pads the heartbeat past a proxy write buffer while staying a skippable blank line", () => {
+    expect(HEARTBEAT_LINE.length).toBeGreaterThanOrEqual(8192);
+    expect(HEARTBEAT_LINE.endsWith("\n")).toBe(true);
+    expect(HEARTBEAT_LINE.trim()).toBe("");
+  });
+
   it("interleaves blank-line heartbeats that the line parser skips", async () => {
     const res = editOkStream(
       async (emit) => {
@@ -62,8 +72,8 @@ describe("editOkStream — NDJSON contract", () => {
       { heartbeatMs: 1 },
     );
     const text = await res.text();
-    // The raw body carries blank heartbeat lines during the awaits...
-    expect(text).toContain("\n\n");
+    // The raw body carries padded blank heartbeat lines during the awaits...
+    expect(text).toContain(HEARTBEAT_LINE);
     // ...but parsing the non-blank lines yields exactly the progress event + the result.
     const msgs = text
       .split("\n")

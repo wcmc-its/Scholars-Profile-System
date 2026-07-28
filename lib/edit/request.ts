@@ -97,18 +97,42 @@ export function editRateLimited(retryAfterSeconds: number): NextResponse {
 export type EditStreamProgress = Record<string, unknown>;
 
 /**
+ * Bytes of padding on the idle heartbeat line (#2036).
+ *
+ * The heartbeat used to be a bare `"\n"`. Measured on prod + staging CloudFront access logs, a
+ * one-byte write NEVER reached the CDN: three real failures all died at `time-taken - ttfb` =
+ * 30.001/30.001/30.002s with `sc-status=200`, `x-edge-result-type=Error` and `sc-bytes` 1159-1161
+ * (response headers only) — across one prod draft whose main model call alone ran 51.6s, i.e. five
+ * heartbeats due and zero delivered. The origin is not at fault (Next 15.5 `pipe-readable` calls
+ * `res.write()` + `res.flush()` per chunk, and `compression` never engages on `x-ndjson`), so a hop
+ * between Fargate and CloudFront withholds the tiny chunk, CloudFront's 30s `OriginReadTimeout`
+ * never re-arms, and it resets the viewer's HTTP/2 stream → `ERR_HTTP2_PROTOCOL_ERROR`, with nothing
+ * logged server-side. Padding past that hop's write buffer is what makes the beat traverse the path.
+ *
+ * ponytail: 16 KiB is chosen to clear the usual 4K/8K proxy buffers, NOT measured against the
+ * appliance. If a heartbeat still fails to land, raise this to 64 KiB before considering anything
+ * structural; if beats land and the stream is still cut at ~30s, the cap is a whole-transaction
+ * timeout at the VIP and needs the network team, not code.
+ */
+const HEARTBEAT_PAD_BYTES = 16 * 1024;
+
+/** The idle heartbeat: a padded, whitespace-only NDJSON line every reader skips. */
+export const HEARTBEAT_LINE = " ".repeat(HEARTBEAT_PAD_BYTES) + "\n";
+
+/**
  * A streamed `200` success for a SLOW producer, as **newline-delimited JSON (NDJSON)**. Each line
  * is one JSON object: zero or more `{"type":"progress",...}` lines (whatever `produce` emits via its
  * `emit` callback) followed by exactly one terminal `{"type":"result","ok":true,...}` (resolve) or
- * `{"type":"result","ok":false,"error":...}` (throw). A bare blank line is an idle heartbeat the
- * client ignores.
+ * `{"type":"result","ok":false,"error":...}` (throw). A whitespace-only line is an idle heartbeat
+ * the client ignores (see {@link HEARTBEAT_LINE}).
  *
  * Why a stream: the biosketch generation fans out to ~5 sequential gateway calls (main draft →
  * per-entry faithfulness → products → sources) and runs 60-90s for a full Contributions draft —
- * well past the CloudFront 30s origin-read timeout. A buffered response looks IDLE to the CDN for
- * that whole window, so CloudFront 504s mid-flight while the route is still running (nothing logs
- * server-side). The progress lines (and the blank-line heartbeat fallback for a long phase) reset
- * the CDN/ALB idle timers, so any duration works with NO infra-timeout change.
+ * well past the CloudFront 30s origin-read timeout. A response that looks IDLE to the CDN for that
+ * whole window gets its viewer HTTP/2 stream RESET mid-flight (not a clean 504) while the route is
+ * still running, and nothing logs server-side. The progress lines (and the padded heartbeat for a
+ * long phase) reset the CDN/ALB idle timers, so any duration works with NO infra-timeout change —
+ * but ONLY if they physically traverse every hop; see {@link HEARTBEAT_LINE} (#2036).
  *
  * Why NDJSON (not a single tolerant-whitespace JSON body): the progress events ARE the point — the
  * client reads the body incrementally (`res.body.getReader()`), parses each line, advances a
@@ -137,12 +161,12 @@ export function editOkStream(
       const emit = (progress: EditStreamProgress) => {
         if (!finished) writeLine({ type: "progress", ...progress });
       };
-      // A bare newline is an empty NDJSON line the client skips, so it keeps the connection alive
-      // through a long single phase (e.g. the ~10s main draft) without corrupting the body.
+      // A whitespace-only NDJSON line the client skips (`.trim()` → empty → `continue`), so it keeps
+      // the connection alive through a long single phase without corrupting the body.
       const beat = setInterval(() => {
         if (finished) return;
         try {
-          controller.enqueue(encoder.encode("\n"));
+          controller.enqueue(encoder.encode(HEARTBEAT_LINE));
         } catch {
           // Controller already closed — nothing to keep alive.
         }
