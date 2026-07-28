@@ -63,7 +63,11 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import { getMenteesForMentor } from "@/lib/api/mentoring";
-import { MAX_MANUAL_MENTEES, validateManualMentees } from "@/lib/edit/manual-mentee";
+import {
+  MAX_MANUAL_MENTEES,
+  manualMenteePairs,
+  validateManualMentees,
+} from "@/lib/edit/manual-mentee";
 
 const MENTOR = "abc1001";
 
@@ -286,5 +290,59 @@ describe("getMenteesForMentor — manual mentees (#2011)", () => {
     fieldOverrideFindUnique.mockResolvedValue({ value: "{not-an-array" } as never);
     const { mentees } = await getMenteesForMentor(MENTOR);
     expect(mentees).toEqual([]);
+  });
+});
+
+describe("manualMenteePairs — the co-pub bridge export's fourth pair source (#2011)", () => {
+  it("emits a pair for an entry carrying a cwid", () => {
+    expect(
+      manualMenteePairs([
+        { entityId: "thc2015", value: JSON.stringify([{ name: "Evan S", cwid: "evs2008" }]) },
+      ]),
+    ).toEqual([{ mentorCwid: "thc2015", menteeCwid: "evs2008" }]);
+  });
+
+  it("emits NOTHING for a CWID-less entry — there is no identifier to join on", () => {
+    expect(
+      manualMenteePairs([
+        { entityId: "thc2015", value: JSON.stringify([{ name: "Rowan Ellis" }]) },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("skips an unparseable row instead of throwing — one bad row must not abort the export", () => {
+    expect(
+      manualMenteePairs([
+        { entityId: "aaa1001", value: "{not-json" },
+        { entityId: "thc2015", value: JSON.stringify([{ name: "Evan S", cwid: "evs2008" }]) },
+      ]),
+    ).toEqual([{ mentorCwid: "thc2015", menteeCwid: "evs2008" }]);
+  });
+
+  it("drops a self-pair, matching the export's own add() guard", () => {
+    expect(
+      manualMenteePairs([
+        { entityId: "thc2015", value: JSON.stringify([{ name: "Self", cwid: "thc2015" }]) },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("flattens several mentors and several mentees per mentor", () => {
+    const pairs = manualMenteePairs([
+      {
+        entityId: "thc2015",
+        value: JSON.stringify([
+          { name: "A", cwid: "aaa1" },
+          { name: "B" },
+          { name: "C", cwid: "ccc3" },
+        ]),
+      },
+      { entityId: "xyz9", value: JSON.stringify([{ name: "D", cwid: "ddd4" }]) },
+    ]);
+    expect(pairs).toEqual([
+      { mentorCwid: "thc2015", menteeCwid: "aaa1" },
+      { mentorCwid: "thc2015", menteeCwid: "ccc3" },
+      { mentorCwid: "xyz9", menteeCwid: "ddd4" },
+    ]);
   });
 });

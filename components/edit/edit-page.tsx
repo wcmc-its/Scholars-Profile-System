@@ -1174,7 +1174,9 @@ function renderPanel(
       );
     case "mentees":
       return (
-        <>
+        // gap-10 because the two panels are peer h2 sections, not a heading and
+        // its body — at EditPanel's internal gap-4 they read as one run-on card.
+        <div className="flex flex-col gap-10">
           {/* #2011 — the mentor's own entries come FIRST: it is the one part of
               this tab they can actually author. The derived roster below is
               hide-only, and the two must stay visually separate so nobody
@@ -1191,7 +1193,7 @@ function renderPanel(
             scholarName={scholarName}
             mentees={ctx.mentees}
           />
-        </>
+        </div>
       );
     case "coi":
       return (
