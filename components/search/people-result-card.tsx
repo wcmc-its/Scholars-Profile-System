@@ -586,6 +586,11 @@ export function PeopleResultCard({
           cwid={hit.cwid}
           slug={hit.slug}
           pubCount={hit.pubCount}
+          // The METHOD line's denominator — the scholar's method-INDEXED pub count, not
+          // their whole career (extraction is post-2020 by design). Absent on the hit ⇒
+          // the line prints its count with no share. Passed on both tiers so the two
+          // rows can never disagree about what a method count is a share of.
+          methodPubCount={hit.methodPubCount}
           q={q}
           keyPaperConfig={keyPaperConfig}
           hasQuery={hasQuery}
@@ -648,6 +653,9 @@ export function PeopleResultCard({
                 cwid={hit.cwid}
                 slug={hit.slug}
                 pubCount={hit.pubCount}
+                // See the lesser rows above — a method count is a share of the
+                // method-indexed pool, never of `pubCount`.
+                methodPubCount={hit.methodPubCount}
                 q={q}
                 keyPaperConfig={keyPaperConfig}
                 hasQuery={hasQuery}

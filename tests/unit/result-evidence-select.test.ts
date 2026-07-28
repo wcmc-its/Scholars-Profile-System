@@ -921,3 +921,98 @@ describe("selectEvidenceLines — #1366 stacked, counted reason lines", () => {
     expect(counted).toEqual([7, 12]);
   });
 });
+
+/**
+ * The ONE ordering exception in `selectEvidenceLines`: a method lead the tagged lead
+ * OUTNUMBERS gives up the primary slot to it.
+ *
+ * The defect it fixes, measured in prod on `rgcryst`: the card led with "11 … AAV
+ * (method)" while "140 … Genetic Therapy (tagged concept)" — same scholar, 12.7× the
+ * publications — sat folded under "Also matched". The primary slot is the one line a
+ * searcher reads, so ordering it by fiat rather than magnitude made the card state the
+ * weaker case for its own result.
+ *
+ * What these pin is as much what does NOT move: `topic` never changes position, the whole
+ * array is never sorted, and a missing count on either side leaves today's method-first
+ * order alone. The comparison is legal for exactly this pair — both are distinct-pub counts
+ * over the same scholar, both clamped to `pubCount` by `countOf` in `lib/api/search.ts` —
+ * and generalising it would resurrect the "two pipelines, one frame" error the lesser rows
+ * were built to avoid.
+ */
+describe("selectEvidenceLines — method ⇄ tagged order by magnitude", () => {
+  const topic = { label: "Immunology", id: "immunology", count: 12 };
+  const kinds = (input: SelectEvidenceInput) =>
+    selectEvidenceLines(input).map((e) => (e.kind === "publications" ? `pub:${e.strength}` : e.kind));
+
+  const withCounts = (methodCount?: number, taggedCount = 140): SelectEvidenceInput => ({
+    method: {
+      family: "AAV gene-therapy vectors",
+      tools: [],
+      ...(methodCount != null ? { count: methodCount } : {}),
+    },
+    pub: {
+      tagged: {
+        text: `${taggedCount} of 923 publications tagged under`,
+        term: "Genetic Therapy",
+        count: taggedCount,
+      },
+    },
+    topic,
+  });
+
+  it("method.count < tagged.count ⇒ the tagged line leads, method demotes", () => {
+    // The prod shape: 11 method vs 140 tagged.
+    expect(kinds(withCounts(11))).toEqual(["pub:tagged", "method", "topic"]);
+  });
+
+  it("method.count >= tagged.count ⇒ method stays first (today's order)", () => {
+    expect(kinds(withCounts(200))).toEqual(["method", "pub:tagged", "topic"]);
+    // EQUAL is not "outnumbers" — a tie must not disturb the shipped order.
+    expect(kinds(withCounts(140))).toEqual(["method", "pub:tagged", "topic"]);
+  });
+
+  it("method.count MISSING ⇒ order unchanged — an absent number decides nothing", () => {
+    // A not-yet-reindexed people doc carries no `methodFamilyCounts` map, so `method.count`
+    // is absent. Inferring an order from that would be the same fabrication this change
+    // exists to remove, so the swap declines and method keeps the slot it has today.
+    expect(kinds(withCounts(undefined))).toEqual(["method", "pub:tagged", "topic"]);
+  });
+
+  it("topic NEVER moves — it is third in every one of these cases", () => {
+    for (const input of [withCounts(11), withCounts(200), withCounts(140), withCounts(undefined)]) {
+      expect(selectEvidenceLines(input)[2].kind).toBe("topic");
+    }
+    // …and it is not pulled forward by a count larger than both. `areaCounts` is
+    // doc-precomputed and NOT query-filtered, so its N is the scholar's total in the area
+    // whatever you searched — it is not comparable to either of the two above, which is
+    // precisely why this is a two-way swap and not a sort.
+    expect(
+      kinds({ ...withCounts(11), topic: { label: "Immunology", id: "immunology", count: 900 } }),
+    ).toEqual(["pub:tagged", "method", "topic"]);
+  });
+
+  it("the swap carries the WHOLE line, not just its position", () => {
+    const lines = selectEvidenceLines(withCounts(11));
+    const [tagged, method] = lines;
+    if (tagged.kind !== "publications" || method.kind !== "method") throw new Error("shape");
+    expect(tagged.count).toBe(140);
+    expect(tagged.term).toBe("Genetic Therapy");
+    expect(method.count).toBe(11);
+    expect(method.family).toBe("AAV gene-therapy vectors");
+  });
+
+  it("one line alone is unaffected by the rule", () => {
+    expect(kinds({ method: { family: "AAV gene-therapy vectors", tools: [], count: 11 } })).toEqual([
+      "method",
+    ]);
+    expect(
+      kinds({ pub: { tagged: { text: "140 of 923 publications tagged under", term: "Genetic Therapy", count: 140 } } }),
+    ).toEqual(["pub:tagged"]);
+  });
+
+  it("clinical still appends LAST, after the swap", () => {
+    expect(
+      kinds({ ...withCounts(11), clinical: { specialty: "Endocrinology", boardCertified: true } }),
+    ).toEqual(["pub:tagged", "method", "topic", "clinical"]);
+  });
+});

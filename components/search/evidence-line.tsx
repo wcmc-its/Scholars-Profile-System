@@ -45,7 +45,11 @@ import type { KeyPaperConfig } from "@/components/search/people-result-card";
  * `term` is the descriptor it was tagged with — which is often not the sponsor's word for it, and
  * is exactly the fact worth surfacing.
  */
-function evidenceSummary(evidence: ResultEvidenceT, pubCount: number): string {
+function evidenceSummary(
+  evidence: ResultEvidenceT,
+  pubCount: number,
+  methodPubCount?: number,
+): string {
   switch (evidence.kind) {
     case "publications": {
       const term = evidence.term ? ` ${evidence.term}` : "";
@@ -72,7 +76,20 @@ function evidenceSummary(evidence: ResultEvidenceT, pubCount: number): string {
       return `${evidence.text}${term}${desc}`;
     }
     case "method":
-      return `${evidence.count ?? 0} of ${pubCount} publications used ${evidence.family}`;
+      // The denominator is the METHOD-INDEXED pool, never `pubCount`. Method extraction
+      // covers 2020+ by design, so a scholar with 923 publications can have 27 that were
+      // ever eligible; "11 of 923" divides a numerator drawn from the 27 by the 923 and
+      // understates the signal by ~34x. Same fix as the People card's primary row
+      // (`result-evidence.tsx`) — this surface is a fundraising officer's, so an
+      // understated share is acted on, not just read.
+      //
+      // Absent denominator ⇒ the count ALONE. `methodPubCount` is only emitted on the
+      // people search's match-aware path (`lib/api/search.ts`), so a sponsor card will
+      // usually land here — and a magnitude with no share is the honest degrade. Falling
+      // back to `pubCount` would restore the exact lie this removes.
+      return methodPubCount != null
+        ? `${evidence.count ?? 0} of ${methodPubCount} method-indexed publications used ${evidence.family}`
+        : `${evidence.count ?? 0} publication${evidence.count === 1 ? "" : "s"} used ${evidence.family}`;
     case "topic":
       return `${evidence.count ?? 0} of ${pubCount} publications in ${evidence.label}`;
     case "clinical":
@@ -301,6 +318,7 @@ export function EvidenceLine({
   cwid,
   slug,
   pubCount,
+  methodPubCount,
   q,
   keyPaperConfig,
   hasQuery,
@@ -317,6 +335,12 @@ export function EvidenceLine({
   cwid: string;
   slug: string;
   pubCount: number;
+  /** Forwarded verbatim to `<ResultEvidence>`: the scholar's method-INDEXED publication
+   *  count (`PeopleHit.methodPubCount`), which is the denominator a METHOD line's share is
+   *  measured against — method extraction is post-2020 by design, so `pubCount` is the
+   *  wrong pool. Absent ⇒ the method line prints its count with no "of M" and no %.
+   *  Not read here; this component only routes it. */
+  methodPubCount?: number;
   q: string;
   keyPaperConfig: KeyPaperConfig | null;
   hasQuery: boolean;
@@ -637,7 +661,7 @@ export function EvidenceLine({
       <ArtifactLead
         papers={repPapers}
         grants={grants}
-        summary={evidenceSummary(evidence, pubCount)}
+        summary={evidenceSummary(evidence, pubCount, methodPubCount)}
         expanded={expanded}
         onToggle={() => setExpanded((v) => !v)}
         panelId={panelId}
@@ -657,6 +681,7 @@ export function EvidenceLine({
         slug={slug}
         badged={badged}
         pubCount={pubCount}
+        methodPubCount={methodPubCount}
         stacked={stacked}
         tier={tier}
       />

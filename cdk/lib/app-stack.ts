@@ -1964,6 +1964,36 @@ export class AppStack extends Stack {
         //   Resolve-time only: no reindex. Flip is env-only via cdk deploy
         //   Sps-App-<env> -- the flag-parity rule.
         SEARCH_MESH_RESOLVE_TOKEN_COVERAGE: "off",
+        // SEARCH_MESH_ENTRY_TIER_PARITY -- entry-term tier parity. When ON, meshMatchTier
+        //   promotes an entry-term resolution to the `exact` tier IF the user's WHOLE
+        //   query is the entry term that matched. Same descriptor => same tier => same
+        //   MESH_ADMIT_WEIGHT / MESH_ATTRIBUTION_WEIGHT, so two spellings of one concept
+        //   stop returning two different answers.
+        //
+        //   Measured on PROD 2026-07-27 (docs/2026-07-27-search-resolution-evidence-
+        //   handoff.md section 3): `gene therapy` and `genetic therapy` both resolve to
+        //   `Genetic Therapy` (D015316), yet `gene therapy` lands at entry-term (attribution
+        //   1.15 / admit 0.03, 921 scholars) and `genetic therapy` at exact (1.5 / 0.1, 848
+        //   scholars) -- only 2 of the top 6 scholars in common. Pre-parity the tier came
+        //   from `anchorCount > 0 ? "anchored-entry" : "entry"`, i.e. from whether a human
+        //   had curated a topic anchor, which says nothing about match quality; NLM's choice
+        //   of preferred label was deciding the weight.
+        //
+        //   WHY IT IS FLAGGED AT ALL, given it looks like a bug fix: the promotion moves the
+        //   attribution weight 1.15 -> 1.5 (1.3 -> 1.5 where the descriptor carries a
+        //   curated anchor) and admit 0.03 -> 0.1 on EVERY full-query entry-term topical
+        //   search -- not just the two above -- so it REORDERS live search results (and the
+        //   concept-admission floor with them). That is a ranking change with a broad blast
+        //   radius, not a local correction. STAGING ON to soak + measure; PROD
+        //   OFF until product decides. The #692 generic-strip retry is excluded by
+        //   construction: callers compare against the USER's query, never the stripped
+        //   contentQuery, so a retry-derived entry-term match keeps the anchored-entry/entry
+        //   tiers. Independent of the two flags above -- `entry-term` only survives on
+        //   resolveMeshDescriptor's full-query branch; the window fallback and the #1342
+        //   singularize retry both overwrite it with `partial`, which is never promoted.
+        //   Resolve-time only: no reindex. Flip is env-only via cdk deploy
+        //   Sps-App-<env> (CD re-rolls the image only) -- the flag-parity rule.
+        SEARCH_MESH_ENTRY_TIER_PARITY: env === "staging" ? "on" : "off",
         // #1342 -- query-side morphology retry. When ON, resolveMeshDescriptor, after
         //   the exact lookup misses, retries the SINGULARIZED query ("melanomas" ->
         //   "melanoma") against the same index and, on a hit, returns the descriptor at

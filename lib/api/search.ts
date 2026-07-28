@@ -30,6 +30,7 @@ import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import {
   loadFamilyOverlayGate,
   isFamilyPubliclyVisible,
+  type FamilyOverlayGate,
 } from "@/lib/api/methods-overlay";
 import { supercategoryLabel } from "@/lib/methods/supercategory-labels";
 import { methodFamilyPath } from "@/lib/method-url";
@@ -268,6 +269,18 @@ export type PeopleHit = {
   divisionName: string | null;
   roleCategory: string | null;
   pubCount: number;
+  /** The scholar's method-INDEXED publication count — the union of the publicly-visible
+   *  method families' member PMIDs (see {@link methodIndexedPubCounts}), and the honest
+   *  denominator for a METHOD evidence line. Method extraction is post-2020 by design, so
+   *  the eligible pool is a fraction of `pubCount` and dividing by `pubCount` understates
+   *  the share by ~30× on a long career.
+   *
+   *  ABSENT WHEN IT CANNOT BE COMPUTED EXACTLY — no method family resolved, the scholar is
+   *  in none of them, or a gate-visible family carries a null `pmids` (the nullable column
+   *  is backfilled by the full-replace ETL). The renderer must degrade to the count alone,
+   *  never fall back to `pubCount`: an under-counted denominator inflates the percentage,
+   *  and that is a worse claim than no percentage. */
+  methodPubCount?: number;
   /** D1 (sponsor recency) — the scholar's most-recent publication YEAR, from the precomputed
    *  `mostRecentPubDate`. Present only under `includeMostRecentPub` (the sponsor recency path);
    *  absent for every other caller, so the hit shape is unchanged. Feeds `recencyWeight` and D8's
@@ -534,6 +547,79 @@ export function taggedCountFromDoc(
   if (!meshSubtreeCounts || resolvedConceptUi.length === 0) return 0;
   const n = meshSubtreeCounts[resolvedConceptUi];
   return typeof n === "number" && n > 0 ? n : 0;
+}
+
+/**
+ * The scholar's METHOD-INDEXED publication count — the honest denominator for a
+ * method evidence line, folded per cwid from `ScholarFamily` rows.
+ *
+ * WHY THIS EXISTS. The method line rendered "11 of 923 publications used AAV
+ * gene-therapy vectors · 1.2%", where 923 is `publicationCount` — the scholar's
+ * TOTAL authored output. Method extraction only covers 2020+ BY DESIGN, so the
+ * eligible pool for that numerator was ~27 papers, not 923. The sentence therefore
+ * divided a numerator drawn from one population by the size of another, and at 1.2%
+ * the `COVERAGE_CUE_THRESHOLD` dim in `components/search/result-evidence.tsx` then
+ * greyed out the scholar's strongest signal. 11 of 27 is 41%.
+ *
+ * SPS stores no method-eligible pub count anywhere — no column, no index field, no
+ * ETL artifact stat. The one derivable denominator is the union of
+ * `ScholarFamily.pmids` across the scholar's PUBLICLY-VISIBLE method families,
+ * which is what this folds. A union and not a sum of `pmidCount`: one publication
+ * can put a scholar in several families, and summing would double-count it into a
+ * denominator larger than the pool.
+ *
+ * THE NULL GUARD IS THE LOAD-BEARING PART. `pmids` is `Json?` and NULLABLE
+ * (prisma/schema.prisma — the column was ALTERed onto a populated table and is
+ * backfilled by the full-replace ETL), so a row can be gate-visible and still carry
+ * no member list. A cwid with ANY such row has an UNKNOWN union and gets NO
+ * denominator at all — never a partial one. A silently-low denominator INFLATES the
+ * percentage, which is a worse lie than the total-pubs bug this replaces: it would
+ * turn a thin match into a headline. Absent ⇒ the renderer degrades to the count
+ * alone ("11 publications used …", no share), which says less rather than wrong.
+ *
+ * Gate-filtered here rather than in SQL for the same reason the resolved-family
+ * query is: `isFamilyPubliclyVisible` reads two overlay tables (#800 suppression,
+ * #801 sensitivity) that have no FK onto `scholar_family`. A #801-sensitive family
+ * must not even contribute its PMID count to a public surface.
+ *
+ * Pure (gate + rows in, counts out) so the null/partial cases are unit-testable
+ * without a database.
+ */
+export function methodIndexedPubCounts(
+  rows: ReadonlyArray<{
+    cwid: string;
+    supercategory: string;
+    familyLabel: string;
+    pmids: unknown;
+  }>,
+  gate: FamilyOverlayGate,
+): Map<string, number> {
+  const unions = new Map<string, Set<string>>();
+  // Cwids whose union we cannot state exactly — see the null guard above.
+  const unknown = new Set<string>();
+  for (const row of rows) {
+    if (!isFamilyPubliclyVisible(row.supercategory, row.familyLabel, gate)) continue;
+    if (!Array.isArray(row.pmids)) {
+      unknown.add(row.cwid);
+      continue;
+    }
+    let s = unions.get(row.cwid);
+    if (!s) {
+      s = new Set<string>();
+      unions.set(row.cwid, s);
+    }
+    // Stringified: the artifact writes PMIDs as JSON numbers in some loads and
+    // strings in others, and a Set keyed on the raw value would count "33144353"
+    // and 33144353 as two publications.
+    for (const p of row.pmids) s.add(String(p));
+  }
+  const out = new Map<string, number>();
+  for (const [cwid, s] of unions) {
+    // An empty union is not a denominator — it is a 0 that would divide the share.
+    if (unknown.has(cwid) || s.size === 0) continue;
+    out.set(cwid, s.size);
+  }
+  return out;
 }
 
 /**
@@ -3564,6 +3650,11 @@ export async function searchPeople(opts: {
     string,
     { family: string; tools: string[]; rawTools: unknown }
   >();
+  //   methodPubCountByCwid — the method-INDEXED pub count that a method reason line
+  //     is measured against (see `methodIndexedPubCounts`). Populated only when a
+  //     method family actually resolved AND at least one scholar on the page is in
+  //     it, so the off path and every non-method query add zero queries.
+  const methodPubCountByCwid = new Map<string, number>();
   const matchedTopicSlugs = new Set<string>();
   const topicLabelByMatchedSlug = new Map<string, string>();
   const topicLabelBySlug = new Map<string, string>();
@@ -3596,6 +3687,37 @@ export async function searchPeople(opts: {
             // legacy `cleanExemplarTools` output the off-flag path renders.
             rawTools: row.exemplarTools,
           });
+        }
+
+        // The method line's DENOMINATOR — a second batched query over the same page,
+        // reusing the SAME `gate` object loaded above (the loader hits two overlay
+        // tables; calling it twice for one request would double that for nothing).
+        //
+        // Unlike the query above this one is NOT filtered to the resolved family: the
+        // denominator is "how many of this scholar's publications are method-indexed
+        // AT ALL", which is the union across every family they are in. `methodFamily`
+        // narrows the NUMERATOR, not the pool it is a share of.
+        //
+        // Skipped entirely when nobody on the page carries the resolved family — no
+        // method line will render, so no denominator is needed and the off path stays
+        // at exactly today's query count.
+        //
+        // ponytail: this is a per-page query-time union rather than an index-time
+        // integer. If it ever shows up in search latency, precompute it next to
+        // `methodFamilyCounts` in `buildPeopleDoc` (lib/search-index-docs.ts) and it
+        // becomes a `_source` read with no query at all — but that costs a people-index
+        // rebuild + alias swap PER ENV before the honest denominator can ship anywhere,
+        // which is why it is not the first move. Query-time works in both envs today.
+        if (methodReasonByCwid.size > 0) {
+          const memberRows = await prisma.scholarFamily.findMany({
+            where: {
+              cwid: { in: pageCwids },
+              scholar: { deletedAt: null, status: "active" },
+            },
+            select: { cwid: true, supercategory: true, familyLabel: true, pmids: true },
+          });
+          for (const [cwid, n] of methodIndexedPubCounts(memberRows, gate))
+            methodPubCountByCwid.set(cwid, n);
         }
       }
     }
@@ -3889,6 +4011,14 @@ export async function searchPeople(opts: {
         divisionName: h._source.divisionName,
         roleCategory: h._source.personType,
         pubCount: h._source.publicationCount,
+        // The method line's honest denominator. Emitted ONLY when the union was
+        // computable (see `methodIndexedPubCounts`), so a hit whose method families
+        // predate the `pmids` backfill carries no field and the card prints the count
+        // with no share rather than a share against the wrong pool.
+        ...(() => {
+          const n = methodPubCountByCwid.get(h._source.cwid);
+          return n != null ? { methodPubCount: n } : {};
+        })(),
         grantCount: h._source.grantCount,
         hasActiveGrants: h._source.hasActiveGrants,
         // #1412 — eager Funding-row count/strength from the page-level agg above.

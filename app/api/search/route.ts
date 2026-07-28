@@ -53,10 +53,12 @@ import {
   resolvePublicationDepartmentFilter,
   resolvePublicationMeshOnlyFilter,
   resolveConceptFallbackSparseEnabled,
+  resolveMeshEntryTierParityEnabled,
   computeConceptFallback,
   CONCEPT_FALLBACK_CAP,
   CONCEPT_FALLBACK_SPARSE_THRESHOLD,
 } from "@/lib/api/search-flags";
+import { isFullQueryMeshMatch } from "@/lib/api/normalize";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
 import { serverTimingHeader } from "@/lib/api/search-timing";
@@ -581,7 +583,26 @@ async function handleSearch(request: NextRequest) {
   // it via the null, matching the SSR page's suppression of the concept layer.
   const meshRes = meshOff ? null : taxonomyMatch.meshResolution;
   const meshTier = meshRes
-    ? meshMatchTier(meshRes.confidence, meshRes.curatedTopicAnchors.length)
+    ? meshMatchTier(meshRes.confidence, meshRes.curatedTopicAnchors.length, {
+        // Entry-term tier parity (`SEARCH_MESH_ENTRY_TIER_PARITY`, default OFF): a
+        // verbatim entry-term hit ("gene therapy" → the `Genetic Therapy` entry term)
+        // earns the same tier as the descriptor name, so two spellings of one concept
+        // stop scoring differently. See `meshMatchTier`'s docblock for the prod numbers.
+        //
+        // 🔴 The operand is `q`, the USER's query — NOT `contentQuery`. The #692
+        // generic-strip retry above may have re-resolved the stripped query, and its
+        // `matchedForm` can be full-coverage of THAT while covering only part of what
+        // the user typed; promoting it would manufacture verbatim confidence.
+        //
+        // This predicate must stay identical to the one on the SSR page's `meshTier`
+        // (`app/(public)/search/page.tsx`), whose single value feeds BOTH the badge-count
+        // `searchPeople` and the streamed full search — so a divergence here is the
+        // badge-count ≠ result-list class of bug the two files' mirrored #692/#1972
+        // comments exist to prevent.
+        fullQueryMatch:
+          resolveMeshEntryTierParityEnabled() &&
+          isFullQueryMeshMatch(q, meshRes.matchedForm),
+      })
     : undefined;
   // Track B — Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
   // When the flag is on, the query resolved to a Research Area, and we're not under Exact

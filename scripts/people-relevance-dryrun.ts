@@ -33,7 +33,11 @@ import {
   type PeopleQueryShape,
 } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
-import { resolveDeptLeadershipBoost } from "@/lib/api/search-flags";
+import {
+  resolveDeptLeadershipBoost,
+  resolveMeshEntryTierParityEnabled,
+} from "@/lib/api/search-flags";
+import { isFullQueryMeshMatch } from "@/lib/api/normalize";
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 
 type Shape = "name" | "topic" | "department" | "hybrid";
@@ -89,7 +93,17 @@ async function classify(
     // #726 — thread the same tier + floor inputs production uses, so the dryrun
     // exercises the graduated attribution AND the sparse concept escalation.
     meshMatchTier: res
-      ? meshMatchTier(res.confidence, res.curatedTopicAnchors.length)
+      ? meshMatchTier(res.confidence, res.curatedTopicAnchors.length, {
+          // Entry-term tier parity (`SEARCH_MESH_ENTRY_TIER_PARITY`, default OFF) —
+          // mirrored from the route deliberately. This harness is what a Recall@3 claim
+          // about the promotion would be based on; if it omitted the option it would
+          // measure a DIFFERENT ranking than production runs and the number would be used
+          // to justify a change it never exercised. Toggle by exporting the env var, the
+          // same way `SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST` is toggled below.
+          fullQueryMatch:
+            resolveMeshEntryTierParityEnabled() &&
+            isFullQueryMeshMatch(query, res.matchedForm),
+        })
       : undefined,
     meshAmbiguous: res?.ambiguous,
     meshMatchedFormLength: res?.matchedForm.length,

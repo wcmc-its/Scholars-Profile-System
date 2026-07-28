@@ -58,6 +58,11 @@ describe("<ResultEvidence> — one render per kind", () => {
       <ResultEvidence
         evidence={{ kind: "method", family: "CRISPR", tools: [], count: 4 }}
         pubCount={98}
+        // A method count is a share of the METHOD-INDEXED pool, so the denominator comes
+        // from `methodPubCount`. Kept equal to `pubCount` here so this test still asserts
+        // exactly what it asserted before — its subject is the type indicator, not the
+        // denominator.
+        methodPubCount={98}
         stacked
       />,
     );
@@ -72,9 +77,11 @@ describe("<ResultEvidence> — one render per kind", () => {
     // provenance datum, and painting every non-mention lead green would resolve one value
     // across ~98% of rows — the exact failure #1913 retired.
     expect(pillsIn(container)).toEqual([]);
-    // count-first: emphasized count + muted "of 98 publications used" + underlined family.
+    // count-first: emphasized count + muted "of 98 method-indexed publications used" +
+    // underlined family. "method-indexed" names the pool the M is the size of: extraction
+    // is post-2020 by design, so the whole-career `pubCount` would be the wrong word for it.
     expect(screen.getByText("Method")).toBeTruthy();
-    expect(container.textContent).toMatch(/4 of 98 publications used/);
+    expect(container.textContent).toMatch(/4 of 98 method-indexed publications used/);
     const fam = screen.getByText("CRISPR");
     expect(fam.tagName).toBe("SPAN");
     expect(fam.className).toMatch(/underline/);
@@ -163,6 +170,8 @@ describe("<ResultEvidence> — one render per kind", () => {
       <ResultEvidence
         evidence={{ kind: "method", family: "Mass spectrometry", tools: [], count: 1 }}
         pubCount={538}
+        // 1 of 538 METHOD-INDEXED pubs — the % and the dim both read this, not `pubCount`.
+        methodPubCount={538}
         stacked
       />,
     );
@@ -977,18 +986,61 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
 });
 
 describe("<ResultEvidence> — #1366 count suffix (method / research area)", () => {
-  it("method with a count + pubCount renders '· N of M publications' after the family", () => {
+  it("method with a count + methodPubCount renders 'N of M method-indexed publications'", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{ kind: "method", family: "Anti-obesity pharmacotherapy", tools: [], count: 7 }}
-        pubCount={41}
+        // The scholar has 900 publications and 41 of them are method-indexed. The line must
+        // divide by the 41 — the numerator can only ever have come from that pool, because
+        // method extraction covers 2020+ by design.
+        pubCount={900}
+        methodPubCount={41}
       />,
     );
-    // #1381 count-first: emphasized count, muted "of 41 publications used", underlined family.
+    // #1381 count-first: emphasized count, muted "of 41 method-indexed publications used",
+    // underlined family.
     const fam = screen.getByText("Anti-obesity pharmacotherapy");
     expect(fam.tagName).toBe("SPAN");
     expect(fam.className).toMatch(/underline/);
-    expect(container.textContent).toMatch(/7 of 41 publications used Anti-obesity pharmacotherapy/);
+    expect(container.textContent).toMatch(
+      /7 of 41 method-indexed publications used Anti-obesity pharmacotherapy/,
+    );
+    // …and NEVER the career total, which is the sentence this replaces.
+    expect(container.textContent).not.toMatch(/of 900/);
+  });
+
+  it("method with a count but NO methodPubCount ⇒ the COUNT ALONE, no 'of M', no %", () => {
+    // The server omits `methodPubCount` whenever it cannot state the union exactly — a
+    // gate-visible family whose `pmids` is still null (the column is backfilled by the
+    // full-replace ETL). Falling back to `pubCount` there is the bug; the honest degrade is
+    // a magnitude with no share, the same shape the "Also matched" rows already use.
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "Anti-obesity pharmacotherapy", tools: [], count: 7 }}
+        pubCount={900}
+        stacked
+      />,
+    );
+    expect(container.textContent).toMatch(/7 publications used Anti-obesity pharmacotherapy/);
+    expect(container.textContent).not.toMatch(/of 900/);
+    // no % column at all — a share against `pubCount` is exactly the claim being removed.
+    expect(container.querySelector(".tabular-nums")).toBeNull();
+    expect(container.textContent).not.toMatch(/%/);
+  });
+
+  it("a NON-method line still measures against pubCount, verbatim", () => {
+    // The denominator swap is scoped to `method`. A topic count is a share of the whole
+    // career and `methodPubCount` must not touch it, even when the hit carries one.
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "topic", label: "Endocrinology", id: "endocrinology", count: 12 }}
+        pubCount={100}
+        methodPubCount={20}
+        stacked
+      />,
+    );
+    expect(container.textContent).toMatch(/12 of 100 publications in Endocrinology/);
+    expect(screen.getByText("12%")).toBeTruthy(); // 12/100, not 12/20
   });
 
   it("research area with a count renders the count-first phrase too", () => {
@@ -1226,6 +1278,10 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
       <ResultEvidence
         evidence={{ kind: "method", family: "Mass spectrometry", tools: [], count: 1 }}
         pubCount={538}
+        // 1 of 538 METHOD-INDEXED pubs. The dim gets NO method exemption: with the right
+        // denominator it stops firing on its own where it was wrong, and a match this thin
+        // against its OWN eligible pool still deserves to be faint.
+        methodPubCount={538}
         stacked
       />,
     );
@@ -1388,6 +1444,7 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
       <ResultEvidence
         evidence={{ kind: "method", family: "Imaging mass cytometry", tools: [], count: 1 }}
         pubCount={3000}
+        methodPubCount={3000}
         stacked
       />,
     );
@@ -1432,6 +1489,7 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
       <ResultEvidence
         evidence={{ kind: "method", family: "Flow cytometry", tools: [], count: 4 }}
         pubCount={98}
+        methodPubCount={98}
         stacked
       />,
     );
@@ -1467,6 +1525,7 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
       <ResultEvidence
         evidence={{ kind: "method", family: "Flow cytometry", tools: [], count: 4 }}
         pubCount={98}
+        methodPubCount={98}
         stacked
         canExpand
         onToggle={() => {}}
@@ -1510,6 +1569,7 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
       <ResultEvidence
         evidence={{ kind: "method", family: "Mass spectrometry", tools: [], count: 1 }}
         pubCount={538}
+        methodPubCount={538}
         stacked
       />,
     );
@@ -1622,10 +1682,13 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
   it("the single-evidence path (stacked omitted) gets NO % column and NO dim, even at low coverage", () => {
     // Same 1/538 = 0.19% lead as the first test, but without `stacked` → the new signals are
     // gated off so the single-evidence render stays visually frozen (matches C/D).
+    // `methodPubCount` is supplied deliberately: the assertions below must fail because the
+    // `stacked` GATE silenced the column, not because the denominator was missing.
     const { container } = render(
       <ResultEvidence
         evidence={{ kind: "method", family: "Mass spectrometry", tools: [], count: 1 }}
         pubCount={538}
+        methodPubCount={538}
       />,
     );
     expect(container.textContent).not.toMatch(/of output/);
@@ -1788,16 +1851,20 @@ describe("<ResultEvidence> — the primary lead degrades instead of collapsing o
     const { container } = renderTagged();
     expect(screen.getByText("12.2%")).toBeTruthy();
     expect(container.textContent).toMatch(/12 of 98 publications tagged/);
-    // Same for the method/topic leads, which build the phrase through `CountFirst`.
+    // Same for the method/topic leads, which build the phrase through `CountFirst`. The
+    // licence is stronger for method, not weaker: the % and the "of M" are computed from
+    // the SAME `methodPubCount`, so they are absent together and present together — the
+    // hidden column can never round a ratio the phrase does not also state.
     const method = render(
       <ResultEvidence
         evidence={{ kind: "method", family: "Flow cytometry", tools: [], count: 4 }}
         pubCount={98}
+        methodPubCount={98}
         stacked
       />,
     );
     expect(screen.getByText("4.1%")).toBeTruthy();
-    expect(method.container.textContent).toMatch(/4 of 98 publications used/);
+    expect(method.container.textContent).toMatch(/4 of 98 method-indexed publications used/);
   });
 
   it("the lesser row drops its pill at a NARROWER breakpoint — it loses less to it", () => {
