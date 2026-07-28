@@ -45,8 +45,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const rows = await db.read.opportunity.findMany({
     where: {
       isResearch: true,
-      // reverse-view honorific gate: drop explicit-true honorifics, keep null/false
-      // (the matcher path has its own honorific gate).
+      // Reverse-view honorific gate. 🔴 This drops NULL as well as true — Prisma's `not` compiles
+      // to three-valued SQL, where `NULL <> true` is NULL, not a match. The comment here used to
+      // claim it "keeps null/false"; it never did, and CHANGING IT TO MATCH THAT CLAIM WOULD BE A
+      // REGRESSION. Measured on staging 2026-07-28: 29 of the 333 research, non-grants.gov rows
+      // carry `is_honorific IS NULL`, and 28 of those 29 are prizes — National Medal of Science,
+      // Vannevar Bush Award, Vilcek Prizes, AAAS science-journalism awards, mentoring medals.
+      // NULL means the classifier never labelled the row, and empirically an unlabelled row is an
+      // honorific. So the browse shows 304, not 333, and that is the right 304.
+      // (The OpenSearch matcher path differs ON PURPOSE: `lib/search.ts` indexes
+      // `isHonorific: row.isHonorific === true`, folding NULL to false, so its
+      // `must_not term isHonorific:true` KEEPS these. Two surfaces, two postures — do not
+      // "harmonize" them without re-reading what the null rows actually are.)
       isHonorific: { not: true },
       ...(includeGrantsGov ? {} : { source: { not: "grants_gov" } }),
       ...(q ? { title: { contains: q } } : {}),
