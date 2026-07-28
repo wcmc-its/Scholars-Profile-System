@@ -300,6 +300,23 @@ describe("MatchaPanel", () => {
     expect(body.description).toBe("glioblastoma immunotherapy CAR-T persistence");
   });
 
+  // ── #1919 — an empty result names WHY, so it does not read as "WCM has nobody" ──
+  it("empty results name the concepts that were searched", async () => {
+    stubFetch({ concepts: CONCEPTS, candidates: [] });
+    render(<MatchaPanel initialDescription="glioblastoma immunotherapy" autoRun />);
+    await screen.findByText(/No researchers matched this description/);
+    // The concepts are the only evidence of what happened; a bare message discards them.
+    expect(await screen.findByText(/Searched on Immuno-oncology/)).toBeTruthy();
+  });
+
+  it("empty results with NO extracted concepts say the ask yielded nothing to search on", async () => {
+    stubFetch({ concepts: [], candidates: [] });
+    render(<MatchaPanel initialDescription="Applications are due May 27. One per institution." autoRun />);
+    expect(
+      await screen.findByText(/Nothing was extracted to search on/),
+    ).toBeTruthy();
+  });
+
   it("Grant Matcha — a seed WITHOUT autoRun never auto-searches (blank panel, as before)", async () => {
     const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE });
     render(<MatchaPanel initialDescription="glioblastoma immunotherapy" />);
