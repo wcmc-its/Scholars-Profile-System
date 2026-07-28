@@ -68,6 +68,9 @@ export interface GapReportRow {
   scholarName: string;
   accountNumber: string;
   awardNumber: string | null;
+  /** InfoEd `proj_title`. The only recognizable identifier on the ~74% of
+   *  these awards that carry no award number. */
+  title: string | null;
   sponsor: string | null;
   projectStatus: string;
   programType: string;
@@ -84,6 +87,7 @@ const CSV_HEADERS = [
   "scholar_name",
   "account_number",
   "award_number",
+  "title",
   "sponsor",
   "project_status",
   "program_type",
@@ -128,6 +132,7 @@ export function toCsv(rows: GapReportRow[]): string {
         r.scholarName,
         r.accountNumber,
         r.awardNumber,
+        r.title,
         r.sponsor,
         r.projectStatus,
         r.programType,

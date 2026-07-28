@@ -873,6 +873,12 @@ model GrantDateGap {
   /// carry, so a gap and its eventual grant are joinable.
   externalId    String  @unique @map("external_id") @db.VarChar(128)
   awardNumber   String? @map("award_number") @db.VarChar(128)
+  /// InfoEd `proj_title`. Carried because 74% of these awards have NO award
+  /// number (measured 2026-07-28: 1,862 of 2,519) — for those the title is the
+  /// only field that makes the record recognizable to whoever has to find and
+  /// fix it. Nullable: some InfoEd records genuinely carry no title either,
+  /// and an empty cell is itself a finding worth sending.
+  title         String? @db.Text
   sponsor       String? @db.VarChar(255)
   /// InfoEd `Project_Status`: Active Award | Expired Award | In Process.
   /// Drives triage — an undated ACTIVE award is what a faculty member notices.
