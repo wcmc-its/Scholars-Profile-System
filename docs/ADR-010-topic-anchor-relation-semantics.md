@@ -1,4 +1,4 @@
-# docs/ADR-010 — Topic anchors: relation semantics and graded strength
+# docs/ADR-010 — Topic anchors: the unvetted second hop
 
 **Status:** Proposed
 **Date:** 2026-07-28
@@ -6,201 +6,252 @@
 **Supersedes:** —
 **Superseded by:** —
 
-> Raised while reviewing the 143 curated anchors ahead of the prod promotion in
+> Raised while reviewing the curated anchors ahead of the prod promotion in
 > [#2016](https://github.com/wcmc-its/Scholars-Profile-System/issues/2016) / PR #2024. The promotion
-> itself does not depend on this decision; the review of the rows does. Filed as **Proposed** because
-> the options below are genuinely open — this document exists to make the choice, not to record one.
+> does not depend on this decision; the review of the rows does. **Proposed**, because the options
+> below are open — this document exists to make the choice, not to record one.
+>
+> **All data claims are against `etl/mesh-anchors/curated.csv` at `origin/master`, 2026-07-28.**
+> That file grew 8 → 143 rows on 2026-06-25 (`0f674eac`); a checkout behind that commit shows the
+> 8-row version, which is also the state prod is frozen on. Cite the ref when re-checking.
 
 ## Context
 
 `mesh_curated_topic_anchor` maps a MeSH descriptor onto a ReciterAI parent topic (a WCM research
-area). It is the only mechanism that exits MeSH into the local taxonomy; the three other
-synonym-like sources all enter MeSH from a surface form:
+area). It is the only mechanism that exits MeSH into the local taxonomy; the other synonym-like
+sources all enter MeSH from a surface form.
 
-| mechanism | direction | scale |
+The table holds two populations that arrive by completely different routes:
+
+| | rows | origin |
 |---|---|---|
-| NLM entry terms | surface form → descriptor | from MeSH |
-| curated aliases (`etl/mesh-aliases/`, #642) | surface form → descriptor, where NLM has no such form | 75 rows |
-| method-family synonyms (`lib/methods/family-synonyms.ts`) | query → method family | — |
-| **topic anchors** (this ADR) | **descriptor → research area** | **143 curated + derived** |
+| **derived** | recomputed nightly | mined: descriptor's relevance-weighted share of a topic's high-relevance papers ≥ `MESH_ANCHOR_THRESHOLD` (0.30) over ≥ `MESH_ANCHOR_MIN_SUPPORT` (5) papers, drawn from papers scoring ≥ `MESH_ANCHOR_SCORE_MIN` (0.9) |
+| **curated** | **143** | hand-written in `curated.csv`; **none produced by the threshold** |
 
-The table models exactly one relation:
+**This ADR is about the curated population**, because that is what PR #2024 promotes: prod's
+`MESH_ANCHOR_SCORE_MIN` is set to `2`, a documented kill-switch that yields zero derived rows.
 
-```prisma
-model MeshCuratedTopicAnchor {
-  descriptorUi  String
-  parentTopicId String
-  confidence    String   // 'curated' | 'derived'
-  sourceNote    String?
-  refreshedAt   DateTime
-  @@id([descriptorUi, parentTopicId])
-}
+The 143 curated rows break down as:
+
+| kind | count | shape of the note |
+|---|---|---|
+| #1258 lay-term | **135** | `#1258 lay-term "longevity" -> Longevity (NLM exact). Review.` |
+| #690/#642 alias targets | 6 | surgical specialties, all marked *"Inert until §1.6 anchor consumption"* |
+| seeds | 2 | *"Replace via curation team review."* |
+
+Three facts about that set that shape everything below:
+
+1. **The review has not happened.** 135 notes end in `Review.`; both seeds say *"Replace via curation
+   team review."* These are called *curated*, but `confidence: 'curated'` records **provenance** —
+   hand-written rather than mined — not that anyone signed off. The 143-row review is a **first
+   pass**, not a re-litigation.
+2. **143 rows, 143 distinct descriptors.** No descriptor maps to two topics. Any weighting can only
+   *damp* a single claim; it can never arbitrate between competing areas.
+3. **`curated.candidates.csv` is not an ETL input.** The loader reads only `MESH_ANCHOR_CURATED_PATH`
+   (default `curated.csv`). All 137 candidate UIs are already folded into `curated.csv`.
+
+## The problem: a two-hop claim stored as one hop
+
+Each #1258 row encodes two separate assertions, joined into a single stored pair:
+
+```
+  lay term  ──hop 1──▶  descriptor  ──hop 2──▶  research area
+  "glioblastoma"        Glioblastoma            neuro_oncology
 ```
 
-`confidence` records **provenance** — hand-written vs mined — not relation kind or strength.
+**Hop 1 is vetted and strong.** The note records the surface form and NLM's own verdict on the match:
+`NLM exact` on 133 rows, `NLM contains` on 2. That is a real, already-graded quality signal.
 
-## The mismatch
+**Hop 2 is neither.** Nothing vetted `Glioblastoma → neuro_oncology` independently, and it is the hop
+whose strength varies enormously across the set. `gene therapy → Genetic Therapy → gene_cell_therapy`
+is tight at both hops. `glioblastoma → Glioblastoma → neuro_oncology` is airtight at hop 1 and a
+large widening at hop 2 — one disease standing in for a whole field.
 
-An anchor is **produced** by a subsumption test and **consumed** as a synonym.
+Only the *pair* is stored, so the two hops cannot be reviewed, weighted, or corrected separately. A
+reviewer looking at `D005909,neuro_oncology` sees neither the lay term that motivated it nor any
+record that hop 2 was the judgement call.
 
-**Produced by subsumption.** `etl/mesh-anchors/index.ts` derives an anchor when a descriptor's
-relevance-weighted share of high-relevance papers falls at or above `MESH_ANCHOR_THRESHOLD` (0.30)
-into a topic, over at least `MESH_ANCHOR_MIN_SUPPORT` (5) papers. In plain terms: *most of what this
-descriptor is about lives in that area*. That is a membership claim — narrower thing under broader
-thing. The column name agrees: `parent_topic_id`.
+**How the pair is then consumed.** `lib/api/search-taxonomy.ts` folds anchors in *as synonym matches*
+at **similarity 1.0**, in its own words *"exactly like a curated method-family synonym hit."* Two
+further consumers use the topic id as a `terms` clause at `boost: 6`, and `meshMatchTier` reads
+`curatedTopicAnchors.length` as a boolean lifting the tier from `entry` (attribution 1.15 / admit
+0.03) to `anchored-entry` (1.3 / 0.05). The boost is flat by design — the code states that a doc
+matching N anchors scores the same as one matching 1.
 
-**Consumed as synonymy.** `lib/api/search-taxonomy.ts` folds anchors in as *synonym matches*, at the
-maximum similarity, with the code saying so directly:
+So a two-hop claim whose second hop was never vetted is applied with the force of equivalence, and
+every row gets identical weight regardless of how far hop 2 travels.
 
-> fold curated MeSH topic anchors in **as synonym matches** … Inject those parentTopic candidates at
-> **similarity 1.0** so they flow through partition/rank/enrich/areas **exactly like a curated
-> method-family synonym hit** — surfacing the area's chip with zero name match.
-
-Two further consumers use the topic id substantively: a `terms` clause at `boost: 6` on both the
-people and evidence paths (`lib/api/search.ts`), and the "Concept impact" anchor set. A fourth
-consumer, `meshMatchTier`, reads only `curatedTopicAnchors.length` as a boolean to lift the match
-tier from `entry` (attribution 1.15 / admit 0.03) to `anchored-entry` (1.3 / 0.05).
-
-**Every anchor is treated identically.** The boost is flat by design — `lib/api/search.ts` states
-that "a doc matching N anchors scores the same as a doc matching 1" — and the fold-in similarity is
-a constant 1.0. The graded ladder in `lib/search.ts` (`MESH_ADMIT_WEIGHT` / `MESH_ATTRIBUTION_WEIGHT`)
-grades **how the query matched a descriptor**, not what the anchor asserts.
-
-So a claim that is true as membership is applied with the force of equivalence, and the system has no
-way to tell the two apart.
+> **Note on derived rows.** For the derived population the mismatch takes a different form: those
+> *are* produced by a subsumption test (hop 2 mined statistically) and consumed as synonymy. That
+> tension is real but out of scope here, since prod's kill-switch excludes them. It becomes live the
+> day `MESH_ANCHOR_SCORE_MIN` is lowered for prod.
 
 ## Worked examples
 
-All rows below are real, from the 143 curated anchors in staging. `coverage` is the descriptor's
-`local_pub_coverage` — its share of the WCM corpus — included as a rough breadth signal, not as the
-proposed metric.
+Real rows, `curated.csv` @ `origin/master` 2026-07-28.
 
-**Near-synonymous — the relation the consumer assumes.** The descriptor essentially *is* the area;
-folding the area in at similarity 1.0 is what a searcher wants.
+**One topic, three relation strengths, identical weight.** `radiology_medical_imaging` receives:
 
-| descriptor | → topic | coverage |
-|---|---|---|
-| Genetic Therapy | Gene & Cell Therapy | 0.0021 |
-| Telemedicine | Digital Health & Telemedicine | 0.0013 |
-| Palliative Care | Palliative & End-of-Life Care | 0.0018 |
-| Regenerative Medicine | Stem Cell & Regenerative Medicine | 0.0002 |
+| descriptor | hop 2 is… |
+|---|---|
+| Radiology | the area itself — a true synonym |
+| Magnetic Resonance Imaging | a modality used across neuro, cardio and oncology |
+| Diagnostic Imaging | a method category broader than the modality, narrower than the field |
 
-**Narrow instance under a whole discipline — true, but not equivalence.** The descriptor names one
-disease or device; the topic names the field that studies it.
+Three different claims, one flat `boost: 6` and one similarity of 1.0. This is the defect in a single
+topic.
 
-| descriptor | → topic | coverage |
-|---|---|---|
-| Glioblastoma | Neuro-Oncology | 0.0028 |
-| Burnout, Professional | Bioethics, Medical Humanities & Clinician Wellbeing | 0.0006 |
-| Wearable Electronic Devices | Digital Health & Telemedicine | 0.0002 |
-| Fertilization in Vitro | Women's Health & Reproductive Medicine | 0.0009 |
+**Tight at both hops** — `gene therapy → Genetic Therapy → gene_cell_therapy`;
+`longevity → Longevity → aging_geroscience`; `palliative care → Palliative Care →
+palliative_end_of_life_care`.
 
-**Method or artifact under a field** — defensible, and widens for a different reason: the method is
-used across the field rather than being a subject of it.
+**Tight hop 1, wide hop 2** — `glioblastoma → Glioblastoma → neuro_oncology`;
+`burnout → Burnout, Professional → bioethics_medical_humanities`;
+`IVF → Fertilization in Vitro → womens_health_reproductive_medicine`.
 
-| descriptor | → topic | coverage |
-|---|---|---|
-| Cost-Effectiveness Analysis | Health Economics | 0.0000 |
-| Electronic Health Records | Biomedical Informatics | 0.0011 |
-| Magnetic Resonance Imaging | Radiology & Medical Imaging | 0.0141 |
-
-Nothing in the stored row distinguishes these three groups.
+An earlier draft used `local_pub_coverage` as a breadth proxy across these groups. It is dropped: the
+ranges overlap almost completely (Glioblastoma, a wide hop 2, scores *above* Genetic Therapy, a tight
+one), so it does not separate them and would have argued against the very option it was offered to
+support.
 
 ## Use cases
 
-**1. The motivating case, which works.** A user searches `longevity`. It resolves to a descriptor
-anchored to *Aging & Geroscience*; the area is folded in at similarity 1.0 and its chip surfaces with
-no name match. This is #1258's original goal and the anchor mechanism delivers it exactly.
+**1. Both hops tight — works today.** A user searches `longevity`. Hop 1 is NLM-exact; hop 2 lands on
+*Aging & Geroscience*, which is what the searcher meant. The area chip surfaces with no name match.
+This is #1258's goal and the mechanism delivers it.
 
-**2. The narrow case, which over-delivers.** A user searches `glioblastoma`, wanting people who work
-on GBM. The anchor injects the entire *Neuro-Oncology* area as though the user had typed the field's
-name, and adds a `boost: 6` terms clause over every scholar carrying that parent topic. A brain-
-metastasis or meningioma researcher with no glioblastoma work is now competing with GBM researchers
-on equal footing. The claim "glioblastoma belongs to neuro-oncology" is true; the claim "someone
-searching glioblastoma meant neuro-oncology" is not.
+**2. Wide hop 2 — over-delivers.** A user searches `glioblastoma`, wanting GBM researchers. The
+entire *Neuro-Oncology* area is injected at similarity 1.0 plus a `boost: 6` terms clause over every
+scholar carrying that parent topic. A meningioma researcher with no GBM work now competes on equal
+footing. Hop 2 is a true membership claim; it is not what the searcher meant.
 
-**3. The tier side effect, which is separate and unconditional.** Because `meshMatchTier` reads only
-`curatedTopicAnchors.length > 0`, *any* anchor — however narrow — lifts the query one tier, from
-`entry` to `anchored-entry`. This applies even when the topic identity is irrelevant to the query.
+**3. The widest case in the set — `MRI`.** `Magnetic Resonance Imaging` has ~18× the median
+`local_pub_coverage` of the set (0.0141 against a 0.0008 median; only Prostatic Neoplasms is higher).
+It is a term people type constantly, and the descriptor is used across neuro, cardio and oncology. So
+injecting *Radiology & Medical Imaging* at similarity 1.0 distorts more than glioblastoma does, and
+it does so on a high-traffic query.
 
-**4. Downstream consumers inherit the semantics.** `lib/api/matcha-spine-run.ts` derives its tier the
-same way, so a decision here propagates to Grant Matcha, not only to public search.
+**4. The tier lift is unconditional.** Because `meshMatchTier` reads only
+`curatedTopicAnchors.length > 0`, *any* anchor — however wide its hop 2 — lifts the query one tier,
+irrespective of topic identity. This propagates to Grant Matcha via `lib/api/matcha-spine-run.ts`.
 
-## What the schema cannot express
+## What the schema cannot express, and what the prose already does
 
-There is no way to record *"this mapping is true but weaker."* The only lever per row is include or
-exclude. That forces every borderline judgement into a binary, and it is why reviewing the 143 rows is
-harder than it should be: the reviewer is not asked "is this true?" (nearly all are) but "does this
-deserve synonym-strength treatment?" — while being unable to answer anything except yes or no.
+The row cannot record that hop 2 is weaker than hop 1, so the only lever is include or exclude. That
+forces every borderline judgement into a binary.
+
+But the data is richer than the schema: **every #1258 note already carries the originating lay term
+and NLM's match verdict**, as prose. The question use case 2 asks — *did someone typing this mean the
+area?* — is answerable per row from that string, without corpus statistics. It is also the judgement
+a human is genuinely better at than an ETL. The field exists; it is just trapped in a text column.
 
 ## Options
 
-**A. Status quo; curate tightly.** Keep the flat boost and delete rows that are too narrow to justify
-synonym treatment. No code change. Cost: permanently loses true relations because they cannot be
-expressed at reduced weight, and re-litigates the same judgement every time the CSV grows.
+**A. Status quo; curate tightly.** Delete rows whose hop 2 is too wide. No code change. Permanently
+discards true relations that cannot be expressed at reduced weight, and re-litigates on every CSV
+growth.
 
-**B. Add a `strength` column.** A float on the anchor row, multiplying the fold-in similarity and the
-`terms` boost. Curated rows carry a hand-set strength; derived rows inherit their computed ratio.
-Cost: schema migration, ETL change, three consumer changes. Benefit: `Glioblastoma → Neuro-Oncology`
-can exist at half weight instead of being deleted or over-applied.
+**B. Add an applied-weight column.** A float scaling the fold-in similarity and the `terms` boost.
+Name it `applied_weight` or `boost_scale`, **not** `strength` — sitting beside `confidence` it would
+read as a graded version of that column, which it is not. Given fact 2 above (one topic per
+descriptor) this can only damp, never arbitrate — a smaller benefit than it first appears.
 
-**C. Type the relation.** Add a `kind` enum (`synonym` | `member` | `related`) with a per-kind boost
-table, mirroring the existing tier ladder. More expressive than B and self-documenting, but requires
-every curator to assign a type, and the boundary between `member` and `related` is itself a judgement.
+**C. Type the relation.** A `kind` enum (`synonym` | `member` | `related`) with a per-kind boost
+table. Self-documenting, but requires curators to assign a type and the `member`/`related` boundary is
+itself a judgement.
 
-**D. Stop treating anchors as synonyms.** Drop the similarity-1.0 entity fold-in and keep only the
-tier lift and the `terms` boost. Cost: gives up #1258's original goal — the "longevity → Aging &
-Geroscience" chip is precisely the fold-in. Only sensible if the narrow rows dominate in practice.
+**D. Reduce anchors to admission only.** Drop *both* the similarity-1.0 fold-in **and** the `boost: 6`
+terms clause, keeping the tier lift alone. An earlier draft dropped only the fold-in while keeping the
+boost — incoherent, since the fold-in is what delivers #1258's chip and the boost is what use case 2
+identifies as harmful. Stated correctly, D means: give up the chip, keep the widening. Nobody should
+pick it; it is recorded so the asymmetry is on the record.
 
-**E. Compute the strength instead of curating it.** At ETL time, derive a widening factor per pair
-(descriptor breadth against topic breadth, both already available to the derivation SQL) and scale the
-boost by it automatically. No curator burden and it self-maintains as the corpus changes. Cost: a
-computed weight is harder to reason about when a specific pairing looks wrong, and it needs a
-validation pass before anyone trusts it.
+**E. Compute hop 2's weight from the corpus.** Derive a widening factor per pair at ETL time and scale
+the boost automatically. Apt for *derived* rows, which are already corpus-derived. Weak for the
+curated 143, which were not produced from corpus statistics at all — and with one topic per descriptor
+there is no competing area to normalize the ratio against.
 
-B and E compose: E computes the value, B stores and applies it. C is an alternative to both.
+**F. Promote the lay term to a column.** Extract `lay_term` (and NLM's verdict) out of `source_note`
+into real fields, and attach the weight to the **term → area** pair rather than the descriptor → area
+pair. This puts the weight on the hop that actually varies, makes the review question *"is this what
+the searcher meant?"* rather than *"is this mapping true?"*, and needs no corpus statistics. Cost: a
+migration plus a CSV schema change; the 6 alias targets and 2 seeds have no lay term and need a null
+path.
 
 ## Recommendation
 
-**B + E**, with A's curation discipline applied to the current 143 in the meantime.
+**F + B**, with A's discipline applied to the current 143 meanwhile. E is deferred until derived rows
+are promoted, where it belongs.
 
-Store a `strength` on the anchor row and scale the boost by it, and compute it in the ETL from the
-same co-occurrence data the derivation already produces. This keeps curation binary — a human decides
-whether a mapping is *true*, which is the judgement humans are good at — and lets the system grade
-*how strongly* to apply it, which is the judgement data is good at. It preserves #1258's fold-in for
-near-synonymous anchors while damping the narrow ones, and it needs no new curator vocabulary.
+Store the lay term and NLM verdict as columns, add an `applied_weight` on the term → area pair, and
+scale the fold-in similarity and `terms` boost by it. This puts the graded lever on hop 2 — the hop
+that is unvetted and variable — while leaving hop 1 as the NLM-backed fact it already is. Curation
+stays a human call about intent, which is the call humans are good at.
 
-This is a recommendation, not a decision. Adopting nothing and shipping the promotion as-is is a
-legitimate outcome: the defect is ordering quality on a subset of queries, not correctness.
+**Adopt the tier gate with it.** B and F both scale the fold-in and the boost; neither touches
+`meshMatchTier`. Without an additional change, the widest anchor in the set still lifts
+`entry → anchored-entry` at full force and propagates to Matcha. The fix is one line — threshold on
+the maximum `applied_weight` rather than on `length` — and it must be in scope, or use case 4 survives
+adoption.
+
+This is a recommendation, not a decision. Adopting nothing is legitimate: the defect is ordering
+quality on a subset of queries, not correctness.
 
 ## Consequences
 
-**Positive.** Narrow-but-true anchors stop being a binary choice. The 143-row review becomes "is this
-mapping true?" rather than "does this deserve maximum boost?". Anchor behaviour becomes explainable —
-a scored row can be shown to a curator with its weight.
+**Positive.** Hop 2 becomes reviewable and weightable on its own. The review question becomes "is this
+what the searcher meant?", answerable from the row without corpus statistics. Anchor behaviour becomes
+explainable to a curator.
 
-**Negative / accepted.** A schema migration on a table with no backup coverage (it is a derived
-projection — curated rows come from `curated.csv` in git, derived rows are recomputed — so this is
-acceptable, but the migration must still be ordered against the ETL). Any strength change reweights
-live queries, so it needs the same staging-first posture as the promotion itself.
+**Negative / accepted.** A migration on a table with no backup coverage — acceptable, since it is a
+derived projection (curated rows come from git, derived rows recompute), but it must be ordered
+against the ETL. Any weight change reweights live queries and needs the same staging-first posture as
+the promotion. The 6 inert alias targets and 2 seeds carry no lay term and need a null path.
 
-**Out of scope.** This ADR does not change which rows exist, does not change
-`MESH_ANCHOR_SCORE_MIN`, and does not gate the #2016 promotion. It also does not address the separate
-finding in [#2018](https://github.com/wcmc-its/Scholars-Profile-System/issues/2018) that the concept
-boost tracks research-area rollup size rather than tagged-descriptor count — though the two may share
-a mechanism, since an anchor injects an entire area at similarity 1.0. That link is a hypothesis, not
-an established result.
+**Not fixed by any option here.** Exposure across topics is uneven — 57 topics over 143 rows, with
+`cardiovascular_disease` carrying 6 and seven topics carrying one apiece. More anchors on an area
+means more distinct queries surface its chip. That asymmetry is invisible in the flat design and none
+of A–F corrects it; it needs a per-topic normalisation that is out of scope here.
+
+**Out of scope.** Which rows exist; `MESH_ANCHOR_SCORE_MIN`; gating the #2016 promotion; and the
+separate finding in [#2018](https://github.com/wcmc-its/Scholars-Profile-System/issues/2018) that the
+concept boost tracks research-area rollup size rather than tagged-descriptor count. The two may share
+a mechanism — an anchor injects a whole area at similarity 1.0 — but that is a hypothesis, not a
+result.
 
 ## Validation
 
-Before adopting B or E, measure the widening each anchor actually causes: per pair, the count of
-scholars in topic Y against the count carrying descriptor X. A ratio near 1 confirms near-synonymy; a
-large ratio identifies the rows this ADR is about. That single query also ranks all 143 by risk and
-reduces the outstanding curation review to the outliers.
+The metric must match the consumer, and the two consumers differ:
 
-After adoption, the check is a before/after on the affected queries — top-N overlap for a sample of
-narrow anchors, confirming the area chip still surfaces for near-synonymous rows while narrow rows
-stop dominating.
+- **People path** (fold-in + `terms` boost over scholars): scholars in topic Y against scholars
+  carrying descriptor X.
+- **Evidence path** (`terms` over publications): publications in topic Y against publications
+  carrying descriptor X.
+
+An earlier draft proposed the paper-level metric in option E and the scholar-level one in Validation.
+Both are needed, one per path.
+
+A ratio near 1 confirms a tight hop 2; a large ratio identifies the rows this ADR is about. That query
+also ranks all 143 by risk and reduces the outstanding first-pass review to the outliers.
+
+After adoption, check top-N overlap on a sample of wide-hop-2 anchors: the area chip should still
+surface for tight rows while wide rows stop dominating.
+
+## Data hygiene noted in review
+
+Not blocking, but they belong on the record:
+
+- **`D008498` is a provisional row with no expiry.** It exists solely to catch EHR under a suspected
+  §1.3 ETL name/UI inconsistency. Nothing links it to that fix, so when §1.3 is resolved it silently
+  becomes a wrong anchor. A concrete instance of this ADR's thesis: there is no way to mark a row
+  provisional.
+- **`biomedical_informatics` receives four anchors**, two of them the shadowing EHR seeds
+  (`D057286`, `D008498`) that the file itself flags for replacement. An earlier draft used
+  `Electronic Health Records` as a worked example; it was the weakest available choice and is
+  withdrawn.
+- **`Cost-Effectiveness Analysis` reports `local_pub_coverage` 0.0000.** If that is a true zero rather
+  than an unset field, the anchor cannot fire on the evidence path and is a curation deletion
+  regardless of which option is adopted. Verify before acting.
 
 ## References
 
@@ -208,7 +259,7 @@ stop dominating.
 - Issue [#2016](https://github.com/wcmc-its/Scholars-Profile-System/issues/2016) — prod anchor table is a 2026-06-02 fossil
 - Issue [#2018](https://github.com/wcmc-its/Scholars-Profile-System/issues/2018) — concept boost tracks area rollup size
 - PR #2024 — promote the anchor step to the prod nightly, curated-only
-- `etl/mesh-anchors/index.ts` — derivation and write semantics
-- `lib/api/search-taxonomy.ts` — the synonym fold-in
-- `lib/api/search.ts` — the `terms` boost and Concept-impact set
+- `etl/mesh-anchors/index.ts` — derivation, write semantics, the three threshold constants
+- `lib/api/search-taxonomy.ts` — the similarity-1.0 synonym fold-in
+- `lib/api/search.ts` — the `boost: 6` terms clauses and the Concept-impact set
 - `lib/search.ts` — `meshMatchTier`, `MESH_ADMIT_WEIGHT`, `MESH_ATTRIBUTION_WEIGHT`
