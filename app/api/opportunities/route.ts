@@ -53,11 +53,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       // Vannevar Bush Award, Vilcek Prizes, AAAS science-journalism awards, mentoring medals.
       // NULL means the classifier never labelled the row, and empirically an unlabelled row is an
       // honorific. So the browse shows 304, not 333, and that is the right 304.
-      // (The OpenSearch matcher path differs ON PURPOSE: `lib/search.ts` indexes
-      // `isHonorific: row.isHonorific === true`, folding NULL to false, so its
-      // `must_not term isHonorific:true` KEEPS these. Two surfaces, two postures — do not
-      // "harmonize" them without re-reading what the null rows actually are.)
-      isHonorific: { not: true },
+      // Stated as `false` rather than `not: true` so the intent is in the code and not in
+      // Prisma's null semantics: show only rows the extractor positively classified as
+      // non-honorific. Same 304 rows either way. The index now agrees — `lib/search.ts` indexes
+      // unclassified AS honorific, so the recommender excludes these too (#2041).
+      isHonorific: false,
       ...(includeGrantsGov ? {} : { source: { not: "grants_gov" } }),
       ...(q ? { title: { contains: q } } : {}),
     },
