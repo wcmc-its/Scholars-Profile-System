@@ -157,6 +157,25 @@ describe("loadEditContext — boundary cases", () => {
       expect.objectContaining({ includeCopubs: false, sort: "class-year" }),
     );
   });
+
+  it("#2011 keeps a CWID-less manual mentee OUT of the hide-only panel", async () => {
+    // The union hands back both; a manual entry is deleted from the mentor's own
+    // list, not suppressed, so offering "hide" on that row is the wrong verb.
+    vi.mocked(getMenteesForMentor).mockResolvedValueOnce({
+      mentees: [
+        { cwid: "m1", fullName: "Jordan Mentee", programName: "Immunology", programType: "PhD" },
+        { cwid: "manual:0", fullName: "Rowan Ellis", programName: "Visiting", programType: null },
+      ],
+      copubSourceAvailable: true,
+    } as never);
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+
+    const ctx = await loadEditContext(SELF, asClient(c));
+
+    expect(ctx!.mentees).toHaveLength(1);
+    expect(ctx!.mentees[0].externalId).toBe(`${SELF}:m1`);
+  });
 });
 
 describe("loadEditContext — overview merge (Phase 3 read-merge)", () => {
