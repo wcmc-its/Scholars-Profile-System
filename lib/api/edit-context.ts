@@ -28,8 +28,13 @@
  * Server-only by construction (uses Prisma) — no explicit `server-only` import
  * so the module loads under vitest without a stub, matching `manual-layer.ts`.
  */
-import { getEffectiveOverview, getSelectedHighlightPmids } from "@/lib/api/manual-layer";
+import {
+  getEffectiveOverview,
+  getManualMentees,
+  getSelectedHighlightPmids,
+} from "@/lib/api/manual-layer";
 import { getMenteesForMentor } from "@/lib/api/mentoring";
+import { type ManualMentee, isManualMenteeId } from "@/lib/edit/manual-mentee";
 import { rankForSelectedHighlights } from "@/lib/ranking";
 import { MAX_SELECTED_HIGHLIGHTS, SECTION_VISIBILITY_FIELDS } from "@/lib/edit/validators";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
@@ -550,6 +555,14 @@ export type EditContext = {
   /** Suppressible mentees (derived from training records; mentor may hide). */
   mentees: ReadonlyArray<EditContextMentee>;
   /**
+   * #2011 — the mentor's OWN hand-entered mentees, the stored array verbatim
+   * (order preserved: it is the edit-card's row order and the key the read path
+   * derives synthetic ids from). Distinct from `mentees` above, which is the
+   * derived, hide-only roster: these are created/edited/removed outright, so the
+   * card round-trips this array through `POST /api/edit/field`.
+   */
+  manualMentees: ReadonlyArray<ManualMentee>;
+  /**
    * Publication-derived COI-gap candidates surfaced ONLY to the genuine self
    * viewer behind `SELF_EDIT_COI_GAP_HINT`. Populated only when
    * `loadEditContext` is called with `opts.includeCoiGap === true`; an empty
@@ -640,12 +653,26 @@ const defaultLoadMentees: LoadMentees = async (mentorCwid) => {
     includeCopubs: false,
     sort: "class-year",
   });
-  return mentees.map((m) => ({
-    cwid: m.cwid,
-    fullName: m.fullName,
-    programName: m.programName,
-    programType: m.programType,
-  }));
+  return (
+    mentees
+      // #2011 — a CWID-less manual entry is DELETED from the mentor's own list,
+      // not suppressed, so it has no business in the hide-only panel; offering
+      // both actions on one row only invites hiding a row that should be
+      // removed. Sourced mentees are unaffected.
+      //
+      // ponytail: filters on the synthetic id only. A manual entry that DOES
+      // carry a CWID stays in the hide list as well as the manual list — from
+      // out here it is indistinguishable from a sourced mentee, and hiding it
+      // is a coherent action either way. Thread a provenance flag out of
+      // `getMenteesForMentor` if that double-listing ever confuses anyone.
+      .filter((m) => !isManualMenteeId(m.cwid))
+      .map((m) => ({
+        cwid: m.cwid,
+        fullName: m.fullName,
+        programName: m.programName,
+        programType: m.programType,
+      }))
+  );
 };
 
 /**
@@ -747,6 +774,7 @@ export async function loadEditContext(
     authorships,
     menteeRows,
     sectionOverrideRows,
+    manualMenteeRows,
   ] = await Promise.all([
     // Phase 7 — the slug-card baseline. `null` = no override; superuser slug card
     // shows the "no override" state. The self surface does not surface this field
@@ -898,6 +926,18 @@ export async function loadEditContext(
         value: "true",
       },
       select: { fieldName: true },
+    }),
+    // #2011 — the mentor's own hand-entered mentees. Same best-effort posture as
+    // `loadMentees`: /edit must not 500 because one card's data is unreachable.
+    getManualMentees(cwid, client).catch((err) => {
+      console.warn(
+        JSON.stringify({
+          event: "edit_context_manual_mentees_unavailable",
+          cwid,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      return [] as ManualMentee[];
     }),
   ]);
 
@@ -1532,6 +1572,7 @@ export async function loadEditContext(
       technologies,
       news,
       mentees,
+      manualMentees: manualMenteeRows,
       unmatchedPubmedCoi,
       unmatchedPubmedCoiLower,
       unmatchedPubmedCoiReviewed,
@@ -1699,6 +1740,7 @@ export async function loadEditContext(
     technologies,
     news,
     mentees,
+    manualMentees: manualMenteeRows,
     unmatchedPubmedCoi,
     unmatchedPubmedCoiLower,
     unmatchedPubmedCoiReviewed,

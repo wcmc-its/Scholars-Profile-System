@@ -21,6 +21,7 @@ import { EducationCard } from "@/components/edit/education-card";
 import { EmailCard } from "@/components/edit/email-card";
 import { FundingCard } from "@/components/edit/funding-card";
 import { HighlightsCard } from "@/components/edit/highlights-card";
+import { ManualMenteesCard } from "@/components/edit/manual-mentees-card";
 import { MenteesCard } from "@/components/edit/mentees-card";
 import { HomePanel } from "@/components/edit/home-panel";
 import { OverviewCard } from "@/components/edit/overview-card";
@@ -1173,7 +1174,24 @@ function renderPanel(
       );
     case "mentees":
       return (
-        <MenteesCard cwid={cwid} mode={voiceMode} scholarName={scholarName} mentees={ctx.mentees} />
+        <>
+          {/* #2011 — the mentor's own entries come FIRST: it is the one part of
+              this tab they can actually author. The derived roster below is
+              hide-only, and the two must stay visually separate so nobody
+              expects to correct a Jenzabar record here. */}
+          <ManualMenteesCard
+            cwid={cwid}
+            mode={voiceMode}
+            scholarName={scholarName}
+            initial={ctx.manualMentees}
+          />
+          <MenteesCard
+            cwid={cwid}
+            mode={voiceMode}
+            scholarName={scholarName}
+            mentees={ctx.mentees}
+          />
+        </>
       );
     case "coi":
       return (

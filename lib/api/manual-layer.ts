@@ -20,6 +20,7 @@
  *    applied in code.
  */
 import { sanitizeOverviewHtml, validateSelectedHighlightPmids } from "@/lib/edit/validators";
+import { type ManualMentee, validateManualMentees } from "@/lib/edit/manual-mentee";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 import { sanitizeVIVOHtml } from "@/lib/utils";
 
@@ -114,6 +115,42 @@ export async function getSelectedHighlightPmids(
   const parsed = validateSelectedHighlightPmids(override.value);
   if (!parsed.ok) return null;
   return parsed.value;
+}
+
+// ---------------------------------------------------------------------------
+// manualMentees — #2011 mentor-entered mentees no source system recorded
+// ---------------------------------------------------------------------------
+
+/**
+ * The mentor's hand-entered mentees, or `[]` when they have none.
+ *
+ * Reads `field_override(scholar, mentorCwid, 'manualMentees')` and parses its
+ * stored JSON via {@link validateManualMentees}. A malformed stored value
+ * (should never happen — the write path validates) is treated as "no manual
+ * mentees" rather than throwing, matching `getSelectedHighlightPmids`: a corrupt
+ * row must never 500 a public profile.
+ *
+ * Returns `[]` rather than `null` — unlike Highlights there is no "override
+ * replaces the default" semantic here. Manual mentees are purely ADDITIVE to the
+ * three ETL sources, so an absent row and an empty array mean the same thing.
+ */
+export async function getManualMentees(
+  mentorCwid: string,
+  client: OverrideReadClient,
+): Promise<ManualMentee[]> {
+  const override = await client.fieldOverride.findUnique({
+    where: {
+      entityType_entityId_fieldName: {
+        entityType: "scholar",
+        entityId: mentorCwid,
+        fieldName: "manualMentees",
+      },
+    },
+    select: { value: true },
+  });
+  if (!override) return [];
+  const parsed = validateManualMentees(override.value);
+  return parsed.ok ? parsed.value : [];
 }
 
 /**

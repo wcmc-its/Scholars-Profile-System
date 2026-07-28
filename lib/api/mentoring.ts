@@ -29,10 +29,12 @@ import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
 import {
+  getManualMentees,
   isAuthorHidden,
   loadPublicationSuppressions,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
+import { MANUAL_MENTEE_ID_PREFIX, isManualMenteeId } from "@/lib/edit/manual-mentee";
 import { hiddenMenteeCwids } from "@/lib/mentee-suppression";
 
 /**
@@ -279,7 +281,7 @@ export async function getMenteesForMentor(
 ): Promise<MenteesResult> {
   if (!mentorCwid) return { mentees: [], copubSourceAvailable: true };
 
-  const [aocRows, jenzabarRows, postdocRows] = await Promise.all([
+  const [aocRows, jenzabarRows, postdocRows, manualRows] = await Promise.all([
     // #928 — AOC source switches on MENTORING_COPUB_BRIDGE inside the helper.
     loadAocRows(mentorCwid),
     prisma.phdMentorRelationship.findMany({
@@ -305,9 +307,21 @@ export async function getMenteesForMentor(
         programType: true,
       },
     }),
+    // #2011 — mentees no source system recorded, entered by the mentor on
+    // /edit. Additive to the three ETL sources. Best-effort: a read failure
+    // must not take down a Mentoring section the ETL sources can still fill.
+    getManualMentees(mentorCwid, prisma).catch((err) => {
+      console.error(`[mentoring] manual mentee read failed for mentor ${mentorCwid}`, err);
+      return [];
+    }),
   ]);
 
-  if (aocRows.length === 0 && jenzabarRows.length === 0 && postdocRows.length === 0)
+  if (
+    aocRows.length === 0 &&
+    jenzabarRows.length === 0 &&
+    postdocRows.length === 0 &&
+    manualRows.length === 0
+  )
     return { mentees: [], copubSourceAvailable: true };
 
   // Collapse to one row per mentee CWID across all three sources. Preserve
@@ -405,14 +419,44 @@ export async function getMenteesForMentor(
       range,
     );
   }
+  // #2011 — manual entries LAST so a sourced record wins the display name on a
+  // cwid collision (`upsert` keeps the first writer's `fullName`): if the mentee
+  // has since landed in Jenzabar/ED, that record is authoritative and the
+  // mentor's hand-typed entry silently merges into it rather than duplicating.
+  //
+  // ponytail: a CWID-less entry keys on its array index, so deleting one
+  // reindexes the rest. Nothing durable references these ids — manual mentees
+  // have no co-pubs page (no CWID ⇒ no author rows) and are deleted rather than
+  // suppressed — so the churn is invisible. Store a minted id per entry if a
+  // durable reference ever appears.
+  manualRows.forEach((m, i) => {
+    upsert(m.cwid ?? `${MANUAL_MENTEE_ID_PREFIX}${i}`, m.name, null, m.year ?? null);
+  });
 
   const cwids = [...byCwid.keys()];
+  // #2011 — a synthetic `manual:N` id is a dead parameter in the live
+  // `IN (...)` clause and in the bridge read, so drop it before either.
+  //
+  // Filter on the prefix WE mint, NOT on `isCwid`: source ids come from
+  // Jenzabar / ED / ReciterDB and are not ours to validate. An `isCwid`
+  // allowlist here silently drops any source id that doesn't match the
+  // pattern (caught by mentoring-copub-source.test.ts, whose `m1` fixture is
+  // below the 3-char minimum) — a co-pub count regression wearing a tidier
+  // predicate.
+  const sourceCwids = cwids.filter((c) => !isManualMenteeId(c));
 
   // Issue #195 — Resolve program names. Precedence: ED `student_phd_program`
   // beats Jenzabar `phd_mentor_relationship.major_desc` (ED is the
   // authoritative curated source; Jenzabar fills the gap for pre-LDAP
   // alumni and off-cycle students).
   const programNameByCwid = new Map<string, string>();
+  // #2011 — seed manual labels FIRST (lowest precedence). A mentor's hand-typed
+  // program is the fallback for a mentee no source knows; where a real source
+  // does know them, that source wins.
+  manualRows.forEach((m, i) => {
+    if (m.programLabel)
+      programNameByCwid.set(m.cwid ?? `${MANUAL_MENTEE_ID_PREFIX}${i}`, m.programLabel);
+  });
   // Seed with Jenzabar majorDesc (lower precedence).
   for (const r of jenzabarRows) {
     const md = r.majorDesc?.trim();
@@ -459,10 +503,17 @@ export async function getMenteesForMentor(
   if (!includeCopubs) {
     // Skip both co-pub sources — the caller doesn't render counts (#955 #5). The
     // dark-pmid suppression below no-ops on the empty preview map.
+  } else if (sourceCwids.length === 0) {
+    // #2011 — every mentee is a manual entry with no CWID, so there is nothing to
+    // ask either source. Zero co-pubs is a FACT here, not an outage, so mark the
+    // source available: `false` would make callers suppress the badges as though
+    // ReciterDB were down. This also guards the live path below, whose
+    // `IN (${...join(",")})` is malformed SQL on an empty list.
+    copubSourceAvailable = true;
   } else if (process.env.MENTORING_COPUB_BRIDGE === "on") {
     try {
       const rows = await prisma.menteeCopublication.findMany({
-        where: { mentorCwid, menteeCwid: { in: cwids } },
+        where: { mentorCwid, menteeCwid: { in: sourceCwids } },
         select: { menteeCwid: true, count: true, preview: true },
       });
       for (const r of rows) {
@@ -501,9 +552,9 @@ export async function getMenteesForMentor(
            JOIN analysis_summary_article art
              ON art.pmid = a1.pmid
           WHERE a1.personIdentifier = ?
-            AND a2.personIdentifier IN (${cwids.map(() => "?").join(",")})
+            AND a2.personIdentifier IN (${sourceCwids.map(() => "?").join(",")})
           ORDER BY a2.personIdentifier, art.articleYear DESC, a1.pmid DESC`,
-        [mentorCwid, ...cwids],
+        [mentorCwid, ...sourceCwids],
       )) as {
         mentee_cwid: string;
         pmid: number | bigint;
@@ -603,7 +654,12 @@ export async function getMenteesForMentor(
       appointmentRange: c.appointmentRange,
       copublicationCount: copubCountByCwid.get(c.cwid) ?? 0,
       copublicationPreview: copubPreviewByCwid.get(c.cwid) ?? [],
-      identityImageEndpoint: identityImageEndpoint(c.cwid),
+      // #2011 — a synthetic `manual:N` id would build a headshot URL that can
+      // only 404. The avatar contract accepts an empty string (see the field's
+      // JSDoc) and falls back to initials, so skip the pointless request. A
+      // SOURCED id keeps its endpoint even if oddly shaped — that request is
+      // the pre-existing behaviour and not ours to second-guess.
+      identityImageEndpoint: isManualMenteeId(c.cwid) ? "" : identityImageEndpoint(c.cwid),
       scholar: s
         ? {
             slug: s.slug,

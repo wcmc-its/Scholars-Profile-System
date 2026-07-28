@@ -64,6 +64,10 @@ vi.mock("@/lib/api/manual-layer", () => ({
   loadPublicationSuppressions: vi.fn(async () => []),
   resolveDarkPmids: vi.fn(async () => new Set<string>()),
   isAuthorHidden: vi.fn(() => false),
+  // #2011 — the mentee union reads the mentor's manual entries from here too.
+  // No manual mentees in these fixtures: the mentee-level hide under test is a
+  // suppression concern and orthogonal to manual entry.
+  getManualMentees: vi.fn(async () => []),
 }));
 vi.mock("@/lib/db", () => ({
   prisma: {

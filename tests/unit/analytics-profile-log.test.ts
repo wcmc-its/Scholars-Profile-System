@@ -87,6 +87,8 @@ vi.mock("@/lib/api/mentoring", () => ({
 // 10s pool timeout. Return no hidden mentees (the fixture has none anyway).
 vi.mock("@/lib/db", () => ({
   db: { read: { suppression: { findMany: vi.fn(async () => []) } } },
+  // #2011 — the mentee union reads the mentor's manual entries off `prisma`.
+  prisma: { fieldOverride: { findUnique: vi.fn(async () => null) } },
 }));
 
 // Mock next/headers (used by not-found.tsx — not by profile page, but avoids

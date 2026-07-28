@@ -36,7 +36,10 @@ export function MenteesCard({ cwid, mode, scholarName, mentees }: MenteesCardPro
       getTitle={(m) => m.name}
       renderMeta={(m) => m.subtitle ?? "Program unknown"}
       copy={{
-        heading: "Mentees",
+        // #2011 — named for its SOURCE now that the mentor's own entries sit in
+        // a sibling "Added by you" card above. "Mentees" would read as the whole
+        // roster and imply this panel's hide-only verb applies to all of it.
+        heading: "From training records",
         description: `Hide a mentee to remove them from ${possessive} public profile. Hiding is display-only — it doesn't correct the underlying training record, which comes from Jenzabar or Employee Central.`,
         empty:
           mode === "superuser"
