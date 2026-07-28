@@ -4,10 +4,11 @@
  * During the ~1-minute deployment cutover a search soft-nav (router.push inside
  * useTransition) can receive an RSC 200 the client neither applies nor
  * hard-reloads: isPending stays true and the URL never moves (the box spins
- * forever). The watchdog arms a ~7s timer on every soft-nav; if it's still
- * pending AND the URL hasn't moved when it fires, it forces a hard navigation
- * via window.location.assign(href). A successful soft-nav moves the URL (and
- * clears isPending), so the watchdog no-ops — no spurious reload.
+ * forever). The watchdog arms a 2.5s timer on every soft-nav; if the URL hasn't
+ * moved when it fires, it forces a hard navigation via
+ * window.location.assign(href). A successful soft-nav moves the URL (and clears
+ * isPending, which disarms the timer), so the watchdog no-ops — no spurious
+ * reload.
  *
  * Mocking strategy mirrors search-autocomplete-pending.test.tsx (the
  * established convention for this component):
@@ -26,11 +27,13 @@
  * Fake timers drive the watchdog; the watchdog's setState/location side effect
  * is flushed inside act() (await act(async () => advanceTimersByTimeAsync)).
  *
- * #1995 split the two surfaces apart. SearchTransitionProvider now fires at
- * 2500ms and its guard reads ONLY the URL: the isPending ref it used to also
- * require was written during render, and React writes it on renders that never
- * commit, so it read false through the very hang it was meant to catch. The
- * autocomplete surface below is unchanged (7000ms, pending ref + URL).
+ * #1995 landed the real fix on SearchTransitionProvider first: fire at 2500ms and
+ * guard on ONLY the URL. The isPending ref both surfaces used to also require was
+ * written during render, and React writes it on renders that never commit, so it
+ * read false through the very hang it was meant to catch. The autocomplete —
+ * the header/hero search box, and the surface the reported spinner-for-minutes
+ * comes in through — kept the broken guard until now; both surfaces are on the
+ * same 2500ms URL-only contract as of this file.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
@@ -141,7 +144,7 @@ afterEach(() => {
 });
 
 describe("#1017 navigation watchdog — autocomplete submit()", () => {
-  it("A. HANG → hard-navigates once: push fires but isPending stuck true + URL frozen, fires assign(href) after 7s", async () => {
+  it("A. HANG → hard-navigates once: push fires but isPending stuck true + URL frozen, fires assign(href) after 2.5s", async () => {
     // Model the real #1017 hang: startTransition runs its callback so
     // router.push DOES fire (the RSC request goes out, server returns 200) — but
     // the client never commits it, so isPending is stuck true and the URL never
@@ -161,47 +164,73 @@ describe("#1017 navigation watchdog — autocomplete submit()", () => {
     expect(assign).not.toHaveBeenCalled();
 
     // Advance just shy of the watchdog: nothing yet.
-    await settle(6900);
+    await settle(2400);
     expect(assign).not.toHaveBeenCalled();
 
-    // Cross the 7s threshold: the watchdog hard-navigates to the intended href.
+    // Cross the 2.5s threshold: the watchdog hard-navigates to the intended href.
     await settle(200);
     expect(assign).toHaveBeenCalledTimes(1);
     expect(assign).toHaveBeenCalledWith("/search?q=cancer");
   });
 
-  it("A2. HANG (hero Search button) → hard-navigates after 7s", async () => {
+  it("A2. HANG (hero Search button) → hard-navigates after 2.5s", async () => {
     // The hero Search button is `disabled={isPending}`, so the click that ARMS
-    // the watchdog must happen while not yet pending (push fires, watchdog
-    // arms). We then flip pending stuck-true (re-render updates isPendingRef) to
-    // model the hung transition before advancing the timer.
+    // the watchdog must happen while not yet pending (push fires, watchdog arms).
+    // The transition then hangs: the URL never moves, and no re-render is needed
+    // to prime a pending ref — the guard reads only the URL.
     h.start = (cb: () => void) => cb();
     h.pending = false;
     const { assign } = stubLocation("https://scholars-staging.weill.cornell.edu/", "/", "");
 
-    const { rerender } = render(<SearchAutocomplete variant="hero" />);
+    render(<SearchAutocomplete variant="hero" />);
     fireEvent.change(screen.getByLabelText("Search scholars"), { target: { value: "cancer" } });
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
     expect(pushMock).toHaveBeenCalledWith("/search?q=cancer");
     expect(assign).not.toHaveBeenCalled();
 
-    // Transition is stuck: pending stays true and the URL never moves. Re-render
-    // so the component reads h.pending=true into isPendingRef.current.
-    h.pending = true;
-    rerender(<SearchAutocomplete variant="hero" />);
-
-    await settle(7100);
+    await settle(2600);
     expect(assign).toHaveBeenCalledTimes(1);
     expect(assign).toHaveBeenCalledWith("/search?q=cancer");
   });
 
-  it("B. RESOLVED → no hard nav: transition resolves inline, isPending false, assign NOT called even past 7s", async () => {
-    // Steady state: synchronous startTransition + not pending. The [isPending]
-    // effect clears the armed timer; even advancing past 7s, assign never fires.
+  it("A3. #1995 POISONED PENDING FLAG → still recovers: pending reads false, URL frozen, timer fires", async () => {
+    // The reported spinner-for-minutes. The committed DOM says aria-busy (the
+    // nav IS pending) but a render-time `isPendingRef` reads false, because
+    // React wrote it on a render that never committed. Under the old
+    // `isPendingRef.current && href === startHref` guard this is the exact hang
+    // the watchdog no-opped through. h.pending=false models the poisoned read;
+    // the URL never moves, so the URL-only guard must still recover.
+    h.start = (cb: () => void) => cb();
+    h.pending = false;
+    const { assign } = stubLocation(
+      "https://scholars-staging.weill.cornell.edu/search",
+      "/search",
+      "?q=minimal+residual+disease",
+    );
+
+    render(<SearchAutocomplete />);
+    const input = screen.getByLabelText("Search scholars");
+    fireEvent.change(input, { target: { value: "leukemia" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(pushMock).toHaveBeenCalledWith("/search?q=leukemia");
+
+    await settle(2600);
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(assign).toHaveBeenCalledWith("/search?q=leukemia");
+  });
+
+  it("B. RESOLVED → no hard nav: the committed push moves the URL, assign NOT called even past 10s", async () => {
+    // Steady state: synchronous startTransition + not pending. A soft-nav that
+    // commits moves the URL — that IS what the guard reads now, so model it
+    // rather than relying on the pending flag the hang poisons.
     h.start = (cb: () => void) => cb();
     h.pending = false;
     const { assign } = stubLocation("https://scholars-staging.weill.cornell.edu/", "/", "");
+    pushMock.mockImplementationOnce((to: string) => {
+      window.location.href = `https://scholars-staging.weill.cornell.edu${to}`;
+    });
 
     render(<SearchAutocomplete />);
     const input = screen.getByLabelText("Search scholars");
@@ -230,7 +259,7 @@ describe("#1017 navigation watchdog — autocomplete submit()", () => {
     // Simulate the soft-nav actually committing: the URL moved.
     window.location.href = "https://scholars-staging.weill.cornell.edu/search?q=cancer";
 
-    await settle(7500);
+    await settle(3000);
     // startHref !== current href → watchdog no-ops.
     expect(stub.assign).toHaveBeenCalledTimes(0);
   });
@@ -246,13 +275,13 @@ describe("#1017 navigation watchdog — autocomplete submit()", () => {
     fireEvent.change(input, { target: { value: "cancer" } });
     fireEvent.keyDown(input, { key: "Enter" });
     // Re-submit before the first watchdog fires; the prior timer must be cleared.
-    await settle(3000);
+    await settle(1000);
     fireEvent.change(input, { target: { value: "genomics" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    // 3s + 7s = 10s total. The first timer (armed at t=0) would have fired at
-    // t=7000 if not cleared; the second (armed at t=3000) fires at t=10000.
-    await settle(7000);
+    // 1s + 2.6s. The first timer (armed at t=0) would have fired at t=2500 if
+    // not cleared; the second (armed at t=1000) fires at t=3500.
+    await settle(2600);
     expect(assign).toHaveBeenCalledTimes(1);
     expect(assign).toHaveBeenCalledWith("/search?q=genomics");
   });
@@ -271,13 +300,13 @@ describe("#1017 navigation watchdog — autocomplete submit()", () => {
     expect(pushMock).toHaveBeenCalledWith("/search?q=cancer");
 
     unmount();
-    await settle(7500);
+    await settle(3000);
     expect(assign).toHaveBeenCalledTimes(0);
   });
 
   it("F. transition resolves after arming → no hard nav (timer cleared on resolve)", async () => {
     // Arm while pending, then the transition resolves (pending true→false) before
-    // 7s; the [isPending] effect clears the armed timer so nothing fires.
+    // 2.5s; the [isPending] effect clears the armed timer so nothing fires.
     h.start = (cb: () => void) => cb();
     h.pending = true;
     const { assign } = stubLocation("https://scholars-staging.weill.cornell.edu/", "/", "");
@@ -291,13 +320,13 @@ describe("#1017 navigation watchdog — autocomplete submit()", () => {
     h.pending = false;
     rerender(<SearchAutocomplete />);
 
-    await settle(7500);
+    await settle(3000);
     expect(assign).toHaveBeenCalledTimes(0);
   });
 });
 
 describe("#1017 navigation watchdog — Enter-on-suggestion soft-nav", () => {
-  it("hangs on a highlighted suggestion → hard-navigates to the suggestion href after 7s", async () => {
+  it("hangs on a highlighted suggestion → hard-navigates to the suggestion href after 2.5s", async () => {
     // Populate one suggestion so ArrowDown sets activeIndex=0 and Enter routes
     // through the suggestion branch (not submit()).
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
@@ -325,7 +354,7 @@ describe("#1017 navigation watchdog — Enter-on-suggestion soft-nav", () => {
     expect(pushMock).toHaveBeenCalledWith("/scholars/jane-cancer");
     expect(assign).not.toHaveBeenCalled();
 
-    await settle(7100);
+    await settle(2600);
     expect(assign).toHaveBeenCalledTimes(1);
     expect(assign).toHaveBeenCalledWith("/scholars/jane-cancer");
   });
@@ -591,7 +620,7 @@ describe("#1017 navigation watchdog — telemetry beacon", () => {
     const body = await beaconPayload(sendBeacon);
     expect(body.event).toBe("search_nav_watchdog");
     expect(body.surface).toBe("autocomplete_submit");
-    expect(body.n).toBe(7000);
+    expect(body.n).toBe(2500);
   });
 
   it("Enter-on-suggestion hang reports surface=autocomplete_suggestion", async () => {
@@ -653,6 +682,10 @@ describe("#1017 navigation watchdog — telemetry beacon", () => {
     h.start = (cb: () => void) => cb();
     h.pending = false;
     stubLocation("https://scholars-staging.weill.cornell.edu/", "/", "");
+    // A committed soft-nav moves the URL — the only thing the guard reads now.
+    pushMock.mockImplementationOnce((to: string) => {
+      window.location.href = `https://scholars-staging.weill.cornell.edu${to}`;
+    });
     const sendBeacon = spyBeacon();
 
     render(<SearchAutocomplete />);

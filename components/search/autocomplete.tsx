@@ -22,17 +22,23 @@ type Suggestion = {
 type Variant = "header" | "hero";
 
 /**
- * #1017 deploy-cutover skew watchdog. During the ~1-minute window when a new
- * deployment is cutting over, a soft-nav (router.push inside useTransition) can
- * receive an RSC 200 the client neither applies nor hard-reloads: isPending
- * stays true and the URL never moves (the search box spins forever). #931's
- * deployment-skew hard-reload fallback doesn't fire in this window. The
- * watchdog arms a timer on every soft-nav; if, after this delay, we're still
- * pending AND the URL hasn't moved from where the nav started, it forces a hard
- * navigation to the intended href. A successful soft-nav changes the URL (and
- * clears isPending), so the watchdog no-ops — no spurious reload.
+ * Hung-navigation watchdog (#1017, #1995; mirrors
+ * components/search/transition-link.tsx). A soft-nav (router.push inside
+ * useTransition) can receive an RSC 200 the client neither applies nor
+ * hard-reloads: the navigation stays pending and the URL never moves (the
+ * search box spins forever). #1017 saw it during the ~1-minute deployment
+ * cutover, where #931's deployment-skew hard-reload fallback doesn't fire;
+ * #1995 measured the same signature in steady state with no deploy in flight.
+ * The watchdog arms a timer on every soft-nav; if the URL still hasn't moved
+ * when it fires, it forces a hard navigation to the intended href. A successful
+ * soft-nav moves the URL (and clears isPending, which disarms the timer in the
+ * effect below), so the watchdog no-ops — no spurious reload.
+ *
+ * 2500 ms, down from #1017's 7000: the origin answers this navigation in ~0.25 s
+ * (measured against prod, #1995), so 2.5 s is ~10x headroom over a healthy round
+ * trip.
  */
-const NAV_WATCHDOG_MS = 7000;
+const NAV_WATCHDOG_MS = 2500;
 
 /**
  * Search input with entity-aware autocomplete (spec line 184: fires on 2 chars).
@@ -77,22 +83,29 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
   const suggestCacheRef = useRef(new Map<string, Suggestion[]>());
   const [isPending, startTransition] = useTransition();
 
-  // #1017 watchdog plumbing. Read the latest isPending from a ref inside the
-  // async timer (a captured closure would see a stale value), keep the timer id
-  // in a ref so a rapid re-submit clears the prior one, and clear it as soon as
-  // the transition resolves so a fast success leaves no lingering timer.
-  const isPendingRef = useRef(isPending);
-  isPendingRef.current = isPending;
+  // #1017 watchdog plumbing. Keep the timer id in a ref so a rapid re-submit
+  // clears the prior one, and clear it as soon as the transition resolves so a
+  // fast success leaves no lingering timer. That effect-driven disarm is now the
+  // only pending signal the watchdog trusts — see the guard below.
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Call this BEFORE the router.push, so `startHref` is read before the
+  // navigation starts — a nav that commits promptly would otherwise leave the
+  // URL already moved when we sample it, and a frozen URL is now the whole guard.
   const armNavWatchdog = (href: string, surface: NavWatchdogSurface) => {
     if (watchdogRef.current) clearTimeout(watchdogRef.current);
     const startHref = window.location.href;
     watchdogRef.current = setTimeout(() => {
       watchdogRef.current = null;
-      // Still pending and the URL never moved → the soft-nav hung mid
-      // deploy-cutover; force a hard navigation to the intended href.
-      if (isPendingRef.current && window.location.href === startHref) {
+      // #1995: the guard reads ONLY the BOM. It used to also require an
+      // `isPendingRef` written during render, but React writes that ref on
+      // renders that never commit, so it read false while the committed DOM
+      // still said aria-busy — the watchdog no-opped through the exact hang it
+      // exists for (0 recoveries in 4 of 5 observed firings). The [isPending]
+      // effect below already disarms this timer when the transition resolves,
+      // and effects only run on committed renders, so that is the trustworthy
+      // half of the old condition.
+      if (window.location.href === startHref) {
         // Observe-only telemetry (never blocks the recovery nav) so the firing
         // rate can be tuned — #1017.
         reportNavWatchdog(surface, NAV_WATCHDOG_MS);
@@ -205,10 +218,10 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
       const t = new URLSearchParams(window.location.search).get("type");
       if (t && t !== "people") href += `&type=${encodeURIComponent(t)}`;
     }
+    armNavWatchdog(href, "autocomplete_submit"); // #1017
     startTransition(() => {
       router.push(href);
     });
-    armNavWatchdog(href, "autocomplete_submit"); // #1017
   };
 
   const containerClass = isHero
@@ -251,10 +264,10 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
                 setSuggestions([]);
                 setOpen(false);
                 const suggestionHref = suggestions[activeIndex].href;
+                armNavWatchdog(suggestionHref, "autocomplete_suggestion"); // #1017
                 startTransition(() => {
                   router.push(suggestionHref);
                 });
-                armNavWatchdog(suggestionHref, "autocomplete_suggestion"); // #1017
               } else {
                 submit();
               }
