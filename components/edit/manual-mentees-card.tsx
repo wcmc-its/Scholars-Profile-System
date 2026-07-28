@@ -47,11 +47,29 @@ export type ManualMenteesCardProps = {
   mode: "self" | "superuser";
   scholarName: string;
   initial: ReadonlyArray<ManualMentee>;
+  /**
+   * Stored CWIDs that match no linkable WCM scholar. Server-computed, so it
+   * covers entries saved long before this notice existed — the case that
+   * prompted it. Deliberately NOT held in local state: `save()` calls
+   * `router.refresh()`, so a re-rendered prop is what makes the notice appear
+   * (or clear) a beat after an edit, with no lookup endpoint to build.
+   */
+  unresolvedCwids?: ReadonlyArray<string>;
 };
 
-export function ManualMenteesCard({ cwid, mode, scholarName, initial }: ManualMenteesCardProps) {
+export function ManualMenteesCard({
+  cwid,
+  mode,
+  scholarName,
+  initial,
+  unresolvedCwids,
+}: ManualMenteesCardProps) {
   const router = useRouter();
   const possessive = mode === "superuser" ? `${scholarName}'s` : "your";
+  const unresolved = React.useMemo(
+    () => new Set(unresolvedCwids ?? []),
+    [unresolvedCwids],
+  );
 
   const [rows, setRows] = React.useState<ManualMentee[]>([...initial]);
   const [adding, setAdding] = React.useState(false);
@@ -157,6 +175,22 @@ export function ManualMenteesCard({ cwid, mode, scholarName, initial }: ManualMe
                   </div>
                   {metaLine(row) ? (
                     <div className="text-muted-foreground mt-0.5 text-sm">{metaLine(row)}</div>
+                  ) : null}
+                  {row.cwid && unresolved.has(row.cwid) ? (
+                    // A NOTICE, not an error — this is the expected state for the
+                    // alumni and outside-institution trainees the card exists for,
+                    // so it must not read as "you did something wrong" or imply the
+                    // entry failed to save. It names only what the mentor will
+                    // otherwise notice missing, and what to do if it IS a typo.
+                    <p
+                      className="text-muted-foreground mt-1 text-xs"
+                      data-testid={`manual-mentee-unresolved-${index}`}
+                    >
+                      No WCM profile matches <span className="font-medium">{row.cwid}</span>, so
+                      their photo, profile link, and co-authored publications won&rsquo;t appear.
+                      That&rsquo;s expected for alumni and people outside WCM &mdash; if it should
+                      match someone here, use Edit to check the CWID.
+                    </p>
                   ) : null}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">

@@ -563,6 +563,25 @@ export type EditContext = {
    */
   manualMentees: ReadonlyArray<ManualMentee>;
   /**
+   * #2011 follow-up — the subset of `manualMentees[].cwid` that resolves to NO
+   * linkable WCM scholar, so the card can say so instead of leaving the mentor
+   * to discover it on the public profile.
+   *
+   * A hand-entered CWID is format-checked but never existence-checked (see
+   * `lib/edit/manual-mentee.ts`), deliberately: alumni legitimately hold a CWID
+   * with no `Scholar` row, and that is the population this feature exists for.
+   * The cost is that a TYPO and a legitimate alumnus are indistinguishable, and
+   * the mentor gets no signal either way — observed in staging, where a mentee
+   * saved as `evs2001` instead of `evs2008` sat there silently with no photo, no
+   * profile link and no co-publications.
+   *
+   * So this is a NOTICE, never a validation error: the entry still saves. It
+   * mirrors `getMenteesForMentor`'s own linkability filter (`deletedAt: null`,
+   * `status: "active"`) exactly, so what it predicts is what the public chip
+   * actually does.
+   */
+  manualMenteeUnresolvedCwids: ReadonlyArray<string>;
+  /**
    * Publication-derived COI-gap candidates surfaced ONLY to the genuine self
    * viewer behind `SELF_EDIT_COI_GAP_HINT`. Populated only when
    * `loadEditContext` is called with `opts.includeCoiGap === true`; an empty
@@ -1427,6 +1446,27 @@ export async function loadEditContext(
       });
     }
   }
+  // #2011 follow-up — which hand-entered CWIDs resolve to a linkable scholar.
+  // NOT derived from `menteeRows`: `defaultLoadMentees` filters manual-only
+  // entries out by design, and it is a fallible cross-VPC read, so the notice
+  // would vanish on a ReciterDB outage. One local indexed query instead, skipped
+  // entirely when no entry carries a CWID.
+  //
+  // The `deletedAt`/`status` filter mirrors `getMenteesForMentor` so the notice
+  // predicts the real chip: a suppressed scholar renders unlinked there too.
+  // No dedup: `validateManualMentees` rejects an array that repeats a cwid, and
+  // a rejected array reads back as `[]`, so these are unique by construction.
+  const manualCwids = manualMenteeRows.map((m) => m.cwid).filter((c): c is string => !!c);
+  let manualMenteeUnresolvedCwids: string[] = [];
+  if (manualCwids.length > 0) {
+    const resolved = await client.scholar.findMany({
+      where: { cwid: { in: manualCwids }, deletedAt: null, status: "active" },
+      select: { cwid: true },
+    });
+    const found = new Set(resolved.map((s) => s.cwid));
+    manualMenteeUnresolvedCwids = manualCwids.filter((c) => !found.has(c));
+  }
+
   const mentees: EditContextMentee[] = menteeRows.map((m) => {
     const externalId = `${cwid}:${m.cwid}`;
     const hide = menteeHide.get(externalId);
@@ -1580,6 +1620,7 @@ export async function loadEditContext(
       news,
       mentees,
       manualMentees: manualMenteeRows,
+      manualMenteeUnresolvedCwids,
       unmatchedPubmedCoi,
       unmatchedPubmedCoiLower,
       unmatchedPubmedCoiReviewed,
@@ -1748,6 +1789,7 @@ export async function loadEditContext(
     news,
     mentees,
     manualMentees: manualMenteeRows,
+    manualMenteeUnresolvedCwids,
     unmatchedPubmedCoi,
     unmatchedPubmedCoiLower,
     unmatchedPubmedCoiReviewed,

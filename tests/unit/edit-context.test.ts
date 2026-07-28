@@ -20,7 +20,7 @@ import { REJECT_REASON } from "@/lib/edit/reject-reason";
 
 type AnyMock = ReturnType<typeof vi.fn>;
 type FakeClient = {
-  scholar: { findUnique: AnyMock };
+  scholar: { findUnique: AnyMock; findMany: AnyMock };
   suppression: { findMany: AnyMock };
   publicationAuthor: { findMany: AnyMock };
   fieldOverride: { findUnique: AnyMock; findMany: AnyMock };
@@ -45,7 +45,9 @@ function fakeClient(): FakeClient {
   // the requested fieldName via `mockImplementation`, or simply
   // `mockResolvedValue` to set both at once.
   return {
-    scholar: { findUnique: vi.fn() },
+    // `findMany` serves the #2011 hand-entered-CWID resolution check;
+    // default "nothing resolves" is never reached with no manual entries.
+    scholar: { findUnique: vi.fn(), findMany: vi.fn().mockResolvedValue([]) },
     suppression: { findMany: vi.fn().mockResolvedValue([]) },
     publicationAuthor: { findMany: vi.fn().mockResolvedValue([]) },
     // `findUnique` serves the overview + slug baselines; `findMany` serves the
@@ -197,6 +199,91 @@ describe("loadEditContext — boundary cases", () => {
 
     expect(ctx!.mentees).toHaveLength(1);
     expect(ctx!.mentees[0].externalId).toBe(`${SELF}:m1`);
+  });
+
+  describe("#2011 follow-up — flagging a hand-entered CWID that resolves to nobody", () => {
+    /** Stub the stored `manualMentees` array. */
+    function storeManual(c: FakeClient, entries: unknown[]) {
+      c.fieldOverride.findUnique.mockImplementation((args: {
+        where: { entityType_entityId_fieldName: { fieldName: string } };
+      }) =>
+        Promise.resolve(
+          args.where.entityType_entityId_fieldName.fieldName === "manualMentees"
+            ? { value: JSON.stringify(entries) }
+            : null,
+        ),
+      );
+    }
+
+    it("reports the CWID no active scholar matches, and only that one", async () => {
+      const c = fakeClient();
+      c.scholar.findUnique.mockResolvedValue(scholarRow());
+      storeManual(c, [
+        { name: "Rowan Ellis", cwid: "rel2002" },
+        { name: "Sam Okafor", cwid: "sao4001" },
+        { name: "No Cwid Here" },
+      ]);
+      // Only rel2002 exists.
+      c.scholar.findMany.mockResolvedValue([{ cwid: "rel2002" }]);
+
+      const ctx = await loadEditContext(SELF, asClient(c));
+
+      expect(ctx!.manualMenteeUnresolvedCwids).toEqual(["sao4001"]);
+    });
+
+    it("asks about ACTIVE, non-deleted scholars — the same filter the public chip links on", async () => {
+      // A suppressed or soft-deleted scholar renders as an unlinked chip with no
+      // co-pubs, so the notice has to predict that too. Asserting the where-clause
+      // is the only way to catch a drift that a row-count fixture cannot.
+      const c = fakeClient();
+      c.scholar.findUnique.mockResolvedValue(scholarRow());
+      storeManual(c, [{ name: "Sam Okafor", cwid: "sao4001" }]);
+      c.scholar.findMany.mockResolvedValue([]);
+
+      await loadEditContext(SELF, asClient(c));
+
+      const call = c.scholar.findMany.mock.calls[0]![0] as {
+        where: { cwid: { in: string[] }; deletedAt: null; status: string };
+      };
+      expect(call.where).toEqual({
+        cwid: { in: ["sao4001"] },
+        deletedAt: null,
+        status: "active",
+      });
+    });
+
+    it("does not query at all when no entry carries a CWID", async () => {
+      const c = fakeClient();
+      c.scholar.findUnique.mockResolvedValue(scholarRow());
+      storeManual(c, [{ name: "Rowan Ellis" }, { name: "Jo Adeyemi" }]);
+
+      const ctx = await loadEditContext(SELF, asClient(c));
+
+      expect(c.scholar.findMany).not.toHaveBeenCalled();
+      expect(ctx!.manualMenteeUnresolvedCwids).toEqual([]);
+    });
+
+    it("flags nothing when a corrupt stored value reads back as no mentees", async () => {
+      // `getManualMentees` swallows an unparseable override and returns `[]`
+      // rather than throwing. Nothing to ask about, and no notice to show —
+      // the card must not imply an entry is broken when there is no entry.
+      const c = fakeClient();
+      c.scholar.findUnique.mockResolvedValue(scholarRow());
+      c.fieldOverride.findUnique.mockImplementation((args: {
+        where: { entityType_entityId_fieldName: { fieldName: string } };
+      }) =>
+        Promise.resolve(
+          args.where.entityType_entityId_fieldName.fieldName === "manualMentees"
+            ? { value: "{not-an-array" }
+            : null,
+        ),
+      );
+
+      const ctx = await loadEditContext(SELF, asClient(c));
+
+      expect(c.scholar.findMany).not.toHaveBeenCalled();
+      expect(ctx!.manualMenteeUnresolvedCwids).toEqual([]);
+    });
   });
 
   it("#2011 KEEPS a hand-entered mentee the source system also carries", async () => {
