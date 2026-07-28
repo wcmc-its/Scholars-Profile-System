@@ -8,19 +8,33 @@ const TOP_VISIBLE = 8;
 
 /**
  * Journal facet with a small search-within input. Buckets come in
- * pre-sorted (active values first) with their toggleHref already computed
- * server-side — Next.js can't pass a function from a Server to a Client
- * component, so the parent precomputes per-bucket hrefs and we filter +
- * paginate them in the browser.
+ * pre-sorted (active values first); we filter + paginate them in the browser.
+ * Next.js can't pass a function from a Server to a Client component, so the
+ * parent ships one `appendBase` prefix (#1995) and each unselected bucket
+ * appends its own encoded value — only selected buckets carry a full href.
  */
 export type JournalFacetItem = {
   value: string;
   count: number;
   isActive: boolean;
-  toggleHref: string;
+  /** #1995 — present only on selected buckets, whose href removes the value
+   *  rather than appending it. Unselected buckets derive theirs from
+   *  `appendBase`, which keeps ~500 near-identical URLs off the wire. */
+  toggleHref?: string;
 };
 
-export function JournalFacet({ items }: { items: JournalFacetItem[] }) {
+/** Encode one value exactly as `URLSearchParams.toString()` did server-side
+ *  (space → `+`), so the derived href is byte-identical to the old one. */
+const encodeValue = (v: string) =>
+  new URLSearchParams({ v }).toString().slice("v=".length);
+
+export function JournalFacet({
+  items,
+  appendBase,
+}: {
+  items: JournalFacetItem[];
+  appendBase: string;
+}) {
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
 
@@ -50,7 +64,7 @@ export function JournalFacet({ items }: { items: JournalFacetItem[] }) {
         {visible.map((j) => (
           <li key={j.value} className="py-1 leading-[1.4]">
             <Link
-              href={j.toggleHref}
+              href={j.toggleHref ?? appendBase + encodeValue(j.value)}
               scroll={false}
               className="flex items-start gap-2 text-[#1a1a1a] no-underline hover:no-underline"
             >

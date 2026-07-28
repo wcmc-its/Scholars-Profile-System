@@ -101,6 +101,10 @@ describe("PublicationMeta — abstract disclosure (#288 PR-A)", () => {
 
 // #1537 — the profile ships hasAbstract:boolean instead of the text; the meta
 // row fetches it from the gated /api/publications/[pmid] route on first open.
+// The fetch mocks mirror what `/api/publications/[pmid]` actually emits —
+// `PublicationDetailPayload`, which nests the text under `pub`. They used to
+// return a top-level `abstract`, so they passed while every real lazy open
+// rendered "Abstract unavailable."
 describe("PublicationMeta — lazy abstract (#1537)", () => {
   const abstractText = "Fetched abstract body for the lazy path.";
 
@@ -124,7 +128,7 @@ describe("PublicationMeta — lazy abstract (#1537)", () => {
   it("clicking Abstract fetches the detail route and renders the text", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ abstract: abstractText }),
+      json: async () => ({ pub: { abstract: abstractText } }),
     });
     vi.stubGlobal("fetch", fetchMock);
     render(<PublicationMeta pmid="12345" lazyAbstract />);
@@ -138,7 +142,7 @@ describe("PublicationMeta — lazy abstract (#1537)", () => {
   it("does not refetch when reopened after a successful load", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ abstract: abstractText }),
+      json: async () => ({ pub: { abstract: abstractText } }),
     });
     vi.stubGlobal("fetch", fetchMock);
     render(<PublicationMeta pmid="12345" lazyAbstract />);
@@ -154,7 +158,7 @@ describe("PublicationMeta — lazy abstract (#1537)", () => {
     const fetchMock = vi
       .fn()
       .mockRejectedValueOnce(new Error("network"))
-      .mockResolvedValue({ ok: true, json: async () => ({ abstract: abstractText }) });
+      .mockResolvedValue({ ok: true, json: async () => ({ pub: { abstract: abstractText } }) });
     vi.stubGlobal("fetch", fetchMock);
     render(<PublicationMeta pmid="12345" lazyAbstract />);
     const trigger = screen.getByRole("button", { name: "Abstract" });
@@ -171,7 +175,7 @@ describe("PublicationMeta — lazy abstract (#1537)", () => {
   it("shows 'Abstract unavailable.' when the route returns no abstract", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ abstract: null }) }),
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ pub: { abstract: null } }) }),
     );
     render(<PublicationMeta pmid="12345" lazyAbstract />);
     fireEvent.click(screen.getByRole("button", { name: "Abstract" }));

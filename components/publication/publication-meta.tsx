@@ -91,8 +91,13 @@ export function PublicationMeta({
       setFetchFailed(false);
       fetch(`/api/publications/${encodeURIComponent(pmid as string)}`)
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
+        // The detail route nests the text under `pub` (PublicationDetailPayload);
+        // reading a top-level `abstract` made every lazy open render "Abstract
+        // unavailable." — the unit mocks returned the wrong shape and hid it.
         .then((d) =>
-          setFetchedAbstract(typeof d.abstract === "string" ? d.abstract : ""),
+          setFetchedAbstract(
+            typeof d?.pub?.abstract === "string" ? d.pub.abstract : "",
+          ),
         )
         .catch(() => setFetchFailed(true));
     }
