@@ -13,12 +13,3 @@ export function glossArmEnv(
   if (m) return { MATCHA_GLOSS_RERANK: "on", MATCHA_GLOSS_RERANK_LAMBDA: m[1] };
   return {}; // base — or any non-gloss arm — leaves the rescore off
 }
-
-// Arm → env for the #1977 cluster-representative A/B.
-// `broadrep` makes `mergeTermClusters` pick each cluster's BROADEST member as the representative;
-// every other arm leaves today's rule (earliest member) in place. Lives beside `glossArmEnv` for the
-// same load-bearing reason: if the control and the variant silently produced the same env, the run
-// would read as "the rep rule had no effect" — a false-negative kill the seed guard cannot see.
-export function repArmEnv(arm: string): { MATCHA_BROAD_REP?: string } {
-  return arm === "broadrep" ? { MATCHA_BROAD_REP: "on" } : {};
-}
