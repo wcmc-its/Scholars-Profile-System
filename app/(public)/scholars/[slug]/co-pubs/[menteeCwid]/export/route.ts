@@ -62,7 +62,10 @@ export async function GET(
     return NextResponse.json({ error: "mentee not found" }, { status: 404 });
   }
 
-  const pubs = await getCoPublications(mentor.cwid, menteeCwid);
+  // #2011 follow-up — same provenance routing as the page it exports.
+  const pubs = await getCoPublications(mentor.cwid, menteeCwid, {
+    manualOnly: pair.manualOnly,
+  });
 
   const filename = `co-pubs_${mentor.cwid}_${menteeCwid}.${format}`;
 

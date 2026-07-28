@@ -67,7 +67,11 @@ export default async function CoPubsPage({
   const pair = await getMentorMenteePair(mentor.cwid, menteeCwid);
   if (!pair) notFound();
 
-  const pubs = await getCoPublications(mentor.cwid, menteeCwid);
+  // #2011 follow-up — `pair` already knows whether any ETL source contributed
+  // this mentee; a manual-only one has no bridge rows and is computed locally.
+  const pubs = await getCoPublications(mentor.cwid, menteeCwid, {
+    manualOnly: pair.manualOnly,
+  });
 
   // Resolve every WCM-affiliated CWID in the author lists to a Scholar row
   // (slug + preferredName) in a single query so the citation rows can
