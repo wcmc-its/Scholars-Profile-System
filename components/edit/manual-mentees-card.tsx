@@ -110,9 +110,17 @@ export function ManualMenteesCard({ cwid, mode, scholarName, initial }: ManualMe
   return (
     <EditPanel
       slot="manual-mentees-card"
+      // NOT a subsection: this is the one part of the Mentees tab the scholar can
+      // actually author, and `subsection` renders it as a muted uppercase h3 —
+      // visually subordinate to the read-only roster below it, which inverts the
+      // real relationship. Peer h2 + brand rule instead.
+      //
+      // An explicit headingId is what makes that safe: a non-subsection panel
+      // otherwise claims `EDIT_PANEL_HEADING_ID`, and the sourced panel below
+      // already holds it for `<main aria-labelledby>`. Two would be a duplicate id.
+      headingId="manual-mentees-heading"
       heading="Added by you"
       owned
-      subsection
       description={`Add mentees the training records don't carry — visiting students, trainees from another institution, or anyone who predates the systems we read. These appear on ${possessive} public profile alongside the mentees we already know about.`}
     >
       {rows.length === 0 ? (
@@ -317,8 +325,12 @@ function MenteeForm({
           inputMode="numeric"
           placeholder="e.g. 2019"
           className="max-w-32"
+          aria-describedby={`manual-mentee-year-help-${idPrefix}`}
           data-testid={`manual-mentee-year-${idPrefix}`}
         />
+        <span id={`manual-mentee-year-help-${idPrefix}`} className="text-muted-foreground text-xs">
+          Leave blank if the relationship is ongoing.
+        </span>
       </label>
       {!yearOk ? <p className="text-destructive text-xs">Please enter a four-digit year.</p> : null}
 

@@ -50,6 +50,17 @@ describe("ManualMenteesCard", () => {
     expect(screen.getByText("sao4001")).toBeTruthy();
   });
 
+  it("renders its heading as a peer h2, not a subordinate h3", () => {
+    // The scholar-authored panel must not read as subordinate to the read-only
+    // roster beside it. `subsection` would render a muted uppercase h3.
+    renderCard([]);
+    const heading = screen.getByText("Added by you");
+    expect(heading.tagName).toBe("H2");
+    // ...and must NOT claim the id `<main aria-labelledby>` points at — the
+    // sourced panel below already holds it, and two would be a duplicate id.
+    expect(heading.id).toBe("manual-mentees-heading");
+  });
+
   it("asks for the CWID first and says what it buys, without requiring it", () => {
     renderCard([]);
     fireEvent.click(screen.getByTestId("manual-mentee-add"));

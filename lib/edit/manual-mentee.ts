@@ -72,6 +72,36 @@ export type ManualMentee = {
   year?: number;
 };
 
+/**
+ * #2011 — the (mentorCwid, menteeCwid) pairs a set of stored `manualMentees`
+ * field-override rows contributes to the co-pub bridge export
+ * (`etl/mentoring/export-copubs.ts`).
+ *
+ * Lives here rather than in the ETL script because that script calls `main()` at
+ * import time and so cannot be unit-tested; this module is side-effect-free and
+ * already shared by the read path, the route, and the export.
+ *
+ * Entries WITHOUT a `cwid` yield no pair — there is no identifier to join
+ * `analysis_summary_author` on, so they can never have co-publications. An
+ * unparseable stored value is skipped rather than thrown: one corrupt row must
+ * not abort a whole-corpus export. Self-pairs are dropped, matching the
+ * export's own `add()` guard.
+ */
+export function manualMenteePairs(
+  rows: ReadonlyArray<{ entityId: string; value: string }>,
+): Array<{ mentorCwid: string; menteeCwid: string }> {
+  const pairs: Array<{ mentorCwid: string; menteeCwid: string }> = [];
+  for (const row of rows) {
+    const parsed = validateManualMentees(row.value);
+    if (!parsed.ok) continue;
+    for (const m of parsed.value) {
+      if (!m.cwid || m.cwid === row.entityId) continue;
+      pairs.push({ mentorCwid: row.entityId, menteeCwid: m.cwid });
+    }
+  }
+  return pairs;
+}
+
 export type ManualMenteesResult =
   | { ok: true; value: ManualMentee[] }
   | {
