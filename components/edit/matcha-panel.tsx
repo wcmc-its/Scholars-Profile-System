@@ -1463,9 +1463,27 @@ export function MatchaPanel({
           {/* The ask (title + read-only, highlighted request) renders in the ask card above,
               in place of the textarea — see `showAskCard`. */}
           {ranked.length === 0 ? (
-            <p className="text-muted-foreground py-4 text-sm">
-              No researchers matched this description.
-            </p>
+            /* #1919 — a bare "no researchers matched" reads as "Weill Cornell has nobody for
+               this", which is rarely what happened. The concepts are already in state and are
+               the only evidence of WHY nothing ranked, so the empty state names them: either
+               the ask yielded no research concept at all (a mechanism or eligibility rules
+               rather than a subject — the NIGMS RM1 case), or it yielded concepts that no
+               profile matched. The officer can tell those apart at a glance; nothing here
+               predicts the outcome, it reports it. */
+            <div className="text-muted-foreground py-4 text-sm">
+              <p>No researchers matched this description.</p>
+              {concepts.length === 0 ? (
+                <p className="mt-1">
+                  Nothing was extracted to search on — the ask may describe a funding mechanism or
+                  its eligibility rules rather than a research area.
+                </p>
+              ) : (
+                <p className="mt-1">
+                  Searched on {concepts.map((c) => c.term).join(", ")} — no Weill Cornell
+                  researcher matched {concepts.length === 1 ? "it" : "any of them"}.
+                </p>
+              )}
+            </div>
           ) : (
             /* Two-column shell, matching the mockup's rail + results split and
                `/edit/find-researchers`'s idiom. lg:w-80 (not find-researchers' w-64) because
