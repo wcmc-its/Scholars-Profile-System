@@ -7,7 +7,10 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { loadEditRoster, loadRosterFacets } from "@/lib/api/edit-roster";
 
 type AnyMock = ReturnType<typeof vi.fn>;
-type FakeClient = { scholar: { findMany: AnyMock; count: AnyMock } };
+type FakeClient = {
+  scholar: { findMany: AnyMock; count: AnyMock };
+  divisionMembership: { findMany: AnyMock };
+};
 type RosterClient = Parameters<typeof loadEditRoster>[1];
 
 function fakeClient(rows: unknown[] = [], total = 0): FakeClient {
@@ -16,6 +19,9 @@ function fakeClient(rows: unknown[] = [], total = 0): FakeClient {
       findMany: vi.fn().mockResolvedValue(rows),
       count: vi.fn().mockResolvedValue(total),
     },
+    // Manual division-roster scope (Amendment 4 parity); empty unless a test
+    // overrides it.
+    divisionMembership: { findMany: vi.fn().mockResolvedValue([]) },
   };
 }
 const asClient = (c: FakeClient) => c as unknown as RosterClient;
@@ -184,6 +190,46 @@ describe("loadEditRoster — filters", () => {
       { divCode: { in: ["DEPT_MED"] } },
       { cwid: { in: ["ctr001", "ctr002"] } },
     ]);
+  });
+
+  // Amendment-4 parity: a scholar on a managed division's MANUAL roster is
+  // editable by that division's admin even when their deptCode/divCode columns
+  // point elsewhere. Before this the roster under-listed exactly those people.
+  it("includes scholars on a managed division's manual roster", async () => {
+    const c = fakeClient();
+    c.divisionMembership.findMany.mockResolvedValue([{ cwid: "ros001" }, { cwid: "ros002" }]);
+    await loadEditRoster({ unitCodeScope: ["DIV_CARD"] }, asClient(c));
+    const and = c.scholar.findMany.mock.calls[0][0].where.AND;
+    expect(and[0].OR).toEqual([
+      { deptCode: { in: ["DIV_CARD"] } },
+      { divCode: { in: ["DIV_CARD"] } },
+      { cwid: { in: ["ros001", "ros002"] } },
+    ]);
+    // The whole scope (departments included) is queried — a department code
+    // simply never matches a divisionCode, so no filtering is needed first.
+    expect(c.divisionMembership.findMany.mock.calls[0][0].where).toEqual({
+      divisionCode: { in: ["DIV_CARD"] },
+    });
+  });
+
+  it("merges roster and center membership into ONE deduped cwid arm", async () => {
+    const c = withCenters(fakeClient(), [member("both01"), member("ctr001")]);
+    c.divisionMembership.findMany.mockResolvedValue([{ cwid: "both01" }, { cwid: "ros001" }]);
+    await loadEditRoster(
+      { unitCodeScope: ["DIV_CARD"], scopeCenterCodes: ["MEYER"] },
+      asClient(c),
+    );
+    const and = c.scholar.findMany.mock.calls[0][0].where.AND;
+    expect(and[0].OR).toHaveLength(3);
+    // Roster cwids first (in their read order), then any center-only additions;
+    // `both01` appears once despite being in both sets.
+    expect(and[0].OR.at(-1)).toEqual({ cwid: { in: ["both01", "ros001", "ctr001"] } });
+  });
+
+  it("issues no roster-membership read when unscoped (a superuser)", async () => {
+    const c = fakeClient();
+    await loadEditRoster({}, asClient(c));
+    expect(c.divisionMembership.findMany).not.toHaveBeenCalled();
   });
 
   it("excludes pending and expired center memberships from scope", async () => {
