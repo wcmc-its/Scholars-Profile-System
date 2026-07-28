@@ -1186,6 +1186,7 @@ function renderPanel(
             mode={voiceMode}
             scholarName={scholarName}
             initial={ctx.manualMentees}
+            unresolvedCwids={ctx.manualMenteeUnresolvedCwids}
           />
           <MenteesCard
             cwid={cwid}

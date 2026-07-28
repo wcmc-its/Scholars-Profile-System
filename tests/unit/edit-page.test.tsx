@@ -108,6 +108,7 @@ const ctx: EditContext = {
   // #2011 — no hand-entered mentees in the default fixture; the sourced roster
   // above is what the hide-only panel renders.
   manualMentees: [],
+  manualMenteeUnresolvedCwids: [],
   // SELF_EDIT_COI_GAP_HINT — empty by default (loader returns [] unless the
   // flag is on AND the viewer is genuine self); a dedicated describe block below
   // exercises the populated case.

@@ -28,9 +28,15 @@ function postedValue(fetchMock: ReturnType<typeof mockPost>): unknown {
   return JSON.parse(String(init.body)).value;
 }
 
-function renderCard(initial: ManualMentee[]) {
+function renderCard(initial: ManualMentee[], unresolvedCwids?: string[]) {
   return render(
-    <ManualMenteesCard cwid="abc1001" mode="self" scholarName="Alex Self" initial={initial} />,
+    <ManualMenteesCard
+      cwid="abc1001"
+      mode="self"
+      scholarName="Alex Self"
+      initial={initial}
+      unresolvedCwids={unresolvedCwids}
+    />,
   );
 }
 
@@ -153,5 +159,56 @@ describe("ManualMenteesCard", () => {
     );
     // Local state must not advance past what the server actually stored.
     expect(screen.getByText("Sam Okafor")).toBeTruthy();
+  });
+
+  describe("unresolved-CWID notice (#2011 follow-up)", () => {
+    // A CWID is format-checked but never existence-checked, on purpose: alumni
+    // legitimately hold one with no Scholar row. The cost is that a TYPO looks
+    // identical to a legitimate alum. Staging carried `evs2001` for `evs2008`
+    // for days — no photo, no profile link, no co-pubs, and no signal anywhere.
+    it("flags the entry whose CWID matches no WCM scholar", () => {
+      renderCard([{ name: "Sam Okafor", cwid: "sao4001" }], ["sao4001"]);
+      const notice = screen.getByTestId("manual-mentee-unresolved-0");
+      expect(notice.textContent).toContain("No WCM profile matches");
+      expect(notice.textContent).toContain("sao4001");
+    });
+
+    it("stays SILENT for a CWID that does resolve", () => {
+      renderCard([{ name: "Sam Okafor", cwid: "sao4001" }], []);
+      expect(screen.queryByTestId("manual-mentee-unresolved-0")).toBeNull();
+    });
+
+    it("flags only the offending row in a mixed list", () => {
+      renderCard(
+        [
+          { name: "Rowan Ellis", cwid: "rel2002" },
+          { name: "Sam Okafor", cwid: "sao4001" },
+        ],
+        ["sao4001"],
+      );
+      expect(screen.queryByTestId("manual-mentee-unresolved-0")).toBeNull();
+      expect(screen.getByTestId("manual-mentee-unresolved-1")).toBeTruthy();
+    });
+
+    it("says nothing about a CWID-less entry — absent is not unresolved", () => {
+      // The population this card exists for. A plain-name entry is working as
+      // designed and must never be nagged about a CWID it deliberately lacks.
+      renderCard([{ name: "Rowan Ellis" }], ["sao4001"]);
+      expect(screen.queryByTestId("manual-mentee-unresolved-0")).toBeNull();
+    });
+
+    it("does NOT block editing or removal — the entry is valid and saveable", () => {
+      // The notice must read as information, not rejection: an alum with a real
+      // CWID and no Scholars profile is a legitimate, permanent state.
+      renderCard([{ name: "Sam Okafor", cwid: "sao4001" }], ["sao4001"]);
+      expect(screen.getByTestId("manual-mentee-unresolved-0")).toBeTruthy();
+      expect(screen.getByTestId("manual-mentee-edit-0").hasAttribute("disabled")).toBe(false);
+      expect(screen.getByTestId("manual-mentee-remove-0").hasAttribute("disabled")).toBe(false);
+    });
+
+    it("treats an absent prop as nothing-to-flag rather than everything-unresolved", () => {
+      renderCard([{ name: "Sam Okafor", cwid: "sao4001" }]);
+      expect(screen.queryByTestId("manual-mentee-unresolved-0")).toBeNull();
+    });
   });
 });
