@@ -25,6 +25,21 @@ describe("requirementsFrom", () => {
     expect(r.careerStages).toEqual(["early", "mid", "senior"]);
   });
 
+  it("a ROLE alone does not restrict — `clinician` is not a career stage (spec §3.2)", () => {
+    // The 2 measured rows: career_stages ["clinician"], flags [us_eligible, faculty_eligible].
+    // The old restriction signal (any non-empty array) rendered "Required: Early · Mid · Senior"
+    // off the FLAGS — a stage requirement the sponsor never stated.
+    const r = requirementsFrom(["us_eligible", "faculty_eligible"], { career_stages: ["clinician"] });
+    expect(r.careerStages).toBeNull();
+  });
+
+  it("a role ALONGSIDE a real stage still restricts, on the stage", () => {
+    const r = requirementsFrom(["us_eligible", "faculty_eligible", "postdoc_eligible"], {
+      career_stages: ["clinician", "postdoc"],
+    });
+    expect(r.careerStages).toEqual(["early", "mid", "senior", "postdoc"]);
+  });
+
   it("carries the sponsor's own eligibility wording so the axis can cite it", () => {
     // The stage list is SPS vocabulary; without the source the rail states a requirement over an
     // opportunity whose SYNOPSIS never mentions career stage (spin:095001, reported 2026-07-28).

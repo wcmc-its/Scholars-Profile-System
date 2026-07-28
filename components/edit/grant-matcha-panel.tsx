@@ -86,6 +86,22 @@ function asStringArray(v: unknown): string[] {
 }
 
 /**
+ * Values that appear in `career_stages` but are NOT career stages (screening spec §3.2 — the
+ * extraction contract mixes two axes into one array).
+ *
+ * 🔴 A role must not trip the restriction signal. Measured on staging 2026-07-28: 27 of 304
+ * opportunities carry `clinician`, and on the 2 where it is the ONLY value the rail stated
+ * "Required: Early career · Mid career · Senior" — stages taken from the derived flags, which the
+ * sponsor never mentioned — while the restriction it DID state (be a clinician) went unshown and
+ * unenforced. Dropping roles here makes those 2 render no axis, which is the truth: they state no
+ * career-stage requirement.
+ *
+ * Enforcing the clinician restriction is a separate, larger job (#2042): SPS has `isClinician`, but
+ * a second hard axis needs its own gate, badge, floor and relax control for 0.7% of the corpus.
+ */
+const NON_STAGE_ROLES: ReadonlySet<string> = new Set(["clinician"]);
+
+/**
  * Turn an opportunity's stored eligibility into the axes the rail should render.
  *
  * The RESTRICTION SIGNAL is the structured map's `career_stages` being non-empty — the same test
@@ -104,7 +120,8 @@ export function requirementsFrom(
     eligibility && typeof eligibility === "object" && !Array.isArray(eligibility)
       ? (eligibility as Record<string, unknown>)
       : {};
-  const restricts = asStringArray(map.career_stages).length > 0;
+  // Only STAGE values restrict — a role in this array says who may apply, not at what stage.
+  const restricts = asStringArray(map.career_stages).some((s) => !NON_STAGE_ROLES.has(s));
 
   const allowed: CareerStage[] = [];
   if (flags.includes("student_only")) allowed.push("grad");
