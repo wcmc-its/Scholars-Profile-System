@@ -110,9 +110,13 @@ export const TRACKED: Readonly<
   // (a 0-row success in ddb mode), so it is freshness-tracked from the start.
   Tools: { cadence: "nightly" },
   MeshCoverage: { cadence: "nightly" },
-  // #1258 — staging-only until the derived-anchor soak signs off (mirrors the
-  // nightlySteps env split).
-  MeshAnchor: { cadence: "nightly", envs: ["staging"] },
+  // #1258/#2016 — both envs. The `envs: ["staging"]` restriction is retired with
+  // the nightlySteps env split it mirrored. Tracking prod is the POINT of this
+  // half of the change: prod's anchors sat at a uniform 2026-06-02 refreshed_at
+  // for eight weeks while the nightly reported success every night, and nothing
+  // alarmed precisely because prod was excluded here. A promoted step that is not
+  // freshness-tracked would re-accumulate that staleness silently.
+  MeshAnchor: { cadence: "nightly" },
   PubMedRetractions: { cadence: "nightly" },
   // Terminal steps — run in BOTH cadences; the nightly SLA is the binding one.
   SearchIndex: { cadence: "nightly" },

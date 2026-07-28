@@ -1457,20 +1457,31 @@ describe("EtlStack", () => {
       expect(prodNightly).toMatch(/etl:infoed/);
     });
 
-    it("includes etl:mesh-anchors in the staging nightly cadence (#1258), while prod excludes it until the soak", () => {
+    it("includes etl:mesh-anchors in BOTH nightly cadences (#1258, promoted to prod in #2016)", () => {
       const stagingNightly = getStateMachineDefinitionText(
         template,
         "scholars-nightly-staging",
       );
       expect(stagingNightly).toMatch(/etl:mesh-anchors/);
-      // Staging-only — prod's nightly omits it so the curated lay-term anchors
-      // don't load on prod ahead of the soak (the SCORE_MIN=2 gate only stops
-      // derived rows, not curated).
+      // #2016 — prod no longer excludes it. The curated anchors soaked in staging
+      // from 2026-06-25; the SECOND gate (MESH_ANCHOR_SCORE_MIN) is what still
+      // holds derived rows back in prod, and it is asserted separately below.
       const prodNightly = getStateMachineDefinitionText(
         buildEtlStack("prod").template,
         "scholars-nightly-prod",
       );
-      expect(prodNightly).not.toMatch(/etl:mesh-anchors/);
+      expect(prodNightly).toMatch(/etl:mesh-anchors/);
+    });
+
+    it("keeps prod's derived-anchor kill-switch ON — promoting the step must not promote derived rows", () => {
+      // The two gates are independent and this pins that. If a future change drops
+      // MESH_ANCHOR_SCORE_MIN to 0.9 for prod it should be a deliberate, separately
+      // reviewed decision, not a side effect of the #2016 step promotion. A value
+      // > 1 is the documented kill-switch: curated rows still load, derived is zero.
+      const prodEnv = JSON.stringify(buildEtlStack("prod").template.toJSON());
+      expect(prodEnv).toMatch(/"MESH_ANCHOR_SCORE_MIN"[^}]*"2"/);
+      const stagingEnv = JSON.stringify(template.toJSON());
+      expect(stagingEnv).toMatch(/"MESH_ANCHOR_SCORE_MIN"[^}]*"0\.9"/);
     });
 
     it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled + cdnReconcileScheduleEnabled + curationBackupScheduleEnabled + edEmailVisibilityBridgeEnabled all true)", () => {

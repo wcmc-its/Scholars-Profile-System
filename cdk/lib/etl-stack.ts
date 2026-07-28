@@ -1092,20 +1092,29 @@ export class EtlStack extends Stack {
       // #1258 — curated + derived descriptor→topic anchors. SPS-DB only (reads
       // publication.mesh_terms × publication_topic), so external:false. Runs after
       // MeshCoverage (mesh_terms fresh) and Dynamodb (publication_topic fresh).
-      // STAGING-ONLY for now: adding it to the prod nightly would load the 143
-      // curated lay-term anchors onto prod (the MESH_ANCHOR_SCORE_MIN=2 gate only
-      // suppresses *derived* rows, not curated), bypassing the soak. Add to prod
-      // once staging is verified — mirror of the infoed exclusion above.
-      ...(env === "staging"
-        ? [
-            {
-              id: "MeshAnchorNightly",
-              npmScript: "etl:mesh-anchors",
-              external: false,
-              tier: "continue",
-            } as StepSpec,
-          ]
-        : []),
+      // BOTH ENVS as of #2016. The staging-only exclusion is retired: the curated
+      // anchors have soaked in the staging nightly since 2026-06-25 (#1283).
+      //
+      // Prod's MESH_ANCHOR_SCORE_MIN stays at "2" deliberately — see the env block
+      // above. That is the second, INDEPENDENT gate: this change promotes the 143
+      // CURATED rows only, and prod still derives zero. One variable at a time,
+      // because the two populations answer different questions (a hand-reviewed
+      // lay-term alias vs. a mined co-occurrence) and deserve separate verdicts.
+      //
+      // Promoting also REPAIRS prod rather than merely extending it. The loader is
+      // a full replace, and prod currently holds 248 rows from a single on-demand
+      // run on 2026-06-02: 8 curated (the CSV had exactly 8 rows that day) plus 240
+      // derived from the v1 precision ratio, which fanned one descriptor onto up to
+      // 7 topics. v2 (#1258) replaced that with a relevance-weighted share, so under
+      // today's SCORE_MIN=2 no current run could reproduce those 240 rows — they are
+      // unreachable state that nothing else will ever clean up. First prod run
+      // deletes them and leaves 143 curated / 0 derived.
+      {
+        id: "MeshAnchorNightly",
+        npmScript: "etl:mesh-anchors",
+        external: false,
+        tier: "continue",
+      } as StepSpec,
       // #604 -- stamp publication_type='Retraction' on PubMed-retracted originals
       // ReCiter hasn't re-fetched yet. MUST run after Reciter (whose upsert
       // overwrites publication_type from ReciterDB) and before SearchIndex (so
