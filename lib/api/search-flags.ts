@@ -464,6 +464,21 @@ export function resolveSearchPeopleAreaBoost(): boolean {
   return process.env.SEARCH_PEOPLE_AREA_BOOST === "on";
 }
 
+/**
+ * #2018 — concept-arm precedence for the concentration boost. The boost has two arms: a
+ * curated one keyed on `taxonomyMatch.areas[0]` (area membership) and a concept one keyed
+ * on the resolved MeSH `descendantUis` (the query). On master the concept arm only runs
+ * when the curated arm returned nothing, so on any query whose area is reached by a MeSH
+ * anchor or a subtopic-to-parent collapse — which is most of them — the arm that tracks
+ * the query never runs at all. When ON, the descriptor-keyed arm is tried first and the
+ * curated arm is the fallback. Reorder-only, query-time, no reindex. `=== "on"` opt-in;
+ * an absent key must be master's arm order. Requires SEARCH_PEOPLE_AREA_BOOST to be on —
+ * this selects between arms, it does not enable the boost.
+ */
+export function resolveSearchPeopleConceptArmFirst(): boolean {
+  return process.env.SEARCH_PEOPLE_CONCEPT_ARM_FIRST === "on";
+}
+
 export type PubRecencyMode = "off" | "gentle" | "strong";
 
 /**
