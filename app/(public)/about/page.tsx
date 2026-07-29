@@ -1324,7 +1324,7 @@ export default function DocsPage() {
                 <td>Impact and heavy recency; all attributed authors</td>
               </tr>
               <tr id="top-scholars" className="scroll-mt-28 lg:scroll-mt-20">
-                <td>Top scholars</td>
+                <td>Scholars in this area</td>
                 <td>Research area page</td>
                 <td>Full-time faculty most active in a research area</td>
                 <td>Summed Impact of their first- or senior-author papers in the research area; refreshed weekly</td>

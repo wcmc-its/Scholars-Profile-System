@@ -38,11 +38,11 @@ export function TopScholarsChipRow({
     <div className="mt-6">
       <div className="mb-2">
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Top scholars in this area
-          <SectionInfoButton label="Top scholars in this area" anchor="topScholars">
-            Full-time faculty ranked by ReCiterAI on their first- or
+          Scholars in this area
+          <SectionInfoButton label="Scholars in this area" anchor="topScholars">
+            Full-time faculty identified by ReCiterAI from their first- or
             senior-author publications in this research area. Curators do not
-            handpick this list; the order updates weekly as new work appears.
+            handpick this list; it updates weekly as new work appears.
           </SectionInfoButton>
         </span>
       </div>

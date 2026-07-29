@@ -81,20 +81,20 @@ export function FamilyScholarsRow({
     <div className="mb-8">
       <div className="mb-2">
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {familyLabel ? `Top scholars in ${familyLabel}` : "Top scholars in this method"}
-          <SectionInfoButton label="Top scholars in this method" anchor="topScholars">
+          {familyLabel ? `Scholars in ${familyLabel}` : "Scholars in this method"}
+          <SectionInfoButton label="Scholars in this method" anchor="topScholars">
             {includesNonFaculty ? (
               <>
-                Researchers ranked by ReCiterAI on their first- or senior-author
+                Researchers identified by ReCiterAI from their first- or senior-author
                 publications using this method, with full-time faculty listed first.
-                Curators do not handpick this list; the order updates weekly as new
-                work appears.
+                Curators do not handpick this list; it updates weekly as new work
+                appears.
               </>
             ) : (
               <>
-                Full-time faculty ranked by ReCiterAI on their first- or senior-author
-                publications using this method. Curators do not handpick this list; the
-                order updates weekly as new work appears.
+                Full-time faculty identified by ReCiterAI from their first- or
+                senior-author publications using this method. Curators do not handpick
+                this list; it updates weekly as new work appears.
               </>
             )}
           </SectionInfoButton>
