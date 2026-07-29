@@ -79,9 +79,20 @@ describe("buildOpportunityDoc", () => {
     expect(doc.isHonorific).toBe(true);
   });
 
-  it("defaults isHonorific to false and omits prestige when absent", () => {
+  it("indexes UNCLASSIFIED (null) as honorific — null is 'unlabelled', not 'not an honorific'", () => {
+    // 🔴 This pinned `false` until #2041. Measured on staging 2026-07-28: null is exactly 29 rows
+    // corpus-wide and 28 are prizes (National Medal of Science, Vannevar Bush Award, Vilcek
+    // Prizes…). A live index probe found the recommender's own `must_not term isHonorific:true`
+    // admitting all of them — i.e. "grants for you" could offer a faculty member the National
+    // Medal of Science as applyable funding. It also disagreed with `/api/opportunities`, which
+    // excludes null. Excluding here is both the safer default and the one that reconciles them.
     const { doc } = buildOpportunityDoc(row({ prestige: null, isHonorific: null }));
-    expect(doc.isHonorific).toBe(false);
+    expect(doc.isHonorific).toBe(true);
     expect(doc.prestige).toBeUndefined();
+  });
+
+  it("still indexes an explicit false as false — a classified row is trusted", () => {
+    const { doc } = buildOpportunityDoc(row({ isHonorific: false }));
+    expect(doc.isHonorific).toBe(false);
   });
 });

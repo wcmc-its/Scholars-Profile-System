@@ -1276,8 +1276,19 @@ export function buildOpportunityDoc(
     topicIds,
     meshDescriptorUi: asStringArray(row.meshDescriptorUi),
     // Honorific flag — indexed so prestige-ordered / recommender reads can filter
-    // (`must_not term isHonorific:true`). Absent/null ⇒ false (not excluded).
-    isHonorific: row.isHonorific === true,
+    // (`must_not term isHonorific:true`).
+    //
+    // 🔴 UNCLASSIFIED (null) INDEXES AS HONORIFIC. Null does not mean "not an honorific", it means
+    // the GRANT# extractor never labelled the row — and empirically an unlabelled row IS one.
+    // Measured on staging 2026-07-28: null is exactly 29 rows corpus-wide (of 1,151), every one
+    // `wcm_curated`, and 28 of the 29 are prizes — National Medal of Science, Vannevar Bush Award,
+    // Vilcek Prizes, AAAS science-journalism awards, mentoring medals. Folding them to `false` put
+    // them in "grants for you" as applyable funding.
+    //
+    // This also makes the two consumers agree. `/api/opportunities` excludes null (Prisma's
+    // three-valued `not: true`), so the browse never showed these; the index said the opposite.
+    // Same rows, opposite postures, decided by which storage layer each surface happened to read.
+    isHonorific: row.isHonorific !== false,
     awardCeiling: row.awardCeiling != null ? Number(row.awardCeiling) : undefined,
     numberOfAwards: row.numberOfAwards ?? undefined,
     // Non-indexed re-rank payload.
