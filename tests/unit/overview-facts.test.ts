@@ -510,18 +510,70 @@ describe("assembleOverviewFacts — §5.1 live auto-set (Phase 2c flip)", () => 
 });
 
 describe("assembleOverviewFacts — funding (selection-driven)", () => {
-  it("defaults to lead-role (PI/Co-PI) active awards, shaped {role,funderLabel,title,mechanism}", async () => {
+  it("defaults to PI-level active awards, shaped {role,roleLabel,isPrincipalInvestigator,funderLabel,title,mechanism}", async () => {
     mockGrantFindMany.mockResolvedValue([
       grantRow("g1", "PI", { funder: "NIH/NIGMS", title: "Gene therapy", mechanism: "R01" }),
       grantRow("g2", "Co-I", { funder: "NIH/NHGRI", title: "Side project", mechanism: null }),
     ]);
     const facts = await assembleOverviewFacts("self01");
-    // Co-I is a candidate but NOT a default pick — only the lead role.
+    // Co-I is a candidate but NOT a default pick — only the PI-level role.
     expect(facts?.activeGrants).toEqual([
-      { role: "PI", funderLabel: "NIH/NIGMS", title: "Gene therapy", mechanism: "R01" },
+      {
+        role: "PI",
+        roleLabel: "Principal Investigator",
+        isPrincipalInvestigator: true,
+        funderLabel: "NIH/NIGMS",
+        title: "Gene therapy",
+        mechanism: "R01",
+      },
     ]);
     expect(mockGrantFindMany.mock.calls[0][0].where).toMatchObject({ cwid: "self01" });
     expect(mockGrantFindMany.mock.calls[0][0].where.endDate).toHaveProperty("gte");
+  });
+
+  // A `Co-PI` row is InfoEd's NON-CONTACT PD/PI — an NIH multiple-PI award, with full
+  // PI standing. The raw token must never be what the model is handed: NIH has no
+  // "co-PI" (that is NSF's), so FACTS carry the MPI label and the PI flag.
+  it("hands the model the MPI LABEL for a Co-PI row, and counts it as a PI (#2064)", async () => {
+    mockGrantFindMany.mockResolvedValue([
+      grantRow("g1", "Co-PI", { funder: "NIH/NCI", title: "Multi-PI consortium", mechanism: "U01" }),
+    ]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.activeGrants).toEqual([
+      {
+        role: "Co-PI",
+        roleLabel: "Multiple Principal Investigator (MPI)",
+        isPrincipalInvestigator: true,
+        funderLabel: "NIH/NCI",
+        title: "Multi-PI consortium",
+        mechanism: "U01",
+      },
+    ]);
+    // Raw `Co-PI` must not reach the model as a label anywhere in the entry.
+    expect(JSON.stringify(facts?.activeGrants[0].roleLabel)).not.toContain("Co-PI");
+  });
+
+  it("a Co-PI award is a DEFAULT (lead-role) pick, not a Co-I-style candidate", async () => {
+    mockGrantFindMany.mockResolvedValue([
+      grantRow("g1", "Co-PI", { funder: "NIH/NCI", title: "MPI award" }),
+      grantRow("g2", "Key Personnel", { funder: "NIH/NEI", title: "KP award" }),
+    ]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.activeGrants.map((g) => g.role)).toEqual(["Co-PI"]);
+  });
+
+  it("marks a non-PI role isPrincipalInvestigator:false with its own label", async () => {
+    mockGrantFindMany.mockResolvedValue([grantRow("g2", "Co-I", { funder: "NSF" })]);
+    const facts = await assembleOverviewFacts("self01", {
+      pmids: [],
+      grantIds: ["g2"],
+      toolNames: [],
+    });
+    expect(facts?.activeGrants[0]).toMatchObject({
+      role: "Co-I",
+      roleLabel: "Co-Investigator",
+      isPrincipalInvestigator: false,
+    });
   });
 
   it("includes a non-lead award when it is explicitly selected", async () => {
@@ -949,6 +1001,7 @@ describe("loadOverviewSourceOptions", () => {
       {
         id: "g1",
         role: "PI",
+        roleLabel: "Principal Investigator",
         funder: "NIH",
         title: "Proj 1",
         award: "R01 X",
@@ -958,6 +1011,7 @@ describe("loadOverviewSourceOptions", () => {
       {
         id: "g2",
         role: "Co-I",
+        roleLabel: "Co-Investigator",
         funder: "NSF",
         title: "Proj 2",
         award: null,
@@ -966,6 +1020,24 @@ describe("loadOverviewSourceOptions", () => {
       },
     ]);
     expect(opts.tools).toEqual([]);
+  });
+
+  it("labels a Co-PI drawer row as MPI and pre-checks it as a lead award (#2064)", async () => {
+    mockGrantFindMany.mockResolvedValue([
+      grantRow("g1", "Co-PI", { funder: "NIH/NCI", title: "MPI consortium", endYear: 2028 }),
+    ]);
+    const opts = await loadOverviewSourceOptions("self01");
+    expect(opts.funding).toMatchObject([
+      {
+        id: "g1",
+        role: "Co-PI",
+        roleLabel: "Multiple Principal Investigator (MPI)",
+        defaultSelected: true,
+        featured: true,
+        // isLeadRole now delegates to isPiRole; a Co-PI still reads as an award you lead.
+        reason: "An active grant you lead",
+      },
+    ]);
   });
 
   it("projects titles, education, and the resolved identity scaffold for the picker", async () => {
@@ -1212,7 +1284,16 @@ describe("hasSufficientFacts", () => {
     expect(
       hasSufficientFacts({
         ...empty,
-        activeGrants: [{ role: "PI", funderLabel: "NIH", title: null, mechanism: "R01" }],
+        activeGrants: [
+          {
+            role: "PI",
+            roleLabel: "Principal Investigator",
+            isPrincipalInvestigator: true,
+            funderLabel: "NIH",
+            title: null,
+            mechanism: "R01",
+          },
+        ],
       }),
     ).toBe(true);
   });

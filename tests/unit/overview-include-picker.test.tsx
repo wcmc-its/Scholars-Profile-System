@@ -28,9 +28,9 @@ function options(over: Partial<OverviewSourceOptions> = {}): OverviewSourceOptio
       { pmid: "44", title: "Parenchymal gene transfer review", venue: "Hum Gene Ther", year: 2022, impact: 61, isFirstOrLast: false, authorPosition: "middle", defaultSelected: false, featured: false },
     ],
     funding: [
-      { id: "g1", role: "PI", funder: "NIH/NINDS", title: "Batten gene therapy", award: "R01 NS-1", endYear: 2027, defaultSelected: true },
+      { id: "g1", role: "PI", roleLabel: "Principal Investigator", funder: "NIH/NINDS", title: "Batten gene therapy", award: "R01 NS-1", endYear: 2027, defaultSelected: true },
       // co-I — behind "all roles"
-      { id: "g2", role: "Co-I", funder: "NIH/NEI", title: "Imaging core", award: null, endYear: 2026, defaultSelected: false },
+      { id: "g2", role: "Co-I", roleLabel: "Co-Investigator", funder: "NIH/NEI", title: "Imaging core", award: null, endYear: 2026, defaultSelected: false },
     ],
     tools: [],
     ...over,
@@ -165,7 +165,7 @@ describe("OverviewIncludePicker — led ⇄ all toggle", () => {
   it("shows funding's 'no grants you lead' empty state when led and none are featured", () => {
     const opts = options({
       funding: [
-        { id: "g2", role: "Co-I", funder: "NIH", title: "Imaging core", award: null, endYear: 2026, defaultSelected: false },
+        { id: "g2", role: "Co-I", roleLabel: "Co-Investigator", funder: "NIH", title: "Imaging core", award: null, endYear: 2026, defaultSelected: false },
       ],
     });
     render(<OverviewIncludePicker options={opts} deltas={deltas()} onChange={() => {}} />);

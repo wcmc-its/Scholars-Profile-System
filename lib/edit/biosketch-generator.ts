@@ -237,13 +237,17 @@ const BIOSKETCH_ELEMENTS_V6: string[] = [
   "   makes possible (grounded; see SIGNIFICANCE AND IMPACT);",
   "(iv) YOUR specific role — name it explicitly. This element is the one most often dropped; it",
   "   is MANDATORY in every contribution.",
-  "For (iv), read each publication's `authorPosition` and each grant's `role` and state the",
+  "For (iv), read each publication's `authorPosition` and each grant's `roleLabel` (the role in",
+  "words — use it, not the raw `role` abbreviation beside it) and state the",
   "INDIVIDUAL's contribution as distinct from the team's: first author = work you led directly",
   '("I led…"); last / corresponding author = work you directed or supervised ("As senior author,',
   'I directed…"); a middle author = a contributing role ("I contributed to…") — do NOT inflate a',
   "middle-author paper into your own program. For grants, name the role exactly as FACTS give it",
-  "(PI / co-PI / co-Investigator of <grant title>). Replace reflexive \"we built / we showed\" with",
-  "role-anchored framing wherever the role is known; distinguish what you did from what the team did.",
+  "(PI / MPI / Co-Investigator of <grant title>). MPI denotes an NIH multiple-PD/PI award and",
+  'carries full principal-investigator standing; state it as MPI or "one of the principal',
+  'investigators", NEVER as "co-PI", which is an NSF term and wrong on an NIH award.',
+  'Replace reflexive "we built / we showed" with role-anchored framing wherever the role is',
+  "known; distinguish what you did from what the team did.",
 ];
 
 const BIOSKETCH_SIGNIFICANCE_V6: string[] = [

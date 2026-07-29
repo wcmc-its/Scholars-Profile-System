@@ -127,6 +127,8 @@ describe("GET /api/faculty-review/[cwid]/grants", () => {
       source: "InfoEd",
       title: "Mechanisms of X",
       role: "PI",
+      roleLabel: "Principal Investigator",
+      isPrincipalInvestigator: true,
       awardNumber: "R01 AG067497",
       funder: "NCI",
       primeSponsor: "NCI",
@@ -146,6 +148,41 @@ describe("GET /api/faculty-review/[cwid]/grants", () => {
     // No search-enrichment / dollar fields leak into the contract.
     expect(active).not.toHaveProperty("keywords");
     expect(active).not.toHaveProperty("amount");
+  });
+
+  // #2064 — ADDITIVE. The Faculty Review Tool renders these strings into promotion
+  // packets, so `role` must stay a RAW passthrough (an existing caller may key off the
+  // stored token) while the new derived fields carry the correct words: InfoEd's `Co-PI`
+  // is the NON-CONTACT PD/PI of an NIH multiple-PI award, holding full PI standing.
+  it("adds roleLabel + isPrincipalInvestigator while `role` stays raw", async () => {
+    mockFindMany.mockResolvedValue([
+      grantRow({ externalId: "MPI-1", role: "Co-PI" }),
+      grantRow({ externalId: "SUB-1", role: "PI-Subaward" }),
+      grantRow({ externalId: "COI-1", role: "Co-I" }),
+      grantRow({ externalId: "KP-1", role: "Key Personnel" }),
+    ]);
+    const resp = await call(makeRequest({ token: TOKEN }));
+    const { grants } = await resp.json();
+
+    // `role` is untouched — the frozen source vocabulary, byte for byte.
+    expect(grants.map((g: { role: string }) => g.role)).toEqual([
+      "Co-PI",
+      "PI-Subaward",
+      "Co-I",
+      "Key Personnel",
+    ]);
+    expect(grants.map((g: { roleLabel: string }) => g.roleLabel)).toEqual([
+      "Multiple Principal Investigator (MPI)",
+      "Principal Investigator (subaward)",
+      "Co-Investigator",
+      "Key Personnel",
+    ]);
+    // Co-PI and the subaward PI BOTH carry PI standing; Co-I / KP do not.
+    expect(
+      grants.map((g: { isPrincipalInvestigator: boolean }) => g.isPrincipalInvestigator),
+    ).toEqual([true, true, false, false]);
+    // No "co-PI" (an NSF term, wrong on an NIH award) in any printable field.
+    expect(grants[0].roleLabel).not.toMatch(/co-pi/i);
   });
 
   it("returns an empty list for a cwid with no grants", async () => {

@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { apiError, API_NO_STORE } from "@/lib/api/error-response";
 import { db } from "@/lib/db";
 import { isFundingActive } from "@/lib/funding-active";
+import { fundingRoleLabel, isPiRole } from "@/lib/funding-roles";
 import { isAuthorizedBearer } from "@/lib/revalidate-auth";
 
 /**
@@ -36,8 +37,24 @@ interface GrantRecord {
   /** "InfoEd" (WCM-administered) or "RePORTER" (NIH prior/dropped history). */
   source: string;
   title: string;
-  /** This scholar's role: PI | PI-Subaward | Co-PI | Co-I | Key Personnel. */
+  /** This scholar's role, RAW as stored: PI | PI-Subaward | Co-PI | Co-I | Key Personnel.
+   *  A stable passthrough of the source vocabulary — never relabelled here, so an existing
+   *  caller keying off these tokens keeps working. For prose, use `roleLabel`.
+   *
+   *  `Co-PI` is InfoEd's NON-CONTACT PD/PI: the other principal investigator on an NIH
+   *  multiple-PD/PI (MPI) award, holding FULL principal-investigator standing. It is not a
+   *  junior or associate role, and NIH has no "co-PI" designation at all (that is NSF's
+   *  term) — do not render this token verbatim in a promotion packet. */
   role: string;
+  /** The role in WORDS, ready to print: "Principal Investigator", "Principal Investigator
+   *  (subaward)", "Multiple Principal Investigator (MPI)" (for `Co-PI`), "Co-Investigator",
+   *  "Key Personnel". Derived from `role` via the shared vocabulary; an unrecognized future
+   *  source value passes through unchanged rather than rendering blank. */
+  roleLabel: string;
+  /** True when the role carries principal-investigator standing — `PI`, `PI-Subaward`, or
+   *  `Co-PI`/MPI. Use this rather than testing `role === "PI"`, which silently excludes both
+   *  the MPI and the subaward PI. `Co-I` and `Key Personnel` are false. */
+  isPrincipalInvestigator: boolean;
   /** Sponsor-issued award number (e.g. "R01 AG067497"); null when none. */
   awardNumber: string | null;
   /** Pre-rendered sponsor display string (e.g. "NCI via Duke University"). */
@@ -118,7 +135,13 @@ export async function GET(
       externalId: g.externalId,
       source: g.source,
       title: g.title,
+      // ADDITIVE: `role` stays a raw passthrough of the stored vocabulary (an existing
+      // caller may key off it); `roleLabel`/`isPrincipalInvestigator` are the new derived
+      // fields, so the tool prints "Multiple Principal Investigator (MPI)" for a `Co-PI`
+      // row instead of an NSF-flavoured token NIH does not use.
       role: g.role,
+      roleLabel: fundingRoleLabel(g.role),
+      isPrincipalInvestigator: isPiRole(g.role),
       awardNumber: g.awardNumber,
       funder: g.funder,
       primeSponsor: g.primeSponsor,

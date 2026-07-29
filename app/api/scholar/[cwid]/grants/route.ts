@@ -141,6 +141,10 @@ export async function GET(
       // Absent when the index has no role for them: undefined, so the card renders nothing
       // rather than defaulting a role we cannot stand behind.
       role: h.people.find((p) => p.cwid === cwid)?.role,
+      // Whether the AWARD has ≥2 PD/PIs. Already on the hit; it was being dropped here,
+      // which left a renderer unable to tell a sole PI from the contact PI of an MPI
+      // award. Always a boolean from the index, so no unknown state to preserve.
+      isMultiPi: h.isMultiPi,
       // Per-ROW concept admission. The page-level `strength` below cannot answer this:
       // on a mixed page it reads "tagged" while individual rows are literal-text hits.
       // A concept-captioned card block needs the row fact, not the page's.

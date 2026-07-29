@@ -96,7 +96,12 @@ export type FundingPersonChip = {
   cwid: string;
   slug: string;
   preferredName: string;
-  /** Per-person role on this grant: PI | Multi-PI | Co-I | Sub-PI | KP. */
+  /** Per-person role on this grant, RAW as indexed from `Grant.role`:
+   *  `PI | PI-Subaward | Co-PI | Co-I | Key Personnel`. NOT display text and NOT the
+   *  `Multi-PI`/`Sub-PI`/`KP` bucket-and-pill spellings — those are, respectively, the
+   *  role-FACET token (see `roles` below) and the short pill labels produced by
+   *  `grantRoleShortLabel` (lib/funding-roles.ts). Render through that module;
+   *  `Co-PI` is InfoEd's non-contact PD/PI and must read as MPI, never "co-PI". */
   role: string;
   identityImageEndpoint: string;
   /** #536 — scholar role category (enriched from the DB; the funding index
@@ -124,8 +129,13 @@ export type FundingHit = {
   endDate: string;
   isActive: boolean;
   status: FundingStatus | "ended";
+  /** The PROJECT has ≥2 distinct WCM scholars in a PI-standing role (`PI` /
+   *  `PI-Subaward` / `Co-PI`) — i.e. an NIH multiple-PD/PI award. It is what relabels
+   *  the CONTACT PI as an MPI; a `Co-PI` row already implies MPI on its own. */
   isMultiPi: boolean;
-  /** WCM scholars on the grant — lead PI first, Multi-PIs next, Co-Is last. */
+  /** WCM scholars on the grant, ordered by raw role: contact PI (`PI` / `PI-Subaward`)
+   *  first, then the non-contact PD/PIs (`Co-PI`, i.e. the MPIs), then `Co-I`, then the
+   *  rest. Ordering is by `Grant.role`, not by any display label. */
   people: FundingPersonChip[];
   totalPeople: number;
   /** Department of record — typically lead PI's primary appointment. */
@@ -199,6 +209,12 @@ export type FundingSearchResult = {
     mechanisms: SearchFacetBucket[];
     status: { active: number; endingSoon: number; recentlyEnded: number };
     departments: SearchFacetBucket[];
+    /** Counts over the `roles` bucket tokens ({@link FundingRoleBucket}). NOT a
+     *  partition: `multiPi` is a strict SUBSET of `pi`. A project with ≥2 PD/PIs is
+     *  written into the index with BOTH `PI` and `Multi-PI` (lib/funding-projection.ts —
+     *  `roles.add("Multi-PI")` after the `PI` bucket), so that it is still found by a
+     *  plain "PI" filter. These three therefore sum PAST the result total on purpose;
+     *  do not render them as shares of a whole. */
     roles: { pi: number; multiPi: number; coI: number };
     /** Issue #94 — top WCM investigators in the current result set,
      *  hydrated server-side. */

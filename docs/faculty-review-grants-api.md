@@ -103,7 +103,9 @@ curl -sS \
 | `externalId` | string | Stable, source-issued unique id. Use as the record key for dedupe/joins. |
 | `source` | string | `"InfoEd"` (WCM-administered awards) or `"RePORTER"` (NIH prior-institution / dropped-WCM-history federal grants). |
 | `title` | string | Project title. |
-| `role` | string | This scholar's role on the grant: `PI`, `PI-Subaward`, `Co-PI`, `Co-I`, or `Key Personnel`. |
+| `role` | string | This scholar's role on the grant, **raw source vocabulary**: `PI`, `PI-Subaward`, `Co-PI`, `Co-I`, or `Key Personnel`. Stable — these tokens do not change. Do not print it; see `roleLabel`. |
+| `roleLabel` | string | The role in words, ready to print: `Principal Investigator`, `Principal Investigator (subaward)`, `Multiple Principal Investigator (MPI)`, `Co-Investigator`, `Key Personnel`. |
+| `isPrincipalInvestigator` | boolean | `true` when the role carries principal-investigator standing — `PI`, `PI-Subaward`, **or** `Co-PI` (MPI). Prefer this over testing `role === "PI"`, which drops both the MPI and the subaward PI. |
 | `awardNumber` | string \| null | Sponsor-issued award number (e.g. `"R01 CA123456"`). `null` for awards without one (many industry/internal awards). |
 | `funder` | string | Ready-to-display sponsor string (e.g. `"NCI"` or `"NCI via Duke University"`). Use this if you just need one label. |
 | `primeSponsor` | string \| null | Canonical short name of the original source of funds; `null` when the raw sponsor isn't in the canonical lookup. |
@@ -125,6 +127,16 @@ curl -sS \
 - **No dollar amounts.** SPS never ingests award `$` from InfoEd, so no funding
   totals / direct-cost figures are available here. If you need dollar amounts,
   the system of record is InfoEd, not SPS.
+- **`Co-PI` means MPI, not "co-principal-investigator".** InfoEd flags only the
+  *contact* PI as `PI` and writes `Co-PI` for the **non-contact PD/PI** — the
+  other principal investigator on an NIH multiple-PD/PI (MPI) award. A `Co-PI`
+  row therefore means, by construction, that the award has ≥2 PD/PIs, and the
+  scholar holds **full principal-investigator standing** on it; it is not a
+  junior, associate, or deputy role. NIH has no "co-PI" designation at all —
+  that is NSF's term — so rendering the raw `Co-PI` token in a promotion packet
+  on an NIH award is factually wrong and understates the appointment. Print
+  `roleLabel` (`Multiple Principal Investigator (MPI)`), and use
+  `isPrincipalInvestigator` for any "did they lead an award" logic.
 - **Two sources, deduped.** `InfoEd` rows are WCM-administered awards;
   `RePORTER` rows are NIH awards from a scholar's prior institution or dropped
   WCM history that InfoEd never had. RePORTER rows that duplicate an InfoEd

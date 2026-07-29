@@ -42,6 +42,7 @@ import {
   type RepresentativeRanked,
   type RepresentativeTier,
 } from "@/lib/edit/overview-representative";
+import { fundingRoleLabel, isPiRole } from "@/lib/funding-roles";
 
 /** How many parent topics the facts payload carries. */
 const TOPIC_LIMIT = 4;
@@ -104,10 +105,22 @@ export type OverviewFacts = {
   yearsActive: { first: number | null; last: number | null };
 
   // --- funding / training ---
-  /** The selected (or default PI/Co-PI) active awards. `title` is the project
+  /** The selected (or default PI-level / MPI) active awards. `title` is the project
    *  title (v3.1); `mechanism` the award mechanism. */
   activeGrants: {
+    /** The RAW `Grant.role` value (`PI | PI-Subaward | Co-PI | Co-I | Key Personnel`).
+     *  Kept for callers that key off the stored vocabulary; never render it. */
     role: string;
+    /** The role in WORDS — {@link fundingRoleLabel}. This is what the model is
+     *  handed and what `buildGroundingReference` puts in ALLOWED_FACTS, so a
+     *  `Co-PI` row reaches the drafter as "Multiple Principal Investigator (MPI)"
+     *  and the grounding verifier ENFORCES that label instead of stripping it.
+     *  InfoEd's `Co-PI` is the non-contact PD/PI of an NIH multiple-PI award; NIH
+     *  has no "co-PI", so the raw token must never reach prose. */
+    roleLabel: string;
+    /** True when the role carries principal-investigator standing (PI /
+     *  PI-Subaward / Co-PI) — {@link isPiRole}. */
+    isPrincipalInvestigator: boolean;
     funderLabel: string;
     title: string | null;
     mechanism: string | null;
@@ -182,7 +195,11 @@ export type OverviewSourcePublication = {
  *  additive fields; `defaultSelected` stays the current lead-role rule. */
 export type OverviewSourceFunding = {
   id: string;
+  /** The RAW `Grant.role` value. Never render it — see `roleLabel`. */
   role: string;
+  /** The role in WORDS ({@link fundingRoleLabel}); `Co-PI` reads as
+   *  "Multiple Principal Investigator (MPI)", InfoEd's non-contact PD/PI. */
+  roleLabel: string;
   funder: string;
   title: string | null;
   award: string | null;
@@ -280,10 +297,15 @@ function decimalToNumber(
   return typeof value === "number" ? value : value.toNumber();
 }
 
-/** A funding role that counts as "lead" (PI / PI-Subaward / Co-PI) — the default
- *  pre-check set (§3.2). `Co-I` / `Key Personnel` are candidates but unchecked. */
+/** A funding role that counts as "lead" — the default pre-check set (§3.2).
+ *  Delegates to the ONE role vocabulary ({@link isPiRole}: PI / PI-Subaward /
+ *  Co-PI, where `Co-PI` is the non-contact PD/PI of an MPI award and so holds
+ *  full PI standing). `Co-I` / `Key Personnel` are candidates but unchecked.
+ *  Membership over the five frozen `Grant.role` values is IDENTICAL to the
+ *  prefix regex this replaced; exact matching just stops a future InfoEd value
+ *  that merely starts with "PI" from silently joining the lead set. */
 function isLeadRole(role: string): boolean {
-  return /^(pi\b|pi-subaward|co-pi)/i.test(role.trim());
+  return isPiRole(role.trim());
 }
 
 
@@ -747,6 +769,9 @@ export async function assembleOverviewFacts(
     .filter((f) => selectedGrantSet.has(f.id))
     .map((f) => ({
       role: f.role,
+      // The words the model sees. `Co-PI` → "Multiple Principal Investigator (MPI)".
+      roleLabel: fundingRoleLabel(f.role),
+      isPrincipalInvestigator: isPiRole(f.role),
       funderLabel: f.funder,
       title: f.title,
       mechanism: f.mechanism,
@@ -1254,6 +1279,7 @@ export async function loadOverviewSourceOptions(cwid: string): Promise<OverviewS
     funding: funding.map((f) => ({
       id: f.id,
       role: f.role,
+      roleLabel: fundingRoleLabel(f.role),
       funder: f.funder,
       title: f.title,
       award: f.awardNumber ?? f.mechanism,

@@ -67,12 +67,21 @@ export type EvidenceGrant = {
   endYear?: number | null;
   isActive?: boolean;
   /** THIS scholar's investigator role on the grant, from the funding index's per-person
-   *  `FundingPersonChip.role` (`PI | Multi-PI | Co-I | Sub-PI | KP`), picked for the querying
-   *  cwid. Absent ⇒ unknown (the scholar is on the grant but the index carries no role for
+   *  `FundingPersonChip.role`, picked for the querying cwid. This is the RAW InfoEd
+   *  `Grant.role` vocabulary — `PI | PI-Subaward | Co-PI | Co-I | Key Personnel` — NOT
+   *  display text: put it through `fundingRoleLabel` / `grantRoleShortLabel`
+   *  (lib/funding-roles.ts) before rendering. In particular `Co-PI` is InfoEd's
+   *  NON-CONTACT PD/PI of a multiple-PI award and must read as MPI, never "co-PI".
+   *  Absent ⇒ unknown (the scholar is on the grant but the index carries no role for
    *  them) and must render nothing, never a default. "Is this scholar the PI, and is the award
    *  still alive" are the two questions a sponsor asks of a grant; `isActive`/`endYear` answer
    *  the second, this answers the first. */
   role?: string | null;
+  /** The AWARD carries ≥2 PD/PIs (`FundingHit.isMultiPi`), which is what relabels the
+   *  CONTACT PI (`PI` / `PI-Subaward`) as an MPI; a `Co-PI` row is an MPI on its own and
+   *  needs this for nothing. Absent ⇒ UNKNOWN, not false: a caller that does not supply it
+   *  must render the plain role, never assume a sole-PI award. */
+  isMultiPi?: boolean;
   /** The grant was admitted via the resolved MeSH concept, not merely by a literal
    *  text hit (`FundingHit.matchedConcept`). The funding query is an OR — text OR
    *  concept — so a grant can surface having matched nothing but a stray word of the
