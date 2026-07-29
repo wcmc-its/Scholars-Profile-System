@@ -15,6 +15,7 @@ import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { cachedRead } from "@/lib/api/swr-cache";
 import { identityImageEndpoint } from "@/lib/headshot";
+import { isPiRole } from "@/lib/funding-roles";
 import type { DepartmentTopicArea } from "@/lib/api/departments";
 import type {
   DeptPublicationCard,
@@ -686,9 +687,6 @@ async function getDivisionGrantsListUncached(
     sortKey: number;
   };
   const groups = new Map<string, Group>();
-  function isPiRole(role: string): boolean {
-    return /^(PI|Co-PI|MPI)/i.test(role);
-  }
   for (const r of all) {
     // #160/#481(b) — skip suppressed grant rows before grouping.
     if (r.externalId !== null && suppressed.has(r.externalId)) continue;

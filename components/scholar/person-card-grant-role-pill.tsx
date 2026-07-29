@@ -5,51 +5,37 @@
  * neutral treatment — but maps the per-person grant role (`Grant.role`:
  * PI, Co-PI, PI-Subaward, Co-I, Key Personnel) rather than authorship flags.
  *
- * Tone: PI = lead (slate); Co-PI / PI-Subaward = co-lead (amber);
- * Co-I / Key Personnel = neutral. A PI on a multi-PI grant reads "Multi-PI",
- * still slate. Unknown roles render their raw value, neutral.
+ * Tone: PI / Co-PI = lead (slate); PI-Subaward = co-lead (amber);
+ * Co-I / Key Personnel = neutral. Unknown roles render their raw value, neutral.
+ *
+ * The vocabulary itself lives in `lib/funding-roles.ts` — this file only renders
+ * it. Co-PI is InfoEd's non-contact PD/PI (an NIH multiple-PI award), so it takes
+ * the lead tone and reads "MPI", with or without `isMultiPi`.
  */
-export type GrantRoleTone = "lead" | "co-lead" | "neutral";
+import {
+  fundingRoleLabel,
+  grantRoleTone,
+  type GrantRoleTone,
+} from "@/lib/funding-roles";
 
-// Sub-PI / KP are not in the live data (the five values are PI, Co-PI,
-// PI-Subaward, Co-I, Key Personnel) but are kept as defensive aliases — the
-// indexer copies Grant.role verbatim and InfoEd role strings can drift.
-const GRANT_ROLE_LABEL: Record<string, string> = {
-  PI: "Principal Investigator",
-  "Co-PI": "Co-Principal Investigator",
-  "PI-Subaward": "PI (subaward)",
-  "Sub-PI": "PI (subaward)",
-  "Co-I": "Co-Investigator",
-  "Key Personnel": "Key Personnel",
-  KP: "Key Personnel",
-};
-
-const GRANT_ROLE_TONE: Record<string, GrantRoleTone> = {
-  PI: "lead",
-  "Co-PI": "co-lead",
-  "PI-Subaward": "co-lead",
-  "Sub-PI": "co-lead",
-  "Co-I": "neutral",
-  "Key Personnel": "neutral",
-  KP: "neutral",
-};
+export { grantRoleTone };
+export type { GrantRoleTone };
 
 /** Human label for a raw `Grant.role` value; unknown roles fall back to raw. */
 export function grantRoleLabel(role: string): string {
-  return GRANT_ROLE_LABEL[role] ?? role;
-}
-
-/** Pill tone for a raw `Grant.role` value; unknown roles are neutral. */
-export function grantRoleTone(role: string): GrantRoleTone {
-  return GRANT_ROLE_TONE[role] ?? "neutral";
+  return fundingRoleLabel(role);
 }
 
 /**
- * Display label including the Multi-PI relabel: a PI on a project with ≥2 PIs
- * reads "Multi-PI". Every other role keeps its plain label.
+ * Display label including the MPI relabel. Reads "MPI" for a Co-PI row (an MPI
+ * unconditionally — InfoEd only flags the contact PI, so a Co-PI row means the
+ * award has ≥2 PD/PIs) and for the CONTACT PI of a project `isMultiPi` says has
+ * ≥2 PD/PIs. Every other role keeps its plain label.
  */
 export function grantRolePillLabel(role: string, isMultiPi?: boolean): string {
-  if (isMultiPi && role === "PI") return "Multi-PI";
+  if (role === "Co-PI" || (isMultiPi && (role === "PI" || role === "PI-Subaward"))) {
+    return "MPI";
+  }
   return grantRoleLabel(role);
 }
 
@@ -59,7 +45,7 @@ export function GrantRolePill({
   onGrant,
 }: {
   role: string;
-  /** When the project has ≥2 PIs, a PI reads "Multi-PI". */
+  /** When the project has ≥2 PD/PIs, the contact PI reads "MPI" too. */
   isMultiPi?: boolean;
   /** When true, suffixes "on this grant" for added clarity in the popover. */
   onGrant?: boolean;

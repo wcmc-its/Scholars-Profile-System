@@ -76,14 +76,17 @@ describe("FundingResultRow — basics", () => {
 });
 
 describe("FundingResultRow — pills", () => {
-  it("does not render Multi-PI when isMultiPi is false", () => {
+  it("does not render the MPI pill when isMultiPi is false", () => {
     render(<FundingResultRow hit={baseHit} />);
-    expect(screen.queryByText("Multi-PI")).toBeNull();
+    expect(screen.queryByText("MPI")).toBeNull();
   });
 
-  it("renders Multi-PI pill when the project is multi-PI", () => {
+  it("renders the MPI pill when the project is multi-PI", () => {
+    // House spelling. The index/URL TOKEN stays "Multi-PI" (renaming it needs a
+    // reindex); only the rendered label changed.
     render(<FundingResultRow hit={{ ...baseHit, isMultiPi: true }} />);
-    expect(screen.getByText("Multi-PI")).toBeTruthy();
+    expect(screen.getByText("MPI")).toBeTruthy();
+    expect(screen.queryByText("Multi-PI")).toBeNull();
   });
 
   it("does not render a Type pill for plain Grant", () => {

@@ -20,6 +20,7 @@
  * under vitest with a fake client, matching `edit-roster.ts`.
  */
 import { toCsv } from "@/lib/csv";
+import { PI_ROLES } from "@/lib/funding-roles";
 import { formatRoleCategory } from "@/lib/role-display";
 import type { EditRosterUnitFilter } from "@/lib/api/edit-roster";
 import { buildScholarNameClauses } from "@/lib/api/scholar-name-search";
@@ -45,9 +46,13 @@ export type DataQualityClient = Pick<
 export type { EditRosterUnitFilter };
 
 /** Grant `role` values that count as a principal-investigator role ("times as PI").
- *  PI-Subaward is still PI (on a subaward); Co-PI is a shared principal role.
- *  Co-I / Key Personnel are NOT PI. (Source: `Grant.role`, #78.) */
-export const PI_ROLES = ["PI", "PI-Subaward", "Co-PI"] as const;
+ *  PI-Subaward is still PI (on a subaward). Co-PI is InfoEd's NON-CONTACT PD/PI —
+ *  the other principal investigator on an NIH multiple-PI (MPI) award, not a
+ *  junior "co-" role. Co-I / Key Personnel are NOT PI. (Source: `Grant.role`, #78.)
+ *
+ *  Re-exported, not redeclared: `lib/funding-roles.ts` is the single vocabulary.
+ *  The named export stays because this module's own queries consume it. */
+export { PI_ROLES };
 
 /** #536 hidden identity classes — not publicly displayed; mirrors
  *  `HIDDEN_DISPLAY_ROLES` in `lib/eligibility.ts`. Excluded when the viewer turns

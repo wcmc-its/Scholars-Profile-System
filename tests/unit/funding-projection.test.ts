@@ -94,6 +94,28 @@ describe("projectFromRows", () => {
     expect(new Set(doc.roles)).toEqual(new Set(["PI", "Multi-PI"]));
   });
 
+  it("resolves a department from a Co-PI when the project has no contact-PI row", () => {
+    // InfoEd flags only the CONTACT PI as `PI`, so a WCM scholar can be the
+    // non-contact PD/PI of a direct award whose contact PI sits at another
+    // institution — the project then has no PI / PI-Subaward row at all. The lead-PI
+    // lookup used to match only those two, so such a project resolved
+    // `department: null` and dropped out of the Department facet entirely.
+    const doc = projectFromRows([
+      makeRow({ cwid: "bob", role: "Co-PI", scholar: SCHOLAR_B }),
+      makeRow({ cwid: "carol", role: "Co-I", scholar: SCHOLAR_C }),
+    ])!;
+    expect(doc.department).toBe("Surgery");
+  });
+
+  it("prefers the contact PI's department over a Co-PI's", () => {
+    // The fallback must not steal the department when a contact PI IS present.
+    const doc = projectFromRows([
+      makeRow({ cwid: "bob", role: "Co-PI", scholar: SCHOLAR_B }),
+      makeRow({ cwid: "alice", role: "PI", scholar: SCHOLAR_A }),
+    ])!;
+    expect(doc.department).toBe("Medicine");
+  });
+
   it("does not count one scholar's PI and Co-PI rows as Multi-PI", () => {
     const doc = projectFromRows([
       makeRow({ cwid: "alice", role: "PI", scholar: SCHOLAR_A }),

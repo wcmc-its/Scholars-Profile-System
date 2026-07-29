@@ -53,6 +53,20 @@ describe("scoreFundingImportance", () => {
     expect(scoreFundingImportance(pi)).toBeGreaterThan(scoreFundingImportance(coI));
   });
 
+  it("ranks Co-PI above PI-Subaward, and level with PI, on an identical award", () => {
+    // Co-PI is InfoEd's NON-CONTACT PD/PI — the other principal investigator on an
+    // NIH multiple-PI award, holding PI standing equally. It used to score 30, below
+    // PI-Subaward's 35, which demoted a scholar's own R01 beneath a slice of someone
+    // else's award when the overview picked its grounding sources.
+    const coPi = grant({ role: "Co-PI" });
+    const subaward = grant({ role: "PI-Subaward" });
+    const pi = grant({ role: "PI" });
+    expect(scoreFundingImportance(coPi)).toBeGreaterThan(
+      scoreFundingImportance(subaward),
+    );
+    expect(scoreFundingImportance(coPi)).toBe(scoreFundingImportance(pi));
+  });
+
   it("ranks an NIH award above an industry / company-funder award at the same role", () => {
     const nih = grant({ role: "Co-I", funder: "NCI", mechanism: "R01" });
     const company = grant({

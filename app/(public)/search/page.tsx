@@ -89,6 +89,7 @@ import {
   type FundingSort,
   type FundingStatus,
 } from "@/lib/api/search-funding";
+import { FUNDING_ROLE_BUCKET_LABEL } from "@/lib/funding-roles";
 import { FundingResultsList } from "@/components/search/funding-results-list";
 import { InvestigatorFacet } from "@/components/search/investigator-facet";
 import { getAZBuckets } from "@/lib/api/browse";
@@ -2112,7 +2113,8 @@ async function FundingResults({
     chips.push({ label: v, removeHref: removeHref("department", v) });
   }
   for (const v of filters.role ?? []) {
-    chips.push({ label: v, removeHref: removeHref("role", v) });
+    // Label only — `v` is the index/URL token and stays "Multi-PI" in the href.
+    chips.push({ label: FUNDING_ROLE_BUCKET_LABEL[v] ?? v, removeHref: removeHref("role", v) });
   }
   // Issue #94 — investigator chips. Names come from the hydrated facet
   // buckets (active selections always surface there even with zero
@@ -2386,7 +2388,9 @@ function FacetSidebarFunding({
         {sortActiveFirst(roleItems, (r) => activeRole.includes(r.key)).map((r) => (
           <FacetCheckbox
             key={r.key}
-            label={r.key}
+            // Display label only. `r.key` is the OpenSearch/URL token and stays
+            // "Multi-PI" in `href` and `terms` — renaming it needs a reindex.
+            label={FUNDING_ROLE_BUCKET_LABEL[r.key] ?? r.key}
             count={r.count}
             isActive={activeRole.includes(r.key)}
             href={toggleHref("role", r.key)}

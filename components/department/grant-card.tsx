@@ -74,7 +74,11 @@ export function GrantCard({
           {grant.pis.map((p) => (
             <HoverTooltip
               key={p.cwid ?? p.name}
-              text={grant.isMultiPi ? "Multi-PI" : "Principal investigator"}
+              text={
+                grant.isMultiPi
+                  ? "Multiple Principal Investigator (MPI)"
+                  : "Principal investigator"
+              }
             >
               <a
                 href={p.slug ? profilePath(p.slug) : undefined}

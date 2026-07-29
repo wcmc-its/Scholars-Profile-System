@@ -20,7 +20,7 @@ import type { FundingFilters, FundingHit } from "@/lib/api/search-funding";
  * Issue #78 F2 — Funding result row.
  *
  *   Title (wraps to two lines, ellipsis beyond)
- *   People row: avatar + name chips, lead-PI first, with Multi-PI pill
+ *   People row: avatar + name chips, lead-PI first, with MPI pill
  *               and Type pill (when programType !== "Grant")
  *   Sponsor · year–year · via [direct]
  *   ↳ right column: <MechanismAbbr> serial   (NIH-funded only)
@@ -178,9 +178,13 @@ export function FundingResultRow({
               +{remainder} more
             </span>
           ) : null}
+          {/* Display only — the index/URL token stays "Multi-PI" (renaming it needs a reindex). */}
           {hit.isMultiPi ? (
-            <span className="inline-flex h-5 items-center rounded-sm bg-[#f1efe8] px-2 text-[10px] font-semibold uppercase tracking-wide text-[#444441]">
-              Multi-PI
+            <span
+              className="inline-flex h-5 items-center rounded-sm bg-[#f1efe8] px-2 text-[10px] font-semibold uppercase tracking-wide text-[#444441]"
+              title="Multiple Principal Investigator (MPI) award"
+            >
+              MPI
             </span>
           ) : null}
           {typeLabel ? (

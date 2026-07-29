@@ -16,6 +16,7 @@
  */
 import type { ProfilePayload } from "@/lib/api/profile";
 import type { MenteeChip } from "@/lib/api/mentoring";
+import { fundingRoleLabel, isPiRole } from "@/lib/funding-roles";
 import {
   appendToLabelParagraph,
   applyTableStyling,
@@ -337,7 +338,7 @@ function clinicalPracticeLines(pops: PopsEnrichment | null): string[] {
  *  table, unlike Current Research Funding). */
 function grantSummaryLine(g: ProfilePayload["grants"][number]): string {
   const range = dateRange(g.startDate, g.endDate, false);
-  return [g.funder, g.title, range, g.role].filter(Boolean).join(". ") + ".";
+  return [g.funder, g.title, range, fundingRoleLabel(g.role)].filter(Boolean).join(". ") + ".";
 }
 
 // ── public builder ──────────────────────────────────────────────────────────
@@ -443,8 +444,13 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
       setLabeledValue(doc, clone, "Award Source:", g.funder || NA);
       setLabeledValue(doc, clone, "Project title:", g.title || NA);
       setLabeledValue(doc, clone, "Duration of support:", dateRange(g.startDate, g.endDate, g.isActive));
-      setLabeledValue(doc, clone, "Name of Principal Investigator:", g.role === "Principal Investigator" ? p.publishedName : "");
-      setLabeledValue(doc, clone, "Your role", g.role || "");
+      // `role` carries the DB vocabulary (PI | PI-Subaward | Co-PI | Co-I | Key
+      // Personnel), never the spelled-out "Principal Investigator" this used to
+      // compare against — so this cell was blank on every grant for every
+      // scholar. Co-PI is InfoEd's non-contact PD/PI, i.e. an NIH multiple-PI,
+      // and counts as a principal investigator here.
+      setLabeledValue(doc, clone, "Name of Principal Investigator:", isPiRole(g.role) ? p.publishedName : "");
+      setLabeledValue(doc, clone, "Your role", fundingRoleLabel(g.role));
     },
   );
   // Past (Completed) Funding — the template prompts free prose here (no table),
