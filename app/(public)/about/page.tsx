@@ -1360,8 +1360,8 @@ export default function DocsPage() {
           Because these surfaces highlight ongoing research, they draw from people in active research
           roles: full-time faculty, postdocs, and fellows. Affiliated and voluntary appointees,
           instructors, lecturers, and emeritus faculty are not featured here, though they still appear
-          in full on their own profiles, in search, and on the Browse directory. <strong>Top
-          scholars</strong> narrows further to full-time faculty only, because it is a
+          in full on their own profiles, in search, and on the Browse directory. <strong>Scholars in
+          this area</strong> narrows further to full-time faculty only, because it is a
           principal-investigator surface. Doctoral students are not shown on any public surface at
           all, which is a privacy choice, and they appear only as plain-text names where a mentor or
           co-author relationship refers to them.
