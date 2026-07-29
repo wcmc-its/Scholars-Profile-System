@@ -1984,8 +1984,27 @@ export class AppStack extends Stack {
         //   curated anchor) and admit 0.03 -> 0.1 on EVERY full-query entry-term topical
         //   search -- not just the two above -- so it REORDERS live search results (and the
         //   concept-admission floor with them). That is a ranking change with a broad blast
-        //   radius, not a local correction. STAGING ON to soak + measure; PROD
-        //   OFF until product decides. The #692 generic-strip retry is excluded by
+        //   radius, not a local correction.
+        //
+        //   MEASURED ON STAGING 2026-07-28, the flag's first execution in any environment
+        //   (it was absent from BOTH running task definitions until sps-app-staging:142 --
+        //   merged 07-27 22:39, after both taskdefs were registered). Same env, same index,
+        //   before vs after: people totals 919 / 844 UNCHANGED and both publication arms
+        //   bit-identical, confirming the "ordering only" contract against the live system;
+        //   19 of the top 20 scaled by exactly 1.5/1.3 = x1.15385 and the one scholar not
+        //   carrying the descriptor scaled x1.0, which produced the single reorder (ranks
+        //   10/11). `genetic therapy` came back byte-identical -- it was already `exact`.
+        //   Pair convergence is modest: people top-10 overlap 2 -> 3, top-20 8 -> 8. The
+        //   residual difference is the lexical arm, which is legitimate -- `gene therapy`
+        //   tops out ~3.5x higher because WCM authors literally write that phrase.
+        //
+        //   PROD IS A BIGGER MOVE THAN STAGING'S, and does NOT stack with #2024: prod lacks
+        //   the D015316 -> gene_cell_therapy anchor (the 2026-06-02 fossil; meshAnchorCount
+        //   is 1 on staging, 0 on prod), so prod sits at `entry` 1.15, making the flip
+        //   x1.30435 rather than staging's x1.15385. #2024 alone would be x1.13043, and
+        //   both together are still x1.30435 because fullQueryMatch short-circuits in
+        //   meshMatchTier before the anchor test is reached. Never measure them as additive.
+        //   The #692 generic-strip retry is excluded by
         //   construction: callers compare against the USER's query, never the stripped
         //   contentQuery, so a retry-derived entry-term match keeps the anchored-entry/entry
         //   tiers. Independent of the two flags above -- `entry-term` only survives on
@@ -1993,7 +2012,7 @@ export class AppStack extends Stack {
         //   singularize retry both overwrite it with `partial`, which is never promoted.
         //   Resolve-time only: no reindex. Flip is env-only via cdk deploy
         //   Sps-App-<env> (CD re-rolls the image only) -- the flag-parity rule.
-        SEARCH_MESH_ENTRY_TIER_PARITY: env === "staging" ? "on" : "off",
+        SEARCH_MESH_ENTRY_TIER_PARITY: "on",
         // #1342 -- query-side morphology retry. When ON, resolveMeshDescriptor, after
         //   the exact lookup misses, retries the SINGULARIZED query ("melanomas" ->
         //   "melanoma") against the same index and, on a hit, returns the descriptor at
