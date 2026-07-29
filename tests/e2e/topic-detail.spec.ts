@@ -13,7 +13,7 @@ test.describe("Topic detail page Layout B", () => {
     await expect(page.locator("h1")).toBeVisible();
     // TopScholarsChipRow and Spotlight are conditionally rendered (sparse-state policy).
     // If they render, assert their structure; otherwise pass silently.
-    const topScholarsHeading = page.getByRole("heading", { name: "Top scholars in this area" });
+    const topScholarsHeading = page.getByRole("heading", { name: "Scholars in this area" });
     if (await topScholarsHeading.isVisible().catch(() => false)) {
       await expect(topScholarsHeading).toBeVisible();
     }

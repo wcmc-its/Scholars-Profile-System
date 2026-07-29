@@ -61,7 +61,7 @@ test.describe("/topics/{slug} placeholder route (Phase 2 D-10)", () => {
       const resp = await page.goto(`/topics/${slug}`);
       if (!resp || !resp.ok()) continue;
       const heading = page.getByRole("heading", {
-        name: "Top scholars in this area",
+        name: "Scholars in this area",
       });
       if (await heading.isVisible().catch(() => false)) {
         const section = page.locator("section").filter({ has: heading });
