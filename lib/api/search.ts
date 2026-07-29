@@ -945,22 +945,70 @@ export function cleanExemplarTools(raw: unknown, limit = 3): string[] {
 }
 
 /**
+ * Which of the scholar's OWN areas do we name as the one the query matched?
+ *
+ * The rule used to be "the first one that intersects the matched set" — i.e. the
+ * scholar's own list order decided it. That order is not evidence of anything, and on a
+ * broad query where several of a scholar's areas intersect, it picks arbitrarily.
+ * Measured on staging for `cancer`: a hematopathologist with 219 of 347 publications
+ * tagged under Neoplasms (descendants: Leukemia, Lymphoma, Hodgkin Disease) was credited
+ * with `Breast Cancer`, because `breast_cancer` happens to lead their `areasOfInterest`
+ * string and carries `areaCounts.breast_cancer = 1`. Their `hematology` count is 21.
+ * The card named a one-paper area as the reason for a match built on twenty-one.
+ *
+ * So: among the intersecting areas, take the one the scholar has the MOST publications
+ * in. `>` is deliberately strict, which makes the scholar's own order the tie-break and
+ * makes the degradation exact — a not-yet-reindexed doc carries no `areaCounts`, every
+ * candidate scores 0, and the first intersecting slug wins, which is the old behavior
+ * byte-for-byte. That is why this needs no flag.
+ *
+ * Contract: docs/search-relevance-contract.md § Layer 3, rule E1. This closes the
+ * SELECTION half only. The count is still `areaCounts`, computed at index time and never
+ * filtered by the query, so it remains the scholar's total in that area whatever was
+ * searched — E1 stays open on that half.
+ */
+export function pickMatchedAreaIndex(
+  slugs: readonly string[],
+  matchedSlugs: ReadonlySet<string>,
+  areaCounts: Record<string, number> | undefined,
+): number {
+  let best = -1;
+  let bestCount = -1;
+  for (let i = 0; i < slugs.length; i++) {
+    const slug = slugs[i]!;
+    if (!matchedSlugs.has(slug)) continue;
+    const n = areaCounts?.[slug] ?? 0;
+    if (n > bestCount) {
+      best = i;
+      bestCount = n;
+    }
+  }
+  return best;
+}
+
+/**
  * #824 follow-up — derive the humanized research-areas fallback for a scholar from
  * the space-joined `areasOfInterest` slug string, a topic slug→label map (real
  * `Topic.label` preferred, else {@link humanizeAreaSlug}), and the matched topic
  * slugs (so the matched area can be bolded as a WHOLE label). Returns null when
- * the scholar has no areas. `matchedIndex` is the index of the first area whose
- * slug is in `matchedSlugs`, or -1.
+ * the scholar has no areas. `matchedIndex` is the BEST-EVIDENCED matched area per
+ * {@link pickMatchedAreaIndex}, or -1.
+ *
+ * `areaCounts` is optional so the older 3-arg shape still compiles; omitting it is the
+ * degenerate case that reproduces the previous first-intersecting behavior. The bolded
+ * chip and the topic evidence line MUST agree on which area they name, so both call
+ * sites pass the same map.
  */
 export function buildHumanizedAreas(
   areasOfInterest: string | undefined,
   labelBySlug: Map<string, string>,
   matchedSlugs: Set<string>,
+  areaCounts?: Record<string, number>,
 ): { labels: string[]; matchedIndex: number } | null {
   const slugs = (areasOfInterest ?? "").trim().split(/\s+/).filter(Boolean);
   if (slugs.length === 0) return null;
   const labels = slugs.map((s) => labelBySlug.get(s) ?? humanizeAreaSlug(s));
-  const matchedIndex = slugs.findIndex((s) => matchedSlugs.has(s));
+  const matchedIndex = pickMatchedAreaIndex(slugs, matchedSlugs, areaCounts);
   return { labels, matchedIndex };
 }
 
@@ -3853,7 +3901,12 @@ export async function searchPeople(opts: {
     let topic: { label: string; id: string; count?: number } | undefined;
     if (matchedTopicSlugs.size > 0 && areasOfInterest) {
       const areaSlugs = areasOfInterest.trim().split(/\s+/).filter(Boolean);
-      const hitSlug = areaSlugs.find((s) => matchedTopicSlugs.has(s));
+      // E1 (selection half) — the BEST-EVIDENCED intersecting area, not the first one in
+      // the scholar's own list. Same rule and same map as the bolded chip in
+      // `buildHumanizedAreas`; if these two ever diverge the card names one area and
+      // bolds another. See `pickMatchedAreaIndex` for the measurement behind it.
+      const hitIndex = pickMatchedAreaIndex(areaSlugs, matchedTopicSlugs, areaCounts);
+      const hitSlug = hitIndex >= 0 ? areaSlugs[hitIndex] : undefined;
       // `hitSlug` IS the parent-topic slug (= Topic.id = PublicationTopic
       // .parentTopicId) — carry it as `id` so the hover can resolve the
       // scholar's representative paper in this topic, and as the `areaCounts` key.
@@ -4104,6 +4157,9 @@ export async function searchPeople(opts: {
                 h._source.areasOfInterest,
                 topicLabelBySlug,
                 matchedTopicSlugs,
+                // Same map the topic evidence line uses — the bolded chip and the named
+                // area have to agree (E1 selection half).
+                h._source.areaCounts,
               );
               return ha ? { humanizedAreas: ha } : {};
             })()
