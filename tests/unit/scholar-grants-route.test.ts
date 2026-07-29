@@ -160,12 +160,34 @@ describe("GET /api/scholar/[cwid]/grants", () => {
     expect(body.grants[0]).toMatchObject({ sponsor: null, startYear: null, endYear: null });
   });
 
-  it("returns empty 200 (never 500s) when searchFunding throws", async () => {
+  it("returns empty 200 (never 500s) when searchFunding throws, and SAYS it failed", async () => {
     vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
     vi.mocked(searchFunding).mockRejectedValue(new Error("OpenSearch down"));
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     const res = await call("abc1234", "diabetes");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ grants: [], total: 0 });
+    // Contract E5 — the body must distinguish a failure from a real no-match. Status stays
+    // 200 so the card's control never goes dead.
+    expect(await res.json()).toEqual({ grants: [], total: 0, error: "search_failed" });
+    // ...and it must not fail silently: a persistent outage that logs nothing reads as
+    // "no scholar has matching grants" forever.
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("a genuine no-match carries NO error discriminator", async () => {
+    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
+    vi.mocked(searchFunding).mockResolvedValue({ hits: [], total: 0 } as never);
+    const body = await (await call("abc1234", "diabetes")).json();
+    expect(body).not.toHaveProperty("error");
+    expect(body.total).toBe(0);
+  });
+
+  it("the flag-off and no-query inert paths are not failures either", async () => {
+    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(false);
+    expect(await (await call("abc1234", "diabetes")).json()).not.toHaveProperty("error");
+    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
+    expect(await (await call("abc1234")).json()).not.toHaveProperty("error");
   });
 
   describe("#1359 Tier 2 — concept threading", () => {

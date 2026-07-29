@@ -1432,6 +1432,12 @@ export async function relevanceScoresForQuery(
  * emitting one `filter`/`weight` clause per non-empty tier for the OUTER prominence
  * `function_score` (additive). Pure — unit-tested directly. Reorder-only: a `filter`
  * clause scores only docs already in the result set.
+ *
+ * Contract: docs/search-relevance-contract.md § Layer 2, rule O2 — a term must reference
+ * what it claims to measure. The emitted clause is a bare `terms: { cwid }` membership
+ * filter: it names neither the query nor the resolved descriptor, so whether it credits the
+ * QUERIED concept depends entirely on how the caller built `concentration`. See
+ * lib/api/area-concentration.ts, which owns that choice.
  */
 export function buildAreaBoostFunctions(
   concentration: { cwid: string; total: number }[],
@@ -2834,6 +2840,12 @@ export async function searchPeople(opts: {
     // multiplicatively with the attribution boost above, so tagged+MeSH >
     // tagged-only > MeSH-only > neither. Off ⇒ `methodFamilyTierLabel` is null
     // and nothing is pushed.
+    // Contract: docs/search-relevance-contract.md § Layer 2, rule O1 — OPEN VIOLATION.
+    // `methodFamilyTierLabel` comes from a lexical token-boundary match of the query against
+    // the family's own label, never from the resolved descriptor, so two queries that resolve
+    // to the SAME concept can differ by this x2.0 on spelling alone (`gene therapy` carries
+    // it, `gene therapies` does not, on identical result sets). Regression pair for any
+    // change here: probe both forms and require convergence.
     if (methodFamilyTierLabel) {
       scoreFunctions.push({
         filter: { match_phrase: { methodFamily: methodFamilyTierLabel } },
@@ -2926,6 +2938,11 @@ export async function searchPeople(opts: {
           },
         ]
       : [];
+  // Contract: docs/search-relevance-contract.md § Layer 2. These are the query-INDEPENDENT
+  // priors, and rule O3 requires each to state a ceiling. The ln1p(publicationCount) factor
+  // below has none — unfiltered and unbounded — and is logged as an open O3 violation in
+  // that document's register. Do not bound it with `max_boost` on the wrapper: that caps
+  // the SUM and truncates every other term with it (rule O4).
   const prominenceFunctions: Record<string, unknown>[] = applyProminence
     ? [
         { weight: PEOPLE_PROMINENCE_BASE_WEIGHT },

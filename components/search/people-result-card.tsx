@@ -402,16 +402,19 @@ export function PeopleResultCard({
   // carries the remainder, so a mixed set states both and they sum to `grantsTotal`.
   // Both degenerate to today's exact strings when the set is all-tagged or all-mention.
   const fundingLead = fundingTagged ? grantsTagged : grantsTotal;
-  // #2018/E2 — the denominator of THIS fraction must be the population the numerator came
-  // from: the scholar's funding-index projects, computed by the same aggregation as
-  // `grantMatchCount` (coreProjectNum-grouped, suppression-filtered). It is NOT
-  // `hit.grantCount`, which is the people doc's `s.grants.length` — raw Grant rows, neither
-  // grouped nor suppressed. Measured on staging: one scholar rendered "of 127" against a
-  // searchable population of 117, so the share was of a set the numerator never came from.
-  // `Math.min` cannot catch that: it only guards lead > denominator.
+  // Contract: docs/search-relevance-contract.md § Layer 3, rule E2 — SATISFIED HERE, and the
+  // reason this line reads the way it does. Both sides must come from ONE population: the
+  // scholar's funding-index projects (coreProjectNum-grouped, suppression-filtered), which
+  // `grantIndexedCount` carries from the same aggregation that produced `grantMatchCount`.
+  //
+  // It is NOT `hit.grantCount` — that is the people doc's `s.grants.length`, raw Grant rows,
+  // neither grouped nor suppressed. Measured on staging before this: one scholar rendered
+  // "of 127" against a searchable population of 117, so the share was of a set the numerator
+  // never came from. `Math.min` cannot catch that; it only guards lead > denominator.
   //
   // Falls back to `grantCount` when the field is absent, which is a payload from before this
-  // shipped — a stale client then renders exactly today's number rather than nothing.
+  // shipped — a stale client then renders exactly the old number rather than "of 0", which
+  // would turn a thin match into a headline share.
   //
   // The right-hand stat column below deliberately KEEPS `hit.grantCount`. It makes a
   // different claim — "this scholar holds N grants", career-wide, not a share of anything —

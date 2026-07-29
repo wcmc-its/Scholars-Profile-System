@@ -1775,6 +1775,22 @@ export class AppStack extends Stack {
         // relevance×coverage ranking in that area (reorder-only, no reindex).
         // resolveSearchPeopleAreaBoost reads === "on". Staging-first.
         SEARCH_PEOPLE_AREA_BOOST: "on", // Prod flipped 2026-07-07 (reorder-only, no reindex).
+        // #2018 -- concept-arm precedence for the concentration boost above. That boost has
+        //   two arms: a CURATED one keyed on taxonomyMatch.areas[0] (area membership) and a
+        //   CONCEPT one keyed on the resolved MeSH descendantUis (the query). On master the
+        //   concept arm only runs when the curated arm returned nothing -- and an area reaches
+        //   the matched set via a MeSH anchor or a subtopic->parent collapse even when the
+        //   query matches no area NAME, so the arm that tracks the query is effectively dead.
+        //   Measured on staging 2026-07-29 (`genetic therapy`): scholars with 1-of-393 and
+        //   1-of-607 tagged publications gained up to 30 ranks while the 36-of-135 scholar
+        //   lost 5. When on, the descriptor-keyed arm is tried first and the curated arm is
+        //   the fallback. resolveSearchPeopleConceptArmFirst reads === "on". Reorder-only,
+        //   query-time, no reindex; flag-OFF => master's arm order and round-trip count.
+        //   STAGING-FIRST: mesh_curated_topic_anchor is 85 distinct rows in prod vs 349 in
+        //   staging (#2016), and anchors are exactly what puts an off-query area at areas[0],
+        //   so the two envs select from different distributions -- A/B on staging before any
+        //   prod flip.
+        SEARCH_PEOPLE_CONCEPT_ARM_FIRST: env === "staging" ? "on" : "off",
         // #1344 -- multi-word topic phrase boost. When on, a topic People query adds
         //   match_phrase should-clauses over publicationTitles (slop 8) + areasOfInterest
         //   (slop 4) so a multi-word specialty ("pediatric congenital heart surgery") is
