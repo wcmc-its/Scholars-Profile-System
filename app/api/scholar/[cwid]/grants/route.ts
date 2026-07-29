@@ -15,6 +15,14 @@ import type { EvidenceGrant } from "@/lib/api/result-evidence";
  * this only for scholars with grantCount > 0 and a non-empty query, and renders the
  * Funding row only when ≥1 grant comes back (hide-when-empty, §4.1/§5).
  *
+ * A FAILURE still answers 200 with an empty `grants`, but carries `error: "search_failed"`
+ * so it is distinguishable from a real no-match (contract E5). NOT distinguishable, by
+ * design: an unknown `cwid` and a known scholar with no matching grants both return a bare
+ * empty. They are the same answer to this endpoint's question, and separating them costs a
+ * scholar-existence lookup on a per-card path to serve only a hand-probing human. The guard
+ * against that failure mode is contract E4 — take the identifier from the payload, never
+ * construct one from a name.
+ *
  * Gated behind SEARCH_EVIDENCE_ROWS: off ⇒ { grants: [], total: 0 } so prod is inert
  * and the route can't be probed for data early.
  *
@@ -36,8 +44,18 @@ export const dynamic = "force-dynamic";
 
 const NO_STORE = { "cache-control": "no-store" } as const;
 
-/** The inert / error / no-match response — never a dead control on the card. */
+/** The inert / no-match response — never a dead control on the card. */
 const EMPTY: { grants: EvidenceGrant[]; total: number } = { grants: [], total: 0 };
+
+/**
+ * The FAILED response. Same shape as {@link EMPTY} plus a discriminator, because a
+ * failure and a genuine no-match must not look alike (contract E5,
+ * `docs/search-relevance-contract.md` § Layer 3). Status stays 200 — the docblock's
+ * never-500 contract keeps the card's control alive, and the card reads only `grants` —
+ * so the signal lives in the BODY, where anyone probing this endpoint to substantiate a
+ * card claim will actually see it.
+ */
+const FAILED = { ...EMPTY, error: "search_failed" } as const;
 
 /** Top-N representative grants in the disclosure (parity with rep-papers' 3). */
 const GRANT_CAP = 3;
@@ -137,7 +155,13 @@ export async function GET(
     const strength: "tagged" | "mention" =
       meshResolution !== null && result.hits.some((h) => h.matchedConcept) ? "tagged" : "mention";
     return NextResponse.json({ grants, total: result.total, strength }, { headers: NO_STORE });
-  } catch {
-    return NextResponse.json(EMPTY, { headers: NO_STORE });
+  } catch (err) {
+    // This used to return EMPTY, so an OpenSearch throw rendered as "this scholar has no
+    // matching grants" — indistinguishable from the truth, and logged nowhere at all. Both
+    // halves mattered: the silence meant a persistent failure could not be noticed, and the
+    // ambiguity meant this endpoint could not be used to check a card's number. It was
+    // read as a data bug once for exactly that reason.
+    console.error("[grants-evidence] searchFunding failed", { cwid, err });
+    return NextResponse.json(FAILED, { headers: NO_STORE });
   }
 }
