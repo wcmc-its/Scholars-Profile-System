@@ -25,6 +25,9 @@ vi.mock("@/lib/db", () => ({
     publicationAuthor: { findMany: mockPublicationAuthorFindMany },
     suppression: { findMany: mockSuppressionFindMany },
     personNihProfile: { findFirst: mockPersonNihProfileFindFirst },
+    // The `grants[].isMultiPi` sibling-PD/PI lookup. No sibling rows here, so
+    // every grant in this fixture is single-PI — this file is about suppression.
+    grant: { findMany: vi.fn(async () => []) },
     // #1266 — leadership reader lookups; default empty (no leadership roles).
     department: { findMany: vi.fn(async () => []) },
     division: { findMany: vi.fn(async () => []) },
