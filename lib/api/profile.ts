@@ -23,8 +23,14 @@ import { gateEmailForViewer } from "@/lib/profile/email-display-gate";
 import { MAX_SELECTED_HIGHLIGHTS, SECTION_VISIBILITY_FIELDS } from "@/lib/edit/validators";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
-import { coreProjectNum } from "@/lib/award-number";
+import { coreProjectNum, parseNihAward } from "@/lib/award-number";
 import { isFundingActive } from "@/lib/funding-active";
+import { isPiRole } from "@/lib/funding-roles";
+import {
+  GRANT_INDEX_WHERE,
+  groupGrantsByProject,
+  parseExternalId,
+} from "@/lib/funding-projection";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import {
   isMethodsLensEnabled,
@@ -581,6 +587,18 @@ export type ProfilePayload = {
     nihIc: string | null;
     /** Issue #78 F6 — true when direct sponsor differs from prime. */
     isSubaward: boolean;
+    /** True when the FUNDING PROJECT this row belongs to has ≥2 distinct WCM
+     *  cwids in `PI_ROLES` — i.e. an NIH multiple-PI award. A project-level fact,
+     *  not a per-row one: it exists only to relabel the CONTACT PI
+     *  (`PI` / `PI-Subaward`) as MPI, since a `Co-PI` row is InfoEd's non-contact
+     *  PD/PI and already reads MPI from the role alone (lib/funding-roles.ts).
+     *
+     *  Computed over the same project key the funding index uses —
+     *  `coreProjectNum(awardNumber) ?? accountNumber`, via `groupGrantsByProject`
+     *  — so the profile and `/search?type=funding` cannot disagree about which
+     *  award is multi-PI. False when the row's `externalId` isn't an InfoEd id
+     *  (the funding index drops those projects too). */
+    isMultiPi: boolean;
     /** Issue #85/#86 — RePORTER core_project_num parsed from awardNumber.
      *  Used by the UI to group renewal-year rows of the same core grant
      *  into a single displayed entry. Null for non-NIH grants. */
@@ -845,6 +863,103 @@ export function isActiveTrialStatus(status: string | null): boolean {
   );
 }
 
+/** The two columns that decide a grant row's funding-project key. Kept as a
+ *  named type so the candidate query, `groupGrantsByProject`, and the tests all
+ *  agree on the projection. */
+type ProjectKeyRow = {
+  cwid: string;
+  role: string;
+  externalId: string | null;
+  awardNumber: string | null;
+};
+
+/**
+ * ONE query that pulls every Grant row which could share a funding project with
+ * this scholar's rows — the sibling PD/PIs the nested `grants` relation cannot
+ * see, because it holds only the owning scholar's rows.
+ *
+ * THE KEY. A funding project is `coreProjectNum(awardNumber) ?? accountNumber`
+ * (lib/funding-projection.ts) — derived in app code, NOT a queryable column. So
+ * this can only fetch a SUPERSET and let `groupGrantsByProject` do the exact
+ * grouping. Two OR arms, one per half of that expression:
+ *
+ *   1. `external_id LIKE 'INFOED-<account>-%'` — every WCM investigator on the
+ *      same InfoEd Account_Number (the id is `INFOED-{account}-{cwid}`, so this
+ *      is a left-anchored prefix on the `external_id` UNIQUE index). Covers the
+ *      non-NIH key entirely and the common same-account MPI.
+ *   2. `award_number LIKE '%<serial>%'` — the NIH serial (6-7 digits) of each of
+ *      the scholar's NIH awards. `coreProjectNum` collapses renewals and
+ *      supplements whose award-number STRINGS differ ("1R01CA245678-01" vs
+ *      "5 R01 CA245678-02"), and those may sit on a different Account_Number, so
+ *      arm 1 alone would miss an MPI listed on the renewal. The serial is the
+ *      longest substring common to every spelling of one core project.
+ *
+ * Over-matching is harmless — `groupGrantsByProject` re-derives the real key and
+ * anything that lands in another project's bucket is simply never looked up.
+ * Under-matching would not be: it silently under-flags.
+ *
+ * VISIBILITY: `GRANT_INDEX_WHERE` — active, non-deleted scholars only, the exact
+ * population the funding index walks and the same predicate this loader applies
+ * to the profile's own scholar. A soft-deleted or `status = 'suppressed'`
+ * sibling therefore cannot flip the flag.
+ *
+ * Returns [] without querying when the scholar has no grant row that yields a
+ * project key at all.
+ */
+async function loadProjectSiblingRows(
+  grants: ReadonlyArray<{ externalId: string | null; awardNumber: string | null }>,
+): Promise<ProjectKeyRow[]> {
+  const arms: Array<{ externalId?: { startsWith: string } } | { awardNumber: { contains: string } }> =
+    [];
+  const seenAccounts = new Set<string>();
+  const seenSerials = new Set<string>();
+  for (const g of grants) {
+    const ext = parseExternalId(g.externalId);
+    if (ext && !seenAccounts.has(ext.accountNumber)) {
+      seenAccounts.add(ext.accountNumber);
+      arms.push({ externalId: { startsWith: `INFOED-${ext.accountNumber}-` } });
+    }
+    const serial = parseNihAward(g.awardNumber).serial;
+    if (serial && !seenSerials.has(serial)) {
+      seenSerials.add(serial);
+      arms.push({ awardNumber: { contains: serial } });
+    }
+  }
+  if (arms.length === 0) return [];
+  return (await prisma.grant.findMany({
+    where: { AND: [GRANT_INDEX_WHERE, { OR: arms }] },
+    select: { cwid: true, role: true, externalId: true, awardNumber: true },
+  })) as ProjectKeyRow[];
+}
+
+/**
+ * The scholar's grant `externalId`s whose funding PROJECT is multiple-PI.
+ *
+ * Same rule as `projectFromRows`: ≥2 DISTINCT cwids in `PI_ROLES` on one
+ * project. Counting distinct cwids (not rows) is what keeps a renewal or
+ * supplement — the same scholar on two Account_Numbers under one
+ * `coreProjectNum` — from reading as multi-PI. Row-level dedupe by best role is
+ * unnecessary here: `isPiRole` is true for a cwid iff it is true for that cwid's
+ * highest-priority role, so the set is identical to the projection's.
+ *
+ * Suppressed rows (#160) are dropped before grouping, exactly as the funding
+ * index does — a colleague who hid their own grant row must not keep flipping
+ * this flag.
+ */
+function multiPiExternalIds(
+  siblingRows: readonly ProjectKeyRow[],
+  suppressedGrantIds: ReadonlySet<string>,
+): Set<string> {
+  const flagged = new Set<string>();
+  for (const group of groupGrantsByProject(siblingRows, suppressedGrantIds).values()) {
+    const piCwids = new Set<string>();
+    for (const r of group) if (isPiRole(r.role)) piCwids.add(r.cwid);
+    if (piCwids.size < 2) continue;
+    for (const r of group) if (r.externalId) flagged.add(r.externalId);
+  }
+  return flagged;
+}
+
 export const getScholarFullProfileBySlug = cache(
   async (
     slug: string,
@@ -969,6 +1084,8 @@ export const getScholarFullProfileBySlug = cache(
     //   - families               — gated Methods-lens rows (#799); [] when off
     //   - manualHighlightPmids   — field_override('selectedHighlightPmids') (#836);
     //                              read only when the flag is on, else null (dark)
+    //   - projectSiblingRows     — sibling PD/PI rows on this scholar's funding
+    //                              projects, for the grants[].isMultiPi flag
     const [
       effectiveOverview,
       authorships,
@@ -978,6 +1095,7 @@ export const getScholarFullProfileBySlug = cache(
       centers,
       leadershipTitles,
       sectionOverrideRows,
+      projectSiblingRows,
     ] = await Promise.all([
       // The effective `overview` merges a manual `field_override` over the ETL
       // column at read time (#356, lib/api/manual-layer.ts). A self-edited bio is
@@ -1123,6 +1241,13 @@ export const getScholarFullProfileBySlug = cache(
         },
         select: { fieldName: true },
       }),
+      // The sibling PD/PI rows on this scholar's funding projects — the ONE extra
+      // query behind `grants[].isMultiPi`. The nested `grants` relation above
+      // holds only this scholar's rows, so it can never see a co-PD/PI; without
+      // this the contact PI of a multiple-PI award reads a plain "PI". Rides in
+      // this round (it needs nothing but the already-fetched grant rows) so it
+      // costs no extra round trip. Skipped entirely for a scholar with no grants.
+      loadProjectSiblingRows(scholar.grants),
     ]);
     const hiddenSections = new Set(sectionOverrideRows.map((r) => r.fieldName));
 
@@ -1161,12 +1286,23 @@ export const getScholarFullProfileBySlug = cache(
           scholar.appointments.map((a) => a.externalId),
           prisma,
         ),
+        // The sibling rows are folded into the SAME id-scoped load (it de-dupes
+        // its `in` list), so respecting #160 on a co-PD/PI's row costs no extra
+        // query. `loadAllGrantSuppressions` is batch-only by contract (ADR-005 —
+        // no whole-table read on a request), which is why this stays id-scoped.
         loadEntitySuppressions(
           "grant",
-          scholar.grants.map((g) => g.externalId),
+          [
+            ...scholar.grants.map((g) => g.externalId),
+            ...projectSiblingRows.map((r) => r.externalId),
+          ].filter((id): id is string => id !== null),
           prisma,
         ),
       ]);
+    // Project keys with ≥2 distinct PI-standing cwids, resolved back to the
+    // grant `externalId`s that belong to them (#2063 vocabulary, same rule as
+    // `projectFromRows`). A Set lookup in the mapper below — no per-row work.
+    const multiPiGrantIds = multiPiExternalIds(projectSiblingRows, suppressedGrantIds);
 
     const rankablePubs = visibleAuthorships.map((a) => {
       // ReCiterAI publication score for this scholar+pmid pair (D-08). Source
@@ -1515,6 +1651,10 @@ export const getScholarFullProfileBySlug = cache(
                 mechanism: g.mechanism ?? null,
                 nihIc: g.nihIc ?? null,
                 isSubaward: g.isSubaward,
+                // Project-level, keyed on `coreProjectNum(awardNumber) ??
+                // accountNumber` via `groupGrantsByProject` — the funding index's
+                // key, so the profile can't contradict /search?type=funding.
+                isMultiPi: g.externalId !== null && multiPiGrantIds.has(g.externalId),
                 coreProjectNum: coreProjectNum(g.awardNumber),
                 applId: g.applId ?? null,
                 abstract: g.abstract ?? null,

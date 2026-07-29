@@ -7,7 +7,7 @@
  * subaward annotation, Type pill, and MechanismAbbr in award numbers.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { GrantsSection } from "@/components/profile/grants-section";
 import type { ProfilePayload } from "@/lib/api/profile";
 
@@ -48,6 +48,7 @@ const baseGrant: Grant = {
   mechanism: "R01",
   nihIc: "NCI",
   isSubaward: false,
+  isMultiPi: false,
   coreProjectNum: "R01CA245678",
   applId: null,
   abstract: null,
@@ -165,6 +166,138 @@ describe("GrantsSection row — RePORTER provenance marker", () => {
   it("does not render the RePORTER marker for InfoEd-sourced grants", () => {
     render(<GrantsSection grants={[baseGrant]} />);
     expect(screen.queryByText(/via NIH RePORTER/i)).toBeNull();
+  });
+});
+
+/** The row's role pill. `tracking-wider` is the pill's own utility — the Type
+ *  pill next to the eyebrow uses `tracking-wide`, so this can't collide. */
+function rolePillText(container: HTMLElement): string {
+  return container.querySelector(".tracking-wider")?.textContent ?? "";
+}
+
+describe("GrantsSection row — MPI relabelling of the contact PI", () => {
+  // InfoEd flags only the CONTACT PI as `PI`, so the role alone can't say the
+  // award is multiple-PI. `isMultiPi` (≥2 distinct WCM PD/PIs on the project) is
+  // what turns that pill into MPI; a `Co-PI` row needs no flag at all.
+  it("renders 'PI' for a contact PI on a single-PI award", () => {
+    const { container } = render(<GrantsSection grants={[baseGrant]} />);
+    expect(rolePillText(container)).toBe("PI");
+  });
+
+  it("renders 'MPI' for a contact PI once isMultiPi is set", () => {
+    const g: Grant = { ...baseGrant, role: "PI", isMultiPi: true };
+    const { container } = render(<GrantsSection grants={[g]} />);
+    expect(rolePillText(container)).toBe("MPI");
+  });
+
+  it("renders 'MPI' for a PI-Subaward contact PI on a multi-PI award", () => {
+    const sub: Grant = { ...baseGrant, role: "PI-Subaward", isMultiPi: false };
+    const { container: plain } = render(<GrantsSection grants={[sub]} />);
+    expect(rolePillText(plain)).toBe("Sub-PI");
+
+    const { container: mpi } = render(
+      <GrantsSection grants={[{ ...sub, isMultiPi: true }]} />,
+    );
+    expect(rolePillText(mpi)).toBe("MPI");
+  });
+
+  it("renders 'MPI' for a Co-PI even without isMultiPi (role alone suffices)", () => {
+    // The contact PI is at another institution, so there is only one WCM row and
+    // no second cwid to count — the flag is false and the pill must still read MPI.
+    const g: Grant = { ...baseGrant, role: "Co-PI", isMultiPi: false };
+    const { container } = render(<GrantsSection grants={[g]} />);
+    expect(rolePillText(container)).toBe("MPI");
+  });
+
+  it("passes the flag to the TOOLTIP too, not just the pill label", () => {
+    // Two helpers read the flag at the render site; wiring only the label would
+    // leave a pill reading MPI whose tooltip still said "Principal Investigator".
+    const { container } = render(
+      <GrantsSection grants={[{ ...baseGrant, role: "PI", isMultiPi: true }]} />,
+    );
+    const trigger = container.querySelector(".tracking-wider")!.parentElement!;
+    fireEvent.focus(trigger); // Radix opens the tooltip on focus.
+    expect(
+      screen.getAllByText("Multiple Principal Investigator (contact PD/PI)").length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("leaves a Co-I on a multi-PI project reading 'Co-I'", () => {
+    // `isMultiPi` is a PROJECT fact carried by every row of the project — it must
+    // never promote a non-PI role.
+    const g: Grant = { ...baseGrant, role: "Co-I", isMultiPi: true };
+    const { container } = render(<GrantsSection grants={[g]} />);
+    expect(rolePillText(container)).toBe("Co-I");
+  });
+});
+
+describe("GrantsSection — MPI role tab", () => {
+  /** The tab button carrying `label`, or undefined when the tab is hidden
+   *  (~:220 hides a zero-count tab). */
+  function tab(label: string): HTMLElement | undefined {
+    return screen
+      .queryAllByRole("button")
+      .find((b) => b.textContent?.startsWith(label));
+  }
+
+  const contactPiOnMpi: Grant = {
+    ...baseGrant,
+    role: "PI",
+    isMultiPi: true,
+    title: "Contact PI on a multiple-PI award",
+    awardNumber: "R01 CA245678",
+    coreProjectNum: "R01CA245678",
+  };
+  const nonContactPi: Grant = {
+    ...baseGrant,
+    role: "Co-PI",
+    isMultiPi: true,
+    title: "Non-contact PD/PI on another award",
+    awardNumber: "R01 HL111111",
+    coreProjectNum: "R01HL111111",
+  };
+
+  it("counts both a Co-PI row and a contact PI on a multi-PI award", () => {
+    render(<GrantsSection grants={[contactPiOnMpi, nonContactPi]} />);
+    expect(tab("MPI")?.textContent).toBe("MPI2");
+    // The contact PI keeps its PI standing, so the PI tab still counts it.
+    expect(tab("PI")?.textContent).toBe("PI1");
+  });
+
+  it("returns exactly those rows when the MPI tab is selected", () => {
+    const soloPi: Grant = {
+      ...baseGrant,
+      role: "PI",
+      isMultiPi: false,
+      title: "Sole PI award",
+      awardNumber: "R01 AI222222",
+      coreProjectNum: "R01AI222222",
+    };
+    render(<GrantsSection grants={[contactPiOnMpi, nonContactPi, soloPi]} />);
+    fireEvent.click(tab("MPI")!);
+    expect(screen.getByText("Contact PI on a multiple-PI award")).toBeTruthy();
+    expect(screen.getByText("Non-contact PD/PI on another award")).toBeTruthy();
+    expect(screen.queryByText("Sole PI award")).toBeNull();
+  });
+
+  it("hides the MPI tab entirely when nothing is multi-PI", () => {
+    render(<GrantsSection grants={[baseGrant]} />);
+    expect(tab("MPI")).toBeUndefined();
+  });
+
+  it("does not sweep a Co-I on a multi-PI project into the MPI tab", () => {
+    const coI: Grant = {
+      ...baseGrant,
+      role: "Co-I",
+      isMultiPi: true,
+      title: "Co-I on a multiple-PI award",
+      awardNumber: "R01 DK333333",
+      coreProjectNum: "R01DK333333",
+    };
+    render(<GrantsSection grants={[contactPiOnMpi, coI]} />);
+    expect(tab("MPI")?.textContent).toBe("MPI1");
+    fireEvent.click(tab("MPI")!);
+    expect(screen.queryByText("Co-I on a multiple-PI award")).toBeNull();
   });
 });
 

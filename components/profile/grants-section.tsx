@@ -10,7 +10,7 @@ import { FunderEyebrow } from "@/components/ui/funder-eyebrow";
 import { MechanismAbbr } from "@/components/ui/mechanism-abbr";
 import { useNihApplIdMap } from "@/lib/use-nih-resolve";
 import { ExpandedGrant, expandLabel } from "@/components/funding/expanded-grant";
-import { grantRoleShortLabel, grantRoleTitle } from "@/lib/funding-roles";
+import { grantRoleShortLabel, grantRoleTitle, isPiRole } from "@/lib/funding-roles";
 
 type RoleBucket = "all" | "PI" | "Co-PI" | "Co-I" | "PI-Subaward" | "Key Personnel";
 
@@ -77,6 +77,28 @@ function awardSerial(awardNumber: string, mechanism: string): string {
 
 type Grant = ProfilePayload["grants"][number];
 type GrantPublication = Grant["publications"][number];
+
+/**
+ * Role-tab membership. Drives BOTH the tab counts and the tab filter, so a tab
+ * can never show a count it can't produce rows for (~:220 hides a zero-count
+ * tab, so the visible tab set moves with these counts).
+ *
+ * The MPI tab's key stays the DB value "Co-PI" — it is URL/filter state — but
+ * membership is no longer plain role equality: the CONTACT PI (`PI` /
+ * `PI-Subaward`) of a multiple-PI award renders an MPI pill, so its grant
+ * belongs in the MPI tab too. `isPiRole` guards the `isMultiPi` arm because the
+ * flag is a PROJECT-level fact that a Co-I / Key Personnel row on the same award
+ * also carries — without the guard the MPI tab would sweep in non-PIs.
+ *
+ * A contact PI on a multi-PI award counts in BOTH the PI and MPI tabs: its PI
+ * standing is unchanged, and the MPI tab exists to find multiple-PI awards.
+ */
+function inRoleBucket(g: Grant, bucket: Exclude<RoleBucket, "all">): boolean {
+  if (bucket === "Co-PI") {
+    return isPiRole(g.role) && (g.role === "Co-PI" || g.isMultiPi);
+  }
+  return g.role === bucket;
+}
 
 /** A group of grant rows that share a coreProjectNum (NIH renewal years
  *  of the same award) collapsed into one displayed row. Non-NIH grants
@@ -174,7 +196,9 @@ export function GrantsSection({ grants }: { grants: Grant[] }) {
       "Key Personnel": 0,
     };
     for (const g of grants) {
-      if (g.role in c) c[g.role as RoleBucket] += 1;
+      for (const { key } of ROLE_BUCKET_ORDER) {
+        if (key !== "all" && inRoleBucket(g, key)) c[key] += 1;
+      }
     }
     return c;
   }, [grants]);
@@ -182,7 +206,7 @@ export function GrantsSection({ grants }: { grants: Grant[] }) {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return grants.filter((g) => {
-      if (roleBucket !== "all" && g.role !== roleBucket) return false;
+      if (roleBucket !== "all" && !inRoleBucket(g, roleBucket)) return false;
       if (q.length === 0) return true;
       const hay = `${g.title} ${g.funder} ${g.awardNumber ?? ""}`.toLowerCase();
       return hay.includes(q);
@@ -311,8 +335,11 @@ function GrantRow({
 }) {
   const grant = group.primary;
   const isReporter = group.members.some((m) => m.source === "RePORTER");
-  const label = grantRoleShortLabel(grant.role);
-  const title = grantRoleTitle(grant.role);
+  // `isMultiPi` is what relabels the CONTACT PI of a multiple-PI award: a
+  // `Co-PI` row is InfoEd's non-contact PD/PI and already reads MPI from the
+  // role alone, but `PI` / `PI-Subaward` needs the project-level fact.
+  const label = grantRoleShortLabel(grant.role, grant.isMultiPi);
+  const title = grantRoleTitle(grant.role, grant.isMultiPi);
   const startYear = group.startDate.slice(0, 4);
   const endYear = group.endDate.slice(0, 4);
   const [expanded, setExpanded] = useState(false);
