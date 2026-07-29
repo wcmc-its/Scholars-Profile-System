@@ -444,7 +444,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "MATCHA_GLOSS_RERANK",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "MATCHA_GLOSS_RERANK_LAMBDA",
