@@ -910,9 +910,28 @@ is the largest single factor in the pipeline and it rewards an ETL annotation, n
 Read this before proposing a fix to the area boost or the volume prior: **neither of those touches this
 term.** A ranking fix aimed at #2018 will not move a scholar demoted by a missing method tag.
 
-Caveats: n=6, and the with/without groups also differ in publication count and area tier, so the split is
-not a clean isolation. What is solid is that the two groups do not overlap and the gap sits on the
-constant. Isolate it properly by re-running with `SEARCH_PEOPLE_METHOD_FAMILY_TIER=off`.
+**Confirmed by reconstruction, without a deploy.** `match=exact` sets `meshOff`
+(`lib/api/search-flags.ts:126-128`), and both area-concentration blocks are gated on `!meshOff`
+(`app/api/search/route.ts:613, 635`). So under `exact` there is no MeSH attribution, no concept
+admission and **no area term at all** — the score reduces to
+
+```
+app = BM25  x  2.0^(method tag)  x  productivity  x  ( 1 + ln(1 + publicationCount)
+                                                       + 0.5 if active grants )
+```
+
+with the faculty term absent on staging (`SEARCH_PEOPLE_FACULTY_PROMINENCE=off`). Fitting that to the six
+measured scores leaves a residual constant of **3.60-3.71, a 2.9% spread** — against a 2.8x separation
+before the method term is applied. One binary factor collapses two disjoint groups into one band.
+
+This also validates the measurement method for #2018 above: because the area boost is absent under
+`exact` and present under `expanded`, the `exact -> expanded` delta genuinely does contain the area term,
+so attributing that delta's monotonicity to the area rollup is sound.
+
+Caveats: n=6. The residual is not fully pinned — the fit tightens from 9.9% to 2.9% if the grants term is
+credited to all six, but two of them carry `hasActiveGrants: false`, so roughly +0.5 is reaching them from
+something not yet identified. That is a small unexplained term, not a competing explanation for the 2x.
+`SEARCH_PEOPLE_METHOD_FAMILY_TIER=off` would still isolate it exactly, at the cost of a staging deploy.
 
 ### Latent: `position_increment_gap` and the phrase boost
 
