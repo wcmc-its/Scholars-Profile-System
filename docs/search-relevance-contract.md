@@ -232,9 +232,30 @@ with no violations listed is either new or not being read.
 | O2   | Concentration boost credits area membership via a bare `terms: {cwid}` filter                          | Fixed behind `SEARCH_PEOPLE_CONCEPT_ARM_FIRST`, default off, staging-first (#2018) |
 | O3   | `ln1p(publicationCount)` is unfiltered and unbounded; worth 2.01× across a measured top 40             | Open, scoped                                                                       |
 | E1   | `topic` evidence line renders an index-time area total as query evidence                               | Open                                                                               |
-| E2b  | `topic` line divides by `pubCount` while its numerator is carved (see below)                           | Open — needs an eligible-pool count SPS does not store                             |
+| E2b  | `topic` line divides by `pubCount` while its numerator is carved                                       | **Fixed** — the line states a magnitude, no share (see below)                       |
 | E2   | Grant card denominator is raw Grant rows; numerator is grouped, suppression-filtered projects          | **Fixed** (#2058) — `grantIndexedCount`, same aggregation, no reindex              |
 | E5   | `/api/scholar/[cwid]/grants` swallowed a caught throw into a body identical to a real no-match         | **Fixed** (#2057) — 200 + `error: "search_failed"`, and it logs                     |
+
+### E2b — how it was closed, and why not with a new denominator
+
+The obvious repair was to divide by the scholar's topic-eligible pool. Measured on staging
+2026-07-29, across all 2,422 scholars with ≥ 20 authored publications: **12,129 of 245,135 authored
+pmids (4.9%) carry any `PublicationTopic` row**, the median scholar carries **zero**, and 1,446 of
+the 2,422 (59.7%) have none at all. So `pubCount` overstates the pool by roughly 20× — the Chair of
+Genetic Medicine has 36 topic-assigned pmids of 924, which is why his area line rendered
+"21 of 923 = 2.3%", one publication above the `COVERAGE_CUE_THRESHOLD` that would have greyed it out
+as a thin match, when the honest share is 21 of 36.
+
+The eligible pool was rejected as the replacement anyway. The `%` cell is a fixed position on every
+card and therefore a cross-card comparison device; that only works while every cell divides by the
+same KIND of denominator, and an eligible-pool ratio would be a third kind beside output-share and
+the method-indexed pool. So `topic` joins `method` in withholding the share and stating a magnitude
+("21 publications in Gene & Cell Therapy") — which is what the lesser-tier row had already decided
+for this same count, on this same argument. Consequence to know: after this change **no
+`CountFirst` kind renders a `%`**, so a test that needs the column must use a `publications` lead.
+
+E1 is untouched and still open: that 21 is the scholar's index-time total in the area whatever you
+searched.
 
 ## Related documents
 

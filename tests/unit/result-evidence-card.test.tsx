@@ -166,18 +166,24 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(container.innerHTML).not.toContain("--evidence-accent");
     // …and the CountFirst dim gate, which is a SEPARATE line from the inline one above:
     // without this, dropping `dim ?` in CountFirst survives the whole suite green.
-    // `topic`, not `method`: this exercises the CountFirst dim gate, and a method line no
-    // longer renders a % (its denominator is not this column's kind), so it could not carry
-    // the "it really is dim" assertion. Topic goes through the same CountFirst path.
-    const topic = render(
+    // `method`, because after E2b NO CountFirst kind renders a % any more (topic joined
+    // method in withholding its share), so the old "assert the visible % proves it is
+    // really dim" route is gone. Method still DIMS — `lowCoverage` keeps its denominator
+    // (`methodPubCount`) precisely because dimming is a within-card judgement — so the dim
+    // is asserted directly on the tokens instead of inferred from a column.
+    const m = render(
       <ResultEvidence
-        evidence={{ kind: "topic", label: "Mass spectrometry", id: "mass_spec", count: 1 }}
-        pubCount={538}
+        evidence={{ kind: "method", family: "Mass spectrometry", tools: [], count: 1 }}
+        pubCount={900}
+        methodPubCount={538}
         stacked
       />,
     );
-    expect(topic.container.textContent).toMatch(/0\.2%/); // it really is dim
-    expect(topic.container.innerHTML).not.toContain("--evidence-accent");
+    expect(m.container.textContent).toMatch(/1 of 538 method-indexed publications/);
+    expect(screen.getAllByText("Mass spectrometry")[0]!.className).toMatch(
+      /text-\[var\(--evidence-body\)\]/,
+    ); // it really is dim
+    expect(m.container.innerHTML).not.toContain("--evidence-accent");
   });
 
   it("#1391 — clinical primary ⇒ 'Clinical' type word + underlined specialty, NO count", () => {
@@ -1029,9 +1035,12 @@ describe("<ResultEvidence> — #1366 count suffix (method / research area)", () 
     expect(container.textContent).not.toMatch(/%/);
   });
 
-  it("a NON-method line still measures against pubCount, verbatim", () => {
-    // The denominator swap is scoped to `method`. A topic count is a share of the whole
-    // career and `methodPubCount` must not touch it, even when the hit carries one.
+  it("E2b — a topic line states a MAGNITUDE and no share: no 'of M', no % cell", () => {
+    // `areaCounts` counts only publications that got a topic assignment at all — 4.9% of
+    // authored pmids, measured across all 2,422 staging scholars with >= 20 publications.
+    // Framing it against `pubCount` divides by a pool ~20x the one the numerator came from,
+    // and `methodPubCount` is not its pool either. There is no third denominator to swap
+    // in, so the line withholds the share, exactly as the lesser-tier row already does.
     const { container } = render(
       <ResultEvidence
         evidence={{ kind: "topic", label: "Endocrinology", id: "endocrinology", count: 12 }}
@@ -1040,8 +1049,26 @@ describe("<ResultEvidence> — #1366 count suffix (method / research area)", () 
         stacked
       />,
     );
-    expect(container.textContent).toMatch(/12 of 100 publications in Endocrinology/);
-    expect(screen.getByText("12%")).toBeTruthy(); // 12/100, not 12/20
+    expect(container.textContent).toMatch(/12 publications in Endocrinology/);
+    expect(container.textContent).not.toMatch(/of 100/);
+    expect(container.textContent).not.toMatch(/of 20/);
+    expect(screen.queryByText("12%")).toBeNull();
+    expect(screen.queryByText("60%")).toBeNull();
+  });
+
+  it("E2b — a low topic count is NOT dimmed: with no denominator there is no thinness test", () => {
+    // The urgent case. The Chair of Genetic Medicine rendered 21 of 923 = 2.3%, one
+    // publication above `COVERAGE_CUE_THRESHOLD` greying the line out — on a ratio whose
+    // real denominator is his 36 topic-assigned publications, i.e. 58%.
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "topic", label: "Gene & Cell Therapy", id: "gene_cell_therapy", count: 21 }}
+        pubCount={923}
+        stacked
+      />,
+    );
+    expect(container.textContent).toMatch(/21 publications in Gene & Cell Therapy/);
+    expect(container.querySelector(".text-\\[var\\(--evidence-faint\\)\\]")).toBeNull();
   });
 
   it("research area with a count renders the count-first phrase too", () => {
@@ -1051,7 +1078,10 @@ describe("<ResultEvidence> — #1366 count suffix (method / research area)", () 
         pubCount={41}
       />,
     );
-    expect(container.textContent).toMatch(/12 of 41 publications in Endocrinology/);
+    // Frozen single-evidence surface, but the fraction was wrong here too — withholding a
+    // false denominator is a correction, not the kind of ADDITION the freeze governs.
+    expect(container.textContent).toMatch(/12 publications in Endocrinology/);
+    expect(container.textContent).not.toMatch(/of 41/);
   });
 
   it("no count (single-evidence path) ⇒ NO suffix — label-only, unchanged", () => {
@@ -1493,7 +1523,13 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
   it("a coverage that rounds below 0.1% displays '<0.1%' rather than a lying '0.0%'", () => {
     render(
       <ResultEvidence
-        evidence={{ kind: "topic", label: "Imaging mass cytometry", id: "imc", count: 1 }}
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "1 of 3000 publications tagged under",
+          term: "Imaging mass cytometry",
+          count: 1,
+        }}
         pubCount={3000}
         stacked
       />,
@@ -1537,7 +1573,13 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
   it("uniform fold rule — a normal-coverage primary is NOT dimmed but STILL shows its %", () => {
     const { container } = render(
       <ResultEvidence
-        evidence={{ kind: "topic", label: "Flow cytometry", id: "flow_cyt", count: 4 }}
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "4 of 98 publications tagged under",
+          term: "Flow cytometry",
+          count: 4,
+        }}
         pubCount={98}
         stacked
       />,
@@ -1572,7 +1614,13 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
     // being INSIDE the button is what puts it in the accessible name.
     render(
       <ResultEvidence
-        evidence={{ kind: "topic", label: "Flow cytometry", id: "flow_cyt", count: 4 }}
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "4 of 98 publications tagged under",
+          term: "Flow cytometry",
+          count: 4,
+        }}
         pubCount={98}
         stacked
         canExpand
@@ -1615,7 +1663,13 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
     // the number that explains why. This is a one-token change away from regressing.
     render(
       <ResultEvidence
-        evidence={{ kind: "topic", label: "Mass spectrometry", id: "mass_spec", count: 1 }}
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "1 of 538 publications tagged under",
+          term: "Mass spectrometry",
+          count: 1,
+        }}
         pubCount={538}
         stacked
       />,
@@ -1898,7 +1952,10 @@ describe("<ResultEvidence> — the primary lead degrades instead of collapsing o
     const { container } = renderTagged();
     expect(screen.getByText("12.2%")).toBeTruthy();
     expect(container.textContent).toMatch(/12 of 98 publications tagged/);
-    // Same for the topic lead, which builds its phrase through `CountFirst`.
+    // TOPIC used to be checked here too, on the same "the phrase states the ratio the
+    // column rounds" rule. After E2b it has no column and no ratio to state — its count is
+    // over the topic-assigned pool, not `pubCount` — so it is licensed like method below,
+    // and there is nothing narrow-only for it to lose.
     const topic = render(
       <ResultEvidence
         evidence={{ kind: "topic", label: "Flow cytometry", id: "flow_cyt", count: 4 }}
@@ -1906,8 +1963,8 @@ describe("<ResultEvidence> — the primary lead degrades instead of collapsing o
         stacked
       />,
     );
-    expect(screen.getByText("4.1%")).toBeTruthy();
-    expect(topic.container.textContent).toMatch(/4 of 98 publications in/);
+    expect(screen.queryByText("4.1%")).toBeNull();
+    expect(topic.container.textContent).toMatch(/4 publications in/);
     // METHOD is licensed differently and more strongly: it renders NO column at all, so
     // there is no hidden ratio to lose on a narrow viewport. Its share lives only in the
     // sentence, at every width.
