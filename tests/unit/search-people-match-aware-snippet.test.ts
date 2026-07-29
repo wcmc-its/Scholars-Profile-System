@@ -153,6 +153,7 @@ vi.mock("@/lib/search", () => ({
 import {
   searchPeople,
   buildHumanizedAreas,
+  pickMatchedAreaIndex,
   cleanExemplarTools,
   humanizeAreaSlug,
 } from "@/lib/api/search";
@@ -433,6 +434,48 @@ describe("pure helpers", () => {
     });
     expect(buildHumanizedAreas("", labelBySlug, new Set())).toBeNull();
     expect(buildHumanizedAreas(undefined, labelBySlug, new Set())).toBeNull();
+  });
+
+  describe("E1 selection half — pickMatchedAreaIndex", () => {
+    // The real staging shape that motivated this: a hematopathologist whose
+    // `areasOfInterest` string LEADS with breast_cancer (count 1) while the corpus the
+    // query actually matched lives in hematology (count 21).
+    const INGHIRAMI = "breast_cancer lung_cancer gene_cell_therapy hematology gi_cancer".split(" ");
+    const COUNTS = { breast_cancer: 1, lung_cancer: 1, hematology: 21, gi_cancer: 4 };
+    const ALL_CANCER = new Set(["breast_cancer", "lung_cancer", "hematology", "gi_cancer"]);
+
+    it("picks the BEST-EVIDENCED intersecting area, not the first in the scholar's list", () => {
+      expect(pickMatchedAreaIndex(INGHIRAMI, ALL_CANCER, COUNTS)).toBe(3); // hematology (21)
+    });
+
+    it("a narrower query still picks the area that query matched, however small", () => {
+      // The rule must not become "always the scholar's biggest area" — only the
+      // intersecting ones are candidates.
+      expect(pickMatchedAreaIndex(INGHIRAMI, new Set(["breast_cancer"]), COUNTS)).toBe(0);
+    });
+
+    it("no areaCounts (doc not yet reindexed) ⇒ first intersecting, i.e. the OLD behavior", () => {
+      expect(pickMatchedAreaIndex(INGHIRAMI, ALL_CANCER, undefined)).toBe(0);
+      expect(pickMatchedAreaIndex(INGHIRAMI, ALL_CANCER, {})).toBe(0);
+    });
+
+    it("ties keep the scholar's own order — `>` is strict, so the rule is stable", () => {
+      expect(pickMatchedAreaIndex(INGHIRAMI, new Set(["breast_cancer", "lung_cancer"]), COUNTS)).toBe(0);
+    });
+
+    it("an area with no count still beats no match at all, and no intersection is -1", () => {
+      expect(pickMatchedAreaIndex(INGHIRAMI, new Set(["gene_cell_therapy"]), COUNTS)).toBe(2);
+      expect(pickMatchedAreaIndex(INGHIRAMI, new Set(["cardiology"]), COUNTS)).toBe(-1);
+      expect(pickMatchedAreaIndex([], ALL_CANCER, COUNTS)).toBe(-1);
+    });
+
+    it("buildHumanizedAreas bolds the same area the rule picks", () => {
+      const ha = buildHumanizedAreas(INGHIRAMI.join(" "), new Map(), ALL_CANCER, COUNTS);
+      expect(ha!.matchedIndex).toBe(3);
+      expect(ha!.labels[ha!.matchedIndex]).toBe("Hematology");
+      // and without counts it bolds what it always did
+      expect(buildHumanizedAreas(INGHIRAMI.join(" "), new Map(), ALL_CANCER)!.matchedIndex).toBe(0);
+    });
   });
 });
 

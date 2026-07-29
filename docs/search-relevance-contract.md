@@ -231,7 +231,8 @@ with no violations listed is either new or not being read.
 | O1   | Method-family tier selected by lexical match on the family label; a plural removes ×2.0                | Open                                                                               |
 | O2   | Concentration boost credits area membership via a bare `terms: {cwid}` filter                          | Fixed behind `SEARCH_PEOPLE_CONCEPT_ARM_FIRST`, default off, staging-first (#2018) |
 | O3   | `ln1p(publicationCount)` is unfiltered and unbounded; worth 2.01× across a measured top 40             | Open, scoped                                                                       |
-| E1   | `topic` evidence line renders an index-time area total as query evidence                               | Open                                                                               |
+| E1a  | `topic` line named the FIRST of the scholar's own areas that intersects the match, not the best-evidenced | **Fixed** — `pickMatchedAreaIndex`, degrades to the old rule without `areaCounts` |
+| E1b  | `topic` evidence line renders an index-time area total as query evidence                               | Open — the count is still `areaCounts`, never query-filtered                        |
 | E2b  | `topic` line divides by `pubCount` while its numerator is carved                                       | **Fixed** — the line states a magnitude, no share (see below)                       |
 | E2   | Grant card denominator is raw Grant rows; numerator is grouped, suppression-filtered projects          | **Fixed** (#2058) — `grantIndexedCount`, same aggregation, no reindex              |
 | E5   | `/api/scholar/[cwid]/grants` swallowed a caught throw into a body identical to a real no-match         | **Fixed** (#2057) — 200 + `error: "search_failed"`, and it logs                     |
@@ -254,7 +255,7 @@ the method-indexed pool. So `topic` joins `method` in withholding the share and 
 for this same count, on this same argument. Consequence to know: after this change **no
 `CountFirst` kind renders a `%`**, so a test that needs the column must use a `publications` lead.
 
-E1 is untouched and still open: that 21 is the scholar's index-time total in the area whatever you
+E1b is untouched and still open: that 21 is the scholar's index-time total in the area whatever you
 searched.
 
 ## Related documents
