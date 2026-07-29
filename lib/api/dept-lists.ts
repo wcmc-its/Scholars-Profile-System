@@ -17,6 +17,7 @@ import { prisma } from "@/lib/db";
 import { cachedRead } from "@/lib/api/swr-cache";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { isPiRole } from "@/lib/funding-roles";
+import { multiPiExternalIds } from "@/lib/funding-projection";
 import type { AuthorChip } from "@/components/publication/author-chip-row";
 import type {
   DeptPublicationCard,
@@ -181,8 +182,8 @@ async function getDeptGrantsListUncached(
       ? [{ endDate: "desc" as const }]
       : [{ startDate: "desc" as const }];
 
-  // Pull all grants and group client-side by externalId — needed for multi-PI
-  // chips. Pagination is applied AFTER grouping. Pool size sufficient for
+  // Pull all grants and group client-side by externalId — one card per grant
+  // row. Pagination is applied AFTER grouping. Pool size sufficient for
   // departments with <2k active grants; revisit if perf shows up.
   const all = (await prisma.grant.findMany({
     where: baseWhere,
@@ -209,6 +210,19 @@ async function getDeptGrantsListUncached(
     awardNumber: string | null;
     applId: number | null;
   }>;
+
+  // #2066 — Multi-PI is a PROJECT-level fact, but `externalId` is
+  // `INFOED-{account}-{cwid}`, so it EMBEDS the cwid: the per-row grouping below
+  // can never hold a second PD/PI and `isMultiPi` was structurally always false.
+  // Derive it from the funding-project key instead, over the rows already
+  // fetched — same helper the profile and the funding index use, so these pages
+  // cannot contradict them.
+  // ponytail: dept-scoped. `all` is filtered to THIS department, so an award
+  // whose PD/PIs sit in different departments still won't fire. Under-flags,
+  // never over-flags. Upgrade path is the corpus-wide sibling query
+  // (`loadProjectSiblingRows`, lib/api/profile.ts) — one extra round trip per
+  // page — if the cross-department gap turns out to matter.
+  const multiPi = multiPiExternalIds(all, suppressed);
 
   type Group = {
     title: string;
@@ -299,7 +313,7 @@ async function getDeptGrantsListUncached(
       endDate: g.endDate,
       isRecentlyCompleted: false,
       pis,
-      isMultiPi: g.piCwids.length >= 2,
+      isMultiPi: g.externalId !== null && multiPi.has(g.externalId),
       applId: g.applId,
     };
   });
