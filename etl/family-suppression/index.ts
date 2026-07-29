@@ -141,6 +141,9 @@ async function assertLabelsMatchFamilies(rows: SuppressedRow[]): Promise<void> {
   }
 }
 
+/** What the reseed actually changed. A CSV row count cannot tell a no-op from a mass rewrite. */
+type ReseedCounts = { inserted: number; updated: number; deleted: number };
+
 /**
  * Seed-safe reseed. The DB is the source of truth: a comms-steward tier set writes
  * `source='steward'` rows that this seed ETL must never clobber.
@@ -153,8 +156,8 @@ async function assertLabelsMatchFamilies(rows: SuppressedRow[]): Promise<void> {
  *
  * All inside one $transaction so a partial failure rolls back the whole reseed.
  */
-async function replaceRows(rows: SuppressedRow[]): Promise<void> {
-  await db.write.$transaction(
+async function replaceRows(rows: SuppressedRow[]): Promise<ReseedCounts> {
+  return db.write.$transaction(
     async (tx) => {
       // Steward-owned keys are off-limits — never insert, overwrite, or delete them.
       const stewardRows = await tx.familySuppressionOverlay.findMany({
@@ -165,13 +168,28 @@ async function replaceRows(rows: SuppressedRow[]): Promise<void> {
         stewardRows.map((r) => rowKey(r.supercategory, r.familyLabel)),
       );
 
+      // Snapshot the seed rows BEFORE the upsert loop so the run can report what actually
+      // changed. `rowsProcessed` on its own is the CSV length, which cannot distinguish a
+      // no-op from a mass rewrite.
+      const existingSeed = await tx.familySuppressionOverlay.findMany({
+        where: { source: "seed" },
+        select: { supercategory: true, familyLabel: true },
+      });
+      const existingSeedKeys = new Set(
+        existingSeed.map((r) => rowKey(r.supercategory, r.familyLabel)),
+      );
+
       // Seed rows we intend to keep — used to prune stale seed rows that left the CSV.
       const seedKeysToKeep = new Set<string>();
+      let inserted = 0;
+      let updated = 0;
 
       for (const r of rows) {
         const key = rowKey(r.supercategory, r.familyLabel);
         if (stewardKeys.has(key)) continue; // steward owns this family; leave it alone
         seedKeysToKeep.add(key);
+        if (existingSeedKeys.has(key)) updated += 1;
+        else inserted += 1;
         await tx.familySuppressionOverlay.upsert({
           where: {
             supercategory_familyLabel: {
@@ -196,10 +214,6 @@ async function replaceRows(rows: SuppressedRow[]): Promise<void> {
 
       // Stale-seed cleanup: drop seed rows whose key is no longer in the CSV. The
       // `source='seed'` filter guarantees steward rows are never touched.
-      const existingSeed = await tx.familySuppressionOverlay.findMany({
-        where: { source: "seed" },
-        select: { supercategory: true, familyLabel: true },
-      });
       const staleSeed = existingSeed.filter(
         (r) => !seedKeysToKeep.has(rowKey(r.supercategory, r.familyLabel)),
       );
@@ -213,6 +227,8 @@ async function replaceRows(rows: SuppressedRow[]): Promise<void> {
           },
         });
       }
+
+      return { inserted, updated, deleted: staleSeed.length };
     },
     { timeout: 5 * 60 * 1000, maxWait: 30 * 1000 },
   );
@@ -222,12 +238,13 @@ async function main(): Promise<void> {
   const startedAt = Date.now();
   const rows = readCurated();
   await assertLabelsMatchFamilies(rows);
-  await replaceRows(rows);
+  const counts = await replaceRows(rows);
   await recordRun({ status: "success", rowsProcessed: rows.length });
   console.log(
     `[FamilySuppression] ${JSON.stringify({
       event: "family_suppression_etl_complete",
       rows: rows.length,
+      ...counts,
       durationMs: Date.now() - startedAt,
     })}`,
   );
