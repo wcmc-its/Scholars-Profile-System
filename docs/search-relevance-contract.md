@@ -1,0 +1,237 @@
+# Search relevance contract — retrieval, ordering, evidence
+
+Normative. This document says what each layer of people search is **allowed to do**. It does not
+describe the pipeline — `docs/search-people-relevance.md` does that, layer by layer, and this document
+assumes it.
+
+```
+Verified against origin/master 98bea66a — 2026-07-29
+Every invariant below was checked in a worktree at that SHA. If HEAD has moved, re-ground before
+citing one:
+  git log 98bea66a..origin/master -- lib/api/search.ts app/api/search/route.ts \
+    app/\(public\)/search/page.tsx lib/api/result-evidence.ts lib/api/search-taxonomy.ts
+```
+
+Each rule is marked **[CHECK]** when it can be verified mechanically, or **[REVIEW]** when it can only
+be asked in review. A rule that cannot be checked is a question, not a gate — do not treat it as one.
+
+## Why this exists
+
+Search has had many ranking changes and few ranking regressions caught before users found them. The
+2026-07-29 investigation is the reason for writing rules rather than more description: five reported
+inversions were diagnosed, and **not one was a mis-tuned weight**. Every one was a rule sitting in the
+wrong layer.
+
+1. An ordering term credited **area membership** rather than the query. The concentration boost emits
+   `{ filter: { terms: { cwid: [...] } }, weight }` (`lib/api/search.ts:1426-1451`) — a bare
+   identity-membership filter referencing neither the query nor the resolved descriptor. Measured on
+   `genetic therapy`, isolating the layer with `?match=exact` versus `expanded`: scholars with 1
+   on-topic publication of 393 and 1 of 607 gained up to 30 ranks, while the scholar with the most
+   on-topic work in the set (36 of 135) lost 5.
+2. An ordering term keyed on the query's **surface form** rather than its resolved concept. The
+   method-family tier is a lexical token-boundary prefix match of the normalised query against the
+   family's own label (`lib/api/search-taxonomy.ts:653-671`, `lib/api/normalize.ts:132-139`).
+   `"genetherapy"` matches `"aavgenetherapyvectors"` at offset 3; `"genetictherapy"` does not. So
+   `gene therapy` carries a ×2.0 multiplier and `gene therapies` does not — same concept, same 921
+   results, different order.
+3. A displayed number that was never computed under the query. The `topic` evidence line reads
+   `areaCounts[hitSlug]` (`lib/api/search.ts:3824`), an index-time total of the scholar's publications
+   in that area (`lib/search-index-docs.ts:968-987`). On a gene-therapy search a line reading
+   "Ophthalmology & Vision Science — 20" means twenty ophthalmology papers.
+4. A displayed fraction whose numerator and denominator are different populations. The card renders
+   `N of grantCount grants` (`components/search/people-result-card.tsx:405,463-464`). `N` counts
+   `coreProjectNum`-grouped, suppression-filtered funding-index project docs; `grantCount` is
+   `s.grants.length`, raw Grant rows with neither grouping nor suppression
+   (`lib/search-index-docs.ts:471-472,1385`). One scholar renders "32 of 127" against a searchable
+   funding population of 117.
+
+A document that describes the layers cannot catch any of these. A document that states what each layer
+may take as **input** catches all four by construction. That is the only job here.
+
+## Layer 1 — Retrieval
+
+Retrieval decides **which scholars are in the result set**. Nothing else.
+
+### Admissible inputs
+
+The query text, its resolved MeSH descriptor and descendants, the user's explicit facet selections,
+and visibility/suppression state. Nothing derived from a scholar's prominence, volume, seniority,
+funding, or area membership may admit a document.
+
+### Invariants
+
+**R1. An ordering lever never changes the set.** Every `function_score` function scores documents that
+already matched; it cannot admit one. Any ranking change must therefore leave `hits.total` and every
+facet bucket count byte-identical.
+**[CHECK]** For each probe query, diff `total` and `facets` before and after. A moved `total` means the
+change escaped its layer — stop and diagnose; do not adjudicate the ordering. This is the existing
+hard gate in the #2018 scope protocol, promoted here to policy.
+
+**R2. Identical totals with a different order is a ranking effect, and must be attributable to a named
+term.** `gene therapy` and `gene therapies` both return 921; `genetic therapy` and `genetic therapies`
+both return 846. Identical `total` with a different order proves the difference ranks rather than
+filters, with no deploy.
+**[CHECK]** `?match=` decomposition — `exact` suppresses MeSH attribution, concept admission and both
+concentration arms (`lib/api/search-flags.ts:126-128`, `app/api/search/route.ts:613,635`), so
+`expanded − exact` isolates the concept layers. The param is `match=`, not `scope=`; a wrong name is
+silently ignored and returns the default, and the tell is an identical `total` **and** an identical
+order.
+
+**R3. Flag off is byte-identical.** A new ordering lever, unset, produces the same request body as the
+prior revision — guaranteed structurally (omit the key) rather than by setting it to its identity
+value.
+**[CHECK]** Snapshot the built body. This is the entire rollback story for any ranking flag.
+
+**R4. A merged flag is dark until deployed.** Flags live in the `sps-app-<env>` task-def env
+(`cdk/lib/app-stack.ts`), not the image. Before asserting any live posture, read the **running** task
+definition.
+**[CHECK]** `scripts/release/flag-parity.mjs` gates wiring, but it validates the synthesised env and is
+blind to "merged but never deployed". Read the running task def separately. Note prod's
+`containerDefinitions[0]` is `otel-collector`, so a query against `[0]` returns empty and reads as
+"flag absent"; filter in Python or jq, never a nested JMESPath.
+
+## Layer 2 — Relevance sorting
+
+Ordering decides **which of the admitted scholars answers the query best**.
+
+### The principle
+
+> Rank by the strength of a scholar's evidence for the queried concept. Query-independent priors may
+> break ties among comparably-relevant scholars; they must never overturn a large difference in query
+> evidence.
+
+Today the system does the opposite, and the size of the inversion is measured. Across the top 40 of
+`genetic therapy`: the query-independent volume prior spans **2.01×** (2060 publications → prominence
+multiplier 8.63, versus 26 publications → 4.30) while everything the query contributes spans **2.29×**.
+Total output volume, which has no topical relation to the query, carries as much ordering authority as
+the query itself.
+
+### Admissible inputs
+
+A term that reorders results may read: the query text and its resolved concept; per-scholar evidence
+**for that concept**; and query-independent priors, subject to O3.
+
+### Invariants
+
+**O1. A term keyed on the query's surface form rather than its resolved concept is a defect.** If two
+queries resolve to the same descriptor, any ordering difference between them must be attributable to a
+genuine difference in evidence, not to spelling, pluralisation, or word order.
+**[CHECK]** For any concept with more than one common surface form, probe the forms as a pair and
+require convergence. `gene therapy` / `gene therapies` is the standing regression pair for the method
+tier; add a pair whenever a new lexical lever lands.
+
+**O2. A term must reference what it claims to measure.** A boost justified as "this scholar works on
+the queried concept" must have the concept in its filter. A `terms: { cwid: [...] }` membership list
+computed from something other than the query does not satisfy this, however the list was built.
+**[REVIEW]** Read the emitted clause, not the function name: what field does it match on, and is that
+field a function of the query?
+
+**O3. Every query-independent prior states a ceiling.** Volume, seniority, faculty status and funding
+status are legitimate tiebreaks and illegitimate deciders. A prior with no bound cannot be argued
+about, only observed after the fact.
+**[CHECK]** `grep -c max_boost lib/api/search.ts` is currently `0`, and the `ln1p(publicationCount)`
+`field_value_factor` (`lib/api/search.ts:2919-2926`) carries no `filter` and no bound. That is the
+open violation; see the register below. A ceiling means a stated maximum contribution, not a
+smaller unbounded slope.
+
+**O4. Do not cap the sum to bound a term.** `max_boost` on the outer `function_score` caps the
+**sum**, so it silently truncates every other term alongside the one being bounded and makes each
+lever's A/B uninterpretable. Bound the term.
+**[REVIEW]** If a global ceiling is genuinely wanted it is a separate, separately-flagged change with
+its own validation.
+
+**O5. Ship ordering levers serially.** Two changes to the same additive sum in one revision make every
+observed reorder the composition of two effects with no way to attribute either. An effect size is
+reported with the state of every interacting flag attached.
+**[REVIEW]** Also: an effect measured on staging is not an effect in prod. Staging and prod differ on
+`SEARCH_PEOPLE_FACULTY_PROMINENCE`, `SEARCH_MESH_RESOLUTION_FALLBACK`, and the
+`mesh_curated_topic_anchor` row population (85 distinct in prod versus 349 in staging, #2016). The
+last one is the sharpest: anchors determine which area is credited, so the two environments choose
+from different distributions.
+
+**O6. Not every fix is monotone-downward.** Rejecting one arm of a boost can route a query to another
+arm with a **wider** eligibility carve, taking a scholar from no boost to the maximum. Describe such a
+change as a re-targeting, never as a reduction.
+**[REVIEW]** Nothing in the search response distinguishes which arm produced a boost. If a change
+alters arm selection, say so explicitly rather than reporting the net.
+
+## Layer 3 — Evidence display
+
+Display decides **what the card asserts about why this scholar is here**.
+
+### Admissible inputs
+
+Anything, provided it is labelled as what it is. The rules below are about honesty of the claim, not
+about which data may appear.
+
+### Invariants
+
+**E1. A number presented as query evidence is computed under the query.** An index-time total, a
+career total, or any figure that would be identical for a different query is not query evidence and
+must not be rendered where the user reads it as such.
+**[CHECK]** For any evidence count, ask whether the value changes when the query changes. Probe the
+same scholar under two unrelated queries: a figure that does not move is not evidence for either.
+
+**E2. A numerator and a denominator rendered as one fraction come from one population.** "N of M"
+where N and M are counted over different sets is false regardless of how correct N is.
+**[CHECK]** Name the population of each side. A `Math.min(N, M)` guard only prevents N > M; it cannot
+detect M being drawn from a larger set.
+
+**E3. An OR count is labelled as a match, not as a topical count.** Where a count admits on a text
+match **or** a concept tag, the rendered phrasing claims a match. It does not claim the concept.
+**[CHECK]** Compare the count against its tagged sub-count. One scholar's funding count of 32 carries
+a tagged sub-count of 1; the remaining 31 matched loose words in title, sponsor, abstract or keyword
+fields. Note the concept axis is per-env gated (`SEARCH_FUNDING_CONCEPT_GRANTS`), so in prod the
+tagged sub-bucket is hard zero for everyone — a phrasing that depends on it renders nothing there.
+
+**E4. A summary count and the drill-down it opens are the same population.** Where a card shows a
+count the user can expand, the admission logic of the two must be identical, and this is already
+stated as a requirement in code (`lib/api/search-funding.ts:316-320`): "a summary count that
+disagreed with the records the user then expands would be a bug".
+**[CHECK]** Probe both surfaces for the same scholar and the same query, threading every parameter the
+card threads — a drill-down called without the card's concept parameters runs text-only and
+undercounts. Take the identifier from the payload; never construct one from a name.
+
+**E5. A failure and an empty result are distinguishable.** An endpoint that returns HTTP 200 with a
+zero count for a bad identifier, a caught exception, and a genuine no-match cannot be used as
+evidence of anything.
+**[CHECK]** Probe with a deliberately invalid identifier. If the response is indistinguishable from a
+real empty result, the endpoint cannot verify a card claim, and any investigation using it will
+produce a false finding. One did.
+
+**E6. Ordering of evidence lines is a claim about strength.** The first line is read as the primary
+reason. Where the order is structural rather than scored, say so in the code that builds it, so a
+later reader does not infer a ranking that was never computed.
+**[REVIEW]** Current order is method → tagged → topic → mention → clinical, fixed, with one two-way
+swap (`lib/api/result-evidence.ts:638-746`).
+
+## Register of known violations
+
+Open at the verified SHA. This section is the reason the document is worth keeping current: a contract
+with no violations listed is either new or not being read.
+
+| Rule | Violation                                                                                              | Status                                                                             |
+| ---- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| O1   | Method-family tier selected by lexical match on the family label; a plural removes ×2.0                | Open                                                                               |
+| O2   | Concentration boost credits area membership via a bare `terms: {cwid}` filter                          | Fixed behind `SEARCH_PEOPLE_CONCEPT_ARM_FIRST`, default off, staging-first (#2018) |
+| O3   | `ln1p(publicationCount)` is unfiltered and unbounded; worth 2.01× across a measured top 40             | Open, scoped                                                                       |
+| E1   | `topic` evidence line renders an index-time area total as query evidence                               | Open                                                                               |
+| E2   | Grant card denominator is raw Grant rows; numerator is grouped, suppression-filtered projects          | Open                                                                               |
+| E5   | `/api/scholar/[cwid]/grants` returns HTTP 200 `{"total":0}` for an unknown CWID and for a caught throw | Open                                                                               |
+
+## Related documents
+
+- `docs/search-people-relevance.md` — the descriptive reference this contract assumes. Layers,
+  formula, flag inventory, measurement recipes, known defects.
+- `docs/search-research-area-relevance-spec.md` — the concentration boost's original spec.
+- `docs/search-evidence-rows.md` and `docs/scholar-card-evidence-rows-spec.md` — evidence-row
+  surface specs. Layer 3 above governs what those rows may claim; it does not restate their contents.
+- `docs/taxonomy-aware-search.md` — resolution and the curated taxonomy.
+
+## Scope
+
+People search on `/search` and `/api/search`. The Publications and Funding tabs share Layer 1's
+invariants and the Layer 3 invariants, but not Layer 2 — `searchPublications` takes no
+`meshMatchTier` and carries none of the people prominence terms. The Matcha spine reuses the people
+body with `shape: "topic"` and suppresses the faculty and grant priors but not the volume prior, so
+Layer 2 changes move Matcha ranking and require a re-baseline before a prod flip.

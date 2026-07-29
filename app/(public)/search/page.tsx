@@ -42,7 +42,6 @@ import {
   resolvePeopleMatchExplain,
   resolvePeopleSnippetRepresentativePub,
   resolvePeopleReasonFromDoc,
-  resolveSearchPeopleAreaBoost,
   resolveSearchPeopleFacultyProminence,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
@@ -56,6 +55,7 @@ import {
   CONCEPT_FALLBACK_CAP,
   CONCEPT_FALLBACK_SPARSE_THRESHOLD,
 } from "@/lib/api/search-flags";
+import { resolveAreaConcentration } from "@/lib/api/area-concentration";
 import { isFullQueryMeshMatch } from "@/lib/api/normalize";
 import {
   stripDeprioritized,
@@ -67,7 +67,6 @@ import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
 import {
   searchPeople,
   searchPublications,
-  getConceptScholarConcentration,
   PI_MIN_CEILING,
   PI_MIN_FLOOR,
   type ActivityFilter,
@@ -82,9 +81,7 @@ import {
   meshConfidenceRank,
   MESH_RANK_VERBATIM,
   meshRetryIsSameDescriptorUpgrade,
-  AREA_BOOST_TOP_N,
 } from "@/lib/search";
-import { getAreaScholarConcentration } from "@/lib/api/topics";
 import {
   searchFunding,
   type FundingFilters,
@@ -480,46 +477,14 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // the card). The split only matters when `matchExplain` is on (otherwise no
   // reason agg runs and `skipReasonAgg` is a no-op).
   const peopleMatchExplain = resolvePeopleMatchExplain();
-  // Track B — Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
-  // Same resolution as the JSON route: when the flag is on, the query resolved to a
-  // Research Area, and not under Exact word, pull the area's relevance×coverage ranking
-  // ({cwid,total}) so area-concentrated scholars are lifted (topic/hybrid only,
-  // reorder-only). `areas[0]` is the area drawn as the "Research Areas" chip. Cached
-  // read; flag-off ⇒ skipped, the people search is byte-identical to today.
-  let areaConcentration: { cwid: string; total: number }[] | undefined;
-  if (
-    type === "people" &&
-    resolveSearchPeopleAreaBoost() &&
-    !meshOff &&
-    taxonomyMatch.state === "matches" &&
-    taxonomyMatch.areas.length > 0
-  ) {
-    const top = taxonomyMatch.areas[0];
-    const parentTopicId = top.entityType === "subtopic" ? top.parentTopicId : top.id;
-    const subtopicId = top.entityType === "subtopic" ? top.id : null;
-    if (parentTopicId) {
-      areaConcentration = await getAreaScholarConcentration(
-        parentTopicId,
-        subtopicId,
-        AREA_BOOST_TOP_N,
-      );
-    }
-  }
-  // #1343 — concept-axis fallback (mirrors the route). No curated area but a MeSH
-  // descriptor resolved ⇒ source concentration from the publications index so the boost
-  // reaches concept queries (obesity/hypertension). Reuses the area-boost source toggle.
-  if (
-    type === "people" &&
-    resolveSearchPeopleAreaBoost() &&
-    !meshOff &&
-    (!areaConcentration || areaConcentration.length === 0) &&
-    taxonomyMatch.meshResolution?.descendantUis?.length
-  ) {
-    areaConcentration = await getConceptScholarConcentration(
-      taxonomyMatch.meshResolution.descendantUis,
-      AREA_BOOST_TOP_N,
-    );
-  }
+  // Track B — Research-Area concentration boost plus the #1343 concept axis. Shared with
+  // the JSON route via resolveAreaConcentration so the badge count and the result list
+  // cannot resolve different arms; see that module for the #2018 precedence fix. The
+  // `type === "people"` guard stays here — the other tabs never build this.
+  const areaConcentration =
+    type === "people"
+      ? await resolveAreaConcentration({ taxonomyMatch, meshOff })
+      : undefined;
   const peopleSearchOpts =
     type === "people"
       ? {

@@ -6,6 +6,10 @@ no prior context on this subsystem.
 Grounded at `origin/master` 63d56596. Every claim carries a `file:line` citation; if a line has drifted,
 re-ground with `git show origin/master:<path>` rather than trusting the number.
 
+This document is **descriptive** — it says what the code does. For what each layer is _allowed_ to do,
+and the register of open violations, see [`search-relevance-contract.md`](./search-relevance-contract.md).
+Changing ranking or evidence display means satisfying that contract, not just matching this description.
+
 Scope: `searchPeople` (`lib/api/search.ts:1537`). The Publications and Funding tabs use
 `searchPublications` / `searchFunding`, which share the MeSH resolver but none of the ranking machinery
 described here. See [Traps](#traps).

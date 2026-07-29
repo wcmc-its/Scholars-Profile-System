@@ -310,6 +310,13 @@ function pickTextEvidence(
  * tagged/mention) without its own `searchFunding` round-trip. The `/grants` route
  * survives only for the on-expand top-N record list.
  *
+ * Contract: docs/search-relevance-contract.md § Layer 3, rule E4 — the paragraph below IS
+ * that rule, stated here first. Also E3: this count admits on text OR concept tag, so any
+ * rendered phrasing must claim a MATCH, not a topical grant count; compare `count` against
+ * `tagged` before wording it. When probing the two surfaces against each other, thread every
+ * parameter the card threads (a `/grants` call without `descriptorUis` runs text-only and
+ * undercounts) and take the identifier from the payload, never construct it from a name.
+ *
  * The admission `must` here MUST stay identical to `searchFunding`'s `expanded`-scope
  * admission (text OR — under the concept flag — descriptor-tagged), because that is the
  * set the `/grants` records reflect: a summary count that disagreed with the records the

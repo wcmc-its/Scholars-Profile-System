@@ -634,6 +634,14 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
  * `selectEvidence` only when the flag is on, so the off-flag path is unchanged.
  * `count` on method/topic drives the "N of M publications" prefix (the renderer
  * pairs it with the hit's `pubCount`). Pure + client-safe.
+ *
+ * Contract: docs/search-relevance-contract.md § Layer 3. Three rules bind here.
+ * E1 — a number rendered as query evidence must be COMPUTED UNDER THE QUERY. The `topic`
+ *   line currently fails this: its count is an index-time area total, identical whatever
+ *   was searched (open violation in that document's register).
+ * E2 — a rendered "N of M" takes both sides from one population.
+ * E6 — this ordering is STRUCTURAL, not scored. Users read the first line as the primary
+ *   reason, but nothing here ranks lines by strength; do not infer that it does.
  */
 export function selectEvidenceLines(input: SelectEvidenceInput): ResultEvidence[] {
   const lines: ResultEvidence[] = [];

@@ -1,10 +1,10 @@
 import { gzipSync } from "node:zlib";
 import { NextResponse, type NextRequest } from "next/server";
+import { resolveAreaConcentration } from "@/lib/api/area-concentration";
 import { apiError } from "@/lib/api/error-response";
 import {
   searchPeople,
   searchPublications,
-  getConceptScholarConcentration,
   type PeopleSort,
   type PublicationsSort,
 } from "@/lib/api/search";
@@ -14,9 +14,7 @@ import {
   MESH_RANK_VERBATIM,
   meshRetryIsSameDescriptorUpgrade,
   meshStripRemovedAtMostHalf,
-  AREA_BOOST_TOP_N,
 } from "@/lib/search";
-import { getAreaScholarConcentration } from "@/lib/api/topics";
 import {
   searchFunding,
   type FundingFilters,
@@ -45,7 +43,6 @@ import {
   resolvePeopleMatchExplain,
   resolvePeopleSnippetRepresentativePub,
   resolveGenericTermMode,
-  resolveSearchPeopleAreaBoost,
   resolveSearchPeopleDivisionShape,
   resolveSearchPeopleFacultyProminence,
   resolvePublicationHighlight,
@@ -604,44 +601,11 @@ async function handleSearch(request: NextRequest) {
           isFullQueryMeshMatch(q, meshRes.matchedForm),
       })
     : undefined;
-  // Track B — Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
-  // When the flag is on, the query resolved to a Research Area, and we're not under Exact
-  // word, pull that area's relevance×coverage ranking ({cwid,total}) so searchPeople can
-  // lift area-concentrated scholars (topic/hybrid only, reorder-only). `areas[0]` is the
-  // top matched area — the same one drawn as the "Research Areas" chip. Cached read.
-  let areaConcentration: { cwid: string; total: number }[] | undefined;
-  if (
-    resolveSearchPeopleAreaBoost() &&
-    !meshOff &&
-    taxonomyMatch.state === "matches" &&
-    taxonomyMatch.areas.length > 0
-  ) {
-    const top = taxonomyMatch.areas[0];
-    const parentTopicId = top.entityType === "subtopic" ? top.parentTopicId : top.id;
-    const subtopicId = top.entityType === "subtopic" ? top.id : null;
-    if (parentTopicId) {
-      areaConcentration = await getAreaScholarConcentration(
-        parentTopicId,
-        subtopicId,
-        AREA_BOOST_TOP_N,
-      );
-    }
-  }
-  // #1343 — concept-axis fallback. When no curated Research Area matched but the query
-  // resolved to a MeSH descriptor (obesity/hypertension), source the concentration from
-  // the publications index instead, so the same boost slot reaches concept queries.
-  // Reuses the SEARCH_PEOPLE_AREA_BOOST source toggle; reorder-only, no reindex.
-  if (
-    resolveSearchPeopleAreaBoost() &&
-    !meshOff &&
-    (!areaConcentration || areaConcentration.length === 0) &&
-    taxonomyMatch.meshResolution?.descendantUis?.length
-  ) {
-    areaConcentration = await getConceptScholarConcentration(
-      taxonomyMatch.meshResolution.descendantUis,
-      AREA_BOOST_TOP_N,
-    );
-  }
+  // Track B — Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md),
+  // plus the #1343 concept axis. Both arms and their precedence live in
+  // resolveAreaConcentration so this route and the SSR page cannot diverge; see that
+  // module for why the arm ORDER is the #2018 fix. Cached read; reorder-only.
+  const areaConcentration = await resolveAreaConcentration({ taxonomyMatch, meshOff });
   const result = await searchPeople({
     q,
     page,
