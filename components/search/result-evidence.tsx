@@ -300,7 +300,26 @@ export function ResultEvidence({
   // place a searcher actually reads. The lesser rows answered it by withholding the share;
   // the primary row can now state it, because there is a denominator the numerator came
   // from.
-  const denominator = evidence.kind === "method" ? methodPubCount : pubCount;
+  //
+  // …AND `topic` JOINS `method` IN WITHHOLDING ONE. Measured on staging 2026-07-29, all
+  // 2,422 scholars with >= 20 authored publications: only 12,129 of 245,135 authored pmids
+  // (4.9%) carry ANY `PublicationTopic` row, the median scholar carries ZERO, and 1,446 of
+  // the 2,422 (59.7%) have none at all. `areaCounts` is a distinct-pub count over THAT pool;
+  // `pubCount` is the whole career. Dividing one by the other understates the area share by
+  // roughly 20x — the Chair of Genetic Medicine has 36 topic-assigned pmids of 924, so his
+  // "21 of 923 = 2.3%" is really 21 of a 36-pub eligible pool, and 2.3% is one publication
+  // from `COVERAGE_CUE_THRESHOLD` greying the line out as a thin match. The topic-eligible
+  // pool is not the fix either: it is a THIRD denominator kind in a column whose contract
+  // (stated below) is one kind for every cell. So the topic line states a magnitude and no
+  // share — which is what the `tier === "lesser"` block above already decided for exactly
+  // this count, on exactly this argument. The primary row was the last place still framing
+  // an index-time topic count against the career total.
+  const denominator =
+    evidence.kind === "method"
+      ? methodPubCount
+      : evidence.kind === "topic"
+        ? undefined
+        : pubCount;
   const lowCoverage =
     primaryCount != null &&
     denominator != null &&
@@ -385,9 +404,12 @@ export function ResultEvidence({
           onToggle={onToggle}
           panelId={panelId}
         >
+          {/* No `m`: see `denominator` above. `areaCounts` counts pubs that got a topic
+              assignment at all (4.9% of authored pmids), so "of {pubCount}" frames it
+              against a pool 20x the one it came from. `CountFirst` drops the clause and
+              keeps the count — "21 publications in Gene & Cell Therapy". */}
           <CountFirst
             n={evidence.count}
-            m={pubCount}
             thing="publications"
             relation="in"
             entity={evidence.label}
