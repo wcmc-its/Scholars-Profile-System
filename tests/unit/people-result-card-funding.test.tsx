@@ -250,6 +250,41 @@ describe("PeopleResultCard — Funding evidence row (eager count, lazy records)"
     expect(tagged + mention).toBe(5);
   });
 
+  it("#2018/E2 — the fraction divides by grantIndexedCount, NOT the people-doc grantCount", async () => {
+    mockFetch({ grants: [] });
+    render(
+      <PeopleResultCard
+        {...base}
+        evidenceRows
+        hit={makeHit({
+          grantMatchCount: 32,
+          // The measured shape: the people doc counts 127 raw Grant rows while the funding
+          // index — the population the numerator is drawn from — holds 117 projects.
+          grantCount: 127,
+          grantIndexedCount: 117,
+          evidence: pubEvidence(),
+        })}
+      />,
+    );
+    const text = document.body.textContent ?? "";
+    expect(text).toMatch(/32 of 117 grants/);
+    expect(text).not.toMatch(/32 of 127 grants/);
+  });
+
+  it("#2018/E2 — an older payload without grantIndexedCount still renders today's number", async () => {
+    mockFetch({ grants: [] });
+    render(
+      <PeopleResultCard
+        {...base}
+        evidenceRows
+        hit={makeHit({ grantMatchCount: 5, grantCount: 24, evidence: pubEvidence() })}
+      />,
+    );
+    // Absent ⇒ fall back to grantCount. A stale client renders the old figure rather than
+    // "of 0", which would turn a thin match into a headline share.
+    expect(document.body.textContent ?? "").toMatch(/5 of 24 grants/);
+  });
+
   it("#1732 — an all-mention set is unchanged: no tagged clause, the OR total leads", async () => {
     mockFetch({ grants: [] });
     render(

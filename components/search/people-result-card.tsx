@@ -402,7 +402,22 @@ export function PeopleResultCard({
   // carries the remainder, so a mixed set states both and they sum to `grantsTotal`.
   // Both degenerate to today's exact strings when the set is all-tagged or all-mention.
   const fundingLead = fundingTagged ? grantsTagged : grantsTotal;
-  const fundingCount = `${Math.min(fundingLead, hit.grantCount)} of ${hit.grantCount} grants`;
+  // #2018/E2 — the denominator of THIS fraction must be the population the numerator came
+  // from: the scholar's funding-index projects, computed by the same aggregation as
+  // `grantMatchCount` (coreProjectNum-grouped, suppression-filtered). It is NOT
+  // `hit.grantCount`, which is the people doc's `s.grants.length` — raw Grant rows, neither
+  // grouped nor suppressed. Measured on staging: one scholar rendered "of 127" against a
+  // searchable population of 117, so the share was of a set the numerator never came from.
+  // `Math.min` cannot catch that: it only guards lead > denominator.
+  //
+  // Falls back to `grantCount` when the field is absent, which is a payload from before this
+  // shipped — a stale client then renders exactly today's number rather than nothing.
+  //
+  // The right-hand stat column below deliberately KEEPS `hit.grantCount`. It makes a
+  // different claim — "this scholar holds N grants", career-wide, not a share of anything —
+  // and the raw row count is the right answer to that one.
+  const fundingDenominator = hit.grantIndexedCount ?? hit.grantCount;
+  const fundingCount = `${Math.min(fundingLead, fundingDenominator)} of ${fundingDenominator} grants`;
   // "· 7 mention “<q>”" read as a second, parallel claim, so a reader summed it with the
   // lead and got a universe that looked double-counted. It is a REMAINDER —
   // `grantsMentionOnly` is `grantsTotal - grantsTagged` — so "more" says so in the one
@@ -460,8 +475,8 @@ export function PeopleResultCard({
             panelId={fundingPanelId}
           >
             <CountFirst
-              n={Math.min(fundingLead, hit.grantCount)}
-              m={hit.grantCount}
+              n={Math.min(fundingLead, fundingDenominator)}
+              m={fundingDenominator}
               thing="grants"
               relation={fundingTagged ? "tagged" : "mention"}
               entity={fundingTagged ? grantConceptLabel : `“${qParam}”`}
@@ -564,7 +579,7 @@ export function PeopleResultCard({
     // its two clauses, which is where the partition belongs.
     secondaryChips.push({
       label: SECONDARY_LABEL.funding,
-      detail: unit(Math.min(grantsTotal, hit.grantCount), "grant"),
+      detail: unit(Math.min(grantsTotal, fundingDenominator), "grant"),
     });
   }
   // ponytail: 3 chips fit one line at typical widths now that each carries a count

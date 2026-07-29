@@ -315,6 +315,16 @@ export type PeopleHit = {
    *  `grantMatchTaggedCount` and `grantMatchCount - grantMatchTaggedCount` PARTITION the
    *  matched set (tagged vs mention-only). The card renders both clauses, and they add up. */
   grantMatchTaggedCount?: number;
+  /** #2018/E2 — the DENOMINATOR `grantMatchCount` is a subset of: every funding-index
+   *  project this scholar is an investigator on, from the same aggregation and therefore
+   *  the same population (coreProjectNum-grouped, suppression-filtered).
+   *
+   *  The card used to divide by `grantCount`, which is the people doc's `s.grants.length`
+   *  (`lib/search-index-docs.ts:1385`) — raw Grant rows, neither grouped nor suppressed.
+   *  Measured on staging: one scholar rendered "of 127" against a searchable population of
+   *  117, so the fraction stated a share of a set the numerator was never drawn from.
+   *  Emitted alongside `grantMatchCount`, i.e. only for a scholar with ≥1 match. */
+  grantIndexedCount?: number;
   identityImageEndpoint: string;
   /** Highlight fragments from the scholar's self-reported fields
    *  (`preferredName` / `areasOfInterest` / `overview`). The card renders the
@@ -3976,7 +3986,7 @@ export async function searchPeople(opts: {
                 }
               : null,
         })
-      : new Map<string, { count: number; taggedCount: number }>();
+      : new Map<string, { count: number; taggedCount: number; indexedCount: number }>();
 
   return {
     hits: r.hits.hits.map((h) => {
@@ -4028,7 +4038,11 @@ export async function searchPeople(opts: {
         ...(() => {
           const gm = grantMatchByCwid.get(h._source.cwid);
           return gm && gm.count > 0
-            ? { grantMatchCount: gm.count, grantMatchTaggedCount: gm.taggedCount }
+            ? {
+                grantMatchCount: gm.count,
+                grantMatchTaggedCount: gm.taggedCount,
+                grantIndexedCount: gm.indexedCount,
+              }
             : {};
         })(),
         // D1 (sponsor recency) — the most-recent publication YEAR, derived from the projected
