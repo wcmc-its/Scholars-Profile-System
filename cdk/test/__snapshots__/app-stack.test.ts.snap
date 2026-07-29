@@ -4470,7 +4470,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_METHOD_FAMILY_TIER",
-                "Value": "on",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_PEOPLE_METHOD_CONTEXT",

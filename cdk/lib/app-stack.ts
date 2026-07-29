@@ -1704,7 +1704,22 @@ export class AppStack extends Stack {
         // on for staging (validate the #1269 spatial-transcriptomics repro), off
         // for prod -- prod go-live pairs with SEARCH_PEOPLE_METHOD_FAMILY's own
         // prod flip + reindex.
-        SEARCH_PEOPLE_METHOD_FAMILY_TIER: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
+        // O1 ISOLATION, STAGING ONLY, 2026-07-29 — off for staging, prod unchanged.
+        // The ×2.0 is the largest single term in people ranking and it is BINARY: a
+        // scholar either carries the `methodFamily` tag or takes a flat halving. Measured
+        // in-VPC against staging `scholars-people`: only 1,270 of 8,738 people docs
+        // (14.5%) carry ANY `methodFamily` value, and of the scholars a text query
+        // actually admits, the share carrying the family that earns the boost runs
+        // 1.1% (functional mri) / 7.7% / 8.1% / 11.5% / 15.7% / 40.0% (cryo em). So it
+        // rewards ETL annotation coverage, not the query — which is also why the two
+        // scholars holding the HIGHEST tagged-descriptor shares in a measured set (42.5%,
+        // 39.3%) finished 9th and 15th. Off here isolates the term exactly (the residual
+        // fit that identified it could not, absent a deploy) and converges the standing
+        // O1 regression pair `gene therapy` / `gene therapies` byte-exactly, because the
+        // only term that differed between them is the one being removed.
+        // resolvePeopleMethodFamilyTier reads === "on"; off ⇒ no factor pushed and the
+        // request body is unchanged, so the rollback is flipping this back.
+        SEARCH_PEOPLE_METHOD_FAMILY_TIER: env === "staging" ? "off" : "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
         // #1119 -- People-tab method-CONTEXT ranking boost (tool-usage snippet text
         // from ReciterAI tool_context). Same reindex-then-flip shape as
         // SEARCH_PEOPLE_METHOD_FAMILY. It is PROSE, so it must SOAK on staging
