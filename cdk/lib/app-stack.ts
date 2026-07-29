@@ -1447,14 +1447,28 @@ export class AppStack extends Stack {
         // by BM25(gloss). A RANKING change ⇒ eval-gated. The 2026-07-22 in-VPC λ-sweep cleared the
         // gate on the eval-fair metric: graded-only nDCG@20 rose 0.872→0.894 (λ=1.0), monotonic,
         // ~2.8× the 0.0074 noise floor; λ=0.5 = 0.890 (within 0.004 of peak, gentler displacement);
-        // graded-relevant retention rose 232→234 (zero experts lost). STAGING-ON at λ=0.5; prod held
-        // OFF pending an eyeball → deliberate prod flip. NOTE: the rescore is NOT recall-neutral on a
-        // multi-shard index (per-shard rescore-then-merge churns the ungraded deep tail, fused rank
-        // ≥66) — the win rests on the graded metric, not on recall-invariance. See
-        // docs/2026-07-22-gloss-rerank-eval-result-and-fix-handoff.md.
-        MATCHA_GLOSS_RERANK: env === "staging" ? "on" : "off",
+        // graded-relevant retention rose 232→234 (zero experts lost). NOTE: the rescore is NOT
+        // recall-neutral on a multi-shard index (per-shard rescore-then-merge churns the ungraded
+        // deep tail, fused rank ≥66) — the win rests on the graded metric, not on recall-invariance.
+        // See docs/2026-07-22-gloss-rerank-eval-result-and-fix-handoff.md.
+        //
+        // RE-MEASURED 2026-07-28 and prod-ON. The 07-22 sweep was graded with
+        // SEARCH_PEOPLE_PHRASE_BOOST OFF — a harness defect (#1981): the flag is on in BOTH envs
+        // while the sps-etl task def carries no SEARCH_* at all, so that sweep measured a spine with
+        // no match_phrase clauses. Both are query-side signals over the same fields, so the boost
+        // subsumes part of what the rescore was credited with. Re-run on the corrected harness,
+        // 5 paired draws × 15 fixtures: λ=0.5 is **+0.00909** vs base, 95% CI [+0.0044, +0.0138],
+        // winning in 5/5 draws. λ=1.0 is +0.00043 over λ=0.5 with a CI straddling zero — no reason
+        // to move. λ=0.25 is decisively worse than both.
+        //
+        // So the win is REAL but ~2.4× SMALLER than the 0.872→0.894 recorded above. Quote the paired
+        // delta, not those absolutes: base is 0.900 on the corrected harness, and the re-run has 15
+        // fixtures where the original had 14 (`ml-in-medicine` was unextractable until #2039).
+        // docs/2026-07-28-gloss-rerank-resweep-findings.md.
+        MATCHA_GLOSS_RERANK: "on",
         // λ = rescore_query_weight, wired per-env (was eval-only, set per-arm in the sweep). 0.5 is
-        // the picked value; inert in prod while the flag is off, so a plain literal is fine.
+        // the picked value, re-confirmed 2026-07-28: λ=1.0 is indistinguishable from it (+0.00043,
+        // CI straddling zero, 3/5 draws) and λ=0.25 is worse. Now LIVE in prod, not inert.
         MATCHA_GLOSS_RERANK_LAMBDA: "0.5",
         // MATCHA_GLOSS_INWORDS — the "in their words" evidence line: highlight the gloss's distinctive
         // terms (the sponsor's sense words that diverge from the MeSH canonical) in each candidate's
