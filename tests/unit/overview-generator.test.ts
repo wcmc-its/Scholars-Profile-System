@@ -566,7 +566,7 @@ const RICH_FACTS: OverviewFacts = {
     },
   ],
   activeGrants: [
-    { role: "PI", funderLabel: "NHLBI", title: "Gene Therapy for Alpha 1-Antitrypsin Deficiency", mechanism: "R01" },
+    { role: "PI", roleLabel: "Principal Investigator", isPrincipalInvestigator: true, funderLabel: "NHLBI", title: "Gene Therapy for Alpha 1-Antitrypsin Deficiency", mechanism: "R01" },
   ],
   facultyMetrics: { firstAuthorCount: 27, lastAuthorCount: 545, scoredPubCount: 36, hIndex: 155 },
 };
@@ -622,6 +622,38 @@ describe("buildGroundingReference (#742 fact-checker reference)", () => {
     expect(ref).toContain("Weill Cornell Medicine");
     expect(ref).toMatch(/never flag/i);
   });
+  // LOAD-BEARING (#2064). This reference IS the ALLOWED_FACTS block handed to
+  // `verifyDraftGrounding`. If it carried the raw `Co-PI` while the drafter (correctly)
+  // wrote "MPI", the verifier would flag MPI as ungrounded and `reviseDraftForGrounding`
+  // would DELETE it — silently undoing the label everywhere downstream. So the reference
+  // must state the role in the SAME words we want in the prose.
+  it("grounds the role LABEL, never the raw Grant.role token (#2064)", () => {
+    const ref = buildGroundingReference({
+      ...FACTS,
+      activeGrants: [
+        {
+          role: "Co-PI",
+          roleLabel: "Multiple Principal Investigator (MPI)",
+          isPrincipalInvestigator: true,
+          funderLabel: "NIH/NCI",
+          title: "Multi-PI consortium",
+          mechanism: "U01",
+        },
+      ],
+    });
+    expect(ref).toContain("role: Multiple Principal Investigator (MPI)");
+    // The raw token must not appear anywhere in ALLOWED_FACTS: its presence is what
+    // would license "co-PI" — an NSF term, wrong on an NIH award — in the draft.
+    expect(ref).not.toContain("Co-PI");
+    expect(ref).not.toMatch(/role:\s*Co-PI/);
+  });
+
+  it("grounds the plain PI label for a non-MPI award (#2064)", () => {
+    const ref = buildGroundingReference(RICH_FACTS);
+    expect(ref).toContain("role: Principal Investigator");
+    expect(ref).not.toMatch(/role:\s*PI\b/);
+  });
+
   it("states when there are NO method families (so any named tool is a violation)", () => {
     const ref = buildGroundingReference(FACTS); // FACTS.methods === []
     expect(ref).toContain("ALLOWED METHOD / TOOL NAMES: (none)");

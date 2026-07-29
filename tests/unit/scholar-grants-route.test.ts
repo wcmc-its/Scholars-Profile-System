@@ -117,6 +117,31 @@ describe("GET /api/scholar/[cwid]/grants", () => {
     expect(body.grants[0].role).toBe("Multi-PI");
   });
 
+  // #2064 — the hit already knows whether the AWARD has ≥2 PD/PIs; the route used to
+  // throw it away at the API boundary, leaving a renderer unable to tell a sole PI from
+  // the contact PI of an MPI award.
+  it("passes the hit's isMultiPi through to the mapped grant", async () => {
+    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
+    vi.mocked(searchFunding).mockResolvedValue({
+      hits: [
+        hit({
+          projectId: "p1",
+          isMultiPi: true,
+          people: [
+            { cwid: "abc1234", role: "PI" },
+            { cwid: "lead999", role: "Co-PI" },
+          ],
+        }),
+        hit({ projectId: "p2", isMultiPi: false, people: [{ cwid: "abc1234", role: "PI" }] }),
+      ],
+      total: 2,
+    } as never);
+    const body = await (await call("abc1234", "diabetes")).json();
+    expect(body.grants.map((g: { isMultiPi?: boolean }) => g.isMultiPi)).toEqual([true, false]);
+    // The raw per-person role is still THIS scholar's own, unrelabelled at the boundary.
+    expect(body.grants[0].role).toBe("PI");
+  });
+
   it("omits role when the hit carries none for this scholar (absent ≠ a default role)", async () => {
     vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
     vi.mocked(searchFunding).mockResolvedValue({

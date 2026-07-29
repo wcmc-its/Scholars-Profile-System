@@ -103,9 +103,35 @@ describe("biosketch system prompts — byte-identity + v6 content", () => {
 
   it("v6 (BIOSKETCH_SYSTEM_PROMPT_V6) is byte-identical — the rollback target must not drift", () => {
     // v6 is now the documented one-step-back rollback target for the v7 default, so pin it like v5.
+    //
+    // MOVED ONCE, DELIBERATELY (#2064, was …bccfc5): v6 and v7 SHARE
+    // `BIOSKETCH_ELEMENTS_V6`, whose element-(iv) block used to enumerate the permitted
+    // role vocabulary as "PI / co-PI / co-Investigator". That is an NSF term and is wrong
+    // on an NIH award, and it had become actively harmful: FACTS + the ALLOWED_FACTS
+    // grounding reference now carry "Multiple Principal Investigator (MPI)", so a v6 draft
+    // obeying the old wording would write "co-PI", `verifyDraftGrounding` would flag it as
+    // ungrounded, and `reviseDraftForGrounding` would DELETE the mandatory role element.
+    // Rolling back to a prompt that fights the verifier is not a usable rollback, so the
+    // fix had to reach v6 too. The pin still guards against ACCIDENTAL drift.
     expect(sha(BIOSKETCH_SYSTEM_PROMPT_V6)).toBe(
-      "06b97d3e38f4579e25de6def1283a99eb127dc7c1233166590dd7efb31bccfc5",
+      "216964dcb9b175ccf0cbc5fa1a9fe8698e5eae193d2b43cd8225c75ca2375276",
     );
+  });
+
+  // #2064 — the belt-and-braces half of the MPI fix (the load-bearing half is the
+  // roleLabel in FACTS + ALLOWED_FACTS). Both live versions share the elements block,
+  // so both must name the role correctly.
+  it.each([
+    ["v6", BIOSKETCH_SYSTEM_PROMPT_V6],
+    ["v7", BIOSKETCH_SYSTEM_PROMPT_V7],
+  ])("%s permits MPI and forbids the NSF 'co-PI' term for the role element", (_id, prompt) => {
+    expect(prompt).toContain("(PI / MPI / Co-Investigator of <grant title>)");
+    expect(prompt).toContain("NIH multiple-PD/PI award");
+    expect(prompt).toMatch(/NEVER as "co-PI"/);
+    // The old permitted-vocabulary line must be gone, not merely supplemented.
+    expect(prompt).not.toContain("(PI / co-PI / co-Investigator of <grant title>)");
+    // The model is pointed at the LABEL, not the raw abbreviation.
+    expect(prompt).toContain("`roleLabel`");
   });
 
   it("v6 is a distinct prompt from v5", () => {

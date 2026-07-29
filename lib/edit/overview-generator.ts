@@ -1011,7 +1011,14 @@ export function buildGroundingReference(
   if (facts.activeGrants.length > 0) {
     lines.push("GRANT TITLES (a grant aim or a disease named inside one of these titles is grounded):");
     for (const g of facts.activeGrants) {
-      lines.push(`- ${g.title ?? "(no title — funder only)"}  [funder: ${g.funderLabel}; role: ${g.role}]`);
+      // The role goes in as the LABEL, never the raw `Grant.role`. This line becomes
+      // ALLOWED_FACTS for `verifyDraftGrounding`: if the drafter (correctly) writes
+      // "MPI" while this said "Co-PI", the verifier would flag MPI as ungrounded and
+      // `reviseDraftForGrounding` would DELETE it. The label is what we want in the
+      // prose, so the label is what has to be grounded.
+      lines.push(
+        `- ${g.title ?? "(no title — funder only)"}  [funder: ${g.funderLabel}; role: ${g.roleLabel}]`,
+      );
     }
     lines.push(
       "A grant's FUNDER identifies the sponsor only — it does NOT license naming the disease the grant studies unless that disease is in the grant TITLE.",

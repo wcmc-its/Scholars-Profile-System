@@ -20,8 +20,8 @@ const OPTIONS: OverviewSourceOptions = {
     { pmid: "c", title: "C", venue: null, year: 2022, impact: 4, isFirstOrLast: false, authorPosition: "middle", defaultSelected: false, featured: false },
   ],
   funding: [
-    { id: "g1", role: "PI", funder: "NIH", title: "G1", award: null, endYear: 2027, defaultSelected: true },
-    { id: "g2", role: "Co-I", funder: "NIH", title: "G2", award: null, endYear: 2026, defaultSelected: false },
+    { id: "g1", role: "PI", roleLabel: "Principal Investigator", funder: "NIH", title: "G1", award: null, endYear: 2027, defaultSelected: true },
+    { id: "g2", role: "Co-I", roleLabel: "Co-Investigator", funder: "NIH", title: "G2", award: null, endYear: 2026, defaultSelected: false },
   ],
   tools: [
     { toolName: "t1", category: null, pmidCount: 3, maxConfidence: 0.9, defaultSelected: true },
