@@ -5,10 +5,14 @@
  * The point of these tests is the GROUPING KEY. `lib/api/profile.ts` must use
  * the funding index's key — `coreProjectNum(awardNumber) ?? accountNumber`
  * (lib/funding-projection.ts) — not the per-row `externalId`
- * (`INFOED-{account}-{cwid}`, unique per row) that `lib/api/dept-lists.ts`
- * groups on. The two disagree on renewals and supplements, and the profile
- * contradicting `/search?type=funding` about which award is multi-PI is exactly
- * the defect this guards.
+ * (`INFOED-{account}-{cwid}`, unique per row) that the department and division
+ * lists still group their CARDS on. The two disagree on renewals and
+ * supplements, and the profile contradicting `/search?type=funding` about which
+ * award is multi-PI is exactly the defect this guards.
+ *
+ * #2066 — those lists no longer derive `isMultiPi` from their card key; they
+ * call the same `multiPiExternalIds` this file exercises. Only the card
+ * grouping is still per-row, so do not "fix" them by reading the card key here.
  *
  * The Prisma mock below is not a stub that returns a fixed row set: it
  * INTERPRETS the `where` the loader sends (the `startsWith` / `contains` OR
