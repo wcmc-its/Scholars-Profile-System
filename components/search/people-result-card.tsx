@@ -402,6 +402,12 @@ export function PeopleResultCard({
   // carries the remainder, so a mixed set states both and they sum to `grantsTotal`.
   // Both degenerate to today's exact strings when the set is all-tagged or all-mention.
   const fundingLead = fundingTagged ? grantsTagged : grantsTotal;
+  // Contract: docs/search-relevance-contract.md § Layer 3, rule E2 — OPEN VIOLATION. The two
+  // sides of this fraction are different populations: the lead counts coreProjectNum-grouped,
+  // suppression-filtered funding-index PROJECT docs, while `hit.grantCount` is
+  // `s.grants.length` — raw Grant rows, ungrouped and unsuppressed. Measured gap on one
+  // scholar: denominator 127 against a searchable funding population of 117. The `Math.min`
+  // only guards lead > denominator; it cannot see the denominator drawn from a larger set.
   const fundingCount = `${Math.min(fundingLead, hit.grantCount)} of ${hit.grantCount} grants`;
   // "· 7 mention “<q>”" read as a second, parallel claim, so a reader summed it with the
   // lead and got a universe that looked double-counted. It is a REMAINDER —
