@@ -11,8 +11,13 @@
 import { describe, expect, it } from "vitest";
 import { isTrainingOnlyGrant } from "@/lib/grants/training-exclusions";
 import { isFundingActive } from "@/lib/api/search-funding";
+import { PI_ROLES as SHARED_PI_ROLES } from "@/lib/funding-roles";
 
-const PI_ROLES = new Set(["PI", "PI-Subaward"]);
+// The SHARED vocabulary, not a local re-declaration — this test exists to lock the
+// index-time derivation in `lib/search-index-docs.ts`, and a private copy here let
+// the two drift apart silently (which is exactly what happened: the indexer's set
+// was narrow, this file agreed with it, and the PI facet was wrong in both).
+const PI_ROLES = new Set<string>(SHARED_PI_ROLES);
 
 type GrantLike = {
   role: string;
@@ -138,21 +143,28 @@ describe("PI facet — locked test cases from SPEC (lines 318–330)", () => {
     expect(activePiGrantCount(grants, NOW)).toBe(2);
   });
 
-  it("row 8: one PI + one Co-PI active — Co-PI not counted, only one active PI grant", () => {
+  it("row 8: one PI + one Co-PI active — BOTH count; a Co-PI is an MPI, not a lesser PI", () => {
+    // Was "Co-PI not counted, only one active PI grant". Inverted with #1998: the
+    // May-2026 audit that dropped Co-PI predates the finding that InfoEd writes
+    // Co-PI for the NON-CONTACT PD/PI of an NIH multiple-PI award — a principal
+    // investigator, not a junior "co-" role. Counting one is counting the other.
     const grants: GrantLike[] = [
       { role: "PI", endDate: FAR_FUTURE, mechanism: "R01", programType: "Grant" },
       { role: "Co-PI", endDate: FAR_FUTURE, mechanism: "R01", programType: "Grant" },
     ];
-    expect(piRoleEver(grants)).toBe(true); // PI grant satisfies
-    expect(activePiGrantCount(grants, NOW)).toBe(1);
+    expect(piRoleEver(grants)).toBe(true);
+    expect(activePiGrantCount(grants, NOW)).toBe(2);
   });
 
-  it("row 9: only ever Co-PI — `piRoleEver=false` (Co-PI dropped per audit)", () => {
+  it("row 9: only ever Co-PI — `piRoleEver=true`; an MPI-only scholar IS a PI", () => {
+    // Was "`piRoleEver=false` (Co-PI dropped per audit)". Same inversion, and this
+    // is the row that made the defect visible: a scholar whose principal-investigator
+    // standing is entirely on multiple-PI awards was absent from the PI facet.
     const grants: GrantLike[] = [
       { role: "Co-PI", endDate: FAR_FUTURE, mechanism: "R01", programType: "Grant" },
     ];
-    expect(piRoleEver(grants)).toBe(false);
-    expect(activePiGrantCount(grants, NOW)).toBe(0);
+    expect(piRoleEver(grants)).toBe(true);
+    expect(activePiGrantCount(grants, NOW)).toBe(1);
   });
 
   it("PI-Subaward counts the same as PI for all three options", () => {

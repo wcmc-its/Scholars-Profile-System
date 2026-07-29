@@ -187,10 +187,20 @@ export type ActivityFilter = "has_grants" | "recent_pub";
 /**
  * Issue #233 — Principal Investigator facet. Single-select radio in the
  * People-tab sidebar. Definitions are locked in `.planning/drafts/SPEC-pi-facet.md`.
- *   - `any`    : ≥1 grant with role in ('PI','PI-Subaward'), any date
- *   - `active` : ≥1 currently-active (NCE grace) PI/PI-Subaward grant that
+ *   - `any`    : ≥1 grant with role in ('PI','PI-Subaward','Co-PI'), any date
+ *   - `active` : ≥1 currently-active (NCE grace) PI/PI-Subaward/Co-PI grant that
  *                is not a training-only mechanism
  *   - `multi`  : ≥N grants meeting the `active` criteria (N = piMin)
+ *
+ * `Co-PI` is InfoEd's NON-CONTACT PD/PI — the other principal investigator on an
+ * NIH multiple-PI award — so it carries principal-investigator standing and counts
+ * here. The membership test is `isPiRole` in `lib/funding-roles.ts`, applied at
+ * index time in `lib/search-index-docs.ts`.
+ *
+ * ⚠ `multi` here means MULTI-GRANT (this scholar leads ≥N active awards). It has
+ * nothing to do with the funding index's `FundingRoleBucket` value "Multi-PI",
+ * which means one award has ≥2 PD/PIs. Different feature, different axis; the
+ * "Multi-grant PI" facet labels below belong to THIS one.
  */
 export type PiFilter = "any" | "active" | "multi";
 

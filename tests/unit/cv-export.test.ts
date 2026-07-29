@@ -142,7 +142,7 @@ const researchInput: CvInput = {
     grants: [
       {
         title: "Klotho signaling in aging",
-        role: "Principal Investigator",
+        role: "PI",
         funder: "National Institutes of Health",
         source: "InfoEd",
         startDate: "2021-04-01",
@@ -228,7 +228,7 @@ const clinicalInput: CvInput = {
     grants: [
       {
         title: "Hospital readmissions cohort",
-        role: "Co-Investigator",
+        role: "Co-I",
         funder: "AHRQ",
         source: "InfoEd",
         startDate: "2020-01-01",
@@ -330,6 +330,43 @@ describe("buildWcmCv — scholar data is injected", () => {
     expect(text).toContain("MIT"); // Education institution
     expect(text).toContain("Pat Lee"); // Current mentee
     expect(text).toContain("Director, Center for Aging Research"); // Leadership
+  });
+});
+
+// ── (c2) grant roles: MPI label + the "Name of Principal Investigator" cell ──
+// The fixtures above used to carry role: "Principal Investigator" / "Co-Investigator",
+// values ProfilePayload.grants[].role never holds (the real vocabulary is
+// PI | PI-Subaward | Co-PI | Co-I | Key Personnel). That mismatch is why the
+// "Name of Principal Investigator:" cell was blank on every grant for every
+// scholar and no test caught it.
+
+describe("buildWcmCv — grant role labels", () => {
+  const withRole = (role: string): CvInput => ({
+    ...researchInput,
+    profile: {
+      ...researchInput.profile,
+      grants: researchInput.profile.grants.map((g) => ({ ...g, role })),
+    },
+  });
+
+  it("fills 'Name of Principal Investigator' for a PI (was blank for everyone)", async () => {
+    const text = allText(await documentXml(withRole("PI")));
+    // Once under "Name:", once in the funding table's PI cell.
+    expect(text.split("Jane Smith, PhD").length - 1).toBeGreaterThanOrEqual(2);
+  });
+
+  it("counts a Co-PI as a principal investigator and labels the award MPI", async () => {
+    const text = allText(await documentXml(withRole("Co-PI")));
+    expect(text).toContain("Multiple Principal Investigator (MPI)");
+    expect(text).not.toContain("Co-Principal Investigator");
+    expect(text.split("Jane Smith, PhD").length - 1).toBeGreaterThanOrEqual(2);
+  });
+
+  it("leaves the PI cell blank for a Co-I and does not call them an MPI", async () => {
+    const text = allText(await documentXml(withRole("Co-I")));
+    expect(text).toContain("Co-Investigator");
+    expect(text).not.toContain("Multiple Principal Investigator");
+    expect(text.split("Jane Smith, PhD").length - 1).toBe(1); // name only, not the PI cell
   });
 });
 

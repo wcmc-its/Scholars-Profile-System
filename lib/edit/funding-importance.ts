@@ -82,12 +82,18 @@ function typeBase(g: FundingImportanceInput): number {
   return 300;
 }
 
-/** The ROLE bonus — how central the scholar is to the award. */
+/** The ROLE bonus — how central the scholar is to the award.
+ *
+ *  `co-pi` scores the same as `pi`: InfoEd writes Co-PI for the NON-CONTACT PD/PI
+ *  of an NIH multiple-PI award, and an MPI holds principal-investigator standing
+ *  equally with the contact PI — which one NIH names for correspondence carries no
+ *  seniority. Scoring it below `pi-subaward` demoted a scholar's own R01 beneath a
+ *  slice of somebody else's. */
 function roleBonus(role: string): number {
   const r = (role ?? "").trim().toLowerCase();
   if (r === "pi") return 50;
+  if (r === "co-pi") return 50;
   if (r === "pi-subaward") return 35;
-  if (r === "co-pi") return 30;
   if (r === "co-i") return 15;
   return 5; // Key Personnel / unknown
 }

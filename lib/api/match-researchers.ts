@@ -20,6 +20,7 @@ import {
 import { db } from "@/lib/db";
 import { TOP_SCHOLARS_ELIGIBLE_ROLES } from "@/lib/eligibility";
 import { isFundingActive } from "@/lib/funding-active";
+import { PI_ROLES } from "@/lib/funding-roles";
 import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
 import { scorePublication, type RankablePublication } from "@/lib/ranking";
 import { OPPORTUNITY_TOPIC_GATE, type OpportunityTopicScore } from "@/lib/search";
@@ -142,7 +143,9 @@ export type FundingStatus = "funded" | "unfunded";
 // ponytail: prefix list off NIH's ESI guidance; tune if curators flag false drops.
 const MAJOR_PI_MECHANISMS = ["R01", "R37", "R35", "RF1", "U01", "DP1", "DP2", "DP5", "R61"];
 // Lead roles — the ones that confer independence (for the ESI disqualification).
-const LEAD_GRANT_ROLES = new Set(["PI", "Co-PI", "MPI", "PI-Subaward"]);
+// Sourced from the shared vocabulary so this cannot drift from the other PI-role
+// call sites. ("MPI" was never a `Grant.role` value and matched nothing.)
+const LEAD_GRANT_ROLES = new Set<string>(PI_ROLES);
 
 // NIH ESI is keyed to the TERMINAL research/clinical degree, not the most recent
 // credential — so a later MPH/cert/fellowship row must not reset the clock. Match

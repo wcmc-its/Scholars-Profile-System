@@ -10,35 +10,21 @@ import { FunderEyebrow } from "@/components/ui/funder-eyebrow";
 import { MechanismAbbr } from "@/components/ui/mechanism-abbr";
 import { useNihApplIdMap } from "@/lib/use-nih-resolve";
 import { ExpandedGrant, expandLabel } from "@/components/funding/expanded-grant";
+import { grantRoleShortLabel, grantRoleTitle } from "@/lib/funding-roles";
 
 type RoleBucket = "all" | "PI" | "Co-PI" | "Co-I" | "PI-Subaward" | "Key Personnel";
 
+/** `key` is compared against the raw `Grant.role` value and must stay a DB value;
+ *  only `label` is display text. "Co-PI" is InfoEd's non-contact PD/PI, i.e. an
+ *  NIH multiple-PI award, so the tab reads MPI while the key stays "Co-PI". */
 const ROLE_BUCKET_ORDER: ReadonlyArray<{ key: RoleBucket; label: string }> = [
   { key: "all", label: "All" },
   { key: "PI", label: "PI" },
-  { key: "Co-PI", label: "Co-PI" },
+  { key: "Co-PI", label: "MPI" },
   { key: "Co-I", label: "Co-I" },
   { key: "PI-Subaward", label: "Sub-PI" },
   { key: "Key Personnel", label: "KP" },
 ];
-
-/** Compact pill-friendly labels for the role column.
- *  DB values: PI | Co-PI | Co-I | PI-Subaward | Key Personnel.
- *  Mirrors the mockup's PI/MPI brevity so the 64px column stays tidy. */
-const GRANT_ROLE_LABEL: Record<string, string> = {
-  PI: "PI",
-  "Co-PI": "Co-PI",
-  "Co-I": "Co-I",
-  "PI-Subaward": "Sub-PI",
-  "Key Personnel": "KP",
-};
-const GRANT_ROLE_TITLE: Record<string, string> = {
-  PI: "Principal Investigator",
-  "Co-PI": "Co-Principal Investigator",
-  "Co-I": "Co-Investigator",
-  "PI-Subaward": "Principal Investigator (Subaward)",
-  "Key Personnel": "Key Personnel",
-};
 
 /** Issue #78 — short labels for the inline Type pill that appears next to
  *  the eyebrow when programType isn't a plain Grant. */
@@ -325,8 +311,8 @@ function GrantRow({
 }) {
   const grant = group.primary;
   const isReporter = group.members.some((m) => m.source === "RePORTER");
-  const label = GRANT_ROLE_LABEL[grant.role] ?? grant.role;
-  const title = GRANT_ROLE_TITLE[grant.role] ?? grant.role;
+  const label = grantRoleShortLabel(grant.role);
+  const title = grantRoleTitle(grant.role);
   const startYear = group.startDate.slice(0, 4);
   const endYear = group.endDate.slice(0, 4);
   const [expanded, setExpanded] = useState(false);

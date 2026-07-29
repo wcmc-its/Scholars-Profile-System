@@ -34,6 +34,7 @@ import * as React from "react";
 import { ChevronDown, Pin, Plus, TriangleAlert, Undo2, X } from "lucide-react";
 
 import { PubTitle } from "@/components/publication/pub-html";
+import { fundingRoleLabel } from "@/lib/funding-roles";
 import type {
   OverviewSourceEducation,
   OverviewSourceFunding,
@@ -173,9 +174,12 @@ function buildPublications(options: OverviewSourceOptions): RecordView[] {
 }
 
 function fundingMeta(f: OverviewSourceFunding): string[] {
-  return [f.role, f.endYear != null ? String(f.endYear) : "active"].filter(
-    (x): x is string => Boolean(x),
-  );
+  // Spelled out, not the raw InfoEd code — the scholar reading their own sources
+  // should not have to know that "Co-PI" means the non-contact PD/PI of an MPI award.
+  return [
+    f.role ? fundingRoleLabel(f.role) : null,
+    f.endYear != null ? String(f.endYear) : "active",
+  ].filter((x): x is string => Boolean(x));
 }
 
 function buildFunding(options: OverviewSourceFunding[]): RecordView[] {

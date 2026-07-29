@@ -60,6 +60,8 @@ const NAV: NavGroup[] = [
 const LINK = "text-[#7d1c1c] underline underline-offset-4 hover:no-underline";
 const PM = "https://reciter.weill.cornell.edu";
 const WEB_DIR = "https://directory.weill.cornell.edu";
+const NIH_MPI =
+  "https://grants.nih.gov/grants-process/plan-to-apply/consider-your-idea-resources-and-collaborators/multiple-principal-investigators";
 
 function Callout({
   variant = "note",
@@ -1442,6 +1444,7 @@ export default function DocsPage() {
             { term: "Scopus", def: "Elsevier’s abstract and citation database. Scholars uses it for two things: the headline times-cited count on a publication, and publications that are not in PubMed, which a curator can add in Publication Manager. It is not used for author disambiguation — deciding which publications are yours is ReCiter’s job, from PubMed." },
             { term: "OpenAlex", def: "An open catalog of scholarly works. Like Scopus, it is a source for publications that are not in PubMed, which a curator can add in Publication Manager; such a paper is labeled “Source: OpenAlex” and carries a DOI rather than a PMID. It is not used for citation counts or for author disambiguation." },
             { term: "InfoEd", def: "WCM’s grants system of record, for all sponsors. NIH RePORTER supplies federal abstract text and the portfolio link." },
+            { term: "Grant roles (PI, MPI, Co-I)", def: (<>Your role on an award, as recorded in InfoEd. PI is the principal investigator. MPI marks an NIH <a href={NIH_MPI} className={LINK}>multiple-principal-investigator</a> award, where two or more investigators hold principal-investigator standing equally; NIH names one of them the contact PI for correspondence only, which carries no seniority. Co-I is a co-investigator, Sub-PI leads a subaward, and KP is other key personnel. MPI is not a lesser form of PI, and it is not the same as co-PI, which is an NSF term not used on NIH awards. Corrections go to Sponsored Research through Request a change.</>) },
             { term: "Available technologies", def: "Licensable inventions a scholar holds in the WCM Center for Technology Licensing (CTL) portfolio, shown on their profile with a link to the public technology page (innovation.weill.cornell.edu). Sourced from CTL and refreshed weekly." },
             { term: "MeSH", def: "Medical Subject Headings, the NLM’s controlled vocabulary for indexing biomedical literature. Scholars search is MeSH-aware." },
             { term: "System of record (SOR)", def: "The authoritative system that owns a field. Scholars shows a copy and cannot override it; corrections happen at the SOR. Scholars is the SOR for the institutional data it curates directly (center membership, unit and division metadata, and manually-created division rosters), and that set may grow; a scholar’s own overview and visibility choices are stored in Scholars too, but those are personal profile data, not shared institutional records." },

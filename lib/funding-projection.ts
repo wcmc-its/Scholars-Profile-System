@@ -15,6 +15,7 @@
  */
 
 import { coreProjectNum } from "@/lib/award-number";
+import { isPiRole } from "@/lib/funding-roles";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { extractMeshDescriptorUis } from "@/lib/mesh-descriptor-uis";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
@@ -380,13 +381,15 @@ export function projectFromRows(
   // — both rows share coreProjectNum and would otherwise produce duplicate
   // person chips, miscount Multi-PI, and break tooltip state via duplicate
   // React keys. Keep the highest-priority role per scholar.
+  // Keyed on the frozen `Grant.role` vocabulary. ("Sub-PI" / "KP" used to sit here
+  // and are DISPLAY abbreviations, not data — they matched nothing, so a Key
+  // Personnel duplicate fell to the unknown rank.)
   const ROLE_PRIORITY: Record<string, number> = {
     PI: 0,
     "PI-Subaward": 0,
     "Co-PI": 1,
     "Co-I": 2,
-    "Sub-PI": 3,
-    KP: 4,
+    "Key Personnel": 3,
   };
   const bestByCwid = new Map<string, (typeof rows)[number]>();
   for (const r of rows) {
@@ -413,24 +416,29 @@ export function projectFromRows(
   // `Co-PI` counts as a PI here: it is InfoEd's non-contact PD/PI, i.e. the
   // other principal investigator on an NIH multiple-PI award. Excluding it
   // meant `piCwids` never reached 2 on exactly the awards Multi-PI exists to
-  // mark, so the facet was structurally always 0. Matches PI_ROLES in
-  // lib/api/data-quality.ts and isPiRole in lib/api/dept-lists.ts.
+  // mark, so the facet was structurally always 0. `isPiRole` is the shared
+  // membership test (lib/funding-roles.ts).
   const roles = new Set<string>();
   const piCwids = new Set<string>();
   for (const r of dedupedRows) {
     const bucket = rowRoleBucket(r.role);
     if (bucket) roles.add(bucket);
-    if (r.role === "PI" || r.role === "PI-Subaward" || r.role === "Co-PI") {
-      piCwids.add(r.cwid);
-    }
+    if (isPiRole(r.role)) piCwids.add(r.cwid);
   }
   const isMultiPi = piCwids.size >= 2;
+  // "Multi-PI" is the INDEX TOKEN, not a label — the UI renders it as "MPI" via
+  // FUNDING_ROLE_BUCKET_LABEL. Renaming it here would need a full reindex.
   if (isMultiPi) roles.add("Multi-PI");
 
-  // Lead PI's primary department drives the Department facet.
-  const leadPiRow = rows.find(
-    (r) => r.role === "PI" || r.role === "PI-Subaward",
-  );
+  // Lead PI's primary department drives the Department facet. The contact PI wins
+  // when present; a Co-PI is the fallback, NOT an also-ran. InfoEd flags only the
+  // contact PI as `PI`, so a WCM scholar can be the non-contact PD/PI of a
+  // direct award whose contact PI is at another institution — no PI/PI-Subaward
+  // row exists at all. Without the fallback such a project resolved
+  // `department: null` and dropped out of the Department facet entirely.
+  const leadPiRow =
+    rows.find((r) => r.role === "PI" || r.role === "PI-Subaward") ??
+    rows.find((r) => r.role === "Co-PI");
   const department = leadPiRow?.scholar.primaryDepartment ?? null;
 
   const primeShort = resolveCanonical(head.primeSponsor, head.primeSponsorRaw);

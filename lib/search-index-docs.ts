@@ -36,6 +36,9 @@ import {
 import { isFamilyPubliclyVisible } from "@/lib/api/methods-overlay";
 import type { FamilyOverlayGate } from "@/lib/api/methods-overlay";
 import { isFundingActive } from "@/lib/api/search-funding";
+// `lib/funding-roles.ts` is deliberately import-free — safe here, unlike
+// `lib/api/data-quality.ts`, which re-exports the same PI_ROLES but constructs Prisma.
+import { isPiRole } from "@/lib/funding-roles";
 import { extractMeshDescriptorUis } from "@/lib/mesh-descriptor-uis";
 import { buildClinicalAnchors, loadSpecialtyAnchorMap } from "@/lib/clinical-mesh-anchors";
 import {
@@ -992,12 +995,18 @@ export async function buildPeopleDoc(
   // Funding tab all share one definition of "currently active." Small
   // behavior delta: grants in their NCE window flip from "inactive" to
   // "active" here.
+  //
+  // PI membership comes from the shared vocabulary (`lib/funding-roles.ts`), which
+  // INCLUDES Co-PI. The narrow local set this replaced ({PI, PI-Subaward}) was the
+  // root of the facet defect: InfoEd writes Co-PI for the non-contact PD/PI of an
+  // NIH multiple-PI award, so a scholar whose only principal-investigator standing
+  // is on an MPI award indexed as `piRoleEver: false` and never appeared in the PI
+  // facet at all.
   const now = new Date();
-  const PI_ROLES = new Set(["PI", "PI-Subaward"]);
   const hasActiveGrants = s.grants.some((g) => isFundingActive(g.endDate, now));
-  const piRoleEver = s.grants.some((g) => PI_ROLES.has(g.role));
+  const piRoleEver = s.grants.some((g) => isPiRole(g.role));
   const activePiGrantCount = s.grants.reduce((n, g) => {
-    if (!PI_ROLES.has(g.role)) return n;
+    if (!isPiRole(g.role)) return n;
     if (!isFundingActive(g.endDate, now)) return n;
     if (isTrainingOnlyGrant(g)) return n;
     return n + 1;

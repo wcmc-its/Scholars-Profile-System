@@ -7,6 +7,7 @@ import { ResultEvidence } from "@/components/search/result-evidence";
 import { DESCENDANT_SEPARATOR } from "@/lib/search/descendant-summary";
 import { highlightedTitleHtml } from "@/lib/search/highlight-title";
 import { profilePath } from "@/lib/profile-url";
+import { grantRoleShortLabel } from "@/lib/funding-roles";
 import type {
   EvidenceGrant,
   EvidencePub,
@@ -102,21 +103,16 @@ function evidenceSummary(
   }
 }
 
-/** The funding index's per-person role vocabulary (`FundingPersonChip.role`) → the sponsor
- *  card's brevity. `Multi-PI → MPI` mirrors the rebuild; unknown roles fall back to raw. */
-const FUNDING_ROLE_LABEL: Record<string, string> = {
-  PI: "PI",
-  "Multi-PI": "MPI",
-  "Co-I": "Co-I",
-  "Sub-PI": "Sub-PI",
-  KP: "KP",
-};
-
 function GrantRow({ grant }: { grant: EvidenceGrant }) {
   // Absent role renders NOTHING — the scholar is on the grant but the index carries no role for
   // them; a default here would assert a rank in the award we cannot stand behind. (Same rule as
   // an absent authorship role below.)
-  const roleLabel = grant.role ? (FUNDING_ROLE_LABEL[grant.role] ?? grant.role) : null;
+  //
+  // `FundingPersonChip.role` is the RAW `Grant.role` copied through the projection, so the map
+  // this used to carry (keyed PI / Multi-PI / Co-I / Sub-PI / KP) matched on "PI" and "Co-I" and
+  // nothing else: "Co-PI", "PI-Subaward" and "Key Personnel" all fell through to raw. The shared
+  // vocabulary keys on the values production actually emits.
+  const roleLabel = grant.role ? grantRoleShortLabel(grant.role) : null;
   // Status closes the line, and it is the fact a sponsor reads first: an active award is a live
   // pitch (green); an expired one is a materially different conversation and says so plainly
   // (muted). "expired 2020" over a bare "2014–2020" — the end date is the only date that changes
