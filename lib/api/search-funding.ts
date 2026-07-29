@@ -335,7 +335,7 @@ export async function investigatorGrantMatchCounts(opts: {
   q: string;
   cwids: string[];
   meshResolution?: MeshResolution | null;
-}): Promise<Map<string, { count: number; taggedCount: number }>> {
+}): Promise<Map<string, { count: number; taggedCount: number; indexedCount: number }>> {
   const cwids = Array.from(new Set(opts.cwids.filter(Boolean)));
   const trimmed = opts.q.trim();
   if (cwids.length === 0 || trimmed.length === 0) return new Map();
@@ -369,19 +369,36 @@ export async function investigatorGrantMatchCounts(opts: {
     ? [{ bool: { should: [textClause, conceptTermsClause], minimum_should_match: 1 } }]
     : [textClause];
 
+  // #2018/E2 — the query moves OUT of the top-level `must` and INTO a `matched` filter
+  // sub-agg, so one request yields both sides of the card's fraction from ONE population:
+  //   byInvestigator.doc_count          -> every funding-index project this investigator
+  //                                        is on = the honest DENOMINATOR
+  //   byInvestigator.matched.doc_count  -> the ones the query admitted = the numerator
+  //   byInvestigator.matched.tagged     -> the concept-tagged sub-bucket
+  // Previously the card divided the numerator by the people doc's `grantCount`, which is
+  // `s.grants.length` — raw Grant rows, NOT grouped by coreProjectNum and NOT suppression-
+  // filtered. Measured on staging: one scholar rendered "of 127" against a searchable
+  // funding population of 117. Admission is unchanged; the same `must` still selects the
+  // numerator, one level down. No extra round-trip.
+  const matchedFilter = { bool: { must } };
   const resp = await searchClient().search({
     index: FUNDING_INDEX,
     body: {
       size: 0,
       track_total_hits: false,
       query: {
-        bool: { must, filter: [{ terms: { wcmInvestigatorCwids: cwids } }] },
+        bool: { filter: [{ terms: { wcmInvestigatorCwids: cwids } }] },
       },
       aggs: {
         byInvestigator: {
           terms: { field: "wcmInvestigatorCwids", include: cwids, size: cwids.length },
-          // Concept-tagged sub-count → per-investigator "tagged" vs "mention".
-          ...(conceptTermsClause ? { aggs: { tagged: { filter: conceptTermsClause } } } : {}),
+          aggs: {
+            matched: {
+              filter: matchedFilter,
+              // Concept-tagged sub-count → per-investigator "tagged" vs "mention".
+              ...(conceptTermsClause ? { aggs: { tagged: { filter: conceptTermsClause } } } : {}),
+            },
+          },
         },
       },
     } as object,
@@ -392,7 +409,11 @@ export async function investigatorGrantMatchCounts(opts: {
       resp.body as unknown as {
         aggregations?: {
           byInvestigator?: {
-            buckets: Array<{ key: string; doc_count: number; tagged?: { doc_count: number } }>;
+            buckets: Array<{
+              key: string;
+              doc_count: number;
+              matched?: { doc_count: number; tagged?: { doc_count: number } };
+            }>;
           };
         };
       }
@@ -405,9 +426,17 @@ export async function investigatorGrantMatchCounts(opts: {
   //
   // `taggedCount` and `count - taggedCount` PARTITION the matched set: tagged vs
   // mention-only. Both clauses are rendered, and they add up.
-  const out = new Map<string, { count: number; taggedCount: number }>();
+  //
+  // `indexedCount` is the bucket's own doc_count — this investigator's whole searchable
+  // funding population, the denominator `count` is a subset of. Emitted so the card never
+  // has to reach for a differently-built total.
+  const out = new Map<string, { count: number; taggedCount: number; indexedCount: number }>();
   for (const b of buckets) {
-    out.set(b.key, { count: b.doc_count, taggedCount: b.tagged?.doc_count ?? 0 });
+    out.set(b.key, {
+      count: b.matched?.doc_count ?? 0,
+      taggedCount: b.matched?.tagged?.doc_count ?? 0,
+      indexedCount: b.doc_count,
+    });
   }
   return out;
 }

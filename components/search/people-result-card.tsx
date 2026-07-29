@@ -402,13 +402,25 @@ export function PeopleResultCard({
   // carries the remainder, so a mixed set states both and they sum to `grantsTotal`.
   // Both degenerate to today's exact strings when the set is all-tagged or all-mention.
   const fundingLead = fundingTagged ? grantsTagged : grantsTotal;
-  // Contract: docs/search-relevance-contract.md § Layer 3, rule E2 — OPEN VIOLATION. The two
-  // sides of this fraction are different populations: the lead counts coreProjectNum-grouped,
-  // suppression-filtered funding-index PROJECT docs, while `hit.grantCount` is
-  // `s.grants.length` — raw Grant rows, ungrouped and unsuppressed. Measured gap on one
-  // scholar: denominator 127 against a searchable funding population of 117. The `Math.min`
-  // only guards lead > denominator; it cannot see the denominator drawn from a larger set.
-  const fundingCount = `${Math.min(fundingLead, hit.grantCount)} of ${hit.grantCount} grants`;
+  // Contract: docs/search-relevance-contract.md § Layer 3, rule E2 — SATISFIED HERE, and the
+  // reason this line reads the way it does. Both sides must come from ONE population: the
+  // scholar's funding-index projects (coreProjectNum-grouped, suppression-filtered), which
+  // `grantIndexedCount` carries from the same aggregation that produced `grantMatchCount`.
+  //
+  // It is NOT `hit.grantCount` — that is the people doc's `s.grants.length`, raw Grant rows,
+  // neither grouped nor suppressed. Measured on staging before this: one scholar rendered
+  // "of 127" against a searchable population of 117, so the share was of a set the numerator
+  // never came from. `Math.min` cannot catch that; it only guards lead > denominator.
+  //
+  // Falls back to `grantCount` when the field is absent, which is a payload from before this
+  // shipped — a stale client then renders exactly the old number rather than "of 0", which
+  // would turn a thin match into a headline share.
+  //
+  // The right-hand stat column below deliberately KEEPS `hit.grantCount`. It makes a
+  // different claim — "this scholar holds N grants", career-wide, not a share of anything —
+  // and the raw row count is the right answer to that one.
+  const fundingDenominator = hit.grantIndexedCount ?? hit.grantCount;
+  const fundingCount = `${Math.min(fundingLead, fundingDenominator)} of ${fundingDenominator} grants`;
   // "· 7 mention “<q>”" read as a second, parallel claim, so a reader summed it with the
   // lead and got a universe that looked double-counted. It is a REMAINDER —
   // `grantsMentionOnly` is `grantsTotal - grantsTagged` — so "more" says so in the one
@@ -466,8 +478,8 @@ export function PeopleResultCard({
             panelId={fundingPanelId}
           >
             <CountFirst
-              n={Math.min(fundingLead, hit.grantCount)}
-              m={hit.grantCount}
+              n={Math.min(fundingLead, fundingDenominator)}
+              m={fundingDenominator}
               thing="grants"
               relation={fundingTagged ? "tagged" : "mention"}
               entity={fundingTagged ? grantConceptLabel : `“${qParam}”`}
@@ -570,7 +582,7 @@ export function PeopleResultCard({
     // its two clauses, which is where the partition belongs.
     secondaryChips.push({
       label: SECONDARY_LABEL.funding,
-      detail: unit(Math.min(grantsTotal, hit.grantCount), "grant"),
+      detail: unit(Math.min(grantsTotal, fundingDenominator), "grant"),
     });
   }
   // ponytail: 3 chips fit one line at typical widths now that each carries a count

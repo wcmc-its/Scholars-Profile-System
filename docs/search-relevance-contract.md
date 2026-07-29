@@ -172,10 +172,26 @@ must not be rendered where the user reads it as such.
 **[CHECK]** For any evidence count, ask whether the value changes when the query changes. Probe the
 same scholar under two unrelated queries: a figure that does not move is not evidence for either.
 
-**E2. A numerator and a denominator rendered as one fraction come from one population.** "N of M"
+**E2. A numerator and a denominator rendered as one fraction come from one population — and the
+denominator is the ELIGIBLE POOL for that specific claim, not the largest number to hand.** "N of M"
 where N and M are counted over different sets is false regardless of how correct N is.
 **[CHECK]** Name the population of each side. A `Math.min(N, M)` guard only prevents N > M; it cannot
 detect M being drawn from a larger set.
+
+Worked examples of all three states, because this rule is the one most often satisfied by accident:
+
+- **Method — correct.** `components/search/result-evidence.tsx:303` sends the method kind to
+  `methodPubCount`, the union of `ScholarFamily.pmids`, because method extraction covers 2020+ by
+  design. Dividing by `pubCount` once rendered 11 of 923 (1.2%) where the honest figure was 11 of 27
+  (41%) — and at 1.2% the `COVERAGE_CUE_THRESHOLD = 0.02` dim then greyed out the strongest match on
+  the page. Resolved query-time over the page cwids, not as an index field.
+- **Grants — fixed.** See the register.
+- **Research area — still wrong.** That same ternary sends every non-method kind to `pubCount`, but a
+  publication is only listed in a Research Area if it is **post-2020**, a **research article**, and one
+  where the faculty member was **first or last author**. The numerator is carved and the denominator is
+  not, so the area line understates by roughly the same mechanism method did — and it sits close enough
+  to the 2% dim to be silenced by it. Fixing it needs an eligible-pool count SPS does not store today;
+  the method line is the template.
 
 **E3. An OR count is labelled as a match, not as a topical count.** Where a count admits on a text
 match **or** a concept tag, the rendered phrasing claims a match. It does not claim the concept.
@@ -216,8 +232,9 @@ with no violations listed is either new or not being read.
 | O2   | Concentration boost credits area membership via a bare `terms: {cwid}` filter                          | Fixed behind `SEARCH_PEOPLE_CONCEPT_ARM_FIRST`, default off, staging-first (#2018) |
 | O3   | `ln1p(publicationCount)` is unfiltered and unbounded; worth 2.01× across a measured top 40             | Open, scoped                                                                       |
 | E1   | `topic` evidence line renders an index-time area total as query evidence                               | Open                                                                               |
-| E2   | Grant card denominator is raw Grant rows; numerator is grouped, suppression-filtered projects          | Open                                                                               |
-| E5   | `/api/scholar/[cwid]/grants` returns HTTP 200 `{"total":0}` for an unknown CWID and for a caught throw | Open                                                                               |
+| E2b  | `topic` line divides by `pubCount` while its numerator is carved (see below)                           | Open — needs an eligible-pool count SPS does not store                             |
+| E2   | Grant card denominator is raw Grant rows; numerator is grouped, suppression-filtered projects          | **Fixed** (#2058) — `grantIndexedCount`, same aggregation, no reindex              |
+| E5   | `/api/scholar/[cwid]/grants` swallowed a caught throw into a body identical to a real no-match         | **Fixed** (#2057) — 200 + `error: "search_failed"`, and it logs                     |
 
 ## Related documents
 
