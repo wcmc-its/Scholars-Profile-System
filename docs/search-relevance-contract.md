@@ -5,7 +5,7 @@ describe the pipeline — `docs/search-people-relevance.md` does that, layer by 
 assumes it.
 
 ```
-Verified against origin/master 98bea66a — 2026-07-29
+Verified against origin/master b837c8c6 — 2026-07-30
 Every invariant below was checked in a worktree at that SHA. If HEAD has moved, re-ground before
 citing one:
   git log 98bea66a..origin/master -- lib/api/search.ts app/api/search/route.ts \
@@ -163,6 +163,44 @@ change as a re-targeting, never as a reduction.
 **[REVIEW]** Nothing in the search response distinguishes which arm produced a boost. If a change
 alters arm selection, say so explicitly rather than reporting the net.
 
+**O7. A publication contributes once.** Two ordering terms that can both fire on the same publication
+are one signal expressed twice. The inner `function_score` composes with `score_mode: "multiply"`
+(`lib/api/search.ts`), so they do not merely add — they compound. A scholar whose single paper is both
+tagged with the resolved descriptor and carries a matching method-family label earns
+×1.5 × ×2.0 = **×3.0** from one piece of evidence. The stacking is deliberate and is stated in
+`lib/search.ts` ("tagged + MeSH (×1.5·2.0=3.0) > tagged-only > MeSH-only"); what was never stated is
+that the two filters may be reading the **same paper**. Multiplying two views of one publication is
+not a trust ladder, it is a double count.
+**[REVIEW]** For every pair of terms inside one multiply block, ask whether a single publication can
+satisfy both filters. If it can, they are one signal and must compose additively, be collapsed, or be
+justified in writing here. Ask separately whether the two filters even read the same publications:
+`methodFamily` is built from a sidecar `ScholarFamily` lookup that never intersects the
+authorship-derived kept-PMID set (`lib/search-index-docs.ts`), so the ×2.0 can fire on papers that are
+not the papers that produced the descriptor match. A multiplier sourced from a different paper set
+than the one it is credited against fails O2 as well.
+
+**O8. A term that orders by evidence is sensitive to how much evidence there is.** A filter that fires
+identically for one matching publication and five hundred answers **admission**, not ordering. It
+belongs in Layer 1. Using it to order is how the principle at the top of this layer is violated while
+every other rule is satisfied — O1 through O6 constrain what a term may be keyed on and how far a
+prior may reach, and a presence test passes all of them.
+
+Today every query-derived ordering term in the people body is a presence test. `publicationMeshUi` is
+a deduped keyword set, so the count never reaches the query; `methodFamily` is a joined label string;
+clinical, faculty and active-grant terms are booleans. The only smoothly increasing term in the sum is
+`ln1p(publicationCount)` — **total career output, with no topical relation to the query** (see O3).
+So the single continuous dial in the system is pointed at the one quantity the query does not ask
+about, and the measured consequence is that ordering barely responds to the evidence being ranked on:
+on a disease query, the scholar with **318** publications tagged to the queried descriptor ranks
+**15th** while one with **13** ranks first, and across a top 20 the score per matching publication
+spans **43×, inverted** — the less evidence a scholar has, the more each paper is worth.
+**[CHECK]** Capture a query's top 20 and divide each scholar's score by their count of matching
+publications. Under a magnitude-sensitive ordering that ratio is roughly flat; a wide spread, or one
+that trends **downward** as evidence rises, localises the violation. Then count inversion pairs — a
+scholar outranking another who has more than 3× their matching publications. Both are computable from
+the search response alone, with no index access. A term proposed as evidence should move this
+measurement; if it does not, it is an admission signal wearing an ordering signal's clothes.
+
 ## Layer 3 — Evidence display
 
 Display decides **what the card asserts about why this scholar is here**.
@@ -237,8 +275,10 @@ with no violations listed is either new or not being read.
 | Rule | Violation                                                                                              | Status                                                                             |
 | ---- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
 | O1   | Method-family tier selected by lexical match on the family label; a plural removes ×2.0                | Open                                                                               |
-| O2   | Concentration boost credits area membership via a bare `terms: {cwid}` filter                          | Fixed behind `SEARCH_PEOPLE_CONCEPT_ARM_FIRST`, default off, staging-first (#2018) |
+| O2   | Concentration boost credits area membership via a bare `terms: {cwid}` filter                          | Fixed behind `SEARCH_PEOPLE_CONCEPT_ARM_FIRST` — **on in both envs**; prod flipped 2026-07-30 (#2018/#2079). The descriptor-keyed arm is tried first, but its magnitude is still quantised to three bands — see O8 |
 | O3   | `ln1p(publicationCount)` is unfiltered and unbounded; worth 2.01× across a measured top 40             | Ceiling shipped behind `SEARCH_PEOPLE_PUBCOUNT_DAMPEN=capped`, default off, topic/hybrid/unclassified only, spine pins it off (#2068) |
+| O7   | Attribution ×1.5 and the method tier ×2.0 sit in one multiply block and can both fire on the same publication, compounding to ×3.0 from one paper; `methodFamily` is not even joined to the papers that produced the descriptor match | Open — no flag isolates it; the composition is intentional and documented in `lib/search.ts`, the shared-publication case is not |
+| O8   | Every query-derived ordering term is a presence test; the only continuous term is career-total volume. A scholar with 318 publications tagged to the queried descriptor ranks 15th while one with 13 ranks first | Open — the root cause O1/O3/E1b are each a facet of. The recency-weighted per-publication sum this needs already exists (`scorePublication`, `lib/ranking.ts`) and is discarded by quantising to three bands in `buildAreaBoostFunctions` |
 | E1a  | `topic` line named the FIRST of the scholar's own areas that intersects the match, not the best-evidenced | **Fixed** — `pickMatchedAreaIndex`, degrades to the old rule without `areaCounts` |
 | E1b  | `topic` evidence line renders an index-time area total as query evidence                               | Open — the count is still `areaCounts`, never query-filtered                        |
 | E2b  | `topic` line divides by `pubCount` while its numerator is carved                                       | **Fixed** — the line states a magnitude, no share (see below)                       |
