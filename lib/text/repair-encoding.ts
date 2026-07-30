@@ -84,7 +84,6 @@ const DROPPED = [
 const C1_CLASS = `[${cc(0x80)}-${cc(0x9f)}]`;
 const DROPPED_CLASS = `[${DROPPED.map(([a, b]) => (a === b ? cc(a) : `${cc(a)}-${cc(b)}`)).join("")}]`;
 
-const C1_RE = new RegExp(C1_CLASS, "g");
 const DROPPED_RE = new RegExp(DROPPED_CLASS, "g");
 const DEFECT_RE = new RegExp(`${C1_CLASS}|${DROPPED_CLASS}`); // non-global: safe to .test()
 
@@ -93,13 +92,114 @@ export function hasEncodingDefect(input: string): boolean {
   return DEFECT_RE.test(input);
 }
 
+/** cp1252 replacement character -> the 0x80-0x9F byte it stands for. */
+const CP1252_TO_BYTE = new Map<number, number>(
+  Object.entries(CP1252).map(([byte, chr]) => [chr.codePointAt(0) as number, Number(byte)]),
+);
+
+/**
+ * The byte this character stands for when a UTF-8 octet stream was decoded as
+ * Latin-1 (`\u00c3\u00af`) or as cp1252 (`\u00e2\u20ac\u2122`, where 0x80 already
+ * became a euro sign upstream). Null when the character cannot be a byte at all.
+ */
+function byteOf(cp: number): number | null {
+  if (cp <= 0xff) return cp;
+  return CP1252_TO_BYTE.get(cp) ?? null;
+}
+
+const seqLen = (b: number): number =>
+  b >= 0xf0 && b <= 0xf4 ? 4 : b >= 0xe0 && b <= 0xef ? 3 : b >= 0xc2 && b <= 0xdf ? 2 : 0;
+
+const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
+
+/**
+ * The one scanner both repairs share: every maximal run of characters that,
+ * read back as bytes, forms a well-formed multi-byte UTF-8 sequence — i.e. text
+ * that was double-encoded. `repairDoubleEncoding` decodes these runs;
+ * `repairEncoding` uses them as a DO-NOT-TOUCH mask, because a C1 inside one is
+ * a continuation byte, not cp1252 mojibake.
+ *
+ * Sharing it is the whole point: an earlier version hand-checked only the
+ * immediately-preceding character, which held the first continuation byte of a
+ * 3-byte sequence and then happily mapped the second.
+ */
+function doubleEncodedRuns(chars: string[]): { at: number; len: number; text: string }[] {
+  const runs: { at: number; len: number; text: string }[] = [];
+  for (let i = 0; i < chars.length; ) {
+    const b0 = byteOf(chars[i].codePointAt(0) as number);
+    const len = b0 === null ? 0 : seqLen(b0);
+    if (len === 0 || i + len > chars.length) {
+      i += 1;
+      continue;
+    }
+    const bytes = [b0 as number];
+    for (let k = 1; k < len; k++) {
+      const b = byteOf(chars[i + k].codePointAt(0) as number);
+      if (b === null || b < 0x80 || b > 0xbf) break;
+      bytes.push(b);
+    }
+    if (bytes.length !== len) {
+      i += 1;
+      continue;
+    }
+    try {
+      runs.push({ at: i, len, text: UTF8_DECODER.decode(new Uint8Array(bytes)) });
+      i += len;
+    } catch {
+      i += 1;
+    }
+  }
+  return runs;
+}
+
 export function repairEncoding(input: string): string {
   // ponytail: a control char followed by hex digits is sometimes a mangled
   // \uXXXX escape (scholar_tool's "amyloid-b2" was a beta) - dropping the
   // control leaves "amyloid-b2". Decoding that needs a Symbol-font table; do it
   // only if the greek-letter loss ever surfaces on a public page.
   if (!DEFECT_RE.test(input)) return input;
-  return input.replace(C1_RE, (c) => CP1252[c.charCodeAt(0)] ?? "").replace(DROPPED_RE, "");
+  const chars = [...input];
+  const held = new Set<number>();
+  for (const r of doubleEncodedRuns(chars)) for (let k = 0; k < r.len; k++) held.add(r.at + k);
+  let out = "";
+  for (let i = 0; i < chars.length; i++) {
+    const cp = chars[i].codePointAt(0) as number;
+    // A C1 inside a double-encoded run is a continuation byte. Mapping it
+    // through the cp1252 table turns an invisible box into a visible
+    // "Children<euro><tm>s" - strictly worse. Leave it for repairDoubleEncoding.
+    out += cp >= 0x80 && cp <= 0x9f && !held.has(i) ? (CP1252[cp] ?? "") : chars[i];
+  }
+  return out.replace(DROPPED_RE, "");
+}
+
+/**
+ * Repair DOUBLE-ENCODED UTF-8: octets decoded as Latin-1/cp1252 and re-encoded,
+ * so `\u2019` became `\u00e2\u20ac\u2122` and `\u00ef` became `\u00c3\u00af`.
+ * Distinct from {@link repairEncoding} and its exact inverse - map each
+ * character back to the byte it stands for, then decode the run as UTF-8. A
+ * `fatal` decoder rejects anything not well-formed, so genuine accented text
+ * (`Tom\u00e1\u0161`, `L\u00ed\u0161kov\u00e1`) is left alone.
+ *
+ * NOT wired into any ingest boundary on purpose: the signature can occur in
+ * genuine text, and a false positive here silently rewrites a scholar's name.
+ * Opt in per run via `scripts/repair-text-encoding.ts --double-encoding`.
+ */
+export function repairDoubleEncoding(input: string): string {
+  const chars = [...input];
+  const runs = doubleEncodedRuns(chars);
+  if (runs.length === 0) return input;
+  let out = "";
+  let i = 0;
+  for (const r of runs) {
+    out += chars.slice(i, r.at).join("") + r.text;
+    i = r.at + r.len;
+  }
+  return out + chars.slice(i).join("");
+}
+
+/** True when `input` looks double-encoded (see {@link repairDoubleEncoding}). */
+export function hasDoubleEncoding(input: string): boolean {
+  return doubleEncodedRuns([...input]).length > 0;
 }
 
 /** `null`/`undefined`-tolerant wrapper for ETL upsert payloads. */
