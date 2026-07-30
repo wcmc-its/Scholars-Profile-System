@@ -15,14 +15,12 @@ import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { cachedRead } from "@/lib/api/swr-cache";
 import { identityImageEndpoint } from "@/lib/headshot";
-import { isPiRole } from "@/lib/funding-roles";
-import { multiPiExternalIds } from "@/lib/funding-projection";
-import { loadProjectSiblingRows } from "@/lib/api/project-siblings";
+import {
+  buildUnitGrantCards,
+  loadUnitGrantProjects,
+} from "@/lib/api/unit-grant-projects";
 import type { DepartmentTopicArea } from "@/lib/api/departments";
-import type {
-  DeptPublicationCard,
-  DeptGrantCard,
-} from "@/lib/api/dept-highlights";
+import type { DeptPublicationCard } from "@/lib/api/dept-highlights";
 import type {
   DeptListPubResult,
   DeptListGrantResult,
@@ -35,11 +33,9 @@ import {
   isAuthorHidden,
   isUnitSuppressed,
   loadHiddenAuthorshipCounts,
-  loadEntitySuppressions,
   loadPublicationSuppressions,
   loadUnitFieldOverrides,
   mergeUnitFields,
-  resolveActiveGrantSuppression,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
 import {
@@ -245,24 +241,19 @@ async function getDivisionUncached(
           const darkPmids = await resolveDarkPmids(poolPmids, suppressions, prisma);
           return poolPmids.filter((p) => !darkPmids.has(p)).length;
         })(),
+    // #2066 — count funding PROJECTS, not investigator-award rows, via the SAME
+    // call `getDivisionGrantsList` paginates. Not "two implementations that
+    // agree": one call, one number. #481(b) suppression is applied inside it.
     memberCwids.length === 0
       ? Promise.resolve(0)
-      : prisma.grant
-          .findMany({
-            where: {
-              endDate: { gte: new Date() },
-              cwid: { in: memberCwids },
-              source: { not: "RePORTER" }, // exclude individual RePORTER history
-            },
-            select: { externalId: true, id: true },
-          })
-          // #481(b) — exclude #160-suppressed grants so the stat agrees with
-          // the Grants-tab list/badge.
-          .then((rows) =>
-            resolveActiveGrantSuppression(rows, prisma).then(
-              (r) => r.unsuppressedKeyCount,
-            ),
-          ),
+      : loadUnitGrantProjects(
+          {
+            endDate: { gte: new Date() },
+            cwid: { in: memberCwids },
+            source: { not: "RePORTER" }, // exclude individual RePORTER history
+          },
+          "most_recent",
+        ).then((projects) => projects.length),
   ]);
 
   return {
@@ -637,158 +628,28 @@ async function getDivisionGrantsListUncached(
     source: { not: "RePORTER" }, // exclude individual RePORTER history
   };
 
-  const distinctRows = (await prisma.grant.findMany({
-    where: baseWhere,
-    select: { externalId: true, id: true },
-  })) as Array<{ externalId: string | null; id: string }>;
-  // #160/#481(b) — drop suppressed grants from the count and (below) the
-  // grouping so a hidden grant never lists or inflates the badge.
-  const { suppressed, unsuppressedKeyCount: total } =
-    await resolveActiveGrantSuppression(distinctRows, prisma);
+  // #2066 — ONE card per funding PROJECT via the SAME call the division hero stat
+  // makes, so `total` here and "N active grants" there cannot disagree. (They
+  // already could before: this loader returned a ROW count from
+  // `resolveActiveGrantSuppression` while the dept twin returned a GROUP count.)
+  // #160/#481(b) suppression is applied inside, before grouping.
+  const sortedGroups = await loadUnitGrantProjects(baseWhere, sort);
+  const total = sortedGroups.length;
   if (total === 0) {
     return { hits: [], total: 0, page, pageSize: GRANT_PAGE_SIZE };
   }
-
-  const orderBy =
-    sort === "end_date"
-      ? [{ endDate: "desc" as const }]
-      : [{ startDate: "desc" as const }];
-
-  const all = (await prisma.grant.findMany({
-    where: baseWhere,
-    orderBy,
-    select: {
-      cwid: true,
-      title: true,
-      role: true,
-      funder: true,
-      startDate: true,
-      endDate: true,
-      externalId: true,
-      awardNumber: true,
-    },
-  })) as Array<{
-    cwid: string;
-    title: string;
-    role: string;
-    funder: string;
-    startDate: Date;
-    endDate: Date;
-    externalId: string | null;
-    awardNumber: string | null;
-  }>;
-
-  type Group = {
-    title: string;
-    funder: string;
-    startDate: Date;
-    endDate: Date;
-    externalId: string | null;
-    awardNumber: string | null;
-    cwids: string[];
-    piCwids: string[];
-    /** #2074 — each investigator's raw `Grant.role` on this award, so the chip can
-     *  be described truthfully instead of being assumed to be a PI. */
-    roleByCwid: Map<string, string>;
-    sortKey: number;
-  };
-  const groups = new Map<string, Group>();
-  for (const r of all) {
-    // #160/#481(b) — skip suppressed grant rows before grouping.
-    if (r.externalId !== null && suppressed.has(r.externalId)) continue;
-    const key = r.externalId ?? `__solo__${r.cwid}-${r.startDate.toISOString()}`;
-    const existing = groups.get(key);
-    const sortKey =
-      sort === "end_date" ? r.endDate.getTime() : r.startDate.getTime();
-    if (!existing) {
-      groups.set(key, {
-        title: r.title,
-        funder: r.funder,
-        startDate: r.startDate,
-        endDate: r.endDate,
-        externalId: r.externalId,
-        awardNumber: r.awardNumber,
-        cwids: [r.cwid],
-        piCwids: isPiRole(r.role) ? [r.cwid] : [],
-        roleByCwid: new Map([[r.cwid, r.role]]),
-        sortKey,
-      });
-    } else {
-      if (!existing.cwids.includes(r.cwid)) existing.cwids.push(r.cwid);
-      if (isPiRole(r.role) && !existing.piCwids.includes(r.cwid))
-        existing.piCwids.push(r.cwid);
-      // ponytail: first role wins — one row per cwid per group today (#2066).
-      if (!existing.roleByCwid.has(r.cwid)) existing.roleByCwid.set(r.cwid, r.role);
-      if (sortKey > existing.sortKey) existing.sortKey = sortKey;
-    }
-  }
-
-  const sortedGroups = Array.from(groups.values()).sort(
-    (a, b) => b.sortKey - a.sortKey,
-  );
   const pageSlice = sortedGroups.slice(
     page * GRANT_PAGE_SIZE,
     (page + 1) * GRANT_PAGE_SIZE,
   );
 
-  // #2066/#2075 — see the twin comment in lib/api/dept-lists.ts for the full
-  // reasoning. Keyed on `pageSlice`, never `all`: the sibling query builds up to
-  // two OR arms per distinct account/serial and the serial arm is an unanchored
-  // LIKE, so passing the whole division pool would build thousands of arms.
-  const siblingRows = await loadProjectSiblingRows(pageSlice);
-
-  const cwids = Array.from(new Set(pageSlice.flatMap((g) => g.cwids)));
-  type Sl = { cwid: string; preferredName: string; slug: string; roleCategory: string | null };
-  const [scholars, siblingSuppressed] = await Promise.all([
-    cwids.length === 0
-      ? Promise.resolve([] as Sl[])
-      : (prisma.scholar.findMany({
-          where: { cwid: { in: cwids } },
-          select: { cwid: true, preferredName: true, slug: true, roleCategory: true },
-        }) as Promise<Sl[]>),
-    // #160 on a SIBLING's row — `suppressed` was resolved over this division's
-    // rows only and cannot speak for a co-PD/PI outside it.
-    loadEntitySuppressions(
-      "grant",
-      siblingRows.map((r) => r.externalId).filter((id): id is string => id !== null),
-      prisma,
-    ),
-  ]);
-  const scholarMap = new Map(scholars.map((s) => [s.cwid, s]));
-  const multiPi = multiPiExternalIds(siblingRows, siblingSuppressed);
-
-  const hits: DeptGrantCard[] = pageSlice.map((g) => {
-    const piList = g.piCwids.length > 0 ? g.piCwids : g.cwids;
-    const pis: AuthorChip[] = piList
-      .map((c) => {
-        const s = scholarMap.get(c);
-        if (!s) return null;
-        return {
-          name: s.preferredName,
-          cwid: s.cwid,
-          slug: s.slug,
-          identityImageEndpoint: identityImageEndpoint(s.cwid),
-          isFirst: false,
-          isLast: false,
-          roleCategory: s.roleCategory,
-          // #2074 — `piList` falls back to non-PI cwids when the award has no PI
-          // row in this division, so the chip cannot be assumed to be a PI.
-          grantRole: g.roleByCwid.get(c) ?? null,
-        } satisfies AuthorChip;
-      })
-      .filter((x): x is NonNullable<typeof x> => x !== null);
-    return {
-      externalId: g.externalId,
-      awardNumber: g.awardNumber,
-      funder: g.funder,
-      title: g.title,
-      startDate: g.startDate,
-      endDate: g.endDate,
-      isRecentlyCompleted: false,
-      pis,
-      isMultiPi: g.externalId !== null && multiPi.has(g.externalId),
-    };
-  });
+  // #2066 — the SAME card assembly the department tab uses. This tail used to be
+  // a near-verbatim copy of `lib/api/dept-lists.ts` that had already drifted:
+  // the chip fallback listed EVERY cwid where the dept listed one (harmless
+  // while the key embedded the cwid, N chips once cards group by project), and
+  // the scholar lookup omitted `deletedAt: null`. Nothing is passed per-surface:
+  // this tab and the department's render the same `GrantCard`.
+  const hits = await buildUnitGrantCards(pageSlice);
 
   return { hits, total, page, pageSize: GRANT_PAGE_SIZE };
 }

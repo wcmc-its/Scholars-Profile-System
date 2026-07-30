@@ -28,8 +28,8 @@ import {
   isUnitSuppressed,
   loadUnitFieldOverrides,
   mergeUnitFields,
-  resolveActiveGrantSuppression,
 } from "@/lib/api/manual-layer";
+import { loadUnitGrantProjects } from "@/lib/api/unit-grant-projects";
 import {
   aggregatePublicFamiliesForUnit,
   loadPublicFamiliesForMembers,
@@ -259,22 +259,19 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
     prisma.publicationTopic.count({
       where: { scholar: { deptCode: dept.code, deletedAt: null, status: "active" } },
     }),
-    // #481(b) — count active grants excluding #160-suppressed rows, so the
-    // hero stat agrees with the Grants-tab list/badge.
-    prisma.grant
-      .findMany({
-        where: {
-          scholar: { deptCode: dept.code, deletedAt: null, status: "active" },
-          endDate: { gte: now },
-          source: { not: "RePORTER" }, // exclude individual RePORTER history
-        },
-        select: { externalId: true, id: true },
-      })
-      .then((rows) =>
-        resolveActiveGrantSuppression(rows, prisma).then(
-          (r) => r.unsuppressedKeyCount,
-        ),
-      ),
+    // #2066/#481(b) — count active funding PROJECTS (`coreProjectNum ??
+    // accountNumber`), not investigator-award rows, through the SAME call
+    // `getDeptGrantsList` paginates. The hero stat and the Grants-tab total are
+    // one number from one implementation, not two that agree today.
+    // #160-suppressed rows are dropped inside, before grouping.
+    loadUnitGrantProjects(
+      {
+        scholar: { deptCode: dept.code, deletedAt: null, status: "active" },
+        endDate: { gte: now },
+        source: { not: "RePORTER" }, // exclude individual RePORTER history
+      },
+      "most_recent",
+    ).then((projects) => projects.length),
   ]);
 
   const stats: DepartmentStats = {

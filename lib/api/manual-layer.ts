@@ -353,12 +353,18 @@ export async function loadAllGrantSuppressions(
  *
  * A grant row is per-investigator and keyed on its stable `externalId` (#352);
  * a suppression on that `externalId` hides exactly that row (ADR-005 keying /
- * #160 D1). This is the shared predicate for the aggregate grant surfaces —
- * department / division / center listings and their active-grant counts — so
- * the Grants-tab list, its badge, and the hero stat all drop the same rows and
- * stay in agreement (#481(b): suppressed grants must neither list nor inflate a
- * count). Mirrors the row-drop the funding search-index build applies before
- * grouping (`etl/search-index/index.ts`).
+ * #160 D1). This is the shared predicate for the CENTER grant surfaces
+ * (`lib/api/centers.ts`, `lib/api/center-collaboration.ts`) — the listing, its
+ * badge, and the hero stat drop the same rows and stay in agreement (#481(b):
+ * suppressed grants must neither list nor inflate a count). Mirrors the row-drop
+ * the funding search-index build applies before grouping
+ * (`etl/search-index/index.ts`).
+ *
+ * NOT the department/division path any more: #2066 moved those four surfaces
+ * (both hero stats, both Grants tabs) onto `loadUnitGrantProjects`
+ * (lib/api/unit-grant-projects.ts), which applies the same `externalId`
+ * suppression gate but then counts funding PROJECTS rather than the
+ * investigator-award ROWS `unsuppressedKeyCount` returns.
  *
  * Returns the active suppressed `externalId` set (for filtering rows before
  * grouping) and the distinct unsuppressed key count (`externalId`, or `id` when
