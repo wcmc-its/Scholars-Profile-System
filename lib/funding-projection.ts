@@ -278,6 +278,41 @@ export function groupGrantsByProject<
   return byProject;
 }
 
+/**
+ * The grant `externalId`s whose funding PROJECT is multiple-PI.
+ *
+ * Same rule as `projectFromRows`: ≥2 DISTINCT cwids in `PI_ROLES` on one
+ * project. Counting distinct cwids (not rows) is what keeps a renewal or
+ * supplement — the same scholar on two Account_Numbers under one
+ * `coreProjectNum` — from reading as multi-PI. Row-level dedupe by best role is
+ * unnecessary here: `isPiRole` is true for a cwid iff it is true for that cwid's
+ * highest-priority role, so the set is identical to the projection's.
+ *
+ * Suppressed rows (#160) are dropped before grouping, exactly as the funding
+ * index does — a colleague who hid their own grant row must not keep flipping
+ * this flag.
+ *
+ * WHAT `rows` CONTAINS DECIDES WHAT THIS CAN SEE. It groups only what it is
+ * given, so the caller owns the population: `lib/api/profile.ts` feeds it a
+ * corpus-wide sibling query and gets institution-wide truth, while the
+ * department and division lists (#2066) feed it their own already-fetched rows
+ * and get a unit-scoped answer. Under-population under-flags; it never
+ * over-flags.
+ */
+export function multiPiExternalIds(
+  rows: readonly { cwid: string; role: string; externalId: string | null; awardNumber: string | null }[],
+  suppressedExternalIds: ReadonlySet<string>,
+): Set<string> {
+  const flagged = new Set<string>();
+  for (const group of groupGrantsByProject(rows, suppressedExternalIds).values()) {
+    const piCwids = new Set<string>();
+    for (const r of group) if (isPiRole(r.role)) piCwids.add(r.cwid);
+    if (piCwids.size < 2) continue;
+    for (const r of group) if (r.externalId) flagged.add(r.externalId);
+  }
+  return flagged;
+}
+
 /** Per-row role bucket — Multi-PI is a project-level fact (≥2 PI rows on
  *  the same account number) and gets layered in by the caller. */
 export function rowRoleBucket(role: string): "PI" | "Co-I" | null {

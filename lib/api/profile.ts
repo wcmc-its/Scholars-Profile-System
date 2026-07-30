@@ -25,10 +25,9 @@ import { identityImageEndpoint } from "@/lib/headshot";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { coreProjectNum, parseNihAward } from "@/lib/award-number";
 import { isFundingActive } from "@/lib/funding-active";
-import { isPiRole } from "@/lib/funding-roles";
 import {
   GRANT_INDEX_WHERE,
-  groupGrantsByProject,
+  multiPiExternalIds,
   parseExternalId,
 } from "@/lib/funding-projection";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
@@ -930,34 +929,6 @@ async function loadProjectSiblingRows(
     where: { AND: [GRANT_INDEX_WHERE, { OR: arms }] },
     select: { cwid: true, role: true, externalId: true, awardNumber: true },
   })) as ProjectKeyRow[];
-}
-
-/**
- * The scholar's grant `externalId`s whose funding PROJECT is multiple-PI.
- *
- * Same rule as `projectFromRows`: ≥2 DISTINCT cwids in `PI_ROLES` on one
- * project. Counting distinct cwids (not rows) is what keeps a renewal or
- * supplement — the same scholar on two Account_Numbers under one
- * `coreProjectNum` — from reading as multi-PI. Row-level dedupe by best role is
- * unnecessary here: `isPiRole` is true for a cwid iff it is true for that cwid's
- * highest-priority role, so the set is identical to the projection's.
- *
- * Suppressed rows (#160) are dropped before grouping, exactly as the funding
- * index does — a colleague who hid their own grant row must not keep flipping
- * this flag.
- */
-function multiPiExternalIds(
-  siblingRows: readonly ProjectKeyRow[],
-  suppressedGrantIds: ReadonlySet<string>,
-): Set<string> {
-  const flagged = new Set<string>();
-  for (const group of groupGrantsByProject(siblingRows, suppressedGrantIds).values()) {
-    const piCwids = new Set<string>();
-    for (const r of group) if (isPiRole(r.role)) piCwids.add(r.cwid);
-    if (piCwids.size < 2) continue;
-    for (const r of group) if (r.externalId) flagged.add(r.externalId);
-  }
-  return flagged;
 }
 
 export const getScholarFullProfileBySlug = cache(

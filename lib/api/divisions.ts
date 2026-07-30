@@ -16,6 +16,7 @@ import { prisma } from "@/lib/db";
 import { cachedRead } from "@/lib/api/swr-cache";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { isPiRole } from "@/lib/funding-roles";
+import { multiPiExternalIds } from "@/lib/funding-projection";
 import type { DepartmentTopicArea } from "@/lib/api/departments";
 import type {
   DeptPublicationCard,
@@ -675,6 +676,12 @@ async function getDivisionGrantsListUncached(
     awardNumber: string | null;
   }>;
 
+  // #2066 — see the twin comment in lib/api/dept-lists.ts. `externalId` embeds
+  // the cwid, so the per-row grouping below made `isMultiPi` structurally always
+  // false; derive it from the funding-project key instead.
+  // ponytail: division-scoped, so a cross-unit MPI award still won't fire.
+  const multiPi = multiPiExternalIds(all, suppressed);
+
   type Group = {
     title: string;
     funder: string;
@@ -759,7 +766,7 @@ async function getDivisionGrantsListUncached(
       endDate: g.endDate,
       isRecentlyCompleted: false,
       pis,
-      isMultiPi: g.piCwids.length >= 2,
+      isMultiPi: g.externalId !== null && multiPi.has(g.externalId),
     };
   });
 
