@@ -23,13 +23,10 @@ import { gateEmailForViewer } from "@/lib/profile/email-display-gate";
 import { MAX_SELECTED_HIGHLIGHTS, SECTION_VISIBILITY_FIELDS } from "@/lib/edit/validators";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
-import { coreProjectNum, parseNihAward } from "@/lib/award-number";
+import { coreProjectNum } from "@/lib/award-number";
 import { isFundingActive } from "@/lib/funding-active";
-import {
-  GRANT_INDEX_WHERE,
-  multiPiExternalIds,
-  parseExternalId,
-} from "@/lib/funding-projection";
+import { multiPiExternalIds } from "@/lib/funding-projection";
+import { loadProjectSiblingRows } from "@/lib/api/project-siblings";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import {
   isMethodsLensEnabled,
@@ -860,75 +857,6 @@ export function isActiveTrialStatus(status: string | null): boolean {
     s.includes("active") || // CTgov "active, not recruiting"
     s.includes("available")
   );
-}
-
-/** The two columns that decide a grant row's funding-project key. Kept as a
- *  named type so the candidate query, `groupGrantsByProject`, and the tests all
- *  agree on the projection. */
-type ProjectKeyRow = {
-  cwid: string;
-  role: string;
-  externalId: string | null;
-  awardNumber: string | null;
-};
-
-/**
- * ONE query that pulls every Grant row which could share a funding project with
- * this scholar's rows — the sibling PD/PIs the nested `grants` relation cannot
- * see, because it holds only the owning scholar's rows.
- *
- * THE KEY. A funding project is `coreProjectNum(awardNumber) ?? accountNumber`
- * (lib/funding-projection.ts) — derived in app code, NOT a queryable column. So
- * this can only fetch a SUPERSET and let `groupGrantsByProject` do the exact
- * grouping. Two OR arms, one per half of that expression:
- *
- *   1. `external_id LIKE 'INFOED-<account>-%'` — every WCM investigator on the
- *      same InfoEd Account_Number (the id is `INFOED-{account}-{cwid}`, so this
- *      is a left-anchored prefix on the `external_id` UNIQUE index). Covers the
- *      non-NIH key entirely and the common same-account MPI.
- *   2. `award_number LIKE '%<serial>%'` — the NIH serial (6-7 digits) of each of
- *      the scholar's NIH awards. `coreProjectNum` collapses renewals and
- *      supplements whose award-number STRINGS differ ("1R01CA245678-01" vs
- *      "5 R01 CA245678-02"), and those may sit on a different Account_Number, so
- *      arm 1 alone would miss an MPI listed on the renewal. The serial is the
- *      longest substring common to every spelling of one core project.
- *
- * Over-matching is harmless — `groupGrantsByProject` re-derives the real key and
- * anything that lands in another project's bucket is simply never looked up.
- * Under-matching would not be: it silently under-flags.
- *
- * VISIBILITY: `GRANT_INDEX_WHERE` — active, non-deleted scholars only, the exact
- * population the funding index walks and the same predicate this loader applies
- * to the profile's own scholar. A soft-deleted or `status = 'suppressed'`
- * sibling therefore cannot flip the flag.
- *
- * Returns [] without querying when the scholar has no grant row that yields a
- * project key at all.
- */
-async function loadProjectSiblingRows(
-  grants: ReadonlyArray<{ externalId: string | null; awardNumber: string | null }>,
-): Promise<ProjectKeyRow[]> {
-  const arms: Array<{ externalId?: { startsWith: string } } | { awardNumber: { contains: string } }> =
-    [];
-  const seenAccounts = new Set<string>();
-  const seenSerials = new Set<string>();
-  for (const g of grants) {
-    const ext = parseExternalId(g.externalId);
-    if (ext && !seenAccounts.has(ext.accountNumber)) {
-      seenAccounts.add(ext.accountNumber);
-      arms.push({ externalId: { startsWith: `INFOED-${ext.accountNumber}-` } });
-    }
-    const serial = parseNihAward(g.awardNumber).serial;
-    if (serial && !seenSerials.has(serial)) {
-      seenSerials.add(serial);
-      arms.push({ awardNumber: { contains: serial } });
-    }
-  }
-  if (arms.length === 0) return [];
-  return (await prisma.grant.findMany({
-    where: { AND: [GRANT_INDEX_WHERE, { OR: arms }] },
-    select: { cwid: true, role: true, externalId: true, awardNumber: true },
-  })) as ProjectKeyRow[];
 }
 
 export const getScholarFullProfileBySlug = cache(
