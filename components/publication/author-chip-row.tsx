@@ -33,6 +33,13 @@ export type AuthorChip = {
    *  navigating PersonPopover is downgraded to a static role tooltip. Omitted /
    *  null is treated as publicly displayed (isPubliclyDisplayed fail-open). */
   roleCategory?: RoleCategory | string | null;
+  /** #2074 — GRANT surfaces only: this person's raw `Grant.role` on the award the
+   *  chip belongs to (`PI` / `Co-PI` / `Co-I` / …). Publication chips never set
+   *  it. Render through `grantRoleTitle` (lib/funding-roles.ts), never by
+   *  hand — a chip whose role is unknown must not be described as a PI. Carried
+   *  PER CHIP rather than per card because a card may show several investigators
+   *  holding DIFFERENT roles once cards group by project (#2066). */
+  grantRole?: string | null;
 };
 
 const CHIP_CAP = 5;

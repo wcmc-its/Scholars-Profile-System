@@ -1,8 +1,10 @@
 /**
  * Compact grant card used in the dept "Active grants" highlights row and the
- * Grants tab full list. Server Component. PI chips reuse AuthorChipRow with
- * isFirst=true to render the slate first-author variant; tooltip text is
- * overridden via a wrapper so single-PI vs multi-PI tooltips differ.
+ * Grants tab full list. Server Component. Investigator chips render the slate
+ * first-author variant; each chip's tooltip names that person's OWN role on the
+ * award via `grantRoleTitle` (#2074) — the chip list falls back to a non-PI
+ * investigator when the award has no PI row in the unit, so the tooltip must not
+ * assume PI standing.
  *
  * Phase A: no dollar amount displayed (column missing from upstream).
  */
@@ -11,6 +13,7 @@ import { parseFunderEyebrow } from "@/lib/grant-meta";
 import { sanitizePubTitle } from "@/lib/utils";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { grantRoleTitle } from "@/lib/funding-roles";
 import { profilePath } from "@/lib/profile-url";
 
 export function GrantCard({
@@ -74,10 +77,17 @@ export function GrantCard({
           {grant.pis.map((p) => (
             <HoverTooltip
               key={p.cwid ?? p.name}
+              // #2074 — BOTH arms of the old ternary asserted principal-investigator
+              // standing, and this card falls back to a non-PI chip when the award
+              // has no PI row in the unit, so a Co-Investigator was being named the
+              // principal investigator. Route through the one role vocabulary
+              // (#2063) instead: it already encodes that `Co-PI` means NIH
+              // multiple-PI and that the CONTACT PI of a multi-PI award reads MPI.
+              // No role ⇒ say only what is known, never "principal investigator".
               text={
-                grant.isMultiPi
-                  ? "Multiple Principal Investigator (MPI)"
-                  : "Principal investigator"
+                p.grantRole
+                  ? grantRoleTitle(p.grantRole, grant.isMultiPi)
+                  : "Investigator"
               }
             >
               <a

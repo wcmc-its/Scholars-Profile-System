@@ -223,6 +223,9 @@ async function getDeptGrantsListUncached(
     applId: number | null;
     cwids: string[];
     piCwids: string[];
+    /** #2074 — each investigator's raw `Grant.role` on this award, so the chip can
+     *  be described truthfully instead of being assumed to be a PI. */
+    roleByCwid: Map<string, string>;
     sortKey: number;
   };
   const groups = new Map<string, Group>();
@@ -245,12 +248,17 @@ async function getDeptGrantsListUncached(
         applId: r.applId,
         cwids: [r.cwid],
         piCwids: isPiRole(r.role) ? [r.cwid] : [],
+        roleByCwid: new Map([[r.cwid, r.role]]),
         sortKey,
       });
     } else {
       if (!existing.cwids.includes(r.cwid)) existing.cwids.push(r.cwid);
       if (isPiRole(r.role) && !existing.piCwids.includes(r.cwid))
         existing.piCwids.push(r.cwid);
+      // ponytail: first role wins. A cwid has exactly one row per group today
+      // (the key embeds the cwid), so this cannot collide. If cards ever group by
+      // project (#2066), pick the highest-priority role instead of the first.
+      if (!existing.roleByCwid.has(r.cwid)) existing.roleByCwid.set(r.cwid, r.role);
       if (existing.applId === null && r.applId !== null) existing.applId = r.applId;
       if (sortKey > existing.sortKey) existing.sortKey = sortKey;
     }
@@ -316,6 +324,9 @@ async function getDeptGrantsListUncached(
           isFirst: true,
           isLast: false,
           roleCategory: s.roleCategory,
+          // #2074 — `chipCwids` falls back to a NON-PI cwid when the award has no
+          // PI row in this department, so the chip cannot be assumed to be a PI.
+          grantRole: g.roleByCwid.get(cwid) ?? null,
         } satisfies AuthorChip;
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);

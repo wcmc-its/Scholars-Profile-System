@@ -687,6 +687,9 @@ async function getDivisionGrantsListUncached(
     awardNumber: string | null;
     cwids: string[];
     piCwids: string[];
+    /** #2074 — each investigator's raw `Grant.role` on this award, so the chip can
+     *  be described truthfully instead of being assumed to be a PI. */
+    roleByCwid: Map<string, string>;
     sortKey: number;
   };
   const groups = new Map<string, Group>();
@@ -707,12 +710,15 @@ async function getDivisionGrantsListUncached(
         awardNumber: r.awardNumber,
         cwids: [r.cwid],
         piCwids: isPiRole(r.role) ? [r.cwid] : [],
+        roleByCwid: new Map([[r.cwid, r.role]]),
         sortKey,
       });
     } else {
       if (!existing.cwids.includes(r.cwid)) existing.cwids.push(r.cwid);
       if (isPiRole(r.role) && !existing.piCwids.includes(r.cwid))
         existing.piCwids.push(r.cwid);
+      // ponytail: first role wins — one row per cwid per group today (#2066).
+      if (!existing.roleByCwid.has(r.cwid)) existing.roleByCwid.set(r.cwid, r.role);
       if (sortKey > existing.sortKey) existing.sortKey = sortKey;
     }
   }
@@ -765,6 +771,9 @@ async function getDivisionGrantsListUncached(
           isFirst: false,
           isLast: false,
           roleCategory: s.roleCategory,
+          // #2074 — `piList` falls back to non-PI cwids when the award has no PI
+          // row in this division, so the chip cannot be assumed to be a PI.
+          grantRole: g.roleByCwid.get(c) ?? null,
         } satisfies AuthorChip;
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);

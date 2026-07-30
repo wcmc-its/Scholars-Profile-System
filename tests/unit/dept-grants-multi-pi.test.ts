@@ -88,6 +88,11 @@ const CORPUS: Row[] = [
   { ...D, cwid: "coi00001", role: "PI",    externalId: "INFOED-A500-coi00001", awardNumber: "1R01CA555555-01", dept: "NEURO" },
   { ...D, cwid: "coi00002", role: "Co-I",  externalId: "INFOED-A500-coi00002", awardNumber: "1R01CA555555-01", dept: "MED" },
 
+  // (4b) A NEURO award whose ONLY investigator is a CO-I. The card still renders
+  // (chipCwids falls back to a non-PI cwid), which is the #2074 shape: the chip
+  // must report Co-I so the tooltip cannot call them the principal investigator.
+  { ...D, cwid: "conly001", role: "Co-I",  externalId: "INFOED-A900-conly001", awardNumber: "1R01CA444444-01", dept: "NEURO" },
+
   // (5) RENEWAL — ONE scholar on two Account_Numbers under one core project.
   // `coreProjectNum` collapses them; counting distinct CWIDS is what keeps that
   // from reading as multi-PI.
@@ -113,11 +118,13 @@ const CORPUS: Row[] = [
 /**
  * Accounts whose cards do NOT fit on page 0.
  *
- * 22 NEURO groups: 7 non-padding (A400 yields TWO — one per investigator, since
- * cards are still keyed per row) + 15 padding. PAGE_SIZE 20 takes the 7 recent
- * ones plus PAD00–PAD12, leaving these two off the page.
+ * 23 NEURO groups: 8 non-padding (A400 yields TWO — one per investigator, since
+ * cards are still keyed per row) + 15 padding. PAGE_SIZE 20 takes the 8 recent
+ * ones plus PAD00–PAD11, leaving these three off the page. The scoping test also
+ * asserts `hits.length === 20`, so a miscount here fails loudly rather than
+ * silently weakening the check.
  */
-const OFF_PAGE_ACCOUNTS = ["PAD13", "PAD14"];
+const OFF_PAGE_ACCOUNTS = ["PAD12", "PAD13", "PAD14"];
 
 const DEPT = "NEURO";
 const ownRows = (c: Row[] = CORPUS) => c.filter((r) => r.dept === DEPT);
@@ -235,6 +242,19 @@ describe("getDeptGrantsList — isMultiPi (#2066, #2075)", () => {
     expect((await flags())["INFOED-A100-xdep0001"]).toBe(false);
   });
 
+  it("carries each investigator's own grantRole onto the chip (#2074)", async () => {
+    // Without this the component fix is dark: grant-card.tsx routes the chip
+    // tooltip through `grantRoleTitle(p.grantRole, ...)`, so a null role
+    // degrades every chip to a bare "Investigator".
+    const { hits } = await getDeptGrantsList(DEPT, { page: 0 });
+    const byId = new Map(hits.map((h) => [h.externalId, h]));
+    expect(byId.get("INFOED-A100-xdep0001")?.pis[0]?.grantRole).toBe("PI");
+    expect(byId.get("INFOED-A400-same0002")?.pis[0]?.grantRole).toBe("Co-PI");
+    // The fallback chip on an award with NO PI row in this department — the
+    // #2074 case. It must report Co-I, so the tooltip cannot claim PI standing.
+    expect(byId.get("INFOED-A900-conly001")?.pis[0]?.grantRole).toBe("Co-I");
+  });
+
   it("asks for the sibling rows by account prefix AND NIH serial", async () => {
     await flags();
     const sib = mockGrantFindMany.mock.calls
@@ -272,6 +292,10 @@ describe("getDeptGrantsList — isMultiPi (#2066, #2075)", () => {
       expect(prefixes, `off-page account ${acct} leaked into the sibling query`).not.toContain(acct);
     }
     expect(arms.length).toBeLessThanOrEqual(2 * 20);
-    expect(ownRows().length).toBeGreaterThan(20); // the fixture must exceed one page
+    // The fixture must actually exceed one page, or pageSlice === all and this
+    // test proves nothing.
+    const { hits } = await getDeptGrantsList(DEPT, { page: 0 });
+    expect(hits.length).toBe(20);
+    expect(ownRows().length).toBeGreaterThan(20);
   });
 });
