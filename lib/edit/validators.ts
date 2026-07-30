@@ -30,6 +30,7 @@ import { CWID_PATTERN } from "@/lib/cwid";
 import { containsProfanity } from "@/lib/edit/profanity";
 import { isChairTitleFor } from "@/lib/leadership";
 import { isNameBasedSlug, RESERVED_SLUGS } from "@/lib/slug";
+import { repairEncoding } from "@/lib/text/repair-encoding";
 
 /**
  * The per-scholar SECTION-VISIBILITY keys (`section-visibility-spec.md`).
@@ -205,7 +206,13 @@ export function sanitizeOverviewHtml(input: string): string {
   // synchronous, so no other call can interleave between add and remove.
   DOMPurify.addHook("afterSanitizeAttributes", hardenLinks);
   try {
-    return DOMPurify.sanitize(normalizeBoldItalic(input), OVERVIEW_CONFIG);
+    // `repairEncoding` first, and deliberately INSIDE the shared helper rather
+    // than only on the save path: `getEffectiveOverview` re-sanitizes on read,
+    // so one call here also heals the bios already stored with cp1252 mojibake
+    // (12 scholars on 2026-07-30, e.g. "Dr. Zarnegar□s primary clinical
+    // interests"). The DB rows still want the one-time
+    // `scripts/repair-text-encoding.ts` pass so the search index sees clean text.
+    return DOMPurify.sanitize(normalizeBoldItalic(repairEncoding(input)), OVERVIEW_CONFIG);
   } finally {
     DOMPurify.removeHook("afterSanitizeAttributes");
   }

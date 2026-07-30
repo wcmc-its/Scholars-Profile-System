@@ -22,6 +22,7 @@
  */
 
 import { NIH_INSTITUTE_BY_PREFIX } from "@/lib/nih-ic-prefixes";
+import { repairEncoding } from "@/lib/text/repair-encoding";
 
 export interface ParsedAward {
   mechanism: string | null;
@@ -30,6 +31,16 @@ export interface ParsedAward {
 }
 
 const EMPTY: ParsedAward = { mechanism: null, nihIc: null, serial: null };
+
+/**
+ * Every matcher below starts here. InfoEd hands back award numbers carrying a
+ * soft hyphen (9 rows on 2026-07-30, e.g. "5 D34 HP31879-<U+00AD>04 00"): it is
+ * invisible on screen but it is not `\w`, so `NIH_AWARD_RE` fails the tail and
+ * the grant silently loses its mechanism and IC. Repair, then trim.
+ */
+function clean(awardNumber: string): string {
+  return repairEncoding(awardNumber).trim();
+}
 
 /** Activity code: 1 letter + 2 alphanumerics (R01, K23, UG3, U2C, S10,
  *  DP1, etc.). May be preceded by an optional support-type digit. Then
@@ -40,7 +51,7 @@ const NIH_AWARD_RE = /^\s*[1-9]?\s*([A-Z][A-Z0-9][A-Z0-9])\s*([A-Z]{2})\s*(\d{6,
 
 export function parseNihAward(awardNumber: string | null | undefined): ParsedAward {
   if (!awardNumber) return EMPTY;
-  const m = awardNumber.trim().match(NIH_AWARD_RE);
+  const m = clean(awardNumber).match(NIH_AWARD_RE);
   if (!m) return EMPTY;
   const mechanism = m[1].toUpperCase();
   const prefix = m[2].toUpperCase();
@@ -62,7 +73,7 @@ export function isNihAwardNumber(awardNumber: string | null | undefined): boolea
  *  Grant rows to reciterdb.grant_reporter_project. */
 export function coreProjectNum(awardNumber: string | null | undefined): string | null {
   if (!awardNumber) return null;
-  const m = awardNumber.trim().match(NIH_AWARD_RE);
+  const m = clean(awardNumber).match(NIH_AWARD_RE);
   if (!m) return null;
   return `${m[1].toUpperCase()}${m[2].toUpperCase()}${m[3]}`;
 }
@@ -94,7 +105,7 @@ const NSF_AWARD_RE =
 
 export function nsfAwardId(awardNumber: string | null | undefined): string | null {
   if (!awardNumber) return null;
-  const trimmed = awardNumber.trim();
+  const trimmed = clean(awardNumber);
   if (!trimmed) return null;
   // Don't mistake an NIH award (e.g. "1R01CA245678-01") for an NSF ID.
   if (isNihAwardNumber(trimmed)) return null;
@@ -125,7 +136,7 @@ const GATES_AWARD_RE = /\b(INV|OPP)[-\s]?(\d{1,7})\b/i;
 
 export function gatesGrantId(awardNumber: string | null | undefined): string | null {
   if (!awardNumber) return null;
-  const m = awardNumber.match(GATES_AWARD_RE);
+  const m = clean(awardNumber).match(GATES_AWARD_RE);
   if (!m) return null;
   const prefix = m[1].toUpperCase();
   // Pad to 6 digits for INV (the modern canonical form). OPP IDs vary
