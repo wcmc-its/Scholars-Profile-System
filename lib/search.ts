@@ -1181,6 +1181,20 @@ export const AREA_BOOST_MID_FRAC = 0.2;
 /** Cap on how many of the area's ranked scholars are pulled for the boost. */
 export const AREA_BOOST_TOP_N = 200;
 /**
+ * Contract rule O8 — number of steps the graded area boost spans between
+ * `AREA_BOOST_W_LO` and `AREA_BOOST_W_HI` when `SEARCH_PEOPLE_AREA_BOOST_GRADED` is on.
+ *
+ * The upstream `total` is a genuine magnitude — the concept arm's `n²/total` over the
+ * publications index — and the three-band cut discards it: a 200-paper specialist and a
+ * 3-paper one share a band whenever both clear `AREA_BOOST_HI_FRAC` of the area's top.
+ * More bands is the whole change; the emitted clause shape is unchanged.
+ *
+ * ponytail: banded, not one clause per scholar. Continuous would mean up to
+ *   AREA_BOOST_TOP_N (200) function_score clauses for a boost that only needs to
+ *   reorder within a relevance band. Raise the band count before going continuous.
+ */
+export const AREA_BOOST_GRADED_BANDS = 10;
+/**
  * #1343 — minimum on-topic pubs for a WCM author to be eligible for the
  * concept-axis concentration boost. Floors out 1–2-pub authors whose on-topic
  * fraction would otherwise spike them above genuine specialists.

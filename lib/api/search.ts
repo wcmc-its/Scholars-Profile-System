@@ -72,6 +72,7 @@ import {
   AREA_BOOST_W_HI,
   AREA_BOOST_W_MID,
   AREA_BOOST_W_LO,
+  AREA_BOOST_GRADED_BANDS,
   AREA_BOOST_HI_FRAC,
   AREA_BOOST_MID_FRAC,
   CONCEPT_CONCENTRATION_MIN_PUBS,
@@ -105,6 +106,7 @@ import {
   resolvePublicationDepartmentFilter,
   resolvePeopleTopicPhraseBoost,
   resolveAreaBoostWeights,
+  resolveSearchPeopleAreaBoostGraded,
   resolveSearchPeopleClinicalFn,
   resolveSearchPeopleClinicalFnWeight,
   resolveSearchPeopleClinicalMeshAnchor,
@@ -1505,6 +1507,17 @@ export function buildAreaBoostFunctions(
 ): Record<string, unknown>[] {
   const maxTotal = concentration[0]?.total ?? 0;
   if (maxTotal <= 0) return [];
+  const w = resolveAreaBoostWeights({
+    hi: AREA_BOOST_W_HI,
+    mid: AREA_BOOST_W_MID,
+    lo: AREA_BOOST_W_LO,
+  });
+  // Contract rule O8 — `total` is a real magnitude; three bands throw it away.
+  // Graded mode spreads [w.lo, w.hi] over AREA_BOOST_GRADED_BANDS steps of
+  // fraction-of-max, so ordering tracks how much on-topic work a scholar has.
+  if (resolveSearchPeopleAreaBoostGraded()) {
+    return buildGradedAreaBoostFunctions(concentration, maxTotal, w);
+  }
   const hi: string[] = [];
   const mid: string[] = [];
   const lo: string[] = [];
@@ -1516,14 +1529,48 @@ export function buildAreaBoostFunctions(
     else lo.push(cwid);
   }
   const fns: Record<string, unknown>[] = [];
-  const w = resolveAreaBoostWeights({
-    hi: AREA_BOOST_W_HI,
-    mid: AREA_BOOST_W_MID,
-    lo: AREA_BOOST_W_LO,
-  });
   if (hi.length && w.hi > 0) fns.push({ filter: { terms: { cwid: hi } }, weight: w.hi });
   if (mid.length && w.mid > 0) fns.push({ filter: { terms: { cwid: mid } }, weight: w.mid });
   if (lo.length && w.lo > 0) fns.push({ filter: { terms: { cwid: lo } }, weight: w.lo });
+  return fns;
+}
+
+/**
+ * Contract rule O8 — the graded arm of `buildAreaBoostFunctions`.
+ *
+ * Band `i` of `AREA_BOOST_GRADED_BANDS` spans an equal slice of fraction-of-max and
+ * carries `w.lo + (w.hi - w.lo) * i/(bands-1)`, so the weight rises with the evidence
+ * magnitude instead of stepping three times. `w.mid` is deliberately unused: it is a
+ * cut point in the banded scheme, and interpolating through it would make the two modes
+ * disagree about what "mid" means for the same scholar.
+ *
+ * Same clause shape as the banded arm, so this stays reorder-only and needs no reindex.
+ * Scholars sharing a band still share a weight — this widens the resolution, it does not
+ * make the boost continuous.
+ */
+function buildGradedAreaBoostFunctions(
+  concentration: { cwid: string; total: number }[],
+  maxTotal: number,
+  w: { hi: number; mid: number; lo: number },
+): Record<string, unknown>[] {
+  const bands = Math.max(2, AREA_BOOST_GRADED_BANDS);
+  const byBand = new Map<number, string[]>();
+  for (const { cwid, total } of concentration) {
+    if (total <= 0) continue;
+    const frac = Math.min(1, total / maxTotal);
+    // frac === 1 must land in the top band, not one past it.
+    const band = Math.min(bands - 1, Math.floor(frac * bands));
+    const list = byBand.get(band);
+    if (list) list.push(cwid);
+    else byBand.set(band, [cwid]);
+  }
+  const fns: Record<string, unknown>[] = [];
+  // Descending so the strongest evidence emits first, matching the banded arm's order.
+  for (const band of [...byBand.keys()].sort((a, b) => b - a)) {
+    const weight = w.lo + ((w.hi - w.lo) * band) / (bands - 1);
+    if (weight <= 0) continue;
+    fns.push({ filter: { terms: { cwid: byBand.get(band) as string[] } }, weight });
+  }
   return fns;
 }
 

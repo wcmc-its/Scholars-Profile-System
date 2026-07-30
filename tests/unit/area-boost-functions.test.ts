@@ -97,3 +97,82 @@ describe("buildAreaBoostFunctions", () => {
     });
   });
 });
+
+/**
+ * Contract rule O8 — the graded arm. `total` carries a real evidence magnitude (the
+ * concept arm's n²/total over the publications index); three bands discard it. These
+ * cover the two properties that matter: OFF is unchanged, and ON makes weight track
+ * magnitude for scholars the banded arm cannot separate.
+ */
+describe("buildAreaBoostFunctions — graded (SEARCH_PEOPLE_AREA_BOOST_GRADED)", () => {
+  const CONC = [
+    { cwid: "top", total: 100 },
+    { cwid: "strong", total: 80 },
+    { cwid: "solid", total: 55 },
+    { cwid: "thin", total: 30 },
+    { cwid: "trace", total: 4 },
+  ];
+
+  afterEach(() => {
+    delete process.env.SEARCH_PEOPLE_AREA_BOOST_GRADED;
+    vi.unstubAllEnvs();
+  });
+
+  const weightFor = (fns: Record<string, unknown>[], cwid: string) => {
+    const hit = fns.find((f) =>
+      (
+        (f.filter as { terms?: { cwid?: string[] } } | undefined)?.terms?.cwid ?? []
+      ).includes(cwid),
+    );
+    return hit?.weight as number | undefined;
+  };
+
+  it("absent flag reproduces the three-band output exactly", () => {
+    const banded = buildAreaBoostFunctions(CONC);
+    expect(banded).toHaveLength(3);
+    expect(banded.map((f) => f.weight)).toEqual([
+      AREA_BOOST_W_HI,
+      AREA_BOOST_W_MID,
+      AREA_BOOST_W_LO,
+    ]);
+  });
+
+  it('"off" is byte-identical to absent', () => {
+    const absent = buildAreaBoostFunctions(CONC);
+    process.env.SEARCH_PEOPLE_AREA_BOOST_GRADED = "off";
+    expect(buildAreaBoostFunctions(CONC)).toEqual(absent);
+  });
+
+  it("separates scholars the banded arm collapses into one band", () => {
+    // Banded: top/strong/solid all clear AREA_BOOST_HI_FRAC (0.5) => identical weight.
+    const banded = buildAreaBoostFunctions(CONC);
+    expect(weightFor(banded, "top")).toBe(weightFor(banded, "solid"));
+
+    process.env.SEARCH_PEOPLE_AREA_BOOST_GRADED = "on";
+    const graded = buildAreaBoostFunctions(CONC);
+    // 100 vs 55 is nearly 2x the evidence and must no longer tie.
+    expect(weightFor(graded, "top")!).toBeGreaterThan(weightFor(graded, "solid")!);
+  });
+
+  it("weight is non-increasing as evidence falls, and stays inside [lo, hi]", () => {
+    process.env.SEARCH_PEOPLE_AREA_BOOST_GRADED = "on";
+    const fns = buildAreaBoostFunctions(CONC);
+    const ws = CONC.map((c) => weightFor(fns, c.cwid)!);
+    expect(ws.every((w) => typeof w === "number")).toBe(true);
+    for (let i = 1; i < ws.length; i++) expect(ws[i]).toBeLessThanOrEqual(ws[i - 1]);
+    expect(Math.max(...ws)).toBeLessThanOrEqual(AREA_BOOST_W_HI);
+    expect(Math.min(...ws)).toBeGreaterThanOrEqual(AREA_BOOST_W_LO);
+    // The top scholar (frac === 1) must reach the ceiling, not fall one band short.
+    expect(weightFor(fns, "top")).toBe(AREA_BOOST_W_HI);
+  });
+
+  it("is reorder-only: graded emits the same cwid set as banded", () => {
+    const cwids = (fns: Record<string, unknown>[]) =>
+      fns
+        .flatMap((f) => (f.filter as { terms: { cwid: string[] } }).terms.cwid)
+        .sort();
+    const banded = cwids(buildAreaBoostFunctions(CONC));
+    process.env.SEARCH_PEOPLE_AREA_BOOST_GRADED = "on";
+    expect(cwids(buildAreaBoostFunctions(CONC))).toEqual(banded);
+  });
+});

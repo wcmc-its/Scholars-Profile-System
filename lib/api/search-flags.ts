@@ -1272,6 +1272,23 @@ export function resolveSearchPeopleClinicalFnWeight(): number {
  *  weight above) so weight cells A/B on staging as task-def env edits, no rebuild.
  *  Code defaults are the softened `AREA_BOOST_W_*` constants in lib/search.ts.
  *  0 is a valid override (disables a tier); negative/NaN falls back to the default. */
+/**
+ * Contract rule O8 — grade the area boost by the magnitude it is already given.
+ *
+ * `buildAreaBoostFunctions` receives `{cwid, total}[]` where `total` is a real
+ * evidence magnitude (the concept arm's `n²/total` over the publications index) and
+ * quantises it to three membership bands, so ordering stops responding to how much
+ * on-topic work a scholar has. ON spreads the same weight range over
+ * `AREA_BOOST_GRADED_BANDS` steps instead of three.
+ *
+ * Reorder-only, query-time, no reindex — the emitted clause is still
+ * `{filter: {terms: {cwid}}, weight}`. `=== "on"` opt-in; absent must reproduce
+ * master's three-band output byte-identically.
+ */
+export function resolveSearchPeopleAreaBoostGraded(): boolean {
+  return process.env.SEARCH_PEOPLE_AREA_BOOST_GRADED === "on";
+}
+
 export function resolveAreaBoostWeights(defaults: {
   hi: number;
   mid: number;

@@ -1814,6 +1814,12 @@ export class AppStack extends Stack {
         //   so the two envs select from different distributions. The staging ordering does
         //   NOT necessarily reproduce here -- verify prod after the deploy, do not assume.
         SEARCH_PEOPLE_CONCEPT_ARM_FIRST: "on", // Prod flipped 2026-07-30 (#2018; query-time, reorder-only; A/B 16/18).
+        // Contract rule O8 — grade the area boost by the magnitude it already receives
+        // instead of three membership bands. Query-time, reorder-only, no reindex; OFF
+        // reproduces the three-band clauses byte-identically. A/B on staging before any
+        // prod flip — this is the first term that lets ordering track how much on-topic
+        // work a scholar has, so it moves results the volume prior currently decides.
+        SEARCH_PEOPLE_AREA_BOOST_GRADED: envConfig.envName === "staging" ? "on" : "off",
         // #1344 -- multi-word topic phrase boost. When on, a topic People query adds
         //   match_phrase should-clauses over publicationTitles (slop 8) + areasOfInterest
         //   (slop 4) so a multi-word specialty ("pediatric congenital heart surgery") is
