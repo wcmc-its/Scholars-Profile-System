@@ -40,6 +40,7 @@ import { db } from "../../lib/db";
 import { assertPruneVolume } from "../../lib/etl-guard";
 import { closeInfoedPool, getInfoedPool } from "@/lib/sources/mssql-infoed";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
+import { repairEncodingOrNull } from "@/lib/text/repair-encoding";
 import { coreProjectNum, parseNihAward } from "@/lib/award-number";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
@@ -313,11 +314,14 @@ async function reconcileDateGaps(
     const shared = {
       cwid: r.CWID!,
       accountNumber: r.Account_Number,
-      awardNumber: r.Award_Number?.trim() || null,
+      // InfoEd hands back cp1252 mojibake and soft hyphens in both fields (9
+      // award numbers, 2 titles on 2026-07-30); repaired at the boundary so the
+      // nightly upsert heals the stored row instead of re-dirtying it.
+      awardNumber: repairEncodingOrNull(r.Award_Number?.trim() || null),
       // The only recognizable identifier on the ~74% of these that carry no
       // award number. Unlike the Grant row, no "(untitled …)" placeholder —
       // a genuinely untitled InfoEd record is a finding, not a rendering problem.
-      title: r.proj_title?.trim() || null,
+      title: repairEncodingOrNull(r.proj_title?.trim() || null),
       sponsor: r.Orig_Sponsor?.trim() || null,
       projectStatus: r.Project_Status?.trim() || "(unknown)",
       programType: r.program_type?.trim() || "Grant",
@@ -444,13 +448,13 @@ async function main() {
 
       return {
         cwid: r.CWID!,
-        title: r.proj_title?.trim() || `(untitled grant ${r.Account_Number})`,
+        title: repairEncodingOrNull(r.proj_title?.trim()) || `(untitled grant ${r.Account_Number})`,
         role,
         funder: funderParts.join(" "),
         startDate: r.begin_date!,
         endDate: r.end_date!,
         externalId: `INFOED-${r.Account_Number}-${r.CWID}`,
-        awardNumber: r.Award_Number?.trim() || null,
+        awardNumber: repairEncodingOrNull(r.Award_Number?.trim() || null),
         source: "InfoEd",
         datesSource,
         programType: r.program_type?.trim() || "Grant",

@@ -48,6 +48,7 @@ import { createHash } from "node:crypto";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "../../lib/db";
+import { repairEncoding, repairEncodingOrNull } from "@/lib/text/repair-encoding";
 import { assertSourceVolume } from "../../lib/etl-guard";
 import { loadAllPublicationSuppressions } from "@/lib/api/manual-layer";
 import { resolveScholarToolSource } from "../../lib/etl/scholar-tool-source";
@@ -614,11 +615,11 @@ async function main(): Promise<void> {
         await tx.scholarTool.createMany({
           data: chunk.map((w) => ({
             cwid: w.cwid,
-            toolName: w.toolName,
+            toolName: repairEncoding(w.toolName),
             category: w.category,
             pmidCount: w.pmidCount,
             maxConfidence: new Prisma.Decimal(w.maxConfidence),
-            sampleContext: w.sampleContext,
+            sampleContext: repairEncodingOrNull(w.sampleContext),
             pmids: w.pmids,
           })),
           skipDuplicates: true,

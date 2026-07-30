@@ -9,6 +9,7 @@
  * recency gate.
  */
 import { parseNihAward } from "@/lib/award-number";
+import { repairEncodingOrNull } from "@/lib/text/repair-encoding";
 import type { ReporterProject } from "@/lib/edit/reporter-grants";
 import type { ReporterGrantProject } from "@/etl/nih-profile/fetcher";
 
@@ -182,13 +183,13 @@ export function buildReporterGrantRow(
     cwid,
     source: "RePORTER",
     role: "PI",
-    title: g.title?.trim() || `(untitled grant ${core})`,
+    title: repairEncodingOrNull(g.title?.trim()) || `(untitled grant ${core})`,
     funder: nihIc ?? "NIH",
     mechanism,
     nihIc,
     startDate: g.startDate,
     endDate: g.endDate,
-    awardNumber: g.awardNumber,
+    awardNumber: repairEncodingOrNull(g.awardNumber),
     programType: "Grant",
   };
 }

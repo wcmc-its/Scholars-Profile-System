@@ -25,6 +25,7 @@
  * Usage: `npm run etl:nsf`
  */
 import { db } from "../../lib/db";
+import { repairEncodingOrNull } from "@/lib/text/repair-encoding";
 import { nsfAwardId } from "@/lib/award-number";
 import { fetchNsfAward, sleepBetweenRequests } from "./fetcher";
 import { hasFreshNsfResult } from "./candidate";
@@ -151,13 +152,14 @@ async function main() {
       });
     } else {
       matched++;
-      if (award.abstractText === c.currentAbstract && c.currentSource === "nsf") {
+      const abstractText = repairEncodingOrNull(award.abstractText);
+      if (abstractText === c.currentAbstract && c.currentSource === "nsf") {
         unchanged++;
       } else {
         await db.write.grant.update({
           where: { id: c.id },
           data: {
-            abstract: award.abstractText,
+            abstract: abstractText,
             abstractFetchedAt: fetchedAt,
             abstractSource: "nsf",
           },

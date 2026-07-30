@@ -26,6 +26,7 @@
  * Usage: `npm run etl:reciter:coi-statements`  (or `npx tsx etl/reciter/backfill-coi-statements.ts`)
  */
 import { db } from "../../lib/db";
+import { repairEncoding } from "@/lib/text/repair-encoding";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 import { withEtlRun } from "@/lib/etl-run";
 
@@ -60,7 +61,8 @@ async function main() {
       )) as ConflictRow[];
       for (const r of rows) {
         // reporting_conflicts has no unique pmid constraint; last non-empty wins.
-        if (r.conflictsVarchar) statementByPmid.set(Number(r.pmid), r.conflictsVarchar);
+        if (r.conflictsVarchar)
+          statementByPmid.set(Number(r.pmid), repairEncoding(r.conflictsVarchar));
       }
     });
     checked += batch.length;
