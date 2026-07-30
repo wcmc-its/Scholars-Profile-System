@@ -73,3 +73,6 @@ alcohol use,D000437,#1258 lay-term alias -> Alcoholism
 perioperative,D019990,#1258 lay-term alias -> Perioperative Care
 clinical trials,D002986,#1258 lay-term alias -> Clinical Trials as Topic
 IVF,D005307,#1258 lay-term alias -> Fertilization in Vitro
+sickle cell,D000755,"#2091 lay-term alias -> Anemia, Sickle Cell. Users truncate the lay form; no NLM entry-term match (verified staging mesh_descriptor 2026-07-30). Full form 'sickle cell anemia' already resolves."
+TBI,D000070642,"#2091 abbreviation alias -> Brain Injuries, Traumatic. No NLM entry-term match (verified 2026-07-30). Full form 'traumatic brain injury' already resolves."
+CKD,D051436,"#2091 abbreviation alias -> Renal Insufficiency, Chronic. No NLM entry-term match (verified 2026-07-30). Full form 'chronic kidney disease' already resolves."
