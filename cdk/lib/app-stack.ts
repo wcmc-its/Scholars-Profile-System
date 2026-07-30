@@ -1801,11 +1801,19 @@ export class AppStack extends Stack {
         //   lost 5. When on, the descriptor-keyed arm is tried first and the curated arm is
         //   the fallback. resolveSearchPeopleConceptArmFirst reads === "on". Reorder-only,
         //   query-time, no reindex; flag-OFF => master's arm order and round-trip count.
-        //   STAGING-FIRST: mesh_curated_topic_anchor is 85 distinct rows in prod vs 349 in
-        //   staging (#2016), and anchors are exactly what puts an off-query area at areas[0],
-        //   so the two envs select from different distributions -- A/B on staging before any
-        //   prod flip.
-        SEARCH_PEOPLE_CONCEPT_ARM_FIRST: env === "staging" ? "on" : "off",
+        //   STAGING A/B DONE 2026-07-29 -- ACCEPT. 18 blind judges, 9 diverging queries x 2
+        //   lenses (research-evidence analyst / RD officer), scores and rank deltas withheld,
+        //   arm<->list scrambled per query. Concept arm won 16/18 overall, 14/18 at first
+        //   divergence, 7/9 queries unanimous, and no query where BOTH lenses preferred
+        //   baseline.
+        //   KNOWN COST, shipped knowingly: `lung cancer` rank 1 inverts (a 3.8%-tagged
+        //   scholar over a 43.1% one). Baseline orders that pair correctly and this flag
+        //   inverts it -- the one divergence both lenses called against the arm (#2072).
+        //   ⚠ #2016 STILL APPLIES: mesh_curated_topic_anchor is 85 distinct rows in prod vs
+        //   349 in staging, and anchors are exactly what puts an off-query area at areas[0],
+        //   so the two envs select from different distributions. The staging ordering does
+        //   NOT necessarily reproduce here -- verify prod after the deploy, do not assume.
+        SEARCH_PEOPLE_CONCEPT_ARM_FIRST: "on", // Prod flipped 2026-07-30 (#2018; query-time, reorder-only; A/B 16/18).
         // #1344 -- multi-word topic phrase boost. When on, a topic People query adds
         //   match_phrase should-clauses over publicationTitles (slop 8) + areasOfInterest
         //   (slop 4) so a multi-word specialty ("pediatric congenital heart surgery") is
