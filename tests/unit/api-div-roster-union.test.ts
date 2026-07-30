@@ -326,6 +326,8 @@ describe("getDivisionGrantsList — isMultiPi (#2066, #2075)", () => {
     { ...D, cwid: "mpi00002", role: "Co-PI", externalId: "INFOED-A100-mpi00002", awardNumber: "1R01CA245678-01", inDivision: true },
     // Single-PI negative control.
     { ...D, cwid: "solo0001", role: "PI",    externalId: "INFOED-A200-solo0001", awardNumber: "1R01CA999999-01", inDivision: true },
+    // An award whose ONLY in-division investigator is a CO-I — the #2074 shape.
+    { ...D, cwid: "conly002", role: "Co-I",  externalId: "INFOED-A950-conly002", awardNumber: "1R01CA444444-01", inDivision: true },
     // CROSS-DIVISION multi-PI — the #2075 case: `xdiv0002` is outside CARDIO.
     { ...D, cwid: "xdiv0001", role: "PI",    externalId: "INFOED-A800-xdiv0001", awardNumber: "1R01CA888888-01", inDivision: true },
     { ...D, cwid: "xdiv0002", role: "Co-PI", externalId: "INFOED-A800-xdiv0002", awardNumber: "1R01CA888888-01", inDivision: false },
@@ -418,6 +420,19 @@ describe("getDivisionGrantsList — isMultiPi (#2066, #2075)", () => {
     // the derivation needs its own sibling-scoped suppression load.
     suppressedIds = ["INFOED-A800-xdiv0002"];
     expect((await flags())["INFOED-A800-xdiv0001"]).toBe(false);
+  });
+
+  it("carries each investigator's own grantRole onto the chip (#2074)", async () => {
+    // The twin of the dept assertion. Without it, nulling `grantRole` in
+    // divisions.ts stays green while the tooltip silently degrades to a bare
+    // "Investigator" on every division card — the drift this file exists to catch.
+    const { hits } = await getDivisionGrantsList("CARDIO", { page: 0 });
+    const byId = new Map(hits.map((h) => [h.externalId, h]));
+    expect(byId.get("INFOED-A100-mpi00001")?.pis[0]?.grantRole).toBe("PI");
+    expect(byId.get("INFOED-A100-mpi00002")?.pis[0]?.grantRole).toBe("Co-PI");
+    // No PI row in this division ⇒ the fallback chip must report Co-I, so the
+    // tooltip cannot call them the principal investigator.
+    expect(byId.get("INFOED-A950-conly002")?.pis[0]?.grantRole).toBe("Co-I");
   });
 
   it("does not flag a renewal — one scholar on two Account_Numbers under one core project", async () => {
