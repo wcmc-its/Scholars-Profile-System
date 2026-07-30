@@ -178,13 +178,32 @@ function mockDefaultDeptSetup() {
   mockScholarGroupBy.mockResolvedValue([]);
   mockPublicationTopicCount.mockResolvedValue(1500);
   mockGrantCount.mockResolvedValue(25);
-  // #481(b) — activeGrants now derives from grant.findMany + #160 suppression
-  // resolution (resolveActiveGrantSuppression → distinct unsuppressed keys),
-  // not grant.count. 25 distinct active grants, none suppressed → 25.
+  // #481(b)/#2066 — activeGrants derives from grant.findMany + #160 suppression,
+  // then groups by funding PROJECT (`coreProjectNum ?? accountNumber`) via the
+  // shared `loadUnitGrantProjects`, not from grant.count and not from a row
+  // count. 25 rows on 25 distinct NIH core projects, none suppressed → 25.
   mockGrantFindMany.mockResolvedValue(
-    Array.from({ length: 25 }, (_, i) => ({ externalId: `grant-${i}`, id: `grant-${i}` })),
+    Array.from({ length: 25 }, (_, i) => grantRow(i)),
   );
   mockSuppressionFindMany.mockResolvedValue([]);
+}
+
+/** One active grant row shaped like `UNIT_GRANT_SELECT`. `i` gives it its own
+ *  Account_Number, cwid, and NIH core project, so N rows fold to N projects. */
+function grantRow(i: number, over: Record<string, unknown> = {}) {
+  const n = String(i).padStart(4, "0");
+  return {
+    cwid: `cw${n}`,
+    title: `Grant ${i}`,
+    role: "PI",
+    funder: "NCI",
+    startDate: new Date("2024-01-01"),
+    endDate: new Date("2029-12-31"),
+    externalId: `INFOED-ACC${n}-cw${n}`,
+    awardNumber: `1R01CA30${n}-01`,
+    applId: null,
+    ...over,
+  };
 }
 
 describe("getDepartment", () => {
@@ -302,15 +321,12 @@ describe("getDepartment", () => {
 
   it("activeGrants excludes #160-suppressed active grants (#481(b))", async () => {
     mockDefaultDeptSetup();
-    // 4 active grant rows; one (grant-2) is #160-suppressed → the hero stat
-    // must drop it so it agrees with the Grants-tab list/badge.
-    mockGrantFindMany.mockResolvedValue([
-      { externalId: "grant-1", id: "g1" },
-      { externalId: "grant-2", id: "g2" },
-      { externalId: "grant-3", id: "g3" },
-      { externalId: "grant-4", id: "g4" },
+    // 4 active grant rows on 4 distinct projects; one is #160-suppressed → the
+    // hero stat must drop it so it agrees with the Grants-tab list/badge.
+    mockGrantFindMany.mockResolvedValue([0, 1, 2, 3].map((i) => grantRow(i)));
+    mockSuppressionFindMany.mockResolvedValue([
+      { entityId: "INFOED-ACC0002-cw0002" },
     ]);
-    mockSuppressionFindMany.mockResolvedValue([{ entityId: "grant-2" }]);
 
     const result = await getDepartment("medicine");
 
@@ -319,6 +335,23 @@ describe("getDepartment", () => {
     const supCall = mockSuppressionFindMany.mock.calls[0][0];
     expect(supCall.where.entityType).toBe("grant");
     expect(supCall.where.revokedAt).toBeNull();
+  });
+
+  it("counts active grants by funding PROJECT, not investigator-award row (#2066)", async () => {
+    mockDefaultDeptSetup();
+    // 4 rows, 2 projects: a two-PD/PI award on one Account_Number, and a renewal
+    // pair whose award-number spellings differ but share one coreProjectNum.
+    // `externalId` embeds the cwid, so a row count reports 4 — the defect #2066
+    // exists to remove (Medicine measured 1005 rows vs 520 projects).
+    mockGrantFindMany.mockResolvedValue([
+      grantRow(1, { cwid: "mpi001", externalId: "INFOED-A100-mpi001", awardNumber: "1R01CA245678-01" }),
+      grantRow(2, { cwid: "mpi002", role: "Co-PI", externalId: "INFOED-A100-mpi002", awardNumber: "1R01CA245678-01" }),
+      grantRow(3, { cwid: "ren001", externalId: "INFOED-A600-ren001", awardNumber: "1R01CA333333-01" }),
+      grantRow(4, { cwid: "ren001", externalId: "INFOED-A700-ren001", awardNumber: "5 R01 CA333333-02" }),
+    ]);
+
+    const result = await getDepartment("medicine");
+    expect(result!.stats.activeGrants).toBe(2);
   });
 });
 

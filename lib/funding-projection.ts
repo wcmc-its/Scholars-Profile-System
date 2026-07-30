@@ -321,17 +321,41 @@ export function rowRoleBucket(role: string): "PI" | "Co-I" | null {
   return null;
 }
 
-/** Lead-PI-first ordering for the people chips — keeps the result row
- *  visually consistent with the v1 implementation. */
-function sortPeople<T extends { role: string; cwid: string }>(rows: T[]): T[] {
-  const rank = (r: string) => {
-    if (r === "PI" || r === "PI-Subaward") return 0;
-    if (r === "Co-PI") return 1;
-    if (r === "Co-I") return 2;
-    return 3;
-  };
+/**
+ * Priority of a raw `Grant.role`, LOWER IS MORE SENIOR:
+ * PI / PI-Subaward (0) < Co-PI (1) < Co-I (2) < everything else (3).
+ *
+ * Exported because two different shapes need the SAME ordering and a second
+ * copy is exactly how `search-index-docs.ts` and `data-quality.ts` came to
+ * disagree about whether `Co-PI` is a PI role: `sortPeople` below ORDERS an
+ * array of chips by it, while `groupUnitGrantsByProject`
+ * (lib/api/unit-grant-projects.ts) folds it into a per-cwid Map — a scholar can
+ * hold two roles on one funding project once cards group by project (#2066),
+ * and the senior one must win. That FOLD cannot be expressed as a sort, so the
+ * RANK is the shared primitive; the ORDER is shared separately, via
+ * `sortPeople` itself.
+ */
+export function grantRoleRank(role: string): number {
+  if (role === "PI" || role === "PI-Subaward") return 0;
+  if (role === "Co-PI") return 1;
+  if (role === "Co-I") return 2;
+  return 3;
+}
+
+/**
+ * Lead-PI-first ordering for the people chips — keeps the result row visually
+ * consistent with the v1 implementation.
+ *
+ * Exported for `lib/api/unit-grant-projects.ts` (#2066). Before project
+ * grouping, a department/division grant card's key embedded the cwid, so every
+ * card carried exactly ONE chip and no order existed; now a card can carry
+ * several, and it must list them the way `/search?type=funding` lists the
+ * IDENTICAL project. Reusing this function — not just `grantRoleRank` — is what
+ * makes the two surfaces agree on the tiebreak as well as the ranking.
+ */
+export function sortPeople<T extends { role: string; cwid: string }>(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
-    const d = rank(a.role) - rank(b.role);
+    const d = grantRoleRank(a.role) - grantRoleRank(b.role);
     if (d !== 0) return d;
     return a.cwid.localeCompare(b.cwid);
   });

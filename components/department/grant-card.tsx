@@ -1,10 +1,15 @@
 /**
- * Compact grant card used in the dept "Active grants" highlights row and the
- * Grants tab full list. Server Component. Investigator chips render the slate
- * first-author variant; each chip's tooltip names that person's OWN role on the
- * award via `grantRoleTitle` (#2074) — the chip list falls back to a non-PI
- * investigator when the award has no PI row in the unit, so the tooltip must not
- * assume PI standing.
+ * Compact grant card for the department and division Grants tabs. It has exactly
+ * one call site — `dept-grants-list.tsx`, which is `"use client"` — so despite
+ * carrying no `"use client"` of its own it ALWAYS renders inside that client
+ * boundary (a boundary is inherited by everything below it, not re-declared per
+ * file). It is never server-rendered: the dept "Active grants" highlights row it
+ * once also served lost its loaders in the #1440 dead-code sweep (see
+ * `lib/api/dept-highlights.ts`).
+ * Investigator chips render the slate first-author variant; each chip's tooltip
+ * names that person's OWN role on the award via `grantRoleTitle` (#2074) — the
+ * chip list falls back to a non-PI investigator when the award has no PI row in
+ * the unit, so the tooltip must not assume PI standing.
  *
  * Phase A: no dollar amount displayed (column missing from upstream).
  */

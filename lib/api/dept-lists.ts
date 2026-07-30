@@ -16,9 +16,11 @@
 import { prisma } from "@/lib/db";
 import { cachedRead } from "@/lib/api/swr-cache";
 import { identityImageEndpoint } from "@/lib/headshot";
-import { isPiRole } from "@/lib/funding-roles";
-import { multiPiExternalIds } from "@/lib/funding-projection";
-import { loadProjectSiblingRows } from "@/lib/api/project-siblings";
+import {
+  buildUnitGrantCards,
+  loadUnitGrantProjects,
+} from "@/lib/api/unit-grant-projects";
+import type { GrantSort } from "@/lib/api/unit-grant-projects";
 import type { AuthorChip } from "@/components/publication/author-chip-row";
 import type {
   DeptPublicationCard,
@@ -27,15 +29,15 @@ import type {
 import {
   isAuthorHidden,
   loadAllPublicationSuppressions,
-  loadEntitySuppressions,
-  resolveActiveGrantSuppression,
   resolveUnitDarkPmids,
 } from "@/lib/api/manual-layer";
 
 const PAGE_SIZE = 20;
 
 export type PubSort = "newest" | "most_cited";
-export type GrantSort = "most_recent" | "end_date";
+/** Re-exported (type-only, so nothing is pulled into the client bundle) because
+ *  the department/division page components already import it from here. */
+export type { GrantSort };
 
 export type DeptListPubResult = {
   hits: DeptPublicationCard[];
@@ -165,187 +167,29 @@ async function getDeptGrantsListUncached(
     source: { not: "RePORTER" },
   };
 
-  // Count distinct externalIds (grants) — fall back to count of rows when
-  // externalId is null. #160/#481(b) — drop suppressed grants from the count
-  // and (below) from the grouping, so the list and its badge never surface a
-  // hidden grant.
-  const distinctRows = (await prisma.grant.findMany({
-    where: baseWhere,
-    select: { externalId: true, id: true },
-  })) as Array<{ externalId: string | null; id: string }>;
-  const { suppressed, unsuppressedKeyCount: total } =
-    await resolveActiveGrantSuppression(distinctRows, prisma);
+  // #2066 — ONE card per funding PROJECT (`coreProjectNum ?? accountNumber`), not
+  // per investigator-award row. `loadUnitGrantProjects` is the same call the hero
+  // stat makes, so `total` below and "N active grants" agree by construction.
+  // #160/#481(b) suppression is applied inside it, before grouping.
+  const sortedGroups = await loadUnitGrantProjects(baseWhere, sort);
+  const total = sortedGroups.length;
   if (total === 0) {
     return { hits: [], total: 0, page, pageSize: PAGE_SIZE };
   }
-
-  const orderBy =
-    sort === "end_date"
-      ? [{ endDate: "desc" as const }]
-      : [{ startDate: "desc" as const }];
-
-  // Pull all grants and group client-side by externalId — one card per grant
-  // row. Pagination is applied AFTER grouping. Pool size sufficient for
-  // departments with <2k active grants; revisit if perf shows up.
-  const all = (await prisma.grant.findMany({
-    where: baseWhere,
-    orderBy,
-    select: {
-      cwid: true,
-      title: true,
-      role: true,
-      funder: true,
-      startDate: true,
-      endDate: true,
-      externalId: true,
-      awardNumber: true,
-      applId: true,
-    },
-  })) as Array<{
-    cwid: string;
-    title: string;
-    role: string;
-    funder: string;
-    startDate: Date;
-    endDate: Date;
-    externalId: string | null;
-    awardNumber: string | null;
-    applId: number | null;
-  }>;
-
-  type Group = {
-    title: string;
-    funder: string;
-    startDate: Date;
-    endDate: Date;
-    externalId: string | null;
-    awardNumber: string | null;
-    applId: number | null;
-    cwids: string[];
-    piCwids: string[];
-    /** #2074 — each investigator's raw `Grant.role` on this award, so the chip can
-     *  be described truthfully instead of being assumed to be a PI. */
-    roleByCwid: Map<string, string>;
-    sortKey: number;
-  };
-  const groups = new Map<string, Group>();
-  for (const r of all) {
-    // #160/#481(b) — skip suppressed grant rows before grouping (keyed on the
-    // same externalId set the count excluded above).
-    if (r.externalId !== null && suppressed.has(r.externalId)) continue;
-    const key = r.externalId ?? `__solo__${r.cwid}-${r.startDate.toISOString()}`;
-    const existing = groups.get(key);
-    const sortKey =
-      sort === "end_date" ? r.endDate.getTime() : r.startDate.getTime();
-    if (!existing) {
-      groups.set(key, {
-        title: r.title,
-        funder: r.funder,
-        startDate: r.startDate,
-        endDate: r.endDate,
-        externalId: r.externalId,
-        awardNumber: r.awardNumber,
-        applId: r.applId,
-        cwids: [r.cwid],
-        piCwids: isPiRole(r.role) ? [r.cwid] : [],
-        roleByCwid: new Map([[r.cwid, r.role]]),
-        sortKey,
-      });
-    } else {
-      if (!existing.cwids.includes(r.cwid)) existing.cwids.push(r.cwid);
-      if (isPiRole(r.role) && !existing.piCwids.includes(r.cwid))
-        existing.piCwids.push(r.cwid);
-      // ponytail: first role wins. A cwid has exactly one row per group today
-      // (the key embeds the cwid), so this cannot collide. If cards ever group by
-      // project (#2066), pick the highest-priority role instead of the first.
-      if (!existing.roleByCwid.has(r.cwid)) existing.roleByCwid.set(r.cwid, r.role);
-      if (existing.applId === null && r.applId !== null) existing.applId = r.applId;
-      if (sortKey > existing.sortKey) existing.sortKey = sortKey;
-    }
-  }
-
-  const sortedGroups = Array.from(groups.values()).sort(
-    (a, b) => b.sortKey - a.sortKey,
-  );
   const pageSlice = sortedGroups.slice(
     page * PAGE_SIZE,
     (page + 1) * PAGE_SIZE,
   );
 
-  // #2066/#2075 — Multi-PI is a PROJECT-level fact, but `externalId` is
-  // `INFOED-{account}-{cwid}`, so it EMBEDS the cwid: the per-row grouping above
-  // can never hold a second PD/PI, which is why `isMultiPi` used to be
-  // structurally always false. #2073 derived it from the project key over `all`,
-  // which fixed the flag but only saw PD/PIs inside THIS department — measured at
-  // 65% of active multi-PI awards, missing the 35% whose PD/PIs sit in different
-  // departments. The corpus-wide sibling query closes that.
-  //
-  // 🔴 Keyed on `pageSlice`, NOT `all`, and that is load-bearing:
-  // `loadProjectSiblingRows` builds up to two OR arms per distinct
-  // account/serial, and the serial arm is an unanchored LIKE. `all` is every
-  // active grant in the department (~2k for a large one) ⇒ thousands of arms.
-  // `isMultiPi` is only ever read for the cards this page RENDERS, so the slice
-  // of 20 caps it at ~40 arms.
-  const siblingRows = await loadProjectSiblingRows(pageSlice);
+  // #2066 — the card assembly (sibling PD/PI query → chips → `isMultiPi`) is
+  // shared with the division twin; `lib/api/divisions.ts` was a near-verbatim
+  // copy of it and had already drifted in three places. No per-surface argument:
+  // both tabs render through the same `DeptGrantsList` → `GrantCard`.
+  // 🔴 `pageSlice`, never `sortedGroups` — see the arm-count note on
+  // `buildUnitGrantCards`.
+  const hits = await buildUnitGrantCards(pageSlice);
 
-  const cwids = Array.from(new Set(pageSlice.flatMap((g) => g.cwids)));
-  type Sl = { cwid: string; preferredName: string; slug: string; roleCategory: string | null };
-  const [scholars, siblingSuppressed] = await Promise.all([
-    cwids.length > 0
-      ? (prisma.scholar.findMany({
-          where: { cwid: { in: cwids }, deletedAt: null },
-          select: { cwid: true, preferredName: true, slug: true, roleCategory: true },
-        }) as Promise<Sl[]>)
-      : Promise.resolve([] as Sl[]),
-    // #160 on a SIBLING's row. `suppressed` above was resolved over this
-    // department's rows only, so it cannot speak for a co-PD/PI in another
-    // department — without this, a colleague who hid their own grant row would
-    // keep flipping this flag. Mirrors the same fold in lib/api/profile.ts.
-    loadEntitySuppressions(
-      "grant",
-      siblingRows.map((r) => r.externalId).filter((id): id is string => id !== null),
-      prisma,
-    ),
-  ]);
-  const scholarMap = new Map(scholars.map((s) => [s.cwid, s]));
-  const multiPi = multiPiExternalIds(siblingRows, siblingSuppressed);
-
-  const hits: DeptGrantCard[] = pageSlice.map((g) => {
-    const chipCwids = g.piCwids.length > 0 ? g.piCwids : g.cwids.slice(0, 1);
-    const pis: AuthorChip[] = chipCwids
-      .map((cwid) => {
-        const s = scholarMap.get(cwid);
-        if (!s) return null;
-        return {
-          name: s.preferredName,
-          cwid: s.cwid,
-          slug: s.slug,
-          identityImageEndpoint: identityImageEndpoint(s.cwid),
-          isFirst: true,
-          isLast: false,
-          roleCategory: s.roleCategory,
-          // #2074 — `chipCwids` falls back to a NON-PI cwid when the award has no
-          // PI row in this department, so the chip cannot be assumed to be a PI.
-          grantRole: g.roleByCwid.get(cwid) ?? null,
-        } satisfies AuthorChip;
-      })
-      .filter((x): x is NonNullable<typeof x> => x !== null);
-
-    return {
-      externalId: g.externalId,
-      awardNumber: g.awardNumber,
-      funder: g.funder,
-      title: g.title,
-      startDate: g.startDate,
-      endDate: g.endDate,
-      isRecentlyCompleted: false,
-      pis,
-      isMultiPi: g.externalId !== null && multiPi.has(g.externalId),
-      applId: g.applId,
-    };
-  });
-
-  return { hits, total: sortedGroups.length, page, pageSize: PAGE_SIZE };
+  return { hits, total, page, pageSize: PAGE_SIZE };
 }
 
 // --- Cached public wrappers (viewer-independent reads via lib/api/swr-cache;
