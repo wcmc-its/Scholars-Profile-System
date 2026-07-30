@@ -375,7 +375,11 @@ describe("getDivisionGrantsList — isMultiPi (#2066, #2075)", () => {
     return Object.fromEntries(hits.map((h) => [h.externalId, h.isMultiPi]));
   };
 
+  /** Active whole-grant suppressions, set per test. */
+  let suppressedIds: string[] = [];
+
   beforeEach(() => {
+    suppressedIds = [];
     mockDivisionFindFirst.mockResolvedValue({ ...DIV_BASE, source: "manual" });
     mockDivisionMembershipFindMany.mockResolvedValue(
       members(CORPUS).map((r) => ({ cwid: r.cwid })),
@@ -384,6 +388,17 @@ describe("getDivisionGrantsList — isMultiPi (#2066, #2075)", () => {
       routeScholarFindMany(new Set(CORPUS.map((r) => r.cwid))),
     );
     mockGrantFindMany.mockImplementation(serveGrants());
+    // INTERPRETS `entityId: { in: [...] }`. Required to tell the division-scoped
+    // suppression set apart from the sibling-scoped one — see the twin note in
+    // dept-grants-multi-pi.test.ts.
+    mockSuppressionFindMany.mockImplementation(
+      (args?: { where?: { entityId?: { in?: string[] } } }) => {
+        const asked = new Set(args?.where?.entityId?.in ?? []);
+        return Promise.resolve(
+          suppressedIds.filter((id) => asked.has(id)).map((entityId) => ({ entityId })),
+        );
+      },
+    );
   });
 
   it("flags BOTH rows of a two-PD/PI project, and not the single-PI project", async () => {
@@ -401,7 +416,7 @@ describe("getDivisionGrantsList — isMultiPi (#2066, #2075)", () => {
   it("does not flag when the outside PD/PI's own row is suppressed (#160)", async () => {
     // The division-scoped `suppressed` set cannot contain a non-member's row, so
     // the derivation needs its own sibling-scoped suppression load.
-    mockSuppressionFindMany.mockResolvedValue([{ entityId: "INFOED-A800-xdiv0002" }]);
+    suppressedIds = ["INFOED-A800-xdiv0002"];
     expect((await flags())["INFOED-A800-xdiv0001"]).toBe(false);
   });
 
