@@ -444,6 +444,21 @@ async function retrieveCluster(
     // this exact caller as the intended `false`).
     facultyProminence: false,
     grantProminence: false,
+    // #2068 — the volume-prior ceiling lever, pinned OFF rather than inherited from the
+    // deployment's SEARCH_PEOPLE_PUBCOUNT_DAMPEN. `shape: "topic"` is inside that lever's
+    // gate, so without this pin the spine would silently pick up a /search A/B: with the
+    // two employment priors already false above, the spine's ENTIRE outer prominence
+    // multiplier is `1 + volume`, so swapping the volume term's shape moves the spine's
+    // ranking PROPORTIONALLY MORE than it moves /search's.
+    //
+    // Enabling it for the spine is a separate decision, not a side effect of flipping the
+    // /search flag: it requires a sponsor gold re-baseline, and that gold is nDCG@20-graded
+    // (rows 21-100 the panel paints are ungraded), so the re-baseline has to be run and read
+    // deliberately. Pinning also keeps `scripts/search-eval/spine-eval-run.ts` honest — it
+    // runs on the sps-etl-<env> task def, which carries ZERO SEARCH_* flags, so an
+    // env-driven lever would have the harness measuring OFF while the staging app served
+    // ON. Pinned here, the harness measures the shipped spine path by construction.
+    pubCountDampen: "off",
     // #1689 — ASK FOR THE EVIDENCE. This is the whole fix, and it is three options on a
     // call this spine already makes.
     //

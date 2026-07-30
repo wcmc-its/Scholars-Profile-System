@@ -90,6 +90,16 @@ async function main() {
   // `clusterQuery = cluster.members.join(" ")`, so any arm that touches clustering, cluster
   // membership, or member order is measured blind without them. Absolute nDCG is therefore NOT
   // comparable to arms run before this line; the PAIRED within-draw difference is unaffected.
+  // SEARCH_PEOPLE_PUBCOUNT_DAMPEN (#2068) is DELIBERATELY NOT in this list, and must not be
+  // added — the reasoning above does not apply to it. The paragraph above says a flag that is
+  // on in the deployed app but absent from the etl task def has to be seeded here or the arm
+  // isn't the shipped path. That argument only bites on a flag the spine reads FROM THE ENV.
+  // #2068 is an `opts` field (`pubCountDampen`), and the spine's single `searchPeople` call
+  // (`matcha-spine-run.ts`, `retrieveCluster`) pins it `"off"` alongside `facultyProminence` /
+  // `grantProminence`. So the spine's body does not depend on the variable at all: seeding it
+  // here would change nothing, and seeding it "on" would misrepresent the shipped spine.
+  // Enabling the ladder for the spine is a separate decision needing a sponsor gold
+  // re-baseline (and that gold is nDCG@20-graded).
   for (const f of [
     "SEARCH_RESULT_EVIDENCE",
     "SEARCH_EVIDENCE_REASON_COUNTS",

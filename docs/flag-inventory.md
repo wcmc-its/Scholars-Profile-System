@@ -58,6 +58,7 @@ owning issues; dates from the cdk flip annotations.
 | Flag | Owner | Exit criterion / decision |
 |---|---|---|
 | SEARCH_PEOPLE_DIVISION_SHAPE | #1347 | Dark pending A/B of division-shape routing |
+| SEARCH_PEOPLE_PUBCOUNT_DAMPEN | #2068 | Volume-prior ceiling (contract O3). Flip staging → prod only after (a) SEARCH_PEOPLE_FACULTY_PROMINENCE lands on one value in BOTH envs — it is `off` staging / `on` prod today, and capping the volume term raises the faculty term's share of the same sum 16.3%→21.8%, so a staging A/B otherwise measures a composition prod will not serve; then (b) a People nDCG read on the prod posture. The Matcha spine pins the opt `off` and is NOT part of this rollout (enabling it there needs a sponsor-gold re-baseline, and that gold is nDCG@20-graded) |
 | SEARCH_PEOPLE_CONCEPT_PRECOUNT | #1414 | Inverted polarity ("off" = new fast path); #1414 wants code-default flip |
 | SEARCH_SUGGEST_MESH_CONCEPT | #878 | Flip staging first for a soak → prod; no data prereq |
 | SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB | #967 | ROLLED BACK (drove ~10s broad-concept hang); re-soak only after #1278 wall-time cap |

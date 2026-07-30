@@ -157,6 +157,11 @@ async function main() {
               // the dryrun mirrors the route's behavior under either flag
               // state. Toggle by exporting SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST.
               deptLeadershipBoost: resolveDeptLeadershipBoost(),
+              // Issue #2068 — the volume-prior ladder is likewise env-gated and
+              // likewise inherited here ON PURPOSE: `pubCountDampen` is left
+              // absent so `searchPeople` falls back to the env, which is what
+              // the route does. Toggle by exporting SEARCH_PEOPLE_PUBCOUNT_DAMPEN.
+              // (The Matcha spine is the opposite case — it PINS the opt off.)
             }
           : { q: c.query },
       );

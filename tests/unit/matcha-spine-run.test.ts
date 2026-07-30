@@ -399,8 +399,42 @@ describe("rankResearchersForDescriptionSpine", () => {
       relevanceMode: "v3",
       facultyProminence: false,
       grantProminence: false,
+      // #2068 — the volume-prior ceiling lever is the THIRD prior in the same additive
+      // sum, and `shape: "topic"` is inside its gate. It must be PINNED, not inherited
+      // from SEARCH_PEOPLE_PUBCOUNT_DAMPEN: with the two employment priors already off,
+      // the spine's entire outer multiplier is `1 + volume`, so a /search A/B would move
+      // the spine's ranking proportionally MORE than /search's.
+      pubCountDampen: "off",
       meshDescendantUis: ["D_CANCER"],
     });
+  });
+
+  it("#2068 — pins pubCountDampen off even when the environment says capped", async () => {
+    // The spine must not inherit a /search A/B. `shape: "topic"` is inside the ladder's
+    // gate, so if the lever were read from `process.env` inside `searchPeople` this env
+    // value would silently reach the spine's body — and with both employment priors off
+    // (asserted above) the spine's whole outer multiplier is `1 + volume`, so it would move
+    // the spine's ranking proportionally MORE than /search's.
+    const prior = process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN;
+    process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN = "capped";
+    try {
+      mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
+      mockMatchQueryToTaxonomy.mockImplementation(async () => meshRes("D_CANCER", ["D_CANCER"]));
+      mockSearchPeople.mockImplementation(async () => people(["x", "y"]));
+
+      await rankResearchersForDescriptionSpine("cancer work");
+
+      expect(mockSearchPeople.mock.calls.length).toBeGreaterThan(0);
+      for (const [callOpts] of mockSearchPeople.mock.calls) {
+        expect(callOpts.pubCountDampen).toBe("off");
+        // Pinned as a set with its two siblings — all three are addends of the one sum.
+        expect(callOpts.facultyProminence).toBe(false);
+        expect(callOpts.grantProminence).toBe(false);
+      }
+    } finally {
+      if (prior === undefined) delete process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN;
+      else process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN = prior;
+    }
   });
 
   /**

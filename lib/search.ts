@@ -1013,10 +1013,21 @@ export const MESH_MIN_MATCHED_FORM_LEN = 4;
  * high-output Wongs). These weights compose a function_score over the
  * name / department / hybrid bodies as:
  *
- *   final = text_score × ( BASE + ln1p(FACTOR · publicationCount)
+ *   final = text_score × ( BASE + VOLUME(publicationCount)
  *                          + FACULTY·[full_time_faculty] + GRANT·[hasActiveGrants] )
  *
  * (`score_mode: sum`, `boost_mode: multiply`).
+ *
+ * `VOLUME` has TWO MODES, selected by `SEARCH_PEOPLE_PUBCOUNT_DAMPEN` (#2068).
+ * ("mode", never "shape" — in this codebase a *shape* is a People query shape
+ * (topic / hybrid / unclassified / name / department / …), and the capped mode
+ * applies to THREE of those. Two modes, three shapes; do not conflate them.)
+ * `"off"` (default, and what both envs serve today) is the original
+ * `ln1p(FACTOR · publicationCount)`; `"capped"` is the step ladder
+ * {@link PEOPLE_PROMINENCE_PUBCOUNT_BANDS}, ceiling
+ * {@link PEOPLE_PROMINENCE_PUBCOUNT_CEILING} = 3.0, on the topic / hybrid /
+ * unclassified shapes only. Everything below describes the `"off"` shape unless
+ * it says otherwise.
  *
  *   - **Publication count leads** — log-saturated (`ln1p`, so 250 vs 500 pubs
  *     doesn't run away). The dense signal (60.9% of active scholars have ≥1
@@ -1026,9 +1037,19 @@ export const MESH_MIN_MATCHED_FORM_LEN = 4;
  *     `× log1p(grantCount)` probe was rejected precisely because it zeroed the
  *     84% with no grant.
  *   - **Full-time-faculty — a *meaningful additive* boost**, deliberately NOT an
- *     absolute first tier: FACULTY must stay below a typical publication-count
- *     gap so a ≤17-pub full-time Wong can't outrank a 250-pub affiliated Wong
- *     (1 + ln1p(17) + 1 = 4.89 < 1 + ln1p(250) = 6.52). #513 decision.
+ *     absolute first tier: under the `"off"` volume shape FACULTY stays below a
+ *     typical publication-count gap, so a ≤17-pub full-time Wong can't outrank a
+ *     250-pub affiliated Wong (1 + ln1p(17) + 1 = 4.89 < 1 + ln1p(250) = 6.52).
+ *     #513 decision.
+ *
+ *     **This rule does NOT survive `SEARCH_PEOPLE_PUBCOUNT_DAMPEN=capped`, and the
+ *     #513 decision it encodes is therefore in scope for any flip.** Capping the
+ *     volume term compresses the very gap FACULTY was sized against: over the
+ *     measured 8..219 tagged-pub range the volume span falls from 3.197 to 1.75,
+ *     so +1.0 goes from 31.3% to 57.1% of it. Same pair, capped: a 50-pub
+ *     full-time scholar (1 + 2.5 + 1 = 4.5) now OUTRANKS a 580-pub affiliated one
+ *     (1 + 3.0 = 4.0), where the `"off"` shape ranks them 5.932 < 7.365. See the
+ *     band table below and the interaction note in `cdk/lib/app-stack.ts`.
  *   - **Active grants — a *small additive* boost** (a "currently funded"
  *     tiebreaker), never a standalone multiplier (the signal is too sparse —
  *     12.5% — to lead).
@@ -1052,6 +1073,68 @@ export const PEOPLE_PROMINENCE_FACULTY_WEIGHT = 1.0;
 export const PEOPLE_PROMINENCE_GRANT_WEIGHT = 0.5;
 /** The `personType` (= `roleCategory`) value the faculty boost matches. */
 export const PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE = "full_time_faculty";
+
+/**
+ * Issue #2068 — the CAPPED replacement for the unbounded `ln1p(publicationCount)`
+ * volume prior (contract `docs/search-relevance-contract.md` open violation O3:
+ * "every query-independent prior states a ceiling").
+ *
+ * Measured on `q=cancer`: everything the query contributes spans 1.38×, while the
+ * tagged evidence being ranked on spans 27× (8 → 219 tagged pubs). Every other
+ * query-derived term in the outer `score_mode: sum` is a step function (MeSH
+ * attribution ×1.5/1.3/1.15 by match TYPE, the area boost a membership filter, the
+ * method tier a flat ×2.0), so `ln1p(publicationCount)` is the only smoothly
+ * increasing term in the sum and the one least related to the query.
+ *
+ * The replacement is an exact-ceiling step ladder: one `filter`+`weight` clause per
+ * band, so the contribution to the sum is a STATED maximum instead of an
+ * unbounded slope. Properties the bands must keep (each pinned by a test in
+ * `tests/unit/search-people-pubcount-dampen.test.ts`):
+ *
+ *   - mutually exclusive — exactly one band matches any P ≥ 1, so the contribution
+ *     to the `score_mode: sum` is exactly that band's weight (never a sum of two);
+ *   - monotone non-decreasing in P;
+ *   - a stated ceiling of {@link PEOPLE_PROMINENCE_PUBCOUNT_CEILING}, DERIVED from
+ *     this table (not a parallel literal) so the two cannot drift;
+ *   - P = 0 matches NO band and so contributes nothing, preserving today's
+ *     `missing: 0` / `ln1p(0) = 0` semantics. There is deliberately no `lt: 1` band.
+ *
+ * ORDERING ONLY. These are `function_score` functions — they score documents the
+ * query already matched. `publicationCount` appears in no filter/must/post_filter,
+ * so `total` and every facet count are identical flag-on and flag-off.
+ *
+ * Bucketing on the indexed `pubCountBucket` field was REJECTED: it is
+ * corpus-relative quartiles of the nonzero population, recomputed per index build,
+ * so its cut points drift between builds and between staging and prod — a lever
+ * built on it is not reproducible across the A/B that justifies it. `max_boost` on
+ * the outer wrapper was also rejected: it caps the SUM and truncates the area and
+ * clinical terms alongside the volume prior (contract rule O4).
+ */
+export const PEOPLE_PROMINENCE_PUBCOUNT_BANDS: ReadonlyArray<{
+  /** Inclusive lower bound on `publicationCount`. */
+  readonly gte: number;
+  /** Exclusive upper bound; omitted on the top (ceiling) band. */
+  readonly lt?: number;
+  /** Additive contribution to the outer prominence `score_mode: sum`. */
+  readonly weight: number;
+}> = [
+  { gte: 200, weight: 3.0 },
+  { gte: 100, lt: 200, weight: 2.75 },
+  { gte: 50, lt: 100, weight: 2.5 },
+  { gte: 20, lt: 50, weight: 2.0 },
+  { gte: 5, lt: 20, weight: 1.25 },
+  { gte: 1, lt: 5, weight: 0.5 },
+];
+
+/**
+ * The stated ceiling of the #2068 volume prior — the maximum a scholar's raw
+ * publication count can add to the outer prominence sum. DERIVED from
+ * {@link PEOPLE_PROMINENCE_PUBCOUNT_BANDS} (one source of truth), so editing a band
+ * weight moves the ceiling rather than silently contradicting it.
+ */
+export const PEOPLE_PROMINENCE_PUBCOUNT_CEILING = Math.max(
+  ...PEOPLE_PROMINENCE_PUBCOUNT_BANDS.map((b) => b.weight),
+);
 
 /**
  * Issue #532 — multiplicative weights for the dept-shape leadership boost.
