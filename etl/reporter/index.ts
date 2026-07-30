@@ -31,6 +31,7 @@
  * Usage: `npm run etl:reporter`
  */
 import { db, disconnect } from "../../lib/db";
+import { repairEncodingOrNull } from "@/lib/text/repair-encoding";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 import { coreProjectNum } from "@/lib/award-number";
@@ -144,7 +145,7 @@ async function step1_GrantAbstracts() {
     // abstract_text on rows RePORTER has already published abstracts for —
     // never replace a real abstract with upstream NULL (applId/keywords
     // still update normally).
-    const abstract = r.abstract_text ?? g.abstract;
+    const abstract = repairEncodingOrNull(r.abstract_text) ?? g.abstract;
     if (
       g.applId !== r.appl_id ||
       g.abstract !== abstract ||

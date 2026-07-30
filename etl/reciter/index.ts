@@ -43,6 +43,7 @@ import { Prisma } from "@/lib/generated/prisma/client";
 import { db, disconnect } from "../../lib/db";
 import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { markTopicRebuildStarted } from "../../lib/etl-state";
+import { repairEncoding, repairEncodingOrNull } from "../../lib/text/repair-encoding";
 import {
   publicationSignature,
   planAuthorshipReconcile,
@@ -617,7 +618,11 @@ async function main() {
       const nih = nihByPmid.get(Number(a.pmid));
       return {
         pmid: pubKey(Number(a.pmid)),
-        title: a.articleTitle ?? `(untitled, pmid ${a.pmid})`,
+        // cp1252 mojibake / zero-width junk arrives with the source title and
+        // abstract and renders as a black box. Repaired here, at the boundary:
+        // the signature diff below then rewrites any already-stored dirty row on
+        // the next run, so no separate backfill is needed for these two columns.
+        title: repairEncoding(a.articleTitle ?? `(untitled, pmid ${a.pmid})`),
         authorsString,
         fullAuthorsString: fullAuthorsByPmid.get(Number(a.pmid)) ?? null,
         journal: a.journalTitleVerbose,
@@ -642,7 +647,7 @@ async function main() {
         // #1567 — eCommons handle URL (null when this pmid is not in the repo,
         // or when the crosswalk read failed for its batch above).
         ecommonsLink: ecommonsLinkByPmid.get(Number(a.pmid)) ?? null,
-        abstract: abstractByPmid.get(Number(a.pmid)) ?? null,
+        abstract: repairEncodingOrNull(abstractByPmid.get(Number(a.pmid)) ?? null),
         meshTerms: keywordsByPmid.get(Number(a.pmid)) ?? Prisma.DbNull,
         source: "ReciterDB",
       };

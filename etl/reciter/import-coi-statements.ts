@@ -30,6 +30,7 @@
  */
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { db, disconnect } from "../../lib/db";
+import { repairEncoding } from "@/lib/text/repair-encoding";
 
 const BUCKET =
   process.env.COI_STATEMENTS_BUCKET ?? process.env.ARTIFACTS_BUCKET ?? "wcmc-reciterai-artifacts";
@@ -65,7 +66,8 @@ function parseNdjson(text: string): { rows: Row[]; skipped: number } {
     try {
       const o = JSON.parse(trimmed) as Partial<Row>;
       const pmid = o.pmid != null ? String(o.pmid) : "";
-      const statementText = typeof o.statementText === "string" ? o.statementText : "";
+      const statementText =
+        typeof o.statementText === "string" ? repairEncoding(o.statementText) : "";
       if (!/^[0-9]+$/.test(pmid) || statementText.length === 0) {
         skipped++;
         continue;
