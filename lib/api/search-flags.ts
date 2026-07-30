@@ -356,11 +356,32 @@ export type PeoplePubCountDampenMode = "off" | "capped";
  *   otherwise (unset / "off" / anything unrecognized) → "off": today's
  *     `field_value_factor`, byte-identical.
  *
- * Default OFF, and the ladder additionally applies ONLY to the topic and hybrid
- * shapes (the same gate as the area and clinical boosts) — raw volume is a
- * reasonable tiebreak on a name lookup and a lie on a topical query. Query-time
- * only, no reindex; ORDERING ONLY (a `function_score` function scores only
+ * Default OFF, and the ladder additionally applies ONLY to the topic, hybrid and
+ * `unclassified` shapes — the same gate as the area and clinical boosts. That is THREE
+ * shapes, not two: `applyTopicTemplate` is `shape === "topic" || shape ===
+ * "unclassified"`, and `unclassified` is the People classifier's catch-all fallback.
+ * Raw volume is a reasonable tiebreak on a name lookup and a lie on a topical query.
+ * Query-time only, no reindex; ORDERING ONLY (a `function_score` function scores only
  * already-matched docs, so `total` and every facet count are unchanged).
+ *
+ * Like its two siblings this is resolved AT THE CALLER and passed as the `pubCountDampen`
+ * option (the /search route and the SSR page call this resolver; the Matcha spine pins
+ * `"off"` — see `lib/api/matcha-spine-run.ts`), so a non-/search consumer never silently
+ * inherits a /search A/B. `searchPeople` falls back to this resolver when the option is
+ * absent.
+ *
+ * INTERACTION — capping one addend of the outer `score_mode: sum` RAISES every other
+ * term's share. Over the measured 8..219 tagged-pub range the volume span falls from
+ * `ln1p(219) - ln1p(8)` = 3.197 to `3.0 - 1.25` = 1.75, so the +1.0
+ * {@link resolveSearchPeopleFacultyProminence} weight goes from 31.3% to 57.1% of the
+ * volume span (across 80 captured top-10 docs the employment prior's share of the sum
+ * rises 16.3% → 21.8%, ×1.34). This inverts pairs master does not invert: prod posture,
+ * 50-pub full-time faculty vs 580-pub affiliated, no grants — master `1+ln1p(50)+1.0`
+ * = 5.932 vs `1+ln1p(580)` = 7.365 (the 580-pub scholar wins), capped `1+2.5+1.0` = 4.5
+ * vs `1+3.0` = 4.0 (the 50-pub faculty wins). The faculty lever is env-divergent today
+ * (staging off, prod on), so a staging A/B of this lever measures a different sum
+ * composition than prod will serve. Full note in `cdk/lib/app-stack.ts` beside the flag
+ * and in `docs/search-people-relevance.md`.
  */
 export function resolveSearchPeoplePubCountDampen(): PeoplePubCountDampenMode {
   return process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN === "capped" ? "capped" : "off";

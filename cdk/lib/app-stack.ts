@@ -1834,12 +1834,29 @@ export class AppStack extends Stack {
         //   today's unbounded ln1p(publicationCount) field_value_factor, byte-identical.
         //   "capped" swaps it for the exact-ceiling step ladder
         //   PEOPLE_PROMINENCE_PUBCOUNT_BANDS (max 3.0), satisfying contract rule O3, and
-        //   only on the topic/hybrid shapes (name/dept ranking is untouched).
+        //   only on the topic/hybrid/unclassified shapes -- `unclassified` is the People
+        //   classifier's catch-all fallback and shares the topic template, so the ladder
+        //   covers THREE shapes (name/dept ranking is untouched).
         //   resolveSearchPeoplePubCountDampen reads === "capped". Query-time, no reindex;
         //   ORDERING ONLY (function_score over already-matched docs, so `total` and every
-        //   facet count are unchanged). DARK in both envs -- flip staging first for the
-        //   #2068 A/B, and per contract rule O5 not while another lever in the same
-        //   additive sum is mid-A/B.
+        //   facet count are unchanged). DARK in both envs.
+        //
+        //   INTERACTION WITH THE FACULTY LEVER ABOVE -- read before flipping. These two
+        //   terms are addends of the SAME sum, so capping one RAISES every other term's
+        //   share. Over the measured 8..219 tagged-pub range the volume span falls from
+        //   ln1p(219)-ln1p(8) = 3.197 to 3.0-1.25 = 1.75, so the +1.0 faculty weight goes
+        //   from 31.3% to 57.1% of the volume span; across 80 captured top-10 docs the
+        //   employment prior's share of the outer sum rises 16.3% -> 21.8% (x1.34). That
+        //   produces inversions master does not have. Prod posture, 50-pub full-time
+        //   faculty vs 580-pub affiliated, no grants: master 1+ln1p(50)+1.0 = 5.932 vs
+        //   1+ln1p(580) = 7.365 (the 580-pub scholar wins); capped 1+2.5+1.0 = 4.5 vs
+        //   1+3.0 = 4.0 (the 50-pub faculty wins).
+        //
+        //   Consequence for the rollout: SEARCH_PEOPLE_FACULTY_PROMINENCE is itself
+        //   env-divergent right now (staging "off" for its A/B soak, prod "on"), so a
+        //   staging A/B of THIS lever measures a different sum composition than prod will
+        //   serve -- staging has no +1.0 faculty term to have its share raised. Size the
+        //   prod effect from the prod posture, not from the staging read.
         SEARCH_PEOPLE_PUBCOUNT_DAMPEN: "off",
         // People-tab "concepts" hint -- replace the sparse self-reported
         // research-areas hint on the scholar row's identity line with the

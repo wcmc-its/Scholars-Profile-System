@@ -5,11 +5,18 @@
  * (`modifier: ln1p`, `factor: 1`, `missing: 0`) inside the outer prominence
  * `function_score` (`score_mode: sum`, `boost_mode: multiply`) — contract
  * `docs/search-relevance-contract.md` open violation O3: a query-independent prior
- * with no stated ceiling. With the flag set to `capped`, the topic and hybrid
- * shapes swap it for the exact-ceiling step ladder
+ * with no stated ceiling. With the lever set to `capped`, the topic, hybrid and
+ * `unclassified` shapes swap it for the exact-ceiling step ladder
  * `PEOPLE_PROMINENCE_PUBCOUNT_BANDS` (max `PEOPLE_PROMINENCE_PUBCOUNT_CEILING`).
+ * THREE shapes, not two — `applyTopicTemplate` is `shape === "topic" || shape ===
+ * "unclassified"`, and `unclassified` is the classifier's catch-all fallback.
  *
- * The two invariants this file exists to defend:
+ * The lever is an `opts` field (`pubCountDampen`) resolved AT THE CALLER, exactly like
+ * `facultyProminence` / `grantProminence`, falling back to
+ * `resolveSearchPeoplePubCountDampen()` when absent — so the Matcha spine can pin it
+ * `off` rather than inherit a /search A/B. The last describe block covers that.
+ *
+ * The three invariants this file exists to defend:
  *
  *  1. **OFF is byte-identical.** Flag off — or on but on a name/department shape —
  *     the prominence functions array must deep-equal master's, in order, with no
@@ -19,6 +26,9 @@
  *     innermost matched bool mentions `publicationCount` nowhere. A `function_score`
  *     function scores documents the query already matched, so `total` and every
  *     facet bucket count are unchanged.
+ *  3. **The caller wins over the env.** An explicit `pubCountDampen` overrides the
+ *     environment in BOTH directions, and the spine's own opts produce master's body
+ *     even with the env set to `capped`.
  *
  * `@/lib/search` is only PARTIALLY mocked (real constants via `importOriginal`, only
  * the client replaced) so the emitted ladder is asserted against the SHIPPED band
@@ -194,6 +204,22 @@ describe("#2068 — flag CAPPED swaps the factor for the ladder (topic + hybrid)
     ]);
   });
 
+  // THREE shapes, not two. `applyTopicTemplate` is `shape === "topic" || shape ===
+  // "unclassified"`, and `unclassified` is the People classifier's catch-all fallback — so
+  // it shares the topic template and is inside the ladder's gate. A doc that says
+  // "topic/hybrid" understates the lever's reach by a whole shape.
+  it("unclassified shape emits the ladder too (it shares the topic template)", async () => {
+    await searchPeople({ q: "crispr screens 2019", relevanceMode: "v3", shape: "unclassified" });
+    const fs = outerFnScore(capturedBodies[0]);
+    expect(fs.functions).toEqual([
+      { weight: 1.0 },
+      ...EXPECTED_LADDER_FUNCTIONS,
+      { filter: { term: { personType: "full_time_faculty" } }, weight: 1.0 },
+      { filter: { term: { hasActiveGrants: true } }, weight: 0.5 },
+    ]);
+    expect(fs.functions).not.toContainEqual(MASTER_PUBCOUNT_FUNCTION);
+  });
+
   it("no emitted band weight exceeds the declared ceiling", async () => {
     await searchPeople({ ...TOPIC_CALL });
     const weights = outerFnScore(capturedBodies[0])
@@ -284,5 +310,74 @@ describe("#2068 — ORDERING ONLY: admission and facets are untouched", () => {
     // The inner (topic multiplicative) layer is untouched by the swap.
     const inner = (fs.query as { function_score?: FnScore }).function_score;
     expect(inner?.score_mode).toBe("multiply");
+  });
+});
+
+describe("#2068 — `pubCountDampen` is a CALLER opt; the env is only the fallback", () => {
+  // The whole point of the opt. `facultyProminence` and `grantProminence` are resolved at
+  // the caller precisely so a non-/search consumer can override them, and the Matcha spine
+  // does exactly that. Reading the volume lever from `process.env` INSIDE `searchPeople`
+  // would have given the spine no way out of a /search A/B.
+
+  it("an explicit 'off' opt beats env=capped (the spine's posture)", async () => {
+    process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN = "capped";
+    await searchPeople({ ...TOPIC_CALL, pubCountDampen: "off" });
+    expect(outerFnScore(capturedBodies[0]).functions).toEqual(MASTER_PROMINENCE_FUNCTIONS);
+  });
+
+  it("an explicit 'capped' opt beats an unset/off env", async () => {
+    delete process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN;
+    await searchPeople({ ...TOPIC_CALL, pubCountDampen: "capped" });
+    expect(outerFnScore(capturedBodies[0]).functions).toEqual([
+      { weight: 1.0 },
+      ...EXPECTED_LADDER_FUNCTIONS,
+      { filter: { term: { personType: "full_time_faculty" } }, weight: 1.0 },
+      { filter: { term: { hasActiveGrants: true } }, weight: 0.5 },
+    ]);
+
+    capturedBodies.length = 0;
+    process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN = "off";
+    await searchPeople({ ...TOPIC_CALL, pubCountDampen: "capped" });
+    expect(
+      outerFnScore(capturedBodies[0]).functions.filter(
+        (f) => "filter" in f && "range" in (f.filter as object),
+      ),
+    ).toHaveLength(BANDS.length);
+  });
+
+  it("an ABSENT opt still consults the env (headless callers keep today's behavior)", async () => {
+    process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN = "capped";
+    await searchPeople({ ...TOPIC_CALL });
+    expect(outerFnScore(capturedBodies[0]).functions).not.toContainEqual(MASTER_PUBCOUNT_FUNCTION);
+  });
+
+  it("THE SPINE'S OWN OPTS produce master's body even when the env says capped", async () => {
+    // Exactly the three prominence opts `matcha-spine-run.ts` `retrieveCluster` passes,
+    // on the shape it passes (`topic`, which IS inside the ladder's gate). With both
+    // employment priors off the spine's entire outer multiplier is `1 + volume`, so the
+    // ladder's proportional effect there is LARGER than on /search — this must not move.
+    process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN = "capped";
+    await searchPeople({
+      ...TOPIC_CALL,
+      facultyProminence: false,
+      grantProminence: false,
+      pubCountDampen: "off",
+    });
+    const capped = structuredClone(capturedBodies[0]);
+
+    capturedBodies.length = 0;
+    delete process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN;
+    await searchPeople({
+      ...TOPIC_CALL,
+      facultyProminence: false,
+      grantProminence: false,
+      pubCountDampen: "off",
+    });
+    const off = structuredClone(capturedBodies[0]);
+
+    // The spine's body is exactly BASE + the unbounded factor, in both env postures.
+    expect(outerFnScore(capped).functions).toEqual([{ weight: 1.0 }, MASTER_PUBCOUNT_FUNCTION]);
+    expect(outerFnScore(off).functions).toEqual(outerFnScore(capped).functions);
+    expect(JSON.stringify(capped)).toBe(JSON.stringify(off));
   });
 });

@@ -26,12 +26,31 @@ final = BM25(topic bool)
         x  productivity (1.2 | 1.1)           inner, multiply
         x  sparse decay (0.7)                 inner, multiply
         x  ( 1.0                              outer, sum -> multiply
-            + ln(1 + publicationCount)
+            + ln(1 + publicationCount)                     [flag: see below]
             + 1.0   if personType == full_time_faculty     [flag]
             + 0.5   if hasActiveGrants
             + 3.0 | 1.5 | 0.75   if cwid in an area-concentration tier
             + 3.0   if the clinical filter matches )
 ```
+
+The volume term has a second shape. Under `SEARCH_PEOPLE_PUBCOUNT_DAMPEN=capped` (#2068, default
+`off`, which is what both envs serve today) the `ln(1 + publicationCount)` line is replaced, on the
+topic / hybrid / `unclassified` shapes only, by exactly ONE band weight from
+`PEOPLE_PROMINENCE_PUBCOUNT_BANDS`:
+
+```
+            + 3.0   if publicationCount >= 200             capped only
+            + 2.75  if 100..199
+            + 2.5   if 50..99
+            + 2.0   if 20..49
+            + 1.25  if 5..19
+            + 0.5   if 1..4
+            + 0     if 0   (matches no band, as ln1p(0) = 0 did)
+```
+
+The bands are mutually exclusive, so the contribution is one weight, never a sum of two, and the
+ceiling is `PEOPLE_PROMINENCE_PUBCOUNT_CEILING` = 3.0 (derived from the table by `Math.max`, not a
+parallel literal). `name` and `department` keep the unbounded factor in both modes.
 
 Structure, verbatim:
 
@@ -44,15 +63,23 @@ Structure, verbatim:
 - `baseQuery` = `{ bool: { must, filter: queryFilter } }` (`lib/api/search.ts:2986`).
 
 Constants: `PEOPLE_PROMINENCE_BASE_WEIGHT` 1.0, `PEOPLE_PROMINENCE_PUBCOUNT_FACTOR` 1,
-`PEOPLE_PROMINENCE_FACULTY_WEIGHT` 1.0, `PEOPLE_PROMINENCE_GRANT_WEIGHT` 0.5 (`lib/search.ts:1049-1052`);
-`AREA_BOOST_W_HI` 3 / `_MID` 1.5 / `_LO` 0.75 (`lib/search.ts:1092-1094`); clinical weight default 3
+`PEOPLE_PROMINENCE_FACULTY_WEIGHT` 1.0, `PEOPLE_PROMINENCE_GRANT_WEIGHT` 0.5;
+`AREA_BOOST_W_HI` 3 / `_MID` 1.5 / `_LO` 0.75 — all in `lib/search.ts`, cited by symbol because the
+#2068 insertion shifted every line anchor past the prominence block; clinical weight default 3
 (`lib/api/search-flags.ts:1205-1209`).
 
 Under `score_mode: "sum"` only functions whose `filter` matches contribute. `BASE` and the
-`field_value_factor` are unfiltered, so the outer multiplier has a hard floor of 1.0 and no ceiling —
-there is no `max_boost`, no `min_score`, and no `script_score` anywhere in the people body (grep-verified
-against `lib/api/search.ts`). Default sort is `_score` (`lib/api/search.ts:2676-2686`), so this product
-is the display order.
+`field_value_factor` are unfiltered, so **in the default (`off`) mode** the outer multiplier has a hard
+floor of 1.0 and no ceiling. There is no `max_boost`, no `min_score`, and no `script_score` anywhere in
+the people body in either mode — `grep -n max_boost lib/api/search.ts` returns exactly one line, and it
+is the comment warning against adding one (contract rule O4).
+
+Under `SEARCH_PEOPLE_PUBCOUNT_DAMPEN=capped` the volume term becomes a filtered step ladder, so on the
+topic / hybrid / `unclassified` shapes the multiplier gains a stated ceiling: 1.0 (BASE) + 3.0 (volume)
++ 1.0 (faculty) + 0.5 (grants) + 3.0 (area hi) + 3.0 (clinical) = 11.5. The floor of 1.0 is unchanged,
+because P = 0 matches no band exactly as `ln1p(0) = 0` contributed nothing.
+
+Default sort is `_score` (`lib/api/search.ts:2676-2686`), so this product is the display order.
 
 ### Worked example
 
@@ -557,7 +584,8 @@ when `resolvePeopleMethodFamilyTier() && applyTopicTemplate` and the taxonomy re
 Inner multiplier range: 0.7 to `1.5 x 2.0 x 1.2 = 3.6`.
 
 Dept shape gets a different inner wrapper — `score_mode: "max"`, chair 3.0 / chief 1.5
-(`lib/api/search.ts:2968-2979, 2996-3005`; `lib/search.ts:1069-1070`) — mutually exclusive with the topic
+(`lib/api/search.ts:2968-2979, 2996-3005`; `PEOPLE_DEPT_LEADERSHIP_CHAIR_WEIGHT` / `_CHIEF_WEIGHT` in
+`lib/search.ts`) — mutually exclusive with the topic
 branch. Its opt defaults to **off** inside `searchPeople` (`(opts.deptLeadershipBoost ?? false)`,
 `:2966`); the flag's documented default-on reaches the query only because both public callers pass it
 explicitly (`route.ts:703`, `page.tsx:550`).
@@ -570,16 +598,50 @@ Applies to all four v3 shapes. Everything here is **ORDER**.
 **1. BASE — `{ weight: 1.0 }`, no filter** (`:2921`). Applies to every doc; it is what floors M at 1.0, so
 a zero-pub non-faculty scholar keeps its inner score rather than being zeroed.
 
-**2. Publication count — `field_value_factor { field: "publicationCount", modifier: "ln1p", factor: 1,
-missing: 0 }`, no filter** (`:2922-2929`). Contribution is exactly `ln(1 + publicationCount)`. This is the
+**2. Publication count — TWO shapes**, selected by `SEARCH_PEOPLE_PUBCOUNT_DAMPEN` (#2068). This is the
 scholar's **total** indexed pub count, not the on-topic count — a pure volume prior with zero topical
-relation.
+relation, in either shape.
+
+*Mode `off` (default; what both envs serve today), and all four shapes:* `field_value_factor { field:
+"publicationCount", modifier: "ln1p", factor: 1, missing: 0 }`, **no filter**. Contribution is exactly
+`ln(1 + publicationCount)`, unbounded — contract violation O3.
 
 | Pubs | 30 | 50 | 100 | 250 | 500 |
 |---|---|---|---|---|---|
 | `ln(1+P)` | 3.434 | 3.932 | 4.615 | 5.525 | 6.217 |
 
 Across a plausible 30-500 band this single term contributes a 2.78-point swing.
+
+*Mode `capped`, and only on the topic / hybrid / `unclassified` shapes:* the factor is replaced by one
+`{ filter: range{publicationCount}, weight }` clause per band of `PEOPLE_PROMINENCE_PUBCOUNT_BANDS`. The
+bands are mutually exclusive, so exactly one weight lands in the sum:
+
+| Pubs | 0 | 1-4 | 5-19 | 20-49 | 50-99 | 100-199 | >= 200 |
+|---|---|---|---|---|---|---|---|
+| band weight | 0 | 0.5 | 1.25 | 2.0 | 2.5 | 2.75 | **3.0** |
+
+Ceiling `PEOPLE_PROMINENCE_PUBCOUNT_CEILING` = 3.0, derived from the table. `name` and `department`
+keep the `off` shape regardless of the flag. **Sizing a lever off the `ln(1+P)` table above is only
+valid in `off` mode** — see [the faculty interaction](#the-faculty-interaction-under-capped) below.
+
+#### The faculty interaction under `capped`
+
+Capping one addend of a `score_mode: sum` raises every other term's SHARE. Over the measured 8-219
+tagged-pub range the volume span falls from `ln1p(219) - ln1p(8)` = 3.197 to `3.0 - 1.25` = 1.75, so the
++1.0 faculty weight goes from **31.3% to 57.1%** of the volume span; across 80 captured top-10 docs the
+employment prior's share of the outer sum rises **16.3% -> 21.8% (x1.34)**.
+
+That produces inversions the default mode does not have. Prod posture, 50-pub full-time faculty vs
+580-pub affiliated, no grants:
+
+| | 50-pub full-time faculty | 580-pub affiliated | winner |
+|---|---|---|---|
+| `off` | `1 + ln1p(50) + 1.0` = **5.932** | `1 + ln1p(580)` = **7.365** | the 580-pub scholar |
+| `capped` | `1 + 2.5 + 1.0` = **4.5** | `1 + 3.0` = **4.0** | the 50-pub faculty |
+
+`SEARCH_PEOPLE_FACULTY_PROMINENCE` is itself env-divergent today (staging `off`, prod `on`), so a
+staging A/B of the volume lever measures a sum composition prod will not serve: staging has no +1.0
+faculty term whose share could rise. Size the prod effect from the prod posture.
 
 **3. Faculty — `{ filter: term{personType: "full_time_faculty"}, weight: 1.0 }`** (`:2932-2939`), spread in
 only when `opts.facultyProminence !== false`. Both public callers pass
@@ -594,7 +656,8 @@ env flag** — grep-verified, the only caller that sets `grantProminence: false`
 **5. Area concentration — `{ filter: terms{cwid: [...]}, weight: 3 | 1.5 | 0.75 }`**, gated
 `(applyTopicTemplate || applyHybridTemplate) && opts.areaConcentration?.length > 0` (`:2881-2886`). Built
 by `buildAreaBoostFunctions` (`:1426-1451`): `frac = total / concentration[0].total`; `>= 0.5` -> hi,
-`>= 0.2` -> mid, else lo (`lib/search.ts:1096-1097`). At most three clauses; the if/else-if/else makes
+`>= 0.2` -> mid, else lo (`AREA_BOOST_HI_FRAC` / `AREA_BOOST_MID_FRAC` in `lib/search.ts`). At most
+three clauses; the if/else-if/else makes
 tiers mutually exclusive, so exactly one fires per scholar.
 
 The filter is a **bare cwid membership list**. Nothing in the clause references the query, the resolved
@@ -654,6 +717,7 @@ Every value below is the **CDK-wired** value at `cdk/lib/app-stack.ts`. It is no
 | Flag | Code default | Staging | Prod | Effect | Code |
 |---|---|---|---|---|---|
 | `SEARCH_PEOPLE_FACULTY_PROMINENCE` | on (`!== "off"`) | **off** `:1799` | **on** | The flat +1.0 faculty term in the outer sum. | `search-flags.ts:341-343`; `search.ts:2932-2939` |
+| `SEARCH_PEOPLE_PUBCOUNT_DAMPEN` | off (`=== "capped"`) | off `:1860` | off | Replaces the unbounded `ln1p(publicationCount)` factor with the `PEOPLE_PROMINENCE_PUBCOUNT_BANDS` step ladder, ceiling 3.0 (contract O3). **Topic / hybrid / `unclassified` only** — `name` and `department` keep the factor. **Cannot change the set** (a `function_score` function over already-matched docs). Raises the faculty term's share of the same sum 16.3% -> 21.8%; see [the faculty interaction](#the-faculty-interaction-under-capped). Also reached by the Matcha spine, which **pins it `off`** (`matcha-spine-run.ts`, `retrieveCluster`) so the spine never inherits a /search A/B. | `search-flags.ts:345, 386-388`; `search.ts:3046-3069` |
 | `SEARCH_PEOPLE_AREA_BOOST` | off | on `:1777` | on | Gates **both** concentration arms; the +3/+1.5/+0.75 tiers. Largest ranking lever on people. | `search-flags.ts:463-465`; `search.ts:1426-1451, 2881-2886` |
 | `SEARCH_PEOPLE_CLINICAL_FN` | off | on `:1734` | on | The +3 clinical term. | `search-flags.ts:1183-1185`; `search.ts:2910-2918` |
 | `SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR` | off | on `:1744` | on | Sub-toggle; ORs the uncapped `clinicalSpecialtyMeshTree` closure into the same weight. Inert in prod until a prod people reindex carries the anchor fields (`cdk:1741-1743`). | `search-flags.ts:1198-1200`; `search.ts:2073-2074, 2896-2904` |

@@ -98,17 +98,19 @@ describe("#2068 volume-prior ladder — monotone non-decreasing", () => {
 });
 
 describe("#2068 volume-prior ladder — the stated ceiling (contract O3)", () => {
+  // NB: two assertions that used to sit here were DELETED as tautological, not replaced:
+  // `expect(Math.max(...BANDS.map(b => b.weight))).toBe(CEILING)` and
+  // `expect(weightAt(1_000_000)).toBe(CEILING)`. `CEILING` is DEFINED as that `Math.max`, so
+  // both re-execute the definition and cannot fail for any band table. The load-bearing
+  // checks are the literal `toBe(3.0)` below (which a band-weight edit has to be reconciled
+  // with by hand), the `toBeLessThanOrEqual` sweep, the open-ended-top-band check, and the
+  // emitted-body assertion in `search-people-pubcount-dampen.test.ts`.
   it("declares a ceiling of 3.0", () => {
     expect(CEILING).toBe(3.0);
   });
 
-  it("the maximum band weight IS the declared ceiling (one source of truth)", () => {
-    expect(Math.max(...BANDS.map((b) => b.weight))).toBe(CEILING);
-  });
-
   it("no publication count, however large, can exceed the ceiling", () => {
     for (const p of PROBE_COUNTS) expect(weightAt(p)).toBeLessThanOrEqual(CEILING);
-    expect(weightAt(1_000_000)).toBe(CEILING);
     // The unbounded factor this replaces: ln1p(1e6) ~= 13.8, i.e. 4.6x the ceiling.
     expect(Math.log1p(1_000_000)).toBeGreaterThan(CEILING);
   });

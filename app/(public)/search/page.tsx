@@ -43,6 +43,7 @@ import {
   resolvePeopleSnippetRepresentativePub,
   resolvePeopleReasonFromDoc,
   resolveSearchPeopleFacultyProminence,
+  resolveSearchPeoplePubCountDampen,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
   resolvePublicationDepartmentFilter,
@@ -517,6 +518,10 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           // #1345 — full-time-faculty prominence lever (default ON). Resolved here so the
           // SSR list ranks identically to the /api/search route.
           facultyProminence: resolveSearchPeopleFacultyProminence(),
+          // #2068 — volume-prior ceiling lever (default "off"). Resolved here so the SSR
+          // list ranks identically to the /api/search route, and so non-/search consumers
+          // (the Matcha spine) can pin it instead of inheriting this deployment's env.
+          pubCountDampen: resolveSearchPeoplePubCountDampen(),
           genericDemote,
           contentQuery,
           meshDescriptorName: taxonomyMatch.meshResolution?.name,

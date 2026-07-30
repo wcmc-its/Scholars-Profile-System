@@ -111,6 +111,7 @@ import {
   resolveSearchPeopleClinicalReasonThresholds,
   resolveSearchPeopleConceptHint,
   resolveSearchPeoplePubCountDampen,
+  type PeoplePubCountDampenMode,
   resolveSearchResultEvidence,
   resolveSearchEvidenceReasonCounts,
   resolveSearchEvidenceRows,
@@ -1791,6 +1792,22 @@ export async function searchPeople(opts: {
    */
   grantProminence?: boolean;
   /**
+   * #2068 — the volume-prior ceiling lever, third sibling of `facultyProminence` and
+   * `grantProminence` (all three bound a term of the SAME outer prominence
+   * `score_mode: sum`). `"capped"` replaces the unbounded `ln1p(publicationCount)`
+   * `field_value_factor` with the exact-ceiling step ladder
+   * `PEOPLE_PROMINENCE_PUBCOUNT_BANDS`; `"off"` emits today's factor, byte-identically.
+   * Applied only on the topic / hybrid / unclassified shapes (the same gate as the area
+   * and clinical boosts).
+   *
+   * Resolved AT THE CALLER, exactly like its two siblings, so a non-/search consumer can
+   * pin it rather than inherit the deployment's env: the /search route and the SSR page
+   * pass `resolveSearchPeoplePubCountDampen()`, and the Matcha spine
+   * (`matcha-spine-run.ts`) pins `"off"`. When ABSENT the resolver is consulted, so
+   * headless callers and tests keep today's env-driven behavior.
+   */
+  pubCountDampen?: PeoplePubCountDampenMode;
+  /**
    * Issue #692 — generic-term demotion (mode `on`). When true and `contentQuery`
    * differs from the raw query, the topic + hybrid bodies score on the content
    * query (full query discounted) and highlighting is restricted to the content
@@ -3011,17 +3028,24 @@ export async function searchPeople(opts: {
   //                        in the SAME slot);
   //   "capped"           → PEOPLE_PROMINENCE_PUBCOUNT_BANDS, one disjoint filter+weight
   //                        clause per band, ceiling PEOPLE_PROMINENCE_PUBCOUNT_CEILING.
-  // Topic/hybrid ONLY — the same gate as areaBoostFunctions / clinicalFnFunctions above.
-  // `applyProminence` is the OR of all four v3 templates, and volume is a reasonable
-  // tiebreak for a name lookup even though it is a lie for a topical query, so an ungated
-  // ladder would also move `name` and `department` ranking. P = 0 matches no band, which
-  // reproduces the `missing: 0` / ln1p(0) = 0 contribution of the factor it replaces.
+  // THREE shapes, not two — the same gate as areaBoostFunctions / clinicalFnFunctions
+  // above: `applyTopicTemplate` is itself `shape === "topic" || shape === "unclassified"`
+  // (the classifier's catch-all fallback), so with `applyHybridTemplate` the ladder covers
+  // topic + unclassified + hybrid. `applyProminence` is the OR of all four v3 templates,
+  // and volume is a reasonable tiebreak for a name lookup even though it is a lie for a
+  // topical query, so an ungated ladder would also move `name` and `department` ranking.
+  // P = 0 matches no band, which reproduces the `missing: 0` / ln1p(0) = 0 contribution of
+  // the factor it replaces.
   // ORDERING ONLY: these are function_score functions over already-matched docs —
   // publicationCount enters no queryFilter / must / post_filter, so `total` and every
   // facet bucket count are identical in both modes.
+  //
+  // `opts.pubCountDampen` is resolved AT THE CALLER (like `facultyProminence` /
+  // `grantProminence`) so a non-/search consumer can pin the lever instead of inheriting
+  // the deployment's env — the Matcha spine pins "off". Absent ⇒ consult the resolver.
+  const pubCountDampenMode = opts.pubCountDampen ?? resolveSearchPeoplePubCountDampen();
   const applyPubCountLadder =
-    (applyTopicTemplate || applyHybridTemplate) &&
-    resolveSearchPeoplePubCountDampen() === "capped";
+    (applyTopicTemplate || applyHybridTemplate) && pubCountDampenMode === "capped";
   // (Gated on `applyProminence` as well so nothing is built — or dereferenced — for a
   // shape that emits no prominence wrapper at all, e.g. legacy mode.)
   const pubCountFunctions: Record<string, unknown>[] = !applyProminence

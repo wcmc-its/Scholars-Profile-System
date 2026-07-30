@@ -1013,10 +1013,18 @@ export const MESH_MIN_MATCHED_FORM_LEN = 4;
  * high-output Wongs). These weights compose a function_score over the
  * name / department / hybrid bodies as:
  *
- *   final = text_score × ( BASE + ln1p(FACTOR · publicationCount)
+ *   final = text_score × ( BASE + VOLUME(publicationCount)
  *                          + FACULTY·[full_time_faculty] + GRANT·[hasActiveGrants] )
  *
  * (`score_mode: sum`, `boost_mode: multiply`).
+ *
+ * `VOLUME` has TWO shapes, selected by `SEARCH_PEOPLE_PUBCOUNT_DAMPEN` (#2068):
+ * `"off"` (default, and what both envs serve today) is the original
+ * `ln1p(FACTOR · publicationCount)`; `"capped"` is the step ladder
+ * {@link PEOPLE_PROMINENCE_PUBCOUNT_BANDS}, ceiling
+ * {@link PEOPLE_PROMINENCE_PUBCOUNT_CEILING} = 3.0, on the topic / hybrid /
+ * unclassified shapes only. Everything below describes the `"off"` shape unless
+ * it says otherwise.
  *
  *   - **Publication count leads** — log-saturated (`ln1p`, so 250 vs 500 pubs
  *     doesn't run away). The dense signal (60.9% of active scholars have ≥1
@@ -1026,9 +1034,19 @@ export const MESH_MIN_MATCHED_FORM_LEN = 4;
  *     `× log1p(grantCount)` probe was rejected precisely because it zeroed the
  *     84% with no grant.
  *   - **Full-time-faculty — a *meaningful additive* boost**, deliberately NOT an
- *     absolute first tier: FACULTY must stay below a typical publication-count
- *     gap so a ≤17-pub full-time Wong can't outrank a 250-pub affiliated Wong
- *     (1 + ln1p(17) + 1 = 4.89 < 1 + ln1p(250) = 6.52). #513 decision.
+ *     absolute first tier: under the `"off"` volume shape FACULTY stays below a
+ *     typical publication-count gap, so a ≤17-pub full-time Wong can't outrank a
+ *     250-pub affiliated Wong (1 + ln1p(17) + 1 = 4.89 < 1 + ln1p(250) = 6.52).
+ *     #513 decision.
+ *
+ *     **This rule does NOT survive `SEARCH_PEOPLE_PUBCOUNT_DAMPEN=capped`, and the
+ *     #513 decision it encodes is therefore in scope for any flip.** Capping the
+ *     volume term compresses the very gap FACULTY was sized against: over the
+ *     measured 8..219 tagged-pub range the volume span falls from 3.197 to 1.75,
+ *     so +1.0 goes from 31.3% to 57.1% of it. Same pair, capped: a 50-pub
+ *     full-time scholar (1 + 2.5 + 1 = 4.5) now OUTRANKS a 580-pub affiliated one
+ *     (1 + 3.0 = 4.0), where the `"off"` shape ranks them 5.932 < 7.365. See the
+ *     band table below and the interaction note in `cdk/lib/app-stack.ts`.
  *   - **Active grants — a *small additive* boost** (a "currently funded"
  *     tiebreaker), never a standalone multiplier (the signal is too sparse —
  *     12.5% — to lead).

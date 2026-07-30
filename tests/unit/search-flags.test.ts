@@ -22,6 +22,7 @@ import {
   resolveSearchShellStreaming,
   resolveSearchPeopleDivisionShape,
   resolveSearchPeopleFacultyProminence,
+  resolveSearchPeoplePubCountDampen,
   resolvePeopleTopicPhraseBoost,
   resolveSearchPeopleClinicalMeshAnchor,
 } from "@/lib/api/search-flags";
@@ -427,6 +428,27 @@ describe("resolveSearchPeopleFacultyProminence (#1345)", () => {
     expect(resolveSearchPeopleFacultyProminence()).toBe(true);
     process.env.SEARCH_PEOPLE_FACULTY_PROMINENCE = "on";
     expect(resolveSearchPeopleFacultyProminence()).toBe(true);
+  });
+});
+
+describe("resolveSearchPeoplePubCountDampen (#2068)", () => {
+  const original = process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN;
+  beforeEach(() => delete process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN);
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN;
+    else process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN = original;
+  });
+
+  it("defaults to 'off' (today's unbounded ln1p factor, byte-identical)", () => {
+    expect(resolveSearchPeoplePubCountDampen()).toBe("off");
+  });
+  it("is 'capped' only for exactly 'capped' — the opposite polarity to the faculty lever", () => {
+    process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN = "capped";
+    expect(resolveSearchPeoplePubCountDampen()).toBe("capped");
+    for (const v of ["CAPPED", "capped ", " capped", "on", "true", "1", "off", ""]) {
+      process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN = v;
+      expect(resolveSearchPeoplePubCountDampen()).toBe("off");
+    }
   });
 });
 
