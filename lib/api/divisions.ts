@@ -17,6 +17,7 @@ import { cachedRead } from "@/lib/api/swr-cache";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { isPiRole } from "@/lib/funding-roles";
 import { multiPiExternalIds } from "@/lib/funding-projection";
+import { loadProjectSiblingRows } from "@/lib/api/project-siblings";
 import type { DepartmentTopicArea } from "@/lib/api/departments";
 import type {
   DeptPublicationCard,
@@ -34,6 +35,7 @@ import {
   isAuthorHidden,
   isUnitSuppressed,
   loadHiddenAuthorshipCounts,
+  loadEntitySuppressions,
   loadPublicationSuppressions,
   loadUnitFieldOverrides,
   mergeUnitFields,
@@ -676,12 +678,6 @@ async function getDivisionGrantsListUncached(
     awardNumber: string | null;
   }>;
 
-  // #2066 — see the twin comment in lib/api/dept-lists.ts. `externalId` embeds
-  // the cwid, so the per-row grouping below made `isMultiPi` structurally always
-  // false; derive it from the funding-project key instead.
-  // ponytail: division-scoped, so a cross-unit MPI award still won't fire.
-  const multiPi = multiPiExternalIds(all, suppressed);
-
   type Group = {
     title: string;
     funder: string;
@@ -729,16 +725,31 @@ async function getDivisionGrantsListUncached(
     (page + 1) * GRANT_PAGE_SIZE,
   );
 
+  // #2066/#2075 — see the twin comment in lib/api/dept-lists.ts for the full
+  // reasoning. Keyed on `pageSlice`, never `all`: the sibling query builds up to
+  // two OR arms per distinct account/serial and the serial arm is an unanchored
+  // LIKE, so passing the whole division pool would build thousands of arms.
+  const siblingRows = await loadProjectSiblingRows(pageSlice);
+
   const cwids = Array.from(new Set(pageSlice.flatMap((g) => g.cwids)));
   type Sl = { cwid: string; preferredName: string; slug: string; roleCategory: string | null };
-  const scholars =
+  const [scholars, siblingSuppressed] = await Promise.all([
     cwids.length === 0
-      ? ([] as Sl[])
-      : ((await prisma.scholar.findMany({
+      ? Promise.resolve([] as Sl[])
+      : (prisma.scholar.findMany({
           where: { cwid: { in: cwids } },
           select: { cwid: true, preferredName: true, slug: true, roleCategory: true },
-        })) as Sl[]);
+        }) as Promise<Sl[]>),
+    // #160 on a SIBLING's row — `suppressed` was resolved over this division's
+    // rows only and cannot speak for a co-PD/PI outside it.
+    loadEntitySuppressions(
+      "grant",
+      siblingRows.map((r) => r.externalId).filter((id): id is string => id !== null),
+      prisma,
+    ),
+  ]);
   const scholarMap = new Map(scholars.map((s) => [s.cwid, s]));
+  const multiPi = multiPiExternalIds(siblingRows, siblingSuppressed);
 
   const hits: DeptGrantCard[] = pageSlice.map((g) => {
     const piList = g.piCwids.length > 0 ? g.piCwids : g.cwids;

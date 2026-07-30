@@ -18,6 +18,7 @@ import { cachedRead } from "@/lib/api/swr-cache";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { isPiRole } from "@/lib/funding-roles";
 import { multiPiExternalIds } from "@/lib/funding-projection";
+import { loadProjectSiblingRows } from "@/lib/api/project-siblings";
 import type { AuthorChip } from "@/components/publication/author-chip-row";
 import type {
   DeptPublicationCard,
@@ -26,6 +27,7 @@ import type {
 import {
   isAuthorHidden,
   loadAllPublicationSuppressions,
+  loadEntitySuppressions,
   resolveActiveGrantSuppression,
   resolveUnitDarkPmids,
 } from "@/lib/api/manual-layer";
@@ -211,19 +213,6 @@ async function getDeptGrantsListUncached(
     applId: number | null;
   }>;
 
-  // #2066 — Multi-PI is a PROJECT-level fact, but `externalId` is
-  // `INFOED-{account}-{cwid}`, so it EMBEDS the cwid: the per-row grouping below
-  // can never hold a second PD/PI and `isMultiPi` was structurally always false.
-  // Derive it from the funding-project key instead, over the rows already
-  // fetched — same helper the profile and the funding index use, so these pages
-  // cannot contradict them.
-  // ponytail: dept-scoped. `all` is filtered to THIS department, so an award
-  // whose PD/PIs sit in different departments still won't fire. Under-flags,
-  // never over-flags. Upgrade path is the corpus-wide sibling query
-  // (`loadProjectSiblingRows`, lib/api/profile.ts) — one extra round trip per
-  // page — if the cross-department gap turns out to matter.
-  const multiPi = multiPiExternalIds(all, suppressed);
-
   type Group = {
     title: string;
     funder: string;
@@ -275,16 +264,43 @@ async function getDeptGrantsListUncached(
     (page + 1) * PAGE_SIZE,
   );
 
+  // #2066/#2075 — Multi-PI is a PROJECT-level fact, but `externalId` is
+  // `INFOED-{account}-{cwid}`, so it EMBEDS the cwid: the per-row grouping above
+  // can never hold a second PD/PI, which is why `isMultiPi` used to be
+  // structurally always false. #2073 derived it from the project key over `all`,
+  // which fixed the flag but only saw PD/PIs inside THIS department — measured at
+  // 65% of active multi-PI awards, missing the 35% whose PD/PIs sit in different
+  // departments. The corpus-wide sibling query closes that.
+  //
+  // 🔴 Keyed on `pageSlice`, NOT `all`, and that is load-bearing:
+  // `loadProjectSiblingRows` builds up to two OR arms per distinct
+  // account/serial, and the serial arm is an unanchored LIKE. `all` is every
+  // active grant in the department (~2k for a large one) ⇒ thousands of arms.
+  // `isMultiPi` is only ever read for the cards this page RENDERS, so the slice
+  // of 20 caps it at ~40 arms.
+  const siblingRows = await loadProjectSiblingRows(pageSlice);
+
   const cwids = Array.from(new Set(pageSlice.flatMap((g) => g.cwids)));
   type Sl = { cwid: string; preferredName: string; slug: string; roleCategory: string | null };
-  const scholars =
+  const [scholars, siblingSuppressed] = await Promise.all([
     cwids.length > 0
-      ? ((await prisma.scholar.findMany({
+      ? (prisma.scholar.findMany({
           where: { cwid: { in: cwids }, deletedAt: null },
           select: { cwid: true, preferredName: true, slug: true, roleCategory: true },
-        })) as Sl[])
-      : [];
+        }) as Promise<Sl[]>)
+      : Promise.resolve([] as Sl[]),
+    // #160 on a SIBLING's row. `suppressed` above was resolved over this
+    // department's rows only, so it cannot speak for a co-PD/PI in another
+    // department — without this, a colleague who hid their own grant row would
+    // keep flipping this flag. Mirrors the same fold in lib/api/profile.ts.
+    loadEntitySuppressions(
+      "grant",
+      siblingRows.map((r) => r.externalId).filter((id): id is string => id !== null),
+      prisma,
+    ),
+  ]);
   const scholarMap = new Map(scholars.map((s) => [s.cwid, s]));
+  const multiPi = multiPiExternalIds(siblingRows, siblingSuppressed);
 
   const hits: DeptGrantCard[] = pageSlice.map((g) => {
     const chipCwids = g.piCwids.length > 0 ? g.piCwids : g.cwids.slice(0, 1);

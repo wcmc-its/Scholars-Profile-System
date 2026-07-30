@@ -292,113 +292,143 @@ describe("getDivisionGrantsList — Phase 8 roster union (#540)", () => {
 });
 
 /**
- * #2066 — `isMultiPi` on a division grant card.
+ * #2066 / #2075 — `isMultiPi` on a division grant card.
  *
- * This asserts through `getDivisionGrantsList`, not against
- * `multiPiExternalIds` directly, on purpose. The helper was already correct and
- * unit-tested before #2066; the defect was that this surface never called it —
- * it read `piCwids.length >= 2` off a grouping keyed on `externalId`
+ * Asserts through `getDivisionGrantsList`, not against `multiPiExternalIds`
+ * directly, on purpose. The helper was already correct and unit-tested before
+ * #2066; the defect was that this surface never called it — it read
+ * `piCwids.length >= 2` off a grouping keyed on `externalId`
  * (`INFOED-{account}-{cwid}`), which embeds the cwid, so every group was a
  * singleton and the flag was structurally always false. A test of the helper
  * alone would have stayed green through the entire bug.
+ *
+ * #2075 then widened the row pool from "this division's rows" to the
+ * corpus-wide sibling query, so a PD/PI outside the division counts. The mock
+ * INTERPRETS that query's OR arms rather than returning a fixed set.
+ *
+ * The dept twin (`dept-grants-multi-pi.test.ts`) carries the fuller matrix;
+ * this block covers the division WIRING, which is a separate code path.
  */
-describe("getDivisionGrantsList — isMultiPi (#2066)", () => {
-  /** Two PD/PIs on ONE project (same Account_Number, distinct cwids), plus a
-   *  single-PI project as the negative control. */
-  const GRANT_ROWS = [
-    {
-      cwid: "mpi00001",
-      role: "PI", // InfoEd flags only the CONTACT PI
-      externalId: "INFOED-A100-mpi00001",
-      awardNumber: "1R01CA245678-01",
-      title: "Multi-PI project",
-      funder: "NCI",
-      startDate: new Date("2024-01-01"),
-      endDate: new Date("2029-12-31"),
-    },
-    {
-      cwid: "mpi00002",
-      role: "Co-PI", // InfoEd's NON-CONTACT PD/PI — an NIH multiple-PI
-      externalId: "INFOED-A100-mpi00002",
-      awardNumber: "1R01CA245678-01",
-      title: "Multi-PI project",
-      funder: "NCI",
-      startDate: new Date("2024-01-01"),
-      endDate: new Date("2029-12-31"),
-    },
-    {
-      cwid: "solo0001",
-      role: "PI",
-      externalId: "INFOED-A200-solo0001",
-      awardNumber: "1R01CA999999-01",
-      title: "Single-PI project",
-      funder: "NCI",
-      startDate: new Date("2024-01-01"),
-      endDate: new Date("2029-12-31"),
-    },
+describe("getDivisionGrantsList — isMultiPi (#2066, #2075)", () => {
+  const D = {
+    title: "Project",
+    funder: "NCI",
+    startDate: new Date("2024-01-01"),
+    endDate: new Date("2029-12-31"),
+  };
+
+  /** `inDivision: false` rows are NOT division members, so they never reach the
+   *  page's own pull — only the sibling query can find them. */
+  const CORPUS = [
+    // Same-division multi-PI. InfoEd flags only the contact PI, so the second
+    // PD/PI arrives as `Co-PI` (an NIH multiple-PI).
+    { ...D, cwid: "mpi00001", role: "PI",    externalId: "INFOED-A100-mpi00001", awardNumber: "1R01CA245678-01", inDivision: true },
+    { ...D, cwid: "mpi00002", role: "Co-PI", externalId: "INFOED-A100-mpi00002", awardNumber: "1R01CA245678-01", inDivision: true },
+    // Single-PI negative control.
+    { ...D, cwid: "solo0001", role: "PI",    externalId: "INFOED-A200-solo0001", awardNumber: "1R01CA999999-01", inDivision: true },
+    // CROSS-DIVISION multi-PI — the #2075 case: `xdiv0002` is outside CARDIO.
+    { ...D, cwid: "xdiv0001", role: "PI",    externalId: "INFOED-A800-xdiv0001", awardNumber: "1R01CA888888-01", inDivision: true },
+    { ...D, cwid: "xdiv0002", role: "Co-PI", externalId: "INFOED-A800-xdiv0002", awardNumber: "1R01CA888888-01", inDivision: false },
   ];
+
+  type CRow = (typeof CORPUS)[number];
+  const members = (c: CRow[]) => c.filter((r) => r.inDivision);
+
+  function serveGrants(corpus: CRow[] = CORPUS) {
+    return (args?: { select?: Record<string, true>; where?: { AND?: unknown[] } }) => {
+      if (args?.where?.AND) {
+        // Sibling candidate query — interpret the OR arms as MySQL would.
+        const or =
+          (
+            args.where.AND.find((c) => c && typeof c === "object" && "OR" in c) as
+              | { OR: Array<Record<string, { startsWith?: string; contains?: string }>> }
+              | undefined
+          )?.OR ?? [];
+        return Promise.resolve(
+          corpus
+            .filter((r) =>
+              or.some((arm) =>
+                arm.externalId?.startsWith
+                  ? r.externalId.startsWith(arm.externalId.startsWith)
+                  : arm.awardNumber?.contains
+                    ? r.awardNumber.includes(arm.awardNumber.contains)
+                    : false,
+              ),
+            )
+            .map((r) => ({
+              cwid: r.cwid,
+              role: r.role,
+              externalId: r.externalId,
+              awardNumber: r.awardNumber,
+            })),
+        );
+      }
+      if (args?.select?.title) return Promise.resolve(members(corpus));
+      return Promise.resolve(
+        members(corpus).map((r) => ({ externalId: r.externalId, id: r.externalId })),
+      );
+    };
+  }
+
+  const flags = async () => {
+    const { hits } = await getDivisionGrantsList("CARDIO", { page: 0 });
+    return Object.fromEntries(hits.map((h) => [h.externalId, h.isMultiPi]));
+  };
 
   beforeEach(() => {
     mockDivisionFindFirst.mockResolvedValue({ ...DIV_BASE, source: "manual" });
     mockDivisionMembershipFindMany.mockResolvedValue(
-      GRANT_ROWS.map((r) => ({ cwid: r.cwid })),
+      members(CORPUS).map((r) => ({ cwid: r.cwid })),
     );
     mockScholarFindMany.mockImplementation(
-      routeScholarFindMany(new Set(GRANT_ROWS.map((r) => r.cwid))),
+      routeScholarFindMany(new Set(CORPUS.map((r) => r.cwid))),
     );
-    // Two grant reads: the suppression/count projection, then the full pull.
-    mockGrantFindMany.mockImplementation((args?: { select?: Record<string, true> }) =>
-      Promise.resolve(
-        args?.select?.title
-          ? GRANT_ROWS
-          : GRANT_ROWS.map((r) => ({ externalId: r.externalId, id: r.externalId })),
-      ),
-    );
+    mockGrantFindMany.mockImplementation(serveGrants());
   });
 
   it("flags BOTH rows of a two-PD/PI project, and not the single-PI project", async () => {
-    const { hits } = await getDivisionGrantsList("CARDIO", { page: 0 });
-    expect(
-      Object.fromEntries(hits.map((h) => [h.externalId, h.isMultiPi])),
-    ).toEqual({
-      // The contact PI reads MPI too — that was the #2065 inversion.
-      "INFOED-A100-mpi00001": true,
-      "INFOED-A100-mpi00002": true,
-      "INFOED-A200-solo0001": false,
-    });
+    const f = await flags();
+    // The contact PI reads MPI too — that was the #2065 inversion.
+    expect(f["INFOED-A100-mpi00001"]).toBe(true);
+    expect(f["INFOED-A100-mpi00002"]).toBe(true);
+    expect(f["INFOED-A200-solo0001"]).toBe(false);
+  });
+
+  it("flags an award whose second PD/PI is OUTSIDE the division (#2075)", async () => {
+    expect((await flags())["INFOED-A800-xdiv0001"]).toBe(true);
+  });
+
+  it("does not flag when the outside PD/PI's own row is suppressed (#160)", async () => {
+    // The division-scoped `suppressed` set cannot contain a non-member's row, so
+    // the derivation needs its own sibling-scoped suppression load.
+    mockSuppressionFindMany.mockResolvedValue([{ entityId: "INFOED-A800-xdiv0002" }]);
+    expect((await flags())["INFOED-A800-xdiv0001"]).toBe(false);
   });
 
   it("does not flag a renewal — one scholar on two Account_Numbers under one core project", async () => {
     // `coreProjectNum` collapses these into ONE project. Counting distinct
     // cwids (not rows) is what keeps that from reading as multi-PI.
-    const renewal = [
-      { ...GRANT_ROWS[0], externalId: "INFOED-A300-mpi00001", awardNumber: "5R01CA245678-02" },
-      GRANT_ROWS[0],
+    const renewal: CRow[] = [
+      CORPUS[0],
+      { ...CORPUS[0], externalId: "INFOED-A300-mpi00001", awardNumber: "5R01CA245678-02" },
     ];
     mockDivisionMembershipFindMany.mockResolvedValue([{ cwid: "mpi00001" }]);
-    mockGrantFindMany.mockImplementation((args?: { select?: Record<string, true> }) =>
-      Promise.resolve(
-        args?.select?.title
-          ? renewal
-          : renewal.map((r) => ({ externalId: r.externalId, id: r.externalId })),
-      ),
-    );
+    mockGrantFindMany.mockImplementation(serveGrants(renewal));
 
     const { hits } = await getDivisionGrantsList("CARDIO", { page: 0 });
     expect(hits.map((h) => h.isMultiPi)).toEqual([false, false]);
   });
 
   it("does not flag a PD/PI plus a Co-Investigator", async () => {
-    const withCoI = [GRANT_ROWS[0], { ...GRANT_ROWS[1], role: "Co-I" }];
-    mockGrantFindMany.mockImplementation((args?: { select?: Record<string, true> }) =>
-      Promise.resolve(
-        args?.select?.title
-          ? withCoI
-          : withCoI.map((r) => ({ externalId: r.externalId, id: r.externalId })),
-      ),
-    );
+    const withCoI: CRow[] = [CORPUS[0], { ...CORPUS[1], role: "Co-I" }];
+    mockGrantFindMany.mockImplementation(serveGrants(withCoI));
 
     const { hits } = await getDivisionGrantsList("CARDIO", { page: 0 });
-    expect(hits.every((h) => h.isMultiPi)).toBe(false);
+    // Named per externalId rather than `.every(...)`, which any single unflagged
+    // card would satisfy regardless of the other.
+    expect(Object.fromEntries(hits.map((h) => [h.externalId, h.isMultiPi]))).toEqual({
+      "INFOED-A100-mpi00001": false,
+      "INFOED-A100-mpi00002": false,
+    });
   });
 });
