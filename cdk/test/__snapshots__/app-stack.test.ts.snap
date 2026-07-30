@@ -659,6 +659,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SEARCH_PEOPLE_PUBCOUNT_DAMPEN",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_CONCEPT_HINT",
                 "Value": "on",
               },
@@ -4526,6 +4530,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_FACULTY_PROMINENCE",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_PUBCOUNT_DAMPEN",
                 "Value": "off",
               },
               {

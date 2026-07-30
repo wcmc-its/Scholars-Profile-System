@@ -130,9 +130,13 @@ field a function of the query?
 status are legitimate tiebreaks and illegitimate deciders. A prior with no bound cannot be argued
 about, only observed after the fact.
 **[CHECK]** `grep -c max_boost lib/api/search.ts` is currently `0`, and the `ln1p(publicationCount)`
-`field_value_factor` (`lib/api/search.ts:2919-2926`) carries no `filter` and no bound. That is the
-open violation; see the register below. A ceiling means a stated maximum contribution, not a
-smaller unbounded slope.
+`field_value_factor` carries no `filter` and no bound. That is the violation; see the register below.
+A ceiling means a stated maximum contribution, not a smaller unbounded slope. #2068 supplies the
+ceiling behind `SEARCH_PEOPLE_PUBCOUNT_DAMPEN=capped` (default `off`, so the unbounded factor is
+still what both envs serve): a mutually exclusive step ladder,
+`PEOPLE_PROMINENCE_PUBCOUNT_BANDS` in `lib/search.ts`, whose maximum
+(`PEOPLE_PROMINENCE_PUBCOUNT_CEILING` = 3.0) is derived from the table rather than asserted beside
+it, and is machine-checked in `tests/unit/search-people-pubcount-bands.test.ts`.
 
 **O4. Do not cap the sum to bound a term.** `max_boost` on the outer `function_score` caps the
 **sum**, so it silently truncates every other term alongside the one being bounded and makes each
@@ -230,7 +234,7 @@ with no violations listed is either new or not being read.
 | ---- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
 | O1   | Method-family tier selected by lexical match on the family label; a plural removes ×2.0                | Open                                                                               |
 | O2   | Concentration boost credits area membership via a bare `terms: {cwid}` filter                          | Fixed behind `SEARCH_PEOPLE_CONCEPT_ARM_FIRST`, default off, staging-first (#2018) |
-| O3   | `ln1p(publicationCount)` is unfiltered and unbounded; worth 2.01× across a measured top 40             | Open, scoped                                                                       |
+| O3   | `ln1p(publicationCount)` is unfiltered and unbounded; worth 2.01× across a measured top 40             | Ceiling shipped behind `SEARCH_PEOPLE_PUBCOUNT_DAMPEN=capped`, default off, topic/hybrid only (#2068) |
 | E1a  | `topic` line named the FIRST of the scholar's own areas that intersects the match, not the best-evidenced | **Fixed** — `pickMatchedAreaIndex`, degrades to the old rule without `areaCounts` |
 | E1b  | `topic` evidence line renders an index-time area total as query evidence                               | Open — the count is still `areaCounts`, never query-filtered                        |
 | E2b  | `topic` line divides by `pubCount` while its numerator is carved                                       | **Fixed** — the line states a magnitude, no share (see below)                       |

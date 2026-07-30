@@ -68,6 +68,7 @@ import {
   PEOPLE_PROMINENCE_FACULTY_WEIGHT,
   PEOPLE_PROMINENCE_GRANT_WEIGHT,
   PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
+  PEOPLE_PROMINENCE_PUBCOUNT_BANDS,
   AREA_BOOST_W_HI,
   AREA_BOOST_W_MID,
   AREA_BOOST_W_LO,
@@ -109,6 +110,7 @@ import {
   resolveSearchPeopleClinicalMeshAnchor,
   resolveSearchPeopleClinicalReasonThresholds,
   resolveSearchPeopleConceptHint,
+  resolveSearchPeoplePubCountDampen,
   resolveSearchResultEvidence,
   resolveSearchEvidenceReasonCounts,
   resolveSearchEvidenceRows,
@@ -2998,20 +3000,56 @@ export async function searchPeople(opts: {
       : [];
   // Contract: docs/search-relevance-contract.md § Layer 2. These are the query-INDEPENDENT
   // priors, and rule O3 requires each to state a ceiling. The ln1p(publicationCount) factor
-  // below has none — unfiltered and unbounded — and is logged as an open O3 violation in
-  // that document's register. Do not bound it with `max_boost` on the wrapper: that caps
+  // has none — unfiltered and unbounded — and is logged as an O3 violation in that
+  // document's register. #2068 bounds it with the SEARCH_PEOPLE_PUBCOUNT_DAMPEN=capped
+  // step ladder below. Do NOT instead bound it with `max_boost` on the wrapper: that caps
   // the SUM and truncates every other term with it (rule O4).
+  //
+  // #2068 — the volume prior, in one of two mutually exclusive shapes:
+  //   "off"    (default) → today's single unbounded ln1p field_value_factor, emitted
+  //                        byte-identically (a one-element spread lands the SAME object
+  //                        in the SAME slot);
+  //   "capped"           → PEOPLE_PROMINENCE_PUBCOUNT_BANDS, one disjoint filter+weight
+  //                        clause per band, ceiling PEOPLE_PROMINENCE_PUBCOUNT_CEILING.
+  // Topic/hybrid ONLY — the same gate as areaBoostFunctions / clinicalFnFunctions above.
+  // `applyProminence` is the OR of all four v3 templates, and volume is a reasonable
+  // tiebreak for a name lookup even though it is a lie for a topical query, so an ungated
+  // ladder would also move `name` and `department` ranking. P = 0 matches no band, which
+  // reproduces the `missing: 0` / ln1p(0) = 0 contribution of the factor it replaces.
+  // ORDERING ONLY: these are function_score functions over already-matched docs —
+  // publicationCount enters no queryFilter / must / post_filter, so `total` and every
+  // facet bucket count are identical in both modes.
+  const applyPubCountLadder =
+    (applyTopicTemplate || applyHybridTemplate) &&
+    resolveSearchPeoplePubCountDampen() === "capped";
+  // (Gated on `applyProminence` as well so nothing is built — or dereferenced — for a
+  // shape that emits no prominence wrapper at all, e.g. legacy mode.)
+  const pubCountFunctions: Record<string, unknown>[] = !applyProminence
+    ? []
+    : applyPubCountLadder
+      ? PEOPLE_PROMINENCE_PUBCOUNT_BANDS.map((band) => ({
+          filter: {
+            range: {
+              publicationCount:
+                band.lt === undefined ? { gte: band.gte } : { gte: band.gte, lt: band.lt },
+            },
+          },
+          weight: band.weight,
+        }))
+      : [
+          {
+            field_value_factor: {
+              field: "publicationCount",
+              modifier: "ln1p",
+              factor: PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
+              missing: 0,
+            },
+          },
+        ];
   const prominenceFunctions: Record<string, unknown>[] = applyProminence
     ? [
         { weight: PEOPLE_PROMINENCE_BASE_WEIGHT },
-        {
-          field_value_factor: {
-            field: "publicationCount",
-            modifier: "ln1p",
-            factor: PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
-            missing: 0,
-          },
-        },
+        ...pubCountFunctions,
         // #1345 — the flat full_time_faculty prominence term, dropped when the
         // faculty-prominence lever is off (expertise-independent employment prior).
         ...(opts.facultyProminence !== false

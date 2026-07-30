@@ -1828,6 +1828,19 @@ export class AppStack extends Stack {
         //   resolveSearchPeopleFacultyProminence reads !== "off". Query-time, no reindex.
         //   STAGING-FIRST: neutralized on staging for the A/B soak, prod keeps +1.0.
         SEARCH_PEOPLE_FACULTY_PROMINENCE: env === "staging" ? "off" : "on",
+        // #2068 -- volume-prior ceiling. Same family as the faculty lever above
+        //   (expertise-INDEPENDENT priors in the one outer prominence sum), kept adjacent
+        //   so both envs' divergence is visible in a single screenful. Default "off" =
+        //   today's unbounded ln1p(publicationCount) field_value_factor, byte-identical.
+        //   "capped" swaps it for the exact-ceiling step ladder
+        //   PEOPLE_PROMINENCE_PUBCOUNT_BANDS (max 3.0), satisfying contract rule O3, and
+        //   only on the topic/hybrid shapes (name/dept ranking is untouched).
+        //   resolveSearchPeoplePubCountDampen reads === "capped". Query-time, no reindex;
+        //   ORDERING ONLY (function_score over already-matched docs, so `total` and every
+        //   facet count are unchanged). DARK in both envs -- flip staging first for the
+        //   #2068 A/B, and per contract rule O5 not while another lever in the same
+        //   additive sum is mid-A/B.
+        SEARCH_PEOPLE_PUBCOUNT_DAMPEN: "off",
         // People-tab "concepts" hint -- replace the sparse self-reported
         // research-areas hint on the scholar row's identity line with the
         // scholar's top MeSH descriptor labels (topMeshTerms). Only the no-match

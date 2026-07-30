@@ -342,6 +342,30 @@ export function resolveSearchPeopleFacultyProminence(): boolean {
   return process.env.SEARCH_PEOPLE_FACULTY_PROMINENCE !== "off";
 }
 
+export type PeoplePubCountDampenMode = "off" | "capped";
+
+/**
+ * #2068 — the volume-prior ceiling lever, sibling to
+ * {@link resolveSearchPeopleFacultyProminence} (both bound an expertise-INDEPENDENT
+ * prior in the same outer prominence `score_mode: sum`).
+ *
+ *   `SEARCH_PEOPLE_PUBCOUNT_DAMPEN=capped` → "capped": the unbounded
+ *     `ln1p(publicationCount)` `field_value_factor` is replaced by the exact-ceiling
+ *     step ladder `PEOPLE_PROMINENCE_PUBCOUNT_BANDS` (max
+ *     `PEOPLE_PROMINENCE_PUBCOUNT_CEILING`), satisfying contract rule O3.
+ *   otherwise (unset / "off" / anything unrecognized) → "off": today's
+ *     `field_value_factor`, byte-identical.
+ *
+ * Default OFF, and the ladder additionally applies ONLY to the topic and hybrid
+ * shapes (the same gate as the area and clinical boosts) — raw volume is a
+ * reasonable tiebreak on a name lookup and a lie on a topical query. Query-time
+ * only, no reindex; ORDERING ONLY (a `function_score` function scores only
+ * already-matched docs, so `total` and every facet count are unchanged).
+ */
+export function resolveSearchPeoplePubCountDampen(): PeoplePubCountDampenMode {
+  return process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN === "capped" ? "capped" : "off";
+}
+
 /**
  * #1344 — topic/hybrid People proximity boost. When ON, the topic (and hybrid)
  * template adds scoring-only `match_phrase` clauses (bounded slop) on
