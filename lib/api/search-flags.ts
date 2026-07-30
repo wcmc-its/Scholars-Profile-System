@@ -11,6 +11,8 @@
  * Server Component as well as the API route and lib code.
  */
 
+import { ovr } from "./flag-override";
+
 export type ConceptMode = "strict" | "expanded" | "off";
 
 /**
@@ -339,7 +341,10 @@ export function resolveSearchPeopleDivisionShape(): boolean {
  * only, no reindex; an independent rollback lever from SEARCH_PEOPLE_RELEVANCE_MODE.
  */
 export function resolveSearchPeopleFacultyProminence(): boolean {
-  return process.env.SEARCH_PEOPLE_FACULTY_PROMINENCE !== "off";
+  return (
+    (ovr("SEARCH_PEOPLE_FACULTY_PROMINENCE") ?? process.env.SEARCH_PEOPLE_FACULTY_PROMINENCE) !==
+    "off"
+  );
 }
 
 export type PeoplePubCountDampenMode = "off" | "capped";
@@ -384,7 +389,10 @@ export type PeoplePubCountDampenMode = "off" | "capped";
  * and in `docs/search-people-relevance.md`.
  */
 export function resolveSearchPeoplePubCountDampen(): PeoplePubCountDampenMode {
-  return process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN === "capped" ? "capped" : "off";
+  return (ovr("SEARCH_PEOPLE_PUBCOUNT_DAMPEN") ?? process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN) ===
+    "capped"
+    ? "capped"
+    : "off";
 }
 
 /**
@@ -400,7 +408,7 @@ export function resolveSearchPeoplePubCountDampen(): PeoplePubCountDampenMode {
  * flag-off ⇒ the people body is byte-identical. No reindex (fields already analyzed).
  */
 export function resolvePeopleTopicPhraseBoost(): boolean {
-  return process.env.SEARCH_PEOPLE_PHRASE_BOOST === "on";
+  return (ovr("SEARCH_PEOPLE_PHRASE_BOOST") ?? process.env.SEARCH_PEOPLE_PHRASE_BOOST) === "on";
 }
 
 /**
@@ -506,7 +514,7 @@ export function resolveGenericTermMode(): GenericTermMode {
  * staging-first (wired `env === "staging" ? "on" : "off"` in cdk/lib/app-stack.ts).
  */
 export function resolveSearchPeopleAreaBoost(): boolean {
-  return process.env.SEARCH_PEOPLE_AREA_BOOST === "on";
+  return (ovr("SEARCH_PEOPLE_AREA_BOOST") ?? process.env.SEARCH_PEOPLE_AREA_BOOST) === "on";
 }
 
 /**
@@ -521,7 +529,9 @@ export function resolveSearchPeopleAreaBoost(): boolean {
  * this selects between arms, it does not enable the boost.
  */
 export function resolveSearchPeopleConceptArmFirst(): boolean {
-  return process.env.SEARCH_PEOPLE_CONCEPT_ARM_FIRST === "on";
+  return (
+    (ovr("SEARCH_PEOPLE_CONCEPT_ARM_FIRST") ?? process.env.SEARCH_PEOPLE_CONCEPT_ARM_FIRST) === "on"
+  );
 }
 
 export type PubRecencyMode = "off" | "gentle" | "strong";
@@ -786,7 +796,7 @@ export function resolvePublicationMeshOnlyFilter(): boolean {
  * operator rollout step.)
  */
 export function resolvePeopleMethodFamilyBoost(): boolean {
-  return process.env.SEARCH_PEOPLE_METHOD_FAMILY === "on";
+  return (ovr("SEARCH_PEOPLE_METHOD_FAMILY") ?? process.env.SEARCH_PEOPLE_METHOD_FAMILY) === "on";
 }
 
 /**
@@ -827,7 +837,10 @@ export function resolvePeopleMethodContextBoost(): boolean {
  * `cdk/lib/app-stack.ts` per environment.
  */
 export function resolvePeopleMethodFamilyTier(): boolean {
-  return process.env.SEARCH_PEOPLE_METHOD_FAMILY_TIER === "on";
+  return (
+    (ovr("SEARCH_PEOPLE_METHOD_FAMILY_TIER") ?? process.env.SEARCH_PEOPLE_METHOD_FAMILY_TIER) ===
+    "on"
+  );
 }
 
 /**
@@ -1075,7 +1088,9 @@ export function resolvePeopleConceptGrantAxis(): boolean {
  * match, so a short/common word cannot mis-map (the "Seahorse → Smegmamorpha" trap).
  */
 export function resolveMeshResolutionFallbackEnabled(): boolean {
-  return process.env.SEARCH_MESH_RESOLUTION_FALLBACK === "on";
+  return (
+    (ovr("SEARCH_MESH_RESOLUTION_FALLBACK") ?? process.env.SEARCH_MESH_RESOLUTION_FALLBACK) === "on"
+  );
 }
 
 /**
@@ -1170,7 +1185,9 @@ export function resolveMeshTokenCoverageEnabled(): boolean {
  * Resolve-time only: no reindex. Staging-first; prod is a product decision.
  */
 export function resolveMeshEntryTierParityEnabled(): boolean {
-  return process.env.SEARCH_MESH_ENTRY_TIER_PARITY === "on";
+  return (
+    (ovr("SEARCH_MESH_ENTRY_TIER_PARITY") ?? process.env.SEARCH_MESH_ENTRY_TIER_PARITY) === "on"
+  );
 }
 
 /**
@@ -1264,7 +1281,9 @@ export function resolveSearchPeopleClinicalMeshAnchor(): boolean {
  *  A/B cells need no reindex. */
 const CLINICAL_FN_WEIGHT_DEFAULT = 3;
 export function resolveSearchPeopleClinicalFnWeight(): number {
-  const raw = Number(process.env.SEARCH_PEOPLE_CLINICAL_FN_WEIGHT);
+  const raw = Number(
+    ovr("SEARCH_PEOPLE_CLINICAL_FN_WEIGHT") ?? process.env.SEARCH_PEOPLE_CLINICAL_FN_WEIGHT,
+  );
   return Number.isFinite(raw) && raw > 0 ? raw : CLINICAL_FN_WEIGHT_DEFAULT;
 }
 
@@ -1286,7 +1305,9 @@ export function resolveSearchPeopleClinicalFnWeight(): number {
  * master's three-band output byte-identically.
  */
 export function resolveSearchPeopleAreaBoostGraded(): boolean {
-  return process.env.SEARCH_PEOPLE_AREA_BOOST_GRADED === "on";
+  return (
+    (ovr("SEARCH_PEOPLE_AREA_BOOST_GRADED") ?? process.env.SEARCH_PEOPLE_AREA_BOOST_GRADED) === "on"
+  );
 }
 
 export function resolveAreaBoostWeights(defaults: {
@@ -1299,8 +1320,8 @@ export function resolveAreaBoostWeights(defaults: {
     return Number.isFinite(n) && n >= 0 ? n : dflt;
   };
   return {
-    hi: num(process.env.SEARCH_AREA_BOOST_W_HI, defaults.hi),
-    mid: num(process.env.SEARCH_AREA_BOOST_W_MID, defaults.mid),
-    lo: num(process.env.SEARCH_AREA_BOOST_W_LO, defaults.lo),
+    hi: num(ovr("SEARCH_AREA_BOOST_W_HI") ?? process.env.SEARCH_AREA_BOOST_W_HI, defaults.hi),
+    mid: num(ovr("SEARCH_AREA_BOOST_W_MID") ?? process.env.SEARCH_AREA_BOOST_W_MID, defaults.mid),
+    lo: num(ovr("SEARCH_AREA_BOOST_W_LO") ?? process.env.SEARCH_AREA_BOOST_W_LO, defaults.lo),
   };
 }

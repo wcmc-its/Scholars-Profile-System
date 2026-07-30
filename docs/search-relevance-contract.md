@@ -156,6 +156,13 @@ reported with the state of every interacting flag attached.
 `mesh_curated_topic_anchor` row population (85 distinct in prod versus 349 in staging, #2016). The
 last one is the sharpest: anchors determine which area is credited, so the two environments choose
 from different distributions.
+**[CHECK]** On staging, isolate a single lever without a deploy: `?flags=NAME:value,…` on
+`/api/search` overrides an allowlisted ranking flag for that request only, so an A/B is two curls
+against the same process, the same index and the same second instead of two captures separated by a
+deploy and a container restart. The allowlist, the staging gate and the cache-key reasoning are in
+`lib/api/flag-override.ts` (#2085); an overridden response carries `flagOverride` in its JSON body,
+so a capture cannot be mistaken for default behaviour. The param is inert outside staging — the
+prod/staging differences above still have to be reasoned about, not measured away.
 
 **O6. Not every fix is monotone-downward.** Rejecting one arm of a boost can route a query to another
 arm with a **wider** eligibility carve, taking a scholar from no boost to the maximum. Describe such a

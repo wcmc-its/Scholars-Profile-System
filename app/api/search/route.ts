@@ -64,6 +64,11 @@ import {
   runWithOsRoundTripCounter,
   getOsRoundTripCount,
 } from "@/lib/api/os-round-trips";
+import {
+  activeFlagOverride,
+  parseFlagOverride,
+  runWithFlagOverride,
+} from "@/lib/api/flag-override";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +80,15 @@ const TOPIC_SLUG_RE = /^[a-zA-Z0-9_][a-zA-Z0-9_-]*$/;
 // so each `search_query` log can report `osRoundTrips`. The counter is inert
 // outside this scope (ETL / index build).
 export async function GET(request: NextRequest) {
-  return runWithOsRoundTripCounter(() => handleSearch(request));
+  // #2085 — `?flags=NAME:value,…` overrides allowlisted RANKING flags for this
+  // request only, so an A/B is two curls against one process instead of two
+  // deploys 30 minutes apart. Staging-only and inert elsewhere; see
+  // lib/api/flag-override.ts for the allowlist and the cache-key reasoning.
+  const parsed = parseFlagOverride(request.nextUrl.searchParams.get("flags"));
+  if (!parsed.ok) return apiError(parsed.error, 400);
+  return runWithFlagOverride(parsed.overrides, () =>
+    runWithOsRoundTripCounter(() => handleSearch(request)),
+  );
 }
 
 // DoS/robustness via deep paging (mirrors the topics route's T-03-05-05 clamp):
@@ -766,7 +779,14 @@ function jsonWithTiming<T extends object>(
   // An origin response that already carries Content-Encoding passes through
   // CloudFront untouched, so gzipping here is the deterministic fix.
   // gzipSync on a ~200 KB JSON string costs low single-digit ms.
-  const payload = JSON.stringify({ ...body, searchInterpretation });
+  // #2085 — an overridden capture must be self-identifying so it can never be
+  // mistaken for default behaviour. Absent entirely on a normal request.
+  const flagOverride = activeFlagOverride();
+  const payload = JSON.stringify({
+    ...body,
+    searchInterpretation,
+    ...(flagOverride ? { flagOverride } : {}),
+  });
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "Server-Timing": serverTimingHeader([
