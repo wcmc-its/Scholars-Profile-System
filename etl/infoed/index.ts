@@ -232,10 +232,17 @@ SELECT DISTINCT
     -- InfoEd extract: R01 NS126342 and R01 NS136423 both carry
     -- Role_Description = 'PD/PI' with Primary_PI_Flag = 'N' and were published as
     -- Key Personnel, while the same investigator's contact-PI award (R01
-    -- AG083949) published as PI. LIKE '%PI' only ever matches Role_Category =
-    -- 'PI' ('PI Subaward' / 'PI Subproject' don't end in "PI"), so this branch
-    -- stays scoped to PD/PIs and the Co-I branch below stays reachable.
-    WHEN z.Role_Category LIKE '%PI' THEN 'CoPrincipalInvestigatorRole'
+    -- AG083949) published as PI.
+    --
+    -- It then read MIN(Role_Category) LIKE '%PI', which fired only when 'PI' won
+    -- an ALPHABETICAL MIN() across the account -- see Any_Pd_Pi above for why
+    -- that lost 121 more of them. Any_Pd_Pi tests role_category = 'PI' EXACTLY,
+    -- so it keeps the scoping the old LIKE gave us for free: 'PI Subaward' and
+    -- 'PI Subproject' still do not count as PD/PI, and the Co-I branch below
+    -- stays reachable. Reaching this branch at all already implies
+    -- Primary_PI_Flag = 'N' (the two arms above are checked first), so a contact
+    -- PI cannot be relabelled by it.
+    WHEN z.Any_Pd_Pi = 1 THEN 'CoPrincipalInvestigatorRole'
     WHEN z.Role_Category LIKE '%Co-investigator' THEN 'CoInvestigatorRole'
     ELSE 'KeyPersonnelRole'
   END AS Role
@@ -256,6 +263,17 @@ LEFT JOIN (
     MIN(CASE WHEN program_type <> 'Contract without funding' THEN program_type END) AS program_type,
     MIN(unit_name) AS unit_name, MIN(int_unit_code) AS int_unit_code,
     MAX(Primary_PI_Flag) AS Primary_PI_Flag, MIN(role_category) AS Role_Category,
+    -- Role_Category is aggregated with MIN(), which is ALPHABETICAL:
+    -- 'Co-Investigator' < 'Key Personnel' < 'PI'. So 'PI' survived only when it
+    -- was the person's ONLY category on the account -- and Account_Number is the
+    -- PARENT proposal (see the CTE), so it rolls up sibling proposals. A
+    -- non-contact PD/PI who also appeared as a co-investigator or key personnel
+    -- anywhere under the same parent had their MPI standing silently eaten and
+    -- published as Co-I / Key Personnel. Measured against InfoEd prod
+    -- 2026-07-30: 121 (cwid, Account_Number) pairs. Ask the question directly
+    -- instead -- "did this person hold a PD/PI category ANYWHERE on this
+    -- account" -- which no other row can outvote.
+    MAX(CASE WHEN role_category = 'PI' THEN 1 ELSE 0 END) AS Any_Pd_Pi,
     -- #2020 — triage field for the undated-award worklist. MIN() so an account
     -- mixing statuses reports 'Active Award' ('A' sorts before 'E' and 'I'):
     -- an undated ACTIVE award is the one a faculty member notices missing.

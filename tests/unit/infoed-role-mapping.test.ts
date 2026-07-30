@@ -48,7 +48,46 @@ describe("InfoEd role mapping", () => {
     // which restricted it to subawards. An NIH multiple-PI on a direct award
     // then missed every branch and fell through to ELSE -> Key Personnel.
     expect(branch).not.toMatch(/Sponsor\s*<>\s*z\.Orig_Sponsor/);
-    expect(branch).toMatch(/Role_Category LIKE '%PI'/);
+    expect(branch).toMatch(/Any_Pd_Pi = 1/);
+  });
+
+  it("does not let an alphabetical MIN() outvote a PD/PI category", () => {
+    // The arithmetic the old aggregate got wrong. MIN() over Role_Category is
+    // alphabetical, so 'PI' survived only as a person's SOLE category on the
+    // account; one co-investigator or key-personnel row anywhere under the same
+    // PARENT proposal silently demoted a non-contact PD/PI. Measured against
+    // InfoEd prod 2026-07-30: 121 (cwid, Account_Number) pairs.
+    expect(["Co-Investigator", "PI"].sort()[0]).toBe("Co-Investigator");
+    expect(["Key Personnel", "PI"].sort()[0]).toBe("Key Personnel");
+
+    // So the Co-PI branch must not key off the MIN()'d column at all.
+    const branch = outerRoleCase()
+      .split("\n")
+      .find((l) => l.includes("'CoPrincipalInvestigatorRole'"));
+    expect(branch).not.toMatch(/Role_Category/);
+
+    // ...and the aggregate it does key off must exist, testing role_category
+    // EXACTLY -- a LIKE/prefix here would sweep in 'PI Subaward'/'PI Subproject',
+    // which are deliberately NOT PD/PI.
+    expect(SRC).toMatch(
+      /MAX\(CASE WHEN role_category = 'PI' THEN 1 ELSE 0 END\) AS Any_Pd_Pi/,
+    );
+  });
+
+  it("still routes a contact PI through the Primary_PI_Flag arms first", () => {
+    // Any_Pd_Pi is set by first_pd = '1' too (see the CTE's Role_Category CASE),
+    // so it would relabel contact PIs as MPI if it were ever reordered above
+    // them. The two Primary_PI_Flag arms must stay first.
+    const lines = outerRoleCase().split("\n");
+    const lastFlagArm = lines.reduce(
+      (acc, l, i) => (l.includes("z.Primary_PI_Flag = 'Y'") ? i : acc),
+      -1,
+    );
+    const coPi = lines.findIndex((l) =>
+      l.includes("'CoPrincipalInvestigatorRole'"),
+    );
+    expect(lastFlagArm).toBeGreaterThanOrEqual(0);
+    expect(coPi).toBeGreaterThan(lastFlagArm);
   });
 
   it("keeps the Co-I branch reachable after the Co-PI branch", () => {
