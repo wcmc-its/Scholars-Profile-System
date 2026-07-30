@@ -1018,7 +1018,10 @@ export const MESH_MIN_MATCHED_FORM_LEN = 4;
  *
  * (`score_mode: sum`, `boost_mode: multiply`).
  *
- * `VOLUME` has TWO shapes, selected by `SEARCH_PEOPLE_PUBCOUNT_DAMPEN` (#2068):
+ * `VOLUME` has TWO MODES, selected by `SEARCH_PEOPLE_PUBCOUNT_DAMPEN` (#2068).
+ * ("mode", never "shape" — in this codebase a *shape* is a People query shape
+ * (topic / hybrid / unclassified / name / department / …), and the capped mode
+ * applies to THREE of those. Two modes, three shapes; do not conflate them.)
  * `"off"` (default, and what both envs serve today) is the original
  * `ln1p(FACTOR · publicationCount)`; `"capped"` is the step ladder
  * {@link PEOPLE_PROMINENCE_PUBCOUNT_BANDS}, ceiling

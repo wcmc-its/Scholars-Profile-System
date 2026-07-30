@@ -598,9 +598,10 @@ Applies to all four v3 shapes. Everything here is **ORDER**.
 **1. BASE — `{ weight: 1.0 }`, no filter** (`:2921`). Applies to every doc; it is what floors M at 1.0, so
 a zero-pub non-faculty scholar keeps its inner score rather than being zeroed.
 
-**2. Publication count — TWO shapes**, selected by `SEARCH_PEOPLE_PUBCOUNT_DAMPEN` (#2068). This is the
+**2. Publication count — TWO MODES**, selected by `SEARCH_PEOPLE_PUBCOUNT_DAMPEN` (#2068). This is the
 scholar's **total** indexed pub count, not the on-topic count — a pure volume prior with zero topical
-relation, in either shape.
+relation, in either mode. (Two *modes* of the lever; the capped mode applies to *three* query
+**shapes** — topic, hybrid, unclassified. The two counts are unrelated.)
 
 *Mode `off` (default; what both envs serve today), and all four shapes:* `field_value_factor { field:
 "publicationCount", modifier: "ln1p", factor: 1, missing: 0 }`, **no filter**. Contribution is exactly
