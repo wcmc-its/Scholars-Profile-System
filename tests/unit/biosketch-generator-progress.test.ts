@@ -15,10 +15,12 @@ const { mockGenerateText, mockGround } = vi.hoisted(() => ({
 vi.mock("ai", () => ({ generateText: mockGenerateText }));
 vi.mock("@ai-sdk/amazon-bedrock", () => ({ createAmazonBedrock: () => () => ({}) }));
 vi.mock("@aws-sdk/credential-providers", () => ({ fromNodeProviderChain: () => undefined }));
-vi.mock("@/lib/edit/overview-generator", () => ({
+vi.mock("@/lib/llm/models", () => ({
   DEFAULT_GENERATE_MODEL: "test-model",
-  groundOverviewDraft: mockGround,
   modelAcceptsTemperature: () => false,
+}));
+vi.mock("@/lib/edit/overview-generator", () => ({
+  groundOverviewDraft: mockGround,
   toBiosketchModelFacts: (f: unknown) => f,
   toModelFacts: (f: unknown) => f,
 }));

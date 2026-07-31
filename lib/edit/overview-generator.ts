@@ -19,9 +19,9 @@
  * NEVER writes the DB (SPEC § States & edge cases G8).
  */
 import { generateText } from "ai";
-import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
-import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 
+import { bedrockClient } from "@/lib/llm/client";
+import { DEFAULT_GENERATE_MODEL, modelAcceptsTemperature } from "@/lib/llm/models";
 import { sanitizeOverviewHtml } from "@/lib/edit/validators";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
 import {
@@ -45,26 +45,8 @@ import {
   VERBATIM_STRINGS,
 } from "@/lib/edit/overview-prompt-fragments";
 
-/** Default model — the Claude Opus 4.8 cross-region inference profile on Amazon
- *  Bedrock (VERIFIED ACTIVE inference-profile id; no date/version suffix). Operator-
- *  tunable via OVERVIEW_GENERATE_MODEL; the TaskRoleBedrockPolicy (cdk app-stack)
- *  scopes bedrock:InvokeModel to the `claude-sonnet-4-*` family and now ALSO grants
- *  the `claude-opus-4-8` inference-profile + foundation-model (the cdk change is being
- *  made in parallel), so this default invokes without an IAM denial. */
-const DEFAULT_MODEL = "us.anthropic.claude-opus-4-8";
-/** The generator's default model, exported so sibling purposes (the NIH-biosketch
- *  generator, #917 v5) share the exact Opus 4.8 inference-profile id and its IAM grant
- *  without re-declaring it. */
-export const DEFAULT_GENERATE_MODEL = DEFAULT_MODEL;
 /** Low-but-not-zero temperature — grounded prose, minimal confabulation. */
 const DEFAULT_TEMPERATURE = 0.4;
-/** Opus 4.7 / 4.8 and Fable REJECT an explicit `temperature` on Bedrock (HTTP 400).
- *  Gate the param so those models run; every other model keeps its tuned temperature.
- *  `thinking` stays unset regardless. Exported so the biosketch generator reuses the
- *  exact same gate (it must NOT re-add temperature for Opus 4.x). */
-export function modelAcceptsTemperature(modelId: string): boolean {
-  return !/claude-(opus-4-[78]|fable)/.test(modelId);
-}
 
 /**
  * The fixed system prompt — the grounding / anti-hallucination contract from
@@ -354,7 +336,7 @@ export function overviewSystemPromptFor(versionId?: OverviewPromptVersionId | nu
 
 /**
  * The EFFECTIVE model for a version: the version's optional model pin → the
- * operator's `OVERVIEW_GENERATE_MODEL` env → the generator's `DEFAULT_MODEL`. This
+ * operator's `OVERVIEW_GENERATE_MODEL` env → `DEFAULT_GENERATE_MODEL`. This
  * is what actually runs and what the UI lists next to the version. Exported so the
  * `/edit` page can show the resolved model in the version selector.
  */
@@ -365,7 +347,7 @@ export function resolveEffectiveOverviewModel(
   return (
     OVERVIEW_PROMPT_VERSION_METAS[id].model ??
     process.env.OVERVIEW_GENERATE_MODEL ??
-    DEFAULT_MODEL
+    DEFAULT_GENERATE_MODEL
   );
 }
 
@@ -736,7 +718,7 @@ export async function generateOverviewDraft(
 
   emit({ phase: "drafting" });
   const result = await generateText({
-    model: overviewBedrock()(modelId),
+    model: bedrockClient()(modelId),
     system: impl.systemPrompt,
     prompt: buildOverviewUserPrompt(facts, { ...params, promptVersion: versionId }),
     ...(modelAcceptsTemperature(modelId) ? { temperature } : {}),
@@ -1150,15 +1132,6 @@ export const OVERVIEW_REVISE_SYSTEM_PROMPT = [
 /** A single ungrounded specific the fact-checker found in a draft. */
 export type UngroundedSpan = { span: string; category: string; reason: string };
 
-/** Lazily build a Bedrock client from the AWS credential chain (ECS task role in
- *  deployment, shell creds locally) — shared by generate / verify / revise. */
-function overviewBedrock() {
-  return createAmazonBedrock({
-    region: process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-east-1",
-    credentialProvider: fromNodeProviderChain(),
-  });
-}
-
 /** Parse the verifier's JSON, tolerantly. Returns [] on any malformed output so a
  *  checker glitch degrades to "no changes" rather than crashing the generate.
  *  Exported for unit tests. */
@@ -1195,7 +1168,7 @@ export async function verifyDraftGrounding(
     permitBibliometrics?: boolean;
   },
 ): Promise<UngroundedSpan[]> {
-  const modelId = opts?.model ?? process.env.OVERVIEW_GENERATE_MODEL ?? DEFAULT_MODEL;
+  const modelId = opts?.model ?? process.env.OVERVIEW_GENERATE_MODEL ?? DEFAULT_GENERATE_MODEL;
   const permitSynopsisFindings = opts?.permitSynopsisFindings ?? false;
   const permitSignificance = opts?.permitSignificance ?? false;
   const permitBibliometrics = opts?.permitBibliometrics ?? false;
@@ -1213,7 +1186,7 @@ export async function verifyDraftGrounding(
     "</DRAFT>",
   ].join("\n");
   const result = await generateText({
-    model: overviewBedrock()(modelId),
+    model: bedrockClient()(modelId),
     // The verifier prompt + the reference both honor the version's synopsis-number
     // permission so the pass never strips a number the prompt legitimately allowed, the
     // biosketch significance permission (#917 v5) so it does not strip an anchored
@@ -1234,7 +1207,7 @@ export async function reviseDraftForGrounding(
   opts?: { model?: string; temperature?: number; system?: string },
 ): Promise<string> {
   if (ungrounded.length === 0) return prose;
-  const modelId = opts?.model ?? process.env.OVERVIEW_GENERATE_MODEL ?? DEFAULT_MODEL;
+  const modelId = opts?.model ?? process.env.OVERVIEW_GENERATE_MODEL ?? DEFAULT_GENERATE_MODEL;
   const userTurn = [
     "DRAFT:",
     "",
@@ -1244,7 +1217,7 @@ export async function reviseDraftForGrounding(
     ...ungrounded.map((u) => `- ${JSON.stringify(u.span)} (${u.category})`),
   ].join("\n");
   const result = await generateText({
-    model: overviewBedrock()(modelId),
+    model: bedrockClient()(modelId),
     // `system` lets the biosketch purpose swap in BIOSKETCH_REVISE_SYSTEM_PROMPT (which
     // preserves an anchored significance clause); absent it, the overview reviser runs.
     system: opts?.system ?? OVERVIEW_REVISE_SYSTEM_PROMPT,

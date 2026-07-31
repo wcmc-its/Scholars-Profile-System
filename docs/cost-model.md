@@ -50,7 +50,7 @@ those sizes at on-demand `us-east-1` rates and are **directional, not invoice-ac
 | **NAT gateway** | 1 | 1 | hourly + per-GB processed | Single NAT per env (EIP-cap trade-off). VPC endpoints (Secrets Mgr, S3) keep AWS-service traffic *off* the NAT to limit per-GB charges. |
 | **ALBs** | 2 (public + internal) | 2 | LCU-hours (~$16/mo each `est.`) | Two-ALB split is a deliberate ~$16/mo cost for a clean SG boundary ([`PRODUCTION_ADDENDUM.md § Two-ALB topology`](./PRODUCTION_ADDENDUM.md)). |
 | **X-Ray (tracing)** | 5% sample + 100% errors/slow | same | per-trace recorded ($5/1M) | **< $2/mo** `est.` ([`tracing.md`](./tracing.md)). Sidecar adds ~0.25 vCPU + 256 MB/task. |
-| **Bedrock (LLM callers)** | Opus 4.8 + Sonnet 4.5, on-demand | same | per-token (in/out) per call | **Three** callers: overview + biosketch *generate* (Opus, `lib/edit/overview-generator.ts`, `lib/edit/biosketch-generator.ts`) and sponsor-match concept extraction (Sonnet, `lib/api/sponsor-match-extract.ts`). The two generators are rate-limited 10/hr/scholar with **no bulk path** and persist their output; **sponsor-match is not rate-limited** (30-min result cache only). ~$0.03–0.40/draft, ~$0.01/paste → **tens of $/mo** `est.` (see *Runtime LLM spend* below). |
+| **Bedrock (LLM callers)** | Opus 4.8 + Sonnet 4.5, on-demand | same | per-token (in/out) per call | **Four** callers: overview generate, biosketch generate, and the CV research-summary (Opus, `lib/edit/overview-generator.ts`, `lib/edit/biosketch-generator.ts`, `app/api/edit/cv/route.ts`) and Matcha concept extraction (Sonnet, `lib/api/matcha-extract.ts`). The generators are rate-limited 10/hr/scholar with **no bulk path** and persist their output; **Matcha is not rate-limited** (30-min result cache only). ~$0.03–0.40/draft, ~$0.01/paste → **tens of $/mo** `est.` (see *Runtime LLM spend* below). |
 | **On-call relay Lambda** | 256 MB, per-alarm | same | per-invocation | Negligible (one POST per alarm). |
 | **Secrets Manager** | ~11 secrets/env | ~11 | per-secret-month + API calls | Small, flat. |
 | **S3** | CloudFront logs (90 d), backups | logs | storage + requests | Small; access-log bucket has a 90-day lifecycle. |
@@ -68,23 +68,25 @@ compute — watch both lines together at the post-EdgeStack budget review.
 
 ## Runtime LLM (Bedrock) spend
 
-The app calls Bedrock from **three** places, on two models.
+The app calls Bedrock from **four** places, on two models.
 
-Two are the self-service generators — the overview/research-summary and the NIH biosketch
-(`lib/edit/overview-generator.ts`, `lib/edit/biosketch-generator.ts`), both on **Claude Opus
-4.8**. On-demand, per-scholar, **rate-limited to 10 generations/hour per target** (`lib/edit/
-rate-limit.ts`) with **no app-side bulk path**; drafts are persisted, so a re-render never
-re-calls the model. The app computes its own per-draft estimate
-(`lib/edit/overview-prompt-versions.ts`, surfaced to superusers) at the Opus $5/$25-per-Mtok
-rate:
+Three are Opus 4.8 callers sharing `lib/llm/models.ts`'s `DEFAULT_GENERATE_MODEL` — the
+overview/research-summary generator, the NIH biosketch generator, and the CV export's
+research-summary regeneration (`lib/edit/overview-generator.ts`, `lib/edit/
+biosketch-generator.ts`, `app/api/edit/cv/route.ts`). On-demand, per-scholar, **rate-limited
+to 10 generations/hour per target** (`lib/edit/rate-limit.ts`) with **no app-side bulk path**;
+overview/biosketch drafts are persisted, so a re-render never re-calls the model (the CV
+research-summary regenerates on every export by design — no persisted draft to reuse). The app
+computes its own per-draft estimate (`lib/llm/pricing.ts`, surfaced to superusers) at the Opus
+$5/$25-per-Mtok rate:
 
 - **Overview** — 1 call (~5k in / 300 out) → **~$0.03/draft** `est.` (faithfulness pass off in prod).
 - **Biosketch** — faithfulness pass on → up to ~18 calls/generation → **~$0.40/draft** `est.`,
   but **prod-dark today** (staging only), so it adds **$0 to the prod bill** until it rolls out.
 
-The third is **sponsor-match concept extraction** (`lib/api/sponsor-match-extract.ts`) — one
+The fourth is **Matcha concept extraction** (`lib/api/matcha-extract.ts`) — one
 **Claude Sonnet 4.5** call per pasted sponsor description, at the Sonnet $3/$15-per-Mtok rate.
-`SPONSOR_MATCH_EXTRACT_MODEL` repoints it at runtime; the IAM policy scopes both the Opus 4.8
+`MATCHA_EXTRACT_MODEL` repoints it at runtime; the IAM policy scopes both the Opus 4.8
 and Sonnet 4.x families, so an intra- or cross-family repoint needs no cdk change.
 
 - **Sponsor match** — 1 call (~1.0–2.0k in / ≤1k out) → **~$0.01/paste** `est.` The ~815-token

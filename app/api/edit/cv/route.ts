@@ -22,16 +22,14 @@
  */
 import { NextResponse, type NextRequest } from "next/server";
 import { generateText } from "ai";
-import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
-import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 
+import { bedrockClient } from "@/lib/llm/client";
+import { DEFAULT_GENERATE_MODEL, modelAcceptsTemperature } from "@/lib/llm/models";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 import { assembleOverviewFacts, type OverviewFacts } from "@/lib/edit/overview-facts";
 import {
-  DEFAULT_GENERATE_MODEL,
-  modelAcceptsTemperature,
   overviewSystemPromptFor,
   buildOverviewUserPrompt,
 } from "@/lib/edit/overview-generator";
@@ -77,12 +75,8 @@ const PATH = "/api/edit/cv";
 async function generateResearchSummary(facts: OverviewFacts): Promise<string> {
   const params: OverviewParams = { ...DEFAULT_OVERVIEW_PARAMS, voice: "third", length: "extended" };
   const modelId = process.env.OVERVIEW_GENERATE_MODEL ?? DEFAULT_GENERATE_MODEL;
-  const bedrock = createAmazonBedrock({
-    region: process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-east-1",
-    credentialProvider: fromNodeProviderChain(),
-  });
   const { text } = await generateText({
-    model: bedrock(modelId),
+    model: bedrockClient()(modelId),
     system: overviewSystemPromptFor(params.promptVersion),
     prompt: buildOverviewUserPrompt(facts, params),
     ...(modelAcceptsTemperature(modelId) ? { temperature: 0.4 } : {}),

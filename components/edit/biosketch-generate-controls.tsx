@@ -40,7 +40,7 @@ import {
   type BiosketchPromptVersionId,
   type BiosketchPromptVersionMeta,
 } from "@/lib/edit/biosketch-prompt-versions";
-import { estimateBiosketchCostUsd } from "@/lib/edit/overview-prompt-versions";
+import { estimateBiosketchCostUsd } from "@/lib/llm/pricing";
 import { cn } from "@/lib/utils";
 
 const MODE_OPTIONS: { value: BiosketchMode; label: string }[] = [
