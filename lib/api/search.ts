@@ -343,51 +343,11 @@ export type PeopleHit = {
    *  Emitted alongside `grantMatchCount`, i.e. only for a scholar with ≥1 match. */
   grantIndexedCount?: number;
   identityImageEndpoint: string;
-  /** Highlight fragments from the scholar's self-reported fields
-   *  (`preferredName` / `areasOfInterest` / `overview`). The card renders the
-   *  first as a self-evident snippet fallback when no `matchReason` was computed. */
-  highlight?: string[];
-  /**
-   * PLAN R4 / #967 / #824-follow-up — the single "why this match" reason line the
-   * card renders. A discriminated union:
-   *
-   *   - `{ kind: "method"; family; tools[] }` — #824 follow-up. The matched method
-   *     family label + up to 3 exemplar tool names, derived at query time from
-   *     `scholar_family`. HIGHEST priority. Only produced when
-   *     `SEARCH_PEOPLE_MATCH_AWARE_SNIPPET` is on and the query resolved to a
-   *     publicly-visible method family the scholar works in.
-   *   - `{ kind: "topic"; label }` — #824 follow-up. The matched research-area
-   *     topic shown as a clean human label. Produced when the snippet flag is on
-   *     and one of the matched topic slugs appears in the scholar's
-   *     `areasOfInterest`. Lower priority than method, higher than the legacy
-   *     icon reasons below.
-   *   - `{ icon: "publications" | "concept" | "area"; text; pub? }` — the legacy
-   *     PLAN R4 (#688/#702) pub-evidence / concept reason, unchanged. Present when
-   *     a concept resolved and `SEARCH_PEOPLE_MATCH_EXPLAIN` is on; on a
-   *     pub-evidence reason, `pub` carries a representative publication when
-   *     `SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB` is on.
-   *
-   * Serializable (it crosses to the `PeopleResultCard` client component).
-   */
-  matchReason?: PeopleMatchReason;
-  /**
-   * #824 follow-up (match-aware snippet) — humanized, comma-separated research
-   * areas (no under_scores) used as the LAST-resort snippet line when no
-   * method/topic/concept/pub reason fires and no bio highlight is present. Each
-   * area is a clean human label (real `Topic.label` when known, else a sentence-
-   * cased humanization of the slug); `matchedIndex` flags which entry should be
-   * bold (the area whose slug the query matched), or -1 when none. Present only
-   * when `SEARCH_PEOPLE_MATCH_AWARE_SNIPPET` is on; absent (and the card falls
-   * back to today's raw slug highlight) when off.
-   */
-  humanizedAreas?: { labels: string[]; matchedIndex: number };
   /**
    * #824 follow-up Phase 1 — the coherent `ResultEvidence` object (one typed
    * "why this matched", selected by one precedence function; see
    * `lib/api/result-evidence.ts`). Present only when `SEARCH_RESULT_EVIDENCE` is
-   * on; when present the card renders it via `<ResultEvidence>` and IGNORES the
-   * legacy `matchReason` / `highlight` / `humanizedAreas` chain. Absent ⇒ the
-   * card falls back to that legacy chain (today's behavior). Serializable.
+   * on; the card renders it via `<ResultEvidence>`. Serializable.
    */
   evidence?: ResultEvidence;
   /**
@@ -395,29 +355,14 @@ export type PeopleHit = {
    * first-class peers, each "N of M publications"; keyword fallback; clinical an
    * independent label-only line). Present INSTEAD of `evidence` only when
    * `SEARCH_EVIDENCE_REASON_COUNTS` is on; the card renders the list. Absent ⇒
-   * the single `evidence` (or the legacy chain) drives the card. Serializable.
+   * the single `evidence` drives the card. Serializable.
    */
   evidenceLines?: ResultEvidence[];
 };
 
 /**
- * #824 follow-up — the discriminated reason-line union. The two NEW kinds carry
- * structured data (method tools / topic label) so the card can render the
- * mockup's badge styles; the legacy `icon`/`text` variant is unchanged so the
- * #688/#702/#967 render path keeps working. Discriminated by the presence of
- * `kind` (new) vs `icon` (legacy).
- */
-export type PeopleMatchReason =
-  | { kind: "method"; family: string; tools: string[] }
-  | { kind: "topic"; label: string }
-  | LegacyMatchReason;
-
-/**
- * The legacy PLAN R4 (#688/#702/#967) reason variant: a leading icon + a text
- * line, optionally carrying a representative pub. Named separately so
- * `composeMatchReason` can return exactly this (it never produces the #824
- * method/topic kinds), keeping the existing `.text` / `.pub` test assertions
- * precise.
+ * The PLAN R4 (#688/#702/#967) reason variant `composeMatchReason` produces: a
+ * leading icon + a text line, optionally carrying a representative pub.
  */
 export type LegacyMatchReason = {
   icon: "publications" | "concept" | "area";
@@ -931,27 +876,6 @@ export function humanizeAreaSlug(slug: string): string {
 }
 
 /**
- * #824 follow-up — clean exemplar-tool names off a `scholar_family.exemplarTools`
- * JSON value: coerce to string, trim, drop empties, dedupe (case-insensitively),
- * cap at `limit` (3). Defensive against the Json column shape (non-array → []).
- */
-export function cleanExemplarTools(raw: unknown, limit = 3): string[] {
-  if (!Array.isArray(raw)) return [];
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const t of raw) {
-    const name = String(t).trim();
-    if (!name) continue;
-    const key = name.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(name);
-    if (out.length >= limit) break;
-  }
-  return out;
-}
-
-/**
  * Which of the scholar's OWN areas do we name as the one the query matched?
  *
  * The rule used to be "the first one that intersects the matched set" — i.e. the
@@ -991,32 +915,6 @@ export function pickMatchedAreaIndex(
     }
   }
   return best;
-}
-
-/**
- * #824 follow-up — derive the humanized research-areas fallback for a scholar from
- * the space-joined `areasOfInterest` slug string, a topic slug→label map (real
- * `Topic.label` preferred, else {@link humanizeAreaSlug}), and the matched topic
- * slugs (so the matched area can be bolded as a WHOLE label). Returns null when
- * the scholar has no areas. `matchedIndex` is the BEST-EVIDENCED matched area per
- * {@link pickMatchedAreaIndex}, or -1.
- *
- * `areaCounts` is optional so the older 3-arg shape still compiles; omitting it is the
- * degenerate case that reproduces the previous first-intersecting behavior. The bolded
- * chip and the topic evidence line MUST agree on which area they name, so both call
- * sites pass the same map.
- */
-export function buildHumanizedAreas(
-  areasOfInterest: string | undefined,
-  labelBySlug: Map<string, string>,
-  matchedSlugs: Set<string>,
-  areaCounts?: Record<string, number>,
-): { labels: string[]; matchedIndex: number } | null {
-  const slugs = (areasOfInterest ?? "").trim().split(/\s+/).filter(Boolean);
-  if (slugs.length === 0) return null;
-  const labels = slugs.map((s) => labelBySlug.get(s) ?? humanizeAreaSlug(s));
-  const matchedIndex = pickMatchedAreaIndex(slugs, matchedSlugs, areaCounts);
-  return { labels, matchedIndex };
 }
 
 export type PublicationHit = {
@@ -3356,12 +3254,11 @@ export async function searchPeople(opts: {
       //
       // #824 follow-up — when the match-aware snippet is active (`matchAwareContext`
       // set), the raw `areasOfInterest` highlight is REPLACED by the server-built
-      // humanized-areas fallback (`buildHumanizedAreas`, emitted per hit below).
-      // We must NOT request its highlight then: the flattened fragment is a raw
-      // `under_score` slug dump that the card renders BEFORE `humanizedAreas`
-      // (priority: method > topic > legacy > bio highlight > humanized areas), so
-      // leaving it on lets the ugly slug line win. `overview` (real bio sentence)
-      // stays highlighted — it's the desired snippet above humanized areas.
+      // humanized "areas" evidence kind (`buildHitEvidenceInput` below). We must
+      // NOT request its highlight then: the flattened fragment is a raw
+      // `under_score` slug dump, and leaving it on lets that ugly slug line win
+      // over the humanized areas evidence. `overview` (real bio sentence) stays
+      // highlighted — it's the desired snippet above the areas fallback.
       fields: {
         preferredName: {},
         ...(matchAwareContext ? {} : { areasOfInterest: {} }),
@@ -3913,10 +3810,7 @@ export async function searchPeople(opts: {
   //   topicLabelBySlug — slug→`Topic.label` map for the humanized-areas fallback.
   // Guarded by `matchAwareContext` (already null when the flag is off), so the
   // off path runs none of this and adds no query.
-  const methodReasonByCwid = new Map<
-    string,
-    { family: string; tools: string[]; rawTools: unknown }
-  >();
+  const methodReasonByCwid = new Map<string, { family: string; rawTools: unknown }>();
   //   methodPubCountByCwid — the method-INDEXED pub count that a method reason line
   //     is measured against (see `methodIndexedPubCounts`). Populated only when a
   //     method family actually resolved AND at least one scholar on the page is in
@@ -3948,10 +3842,8 @@ export async function searchPeople(opts: {
           if (methodReasonByCwid.has(row.cwid)) continue;
           methodReasonByCwid.set(row.cwid, {
             family: row.familyLabel,
-            tools: cleanExemplarTools(row.exemplarTools),
             // Raw kept so the ResultEvidence path can apply the denser
-            // `refineExemplarTools` cleaning (Case A) without changing the
-            // legacy `cleanExemplarTools` output the off-flag path renders.
+            // `refineExemplarTools` cleaning (Case A).
             rawTools: row.exemplarTools,
           });
         }
@@ -4005,57 +3897,11 @@ export async function searchPeople(opts: {
     for (const [id, label] of topicLabelMap) topicLabelBySlug.set(id, label);
   }
 
-  // Strongest-signal reason: pub-evidence count (document) → concept fallback
-  // (sparkle). Delegates to the pure `composeMatchReason` (count cap +
-  // precedence + #967 representative-pub attach).
-  const buildMatchReason = (
-    cwid: string,
-    pubCount: number,
-    hasProvenance: boolean,
-  ): PeopleHit["matchReason"] => {
-    // `reasonReps` now stores up to 3 reps per branch (for the disclosure); the
-    // legacy reason carries a SINGLE pub, so adapt by taking the first of each so
-    // the existing `composeMatchReason` output is byte-identical.
-    const reps = reasonReps.get(cwid);
-    return composeMatchReason({
-      counts: countsFor(cwid),
-      rep: reps ? { tagged: reps.tagged?.[0], mention: reps.mention?.[0] } : undefined,
-      pubCount,
-      hasProvenance,
-      provenanceParent,
-      contentQuery,
-    });
-  };
-
-  // #824 follow-up — pick the per-hit reason with the match-aware PRIORITY:
-  // method > topic > (legacy concept/pub reason). Off ⇒ `matchAwareContext` is
-  // null, both new branches are skipped, and this returns `buildMatchReason` —
-  // byte-identical to today.
-  const resolveHitMatchReason = (
-    cwid: string,
-    areasOfInterest: string | undefined,
-    pubCount: number,
-    hasProvenance: boolean,
-  ): PeopleHit["matchReason"] => {
-    if (matchAwareContext) {
-      const method = methodReasonByCwid.get(cwid);
-      if (method) return { kind: "method", family: method.family, tools: method.tools };
-      if (matchedTopicSlugs.size > 0 && areasOfInterest) {
-        const areaSlugs = areasOfInterest.trim().split(/\s+/).filter(Boolean);
-        const hitSlug = areaSlugs.find((s) => matchedTopicSlugs.has(s));
-        if (hitSlug) {
-          return { kind: "topic", label: topicLabelByMatchedSlug.get(hitSlug) ?? hitSlug };
-        }
-      }
-    }
-    return buildMatchReason(cwid, pubCount, hasProvenance);
-  };
-
-  // #824 follow-up Phase 1 — the ResultEvidence redesign. Resolve the SAME
-  // per-hit signals the legacy chain uses, but hand them to the one precedence
+  // #824 follow-up Phase 1 — the ResultEvidence redesign. Resolves the per-hit
+  // method/topic/pub/concept signals and hands them to the one precedence
   // function (`selectEvidence`) so priority lives in exactly one place. Only
   // called when `resultEvidence` is on (and then `matchAwareContext` is set, so
-  // method/topic/areas are derived). Keyed `hl` (NOT the flattened `highlight`)
+  // method/topic/areas are derived). Keyed `hl` (NOT a flattened highlight list)
   // is required so name vs affiliation can be told apart (handoff Edge G).
   const buildHitEvidenceInput = (
     cwid: string,
@@ -4083,9 +3929,7 @@ export async function searchPeople(opts: {
     if (matchedTopicSlugs.size > 0 && areasOfInterest) {
       const areaSlugs = areasOfInterest.trim().split(/\s+/).filter(Boolean);
       // E1 (selection half) — the BEST-EVIDENCED intersecting area, not the first one in
-      // the scholar's own list. Same rule and same map as the bolded chip in
-      // `buildHumanizedAreas`; if these two ever diverge the card names one area and
-      // bolds another. See `pickMatchedAreaIndex` for the measurement behind it.
+      // the scholar's own list. See `pickMatchedAreaIndex` for the measurement behind it.
       const hitIndex = pickMatchedAreaIndex(areaSlugs, matchedTopicSlugs, areaCounts);
       const hitSlug = hitIndex >= 0 ? areaSlugs[hitIndex] : undefined;
       // `hitSlug` IS the parent-topic slug (= Topic.id = PublicationTopic
@@ -4256,15 +4100,8 @@ export async function searchPeople(opts: {
   return {
     hits: r.hits.hits.map((h) => {
       const hl = h.highlight;
-      // The self-reported fields are highlighted (see the request body above):
-      // {preferredName, areasOfInterest, overview} normally, or {preferredName,
-      // overview} when the match-aware snippet is active (areasOfInterest is then
-      // surfaced as the humanized-areas fallback, never a raw slug highlight).
-      // The flattened fragments are the self snippet the card falls back to when
-      // no `matchReason` was computed.
-      const highlight = hl ? Object.entries(hl).flatMap(([, frags]) => frags) : undefined;
-      // `prov` still feeds the per-row reason (`buildMatchReason`, concept
-      // fallback); it is no longer surfaced as a hit field of its own.
+      // `prov` feeds the per-row evidence (`buildHitEvidenceInput`, concept
+      // fallback); it is not surfaced as a hit field of its own.
       const prov = provenanceOn
         ? computeMatchProvenance({
             publicationMeshUi: h._source.publicationMeshUi,
@@ -4324,34 +4161,9 @@ export async function searchPeople(opts: {
         // that didn't ask keep today's byte-identical hit.
         ...(includeLastName ? { lastNameSort: h._source.lastNameSort ?? null } : {}),
         identityImageEndpoint: identityImageEndpoint(h._source.cwid),
-        highlight,
-        matchReason: resolveHitMatchReason(
-          h._source.cwid,
-          h._source.areasOfInterest,
-          h._source.publicationCount,
-          prov != null,
-        ),
-        // #824 follow-up — humanized research-areas fallback (no under_scores),
-        // emitted only when the flag is on. The card renders it as the last-resort
-        // snippet line when no method/topic/concept/pub reason fires and no bio
-        // highlight is present; null/absent when off (card falls back to today's
-        // raw slug highlight).
-        ...(matchAwareContext
-          ? (() => {
-              const ha = buildHumanizedAreas(
-                h._source.areasOfInterest,
-                topicLabelBySlug,
-                matchedTopicSlugs,
-                // Same map the topic evidence line uses — the bolded chip and the named
-                // area have to agree (E1 selection half).
-                h._source.areaCounts,
-              );
-              return ha ? { humanizedAreas: ha } : {};
-            })()
-          : {}),
         // #824 follow-up Phase 1 — the single typed evidence object. Present
         // only under `SEARCH_RESULT_EVIDENCE`; when present the card renders it
-        // via `<ResultEvidence>` and ignores the legacy fields above.
+        // via `<ResultEvidence>`.
         ...(resultEvidence
           ? (() => {
               const evInput = buildHitEvidenceInput(

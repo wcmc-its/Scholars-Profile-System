@@ -33,6 +33,7 @@ import {
 } from "./cv-template";
 import type { PopsEnrichment } from "./pops";
 import type { CvSourceKey } from "./field-sources";
+import { lastNameKey } from "@/lib/last-name-key";
 export type {
   PopsEnrichment,
   PopsBoardCert,
@@ -133,14 +134,6 @@ const WCM_MARKER_TOKEN_RE = /^\(\((.+)\)\)$/;
 function unwrapMarker(token: string): string {
   const m = WCM_MARKER_TOKEN_RE.exec(token);
   return m ? m[1]! : token;
-}
-
-/** Surname key for the bolding set: drop ", MD"-style postnominals, take the
- *  final whitespace token, lower-cased. */
-export function lastNameKey(displayName: string): string {
-  const noPostnom = displayName.split(/,\s*/)[0] ?? displayName;
-  const tokens = noPostnom.trim().split(/\s+/);
-  return (tokens[tokens.length - 1] ?? "").toLowerCase();
 }
 
 /** Author list as runs, bolding the scholar's surname tokens. */

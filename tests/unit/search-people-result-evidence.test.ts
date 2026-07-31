@@ -411,12 +411,8 @@ describe("searchPeople — free-text publications:mention evidence (#1)", () => 
     expect(
       mockSearch.mock.calls.some(([a]) => (a as { index?: string })?.index === PUBLICATIONS_INDEX),
     ).toBe(false);
-    // No evidence object (flag off) and no "publications mention" legacy reason.
+    // No evidence object (flag off).
     expect(result.hits[0].evidence).toBeUndefined();
-    const reason = result.hits[0].matchReason;
-    if (reason && "text" in reason) {
-      expect(reason.text).not.toMatch(/publications mention/i);
-    }
   });
 
   it("flag ON + matchExplain/representativePub + free-text no-concept query ⇒ publications:mention with pubs", async () => {

@@ -1,15 +1,16 @@
 /**
  * #824 follow-up — match-aware People snippet (`SEARCH_PEOPLE_MATCH_AWARE_SNIPPET`).
  *
- * Behavioral assertions on `searchPeople`'s per-hit reason derivation + the pure
- * helpers (`buildHumanizedAreas`, `cleanExemplarTools`, `humanizeAreaSlug`):
- *   (a) flag OFF ⇒ no method/topic reason, no humanizedAreas, no extra query;
- *   (b) flag ON + resolved method family + scholar in it ⇒ { kind:"method" }
- *       reason with the family label + deduped, ≤3 exemplar tools;
- *   (c) suppressed/sensitive resolved family ⇒ NO method reason (overlay gate);
- *   (d) topic-slug-in-areasOfInterest ⇒ { kind:"topic" } reason;
- *   (e) humanized areas: a slug like "single_cell_spatial_biology" renders without
- *       underscores (real Topic.label preferred).
+ * The legacy `matchReason`/`humanizedAreas` hit fields this file used to assert
+ * on were deleted (#2118 remainder) — they lost their only renderer in #2134 and
+ * had no other consumer. Equivalent (and more thorough) coverage of method/topic/
+ * areas derivation now lives in `search-people-result-evidence.test.ts` (the
+ * `evidence`/`evidenceLines` fields those legacy fields were duplicating). What
+ * remains here:
+ *   (f)/(f-off) the raw `areasOfInterest` highlight-request regression;
+ *   `humanizeAreaSlug` / `pickMatchedAreaIndex` — the pure helpers still used by
+ *   the live evidence path (`buildHitEvidenceInput` in `lib/api/search.ts`);
+ *   `buildMatchAwareContext` — unrelated, still live.
  *
  * Mocks @/lib/db + @/lib/search per the existing search-test harness pattern
  * (search-people-topic-template.test.ts / search-people-query-shape.test.ts).
@@ -152,9 +153,7 @@ vi.mock("@/lib/search", () => ({
 
 import {
   searchPeople,
-  buildHumanizedAreas,
   pickMatchedAreaIndex,
-  cleanExemplarTools,
   humanizeAreaSlug,
 } from "@/lib/api/search";
 import {
@@ -165,9 +164,6 @@ import {
 
 const FLAG = "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET";
 let prior: string | undefined;
-
-const isMethodReason = (r: unknown): boolean =>
-  !!r && typeof r === "object" && "kind" in r && (r as { kind: string }).kind === "method";
 
 const TOPIC_ROWS = [
   { id: "single_cell_spatial_biology", label: "Single-cell & spatial biology" },
@@ -205,168 +201,43 @@ afterEach(() => {
 
 const FAMILY = { supercategory: "sequencing", familyLabel: "Single-cell RNA sequencing" };
 
-describe("match-aware snippet — flag OFF (default)", () => {
-  it("(a) emits no method/topic reason, no humanizedAreas, and never queries scholar_family", async () => {
-    delete process.env[FLAG];
-    const result = await searchPeople({
-      q: "single cell rna sequencing",
-      relevanceMode: "v3",
-      shape: "topic",
-      matchAwareContext: {
-        methodFamily: FAMILY,
-        topics: [{ slug: "single_cell_spatial_biology", label: "Single-cell & spatial biology" }],
-      },
-    });
-    expect(result.hits.map((h) => h.matchReason)).toEqual([undefined, undefined]);
-    expect(result.hits.every((h) => h.humanizedAreas === undefined)).toBe(true);
-    // No extra derivation queries fired.
-    expect(mockScholarFamilyFindMany).not.toHaveBeenCalled();
-    expect(mockTopicFindMany).not.toHaveBeenCalled();
-    expect(mockSuppressionOverlayFindMany).not.toHaveBeenCalled();
-  });
-});
-
 describe("match-aware snippet — flag ON", () => {
   beforeEach(() => {
     process.env[FLAG] = "on";
   });
 
-  it("(b) resolved method family + scholar in it ⇒ method reason with family + ≤3 deduped tools", async () => {
-    mockScholarFamilyFindMany.mockResolvedValue([
-      {
-        cwid: "oe1",
-        familyLabel: "Single-cell RNA sequencing",
-        // Dedupe (case-insensitive) + cap at 3: "scRNA-seq" twice, plus 4 distinct.
-        exemplarTools: ["scRNA-seq", " single-nuclei ", "scrna-seq", "10x", "Smart-seq"],
-      },
-    ]);
-    const result = await searchPeople({
-      q: "single cell rna sequencing",
-      relevanceMode: "v3",
-      shape: "topic",
-      matchAwareContext: { methodFamily: FAMILY, topics: [] },
-    });
-    const oe = result.hits.find((h) => h.cwid === "oe1")!;
-    expect(oe.matchReason).toEqual({
-      kind: "method",
-      family: "Single-cell RNA sequencing",
-      tools: ["scRNA-seq", "single-nuclei", "10x"],
-    });
-    // The batched query is filtered to the resolved family + page cwids.
-    const arg = mockScholarFamilyFindMany.mock.calls[0][0];
-    expect(arg.where.supercategory).toBe("sequencing");
-    expect(arg.where.familyLabel).toBe("Single-cell RNA sequencing");
-    expect(arg.where.cwid).toEqual({ in: ["oe1", "ks2"] });
-    // Scholar NOT in the family gets no method reason (falls through; with empty
-    // topics + no bio highlight that's a humanized-areas fallback, not a method).
-    const ks = result.hits.find((h) => h.cwid === "ks2")!;
-    expect(isMethodReason(ks.matchReason)).toBe(false);
-  });
-
-  it("(c) #800-suppressed resolved family ⇒ NO method reason, NO scholar_family query", async () => {
-    // Suppression overlay marks the resolved (sc,label) — gate must skip it.
+  // The method/topic/areas OUTPUT these used to assert on (`matchReason`,
+  // `humanizedAreas`) is gone (#2118 remainder); equivalent coverage of the
+  // resolution itself (family match, ≤3 deduped/refined tools, topic label,
+  // areas fallback) lives in `search-people-result-evidence.test.ts` against
+  // the live `evidence` field. What's still unique here is the #800/#801
+  // defense-in-depth: the `scholar_family` query is never even ISSUED for a
+  // suppressed/sensitive family, independent of which output field would have
+  // consumed the result.
+  it("(c) #800-suppressed resolved family ⇒ NO scholar_family query", async () => {
     mockSuppressionOverlayFindMany.mockResolvedValue([
       { supercategory: "sequencing", familyLabel: "Single-cell RNA sequencing" },
     ]);
-    mockScholarFamilyFindMany.mockResolvedValue([
-      { cwid: "oe1", familyLabel: "Single-cell RNA sequencing", exemplarTools: ["scRNA-seq"] },
-    ]);
-    const result = await searchPeople({
+    await searchPeople({
       q: "single cell rna sequencing",
       relevanceMode: "v3",
       shape: "topic",
       matchAwareContext: { methodFamily: FAMILY, topics: [] },
     });
-    expect(
-      result.hits.some((h) => isMethodReason(h.matchReason)),
-    ).toBe(false);
-    // Defense-in-depth: the family query is never even issued when suppressed.
     expect(mockScholarFamilyFindMany).not.toHaveBeenCalled();
   });
 
-  it("(c2) #801-sensitive resolved family ⇒ NO method reason (public surface, forceSensitive)", async () => {
+  it("(c2) #801-sensitive resolved family ⇒ NO scholar_family query (public surface, forceSensitive)", async () => {
     mockSensitivityOverlayFindMany.mockResolvedValue([
       { supercategory: "sequencing", familyLabel: "Single-cell RNA sequencing" },
     ]);
-    const result = await searchPeople({
+    await searchPeople({
       q: "single cell rna sequencing",
       relevanceMode: "v3",
       shape: "topic",
       matchAwareContext: { methodFamily: FAMILY, topics: [] },
     });
-    expect(
-      result.hits.some((h) => isMethodReason(h.matchReason)),
-    ).toBe(false);
     expect(mockScholarFamilyFindMany).not.toHaveBeenCalled();
-  });
-
-  it("(d) topic-slug in areasOfInterest ⇒ topic reason with the clean human label", async () => {
-    const result = await searchPeople({
-      q: "single cell spatial biology",
-      relevanceMode: "v3",
-      shape: "topic",
-      matchAwareContext: {
-        methodFamily: null,
-        topics: [
-          { slug: "single_cell_spatial_biology", label: "Single-cell & spatial biology" },
-        ],
-      },
-    });
-    // Both scholars carry the matched slug in areasOfInterest.
-    for (const h of result.hits) {
-      expect(h.matchReason).toEqual({
-        kind: "topic",
-        label: "Single-cell & spatial biology",
-      });
-    }
-  });
-
-  it("(d2) method takes PRIORITY over topic for the same scholar", async () => {
-    mockScholarFamilyFindMany.mockResolvedValue([
-      { cwid: "oe1", familyLabel: "Single-cell RNA sequencing", exemplarTools: ["scRNA-seq"] },
-    ]);
-    const result = await searchPeople({
-      q: "single cell rna sequencing",
-      relevanceMode: "v3",
-      shape: "topic",
-      matchAwareContext: {
-        methodFamily: FAMILY,
-        topics: [
-          { slug: "single_cell_spatial_biology", label: "Single-cell & spatial biology" },
-        ],
-      },
-    });
-    const oe = result.hits.find((h) => h.cwid === "oe1")!;
-    expect(oe.matchReason && "kind" in oe.matchReason && oe.matchReason.kind).toBe("method");
-    // ks2 has no method row but matches the topic slug → topic reason.
-    const ks = result.hits.find((h) => h.cwid === "ks2")!;
-    expect(ks.matchReason).toEqual({ kind: "topic", label: "Single-cell & spatial biology" });
-  });
-
-  it("(e) humanized areas fallback renders WITHOUT underscores, matched area first-bold-eligible", async () => {
-    // No method, no topic-slug match for these areas → humanized-areas fallback.
-    const result = await searchPeople({
-      q: "single cell rna sequencing",
-      relevanceMode: "v3",
-      shape: "topic",
-      matchAwareContext: {
-        methodFamily: null,
-        // A topic whose slug is NOT in either scholar's areasOfInterest, so no
-        // topic reason fires and the humanized fallback is what surfaces.
-        topics: [{ slug: "not_in_any_areas", label: "Unrelated topic" }],
-      },
-    });
-    const oe = result.hits.find((h) => h.cwid === "oe1")!;
-    expect(oe.matchReason).toBeUndefined();
-    expect(oe.humanizedAreas).toBeDefined();
-    expect(oe.humanizedAreas!.labels).toEqual([
-      "Single-cell & spatial biology", // real Topic.label
-      "Cell & molecular biology", // real Topic.label
-      "Lung cancer", // slug with no Topic row → sentence-cased humanization
-    ]);
-    // None of the labels contain an underscore.
-    expect(oe.humanizedAreas!.labels.every((l) => !l.includes("_"))).toBe(true);
-    expect(oe.humanizedAreas!.matchedIndex).toBe(-1);
   });
 });
 
@@ -409,33 +280,6 @@ describe("pure helpers", () => {
     expect(humanizeAreaSlug("")).toBe("");
   });
 
-  it("cleanExemplarTools coerces, trims, dedupes (case-insensitive), caps at 3", () => {
-    expect(cleanExemplarTools(["scRNA-seq", " scrna-seq ", "10x", "Smart-seq", "extra"])).toEqual([
-      "scRNA-seq",
-      "10x",
-      "Smart-seq",
-    ]);
-    expect(cleanExemplarTools("not-an-array")).toEqual([]);
-    expect(cleanExemplarTools([" ", "", 42], 3)).toEqual(["42"]);
-  });
-
-  it("buildHumanizedAreas prefers real labels, bolds the matched area, -1 when none", () => {
-    const labelBySlug = new Map([
-      ["single_cell_spatial_biology", "Single-cell & spatial biology"],
-    ]);
-    const ha = buildHumanizedAreas(
-      "single_cell_spatial_biology lung_cancer",
-      labelBySlug,
-      new Set(["lung_cancer"]),
-    );
-    expect(ha).toEqual({
-      labels: ["Single-cell & spatial biology", "Lung cancer"],
-      matchedIndex: 1,
-    });
-    expect(buildHumanizedAreas("", labelBySlug, new Set())).toBeNull();
-    expect(buildHumanizedAreas(undefined, labelBySlug, new Set())).toBeNull();
-  });
-
   describe("E1 selection half — pickMatchedAreaIndex", () => {
     // The real staging shape that motivated this: a hematopathologist whose
     // `areasOfInterest` string LEADS with breast_cancer (count 1) while the corpus the
@@ -467,14 +311,6 @@ describe("pure helpers", () => {
       expect(pickMatchedAreaIndex(INGHIRAMI, new Set(["gene_cell_therapy"]), COUNTS)).toBe(2);
       expect(pickMatchedAreaIndex(INGHIRAMI, new Set(["cardiology"]), COUNTS)).toBe(-1);
       expect(pickMatchedAreaIndex([], ALL_CANCER, COUNTS)).toBe(-1);
-    });
-
-    it("buildHumanizedAreas bolds the same area the rule picks", () => {
-      const ha = buildHumanizedAreas(INGHIRAMI.join(" "), new Map(), ALL_CANCER, COUNTS);
-      expect(ha!.matchedIndex).toBe(3);
-      expect(ha!.labels[ha!.matchedIndex]).toBe("Hematology");
-      // and without counts it bolds what it always did
-      expect(buildHumanizedAreas(INGHIRAMI.join(" "), new Map(), ALL_CANCER)!.matchedIndex).toBe(0);
     });
   });
 });

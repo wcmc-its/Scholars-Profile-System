@@ -45,7 +45,7 @@ import {
 import type { PublicationsFilters, PublicationsSort } from "@/lib/api/search";
 import { displayPublicationType } from "@/lib/publication-types";
 import { buildPubmedRuns } from "@/lib/pubmed-runs";
-import { lastNameKey } from "@/lib/edit/cv-export";
+import { lastNameKey } from "@/lib/last-name-key";
 
 /** Word's per-export ceiling — lower than CSV's 5,000 because each docx
  *  citation costs more to render and a 5,000-citation bibliography is

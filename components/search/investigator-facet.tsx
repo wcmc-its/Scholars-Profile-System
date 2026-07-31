@@ -5,6 +5,7 @@ import { TransitionLink as Link } from "@/components/search/transition-link";
 import { Search } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { PersonPopover } from "@/components/scholar/person-popover";
+import { lastNameKey } from "@/lib/last-name-key";
 
 const TOP_VISIBLE = 10;
 const EXPANDED_VISIBLE = 50;
@@ -128,14 +129,6 @@ export function InvestigatorFacet({
       ) : null}
     </div>
   );
-}
-
-// Last-name sort key: drops postnominal segments, takes the final
-// whitespace-separated token. Mirrors the Author facet helper.
-function lastNameKey(displayName: string): string {
-  const noPostnom = displayName.split(/,\s*/)[0] ?? displayName;
-  const tokens = noPostnom.trim().split(/\s+/);
-  return (tokens[tokens.length - 1] ?? "").toLowerCase();
 }
 
 function InvestigatorRow({ investigator }: { investigator: InvestigatorFacetItem }) {
