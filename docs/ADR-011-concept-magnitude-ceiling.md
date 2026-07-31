@@ -2,7 +2,7 @@
 
 **Status:** **Partially accepted** — B1/B2/B3/B4 are proposed and unjudged, but parts of this record are already in production: #2095 (instrumentation) is merged, and #2098 raised the `AREA_BOOST_TOP_N` default 200 → 500, which changes prod ranking. Do not read "Proposed" off the header and assume nothing has shipped.
 **Date:** 2026-07-31
-**Revision:** 3
+**Revision:** 4
 
 **Revision 2** corrected three claims from revision 1, all of which failed because new data arrived: the acceptance tally counted a query measured over a broken candidate pool, publication years *are* now in the payload, and the proposed breadth gate is not computable as specified.
 
@@ -12,6 +12,8 @@
 |---|---|
 | `AREA_BOOST_TOP_N` is harmless at `W_HI = 3` and *becomes* a correctness boundary at 20 | **Wrong in both directions.** It was already reordering page 1 at the shipped weight, and a higher weight is *more* cap-stable, not less |
 | watch click-position and zero-click rate for a week after the flip | **Underpowered by one to two orders of magnitude.** At 9.7 people searches/day a week is ~68 events; the same numbers need a quarter |
+
+**Revision 4 runs the census diff this document names as the primary acceptance evidence**, at the full candidate point `(α=0.5, W_HI=20, GRADED on, dampen=capped)` rather than `W_HI`/GRADED alone — see "After the flip" below. It is reach, not quality: it says how much changes, not whether the change is better. The blind panel is still the only thing that can answer that.
 **Authors:** Scholars Profile System development team
 **Supersedes:** —
 **Superseded by:** —
@@ -444,11 +446,20 @@ What to do instead, in decreasing order of strength:
 
 | signal | window | what it would mean |
 |---|---|---|
-| **census diff, pre/post** — replay all 314 distinct real queries against both arms and diff the pages | minutes, and it can run **before** the flip | the primary evidence. Not a proxy for user impact: it *is* every query a user issued. Anything it flags as changed is what the panels should judge |
+| **census diff, pre/post** — replay all real queries against both arms and diff the pages | minutes, and it can run **before** the flip | the primary evidence. Not a proxy for user impact: it *is* every query a user issued. Anything it flags as changed is what the panels should judge |
 | **the affiliated-faculty complaint** | first weeks | **a falsifiable prediction already on the record**: this ADR predicts the complaint will be about **card sparsity, not ordering**. If the feedback is about ordering, **B4 did not work and the model of the failure was wrong** |
 | click position / zero-click rate | **one quarter minimum** | usable only as a slow confirmation, never as a rollback trigger. Do not gate anything on it |
 
 The second row is nearly free and it is the only place in this document where a real user's reaction tests a claim it makes. Record which way it comes out either way.
+
+✅ **Done — the census diff ran at the full candidate point, not `W_HI`/GRADED alone.** All 313 distinct real people-search queries from the 90-day log (one row was a null/empty query, excluded), replayed against staging: baseline (today's prod: `α=1`, `W_HI=3`, GRADED off, dampen off) vs. candidate (`α=0.5`, `W_HI=20`, GRADED on, dampen=capped). Zero request errors, zero flag-echo failures — every candidate-arm capture is confirmed self-identifying, not accidentally the baseline.
+
+| | by distinct query | by event |
+|---|---|---|
+| page 1 changed at all | 278 / 313 (88.8%) | 796 / 874 (91.1%) |
+| top result changed | 112 / 313 (35.8%) | 283 / 874 (32.4%) |
+
+This is markedly larger than the `W_HI`/GRADED-only census above (59.3% events changed page 1, 19.9% top result) — consistent with the sweep panel's own finding that `dampen` and α are not separable from `W_HI` (dampen alone moved the top-10 on 89 of 90 swept combos). Softening the concentration exponent and capping the volume prior both add churn on top of raising `W_HI`; this is not a surprise given that finding, but it is a materially bigger number than 59.3%/19.9%, and the stratified quality set and sealed holdout should be judged knowing the shortlist is this much larger. **This is reach, not a verdict** — it says how much of the page changes, not whether the change is better. The blind panel is the only open item that can answer that.
 
 **The rollback trigger is therefore qualitative, and that is a real limitation.** At this volume there is no automated regression signal that fires fast enough to catch a bad flip. The compensating controls are that the census diff is exhaustive and runs pre-flip, and that rollback is one deploy. Anyone uncomfortable with that should ask for the census diff to be reviewed before the flip, not for a metric that cannot exist.
 
@@ -458,7 +469,7 @@ The second row is nearly free and it is the only place in this document where a 
 
 0. 🔴 **Decide the anchor divergence (B-1) before any sweep.** It is a residual on every tuned parameter, not on one number, and doing nothing decides it by default — as #2098 already did once.
 1. **The `AREA_BOOST_TOP_N` boundary check and the truncation rate are done** (PR #2098). B0 remains unblocked and independent of every parameter below.
-2. **The census diff is the primary acceptance evidence and runs pre-flip**; the stratified quality set is drawn *from its changed stratum* after the sweep, and judged against the pre-registered criterion. The sealed frequency-weighted set is judged in the same sitting and reported separately.
+2. **The census diff is the primary acceptance evidence and runs pre-flip — done** (see "After the flip"); the stratified quality set is drawn *from its changed stratum* after the sweep, and judged against the pre-registered criterion. The sealed frequency-weighted set is judged in the same sitting and reported separately.
 3. **α, `W_HI` and `dampen` are swept together, not in sequence** — they interact, and B3's own thesis is that `dampen` moves `W_HI`. One three-dimensional median-N sweep, one blind panel at the end.
 4. **The breadth gate is validated offline before the sweep**, because if the classifier cannot separate scope-shifting drops from qualifier drops, the gate needs rebuilding and every downstream parameter changes with it.
 5. **B1, B3 and B4 ship as one change.** B4 because the number explaining the reorder must be on the card the same day; B3 because landing it afterwards would invalidate the `W_HI` just accepted.
