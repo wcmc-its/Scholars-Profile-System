@@ -5,7 +5,6 @@ import {
   authorizeFieldEdit,
   authorizeRevoke,
   authorizeSuppress,
-  canAccessPublicationEditPage,
   canAccessScholarEditPage,
   canEditUnit,
   canGrant,
@@ -275,13 +274,6 @@ describe("canAccessScholarEditPage", () => {
   });
 });
 
-describe("canAccessPublicationEditPage", () => {
-  it("allows only a superuser", () => {
-    expect(canAccessPublicationEditPage(ADMIN)).toBe(true);
-    expect(canAccessPublicationEditPage(SELF)).toBe(false);
-  });
-});
-
 describe("requireSuperuserGet (Phase 7 §11)", () => {
   it("returns null for a superuser session and emits no denial log", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -465,7 +457,6 @@ describe("INVARIANT: a superuser is allowed by every edit authorization predicat
 
   it("page-access predicates — a superuser reaches any scholar / publication edit page", () => {
     expect(canAccessScholarEditPage(ADMIN, TARGET)).toBe(true);
-    expect(canAccessPublicationEditPage(ADMIN)).toBe(true);
     expect(
       requireSuperuserGet({ session: ADMIN, path: "/edit/scholar/someoneElse", targetId: TARGET }),
     ).toBeNull();
@@ -520,10 +511,6 @@ describe("comms_steward — suppression parity (incl. publication takedown)", ()
 describe("comms_steward — page access", () => {
   it("may open any scholar's edit page", () => {
     expect(canAccessScholarEditPage(STEWARD, "other9")).toBe(true);
-  });
-
-  it("does NOT get the superuser-only publication takedown PAGE", () => {
-    expect(canAccessPublicationEditPage(STEWARD)).toBe(false);
   });
 });
 

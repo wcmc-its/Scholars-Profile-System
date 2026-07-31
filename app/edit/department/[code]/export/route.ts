@@ -27,7 +27,8 @@ import {
 } from "@/lib/edit/unit-faculty-export";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+// `maxDuration` is inert under `output: "standalone"`; the real budget this route is
+// bound by in prod is CloudFront's 30s origin-read timeout (`/edit*` behavior).
 
 export async function GET(
   request: NextRequest,

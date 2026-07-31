@@ -900,8 +900,6 @@ export async function getTopicPublications(
     // GPT-generated rubric justification (issue #316 PR-C) — surfaced as a
     // hover tooltip on the inline `Impact: NN` value.
     impactJustification: true,
-    // Inline abstract disclosure (issue #288 PR-A).
-    abstract: true,
     // Issue #327 — paper-level top topic (`Publication.topTopicId` + its
     // FK relation). The mapper drops the field when it matches the
     // current page's topic so the redundant inline label never renders.
@@ -966,13 +964,36 @@ export async function getTopicPublications(
   const visibleRows = rows.filter((r) => !darkPmids.has(r.pmid));
   const pmids = visibleRows.map((r) => r.pmid);
   const authorsByPmid = await fetchWcmAuthorsForPmids(pmids);
+  // #2118c — the only consumer of `Publication.abstract` in `mapToTopicPublicationHit`
+  // is the `hasAbstract` boolean; Prisma has no "select this @db.Text column but
+  // only as a boolean" projection, so `pubSelectFields.abstract: true` transferred
+  // every full abstract on the page just to compute Boolean(...). `abstract` is
+  // used here only as a WHERE predicate (MySQL evaluates it server-side) — `pmid`
+  // is the only column selected, so the text itself is never sent back.
+  const pmidsWithAbstract =
+    pmids.length === 0
+      ? new Set<string>()
+      : new Set(
+          (
+            await prisma.publication.findMany({
+              where: { pmid: { in: pmids }, NOT: [{ abstract: null }, { abstract: "" }] },
+              select: { pmid: true },
+            })
+          ).map((r) => r.pmid),
+        );
   // `now` parameter is preserved for backwards compatibility with callers but
   // is unused since the Variant B scoring path was retired in favor of SQL sort.
   void now;
   return {
     hits: (visibleRows as Array<{ pmid: string }>).map((r) =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      mapToTopicPublicationHit(r as any, authorsByPmid.get(r.pmid), includeImpact, topicSlug),
+      mapToTopicPublicationHit(
+        r as any,
+        authorsByPmid.get(r.pmid),
+        includeImpact,
+        topicSlug,
+        pmidsWithAbstract.has(r.pmid),
+      ),
     ),
     total,
     totalAllTypes,
@@ -1008,6 +1029,7 @@ function mapToTopicPublicationHit(
   wcmAuthors: TopicPublicationHit["authors"] | undefined,
   includeImpact: boolean,
   currentTopicSlug: string,
+  hasAbstract: boolean,
 ): TopicPublicationHit {
   // Prisma Decimal | number | null from the include. Convert via Number();
   // defense-in-depth against non-finite values from a future schema change.
@@ -1059,7 +1081,7 @@ function mapToTopicPublicationHit(
     impactScore,
     impactJustification,
     authors: wcmAuthors ?? [],
-    hasAbstract: Boolean(r.publication.abstract),
+    hasAbstract,
     topTopic,
   };
 }

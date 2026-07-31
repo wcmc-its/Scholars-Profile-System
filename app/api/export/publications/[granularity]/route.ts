@@ -48,9 +48,8 @@ import { resolvePublicationMeshOnlyFilter } from "@/lib/api/search-flags";
 import { toCsv, type CsvCell } from "@/lib/csv";
 
 export const dynamic = "force-dynamic";
-// Up to 5,000-row CSVs require a few seconds of DB hydration; raise the
-// default 10s edge timeout so we can finish even on a cold cache.
-export const maxDuration = 60;
+// `maxDuration` is inert under `output: "standalone"`; the real budget this route is
+// bound by in prod is CloudFront's 30s origin-read timeout (`/api/export/*` behavior).
 
 type RouteGranularity = ExportGranularity | "bibliography";
 

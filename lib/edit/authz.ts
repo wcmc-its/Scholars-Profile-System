@@ -219,13 +219,6 @@ export function canAccessScholarEditPage(
   return session.cwid === targetCwid || session.isSuperuser || session.isCommsSteward;
 }
 
-/** `GET /edit/publication/[pmid]`: superuser only. (A comms_steward reaches
- *  publication suppression through the per-scholar editor's Publications panel,
- *  not this standalone takedown surface — kept superuser-only to bound scope.) */
-export function canAccessPublicationEditPage(session: EditSession): boolean {
-  return session.isSuperuser;
-}
-
 /**
  * Phase 7 § 11 — the GET-time superuser re-check used by
  * `/edit/scholar/[cwid]` (when `cwid != session.cwid`) and

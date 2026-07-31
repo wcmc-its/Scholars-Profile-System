@@ -60,9 +60,8 @@ import {
 
 const PATH = "/api/edit/cv";
 
-// The M1 generation is a single Bedrock call (a few seconds). Give the function
-// headroom past the platform default, like the sibling docx-download route.
-export const maxDuration = 60;
+// `maxDuration` is inert under `output: "standalone"`; the real budget this route is
+// bound by in prod is CloudFront's 30s origin-read timeout (`/api/edit*` behavior).
 
 /**
  * Generate the §15 research-activities paragraph(s) ANEW from the scholar's
