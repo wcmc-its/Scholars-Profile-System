@@ -64,35 +64,40 @@ Two caveats on the panel itself, both of which bound how much the tally can carr
 
 The mechanism behind that difference is the strongest argument in this ADR. Where descriptor coverage is thin, the concentration score never leaves its lowest band and the page returns **rank-for-rank identical** — a page sort acts on ties at any scale, a scaled scoring band does not fire below a floor. **The coverage floor is emergent here and absent from the `rank_features` design**, which would have to reimplement it as an explicit gate whose statistic that field type cannot even compute.
 
-### 🔴 `AREA_BOOST_TOP_N = 200` becomes a correctness boundary at the new weight
+### ✅ `AREA_BOOST_TOP_N` — measured, and it was already wrong at today's weight
 
-**This was absent from revision 1 and it is the one way this change could be quietly wrong in production, on exactly the broad queries it most claims to fix.**
+**Resolved. The concern was real, the framing was wrong in both directions, and the fix is #2097 (200 → 500).**
 
-The concentration list is computed for 200 scholars only (`lib/api/area-concentration.ts`). At `W_HI = 3` that cutoff is harmless — the boost barely reorders anything, so a scholar outside the list was not going to reach page 1 regardless. **At `W_HI = 20` the boost dominates the sum, and the cutoff converts from a latency optimisation into a correctness boundary.** The headline argument for this ADR is that the change reaches scholars who were not in the fetched 20; the identical argument applies at 200, and it has not been measured.
+Revision 2 said: at `W_HI = 3` the cutoff is harmless, and it *becomes* a correctness boundary at 20. **Measured, both halves of that are false.** It was already a correctness boundary at the shipped weight, and raising the weight makes most queries *less* sensitive to it, not more.
 
-One correction to the shape of the concern. The cutoff is not an arbitrary candidate rank — the implementation keeps the top 200 **by the very quantity being boosted** (`sort by n²/total, then slice`). So the failure mode is not "a 300-tagged scholar sits at rank 201 and gets weight zero"; that scholar would have to be beaten by 200 others on `n²/total`. The failure mode is narrower and sharper: **descriptors broad enough that more than 200 scholars carry substantial concentration.** That is `Neoplasms` — and it is exactly the query where the descendant truncation below *also* bites. The two interact.
+The correction to the shape of the concern still stands and is what made the result interpretable: the cutoff is not an arbitrary candidate rank. Arm 1 keeps the top N **by the very quantity being boosted** (`sort by n²/total, then slice`), so the failure mode was never "a 300-tagged scholar sits at rank 201". It is **descriptors broad enough that more than N scholars carry substantial concentration** — and the cap is an approximation error that closes as N grows.
 
-What has been checked, and what it does *not* show. Deep-paginated `cancer` and `aging` at `W_HI = 20`, prod parity, looking for a discontinuity in tagged count at result rank 200:
+**Method.** Sweep `SEARCH_AREA_BOOST_TOP_N` on staging and find, per query, the smallest N whose top 10 equals the top 10 at N = 2000. Ten panel queries × the ladder {5, 10, 25, 50, 100, 150, 200} × two `AREA_BOOST_GRADED` postures × `W_HI ∈ {3, 20}`, prod-parity pin echoed and asserted on every capture.
 
-```
-cancer   ranks 161-180  max N= 89    ranks 201-220  max N= 51
-         ranks 181-200  max N= 58    ranks 221-240  max N= 55
-                                     ranks 281-300  max N= 51
-aging    ranks 181-200  max N=  4    ranks 201-220  max N=  3
-```
+**Positive control first, because "no difference" is also what a disconnected flag returns.** At `TOP_N = 1` every probed query reorders substantially. The lever is connected; a null result would have meant something.
 
-No discontinuity at 200. **This is weak evidence and does not retire the concern**, because *result* rank is not *concentration* rank — the concentration list is ordered by `n²/total`, the result list by the whole score, and a smooth decay in one says little about truncation in the other. What it does establish: `aging` cannot be affected (the list is nowhere near saturated), and `cancer` plausibly can.
+**Convergence point (smallest N matching the N = 2000 page):**
 
-**The check is now two curls.** `SEARCH_AREA_BOOST_TOP_N` was a hardcoded const; PR #2095 made it a request-overridable numeric flag (default unchanged at 200, allowlisted rather than CDK-wired, so staging-only). Run `TOP_N:200` versus `TOP_N:2000` at `W_HI:20` and diff the top 10:
+| config | worst query | converges at | 8 of 10 converge at |
+|---|---|---|---|
+| `W_HI = 3`, GRADED off — **today's prod** | `cancer`, `functional mri` | **300** | ≤ 150 |
+| `W_HI = 20`, GRADED off | `diabetes`, `functional mri` | 150 | ≤ 150 |
+| `W_HI = 20`, GRADED on — the B1 ship config | `cancer` | **300** | ≤ 150 |
 
-```
-/api/search?q=<q>&type=people&flags=SEARCH_AREA_BOOST_W_HI:20,SEARCH_AREA_BOOST_TOP_N:200
-/api/search?q=<q>&type=people&flags=SEARCH_AREA_BOOST_W_HI:20,SEARCH_AREA_BOOST_TOP_N:2000
-```
+**Every query, in every configuration, converges at or below 300. None needed more.**
 
-Identical pages on all ten queries retires the cutoff and this section can say so. If any page moves, dump `n²/total` at concentration ranks 190-210 for that query and pick a new cutoff — **at that point it is a latency conversation, not a relevance one**, because the cost is `function_score` clause count, which is the stated reason for 200 in the first place.
+**The defect is live in prod today, not created by B1.** At today's `W_HI = 3` with the cap at 200, two queries had not converged — the page differed from the full-list answer with *identical membership, reordered*: on the broad disease query the **rank 1 and rank 2 scholars swap**, and on the technique query one scholar moves from rank 10 to rank 8. Both settle from 300 upward.
 
-**Do this before any prod flip.**
+Two things follow that revision 2 got backwards:
+
+- **A higher weight is more stable, not less.** At `W_HI = 20` the boost separates scores decisively, so the top of the page stops depending on how many others are in the list; at `W_HI = 3` the scores are tightly clustered and a small change in the list flips ranks. The intuition that a dominant term is more exposed to a truncated candidate list is wrong here, and the measurement is the only reason we know.
+- **Grading raises sensitivity.** With `GRADED` on, `cancer` converges at 300 rather than 100 — more distinct bands means more scholars' relative positions depend on the full list. That is an argument for measuring the cap at the *ship* config, not at prod parity.
+
+**The latency rationale does not bind.** The stated reason for 200 was `function_score` clause count. Origin latency on the broadest panel query is flat from 200 to 5000 — ~0.25-0.30 s across 3 cache-busted runs each, no trend. That is evidence the cost is not binding at 500; it is not evidence it never binds, so re-measure before going higher.
+
+**Decision: raise the default to 500** (#2097) — 1.67× the worst observed convergence, and no larger, because the extra margin buys nothing measurable and a cap should stay a cap. This is independent of B1 and ships on its own: it is an approximation-error fix at the weight already in production.
+
+⚠ **Two caveats, both stated rather than resolved.** `cancer`'s concentration list is built over a descendant pool truncated by #2096, so its specific convergence number is provisional — but `functional mri` is **not** truncated and shows the same 300, so the finding does not rest on the broken query. And this measures **arm 1 only**; arm 2 slices a `doc_count`-ordered list, so its cliff is not self-correcting as N grows and a concentrated low-volume specialist can still score zero there at any cap.
 
 ### Why this ADR does not propose `rank_features`
 
@@ -269,7 +274,7 @@ Once the ranked quantity is the concept count, the displayed number and the rank
 | **Ungrade the bands alone** (`AREA_BOOST_GRADED` on, `W_HI` unchanged) | Measured inert: 5 of 10 queries byte-identical, and where it moved membership it moved it the wrong way. The ceiling, not the banding, is the binding constraint — which is why the flag was previously judged "worse alone". |
 | **Delete the method tier** | Rejected on measurement: it scored as the largest available O8 win (−153 inversion pairs) and reading the pages reversed the verdict — with the tier off, every practitioner of the technique is evicted in favour of high-volume generalists. |
 | **Ship the volume cap first** | Measured worse. See B3. |
-| **Per-request publications-index aggregation for the count** | This is not an alternative — it is what the system already does, on the scoring path, in prod, cached and capped at `AREA_BOOST_TOP_N = 200`. That cap is now sweepable via `SEARCH_AREA_BOOST_TOP_N` on staging (PR #2095); see the correctness-boundary section. |
+| **Per-request publications-index aggregation for the count** | This is not an alternative — it is what the system already does, on the scoring path, in prod, cached and capped at `AREA_BOOST_TOP_N` (500 since #2097, measured; see the cap section). |
 | **Add C04.588 to the Neoplasms expansion** | Treats the symptom. The truncation is a lex-ordered walk hitting a 200 cap, and it affects 161 of 587 broad descriptors — Neoplasms is merely the first one big enough to make it visible. See #2096. |
 
 ## Verification
@@ -291,7 +296,7 @@ The frequency-weighting problem cannot be fixed cheaply — the panel exists *be
 Roughly ten extra judgements buys that. **Sample the holdout while pulling the truncation-rate slice** — that work already opens the query log, so the marginal cost is close to zero.
 
 - **B2:** measure the `max(year)` sub-aggregation route before mapping any new field. PR #2095 shipped the pattern on the reason aggregation, so the mechanism is demonstrated; what remains is measuring it on the concentration aggregation.
-- **`AREA_BOOST_TOP_N`:** `TOP_N:200` vs `TOP_N:2000` at `W_HI:20`, top-10 diff, all ten queries. Must be clean before any prod flip.
+- **`AREA_BOOST_TOP_N`:** ✅ **done.** Convergence swept over ten queries × two GRADED postures × `W_HI ∈ {3, 20}`; everything converges by 300, default raised to 500 (#2097). ⚠ **Re-run at the chosen `(α*, W*)`** — α changes the score distribution, which changes concentration ordering, so this result does not transfer for free.
 - Standing: re-derive `W_HI` whenever another term in the prominence sum changes (O5). B3 is what makes this obligation affordable — and is why B3 is swept with `W_HI` rather than landed after it.
 
 ### After the flip
@@ -314,7 +319,7 @@ That third row is nearly free and it is the only place in this document where a 
 
 **The running checklist lives on the tracking issue (#2097), not here** — an ADR that needs an edit every time a task closes stops being a record. What belongs in the record is *why* the order is what it is. Four of these are decisions, not scheduling:
 
-1. **Three things are unblocked and gate everything else**: the `AREA_BOOST_TOP_N` boundary check, the truncation rate over real traffic, and B0. They are independent of each other and of every parameter below. Nothing else should start until the first is clean, because it can invalidate the premise.
+1. **The `AREA_BOOST_TOP_N` boundary check is done** (#2097). Two remain unblocked and gate everything else: the truncation rate over real traffic, and B0. They are independent of each other and of every parameter below.
 2. **α, `W_HI` and `dampen` are swept together, not in sequence** — they interact, and B3's own thesis is that `dampen` moves `W_HI`. One three-dimensional median-N sweep, one blind panel at the end.
 3. **The breadth gate is validated offline before the sweep**, because if the classifier cannot separate scope-shifting drops from qualifier drops, the gate needs rebuilding and every downstream parameter changes with it.
 4. **B1, B3 and B4 ship as one change.** B4 because the number explaining the reorder must be on the card the same day; B3 because landing it afterwards would invalidate the `W_HI` just accepted.
