@@ -9,7 +9,13 @@
  *    hence a single function, not the generic `Merged<T>` machinery ADR-005
  *    anticipates; that generalization earns its ceremony only once a second
  *    field is runtime-merged. (`slug` is override-able too, but a slug override
- *    is consumed by `etl/ed`, not merged at runtime.)
+ *    is consumed by `etl/ed`, not merged at runtime.) Three consumers apply
+ *    this merge: `lib/api/profile.ts` and `lib/edit/edit-context.ts` call
+ *    `getEffectiveOverview` directly (per-request); the OpenSearch people
+ *    index (`buildPeopleDoc` / `lib/search-index-docs.ts`, #2113) replicates
+ *    the same semantics against a bulk-loaded `cwid -> value` map
+ *    (`loadOverviewOverrides`) instead of a per-scholar query, since it runs
+ *    once per scholar across the whole corpus.
  *
  *  - `suppression` — whole-publication takedowns and per-author hides, applied
  *    as a query-time predicate (`loadPublicationSuppressions` + `isAuthorHidden`

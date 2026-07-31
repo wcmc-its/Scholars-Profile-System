@@ -217,6 +217,39 @@ export async function loadMeshAncestorContext(
 }
 
 /**
+ * #2113 — bulk-load `field_override(entityType='scholar', fieldName='overview')`
+ * rows into a `cwid -> value` map, so `buildPeopleDoc` can apply the SAME
+ * read-merge semantics as `getEffectiveOverview` (`lib/api/manual-layer.ts`)
+ * without an N+1 `findUnique` per scholar across the whole corpus. An empty
+ * string means the scholar deliberately cleared their bio (still a map entry
+ * — distinct from "no override row at all"). Loaded ONCE per index build
+ * (mirroring the `gate` / `meshAncestors` loads) and passed to every
+ * `buildPeopleDoc`.
+ *
+ * `cwid`, when passed, scopes the query to one scholar — the shape the
+ * single-scholar fast-path (`lib/edit/search-suppression.ts`) needs; that
+ * caller already issues several other per-scholar sidecar queries per
+ * `buildPeopleDoc` call, so one more narrow query here is consistent with
+ * its existing cost, not a new N+1.
+ */
+export async function loadOverviewOverrides(
+  client: Pick<PrismaClient, "fieldOverride">,
+  cwid?: string,
+): Promise<Map<string, string>> {
+  const rows = await client.fieldOverride.findMany({
+    where: {
+      entityType: "scholar",
+      fieldName: "overview",
+      ...(cwid !== undefined ? { entityId: cwid } : {}),
+    },
+    select: { entityId: true, value: true },
+  });
+  const byCwid = new Map<string, string>();
+  for (const r of rows) byCwid.set(r.entityId, r.value);
+  return byCwid;
+}
+
+/**
  * Reduce a per-label aggregate ({ count, ui }) map into the ordered
  * `topMeshTerms` array carried on the people doc: the scholar's most frequent
  * MeSH descriptors (each with its `ui`, for deep-linking) across their
@@ -786,7 +819,25 @@ export async function buildPeopleDoc(
   // agg). When OMITTED — every existing test, any caller that doesn't want it —
   // the field is never emitted and the doc is byte-identical to today.
   meshAncestors?: MeshAncestorContext,
+  // #2113 — OPTIONAL corpus-wide `overview` field_override map (from
+  // `loadOverviewOverrides`), keyed by cwid. When provided, the builder
+  // applies the SAME read-merge semantics as `getEffectiveOverview`
+  // (`lib/api/manual-layer.ts`): an override row with value `""` means the
+  // scholar cleared their bio (indexed overview is empty, matching a
+  // never-had-one scholar); a non-empty override value wins over the raw
+  // ETL `Scholar.overview` column; no entry for the cwid falls back to the
+  // ETL column. When OMITTED — every existing test, and any caller that
+  // doesn't pass it — the builder falls back to the raw ETL column for
+  // every scholar, so the produced doc is byte-identical to today.
+  overviewOverrides?: Map<string, string>,
 ): Promise<Record<string, unknown> | null> {
+  // #2113 — effective overview, read-merged against the override map (see
+  // the parameter doc above). Drives both `overview` / `overviewLength`
+  // below and the `isComplete` sparse-profile gate.
+  const overrideValue = overviewOverrides?.get(s.cwid);
+  const effectiveOverview: string | null =
+    overrideValue !== undefined ? (overrideValue === "" ? null : overrideValue) : s.overview;
+
   // Title-field repetition by authorship position.
   const titleParts: string[] = [];
   // D-exact — per-concept distinct-publication counter. Keyed by ANCESTOR concept
@@ -1011,7 +1062,10 @@ export async function buildPeopleDoc(
     if (isTrainingOnlyGrant(g)) return n;
     return n + 1;
   }, 0);
-  const isComplete = !!s.overview && kept >= 3 && hasActiveGrants ? true : false;
+  // #2113 — was `!!s.overview`, the same raw-column bug this issue fixes:
+  // a scholar who cleared their bio via override still had a non-empty ETL
+  // column, so the sparse-profile gate never noticed the clearing.
+  const isComplete = !!effectiveOverview && kept >= 3 && hasActiveGrants ? true : false;
   // Phase 2 — sourced from ED ETL derivation (lib/eligibility.ts RoleCategory).
   // "unknown" only fires for scholars whose ED ETL has not yet backfilled
   // role_category (transitional state during the first refresh after migration).
@@ -1357,7 +1411,11 @@ export async function buildPeopleDoc(
     // empty: scholars with no MeSH on any visible pub write nothing for this
     // field, so `_source` consumers distinguish "no signal" from "[]".
     ...(topMeshTerms.length > 0 ? { topMeshTerms } : {}),
-    overview: s.overview,
+    // #2113 — was `s.overview` (the raw ETL column), ignoring a
+    // field_override read-merge entirely: a scholar who cleared their bio
+    // via /edit stayed indexed (and `overview^2`-boosted) forever. See
+    // `effectiveOverview` above.
+    overview: effectiveOverview,
     publicationTitles: titleParts.join(" "),
     publicationMesh: meshParts.join(" "),
     // Issue #310 — descriptor-UI rollup for the v3 topic-shape attribution
@@ -1382,7 +1440,7 @@ export async function buildPeopleDoc(
     // function_score range filter reads directly. `aoiTermCount` is the count of
     // topic assignments (the "topic-assignment terms" §6.1.5 names), not a token
     // count of the joined string.
-    overviewLength: s.overview?.length ?? 0,
+    overviewLength: effectiveOverview?.length ?? 0,
     aoiTermCount: s.topicAssignments.length,
     publicationAbstracts: abstractParts.join(" "),
     hasActiveGrants,
