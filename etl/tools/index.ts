@@ -63,6 +63,7 @@ import {
   type FamilyEntityArtifact,
 } from "./family-entity-mapper-s3";
 import { entityLayerComplete } from "./entity-layer-guard";
+import { shaIntegrityFailed } from "./integrity-check";
 import { manifestContentSignature } from "./manifest-signature";
 import { publicationSuppressionChangedSince } from "./suppression-freshness";
 
@@ -335,7 +336,7 @@ async function main(): Promise<void> {
   const bytes = await fetchBytes(s3, toolsObj.key);
   const digest = sha256hex(bytes);
   const expected = toolsObj.sha256;
-  if (expected && digest !== expected) {
+  if (shaIntegrityFailed(expected, digest)) {
     log("integrity_failed", {
       key: toolsObj.key,
       expected_sha256: expected,
@@ -406,7 +407,7 @@ async function main(): Promise<void> {
   } else {
     const ctxBytes = await fetchBytes(s3, ctxObj.key);
     const ctxDigest = sha256hex(ctxBytes);
-    if (ctxObj.sha256 && ctxDigest !== ctxObj.sha256) {
+    if (shaIntegrityFailed(ctxObj.sha256, ctxDigest)) {
       log("integrity_failed", {
         key: ctxObj.key,
         expected_sha256: ctxObj.sha256,
@@ -461,7 +462,7 @@ async function main(): Promise<void> {
       [entityCtxObj, ctxBytes],
     ] as const) {
       const d = sha256hex(b);
-      if (obj.sha256 && d !== obj.sha256) {
+      if (shaIntegrityFailed(obj.sha256, d)) {
         log("integrity_failed", {
           key: obj.key,
           expected_sha256: obj.sha256,
