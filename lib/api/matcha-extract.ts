@@ -27,10 +27,9 @@
  */
 import { createHash } from "node:crypto";
 import { generateObject } from "ai";
-import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
-import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 import { z } from "zod";
-import { modelAcceptsTemperature } from "@/lib/edit/overview-generator";
+import { bedrockClient } from "@/lib/llm/client";
+import { DEFAULT_EXTRACT_MODEL, modelAcceptsTemperature } from "@/lib/llm/models";
 import { cachedReasonAgg } from "@/lib/api/reason-agg-cache";
 
 /** One extracted concept: a canonical noun phrase, its funder-centrality in [0,1]
@@ -67,25 +66,6 @@ export type MatchaExtraction = {
   titleSummary?: string;
 };
 
-/** MODEL — the Claude Sonnet 4.5 cross-region inference profile on Amazon Bedrock.
- *  WITHIN the TaskRoleBedrockPolicy IAM scope (cdk `app-stack.ts`): the task role
- *  grants `inference-profile/us.anthropic.claude-sonnet-4-*` +
- *  `foundation-model/anthropic.claude-sonnet-4-*`, which this id matches. Sonnet, not
- *  the Opus 4.8 default the overview generator uses, because a short structured
- *  extraction does not need Opus — Sonnet is cheaper/faster AND, unlike Opus 4.7/4.8,
- *  ACCEPTS an explicit `temperature` (see `modelAcceptsTemperature`), so we can pin
- *  temperature 0 for near-deterministic extraction (Opus would 400 on it). The exact
- *  `-20250929-v1:0` minor is the same profile id the overview generator's
- *  `humanizeModelId` recognizes as active; the IAM glob permits an intra-family bump
- *  (4.5 → 4.6) with no policy change if a newer minor is preferred later. This const is
- *  the DEFAULT; `extractMatchaConcepts` resolves `MATCHA_EXTRACT_MODEL` ahead of
- *  it — a code-default runtime rollback lever mirroring the overview generator's
- *  `OVERVIEW_GENERATE_MODEL`/`BIOSKETCH_GENERATE_MODEL` (registered in the flag-parity
- *  allowlist, deliberately NOT wired per-env; unset ⇒ this default in every env, so
- *  behavior is unchanged until an operator sets it). Repointing the model in a deployed
- *  env is then a task-def env change + restart, not a code edit and full app deploy. */
-const EXTRACT_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
-
 /** Hard cap on returned concepts — an UPPER bound on the LLM output. The spine then
  *  re-caps to its own (tighter) `MAX_TERMS` (8) before the per-concept `searchPeople`
  *  fan-out, so THAT is the operative fan-out bound and raising THIS does NOT raise
@@ -114,16 +94,6 @@ const EXTRACT_MAX_TOKENS = 1280;
  *  matching the `AbortSignal.timeout` idiom in `opportunity-submission.ts` /
  *  `reciter/client.ts`. */
 const EXTRACT_TIMEOUT_MS = 30_000;
-
-/** Lazily build a Bedrock client from the AWS credential chain (ECS task role in
- *  deployment, shell creds locally) — byte-identical to the overview / biosketch
- *  generators' factories (no shared export exists to import). */
-function sponsorBedrock() {
-  return createAmazonBedrock({
-    region: process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-east-1",
-    credentialProvider: fromNodeProviderChain(),
-  });
-}
 
 /** Structured-output contract. Kept minimal — the cap and the [0,1] clamp are enforced in
  *  `sanitizeConcepts`, NOT the schema, so a model that returns 13 concepts or a centrality
@@ -379,7 +349,7 @@ export async function extractMatchaConcepts(paste: string): Promise<MatchaExtrac
   // generator's `OVERVIEW_GENERATE_MODEL` lever; the IAM policy scopes the whole
   // `us.anthropic.claude-sonnet-4-*` family so an intra-family repoint needs no
   // cdk/IAM change). `modelAcceptsTemperature` still gates temperature by id.
-  const modelId = process.env.MATCHA_EXTRACT_MODEL ?? EXTRACT_MODEL;
+  const modelId = process.env.MATCHA_EXTRACT_MODEL ?? DEFAULT_EXTRACT_MODEL;
 
   // Memoize the Bedrock call: extraction is a pure function of (trimmed paste, model id). Sonnet
   // pins temp-0; even a non-pinned model's sampling is fine to REUSE within the TTL — it makes a
@@ -398,7 +368,7 @@ export async function extractMatchaConcepts(paste: string): Promise<MatchaExtrac
     async () => {
       try {
         const { object } = await generateObject({
-          model: sponsorBedrock()(modelId),
+          model: bedrockClient()(modelId),
           schema: ConceptsSchema,
           system: EXTRACT_SYSTEM_PROMPT,
           prompt: buildExtractPrompt(text),

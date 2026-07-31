@@ -17,14 +17,12 @@
  * overview crosses; entries are returned as plain strings.
  */
 import { generateText } from "ai";
-import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
-import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 
+import { bedrockClient } from "@/lib/llm/client";
+import { DEFAULT_GENERATE_MODEL, modelAcceptsTemperature } from "@/lib/llm/models";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
 import {
-  DEFAULT_GENERATE_MODEL,
   groundOverviewDraft,
-  modelAcceptsTemperature,
   toBiosketchModelFacts,
   toModelFacts,
   type UngroundedSpan,
@@ -657,15 +655,6 @@ export type BiosketchProgress =
   | { phase: "sources" }
   | { phase: "done" };
 
-/** Lazily build a Bedrock client from the AWS credential chain (ECS task role in
- *  deployment, shell creds locally). Same provider the overview generator uses. */
-function biosketchBedrock() {
-  return createAmazonBedrock({
-    region: process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-east-1",
-    credentialProvider: fromNodeProviderChain(),
-  });
-}
-
 /**
  * Generate the biosketch prose from `facts`, steered by `params`. One gateway call (no
  * tools — the model writes only from FACTS), then parse into entries; when the faithfulness
@@ -713,7 +702,7 @@ export async function generateBiosketch(
 
   onProgress({ phase: "drafting" });
   const result = await generateText({
-    model: biosketchBedrock()(modelId),
+    model: bedrockClient()(modelId),
     system: systemPrompt,
     prompt: buildBiosketchUserPrompt(facts, params, { groundsImpact }),
     ...(modelAcceptsTemperature(modelId) ? { temperature } : {}),
@@ -784,7 +773,7 @@ export async function generateBiosketch(
         const uniqueToMap = toMap.filter((p) => (seen.has(p.pmid) ? false : (seen.add(p.pmid), true)));
         if (productPmids(selected).length > 0) {
           const mapping = await generateText({
-            model: biosketchBedrock()(modelId),
+            model: bedrockClient()(modelId),
             system: PRODUCT_MAPPING_SYSTEM_PROMPT,
             prompt: buildProductMappingPrompt(entryBodies, uniqueToMap),
             ...(modelAcceptsTemperature(modelId) ? { temperature: 0 } : {}),
@@ -808,7 +797,7 @@ export async function generateBiosketch(
       const pubs = facts.representativePublications;
       const allowed = new Set(pubs.map((p) => p.pmid));
       const attribution = await generateText({
-        model: biosketchBedrock()(modelId),
+        model: bedrockClient()(modelId),
         system: SOURCE_ATTRIBUTION_SYSTEM_PROMPT,
         prompt: buildSourceAttributionPrompt(entryBodies, pubs),
         ...(modelAcceptsTemperature(modelId) ? { temperature: 0 } : {}),

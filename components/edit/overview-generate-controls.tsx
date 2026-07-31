@@ -37,12 +37,12 @@ import {
   type OverviewVoice,
 } from "@/lib/edit/overview-params";
 import {
-  estimateDraftCostUsd,
   humanizeModelId,
   promptVersionElementLabel,
   type OverviewPromptVersionId,
   type OverviewPromptVersionMeta,
 } from "@/lib/edit/overview-prompt-versions";
+import { estimateDraftCostUsd } from "@/lib/llm/pricing";
 import { cn } from "@/lib/utils";
 
 type OverviewGenerateControlsProps = {

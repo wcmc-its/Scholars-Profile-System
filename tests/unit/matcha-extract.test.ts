@@ -12,8 +12,8 @@
  *  - a Bedrock error OR an unparseable (no-object) result returns [] — NEVER throws,
  *    so the spine can fall back to the dictionary extractor.
  * Mocks `ai` (generateObject), the Bedrock provider, and the credential chain — NEVER
- * invokes Bedrock or AWS; also stubs `overview-generator` so only `modelAcceptsTemperature`
- * is pulled in, not its dependency graph.
+ * invokes Bedrock or AWS. `modelAcceptsTemperature` (`@/lib/llm/models`) is
+ * dependency-free, so it runs for real rather than needing a stub.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -40,11 +40,6 @@ vi.mock("@ai-sdk/amazon-bedrock", () => ({
 }));
 vi.mock("@aws-sdk/credential-providers", () => ({
   fromNodeProviderChain: () => () => ({}),
-}));
-// Reuse the real temperature gate's semantics without importing the heavy
-// overview-generator graph (@/lib/db, prompt modules, …).
-vi.mock("@/lib/edit/overview-generator", () => ({
-  modelAcceptsTemperature: (id: string) => !/claude-(opus-4-[78]|fable)/.test(id),
 }));
 
 import { extractMatchaConcepts } from "@/lib/api/matcha-extract";
