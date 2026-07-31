@@ -1473,6 +1473,21 @@ describe("EtlStack", () => {
       expect(prodNightly).toMatch(/etl:mesh-anchors/);
     });
 
+    it("includes etl:mesh-aliases in BOTH nightly cadences (#2093 part A)", () => {
+      // mesh_curated_alias previously only refreshed on an on-demand run, per
+      // env, with nothing keeping them in sync — same failure class as #2051.
+      const stagingNightly = getStateMachineDefinitionText(
+        template,
+        "scholars-nightly-staging",
+      );
+      expect(stagingNightly).toMatch(/etl:mesh-aliases/);
+      const prodNightly = getStateMachineDefinitionText(
+        buildEtlStack("prod").template,
+        "scholars-nightly-prod",
+      );
+      expect(prodNightly).toMatch(/etl:mesh-aliases/);
+    });
+
     it("keeps prod's derived-anchor kill-switch ON — promoting the step must not promote derived rows", () => {
       // The two gates are independent and this pins that. If a future change drops
       // MESH_ANCHOR_SCORE_MIN to 0.9 for prod it should be a deliberate, separately
