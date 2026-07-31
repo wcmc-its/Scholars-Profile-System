@@ -197,9 +197,11 @@ if (process.argv.includes("--selfcheck")) {
   process.exit(0);
 }
 
-// --- consumed keys: process.env.X and resolver-style env.X reads in code ---
+// --- consumed keys: process.env.X, resolver-style env.X, and
+// requireEnv("X")/optionalEnv("X") helper reads in code ---
 const consumed = new Set();
 const READ = /(?:process\.env|(?<![\w.$])env)\.([A-Z][A-Z0-9_]+)/g;
+const HELPER_READ = /\b(?:requireEnv|optionalEnv)\(\s*["']([A-Z][A-Z0-9_]+)["']/g;
 function walk(dir) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
@@ -210,6 +212,7 @@ function walk(dir) {
       let m;
       const s = readFileSync(p, "utf8");
       while ((m = READ.exec(s))) consumed.add(m[1]);
+      while ((m = HELPER_READ.exec(s))) consumed.add(m[1]);
     }
   }
 }
