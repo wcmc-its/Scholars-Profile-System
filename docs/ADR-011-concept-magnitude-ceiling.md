@@ -2,7 +2,7 @@
 
 **Status:** **Partially accepted** — B1/B2/B3/B4 are proposed and unjudged, but parts of this record are already in production: #2095 (instrumentation) is merged, and #2098 raised the `AREA_BOOST_TOP_N` default 200 → 500, which changes prod ranking. Do not read "Proposed" off the header and assume nothing has shipped.
 **Date:** 2026-07-31
-**Revision:** 4
+**Revision:** 5
 
 **Revision 2** corrected three claims from revision 1, all of which failed because new data arrived: the acceptance tally counted a query measured over a broken candidate pool, publication years *are* now in the payload, and the proposed breadth gate is not computable as specified.
 
@@ -14,6 +14,8 @@
 | watch click-position and zero-click rate for a week after the flip | **Underpowered by one to two orders of magnitude.** At 9.7 people searches/day a week is ~68 events; the same numbers need a quarter |
 
 **Revision 4 runs the census diff this document names as the primary acceptance evidence**, at the full candidate point `(α=0.5, W_HI=20, GRADED on, dampen=capped)` rather than `W_HI`/GRADED alone — see "After the flip" below. It is reach, not quality: it says how much changes, not whether the change is better. The blind panel is still the only thing that can answer that.
+
+**Revision 5 re-runs that census diff under PROD's actual posture and records the decision to ship.** `SEARCH_PEOPLE_FACULTY_PROMINENCE` is env-divergent (`off` on staging for its own A/B soak, `on` in prod), and it's an addend of the same outer sum as `dampen` — the code's own comment on that flag warns a staging-only read doesn't size the prod effect. Re-run with `SEARCH_PEOPLE_FACULTY_PROMINENCE:on` added to both arms: **89.1% of queries / 91.2% of events see a changed page 1; 37.1% / 34.8% get a new top result** — materially the same shape as the staging-posture read, so the extra faculty term doesn't change the conclusion. **Decision: B1+B3+B4 ship on this evidence (the census diff plus a targeted spot-check of `lung cancer`, #2072's known cost) rather than waiting for the formal blind judged panel.** That panel — two judges on the decisive four, the stratified quality set, the sealed holdout — was never run. This is a deliberate call to accept the census diff as sufficient, not a claim that the panel's acceptance criteria were met.
 **Authors:** Scholars Profile System development team
 **Supersedes:** —
 **Superseded by:** —
