@@ -1181,7 +1181,7 @@ export const AREA_BOOST_MID_FRAC = 0.2;
 /**
  * Cap on how many of the area's ranked scholars are pulled for the boost.
  *
- * #2097 — raised 200 → 500 on measurement. The list is sorted by the very quantity
+ * PR #2098 (tracking issue #2097) — raised 200 → 500 on measurement. The list is sorted by the very quantity
  * being boosted (`n²/total`) and then sliced, so the cap is an approximation error:
  * below the point where the page stops changing, it returns a different ranking than
  * the one the scoring intends. Measured on staging across the 10-query panel, both

@@ -900,18 +900,18 @@ specialist is tiered identically to the on-query specialist.
 Two further consequences of the tiering being **relative**: `frac = total / concentration[0].total`
 (`:1436`), so a skewed area pushes almost everyone to LO while a flat area puts many at HI. The same
 scholar can be HI in one area and LO in another with identical work. And `AREA_BOOST_TOP_N` (500 since
-#2097, previously 200) is a cliff — in arm 2 the candidates come from a `terms` agg ordered by
+PR #2098, previously 200) is a cliff — in arm 2 the candidates come from a `terms` agg ordered by
 `doc_count` (`:1502`), i.e. they are the highest-**volume** on-topic authors, reranked by concentration
 only afterwards. A genuinely concentrated low-volume specialist outside the cap by raw count gets
 exactly 0.
 
 ⚠ **The two arms truncate on different orderings, and only arm 1's was measured.** Arm 1
 (`CONCEPT_ARM_FIRST`, on in both envs) sorts by `n²/total` — the quantity being boosted — and then
-slices, so the cap there is an approximation error that closes as the cap grows; #2097 measured it
+slices, so the cap there is an approximation error that closes as the cap grows; PR #2098 measured it
 converging by 300 on every panel query and raised the cap to 500 on that basis. Arm 2 slices a
 **volume**-ordered list, so its cliff is not self-correcting in the same way: raising the cap admits
 more high-volume authors, which is not the same as admitting the concentrated specialists it excludes.
-The #2097 measurement does **not** cover arm 2, and a low-volume specialist can still score exactly 0
+The PR #2098 measurement does **not** cover arm 2, and a low-volume specialist can still score exactly 0
 there at any cap.
 
 `match=concept` filters but does not re-rank: `total` falls 919 -> 138 while the scores move by at most 3
