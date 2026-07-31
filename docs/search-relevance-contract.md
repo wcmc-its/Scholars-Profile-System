@@ -5,7 +5,7 @@ describe the pipeline — `docs/search-people-relevance.md` does that, layer by 
 assumes it.
 
 ```
-Verified against origin/master b837c8c6 — 2026-07-30
+Verified against origin/master b837c8c6 — 2026-07-30 (O9 and the O8/O5 amendments: 81045890, 2026-07-31)
 Every invariant below was checked in a worktree at that SHA. If HEAD has moved, re-ground before
 citing one:
   git log 98bea66a..origin/master -- lib/api/search.ts app/api/search/route.ts \
@@ -152,8 +152,12 @@ its own validation.
 observed reorder the composition of two effects with no way to attribute either. An effect size is
 reported with the state of every interacting flag attached.
 **[REVIEW]** Also: an effect measured on staging is not an effect in prod. Staging and prod differ on
-`SEARCH_PEOPLE_FACULTY_PROMINENCE`, `SEARCH_MESH_RESOLUTION_FALLBACK`, and the
-`mesh_curated_topic_anchor` row population (85 distinct in prod versus 349 in staging, #2016). The
+`SEARCH_PEOPLE_FACULTY_PROMINENCE`, `SEARCH_PEOPLE_AREA_BOOST_GRADED`,
+`SEARCH_PEOPLE_METHOD_FAMILY_TIER`, `SEARCH_MESH_RESOLUTION_FALLBACK`, and the
+`mesh_curated_topic_anchor` row population (85 distinct in prod versus 349 in staging, #2016). All
+four flags are on the `?flags=` allowlist, so staging can be made to serve prod's exact
+configuration; the anchor population is data and cannot be pinned, which makes it the residual on
+any staging-measured claim about prod. The
 last one is the sharpest: anchors determine which area is credited, so the two environments choose
 from different distributions.
 **[CHECK]** On staging, isolate a single lever without a deploy: `?flags=NAME:value,…` on
@@ -207,6 +211,42 @@ that trends **downward** as evidence rises, localises the violation. Then count 
 scholar outranking another who has more than 3× their matching publications. Both are computable from
 the search response alone, with no index access. A term proposed as evidence should move this
 measurement; if it does not, it is an admission signal wearing an ordering signal's clothes.
+
+🔴 **This [CHECK] is a smoke test, not an acceptance test, and it has produced a wrong verdict.** It
+measures evidence as tagged-publication count; where the resolved concept is broad, that count and
+career volume become nearly the same quantity, so **deleting any lever that ranks on an orthogonal
+signal scores as a large win.** On 2026-07-30 it recommended disabling the method-family tier by
+−153 inversion pairs, and reading three result pages reversed the verdict outright — with the tier
+off, every practitioner of the queried technique is evicted in favour of high-volume generalists.
+Never ship on this number alone; adjudicate on pages. A change whose gain sits in the tail of a
+20-row result, where the aggregate improves and the visible top 3 is byte-identical, has not been
+shown to help anyone.
+
+**O9. A magnitude is assembled from ONE population.** A term that orders by "how much evidence" must
+count one kind of thing across every candidate it compares. `evidenceLines[kind == "publications"]`
+carries a `strength` discriminator with **three** values (`lib/api/result-evidence.ts:129`):
+
+| `strength` | means | carries `count`? |
+| --- | --- | --- |
+| `tagged` | the publication carries the resolved MeSH descriptor | yes (`:558`) |
+| `concept` | the MeSH-expansion text variant | **no** (`:574-585`) |
+| `mention` | the publication's free text contains the query string | yes (`:598`) |
+
+Within one hit these are mutually exclusive — `selectEvidenceLines` pushes the `mention` line only when
+no method, tagged or topic line fired — so the hazard is not a sum inside a scholar. It is a **column
+assembled across candidates**: a magnitude read by `kind` takes a MeSH count from one scholar and a
+free-text keyword count from the next, and orders them against each other.
+**[CHECK]** Filter to `strength == "tagged"`. Treat a `concept`-strength hit as **unknown**, never as
+zero — it is concept evidence with no count, so a consumer that defaults it to 0 silently ranks a
+matching scholar last. Measured 2026-07-31 across the 10-query panel: eight queries are 100% `tagged`,
+and only `longevity` (10 mention / 8 tagged) and `crispr` (6 / 4) mix — the two with the thinnest
+descriptor coverage, so the defect is invisible on most probes and maximally damaging on the rest.
+Reading the column by `kind` put a cardiac electrophysiologist first for `longevity` on six
+*device-battery*-longevity mentions.
+
+This is **O1 restated for counts**: a `mention` count is keyed on the query's literal string rather
+than its resolved concept, which is the surface-form defect with a magnitude's lever behind it. Use
+O1's standing-pair discipline to check it.
 
 ## Layer 3 — Evidence display
 
@@ -285,7 +325,7 @@ with no violations listed is either new or not being read.
 | O2   | Concentration boost credits area membership via a bare `terms: {cwid}` filter                          | Fixed behind `SEARCH_PEOPLE_CONCEPT_ARM_FIRST` — **on in both envs**; prod flipped 2026-07-30 (#2018/#2079). The descriptor-keyed arm is tried first, but its magnitude is still quantised to three bands — see O8 |
 | O3   | `ln1p(publicationCount)` is unfiltered and unbounded; worth 2.01× across a measured top 40             | Ceiling shipped behind `SEARCH_PEOPLE_PUBCOUNT_DAMPEN=capped`, default off, topic/hybrid/unclassified only, spine pins it off (#2068) |
 | O7   | Attribution ×1.5 and the method tier ×2.0 sit in one multiply block and can both fire on the same publication, compounding to ×3.0 from one paper; `methodFamily` is not even joined to the papers that produced the descriptor match | Open — no flag isolates it; the composition is intentional and documented in `lib/search.ts`, the shared-publication case is not |
-| O8   | Every query-derived ordering term is a presence test; the only continuous term is career-total volume. A scholar with 318 publications tagged to the queried descriptor ranks 15th while one with 13 ranks first | Open, but the missing magnitude **already exists and is live**: the concept arm scores `n²/total` from two publications-index aggs over `meshDescriptorUi ∩ wcmAuthorCwids` (`getConceptScholarConcentration`; both fields already indexed, no reindex), on in both envs since 2026-07-30. `buildAreaBoostFunctions` then quantises it to three membership bands by fraction-of-max, so a 200-paper specialist and a 3-paper one share a band whenever both clear 0.5× of the top. Computed over the right corpus at query time, discarded one step before use. ⚠ The curated arm's `scorePublication` is **not** the vehicle — it sums over `PublicationTopic` (4.9% of authored pmids, median per-scholar ratio 0) and weights each paper by impact, authorship and type rather than counting it once |
+| O8   | Every query-derived ordering term is a presence test; the only continuous term is career-total volume. A scholar with 318 publications tagged to the queried descriptor ranks 15th while one with 13 ranks first | Open, but the missing magnitude **already exists and is live**: the concept arm scores `n²/total` from two publications-index aggs over `meshDescriptorUi ∩ wcmAuthorCwids` (`getConceptScholarConcentration`; both fields already indexed, no reindex), on in both envs since 2026-07-30. `buildAreaBoostFunctions` then quantises it to three membership bands by fraction-of-max, so a 200-paper specialist and a 3-paper one share a band whenever both clear 0.5× of the top. Computed over the right corpus at query time, discarded one step before use. ⚠ The curated arm's `scorePublication` is **not** the vehicle — it sums over `PublicationTopic` (4.9% of authored pmids, median per-scholar ratio 0) and weights each paper by impact, authorship and type rather than counting it once. **✅ The binding constraint is now measured: it is the CEILING, not the banding.** `buildAreaBoostFunctions` bounds the emitted weight by `AREA_BOOST_W_HI`, default **3**, in a sum where the unbounded volume prior alone spans 2.01×. Sweeping `SEARCH_AREA_BOOST_W_HI` via `?flags=` at prod parity (7 weights × 10 queries, `total` byte-identical on all 70 captures): at the default the median tagged-publication count in a disease query's top 10 is 27; at `W_HI=20` it is 187, and the page reaches scholars that were not in the fetched 20 at all. `aging` moves 8 → 11. ⚠ The `cancer` figure (32 → 168) is **struck as evidence**: that query's candidate pool is truncated by the descendant cap (#2096 — 161 of 587 broad descriptors keep only 200 of their descendants, and `Neoplasms` loses every by-site subtree), so it measures a magnitude ordering over a broken pool. Any broad-query claim is provisional until #2096 lands. ⚠ `AREA_BOOST_TOP_N = 200` is harmless at `W_HI=3` and becomes a **correctness boundary** at 20; it is sweepable on staging via `SEARCH_AREA_BOOST_TOP_N` (#2095) and must be checked before a flip. **No reindex is required for concept magnitude** — see [`ADR-011`](./ADR-011-concept-magnitude-unquantise.md). This also explains why `SEARCH_PEOPLE_AREA_BOOST_GRADED` measured "worse alone": grading a magnitude into a range the ceiling has already collapsed reorders within bands that are all worth about the same. The two flags are one change |
 | E1a  | `topic` line named the FIRST of the scholar's own areas that intersects the match, not the best-evidenced | **Fixed** — `pickMatchedAreaIndex`, degrades to the old rule without `areaCounts` |
 | E1b  | `topic` evidence line renders an index-time area total as query evidence                               | Open — the count is still `areaCounts`, never query-filtered                        |
 | E2b  | `topic` line divides by `pubCount` while its numerator is carved                                       | **Fixed** — the line states a magnitude, no share (see below)                       |
@@ -321,6 +361,8 @@ searched.
 - `docs/search-evidence-rows.md` and `docs/scholar-card-evidence-rows-spec.md` — evidence-row
   surface specs. Layer 3 above governs what those rows may claim; it does not restate their contents.
 - `docs/taxonomy-aware-search.md` — resolution and the curated taxonomy.
+- `docs/ADR-011-concept-magnitude-unquantise.md` — the decision to raise the concept-magnitude
+  ceiling rather than index a new one, and the measurement behind O9 and the O8 register row.
 
 ## Scope
 
