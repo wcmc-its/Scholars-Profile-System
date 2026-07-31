@@ -22,6 +22,30 @@ Companion to [`search.md`](./search.md) (how ranking is computed) — this doc i
 | `concept` | **Concept** | expanded MeSH concept match (#1337 relabeled the former "tagged") |
 | `keyword` | **Keyword** | literal mention |
 
+## Publication years in the payload (#2095)
+
+Evidence lines carry an optional **`latestYear`** — the most recent year among the publications that
+line counts — and a hit carries **`mostRecentYear`**, the scholar's latest publication on *any*
+subject. Both are **instrumentation, not ranking inputs**; nothing orders on them today, and nothing
+may start to without its own issue. They exist because relevance judges could not tell from the
+payload that a scholar's matching work was from 1982-89 — one had to check PubMed by hand.
+
+Three properties that matter to anyone consuming them:
+
+- **Absent means UNKNOWN, never 0 and never the current year.** The key is omitted rather than
+  defaulted. Any consumer that coerces a missing year into a number reintroduces exactly the class of
+  defect contract rule **O9** exists to prevent.
+- 🔴 **`latestYear` reaches `/api/search`, not the rendered `/search` page.** Under
+  `SEARCH_PEOPLE_REASON_FROM_DOC` (on in **both** deployed envs) the tagged count is served from
+  `_source.meshSubtreeCounts`, a precomputed count map that carries no years — so the SSR page renders
+  a tagged line with no year while the API returns one. Relevance panels read the API and get years;
+  **do not conclude from the rendered page that years are missing.** Closing the gap means indexing
+  years into `meshSubtreeCounts`, i.e. a reindex.
+- ⚠ **`mostRecentYear` and `latestYear` are different clocks.** `mostRecentYear` derives from
+  `mostRecentPubDate`, built from `dateAddedToEntrez`; `latestYear` is a max over the index's `year`
+  (= `Publication.year`). They skew by 0-2 years and **must not be differenced** to judge whether a
+  scholar's on-topic work has gone stale.
+
 ## Evidence rows — the three disclosures
 
 Flag: `SEARCH_EVIDENCE_ROWS` (`resolveSearchEvidenceRows`, `lib/api/search-flags.ts`). Env state: **staging `on`, prod `off`** (`cdk/lib/app-stack.ts` — `env === "staging" ? "on" : "off"`). Off ⇒ the fetchers return empty and the rows never render, so prod is inert and the routes can't be probed for data early.

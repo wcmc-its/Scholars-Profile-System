@@ -1,4 +1,4 @@
-# docs/ADR-011 — Unquantise the concept magnitude the system already computes
+# docs/ADR-011 — Raise the ceiling on the concept magnitude the system already computes
 
 **Status:** **Partially accepted** — B1/B2/B3/B4 are proposed and unjudged, but parts of this record are already in production: #2095 (instrumentation) is merged, and #2098 raised the `AREA_BOOST_TOP_N` default 200 → 500, which changes prod ranking. Do not read "Proposed" off the header and assume nothing has shipped.
 **Date:** 2026-07-31
@@ -44,7 +44,7 @@ concentration = n² / total          # count × on-topic fraction
 
 `SEARCH_PEOPLE_CONCEPT_ARM_FIRST` is `"on"` unconditionally (`cdk/lib/app-stack.ts:1816`, prod flipped 2026-07-30), so this is what production runs today.
 
-`buildAreaBoostFunctions` (`lib/api/search.ts:1506`) then emits it into the outer prominence `function_score` as **additive per-cwid clauses** — `{ filter: { terms: { cwid: [...] } }, weight: w }` — after quantising it: three fraction-of-max bands by default, or `AREA_BOOST_GRADED_BANDS` graded steps under `SEARCH_PEOPLE_AREA_BOOST_GRADED`. Either way the weight is bounded by `AREA_BOOST_W_HI`, whose default is **3**.
+`buildAreaBoostFunctions` (`lib/api/search.ts:1506`) then emits it into the outer prominence `function_score` as **additive per-cwid clauses** — `{ filter: { terms: { cwid: [...] } }, weight: w }` — after quantizing it: three fraction-of-max bands by default, or `AREA_BOOST_GRADED_BANDS` graded steps under `SEARCH_PEOPLE_AREA_BOOST_GRADED`. Either way the weight is bounded by `AREA_BOOST_W_HI`, whose default is **3**.
 
 So the pipeline is complete end to end. The magnitude is computed over the right corpus, keyed on the resolved descriptor, attached to the right scholars, and delivered additively into the score — and then flattened into a weight that cannot exceed 3, in a sum where the unbounded volume prior spans 2.01×. O8's register row already said it: *"Computed over the right corpus at query time, discarded one step before use."*
 
@@ -153,7 +153,7 @@ Beyond being unbuildable as specified, it was unnecessary: the additive per-cwid
 
 ## Decision
 
-**Do not fund a `rank_features` reindex for concept counts.** Raise the ceiling on the magnitude the system already computes, and stop quantising it.
+**Do not fund a `rank_features` reindex for concept counts.** Raise the ceiling on the magnitude the system already computes, and stop quantizing it.
 
 ⚠ **These blocks are not all independently landable, and revision 1's claim that they were is withdrawn.** B0 and B2 are independent. **B1, B3 and B4 are one shipment** — B4 because the number that explains the reorder must reach the card the same day, B3 because landing it afterwards would invalidate the `W_HI` the acceptance panel had just accepted. Each block below says which it is.
 
