@@ -46,6 +46,7 @@ import {
   matchQueryToTaxonomy,
   normalizeForMatch,
   resolveMeshDescriptor,
+  resolveQueryTaxonomy,
   suggestMeshConcepts,
 } from "@/lib/api/search-taxonomy";
 import {
@@ -1986,5 +1987,49 @@ describe("resolveMeshDescriptor — acronym wrong-sense guard (#1346, SEARCH_ACR
     mockMeshFindMany.mockResolvedValue([D_AUTO]);
     const r = await resolveMeshDescriptor("CAR");
     expect(r?.descriptorUi).toBe("D001332");
+  });
+});
+
+/**
+ * Issue #2115 — `resolveQueryTaxonomy` is the extraction of the retry composition
+ * previously duplicated (and, on the SSR page, drifted — missing the #1980 guard
+ * entirely) between `app/api/search/route.ts` and `app/(public)/search/page.tsx`.
+ * Exercised here directly against real DB-mocked fixtures (not the route/page) so
+ * both call sites now share one, tested implementation.
+ */
+describe("resolveQueryTaxonomy (#2115) — #1980 stripKeptEnough guard", () => {
+  const D_KIDNEY = {
+    descriptorUi: "D007668",
+    name: "Kidney",
+    entryTerms: [],
+    scopeNote: null,
+    dateRevised: null,
+    localPubCoverage: null as number | null,
+    treeNumbers: ["A05.810.453"],
+  };
+
+  beforeEach(() => {
+    process.env.SEARCH_GENERIC_TERM_DEMOTE = "resolve";
+    mockMeshFindMany.mockResolvedValue([D_KIDNEY]);
+  });
+
+  afterEach(() => {
+    delete process.env.SEARCH_GENERIC_TERM_DEMOTE;
+  });
+
+  it("rejects an over-aggressive strip: 2-of-3 tokens removed stays unresolved", async () => {
+    // "disease" and "effects" are both deprioritized filler; stripping them from a
+    // 3-token query keeps only 1 (kidney), well under half — #1980 must reject the
+    // retry even though "kidney" alone resolves cleanly.
+    const { taxonomyMatch } = await resolveQueryTaxonomy("kidney disease effects");
+    expect(taxonomyMatch.meshResolution).toBeNull();
+  });
+
+  it("admits a modest strip: 1-of-2 tokens removed adopts the retry", async () => {
+    // Only "disease" is filler here; stripping it keeps 1 of 2 tokens (exactly half),
+    // which the guard's `removedCount * 2 <= totalCount` admits.
+    const { taxonomyMatch } = await resolveQueryTaxonomy("kidney disease");
+    expect(taxonomyMatch.meshResolution?.descriptorUi).toBe("D007668");
+    expect(taxonomyMatch.meshResolution?.confidence).toBe("exact");
   });
 });

@@ -23,8 +23,8 @@ import {
   type FundingStatus,
 } from "@/lib/api/search-funding";
 import {
-  matchQueryToTaxonomy,
   resolveMeshDescriptor,
+  resolveQueryTaxonomy,
   buildMatchAwareContext,
   DESCENDANT_HARD_CAP,
   type TaxonomyMatchResult,
@@ -176,48 +176,14 @@ async function handleSearch(request: NextRequest) {
     }
     taxonomyMatch = { state: "none", meshResolution: mesh };
   } else {
-    taxonomyMatch = await matchQueryToTaxonomy(q);
-    // Issue #692 §4.1 — full query first; only on a complete MISS (no curated
-    // match AND no MeSH descriptor) retry against the stripped content query.
-    // Full-first protects descriptors built from filler ("gene therapy",
-    // "clinical trial") — those resolve on the first call and never reach here.
-    // #1972 — a `partial` does NOT count as resolved here. Letting it satisfy this guard
-    // suppressed the retry entirely whenever SEARCH_MESH_RESOLUTION_FALLBACK was on,
-    // demoting queries whose stripped form resolves verbatim ("chronic fatigue" → strip
-    // `chronic` → `fatigue` → exact).
-    if (
-      genericStripped &&
-      taxonomyMatch.state === "none" &&
-      meshConfidenceRank(taxonomyMatch.meshResolution?.confidence) < MESH_RANK_VERBATIM
-    ) {
-      const retry = await matchQueryToTaxonomy(contentQuery);
-      const current = taxonomyMatch.meshResolution;
-      if (current === null || isAllDeprioritized(current.matchedForm)) {
-        // Nothing resolved, or the window that resolved was pure filler and carries none
-        // of the query's meaning (`cancer research` → `Research`). Pre-#1972 behavior.
-        // #1980 — same unguarded arm as the mesh-only path above. Gates the WHOLE
-        // adoption, not just its MeSH half: `taxonomyMatch = retry` also swaps in the
-        // curated match, and a strip destructive enough to ruin the descriptor makes the
-        // curated reading of the same wreckage equally suspect. Conservative on purpose —
-        // measurement can relax it to the MeSH arm alone.
-        if (
-          stripKeptEnough &&
-          (retry.state === "matches" ||
-            meshConfidenceRank(retry.meshResolution?.confidence) >
-              meshConfidenceRank(current?.confidence))
-        ) {
-          taxonomyMatch = retry;
-        }
-      } else if (
-        // #1972 — the window held real content, so it IS an interpretation. The retry
-        // resolves a shorter query, so adopting it wholesale swaps the concept: measured,
-        // that demotes `Stem Cells` → `Microscopy, Electron, Scanning Transmission` and
-        // `Kidney Diseases` → `Kidney`. Take the confidence, keep the concept.
-        meshRetryIsSameDescriptorUpgrade(current, retry.meshResolution)
-      ) {
-        taxonomyMatch = { ...taxonomyMatch, meshResolution: retry.meshResolution };
-      }
-    }
+    // Issue #2115 — the full resolution (initial match + the #692/#1972/#1980
+    // generic-term-strip retry) is shared with the SSR page via
+    // `resolveQueryTaxonomy`, so this branch's logic can't drift out of sync
+    // with the page's copy again. `genericStripped`/`contentQuery`/
+    // `stripKeptEnough` above are still consumed by the mesh-only branch and
+    // the response body below; `resolveQueryTaxonomy` recomputes its own copy
+    // internally rather than taking them as params.
+    ({ taxonomyMatch } = await resolveQueryTaxonomy(q));
   }
   const taxonomyMatchMs = Date.now() - taxonomyStart;
   // Server-Timing `taxonomy` span desc — names the resolver actually run

@@ -54,12 +54,22 @@ import {
   resolveMeshTokenCoverageEnabled,
   resolveMeshQueryNormalizationEnabled,
   resolveAcronymSenseGuardEnabled,
+  resolveGenericTermMode,
 } from "@/lib/api/search-flags";
 import {
   isMethodPagesEnabled,
   isMethodFamilySynonymsEnabled,
 } from "@/lib/profile/methods-lens-flags";
-import { isAllDeprioritized } from "@/lib/api/deprioritized-terms";
+import {
+  stripDeprioritized,
+  isAllDeprioritized,
+} from "@/lib/api/deprioritized-terms";
+import {
+  meshConfidenceRank,
+  MESH_RANK_VERBATIM,
+  meshRetryIsSameDescriptorUpgrade,
+  meshStripRemovedAtMostHalf,
+} from "@/lib/search";
 import { familySynonymKeys } from "@/lib/methods/family-synonyms";
 import {
   loadFamilyOverlayGate,
@@ -841,6 +851,82 @@ export async function matchQueryToTaxonomy(
     totalMatched,
     methodMatches,
   };
+}
+
+/**
+ * Issue #2115 — the full taxonomy resolution used by the people/SSR path: the
+ * initial {@link matchQueryToTaxonomy} call, plus the #692/#1972/#1980 generic-
+ * term-strip retry. Shared by `app/api/search/route.ts`'s non-mesh-only branch
+ * and `app/(public)/search/page.tsx` so this logic can't drift between the two
+ * again — the SSR page's copy was previously missing #1980's `stripKeptEnough`
+ * guard, letting an over-aggressive strip's retry get adopted unconditionally.
+ *
+ * Perf #1406's mesh-only arm (publications/funding branches, `resolveMeshDescriptor`)
+ * is a deliberately different, cheaper resolution path and does NOT go through
+ * this function — see route.ts's `meshOnlyResolution` branch.
+ */
+export async function resolveQueryTaxonomy(
+  q: string,
+): Promise<{ taxonomyMatch: TaxonomyMatchResult; taxonomyMatchMs: number }> {
+  const start = Date.now();
+  // Issue #692 — generic-term demotion. Strip deprioritized filler tokens once
+  // up front; `removed` is empty when nothing was stripped (incl. the
+  // never-strip-to-empty case), so the resolution retry below is inert unless
+  // there is a real content/full split.
+  const genericTermMode = resolveGenericTermMode();
+  const { contentQuery, removed: genericRemoved } = stripDeprioritized(q);
+  const genericStripped = genericTermMode !== "off" && genericRemoved.length > 0;
+  // #1980 — did the strip keep enough of the query for its result to be adopted when
+  // NOTHING resolved? Counted off `q` rather than `contentQuery` so the denominator is
+  // what the user actually typed, independent of `stripDeprioritized`'s internals.
+  const stripKeptEnough = meshStripRemovedAtMostHalf(
+    genericRemoved.length,
+    q.trim().split(/\s+/).filter(Boolean).length,
+  );
+
+  let taxonomyMatch = await matchQueryToTaxonomy(q);
+  // Issue #692 §4.1 — full query first; only on a complete MISS (no curated
+  // match AND no MeSH descriptor) retry against the stripped content query.
+  // Full-first protects descriptors built from filler ("gene therapy",
+  // "clinical trial") — those resolve on the first call and never reach here.
+  // #1972 — a `partial` does NOT count as resolved here. Letting it satisfy this guard
+  // suppressed the retry entirely whenever SEARCH_MESH_RESOLUTION_FALLBACK was on,
+  // demoting queries whose stripped form resolves verbatim ("chronic fatigue" → strip
+  // `chronic` → `fatigue` → exact).
+  if (
+    genericStripped &&
+    taxonomyMatch.state === "none" &&
+    meshConfidenceRank(taxonomyMatch.meshResolution?.confidence) < MESH_RANK_VERBATIM
+  ) {
+    const retry = await matchQueryToTaxonomy(contentQuery);
+    const current = taxonomyMatch.meshResolution;
+    if (current === null || isAllDeprioritized(current.matchedForm)) {
+      // Nothing resolved, or the window that resolved was pure filler and carries none
+      // of the query's meaning (`cancer research` → `Research`). Pre-#1972 behavior.
+      // #1980 — same unguarded arm as the mesh-only path in route.ts. Gates the WHOLE
+      // adoption, not just its MeSH half: `taxonomyMatch = retry` also swaps in the
+      // curated match, and a strip destructive enough to ruin the descriptor makes the
+      // curated reading of the same wreckage equally suspect. Conservative on purpose —
+      // measurement can relax it to the MeSH arm alone.
+      if (
+        stripKeptEnough &&
+        (retry.state === "matches" ||
+          meshConfidenceRank(retry.meshResolution?.confidence) >
+            meshConfidenceRank(current?.confidence))
+      ) {
+        taxonomyMatch = retry;
+      }
+    } else if (
+      // #1972 — the window held real content, so it IS an interpretation. The retry
+      // resolves a shorter query, so adopting it wholesale swaps the concept: measured,
+      // that demotes `Stem Cells` → `Microscopy, Electron, Scanning Transmission` and
+      // `Kidney Diseases` → `Kidney`. Take the confidence, keep the concept.
+      meshRetryIsSameDescriptorUpgrade(current, retry.meshResolution)
+    ) {
+      taxonomyMatch = { ...taxonomyMatch, meshResolution: retry.meshResolution };
+    }
+  }
+  return { taxonomyMatch, taxonomyMatchMs: Date.now() - start };
 }
 
 /**

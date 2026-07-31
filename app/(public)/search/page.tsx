@@ -58,10 +58,7 @@ import {
 } from "@/lib/api/search-flags";
 import { resolveAreaConcentration } from "@/lib/api/area-concentration";
 import { isFullQueryMeshMatch } from "@/lib/api/normalize";
-import {
-  stripDeprioritized,
-  isAllDeprioritized,
-} from "@/lib/api/deprioritized-terms";
+import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
 import { isResearchMatchEvidence } from "@/lib/api/result-evidence";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
@@ -77,12 +74,7 @@ import {
   type PublicationsSort,
   type SearchFacetBucket,
 } from "@/lib/api/search";
-import {
-  meshMatchTier,
-  meshConfidenceRank,
-  MESH_RANK_VERBATIM,
-  meshRetryIsSameDescriptorUpgrade,
-} from "@/lib/search";
+import { meshMatchTier } from "@/lib/search";
 import {
   searchFunding,
   type FundingFilters,
@@ -95,12 +87,11 @@ import { FundingResultsList } from "@/components/search/funding-results-list";
 import { InvestigatorFacet } from "@/components/search/investigator-facet";
 import { getAZBuckets } from "@/lib/api/browse";
 import {
-  matchQueryToTaxonomy,
+  resolveQueryTaxonomy,
   buildMatchAwareContext,
   type MeshResolution,
   type TaxonomyMatchResult,
 } from "@/lib/api/search-taxonomy";
-import { timed } from "@/lib/api/search-timing";
 import { cachedReasonAgg, badgeCountKey } from "@/lib/api/reason-agg-cache";
 import { prisma } from "@/lib/db";
 import { logSearchDegraded } from "@/lib/analytics/errors";
@@ -228,13 +219,20 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // Issue #294 PR-5 — time the taxonomy resolver. `taxonomyMatchMs` is null
   // when q is under 3 chars: the resolver call is skipped entirely, so the
   // log records "skipped" rather than a misleading ~0ms measurement.
-  const [azBuckets, taxonomyTimed, peopleClassifierSets] = await Promise.all([
+  //
+  // Issue #2115 — the resolution itself (initial match + the #692/#1972/#1980
+  // generic-term-strip retry, including the #1980 `stripKeptEnough` guard that
+  // was previously missing here) now lives in the shared `resolveQueryTaxonomy`,
+  // so this page can't drift out of sync with `/api/search/route.ts` again.
+  // `taxonomyMatchMs` now spans the whole resolution (incl. any retry), same
+  // definition the route handler already used.
+  const [azBuckets, taxonomyResolved, peopleClassifierSets] = await Promise.all([
     showAZ ? getAZBuckets() : Promise.resolve(null),
     q.trim().length >= 3
-      ? timed(() => matchQueryToTaxonomy(q))
+      ? resolveQueryTaxonomy(q)
       : Promise.resolve({
-          result: { state: "none" as const, meshResolution: null },
-          ms: null,
+          taxonomyMatch: { state: "none" as const, meshResolution: null },
+          taxonomyMatchMs: null,
         }),
     // Perf — boot-cached classifier sets fetched in parallel with the
     // taxonomy resolver rather than sequentially after it. The two are
@@ -244,45 +242,14 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // Issue #692 — generic-term demotion on the SSR path (mirrors the
   // /api/search route) so the server-rendered result set ranks + highlights
   // identically to a subsequent client fetch. `removed` is empty (incl. the
-  // never-strip-to-empty case) when nothing was stripped, so the resolution
-  // retry and `genericDemote` both stay inert.
+  // never-strip-to-empty case) when nothing was stripped, so `genericDemote`
+  // stays inert. `contentQuery` also drives the highlight/fallback fields below.
   const genericTermMode = resolveGenericTermMode();
   const { contentQuery, removed: genericRemoved } = stripDeprioritized(q);
-  const genericStripped = genericTermMode !== "off" && genericRemoved.length > 0;
   const genericDemote = genericTermMode === "on" && genericRemoved.length > 0;
 
-  let taxonomyMatch = taxonomyTimed.result;
-  const taxonomyMatchMs = taxonomyTimed.ms;
-  // Issue #692 §4.1 — full query first; only on a complete MISS (no curated
-  // match AND no MeSH descriptor) retry against the stripped content query.
-  // Full-first protects descriptors built from filler ("gene therapy").
-  // #1972 — a `partial` does NOT count as resolved here (mirrors /api/search). It is the
-  // window fallback's guess, and letting it satisfy this guard suppressed the retry
-  // whenever SEARCH_MESH_RESOLUTION_FALLBACK was on.
-  if (
-    genericStripped &&
-    taxonomyMatch.state === "none" &&
-    meshConfidenceRank(taxonomyMatch.meshResolution?.confidence) < MESH_RANK_VERBATIM
-  ) {
-    const retry = await matchQueryToTaxonomy(contentQuery);
-    const current = taxonomyMatch.meshResolution;
-    if (current === null || isAllDeprioritized(current.matchedForm)) {
-      // Nothing resolved, or the resolved window was pure filler. Pre-#1972 behavior.
-      if (
-        retry.state === "matches" ||
-        meshConfidenceRank(retry.meshResolution?.confidence) >
-          meshConfidenceRank(current?.confidence)
-      ) {
-        taxonomyMatch = retry;
-      }
-    } else if (
-      // #1972 — the window held real content, so a retry on the stripped query may only
-      // raise its CONFIDENCE, never swap the concept (mirrors /api/search).
-      meshRetryIsSameDescriptorUpgrade(current, retry.meshResolution)
-    ) {
-      taxonomyMatch = { ...taxonomyMatch, meshResolution: retry.meshResolution };
-    }
-  }
+  const taxonomyMatch = taxonomyResolved.taxonomyMatch;
+  const taxonomyMatchMs = taxonomyResolved.taxonomyMatchMs;
 
   // Issue #259 §1.11 / §6.2 — `?mesh` URL contract. Three states:
   //   absent     → default expanded mode (chip renders narrow + broaden affordances)

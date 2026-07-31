@@ -12,7 +12,15 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
-import { DESCENDANT_HARD_CAP } from "@/lib/api/search-taxonomy";
+import { DESCENDANT_HARD_CAP, type TaxonomyMatchResult } from "@/lib/api/search-taxonomy";
+import {
+  meshConfidenceRank,
+  MESH_RANK_VERBATIM,
+  meshRetryIsSameDescriptorUpgrade,
+  meshStripRemovedAtMostHalf,
+} from "@/lib/search";
+import { stripDeprioritized, isAllDeprioritized } from "@/lib/api/deprioritized-terms";
+import { resolveGenericTermMode } from "@/lib/api/search-flags";
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -93,13 +101,53 @@ const RESOLUTIONS: Record<string, ReturnType<typeof mesh> | null> = {
 vi.mock("@/lib/api/search-taxonomy", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api/search-taxonomy")>();
   const resolve = async (q: string) => RESOLUTIONS[q.trim().toLowerCase()] ?? null;
+  const matchQueryToTaxonomy = async (q: string): Promise<TaxonomyMatchResult> => ({
+    state: "none" as const,
+    meshResolution: await resolve(q),
+  });
   return {
     ...actual,
     resolveMeshDescriptor: vi.fn(resolve),
-    matchQueryToTaxonomy: vi.fn(async (q: string) => ({
-      state: "none" as const,
-      meshResolution: await resolve(q),
-    })),
+    matchQueryToTaxonomy: vi.fn(matchQueryToTaxonomy),
+    // Issue #2115 — `resolveQueryTaxonomy` (the real, extracted composition) calls
+    // `matchQueryToTaxonomy` as a bare in-module reference, which a `vi.mock` of
+    // this same module cannot intercept (self-calls bypass the mocked export).
+    // Reproduce its composition here against the mocked `matchQueryToTaxonomy`
+    // above, using the REAL (unmocked) guard helpers — so the #1972/#1980 rules
+    // under test still run for real; only the underlying resolution lookup is
+    // fixture-driven. `resolveQueryTaxonomy`'s own implementation is covered
+    // directly (DB-mocked, not module-mocked) in search-taxonomy.test.ts.
+    resolveQueryTaxonomy: vi.fn(async (q: string) => {
+      const genericTermMode = resolveGenericTermMode();
+      const { contentQuery, removed: genericRemoved } = stripDeprioritized(q);
+      const genericStripped = genericTermMode !== "off" && genericRemoved.length > 0;
+      const stripKeptEnough = meshStripRemovedAtMostHalf(
+        genericRemoved.length,
+        q.trim().split(/\s+/).filter(Boolean).length,
+      );
+      let taxonomyMatch = await matchQueryToTaxonomy(q);
+      if (
+        genericStripped &&
+        taxonomyMatch.state === "none" &&
+        meshConfidenceRank(taxonomyMatch.meshResolution?.confidence) < MESH_RANK_VERBATIM
+      ) {
+        const retry = await matchQueryToTaxonomy(contentQuery);
+        const current = taxonomyMatch.meshResolution;
+        if (current === null || isAllDeprioritized(current.matchedForm)) {
+          if (
+            stripKeptEnough &&
+            (retry.state === "matches" ||
+              meshConfidenceRank(retry.meshResolution?.confidence) >
+                meshConfidenceRank(current?.confidence))
+          ) {
+            taxonomyMatch = retry;
+          }
+        } else if (meshRetryIsSameDescriptorUpgrade(current, retry.meshResolution)) {
+          taxonomyMatch = { ...taxonomyMatch, meshResolution: retry.meshResolution };
+        }
+      }
+      return { taxonomyMatch, taxonomyMatchMs: 0 };
+    }),
   };
 });
 
