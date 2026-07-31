@@ -152,7 +152,7 @@ ADRs capture decisions and their rationale; reach for these when a colleague ask
 | [`ADR-007`](./ADR-007-csp-script-src-strategy.md) | CSP `script-src` strategy |
 | [`ADR-008`](./ADR-008-infrastructure-as-code.md) | Infrastructure-as-Code: AWS CDK, TypeScript, in-repo, six stacks (count superseded — nine stacks today) |
 | [`ADR-009`](./ADR-009-database-role-separation.md) | Database role separation: `app_rw` DML-only, `sps_migrate` for DDL (accepted 2026-05-30) |
-| ADR-010 | **Number not in use on `master`.** Reserved by an unmerged branch (`docs/adr-010-anchor-relation-semantics`); the gap between 009 and 011 is deliberate, not a lost file. |
+| [`ADR-010`](./ADR-010-topic-anchor-relation-semantics.md) | Topic anchors: the unvetted second hop — curated lay-term→descriptor mappings are vetted, but descriptor→research-area is not, so a wide anchor (e.g. `Radiology`) injects a whole area at full weight. **Proposed**, undecided — recommends F+B (store the lay term, add a graded `applied_weight`) plus a tier-gate fix, but adopting nothing is also legitimate per the doc |
 | [`ADR-011`](./ADR-011-concept-magnitude-ceiling.md) | Concept magnitude in People ranking: raise the ceiling on the magnitude the system already computes rather than index a new one — **partially accepted**, parts already in production (see the doc's Status header) |
 
 ## 8. How key features behave (for "why does it do that?")
