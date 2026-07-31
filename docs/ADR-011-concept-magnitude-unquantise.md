@@ -284,6 +284,25 @@ Once the ranked quantity is the concept count, the displayed number and the rank
 
   ⚠ **Do not predict a verdict from median-N in the top 10.** It found the knee correctly and got 4 of 10 verdicts wrong, because it is blind to ordering *within* a page whose membership does not change. It is a weight-locating instrument, not an acceptance test.
 
+### What the query log says about this system, and why it changes the method
+
+Measured from `/aws/ecs/sps-app-prod`, 90 days:
+
+| | |
+|---|---|
+| people `search_query` events | **877** (9.7/day) |
+| distinct query strings | **314** |
+| shape mix (event-weighted) | topic 58.3%, unclassified 28.0%, name 6.4%, hybrid 4.5%, department 2.5% |
+| topic/unclassified queries resolving **no** descriptor | 26 of 245 replayed — **10.6%** |
+
+Two consequences, and the second is the more useful one.
+
+**Online metrics cannot adjudicate this change.** At 9.7 people searches a day, a one-week watch window sees roughly **68 searches**, and clicks are a subset of that. No click-position distribution or zero-click rate computed over 68 events will distinguish a real ranking improvement from noise. Any section of this document that proposes watching an online metric for a week is proposing something underpowered by one to two orders of magnitude; see "After the flip", which is corrected accordingly.
+
+**But the query space is small enough to enumerate, which is strictly better.** 314 distinct queries is not a sample problem — it is a *census*. Every real query this system has served in a quarter can be replayed against two arms and diffed, offline, in minutes. That is a stronger claim than any panel or any online metric can support: not "ten hand-picked queries improved" but "here is every query a user actually issued, and here is exactly which pages changed and how."
+
+The truncation-rate measurement already ran this way and covered 92% of events / 96% of distinct queries in a single pass with zero request errors. **The acceptance evidence for B1 should be a census diff, with the panels used to judge the pages the census flags as changed** — the panel's job becomes adjudicating a shortlist rather than estimating a population. This does not remove the need for the holdout: the census says *what* changed, human judgement still says whether the change is better.
+
 ### The acceptance panel needs a held-out set
 
 🔴 **The same ten queries located the `W_HI` knee, will locate α and the dampen setting, and are then proposed as the acceptance test. That is tuning and evaluating on one set**, and with three continuous parameters fitted on ten hand-picked observations it will report a win whether or not one exists.
@@ -307,15 +326,19 @@ Roughly ten extra judgements buys that.
 
 **Rollback is one deploy, and saying so is the point.** All four levers live in the `sps-app-<env>` task-def env, not the image, so reverting is a task-def change and a `cdk deploy Sps-App-prod` — no rebuild, no reindex, no data migration. On staging they are additionally request-scoped via `?flags=`, so the pre-flip arm stays reproducible after the flip. A stated rollback path is what makes an aggressive weight approvable.
 
-Watch for one week:
+⚠ **An earlier draft of this section proposed watching click-position distribution and zero-click rate for a week. That was written before the traffic volume was measured, and it is not viable.** At 9.7 people searches a day a week is ~68 events; neither metric can separate signal from noise at that count. Reaching the ~900 events behind the numbers above takes a **quarter**, not a week. Stating it plainly so nobody spends a sprint building a dashboard that cannot answer the question.
 
-| signal | why | what it would mean |
+What to do instead, in decreasing order of strength:
+
+| signal | window | what it would mean |
 |---|---|---|
-| click position distribution on people results | the direct read on whether the reorder helps | mass moving **up** the page is the win; flat or moving down is not |
-| zero-click rate on people searches | catches "the page got worse in a way nobody clicks through" | a rise is the single clearest regression signal |
-| the affiliated-faculty complaint | **a falsifiable prediction already on the record** | this ADR predicts the complaint will be about **card sparsity, not ordering**. If the feedback is about ordering, **B4 did not work and the model of the failure was wrong** |
+| **census diff, pre/post** — replay all 314 distinct real queries against both arms and diff the pages | minutes, and it can run **before** the flip | the primary evidence. Not a proxy for user impact: it *is* every query a user issued. Anything it flags as changed is what the panels should judge |
+| **the affiliated-faculty complaint** | first weeks | **a falsifiable prediction already on the record**: this ADR predicts the complaint will be about **card sparsity, not ordering**. If the feedback is about ordering, **B4 did not work and the model of the failure was wrong** |
+| click position / zero-click rate | **one quarter minimum** | usable only as a slow confirmation, never as a rollback trigger. Do not gate anything on it |
 
-That third row is nearly free and it is the only place in this document where a real user's reaction tests a claim it makes. Record which way it comes out either way.
+The second row is nearly free and it is the only place in this document where a real user's reaction tests a claim it makes. Record which way it comes out either way.
+
+**The rollback trigger is therefore qualitative, and that is a real limitation.** At this volume there is no automated regression signal that fires fast enough to catch a bad flip. The compensating controls are that the census diff is exhaustive and runs pre-flip, and that rollback is one deploy. Anyone uncomfortable with that should ask for the census diff to be reviewed before the flip, not for a metric that cannot exist.
 
 ## Sequencing decisions
 
@@ -338,6 +361,10 @@ B2 (step-function recency) and the method magnitude (after the 40× is settled b
 - **Does the unconsumed-token gate separate the two drop classes, or does it only count?** It separates the three queries it was derived from, but `pediatric asthma` → `Asthma` drops a token from a *correct* resolution. If a raw coverage ratio cannot tell that from `functional mri` → `MRI`, the gate needs the MeSH qualifier axis and is materially more work than budgeted. This is the cheapest way the design can be shown wrong early, and it is why the offline validation runs first.
 - **Is `n · share^α` the right family at all?** The sweep assumes it, and no alternative functional form has been tried. That is the honest reason to doubt it.
 - **Do the tuning and holdout panels agree?** If they diverge materially, three parameters were fitted to ten hand-picked queries and the result does not generalise. This is the single question that most determines whether the flip is justified.
+- 🔴 **Does the cap measurement transfer from staging to prod?** The convergence sweep ran on staging. Per the contract's own [REVIEW] note, staging and prod differ on the `mesh_curated_topic_anchor` population (85 distinct rows in prod versus 349 in staging, #2016) — and anchors determine which area is credited, so the two environments draw concentration lists from different distributions. Flags were pinned to prod parity; **the anchor population cannot be pinned and is the residual on every staging-measured claim here**, including the 300-convergence figure that justifies 500. Re-run the sweep against prod once the flag reaches a prod task-def, or accept 500 as measured-with-a-known-residual.
+- **Should the 200 → 500 raise have its own page-level acceptance?** It ships as an approximation-error fix, not a ranking-policy change, and it is **not behind a flag** — it reorders page 1 on broad people queries at the next prod deploy. The argument for shipping it directly is that leaving a known-wrong approximation in place to wait for an unrelated panel is worse. The argument against is that this document's own discipline says page-1 reorders get adjudicated on pages. A census diff (see Verification) settles it cheaply and should probably just be run.
+- **Does the concept arm reach the queries that need it?** 10.6% of topic/unclassified queries resolve **no** descriptor at all, so no amount of concept-magnitude work touches them. That is a larger slice of traffic than the descendant-cap defect (7.8%), and nothing in this ADR addresses it.
+- **Is `n · share^α` the right family for arm 2 as well?** Everything measured here is arm 1. Arm 2 slices a `doc_count`-ordered candidate list, so its truncation is not self-correcting as the cap grows and a concentrated low-volume specialist can score exactly zero at any cap. Unmeasured, and not fixed by #2097.
 - **Does anything consume `mostRecentYear`?** It ships in the payload as instrumentation. If B2 lands as a step function on *concept-scoped* recency, the scholar-global field may have no consumer and should be reconsidered rather than left as a field nobody reads.
 
 ## Related
