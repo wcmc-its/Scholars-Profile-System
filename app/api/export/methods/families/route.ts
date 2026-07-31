@@ -21,7 +21,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { isCommsStewardEnabled } from "@/lib/auth/comms-steward";
-import { getEditSession } from "@/lib/auth/superuser";
+import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { authorizeCommsStewardAction, logEditDenial } from "@/lib/edit/authz";
 import { apiError } from "@/lib/api/error-response";
 import { editError } from "@/lib/edit/request";
@@ -61,7 +61,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!isCommsStewardEnabled()) return apiError("not_found", 404);
 
   // (b) authoritative session + live role verdicts.
-  const session = await getEditSession();
+  const session = await getEffectiveEditSession();
   if (!session) return apiError("unauthorized", 401);
 
   // (c) comms_steward OR superuser (§3 superset); denials logged.

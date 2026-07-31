@@ -9,6 +9,7 @@ import { NextRequest } from "next/server";
 
 const {
   mockGetEditSession,
+  mockRealGetEditSession,
   mockAppendAuditRow,
   mockRecordAttempt,
   mockValidate,
@@ -20,6 +21,7 @@ const {
   mockSlugReqFindMany,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
+  mockRealGetEditSession: vi.fn(),
   mockAppendAuditRow: vi.fn(),
   mockRecordAttempt: vi.fn(),
   mockValidate: vi.fn(),
@@ -31,10 +33,14 @@ const {
   mockSlugReqFindMany: vi.fn(),
 }));
 
-// The GET path calls `getEditSession` directly; the POST path resolves identity
-// through `readEditRequest` → the #637 effective-identity seam. Drive BOTH from
-// the same `mockGetEditSession` knob (non-impersonating: real == effective).
-vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+// Both GET and POST must resolve identity through the #637 effective-identity
+// seam (`getEffectiveEditSession`), never the raw `getEditSession` — that's the
+// #2122 defect: a "View as" impersonator must see exactly the TARGET's queue
+// access, not their own (real) superuser tier. `mockRealGetEditSession` is kept
+// separate and deliberately NOT wired to either route path, so a test can set
+// it to a different value than `mockGetEditSession` and prove the route reads
+// the effective identity (see "gates on the EFFECTIVE identity" below).
+vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockRealGetEditSession }));
 vi.mock("@/lib/auth/effective-identity", () => ({
   getEffectiveEditSession: mockGetEditSession,
   impersonationActive: vi.fn().mockReturnValue(false),
@@ -99,6 +105,7 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   mockEnabled.mockReturnValue(true);
   mockGetEditSession.mockResolvedValue(SELF);
+  mockRealGetEditSession.mockResolvedValue(SELF);
   mockValidate.mockReturnValue({ ok: true, value: "jane-smith" });
   mockCheckCollision.mockResolvedValue({ ok: true });
   mockScholarFindUnique.mockResolvedValue(null); // no current slug by default
@@ -204,6 +211,17 @@ describe("GET /api/edit/slug-request (queue)", () => {
   it("400 for a non-pending status filter", async () => {
     mockGetEditSession.mockResolvedValue(ADMIN);
     expect((await GET(get("?status=approved"))).status).toBe(400);
+  });
+
+  it("gates on the EFFECTIVE identity, not the real signed-in superuser (#637/#2122)", async () => {
+    // Real signed-in user is a superuser; the effective ("View as") identity is
+    // a non-superuser. If the route read the real resolver instead of the
+    // effective one, this would wrongly 200 as the admin.
+    mockRealGetEditSession.mockResolvedValue(ADMIN);
+    mockGetEditSession.mockResolvedValue(SELF);
+    const res = await GET(get("?status=pending"));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "not_superuser" });
   });
 
   it("returns the pending queue with name, current slug, and a collision warning", async () => {

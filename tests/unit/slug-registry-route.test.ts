@@ -7,17 +7,23 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockGetEditSession, mockResolve } = vi.hoisted(() => ({
+const { mockGetEditSession, mockRealGetEditSession, mockResolve } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
+  mockRealGetEditSession: vi.fn(),
   mockResolve: vi.fn(),
 }));
 
-// The route imports `editError`/`editOk` from `lib/edit/request`, which pulls in
-// the effective-identity → superuser graph; mock both the GET-path
-// `getEditSession` and the transitively-needed `isSuperuser`.
+// The route resolves identity through the #637 effective-identity seam
+// (`getEffectiveEditSession`), never the raw `getEditSession` — #2122. Keep
+// `mockRealGetEditSession` separate from the effective knob so a test can prove
+// the route reads the effective identity, not the real one.
 vi.mock("@/lib/auth/superuser", () => ({
-  getEditSession: mockGetEditSession,
+  getEditSession: mockRealGetEditSession,
   isSuperuser: vi.fn().mockResolvedValue(false),
+}));
+vi.mock("@/lib/auth/effective-identity", () => ({
+  getEffectiveEditSession: mockGetEditSession,
+  impersonationActive: vi.fn().mockReturnValue(false),
 }));
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
 vi.mock("@/lib/api/slug-registry", () => ({ resolveSlugStatus: mockResolve }));
@@ -35,6 +41,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "warn").mockImplementation(() => {});
   mockGetEditSession.mockResolvedValue(ADMIN);
+  mockRealGetEditSession.mockResolvedValue(ADMIN);
   mockResolve.mockResolvedValue({ state: "available", slug: "free-slug" });
 });
 
@@ -54,6 +61,17 @@ describe("GET /api/edit/slugs", () => {
     expect(await res.json()).toMatchObject({ error: "not_superuser" });
     expect(console.warn).toHaveBeenCalled();
     expect(mockResolve).not.toHaveBeenCalled();
+  });
+
+  it("gates on the EFFECTIVE identity, not the real signed-in superuser (#637/#2122)", async () => {
+    // Real signed-in user is a superuser; the effective ("View as") identity is
+    // a non-superuser. If the route read the real resolver instead of the
+    // effective one, this would wrongly 200 as the admin.
+    mockRealGetEditSession.mockResolvedValue(ADMIN);
+    mockGetEditSession.mockResolvedValue(NONADMIN);
+    const res = await GET(get("?slug=x"));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "not_superuser" });
   });
 
   it("400 when the slug param is missing", async () => {
