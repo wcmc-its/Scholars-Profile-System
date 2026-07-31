@@ -2142,7 +2142,6 @@ async function FundingResults({
     result.facets.investigators.map((a) => ({
       cwid: a.cwid,
       displayName: a.displayName,
-      slug: a.slug,
       count: a.count,
       isActive: (filters.investigator ?? []).includes(a.cwid),
       toggleHref: toggleHref("investigator", a.cwid),
