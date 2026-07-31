@@ -14,7 +14,7 @@
  */
 import { NextResponse, type NextRequest } from "next/server";
 
-import { getEditSession } from "@/lib/auth/superuser";
+import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import {
   fetchDirectoryPeopleByCwid,
   searchDirectoryPeopleByName,
@@ -33,7 +33,7 @@ function jsonError(status: number, error: string): NextResponse {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const session = await getEditSession();
+  const session = await getEffectiveEditSession();
   if (!session) return jsonError(401, "unauthenticated");
 
   const { searchParams } = new URL(request.url);

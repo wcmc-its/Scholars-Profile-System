@@ -14,7 +14,7 @@
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
-import { getEditSession } from "@/lib/auth/superuser";
+import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { logEditDenial } from "@/lib/edit/authz";
@@ -152,7 +152,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // Reads don't mutate (no CSRF surface) and cross-origin reads can't see the
   // response (CORS), so the gate is the session + live isSuperuser re-check.
-  const session = await getEditSession();
+  const session = await getEffectiveEditSession();
   if (!session) return editError(401, "unauthenticated");
   if (!session.isSuperuser) {
     logEditDenial({ actorCwid: session.cwid, targetCwid: session.cwid, path: PATH, reason: "not_superuser" });

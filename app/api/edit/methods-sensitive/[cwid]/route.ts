@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { getEffectiveCwid } from "@/lib/auth/effective-identity";
 import { getSession } from "@/lib/auth/session-server";
 import { isSuperuser } from "@/lib/auth/superuser";
 import { loadSensitiveScholarFamilies } from "@/lib/api/profile";
@@ -19,8 +20,10 @@ import { loadSensitiveScholarFamilies } from "@/lib/api/profile";
  *
  * Authorization (defence in depth — middleware already 401s an unauthenticated
  * `/api/edit/*` request, so anonymous viewers never reach here and get `[]`):
- *   - self  — `session.cwid === cwid`
- *   - admin — `isSuperuser(session.cwid)`
+ * reads the EFFECTIVE cwid (#637 §3 — a "View as" impersonator sees exactly
+ * what the target sees, never their own superuser tier):
+ *   - self  — `getEffectiveCwid(session) === cwid`
+ *   - admin — `isSuperuser(getEffectiveCwid(session))`
  * Any other authenticated viewer gets `[]` (no leak of one scholar's gated
  * families to another). Never cached.
  */
@@ -39,8 +42,9 @@ export async function GET(
     return NextResponse.json({ families: [], viewer: "anonymous" }, { headers: NO_STORE });
   }
 
-  const isSelf = session.cwid === cwid;
-  const allowed = isSelf || (await isSuperuser(session.cwid).catch(() => false));
+  const effectiveCwid = getEffectiveCwid(session);
+  const isSelf = effectiveCwid === cwid;
+  const allowed = isSelf || (await isSuperuser(effectiveCwid).catch(() => false));
   if (!allowed) {
     return NextResponse.json({ families: [], viewer: "other" }, { headers: NO_STORE });
   }

@@ -13,7 +13,9 @@ const { mockGetEditSession, mockSearchByName, mockFetchByCwid } = vi.hoisted(() 
   mockFetchByCwid: vi.fn(),
 }));
 
-vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+// Resolves identity through the #637 effective-identity seam (#2122) — a "View
+// as" impersonator must be gated as the target, not the real signed-in user.
+vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockGetEditSession }));
 vi.mock("@/lib/sources/ldap", () => ({
   searchDirectoryPeopleByName: mockSearchByName,
   fetchDirectoryPeopleByCwid: mockFetchByCwid,

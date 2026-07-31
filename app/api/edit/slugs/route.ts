@@ -13,7 +13,7 @@
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
-import { getEditSession } from "@/lib/auth/superuser";
+import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk } from "@/lib/edit/request";
@@ -22,7 +22,7 @@ import { resolveSlugStatus } from "@/lib/api/slug-registry";
 const PATH = "/api/edit/slugs";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const session = await getEditSession();
+  const session = await getEffectiveEditSession();
   if (!session) return editError(401, "unauthenticated");
   if (!session.isSuperuser) {
     logEditDenial({ actorCwid: session.cwid, targetCwid: session.cwid, path: PATH, reason: "not_superuser" });
