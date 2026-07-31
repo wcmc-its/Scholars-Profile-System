@@ -1816,10 +1816,22 @@ export class AppStack extends Stack {
         SEARCH_PEOPLE_CONCEPT_ARM_FIRST: "on", // Prod flipped 2026-07-30 (#2018; query-time, reorder-only; A/B 16/18).
         // Contract rule O8 — grade the area boost by the magnitude it already receives
         // instead of three membership bands. Query-time, reorder-only, no reindex; OFF
-        // reproduces the three-band clauses byte-identically. A/B on staging before any
-        // prod flip — this is the first term that lets ordering track how much on-topic
-        // work a scholar has, so it moves results the volume prior currently decides.
-        SEARCH_PEOPLE_AREA_BOOST_GRADED: envConfig.envName === "staging" ? "on" : "off",
+        // reproduces the three-band clauses byte-identically. ADR-011 B1 — ships WITH
+        // the W_HI/alpha/dampen flip below; grading alone at W_HI=3 was previously
+        // measured "worse alone, do not promote" because it moves ordering within a range
+        // the low ceiling had already collapsed. Prod flipped alongside B1/B3/B4.
+        SEARCH_PEOPLE_AREA_BOOST_GRADED: "on",
+        // ADR-011 B1 — the area-boost tier ceiling. Code default 3 (byte-identical);
+        // this is the measured knee (flat 12-20 for 8/10 panel queries at alpha=1) that
+        // the whole raise-the-ceiling change is about. Previously an A/B-only `?flags=`
+        // lever (flag-parity-allowlist.txt); now the shipped default in both envs, so the
+        // allowlist entry is removed in the same PR.
+        SEARCH_AREA_BOOST_W_HI: "20",
+        // ADR-011 B1 — the concentration share exponent (`n · share^alpha`). Code default
+        // 1 is byte-identical to the originally-shipped n²/total; 0.5 is the measured
+        // region (8-10/10 top-10 overlap with alpha=1 on 8/10 panel queries; alpha=0 opens
+        // a real gap on the two broadest queries). Previously A/B-only; now shipped.
+        SEARCH_PEOPLE_CONCEPT_ALPHA: "0.5",
         // #1344 -- multi-word topic phrase boost. When on, a topic People query adds
         //   match_phrase should-clauses over publicationTitles (slop 8) + areasOfInterest
         //   (slop 4) so a multi-word specialty ("pediatric congenital heart surgery") is
@@ -1871,7 +1883,12 @@ export class AppStack extends Stack {
         //   staging A/B of THIS lever measures a different sum composition than prod will
         //   serve -- staging has no +1.0 faculty term to have its share raised. Size the
         //   prod effect from the prod posture, not from the staging read.
-        SEARCH_PEOPLE_PUBCOUNT_DAMPEN: "off",
+        //   ADR-011 B3 -- ships WITH B1 (W_HI/alpha/GRADED above), never before: B3 is
+        //   what keeps W_HI from needing re-derivation every time another term in the
+        //   sum moves (contract rule O5). Re-verified against prod posture
+        //   (SEARCH_PEOPLE_FACULTY_PROMINENCE=on) via a `?flags=` census diff before this
+        //   flip, not staging's own (faculty-off) read -- see ADR-011 revision 5.
+        SEARCH_PEOPLE_PUBCOUNT_DAMPEN: "capped",
         // People-tab "concepts" hint -- replace the sparse self-reported
         // research-areas hint on the scholar row's identity line with the
         // scholar's top MeSH descriptor labels (topMeshTerms). Only the no-match
