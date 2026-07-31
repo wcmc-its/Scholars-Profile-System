@@ -861,3 +861,42 @@ export function isResearchMatchEvidence(evidence: ResultEvidence): boolean {
       return false;
   }
 }
+
+/**
+ * The ONE sanctioned way to read a publication magnitude off a hit's evidence.
+ *
+ * Contract rule O9 — a magnitude assembled by `kind` is not a magnitude. `kind` is
+ * `"publications"` for all three of `tagged` (the scholar's papers carry the query's MeSH
+ * DESCRIPTOR), `concept` (the MeSH-expansion TEXT variant) and `mention` (a paper title or
+ * abstract happens to contain the literal string). Only the first is a subject claim. Pick the
+ * line by `kind` and the column you build silently averages a curated tag with a word that
+ * appeared in a sentence — six free-text mentions of a phrase then outrank two genuinely tagged
+ * papers, and the scholar who actually works on the concept sorts last. That is the same
+ * "two pipelines, one frame" error the `tier === "lesser"` block in
+ * `components/search/result-evidence.tsx` refuses to make, and the reason the one comparison
+ * this module DOES perform (`taggedAtLeastMethod`, above) is a targeted two-way test between
+ * two counts that were established to be commensurable, never a sort over a mixed column.
+ *
+ * So: filter on `strength`, NEVER on `kind`. This function is that filter, and any consumer
+ * that wants "how many of this person's papers back the query" should call it rather than
+ * reach into the union itself.
+ *
+ * ABSENT ⇒ UNKNOWN, and the return type says so. `strength: "concept"` carries no `count` AT
+ * ALL — see its construction at rank 5 of {@link selectEvidence}, which emits `text`/`term`/
+ * `descendantTerms` and no numeric field — so a concept-led hit has no magnitude to give. The
+ * honest answer is `undefined`; `0` is a DIFFERENT claim ("we looked and found none") and,
+ * being orderable, it sinks the unmeasured scholar below every measured one. Never `?? 0` the
+ * result of this function: branch on the absence, or leave the number unrendered the way
+ * `evidenceMatchCount` (`lib/api/matcha-contract.ts`) and the `primaryCount` cell in
+ * `result-evidence.tsx` already do.
+ *
+ * Takes the LIST because that is the shape a consumer holds (`PeopleSearchHit.evidenceLines`);
+ * for the single-evidence path pass `[hit.evidence]`.
+ */
+export function taggedPubCount(lines: readonly ResultEvidence[]): number | undefined {
+  for (const ev of lines) {
+    if (ev.kind !== "publications" || ev.strength !== "tagged") continue;
+    if (typeof ev.count === "number") return ev.count;
+  }
+  return undefined;
+}

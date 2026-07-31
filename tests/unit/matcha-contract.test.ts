@@ -575,6 +575,34 @@ describe("evidenceMatchCount — the matched N, never the total M", () => {
     expect(evidenceMatchCount({ kind: "clinical", specialty: "Cardiology", boardCertified: false })).toBeNull();
     expect(evidenceMatchCount({ kind: "selfDescription", html: "…" })).toBeNull();
   });
+
+  // Contract O9 — the supporting blocks on a Matcha card are DIFFERENT concepts from
+  // different `searchPeople` calls, rendered into one shared `tabular-nums` column.
+  // `publications` spans three strengths, so a strength-blind read puts a free-text
+  // keyword count beside a curated MeSH count, unlabelled and visually commensurable.
+  it("O9 — a COUNTED mention is still null: only `tagged` earns the shared column", () => {
+    // The hazard case: a mention line that DOES carry a count. Strength-blind code
+    // returns 6 here and prints it next to a tagged 2.
+    expect(
+      evidenceMatchCount({ kind: "publications", strength: "mention", text: "6 papers", count: 6 }),
+    ).toBeNull();
+    // `concept` carries no count at all — unknown, and never 0.
+    const conceptCount = evidenceMatchCount({
+      kind: "publications",
+      strength: "concept",
+      text: "neoplasms",
+    });
+    expect(conceptCount).toBeNull();
+    expect(conceptCount).not.toBe(0);
+    // The one strength that is comparable across candidates still reads through.
+    expect(
+      evidenceMatchCount({ kind: "publications", strength: "tagged", text: "2 of 40", count: 2 }),
+    ).toBe(2);
+    // A genuine measured zero is preserved — measured-and-found-none is not unknown.
+    expect(
+      evidenceMatchCount({ kind: "publications", strength: "tagged", text: "0 of 40", count: 0 }),
+    ).toBe(0);
+  });
 });
 
 describe("latestEvidenceYear — D8 compact-row 'latest YYYY'", () => {
