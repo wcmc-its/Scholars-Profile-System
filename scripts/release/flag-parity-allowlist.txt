@@ -42,7 +42,6 @@ REPORTER_MATCH_V2_MIN_PMIDS
 FACULTY_REVIEW_TOKEN_PREVIOUS       # rotation slot; primary FACULTY_REVIEW_TOKEN wired in app-stack (#1855)
 SCHOLARS_REVALIDATE_TOKEN_PREVIOUS
 SEARCH_AREA_BOOST_TOP_N             # area-boost scholar-list cap (code default 500) — A/B lever
-SEARCH_AREA_BOOST_W_HI              # area-boost tier weight (code default 3) — A/B lever
 SEARCH_AREA_BOOST_W_MID             # area-boost tier weight (code default 1.5) — A/B lever
 SEARCH_AREA_BOOST_W_LO              # area-boost tier weight (code default 0.75) — A/B lever
 SEARCH_FUNDING_MATCH_REASON         # default-on (!== "off")
@@ -55,7 +54,6 @@ SEARCH_INDEX_BULK_MAX_DOCS
 SEARCH_INDEX_BULK_PAUSE_MS
 SEARCH_OS_REQUEST_TIMEOUT_MS        # interactive OS .search() timeout (code default 5000ms)
 SEARCH_PEOPLE_CLINICAL_FN_WEIGHT    # weight for SEARCH_PEOPLE_CLINICAL_FN (code default 3)
-SEARCH_PEOPLE_CONCEPT_ALPHA         # ADR-011 B1 concentration share exponent (code default 1) — A/B lever
 SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST # default-on (!== "off")
 SEARCH_PEOPLE_RELEVANCE_MODE
 SEARCH_PUB_RELEVANCE_RECENCY
