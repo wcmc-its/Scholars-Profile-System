@@ -76,6 +76,7 @@ import {
   AREA_BOOST_HI_FRAC,
   AREA_BOOST_MID_FRAC,
   CONCEPT_CONCENTRATION_MIN_PUBS,
+  concentrationScore,
   FUNDING_INDEX,
   PEOPLE_RESTRUCTURED_MSM,
   PEOPLE_TOPIC_ABSTRACTS_BOOST,
@@ -106,6 +107,7 @@ import {
   resolvePublicationDepartmentFilter,
   resolvePeopleTopicPhraseBoost,
   resolveAreaBoostWeights,
+  resolveConceptConcentrationAlpha,
   resolveSearchPeopleAreaBoostGraded,
   resolveSearchPeopleClinicalFn,
   resolveSearchPeopleClinicalFnWeight,
@@ -1587,11 +1589,14 @@ function buildGradedAreaBoostFunctions(
  * high-VOLUME authors who merely had many on-topic pubs (a ~900-pub cardiologist
  * with 20 obesity pubs out-tiered a 30-pub obesity specialist) — the exact volume
  * dominance the boost was meant to fix (staging A/B 2026-06-29). Score is
- * `n²/total` = on-topic count × on-topic fraction: rewards BOTH real output and
- * focus, so a niche specialist out-tiers an incidental generalist while a genuine
- * high-output expert (high n AND high fraction) still leads. Pure fraction would
- * over-reward 1–2-pub authors; the n² numerator + the `CONCEPT_CONCENTRATION_MIN_PUBS`
- * floor prevent that.
+ * {@link concentrationScore} = `n · share^alpha` (on-topic count × on-topic
+ * fraction, raised to a tunable exponent — ADR-011 B1): rewards BOTH real
+ * output and focus, so a niche specialist out-tiers an incidental generalist
+ * while a genuine high-output expert (high n AND high fraction) still leads.
+ * `alpha = 1` (code default) is byte-identical to the originally-shipped
+ * `n²/total`; `alpha = 0` collapses to pure count. Pure fraction would
+ * over-reward 1–2-pub authors; the n numerator + the `CONCEPT_CONCENTRATION_MIN_PUBS`
+ * floor prevent that at any alpha.
  *
  * Sources the publications index (`meshDescriptorUi` ∩ `wcmAuthorCwids`, both
  * already indexed — NO reindex): one agg for on-topic counts, a second for each
@@ -1606,8 +1611,13 @@ export async function getConceptScholarConcentration(
   limit: number,
 ): Promise<{ cwid: string; total: number }[]> {
   if (descendantUis.length === 0 || limit <= 0) return [];
+  // ADR-011 B1 — resolved OUTSIDE the cached closure and folded into the cache
+  // key: alpha is a `?flags=`-swept A/B lever (SEARCH_PEOPLE_CONCEPT_ALPHA),
+  // so two requests for the same descendant set at different alpha values
+  // must not collide on one cached score list.
+  const alpha = resolveConceptConcentrationAlpha();
   return cachedReasonAgg<{ cwid: string; total: number }[]>(
-    `concept-concentration:${[...descendantUis].sort().join(",")}:${limit}`,
+    `concept-concentration:${[...descendantUis].sort().join(",")}:${limit}:${alpha}`,
     async () => {
       const authorBuckets = (resp: unknown): { key: string; doc_count: number }[] =>
         (
@@ -1648,10 +1658,14 @@ export async function getConceptScholarConcentration(
       const totalByCwid = new Map(
         authorBuckets(totalResp).map((b) => [b.key, b.doc_count] as [string, number]),
       );
-      // 3. Concentration score n²/total (count × on-topic fraction). Tiered by
+      // 3. Concentration score n · share^alpha (ADR-011 B1 — generalises the
+      //    shipped n²/total; alpha=1 is byte-identical to it). Tiered by
       //    buildAreaBoostFunctions' frac-of-max — that logic is UNCHANGED.
       return onTopic
-        .map(({ cwid, n }) => ({ cwid, total: (n * n) / Math.max(totalByCwid.get(cwid) ?? n, 1) }))
+        .map(({ cwid, n }) => ({
+          cwid,
+          total: concentrationScore(n, totalByCwid.get(cwid) ?? n, alpha),
+        }))
         .sort((a, b) => b.total - a.total)
         .slice(0, limit);
     },

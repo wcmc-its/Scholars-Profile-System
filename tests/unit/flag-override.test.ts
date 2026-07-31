@@ -21,6 +21,7 @@ import {
 import {
   resolveAreaBoostTopN,
   resolveAreaBoostWeights,
+  resolveConceptConcentrationAlpha,
   resolveMeshEntryTierParityEnabled,
   resolveMeshResolutionFallbackEnabled,
   resolvePeopleMethodFamilyBoost,
@@ -98,6 +99,12 @@ const CASES: Record<
     read: resolveSearchPeopleClinicalFnWeight,
     dflt: 3,
     overridden: 7,
+  },
+  SEARCH_PEOPLE_CONCEPT_ALPHA: {
+    value: "0.5",
+    read: resolveConceptConcentrationAlpha,
+    dflt: 1,
+    overridden: 0.5,
   },
   SEARCH_PEOPLE_CONCEPT_ARM_FIRST: {
     value: "on",

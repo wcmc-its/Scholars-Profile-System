@@ -73,6 +73,11 @@ vi.mock("@/lib/search", () => ({
   AREA_BOOST_MID_FRAC: 0.2,
   AREA_BOOST_TOP_N: 200,
   CONCEPT_CONCENTRATION_MIN_PUBS: 3,
+  // ADR-011 B1 — real implementation (not a stub): the concept-concentration
+  // tests below assert on its OUTPUT, so a mock that just returns a constant
+  // would defeat them.
+  concentrationScore: (n: number, total: number, alpha: number) =>
+    n * Math.pow(n / Math.max(total, 1), alpha),
   PUBLICATION_FIELD_BOOSTS: ["title^1"],
   // #726 — searchPeople now dereferences these on the topic-attribution path.
   MESH_ADMIT_WEIGHT: { exact: 3, "anchored-entry": 1.5, entry: 0.7 },
