@@ -183,6 +183,10 @@ Doing nothing is option three without the write-down, which is the worst of the 
 
 Measured: reading the column by `kind` ranked a cardiac electrophysiologist first for a lifespan query on six *device-battery*-longevity mentions. Only the two thinnest-coverage panel queries mix the strengths, which is exactly where the damage is largest.
 
+⚠ **Correction — that symptom came from an eval harness, not from shipped code.** An enumeration of all 19 readers of `evidenceLines` / `kind` / `.count` across `app/`, `components/`, `lib/` and `scripts/` found **nothing that orders on an evidence count**: every ordering is RRF, `fusedScore` or OpenSearch rank, and `.count` is read in six places, all of them rendering. The cardiac-EP result is not reproducible from any code path on `master`. **B0's ranking half is therefore preventive, not a bug fix**, and this ADR previously implied otherwise.
+
+**The same defect is live in DISPLAY, though.** `evidenceMatchCount` was strength-blind for `kind: "publications"`, and its caller renders one row per supporting concept — each from a *different* `searchPeople` call — into one shared numeric column. A free-text keyword count printed beside a curated MeSH count, unlabelled. That is O9's "column assembled across candidates", rendered to a user. Fixed in PR #2100 along with a `taggedPubCount` guard that returns `undefined` rather than `0`; the visible consequence is that mention-backed supporting rows lose their number, which is correct because it was never comparable to the one above it.
+
 Filter to `strength == "tagged"`; treat `concept`-strength hits as **unknown**, never as zero. Contract rule **O9**.
 
 ### B1 — Raise, grade and reshape the concept weight
