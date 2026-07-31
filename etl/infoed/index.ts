@@ -43,7 +43,7 @@ import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { repairEncodingOrNull } from "@/lib/text/repair-encoding";
 import { coreProjectNum, parseNihAward } from "@/lib/award-number";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
-import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
+import { fetchProjectPeriodsByCoreProjectNums } from "../nih-profile/fetcher";
 import {
   type GapStatus,
   missingField,
@@ -92,21 +92,20 @@ function chunks<T>(arr: T[], size: number): T[][] {
 type Prepared = { row: GrantRow; datesSource: "infoed" | "reporter" };
 
 /**
- * #2020 — project periods from `reciterdb.grant_reporter_project`, keyed by
+ * #2020 — project periods straight from NIH RePORTER's public API, keyed by
  * core project number, for awards InfoEd left undated.
  *
- * Same join `etl/reporter` already uses for abstracts/applId. It has to happen
- * HERE rather than in that ETL because an undated award never becomes a `Grant`
- * row at all, so there is nothing downstream for the enrichment pass to attach to.
- *
- * Measured coverage (2026-07-28): 358 of 852 undated funded awards, 35 of 159
- * active ones. The remainder are non-NIH — RePORTER cannot help and only a
- * correction in InfoEd can.
+ * Was `reciterdb.grant_reporter_project` (a WCM-side mirror synced by an
+ * external script we don't control). Switched 2026-07-31: a live check
+ * against every open gap found the mirror missing 30 of 73 still-undated NIH
+ * awards RePORTER itself has (e.g. 5U2GGH000545-05, an active CDC-funded
+ * GHESKIO award) — the mirror is a needless dependency AND measurably stale.
+ * Calling RePORTER directly also drops the ReciterDB/VPC connectivity
+ * requirement from this step entirely.
  */
 async function loadReporterPeriods(
   rows: GrantRow[],
 ): Promise<Map<string, { start: Date; end: Date }>> {
-  const out = new Map<string, { start: Date; end: Date }>();
   const cores = [
     ...new Set(
       rows
@@ -114,32 +113,10 @@ async function loadReporterPeriods(
         .filter((c): c is string => c !== null),
     ),
   ];
-  if (cores.length === 0) return out;
+  if (cores.length === 0) return new Map();
 
   try {
-    await withReciterConnection(async (conn) => {
-      for (const batch of chunks(cores, 500)) {
-        const placeholders = batch.map(() => "?").join(",");
-        const res = (await conn.query(
-          `SELECT core_project_num,
-                  MIN(project_start_date) AS s,
-                  MAX(project_end_date)   AS e
-             FROM grant_reporter_project
-            WHERE project_start_date IS NOT NULL
-              AND project_end_date   IS NOT NULL
-              AND core_project_num IN (${placeholders})
-            GROUP BY core_project_num`,
-          batch,
-        )) as Array<{ core_project_num: string; s: Date | null; e: Date | null }>;
-        for (const r of res) {
-          if (!r.core_project_num || !r.s || !r.e) continue;
-          out.set(r.core_project_num.toUpperCase(), {
-            start: new Date(r.s),
-            end: new Date(r.e),
-          });
-        }
-      }
-    });
+    return await fetchProjectPeriodsByCoreProjectNums(cores);
   } catch (err) {
     // Degrade to the PRE-EXISTING behaviour (drop the row) — never to a wrong
     // date. Loud, because a silent skip is indistinguishable from RePORTER
@@ -149,8 +126,8 @@ async function loadReporterPeriods(
         err instanceof Error ? err.message : String(err)
       }`,
     );
+    return new Map();
   }
-  return out;
 }
 
 const CONSOLIDATED_QUERY = `
@@ -591,5 +568,4 @@ main()
   .finally(async () => {
     await db.write.$disconnect();
     await closeInfoedPool();
-    await closeReciterPool();
   });
