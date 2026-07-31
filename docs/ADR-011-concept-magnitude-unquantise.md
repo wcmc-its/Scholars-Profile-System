@@ -2,6 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-07-31
+**Revision:** 2 — revised after PR #2095 (step-1 instrumentation) merged. Three claims in revision 1 are now falsified and corrected below: the acceptance tally counted a query measured over a broken candidate pool, publication years *are* now in the payload, and the proposed breadth gate is not computable as specified.
 **Authors:** Scholars Profile System development team
 **Supersedes:** —
 **Superseded by:** —
@@ -39,7 +40,7 @@ Median tagged-publication count across the top 10:
 | query | W=3 (today) | W=6 | W=12 | **W=20** | W=40 | W=80 |
 |---|---|---|---|---|---|---|
 | lung cancer | 27 | 187 | 187 | **187** | 187 | 187 |
-| cancer | 32 | 32 | 32 | **168** | 174 | 174 |
+| cancer ⚠ | 32 | 32 | 32 | **168** | 174 | 174 |
 | diabetes | 54 | 54 | 54 | **57** | 57 | 57 |
 | aging | 8 | 8 | 11 | **11** | 14 | 14 |
 | functional mri | 20 | 20 | 40 | **110** | 149 | 149 |
@@ -50,11 +51,48 @@ Median tagged-publication count across the top 10:
 
 **W_HI = 20 is the knee.** Past it the only material movement is `functional mri` climbing further, and on that query climbing is the damage.
 
+⚠ **The `cancer` row is measured over a broken candidate pool and must not be counted.** The `Neoplasms` descendant expansion is truncated (see Consequences), so every number on that row describes a magnitude ordering over a haematology-biased subset of the scholars who should have been candidates. The row is left in the table because the *knee location* is corroborated by the other nine queries, but it carries no weight in the verdict.
+
 On the headline disease query, raising one weight moves the top of the page from a scholar with 13 of 339 publications tagged (3.8%) to a page where nine of ten carry 60 or more — and it reaches scholars who were **not in the fetched 20 at all**, because this is a scoring change and not a reordering. The rank-15 and rank-11 scholars a page-1 experiment could surface are joined by several it structurally could not.
 
-Judged on the 10-query acceptance panel, predictions recorded before the arm was read, one blind judge per query: **6 BETTER, 1 MILD_BETTER, 2 NEUTRAL, 1 WORSE, and no control damaged.** The page-1 `rank_features` proxy scored 7/1/2 but **damaged a control**; this arm does not.
+Judged on the 10-query acceptance panel, predictions recorded before the arm was read, one blind judge per query. The raw tally was 6 BETTER / 1 MILD_BETTER / 2 NEUTRAL / 1 WORSE with no control damaged. **Corrected, it is 5 BETTER / 1 MILD_BETTER / 2 NEUTRAL / 1 WORSE / 1 PROVISIONAL** — `cancer`'s BETTER verdict is struck, because that query's candidate pool is truncated by construction and the judge was ordering a broken set. **Quote the corrected tally.** The page-1 `rank_features` proxy scored 7/1/2 but **damaged a control**; this arm does not.
+
+Two caveats on the panel itself, both of which bound how much the tally can carry:
+
+- **One judge per query, so there is no inter-rater signal at all.** A proxy metric got 4 of 10 verdicts wrong in the same session; human relevance judgement on a single read is at least as noisy. Four extra judgements — a second judge on the WORSE (`functional mri`), the two NEUTRALs (`longevity`, `crispr`) and the headline BETTER (`lung cancer`) — is the difference between this being a result and an anecdote.
+- **The panel is not drawn from the query log and is not frequency-weighted, so the tally does not estimate user impact.** The ten queries were chosen by *known defect* — the 1978-paper specimen, #2072, #1342, #2088, the O1 surface-form pair, #2070, plus three declared controls. Three of ten are technique queries. If techniques are over-represented versus real traffic this change looks worse than it is; if under-represented, better. Checking the real mix is cheap and it changes how much the 1 WORSE should worry anyone.
 
 The mechanism behind that difference is the strongest argument in this ADR. Where descriptor coverage is thin, the concentration score never leaves its lowest band and the page returns **rank-for-rank identical** — a page sort acts on ties at any scale, a scaled scoring band does not fire below a floor. **The coverage floor is emergent here and absent from the `rank_features` design**, which would have to reimplement it as an explicit gate whose statistic that field type cannot even compute.
+
+### 🔴 `AREA_BOOST_TOP_N = 200` becomes a correctness boundary at the new weight
+
+**This was absent from revision 1 and it is the one way this change could be quietly wrong in production, on exactly the broad queries it most claims to fix.**
+
+The concentration list is computed for 200 scholars only (`lib/api/area-concentration.ts`). At `W_HI = 3` that cutoff is harmless — the boost barely reorders anything, so a scholar outside the list was not going to reach page 1 regardless. **At `W_HI = 20` the boost dominates the sum, and the cutoff converts from a latency optimisation into a correctness boundary.** The headline argument for this ADR is that the change reaches scholars who were not in the fetched 20; the identical argument applies at 200, and it has not been measured.
+
+One correction to the shape of the concern. The cutoff is not an arbitrary candidate rank — the implementation keeps the top 200 **by the very quantity being boosted** (`sort by n²/total, then slice`). So the failure mode is not "a 300-tagged scholar sits at rank 201 and gets weight zero"; that scholar would have to be beaten by 200 others on `n²/total`. The failure mode is narrower and sharper: **descriptors broad enough that more than 200 scholars carry substantial concentration.** That is `Neoplasms` — and it is exactly the query where the descendant truncation below *also* bites. The two interact.
+
+What has been checked, and what it does *not* show. Deep-paginated `cancer` and `aging` at `W_HI = 20`, prod parity, looking for a discontinuity in tagged count at result rank 200:
+
+```
+cancer   ranks 161-180  max N= 89    ranks 201-220  max N= 51
+         ranks 181-200  max N= 58    ranks 221-240  max N= 55
+                                     ranks 281-300  max N= 51
+aging    ranks 181-200  max N=  4    ranks 201-220  max N=  3
+```
+
+No discontinuity at 200. **This is weak evidence and does not retire the concern**, because *result* rank is not *concentration* rank — the concentration list is ordered by `n²/total`, the result list by the whole score, and a smooth decay in one says little about truncation in the other. What it does establish: `aging` cannot be affected (the list is nowhere near saturated), and `cancer` plausibly can.
+
+**The check is now two curls.** `SEARCH_AREA_BOOST_TOP_N` was a hardcoded const; PR #2095 made it a request-overridable numeric flag (default unchanged at 200, allowlisted rather than CDK-wired, so staging-only). Run `TOP_N:200` versus `TOP_N:2000` at `W_HI:20` and diff the top 10:
+
+```
+/api/search?q=<q>&type=people&flags=SEARCH_AREA_BOOST_W_HI:20,SEARCH_AREA_BOOST_TOP_N:200
+/api/search?q=<q>&type=people&flags=SEARCH_AREA_BOOST_W_HI:20,SEARCH_AREA_BOOST_TOP_N:2000
+```
+
+Identical pages on all ten queries retires the cutoff and this section can say so. If any page moves, dump `n²/total` at concentration ranks 190-210 for that query and pick a new cutoff — **at that point it is a latency conversation, not a relevance one**, because the cost is `function_score` clause count, which is the stated reason for 200 in the first place.
+
+**Do this before any prod flip.**
 
 ### Why this ADR does not propose `rank_features`
 
@@ -85,25 +123,38 @@ Filter to `strength == "tagged"`; treat `concept`-strength hits as **unknown**, 
 
 ⚠ `SEARCH_PEOPLE_AREA_BOOST_GRADED` is currently `on` in staging and `off` in prod, and was previously recorded as "worse alone, do not promote". That verdict stands **at `W_HI = 3`** and is now explained: grading a magnitude into a range the ceiling has already collapsed changes the ordering within bands that are all worth about the same. The two flags are one change and must ship together; neither is safe to promote alone.
 
-### B2 — Recency, and only recency, needs new indexed data
+### B2 — Recency as an eligibility step, not a decay factor
 
-The one failure magnitude cannot fix is temporal. A control's top row under every arm is a scholar whose entire tagged evidence is from 1982–1989, and **publication years are not in the API payload at all**, so no reading of the page can detect it. This is the sole justification for touching the index:
+The one failure magnitude cannot fix is temporal. A control's top row under every arm is a scholar whose entire tagged evidence is from 1982–1989.
 
-| field | source | why |
-|---|---|---|
-| `meshSubtreeLatestYear` | same ETL loop as `meshSubtreeCounts`, `max(year)` instead of `count` | concept-scoped recency; nothing else in the system carries it |
+**The instrumentation half of this is done and the ADR's original framing of it is now obsolete.** Revision 1 said "publication years are not in the API payload at all, so no reading of the page can detect it." As of PR #2095 they are: evidence lines carry `latestYear` and hits carry `mostRecentYear`. That was a bug in its own right — the judges could not detect the 1982–89 failure by reading the payload, and one found it by hand on PubMed — and it was fixed independently of ranking, because that instrumentation gap taxes every future panel.
 
-Scholar-global `mostRecentPubDate` is **not** a substitute: the failing scholars publish recently, just not on the queried concept.
+Two limits on it, both documented in code and neither blocking:
 
-Consumption is deliberately left open. It may not need `rank_features` either — `getConceptScholarConcentration` already makes two aggregation round trips, and a `max(year)` sub-aggregation on the existing on-topic agg would deliver it query-time with no reindex at all. **Measure that before mapping anything.**
+- **The year reaches the API, not the rendered page.** The reason-from-doc branch serves tagged counts from `meshSubtreeCounts`, a count map with no years; the SSR `/search` page sets that flag in both envs, `/api/search` does not. Panels read the API, so panels get years. Closing the page-side gap is a reindex and is not proposed here.
+- **`mostRecentYear` and `latestYear` are different clocks** — `dateAddedToEntrez` versus `Publication.year`, 0-2 years of skew. They must not be differenced to judge staleness.
 
-### B3 — The volume cap, only after B1 is judged
+On the route: a `max(year)` sub-aggregation almost certainly beats a mapped `meshSubtreeLatestYear` field. Two round trips already exist, the sub-agg rides an aggregation already being issued, and it avoids a dark field a future reindex must carry. PR #2095 already shipped exactly this pattern on the reason aggregation, so the mechanism is demonstrated. Measure it on the concentration aggregation, but expect it to win. `meshSubtreeLatestYear` stays a fallback, not the plan.
+
+**On the shape, the ADR's instinct was wrong: do not multiply concentration by a recency decay.** That is a second continuous tunable interacting with `W_HI`, and no ordering will ever be explainable again.
+
+**Use recency as an eligibility constraint on the top band.** A concept-scoped latest year older than N excludes a scholar from the *top* weight but leaves them in the next one down. A step function, explainable in one sentence — "we don't head a page with work someone stopped doing in 1989" — that fixes the exact control failure observed and adds no interaction term. Sweep N over {5, 10, 15}.
+
+Scholar-global `mostRecentPubDate` remains **not** a substitute: the failing scholars publish recently, just not on the queried concept.
+
+### B3 — The volume cap, argued as `W_HI` stabilisation
 
 #2068's `SEARCH_PEOPLE_PUBCOUNT_DAMPEN=capped` ships **with** B1, never before. Career volume is currently an accidental proxy for topical evidence; capping it alone removes the proxy without supplying the signal, and on two of ten panel queries it demoted the highest-evidence scholar on the page.
 
-### B4 — Reconcile the displayed numbers
+**That is an argument about sequencing, not about value, and it undersells B3.** The durable justification: **B3 is what stops `W_HI` from drifting.** `W_HI` needs re-derivation whenever anything else in the sum moves (O5) *precisely because* it is an absolute weight sitting against an unbounded multiplier spanning 2.01×. Cap the volume prior and the ratio becomes stable by construction, and O5's standing re-measurement obligation gets much cheaper. Without B3, every future change to the prominence sum costs another acceptance panel.
+
+### B4 — Reconcile the displayed numbers — **ships WITH B1**
 
 Once the ranked quantity is the concept count, the displayed number and the ranked number converge by construction, which is the durable fix for the Layer 3 register.
+
+**Revision 1 scheduled this last. That was the wrong call and it is the sequencing change to feel most strongly about.** This ADR correctly predicts the affiliated-faculty complaint will be about **card sparsity, not ordering** — and then schedules the card fix after the reorder. If the page reorders this dramatically, **the number that explains the reorder has to be on the card the same day.** Otherwise the first week of feedback is unfalsifiable ("this looks wrong") and gets spent defending a ranking whose evidence is invisible.
+
+**Refuse the other fix if anyone proposes it: no full-time-faculty prior.** That is a political adjustment dressed as relevance, it is unjustifiable in the contract, and it will ratchet. Make the ranking legible instead.
 
 ## Consequences
 
@@ -116,15 +167,62 @@ Once the ranked quantity is the concept count, the displayed number and the rank
 
 - **Mis-resolution is amplified, not caused, and this ADR does not fix it.** On the one technique query that resolves to its parent modality, raising the weight makes the page *worse than the baseline*: summed on-concept method evidence in the top 10 falls **39 → 10**, every promoted scholar has a method count of **0** for the thing asked about, and the three scholars with 14, 10 and 4 publications of it are all evicted. This is **#2088**, upstream of everything here.
 
-  The gate this needs is **not** `meshConfidence`. Measured: the winning disease query and the losing technique query are *both* `entry-term` with `alsoParent: true`. The discriminator is whether **`conceptLabel` is strictly broader than the query string** — `lung cancer` → `Lung Neoplasms` (descendants all ⊆ the query) and `gene therapy` → `Genetic Therapy` (a synonym) versus `functional mri` → `Magnetic Resonance Imaging` (a strict superset; there is no fMRI descriptor in MeSH at all). That test is computable from the payload before ranking and is the one gate B1 should carry.
+  The gate this needs is **not** `meshConfidence`. Measured: the winning disease query and the losing technique query are *both* `entry-term` with `alsoParent: true`.
 
-- 🔴 **`Neoplasms` descendant expansion is truncated to C04.557 (by histologic type) and omits C04.588 (by site).** Grepping a captured broad-disease query for Breast / Lung / Prostatic / Colorectal Neoplasms, Melanoma, Carcinoma\*, Glioma returns zero, so that query is haematology-biased *by construction* — a scholar with 318 publications tagged, demonstrably present on the narrower query, is absent from the broad query's candidate set entirely. This is upstream of all ranking work, it is not caused by this ADR, and it bounds what any magnitude term can achieve on broad queries. **File and fix before drawing conclusions from broad-query pages.**
-- **Method queries are not served by this.** Three of three technique queries on the panel are the non-wins; every disease, entity and process query improves. The right number for them exists (`evidenceLines[kind == "method"].count`, from `_source.methodFamilyCounts`) and no ordering term reads it. ⚠ It also disagrees with the sibling `methodPubCount` by up to 40× on the same scholar; those two must be reconciled before either is ranked on.
+  **Revision 1 proposed gating on "`conceptLabel` strictly broader than the query string". That is not computable as a string test and will fail review the same way the `meshConfidence` gate did.** `lung cancer` → `Lung Neoplasms` and `functional mri` → `Magnetic Resonance Imaging` are *both* string mismatches. Broadness is a tree relation and testing it needs the tree.
+
+  What actually separates them is already in the payload: **query tokens left unconsumed by the matched entry term.**
+
+  ```
+  lung cancer     entry term "Lung Cancer"    both tokens consumed
+  gene therapy    entry term "Gene Therapy"   both consumed
+  functional mri  entry term "MRI"            "functional" dropped on the floor
+  ```
+
+  The resolver hopped to a parent *precisely because* it could not match a token, and the dropped token is the evidence. A content-word coverage ratio over the matched entry term — computable before ranking, no tree walk.
+
+  **The gate must select a weight, not kill the boost:** `W_HI = unconsumedTokens ? 3 : 20`. A boolean suppression can regress below today's page; a weight selector can only cost the delta.
+
+  **Validate it entirely offline first.** Run the classifier over the query log, eyeball a few hundred classifications, tune the coverage threshold — without touching ranking at all. It is the cheapest de-risking available and it is fully decoupled from B1.
+
+- 🔴 **The descendant expansion silently truncates 27% of broad descriptors. Mechanism confirmed; filed as #2096.**
+
+  Revision 1 recorded the symptom — `Neoplasms` expanded to C04.557 (by histologic type) and omitting C04.588 (by site), so Breast / Lung / Prostatic / Colorectal Neoplasms, Melanoma, Carcinoma\* and Glioma return zero on a broad-disease query, and a scholar with 318 publications tagged, demonstrably present on the narrower query, is absent from the broad query's candidate set entirely. **Revision 1 then kept quoting that query as evidence. Both cannot be true, and the tally above is corrected accordingly.**
+
+  The cause is now established, and it is not about Neoplasms. `computeDescendants` walks a **lex-sorted** `(treeNumber, descriptorUi)` array and early-returns the instant the list reaches `DESCENDANT_HARD_CAP = 200`. Neoplasms is `C04`, has exactly one tree number, and has **702 true descendants**; the scan fills the cap inside `C04.557` (440 descendants) and never reaches `C04.588` (240). Adding C04.588 is therefore *not* the fix — it would treat the symptom.
+
+  The blast radius was already sitting in the repo, no probe required. `docs/spec-snapshots/mesh-broad-descriptors-2026-05.json` records both a capped and an uncapped count per descriptor: **161 of 587 broad descriptors (27.4%) are truncated today** — Amino Acids/Peptides/Proteins keeps 200 of 4175, Protein Conformation 200 of 3850, Eukaryota 200 of 2454.
+
+  PR #2095 makes it observable at runtime (`searchInterpretation.descendantCount` / `.descendantTruncated`, plus `meshDescendantTruncated` in both query-log branches) without changing what the expansion returns, so the rate over real traffic can be counted without replaying it.
+
+  **It is not a one-line fix, which is why it is filed rather than folded in here.** Raising the cap converts the `terms { meshDescriptorUi: [...] }` clause from 200 to 702 terms for Neoplasms — 4175 for `D12` — moving BM25, the People attribution boost, the funding concept gate, `collectGrantMatchedCwids` and every derived count at once. That is a ranking change needing its own panel A/B. The cheap escape hatch is closed too: `meshSubtreeCounts` is mapped `{ enabled: false }`, readable from `_source` but unusable as a filter, so there is no existing uncapped queryable subtree field.
+
+  This is upstream of all ranking work, is not caused by this ADR, and bounds what any magnitude term can achieve on broad queries. **Any verdict on a broad query is provisional until #2096 lands.**
+- **Method queries are not served by this, and that matters more than this ADR's tone suggests.** Three of three technique queries on the panel are the non-wins; every disease, entity and process query improves. *"Find me someone who does X"* is a large share of real usage at a medical school, and the concept arm structurally cannot serve it.
+
+  The right number exists (`evidenceLines[kind == "method"].count`, from `_source.methodFamilyCounts`) and no ordering term reads it. ⚠ It disagrees with the sibling `methodPubCount` by up to 40× on the same scholar.
+
+  **Settle the 40× definitionally, not by argument.** A 40× gap on the same scholar is a *definitional* difference, not a data-quality one — almost certainly distinct-publications versus method-mentions, or family-rolled-up versus leaf. Take the one scholar with the worst gap, pull both underlying publication lists, diff them. An hour, and it ends the discussion with a fact.
+
+  Once settled, **this is not new architecture**: the same query-time aggregation feeding the same additive per-cwid clause over a different field. Scoped that way it is small.
 - **The O1 convergence does not transfer.** A page-1 magnitude rerank made `gene therapy` and `gene therapies` produce identical top-10s. This lever leaves both pages **flat at every weight** — the concept arm is not what separates them. O1's repair is real but it is not this change.
 - **Sparse-coverage queries are inert — measured, and it is a property worth protecting.** Where descriptor coverage is thin the concentration score never leaves its lowest band, so the page returns rank-for-rank identical. Nothing *enforces* this; it follows from the band being scaled rather than a sort. Any successor design that replaces the band with an uncapped linear term loses it, and the query that damaged the `rank_features` proxy is precisely the one this protects.
 
 - **Affiliated faculty are systematically promoted over full-time faculty**, because lifetime publication counts are largest for senior affiliated clinicians whose SPS profiles are thinnest. The promotions are topically correct, but the cards render with empty `humanizedAreas` and no grants next to the fuller cards they displace. Expect "why is this person ranked first" feedback that is about **card sparsity**, not ordering.
-- **Share is baked in at full weight.** The shipped score is `n² / total` — count times on-topic fraction, i.e. share at full strength. An independent sweep found share should be *secondary* to count, and at full weight it demotes the correct scholar on two queries. `n²/total` is inside the knee's win, so it is not urgent, but the exponent is a one-line lever nobody has swept. It is the obvious next experiment and it is free.
+- **Share is baked in at full weight — and sweeping the exponent must happen BEFORE the flip, not after.** The shipped score is `n² / total` — count times on-topic fraction, i.e. share at full strength. An independent sweep found share should be *secondary* to count, and at full weight it demotes the correct scholar on two queries.
+
+  Revision 1 called this "the obvious next experiment, and it is free" and then sequenced it after B1. **Invert that.** `W_HI = 20` is tuned against a functional form that is about to change, and re-tuning it afterwards costs a second acceptance panel. Judging time is the scarce resource here, not curls.
+
+  Generalise the shipped score to `n · share^α` (α = 1 today, α = 0 is pure count). α decides whether the prolific generalist or the mid-career specialist wins:
+
+  ```
+  318/900 vs 150/200     α=1   → 112 vs 113   (near-tie)
+                         α=0.5 → 189 vs 130   (the specialist loses, correctly)
+  ```
+
+  The independent λ sweep concluding share should be *secondary* to count, plus the two queries where full-weight share demotes the right scholar, both point to **α ≈ 0.5**.
+
+  **α and `W_HI` interact** — lowering α widens the raw score range, which changes what the top band is worth — so it is one sweep, not two. Use median-N to locate the knee in both dimensions (that is exactly what it is good for), then spend the single blind panel on one `(α*, W*)` pair with the breadth gate on. **One panel, correct functional form.**
 
 ## Alternatives considered
 
@@ -134,19 +232,50 @@ Once the ranked quantity is the concept count, the displayed number and the rank
 | **Ungrade the bands alone** (`AREA_BOOST_GRADED` on, `W_HI` unchanged) | Measured inert: 5 of 10 queries byte-identical, and where it moved membership it moved it the wrong way. The ceiling, not the banding, is the binding constraint — which is why the flag was previously judged "worse alone". |
 | **Delete the method tier** | Rejected on measurement: it scored as the largest available O8 win (−153 inversion pairs) and reading the pages reversed the verdict — with the tier off, every practitioner of the technique is evicted in favour of high-volume generalists. |
 | **Ship the volume cap first** | Measured worse. See B3. |
-| **Per-request publications-index aggregation for the count** | This is not an alternative — it is what the system already does, on the scoring path, in prod, cached and capped at `AREA_BOOST_TOP_N = 200`. |
+| **Per-request publications-index aggregation for the count** | This is not an alternative — it is what the system already does, on the scoring path, in prod, cached and capped at `AREA_BOOST_TOP_N = 200`. That cap is now sweepable via `SEARCH_AREA_BOOST_TOP_N` on staging (PR #2095); see the correctness-boundary section. |
+| **Add C04.588 to the Neoplasms expansion** | Treats the symptom. The truncation is a lex-ordered walk hitting a 200 cap, and it affects 161 of 587 broad descriptors — Neoplasms is merely the first one big enough to make it visible. See #2096. |
 
 ## Verification
 
 - **B0:** a consumer keyed on `kind` must fail a test that a consumer filtering on `strength == "tagged"` passes, with all three strengths in the fixture and a `concept`-strength row asserting *unknown* rather than zero.
-- **B1:** ✅ **done 2026-07-31.** 10-query panel at pinned prod parity, predictions recorded before the arm was read, one blind judge per query: 6 BETTER / 1 MILD_BETTER / 2 NEUTRAL / 1 WORSE, no control damaged, `total` byte-identical on all 70 captures across the sweep. Re-run before any prod flip, and again whenever another term in the prominence sum moves.
+- **B1:** ⚠ **provisional, not done.** A 10-query panel ran at pinned prod parity with predictions recorded before the arm was read, one blind judge per query, `total` byte-identical on all 70 captures across the sweep. Corrected tally 5 BETTER / 1 MILD_BETTER / 2 NEUTRAL / 1 WORSE / 1 PROVISIONAL, no control damaged. It does **not** constitute acceptance, for three reasons: it was judged against α = 1 and the functional form is changing, one query was measured over a truncated pool, and a single judge carries the four decisive verdicts. **The acceptance panel is the one described under Next steps — one panel on `(α*, W*)` with the gate on, two judges on the decisive four.**
 
   ⚠ **Do not predict a verdict from median-N in the top 10.** It found the knee correctly and got 4 of 10 verdicts wrong, because it is blind to ordering *within* a page whose membership does not change. It is a weight-locating instrument, not an acceptance test.
-- **B2:** measure the `max(year)` sub-aggregation route before mapping any new field.
-- Standing: re-derive `W_HI` whenever another term in the prominence sum changes (O5).
+- **B2:** measure the `max(year)` sub-aggregation route before mapping any new field. PR #2095 shipped the pattern on the reason aggregation, so the mechanism is demonstrated; what remains is measuring it on the concentration aggregation.
+- **`AREA_BOOST_TOP_N`:** `TOP_N:200` vs `TOP_N:2000` at `W_HI:20`, top-10 diff, all ten queries. Must be clean before any prod flip.
+- Standing: re-derive `W_HI` whenever another term in the prominence sum changes (O5). B3 is what makes this obligation affordable.
+
+## Next steps
+
+Ordered. Items 1-3 are independent of each other and can run in parallel; nothing below item 3 should start until they are clean.
+
+1. **`AREA_BOOST_TOP_N` boundary check.** Two curls per query on staging, top-10 diff. Retires or resizes the cutoff. **Blocking for the flip.** Unblocked by PR #2095 — no further code needed.
+2. **Truncation rate over real traffic.** Count `meshDescendantTruncated` over a query-log slice to convert "27.4% of broad descriptors" into "N% of real queries". Feeds #2096's priority. Unblocked by PR #2095.
+3. **B0 — evidence population.** Filter to `strength == "tagged"`; `concept`-strength reads *unknown*, never zero. Contract rule O9. No reindex, no flag, ships on its own.
+4. **Breadth gate validated offline as a classifier.** Unconsumed-token coverage over the query log, a few hundred classifications eyeballed, threshold tuned. No ranking touched. Fully decoupled from B1.
+5. **Locate the `(α, W_HI)` knee together** by median-N. One sweep, not two — they interact.
+6. **One blind acceptance panel** on `(α*, W*)` with the breadth gate on, **two judges on the decisive four** (`functional mri`, `longevity`, `crispr`, `lung cancer`). Check the technique-query share against the real query mix before reading the tally.
+7. **B1 and B4 together.** The number that explains the reorder ships on the card the same day.
+8. **B3**, argued as `W_HI` stabilisation.
+9. **B2** with step-function recency. Sweep N over {5, 10, 15}.
+10. **Method magnitude**, after the 40× is settled by diffing the two publication lists.
+
+## Open questions
+
+- **Does the 200-scholar concentration cutoff change any page at `W_HI = 20`?** Unknown. The deep-pagination check found no discontinuity but measured the wrong ordering to answer it. Item 1 above settles it. If it does move pages, the follow-on question is what the right cutoff costs in `function_score` clause count — a latency question, not a relevance one.
+- **What fraction of *real* queries hit the descendant cap?** 27.4% of broad *descriptors* are truncated, but descriptor frequency in the query log is unknown and almost certainly not uniform. The rate over traffic could be far higher or far lower.
+- **Which of #2096's three fixes is right?** Raise the cap for the terms clause only and A/B it; make the walk breadth-first so a truncated set at least samples the whole tree; or index an ancestor-closure field and drop the runtime expansion. The first is cheapest, the third is correct, the second is the interesting middle. Not decided.
+- **Is the panel's technique-query share representative?** Three of ten are technique queries, chosen by known defect rather than frequency. Until the real mix is checked, the tally does not estimate user impact in either direction.
+- **What is α actually?** ≈ 0.5 is inferred from two independent signals, neither of which swept α directly. Item 5 measures it.
+- **Does the unconsumed-token gate generalise past the panel?** It separates the three queries it was derived from. Whether it holds over a few hundred real queries is exactly what item 4 tests, and it is the cheapest way this design can be shown wrong early.
+- **Is `n · share^α` the right family at all?** The sweep assumes it. No alternative functional form has been tried, and the near-tie at α = 1 between a 318/900 generalist and a 150/200 specialist is the kind of coincidence that suggests the family is under-determined by the evidence available.
+- **Does anything consume `mostRecentYear`?** It ships in the payload as instrumentation. If B2 lands as a step function on *concept-scoped* recency, the scholar-global field may have no consumer and should be reconsidered rather than left as a field nobody reads.
 
 ## Related
 
 - [`search-relevance-contract.md`](./search-relevance-contract.md) — O1, O3, O5, O7, O8, and O9 added by this ADR.
 - [`search-people-relevance.md`](./search-people-relevance.md) — the descriptive reference.
 - `lib/api/area-concentration.ts` — owns the choice of what `concentration` credits, which is what makes the emitted `terms: { cwid }` clause satisfy O2.
+- **PR #2095** — step-1 instrumentation, merged and dark: `SEARCH_AREA_BOOST_TOP_N` as an overridable flag, `descendantCount` / `descendantTruncated`, and publication years in the payload. Unblocks Next-steps items 1 and 2.
+- **Issue #2096** — the descendant-cap truncation, with the three candidate fixes costed.
+- `docs/spec-snapshots/mesh-broad-descriptors-2026-05.json` — capped and uncapped descendant counts for 587 broad descriptors; the source for the 161/587 figure.
