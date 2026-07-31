@@ -230,7 +230,7 @@ Consequence: pushing to `master` deploys only the **staging app image**. It does
 
 #### Ship to staging (automatic)
 
-Merge to `master` → `deploy.yml` runs against staging. Pipeline order (load-bearing): build image → push ECR (app + ETL) → sync `.next/static` → S3 → **db-bootstrap** → **verify-grants** → **prisma migrate deploy** → `ecs update-service --force-new-deployment` → wait services-stable. Steps 3–5 are **fail-closed gates** (non-zero exit halts; service is not rolled). Wall-clock with no migration: **~7–9 min**.
+Merge to `master` → `deploy.yml` runs against staging. Pipeline order (load-bearing): build image → push ECR (app + ETL) → **pin task-def revisions to this deploy's image digests** (#2121) → sync `.next/static` → S3 → **db-bootstrap** → **verify-grants** → **prisma migrate deploy** → `ecs update-service --task-definition sps-app-<env>:<new-pinned-revision>` → wait services-stable. Steps 3–5 are **fail-closed gates** (non-zero exit halts; service is not rolled). Wall-clock with no migration: **~7–9 min**.
 
 #### Promote to prod (gated, manual)
 
@@ -296,10 +296,9 @@ aws ecs update-service --cluster sps-cluster-<env> --service sps-app-<env> --for
 aws ecs update-service \
   --cluster <CLUSTER> \
   --service <SERVICE> \
-  --task-definition <FAMILY>:<PREVIOUS_TASK_DEF_REVISION> \
-  --force-new-deployment
+  --task-definition <FAMILY>:<PREVIOUS_TASK_DEF_REVISION>
 ```
-Find `<PREVIOUS_TASK_DEF_REVISION>` from `aws ecs describe-services → deployments[].taskDefinition` (the entry that was `PRIMARY` before this deploy). Expected ~**4–6 min** for a 4-task service. **Do NOT** roll back by re-triggering the workflow from a prior commit — it re-runs the migration step. Rollback does **not** cover: migration rollback (fix forward), Aurora PITR (§5), CloudFront invalidation (use `/api/revalidate`), OpenSearch alias swap.
+Find `<PREVIOUS_TASK_DEF_REVISION>` from `aws ecs describe-services → deployments[].taskDefinition` (the entry that was `PRIMARY` before this deploy) — a real, distinct, immutable revision since #2121 (each deploy pins the image by digest, not the mutable `:latest` tag). Expected ~**4–6 min** for a 4-task service. **Do NOT** roll back by re-triggering the workflow from a prior commit — it re-runs the migration step. Rollback does **not** cover: migration rollback (fix forward), Aurora PITR (§5), CloudFront invalidation (use `/api/revalidate`), OpenSearch alias swap.
 
 #### Revalidate webhook / cache-bust
 

@@ -23,9 +23,9 @@ The open question this ADR closes is how the ECS service update itself shifts tr
 - ALB health checks gate task registration: a new task is only added to the target group after `/api/health` returns 200, and the matching old task is drained before termination.
 - Circuit breaker is enabled (`deploymentCircuitBreaker: { enable: true, rollback: true }`): if more than the threshold of new tasks fail to reach healthy, the service automatically reverts to the previous task definition without operator action.
 
-Rollback when the circuit breaker does not fire (e.g. functional regression that passes health checks but produces 5xx in real traffic): operator-driven, by repointing the ECR `:latest` tag at the previous known-good image and forcing a new deployment. The paste-able command sequence is documented in [`docs/rollback-runbook.md`](./rollback-runbook.md).
+Rollback when the circuit breaker does not fire (e.g. functional regression that passes health checks but produces 5xx in real traffic): operator-driven, by pointing the service at the previous, digest-pinned task-definition revision (see Amendment 1 below — this superseded an earlier `:latest`-tag-repoint procedure). The paste-able command sequence is documented in [`docs/rollback-runbook.md`](./rollback-runbook.md).
 
-**Note on the image contract.** The task definition pins the image by mutable tag (`cdk/lib/app-stack.ts:1051`) and no workflow registers a new task-definition revision, so the revision is not the deploy unit — the tag is. Selecting a previous revision is therefore a no-op for code rollback. This also bounds the circuit breaker: `rollback: true` reverts to the previous *task set*, which resolves the same `:latest`, so it recovers a task that fails to start for reasons outside the image (a task-def env change, a secret or IAM problem) but cannot recover a bad image. Pinning the image by digest — the discipline already applied to the otel sidecar, asserted at `cdk/test/app-stack.test.ts:1432` with an explicit `not.toMatch(/:latest/)` — would make both the breaker and revision-selection real, at the cost of rendering a task-definition revision per deploy across all seven families.
+**Note on the image contract (fixed, see Amendment 1).** The task definition's CDK-synthesized template still pins the image by mutable tag (`cdk/lib/app-stack.ts`, first-deploy bootstrap value only) — but as of Amendment 1 below, the deploy workflow itself registers a genuinely new, digest-pinned task-definition revision every deploy, so the revision *is* the deploy unit in practice, and the circuit breaker's `rollback: true` reverts to a distinct, immutable previous image.
 
 ## Consequences
 
@@ -69,3 +69,22 @@ The deployment circuit breaker's auto-rollback only triggers on task-health fail
 - B09 (#108) — migration pipeline; the upstream operation this deploy strategy attaches to.
 - B13 (#112) — staging environment; a full rollback drill against staging is a remaining acceptance criterion of B12.
 - B22 (#121) / B23 (#122) — SLOs/alarms and on-call routing; downstream of this ADR.
+
+---
+
+## Amendment 1 (2026-07-31) — Image contract fixed: digest-pinned revisions
+
+**Status:** Accepted
+**Date:** 2026-07-31
+**Implementation:** #2121
+**Amends:** § Decision ("Note on the image contract"), § Consequences (positive: "one task definition revision active at a time").
+**Driver:** #2111 corrected this ADR and `rollback-runbook.md` to document the tag-repoint workaround honestly (the mutable-`:latest` gap described in the pre-amendment "Note on the image contract" above), rather than leaving a rollback procedure that silently didn't work. #2121 is the real fix the correction pointed at.
+
+The deploy workflow (`.github/workflows/deploy.yml`, the "Pin task-definition revisions to this deploy's images" step) now clones each of the `sps-app` / `sps-migrate` / `sps-db-bootstrap` / `sps-verify-grants` families' current active revision, repoints only the running container's `image` field to that deploy's immutable `<repo>@sha256:...` digest, and registers it as a new revision — mirroring the digest-pinning discipline already applied to the otel sidecar (`cdk/lib/app-stack.ts`, asserted at `cdk/test/app-stack.test.ts` with an explicit `not.toMatch(/:latest/)`). Every run-task / update-service call in the same deploy targets that exact revision, never a bare family name.
+
+Two consequences of the original ADR text this amendment supersedes:
+
+- **The revision is now a real rollback signal.** `aws ecs update-service --task-definition <FAMILY>:<PREVIOUS>` (`docs/rollback-runbook.md`) genuinely rolls code back, replacing the ECR tag-repoint procedure #2111 introduced as the honest description of the previous, broken state.
+- **The circuit breaker is a real recovery for a bad image**, not just for a task that fails to start for reasons outside the image (env change, secret, IAM). This closes the gap the original "Note on the image contract" flagged.
+
+**Scope note.** This amendment covers the four families the deploy workflow drives directly (`sps-app`, `sps-migrate`, `sps-db-bootstrap`, `sps-verify-grants`). The six ETL-stack families invoked by Step Functions `EcsRunTask` states (`sps-etl` + `sources`/`ldap`/`reciter-api`/`reconcile`/`cdn-reconcile`) resolve a task-definition ARN baked into each state machine's ASL definition at `cdk deploy` time, not a bare family name at execution time — the deploy-workflow mechanism above is a no-op for them. Pinning those is separate follow-up work (different mechanism: a CDK-context digest thread plus a `cdk deploy EtlStack-<env>`, not `deploy.yml` surgery), scoped out of #2121 given the nightly/weekly ETL pipeline's recent incident history.

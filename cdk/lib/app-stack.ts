@@ -1079,10 +1079,12 @@ export class AppStack extends Stack {
       }),
       portMappings: [{ containerPort: 3000, protocol: ecs.Protocol.TCP }],
       // FLAGS LIVE HERE, NOT IN THE IMAGE. Merging a flag does NOT turn it on:
-      // the app image is `:latest` (mutable), so CD ships new code without a new
-      // task def, but env vars only move on a manual `cdk deploy Sps-App-<env>`.
-      // Until then the flag is `undefined` at runtime and the feature is DARK,
-      // even though the CDK source, the PR, and every handoff say "on" (#1765).
+      // env vars only move on a manual `cdk deploy Sps-App-<env>` -- a code
+      // deploy registers a new task-def revision pinned to that deploy's image
+      // digest (#2121, deploy.yml), but does not touch `environment:` here.
+      // Until a `cdk deploy` ships it, the flag is `undefined` at runtime and
+      // the feature is DARK, even though the CDK source, the PR, and every
+      // handoff say "on" (#1765).
       // Check for drift:
       //   aws ecs describe-task-definition --task-definition sps-app-<env> \
       //     | node scripts/release/flag-parity.mjs --drift <env> -
@@ -3226,6 +3228,41 @@ export class AppStack extends Stack {
         effect: iam.Effect.ALLOW,
         actions: ["ecs:UpdateService", "ecs:DescribeServices"],
         resources: [this.ecsService.serviceArn],
+      }),
+    );
+    // #2121 -- the deploy workflow clones each family's current active
+    // revision, repoints the image to this deploy's immutable digest, and
+    // registers it as a new revision before running/serving it. Scoped to
+    // the same four families as the RunTask grant above (plus the app
+    // service's own family) -- ECS's task-definition resource type does
+    // support ARN-scoped permissions, so this does not need the `*`
+    // exception the audit test above reserves for ecr:GetAuthorizationToken.
+    this.deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["ecs:DescribeTaskDefinition", "ecs:RegisterTaskDefinition"],
+        resources: [
+          Stack.of(this).formatArn({
+            service: "ecs",
+            resource: "task-definition",
+            resourceName: `${appTaskDefinition.family}:*`,
+          }),
+          Stack.of(this).formatArn({
+            service: "ecs",
+            resource: "task-definition",
+            resourceName: `${this.migrationTaskDefinition.family}:*`,
+          }),
+          Stack.of(this).formatArn({
+            service: "ecs",
+            resource: "task-definition",
+            resourceName: `${this.dbBootstrapTaskDefinition.family}:*`,
+          }),
+          Stack.of(this).formatArn({
+            service: "ecs",
+            resource: "task-definition",
+            resourceName: `${this.verifyGrantsTaskDefinition.family}:*`,
+          }),
+        ],
       }),
     );
     this.deployRole.addToPolicy(

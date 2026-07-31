@@ -3,7 +3,19 @@ name: Deploy
 # Drives the deploy pipeline contract documented in
 # docs/PRODUCTION_ADDENDUM.md § Schema migration policy and
 # docs/DEPLOY-RUNBOOK.md:
-#   build -> push -> bootstrap -> verify-grants -> migrate -> roll -> settle.
+#   build -> push -> pin -> bootstrap -> verify-grants -> migrate -> roll -> settle.
+#
+# "pin" (#2121): every image this workflow pushes is also registered as a new,
+# digest-pinned task-definition revision for the families that consume it
+# (sps-app / sps-migrate off the app image; sps-db-bootstrap / sps-verify-grants
+# off the ETL image) -- cloned from each family's current active revision with
+# only the `image` field repointed to `<repo>@sha256:...`. Every run-task /
+# update-service call below then targets that exact new revision, not the bare
+# family name. This is what makes `circuitBreaker: { rollback: true }`
+# (app-stack.ts) a real recovery -- a bad deploy rolls back to a distinct,
+# immutable, previously-good revision instead of re-pulling the same mutable
+# `:latest` the failing deployment just pulled. See docs/ADR-004-deploy-strategy.md
+# and docs/rollback-runbook.md.
 #
 # Triggers
 # - push to master         -> staging deploy (auto)
@@ -151,6 +163,19 @@ jobs:
           docker push "${{ steps.outputs.outputs.ecr_uri }}:${{ github.sha }}"
           docker push "${{ steps.outputs.outputs.ecr_uri }}:latest"
 
+      # #2121 -- the immutable digest of what was just pushed, used below to
+      # pin task-def revisions instead of trusting the mutable `:latest` tag.
+      - name: Resolve pushed app image digest
+        id: app_image
+        run: |
+          set -euo pipefail
+          repo_name="${{ steps.outputs.outputs.ecr_uri }}"
+          repo_name="${repo_name#*/}"
+          digest=$(aws ecr describe-images --repository-name "$repo_name" \
+            --image-ids imageTag="${{ github.sha }}" \
+            --query 'imageDetails[0].imageDigest' --output text)
+          echo "image_uri=${{ steps.outputs.outputs.ecr_uri }}@$digest" >> "$GITHUB_OUTPUT"
+
       # ETL batch image (#454) -- the tsx-based etl/* + search:index scripts.
       # Built from the `etl` target of the same Dockerfile and pushed to the
       # dedicated scholars-etl-<env> repo. Self-skips when EtlEcrRepoUri is
@@ -170,6 +195,73 @@ jobs:
         if: ${{ steps.outputs.outputs.etl_ecr_uri == '' }}
         run: |
           echo "::warning::EtlEcrRepoUri not found on ${{ steps.target.outputs.stack }}. ETL image not built/pushed. Run 'cdk deploy ${{ steps.target.outputs.stack }}' to create scholars-etl-${{ steps.target.outputs.env }}, then re-run this workflow."
+
+      # #2121 -- same digest resolution as the app image above, self-skipping
+      # (empty output) in lockstep with "Skipped ETL image" when the repo
+      # doesn't exist yet. The pin step below falls back to the bare family
+      # name when this is empty, matching today's unpinned behavior rather
+      # than failing the deploy.
+      - name: Resolve pushed ETL image digest
+        id: etl_image
+        run: |
+          set -euo pipefail
+          etl_uri="${{ steps.outputs.outputs.etl_ecr_uri }}"
+          if [ -z "$etl_uri" ]; then
+            echo "image_uri=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          repo_name="${etl_uri#*/}"
+          digest=$(aws ecr describe-images --repository-name "$repo_name" \
+            --image-ids imageTag="${{ github.sha }}" \
+            --query 'imageDetails[0].imageDigest' --output text)
+          echo "image_uri=${etl_uri}@$digest" >> "$GITHUB_OUTPUT"
+
+      # #2121 -- clone each family's current active revision, repoint only the
+      # named container's `image` to this deploy's immutable digest, and
+      # register it as a new revision. Every run-task / update-service call
+      # below then targets this exact revision (never a bare family name),
+      # so a bad image produces a genuine circuit-breaker rollback to the
+      # previous, distinct, immutable revision -- not a rollback-and-re-pull
+      # of the same mutable tag. Falls back to the bare family name (today's
+      # unpinned behavior) when a family isn't provisioned yet or its image
+      # wasn't built this run, matching the self-skip pattern used elsewhere
+      # in this workflow rather than hard-failing an otherwise-valid deploy.
+      - name: Pin task-definition revisions to this deploy's images
+        id: pin
+        run: |
+          set -euo pipefail
+          register_pinned() {
+            local family="$1" container="$2" image_uri="$3"
+            aws ecs describe-task-definition --task-definition "$family" --query 'taskDefinition' \
+              | jq --arg IMAGE "$image_uri" --arg NAME "$container" '
+                  .containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)
+                  | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                        .compatibilities, .registeredAt, .registeredBy)
+                ' > "/tmp/taskdef-$family.json"
+            aws ecs register-task-definition --cli-input-json "file:///tmp/taskdef-$family.json" \
+              --query 'taskDefinition.taskDefinitionArn' --output text
+          }
+
+          app_family="sps-app-${{ steps.target.outputs.env }}"
+          migrate_family="sps-migrate-${{ steps.target.outputs.env }}"
+          app_image="${{ steps.app_image.outputs.image_uri }}"
+          echo "app_taskdef=$(register_pinned "$app_family" app "$app_image")" >> "$GITHUB_OUTPUT"
+          echo "migrate_taskdef=$(register_pinned "$migrate_family" migrate "$app_image")" >> "$GITHUB_OUTPUT"
+
+          etl_image="${{ steps.etl_image.outputs.image_uri }}"
+          bootstrap_family="${{ steps.outputs.outputs.bootstrap_family }}"
+          if [ -n "$etl_image" ] && [ -n "$bootstrap_family" ]; then
+            echo "bootstrap_taskdef=$(register_pinned "$bootstrap_family" db-bootstrap "$etl_image")" >> "$GITHUB_OUTPUT"
+          else
+            echo "bootstrap_taskdef=$bootstrap_family" >> "$GITHUB_OUTPUT"
+          fi
+
+          verify_family="${{ steps.outputs.outputs.verify_family }}"
+          if [ -n "$etl_image" ] && [ -n "$verify_family" ]; then
+            echo "verify_taskdef=$(register_pinned "$verify_family" verify-grants "$etl_image")" >> "$GITHUB_OUTPUT"
+          else
+            echo "verify_taskdef=$verify_family" >> "$GITHUB_OUTPUT"
+          fi
 
       # Static-asset sync to S3 (#700) — make old content-hashed chunks survive a
       # deploy. The Next standalone image bakes `.next/static`; when ECS rolls,
@@ -219,7 +311,7 @@ jobs:
             --query 'services[0].networkConfiguration' --output json)
           task_arn=$(aws ecs run-task \
             --cluster "${{ steps.outputs.outputs.cluster }}" \
-            --task-definition "${{ steps.outputs.outputs.bootstrap_family }}" \
+            --task-definition "${{ steps.pin.outputs.bootstrap_taskdef }}" \
             --launch-type FARGATE \
             --network-configuration "$netcfg" \
             --query 'tasks[0].taskArn' --output text)
@@ -259,7 +351,7 @@ jobs:
             --query 'services[0].networkConfiguration' --output json)
           task_arn=$(aws ecs run-task \
             --cluster "${{ steps.outputs.outputs.cluster }}" \
-            --task-definition "${{ steps.outputs.outputs.verify_family }}" \
+            --task-definition "${{ steps.pin.outputs.verify_taskdef }}" \
             --launch-type FARGATE \
             --network-configuration "$netcfg" \
             --query 'tasks[0].taskArn' --output text)
@@ -294,7 +386,7 @@ jobs:
             --query 'services[0].networkConfiguration' --output json)
           task_arn=$(aws ecs run-task \
             --cluster "${{ steps.outputs.outputs.cluster }}" \
-            --task-definition "${{ steps.outputs.outputs.mig_family }}" \
+            --task-definition "${{ steps.pin.outputs.migrate_taskdef }}" \
             --launch-type FARGATE \
             --network-configuration "$netcfg" \
             --query 'tasks[0].taskArn' --output text)
@@ -311,13 +403,17 @@ jobs:
             exit 1
           fi
 
-      - name: Update ECS service (force new deployment)
+      # #2121 -- explicit `--task-definition` (this deploy's pinned revision),
+      # not `--force-new-deployment` against whatever the service already has.
+      # A rollback that re-targets a PREVIOUS revision now re-targets a
+      # genuinely different, immutable image -- see docs/rollback-runbook.md.
+      - name: Update ECS service (new pinned task-definition revision)
         run: |
           set -euo pipefail
           aws ecs update-service \
             --cluster "${{ steps.outputs.outputs.cluster }}" \
             --service "${{ steps.outputs.outputs.service }}" \
-            --force-new-deployment \
+            --task-definition "${{ steps.pin.outputs.app_taskdef }}" \
             >/dev/null
 
       - name: Wait for service to stabilize
