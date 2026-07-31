@@ -55,7 +55,7 @@ Median tagged-publication count across the top 10:
 
 On the headline disease query, raising one weight moves the top of the page from a scholar with 13 of 339 publications tagged (3.8%) to a page where nine of ten carry 60 or more — and it reaches scholars who were **not in the fetched 20 at all**, because this is a scoring change and not a reordering. The rank-15 and rank-11 scholars a page-1 experiment could surface are joined by several it structurally could not.
 
-Judged on the 10-query acceptance panel, predictions recorded before the arm was read, one blind judge per query. The raw tally was 6 BETTER / 1 MILD_BETTER / 2 NEUTRAL / 1 WORSE with no control damaged. **Corrected, it is 5 BETTER / 1 MILD_BETTER / 2 NEUTRAL / 1 WORSE / 1 PROVISIONAL** — `cancer`'s BETTER verdict is struck, because that query's candidate pool is truncated by construction and the judge was ordering a broken set. **Quote the corrected tally.** The page-1 `rank_features` proxy scored 7/1/2 but **damaged a control**; this arm does not.
+Judged on the 10-query acceptance panel, predictions recorded before the arm was read, one blind judge per query. The raw tally was 6 BETTER / 1 MILD_BETTER / 2 NEUTRAL / 1 WORSE with no control damaged. **Quote it as 5 BETTER / 1 MILD_BETTER / 2 NEUTRAL / 1 WORSE over nine valid queries, `cancer` excluded.** `cancer`'s BETTER verdict is struck because that query's candidate pool is truncated by construction and the judge was ordering a broken set. That is a **methodological exclusion, not a verdict** — do not fold it in as a fifth category, which invites reading it as 5-of-10. The page-1 `rank_features` proxy scored 7/1/2 but **damaged a control**; this arm does not.
 
 Two caveats on the panel itself, both of which bound how much the tally can carry:
 
@@ -107,7 +107,9 @@ Beyond being unbuildable as specified, it was unnecessary: the additive per-cwid
 
 ## Decision
 
-**Do not fund a `rank_features` reindex for concept counts.** Raise the ceiling on the magnitude the system already computes, and stop quantising it. Sequence as independently landable blocks.
+**Do not fund a `rank_features` reindex for concept counts.** Raise the ceiling on the magnitude the system already computes, and stop quantising it.
+
+⚠ **These blocks are not all independently landable, and revision 1's claim that they were is withdrawn.** B0 and B2 are independent. **B1, B3 and B4 are one shipment** — B4 because the number that explains the reorder must reach the card the same day, B3 because landing it afterwards would invalidate the `W_HI` the acceptance panel had just accepted. Each block below says which it is.
 
 ### B0 — Evidence population (no reindex, no flag, ships first)
 
@@ -117,9 +119,18 @@ Measured: reading the column by `kind` ranked a cardiac electrophysiologist firs
 
 Filter to `strength == "tagged"`; treat `concept`-strength hits as **unknown**, never as zero. Contract rule **O9**.
 
-### B1 — Raise and grade the concept weight
+### B1 — Raise, grade and reshape the concept weight
 
-`SEARCH_PEOPLE_AREA_BOOST_GRADED` on, `SEARCH_AREA_BOOST_W_HI` at the measured knee. Both are already flags and both are already on the `?flags=` allowlist, so this is a task-def change and a `cdk deploy` — **no reindex, no ETL change, no new field, no new code path**.
+⚠ **Revision 1 scoped this as "two flag flips and a `cdk deploy`, no new code path". That is no longer what this document argues for.** The α sweep and the breadth gate are both now prerequisites of the flip rather than follow-ups, and both are code. Stated honestly, B1 is:
+
+| part | flags? | new code? |
+|---|---|---|
+| `SEARCH_PEOPLE_AREA_BOOST_GRADED` on, `SEARCH_AREA_BOOST_W_HI` at the measured knee | both exist, both on the `?flags=` allowlist | no |
+| the share exponent — generalise `n²/total` to `n · share^α` | new flag needed to sweep it | **yes**, and it changes the scoring formula |
+| the breadth gate — unconsumed-token coverage selecting `W_HI` per query | new flag | **yes**, a classifier with its own threshold |
+| `SEARCH_PEOPLE_PUBCOUNT_DAMPEN` (B3) — swept in the same pass, see below | exists | no |
+
+**The cheapness claim survives, but it must be re-derived.** It was never really "no code"; it is **no index work**. Against the `rank_features` alternative this change still needs no reindex, adds no dark field a future reindex must carry, costs no index size, and — decisively — is request-scoped on staging, so every parameter above is A/B-able by curl against one process without a deploy. A classifier and a one-line formula generalisation are ordinary application changes; a reindex of `meshSubtreeCounts` is a migration with a rollback that costs another one. That asymmetry, not the line count, is why this wins.
 
 ⚠ `SEARCH_PEOPLE_AREA_BOOST_GRADED` is currently `on` in staging and `off` in prod, and was previously recorded as "worse alone, do not promote". That verdict stands **at `W_HI = 3`** and is now explained: grading a magnitude into a range the ceiling has already collapsed changes the ordering within bands that are all worth about the same. The two flags are one change and must ship together; neither is safe to promote alone.
 
@@ -142,11 +153,23 @@ On the route: a `max(year)` sub-aggregation almost certainly beats a mapped `mes
 
 Scholar-global `mostRecentPubDate` remains **not** a substitute: the failing scholars publish recently, just not on the queried concept.
 
-### B3 — The volume cap, argued as `W_HI` stabilisation
+### B3 — The volume cap, swept WITH `W_HI` and shipped WITH B1
 
 #2068's `SEARCH_PEOPLE_PUBCOUNT_DAMPEN=capped` ships **with** B1, never before. Career volume is currently an accidental proxy for topical evidence; capping it alone removes the proxy without supplying the signal, and on two of ten panel queries it demoted the highest-evidence scholar on the page.
 
-**That is an argument about sequencing, not about value, and it undersells B3.** The durable justification: **B3 is what stops `W_HI` from drifting.** `W_HI` needs re-derivation whenever anything else in the sum moves (O5) *precisely because* it is an absolute weight sitting against an unbounded multiplier spanning 2.01×. Cap the volume prior and the ratio becomes stable by construction, and O5's standing re-measurement obligation gets much cheaper. Without B3, every future change to the prominence sum costs another acceptance panel.
+**That is an argument about sequencing, not about value, and it undersells B3.** The durable justification: **B3 is what stops `W_HI` from drifting.** `W_HI` needs re-derivation whenever anything else in the sum moves (O5) *precisely because* it is an absolute weight sitting against an unbounded multiplier spanning 2.01×. Cap the volume prior and the ratio becomes stable by construction. Without B3, every future change to the prominence sum costs another acceptance panel.
+
+🔴 **That thesis has a consequence the sequencing must respect, and revision 2's first draft got it wrong.** If capping the volume prior is what makes `W_HI` stable, then landing B3 *after* the acceptance panel **moves a term in the prominence sum and invalidates the `W_HI` that panel just accepted** — by this document's own O5 rule. Flipping at `W = 20` and then immediately landing the change that makes 20 the wrong number, with no re-derivation anywhere after it, is not a defensible order.
+
+The fix is the argument already made for α. α and `W_HI` are swept together *because they interact*; `PUBCOUNT_DAMPEN` interacts with `W_HI` too — **that is not an inference, it is B3's thesis.** So it belongs in the same sweep:
+
+```
+α  ×  W_HI  ×  dampen ∈ {off, capped}
+```
+
+Median-N locating over three dimensions is still curls and still one afternoon, and it still costs exactly **one** blind panel at the end. B1 and B3 then ship together and O5's obligation is discharged once instead of twice.
+
+This strengthens B3 rather than weakening it. As a standalone item at the end of a list it is easy to defer indefinitely; folded into the sweep it is part of the change that gets accepted.
 
 ### B4 — Reconcile the displayed numbers — **ships WITH B1**
 
@@ -160,8 +183,9 @@ Once the ranked quantity is the concept count, the displayed number and the rank
 
 ### Accepted
 
-- **Two flag flips and a `cdk deploy`.** No reindex, no ETL change, no index-size cost, no dark field a future reindex must carry.
-- **A weight that is tuned, not derived.** `W_HI = 20` comes from a knee in a 7-point sweep over 10 queries. It is a number chosen by measurement, and it will need re-measuring when anything else in the prominence sum moves (O5).
+- **Application code and flag flips, but no index work.** A scoring-formula generalisation, a breadth classifier, and four flags reaching a `cdk deploy`. No reindex, no ETL change, no index-size cost, no dark field a future reindex must carry. See B1 for why that is the right axis to compare against `rank_features` on.
+- **Three tunables that are tuned, not derived.** `W_HI`, α and the gate threshold all come from knees in curl sweeps over a query panel. They are numbers chosen by measurement. B3 is what stops `W_HI` needing re-derivation every time something else moves (O5); the gate threshold and α have no such stabiliser and remain standing re-measurement obligations.
+- **Tuning and acceptance need separate query sets.** Three continuous parameters fitted on ten hand-picked queries and then declared accepted on those same ten is overfitting by construction. A frequency-sampled holdout is required — see Verification.
 
 ### Not resolved, and stated plainly
 
@@ -179,11 +203,22 @@ Once the ranked quantity is the concept count, the displayed number and the rank
   functional mri  entry term "MRI"            "functional" dropped on the floor
   ```
 
-  The resolver hopped to a parent *precisely because* it could not match a token, and the dropped token is the evidence. A content-word coverage ratio over the matched entry term — computable before ranking, no tree walk.
+  The resolver hopped to a parent *precisely because* it could not match a token, and the dropped token is the evidence. A content-word coverage ratio over the matched entry term — computable before ranking, no tree walk. **Starting threshold: gate to the low weight when coverage < 1.0** (i.e. any unconsumed content word), which is the strictest setting and the one the three worked examples separate at. It is a starting point for the offline validation to move, not a derived value; state whatever it ends up as, because "a content-word coverage ratio" with no cutoff named is not yet a spec.
 
   **The gate must select a weight, not kill the boost:** `W_HI = unconsumedTokens ? 3 : 20`. A boolean suppression can regress below today's page; a weight selector can only cost the delta.
 
-  **Validate it entirely offline first.** Run the classifier over the query log, eyeball a few hundred classifications, tune the coverage threshold — without touching ranking at all. It is the cheapest de-risking available and it is fully decoupled from B1.
+  🔴 **Predicted false-positive class, and it is a big one: the signal conflates two different situations.**
+
+  | query | resolves to | dropped token | resolution is |
+  |---|---|---|---|
+  | `functional mri` | `Magnetic Resonance Imaging` | `functional` | **wrong in kind** — the resolver hopped because it could not match the token; the concept is a strict superset |
+  | `pediatric asthma` | `Asthma` | `pediatric` | **right, just under-specific** — the head matched correctly and a modifier was dropped |
+
+  Both leave a content word on the floor, so a flat coverage threshold gates both to `W_HI = 3` — **costing the win on every modifier-qualified query.** At a medical school, population and site modifiers (`pediatric`, `elderly`, `metastatic`, `refractory`) are a large slice of real traffic, so this is not a corner case.
+
+  **The offline validation must carry this as an explicit hypothesis**, not discover it by luck: *does the classifier separate scope-shifting drops from qualifier drops, or does it only count?* If it only counts, the gate likely needs the unconsumed token checked against MeSH's qualifier axis rather than a raw ratio — which is more work than currently budgeted, and far better to learn before the sweep than after the panel.
+
+  **Validate it entirely offline first.** Run the classifier over the query log, eyeball a few hundred classifications with the two-class question above in hand, tune the threshold — without touching ranking at all. It is the cheapest de-risking available and it is fully decoupled from B1.
 
 - 🔴 **The descendant expansion silently truncates 27% of broad descriptors. Mechanism confirmed; filed as #2096.**
 
@@ -217,10 +252,12 @@ Once the ranked quantity is the concept count, the displayed number and the rank
 
   ```
   318/900 vs 150/200     α=1   → 112 vs 113   (near-tie)
-                         α=0.5 → 189 vs 130   (the specialist loses, correctly)
+                         α=0.5 → 189 vs 130   (the prolific generalist wins)
   ```
 
-  The independent λ sweep concluding share should be *secondary* to count, plus the two queries where full-weight share demotes the right scholar, both point to **α ≈ 0.5**.
+  **No verdict is attached to that example on purpose** — which of those two orderings is right is exactly what the sweep measures, and asserting it here would pre-commit the reader to the answer before the sweep runs. The independent λ sweep concluding share should be *secondary* to count, plus the two queries where full-weight share demotes the right scholar, both point to **α ≈ 0.5** as the region to search, not as the answer.
+
+  ⚠ **This looks like it contradicts the "delete the method tier" row in Alternatives**, which was rejected precisely because it evicted specialists in favour of high-volume generalists. Reconciled: those are different comparisons. The method-tier case is **across evidence types** — generalists with zero publications *of the queried technique* displacing practitioners of it, which is a correctness failure at any α. The α case is **within one evidence type** — both scholars have on-concept tagged publications, and α only decides how much a high on-topic *share* compensates for a lower absolute count. Lowering α never admits a scholar with no on-concept evidence. Keep this distinction explicit; the pair is the first thing an adversarial reviewer will find.
 
   **α and `W_HI` interact** — lowering α widens the raw score range, which changes what the top band is worth — so it is one sweep, not two. Use median-N to locate the knee in both dimensions (that is exactly what it is good for), then spend the single blind panel on one `(α*, W*)` pair with the breadth gate on. **One panel, correct functional form.**
 
@@ -238,37 +275,62 @@ Once the ranked quantity is the concept count, the displayed number and the rank
 ## Verification
 
 - **B0:** a consumer keyed on `kind` must fail a test that a consumer filtering on `strength == "tagged"` passes, with all three strengths in the fixture and a `concept`-strength row asserting *unknown* rather than zero.
-- **B1:** ⚠ **provisional, not done.** A 10-query panel ran at pinned prod parity with predictions recorded before the arm was read, one blind judge per query, `total` byte-identical on all 70 captures across the sweep. Corrected tally 5 BETTER / 1 MILD_BETTER / 2 NEUTRAL / 1 WORSE / 1 PROVISIONAL, no control damaged. It does **not** constitute acceptance, for three reasons: it was judged against α = 1 and the functional form is changing, one query was measured over a truncated pool, and a single judge carries the four decisive verdicts. **The acceptance panel is the one described under Next steps — one panel on `(α*, W*)` with the gate on, two judges on the decisive four.**
+- **B1:** ⚠ **provisional, not done.** A 10-query panel ran at pinned prod parity with predictions recorded before the arm was read, one blind judge per query, `total` byte-identical on all 70 captures across the sweep. Tally 5 BETTER / 1 MILD_BETTER / 2 NEUTRAL / 1 WORSE over nine valid queries (`cancer` excluded), no control damaged. It does **not** constitute acceptance, for three reasons: it was judged against α = 1 and the functional form is changing, one query was measured over a truncated pool, and a single judge carries the four decisive verdicts.
 
   ⚠ **Do not predict a verdict from median-N in the top 10.** It found the knee correctly and got 4 of 10 verdicts wrong, because it is blind to ordering *within* a page whose membership does not change. It is a weight-locating instrument, not an acceptance test.
+
+### The acceptance panel needs a held-out set
+
+🔴 **The same ten queries located the `W_HI` knee, will locate α and the dampen setting, and are then proposed as the acceptance test. That is tuning and evaluating on one set**, and with three continuous parameters fitted on ten hand-picked observations it will report a win whether or not one exists.
+
+The frequency-weighting problem cannot be fixed cheaply — the panel exists *because* those queries expose known defects, and that is legitimate. **Holding out can be.** Sample ten queries from the query log by frequency, do not look at them during any sweep, and report the acceptance panel as **two separate tallies**:
+
+- if the holdout comes back materially worse than the tuning set, the parameters are overfitted and the sweep must be redone with a coarser grid;
+- if it comes back comparable, the "does not estimate user impact" caveat largely dissolves and the claim gets much stronger.
+
+Roughly ten extra judgements buys that. **Sample the holdout while pulling the truncation-rate slice** — that work already opens the query log, so the marginal cost is close to zero.
+
 - **B2:** measure the `max(year)` sub-aggregation route before mapping any new field. PR #2095 shipped the pattern on the reason aggregation, so the mechanism is demonstrated; what remains is measuring it on the concentration aggregation.
 - **`AREA_BOOST_TOP_N`:** `TOP_N:200` vs `TOP_N:2000` at `W_HI:20`, top-10 diff, all ten queries. Must be clean before any prod flip.
-- Standing: re-derive `W_HI` whenever another term in the prominence sum changes (O5). B3 is what makes this obligation affordable.
+- Standing: re-derive `W_HI` whenever another term in the prominence sum changes (O5). B3 is what makes this obligation affordable — and is why B3 is swept with `W_HI` rather than landed after it.
 
-## Next steps
+### After the flip
 
-Ordered. Items 1-3 are independent of each other and can run in parallel; nothing below item 3 should start until they are clean.
+**Everything above is pre-flip. A change that reorders page 1 this dramatically should not go from a ten-query offline panel straight to prod with nothing watching.**
 
-1. **`AREA_BOOST_TOP_N` boundary check.** Two curls per query on staging, top-10 diff. Retires or resizes the cutoff. **Blocking for the flip.** Unblocked by PR #2095 — no further code needed.
-2. **Truncation rate over real traffic.** Count `meshDescendantTruncated` over a query-log slice to convert "27.4% of broad descriptors" into "N% of real queries". Feeds #2096's priority. Unblocked by PR #2095.
-3. **B0 — evidence population.** Filter to `strength == "tagged"`; `concept`-strength reads *unknown*, never zero. Contract rule O9. No reindex, no flag, ships on its own.
-4. **Breadth gate validated offline as a classifier.** Unconsumed-token coverage over the query log, a few hundred classifications eyeballed, threshold tuned. No ranking touched. Fully decoupled from B1.
-5. **Locate the `(α, W_HI)` knee together** by median-N. One sweep, not two — they interact.
-6. **One blind acceptance panel** on `(α*, W*)` with the breadth gate on, **two judges on the decisive four** (`functional mri`, `longevity`, `crispr`, `lung cancer`). Check the technique-query share against the real query mix before reading the tally.
-7. **B1 and B4 together.** The number that explains the reorder ships on the card the same day.
-8. **B3**, argued as `W_HI` stabilisation.
-9. **B2** with step-function recency. Sweep N over {5, 10, 15}.
-10. **Method magnitude**, after the 40× is settled by diffing the two publication lists.
+**Rollback is one deploy, and saying so is the point.** All four levers live in the `sps-app-<env>` task-def env, not the image, so reverting is a task-def change and a `cdk deploy Sps-App-prod` — no rebuild, no reindex, no data migration. On staging they are additionally request-scoped via `?flags=`, so the pre-flip arm stays reproducible after the flip. A stated rollback path is what makes an aggressive weight approvable.
+
+Watch for one week:
+
+| signal | why | what it would mean |
+|---|---|---|
+| click position distribution on people results | the direct read on whether the reorder helps | mass moving **up** the page is the win; flat or moving down is not |
+| zero-click rate on people searches | catches "the page got worse in a way nobody clicks through" | a rise is the single clearest regression signal |
+| the affiliated-faculty complaint | **a falsifiable prediction already on the record** | this ADR predicts the complaint will be about **card sparsity, not ordering**. If the feedback is about ordering, **B4 did not work and the model of the failure was wrong** |
+
+That third row is nearly free and it is the only place in this document where a real user's reaction tests a claim it makes. Record which way it comes out either way.
+
+## Sequencing decisions
+
+**The running checklist lives on the tracking issue (#2097), not here** — an ADR that needs an edit every time a task closes stops being a record. What belongs in the record is *why* the order is what it is. Four of these are decisions, not scheduling:
+
+1. **Three things are unblocked and gate everything else**: the `AREA_BOOST_TOP_N` boundary check, the truncation rate over real traffic, and B0. They are independent of each other and of every parameter below. Nothing else should start until the first is clean, because it can invalidate the premise.
+2. **α, `W_HI` and `dampen` are swept together, not in sequence** — they interact, and B3's own thesis is that `dampen` moves `W_HI`. One three-dimensional median-N sweep, one blind panel at the end.
+3. **The breadth gate is validated offline before the sweep**, because if the classifier cannot separate scope-shifting drops from qualifier drops, the gate needs rebuilding and every downstream parameter changes with it.
+4. **B1, B3 and B4 ship as one change.** B4 because the number explaining the reorder must be on the card the same day; B3 because landing it afterwards would invalidate the `W_HI` just accepted.
+
+B2 (step-function recency) and the method magnitude (after the 40× is settled by diffing the two publication lists) follow, and are independent of each other.
 
 ## Open questions
 
-- **Does the 200-scholar concentration cutoff change any page at `W_HI = 20`?** Unknown. The deep-pagination check found no discontinuity but measured the wrong ordering to answer it. Item 1 above settles it. If it does move pages, the follow-on question is what the right cutoff costs in `function_score` clause count — a latency question, not a relevance one.
+- **Does the 200-scholar concentration cutoff change any page at `W_HI = 20`?** Unknown. The deep-pagination check found no discontinuity but measured the wrong ordering to answer it. The `TOP_N` boundary check settles it. If it does move pages, the follow-on question is what the right cutoff costs in `function_score` clause count — a latency question, not a relevance one.
 - **What fraction of *real* queries hit the descendant cap?** 27.4% of broad *descriptors* are truncated, but descriptor frequency in the query log is unknown and almost certainly not uniform. The rate over traffic could be far higher or far lower.
 - **Which of #2096's three fixes is right?** Raise the cap for the terms clause only and A/B it; make the walk breadth-first so a truncated set at least samples the whole tree; or index an ancestor-closure field and drop the runtime expansion. The first is cheapest, the third is correct, the second is the interesting middle. Not decided.
 - **Is the panel's technique-query share representative?** Three of ten are technique queries, chosen by known defect rather than frequency. Until the real mix is checked, the tally does not estimate user impact in either direction.
-- **What is α actually?** ≈ 0.5 is inferred from two independent signals, neither of which swept α directly. Item 5 measures it.
-- **Does the unconsumed-token gate generalise past the panel?** It separates the three queries it was derived from. Whether it holds over a few hundred real queries is exactly what item 4 tests, and it is the cheapest way this design can be shown wrong early.
-- **Is `n · share^α` the right family at all?** The sweep assumes it. No alternative functional form has been tried, and the near-tie at α = 1 between a 318/900 generalist and a 150/200 specialist is the kind of coincidence that suggests the family is under-determined by the evidence available.
+- **What is α actually?** ≈ 0.5 is inferred from two independent signals, neither of which swept α directly. The three-dimensional sweep measures it.
+- **Does the unconsumed-token gate separate the two drop classes, or does it only count?** It separates the three queries it was derived from, but `pediatric asthma` → `Asthma` drops a token from a *correct* resolution. If a raw coverage ratio cannot tell that from `functional mri` → `MRI`, the gate needs the MeSH qualifier axis and is materially more work than budgeted. This is the cheapest way the design can be shown wrong early, and it is why the offline validation runs first.
+- **Is `n · share^α` the right family at all?** The sweep assumes it, and no alternative functional form has been tried. That is the honest reason to doubt it.
+- **Do the tuning and holdout panels agree?** If they diverge materially, three parameters were fitted to ten hand-picked queries and the result does not generalise. This is the single question that most determines whether the flip is justified.
 - **Does anything consume `mostRecentYear`?** It ships in the payload as instrumentation. If B2 lands as a step function on *concept-scoped* recency, the scholar-global field may have no consumer and should be reconsidered rather than left as a field nobody reads.
 
 ## Related
@@ -276,6 +338,7 @@ Ordered. Items 1-3 are independent of each other and can run in parallel; nothin
 - [`search-relevance-contract.md`](./search-relevance-contract.md) — O1, O3, O5, O7, O8, and O9 added by this ADR.
 - [`search-people-relevance.md`](./search-people-relevance.md) — the descriptive reference.
 - `lib/api/area-concentration.ts` — owns the choice of what `concentration` credits, which is what makes the emitted `terms: { cwid }` clause satisfy O2.
-- **PR #2095** — step-1 instrumentation, merged and dark: `SEARCH_AREA_BOOST_TOP_N` as an overridable flag, `descendantCount` / `descendantTruncated`, and publication years in the payload. Unblocks Next-steps items 1 and 2.
+- **PR #2095** — step-1 instrumentation, merged and dark: `SEARCH_AREA_BOOST_TOP_N` as an overridable flag, `descendantCount` / `descendantTruncated`, and publication years in the payload. Unblocks the `TOP_N` boundary check and the truncation-rate count.
+- **Issue #2097** — the tracking issue. It owns the running checklist and the current state; this ADR owns the arguments. If they disagree about *why*, the ADR wins; about *what is done*, the issue wins.
 - **Issue #2096** — the descendant-cap truncation, with the three candidate fixes costed.
 - `docs/spec-snapshots/mesh-broad-descriptors-2026-05.json` — capped and uncapped descendant counts for 587 broad descriptors; the source for the 161/587 figure.
