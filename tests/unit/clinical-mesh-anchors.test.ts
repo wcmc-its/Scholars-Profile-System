@@ -168,4 +168,14 @@ describe("clinicalMeshMatch (cap-free subsumption)", () => {
     expect(clinicalMeshMatch([], anchors)).toBeNull();
     expect(clinicalMeshMatch(closureOf("C14.280"), [])).toBeNull();
   });
+
+  it("#2022: colorectal anchor (Intestinal Diseases) does not subsume pancreas (C06.689.667)", () => {
+    const colorectal = [
+      { specialty: "Colon and Rectal Surgery", boardCertified: true, tree: ["C06.405.469"] },
+    ];
+    // pancreatic neoplasms D010190 → C06.689.667 / C06.301.761 — outside C06.405.469
+    expect(clinicalMeshMatch(closureOf("C06.689.667"), colorectal)).toBeNull();
+    // colorectal neoplasms D015179 → C06.405.469.158.356 — still subsumed
+    expect(clinicalMeshMatch(closureOf("C06.405.469.158.356"), colorectal)).not.toBeNull();
+  });
 });
