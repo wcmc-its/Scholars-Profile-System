@@ -1998,6 +1998,14 @@ service:
             },
             {
               "Action": [
+                "ecs:DescribeTaskDefinition",
+                "ecs:RegisterTaskDefinition",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
                 "ecs:DescribeTasks",
                 "ecs:ListTasks",
               ],
@@ -5948,6 +5956,14 @@ service:
               "Resource": {
                 "Ref": "EcsService81FC6EF6",
               },
+            },
+            {
+              "Action": [
+                "ecs:DescribeTaskDefinition",
+                "ecs:RegisterTaskDefinition",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
             },
             {
               "Action": [

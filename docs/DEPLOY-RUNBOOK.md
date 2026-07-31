@@ -15,7 +15,7 @@ A typical end-to-end deploy looks like this:
 | 3 | `deploy.yml` | ~3 min | `docker build` of the Next.js standalone image. |
 | 4 | `deploy.yml` | ~30 s | Push to `scholars-app-staging:${sha}` + `:latest`. |
 | 5 | `deploy.yml` | ~30 s (no-op typical) | Run `sps-migrate-staging` Fargate task; wait for stopped; assert `exitCode == 0`. |
-| 6 | `deploy.yml` | ~3 min | `ecs update-service --force-new-deployment` triggers rolling replacement. |
+| 6 | `deploy.yml` | ~3 min | `ecs update-service --task-definition sps-app-staging:<new-pinned-revision>` triggers rolling replacement (#2121). |
 | 7 | `deploy.yml` | ~5 min worst-case | `ecs wait services-stable` polls every 15 s until `runningCount == desiredCount` and the older deployment count drops to zero. |
 | 8 | `deploy.yml` | ~10 s | Curl `/api/health` against the public ALB DNS; retry up to 5 times with 5 s gap. |
 
@@ -39,7 +39,7 @@ The deploy is rolling: ECS replaces old tasks one (or two) at a time, with `minH
 
 1. **Small fleet.** Staging runs 1 task, prod runs 2. The "extra task during deploy" cost (1 -> 2 briefly; 2 -> 3 briefly) is trivial. A blue/green pattern needs a second, idle task-set that doubles steady-state cost for no operational benefit at this scale.
 2. **Additive-only migrations.** Per `CONTRIBUTING.md` § "No rollback. Fix forward.", every migration is backwards-compatible with the previous app version. The previous version reads the old shape; the new column is unused until the next deploy makes it active. That property is what makes a rolling deploy safe: at any moment during the rolling window, both versions are running against a schema they can both read.
-3. **Circuit-breaker covers part of the failure mode.** `cdk/lib/app-stack.ts` sets `circuitBreaker: { rollback: true }` on the service. If new tasks fail health-checks during the rolling window, ECS reverts to the previous task-set without operator intervention. Note the limit: the task definition pins the image as `:latest` (`app-stack.ts:1051`) and no workflow registers a new revision, so the previous task-set resolves the *same* mutable tag. The breaker therefore recovers a task that fails to start for reasons outside the image — a task-def env change, a secret or IAM problem — but a bad **image** produces a rollback→re-pull→fail loop rather than a recovery. For that case the operator path is the ECR tag repoint in [`rollback-runbook.md`](./rollback-runbook.md), and § "Bad image" below.
+3. **Circuit-breaker covers the failure mode, including a bad image.** `cdk/lib/app-stack.ts` sets `circuitBreaker: { rollback: true }` on the service. If new tasks fail health-checks during the rolling window, ECS reverts to the previous task-set without operator intervention. The deploy workflow registers a new, digest-pinned task-definition revision every deploy (#2121) — the previous task-set is a genuinely distinct, immutable image, so the breaker is a real recovery, not a rollback→re-pull→fail loop against the same mutable tag. The remaining gap is behavioral regressions that pass health checks but degrade real traffic; for that case the operator path is the revision-based rollback in [`rollback-runbook.md`](./rollback-runbook.md), and § "Bad image" below.
 4. **Operational simplicity.** Rolling = one workflow file, one IAM role, no CodeDeploy hook Lambdas, no traffic-shift policies to maintain.
 
 Revisit the decision when **any** of:
@@ -59,6 +59,13 @@ Lifted from `docs/PRODUCTION_ADDENDUM.md` § "Where migrations run" and codified
 ```
 1. build image
 2. push to ECR (app image + ETL batch image)
+2a. pin task-definition revisions (#2121)
+     clone each family's (sps-app / sps-migrate / sps-db-bootstrap /
+     sps-verify-grants) current active revision, repoint only the `image`
+     field to this deploy's immutable `<repo>@sha256:...` digest, register
+     as a new revision; every step below targets that exact revision, never
+     a bare family name -- falls back to the bare family name when a family
+     isn't provisioned yet, same self-skip posture as steps 3-4
 2b. sync static assets to S3 (#700)
      docker cp .next/static out of the just-pushed image, then `aws s3 sync`
      (additive, NO --delete) to the EdgeStack static-asset bucket so old
@@ -214,26 +221,17 @@ aws ecs describe-services --cluster sps-cluster-${env} --services sps-app-${env}
 
 If the circuit-breaker has already rolled back, you'll see `service ... rolled back to deployment ...` events. Investigate the failed image at leisure; production is back on the previous version.
 
-If the new tasks are running but returning 5xx (e.g. a config bug that doesn't surface in the health-check path), the rollback is **operator-driven**:
+If the new tasks are running but returning 5xx (e.g. a config bug that doesn't surface in the health-check path), the rollback is **operator-driven**. Every deploy registers a new, digest-pinned task-definition revision (#2121), so a previous revision is a genuinely distinct, immutable image:
 
 ```sh
-# 1. Identify the previous known-good image tag.
-aws ecr describe-images --repository-name scholars-app-${env} \
-  --query 'reverse(sort_by(imageDetails,&imagePushedAt))[:5].{tags:imageTags,pushed:imagePushedAt}' \
-  --output table
+# 1. Identify the previous known-good revision.
+aws ecs list-task-definitions --family-prefix sps-app-${env} --sort DESC --max-items 5
+aws ecs describe-task-definition --task-definition sps-app-${env}:<REVISION> \
+  --query 'taskDefinition.containerDefinitions[?name==`app`].image' --output text
 
-# 2. Repoint :latest to a prior known-good sha.
-prior_sha="<git sha of the prior good build>"
-aws ecr batch-get-image --repository-name scholars-app-${env} \
-  --image-ids imageTag="$prior_sha" \
-  --query 'images[].imageManifest' --output text \
-  | aws ecr put-image --repository-name scholars-app-${env} \
-      --image-tag latest --image-manifest file:///dev/stdin
-
-# 3. Force a new deployment of the same task definition; new tasks pull the
-#    now-repointed :latest.
+# 2. Point the service at that revision.
 aws ecs update-service --cluster sps-cluster-${env} \
-  --service sps-app-${env} --force-new-deployment
+  --service sps-app-${env} --task-definition sps-app-${env}:<PREVIOUS_REVISION>
 ```
 
 Do NOT trigger the workflow from a prior commit as your rollback path: that re-runs the migration step, and if the bad commit included a migration, you'll re-run an already-applied migration (no-op, slow) or attempt a downgrade-via-expand pattern that doesn't fit a hot rollback.

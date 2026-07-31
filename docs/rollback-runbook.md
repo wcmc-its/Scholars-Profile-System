@@ -15,41 +15,30 @@ Both signals are visible on the ALB target-group CloudWatch dashboard. The deplo
 
 ## The paste-able rollback command
 
-> **Selecting a previous task-definition revision does NOT roll code back.** The task definition pins the image by mutable tag — `ecs.ContainerImage.fromEcrRepository(repo, "latest")` at `cdk/lib/app-stack.ts:1051` — and no workflow ever calls `register-task-definition` (`grep -rn register-task-definition .github/workflows/` returns nothing). A code deploy pushes a new `:latest` and force-new-deployments the *same* revision (`.github/workflows/deploy.yml:152,317`). Every revision in the family history therefore resolves to whatever `:latest` points at right now, so `--task-definition <FAMILY>:<PREVIOUS_REVISION>` re-pulls the bad image. Rolling back means moving the **tag**, not the revision.
+Every deploy registers a new, digest-pinned task-definition revision for `sps-app-<env>` (and the migrate/db-bootstrap/verify-grants families it depends on) instead of force-new-deploying the same revision against a mutable `:latest` tag (`.github/workflows/deploy.yml`, the "Pin task-definition revisions to this deploy's images" step, #2121). Every revision in the family history is therefore a genuinely distinct, immutable image — selecting a previous revision **does** roll code back.
 
-Rollback is a three-step ECR tag repoint. `<env>` is `staging` or `prod`.
+Rollback is one command. `<env>` is `staging` or `prod`.
 
 ```bash
-# 1. Identify the previous known-good image tag (images are also tagged by git sha).
-aws ecr describe-images --repository-name scholars-app-<env> \
-  --query 'reverse(sort_by(imageDetails,&imagePushedAt))[:5].{tags:imageTags,pushed:imagePushedAt}' \
-  --output table
+# 1. Identify the previous known-good revision (each is pinned to one image digest).
+aws ecs list-task-definitions --family-prefix sps-app-<env> --sort DESC --max-items 5
+aws ecs describe-task-definition --task-definition sps-app-<env>:<REVISION> \
+  --query 'taskDefinition.containerDefinitions[?name==`app`].image' --output text
 
-# 2. Repoint :latest at that sha.
-prior_sha="<git sha of the prior good build>"
-aws ecr batch-get-image --repository-name scholars-app-<env> \
-  --image-ids imageTag="$prior_sha" \
-  --query 'images[].imageManifest' --output text \
-  | aws ecr put-image --repository-name scholars-app-<env> \
-      --image-tag latest --image-manifest file:///dev/stdin
-
-# 3. Force a new deployment; new tasks pull the now-repointed :latest.
+# 2. Point the service at that revision. This starts a new rolling deployment.
 aws ecs update-service --cluster sps-cluster-<env> \
-  --service sps-app-<env> --force-new-deployment
+  --service sps-app-<env> --task-definition sps-app-<env>:<PREVIOUS_REVISION>
 ```
 
-The service scheduler rolls the tasks using the same `minimumHealthyPercent: 100` / `maximumPercent: 200` configuration as a forward deploy. Expected duration: 4–6 minutes for a 4-task service.
+The service scheduler rolls the tasks using the same `minimumHealthyPercent: 100` / `maximumPercent: 200` configuration as a forward deploy, gated by the same circuit breaker. Expected duration: 4–6 minutes for a 4-task service.
 
-Two consequences of the tag-based contract worth knowing before you start:
-
-- **Step 2 mutates shared state.** `:latest` is what *every* task definition in the family pulls, so the repoint takes effect for anything that starts a task afterwards — not just the service you are fixing.
-- **Do not re-run the deploy workflow from a prior commit as your rollback path.** It re-runs the migration step. If the bad commit carried a migration you will either re-apply an applied migration (no-op, slow) or attempt a downgrade-via-expand that does not fit a hot rollback.
+**Do not re-run the deploy workflow from a prior commit as your rollback path.** It re-runs the migration step. If the bad commit carried a migration you will either re-apply an applied migration (no-op, slow) or attempt a downgrade-via-expand that does not fit a hot rollback. The command above only moves the app service; it does not touch the migrate/db-bootstrap/verify-grants task definitions, matching this runbook's app-code-only scope.
 
 The identical procedure appears in [`DEPLOY-RUNBOOK.md` § Bad image](./DEPLOY-RUNBOOK.md); that document is the operational source of truth for the deploy pipeline. Keep the two in sync, or collapse this section into a pointer.
 
 ## Verifying the rollback
 
-1. Watch `aws ecs describe-services --cluster sps-cluster-<env> --services sps-app-<env>` until `deployments` contains a single entry with `status: PRIMARY` and `runningCount == desiredCount`. Note that the revision number will be **unchanged** — that is expected under the mutable-tag contract, and is why the revision is not a rollback signal. Confirm the running image instead: `aws ecs describe-tasks` → `containers[].imageDigest`, and check it matches the digest of the sha you repointed to in step 2.
+1. Watch `aws ecs describe-services --cluster sps-cluster-<env> --services sps-app-<env>` until `deployments` contains a single entry with `status: PRIMARY` and `runningCount == desiredCount`. The revision number is now a real rollback signal: confirm it matches `<PREVIOUS_REVISION>` from step 1.
 2. Confirm the ALB target-group 5xx rate returns to baseline within 5 minutes of the new tasks reaching healthy.
 3. Tail CloudWatch Logs for the service and confirm new task IDs are emitting normal log lines (no boot-time errors).
 

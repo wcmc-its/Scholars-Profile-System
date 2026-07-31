@@ -1079,10 +1079,12 @@ export class AppStack extends Stack {
       }),
       portMappings: [{ containerPort: 3000, protocol: ecs.Protocol.TCP }],
       // FLAGS LIVE HERE, NOT IN THE IMAGE. Merging a flag does NOT turn it on:
-      // the app image is `:latest` (mutable), so CD ships new code without a new
-      // task def, but env vars only move on a manual `cdk deploy Sps-App-<env>`.
-      // Until then the flag is `undefined` at runtime and the feature is DARK,
-      // even though the CDK source, the PR, and every handoff say "on" (#1765).
+      // env vars only move on a manual `cdk deploy Sps-App-<env>` -- a code
+      // deploy registers a new task-def revision pinned to that deploy's image
+      // digest (#2121, deploy.yml), but does not touch `environment:` here.
+      // Until a `cdk deploy` ships it, the flag is `undefined` at runtime and
+      // the feature is DARK, even though the CDK source, the PR, and every
+      // handoff say "on" (#1765).
       // Check for drift:
       //   aws ecs describe-task-definition --task-definition sps-app-<env> \
       //     | node scripts/release/flag-parity.mjs --drift <env> -
@@ -3123,8 +3125,11 @@ export class AppStack extends Stack {
     // service, ECS task Describe/List on the cluster, iam:PassRole on the
     // two task-side roles, and cloudformation:DescribeStacks on this stack
     // (the deploy workflow reads the AppStack outputs to discover the ECR
-    // URIs, cluster, service, and migration family). The only `*` resource
-    // is ecr:GetAuthorizationToken, which has no resource-level ARN.
+    // URIs, cluster, service, and migration family). The only `*` resources
+    // are ecr:GetAuthorizationToken and ecs:DescribeTaskDefinition /
+    // ecs:RegisterTaskDefinition (#2121) -- none of the three support
+    // resource-level ARNs (confirmed empirically for the ECS pair: an
+    // ARN-scoped grant AccessDenied'd in a live staging dry run).
     // ------------------------------------------------------------------
     const githubOidcIssuerHost = "token.actions.githubusercontent.com";
     const githubOidcProviderArnContext = this.node.tryGetContext("githubOidcProviderArn") as
@@ -3226,6 +3231,23 @@ export class AppStack extends Stack {
         effect: iam.Effect.ALLOW,
         actions: ["ecs:UpdateService", "ecs:DescribeServices"],
         resources: [this.ecsService.serviceArn],
+      }),
+    );
+    // #2121 -- the deploy workflow clones each family's current active
+    // revision, repoints the image to this deploy's immutable digest, and
+    // registers it as a new revision before running/serving it. Tried an
+    // ARN-scoped grant first (matching the RunTask statement above); the
+    // empirical staging dry run proved ECS does NOT honor resource-level
+    // scoping for either action -- AccessDeniedException reports
+    // "resource: *" even against a request the policy's ARNs should have
+    // matched, because ECS evaluates both actions against `*` regardless
+    // of what's in the policy. `Resource: "*"` is the only thing that
+    // works; same class of AWS-mandated exception as ecr:GetAuthorizationToken.
+    this.deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["ecs:DescribeTaskDefinition", "ecs:RegisterTaskDefinition"],
+        resources: ["*"],
       }),
     );
     this.deployRole.addToPolicy(
