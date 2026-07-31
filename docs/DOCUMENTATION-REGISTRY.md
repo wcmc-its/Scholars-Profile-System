@@ -57,7 +57,8 @@ in **§10**.
 | What does this field mean / where is it from? | [`data-dictionary.md`](./data-dictionary.md) |
 | What's the VPC / network / security picture? | [`network-security-topology.md`](./network-security-topology.md) — **staging cut over to the shared `its-reciter-vpc01` 2026-07-02 (#1419)** |
 | What does it cost to run? | [`cost-model.md`](./cost-model.md) |
-| Why does search rank things this way? | [`search.md`](./search.md) |
+| Why does search rank things this way? | [`search.md`](./search.md) for the mechanics; **[`search-relevance-contract.md`](./search-relevance-contract.md) for the rules it must obey and the open-violation register** |
+| Why is *this scholar* above *that* one on a People search? | [`search-people-relevance.md`](./search-people-relevance.md) (layer-by-layer walkthrough), then [`search-relevance-contract.md`](./search-relevance-contract.md) §Register |
 | Why doesn't searching `covid19` or `tylenol` find the obvious people? | [`search-recall.md`](./search-recall.md) |
 | What are the match-reason line and the KEY PAPERS/METHODS/FUNDING rows under a result? | [`search-evidence-rows.md`](./search-evidence-rows.md) |
 | Why doesn't this (retracted) paper show up? | [`retracted-publications.md`](./retracted-publications.md) |
@@ -151,6 +152,8 @@ ADRs capture decisions and their rationale; reach for these when a colleague ask
 | [`ADR-007`](./ADR-007-csp-script-src-strategy.md) | CSP `script-src` strategy |
 | [`ADR-008`](./ADR-008-infrastructure-as-code.md) | Infrastructure-as-Code: AWS CDK, TypeScript, in-repo, six stacks (count superseded — nine stacks today) |
 | [`ADR-009`](./ADR-009-database-role-separation.md) | Database role separation: `app_rw` DML-only, `sps_migrate` for DDL (accepted 2026-05-30) |
+| ADR-010 | **Number not in use on `master`.** Reserved by an unmerged branch (`docs/adr-010-anchor-relation-semantics`); the gap between 009 and 011 is deliberate, not a lost file. |
+| [`ADR-011`](./ADR-011-concept-magnitude-ceiling.md) | Concept magnitude in People ranking: raise the ceiling on the magnitude the system already computes rather than index a new one — **partially accepted**, parts already in production (see the doc's Status header) |
 
 ## 8. How key features behave (for "why does it do that?")
 
@@ -161,6 +164,12 @@ ADRs capture decisions and their rationale; reach for these when a colleague ask
 | [`search-publications.md`](./search-publications.md) | Example-driven explainer for the Publications tab of `/search`. |
 | [`browse-vs-search.md`](./browse-vs-search.md) | The distinct jobs of the browse pages vs search. |
 | [`suggested-search-chips.md`](./suggested-search-chips.md) | Where the homepage "Try:" suggestion chips come from and **how to refresh them** — the curated lay-term master (`data/suggested-searches.json`), the runtime pool + sampler, and the repeatable method (mine the taxonomy → verify WCM depth → keep the lay-term↔MeSH gap). Reach for this when a chip looks stale or thin, or when it's time to regenerate the list. || [`taxonomy-aware-search.md`](./taxonomy-aware-search.md) | Taxonomy/MeSH-aware relevance re-weighting (v2.2). |
+| [`search-relevance-contract.md`](./search-relevance-contract.md) | 🔴 **The governing document for search relevance** — the numbered rules (O1–O9, E-series) every ranking term must obey, plus the **open-violation register** naming which are currently broken and where. Read this before proposing, reviewing or judging any ranking change; a change that moves ordering without a register row is unreviewable. |
+| [`search-people-relevance.md`](./search-people-relevance.md) | The descriptive layer-by-layer walkthrough of how a People result gets its score — admission, the relevance query, the prominence `function_score`, the concept/area arms, and the tiers. The "what it does" to the contract's "what it must do". |
+| [`search-research-area-relevance-spec.md`](./search-research-area-relevance-spec.md) | How research-area (topic) pages rank their scholars, and the eligibility carve behind the listing. |
+| [`search-recency-relevance-spec.md`](./search-recency-relevance-spec.md) | Recency in relevance — the spec for how (and whether) publication age influences ordering. |
+| [`search-mesh-resolution-fallback-spec.md`](./search-mesh-resolution-fallback-spec.md) | How a query string resolves to a MeSH descriptor, and the fallback chain when it doesn't resolve cleanly. Upstream of every concept-based ranking term. |
+| [`scholar-card-evidence-rows-spec.md`](./scholar-card-evidence-rows-spec.md) | The scholar-card evidence rows — what the card is allowed to assert about *why* a scholar matched. The display counterpart to `search-evidence-rows.md`. |
 | [`feedback-handling-matrix.md`](./feedback-handling-matrix.md) | How user feedback is routed (and the planned ServiceNow intake). |
 | [`retracted-publications.md`](./retracted-publications.md) | Why retracted papers don't display — the two-record problem (notice vs original), ReCiter's re-fetch lag, and the nightly PubMed-retraction stamp (#604) that closes the gap via the existing `NEVER_DISPLAY_TYPES` filter. |
 | [`what-can-be-hidden.md`](./what-can-be-hidden.md) | **The catalog of everything that can be removed from a public profile and search**, by section and by record — the four mechanisms (`suppression` rows, the `overview` `field_override`, the two Methods-lens overlays, and `deleted_at` soft-delete), the `EntityType` reach (scholar / publication / grant / education / appointment / mentee / org-unit), per-author hide vs whole-pub takedown vs derived-dark, the non-suppressible leadership guard, who can hide what, and the new **Methods & tools** case (no per-scholar control — families are hidden editorially/globally via `family_suppression_overlay`, or public-gated via `family_sensitivity_overlay` + `METHODS_LENS_SENSITIVE_GATE`). The deliberate-hiding counterpart to `retracted-publications.md`; operational view over `ADR-005`. |

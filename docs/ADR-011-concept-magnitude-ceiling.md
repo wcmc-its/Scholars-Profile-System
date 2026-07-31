@@ -1,4 +1,4 @@
-# docs/ADR-011 — Unquantise the concept magnitude the system already computes
+# docs/ADR-011 — Raise the ceiling on the concept magnitude the system already computes
 
 **Status:** **Partially accepted** — B1/B2/B3/B4 are proposed and unjudged, but parts of this record are already in production: #2095 (instrumentation) is merged, and #2098 raised the `AREA_BOOST_TOP_N` default 200 → 500, which changes prod ranking. Do not read "Proposed" off the header and assume nothing has shipped.
 **Date:** 2026-07-31
@@ -44,7 +44,7 @@ concentration = n² / total          # count × on-topic fraction
 
 `SEARCH_PEOPLE_CONCEPT_ARM_FIRST` is `"on"` unconditionally (`cdk/lib/app-stack.ts:1816`, prod flipped 2026-07-30), so this is what production runs today.
 
-`buildAreaBoostFunctions` (`lib/api/search.ts:1506`) then emits it into the outer prominence `function_score` as **additive per-cwid clauses** — `{ filter: { terms: { cwid: [...] } }, weight: w }` — after quantising it: three fraction-of-max bands by default, or `AREA_BOOST_GRADED_BANDS` graded steps under `SEARCH_PEOPLE_AREA_BOOST_GRADED`. Either way the weight is bounded by `AREA_BOOST_W_HI`, whose default is **3**.
+`buildAreaBoostFunctions` (`lib/api/search.ts:1506`) then emits it into the outer prominence `function_score` as **additive per-cwid clauses** — `{ filter: { terms: { cwid: [...] } }, weight: w }` — after quantizing it: three fraction-of-max bands by default, or `AREA_BOOST_GRADED_BANDS` graded steps under `SEARCH_PEOPLE_AREA_BOOST_GRADED`. Either way the weight is bounded by `AREA_BOOST_W_HI`, whose default is **3**.
 
 So the pipeline is complete end to end. The magnitude is computed over the right corpus, keyed on the resolved descriptor, attached to the right scholars, and delivered additively into the score — and then flattened into a weight that cannot exceed 3, in a sum where the unbounded volume prior spans 2.01×. O8's register row already said it: *"Computed over the right corpus at query time, discarded one step before use."*
 
@@ -153,7 +153,7 @@ Beyond being unbuildable as specified, it was unnecessary: the additive per-cwid
 
 ## Decision
 
-**Do not fund a `rank_features` reindex for concept counts.** Raise the ceiling on the magnitude the system already computes, and stop quantising it.
+**Do not fund a `rank_features` reindex for concept counts.** Raise the ceiling on the magnitude the system already computes, and stop quantizing it.
 
 ⚠ **These blocks are not all independently landable, and revision 1's claim that they were is withdrawn.** B0 and B2 are independent. **B1, B3 and B4 are one shipment** — B4 because the number that explains the reorder must reach the card the same day, B3 because landing it afterwards would invalidate the `W_HI` the acceptance panel had just accepted. Each block below says which it is.
 
@@ -182,6 +182,10 @@ Doing nothing is option three without the write-down, which is the worst of the 
 `evidenceLines[kind == "publications"]` carries a `strength` discriminator with **three** values (`lib/api/result-evidence.ts:129`): `tagged` (MeSH descriptor), `mention` (free-text keyword), and `concept` (the MeSH-expansion text variant, which carries **no `count`**). Within one hit they are mutually exclusive — the `mention` line is emitted only when nothing else fired — so the hazard is not a sum within a scholar but a **column assembled across candidates**, mixing MeSH counts from some scholars with keyword counts from others.
 
 Measured: reading the column by `kind` ranked a cardiac electrophysiologist first for a lifespan query on six *device-battery*-longevity mentions. Only the two thinnest-coverage panel queries mix the strengths, which is exactly where the damage is largest.
+
+⚠ **Correction — that symptom came from an eval harness, not from shipped code.** An enumeration of all 19 readers of `evidenceLines` / `kind` / `.count` across `app/`, `components/`, `lib/` and `scripts/` found **nothing that orders on an evidence count**: every ordering is RRF, `fusedScore` or OpenSearch rank, and `.count` is read in six places, all of them rendering. The cardiac-EP result is not reproducible from any code path on `master`. **B0's ranking half is therefore preventive, not a bug fix**, and this ADR previously implied otherwise.
+
+**The same defect is live in DISPLAY, though.** `evidenceMatchCount` was strength-blind for `kind: "publications"`, and its caller renders one row per supporting concept — each from a *different* `searchPeople` call — into one shared numeric column. A free-text keyword count printed beside a curated MeSH count, unlabelled. That is O9's "column assembled across candidates", rendered to a user. Fixed in PR #2100 along with a `taggedPubCount` guard that returns `undefined` rather than `0`; the visible consequence is that mention-backed supporting rows lose their number, which is correct because it was never comparable to the one above it.
 
 Filter to `strength == "tagged"`; treat `concept`-strength hits as **unknown**, never as zero. Contract rule **O9**.
 

@@ -1296,7 +1296,7 @@ export function resolveSearchPeopleClinicalFnWeight(): number {
  *
  * `buildAreaBoostFunctions` receives `{cwid, total}[]` where `total` is a real
  * evidence magnitude (the concept arm's `n²/total` over the publications index) and
- * quantises it to three membership bands, so ordering stops responding to how much
+ * quantizes it to three membership bands, so ordering stops responding to how much
  * on-topic work a scholar has. ON spreads the same weight range over
  * `AREA_BOOST_GRADED_BANDS` steps instead of three.
  *
