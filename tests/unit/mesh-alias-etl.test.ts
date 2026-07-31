@@ -98,4 +98,15 @@ describe("curated.csv (the real shipped file)", () => {
       expect(aliases.has(a)).toBe(true);
     }
   });
+
+  // #2091 — lay/abbreviation surface forms that resolved to NOTHING before these rows.
+  // Asserted alias → UI (not just presence): a wrong-but-well-formed UI silently maps the
+  // query to the WRONG concept, which the shape check above cannot catch. UIs were read
+  // from the staging `mesh_descriptor` table by exact descriptor name on 2026-07-30.
+  it("maps the #2091 lay/abbreviation gaps to their verified descriptors", () => {
+    const byAlias = new Map(rows.map((r) => [r.alias, r.descriptorUi]));
+    expect(byAlias.get("sickle cell")).toBe("D000755"); // Anemia, Sickle Cell
+    expect(byAlias.get("TBI")).toBe("D000070642"); // Brain Injuries, Traumatic
+    expect(byAlias.get("CKD")).toBe("D051436"); // Renal Insufficiency, Chronic
+  });
 });
