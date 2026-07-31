@@ -1036,18 +1036,28 @@ describe("AppStack", () => {
         expect(deployPolicy).toBeDefined();
         const statements = deployPolicy?.Properties?.PolicyDocument
           ?.Statement as Array<Record<string, unknown>> | undefined;
-        // Exactly one statement is allowed to use Resource=*: the ECR
-        // GetAuthorizationToken call, which is account-scoped at the API
-        // level and has no resource ARN. Everything else must be a
-        // concrete ARN (or Fn::Join/Ref pointing at one).
+        // Two statements are allowed to use Resource=*, both AWS-mandated
+        // (neither action supports resource-level ARN scoping):
+        // - ecr:GetAuthorizationToken, account-scoped at the API level.
+        // - ecs:DescribeTaskDefinition / ecs:RegisterTaskDefinition (#2121)
+        //   -- confirmed empirically: an ARN-scoped grant AccessDenied'd in
+        //   a live staging dry run of the pinned-revision deploy flow.
+        // Everything else must be a concrete ARN (or Fn::Join/Ref pointing
+        // at one).
+        const wildcardExemptActionSets = [
+          ["ecr:GetAuthorizationToken"],
+          ["ecs:DescribeTaskDefinition", "ecs:RegisterTaskDefinition"],
+        ];
         for (const stmt of statements ?? []) {
           const action = stmt.Action as string | string[];
           const resource = stmt.Resource as unknown;
-          const isAuthOnly =
-            (Array.isArray(action)
-              ? action.length === 1 && action[0] === "ecr:GetAuthorizationToken"
-              : action === "ecr:GetAuthorizationToken");
-          if (isAuthOnly) {
+          const actionList = Array.isArray(action) ? action : [action];
+          const isWildcardExempt = wildcardExemptActionSets.some(
+            (set) =>
+              actionList.length === set.length &&
+              set.every((a) => actionList.includes(a)),
+          );
+          if (isWildcardExempt) {
             continue;
           }
           // Walk the resource value; assert no bare `"*"` literal.

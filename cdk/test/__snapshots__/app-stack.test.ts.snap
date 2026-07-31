@@ -2002,56 +2002,7 @@ service:
                 "ecs:RegisterTaskDefinition",
               ],
               "Effect": "Allow",
-              "Resource": [
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":ecs:us-east-1:123456789012:task-definition/sps-app-prod:*",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":ecs:us-east-1:123456789012:task-definition/sps-migrate-prod:*",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":ecs:us-east-1:123456789012:task-definition/sps-db-bootstrap-prod:*",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":ecs:us-east-1:123456789012:task-definition/sps-verify-grants-prod:*",
-                    ],
-                  ],
-                },
-              ],
+              "Resource": "*",
             },
             {
               "Action": [
@@ -6012,56 +5963,7 @@ service:
                 "ecs:RegisterTaskDefinition",
               ],
               "Effect": "Allow",
-              "Resource": [
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":ecs:us-east-1:123456789012:task-definition/sps-app-staging:*",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":ecs:us-east-1:123456789012:task-definition/sps-migrate-staging:*",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":ecs:us-east-1:123456789012:task-definition/sps-db-bootstrap-staging:*",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":ecs:us-east-1:123456789012:task-definition/sps-verify-grants-staging:*",
-                    ],
-                  ],
-                },
-              ],
+              "Resource": "*",
             },
             {
               "Action": [
