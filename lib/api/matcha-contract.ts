@@ -86,7 +86,7 @@
  * matched this concept". Only entries passing `isResearchMatchEvidence` reach the wire — see
  * `MatchaCandidate.searchEvidence`.
  */
-import type { ResultEvidence } from "@/lib/api/result-evidence";
+import { taggedPubCount, type ResultEvidence } from "@/lib/api/result-evidence";
 import { careerStageBucket, type CareerStage } from "@/lib/career-stage";
 
 /**
@@ -1150,7 +1150,17 @@ export function evidenceProvenance(evidence: ResultEvidence): EvidenceProvenance
  */
 export function evidenceMatchCount(evidence: ResultEvidence): number | null {
   switch (evidence.kind) {
+    // Contract O9 — `publications` covers THREE strengths: `tagged` (a curated MeSH
+    // descriptor), `mention` (the query string happened to appear in free text) and
+    // `concept` (no count at all). Each supporting block on this card is a DIFFERENT
+    // concept from a different `searchPeople` call, and they render into one shared
+    // `tabular-nums` column. Returning a mention count here puts a keyword hit beside
+    // a curated tag, unlabelled and visually commensurable — a magnitude assembled
+    // from two populations. Only `tagged` earns the column; anything else renders
+    // nothing, which is the same posture this function already takes for the
+    // countless kinds. Absent is UNKNOWN, never 0.
     case "publications":
+      return taggedPubCount([evidence]) ?? null;
     case "method":
     case "topic":
       return typeof evidence.count === "number" ? evidence.count : null;

@@ -9,6 +9,7 @@ import {
   selectEvidence,
   selectEvidenceLines,
   isResearchMatchEvidence,
+  taggedPubCount,
   clinicalExactMatch,
   bioCoversQuery,
   refineExemplarTools,
@@ -1021,5 +1022,76 @@ describe("selectEvidenceLines — method ⇄ tagged order by magnitude", () => {
     expect(
       kinds({ ...withCounts(11), clinical: { specialty: "Endocrinology", boardCertified: true } }),
     ).toEqual(["pub:tagged", "method", "topic", "clinical"]);
+  });
+});
+
+describe("taggedPubCount — contract rule O9 (magnitude is a STRENGTH, not a kind)", () => {
+  // One fixture carrying all three `kind: "publications"` strengths, in the order that
+  // makes the hazard visible: the free-text `mention` line is FIRST and its count is the
+  // LARGEST. A reader that picks the line by `kind` — or that takes `evidenceLines[0]` —
+  // gets 6 here and ranks this hit above a scholar with two genuinely tagged papers.
+  const mixed: ResultEvidence[] = [
+    { kind: "publications", strength: "mention", text: '6 of 210 publications mention "battery"', count: 6 },
+    { kind: "publications", strength: "concept", text: "publications tagged under", term: "Neoplasms" },
+    { kind: "publications", strength: "tagged", text: "2 of 210 publications tagged under", term: "Neoplasms", count: 2 },
+  ];
+
+  it("returns the TAGGED count, never the larger mention count sitting in front of it", () => {
+    // Fails the moment someone reselects by `kind` (would return 6) or takes lines[0] (6).
+    expect(taggedPubCount(mixed)).toBe(2);
+  });
+
+  it("a concept-strength line reads UNKNOWN — undefined, and specifically NOT 0", () => {
+    const conceptOnly: ResultEvidence[] = [
+      { kind: "publications", strength: "concept", text: "publications tagged under", term: "Neoplasms" },
+    ];
+    const n = taggedPubCount(conceptOnly);
+    expect(n).toBeUndefined();
+    // Stated separately and on purpose: `0` is not a weaker version of "unknown", it is a
+    // different claim, and it is orderable — it sorts the unmeasured scholar below every
+    // measured one. If this ever becomes 0 the payload has started fabricating a magnitude.
+    expect(n).not.toBe(0);
+    expect(typeof n).not.toBe("number");
+  });
+
+  it("a mention-only hit is UNKNOWN too — a free-text count is not a subject magnitude", () => {
+    expect(taggedPubCount([mixed[0]])).toBeUndefined();
+  });
+
+  it("non-publication evidence yields nothing (method/topic counts are other pipelines)", () => {
+    expect(
+      taggedPubCount([
+        { kind: "method", family: "AAV gene-therapy vectors", tools: [], count: 11 },
+        { kind: "topic", label: "Immunology", id: "immunology", count: 900 },
+        { kind: "none" },
+      ]),
+    ).toBeUndefined();
+    expect(taggedPubCount([])).toBeUndefined();
+  });
+
+  it("a tagged line with NO count is unknown, not zero", () => {
+    // The union types `count` optional on every strength, so this shape is constructible
+    // even though today's emitter always sets it on `tagged`.
+    expect(
+      taggedPubCount([{ kind: "publications", strength: "tagged", text: "publications tagged under" }]),
+    ).toBeUndefined();
+  });
+
+  it("a real zero is preserved — 'measured, found none' is not the same as 'unmeasured'", () => {
+    expect(
+      taggedPubCount([{ kind: "publications", strength: "tagged", text: "0 of 210 tagged", count: 0 }]),
+    ).toBe(0);
+  });
+
+  it("reads the emitter's own output, not just hand-built literals", () => {
+    // Guards the wiring: whatever `selectEvidenceLines` emits for a tagged match must be
+    // readable by this accessor. A strength rename on either side breaks this test.
+    const lines = selectEvidenceLines({
+      pub: {
+        mention: { text: '6 of 210 publications mention "battery"', count: 6 },
+        tagged: { text: "2 of 210 publications tagged under", term: "Neoplasms", count: 2 },
+      },
+    });
+    expect(taggedPubCount(lines)).toBe(2);
   });
 });
