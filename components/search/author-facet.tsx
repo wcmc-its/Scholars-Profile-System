@@ -5,6 +5,7 @@ import { TransitionLink as Link } from "@/components/search/transition-link";
 import { Search } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { PersonPopover } from "@/components/scholar/person-popover";
+import { lastNameKey } from "@/lib/last-name-key";
 
 const TOP_VISIBLE = 10;
 const EXPANDED_VISIBLE = 50;
@@ -154,18 +155,6 @@ export function AuthorFacet({
       ) : null}
     </div>
   );
-}
-
-// Derive a last-name sort key from a display name. Drops trailing
-// postnominal segments (", MD", ", PhD, MPH") then takes the final
-// whitespace-separated token. Handles "Maria T. Diaz-Meco" → "diaz-meco"
-// and "Curtis Cole, MD" → "cole". Compound surnames like "van der Berg"
-// sort by their final token ("berg"), which matches how those are
-// commonly indexed in faculty directories.
-function lastNameKey(displayName: string): string {
-  const noPostnom = displayName.split(/,\s*/)[0] ?? displayName;
-  const tokens = noPostnom.trim().split(/\s+/);
-  return (tokens[tokens.length - 1] ?? "").toLowerCase();
 }
 
 function AuthorRow({

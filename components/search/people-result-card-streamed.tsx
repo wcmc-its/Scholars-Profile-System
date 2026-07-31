@@ -6,7 +6,7 @@ import {
   type PeopleResultCardProps,
   type KeyPaperConfig,
 } from "@/components/search/people-result-card";
-import type { PeopleHit, PeopleMatchReason, RepresentativePub } from "@/lib/api/search";
+import type { PeopleHit } from "@/lib/api/search";
 import type { ResultEvidence } from "@/lib/api/result-evidence";
 
 /**
@@ -18,8 +18,8 @@ import type { ResultEvidence } from "@/lib/api/result-evidence";
  * a cwid→patch map) that is NOT on the list's critical path. This wrapper sits in
  * its own Suspense boundary: the fallback is the card rendered with the fast
  * (reason-less) hit, and the resolved child re-renders the same card with the
- * streamed `matchReason`/`evidence` patched in. So a slow agg degrades to "the
- * reason line appears a beat later," never a blocked render / nav-watchdog hang.
+ * streamed `evidence` patched in. So a slow agg degrades to "the reason line
+ * appears a beat later," never a blocked render / nav-watchdog hang.
  *
  * ponytail (full): renders `PeopleResultCard` twice (fallback fast hit + resolved
  * patched hit) rather than threading a Suspense boundary through the card's
@@ -29,7 +29,6 @@ import type { ResultEvidence } from "@/lib/api/result-evidence";
  * byte-identical to its pre-B self.
  */
 type ReasonPatch = {
-  matchReason?: PeopleMatchReason;
   evidence?: ResultEvidence;
   // #1366 — the stacked, counted lines (present instead of `evidence` under
   // SEARCH_EVIDENCE_REASON_COUNTS); overlaid the same way.
@@ -47,30 +46,9 @@ function mergeHit(hit: PeopleHit, patch: ReasonPatch | undefined): PeopleHit {
   // Overlay only the reason-bearing fields; everything else is the fast hit.
   return {
     ...hit,
-    matchReason: patch.matchReason,
     evidence: patch.evidence,
     evidenceLines: patch.evidenceLines,
   };
-}
-
-/**
- * A reason is "key-paper-eligible" when it's a pub-evidence line (the doc-sourced
- * tagged/mention reason — `icon` present) that doesn't already carry a pub. The
- * method/topic (`kind`) and concept-fallback reasons never take a key paper.
- */
-export function reasonWantsKeyPaper(reason: PeopleMatchReason | undefined): boolean {
-  return (
-    !!reason &&
-    !("kind" in reason) &&
-    (reason.icon === "publications") &&
-    !reason.pub
-  );
-}
-
-export function patchKeyPaper(hit: PeopleHit, pub: RepresentativePub): PeopleHit {
-  const reason = hit.matchReason;
-  if (!reason || "kind" in reason) return hit;
-  return { ...hit, matchReason: { ...reason, pub } };
 }
 
 function PatchedCard({

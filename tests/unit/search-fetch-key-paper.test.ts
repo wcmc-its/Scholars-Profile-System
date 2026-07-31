@@ -1,12 +1,8 @@
 /**
- * Search reason-from-doc (lazy key papers, §5, commit 5) — `fetchKeyPaper` and
- * the card's patch helpers.
- *
- *   - `fetchKeyPaper` returns the same `RepresentativePub` shape the inline
- *     rep-pub did (pmid/title/titleHtml/year), scoped to ONE scholar + the
- *     resolved concept subtree, highlighting the literal query.
- *   - `reasonWantsKeyPaper` / `patchKeyPaper` — the card renders the reason line
- *     WITHOUT a key paper, then patches the fetched pub into it.
+ * Search reason-from-doc (lazy key papers, §5, commit 5) — `fetchKeyPaper`.
+ * Returns the same `RepresentativePub` shape the inline rep-pub did
+ * (pmid/title/titleHtml/year), scoped to ONE scholar + the resolved concept
+ * subtree, highlighting the literal query.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -55,10 +51,6 @@ vi.mock("@/lib/api/reason-agg-cache", async (importOriginal) => ({
 }));
 
 import { fetchKeyPaper, parseReasonTopHits, rankKeyPaperHitsByBlend } from "@/lib/api/search";
-import {
-  reasonWantsKeyPaper,
-  patchKeyPaper,
-} from "@/components/search/people-result-card-streamed";
 
 // `body.query` is a bare bool now (the recency `function_score` wrapper was
 // dropped — recency lives in the app-side blend re-rank). `boolOf` still tolerates
@@ -398,49 +390,5 @@ describe("rankKeyPaperHitsByBlend — 0.6 relevance / 0.4 recency + small >50-ci
     const ranked = rankKeyPaperHitsByBlend(input, NOW);
     expect(ranked[0]).toBe(a); // equal blend → original order preserved
     expect(input).toEqual([a, b]); // input array untouched
-  });
-});
-
-describe("card key-paper patch helpers", () => {
-  const taggedReason = { icon: "publications" as const, text: "14 of 372 publications tagged HIV" };
-  const rep = { pmid: "1", title: "Key paper", year: 2024 };
-
-  it("a pub-evidence reason with no pub wants a key paper", () => {
-    expect(reasonWantsKeyPaper(taggedReason)).toBe(true);
-  });
-
-  it("a reason that already carries a pub does not re-fetch", () => {
-    expect(reasonWantsKeyPaper({ ...taggedReason, pub: rep })).toBe(false);
-  });
-
-  it("a method/topic (kind) reason never takes a key paper", () => {
-    expect(reasonWantsKeyPaper({ kind: "method", family: "Flow cytometry", tools: [] })).toBe(false);
-    expect(reasonWantsKeyPaper({ kind: "topic", label: "Cardiology" })).toBe(false);
-  });
-
-  it("a concept-fallback reason does not take a key paper", () => {
-    expect(reasonWantsKeyPaper({ icon: "concept", text: "via related concept HIV" })).toBe(false);
-  });
-
-  it("undefined reason wants nothing", () => {
-    expect(reasonWantsKeyPaper(undefined)).toBe(false);
-  });
-
-  it("patchKeyPaper overlays the pub onto the reason, leaving the rest of the hit intact", () => {
-    const hit = { cwid: "abc1234", matchReason: taggedReason, slug: "x" } as never;
-    const patched = patchKeyPaper(hit, rep) as {
-      cwid: string;
-      slug: string;
-      matchReason: { text: string; pub?: typeof rep };
-    };
-    expect(patched.matchReason.pub).toEqual(rep);
-    expect(patched.matchReason.text).toBe(taggedReason.text);
-    expect(patched.cwid).toBe("abc1234");
-    expect(patched.slug).toBe("x");
-  });
-
-  it("patchKeyPaper is a no-op on a method/topic (kind) reason", () => {
-    const hit = { cwid: "abc1234", matchReason: { kind: "topic", label: "X" } } as never;
-    expect(patchKeyPaper(hit, rep)).toBe(hit);
   });
 });

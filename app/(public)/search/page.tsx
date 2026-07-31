@@ -537,7 +537,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
               new Map(
                 r.hits.map((h) => [
                   h.cwid,
-                  { matchReason: h.matchReason, evidence: h.evidence, evidenceLines: h.evidenceLines },
+                  { evidence: h.evidence, evidenceLines: h.evidenceLines },
                 ]),
               ),
           )
@@ -1046,10 +1046,8 @@ type PeopleResultData = Awaited<ReturnType<typeof searchPeople>>;
 type PubsResultData = Awaited<ReturnType<typeof searchPublications>>;
 // Scaling fix B — the deferred per-row reason patch streamed into the cards. The
 // list paints without it; the card's `use()` overlays it when the promise
-// resolves. Carries both the legacy `matchReason` and the `evidence.pub` reason
-// so the card patches whichever path is active (ResultEvidence vs legacy).
+// resolves.
 type PeopleReasonPatch = {
-  matchReason: PeopleResultData["hits"][number]["matchReason"];
   evidence: PeopleResultData["hits"][number]["evidence"];
   // #1366 — the stacked, counted lines (present instead of `evidence` under the
   // reason-counts flag); streamed and overlaid the same way.
