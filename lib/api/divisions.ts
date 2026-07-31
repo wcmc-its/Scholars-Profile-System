@@ -32,11 +32,11 @@ import { formatRoleCategory } from "@/lib/role-display";
 import {
   isAuthorHidden,
   isUnitSuppressed,
+  loadAllPublicationSuppressions,
   loadHiddenAuthorshipCounts,
-  loadPublicationSuppressions,
   loadUnitFieldOverrides,
   mergeUnitFields,
-  resolveDarkPmids,
+  resolveUnitDarkPmids,
 } from "@/lib/api/manual-layer";
 import {
   aggregatePublicFamiliesForUnit,
@@ -228,18 +228,20 @@ async function getDivisionUncached(
     memberCwids.length === 0
       ? Promise.resolve(0)
       : (async () => {
+          // #1505/#2119 — push membership into `publication.count` via an
+          // `authors: { some }` relation filter instead of materializing every
+          // distinct member pmid; invert suppression (see resolveUnitDarkPmids).
           // #356 — count only publications still visible (not taken down or
           // derived-dark).
-          const poolPmids = (
-            await prisma.publicationAuthor.findMany({
-              where: { isConfirmed: true, cwid: { in: memberCwids } },
-              select: { pmid: true },
-              distinct: ["pmid"],
-            })
-          ).map((r) => r.pmid);
-          const suppressions = await loadPublicationSuppressions(poolPmids, prisma);
-          const darkPmids = await resolveDarkPmids(poolPmids, suppressions, prisma);
-          return poolPmids.filter((p) => !darkPmids.has(p)).length;
+          const membership = { cwid: { in: memberCwids } };
+          const suppressions = await loadAllPublicationSuppressions(prisma);
+          const unitDarkPmids = await resolveUnitDarkPmids(suppressions, membership, prisma);
+          return prisma.publication.count({
+            where: {
+              authors: { some: { isConfirmed: true, ...membership } },
+              ...(unitDarkPmids.length > 0 ? { pmid: { notIn: unitDarkPmids } } : {}),
+            },
+          });
         })(),
     // #2066 — count funding PROJECTS, not investigator-award rows, via the SAME
     // call `getDivisionGrantsList` paginates. Not "two implementations that
@@ -523,20 +525,19 @@ async function getDivisionPublicationsListUncached(
   if (memberCwids.length === 0) {
     return { hits: [], total: 0, page, pageSize: PUB_PAGE_SIZE };
   }
-  const memberPmidRows = (await prisma.publicationAuthor.findMany({
-    where: {
-      isConfirmed: true,
-      cwid: { in: memberCwids },
-    },
-    select: { pmid: true },
-    distinct: ["pmid"],
-  })) as Array<{ pmid: string }>;
-  const poolPmids = memberPmidRows.map((r) => r.pmid);
-  // #356 — drop taken-down / derived-dark publications before paginating.
-  const suppressions = await loadPublicationSuppressions(poolPmids, prisma);
-  const darkPmids = await resolveDarkPmids(poolPmids, suppressions, prisma);
-  const allPmids = poolPmids.filter((p) => !darkPmids.has(p));
-  const total = allPmids.length;
+
+  // #1505/#2119 — push division membership into the page query/count via an
+  // `authors: { some }` relation filter instead of materializing every distinct
+  // member pmid; invert suppression (see resolveUnitDarkPmids). #356 — total
+  // and the page window are both computed over this visible set.
+  const membership = { cwid: { in: memberCwids } };
+  const suppressions = await loadAllPublicationSuppressions(prisma);
+  const unitDarkPmids = await resolveUnitDarkPmids(suppressions, membership, prisma);
+  const visibleWhere = {
+    authors: { some: { isConfirmed: true, ...membership } },
+    ...(unitDarkPmids.length > 0 ? { pmid: { notIn: unitDarkPmids } } : {}),
+  };
+  const total = await prisma.publication.count({ where: visibleWhere });
   if (total === 0) {
     return { hits: [], total: 0, page, pageSize: PUB_PAGE_SIZE };
   }
@@ -547,7 +548,7 @@ async function getDivisionPublicationsListUncached(
       : [{ dateAddedToEntrez: "desc" as const }, { pmid: "asc" as const }];
 
   const pubs = await prisma.publication.findMany({
-    where: { pmid: { in: allPmids } },
+    where: visibleWhere,
     orderBy,
     skip: page * PUB_PAGE_SIZE,
     take: PUB_PAGE_SIZE,

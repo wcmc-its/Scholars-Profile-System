@@ -28,6 +28,7 @@ const {
   mockGrantFindMany,
   mockGrantGroupBy,
   mockPublicationFindMany,
+  mockPublicationCount,
   mockSuppressionFindMany,
 } = vi.hoisted(() => ({
   mockDivisionFindFirst: vi.fn(),
@@ -40,6 +41,7 @@ const {
   mockGrantFindMany: vi.fn(),
   mockGrantGroupBy: vi.fn(),
   mockPublicationFindMany: vi.fn(),
+  mockPublicationCount: vi.fn(),
   mockSuppressionFindMany: vi.fn(),
 }));
 
@@ -60,7 +62,7 @@ vi.mock("@/lib/db", () => ({
       findMany: mockGrantFindMany,
       groupBy: mockGrantGroupBy,
     },
-    publication: { findMany: mockPublicationFindMany },
+    publication: { findMany: mockPublicationFindMany, count: mockPublicationCount },
     suppression: { findMany: mockSuppressionFindMany },
   },
 }));
@@ -81,6 +83,7 @@ beforeEach(() => {
   mockGrantFindMany.mockResolvedValue([]);
   mockGrantGroupBy.mockResolvedValue([]);
   mockPublicationFindMany.mockResolvedValue([]);
+  mockPublicationCount.mockResolvedValue(0);
   mockSuppressionFindMany.mockResolvedValue([]);
   mockDivisionMembershipFindMany.mockResolvedValue([]);
 });
@@ -238,20 +241,23 @@ describe("getDivisionFaculty — Phase 8 roster union (#540)", () => {
 });
 
 describe("getDivisionPublicationsList — Phase 8 roster union (#540)", () => {
-  it("keys publicationAuthor lookup on the unioned member set", async () => {
+  it("keys the publication count/page semi-join on the unioned member set (#2119)", async () => {
+    // #1505/#2119 — membership is pushed into `publication.count`/`findMany` via
+    // an `authors: { some }` relation filter, not a separate pmid-pool query.
     mockDivisionFindFirst.mockResolvedValue({ ...DIV_BASE, source: "manual" });
     mockDivisionMembershipFindMany.mockResolvedValue([{ cwid: "manual001" }]);
     mockScholarFindMany.mockImplementation(routeScholarFindMany(new Set(["manual001"])));
-    mockPublicationAuthorFindMany.mockResolvedValueOnce([{ pmid: "PUB1" }]);
+    mockPublicationCount.mockResolvedValue(1);
+    mockPublicationFindMany.mockResolvedValue([]);
 
     await getDivisionPublicationsList("CARDIO", { page: 0 });
-    expect(mockPublicationAuthorFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          isConfirmed: true,
-          cwid: { in: ["manual001"] },
-        }),
-      }),
+    const countWhere = mockPublicationCount.mock.calls[0][0].where;
+    expect(countWhere.authors.some).toEqual(
+      expect.objectContaining({ isConfirmed: true, cwid: { in: ["manual001"] } }),
+    );
+    const pageWhere = mockPublicationFindMany.mock.calls[0][0].where;
+    expect(pageWhere.authors.some).toEqual(
+      expect.objectContaining({ isConfirmed: true, cwid: { in: ["manual001"] } }),
     );
   });
 

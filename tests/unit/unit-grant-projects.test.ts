@@ -34,6 +34,7 @@ const {
   mockDivisionFindFirst,
   mockDivisionMembershipFindMany,
   mockPublicationAuthorFindMany,
+  mockPublicationCount,
   mockQueryRawUnsafe,
   mockFieldOverrideFindMany,
 } = vi.hoisted(() => ({
@@ -52,6 +53,7 @@ const {
   mockDivisionFindFirst: vi.fn(),
   mockDivisionMembershipFindMany: vi.fn(),
   mockPublicationAuthorFindMany: vi.fn(),
+  mockPublicationCount: vi.fn(),
   mockQueryRawUnsafe: vi.fn(),
   mockFieldOverrideFindMany: vi.fn(),
 }));
@@ -78,6 +80,7 @@ vi.mock("@/lib/db", () => ({
     division: { findMany: mockDivisionFindMany, findFirst: mockDivisionFindFirst },
     divisionMembership: { findMany: mockDivisionMembershipFindMany },
     publicationAuthor: { findMany: mockPublicationAuthorFindMany },
+    publication: { count: mockPublicationCount },
     fieldOverride: { findMany: mockFieldOverrideFindMany },
     $queryRawUnsafe: mockQueryRawUnsafe,
   },
@@ -584,6 +587,7 @@ describe("division hero stat and Grants-tab total agree by construction (#2066)"
     mockScholarFindUnique.mockResolvedValue(null);
     mockAppointmentFindFirst.mockResolvedValue(null);
     mockPublicationAuthorFindMany.mockResolvedValue([]);
+    mockPublicationCount.mockResolvedValue(0);
     mockQueryRawUnsafe.mockResolvedValue([]);
     mockTopicFindMany.mockResolvedValue([]);
   });

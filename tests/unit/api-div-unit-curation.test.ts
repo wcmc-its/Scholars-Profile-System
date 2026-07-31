@@ -23,6 +23,7 @@ const {
   mockTopicFindMany,
   mockQueryRawUnsafe,
   mockPublicationAuthorFindMany,
+  mockPublicationCount,
   mockSuppressionFindMany,
   mockFieldOverrideFindMany,
   mockSuppressionFindFirst,
@@ -38,6 +39,7 @@ const {
   mockTopicFindMany: vi.fn(),
   mockQueryRawUnsafe: vi.fn(),
   mockPublicationAuthorFindMany: vi.fn(),
+  mockPublicationCount: vi.fn(),
   mockSuppressionFindMany: vi.fn(),
   mockFieldOverrideFindMany: vi.fn(),
   mockSuppressionFindFirst: vi.fn(),
@@ -59,6 +61,7 @@ vi.mock("@/lib/db", () => ({
     grant: { findMany: mockGrantFindMany },
     topic: { findMany: mockTopicFindMany },
     publicationAuthor: { findMany: mockPublicationAuthorFindMany },
+    publication: { count: mockPublicationCount },
     suppression: {
       findFirst: mockSuppressionFindFirst,
       findMany: mockSuppressionFindMany,
@@ -105,6 +108,7 @@ function defaultBaselineMocks() {
   mockTopicFindMany.mockResolvedValue([]);
   mockScholarFindMany.mockResolvedValue([]);
   mockPublicationAuthorFindMany.mockResolvedValue([]);
+  mockPublicationCount.mockResolvedValue(0);
   mockSuppressionFindMany.mockResolvedValue([]);
   mockGrantFindMany.mockResolvedValue([]);
   mockDivisionMembershipFindMany.mockResolvedValue([]);
