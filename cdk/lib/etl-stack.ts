@@ -1115,6 +1115,19 @@ export class EtlStack extends Stack {
         external: false,
         tier: "continue",
       } as StepSpec,
+      // #2093 part A — mesh_curated_alias held whatever the last on-demand
+      // `etl:mesh-aliases` run left behind, per env, with nothing keeping the
+      // two in sync (same failure class as #2051's family-sensitivity/
+      // suppression gap). external:false — reads the checked-in curated CSV
+      // and writes SPS-DB only, no per-source secret. No ordering dependency
+      // on MeshCoverage/MeshAnchor (it doesn't read mesh_terms or
+      // publication_topic); grouped here with the other curated-MeSH step.
+      {
+        id: "MeshAliasNightly",
+        npmScript: "etl:mesh-aliases",
+        external: false,
+        tier: "continue",
+      },
       // #604 -- stamp publication_type='Retraction' on PubMed-retracted originals
       // ReCiter hasn't re-fetched yet. MUST run after Reciter (whose upsert
       // overwrites publication_type from ReciterDB) and before SearchIndex (so
