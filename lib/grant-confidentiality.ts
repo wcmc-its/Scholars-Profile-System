@@ -22,17 +22,24 @@
  * confidentiality agreement.
  *
  * NDA is ambiguous — it can also mean "New Drug Application," an unrelated
- * (and non-confidential) FDA regulatory filing. Given the asymmetry (a false
- * suppression is a one-line revoke; a leaked CDA is not undoable), this errs
- * toward flagging it anyway. See the SYSTEM_CONFIDENTIAL_TITLE suppression in
- * etl/infoed/index.ts — every match is revocable, never a silent drop.
+ * (and non-confidential) FDA regulatory filing. CDA can mean "Career
+ * Development Award," also unrelated. MTA (Material Transfer Agreement) and
+ * DUA (Data Use Agreement) are noisier still — a wide sweep of prod titles
+ * (2026-07-31) found 12 MTA and 4 DUA hits, and every one was routine
+ * (academic mouse-strain sharing; CMS claims-data research), not a secrecy
+ * agreement. Included anyway: the asymmetry holds regardless of hit rate — a
+ * false suppression is a one-line revoke (Suppression is user-revocable,
+ * ADR-005), a leaked confidential agreement is not undoable, so the bar for
+ * flagging is "plausibly confidential," not "probably confidential." See the
+ * SYSTEM_CONFIDENTIAL_TITLE suppression in etl/infoed/index.ts — every match
+ * is revocable, never a silent drop.
  */
 
-const CDA_NDA_ACRONYM_RE = /\b(?:CDA|NDA)\b/i;
+const CONFIDENTIAL_ACRONYM_RE = /\b(?:CDA|NDA|MTA|DUA)\b/i;
 const CONFIDENTIAL_PHRASE_RE =
   /\bconfidential(?:ity)?\s+disclosure\s+agreement\b|\bnon-?disclosure\s+agreement\b|\bconfidentiality\s+agreement\b/i;
 
 export function isConfidentialTitle(title: string | null | undefined): boolean {
   if (!title) return false;
-  return CDA_NDA_ACRONYM_RE.test(title) || CONFIDENTIAL_PHRASE_RE.test(title);
+  return CONFIDENTIAL_ACRONYM_RE.test(title) || CONFIDENTIAL_PHRASE_RE.test(title);
 }

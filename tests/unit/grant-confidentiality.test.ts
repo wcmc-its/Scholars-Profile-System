@@ -23,6 +23,18 @@ const REAL_HITS = [
   "CONFIDENTIAL DISCLOSURE AGREEMENT Epygenix Therapeutics, Inc., and Dr.Zachary Grinspan, MD MS,",
 ];
 
+// MTA/DUA hits are intentionally over-inclusive: a wide sweep (2026-07-31)
+// found these are usually routine (academic reagent sharing; CMS claims-data
+// access), not secrecy agreements — but flagged anyway per the "revocable
+// suppression beats a leaked CDA" asymmetry documented in the module.
+const INTENTIONALLY_OVER_INCLUSIVE = [
+  "Outgoing MTA for Egfl7:eGFP transgenic mice",
+  "MTA - The study of Hobit-expressing T cells in models of ovarian cancer",
+  "Incoming VIB MTA for Li Gan",
+  "CMS DUA RSCH-2018-52329: Policy Levers for Improving Nursing Home Care.",
+  "STATE MEDICAL CANNABIS LAWS, CHRONIC PAIN, AND OPIOIDS: A MIXED-METHODS APPROACH DUA 57318",
+];
+
 // Real titles found in the same sweep that must NOT match — a naive
 // substring check on "cda"/"nda" would have false-positived on all of these.
 const FALSE_POSITIVES = [
@@ -36,6 +48,10 @@ const FALSE_POSITIVES = [
 
 describe("isConfidentialTitle (#2020)", () => {
   it.each(REAL_HITS)("flags %s", (title) => {
+    expect(isConfidentialTitle(title)).toBe(true);
+  });
+
+  it.each(INTENTIONALLY_OVER_INCLUSIVE)("flags %s (over-inclusive by design)", (title) => {
     expect(isConfidentialTitle(title)).toBe(true);
   });
 
