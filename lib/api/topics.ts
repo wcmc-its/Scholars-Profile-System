@@ -986,8 +986,8 @@ export async function getTopicPublications(
   void now;
   return {
     hits: (visibleRows as Array<{ pmid: string }>).map((r) =>
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       mapToTopicPublicationHit(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         r as any,
         authorsByPmid.get(r.pmid),
         includeImpact,
