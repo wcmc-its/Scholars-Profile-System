@@ -168,4 +168,75 @@ describe("clinicalMeshMatch (cap-free subsumption)", () => {
     expect(clinicalMeshMatch([], anchors)).toBeNull();
     expect(clinicalMeshMatch(closureOf("C14.280"), [])).toBeNull();
   });
+
+  it("#2022: colorectal anchor (Intestinal Diseases) does not subsume pancreas (C06.689.667)", () => {
+    const colorectal = [
+      { specialty: "Colon and Rectal Surgery", boardCertified: true, tree: ["C06.405.469"] },
+    ];
+    // pancreatic neoplasms D010190 → C06.689.667 / C06.301.761 — outside C06.405.469
+    expect(clinicalMeshMatch(closureOf("C06.689.667"), colorectal)).toBeNull();
+    // colorectal neoplasms D015179 → C06.405.469.158.356 — still subsumed
+    expect(clinicalMeshMatch(closureOf("C06.405.469.158.356"), colorectal)).not.toBeNull();
+  });
+
+  it("#2022 follow-up: Heart Failure anchor does not subsume cerebrovascular disease", () => {
+    const heartFailure = [
+      { specialty: "Advanced Heart Failure and Transplant Cardiology", boardCertified: true, tree: ["C14.280.434"] },
+    ];
+    // cerebrovascular disorders D002561 → C14.907.253 — outside C14.280.434
+    expect(clinicalMeshMatch(closureOf("C14.907.253"), heartFailure)).toBeNull();
+    expect(clinicalMeshMatch(closureOf("C14.280.434"), heartFailure)).not.toBeNull();
+  });
+
+  it("#2022 follow-up: Congenital Heart Defects anchor (3 tree numbers) does not subsume heart failure", () => {
+    const congenitalHeart = [
+      {
+        specialty: "Adult Congenital Heart Disease",
+        boardCertified: true,
+        tree: ["C14.240.400", "C14.280.400", "C16.131.240.400"],
+      },
+    ];
+    // heart failure D006333 → C14.280.434 — outside all three congenital-defect trees
+    expect(clinicalMeshMatch(closureOf("C14.280.434"), congenitalHeart)).toBeNull();
+    expect(clinicalMeshMatch(closureOf("C14.240.400"), congenitalHeart)).not.toBeNull();
+    expect(clinicalMeshMatch(closureOf("C16.131.240.400"), congenitalHeart)).not.toBeNull();
+  });
+
+  it("#2022 follow-up: Vascular Neurology anchor (Cerebrovascular Disorders, 2 tree numbers) subsumes both its trees but not epilepsy", () => {
+    const vascularNeuro = [
+      { specialty: "Vascular Neurology", boardCertified: true, tree: ["C10.228.140.300", "C14.907.253"] },
+    ];
+    // epilepsy D004827 → C10.228.140.490 — sibling under C10.228.140, outside C10.228.140.300
+    expect(clinicalMeshMatch(closureOf("C10.228.140.490"), vascularNeuro)).toBeNull();
+    expect(clinicalMeshMatch(closureOf("C10.228.140.300"), vascularNeuro)).not.toBeNull();
+    expect(clinicalMeshMatch(closureOf("C14.907.253"), vascularNeuro)).not.toBeNull();
+  });
+
+  it("#2022 follow-up: Addiction Psychiatry anchor (Substance-Related Disorders) does not subsume unrelated psychosis", () => {
+    const addictionPsych = [
+      { specialty: "Addiction Psychiatry", boardCertified: true, tree: ["F03.900", "C25.775"] },
+    ];
+    // schizophrenia spectrum disorders D012559 → F03.700.750 — sibling under F03.700, outside F03.900
+    expect(clinicalMeshMatch(closureOf("F03.700.750"), addictionPsych)).toBeNull();
+    expect(clinicalMeshMatch(closureOf("F03.900"), addictionPsych)).not.toBeNull();
+  });
+
+  it("#2022 follow-up: Gynecologic Oncology anchor (Genital Neoplasms, Female) does not subsume pancreatic cancer", () => {
+    const gynOnc = [
+      {
+        specialty: "Gynecologic Oncology",
+        boardCertified: true,
+        tree: [
+          "C04.588.945.418",
+          "C12.050.351.500.242",
+          "C12.050.351.937.418",
+          "C12.100.250.242",
+          "C12.900.418",
+        ],
+      },
+    ];
+    // pancreatic neoplasms D010190 → C04.588.274.761 — sibling under C04.588, outside C04.588.945.418
+    expect(clinicalMeshMatch(closureOf("C04.588.274.761"), gynOnc)).toBeNull();
+    expect(clinicalMeshMatch(closureOf("C04.588.945.418"), gynOnc)).not.toBeNull();
+  });
 });
