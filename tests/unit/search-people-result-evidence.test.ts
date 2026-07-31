@@ -453,6 +453,49 @@ describe("searchPeople — free-text publications:mention evidence (#1)", () => 
     ]);
   });
 
+  // #2094 — the reason agg's `maxYear` sub-agg rides the SAME round-trip and puts
+  // the most recent counted-publication year on the evidence line. The missing case
+  // is the point of this test: OpenSearch answers `{ value: null }` when the filter
+  // matched nothing (or no matching pub carries a `year`), and an older cached /
+  // pre-deploy bucket carries no `maxYear` at all. BOTH must leave the key ABSENT —
+  // an unknown year that arrives as 0, or as the current year, is exactly the
+  // defaulting bug this field exists to avoid.
+  it("mention `latestYear` — present from the agg, ABSENT (never 0) when the year is unknown", async () => {
+    process.env[EVIDENCE] = "on";
+    const run = async () =>
+      (
+        await searchPeople({
+          q: "16s rna",
+          relevanceMode: "v3",
+          matchExplain: true,
+          representativePub: true,
+          matchAwareContext: { methodFamily: null, topics: [] },
+        })
+      ).hits[0].evidence;
+
+    // (a) year present — the stale-scholar signal the payload is for.
+    mockReasonAgg.mockReturnValue([
+      { key: "el1", mention: { doc_count: 7, maxYear: { value: 1989 } } },
+    ]);
+    const withYear = await run();
+    if (withYear?.kind !== "publications") throw new Error("expected publications evidence");
+    expect(withYear.latestYear).toBe(1989);
+
+    // (b) sub-agg ran but has no year ⇒ omitted, not 0.
+    mockReasonAgg.mockReturnValue([
+      { key: "el1", mention: { doc_count: 7, maxYear: { value: null } } },
+    ]);
+    const nullYear = await run();
+    if (nullYear?.kind !== "publications") throw new Error("expected publications evidence");
+    expect("latestYear" in nullYear).toBe(false);
+
+    // (c) no `maxYear` in the bucket at all (pre-#2094 response / cached bucket).
+    mockReasonAgg.mockReturnValue(MENTION_BUCKET);
+    const noAgg = await run();
+    if (noAgg?.kind !== "publications") throw new Error("expected publications evidence");
+    expect("latestYear" in noAgg).toBe(false);
+  });
+
   it("flag ON + no descriptor ⇒ the `tagged` sub-agg is OMITTED from the request body", async () => {
     process.env[EVIDENCE] = "on";
     mockReasonAgg.mockReturnValue(MENTION_BUCKET);

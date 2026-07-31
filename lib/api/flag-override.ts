@@ -48,6 +48,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
  * these are the levers the queued experiments (#2068, #2084, O8) actually need.
  */
 export const OVERRIDABLE_FLAGS = [
+  "SEARCH_AREA_BOOST_TOP_N",
   "SEARCH_AREA_BOOST_W_HI",
   "SEARCH_AREA_BOOST_W_LO",
   "SEARCH_AREA_BOOST_W_MID",

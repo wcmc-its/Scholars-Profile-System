@@ -352,32 +352,43 @@ describe("#2068 — `pubCountDampen` is a CALLER opt; the env is only the fallba
   });
 
   it("THE SPINE'S OWN OPTS produce master's body even when the env says capped", async () => {
-    // Exactly the three prominence opts `matcha-spine-run.ts` `retrieveCluster` passes,
-    // on the shape it passes (`topic`, which IS inside the ladder's gate). With both
-    // employment priors off the spine's entire outer multiplier is `1 + volume`, so the
-    // ladder's proportional effect there is LARGER than on /search — this must not move.
-    process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN = "capped";
-    await searchPeople({
-      ...TOPIC_CALL,
-      facultyProminence: false,
-      grantProminence: false,
-      pubCountDampen: "off",
-    });
-    const capped = structuredClone(capturedBodies[0]);
+    // The whole-body comparison at the end of this test is byte-exact, and the
+    // `activityRecentPub` agg embeds a `Date.now()`-derived `gte`. The two calls
+    // below are built a moment apart, so on a millisecond boundary the bodies
+    // differ by 1ms in that one field and the assertion fails — ~1 run in 15.
+    // Freeze the clock for the duration. `toFake: ["Date"]` only: faking timers
+    // wholesale would stall the awaited promises.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      // Exactly the three prominence opts `matcha-spine-run.ts` `retrieveCluster` passes,
+      // on the shape it passes (`topic`, which IS inside the ladder's gate). With both
+      // employment priors off the spine's entire outer multiplier is `1 + volume`, so the
+      // ladder's proportional effect there is LARGER than on /search — this must not move.
+      process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN = "capped";
+      await searchPeople({
+        ...TOPIC_CALL,
+        facultyProminence: false,
+        grantProminence: false,
+        pubCountDampen: "off",
+      });
+      const capped = structuredClone(capturedBodies[0]);
 
-    capturedBodies.length = 0;
-    delete process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN;
-    await searchPeople({
-      ...TOPIC_CALL,
-      facultyProminence: false,
-      grantProminence: false,
-      pubCountDampen: "off",
-    });
-    const off = structuredClone(capturedBodies[0]);
+      capturedBodies.length = 0;
+      delete process.env.SEARCH_PEOPLE_PUBCOUNT_DAMPEN;
+      await searchPeople({
+        ...TOPIC_CALL,
+        facultyProminence: false,
+        grantProminence: false,
+        pubCountDampen: "off",
+      });
+      const off = structuredClone(capturedBodies[0]);
 
-    // The spine's body is exactly BASE + the unbounded factor, in both env postures.
-    expect(outerFnScore(capped).functions).toEqual([{ weight: 1.0 }, MASTER_PUBCOUNT_FUNCTION]);
-    expect(outerFnScore(off).functions).toEqual(outerFnScore(capped).functions);
-    expect(JSON.stringify(capped)).toBe(JSON.stringify(off));
+      // The spine's body is exactly BASE + the unbounded factor, in both env postures.
+      expect(outerFnScore(capped).functions).toEqual([{ weight: 1.0 }, MASTER_PUBCOUNT_FUNCTION]);
+      expect(outerFnScore(off).functions).toEqual(outerFnScore(capped).functions);
+      expect(JSON.stringify(capped)).toBe(JSON.stringify(off));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

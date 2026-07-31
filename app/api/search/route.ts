@@ -26,6 +26,7 @@ import {
   matchQueryToTaxonomy,
   resolveMeshDescriptor,
   buildMatchAwareContext,
+  DESCENDANT_HARD_CAP,
   type TaxonomyMatchResult,
 } from "@/lib/api/search-taxonomy";
 import {
@@ -249,11 +250,24 @@ async function handleSearch(request: NextRequest) {
   // it. Spread into the response body by `jsonWithTiming`.
   const conceptLabel = taxonomyMatch.meshResolution?.name ?? null;
   const meshMapped = taxonomyMatch.meshResolution !== null;
+  // #2094 — descendant-expansion instrumentation. DIAGNOSTIC ONLY: nothing here
+  // changes what the expansion returns. `computeDescendants` early-returns the
+  // instant the list reaches DESCENDANT_HARD_CAP, so a length AT the cap is the
+  // truncation signal — derived, not measured, which means a descriptor whose
+  // true subtree is exactly cap-1 descendants would read as truncated with
+  // nothing actually lost (no such descriptor exists in the committed
+  // docs/spec-snapshots/mesh-broad-descriptors-2026-05.json census).
+  const descendantCount =
+    taxonomyMatch.meshResolution?.descendantUis.length ?? null;
+  const descendantTruncated =
+    descendantCount !== null && descendantCount >= DESCENDANT_HARD_CAP;
   const searchInterpretation = {
     scope,
     conceptLabel,
     meshMapped,
     meshConfidence: meshResolutionConfidence,
+    descendantCount,
+    descendantTruncated,
   };
 
   // Issue #78 — Funding tab. Multi-select facets are repeated params,
@@ -483,6 +497,14 @@ async function handleSearch(request: NextRequest) {
         // queries can distinguish "no resolution" from "resolution with a
         // self-only descendant set" (length 1).
         meshDescendantSetSize: result.meshDescendantSetSize,
+        // #2094 — did the expansion hit DESCENDANT_HARD_CAP? Lets the truncation
+        // rate be counted from the query log without replaying traffic. Null
+        // EXACTLY when the size above is null, so the rate is
+        // `count(true) / count(non-null)` — logging it unconditionally would
+        // count `mesh=off` and no-match rows in the denominator's numerator and
+        // report a rate that can exceed 1.
+        meshDescendantTruncated:
+          result.meshDescendantSetSize == null ? null : descendantTruncated,
         // SPEC §7.5 — anchor-set size mirrors the descendant convention:
         // `null` distinguishes "no resolution" from "resolution with zero
         // anchors" (which exercises the `concept_fallback` strict-mode path).
@@ -671,6 +693,17 @@ async function handleSearch(request: NextRequest) {
     // Issue #967 — surface a representative matching publication inside the
     // reason line. Inert unless matchExplain is also on.
     representativePub: resolvePeopleSnippetRepresentativePub(),
+    // #2094 — project each hit's OVERALL most-recent publication year
+    // (`mostRecentYear`, from the precomputed `mostRecentPubDate`) into the payload.
+    // Zero extra OpenSearch cost: one more `_source` key on a field already stored
+    // and already read by the recent-pub sort/filter. INSTRUMENTATION ONLY — it is
+    // the scholar's latest paper on ANY subject, not the matching one, and nothing
+    // on this path may turn it into a ranking input without its own issue.
+    // DIFFERENT CLOCK from the evidence line's `latestYear`: this one comes from
+    // `mostRecentPubDate`, built from `dateAddedToEntrez`, while `latestYear` is a
+    // max over the index's `year` (= `Publication.year`). They skew by 0-2 years
+    // and MUST NOT be differenced to judge whether on-topic work is stale.
+    includeMostRecentPub: true,
     // Issue #692 — generic-term demotion (mode `on`). Topic/hybrid bodies score
     // and highlight on the content query (full query discounted); inert
     // otherwise and never applied to name/department shapes.
@@ -696,6 +729,15 @@ async function handleSearch(request: NextRequest) {
     areaConcentration,
   });
   const searchLatencyMs = Date.now() - searchStart;
+  // SPEC §9 — descendant-set size for the shapes that consume it (topic /
+  // unclassified soft-fallback); null otherwise, even when a name/hybrid query
+  // happens to MeSH-resolve, so the field reads as "the attribution path was in
+  // play with N descendants." Hoisted so #2094's truncation flag below can share
+  // the exact same gate.
+  const peopleDescendantSetSize =
+    queryShape === "topic" || queryShape === "unclassified"
+      ? (taxonomyMatch.meshResolution?.descendantUis.length ?? null)
+      : null;
   // ANALYTICS-02 (D-02): structured search-query log (people branch).
   // Issue #308 §9 — `queryShape` is now the lexical query classification
   // (cwid / name / department / topic / hybrid / unclassified / empty),
@@ -712,14 +754,14 @@ async function handleSearch(request: NextRequest) {
       filters: { deptDiv, personType, activity, includeIncomplete },
       meshResolutionDescriptorUi,
       meshResolutionConfidence,
-      // SPEC §9 — resolved MeSH descendant-set size, reported only for the
-      // shapes that consume it (topic / unclassified soft-fallback). Null
-      // otherwise, even when a name/hybrid query happens to MeSH-resolve, so
-      // the field reads as "the attribution path was in play with N descendants."
-      meshDescendantSetSize:
-        queryShape === "topic" || queryShape === "unclassified"
-          ? (taxonomyMatch.meshResolution?.descendantUis.length ?? null)
-          : null,
+      meshDescendantSetSize: peopleDescendantSetSize,
+      // #2094 — did the expansion hit DESCENDANT_HARD_CAP? Null EXACTLY when the
+      // size above is null, so the truncation rate over the query log is
+      // `count(true) / count(non-null)`. The response-body field is ungated on
+      // purpose (a curl asks about one query it already knows the shape of); this
+      // one is gated because it gets aggregated.
+      meshDescendantTruncated:
+        peopleDescendantSetSize === null ? null : descendantTruncated,
       // SPEC §9 / Issue #310 — did the §6.1.3 attribution boost move any
       // result? Boolean under the v3 topic template with a resolved
       // descriptor; null when the boost wasn't in play.
@@ -819,4 +861,10 @@ type SearchInterpretation = {
    * `null` when nothing mapped.
    */
   meshConfidence: "exact" | "entry-term" | "partial" | null;
+  /** #2094 — size of the MeSH descendant expansion, INCLUDING the descriptor
+   *  itself at index 0. `null` when nothing resolved. */
+  descendantCount: number | null;
+  /** #2094 — the walk hit DESCENDANT_HARD_CAP, so the subtree is INCOMPLETE and
+   *  every downstream count/clause built from it undercounts. */
+  descendantTruncated: boolean;
 };

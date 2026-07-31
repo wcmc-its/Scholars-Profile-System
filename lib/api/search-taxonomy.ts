@@ -962,7 +962,7 @@ const MESH_MAP_REFRESH_MS = 60 * 60 * 1000; // 1h
  *  `MeshResolution.descendantUis`. Bounds the future `terms { meshDescriptorUi }`
  *  array in the `concept_expanded` shape; ranking saturates well before
  *  this size, so the cap costs little recall. Inline literal, not externalized. */
-const DESCENDANT_HARD_CAP = 200;
+export const DESCENDANT_HARD_CAP = 200;
 
 let meshMapCache: MeshMap | null = null;
 let meshMapInFlight: Promise<MeshMap> | null = null;

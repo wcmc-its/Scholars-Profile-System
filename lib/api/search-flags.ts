@@ -1325,3 +1325,16 @@ export function resolveAreaBoostWeights(defaults: {
     lo: num(ovr("SEARCH_AREA_BOOST_W_LO") ?? process.env.SEARCH_AREA_BOOST_W_LO, defaults.lo),
   };
 }
+
+/** #2094 — how many of the area's ranked scholars are pulled for the boost. A perf knob at
+ *  `AREA_BOOST_W_HI=3`, but ADR-011 measures it as a CORRECTNESS boundary at W_HI=20: the cap
+ *  decides who is eligible for the top weight at all, so the raise must be A/B-able by request.
+ *  Default (`AREA_BOOST_TOP_N`) is passed in — this module must not import `@/lib/search`.
+ *  Non-integer/zero/negative/absurd falls back to `dflt` rather than throwing or clamping: a
+ *  clamp would silently measure an N the experimenter did not ask for while the response echoes
+ *  the flag as applied. The 5000 ceiling keeps a hostile `?flags=` value out of the concept agg
+ *  `size` and the emitted `terms: {cwid}` clause list. */
+export function resolveAreaBoostTopN(dflt: number): number {
+  const n = Number(ovr("SEARCH_AREA_BOOST_TOP_N") ?? process.env.SEARCH_AREA_BOOST_TOP_N);
+  return Number.isInteger(n) && n > 0 && n <= 5000 ? n : dflt;
+}
