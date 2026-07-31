@@ -45,6 +45,7 @@ import {
 import type { PublicationsFilters, PublicationsSort } from "@/lib/api/search";
 import { displayPublicationType } from "@/lib/publication-types";
 import { buildPubmedRuns } from "@/lib/pubmed-runs";
+import { lastNameKey } from "@/lib/edit/cv-export";
 
 /** Word's per-export ceiling — lower than CSV's 5,000 because each docx
  *  citation costs more to render and a 5,000-citation bibliography is
@@ -178,14 +179,6 @@ function buildAuthorRuns(
     );
   });
   return runs;
-}
-
-/** Drop ", MD"-style postnominals, take final whitespace token, lower-
- *  cased — same heuristic the AuthorFacet sort key uses. */
-function lastNameKey(displayName: string): string {
-  const noPostnom = displayName.split(/,\s*/)[0] ?? displayName;
-  const tokens = noPostnom.trim().split(/\s+/);
-  return (tokens[tokens.length - 1] ?? "").toLowerCase();
 }
 
 function hyperlinkRun(text: string, href: string): ExternalHyperlink {

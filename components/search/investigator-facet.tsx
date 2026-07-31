@@ -19,7 +19,6 @@ const EXPANDED_VISIBLE = 50;
 export type InvestigatorFacetItem = {
   cwid: string;
   displayName: string;
-  slug: string;
   count: number;
   isActive: boolean;
   toggleHref: string;

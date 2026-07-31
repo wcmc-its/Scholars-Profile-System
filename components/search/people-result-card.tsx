@@ -1,19 +1,17 @@
 "use client";
 
-import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { formatRoleCategory } from "@/lib/role-display";
 import { profilePath } from "@/lib/profile-url";
 import {
-  MatchReason,
   MatchAwareReason,
   CountFirst,
   LesserReason,
   KeyFunding,
 } from "@/components/search/match-reason";
-import { HighlightedSnippet } from "@/components/search/highlight-snippet";
 import { EvidenceLine } from "@/components/search/evidence-line";
 import type { EvidenceGrant, ResultEvidence } from "@/lib/api/result-evidence";
 import type { ActivityFilter, PeopleHit } from "@/lib/api/search";
@@ -106,39 +104,6 @@ function RoleTag({ role }: { role: string }) {
     <span className="ml-2 inline-flex h-[16px] items-center rounded-sm bg-[#f0eeea] px-1.5 text-[9.5px] font-medium uppercase tracking-[0.05em] text-[#5f594d]">
       {role}
     </span>
-  );
-}
-
-// `HighlightedSnippet` (the <mark>→<strong> rewriter + HTML strip / entity
-// decode, issue #20) now lives in `components/search/highlight-snippet.tsx`,
-// shared with the `<ResultEvidence>` renderer.
-
-// #824 follow-up — the humanized research-areas fallback (mockup ROW 5). Clean,
-// comma-separated area LABELS (no under_scores; the matched area, if any, bold as
-// a WHOLE label). Replaces today's raw `areas_of_interest` slug dump with
-// mid-word bolding. Server already humanized the slugs (real Topic.label when
-// known, else a sentence-cased slug) — this is pure presentation. LEGACY: used
-// only on the pre-ResultEvidence path (`SEARCH_RESULT_EVIDENCE` off).
-function HumanizedAreas({
-  labels,
-  matchedIndex,
-}: {
-  labels: string[];
-  matchedIndex: number;
-}) {
-  return (
-    <div className="mt-2 text-[13px] leading-snug text-[#4a4a4a]">
-      {labels.map((label, i) => (
-        <span key={`${label}-${i}`}>
-          {i > 0 ? ", " : ""}
-          {i === matchedIndex ? (
-            <strong className="font-medium text-[#111]">{label}</strong>
-          ) : (
-            label
-          )}
-        </span>
-      ))}
-    </div>
   );
 }
 
@@ -255,7 +220,6 @@ export function PeopleResultCard({
       : hit.primaryDepartment ?? null;
 
   const roleLabel = hit.roleCategory ? formatRoleCategory(hit.roleCategory) : null;
-  const snippet = hit.highlight && hit.highlight.length > 0 ? hit.highlight[0] : null;
 
   const pubLabel = hit.pubCount === 1 ? "pub" : "pubs";
   const grantLabel = hit.grantCount === 1 ? "grant" : "grants";
@@ -265,10 +229,10 @@ export function PeopleResultCard({
   const hasQuery = qParam.length > 0;
 
   // #1366 — the evidence reason block. STACKED lines (`evidenceLines`, flag on),
-  // else the single `evidence` object, else the legacy priority chain. The first
-  // two render through one or more `<EvidenceLine>` (each owns its disclosure +
-  // exemplar fetch); they share `claimedPmids` so representative papers stay
-  // globally disjoint across stacked lines.
+  // else the single `evidence` object (selectEvidence's terminal `{ kind: "none" }`
+  // guarantees one of the two is always present). Both render through one or more
+  // `<EvidenceLine>` (each owns its disclosure + exemplar fetch); they share
+  // `claimedPmids` so representative papers stay globally disjoint across stacked lines.
   // #1366 follow-up — `stacked` = the multi-line `evidenceLines` context (the flag on).
   // The PRIMARY / "Also matched" tiering is scoped to it; the single-`evidence` path
   // (the older, separately-flagged rendering) keeps its current single block + full
@@ -287,72 +251,6 @@ export function PeopleResultCard({
   const lesserLines = lines ? lines.slice(1) : [];
   const secondaryCount = lesserLines.length + (hasFunding ? 1 : 0);
   const singleSecondary = secondaryCount === 1;
-
-  // LEGACY priority chain — rendered ONLY when there are no stacked/single `lines`
-  // (SEARCH_RESULT_EVIDENCE off). The `lines` path renders inline below with the
-  // primary / "Also matched" tiering (#1366 follow-up, handoff Part 1).
-  let legacyBlock: ReactNode = null;
-  if (!lines) {
-    // method > topic > (legacy concept/pub matchReason) > bio highlight > humanized
-    // research areas. The method/topic kinds + humanized areas are produced by the
-    // server only when SEARCH_PEOPLE_MATCH_AWARE_SNIPPET is on; off ⇒ legacy
-    // `{ icon, text }` reason (or absent), rendering today's snippet exactly.
-    const reason = hit.matchReason;
-    if (reason && "kind" in reason) {
-      // New match-aware badge reasons (method / topic).
-      legacyBlock =
-        reason.kind === "method" ? (
-          <MatchAwareReason kind="method">
-            <CountFirst entity={reason.family} underline />
-          </MatchAwareReason>
-        ) : (
-          <MatchAwareReason kind="topic">
-            <CountFirst entity={reason.label} underline />
-          </MatchAwareReason>
-        );
-    } else if (reason) {
-      // Legacy PLAN R4 (#688/#702/#967) pub-evidence / concept reason.
-      legacyBlock = (
-        <MatchReason kind={reason.icon}>
-          {reason.text}
-          {/* #967 — concrete proof behind the count: a representative matching
-              publication. The title is <mark>-highlighted when the literal query
-              appears in it, otherwise rendered plain. */}
-          {reason.pub ? (
-            <>
-              {" — incl. "}
-              <span className="italic">
-                &ldquo;
-                {reason.pub.titleHtml ? (
-                  <HighlightedSnippet html={reason.pub.titleHtml} />
-                ) : (
-                  reason.pub.title
-                )}
-                &rdquo;
-              </span>
-              {reason.pub.year ? ` (${reason.pub.year})` : ""}
-            </>
-          ) : null}
-        </MatchReason>
-      );
-    } else if (snippet) {
-      // Self-evident bio/overview/areas highlight from a self-reported field.
-      legacyBlock = (
-        <div className="text-[13px] leading-snug text-[#4a4a4a]">
-          <HighlightedSnippet html={snippet} />
-        </div>
-      );
-    } else if (hit.humanizedAreas && hit.humanizedAreas.labels.length > 0) {
-      // #824 follow-up — last-resort humanized research areas (no under_scores),
-      // replacing today's raw slug dump. Only present when the flag is on.
-      legacyBlock = (
-        <HumanizedAreas
-          labels={hit.humanizedAreas.labels}
-          matchedIndex={hit.humanizedAreas.matchedIndex}
-        />
-      );
-    }
-  }
 
   // When a topic-matching grant IS the query match, drop the generic NO-MATCH
   // identity fallback (`concepts`/`areas`/`none`: the "— no specific match —" line +
@@ -664,27 +562,27 @@ export function PeopleResultCard({
           fundingNode
         ) : (
           <>
-            {lines ? (
-              <EvidenceLine
-                key={lineKey(lines[0], 0)}
-                evidence={lines[0]}
-                cwid={hit.cwid}
-                slug={hit.slug}
-                pubCount={hit.pubCount}
-                // See the lesser rows above — a method count is a share of the
-                // method-indexed pool, never of `pubCount`.
-                methodPubCount={hit.methodPubCount}
-                q={q}
-                keyPaperConfig={keyPaperConfig}
-                hasQuery={hasQuery}
-                badged={evidenceRows}
-                claimedPmids={claimedPmids}
-                stacked={stacked}
-                tier="primary"
-              />
-            ) : (
-              legacyBlock
-            )}
+            {/* `lines` is always populated: selectEvidence/selectEvidenceLines
+                terminate in `{ kind: "none" }` rather than returning nothing. The
+                non-null assertion documents that invariant (see the `stacked`
+                comment above). */}
+            <EvidenceLine
+              key={lineKey(lines![0], 0)}
+              evidence={lines![0]}
+              cwid={hit.cwid}
+              slug={hit.slug}
+              pubCount={hit.pubCount}
+              // See the lesser rows above — a method count is a share of the
+              // method-indexed pool, never of `pubCount`.
+              methodPubCount={hit.methodPubCount}
+              q={q}
+              keyPaperConfig={keyPaperConfig}
+              hasQuery={hasQuery}
+              badged={evidenceRows}
+              claimedPmids={claimedPmids}
+              stacked={stacked}
+              tier="primary"
+            />
             {/* "Also matched" — the demoted signals collapsed under one summary line.
                 Only the STACKED (`evidenceLines`) context tiers; shown when there is ≥1
                 lesser line or a (demoted) Funding row. A single secondary collapses the
