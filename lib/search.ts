@@ -1178,8 +1178,32 @@ export const AREA_BOOST_W_LO = 0.75;
 /** Tier cutoffs as a fraction of the area's top `total` (the #1 scholar). */
 export const AREA_BOOST_HI_FRAC = 0.5;
 export const AREA_BOOST_MID_FRAC = 0.2;
-/** Cap on how many of the area's ranked scholars are pulled for the boost. */
-export const AREA_BOOST_TOP_N = 200;
+/**
+ * Cap on how many of the area's ranked scholars are pulled for the boost.
+ *
+ * PR #2098 (tracking issue #2097) — raised 200 → 500 on measurement. The list is sorted by the very quantity
+ * being boosted (`n²/total`) and then sliced, so the cap is an approximation error:
+ * below the point where the page stops changing, it returns a different ranking than
+ * the one the scoring intends. Measured on staging across the 10-query panel, both
+ * weights and both `AREA_BOOST_GRADED` postures, by sweeping `SEARCH_AREA_BOOST_TOP_N`
+ * and finding the smallest value whose top 10 equals the top 10 at 2000:
+ *
+ *   every query converges at or below 300; 8 of 10 converge at or below 150
+ *
+ * At the old 200 the two broadest queries had NOT converged — page 1 was reordered
+ * relative to the full-list answer, including a rank 1/2 swap on a broad disease
+ * query. That was true at today's shipped `AREA_BOOST_W_HI = 3`, not only at the
+ * proposed higher weight, so this is a live defect and not a pre-flip concern.
+ *
+ * 500 is 1.67× the worst observed convergence point. It is not larger because the
+ * margin buys nothing measurable and a cap should stay a cap.
+ *
+ * ⚠ The stated original reason for 200 was `function_score` clause count. Measured
+ * against it: origin latency on the broadest panel query is flat from 200 to 5000
+ * (~0.25-0.30 s, 3 runs each, cache-busted). Re-measure before raising further —
+ * this says the cost is not binding at 500, not that it never binds.
+ */
+export const AREA_BOOST_TOP_N = 500;
 /**
  * Contract rule O8 — number of steps the graded area boost spans between
  * `AREA_BOOST_W_LO` and `AREA_BOOST_W_HI` when `SEARCH_PEOPLE_AREA_BOOST_GRADED` is on.
@@ -1190,7 +1214,7 @@ export const AREA_BOOST_TOP_N = 200;
  * More bands is the whole change; the emitted clause shape is unchanged.
  *
  * ponytail: banded, not one clause per scholar. Continuous would mean up to
- *   AREA_BOOST_TOP_N (200) function_score clauses for a boost that only needs to
+ *   AREA_BOOST_TOP_N (500) function_score clauses for a boost that only needs to
  *   reorder within a relevance band. Raise the band count before going continuous.
  */
 export const AREA_BOOST_GRADED_BANDS = 10;

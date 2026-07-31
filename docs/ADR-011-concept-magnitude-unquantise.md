@@ -1,8 +1,17 @@
 # docs/ADR-011 — Unquantise the concept magnitude the system already computes
 
-**Status:** Proposed
+**Status:** **Partially accepted** — B1/B2/B3/B4 are proposed and unjudged, but parts of this record are already in production: #2095 (instrumentation) is merged, and #2098 raised the `AREA_BOOST_TOP_N` default 200 → 500, which changes prod ranking. Do not read "Proposed" off the header and assume nothing has shipped.
 **Date:** 2026-07-31
-**Revision:** 2 — revised after PR #2095 (step-1 instrumentation) merged. Three claims in revision 1 are now falsified and corrected below: the acceptance tally counted a query measured over a broken candidate pool, publication years *are* now in the payload, and the proposed breadth gate is not computable as specified.
+**Revision:** 3
+
+**Revision 2** corrected three claims from revision 1, all of which failed because new data arrived: the acceptance tally counted a query measured over a broken candidate pool, publication years *are* now in the payload, and the proposed breadth gate is not computable as specified.
+
+**Revision 3 corrects two claims made by revision 2 itself.** These are more instructive than revision 1's, because nothing new arrived — the document's own reasoning was wrong and measurement caught it:
+
+| revision 2 claimed | measured |
+|---|---|
+| `AREA_BOOST_TOP_N` is harmless at `W_HI = 3` and *becomes* a correctness boundary at 20 | **Wrong in both directions.** It was already reordering page 1 at the shipped weight, and a higher weight is *more* cap-stable, not less |
+| watch click-position and zero-click rate for a week after the flip | **Underpowered by one to two orders of magnitude.** At 9.7 people searches/day a week is ~68 events; the same numbers need a quarter |
 **Authors:** Scholars Profile System development team
 **Supersedes:** —
 **Superseded by:** —
@@ -12,6 +21,18 @@
 [`search-relevance-contract.md`](./search-relevance-contract.md) rule **O8** states that a term which orders by evidence must be sensitive to how much evidence there is. Every query-derived ordering term in the people body fails it — they are presence tests, and the only continuously-varying term in the prominence sum is `ln1p(publicationCount)`, career output with no relation to the query.
 
 The obvious reading of that is "the system has no concept magnitude, so one must be built and indexed." **That reading is wrong, and this ADR exists because two days of work were spent proving it wrong the expensive way.**
+
+### What success looks like to a user, not to a metric
+
+Stated because a reader in a year will otherwise find exhaustive method and no account of whose problem this was.
+
+**The user problem:** someone searches a topic to find who at this institution works on it, and the top of the page is occupied by prolific generalists whose connection to the topic is incidental — while the person with 318 publications on it sits at rank 15 or is absent entirely. The search answers "who publishes a lot and matched some words" when it was asked "who does this."
+
+**Success is that a topical search puts the people who actually do that work on the first screen**, and that the card says why they are there in a number the reader can check.
+
+⚠ **Usage is ~10 people-searches a day.** That is worth stating next to the ambition, because it cuts two ways: it is a *hypothesis* that usage is low partly because topical queries return generalists and people stopped trusting them, and it is *also* a warning that this may simply be a low-traffic tool where ranking work has modest reach. This document cannot distinguish those, and should not pretend to.
+
+**The one online signal with adequate power is people-search volume, quarter over quarter.** Not a week — a quarter, because ~900 events is the sample size the log actually provides. It is slow, badly confounded by term dates and announcements, and **useless as a rollback trigger**. But if the "bad results suppress usage" hypothesis is right, it is the only measurement in this entire programme in which a real user is observably better served. Given how much of "After the flip" is about what cannot be measured here, the one thing that can should be named.
 
 ### The magnitude already exists, is already live in prod, and is already correct
 
@@ -30,6 +51,26 @@ So the pipeline is complete end to end. The magnitude is computed over the right
 **The quantity is right. The cap is the defect.**
 
 Sorting a captured panel by the shipped `n²/total` reproduces a magnitude ordering's top 3 exactly on a disease query (318, 248, 226 tagged publications). Nothing needed to be built to get that number; it is what production already calculates and then throws away.
+
+### How much of the product this touches
+
+**59.3% of real people-search events see a changed page 1, and 19.9% see a different top result.**
+
+Census, not sample: every distinct people query in 90 days of prod logs (299 of 314 replayed, covering 805 of 877 events) run against both arms on staging — baseline `W_HI=3` / GRADED off (today's prod), proposed `W_HI=20` / GRADED on — with the flag echo asserted on every capture and zero request errors.
+
+| outcome | distinct | events |
+|---|---|---|
+| unchanged | 41.8% | 40.7% |
+| reordered, same ten people | 12.0% | 13.2% |
+| **membership changed** | 46.2% | **46.1%** |
+| **any change** | **58.2%** | **59.3%** |
+| top result changed | — | 19.9% |
+
+By query shape (events changed / events): topic **75.6%**, hybrid 58.3%, unclassified 40.7%, name 15.4%, department 0%.
+
+**This is the number that sets how much method the rest of this document deserves**, and it says the reach is large: three in five searches move, one in five gets a new top result. Read the sweep, the panels and the census diff below as proportionate to that.
+
+⚠ Two honest caveats. The shape column mixes the shape *prod logged* with the page *staging evaluated*; five queries prod labelled `name` classify as `hybrid_template` on staging, which is why a shape the boost should not touch shows 15.4% — classifier drift between the older prod image and master, not the boost leaking. And "changed" is not "improved": this measures reach, and only the panels can say direction.
 
 ### What was measured
 
@@ -64,35 +105,40 @@ Two caveats on the panel itself, both of which bound how much the tally can carr
 
 The mechanism behind that difference is the strongest argument in this ADR. Where descriptor coverage is thin, the concentration score never leaves its lowest band and the page returns **rank-for-rank identical** — a page sort acts on ties at any scale, a scaled scoring band does not fire below a floor. **The coverage floor is emergent here and absent from the `rank_features` design**, which would have to reimplement it as an explicit gate whose statistic that field type cannot even compute.
 
-### 🔴 `AREA_BOOST_TOP_N = 200` becomes a correctness boundary at the new weight
+### ✅ `AREA_BOOST_TOP_N` — measured, and it was already wrong at today's weight
 
-**This was absent from revision 1 and it is the one way this change could be quietly wrong in production, on exactly the broad queries it most claims to fix.**
+**Resolved. The concern was real, the framing was wrong in both directions, and the fix is PR #2098 (200 → 500).**
 
-The concentration list is computed for 200 scholars only (`lib/api/area-concentration.ts`). At `W_HI = 3` that cutoff is harmless — the boost barely reorders anything, so a scholar outside the list was not going to reach page 1 regardless. **At `W_HI = 20` the boost dominates the sum, and the cutoff converts from a latency optimisation into a correctness boundary.** The headline argument for this ADR is that the change reaches scholars who were not in the fetched 20; the identical argument applies at 200, and it has not been measured.
+Revision 2 said: at `W_HI = 3` the cutoff is harmless, and it *becomes* a correctness boundary at 20. **Measured, both halves of that are false.** It was already a correctness boundary at the shipped weight, and raising the weight makes most queries *less* sensitive to it, not more.
 
-One correction to the shape of the concern. The cutoff is not an arbitrary candidate rank — the implementation keeps the top 200 **by the very quantity being boosted** (`sort by n²/total, then slice`). So the failure mode is not "a 300-tagged scholar sits at rank 201 and gets weight zero"; that scholar would have to be beaten by 200 others on `n²/total`. The failure mode is narrower and sharper: **descriptors broad enough that more than 200 scholars carry substantial concentration.** That is `Neoplasms` — and it is exactly the query where the descendant truncation below *also* bites. The two interact.
+The correction to the shape of the concern still stands and is what made the result interpretable: the cutoff is not an arbitrary candidate rank. Arm 1 keeps the top N **by the very quantity being boosted** (`sort by n²/total, then slice`), so the failure mode was never "a 300-tagged scholar sits at rank 201". It is **descriptors broad enough that more than N scholars carry substantial concentration** — and the cap is an approximation error that closes as N grows.
 
-What has been checked, and what it does *not* show. Deep-paginated `cancer` and `aging` at `W_HI = 20`, prod parity, looking for a discontinuity in tagged count at result rank 200:
+**Method.** Sweep `SEARCH_AREA_BOOST_TOP_N` on staging and find, per query, the smallest N whose top 10 equals the top 10 at N = 2000. Ten panel queries × the ladder {5, 10, 25, 50, 100, 150, 200} × two `AREA_BOOST_GRADED` postures × `W_HI ∈ {3, 20}`, prod-parity pin echoed and asserted on every capture.
 
-```
-cancer   ranks 161-180  max N= 89    ranks 201-220  max N= 51
-         ranks 181-200  max N= 58    ranks 221-240  max N= 55
-                                     ranks 281-300  max N= 51
-aging    ranks 181-200  max N=  4    ranks 201-220  max N=  3
-```
+**Positive control first, because "no difference" is also what a disconnected flag returns.** At `TOP_N = 1` every probed query reorders substantially. The lever is connected; a null result would have meant something.
 
-No discontinuity at 200. **This is weak evidence and does not retire the concern**, because *result* rank is not *concentration* rank — the concentration list is ordered by `n²/total`, the result list by the whole score, and a smooth decay in one says little about truncation in the other. What it does establish: `aging` cannot be affected (the list is nowhere near saturated), and `cancer` plausibly can.
+**Convergence point (smallest N matching the N = 2000 page):**
 
-**The check is now two curls.** `SEARCH_AREA_BOOST_TOP_N` was a hardcoded const; PR #2095 made it a request-overridable numeric flag (default unchanged at 200, allowlisted rather than CDK-wired, so staging-only). Run `TOP_N:200` versus `TOP_N:2000` at `W_HI:20` and diff the top 10:
+| config | worst query | converges at | 8 of 10 converge at |
+|---|---|---|---|
+| `W_HI = 3`, GRADED off — **today's prod** | `cancer`, `functional mri` | **300** | ≤ 150 |
+| `W_HI = 20`, GRADED off | `diabetes`, `functional mri` | 150 | ≤ 150 |
+| `W_HI = 20`, GRADED on — the B1 ship config | `cancer` | **300** | ≤ 150 |
 
-```
-/api/search?q=<q>&type=people&flags=SEARCH_AREA_BOOST_W_HI:20,SEARCH_AREA_BOOST_TOP_N:200
-/api/search?q=<q>&type=people&flags=SEARCH_AREA_BOOST_W_HI:20,SEARCH_AREA_BOOST_TOP_N:2000
-```
+**Every query, in every configuration, converges at or below 300. None needed more.**
 
-Identical pages on all ten queries retires the cutoff and this section can say so. If any page moves, dump `n²/total` at concentration ranks 190-210 for that query and pick a new cutoff — **at that point it is a latency conversation, not a relevance one**, because the cost is `function_score` clause count, which is the stated reason for 200 in the first place.
+**The defect is live in prod today, not created by B1.** At today's `W_HI = 3` with the cap at 200, two queries had not converged — the page differed from the full-list answer with *identical membership, reordered*: on the broad disease query the **rank 1 and rank 2 scholars swap**, and on the technique query one scholar moves from rank 10 to rank 8. Both settle from 300 upward.
 
-**Do this before any prod flip.**
+Two things follow that revision 2 got backwards:
+
+- **A higher weight is more stable, not less.** At `W_HI = 20` the boost separates scores decisively, so the top of the page stops depending on how many others are in the list; at `W_HI = 3` the scores are tightly clustered and a small change in the list flips ranks. The intuition that a dominant term is more exposed to a truncated candidate list is wrong here, and the measurement is the only reason we know.
+- **Grading raises sensitivity.** With `GRADED` on, `cancer` converges at 300 rather than 100 — more distinct bands means more scholars' relative positions depend on the full list. That is an argument for measuring the cap at the *ship* config, not at prod parity.
+
+**The latency rationale does not bind.** The stated reason for 200 was `function_score` clause count. Origin latency on the broadest panel query is flat from 200 to 5000 — ~0.25-0.30 s across 3 cache-busted runs each, no trend. That is evidence the cost is not binding at 500; it is not evidence it never binds, so re-measure before going higher.
+
+**Decision: raise the default to 500** (PR #2098) — 1.67× the worst observed convergence, and no larger, because the extra margin buys nothing measurable and a cap should stay a cap. This is independent of B1 and ships on its own: it is an approximation-error fix at the weight already in production.
+
+⚠ **Two caveats, both stated rather than resolved.** `cancer`'s concentration list is built over a descendant pool truncated by #2096, so its specific convergence number is provisional — but `functional mri` is **not** truncated and shows the same 300, so the finding does not rest on the broken query. And this measures **arm 1 only**; arm 2 slices a `doc_count`-ordered list, so its cliff is not self-correcting as N grows and a concentrated low-volume specialist can still score zero there at any cap.
 
 ### Why this ADR does not propose `rank_features`
 
@@ -110,6 +156,26 @@ Beyond being unbuildable as specified, it was unnecessary: the additive per-cwid
 **Do not fund a `rank_features` reindex for concept counts.** Raise the ceiling on the magnitude the system already computes, and stop quantising it.
 
 ⚠ **These blocks are not all independently landable, and revision 1's claim that they were is withdrawn.** B0 and B2 are independent. **B1, B3 and B4 are one shipment** — B4 because the number that explains the reorder must reach the card the same day, B3 because landing it afterwards would invalidate the `W_HI` the acceptance panel had just accepted. Each block below says which it is.
+
+### 🔴 B-1 — Decide the staging/prod anchor divergence BEFORE the sweep
+
+**This is not a caveat on one number. It is a residual on every measurement in this document, including the sweep that has not run yet — and it needs a decision, not a footnote.**
+
+Every number here was measured on staging. Flags were pinned to prod parity and the echo asserted on each capture, so the *flag* half is controlled. The data half is not: prod has **85 distinct `mesh_curated_topic_anchor` rows against staging's 349** (#2016), and anchors determine which area is credited. The two environments therefore draw concentration lists from different distributions, and **the anchor population cannot be pinned by a query parameter.**
+
+The consequence that matters is forward-looking. If concentration lists differ by that much, **the α knee found on staging is not necessarily the prod knee**, and neither is `W*` or the gate threshold. Leaving this open means the sweep runs, produces `(α*, W*)`, and the residual is rediscovered by whoever notices the numbers do not reproduce in prod.
+
+⚠ It has already been decided once by default: #2098 shipped `AREA_BOOST_TOP_N = 500` to prod on a staging-measured convergence figure. That was a choice, it was not deliberated, and it should not be the template.
+
+Choose one, explicitly, before the sweep:
+
+| option | cost | what it buys |
+|---|---|---|
+| **Sync the anchor table to prod parity first** | If it is a data sync, cheap — and it **retires the whole class of residual**, not just this instance | Every staging measurement becomes transferable. Strongly preferred if the tables can be reconciled |
+| **Run the sweep against prod** behind the `?flags=` allowlist | `flagOverrideEnabled()` is `SPS_ENV === "staging"`, so this needs a prod task-def change — a deliberate widening of a staging-only debug surface, on a public-facing app | Removes the residual for the sweep specifically. The security posture question is real and belongs to whoever owns the edge |
+| **Accept it** | Free | Then it must be written into **Accepted consequences** as "all tuned parameters carry an unpinned anchor-population residual", so the next person re-deriving `W_HI` under O5 inherits the warning rather than rediscovering it |
+
+Doing nothing is option three without the write-down, which is the worst of the three.
 
 ### B0 — Evidence population (no reindex, no flag, ships first)
 
@@ -269,7 +335,7 @@ Once the ranked quantity is the concept count, the displayed number and the rank
 | **Ungrade the bands alone** (`AREA_BOOST_GRADED` on, `W_HI` unchanged) | Measured inert: 5 of 10 queries byte-identical, and where it moved membership it moved it the wrong way. The ceiling, not the banding, is the binding constraint — which is why the flag was previously judged "worse alone". |
 | **Delete the method tier** | Rejected on measurement: it scored as the largest available O8 win (−153 inversion pairs) and reading the pages reversed the verdict — with the tier off, every practitioner of the technique is evicted in favour of high-volume generalists. |
 | **Ship the volume cap first** | Measured worse. See B3. |
-| **Per-request publications-index aggregation for the count** | This is not an alternative — it is what the system already does, on the scoring path, in prod, cached and capped at `AREA_BOOST_TOP_N = 200`. That cap is now sweepable via `SEARCH_AREA_BOOST_TOP_N` on staging (PR #2095); see the correctness-boundary section. |
+| **Per-request publications-index aggregation for the count** | This is not an alternative — it is what the system already does, on the scoring path, in prod, cached and capped at `AREA_BOOST_TOP_N` (500 since PR #2098, measured; see the cap section). |
 | **Add C04.588 to the Neoplasms expansion** | Treats the symptom. The truncation is a lex-ordered walk hitting a 200 cap, and it affects 161 of 587 broad descriptors — Neoplasms is merely the first one big enough to make it visible. See #2096. |
 
 ## Verification
@@ -278,6 +344,25 @@ Once the ranked quantity is the concept count, the displayed number and the rank
 - **B1:** ⚠ **provisional, not done.** A 10-query panel ran at pinned prod parity with predictions recorded before the arm was read, one blind judge per query, `total` byte-identical on all 70 captures across the sweep. Tally 5 BETTER / 1 MILD_BETTER / 2 NEUTRAL / 1 WORSE over nine valid queries (`cancer` excluded), no control damaged. It does **not** constitute acceptance, for three reasons: it was judged against α = 1 and the functional form is changing, one query was measured over a truncated pool, and a single judge carries the four decisive verdicts.
 
   ⚠ **Do not predict a verdict from median-N in the top 10.** It found the knee correctly and got 4 of 10 verdicts wrong, because it is blind to ordering *within* a page whose membership does not change. It is a weight-locating instrument, not an acceptance test.
+
+### What the query log says about this system, and why it changes the method
+
+Measured from `/aws/ecs/sps-app-prod`, 90 days:
+
+| | |
+|---|---|
+| people `search_query` events | **877** (9.7/day) |
+| distinct query strings | **314** |
+| shape mix (event-weighted) | topic 58.3%, unclassified 28.0%, name 6.4%, hybrid 4.5%, department 2.5% |
+| topic/unclassified queries resolving **no** descriptor | 26 of 245 replayed — **10.6%** |
+
+Two consequences, and the second is the more useful one.
+
+**Online metrics cannot adjudicate this change.** At 9.7 people searches a day, a one-week watch window sees roughly **68 searches**, and clicks are a subset of that. No click-position distribution or zero-click rate computed over 68 events will distinguish a real ranking improvement from noise. Any section of this document that proposes watching an online metric for a week is proposing something underpowered by one to two orders of magnitude; see "After the flip", which is corrected accordingly.
+
+**But the query space is small enough to enumerate, which is strictly better.** 314 distinct queries is not a sample problem — it is a *census*. Every real query this system has served in a quarter can be replayed against two arms and diffed, offline, in minutes. That is a stronger claim than any panel or any online metric can support: not "ten hand-picked queries improved" but "here is every query a user actually issued, and here is exactly which pages changed and how."
+
+The truncation-rate measurement already ran this way and covered 92% of events / 96% of distinct queries in a single pass with zero request errors. **The acceptance evidence for B1 should be a census diff, with the panels used to judge the pages the census flags as changed** — the panel's job becomes adjudicating a shortlist rather than estimating a population. This does not remove the need for the holdout: the census says *what* changed, human judgement still says whether the change is better.
 
 ### The acceptance panel needs a held-out set
 
@@ -288,10 +373,42 @@ The frequency-weighting problem cannot be fixed cheaply — the panel exists *be
 - if the holdout comes back materially worse than the tuning set, the parameters are overfitted and the sweep must be redone with a coarser grid;
 - if it comes back comparable, the "does not estimate user impact" caveat largely dissolves and the claim gets much stronger.
 
-Roughly ten extra judgements buys that. **Sample the holdout while pulling the truncation-rate slice** — that work already opens the query log, so the marginal cost is close to zero.
+Roughly ten extra judgements buys that.
+
+✅ **Done — a frequency-weighted holdout is sampled and sealed.** Ten queries drawn frequency-weighted from the prod people-query log (90 days, seed recorded), panel queries excluded, covering 10.1% of non-panel events with a shape mix close to the population's. It lives outside this repo because the strings are real user queries and this repo is public; see the tracking issue for the path. **Do not look at it while sweeping.**
+
+#### But a frequency-weighted sample is the wrong instrument for the overfitting check
+
+⚠ **That set was sampled before the census reframing, and on its own it is underpowered for the job this section gives it.** The document's own findings say so: sparse-coverage queries are rank-for-rank inert, 10.6% of topic/unclassified queries resolve no descriptor at all, and 40.7% of events are unchanged outright. A frequency-weighted ten will therefore be **mostly unchanged pages** — perhaps three informative judgements, and a tally heavy with NEUTRAL that *reads* as "no overfitting detected" when it actually means the sample missed where the change acts. Judging a byte-identical page is zero-information by construction.
+
+**Use two instruments, answering two different questions, and report them as two numbers — never one tally.**
+
+| instrument | sampled from | answers |
+|---|---|---|
+| **stratified quality set** — 10 queries drawn from the *changed* stratum of the census diff at `(α*, W*)` | pages the census proves moved | **Is the change good?** Every judgement is informative because every page differs |
+| **sealed frequency-weighted set** (already drawn) | all real events | **How much does it matter?** The population-impact estimate the stratified set structurally cannot give |
+
+The stratified set cannot be drawn until the census runs at the chosen parameters, so it is sampled *after* the sweep and *before* any judging — the seal that matters is between sampling and judging, not between sweeping and sampling.
+
+#### Pre-registered pass criterion — written before unsealing, on purpose
+
+This document records predictions before reading arms everywhere else, and then proposed to unseal a holdout with no stated threshold. That is the seal doing much less work than it appears to. **The criterion below is fixed now, while the answer is unknown.** Changing it after seeing a tally voids the holdout, and that should be recorded as a deviation rather than quietly done.
+
+**The change PASSES only if all four hold:**
+
+1. **Stratified quality set:** `BETTER ≥ 2 × WORSE`. Ties and NEUTRALs are ignored; a page the census flagged as changed but a judge calls NEUTRAL counts as neither.
+2. **No damaged control.** Any control query judged WORSE is an automatic fail regardless of the totals.
+3. **No WORSE at rank 1** on any query with more than 5 events in the 90-day log. A new top result that is worse on a query people actually issue is the failure mode with the largest blast radius, and the census says 19.9% of events get a new top result.
+4. **Sealed frequency-weighted set:** `WORSE events ≤ BETTER events`. This one is deliberately weak — the set is mostly unchanged pages, so it is a floor against population-level harm, not evidence of benefit.
+
+**Divergence rule.** If the stratified set passes and the frequency-weighted set fails, the parameters are tuned to the queries that move and are harming the ones that do not — investigate before flipping, do not average the two. If the stratified set fails, the change does not ship regardless of what any other number says.
 
 - **B2:** measure the `max(year)` sub-aggregation route before mapping any new field. PR #2095 shipped the pattern on the reason aggregation, so the mechanism is demonstrated; what remains is measuring it on the concentration aggregation.
-- **`AREA_BOOST_TOP_N`:** `TOP_N:200` vs `TOP_N:2000` at `W_HI:20`, top-10 diff, all ten queries. Must be clean before any prod flip.
+- **`AREA_BOOST_TOP_N`:** ✅ **done at α = 1.** Convergence swept over ten queries × two GRADED postures × `W_HI ∈ {3, 20}`; everything converges by 300, default raised to 500 (PR #2098).
+
+  **It is an explicit post-check, NOT a fourth sweep dimension.** Earlier drafts said both; this is the ruling. The cap is not a relevance parameter to be tuned — it is a cutoff that must sit above where the page stops changing, so the only question is whether 500 still clears the bar at the chosen `(α*, W*)`. Adding it to the sweep would quadruple the grid to answer a yes/no.
+
+  **Pre-registered prediction, recorded before the sweep runs:** convergence at α = 0.5 will be **at or below 300**, so 500 will still clear. Two measured findings jointly imply it — a higher weight is *more* cap-stable because it separates scores, and lowering α widens the raw score range, which separates them further. **If convergence at `(α*, W*)` exceeds 300, that prediction is wrong and the mechanism is not understood** — stop and explain it before raising the cap again.
 - Standing: re-derive `W_HI` whenever another term in the prominence sum changes (O5). B3 is what makes this obligation affordable — and is why B3 is swept with `W_HI` rather than landed after it.
 
 ### After the flip
@@ -300,37 +417,46 @@ Roughly ten extra judgements buys that. **Sample the holdout while pulling the t
 
 **Rollback is one deploy, and saying so is the point.** All four levers live in the `sps-app-<env>` task-def env, not the image, so reverting is a task-def change and a `cdk deploy Sps-App-prod` — no rebuild, no reindex, no data migration. On staging they are additionally request-scoped via `?flags=`, so the pre-flip arm stays reproducible after the flip. A stated rollback path is what makes an aggressive weight approvable.
 
-Watch for one week:
+⚠ **An earlier draft of this section proposed watching click-position distribution and zero-click rate for a week. That was written before the traffic volume was measured, and it is not viable.** At 9.7 people searches a day a week is ~68 events; neither metric can separate signal from noise at that count. Reaching the ~900 events behind the numbers above takes a **quarter**, not a week. Stating it plainly so nobody spends a sprint building a dashboard that cannot answer the question.
 
-| signal | why | what it would mean |
+What to do instead, in decreasing order of strength:
+
+| signal | window | what it would mean |
 |---|---|---|
-| click position distribution on people results | the direct read on whether the reorder helps | mass moving **up** the page is the win; flat or moving down is not |
-| zero-click rate on people searches | catches "the page got worse in a way nobody clicks through" | a rise is the single clearest regression signal |
-| the affiliated-faculty complaint | **a falsifiable prediction already on the record** | this ADR predicts the complaint will be about **card sparsity, not ordering**. If the feedback is about ordering, **B4 did not work and the model of the failure was wrong** |
+| **census diff, pre/post** — replay all 314 distinct real queries against both arms and diff the pages | minutes, and it can run **before** the flip | the primary evidence. Not a proxy for user impact: it *is* every query a user issued. Anything it flags as changed is what the panels should judge |
+| **the affiliated-faculty complaint** | first weeks | **a falsifiable prediction already on the record**: this ADR predicts the complaint will be about **card sparsity, not ordering**. If the feedback is about ordering, **B4 did not work and the model of the failure was wrong** |
+| click position / zero-click rate | **one quarter minimum** | usable only as a slow confirmation, never as a rollback trigger. Do not gate anything on it |
 
-That third row is nearly free and it is the only place in this document where a real user's reaction tests a claim it makes. Record which way it comes out either way.
+The second row is nearly free and it is the only place in this document where a real user's reaction tests a claim it makes. Record which way it comes out either way.
+
+**The rollback trigger is therefore qualitative, and that is a real limitation.** At this volume there is no automated regression signal that fires fast enough to catch a bad flip. The compensating controls are that the census diff is exhaustive and runs pre-flip, and that rollback is one deploy. Anyone uncomfortable with that should ask for the census diff to be reviewed before the flip, not for a metric that cannot exist.
 
 ## Sequencing decisions
 
 **The running checklist lives on the tracking issue (#2097), not here** — an ADR that needs an edit every time a task closes stops being a record. What belongs in the record is *why* the order is what it is. Four of these are decisions, not scheduling:
 
-1. **Three things are unblocked and gate everything else**: the `AREA_BOOST_TOP_N` boundary check, the truncation rate over real traffic, and B0. They are independent of each other and of every parameter below. Nothing else should start until the first is clean, because it can invalidate the premise.
-2. **α, `W_HI` and `dampen` are swept together, not in sequence** — they interact, and B3's own thesis is that `dampen` moves `W_HI`. One three-dimensional median-N sweep, one blind panel at the end.
-3. **The breadth gate is validated offline before the sweep**, because if the classifier cannot separate scope-shifting drops from qualifier drops, the gate needs rebuilding and every downstream parameter changes with it.
-4. **B1, B3 and B4 ship as one change.** B4 because the number explaining the reorder must be on the card the same day; B3 because landing it afterwards would invalidate the `W_HI` just accepted.
+0. 🔴 **Decide the anchor divergence (B-1) before any sweep.** It is a residual on every tuned parameter, not on one number, and doing nothing decides it by default — as #2098 already did once.
+1. **The `AREA_BOOST_TOP_N` boundary check and the truncation rate are done** (PR #2098). B0 remains unblocked and independent of every parameter below.
+2. **The census diff is the primary acceptance evidence and runs pre-flip**; the stratified quality set is drawn *from its changed stratum* after the sweep, and judged against the pre-registered criterion. The sealed frequency-weighted set is judged in the same sitting and reported separately.
+3. **α, `W_HI` and `dampen` are swept together, not in sequence** — they interact, and B3's own thesis is that `dampen` moves `W_HI`. One three-dimensional median-N sweep, one blind panel at the end.
+4. **The breadth gate is validated offline before the sweep**, because if the classifier cannot separate scope-shifting drops from qualifier drops, the gate needs rebuilding and every downstream parameter changes with it.
+5. **B1, B3 and B4 ship as one change.** B4 because the number explaining the reorder must be on the card the same day; B3 because landing it afterwards would invalidate the `W_HI` just accepted.
 
 B2 (step-function recency) and the method magnitude (after the 40× is settled by diffing the two publication lists) follow, and are independent of each other.
 
 ## Open questions
 
 - **Does the 200-scholar concentration cutoff change any page at `W_HI = 20`?** Unknown. The deep-pagination check found no discontinuity but measured the wrong ordering to answer it. The `TOP_N` boundary check settles it. If it does move pages, the follow-on question is what the right cutoff costs in `function_score` clause count — a latency question, not a relevance one.
-- **What fraction of *real* queries hit the descendant cap?** 27.4% of broad *descriptors* are truncated, but descriptor frequency in the query log is unknown and almost certainly not uniform. The rate over traffic could be far higher or far lower.
+- ✅ **What fraction of *real* queries hit the descendant cap? — 7.8%, and it is essentially one descriptor.** Measured: the prod people-query distribution (90 days, 808 events, 300 distinct) replayed against instrumented staging. Of 219 distinct concept-resolving queries (625 events), **9 distinct / 49 events truncate — 4.1% by distinct query, 7.8% frequency-weighted.** `Neoplasms` accounts for **43 of those 49 events (88%)**; the rest are 1-2 events each. So the 27.4%-of-descriptors figure badly overstates the traffic impact, and #2096's priority rests almost entirely on how much cancer queries matter — which, at this institution, is a product question rather than a technical one.
 - **Which of #2096's three fixes is right?** Raise the cap for the terms clause only and A/B it; make the walk breadth-first so a truncated set at least samples the whole tree; or index an ancestor-closure field and drop the runtime expansion. The first is cheapest, the third is correct, the second is the interesting middle. Not decided.
-- **Is the panel's technique-query share representative?** Three of ten are technique queries, chosen by known defect rather than frequency. Until the real mix is checked, the tally does not estimate user impact in either direction.
+- ✅ **Is the panel's technique-query share representative? — No, it over-represents them.** A frequency-weighted sample of ten real non-panel queries contains **zero** technique/method queries, against **three of ten** in the panel. The panel therefore over-weights exactly the class this change serves worst, which means the 1 WORSE (`functional mri`) counts for more in the tally than in user impact — the change most likely looks *worse* on the panel than it is in practice. n=10, so directional rather than settled. The same sample also skews to `partial` confidence with one query resolving no concept at all, while the panel is almost entirely clean `entry-term`/`exact`: **real traffic is harder than the panel**, in a direction the tally does not capture.
 - **What is α actually?** ≈ 0.5 is inferred from two independent signals, neither of which swept α directly. The three-dimensional sweep measures it.
 - **Does the unconsumed-token gate separate the two drop classes, or does it only count?** It separates the three queries it was derived from, but `pediatric asthma` → `Asthma` drops a token from a *correct* resolution. If a raw coverage ratio cannot tell that from `functional mri` → `MRI`, the gate needs the MeSH qualifier axis and is materially more work than budgeted. This is the cheapest way the design can be shown wrong early, and it is why the offline validation runs first.
 - **Is `n · share^α` the right family at all?** The sweep assumes it, and no alternative functional form has been tried. That is the honest reason to doubt it.
 - **Do the tuning and holdout panels agree?** If they diverge materially, three parameters were fitted to ten hand-picked queries and the result does not generalise. This is the single question that most determines whether the flip is justified.
+- **Should the 200 → 500 raise have its own page-level acceptance?** It ships as an approximation-error fix, not a ranking-policy change, and it is **not behind a flag** — it reorders page 1 on broad people queries at the next prod deploy. The argument for shipping it directly is that leaving a known-wrong approximation in place to wait for an unrelated panel is worse. The argument against is that this document's own discipline says page-1 reorders get adjudicated on pages. A census diff (see Verification) settles it cheaply and should probably just be run.
+- **Does the concept arm reach the queries that need it?** 10.6% of topic/unclassified queries resolve **no** descriptor at all, so no amount of concept-magnitude work touches them. That is a larger slice of traffic than the descendant-cap defect (7.8%), and nothing in this ADR addresses it.
+- **Is `n · share^α` the right family for arm 2 as well?** Everything measured here is arm 1. Arm 2 slices a `doc_count`-ordered candidate list, so its truncation is not self-correcting as the cap grows and a concentrated low-volume specialist can score exactly zero at any cap. Unmeasured, and not fixed by PR #2098.
 - **Does anything consume `mostRecentYear`?** It ships in the payload as instrumentation. If B2 lands as a step function on *concept-scoped* recency, the scholar-global field may have no consumer and should be reconsidered rather than left as a field nobody reads.
 
 ## Related
