@@ -19,6 +19,7 @@ import {
   type OverridableFlag,
 } from "@/lib/api/flag-override";
 import {
+  resolveAreaBoostTopN,
   resolveAreaBoostWeights,
   resolveMeshEntryTierParityEnabled,
   resolveMeshResolutionFallbackEnabled,
@@ -44,6 +45,12 @@ const CASES: Record<
   OverridableFlag,
   { value: string; read: () => unknown; dflt: unknown; overridden: unknown }
 > = {
+  SEARCH_AREA_BOOST_TOP_N: {
+    value: "500",
+    read: () => resolveAreaBoostTopN(200),
+    dflt: 200,
+    overridden: 500,
+  },
   SEARCH_AREA_BOOST_W_HI: {
     value: "9",
     read: () => resolveAreaBoostWeights(WEIGHT_DEFAULTS).hi,
@@ -181,6 +188,16 @@ describe("#2085 — every allowlisted flag is actually wired (declared AND conne
       await Promise.resolve();
       expect(resolveSearchPeopleAreaBoost()).toBe(true);
     });
+  });
+
+  // #2094 — the cap reaches a `.slice()` / agg `size`, so a bad value must degrade to the
+  // default, never to NaN or an unbounded clause list.
+  it("SEARCH_AREA_BOOST_TOP_N rejects junk and falls back to the default", () => {
+    for (const bad of ["abc", "-1", "0", "1.5", "99999999", ""]) {
+      runWithFlagOverride(new Map([["SEARCH_AREA_BOOST_TOP_N", bad]]), () => {
+        expect(resolveAreaBoostTopN(200)).toBe(200);
+      });
+    }
   });
 
   it("ovr() is inert outside a request scope (ETL / index build)", () => {

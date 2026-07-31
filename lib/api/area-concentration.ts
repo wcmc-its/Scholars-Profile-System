@@ -3,6 +3,7 @@ import "server-only";
 import { AREA_BOOST_TOP_N } from "@/lib/search";
 import { getConceptScholarConcentration } from "@/lib/api/search";
 import {
+  resolveAreaBoostTopN,
   resolveSearchPeopleAreaBoost,
   resolveSearchPeopleConceptArmFirst,
 } from "@/lib/api/search-flags";
@@ -50,13 +51,14 @@ export async function resolveAreaConcentration(input: {
   const { taxonomyMatch, meshOff } = input;
   if (!resolveSearchPeopleAreaBoost() || meshOff) return undefined;
 
+  const topN = resolveAreaBoostTopN(AREA_BOOST_TOP_N);
   const descendantUis = taxonomyMatch.meshResolution?.descendantUis ?? [];
   const conceptFirst = resolveSearchPeopleConceptArmFirst() && descendantUis.length > 0;
 
   let concentration: AreaConcentration | undefined;
 
   if (conceptFirst) {
-    concentration = await getConceptScholarConcentration(descendantUis, AREA_BOOST_TOP_N);
+    concentration = await getConceptScholarConcentration(descendantUis, topN);
   }
 
   if (
@@ -68,11 +70,7 @@ export async function resolveAreaConcentration(input: {
     const parentTopicId = top.entityType === "subtopic" ? top.parentTopicId : top.id;
     const subtopicId = top.entityType === "subtopic" ? top.id : null;
     if (parentTopicId) {
-      concentration = await getAreaScholarConcentration(
-        parentTopicId,
-        subtopicId,
-        AREA_BOOST_TOP_N,
-      );
+      concentration = await getAreaScholarConcentration(parentTopicId, subtopicId, topN);
     }
   }
 
@@ -80,7 +78,7 @@ export async function resolveAreaConcentration(input: {
   // ponytail: skipped when `conceptFirst` already ran it and came back empty — re-running
   // the same aggregation cannot return a different answer.
   if (!concentration?.length && !conceptFirst && descendantUis.length > 0) {
-    concentration = await getConceptScholarConcentration(descendantUis, AREA_BOOST_TOP_N);
+    concentration = await getConceptScholarConcentration(descendantUis, topN);
   }
 
   return concentration;

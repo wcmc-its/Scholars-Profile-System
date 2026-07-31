@@ -3545,7 +3545,16 @@ export async function searchPeople(opts: {
   // both exact via `cardinality` — distinct by construction, so neither can
   // exceed the scholar's total. No reindex. Skipped on the count-only badge path
   // (returned above) and under `exact` scope (empty `meshDescendantUis`).
-  const reasonCounts = new Map<string, { tagged: number; mention: number }>();
+  // `taggedLatest` / `mentionLatest` (#2094 instrumentation) — the MOST RECENT
+  // publication year among exactly the pubs each count counted, from a `max` sub-agg
+  // that rides the SAME aggregation (no extra round-trip). OPTIONAL on purpose:
+  // absent means UNKNOWN (the agg branch didn't run for that count, or no matching
+  // pub carries a `year`), never 0 and never "this year". Payload only — nothing
+  // reads it for ranking.
+  const reasonCounts = new Map<
+    string,
+    { tagged: number; mention: number; taggedLatest?: number; mentionLatest?: number }
+  >();
   // Issue #967 / rep-papers disclosure — representative pubs per cwid, keyed by
   // which reason branch they belong to (tagged vs mention), up to 3 each.
   // Populated only under `representativePub`; empty otherwise, so the legacy
@@ -3645,7 +3654,12 @@ export async function searchPeople(opts: {
   );
   const countsFor = (cwid: string) => {
     const c = reasonCounts.get(cwid);
-    return c && !conceptTagged.has(cwid) ? { tagged: 0, mention: c.mention } : c;
+    // Zeroing the tagged count also drops `taggedLatest` — a year for a withheld
+    // count would describe publications the card never claims. The mention side is
+    // untouched.
+    return c && !conceptTagged.has(cwid)
+      ? { tagged: 0, mention: c.mention, mentionLatest: c.mentionLatest }
+      : c;
   };
   // Search reason-from-doc — serve the tagged count from `_source.meshSubtreeCounts`
   // (O(1) lookup) and SKIP the publications-index tagged agg entirely. The
@@ -3653,6 +3667,17 @@ export async function searchPeople(opts: {
   // AND a free-text mention is possible — so a pure concept search issues NO
   // publications-index query at all on the initial render.
   if (reasonFromDoc && reasonAggEligible) {
+    // #2094 — NO `taggedLatest` ON THIS BRANCH, AND IT CANNOT BE ADDED HERE.
+    // `meshSubtreeCounts` is a precomputed per-subtree COUNT map; it carries no
+    // years, so a doc-sourced tagged count has no year to report. Absence here
+    // means UNKNOWN, never "no recent work".
+    // Consequence, because the two callers differ: the SSR /search page passes
+    // `reasonFromDoc: resolvePeopleReasonFromDoc()` (on in both deployed envs) and
+    // so renders tagged lines with no year, while /api/search omits the option
+    // entirely and takes the legacy agg below, which DOES carry `taggedLatest`.
+    // Relevance panels read the API, so they get years; do not conclude from the
+    // rendered page that years are missing. Closing the gap means indexing years
+    // into `meshSubtreeCounts` — a reindex, deliberately out of scope here.
     // 1) Doc-sourced tagged counts. Cap is applied in `composeMatchReason`.
     for (const h of r.hits.hits) {
       reasonCounts.set(h._source.cwid, {
@@ -3671,7 +3696,10 @@ export async function searchPeople(opts: {
       (cwid) => (reasonCounts.get(cwid)?.tagged ?? 0) === 0,
     );
     if (contentShape && zeroTaggedCwids.length > 0) {
-      type MentionBucket = { key: string; mention?: { doc_count?: number } };
+      type MentionBucket = {
+        key: string;
+        mention?: { doc_count?: number; maxYear?: { value?: number | null } };
+      };
       const buckets = await cachedReasonAgg<MentionBucket[]>(
         // Distinct cache key from the legacy agg: mention-only, the zero-tagged
         // subset, no descendant set, no rep-pub. So a doc-sourced search never
@@ -3704,6 +3732,10 @@ export async function searchPeople(opts: {
                           operator: "and",
                         },
                       },
+                      // #2094 — most recent year among the mentioning pubs, on the
+                      // agg that already runs. `year` is an indexed integer, so this
+                      // is a doc-values scan over the already-filtered set.
+                      aggs: { maxYear: { max: { field: "year" } } },
                     },
                   },
                 },
@@ -3719,7 +3751,14 @@ export async function searchPeople(opts: {
       );
       for (const b of buckets) {
         const cur = reasonCounts.get(b.key) ?? { tagged: 0, mention: 0 };
-        reasonCounts.set(b.key, { tagged: cur.tagged, mention: b.mention?.doc_count ?? 0 });
+        const mentionLatest = b.mention?.maxYear?.value;
+        reasonCounts.set(b.key, {
+          tagged: cur.tagged,
+          mention: b.mention?.doc_count ?? 0,
+          // Omitted, not defaulted, when the sub-agg matched nothing (`value: null`)
+          // or the response predates it — absent reads as UNKNOWN downstream.
+          ...(mentionLatest != null ? { mentionLatest } : {}),
+        });
       }
     }
   } else if (reasonAggEligible) {
@@ -3755,10 +3794,14 @@ export async function searchPeople(opts: {
     // home.ts) collapses N concurrent misses for the same key to ONE OpenSearch
     // round-trip, shedding the load that saturates the search thread pool. The
     // CACHED unit is the parsed `buckets` array, not the raw response.
+    // #2094 — the `maxYear` sub-agg below is NOT part of `reasonAggKey`, which keys
+    // only on the inputs. Harmless today (the cache is in-process, so a deploy starts
+    // it empty); a PERSISTENT cache layer would have to add the agg shape to the key.
+    type ReasonYearAgg = { maxYear?: { value?: number | null } };
     type ReasonAggBucket = {
       key: string;
-      tagged?: { doc_count?: number } & ReasonTopHitsAgg;
-      mention?: { doc_count?: number } & ReasonTopHitsAgg;
+      tagged?: { doc_count?: number } & ReasonTopHitsAgg & ReasonYearAgg;
+      mention?: { doc_count?: number } & ReasonTopHitsAgg & ReasonYearAgg;
     };
     const buckets = await cachedReasonAgg<ReasonAggBucket[]>(
       reasonAggKey({ pageCwids, meshDescendantUis, contentQuery, representativePub }),
@@ -3786,6 +3829,12 @@ export async function searchPeople(opts: {
                           // `doc_count` directly below.
                           filter: { terms: { meshDescriptorUi: meshDescendantUis } },
                           aggs: {
+                            // #2094 — most recent year among the TAGGED pubs. Rides
+                            // this aggregation; adds no round-trip. Unconditional
+                            // (unlike `top`), so the request body is no longer
+                            // byte-identical to the pre-#2094 shape — a doc-values
+                            // max over an already-filtered set, not a fetch.
+                            maxYear: { max: { field: "year" } },
                             ...(representativePub ? { top: repPubTopHits } : {}),
                           },
                         },
@@ -3803,6 +3852,8 @@ export async function searchPeople(opts: {
                     // for a one-doc-per-pmid index, so the cardinality sub-agg is
                     // dropped.
                     aggs: {
+                      // #2094 — see `tagged` above.
+                      maxYear: { max: { field: "year" } },
                       ...(representativePub ? { top: repPubTopHits } : {}),
                     },
                   },
@@ -3819,9 +3870,16 @@ export async function searchPeople(opts: {
       },
     );
     for (const b of buckets) {
+      const taggedLatest = b.tagged?.maxYear?.value;
+      const mentionLatest = b.mention?.maxYear?.value;
       reasonCounts.set(b.key, {
         tagged: b.tagged?.doc_count ?? 0,
         mention: b.mention?.doc_count ?? 0,
+        // Omitted, not defaulted — `value` is null when the filter matched nothing
+        // (or no matching pub carries a `year`), and an absent year must read as
+        // UNKNOWN rather than as 0 or as the current year.
+        ...(taggedLatest != null ? { taggedLatest } : {}),
+        ...(mentionLatest != null ? { mentionLatest } : {}),
       });
       if (representativePub) {
         reasonReps.set(b.key, {
@@ -4063,6 +4121,8 @@ export async function searchPeople(opts: {
           ? { descendantTerms: narrowerTerms, alsoParent }
           : {}),
         count: Math.min(counts.tagged, pubCount),
+        // #2094 — year of the most recent COUNTED publication. Absent ⇒ unknown.
+        ...(counts.taggedLatest != null ? { latestYear: counts.taggedLatest } : {}),
         ...(reps?.tagged && reps.tagged.length > 0 ? { pubs: reps.tagged } : {}),
       };
     if (counts && counts.mention > 0)
@@ -4073,6 +4133,8 @@ export async function searchPeople(opts: {
         text: `${Math.min(counts.mention, pubCount)} of ${pubCount} publications mention`,
         term: `“${contentQuery}”`,
         count: Math.min(counts.mention, pubCount),
+        // #2094 — see `tagged` above.
+        ...(counts.mentionLatest != null ? { latestYear: counts.mentionLatest } : {}),
         ...(reps?.mention && reps.mention.length > 0 ? { pubs: reps.mention } : {}),
       };
     if (hasProvenance)

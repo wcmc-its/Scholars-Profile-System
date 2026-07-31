@@ -149,6 +149,13 @@ export type ResultEvidence =
        *  parenthetical from `descendantTerms` alone — is untouched; absent is read as
        *  `false`, i.e. the pre-#1955 wording. */
       alsoParent?: boolean;
+      /** #2094 — the most recent publication YEAR among the `count` publications
+       *  this line counted (NOT among `pubs`, which is a capped sample). Payload
+       *  instrumentation for eval panels; nothing renders or ranks on it.
+       *  ABSENT ⇒ UNKNOWN — the branch that would have measured it did not run, or
+       *  no counted publication carries a year. Never defaulted to 0 or to the
+       *  current year; a consumer must handle the absence. */
+      latestYear?: number;
       pubs?: EvidencePub[];
       count?: number;
     }
@@ -415,9 +422,19 @@ export type SelectEvidenceInput = {
        *  {@link ResultEvidence}); forwarded verbatim, never re-derived. */
       alsoParent?: boolean;
       count: number;
+      /** #2094 — most recent year among the counted pubs; absent ⇒ unknown. See the
+       *  same field on {@link ResultEvidence}. Forwarded verbatim, never derived. */
+      latestYear?: number;
       pubs?: EvidencePub[];
     };
-    mention?: { text: string; term?: string; count: number; pubs?: EvidencePub[] };
+    mention?: {
+      text: string;
+      term?: string;
+      count: number;
+      /** #2094 — as `tagged.latestYear`. */
+      latestYear?: number;
+      pubs?: EvidencePub[];
+    };
     concept?: { text: string; term?: string; descendantTerms?: string[]; alsoParent?: boolean };
   };
   /** Resolved clinical specialty — exact tier only. Caller ran
@@ -564,6 +581,7 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
             alsoParent: input.pub.tagged.alsoParent === true,
           }
         : {}),
+      ...(input.pub.tagged.latestYear != null ? { latestYear: input.pub.tagged.latestYear } : {}),
       ...(input.pub.tagged.pubs && input.pub.tagged.pubs.length > 0 ? { pubs: input.pub.tagged.pubs } : {}),
       count: input.pub.tagged.count,
     };
@@ -598,6 +616,7 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
       strength: "mention",
       text: input.pub.mention.text,
       ...(input.pub.mention.term ? { term: input.pub.mention.term } : {}),
+      ...(input.pub.mention.latestYear != null ? { latestYear: input.pub.mention.latestYear } : {}),
       ...(input.pub.mention.pubs && input.pub.mention.pubs.length > 0 ? { pubs: input.pub.mention.pubs } : {}),
       count: input.pub.mention.count,
     };
@@ -677,6 +696,9 @@ export function selectEvidenceLines(input: SelectEvidenceInput): ResultEvidence[
               alsoParent: input.pub.tagged.alsoParent === true,
             }
           : {}),
+        ...(input.pub.tagged.latestYear != null
+          ? { latestYear: input.pub.tagged.latestYear }
+          : {}),
         ...(input.pub.tagged.pubs && input.pub.tagged.pubs.length > 0
           ? { pubs: input.pub.tagged.pubs }
           : {}),
@@ -742,6 +764,7 @@ export function selectEvidenceLines(input: SelectEvidenceInput): ResultEvidence[
       strength: "mention",
       text: input.pub.mention.text,
       ...(input.pub.mention.term ? { term: input.pub.mention.term } : {}),
+      ...(input.pub.mention.latestYear != null ? { latestYear: input.pub.mention.latestYear } : {}),
       ...(input.pub.mention.pubs && input.pub.mention.pubs.length > 0 ? { pubs: input.pub.mention.pubs } : {}),
       count: input.pub.mention.count,
     });

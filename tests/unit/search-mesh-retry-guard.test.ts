@@ -12,6 +12,7 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
+import { DESCENDANT_HARD_CAP } from "@/lib/api/search-taxonomy";
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -48,6 +49,9 @@ function mesh(
   name: string,
   matchedForm: string,
   confidence: "exact" | "entry-term" | "partial",
+  /** #2094 — total expansion size (self at index 0). Only the LENGTH matters:
+   *  the route derives `descendantTruncated` from it. */
+  descendantCount = 1,
 ) {
   return {
     descriptorUi,
@@ -57,7 +61,10 @@ function mesh(
     scopeNote: null,
     entryTerms: [],
     curatedTopicAnchors: [],
-    descendantUis: [descriptorUi],
+    descendantUis: [
+      descriptorUi,
+      ...Array.from({ length: descendantCount - 1 }, (_, i) => `${descriptorUi}d${i}`),
+    ],
   };
 }
 
@@ -67,7 +74,10 @@ const RESOLUTIONS: Record<string, ReturnType<typeof mesh> | null> = {
   // Filler window: the size-1 arm needs an exact descriptor NAME, so the entry-term
   // `cancer` is skipped and `research` wins. The retry MUST be allowed to replace it.
   "cancer research": mesh("D012106", "Research", "research", "partial"),
-  cancer: mesh("D009369", "Neoplasms", "cancer", "entry-term"),
+  // #2094 — Neoplasms is the canonical truncated descriptor: 702 true descendants
+  // (docs/spec-snapshots/mesh-broad-descriptors-2026-05.json), so the real walk
+  // returns exactly DESCENDANT_HARD_CAP entries. Sized to match.
+  cancer: mesh("D009369", "Neoplasms", "cancer", "entry-term", DESCENDANT_HARD_CAP),
   // Content window: `stem` is not a deprioritized term, so this IS an interpretation.
   // The retry resolves the bare token `stem` and MUST NOT replace it.
   "stem cells effects": mesh("D013234", "Stem Cells", "stem cells", "partial"),
@@ -161,6 +171,47 @@ describe("#1980 — an over-aggressive strip may not be adopted on the null arm"
       // The 2→1 class is #1972's 49 measured same-descriptor wins; the guard counts what
       // was REMOVED precisely so this stays admitted.
       expect(i.conceptLabel).toBe("Asthma");
+    });
+  }
+});
+
+/**
+ * #2094 — descendant-expansion instrumentation. `computeDescendants` early-returns
+ * the moment the list reaches DESCENDANT_HARD_CAP, so a set AT the cap means the
+ * subtree was cut short and every count derived from it undercounts. The route
+ * exposes that on `searchInterpretation` so the truncation rate is one curl per
+ * query. These assertions fail if the fields stop being emitted, stop counting the
+ * descriptor itself, or stop tracking the cap.
+ */
+describe("#2094 — searchInterpretation reports the descendant-set size and truncation", () => {
+  beforeEach(() => {
+    process.env.SEARCH_GENERIC_TERM_DEMOTE = "resolve";
+  });
+  afterEach(() => {
+    delete process.env.SEARCH_GENERIC_TERM_DEMOTE;
+    vi.resetModules();
+  });
+
+  for (const type of ["people", "publications"] as const) {
+    it(`${type}: a capped expansion reports truncated — cancer research → Neoplasms`, async () => {
+      const i = await conceptFor("cancer research", type);
+      expect(i.conceptLabel).toBe("Neoplasms");
+      expect(i.descendantCount).toBe(DESCENDANT_HARD_CAP);
+      expect(i.descendantTruncated).toBe(true);
+    });
+
+    it(`${type}: a small expansion reports the real size, untruncated — asthma patients`, async () => {
+      const i = await conceptFor("asthma patients", type);
+      // Self-only set: the count INCLUDES the descriptor at index 0, so 1, not 0.
+      expect(i.descendantCount).toBe(1);
+      expect(i.descendantTruncated).toBe(false);
+    });
+
+    it(`${type}: no resolution reports a null count and no truncation`, async () => {
+      const i = await conceptFor("kidney disease effects", type);
+      expect(i.conceptLabel ?? null).toBeNull();
+      expect(i.descendantCount).toBeNull();
+      expect(i.descendantTruncated).toBe(false);
     });
   }
 });
