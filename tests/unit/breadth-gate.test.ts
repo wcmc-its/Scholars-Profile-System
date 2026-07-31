@@ -3,7 +3,7 @@
  * Worked examples are the ones named in the ADR itself, so a regression here
  * is a regression the ADR's own reasoning already flagged as load-bearing.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   breadthGateWeight,
   classifyBreadthGate,
@@ -59,6 +59,15 @@ describe("unconsumedContentTokens / contentWordCoverage", () => {
       "monitoring",
     ]);
     expect(contentWordCoverage("epidemiological monitoring", "Neoplasms")).toBe(0);
+  });
+
+  it("a possessive 's does not fabricate a spurious extra token (Alzheimer's disease)", () => {
+    expect(unconsumedContentTokens("Alzheimer's disease", "Alzheimer Disease")).toEqual([]);
+    expect(contentWordCoverage("Alzheimer's disease", "Alzheimer Disease")).toBe(1);
+  });
+
+  it("diacritics fold to their base letter instead of splitting the word (Sjögren's syndrome)", () => {
+    expect(unconsumedContentTokens("Sjögren's syndrome", "Sjogren Syndrome")).toEqual([]);
   });
 });
 
@@ -117,6 +126,21 @@ describe("classifyBreadthGate / breadthGateWeight", () => {
   it("dropped span resolving back to the SAME descriptor is not a scope-shift", async () => {
     const resolveDescriptor = async () => ({ descriptorUi: RESOLUTION.descriptorUi });
     const verdict = await classifyBreadthGate("Cardiac amyloidosis", RESOLUTION, resolveDescriptor);
+    expect(verdict).toBe("qualifier-drop");
+  });
+
+  it("does not join non-adjacent dropped words into a phrase the user never typed", async () => {
+    // "diabetic" and "screening" are both unconsumed, but "retinopathy" (consumed)
+    // sits between them in the query — they must never be joined into "diabetic screening".
+    const resolution = {
+      descriptorUi: "D012164",
+      matchedForm: "Retinopathy",
+      name: "Retinopathy",
+      entryTerms: [],
+    };
+    const resolveDescriptor = vi.fn(async () => null);
+    const verdict = await classifyBreadthGate("diabetic retinopathy screening", resolution, resolveDescriptor);
+    expect(resolveDescriptor).not.toHaveBeenCalledWith("diabetic screening");
     expect(verdict).toBe("qualifier-drop");
   });
 

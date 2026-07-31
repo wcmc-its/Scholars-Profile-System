@@ -23,6 +23,10 @@
 function contentTokens(s: string): string[] {
   return s
     .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // strip diacritics (post-NFD combining marks): "Sjogren" -> "sjogren", one token not two
+    .replace(/['\u2019]s\b/g, "") // strip possessive 's: "Alzheimer's" -> "alzheimer", not ["alzheimer","s"]
+    .replace(/['\u2019]/g, "")
     .replace(/\band\b/g, " ")
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
@@ -135,6 +139,31 @@ function decreasingWindows(tokens: readonly string[]): string[][] {
 }
 
 /**
+ * Maximal runs of unconsumed tokens, in the ORIGINAL query's token order,
+ * broken wherever a consumed token sits between them. `decreasingWindows`
+ * must only ever join tokens that were actually adjacent in the query — a
+ * window spanning a break would join two dropped words around a consumed
+ * one into a phrase the user never typed (e.g. "diabetic ... screening"
+ * around a consumed "retinopathy"), and send that fabricated phrase to the
+ * resolver.
+ */
+function contiguousUnconsumedRuns(query: string, forms: readonly string[]): string[][] {
+  const matchedSet = new Set(forms.flatMap(contentTokens));
+  const runs: string[][] = [];
+  let current: string[] = [];
+  for (const t of contentTokens(query)) {
+    if (matchedSet.has(t)) {
+      if (current.length) runs.push(current);
+      current = [];
+    } else {
+      current.push(t);
+    }
+  }
+  if (current.length) runs.push(current);
+  return runs;
+}
+
+/**
  * ADR-011's "MeSH qualifier axis" heuristic (#2097). Joining every unconsumed
  * token into one span and resolving it, v1, caught only 2 of 9 real
  * scope-shifts — dropped modifier words like "mutant" and "osimertinib"
@@ -161,9 +190,10 @@ export async function classifyBreadthGate(
   resolveDescriptor: (q: string) => Promise<{ descriptorUi: string } | null>,
 ): Promise<BreadthGateVerdict> {
   const forms = [resolution.matchedForm, resolution.name, ...resolution.entryTerms];
-  const unconsumed = unconsumedAgainstForms(query, forms);
-  if (unconsumed.length === 0) return "consumed";
-  for (const window of decreasingWindows(unconsumed)) {
+  const runs = contiguousUnconsumedRuns(query, forms);
+  if (runs.length === 0) return "consumed";
+  const windows = runs.flatMap(decreasingWindows).sort((a, b) => b.length - a.length);
+  for (const window of windows) {
     const spanResolution = await resolveDescriptor(window.join(" "));
     if (spanResolution && spanResolution.descriptorUi !== resolution.descriptorUi) {
       return "scope-shift";
