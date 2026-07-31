@@ -1226,6 +1226,32 @@ export const AREA_BOOST_GRADED_BANDS = 10;
 export const CONCEPT_CONCENTRATION_MIN_PUBS = 3;
 
 /**
+ * ADR-011 B1 — the share exponent's code default. `alpha = 1` is the shipped
+ * `n²/total` formula (count × on-topic fraction, at full strength); `alpha =
+ * 0` is pure count. `SEARCH_PEOPLE_CONCEPT_ALPHA` is a `?flags=`-overridable
+ * A/B lever (staging-only) for the α × `W_HI` × `dampen` sweep — see
+ * {@link concentrationScore}. Unset ⇒ byte-identical to today.
+ */
+export const CONCEPT_CONCENTRATION_ALPHA_DEFAULT = 1;
+
+/**
+ * ADR-011 B1 — `n · share^α`, generalising the shipped `n²/total` (count ×
+ * on-topic fraction). At `alpha = 1` this is exactly `n * (n/total) =
+ * n²/total`, byte-identical to today. At `alpha = 0` it collapses to pure
+ * count (`n`), rewarding volume alone. The sweep's job is to locate where
+ * between those two poles the prolific generalist stops beating the
+ * mid-career specialist — see the ADR's worked example (318/900 vs 150/200).
+ *
+ * Extracted as its own pure function (not inlined in
+ * `getConceptScholarConcentration`) so the formula is unit-testable without
+ * mocking OpenSearch.
+ */
+export function concentrationScore(n: number, total: number, alpha: number): number {
+  const share = n / Math.max(total, 1);
+  return n * Math.pow(share, alpha);
+}
+
+/**
  * Boost weights used by the publications-index query builder.
  * (Not specified in spec for publications; reasonable defaults.)
  */

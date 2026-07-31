@@ -395,6 +395,23 @@ export function resolveSearchPeoplePubCountDampen(): PeoplePubCountDampenMode {
     : "off";
 }
 
+/** ADR-011 B1 — code default mirrors `CONCEPT_CONCENTRATION_ALPHA_DEFAULT` in
+ *  `lib/search.ts`; duplicated locally rather than imported, same reason as
+ *  `CLINICAL_FN_WEIGHT_DEFAULT` above (this module stays import-light). */
+const CONCEPT_CONCENTRATION_ALPHA_DEFAULT = 1;
+
+/**
+ * ADR-011 B1 — the share exponent for `getConceptScholarConcentration`'s
+ * `n · share^α` score. `alpha = 1` (the default) is byte-identical to
+ * today's shipped `n²/total`; `alpha = 0` is pure count. 0 is a valid,
+ * meaningful override (unlike most numeric levers here) so it is NOT
+ * treated as falsy/absent — only NaN or negative falls back to the default.
+ */
+export function resolveConceptConcentrationAlpha(): number {
+  const raw = Number(ovr("SEARCH_PEOPLE_CONCEPT_ALPHA") ?? process.env.SEARCH_PEOPLE_CONCEPT_ALPHA);
+  return Number.isFinite(raw) && raw >= 0 ? raw : CONCEPT_CONCENTRATION_ALPHA_DEFAULT;
+}
+
 /**
  * #1344 — topic/hybrid People proximity boost. When ON, the topic (and hybrid)
  * template adds scoring-only `match_phrase` clauses (bounded slop) on

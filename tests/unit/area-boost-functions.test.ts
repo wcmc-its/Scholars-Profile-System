@@ -10,7 +10,37 @@ import {
   AREA_BOOST_W_HI,
   AREA_BOOST_W_MID,
   AREA_BOOST_W_LO,
+  concentrationScore,
+  CONCEPT_CONCENTRATION_ALPHA_DEFAULT,
 } from "@/lib/search";
+
+describe("concentrationScore — ADR-011 B1 share exponent", () => {
+  it("code default (alpha=1) is byte-identical to the originally-shipped n²/total", () => {
+    expect(CONCEPT_CONCENTRATION_ALPHA_DEFAULT).toBe(1);
+    expect(concentrationScore(20, 200, 1)).toBeCloseTo((20 * 20) / 200);
+    expect(concentrationScore(150, 200, 1)).toBeCloseTo((150 * 150) / 200);
+  });
+
+  it("alpha=0 collapses to pure count, independent of total", () => {
+    expect(concentrationScore(20, 200, 0)).toBe(20);
+    expect(concentrationScore(20, 2000, 0)).toBe(20);
+  });
+
+  it("the ADR's worked example: alpha=1 is a near-tie, alpha=0.5 favors the prolific generalist", () => {
+    // 318/900 (generalist) vs 150/200 (specialist)
+    const generalist1 = concentrationScore(318, 900, 1);
+    const specialist1 = concentrationScore(150, 200, 1);
+    expect(generalist1).toBeLessThan(specialist1); // 112.4 vs 112.5 — near-tie, specialist edges it
+
+    const generalist05 = concentrationScore(318, 900, 0.5);
+    const specialist05 = concentrationScore(150, 200, 0.5);
+    expect(generalist05).toBeGreaterThan(specialist05); // the generalist wins at the lower exponent
+  });
+
+  it("total is floored at 1 so a zero total never divides by zero", () => {
+    expect(Number.isFinite(concentrationScore(5, 0, 1))).toBe(true);
+  });
+});
 
 describe("buildAreaBoostFunctions", () => {
   it("returns [] for empty input", () => {
