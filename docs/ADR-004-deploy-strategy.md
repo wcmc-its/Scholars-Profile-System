@@ -23,7 +23,9 @@ The open question this ADR closes is how the ECS service update itself shifts tr
 - ALB health checks gate task registration: a new task is only added to the target group after `/api/health` returns 200, and the matching old task is drained before termination.
 - Circuit breaker is enabled (`deploymentCircuitBreaker: { enable: true, rollback: true }`): if more than the threshold of new tasks fail to reach healthy, the service automatically reverts to the previous task definition without operator action.
 
-Rollback when the circuit breaker does not fire (e.g. functional regression that passes health checks but produces 5xx in real traffic): operator-driven, by pointing the service at the previous task definition revision. The single paste-able command is documented in [`docs/rollback-runbook.md`](./rollback-runbook.md).
+Rollback when the circuit breaker does not fire (e.g. functional regression that passes health checks but produces 5xx in real traffic): operator-driven, by repointing the ECR `:latest` tag at the previous known-good image and forcing a new deployment. The paste-able command sequence is documented in [`docs/rollback-runbook.md`](./rollback-runbook.md).
+
+**Note on the image contract.** The task definition pins the image by mutable tag (`cdk/lib/app-stack.ts:1051`) and no workflow registers a new task-definition revision, so the revision is not the deploy unit — the tag is. Selecting a previous revision is therefore a no-op for code rollback. This also bounds the circuit breaker: `rollback: true` reverts to the previous *task set*, which resolves the same `:latest`, so it recovers a task that fails to start for reasons outside the image (a task-def env change, a secret or IAM problem) but cannot recover a bad image. Pinning the image by digest — the discipline already applied to the otel sidecar, asserted at `cdk/test/app-stack.test.ts:1432` with an explicit `not.toMatch(/:latest/)` — would make both the breaker and revision-selection real, at the cost of rendering a task-definition revision per deploy across all seven families.
 
 ## Consequences
 
@@ -31,7 +33,7 @@ Rollback when the circuit breaker does not fire (e.g. functional regression that
 
 The deploy is a single AWS API call (`UpdateService`) operating on a single resource (the ECS service). There is no ALB target-group pair to keep in sync, no CodeDeploy deployment group to provision, and no second listener rule per service. CDK / IaC stays small and reviewable.
 
-The additive-only migration rule already gives a clean rollback path: rolling the ECS service back to the previous task definition works because the previous image is, by policy, compatible with the new schema. Blue/green's marquee feature — "1-click revert without re-deploying" — collapses to the same operation (point the service at the previous revision), only with more moving parts.
+The additive-only migration rule already gives a clean rollback path: restoring the previous image works because that image is, by policy, compatible with the new schema. Blue/green's marquee feature — "1-click revert without re-deploying" — collapses to roughly the same operation, only with more moving parts. The caveat is that under the mutable-tag contract above, our version of that operation is an ECR tag repoint rather than a revision selection, so it mutates shared state and is a few commands rather than one.
 
 The deployment circuit breaker handles the most common failure mode (new tasks fail to start, fail health checks, or crash on boot) automatically. Operator intervention is only needed for behavioral regressions that pass health checks, which neither strategy detects automatically.
 
