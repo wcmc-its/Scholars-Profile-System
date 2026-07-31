@@ -290,6 +290,23 @@ Once the ranked quantity is the concept count, the displayed number and the rank
 
   **Validate it entirely offline first.** Run the classifier over the query log, eyeball a few hundred classifications with the two-class question above in hand, tune the threshold — without touching ranking at all. It is the cheapest de-risking available and it is fully decoupled from B1.
 
+  🔴 **Done (PR #2105, #2097). Verdict: it does not separate, and the risk is bigger than this hypothesis anticipated.** Re-resolved all 313 real distinct queries from the 90-day census against staging (the exact people-branch retry logic, not a synthetic replay). 72 of 177 resolved queries score `coverage < 1.0` — every one of them would gate to `W_HI = 3` under the starting threshold. Read and classified all 72:
+
+  | class | n | share |
+  |---|---|---|
+  | genuine scope-shift (the hazard the gate exists to catch) | 9 | 12.5% |
+  | genuine qualifier-drop (this hypothesis's predicted confusion) | 17 | 23.6% |
+  | true MeSH synonym, zero real drop (`antimicrobial resistance`→`Drug Resistance, Microbial`, `HIV / AIDS`→`HIV Infections`) | 25 | 34.7% |
+  | acronym / tokenizer artifact (`MRI`, `IBD`, `ALS`, possessives) | 19 | 26.4% |
+
+  So the hypothesis above is **confirmed** — a flat threshold does conflate scope-shift with qualifier-drop, and 15 of the 17 qualifier-drop cases still fail even after widening the check from the single `matchedForm` to the descriptor's full entry-term list (which is otherwise a cheap, free win: it redeems 18 of 72, mostly the acronym/synonym classes). But the **larger finding is the two classes this hypothesis didn't name**: true synonyms (35%) and acronym/tokenizer artifacts (26%) together outnumber the genuine scope-shift class 5-to-1. A flat coverage gate, even entry-term-widened, demotes an *exactly correct* resolution (`antimicrobial resistance`, `HIV/AIDS`, `MRI`) far more often than it catches a real hazard. **Not ready for the sweep** — needs the MeSH qualifier axis (for the 15 remaining qualifier-drop cases) and, separately, a decision on whether the synonym class belongs to this gate at all or is evidence the resolver should prefer entry-term-complete descriptors. Neither built here; this was scoped as validation, not the rebuild.
+
+  ⚠ Also worth recording: neither of this section's own worked examples reproduces today. `functional mri` resolves on staging with `matchedForm: "Functional MRI"` — full consumption, not the parent-hop-drops-`functional` case described above. `pediatric asthma` resolves to **nothing** (confirmed in both the live 90-day census and a fresh staging replay), not to `Asthma`. The worked examples were illustrative at the time; the verdict above is built entirely from the 72 real cases, not from re-checking these two.
+
+  **Update — the qualifier axis is built (PR #2105), measured, and imperfect.** `classifyBreadthGate` resolves the unconsumed span against the SAME resolver (no tree walk, no new data): decreasing-length windows (longest first, ≥2 tokens — single generic words made things worse, see the function's own doc comment) of the dropped tokens, and flags scope-shift only if a window independently resolves to a genuinely different descriptor. Measured on the same 72 real cases: **56% recall on real scope-shifts (5 of 9, up from 2 of 9 joining the whole span)**, **90% precision on the three classes that must stay high-weight (63 of 70, up from 82%)**. The 4 remaining misses are a real hardness class, not a bug: `healthspan` is a single dropped token (excluded by design), and `KRAS inhibitors` / `CDK4/6 inhibitors` drop a drug-class word ("inhibitors") too generic to resolve to anything specific on its own — closing that needs actual MeSH qualifier/subheading data, not more window permutations.
+
+  🔴 **Still not obviously "clean enough" to declare separated.** 56% recall on the hazard class means roughly half of real scope-shifts would still ride the high weight. Whether that residual is acceptable to ship the sweep against, or needs the subheading-data investment, is the next call — logged in #2097, not resolved here.
+
 - 🔴 **The descendant expansion silently truncates 27% of broad descriptors. Mechanism confirmed; filed as #2096.**
 
   Revision 1 recorded the symptom — `Neoplasms` expanded to C04.557 (by histologic type) and omitting C04.588 (by site), so Breast / Lung / Prostatic / Colorectal Neoplasms, Melanoma, Carcinoma\* and Glioma return zero on a broad-disease query, and a scholar with 318 publications tagged, demonstrably present on the narrower query, is absent from the broad query's candidate set entirely. **Revision 1 then kept quoting that query as evidence. Both cannot be true, and the tally above is corrected accordingly.**
