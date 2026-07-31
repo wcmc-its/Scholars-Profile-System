@@ -16,7 +16,8 @@ import { db } from "@/lib/db";
 import { buildHonorCsv, isHonorQueueEnabled, loadHonorExport } from "@/lib/edit/honor-queue";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+// `maxDuration` is inert under `output: "standalone"`; the real budget this route is
+// bound by in prod is CloudFront's 30s origin-read timeout (`/edit*` behavior).
 
 export async function GET() {
   if (!isHonorQueueEnabled()) {

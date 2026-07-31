@@ -33,7 +33,9 @@ import { htmlToPlainText } from "@/lib/utils";
 import { buildPubmedRuns } from "@/lib/pubmed-runs";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// `maxDuration` is inert under `output: "standalone"`; the real budget this route is
+// bound by in prod is CloudFront's 30s origin-read timeout
+// (`/scholars/*/co-pubs/*/export` behavior).
 
 const FORMAT_ALLOWLIST = new Set(["csv", "docx"]);
 

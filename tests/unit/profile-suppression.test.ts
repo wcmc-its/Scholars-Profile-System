@@ -6,6 +6,7 @@ const {
   mockFieldOverrideFindUnique,
   mockFieldOverrideFindMany,
   mockPublicationAuthorFindMany,
+  mockPublicationFindMany,
   mockSuppressionFindMany,
   mockPersonNihProfileFindFirst,
 } = vi.hoisted(() => ({
@@ -14,6 +15,9 @@ const {
   mockFieldOverrideFindUnique: vi.fn(),
   mockFieldOverrideFindMany: vi.fn(),
   mockPublicationAuthorFindMany: vi.fn(),
+  // #2118c — the boolean-only `hasAbstract` lookup (`prisma.publication.findMany`,
+  // select: { pmid: true }, filtered on `abstract`).
+  mockPublicationFindMany: vi.fn(),
   mockSuppressionFindMany: vi.fn(),
   mockPersonNihProfileFindFirst: vi.fn(),
 }));
@@ -23,6 +27,7 @@ vi.mock("@/lib/db", () => ({
     scholar: { findFirst: mockScholarFindFirst, findUnique: mockScholarFindUnique },
     fieldOverride: { findUnique: mockFieldOverrideFindUnique, findMany: mockFieldOverrideFindMany },
     publicationAuthor: { findMany: mockPublicationAuthorFindMany },
+    publication: { findMany: mockPublicationFindMany },
     suppression: { findMany: mockSuppressionFindMany },
     personNihProfile: { findFirst: mockPersonNihProfileFindFirst },
     // The `grants[].isMultiPi` sibling-PD/PI lookup. No sibling rows here, so
@@ -136,6 +141,9 @@ beforeEach(() => {
   // No section-visibility overrides by default (a fully-public profile).
   mockFieldOverrideFindMany.mockReset().mockResolvedValue([]);
   mockPublicationAuthorFindMany.mockReset();
+  // #2118c — default: no publication has an abstract (this file doesn't
+  // assert on hasAbstract).
+  mockPublicationFindMany.mockReset().mockResolvedValue([]);
   mockSuppressionFindMany.mockReset().mockResolvedValue([]);
   mockPersonNihProfileFindFirst.mockReset().mockResolvedValue(null);
 });

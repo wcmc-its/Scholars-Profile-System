@@ -1032,7 +1032,6 @@ export const getScholarFullProfileBySlug = cache(
               pubmedUrl: true,
               ecommonsLink: true,
               meshTerms: true,
-              abstract: true,
               impactScore: true,
               authors: {
                 orderBy: { position: "asc" },
@@ -1203,6 +1202,28 @@ export const getScholarFullProfileBySlug = cache(
     // `projectFromRows`). A Set lookup in the mapper below — no per-row work.
     const multiPiGrantIds = multiPiExternalIds(projectSiblingRows, suppressedGrantIds);
 
+    // #2118c — the only consumer of `Publication.abstract` on this list is the
+    // `hasAbstract` boolean below; Prisma has no "select this @db.Text column
+    // but only as a boolean" projection, so selecting `abstract: true` in the
+    // query above transferred every full abstract (hundreds of KB) just to
+    // compute Boolean(...). `abstract` is used here only as a WHERE predicate
+    // (MySQL evaluates it server-side) — `pmid` is the only column selected,
+    // so the text itself is never sent back.
+    const pmidsWithAbstract =
+      visibleAuthorships.length === 0
+        ? new Set<string>()
+        : new Set(
+            (
+              await prisma.publication.findMany({
+                where: {
+                  pmid: { in: visibleAuthorships.map((a) => a.publication.pmid) },
+                  NOT: [{ abstract: null }, { abstract: "" }],
+                },
+                select: { pmid: true },
+              })
+            ).map((r) => r.pmid),
+          );
+
     const rankablePubs = visibleAuthorships.map((a) => {
       // ReCiterAI publication score for this scholar+pmid pair (D-08). Source
       // chain after issue #316 PR-A: prefer the per-scholar PublicationScore
@@ -1240,7 +1261,7 @@ export const getScholarFullProfileBySlug = cache(
         },
         isConfirmed: a.isConfirmed,
         meshTerms: normalizeMeshTerms(a.publication.meshTerms),
-        hasAbstract: Boolean(a.publication.abstract),
+        hasAbstract: pmidsWithAbstract.has(a.publication.pmid),
         // All confirmed WCM authors on this publication, including the profile
         // owner. Same chip-row shape as topic/search; the page renders chips and
         // omits the plain authorsString to avoid duplicating WCM author names.

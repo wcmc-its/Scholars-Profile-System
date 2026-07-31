@@ -42,7 +42,9 @@ import { buildPubmedRuns } from "@/lib/pubmed-runs";
 import { formatPublishedName } from "@/lib/postnominal";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// `maxDuration` is inert under `output: "standalone"`; the real budget this route is
+// bound by in prod is CloudFront's 30s origin-read timeout
+// (`/scholars/*/co-pubs/export` behavior).
 
 const FORMAT_ALLOWLIST = new Set(["csv", "docx"]);
 

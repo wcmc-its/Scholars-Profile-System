@@ -28,6 +28,7 @@ const {
   mockSubtopicFindMany,
   mockPublicationTopicGroupBy,
   mockPublicationAuthorFindMany,
+  mockPublicationFindMany,
   mockSuppressionFindMany,
   mockTransaction,
   mockQueryRaw,
@@ -38,6 +39,9 @@ const {
   mockSubtopicFindMany: vi.fn(),
   mockPublicationTopicGroupBy: vi.fn(),
   mockPublicationAuthorFindMany: vi.fn(),
+  // #2118c — the boolean-only `hasAbstract` lookup (`prisma.publication.findMany`,
+  // select: { pmid: true }, filtered on `abstract`).
+  mockPublicationFindMany: vi.fn(),
   mockSuppressionFindMany: vi.fn(),
   mockTransaction: vi.fn(),
   mockQueryRaw: vi.fn(),
@@ -53,6 +57,7 @@ vi.mock("@/lib/db", () => ({
       groupBy: mockPublicationTopicGroupBy,
     },
     publicationAuthor: { findMany: mockPublicationAuthorFindMany },
+    publication: { findMany: mockPublicationFindMany },
     suppression: { findMany: mockSuppressionFindMany },
     $queryRaw: mockQueryRaw,
     $transaction: mockTransaction,
@@ -204,6 +209,10 @@ beforeEach(() => {
   // authors — they assert on ordering / scoring / pagination). Tests that care
   // about author enrichment override this in-line.
   mockPublicationAuthorFindMany.mockResolvedValue([]);
+  // #2118c — default: no publication has an abstract (existing tests don't
+  // assert on hasAbstract). Tests that care can override in-line.
+  mockPublicationFindMany.mockReset();
+  mockPublicationFindMany.mockResolvedValue([]);
   // #356 — fetchWcmAuthorsForPmids now also loads publication suppressions;
   // default to none so existing feed tests are unaffected.
   mockSuppressionFindMany.mockReset();
