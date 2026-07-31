@@ -4,7 +4,13 @@
  * is a regression the ADR's own reasoning already flagged as load-bearing.
  */
 import { describe, expect, it } from "vitest";
-import { contentWordCoverage, unconsumedContentTokens } from "@/lib/api/breadth-gate";
+import {
+  breadthGateWeight,
+  classifyBreadthGate,
+  contentWordCoverage,
+  unconsumedAgainstForms,
+  unconsumedContentTokens,
+} from "@/lib/api/breadth-gate";
 
 describe("unconsumedContentTokens / contentWordCoverage", () => {
   it("both tokens consumed — lung cancer / Lung Cancer", () => {
@@ -53,5 +59,71 @@ describe("unconsumedContentTokens / contentWordCoverage", () => {
       "monitoring",
     ]);
     expect(contentWordCoverage("epidemiological monitoring", "Neoplasms")).toBe(0);
+  });
+});
+
+describe("unconsumedAgainstForms", () => {
+  it("real case: a synonym in a NON-winning entry term redeems the query (#2097)", () => {
+    // "antimicrobial resistance" doesn't overlap the winning matchedForm at all,
+    // but the same descriptor's entry-term list has the near-exact synonym.
+    expect(
+      unconsumedAgainstForms("antimicrobial resistance", [
+        "Drug Resistance, Microbial",
+        "Antimicrobial Drug Resistance",
+      ]),
+    ).toEqual([]);
+  });
+
+  it("a genuine drop survives widening — entry terms don't always cover it", () => {
+    expect(
+      unconsumedAgainstForms("Cardiac amyloidosis", ["Amyloidosis", "Amyloidoses"]),
+    ).toEqual(["cardiac"]);
+  });
+});
+
+describe("classifyBreadthGate / breadthGateWeight", () => {
+  const RESOLUTION = {
+    descriptorUi: "D000686",
+    matchedForm: "Amyloidosis",
+    name: "Amyloidosis",
+    entryTerms: ["Amyloidoses"],
+  };
+
+  it("fully consumed (after widening) never calls the resolver", async () => {
+    const resolveDescriptor = async () => {
+      throw new Error("should not be called — nothing left unconsumed");
+    };
+    const verdict = await classifyBreadthGate(
+      "amyloidosis",
+      RESOLUTION,
+      resolveDescriptor,
+    );
+    expect(verdict).toBe("consumed");
+  });
+
+  it("qualifier-drop — dropped span resolves to nothing on its own (real case: Cardiac amyloidosis)", async () => {
+    const resolveDescriptor = async () => null;
+    const verdict = await classifyBreadthGate("Cardiac amyloidosis", RESOLUTION, resolveDescriptor);
+    expect(verdict).toBe("qualifier-drop");
+  });
+
+  it("scope-shift — dropped span independently resolves to a DIFFERENT descriptor (real case: AAV gene therapy)", async () => {
+    const resolution = { descriptorUi: "D003982", matchedForm: "Dependovirus", name: "Dependovirus", entryTerms: [] };
+    const resolveDescriptor = async () => ({ descriptorUi: "D015316" }); // Genetic Therapy — a real, different concept
+    const verdict = await classifyBreadthGate("AAV gene therapy", resolution, resolveDescriptor);
+    expect(verdict).toBe("scope-shift");
+  });
+
+  it("dropped span resolving back to the SAME descriptor is not a scope-shift", async () => {
+    const resolveDescriptor = async () => ({ descriptorUi: RESOLUTION.descriptorUi });
+    const verdict = await classifyBreadthGate("Cardiac amyloidosis", RESOLUTION, resolveDescriptor);
+    expect(verdict).toBe("qualifier-drop");
+  });
+
+  it("breadthGateWeight: only scope-shift gets the low weight", () => {
+    const weights = { wHi: 20, wLo: 3 };
+    expect(breadthGateWeight("consumed", weights)).toBe(20);
+    expect(breadthGateWeight("qualifier-drop", weights)).toBe(20);
+    expect(breadthGateWeight("scope-shift", weights)).toBe(3);
   });
 });
