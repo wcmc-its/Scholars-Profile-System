@@ -43,6 +43,7 @@ import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { repairEncodingOrNull } from "@/lib/text/repair-encoding";
 import { coreProjectNum, parseNihAward } from "@/lib/award-number";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
+import { isConfidentialTitle } from "@/lib/grant-confidentiality";
 import { fetchProjectPeriodsByCoreProjectNums } from "../nih-profile/fetcher";
 import {
   type GapStatus,
@@ -262,6 +263,60 @@ WHERE v.unit_name IS NOT NULL
   AND v.program_type <> 'Contract without funding'
 ORDER BY v.CWID, v.Account_Number;
 `;
+
+/** createdBy marker for the title-based confidentiality safety net (below).
+ *  A manual revoke (a human confirming the title is a false positive, e.g.
+ *  "Winn CDA" trials that are actually fine to be public) carries a different
+ *  createdBy and is never touched by this ETL. */
+const SYSTEM_CONFIDENTIAL_TITLE = "system-confidential-title";
+
+/**
+ * #2020 follow-up — second, independent check for confidential awards, on top
+ * of InfoEd's own (manual, sometimes-unchecked) Confidential flag.
+ *
+ * Every row about to render publicly (i.e. every row in `inserts`, new or
+ * already-published — the nightly run re-upserts the full active set, so this
+ * also retroactively catches anything already live) gets its title checked
+ * against `isConfidentialTitle`. A match gets a revocable `Suppression`
+ * instead of a silent drop: the false-positive rate on a bare keyword match is
+ * real (see lib/grant-confidentiality.ts), so "hidden pending review" is the
+ * safe default, not "hidden forever" or "published anyway."
+ */
+async function reconcileConfidentialTitles(
+  inserts: Array<{ externalId: string; title: string }>,
+): Promise<void> {
+  const existing = new Set(
+    (
+      await db.write.suppression.findMany({
+        where: { entityType: "grant", createdBy: SYSTEM_CONFIDENTIAL_TITLE },
+        select: { entityId: true },
+      })
+    ).map((s) => s.entityId),
+  );
+
+  let newlySuppressed = 0;
+  for (const { externalId, title } of inserts) {
+    if (!isConfidentialTitle(title) || existing.has(externalId)) continue;
+    await db.write.suppression.create({
+      data: {
+        entityType: "grant",
+        entityId: externalId,
+        reason:
+          `Title matches a confidentiality-agreement pattern (CDA/NDA/` +
+          `"Confidentiality Agreement") — auto-hidden pending compliance ` +
+          `review. Revoke if this is not actually confidential.`,
+        createdBy: SYSTEM_CONFIDENTIAL_TITLE,
+      },
+    });
+    existing.add(externalId);
+    newlySuppressed++;
+  }
+  if (newlySuppressed > 0) {
+    console.log(
+      `[InfoEd] ${newlySuppressed} grant(s) auto-suppressed on a confidential-looking title.`,
+    );
+  }
+}
 
 /**
  * #2020 — reconcile the undated-award worklist.
@@ -535,6 +590,7 @@ async function main() {
     );
 
     await reconcileDateGaps(undated, backfilledIds);
+    await reconcileConfidentialTitles(inserts);
 
     await db.write.etlRun.update({
       where: { id: run.id },
