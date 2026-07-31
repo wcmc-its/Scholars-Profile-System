@@ -27,6 +27,11 @@ coverage
 playwright-report
 test-results
 
+# Synthetic dev fixtures. `npm run seed` wipes the core tables and re-creates
+# them from fixtures; nothing deployed ever needs it, so keep it out of the
+# image entirely rather than relying on the in-script NODE_ENV guard alone.
+seed
+
 # Environment files — never copy credentials into an image
 .env
 .env.*

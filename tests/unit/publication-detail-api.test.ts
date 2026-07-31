@@ -47,7 +47,6 @@ vi.mock("@/lib/sources/reciterdb", () => ({
 }));
 
 import {
-  encodeCsvField,
   getCitingPublicationsForCsv,
   getPublicationDetail,
   serializeCitingPubsCsv,
@@ -751,26 +750,32 @@ describe("getPublicationDetail — citing bridge (#928)", () => {
   });
 });
 
-describe("encodeCsvField", () => {
-  it("returns plain values unchanged", () => {
-    expect(encodeCsvField("hello")).toBe("hello");
-    expect(encodeCsvField(42)).toBe("42");
-  });
-
-  it("quotes fields containing commas, quotes, or newlines (RFC 4180)", () => {
-    expect(encodeCsvField("a,b")).toBe('"a,b"');
-    expect(encodeCsvField('with "quotes"')).toBe('"with ""quotes"""');
-    expect(encodeCsvField("line1\nline2")).toBe('"line1\nline2"');
-    expect(encodeCsvField("line1\r\nline2")).toBe('"line1\r\nline2"');
-  });
-
-  it("returns empty string for null/undefined", () => {
-    expect(encodeCsvField(null)).toBe("");
-    expect(encodeCsvField(undefined)).toBe("");
-  });
-});
-
 describe("serializeCitingPubsCsv", () => {
+  it("guards formula/DDE injection in untrusted PubMed text (OWASP CSV injection)", () => {
+    // This export is reachable without authentication and its cells are raw
+    // PubMed titles / journal names, so a title beginning =, +, @ or a tab must
+    // not reach a spreadsheet as a formula.
+    const csv = serializeCitingPubsCsv([
+      {
+        pmid: "1",
+        title: "=cmd|'/c calc'!A1",
+        journal: "@SUM(1+1)",
+        year: null,
+        publicationDate: null,
+      },
+    ]);
+    const row = csv.split("\r\n")[1];
+    expect(row).toContain("'=cmd");
+    expect(row).toContain("'@SUM");
+    expect(row).not.toMatch(/(^|,)=cmd/);
+  });
+
+  it("leaves a signed numeric string alone (a number is not a formula)", () => {
+    const csv = serializeCitingPubsCsv([
+      { pmid: "2", title: "-5", journal: null, year: null, publicationDate: null },
+    ]);
+    expect(csv.split("\r\n")[1]).toBe("2,-5,,,");
+  });
   it("emits a header row and CRLF-terminated lines", () => {
     const csv = serializeCitingPubsCsv([
       {
