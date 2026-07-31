@@ -64,6 +64,7 @@ import {
   isRequireDisplayableAuthorEnabled,
   computePubCountBuckets,
   loadMeshAncestorContext,
+  loadOverviewOverrides,
 } from "@/lib/search-index-docs";
 import { isRetryableBulkStatus, resolveBulkConfig } from "@/lib/search-index-bulk";
 import { rebuildAliasedIndex } from "./alias-swap";
@@ -203,6 +204,12 @@ async function indexPeople(concreteIndex: string) {
   // the backfill (full rebuild + atomic alias swap). Always loaded: the field is
   // OMIT-on-empty and served behind a flag, so emitting it on every rebuild is safe.
   const meshAncestors = await loadMeshAncestorContext(prisma);
+  // #2113 — bulk-load the `overview` field_override read-merge ONCE per
+  // build (mirroring the `gate` / `meshAncestors` loads above) and pass it
+  // to every `buildPeopleDoc`, so a cleared bio (an override row with value
+  // `""`) is honored in the index instead of the raw ETL column staying
+  // indexed forever.
+  const overviewOverrides = await loadOverviewOverrides(prisma);
   const scholars = await prisma.scholar.findMany({
     where: PEOPLE_INDEX_WHERE,
     select: PEOPLE_INDEX_SELECT,
@@ -233,7 +240,9 @@ async function indexPeople(concreteIndex: string) {
     // #824 §4c — pass the public overlay gate so `buildPeopleDoc` emits the
     // `methodFamily` rollup (suppressed + sensitive families always excluded).
     const built = await Promise.all(
-      batch.map((s) => buildPeopleDoc(s, prisma, sup, gate, meshAncestors)),
+      batch.map((s) =>
+        buildPeopleDoc(s, prisma, sup, gate, meshAncestors, overviewOverrides),
+      ),
     );
     built.forEach((doc, j) => {
       if (doc !== null) docs.push({ cwid: batch[j].cwid, doc });

@@ -28,6 +28,7 @@ const hoisted = vi.hoisted(() => ({
   mockDivisionFindMany: vi.fn(),
   mockScholarFamilyFindMany: vi.fn(),
   mockMeshDescriptorFindMany: vi.fn(),
+  mockFieldOverrideFindMany: vi.fn(),
   mockBulk: vi.fn(),
 }));
 
@@ -61,6 +62,11 @@ vi.mock("@/lib/db", () => ({
       // exercise MeSH subtree counts; the default empty descriptor set keeps it
       // omit-on-empty.
       meshDescriptor: { findMany: hoisted.mockMeshDescriptorFindMany },
+      // #2113 — the `overview` field_override read-merge sidecar (scoped to
+      // one cwid). This suite doesn't exercise overview overrides; the
+      // default empty result keeps `buildPeopleDoc` on its raw-ETL-column
+      // fallback (unchanged behavior for these tests).
+      fieldOverride: { findMany: hoisted.mockFieldOverrideFindMany },
     },
     // #393 — the reconciler sentinel stamp on a successful reflect.
     write: { suppression: { update: hoisted.mockSuppressionUpdate } },
@@ -169,6 +175,7 @@ beforeEach(() => {
   hoisted.mockDivisionFindMany.mockResolvedValue([]);
   hoisted.mockScholarFamilyFindMany.mockResolvedValue([]);
   hoisted.mockMeshDescriptorFindMany.mockResolvedValue([]);
+  hoisted.mockFieldOverrideFindMany.mockResolvedValue([]);
 });
 
 describe("reflectSearchSuppression — scholar suppress", () => {

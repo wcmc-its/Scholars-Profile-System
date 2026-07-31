@@ -86,6 +86,7 @@ import {
   buildPublicationDoc,
   isRequireDisplayableAuthorEnabled,
   loadMeshAncestorContext,
+  loadOverviewOverrides,
   type MeshAncestorContext,
 } from "@/lib/search-index-docs";
 
@@ -333,7 +334,21 @@ async function buildScholarOps(
   // fan-out loads it ONCE and threads it; the lone-scholar entry loads its own.
   const ancestors =
     meshAncestors ?? (await loadMeshAncestorContext(db.read));
-  const doc = await buildPeopleDoc(scholar, db.read, sup, overlayGate, ancestors);
+  // #2113 — the `overview` field_override read-merge, scoped to this one
+  // cwid (unlike the ETL's corpus-wide `loadOverviewOverrides` load): this
+  // path already issues several other per-scholar sidecar queries per
+  // `buildPeopleDoc` call, so one more narrow query keeps a fast-path
+  // re-index of a cleared bio consistent with the nightly index instead of
+  // staying stale until the next full rebuild.
+  const overviewOverrides = await loadOverviewOverrides(db.read, cwid);
+  const doc = await buildPeopleDoc(
+    scholar,
+    db.read,
+    sup,
+    overlayGate,
+    ancestors,
+    overviewOverrides,
+  );
   if (doc === null) {
     return [{ type: "delete", index: PEOPLE_INDEX, id: cwid }];
   }

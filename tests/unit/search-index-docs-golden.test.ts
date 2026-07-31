@@ -530,6 +530,81 @@ describe("buildPeopleDoc — golden snapshots", () => {
   });
 });
 
+describe("buildPeopleDoc — overview field_override read-merge (#2113)", () => {
+  function makeOverrideScholar(
+    overview: string | null,
+    cwid = "ovr1234",
+  ): Partial<ScholarForIndex> {
+    return {
+      cwid,
+      slug: cwid,
+      preferredName: "Override Scholar",
+      fullName: "Override Scholar",
+      postnominal: null,
+      primaryTitle: "Professor",
+      primaryDepartment: "Dept",
+      overview,
+      roleCategory: "faculty",
+      deptCode: null,
+      divCode: null,
+      department: null,
+      division: null,
+      topicAssignments: [],
+      grants: [],
+      authorships: [],
+    };
+  }
+
+  it("an override row with value '' clears the indexed overview, even though the ETL column is non-empty", async () => {
+    const s = makeOverrideScholar("<p>Stale ETL bio.</p>");
+    const overrides = new Map([["ovr1234", ""]]);
+    const doc = (await buildPeopleDoc(
+      s as ScholarForIndex,
+      mockPeopleClient([]),
+      NO_SUP,
+      undefined,
+      undefined,
+      overrides,
+    )) as { overview: string | null; overviewLength: number };
+    expect(doc.overview).toBeNull();
+    expect(doc.overviewLength).toBe(0);
+  });
+
+  it("an override row with a value wins over the raw ETL column", async () => {
+    const s = makeOverrideScholar("<p>Stale ETL bio.</p>");
+    const overrides = new Map([["ovr1234", "Curator-written bio."]]);
+    const doc = (await buildPeopleDoc(
+      s as ScholarForIndex,
+      mockPeopleClient([]),
+      NO_SUP,
+      undefined,
+      undefined,
+      overrides,
+    )) as { overview: string | null; overviewLength: number };
+    expect(doc.overview).toBe("Curator-written bio.");
+    expect(doc.overviewLength).toBe("Curator-written bio.".length);
+  });
+
+  it("no override row for this cwid falls back to the raw ETL column — byte-identical to the map-omitted call", async () => {
+    const s = makeOverrideScholar("<p>ETL bio.</p>");
+    // A map that carries entries for OTHER scholars only — this cwid has no
+    // row, so the fallback (raw ETL column) must fire, same as omitting the
+    // param entirely.
+    const overridesForOtherScholar = new Map([["someone-else", "x"]]);
+    const withMap = await buildPeopleDoc(
+      s as ScholarForIndex,
+      mockPeopleClient([]),
+      NO_SUP,
+      undefined,
+      undefined,
+      overridesForOtherScholar,
+    );
+    const withoutMap = await buildPeopleDoc(s as ScholarForIndex, mockPeopleClient([]), NO_SUP);
+    expect(withMap).toEqual(withoutMap);
+    expect((withMap as { overview: string | null }).overview).toBe("<p>ETL bio.</p>");
+  });
+});
+
 describe("authorRole — the per-person fact the facet union cannot express", () => {
   // `wcmAuthorPositions` is a paper-level UNION: on a paper with a WCM first-author and a WCM
   // middle-author it holds ["first","middle"] and cannot say WHICH author is which. Using it to
