@@ -20,6 +20,59 @@ const AUDIT_SQL = readFileSync(
   "utf8",
 );
 
+const AUDIT_TS = readFileSync(
+  path.join(process.cwd(), "lib/edit/audit.ts"),
+  "utf8",
+);
+
+// Pulls the quoted literals out of a `export type <Name> = | "a" | "b" ...;`
+// union declaration. Anchored to the `| "literal"` union-member shape (not
+// any quoted string in the block) so JSDoc prose containing quoted words
+// (and, critically, semicolons — the JSDoc comments in this file are full of
+// them) can't be mistaken for a member or for the terminator. Block comments
+// are stripped first so the *first* `;` found really is the union's own
+// terminator, not one inside a `/** ... */` comment.
+function tsUnionMembers(typeName: string): string[] {
+  const stripped = AUDIT_TS.replace(/\/\*\*[\s\S]*?\*\//g, "");
+  const marker = `export type ${typeName} =`;
+  const start = stripped.indexOf(marker);
+  if (start === -1) {
+    throw new Error(`type ${typeName} not found in lib/edit/audit.ts`);
+  }
+  const end = stripped.indexOf(";", start);
+  if (end === -1) {
+    throw new Error(`no terminating ; found for type ${typeName}`);
+  }
+  const block = stripped.slice(start + marker.length, end);
+  const members: string[] = [];
+  const re = /\|\s*"([^"]+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(block))) {
+    members.push(m[1]);
+  }
+  if (members.length === 0) {
+    throw new Error(`no union members parsed for type ${typeName}`);
+  }
+  return members;
+}
+
+// Pulls the value list out of a `` `column` ENUM('a','b',...) `` column
+// definition within one SQL statement (as already split by
+// `extractStatements`).
+function sqlEnumValues(statement: string, column: string): string[] {
+  const re = new RegExp("`" + column + "`\\s*ENUM\\(([^)]*)\\)");
+  const match = statement.match(re);
+  if (!match) {
+    throw new Error(`no ENUM(...) found for column \`${column}\` in statement: ${statement.slice(0, 80)}...`);
+  }
+  return match[1].split(",").map((v) => v.trim().replace(/^'|'$/g, ""));
+}
+
+function assertSubset(members: string[], enumValues: string[], label: string) {
+  const missing = members.filter((v) => !enumValues.includes(v));
+  expect(missing, `${label} — TS members with no matching SQL ENUM entry`).toEqual([]);
+}
+
 describe("parseDsn", () => {
   it("parses host/port/user/password", () => {
     const p = parseDsn("mysql://sps_bootstrap:s3cr3t@db.internal:3307/");
@@ -82,6 +135,55 @@ describe("extractStatements", () => {
   it("strips both line and block comments", () => {
     const sql = "/* block */ SELECT 1; -- trailing\nSELECT 2; -- done";
     expect(extractStatements(sql)).toEqual(["SELECT 1", "SELECT 2"]);
+  });
+});
+
+describe("AuditAction / AuditEntityType TS unions vs SQL ENUM contract (#2114)", () => {
+  // Index positions match the shape asserted in the `extractStatements` test
+  // above: [0] CREATE DATABASE, [1] CREATE TABLE, [2] ALTER MODIFY `action`,
+  // [3] ALTER MODIFY `target_entity_type`, [4] ALTER ADD COLUMN.
+  const stmts = extractStatements(AUDIT_SQL);
+  const createTable = stmts[1];
+  const alterAction = stmts[2];
+  const alterEntityType = stmts[3];
+
+  const tsActions = tsUnionMembers("AuditAction");
+  const tsEntityTypes = tsUnionMembers("AuditEntityType");
+
+  const createActionEnum = sqlEnumValues(createTable, "action");
+  const alterActionEnum = sqlEnumValues(alterAction, "action");
+  const createEntityTypeEnum = sqlEnumValues(createTable, "target_entity_type");
+  const alterEntityTypeEnum = sqlEnumValues(alterEntityType, "target_entity_type");
+
+  // Subset, NOT set-equality: the SQL convention is append-only (a widening
+  // migration is allowed to ship before the TS code that uses the new
+  // value — "Appended LAST to preserve existing ENUM ordinals"). The actual
+  // 1265-truncation bug is the other direction: a TS member with no matching
+  // SQL ENUM entry.
+  it("every AuditAction member has a matching CREATE TABLE `action` ENUM entry", () => {
+    assertSubset(tsActions, createActionEnum, "AuditAction vs CREATE TABLE action ENUM");
+  });
+
+  it("every AuditAction member has a matching MODIFY COLUMN `action` ENUM entry", () => {
+    assertSubset(tsActions, alterActionEnum, "AuditAction vs MODIFY COLUMN action ENUM");
+  });
+
+  it("every AuditEntityType member has a matching CREATE TABLE `target_entity_type` ENUM entry", () => {
+    assertSubset(tsEntityTypes, createEntityTypeEnum, "AuditEntityType vs CREATE TABLE target_entity_type ENUM");
+  });
+
+  it("every AuditEntityType member has a matching MODIFY COLUMN `target_entity_type` ENUM entry", () => {
+    assertSubset(tsEntityTypes, alterEntityTypeEnum, "AuditEntityType vs MODIFY COLUMN target_entity_type ENUM");
+  });
+
+  // Order-sensitive: both sides are SQL, and MODIFY COLUMN restates the full
+  // literal, so the CREATE TABLE and ALTER value lists should match exactly.
+  it("the CREATE TABLE and MODIFY COLUMN `action` ENUM value lists are in the same order", () => {
+    expect(alterActionEnum).toEqual(createActionEnum);
+  });
+
+  it("the CREATE TABLE and MODIFY COLUMN `target_entity_type` ENUM value lists are in the same order", () => {
+    expect(alterEntityTypeEnum).toEqual(createEntityTypeEnum);
   });
 });
 
