@@ -20,6 +20,7 @@ import {
   isFamilyPubliclyVisible,
 } from "@/lib/api/methods-overlay";
 import { methodFamilyPath } from "@/lib/method-url";
+import { toCsv } from "@/lib/csv";
 import {
   claimKey,
   isEffectiveConfirmed,
@@ -777,30 +778,20 @@ export async function getCitingPublicationsForCsv(
   return rows;
 }
 
-/** RFC 4180 CSV field encoding: double-quote-wrap, double-up inner quotes. */
-export function encodeCsvField(value: string | number | null | undefined): string {
-  if (value === null || value === undefined) return "";
-  const s = String(value);
-  if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
-
-/** Serialize citing-pub rows into a CSV document. Header row included. */
+/**
+ * Serialize citing-pub rows into a CSV document. Header row included.
+ *
+ * Delegates to `lib/csv`. This route previously carried a private RFC 4180
+ * encoder that predated that module, so the #1514/#1544 CSV-injection sweep —
+ * which enumerated its targets by importer of `toCsv` — never saw it. The
+ * result was that the one CSV export reachable without authentication, over
+ * untrusted PubMed title/journal text, was the only one missing the OWASP
+ * formula guard. Route the bytes through the shared writer so the next sweep
+ * finds this call site.
+ */
 export function serializeCitingPubsCsv(rows: PublicationDetailCsvRow[]): string {
-  const header = ["PMID", "Title", "Journal", "Year", "Publication date"];
-  const out: string[] = [header.join(",")];
-  for (const r of rows) {
-    out.push(
-      [
-        encodeCsvField(r.pmid),
-        encodeCsvField(r.title),
-        encodeCsvField(r.journal),
-        encodeCsvField(r.year),
-        encodeCsvField(r.publicationDate),
-      ].join(","),
-    );
-  }
-  return out.join("\r\n") + "\r\n";
+  return toCsv(
+    ["PMID", "Title", "Journal", "Year", "Publication date"],
+    rows.map((r) => [r.pmid, r.title, r.journal, r.year, r.publicationDate]),
+  );
 }

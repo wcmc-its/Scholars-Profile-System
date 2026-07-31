@@ -25,6 +25,21 @@ async function reset() {
 }
 
 async function main() {
+  // reset() below unconditionally deletes every scholar / publication / grant /
+  // appointment / education row. This file ships inside the ETL image
+  // (Dockerfile COPYs the whole repo) alongside tsx and the writer DSN, and the
+  // documented prod run-task slot takes a literal `npm run <script>` string — so
+  // the distance between a routine ETL invocation and a full corpus wipe is one
+  // mistyped word. Fail closed wherever NODE_ENV=production (both the `etl` and
+  // `runtime` Dockerfile stages set it); completely inert on a dev machine.
+  if (process.env.NODE_ENV === "production" && process.env.SEED_CONFIRM !== "yes") {
+    throw new Error(
+      "Refusing to seed with NODE_ENV=production: reset() deletes every scholar, " +
+        "publication, grant, appointment and education row and replaces them with " +
+        "synthetic fixtures. Set SEED_CONFIRM=yes if that is genuinely intended.",
+    );
+  }
+
   console.log("Resetting tables...");
   await reset();
 
