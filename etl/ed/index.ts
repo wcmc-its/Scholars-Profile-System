@@ -111,6 +111,26 @@ export function guardActiveLeaderCwid(
   return activeByCwid.get(candidateCwid.toLowerCase()) === true ? candidateCwid : null;
 }
 
+/**
+ * Whether the historical (ED-HISTORICAL, faculty:expired) appointment
+ * reconcile should run for this pass. Mirrors the NYP affiliate guard
+ * (issue #162): a SUCCESSFUL fetch returning zero rows is a suspected
+ * truncated/misscoped read (an ACL/scope change, etc.), not evidence that no
+ * historical appointments exist — reconciling per-scholar against an empty
+ * incoming set would tombstone every existing ED-HISTORICAL row, including
+ * curator `showOnProfile` reveals. Only a successful, non-empty fetch is
+ * eligible to reconcile; a failed fetch or a successful-but-empty one leaves
+ * existing rows untouched.
+ *
+ * Exported for unit tests (tests/unit/etl-ed-historical-appointments.test.ts).
+ */
+export function shouldReconcileHistoricalAppointments(
+  fetchSucceeded: boolean,
+  rowCount: number,
+): boolean {
+  return fetchSucceeded && rowCount > 0;
+}
+
 // Exported for unit tests (tests/unit/etl-ed-role-category.test.ts).
 export function deriveRoleCategory(f: EdFacultyEntry): RoleCategory {
   if (f.ou === "students" && f.degreeCode === "PHD") return "doctoral_student";
@@ -569,6 +589,20 @@ async function main() {
       arr.push(a);
       historicalByCwid.set(a.cwid, arr);
     }
+    // A SUCCESSFUL fetch returning zero rows gets the same treatment as a
+    // failed fetch (mirrors nypFetchSucceeded below): the historical SOR
+    // always has rows, so 0-with-success is a suspected truncated/misscoped
+    // read, and reconciling per-scholar against an empty incoming set would
+    // tombstone every ED-HISTORICAL appointment (including curator reveals).
+    const historicalReconcileEligible = shouldReconcileHistoricalAppointments(
+      historicalFetchSucceeded,
+      historicalAppointments.length,
+    );
+    if (historicalFetchSucceeded && !historicalReconcileEligible) {
+      console.warn(
+        "[ED] Historical appointment refresh skipped — fetch succeeded but returned 0 rows (suspected truncated read); existing rows retained",
+      );
+    }
 
     // Phase 4 — employee SOR for the manager graph. Used by:
     //   - postdoc mentor lookup (issue #5)
@@ -1007,7 +1041,7 @@ async function main() {
           pinnedSlugCwids,
         );
         await refreshEdAppointments(f.cwid, appointmentsByCwid.get(f.cwid) ?? []);
-        if (historicalFetchSucceeded) {
+        if (historicalReconcileEligible) {
           await refreshHistoricalAppointments(f.cwid, historicalByCwid.get(f.cwid) ?? []);
         }
         if (wasDeleted) reactivated += 1;
@@ -1046,7 +1080,7 @@ async function main() {
           },
         });
         await refreshEdAppointments(f.cwid, appointmentsByCwid.get(f.cwid) ?? []);
-        if (historicalFetchSucceeded) {
+        if (historicalReconcileEligible) {
           await refreshHistoricalAppointments(f.cwid, historicalByCwid.get(f.cwid) ?? []);
         }
         created += 1;
