@@ -18,6 +18,7 @@ import {
   MESH_RANK_VERBATIM,
   meshRetryIsSameDescriptorUpgrade,
   meshStripRemovedAtMostHalf,
+  meshRetryDroppedWordUnrelated,
 } from "@/lib/search";
 import { stripDeprioritized, isAllDeprioritized } from "@/lib/api/deprioritized-terms";
 import { resolveGenericTermMode } from "@/lib/api/search-flags";
@@ -60,6 +61,8 @@ function mesh(
   /** #2094 — total expansion size (self at index 0). Only the LENGTH matters:
    *  the route derives `descendantTruncated` from it. */
   descendantCount = 1,
+  /** #1980 fix (2) — `meshRetryDroppedWordUnrelated` reads this alongside `name`. */
+  entryTerms: string[] = [],
 ) {
   return {
     descriptorUi,
@@ -67,7 +70,7 @@ function mesh(
     matchedForm,
     confidence,
     scopeNote: null,
-    entryTerms: [],
+    entryTerms,
     curatedTopicAnchors: [],
     descendantUis: [
       descriptorUi,
@@ -96,6 +99,28 @@ const RESOLUTIONS: Record<string, ReturnType<typeof mesh> | null> = {
   // stripped forms resolve.
   kidney: mesh("D007668", "Kidney", "kidney", "exact"),
   asthma: mesh("D001249", "Asthma", "asthma", "exact"),
+  // #1980 fix (2) — real staging measurements (2026-07-31), strip removes exactly HALF
+  // the typed tokens (same ratio as the admitted `asthma patients` / `cancer research`
+  // wins above), so `stripKeptEnough` admits both, yet both land on the wrong,
+  // dropped-word-disjoint concept. `meshRetryDroppedWordUnrelated` must reject them.
+  "public policy": mesh("D011640", "Public Policy", "public policy", "exact"),
+  "coronary artery": mesh(
+    "D003331",
+    "Coronary Vessels",
+    "coronary artery",
+    "entry-term",
+  ),
+  // Synthetic positive: a multi-word retry whose descriptor DOES share a content token
+  // with the dropped word (via an entry term) — the guard must ADMIT this one, proving
+  // it rejects on disjointness, not merely on the retry being multi-word.
+  "kidney artery": mesh(
+    "D0KIDART",
+    "Renal Artery",
+    "kidney artery",
+    "entry-term",
+    1,
+    ["Renal Artery Disease"],
+  ),
 };
 
 vi.mock("@/lib/api/search-taxonomy", async (importOriginal) => {
@@ -136,6 +161,7 @@ vi.mock("@/lib/api/search-taxonomy", async (importOriginal) => {
         if (current === null || isAllDeprioritized(current.matchedForm)) {
           if (
             stripKeptEnough &&
+            !meshRetryDroppedWordUnrelated(contentQuery, genericRemoved, retry.meshResolution) &&
             (retry.state === "matches" ||
               meshConfidenceRank(retry.meshResolution?.confidence) >
                 meshConfidenceRank(current?.confidence))
@@ -219,6 +245,47 @@ describe("#1980 — an over-aggressive strip may not be adopted on the null arm"
       // The 2→1 class is #1972's 49 measured same-descriptor wins; the guard counts what
       // was REMOVED precisely so this stays admitted.
       expect(i.conceptLabel).toBe("Asthma");
+    });
+  }
+});
+
+/**
+ * #1980 fix (2) — the residual rows `stripKeptEnough` cannot reach: both strip exactly
+ * HALF their typed tokens (the same ratio the 2→1 class above is admitted at), so the
+ * token-budget guard alone admits both, and the retry's own descriptor is disjoint from
+ * the word the strip dropped.
+ */
+describe("#1980 fix (2) — a multi-word retry disjoint from the dropped word is REJECTED", () => {
+  beforeEach(() => {
+    process.env.SEARCH_GENERIC_TERM_DEMOTE = "resolve";
+  });
+  afterEach(() => {
+    delete process.env.SEARCH_GENERIC_TERM_DEMOTE;
+    vi.resetModules();
+  });
+
+  for (const type of ["people", "publications"] as const) {
+    it(`${type}: public health policy stays unresolved (not Public Policy)`, async () => {
+      const i = await conceptFor("public health policy", type);
+      // Without fix (2), the strip drops only `health` (1 of 3) and the retry adopts
+      // `Public Policy` — neither its name nor entry terms contain `health`, the word
+      // that would have made it `Health Policy`.
+      expect(i.conceptLabel ?? null).toBeNull();
+    });
+
+    it(`${type}: coronary artery disease patients stays unresolved (not Coronary Vessels)`, async () => {
+      const i = await conceptFor("coronary artery disease patients", type);
+      // Strips `disease` and `patients` (2 of 4, exactly half); the retry's `Coronary
+      // Vessels` shares no token with either dropped word.
+      expect(i.conceptLabel ?? null).toBeNull();
+    });
+
+    it(`${type}: a multi-word retry that DOES share a dropped token is still admitted`, async () => {
+      const i = await conceptFor("kidney artery disease", type);
+      // `disease` is dropped, but the retry's descriptor entry term ("Renal Artery
+      // Disease") contains it — proving the guard rejects on disjointness, not merely
+      // because the retry happens to be multi-word.
+      expect(i.conceptLabel).toBe("Renal Artery");
     });
   }
 });
