@@ -1457,6 +1457,65 @@ describe("resolveMeshDescriptor — curated aliases (#642)", () => {
   });
 });
 
+describe("resolveMeshDescriptor — #2088 hard override beats a genuine NLM entry term", () => {
+  const D_MRI = {
+    descriptorUi: "D008279",
+    name: "Magnetic Resonance Imaging",
+    entryTerms: ["functional mri", "fmri"],
+    scopeNote: null as string | null,
+    dateRevised: null as Date | null,
+    localPubCoverage: null as number | null,
+    treeNumbers: ["E01.370.350.700"],
+  };
+  const D_FUNCTIONAL_NEUROIMAGING = {
+    descriptorUi: "D059907",
+    name: "Functional Neuroimaging",
+    entryTerms: [],
+    scopeNote: null as string | null,
+    dateRevised: null as Date | null,
+    localPubCoverage: null as number | null,
+    treeNumbers: ["E01.370.350.400"],
+  };
+
+  it("'functional mri' resolves to Functional Neuroimaging, not the MRI entry-term hit", async () => {
+    mockMeshFindMany.mockResolvedValue([D_MRI, D_FUNCTIONAL_NEUROIMAGING]);
+    mockMeshAliasFindMany.mockResolvedValue([]);
+    const r = await resolveMeshDescriptor("functional mri");
+    expect(r?.descriptorUi).toBe("D059907");
+    expect(r?.confidence).toBe("entry-term");
+  });
+
+  it("'fmri' resolves to Functional Neuroimaging too", async () => {
+    mockMeshFindMany.mockResolvedValue([D_MRI, D_FUNCTIONAL_NEUROIMAGING]);
+    mockMeshAliasFindMany.mockResolvedValue([]);
+    const r = await resolveMeshDescriptor("fmri");
+    expect(r?.descriptorUi).toBe("D059907");
+  });
+
+  it("bare 'mri' is unaffected — still resolves to Magnetic Resonance Imaging", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      {
+        ...D_MRI,
+        entryTerms: ["MRI", "functional mri", "fmri"],
+      },
+      D_FUNCTIONAL_NEUROIMAGING,
+    ]);
+    mockMeshAliasFindMany.mockResolvedValue([]);
+    const r = await resolveMeshDescriptor("mri");
+    expect(r?.descriptorUi).toBe("D008279");
+  });
+
+  it("falls through to the normal entry-term hit if the override's target UI is absent (stale)", async () => {
+    // Functional Neuroimaging (D059907) missing from this load — the override
+    // must not error, it should behave as if it weren't there.
+    mockMeshFindMany.mockResolvedValue([D_MRI]);
+    mockMeshAliasFindMany.mockResolvedValue([]);
+    const r = await resolveMeshDescriptor("functional mri");
+    expect(r?.descriptorUi).toBe("D008279");
+    expect(r?.confidence).toBe("entry-term");
+  });
+});
+
 describe("suggestMeshConcepts (#878)", () => {
   const D_EHR = {
     descriptorUi: "D057286",
