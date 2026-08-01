@@ -111,8 +111,21 @@ export type ResultEvidence =
    *  `boardCertified` true iff the specialty is in the scholar's board-cert set;
    *  the label renders as "Board certified in {specialty}" vs "Clinical specialty:
    *  {specialty}" accordingly. Loose specialty matches contribute to ranking but
-   *  emit no reason (under-claim rather than mislabel). */
-  | { kind: "clinical"; specialty: string; boardCertified: boolean }
+   *  emit no reason (under-claim rather than mislabel).
+   *  `count`/`eligiblePubCount` (#1367 Gap 1) — DISPLAY-ONLY on-topic pub count
+   *  for the "N of M eligible publications" clause. Both absent unless the
+   *  specialty has a curated MeSH anchor (`clinical-mesh-anchors.ts`) AND the
+   *  doc has been reindexed since #1367 landed; when either is absent the label
+   *  renders exactly as before (board-cert/specialty text only, no count clause).
+   *  NEVER read by the precedence gates above (`SEARCH_PEOPLE_CLINICAL_
+   *  {BOARD,SPECIALTY}_OVER_TAGGED`) — those stay count-blind by design. */
+  | {
+      kind: "clinical";
+      specialty: string;
+      boardCertified: boolean;
+      count?: number;
+      eligiblePubCount?: number;
+    }
   /** Matched curated research-area parent topic (v1 keeps the parent label).
    *  `id` is the topic SLUG (= `Topic.id` = `PublicationTopic.parentTopicId`) so
    *  the hover can resolve the scholar's representative paper in this topic.
@@ -440,8 +453,13 @@ export type SelectEvidenceInput = {
   /** Resolved clinical specialty — exact tier only. Caller ran
    *  {@link clinicalExactMatch} against the hit's `_source` clinical fields; pass
    *  the non-null result here. Absent ⇒ no clinical reason (loose matches are
-   *  intentionally silent; they still contribute to the multi_match score). */
-  clinical?: { specialty: string; boardCertified: boolean };
+   *  intentionally silent; they still contribute to the multi_match score).
+   *  `count`/`eligiblePubCount` (#1367 Gap 1) — DISPLAY-ONLY on-topic pub count +
+   *  its eligible-pool denominator, read from the hit's `_source.clinicalOnTopicCounts`
+   *  / `_source.meshTaggedPubCount`. Forwarded verbatim onto the constructed
+   *  `clinical` evidence; NEVER read by the count-gated precedence logic below
+   *  (that stays exactly as it was). */
+  clinical?: { specialty: string; boardCertified: boolean; count?: number; eligiblePubCount?: number };
   /** Count thresholds for the clinical:exact-vs-publications:tagged precedence
    *  (env-tunable). clinical:exact outranks a `tagged` reason only when the tagged
    *  pub count is below `boardOverTagged` (board-certified match) or
@@ -563,7 +581,16 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
     const th = input.clinicalReasonThresholds;
     const limit = th ? (input.clinical.boardCertified ? th.boardOverTagged : th.specialtyOverTagged) : 0;
     if (!tagged || tagged.count < limit)
-      return { kind: "clinical", specialty: input.clinical.specialty, boardCertified: input.clinical.boardCertified };
+      return {
+        kind: "clinical",
+        specialty: input.clinical.specialty,
+        boardCertified: input.clinical.boardCertified,
+        // #1367 Gap 1 — display-only; does not affect the gate above.
+        ...(input.clinical.count != null ? { count: input.clinical.count } : {}),
+        ...(input.clinical.eligiblePubCount != null
+          ? { eligiblePubCount: input.clinical.eligiblePubCount }
+          : {}),
+      };
     // strong tagged signal ⇒ fall through to the tagged return below.
   }
   // tagged: a DIRECT subject/MeSH hit. Beats a weak/absent clinical match (handled
@@ -768,13 +795,19 @@ export function selectEvidenceLines(input: SelectEvidenceInput): ResultEvidence[
       ...(input.pub.mention.pubs && input.pub.mention.pubs.length > 0 ? { pubs: input.pub.mention.pubs } : {}),
       count: input.pub.mention.count,
     });
-  // 5 — clinical: an INDEPENDENT label-only line (#1367 — no count), appended
-  // whenever a clinical:exact match exists, alongside the lines above.
+  // 5 — clinical: an INDEPENDENT line, appended whenever a clinical:exact match
+  // exists, alongside the lines above. #1367 Gap 1 — now carries a display-only
+  // on-topic pub count when the specialty has a curated MeSH anchor; still no
+  // effect on ordering (this line is unconditionally appended either way).
   if (input.clinical)
     lines.push({
       kind: "clinical",
       specialty: input.clinical.specialty,
       boardCertified: input.clinical.boardCertified,
+      ...(input.clinical.count != null ? { count: input.clinical.count } : {}),
+      ...(input.clinical.eligiblePubCount != null
+        ? { eligiblePubCount: input.clinical.eligiblePubCount }
+        : {}),
     });
   // 6 — nothing first-class matched ⇒ the single-evidence tail (concept-text /
   // bio / affiliation / identity hints / honest-empty). It can't return

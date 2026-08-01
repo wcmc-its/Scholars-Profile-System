@@ -1013,3 +1013,92 @@ describe("searchPeople — methodPubCount on the hit", () => {
     expect(where.supercategory).toBeUndefined();
   });
 });
+
+// #1367 Gap 1 — the clinical evidence line's DISPLAY-ONLY on-topic pub count. Both
+// `count` (`_source.clinicalOnTopicCounts[specialty]`) and `eligiblePubCount`
+// (`_source.meshTaggedPubCount`) are read O(1) off the hit and forwarded onto the
+// `clinical` evidence object; neither touches `selectEvidence`'s count-gated
+// clinical-vs-tagged precedence (covered, unchanged, by `result-evidence-select.test.ts`).
+describe("searchPeople — clinical evidence on-topic pub count (#1367 Gap 1)", () => {
+  const CLINICAL_FLAG = "SEARCH_PEOPLE_CLINICAL_FN";
+
+  afterEach(() => {
+    delete process.env[CLINICAL_FLAG];
+  });
+
+  const runClinical = (source: Record<string, unknown>) => {
+    process.env[EVIDENCE] = "on";
+    process.env[CLINICAL_FLAG] = "on";
+    hitSourcePatch = source;
+    return searchPeople({
+      q: "cardiology",
+      relevanceMode: "v3",
+      shape: "topic",
+      matchAwareContext: { methodFamily: null, topics: [] },
+    });
+  };
+
+  it("both fields present in `_source` ⇒ forwarded onto the clinical evidence", async () => {
+    const result = await runClinical({
+      clinicalSpecialties: ["Cardiology"],
+      clinicalBoardSet: ["Cardiology"],
+      clinicalOnTopicCounts: { Cardiology: 12 },
+      meshTaggedPubCount: 340,
+    });
+    expect(result.hits[0].evidence).toEqual({
+      kind: "clinical",
+      specialty: "Cardiology",
+      boardCertified: true,
+      count: 12,
+      eligiblePubCount: 340,
+    });
+  });
+
+  it("neither field present ⇒ label-only clinical evidence, unchanged from today", async () => {
+    const result = await runClinical({
+      clinicalSpecialties: ["Cardiology"],
+      clinicalBoardSet: ["Cardiology"],
+    });
+    expect(result.hits[0].evidence).toEqual({
+      kind: "clinical",
+      specialty: "Cardiology",
+      boardCertified: true,
+    });
+  });
+
+  it("the matched specialty has no entry in `clinicalOnTopicCounts` ⇒ no count (under-claim, not a 0)", async () => {
+    const result = await runClinical({
+      clinicalSpecialties: ["Cardiology"],
+      clinicalBoardSet: ["Cardiology"],
+      // A different specialty's count is present, but not this one's.
+      clinicalOnTopicCounts: { Nephrology: 8 },
+      meshTaggedPubCount: 340,
+    });
+    expect(result.hits[0].evidence).toEqual({
+      kind: "clinical",
+      specialty: "Cardiology",
+      boardCertified: true,
+    });
+  });
+
+  it("requests both fields in the people `_source` when SEARCH_PEOPLE_CLINICAL_FN is on", async () => {
+    await runClinical({ clinicalSpecialties: ["Cardiology"], clinicalBoardSet: [] });
+    const peopleCall = mockSearch.mock.calls.find(
+      ([a]) => (a as { index?: string })?.index !== PUBLICATIONS_INDEX,
+    );
+    const body = (peopleCall?.[0] as { body: { _source: string[] } }).body;
+    expect(body._source).toContain("clinicalOnTopicCounts");
+    expect(body._source).toContain("meshTaggedPubCount");
+  });
+
+  it("does NOT request either field when the flag is off — every other search keeps today's `_source` shape", async () => {
+    process.env[EVIDENCE] = "on";
+    await searchPeople({ q: "cardiology", relevanceMode: "v3" });
+    const peopleCall = mockSearch.mock.calls.find(
+      ([a]) => (a as { index?: string })?.index !== PUBLICATIONS_INDEX,
+    );
+    const body = (peopleCall?.[0] as { body: { _source: string[] } }).body;
+    expect(body._source).not.toContain("clinicalOnTopicCounts");
+    expect(body._source).not.toContain("meshTaggedPubCount");
+  });
+});

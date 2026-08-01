@@ -3181,6 +3181,12 @@ export async function searchPeople(opts: {
       // mesh-anchor flag is on so every other caller keeps today's `_source`
       // shape. Drives the `clinicalMeshMatch` evidence fallback below.
       ...(clinicalMeshOn ? ["clinicalAnchors"] : []),
+      // #1367 Gap 1 — the clinical evidence line's on-topic pub count + its
+      // eligible-pool denominator, requested ONLY when SEARCH_PEOPLE_CLINICAL_FN
+      // is on (same gate as `clinicalSpecialties`/`clinicalBoardSet` above, since
+      // either the exact-match or the mesh-match clinical path can use them) so
+      // the off path keeps today's `_source` shape. DISPLAY-ONLY.
+      ...(clinicalReasonOn ? ["clinicalOnTopicCounts", "meshTaggedPubCount"] : []),
       // D1 (sponsor recency) — the scholar's most-recent pub date, requested ONLY when the
       // sponsor recency path asks for it, so every other caller keeps today's `_source` shape.
       // Already stored + used for the recentPub sort/filter; this only projects it back.
@@ -3382,6 +3388,15 @@ export async function searchPeople(opts: {
       // `clinicalMeshMatch` for the disease-subtree clinical reason. A not-yet-
       // reindexed doc lacks them → no mesh clinical reason, never a 500.
       clinicalAnchors?: ClinicalAnchor[];
+      // #1367 Gap 1 — the clinical evidence line's on-topic pub count (per
+      // specialty, keyed the same as `clinicalAnchors`) + its eligible-pool
+      // denominator, present only when SEARCH_PEOPLE_CLINICAL_FN is on (added to
+      // `_source` above). DISPLAY-ONLY — feeds the `count`/`eligiblePubCount` on
+      // the `clinical` evidence variant, never the count-gated precedence logic.
+      // A not-yet-reindexed doc lacks them → the label renders exactly as before
+      // (no count clause), never a 500.
+      clinicalOnTopicCounts?: Record<string, number>;
+      meshTaggedPubCount?: number;
       // D1 (sponsor recency) — the scholar's most-recent pub date (ISO), present only when
       // `includeMostRecentPub` added it to the include-list above. Derived from
       // `dateAddedToEntrez`, so it is the display-honest recency max (excludes retractions /
@@ -3947,6 +3962,11 @@ export async function searchPeople(opts: {
     clinicalBoardSet: string[] | undefined,
     // #1836 — per-specialty disease anchors for the `clinicalMeshMatch` fallback.
     clinicalAnchors: ClinicalAnchor[] | undefined,
+    // #1367 Gap 1 — doc-precomputed on-topic pub counts (keyed by specialty,
+    // same keys as `clinicalAnchors`) + the eligible-pool denominator.
+    // DISPLAY-ONLY — never read by the clinical:exact-vs-tagged precedence gate.
+    clinicalOnTopicCounts: Record<string, number> | undefined,
+    meshTaggedPubCount: number | undefined,
     // #1366 — doc-precomputed reason-line counts (O(1) lookups, no agg). Keyed by
     // `familyLabel`. Only read by the stacked-lines path.
     methodFamilyCounts: Record<string, number> | undefined,
@@ -4081,6 +4101,18 @@ export async function searchPeople(opts: {
       ? (clinicalExactMatch(contentQuery, clinicalSpecialties ?? [], clinicalBoardSet ?? []) ??
         (clinicalMeshOn ? clinicalMeshMatch(clinicalMeshClosure, clinicalAnchors ?? []) : null))
       : null;
+    // #1367 Gap 1 — DISPLAY-ONLY on-topic pub count for whichever specialty
+    // `clinical` resolved to (the exact-match and mesh-match fallback above both
+    // yield the same `{specialty, ...}` shape, keyed identically to
+    // `clinicalOnTopicCounts` in the ETL). Both count and denominator must be
+    // present or neither is attached — a lone numerator with no denominator
+    // can't render "N of M". Absent when the specialty has no curated MeSH
+    // anchor (under-claim, not mislabel) or the doc predates the reindex.
+    const clinicalOnTopicCount = clinical ? clinicalOnTopicCounts?.[clinical.specialty] : undefined;
+    const clinicalWithCount =
+      clinical && clinicalOnTopicCount != null && clinicalOnTopicCount > 0 && meshTaggedPubCount != null
+        ? { ...clinical, count: clinicalOnTopicCount, eligiblePubCount: meshTaggedPubCount }
+        : clinical;
 
     const methodCount = m ? countOf(methodFamilyCounts?.[m.family]) : undefined;
     return {
@@ -4095,7 +4127,7 @@ export async function searchPeople(opts: {
         : undefined,
       topic,
       pub: Object.keys(pub).length > 0 ? pub : undefined,
-      clinical: clinical ?? undefined,
+      clinical: clinicalWithCount ?? undefined,
       clinicalReasonThresholds,
       // The content query drives the partial-bio-vs-pub.mention precedence split
       // (a subset-only bio highlight loses to publication-mention evidence).
@@ -4212,6 +4244,8 @@ export async function searchPeople(opts: {
                 h._source.clinicalSpecialties,
                 h._source.clinicalBoardSet,
                 h._source.clinicalAnchors,
+                h._source.clinicalOnTopicCounts,
+                h._source.meshTaggedPubCount,
                 h._source.methodFamilyCounts,
                 // #2071 (E1b) — query-time, not `h._source.areaCounts` (the
                 // index-time total the issue is closing).

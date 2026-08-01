@@ -418,9 +418,11 @@ export function ResultEvidence({
           />
         </MatchAwareReason>
       );
-    case "clinical":
-      // No count — the dotted underline (every kind but keyword) marks the specialty, and
-      // there is no coverage column (a specialty has no pub denominator).
+    case "clinical": {
+      // The dotted underline (every kind but keyword) marks the specialty, and there is
+      // still no coverage % column (a specialty has no `pubCount`-shaped denominator —
+      // `evidence.eligiblePubCount` below is a DIFFERENT, MeSH-tag-eligible pool, not a
+      // share of the scholar's whole output).
       // Uniform fold rule — the `credential` pill is `stacked`-gated like the % column and
       // the two publications pills, because it is the same kind of thing: a NEW element on
       // a surface we froze, not a relocation of one already there. `selectEvidence` does
@@ -430,6 +432,20 @@ export function ResultEvidence({
       // (The "via" line below is the one addition that is NOT gated, and deliberately: it
       // is where the pre-existing "(matched …)" parenthetical MOVED to, so gating it would
       // delete a datum this surface used to show rather than withhold a new one.)
+      //
+      // #1367 Gap 1 — the on-topic pub count is a SEPARATE clause appended after the
+      // specialty, reusing `CountFirst` (the same component the method branch above uses)
+      // for consistent numeral styling rather than hand-formatting "N of M" a second way in
+      // this file. `entity=""` because the specialty name is already rendered by the first
+      // `CountFirst` call above; this second call exists only for its count-clause half.
+      // "eligible" (not "publications" / "on-topic") is a deliberate word choice, matching
+      // the wording a separate, unrelated PR (#2156, unmerged) independently settled on for
+      // the analogous method-line denominator — so a searcher who sees both count clauses
+      // learns ONE word for "the pool this count was drawn from", not two. Both `count` and
+      // `eligiblePubCount` must be present (see `lib/api/search.ts` — the pair travels
+      // together) or nothing renders: the label reads exactly as it did before this change,
+      // never a fabricated 0.
+      const hasCount = evidence.count != null && evidence.eligiblePubCount != null;
       return (
         <MatchAwareReason
           kind="clinical"
@@ -441,8 +457,22 @@ export function ResultEvidence({
         >
           {evidence.boardCertified ? <span className="text-[var(--evidence-body)]">Board certified in </span> : null}
           <CountFirst entity={evidence.specialty} underline />
+          {hasCount ? (
+            <span className="text-[var(--evidence-body)]">
+              {" "}
+              &middot;{" "}
+              <CountFirst
+                n={evidence.count}
+                m={evidence.eligiblePubCount}
+                thing="eligible publications"
+                entity=""
+                underline={false}
+              />
+            </span>
+          ) : null}
         </MatchAwareReason>
       );
+    }
     case "publications": {
       // §4.5 flavor: a MeSH-descriptor hit IS a concept (tagged/concept → "Concept"); a
       // literal mention → "Keyword". Count-first emphasis: bold the leading matched count
