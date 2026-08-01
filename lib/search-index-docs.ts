@@ -475,6 +475,14 @@ export const PEOPLE_INDEX_WHERE = {
   // Suppressed scholars (status !== 'active') are excluded at the query layer
   // — Phase 4b's build-time half is publication-suppression only (the spike's
   // reassuring scoping finding); scholar suppression is already correct here.
+  //
+  // NOT the whole eligibility carve: #536's isPubliclyDisplayed(roleCategory)
+  // is a SECOND, downstream filter applied in-memory in etl/search-index/index.ts
+  // (`eligible = scholars.filter(...)`), not here. It's why a scholar can pass
+  // this where-clause and still have no people doc — #1970 measured 690
+  // Aurora-eligible-but-unindexed scholars on staging, and all 690 (100%) were
+  // `doctoral_student`. Diffing against PEOPLE_INDEX_WHERE alone will always
+  // look like a gap; check role_category before assuming a bug.
   deletedAt: null,
   status: "active",
 } satisfies Prisma.ScholarWhereInput;
