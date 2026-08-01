@@ -130,6 +130,7 @@ import {
   selectEvidenceLines,
   refineExemplarTools,
   clinicalExactMatch,
+  clinicalExpertiseMatch,
   AREAS_CAP,
   type ResultEvidence,
   type SelectEvidenceInput,
@@ -3174,9 +3175,12 @@ export async function searchPeople(opts: {
       // POPS clinical fields — the matchable specialty set + the board-cert-only
       // subset (for the `boardCertified` label), requested ONLY when
       // SEARCH_PEOPLE_CLINICAL_FN is on so the off path keeps today's `_source`
-      // shape. `clinicalExpertise` is not indexed into any live query path, so it
-      // is not returned. Drives the `clinical:exact` evidence below.
-      ...(clinicalReasonOn ? ["clinicalSpecialties", "clinicalBoardSet"] : []),
+      // shape. Drives the `clinical:exact` evidence below.
+      // #1367 Gap 2 — `clinicalExpertise` (raw POPS `problem_procedure` strings) is
+      // now ALSO returned here, same gate: it previously fed only the query-time
+      // ranking boost/multi_match and was never read back, but the clinical-
+      // expertise fold-in needs it to run `clinicalExpertiseMatch` below.
+      ...(clinicalReasonOn ? ["clinicalSpecialties", "clinicalBoardSet", "clinicalExpertise"] : []),
       // #1836 — the per-specialty disease anchors, requested ONLY when the
       // mesh-anchor flag is on so every other caller keeps today's `_source`
       // shape. Drives the `clinicalMeshMatch` evidence fallback below.
@@ -3383,6 +3387,11 @@ export async function searchPeople(opts: {
       // reason. A not-yet-reindexed doc lacks them → no clinical reason, never a 500.
       clinicalSpecialties?: string[];
       clinicalBoardSet?: string[];
+      // #1367 Gap 2 — raw POPS `problem_procedure` strings, present only when
+      // SEARCH_PEOPLE_CLINICAL_FN is on (added to `_source` above); feed
+      // `clinicalExpertiseMatch` for the clinical-expertise fold-in. A not-yet-
+      // reindexed doc lacks it → no expertise clause, never a 500.
+      clinicalExpertise?: string[];
       // #1836 — per-specialty disease anchors, present only when
       // SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR is on (added to `_source` above); feed
       // `clinicalMeshMatch` for the disease-subtree clinical reason. A not-yet-
@@ -3967,6 +3976,9 @@ export async function searchPeople(opts: {
     // DISPLAY-ONLY — never read by the clinical:exact-vs-tagged precedence gate.
     clinicalOnTopicCounts: Record<string, number> | undefined,
     meshTaggedPubCount: number | undefined,
+    // #1367 Gap 2 — raw POPS `problem_procedure` strings, run through
+    // `clinicalExpertiseMatch` below for the clinical-expertise fold-in.
+    clinicalExpertise: string[] | undefined,
     // #1366 — doc-precomputed reason-line counts (O(1) lookups, no agg). Keyed by
     // `familyLabel`. Only read by the stacked-lines path.
     methodFamilyCounts: Record<string, number> | undefined,
@@ -4097,18 +4109,36 @@ export async function searchPeople(opts: {
     // MeSH disease-subtree subsumption fallback (a "heart failure" query → a
     // board-certified cardiologist). Both yield the same {specialty, boardCertified}
     // shape, so the evidence renderers are unchanged.
-    const clinical = clinicalReasonOn
+    const specialtyClinical = clinicalReasonOn
       ? (clinicalExactMatch(contentQuery, clinicalSpecialties ?? [], clinicalBoardSet ?? []) ??
         (clinicalMeshOn ? clinicalMeshMatch(clinicalMeshClosure, clinicalAnchors ?? []) : null))
       : null;
+    // #1367 Gap 2 — the clinical-expertise fold-in. Same exact-tier test as
+    // `clinicalExactMatch`, run against the raw POPS `problem_procedure` strings
+    // instead of the specialty set — computed independently of `specialtyClinical`
+    // so an expertise match still surfaces even when no specialty matched at all.
+    const expertiseMatches = clinicalReasonOn
+      ? clinicalExpertiseMatch(contentQuery, clinicalExpertise ?? [])
+      : [];
+    // Fold `expertiseMatches` onto the specialty match when there is one; when there
+    // isn't, still emit a `clinical` object (specialty absent, `boardCertified: false`)
+    // rather than drop the signal — there is no other clinical line for it to attach
+    // to. `null` only when NEITHER a specialty nor an expertise match fired.
+    const clinical: { specialty?: string; boardCertified: boolean; expertise?: string[] } | null =
+      specialtyClinical
+        ? { ...specialtyClinical, ...(expertiseMatches.length > 0 ? { expertise: expertiseMatches } : {}) }
+        : expertiseMatches.length > 0
+          ? { boardCertified: false, expertise: expertiseMatches }
+          : null;
     // #1367 Gap 1 — DISPLAY-ONLY on-topic pub count for whichever specialty
     // `clinical` resolved to (the exact-match and mesh-match fallback above both
     // yield the same `{specialty, ...}` shape, keyed identically to
     // `clinicalOnTopicCounts` in the ETL). Both count and denominator must be
     // present or neither is attached — a lone numerator with no denominator
     // can't render "N of M". Absent when the specialty has no curated MeSH
-    // anchor (under-claim, not mislabel) or the doc predates the reindex.
-    const clinicalOnTopicCount = clinical ? clinicalOnTopicCounts?.[clinical.specialty] : undefined;
+    // anchor (under-claim, not mislabel), the doc predates the reindex, or (Gap 2)
+    // `clinical` resolved via expertise only and carries no specialty to key on.
+    const clinicalOnTopicCount = clinical?.specialty ? clinicalOnTopicCounts?.[clinical.specialty] : undefined;
     const clinicalWithCount =
       clinical && clinicalOnTopicCount != null && clinicalOnTopicCount > 0 && meshTaggedPubCount != null
         ? { ...clinical, count: clinicalOnTopicCount, eligiblePubCount: meshTaggedPubCount }
@@ -4246,6 +4276,7 @@ export async function searchPeople(opts: {
                 h._source.clinicalAnchors,
                 h._source.clinicalOnTopicCounts,
                 h._source.meshTaggedPubCount,
+                h._source.clinicalExpertise,
                 h._source.methodFamilyCounts,
                 // #2071 (E1b) — query-time, not `h._source.areaCounts` (the
                 // index-time total the issue is closing).

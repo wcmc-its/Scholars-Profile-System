@@ -11,6 +11,7 @@ import {
   isResearchMatchEvidence,
   taggedPubCount,
   clinicalExactMatch,
+  clinicalExpertiseMatch,
   bioCoversQuery,
   refineExemplarTools,
   firstMatchingSentence,
@@ -585,6 +586,61 @@ describe("clinicalExactMatch — exact-tier detection (spec §4.1)", () => {
   });
 });
 
+describe("clinicalExpertiseMatch — #1367 Gap 2 clinical-expertise fold-in", () => {
+  it("exact single-token match returns the expertise string in an array", () => {
+    expect(clinicalExpertiseMatch("cardiology", ["Cardiology"])).toEqual(["Cardiology"]);
+  });
+
+  it("token-subset: a single-token query matches a multi-word expertise phrase", () => {
+    expect(clinicalExpertiseMatch("hip", ["Hip replacement surgery"])).toEqual([
+      "Hip replacement surgery",
+    ]);
+  });
+
+  it("phrase equality: multi-word query matching the expertise phrase exactly", () => {
+    expect(clinicalExpertiseMatch("hip replacement", ["Hip Replacement"])).toEqual([
+      "Hip Replacement",
+    ]);
+  });
+
+  it("case-insensitive", () => {
+    expect(clinicalExpertiseMatch("HIP REPLACEMENT", ["Hip Replacement"])).toEqual([
+      "Hip Replacement",
+    ]);
+  });
+
+  it("returns EVERY qualifying entry, not just the first — unlike clinicalExactMatch", () => {
+    // "hip" is a token-subset of both distinct expertise phrases.
+    expect(
+      clinicalExpertiseMatch("hip", ["Hip replacement", "Hip fracture repair", "Knee replacement"]),
+    ).toEqual(["Hip replacement", "Hip fracture repair"]);
+  });
+
+  it("no token overlap → empty array, not null", () => {
+    expect(clinicalExpertiseMatch("heart surgery", ["Hip replacement"])).toEqual([]);
+  });
+
+  it("empty expertise list → empty array", () => {
+    expect(clinicalExpertiseMatch("hip", [])).toEqual([]);
+  });
+
+  it("blank query → empty array", () => {
+    expect(clinicalExpertiseMatch("", ["Hip replacement"])).toEqual([]);
+    expect(clinicalExpertiseMatch("   ", ["Hip replacement"])).toEqual([]);
+  });
+
+  it("dedupes case-insensitively", () => {
+    expect(clinicalExpertiseMatch("hip", ["Hip Replacement", "hip replacement"])).toEqual([
+      "Hip Replacement",
+    ]);
+  });
+
+  it("caps at 3 matches", () => {
+    const many = ["Hip A", "Hip B", "Hip C", "Hip D", "Hip E"];
+    expect(clinicalExpertiseMatch("hip", many)).toEqual(["Hip A", "Hip B", "Hip C"]);
+  });
+});
+
 describe("selectEvidence — clinical:exact precedence (rank 4, spec §4.1)", () => {
   const CLINICAL = { specialty: "Cardiology", boardCertified: true };
 
@@ -631,6 +687,60 @@ describe("selectEvidence — clinical:exact precedence (rank 4, spec §4.1)", ()
   it("boardCertified=false is passed through faithfully", () => {
     const ev = selectEvidence({ clinical: { specialty: "Cardiology", boardCertified: false } });
     expect(ev).toEqual({ kind: "clinical", specialty: "Cardiology", boardCertified: false });
+  });
+});
+
+describe("selectEvidence — #1367 Gap 2 clinical-expertise fold-in", () => {
+  it("expertise folds onto an existing specialty match as an additive field", () => {
+    const ev = selectEvidence({
+      clinical: { specialty: "Cardiology", boardCertified: true, expertise: ["Heart failure management"] },
+    });
+    expect(ev).toEqual({
+      kind: "clinical",
+      specialty: "Cardiology",
+      boardCertified: true,
+      expertise: ["Heart failure management"],
+    });
+  });
+
+  it("expertise-only match (no specialty at all) still emits a clinical line — specialty absent, boardCertified false", () => {
+    // The case Gap 2 §4 calls out: a scholar's popsExpertise matched the query but
+    // no specialty/board-cert did, so there is no other clinical line to attach to.
+    const ev = selectEvidence({
+      clinical: { boardCertified: false, expertise: ["Hip replacement surgery"] },
+    });
+    expect(ev).toEqual({
+      kind: "clinical",
+      boardCertified: false,
+      expertise: ["Hip replacement surgery"],
+    });
+    if (ev.kind !== "clinical") throw new Error("shape");
+    expect("specialty" in ev).toBe(false);
+  });
+
+  it("absent expertise (empty array) omits the field entirely, byte-identical to Gap 1", () => {
+    const ev = selectEvidence({
+      clinical: { specialty: "Cardiology", boardCertified: true, expertise: [] },
+    });
+    expect(ev).toEqual({ kind: "clinical", specialty: "Cardiology", boardCertified: true });
+    if (ev.kind !== "clinical") throw new Error("shape");
+    expect("expertise" in ev).toBe(false);
+  });
+
+  it("an expertise-only match still goes through the count-gated tagged precedence, using the specialty (not board) threshold", () => {
+    const TH = { boardOverTagged: 6, specialtyOverTagged: 4 };
+    const expertiseOnly = { boardCertified: false, expertise: ["Hip replacement surgery"] };
+    const tagged = (count: number) => ({
+      tagged: { text: `${count} of 99 publications tagged`, count },
+    });
+    // 3 < specialtyOverTagged(4) ⇒ clinical (expertise) wins.
+    expect(
+      selectEvidence({ clinical: expertiseOnly, pub: tagged(3), clinicalReasonThresholds: TH }),
+    ).toMatchObject({ kind: "clinical", expertise: ["Hip replacement surgery"] });
+    // 5 >= specialtyOverTagged(4) ⇒ tagged wins, exactly like a bare specialty match.
+    expect(
+      selectEvidence({ clinical: expertiseOnly, pub: tagged(5), clinicalReasonThresholds: TH }),
+    ).toMatchObject({ kind: "publications", strength: "tagged" });
   });
 });
 
@@ -974,6 +1084,36 @@ describe("selectEvidenceLines — #1366 stacked, counted reason lines", () => {
       .map((l) => (l.kind === "method" || l.kind === "topic" ? l.count : undefined))
       .filter((n): n is number => n != null);
     expect(counted).toEqual([7, 12]);
+  });
+
+  // #1367 Gap 2 — the clinical-expertise fold-in on the stacked path.
+  it("expertise folds onto the clinical line alongside specialty/count", () => {
+    const clinicalWithExpertise = { ...clinical, expertise: ["Heart failure management"] };
+    const lines = selectEvidenceLines({ method, pub: tagged, topic, clinical: clinicalWithExpertise });
+    const cl = lines[3];
+    if (cl.kind !== "clinical") throw new Error("shape");
+    expect(cl).toEqual({
+      kind: "clinical",
+      specialty: "Endocrinology",
+      boardCertified: true,
+      expertise: ["Heart failure management"],
+    });
+  });
+
+  it("expertise-only (no specialty match at all) still stacks its own clinical line", () => {
+    const expertiseOnly = { boardCertified: false, expertise: ["Hip replacement surgery"] };
+    const lines = selectEvidenceLines({ method, pub: tagged, topic, clinical: expertiseOnly });
+    expect(lines.map((l) => l.kind)).toEqual(["method", "publications", "topic", "clinical"]);
+    const cl = lines[3];
+    if (cl.kind !== "clinical") throw new Error("shape");
+    expect(cl).toEqual({
+      kind: "clinical",
+      boardCertified: false,
+      expertise: ["Hip replacement surgery"],
+    });
+    expect("specialty" in cl).toBe(false);
+    // and it renders solo too, same as a specialty-only clinical line does.
+    expect(kinds({ clinical: expertiseOnly })).toEqual(["clinical"]);
   });
 });
 
