@@ -587,6 +587,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PUB_MESH_ONLY_FILTER",
                 "Value": "on",
               },
@@ -4479,6 +4483,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_PUB_DEPARTMENT_FILTER",
                 "Value": "on",
+              },
+              {
+                "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_PUB_MESH_ONLY_FILTER",

@@ -1391,6 +1391,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
                 "Value": "on",
               },
+              {
+                "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
+                "Value": "off",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -1943,6 +1947,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
                 "Value": "on",
               },
+              {
+                "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
+                "Value": "off",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -2437,6 +2445,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
                 "Value": "on",
+              },
+              {
+                "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
+                "Value": "off",
               },
             ],
             "Essential": true,
@@ -3371,6 +3383,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
                 "Value": "on",
+              },
+              {
+                "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
+                "Value": "off",
               },
             ],
             "Essential": true,
@@ -9201,6 +9217,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
                 "Value": "on",
               },
+              {
+                "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
+                "Value": "off",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -9753,6 +9773,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
                 "Value": "on",
               },
+              {
+                "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
+                "Value": "off",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -10247,6 +10271,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
                 "Value": "on",
+              },
+              {
+                "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
+                "Value": "off",
               },
             ],
             "Essential": true,
@@ -11181,6 +11209,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
                 "Value": "on",
+              },
+              {
+                "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
+                "Value": "off",
               },
             ],
             "Essential": true,

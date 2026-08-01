@@ -669,6 +669,16 @@ export class EtlStack extends Stack {
       // app-stack copy (app-stack.ts, "off") is documentation-only — no app
       // runtime code reads it — and is deliberately left untouched here.
       SELF_EDIT_ED_ADMINS_IMPORT: "on",
+      // #718 -- publications-index exclusion of pubs with zero displayable WCM
+      // authors (isRequireDisplayableAuthorEnabled, lib/search-index-docs.ts),
+      // read by the search:index build (SearchIndexNightly / SearchIndexWeekly
+      // steps, which run on this baseUnit task def). Companion flag in
+      // app-stack.ts's app container (read by the suppress/revoke fast-path)
+      // — both must agree for flag parity. DEFAULT OFF BOTH ENVS -- wiring
+      // only; the staging-first flip + publications reindex are separate
+      // operator rollout steps (#718 activation checklist), not part of this
+      // change.
+      SEARCH_REQUIRE_DISPLAYABLE_AUTHOR: "off",
     };
     const etlContainer = this.etlTaskDefinition.addContainer("etl", {
       image: containerImage,
