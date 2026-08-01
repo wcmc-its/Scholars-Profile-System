@@ -1373,6 +1373,37 @@ type RankedDescriptorCandidate = {
 };
 
 /**
+ * #2088 — hard-override tier for the rare case where NLM's own entry term is
+ * lossy relative to user intent, and a normal curated alias can't fix it
+ * because aliases merge in AFTER descriptor names + entry terms (see the
+ * `#642 curated-alias merge` comment above `getMeshMap`) and can therefore
+ * never win against one. `functional mri` / `fmri` are genuine NLM entry
+ * terms of Magnetic Resonance Imaging (D008279) — MeSH has no "Functional
+ * MRI" descriptor of its own — but a user typing either means fMRI research,
+ * which `Functional Neuroimaging` (D059907) answers far better than general
+ * MRI/radiology does. Checked BEFORE `byForm`, so it wins outright.
+ *
+ * ponytail: a short explicit list, not a general override-precedence
+ * mechanism. Keep it this small — if it grows past a handful of entries,
+ * that's the signal to design a real precedence tier instead of extending
+ * this map.
+ *
+ * `matchedForm` is the surface form itself (not the target descriptor's
+ * name) so `isFullQueryMeshMatch` (lib/api/normalize.ts) still sees a
+ * verbatim whole-query match and scores this at full entry-term strength
+ * downstream, exactly like a real NLM entry-term hit.
+ */
+const HARD_OVERRIDE_BY_FORM: ReadonlyMap<
+  string,
+  { descriptorUi: string; matchedForm: string }
+> = new Map(
+  [
+    { matchedForm: "functional mri", descriptorUi: "D059907" },
+    { matchedForm: "fmri", descriptorUi: "D059907" },
+  ].map((e) => [normalizeForMatch(e.matchedForm), e]),
+);
+
+/**
  * #259 / #878 — rank the descriptor candidates for an already-normalized query
  * key against the in-memory MeSH map. Shared by `resolveMeshDescriptor` (which
  * takes the winner) and `suggestMeshConcepts` (which lists them), so the two
@@ -1391,6 +1422,24 @@ function rankedDescriptorCandidates(
   map: MeshMap,
   normalized: string,
 ): RankedDescriptorCandidate[] {
+  // #2088 hard override — checked first so it beats the entry-term hit
+  // below outright. Falls through to the normal path (rather than erroring)
+  // if the target UI ever disappears in a MeSH full-replace, mirroring the
+  // curated-alias table's stale-UI behavior.
+  const override = HARD_OVERRIDE_BY_FORM.get(normalized);
+  if (override) {
+    const overrideRow = map.byUi.get(override.descriptorUi);
+    if (overrideRow) {
+      return [
+        {
+          row: overrideRow,
+          confidence: "entry-term",
+          matchedForm: override.matchedForm,
+        },
+      ];
+    }
+  }
+
   const hits = map.byForm.get(normalized);
   if (!hits || hits.length === 0) return [];
 
