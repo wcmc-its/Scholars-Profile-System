@@ -2141,3 +2141,90 @@ describe("resolveQueryTaxonomy (#2115) — #1980 fix (2) dropped-word-disjoint g
     expect(taxonomyMatch.meshResolution).toBeNull();
   });
 });
+
+/**
+ * #1982 — the retry no longer requires `state === "none"` to fire: a curated topic
+ * match on the full query used to suppress it outright, even when that match carries
+ * no MeSH concept of its own (the People tab returned "(none)" for `tumor biology`
+ * where Publications, whose mesh-only path has no curated-match gate, resolved
+ * `Neoplasms`). The retry may now run whenever the full query's MeSH side is weak,
+ * REGARDLESS of curated state — but when the curated side already matched, only
+ * `meshResolution` may change; the curated primary/secondary is never replaced.
+ */
+describe("resolveQueryTaxonomy (#1982) — a curated match no longer blocks the mesh retry", () => {
+  const D_NEOPLASMS = {
+    descriptorUi: "D009369",
+    name: "Neoplasms",
+    entryTerms: ["Cancer"],
+    scopeNote: null,
+    dateRevised: null,
+    localPubCoverage: null as number | null,
+    treeNumbers: ["C04"],
+  };
+  const D_CORONARY_VESSELS = {
+    descriptorUi: "D003331",
+    name: "Coronary Vessels",
+    entryTerms: ["Coronary Artery", "Coronary Arteries", "Coronary Veins"],
+    scopeNote: null,
+    dateRevised: null,
+    localPubCoverage: null as number | null,
+    treeNumbers: ["A07.015.114.269"],
+  };
+
+  beforeEach(() => {
+    process.env.SEARCH_GENERIC_TERM_DEMOTE = "resolve";
+  });
+  afterEach(() => {
+    delete process.env.SEARCH_GENERIC_TERM_DEMOTE;
+  });
+
+  it("attaches a concept for a curated-matched query whose full-query MeSH side is null", async () => {
+    // "Cancer Research Advocacy" curated-matches the full query "cancer research" (token-
+    // boundary prefix), same as any other curated topic. Neither `cancer` (an entry term,
+    // not a descriptor name) nor `research` (deprioritized filler) wins the raw resolver's
+    // window fallback, so the full query's own MeSH side is null — the `tumor biology`
+    // shape from the issue.
+    mockTopicFindMany.mockResolvedValue([
+      { id: "cancer_research", label: "Cancer Research Advocacy" },
+    ]);
+    mockPubTopicGroupBy.mockResolvedValue([{ cwid: "c1" }]);
+    mockMeshFindMany.mockResolvedValue([D_NEOPLASMS]);
+
+    const { taxonomyMatch } = await resolveQueryTaxonomy("cancer research");
+    expect(taxonomyMatch.state).toBe("matches");
+    if (taxonomyMatch.state !== "matches") return;
+    // The curated match survives — this is the primary/secondary the pre-#1982 code
+    // already returned; #1982 changes only whether `meshResolution` gets filled in.
+    expect(taxonomyMatch.primary.id).toBe("cancer_research");
+    // The retry (stripped to the single content token `cancer`) resolves the concept the
+    // full query's raw resolution missed.
+    expect(taxonomyMatch.meshResolution?.name).toBe("Neoplasms");
+    expect(taxonomyMatch.meshResolution?.confidence).toBe("entry-term");
+  });
+
+  it("still rejects a disjoint multi-word retry when the curated side already matched", async () => {
+    // Same fixture as the #1980 fix (2) suite above, but the full query ALSO curated-
+    // matches a topic this time. Proves the #1979/#1980 guards that block the 9 measured
+    // concept-swap regressions are unconditional on curated state — they fire exactly the
+    // same whether or not `state === "matches"` — so dropping the `state === "none"` gate
+    // does not reopen them.
+    mockTopicFindMany.mockResolvedValue([
+      {
+        id: "coronary_registry",
+        label: "Coronary Artery Disease Patients Registry",
+      },
+    ]);
+    mockPubTopicGroupBy.mockResolvedValue([{ cwid: "c1" }]);
+    mockMeshFindMany.mockResolvedValue([D_CORONARY_VESSELS]);
+
+    const { taxonomyMatch } = await resolveQueryTaxonomy(
+      "coronary artery disease patients",
+    );
+    expect(taxonomyMatch.state).toBe("matches");
+    if (taxonomyMatch.state !== "matches") return;
+    expect(taxonomyMatch.primary.id).toBe("coronary_registry");
+    // `Coronary Vessels` shares no token with the dropped `disease`/`patients` — rejected,
+    // exactly as it is with no curated match at all.
+    expect(taxonomyMatch.meshResolution).toBeNull();
+  });
+});

@@ -886,21 +886,33 @@ export async function resolveQueryTaxonomy(
   );
 
   let taxonomyMatch = await matchQueryToTaxonomy(q);
-  // Issue #692 §4.1 — full query first; only on a complete MISS (no curated
-  // match AND no MeSH descriptor) retry against the stripped content query.
-  // Full-first protects descriptors built from filler ("gene therapy",
-  // "clinical trial") — those resolve on the first call and never reach here.
+  // Issue #692 §4.1 — full query first; only on a weak MeSH resolution retry against
+  // the stripped content query. Full-first protects descriptors built from filler
+  // ("gene therapy", "clinical trial") — those resolve on the first call and never
+  // reach here.
   // #1972 — a `partial` does NOT count as resolved here. Letting it satisfy this guard
   // suppressed the retry entirely whenever SEARCH_MESH_RESOLUTION_FALLBACK was on,
   // demoting queries whose stripped form resolves verbatim ("chronic fatigue" → strip
   // `chronic` → `fatigue` → exact).
+  // #1982 — no longer gated on `taxonomyMatch.state === "none"`. That gate blocked the
+  // retry outright whenever the full query ALSO curated-matched a topic label, even
+  // when the topic match carries no MeSH concept of its own — the People tab returned
+  // "(none)" for `tumor biology` while Publications (mesh-only, no curated-match gate)
+  // resolved `Neoplasms` from the identical retry. `curatedAlreadyMatched` below is what
+  // keeps this safe: when the curated side already matched, the retry may only upgrade
+  // `meshResolution`, never replace the whole result — see its comment.
   if (
     genericStripped &&
-    taxonomyMatch.state === "none" &&
     meshConfidenceRank(taxonomyMatch.meshResolution?.confidence) < MESH_RANK_VERBATIM
   ) {
     const retry = await matchQueryToTaxonomy(contentQuery);
     const current = taxonomyMatch.meshResolution;
+    // #1982 — once the curated side already matches a topic (`state === "matches"`),
+    // `taxonomyMatch = retry` below would silently discard that primary/secondary/areas/
+    // methodMatches in favor of whatever the SHORTER stripped query happens to
+    // curated-match instead — worse than the bug being fixed. Merge only the MeSH field
+    // in that case; the curated match, once found, is never clobbered by this retry.
+    const curatedAlreadyMatched = taxonomyMatch.state === "matches";
     if (current === null || isAllDeprioritized(current.matchedForm)) {
       // Nothing resolved, or the window that resolved was pure filler and carries none
       // of the query's meaning (`cancer research` → `Research`). Pre-#1972 behavior.
@@ -923,7 +935,9 @@ export async function resolveQueryTaxonomy(
           meshConfidenceRank(retry.meshResolution?.confidence) >
             meshConfidenceRank(current?.confidence))
       ) {
-        taxonomyMatch = retry;
+        taxonomyMatch = curatedAlreadyMatched
+          ? { ...taxonomyMatch, meshResolution: retry.meshResolution }
+          : retry;
       }
     } else if (
       // #1972 — the window held real content, so it IS an interpretation. The retry
