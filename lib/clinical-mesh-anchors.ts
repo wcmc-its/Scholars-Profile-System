@@ -49,16 +49,21 @@ export function isDiseaseTree(tn: string): boolean {
 }
 
 /**
- * Parse the curated `specialty,descriptor_ui,note` CSV into a
- * `anchorKey → descriptorUi` map. The specialty column MAY contain commas, so we
- * locate the `D\d+` descriptor column rather than blindly splitting on the first
- * comma. Blank lines, `#` comments, and the header row are skipped.
+ * Parse the curated `specialty,descriptor_ui,note` CSV into an
+ * `anchorKey → descriptorUi[]` map. The specialty column MAY contain commas, so
+ * we locate the `D\d+` descriptor column rather than blindly splitting on the
+ * first comma. Blank lines, `#` comments, and the header row are skipped.
+ *
+ * A specialty MAY need more than one disease-tree anchor (#2106, #2107 — e.g.
+ * Reproductive Endocrinology/Infertility spans Gonadal Disorders (C19) AND
+ * Infertility (C12), which share no common ancestor). Multiple CSV rows keying
+ * the same specialty are UNIONED (deduped by UI), not "first row wins".
  *
  * ponytail: hand-parse — the file is a controlled, comment-friendly two-column
  * artifact, not arbitrary user CSV; a quote-aware parser lib would be overkill.
  */
-export function parseSpecialtyAnchors(csv: string): Map<string, string> {
-  const map = new Map<string, string>();
+export function parseSpecialtyAnchors(csv: string): Map<string, string[]> {
+  const map = new Map<string, string[]>();
   for (const rawLine of csv.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
@@ -69,7 +74,12 @@ export function parseSpecialtyAnchors(csv: string): Map<string, string> {
     const ui = cols[uiIdx].trim();
     if (!specialty) continue;
     const key = anchorKey(specialty);
-    if (!map.has(key)) map.set(key, ui); // first row wins
+    const existing = map.get(key);
+    if (existing) {
+      if (!existing.includes(ui)) existing.push(ui); // union multiple D-codes per specialty
+    } else {
+      map.set(key, [ui]);
+    }
   }
   return map;
 }
@@ -84,7 +94,9 @@ export function parseSpecialtyAnchors(csv: string): Map<string, string> {
  * outputFileTracingIncludes traces it into those routes. Any NEW app-runtime
  * caller must add the CSV to that route's trace list.
  */
-export function loadSpecialtyAnchorMap(csvPath: string = CLINICAL_ANCHORS_CSV): Map<string, string> {
+export function loadSpecialtyAnchorMap(
+  csvPath: string = CLINICAL_ANCHORS_CSV,
+): Map<string, string[]> {
   return parseSpecialtyAnchors(readFileSync(csvPath, "utf8"));
 }
 
@@ -92,23 +104,29 @@ export function loadSpecialtyAnchorMap(csvPath: string = CLINICAL_ANCHORS_CSV): 
  * Resolve a scholar's specialty strings to their disease-anchor tree numbers.
  * Returns the flat deduped tree-number set (for the OpenSearch `terms` boost
  * filter) plus the per-specialty {@link ClinicalAnchor} rows (for the evidence
- * label). A specialty absent from the map, or whose anchor has no disease-tree
- * tree number, contributes nothing (graceful — falls back to today's literal
- * clinicalSpecialties behavior, no regression).
+ * label). A specialty absent from the map, or whose anchor(s) have no
+ * disease-tree tree number, contributes nothing (graceful — falls back to
+ * today's literal clinicalSpecialties behavior, no regression).
+ *
+ * A specialty MAY map to multiple descriptor UIs (#2106, #2107); their
+ * disease-tree tree numbers are unioned into the specialty's single
+ * {@link ClinicalAnchor}.
  */
 export function buildClinicalAnchors(
   clinicalSpecialties: string[],
   boardSet: string[],
-  anchorMap: ReadonlyMap<string, string>,
+  anchorMap: ReadonlyMap<string, string[]>,
   treeNumbersByUi: ReadonlyMap<string, string[]>,
 ): { tree: string[]; anchors: ClinicalAnchor[] } {
   const boardNorm = new Set(boardSet.map((b) => b.toLowerCase().trim()));
   const anchors: ClinicalAnchor[] = [];
   const treeSet = new Set<string>();
   for (const specialty of clinicalSpecialties) {
-    const ui = anchorMap.get(anchorKey(specialty));
-    if (!ui) continue;
-    const tns = (treeNumbersByUi.get(ui) ?? []).filter(isDiseaseTree);
+    const uis = anchorMap.get(anchorKey(specialty));
+    if (!uis || uis.length === 0) continue;
+    const tns = [
+      ...new Set(uis.flatMap((ui) => treeNumbersByUi.get(ui) ?? []).filter(isDiseaseTree)),
+    ];
     if (tns.length === 0) continue;
     anchors.push({
       specialty,

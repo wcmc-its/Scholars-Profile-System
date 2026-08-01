@@ -11,7 +11,11 @@
 #                    are listed explicitly.
 #   descriptor_ui  — a MeSH descriptor in the DISEASE tree (C.. or F03..). Only the
 #                    descriptor's C/F03 tree numbers are used; non-disease trees are
-#                    ignored, so a discipline that mis-resolves is harmless.
+#                    ignored, so a discipline that mis-resolves is harmless. A
+#                    specialty needing MORE THAN ONE disease anchor (#2106,
+#                    #2107) repeats the specialty across multiple rows — the
+#                    loader unions their tree numbers, it does not "first row
+#                    wins" dedup.
 #   note           — real NLM label + tree number(s)
 #
 # Every descriptor_ui below was VALIDATED against authoritative NLM MeSH
@@ -74,12 +78,14 @@ Vascular Surgery,D014652,Vascular Diseases (C14.907)
 #
 # REUSE — existing validated disease anchors, additional POPS wordings:
 Hematology/Oncology,D009369,Neoplasms (C04)
+Hematology/Oncology,D006402,Hematologic Diseases (C15.378) — #2107 add non-malignant heme coverage
 Pulmonary Disease Medicine,D008171,Lung Diseases (C08.381)
 Echocardiography,D002318,Cardiovascular Diseases (C14)
 Nuclear Cardiology,D002318,Cardiovascular Diseases (C14)
 Otolaryngology-Head & Neck Surgery,D010038,Otorhinolaryngologic Diseases (C09)
 Pulmonary Critical Care Medicine,D008171,Lung Diseases (C08.381)
-Reproductive Endocrinology/Infertility,D004700,Endocrine System Diseases (C19)
+Reproductive Endocrinology/Infertility,D006058,Gonadal Disorders (C19.391) — #2106 two-descriptor anchor (replaces over-broad D004700)
+Reproductive Endocrinology/Infertility,D007246,Infertility (C12.100.750) — #2106 two-descriptor anchor
 Pediatric Cardiology,D002318,Cardiovascular Diseases (C14)
 Surgery, Neurological,D009422,Nervous System Diseases (C10)
 Psychiatry, Geriatric,D001523,Mental Disorders (F03)
@@ -88,6 +94,7 @@ Cardiac Surgery,D006331,Heart Diseases (C14.280)
 Pediatric Neurology,D009422,Nervous System Diseases (C10)
 Neurology With Special Qualifications In Child Neurology,D009422,Nervous System Diseases (C10)
 Pediatric Hematology-Oncology,D009369,Neoplasms (C04)
+Pediatric Hematology-Oncology,D006402,Hematologic Diseases (C15.378) — #2107 add non-malignant heme coverage
 Radiation Oncology,D009369,Neoplasms (C04)
 Epilepsy,D004827,Epilepsy (C10.228.140.490)
 Vascular Neurology,D002561,Cerebrovascular Disorders (C10.228.140.300)
