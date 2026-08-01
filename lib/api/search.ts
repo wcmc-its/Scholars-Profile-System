@@ -889,14 +889,15 @@ export function humanizeAreaSlug(slug: string): string {
  *
  * So: among the intersecting areas, take the one the scholar has the MOST publications
  * in. `>` is deliberately strict, which makes the scholar's own order the tie-break and
- * makes the degradation exact — a not-yet-reindexed doc carries no `areaCounts`, every
- * candidate scores 0, and the first intersecting slug wins, which is the old behavior
- * byte-for-byte. That is why this needs no flag.
+ * makes the degradation exact — no matching `areaCounts` entry (nobody on the page has a
+ * resolved topic yet, or #2071 hasn't run), every candidate scores 0, and the first
+ * intersecting slug wins, which is the old behavior byte-for-byte. That is why this needs
+ * no flag.
  *
- * Contract: docs/search-relevance-contract.md § Layer 3, rule E1. This closes the
- * SELECTION half only. The count is still `areaCounts`, computed at index time and never
- * filtered by the query, so it remains the scholar's total in that area whatever was
- * searched — E1 stays open on that half.
+ * Contract: docs/search-relevance-contract.md § Layer 3, rule E1. This closed the
+ * SELECTION half. #2071 (E1b) closed the other half — `areaCounts` is now resolved
+ * query-time (`areaCountsByCwid` in `searchPeople`, scoped to the topics the query
+ * resolved to) rather than read from the index-time `_source` total.
  */
 export function pickMatchedAreaIndex(
   slugs: readonly string[],
@@ -3164,12 +3165,12 @@ export async function searchPeople(opts: {
       // path keeps today's `_source` shape. The count is then an O(1) `_source`
       // lookup instead of a publications-index agg.
       ...(reasonFromDoc && opts.skipReasonAgg !== true ? ["meshSubtreeCounts"] : []),
-      // #1366 — the precomputed reason-line counts (method family + research
-      // area), requested ONLY when the stacked-lines flag is on so the off path
-      // keeps today's `_source` shape. Both are O(1) `_source` lookups (no agg).
-      ...(reasonCountsStacked && opts.skipReasonAgg !== true
-        ? ["methodFamilyCounts", "areaCounts"]
-        : []),
+      // #1366 — the precomputed method-family reason-line count, requested ONLY
+      // when the stacked-lines flag is on so the off path keeps today's
+      // `_source` shape. An O(1) `_source` lookup (no agg). The research-area
+      // sibling (`areaCounts`) is no longer read here — #2071 (E1b) moved it to
+      // a query-time aggregation (`areaCountsByCwid`), so it is never fetched.
+      ...(reasonCountsStacked && opts.skipReasonAgg !== true ? ["methodFamilyCounts"] : []),
       // POPS clinical fields — the matchable specialty set + the board-cert-only
       // subset (for the `boardCertified` label), requested ONLY when
       // SEARCH_PEOPLE_CLINICAL_FN is on so the off path keeps today's `_source`
@@ -3363,12 +3364,13 @@ export async function searchPeople(opts: {
       // count is `meshSubtreeCounts[resolvedConceptUi] ?? 0`; a not-yet-reindexed
       // doc lacks the field and degrades to 0 (concept fallback), never a 500.
       meshSubtreeCounts?: Record<string, number>;
-      // #1366 — precomputed reason-line counts. `methodFamilyCounts[familyLabel]`
-      // + `areaCounts[parentTopicSlug]` = distinct on-topic pub counts, read O(1).
-      // Present only when SEARCH_EVIDENCE_REASON_COUNTS is on (added to `_source`
-      // above); a not-yet-reindexed doc lacks them → no count, never a 500.
+      // #1366 — precomputed method reason-line count. `methodFamilyCounts[familyLabel]`
+      // = distinct method-tagged pub count, read O(1). Present only when
+      // SEARCH_EVIDENCE_REASON_COUNTS is on (added to `_source` above); a
+      // not-yet-reindexed doc lacks it → no count, never a 500. The research-area
+      // sibling this used to sit beside (`areaCounts`) is gone from this type —
+      // #2071 (E1b) replaced it with the query-time `areaCountsByCwid`.
       methodFamilyCounts?: Record<string, number>;
-      areaCounts?: Record<string, number>;
       // POPS clinical specialty set + board-cert-only subset (omit-on-empty in
       // the ETL). Present only when SEARCH_PEOPLE_CLINICAL_FN is on (added to
       // `_source` above); feed `clinicalExactMatch` for the `clinical:exact`
@@ -3819,6 +3821,13 @@ export async function searchPeople(opts: {
   const matchedTopicSlugs = new Set<string>();
   const topicLabelByMatchedSlug = new Map<string, string>();
   const topicLabelBySlug = new Map<string, string>();
+  //   areaCountsByCwid — #2071 (E1b) — the topic line's per-scholar distinct-pub
+  //     count in the matched area, resolved QUERY-TIME (one batched
+  //     `publicationTopic.groupBy` over the page cwids, scoped to the topics
+  //     THIS query resolved to) instead of read from the index-time `_source`
+  //     total. Mirrors `methodPubCountByCwid` above. Populated only when at
+  //     least one topic matched, so a non-topic query adds zero queries.
+  const areaCountsByCwid = new Map<string, Record<string, number>>();
   if (matchAwareContext && pageCwids.length > 0) {
     const family = matchAwareContext.methodFamily;
     if (family) {
@@ -3889,6 +3898,30 @@ export async function searchPeople(opts: {
       }
     }
 
+    // #2071 (E1b) — the topic evidence line's count, resolved query-time. Scoped
+    // to the topics THIS query resolved to (never the scholar's full area list),
+    // which is also every slug `pickMatchedAreaIndex` below can ever read (it
+    // only compares slugs that intersect `matchedTopicSlugs` in the first
+    // place), so nothing wider is fetched.
+    if (matchedTopicSlugs.size > 0) {
+      const areaRows = await prisma.publicationTopic.groupBy({
+        by: ["cwid", "parentTopicId"],
+        where: {
+          cwid: { in: pageCwids },
+          parentTopicId: { in: Array.from(matchedTopicSlugs) },
+        },
+        _count: { pmid: true },
+      });
+      for (const row of areaRows) {
+        let m = areaCountsByCwid.get(row.cwid);
+        if (!m) {
+          m = {};
+          areaCountsByCwid.set(row.cwid, m);
+        }
+        m[row.parentTopicId] = row._count.pmid;
+      }
+    }
+
     // Real `Topic.id`→`Topic.label` map for the humanized-areas fallback (no
     // under_scores). `areasOfInterest` is a space-join of `Topic.id` slugs, so a
     // single `topic.findMany` resolves every area to its curated label; unknown
@@ -3915,13 +3948,16 @@ export async function searchPeople(opts: {
     // #1836 — per-specialty disease anchors for the `clinicalMeshMatch` fallback.
     clinicalAnchors: ClinicalAnchor[] | undefined,
     // #1366 — doc-precomputed reason-line counts (O(1) lookups, no agg). Keyed by
-    // `familyLabel` / parent-topic slug. Only read by the stacked-lines path.
+    // `familyLabel`. Only read by the stacked-lines path.
     methodFamilyCounts: Record<string, number> | undefined,
+    // #2071 (E1b) — keyed by parent-topic slug, but UNLIKE `methodFamilyCounts`
+    // this is resolved query-time (`areaCountsByCwid` above), not read from a
+    // doc field — the index-time `areaCounts` total was the open half of E1.
     areaCounts: Record<string, number> | undefined,
   ): SelectEvidenceInput => {
     const hasProvenance = prov != null;
-    // #1366 — clamp a doc-precomputed count to the scholar total; drop 0/absent
-    // (a not-yet-reindexed doc has no map → no count → no prefix, gracefully).
+    // #1366 — clamp a doc-precomputed/query-time count to the scholar total;
+    // drop 0/absent (no matching rows → no count → no prefix, gracefully).
     const countOf = (n: number | undefined): number | undefined =>
       n && n > 0 ? Math.min(n, pubCount) : undefined;
     const m = methodReasonByCwid.get(cwid);
@@ -4177,7 +4213,9 @@ export async function searchPeople(opts: {
                 h._source.clinicalBoardSet,
                 h._source.clinicalAnchors,
                 h._source.methodFamilyCounts,
-                h._source.areaCounts,
+                // #2071 (E1b) — query-time, not `h._source.areaCounts` (the
+                // index-time total the issue is closing).
+                areaCountsByCwid.get(h._source.cwid),
               );
               // #1366 — flag on ⇒ the stacked list; off ⇒ today's single object
               // (byte-identical, `selectEvidenceLines` is never called).
