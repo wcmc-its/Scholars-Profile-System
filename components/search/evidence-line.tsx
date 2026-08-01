@@ -417,7 +417,7 @@ export function EvidenceLine({
     keyPaperConfig != null &&
     evidence.kind === "publications" &&
     (evidence.pubs?.length ?? 0) === 0 &&
-    (evidence.count ?? 0) > 0;
+    (evidence.count == null || evidence.count > 0);
   const keyPaperMentionOnly =
     evidence.kind === "publications" && evidence.strength === "mention";
   const [keyPapers, setKeyPapers] = useState<EvidencePub[]>([]);
