@@ -672,7 +672,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_FACULTY_PROMINENCE",
-                "Value": "on",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_PEOPLE_PUBCOUNT_DAMPEN",

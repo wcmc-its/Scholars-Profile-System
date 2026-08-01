@@ -1863,13 +1863,18 @@ export class AppStack extends Stack {
         //   staging A/B before any flip (then set staging -> "on"); the chief-of ranking
         //   WITHIN the roster additionally needs the #1347 chiefCwid reindex.
         SEARCH_PEOPLE_DIVISION_SHAPE: "off",
-        // #1345 -- full-time-faculty prominence lever. Default ON keeps the #513 flat
-        //   +1.0 full_time_faculty prominence term (prod ranking byte-identical until a
-        //   deliberate flip). Set to "off" to drop the expertise-independent employment
-        //   prior so genuine affiliated/clinical subspecialty experts aren't buried.
+        // #1345 -- full-time-faculty prominence lever. "off" drops the #513 flat +1.0
+        //   full_time_faculty prominence term (the expertise-independent employment
+        //   prior) so genuine affiliated/clinical subspecialty experts aren't buried.
         //   resolveSearchPeopleFacultyProminence reads !== "off". Query-time, no reindex.
-        //   STAGING-FIRST: neutralized on staging for the A/B soak, prod keeps +1.0.
-        SEARCH_PEOPLE_FACULTY_PROMINENCE: env === "staging" ? "off" : "on",
+        //   DECISION: OFF in both envs (2026-08-01). The 2026-07-03 re-eval
+        //   (docs/audits/search-boost-tuning-ab-2026-07-03.md, #1471) found turning it ON
+        //   regresses overall relevance (meanMRR 0.292 -> 0.285) now that the #1363
+        //   concentration boost is active, and the original diabetes-cluster regression
+        //   that parked this issue does not reproduce with #1363 active. Prod previously
+        //   ran "on" as legacy drift from before that re-eval; flipped off here to match
+        //   staging and close out #1345.
+        SEARCH_PEOPLE_FACULTY_PROMINENCE: "off",
         // #2068 -- volume-prior ceiling. Same family as the faculty lever above
         //   (expertise-INDEPENDENT priors in the one outer prominence sum), kept adjacent
         //   so both envs' divergence is visible in a single screenful. Default "off" =
@@ -1894,11 +1899,12 @@ export class AppStack extends Stack {
         //   1+ln1p(580) = 7.365 (the 580-pub scholar wins); capped 1+2.5+1.0 = 4.5 vs
         //   1+3.0 = 4.0 (the 50-pub faculty wins).
         //
-        //   Consequence for the rollout: SEARCH_PEOPLE_FACULTY_PROMINENCE is itself
-        //   env-divergent right now (staging "off" for its A/B soak, prod "on"), so a
-        //   staging A/B of THIS lever measures a different sum composition than prod will
-        //   serve -- staging has no +1.0 faculty term to have its share raised. Size the
-        //   prod effect from the prod posture, not from the staging read.
+        //   Historical note: the math above was measured back when
+        //   SEARCH_PEOPLE_FACULTY_PROMINENCE was env-divergent (staging "off" for its A/B
+        //   soak, prod "on"). As of 2026-08-01 (#1345) that lever is "off" in BOTH envs,
+        //   so prod no longer carries the +1.0 faculty term at all -- the sum composition
+        //   above is now historical context for why these two levers interact, not the
+        //   live prod posture.
         //   ADR-011 B3 -- ships WITH B1 (W_HI/alpha/GRADED above), never before: B3 is
         //   what keeps W_HI from needing re-derivation every time another term in the
         //   sum moves (contract rule O5). Re-verified against prod posture
