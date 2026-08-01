@@ -21,6 +21,15 @@ describe("extractLastNameSort", () => {
     expect(extractLastNameSort("   ")).toBe("");
   });
 
+  it("strips a ' - <Department>' name-collision disambiguation suffix (#2049)", () => {
+    expect(extractLastNameSort("Alessandro Fichera - Surgery")).toBe("fichera");
+    expect(extractLastNameSort("Jesse Codner - Cardiothoracic Surgery")).toBe(
+      "codner",
+    );
+    // Hyphenated surnames with no surrounding spaces are untouched.
+    expect(extractLastNameSort("Mary Smith-Jones")).toBe("smith-jones");
+  });
+
   it("orders people last-name-first when used as a sort key", () => {
     const names = ["Laura Santambrogio", "Amy Chadburn", "David J. Simon", "Vered Stearns"];
     const sorted = [...names].sort(
