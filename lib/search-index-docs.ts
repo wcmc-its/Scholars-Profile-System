@@ -44,6 +44,7 @@ import { buildClinicalAnchors, loadSpecialtyAnchorMap } from "@/lib/clinical-mes
 import {
   buildMeshAncestorIndex,
   ancestorUisFor,
+  treeNumberPrefixes,
   type MeshAncestorIndex,
 } from "@/lib/mesh-tree-ancestors";
 import { extractLastNameSort } from "@/lib/name-sort";
@@ -887,6 +888,88 @@ export async function buildPeopleDoc(
   // hidden/dark filter as every other rollup here.
   const keptPmids = new Set<string>();
 
+  // POPS clinical fields — derived from POPS JSON columns on the scholar row
+  // (populated by the etl/pops step). All three follow the OMIT-on-empty
+  // convention (topMeshTerms pattern): don't emit the key when the array is
+  // empty, so `_source` consumers distinguish "no POPS data" from "[]".
+  // The JSON columns come back as parsed JSON at runtime; guard null /
+  // non-array defensively before coercing to typed arrays.
+  //
+  // #1367 Gap 1 — hoisted ABOVE the per-pub loop (was after it) so
+  // `clinicalAnchorResult.anchors` is available while iterating authorships
+  // below, to build `clinicalOnTopicCounts`. This block depends only on `s`
+  // and `meshAncestors`, both available at function entry, so the hoist is
+  // behavior-preserving for every field it already produced.
+  const boardCertSpecialties: string[] = (() => {
+    const raw = s.popsBoardCertifications;
+    if (!Array.isArray(raw)) return [];
+    const out: string[] = [];
+    for (const item of raw) {
+      if (item && typeof item === "object" && "specialty" in item) {
+        const sp = (item as { specialty: unknown }).specialty;
+        if (typeof sp === "string" && sp.length > 0) out.push(sp);
+      }
+    }
+    return out;
+  })();
+  const primarySpecialties: string[] = (() => {
+    const raw = s.popsSpecialties;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((x): x is string => typeof x === "string" && x.length > 0);
+  })();
+  // clinicalSpecialties = board-cert ∪ primary_specialties, deduped
+  // case-insensitively. Board-cert entries come first; first occurrence wins
+  // for the canonical casing.
+  const clinicalSpecialtiesMap = new Map<string, string>();
+  for (const specialty of boardCertSpecialties) {
+    const key = specialty.toLowerCase();
+    if (!clinicalSpecialtiesMap.has(key)) clinicalSpecialtiesMap.set(key, specialty);
+  }
+  for (const specialty of primarySpecialties) {
+    const key = specialty.toLowerCase();
+    if (!clinicalSpecialtiesMap.has(key)) clinicalSpecialtiesMap.set(key, specialty);
+  }
+  const clinicalSpecialties = Array.from(clinicalSpecialtiesMap.values());
+  // clinicalExpertise = popsExpertise (POPS problem_procedure strings).
+  const clinicalExpertise: string[] = (() => {
+    const raw = s.popsExpertise;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((x): x is string => typeof x === "string" && x.length > 0);
+  })();
+  // clinicalBoardSet = board-cert specialty strings only; used by the
+  // result-evidence layer to set the boardCertified label. Stored as a
+  // keyword field (not analyzed) so exact membership is recoverable at
+  // query time without a DB round-trip.
+  const clinicalBoardSet = boardCertSpecialties;
+  // #1836 — anchor each specialty to a MeSH disease descriptor's tree numbers so
+  // the clinical boost/evidence fire for the whole disease subtree it covers.
+  // Only when the ETL passed the ancestor context (which carries the curated
+  // specialty→UI map); OMIT-on-empty like the fields above.
+  const clinicalAnchorResult = meshAncestors
+    ? buildClinicalAnchors(
+        clinicalSpecialties,
+        clinicalBoardSet,
+        meshAncestors.specialtyAnchors,
+        meshAncestors.treeNumbersByUi,
+      )
+    : { tree: [], anchors: [] };
+
+  // #1367 Gap 1 — the scholar's "eligible" pool for the clinical evidence
+  // line's on-topic pub count: the number of visible/confirmed pubs carrying
+  // ANY MeSH descriptor at all (index-time, MeSH-tag-based — analogous to
+  // `methodPubCount`'s post-2020 method-extraction-eligible pool, but this one
+  // is MeSH-tag-based rather than date-based). Only accumulated when
+  // `meshAncestors` was passed (same guard `subtreeAgg` uses); OMIT-on-zero
+  // below.
+  let meshTaggedPubCount = 0;
+  // #1367 Gap 1 — per-specialty on-topic distinct-pub counts for the clinical
+  // evidence line's "N of M eligible publications" display. Keyed by
+  // `ClinicalAnchor.specialty`; only populated once `clinicalAnchorResult.anchors`
+  // is non-empty. Union-first-then-count-once-per-pub, same discipline as
+  // `subtreeAgg` above (a pub matching a specialty via two tree numbers, or two
+  // anchor D-codes, still counts once for that specialty). OMIT-on-empty below.
+  const clinicalOnTopicAgg = new Map<string, number>();
+
   let kept = 0;
   for (const a of s.authorships) {
     // Phase 4b C4 — skip pubs the scholar hid + dark pmids. Both keep this
@@ -969,6 +1052,39 @@ export async function buildPeopleDoc(
         subtreeAgg.set(concept, (subtreeAgg.get(concept) ?? 0) + 1);
       }
     }
+
+    // #1367 Gap 1 — same `meshAncestors` guard as `subtreeAgg` above (both are
+    // MeSH-ancestor-context-dependent rollups; neither is meaningful without it).
+    if (meshAncestors) {
+      // The "eligible" pool: any visible pub carrying at least one MeSH
+      // descriptor counts once, regardless of whether it lands in a clinical
+      // anchor's subtree.
+      if (pubMeshUis.length > 0) meshTaggedPubCount += 1;
+
+      // Clinical on-topic count: build this pub's tree-number ancestor closure
+      // ONCE, then test every specialty anchor against it — union-first-then-
+      // count-once-per-pub-per-specialty, mirroring `subtreeAgg`'s
+      // `conceptsThisPub` discipline so a pub matching a specialty via two tree
+      // numbers (or two anchor D-codes, #2106/#2107) still counts once for that
+      // specialty.
+      if (clinicalAnchorResult.anchors.length > 0) {
+        const closure = new Set<string>();
+        for (const ui of pubMeshUis) {
+          const tns = meshAncestors.treeNumbersByUi.get(ui) ?? [];
+          for (const tn of tns) {
+            for (const prefix of treeNumberPrefixes(tn)) closure.add(prefix);
+          }
+        }
+        for (const anchor of clinicalAnchorResult.anchors) {
+          if (anchor.tree.some((tn) => closure.has(tn))) {
+            clinicalOnTopicAgg.set(
+              anchor.specialty,
+              (clinicalOnTopicAgg.get(anchor.specialty) ?? 0) + 1,
+            );
+          }
+        }
+      }
+    }
   }
 
   // Apply min-evidence threshold and emit term repetitions.
@@ -1028,6 +1144,18 @@ export async function buildPeopleDoc(
   // OMIT-on-empty (and absent entirely when `meshAncestors` wasn't passed).
   const meshSubtreeCounts: Record<string, number> | null =
     subtreeAgg && subtreeAgg.size > 0 ? Object.fromEntries(subtreeAgg) : null;
+
+  // #1367 Gap 1 — finalize `meshTaggedPubCount`: `null` when zero (no visible
+  // pub carries a MeSH tag, or `meshAncestors` wasn't passed), the same
+  // OMIT-on-empty/zero convention `meshSubtreeCounts` uses above.
+  const meshTaggedPubCountFinal: number | null = meshTaggedPubCount > 0 ? meshTaggedPubCount : null;
+
+  // #1367 Gap 1 — finalize the per-specialty on-topic map for the clinical
+  // evidence line's "N of M eligible publications" count. `null` when empty
+  // (no clinical anchors, or none matched any visible pub), mirroring
+  // `meshSubtreeCounts`.
+  const clinicalOnTopicCounts: Record<string, number> | null =
+    clinicalOnTopicAgg.size > 0 ? Object.fromEntries(clinicalOnTopicAgg) : null;
 
   // #1366 — per-parent-topic distinct-pub map for the research-area reason line.
   // `areaCounts[parentTopicId]` = the scholar's distinct VISIBLE pubs in that
@@ -1338,66 +1466,6 @@ export async function buildPeopleDoc(
     }
   }
 
-  // POPS clinical fields — derived from POPS JSON columns on the scholar row
-  // (populated by the etl/pops step). All three follow the OMIT-on-empty
-  // convention (topMeshTerms pattern): don't emit the key when the array is
-  // empty, so `_source` consumers distinguish "no POPS data" from "[]".
-  // The JSON columns come back as parsed JSON at runtime; guard null /
-  // non-array defensively before coercing to typed arrays.
-  const boardCertSpecialties: string[] = (() => {
-    const raw = s.popsBoardCertifications;
-    if (!Array.isArray(raw)) return [];
-    const out: string[] = [];
-    for (const item of raw) {
-      if (item && typeof item === "object" && "specialty" in item) {
-        const sp = (item as { specialty: unknown }).specialty;
-        if (typeof sp === "string" && sp.length > 0) out.push(sp);
-      }
-    }
-    return out;
-  })();
-  const primarySpecialties: string[] = (() => {
-    const raw = s.popsSpecialties;
-    if (!Array.isArray(raw)) return [];
-    return raw.filter((x): x is string => typeof x === "string" && x.length > 0);
-  })();
-  // clinicalSpecialties = board-cert ∪ primary_specialties, deduped
-  // case-insensitively. Board-cert entries come first; first occurrence wins
-  // for the canonical casing.
-  const clinicalSpecialtiesMap = new Map<string, string>();
-  for (const specialty of boardCertSpecialties) {
-    const key = specialty.toLowerCase();
-    if (!clinicalSpecialtiesMap.has(key)) clinicalSpecialtiesMap.set(key, specialty);
-  }
-  for (const specialty of primarySpecialties) {
-    const key = specialty.toLowerCase();
-    if (!clinicalSpecialtiesMap.has(key)) clinicalSpecialtiesMap.set(key, specialty);
-  }
-  const clinicalSpecialties = Array.from(clinicalSpecialtiesMap.values());
-  // clinicalExpertise = popsExpertise (POPS problem_procedure strings).
-  const clinicalExpertise: string[] = (() => {
-    const raw = s.popsExpertise;
-    if (!Array.isArray(raw)) return [];
-    return raw.filter((x): x is string => typeof x === "string" && x.length > 0);
-  })();
-  // clinicalBoardSet = board-cert specialty strings only; used by the
-  // result-evidence layer to set the boardCertified label. Stored as a
-  // keyword field (not analyzed) so exact membership is recoverable at
-  // query time without a DB round-trip.
-  const clinicalBoardSet = boardCertSpecialties;
-  // #1836 — anchor each specialty to a MeSH disease descriptor's tree numbers so
-  // the clinical boost/evidence fire for the whole disease subtree it covers.
-  // Only when the ETL passed the ancestor context (which carries the curated
-  // specialty→UI map); OMIT-on-empty like the fields above.
-  const clinicalAnchorResult = meshAncestors
-    ? buildClinicalAnchors(
-        clinicalSpecialties,
-        clinicalBoardSet,
-        meshAncestors.specialtyAnchors,
-        meshAncestors.treeNumbersByUi,
-      )
-    : { tree: [], anchors: [] };
-
   return {
     cwid: s.cwid,
     slug: s.slug,
@@ -1495,6 +1563,18 @@ export async function buildPeopleDoc(
     ...(clinicalAnchorResult.anchors.length > 0
       ? { clinicalAnchors: clinicalAnchorResult.anchors }
       : {}),
+    // #1367 Gap 1 — the clinical evidence line's "eligible" pool: the
+    // scholar's count of visible pubs carrying ANY MeSH descriptor at all.
+    // OMIT-on-zero, and absent entirely unless the ETL passed the ancestor
+    // context (same degradation as `meshSubtreeCounts`).
+    ...(meshTaggedPubCountFinal !== null
+      ? { meshTaggedPubCount: meshTaggedPubCountFinal }
+      : {}),
+    // #1367 Gap 1 — per-specialty on-topic distinct-pub counts (_source-only,
+    // `enabled: false` — never queried/aggregated, same as `areaCounts` /
+    // `meshSubtreeCounts`) for the clinical evidence line's "N of M eligible
+    // publications" display. OMIT-on-empty.
+    ...(clinicalOnTopicCounts ? { clinicalOnTopicCounts } : {}),
   };
 }
 

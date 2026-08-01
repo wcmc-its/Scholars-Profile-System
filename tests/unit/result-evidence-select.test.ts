@@ -679,6 +679,29 @@ describe("selectEvidence — clinical:exact vs tagged, COUNT-GATED (tuning: boar
     const ev = selectEvidence({ clinical: board, pub: tagged(1) });
     expect(ev).toMatchObject({ kind: "publications", strength: "tagged" });
   });
+
+  // #1367 Gap 1 — decision #1: the new display-only `clinical.count`/`eligiblePubCount`
+  // must NEVER move the count-gated precedence needle above. Re-run the SAME two
+  // boundary cases (5 < 6 clinical wins; 6 >= 6 tagged wins) with a large on-topic
+  // count attached to `clinical` — the gate still keys off `pub.tagged.count` alone.
+  it("#1367 Gap 1 — a large clinical.count/eligiblePubCount does NOT tip the board/specialty-over-tagged gate", () => {
+    const boardWithCount = { ...board, count: 500, eligiblePubCount: 900 };
+    const belowThreshold = selectEvidence({
+      clinical: boardWithCount,
+      pub: tagged(5),
+      clinicalReasonThresholds: TH,
+    });
+    expect(belowThreshold).toMatchObject({ kind: "clinical", boardCertified: true, count: 500 });
+
+    const atThreshold = selectEvidence({
+      clinical: boardWithCount,
+      pub: tagged(6),
+      clinicalReasonThresholds: TH,
+    });
+    // Still loses to the STRONG tagged signal at 6, exactly as it does with no
+    // clinical count at all (see "board cert loses to a STRONG tagged signal" above).
+    expect(atThreshold).toMatchObject({ kind: "publications", strength: "tagged" });
+  });
 });
 
 describe("INVARIANT guardrails (handoff §4 principle 5 — would have caught #1051)", () => {
@@ -903,6 +926,37 @@ describe("selectEvidenceLines — #1366 stacked, counted reason lines", () => {
     expect("count" in cl).toBe(false);
     // clinical alone still renders
     expect(kinds({ clinical })).toEqual(["clinical"]);
+  });
+
+  // #1367 Gap 1 — the clinical evidence line's DISPLAY-ONLY on-topic pub count.
+  // Forwarded ADDITIVELY onto both `selectEvidence` (single-evidence path) and
+  // `selectEvidenceLines` (stacked path); neither reads it — the count-gated
+  // clinical-vs-tagged threshold logic above (describe block "COUNT-GATED") is
+  // driven entirely by `pub.tagged.count` and `clinicalReasonThresholds`, never by
+  // `clinical.count`/`clinical.eligiblePubCount`.
+  it("#1367 Gap 1 — clinical WITH count/eligiblePubCount forwards both onto the line, still carries no ordering weight", () => {
+    const clinicalWithCount = { ...clinical, count: 9, eligiblePubCount: 210 };
+    const lines = selectEvidenceLines({ method, pub: tagged, topic, clinical: clinicalWithCount });
+    expect(lines.map((l) => l.kind)).toEqual(["method", "publications", "topic", "clinical"]);
+    const cl = lines[3];
+    if (cl.kind !== "clinical") throw new Error("shape");
+    expect(cl).toEqual({
+      kind: "clinical",
+      specialty: "Endocrinology",
+      boardCertified: true,
+      count: 9,
+      eligiblePubCount: 210,
+    });
+
+    // Single-evidence path: `selectEvidence` alone (no stronger evidence to beat).
+    const solo = selectEvidence({ clinical: clinicalWithCount });
+    expect(solo).toEqual({
+      kind: "clinical",
+      specialty: "Endocrinology",
+      boardCertified: true,
+      count: 9,
+      eligiblePubCount: 210,
+    });
   });
 
   it("none of method/concept/area/keyword ⇒ falls back to the single-evidence tail", () => {

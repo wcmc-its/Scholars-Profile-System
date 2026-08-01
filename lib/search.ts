@@ -228,6 +228,16 @@ export const peopleIndexMapping = {
       // #1366 — per-parent-topic distinct-pub counts (dynamic topic-slug keys);
       // store in `_source`, don't index — same rationale as `methodFamilyCounts`.
       areaCounts: { type: "object", enabled: false },
+      // #1367 Gap 1 — the clinical evidence line's "eligible" pool: the
+      // scholar's count of visible pubs carrying ANY MeSH descriptor at all.
+      // A plain scalar (unlike the per-key rollups above), so it's a real
+      // `integer` field like `publicationCount` — not `object`/`enabled:false`.
+      meshTaggedPubCount: { type: "integer" },
+      // #1367 Gap 1 — per-specialty on-topic distinct-pub counts (dynamic
+      // specialty-name keys) for the clinical evidence line's "N of M eligible
+      // publications" display. Source-only (never queried/aggregated) — same
+      // `object` + `enabled:false` convention as `areaCounts`/`meshSubtreeCounts`.
+      clinicalOnTopicCounts: { type: "object", enabled: false },
       overview: { type: "text", analyzer: "scholar_text" },
       // Issue #310 / SPEC §6.1.5 — materialized inputs to the topic-shape
       // sparse-profile soft decay. The decay's "non-trivial" thresholds

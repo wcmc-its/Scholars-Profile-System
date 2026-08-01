@@ -204,6 +204,52 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(spec.className).toMatch(/underline/);
   });
 
+  it("#1367 Gap 1 — clinical WITH count+eligiblePubCount ⇒ appends 'N of M eligible publications'", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{
+          kind: "clinical",
+          specialty: "Cardiology",
+          boardCertified: true,
+          count: 12,
+          eligiblePubCount: 340,
+        }}
+        pubCount={44}
+        stacked
+      />,
+    );
+    expect(container.textContent).toMatch(/Board certified in Cardiology/);
+    // The new count clause — reads "12 of 340 eligible publications", NOT against
+    // `pubCount` (44), which is a different (career-total) denominator.
+    expect(container.textContent).toMatch(/12 of 340 eligible publications/);
+    expect(container.textContent).not.toMatch(/of 44/);
+  });
+
+  it("#1367 Gap 1 — clinical with ONLY `count` (no `eligiblePubCount`) ⇒ no count clause (both-or-neither)", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "clinical", specialty: "Cardiology", boardCertified: true, count: 12 }}
+        pubCount={44}
+        stacked
+      />,
+    );
+    expect(container.textContent).toMatch(/Board certified in Cardiology/);
+    expect(container.textContent).not.toMatch(/eligible publications/);
+  });
+
+  it("#1367 Gap 1 — neither field present ⇒ unchanged from today (label only, no count clause)", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "clinical", specialty: "Cardiology", boardCertified: false }}
+        pubCount={44}
+        stacked
+      />,
+    );
+    expect(container.textContent).toMatch(/Cardiology/);
+    expect(container.textContent).not.toMatch(/eligible publications/);
+    expect(container.textContent).not.toMatch(/of 44/);
+  });
+
   it("shows a real disclosure chevron BUTTON on method AND topic badges when canExpand", () => {
     // The chevron is now a real clickable `<button>` (replaces the hover ▾); it
     // must appear for both kinds, and only when canExpand + onToggle are given.
