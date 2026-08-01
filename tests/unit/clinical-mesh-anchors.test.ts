@@ -44,27 +44,32 @@ describe("parseSpecialtyAnchors", () => {
         "Cardiology,D002318,discipline override",
       ].join("\n"),
     );
-    expect(map.get(anchorKey("Cardiovascular Disease"))).toBe("D002318");
-    expect(map.get(anchorKey("Cardiology"))).toBe("D002318");
+    expect(map.get(anchorKey("Cardiovascular Disease"))).toEqual(["D002318"]);
+    expect(map.get(anchorKey("Cardiology"))).toEqual(["D002318"]);
     expect(map.has(anchorKey("specialty"))).toBe(false); // header not ingested
     expect(map.size).toBe(2);
   });
 
   it("locates the descriptor column even when the specialty contains a comma", () => {
     const map = parseSpecialtyAnchors("Surgery, Vascular,D014656,C14 vessels\n");
-    expect(map.get(anchorKey("Surgery, Vascular"))).toBe("D014656");
+    expect(map.get(anchorKey("Surgery, Vascular"))).toEqual(["D014656"]);
   });
 
-  it("first row wins on a duplicate key", () => {
+  it("#2106/#2107: unions multiple D-codes for a duplicate key instead of first-row-wins", () => {
     const map = parseSpecialtyAnchors("Cardiology,D002318,first\nCardiology,D006331,second\n");
-    expect(map.get(anchorKey("Cardiology"))).toBe("D002318");
+    expect(map.get(anchorKey("Cardiology"))).toEqual(["D002318", "D006331"]);
+  });
+
+  it("does not duplicate a UI repeated for the same key", () => {
+    const map = parseSpecialtyAnchors("Cardiology,D002318,first\nCardiology,D002318,dup\n");
+    expect(map.get(anchorKey("Cardiology"))).toEqual(["D002318"]);
   });
 });
 
 describe("buildClinicalAnchors", () => {
   const anchorMap = new Map([
-    [anchorKey("Cardiology"), "D002318"],
-    [anchorKey("Nephrology"), "D007674"], // Kidney Diseases (curated H→C override)
+    [anchorKey("Cardiology"), ["D002318"]],
+    [anchorKey("Nephrology"), ["D007674"]], // Kidney Diseases (curated H→C override)
   ]);
   const treeNumbersByUi = new Map([
     ["D002318", ["C14"]],
@@ -86,10 +91,22 @@ describe("buildClinicalAnchors", () => {
   });
 
   it("drops a non-disease anchor (the discipline-axis guard)", () => {
-    const map = new Map([[anchorKey("Nephrology"), "D009398"]]); // resolves to H tree
+    const map = new Map([[anchorKey("Nephrology"), ["D009398"]]]); // resolves to H tree
     const { tree, anchors } = buildClinicalAnchors(["Nephrology"], [], map, treeNumbersByUi);
     expect(tree).toEqual([]);
     expect(anchors).toEqual([]);
+  });
+
+  it("#2106/#2107: unions tree numbers across multiple UIs for one specialty into a single anchor", () => {
+    const map = new Map([[anchorKey("Hematology/Oncology"), ["D009369", "D006402"]]]);
+    const tns = new Map([
+      ["D009369", ["C04"]],
+      ["D006402", ["C15.378"]],
+    ]);
+    const { tree, anchors } = buildClinicalAnchors(["Hematology/Oncology"], [], map, tns);
+    expect(anchors).toHaveLength(1);
+    expect(anchors[0].tree).toEqual(expect.arrayContaining(["C04", "C15.378"]));
+    expect(tree).toEqual(expect.arrayContaining(["C04", "C15.378"]));
   });
 
   it("marks boardCertified from the board set (case/space-insensitive)", () => {
@@ -122,23 +139,37 @@ describe("the committed specialty-anchors.csv loads + resolves", () => {
 
   it("parses without error and covers the core specialties", () => {
     expect(map.size).toBeGreaterThanOrEqual(40);
-    expect(map.get(anchorKey("Cardiology"))).toBe("D002318");
-    expect(map.get(anchorKey("Nephrology"))).toBe("D007674"); // case-insensitive
-    expect(map.get(anchorKey("Psychiatry"))).toBe("D001523");
+    expect(map.get(anchorKey("Cardiology"))).toEqual(["D002318"]);
+    expect(map.get(anchorKey("Nephrology"))).toEqual(["D007674"]); // case-insensitive
+    expect(map.get(anchorKey("Psychiatry"))).toEqual(["D001523"]);
   });
 
   it("parses a row whose NOTE column contains a comma", () => {
     // `Clinical Cardiac Electrophysiology,D001145,"Arrhythmias, Cardiac (…)"`
-    expect(map.get(anchorKey("Clinical Cardiac Electrophysiology"))).toBe("D001145");
+    expect(map.get(anchorKey("Clinical Cardiac Electrophysiology"))).toEqual(["D001145"]);
   });
 
   it("distinguishes the 'and' vs '&' specialty wording variants", () => {
-    expect(map.get(anchorKey("Endocrinology Diabetes and Metabolism"))).toBe("D004700");
-    expect(map.get(anchorKey("Endocrinology Diabetes & Metabolism"))).toBe("D004700");
+    expect(map.get(anchorKey("Endocrinology Diabetes and Metabolism"))).toEqual(["D004700"]);
+    expect(map.get(anchorKey("Endocrinology Diabetes & Metabolism"))).toEqual(["D004700"]);
   });
 
   it("every descriptor_ui is a well-formed MeSH D-code", () => {
-    for (const ui of map.values()) expect(ui).toMatch(/^D\d+$/);
+    for (const uis of map.values()) {
+      for (const ui of uis) expect(ui).toMatch(/^D\d+$/);
+    }
+  });
+
+  it("#2106: Reproductive Endocrinology/Infertility anchors to BOTH Gonadal Disorders and Infertility", () => {
+    expect(map.get(anchorKey("Reproductive Endocrinology/Infertility"))).toEqual([
+      "D006058",
+      "D007246",
+    ]);
+  });
+
+  it("#2107: Hematology/Oncology and Pediatric Hematology-Oncology also anchor to Hematologic Diseases", () => {
+    expect(map.get(anchorKey("Hematology/Oncology"))).toEqual(["D009369", "D006402"]);
+    expect(map.get(anchorKey("Pediatric Hematology-Oncology"))).toEqual(["D009369", "D006402"]);
   });
 });
 

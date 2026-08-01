@@ -178,10 +178,11 @@ export const TOP_MESH_TERMS_LIMIT = 8;
 export type MeshAncestorContext = {
   index: MeshAncestorIndex;
   treeNumbersByUi: Map<string, string[]>;
-  /** #1836 — curated specialty→disease-anchor descriptor map (anchorKey → UI),
-   *  loaded from `etl/clinical-mesh/specialty-anchors.csv` alongside the tree
-   *  numbers so every `buildPeopleDoc` can emit the clinical anchor fields. */
-  specialtyAnchors: Map<string, string>;
+  /** #1836 — curated specialty→disease-anchor descriptor map (anchorKey →
+   *  UI[]; #2106/#2107 allow more than one UI per specialty), loaded from
+   *  `etl/clinical-mesh/specialty-anchors.csv` alongside the tree numbers so
+   *  every `buildPeopleDoc` can emit the clinical anchor fields. */
+  specialtyAnchors: Map<string, string[]>;
 };
 
 /**
