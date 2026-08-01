@@ -1355,3 +1355,34 @@ export function resolveAreaBoostTopN(dflt: number): number {
   const n = Number(ovr("SEARCH_AREA_BOOST_TOP_N") ?? process.env.SEARCH_AREA_BOOST_TOP_N);
   return Number.isInteger(n) && n > 0 && n <= 5000 ? n : dflt;
 }
+
+/**
+ * Issue #2096 — descendant-set size used ONLY for the pub-tab `concept_expanded`
+ * terms clause (`terms { meshDescriptorUi }`, `lib/api/search.ts` Clause 3, via
+ * `MeshResolution.termsClauseDescendantUis`). `computeDescendants` is a lex-ordered
+ * tree-number walk that early-returns at the cap, so a cap of 200 takes a
+ * contiguous PREFIX of a broad descriptor's subtree, not an even sample — Neoplasms
+ * (702 true descendants, one tree number `C04`) fills the cap inside
+ * `C04.557` (Neoplasms by Histologic Type) and never reaches `C04.588` (Neoplasms
+ * by Site), so Breast/Lung/Prostatic/Colorectal Neoplasms and Melanoma are
+ * structurally absent from a `cancer` search. Default (`dflt`, always passed as
+ * `DESCENDANT_HARD_CAP`) reproduces today's truncated behavior byte-identically
+ * — this module must not import `@/lib/api/search-taxonomy` (mirrors the
+ * `resolveAreaBoostTopN` note above). Raise past the largest observed true count
+ * in `docs/spec-snapshots/mesh-broad-descriptors-2026-05.json` (4175, "Amino
+ * Acids, Peptides, and Proteins") to clear every currently-known truncated
+ * broad descriptor. Every OTHER consumer of `MeshResolution.descendantUis` —
+ * the People attribution/concept-scope gate, the funding concept gate,
+ * `collectGrantMatchedCwids`, `getConceptScholarConcentration`, the Matcha
+ * grants spine — stays on `DESCENDANT_HARD_CAP` (200), deliberately untouched
+ * by this flag. Non-integer/zero/negative/absurd falls back to `dflt` rather
+ * than throwing; the 10000 ceiling stays well under OpenSearch's
+ * `index.max_terms_count` (65536) with headroom for the anchor-terms clause
+ * alongside it.
+ */
+export function resolveDescendantTermsClauseCap(dflt: number): number {
+  const n = Number(
+    ovr("SEARCH_MESH_DESCENDANT_TERMS_CAP") ?? process.env.SEARCH_MESH_DESCENDANT_TERMS_CAP,
+  );
+  return Number.isInteger(n) && n > 0 && n <= 10000 ? n : dflt;
+}

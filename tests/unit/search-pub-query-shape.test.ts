@@ -208,6 +208,8 @@ type MeshResolutionForTest = {
   curatedTopicAnchors: string[];
   /** Issue #259 §5.4.2 / PR 2 — self at index 0, then descendants. */
   descendantUis: string[];
+  /** Issue #2096 — raised-cap variant consumed ONLY by Clause 3. */
+  termsClauseDescendantUis?: string[];
 };
 
 const RESOLUTION_WITH_ANCHORS: MeshResolutionForTest = {
@@ -360,6 +362,33 @@ describe("pub-tab query shape — SEARCH_PUB_TAB_CONCEPT_MODE (§5)", () => {
       "informatics",
     ]);
     expect(anchors.terms.boost).toBe(6);
+  });
+
+  it("case 3b (#2096) — Clause 3 reads termsClauseDescendantUis, not descendantUis, when present", async () => {
+    process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "expanded";
+    const mod = (await import("@/lib/api/search")) as {
+      searchPublications: (opts: unknown) => Promise<{ queryShape: string }>;
+    };
+    const result = await mod.searchPublications({
+      q: "EHR",
+      page: 0,
+      meshResolution: {
+        ...RESOLUTION_WITH_ANCHORS,
+        // Raised-cap set differs from (and is a superset of) descendantUis —
+        // proves Clause 3 prefers the wider field over the 200-capped one.
+        termsClauseDescendantUis: ["D057286", "D000077863", "D999999"],
+      },
+    });
+    expect(result.queryShape).toBe("concept_expanded");
+    const bool = topLevelBool(capturedBodies[0]);
+    const should = bool.should as Record<string, unknown>[];
+    const meshUi = should[2] as { terms: Record<string, unknown> };
+    expect(meshUi.terms.meshDescriptorUi).toEqual([
+      "D057286",
+      "D000077863",
+      "D999999",
+    ]);
+    expect(meshUi.terms.boost).toBe(8);
   });
 
   it("case 4 — expanded, resolution without anchors: §5.2 with clause 4 omitted (3 clauses)", async () => {

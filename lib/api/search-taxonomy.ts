@@ -55,6 +55,7 @@ import {
   resolveMeshQueryNormalizationEnabled,
   resolveAcronymSenseGuardEnabled,
   resolveGenericTermMode,
+  resolveDescendantTermsClauseCap,
 } from "@/lib/api/search-flags";
 import {
   isMethodPagesEnabled,
@@ -186,6 +187,23 @@ export type MeshResolution = {
    * the publications-branch `search_query` line for baseline analysis only.
    */
   descendantUis: string[];
+  /**
+   * Issue #2096 — `[self, ...descendants]` bounded by the (higher, request-
+   * tunable) `resolveDescendantTermsClauseCap` cap instead of
+   * `DESCENDANT_HARD_CAP`. Consumed ONLY by the pub-tab `concept_expanded`
+   * terms clause (`lib/api/search.ts`, Clause 3) so that widening the
+   * OR-clause admission/recall for a broad descriptor (e.g. Neoplasms' 702
+   * true descendants, truncated to 200 by `descendantUis`) does not also move
+   * BM25 scoring elsewhere, the People attribution/concept-scope gate, the
+   * funding concept gate, `collectGrantMatchedCwids`, or
+   * `getConceptScholarConcentration` — every one of those stays on
+   * `descendantUis` (200-cap) unchanged. Equal to `descendantUis` (same
+   * array) when the cap flag is unset, so a fixture that omits this field
+   * exercises byte-identical behavior via the `?? descendantUis` fallback at
+   * the one call site. Optional so existing fixtures need not set it; the
+   * resolver always populates it.
+   */
+  termsClauseDescendantUis?: string[];
   /**
    * #1836 — the query descriptor's ANCESTOR tree-number closure (each tree
    * number plus all its dot-prefixes, deduped). Used for the cap-free clinical
@@ -1132,13 +1150,25 @@ function getOrComputeDescendants(
  *   - Subsequent elements are descendant UIs in tree-number-walk order,
  *     deduped (a descendant reachable via two of `ui`'s tree numbers
  *     appears once).
- *   - Length ≤ DESCENDANT_HARD_CAP.
+ *   - Length ≤ `cap`.
  *   - If `byUi.get(ui)` returns undefined (caller bug) or has empty
  *     `treeNumbers`, returns `[ui]`.
+ *
+ * `cap` defaults to `DESCENDANT_HARD_CAP` (the shared `descendantsByUi`
+ * precompute always calls with the default). Issue #2096 — the
+ * `termsClauseDescendantUis` field on `MeshResolution` calls this again with
+ * a raised, request-tunable cap (`resolveDescendantTermsClauseCap`) so the
+ * pub-tab `concept_expanded` terms clause alone can recover truncated
+ * by-site/histologic-type descriptors (e.g. Neoplasms' 702 true descendants)
+ * without moving `descendantUis` — and therefore every OTHER consumer of it
+ * (People attribution/concept-scope gate, funding concept gate,
+ * `collectGrantMatchedCwids`, `getConceptScholarConcentration`, the Matcha
+ * grants spine) — off the 200-cap they were measured against.
  */
 function computeDescendants(
   ui: string,
   map: Pick<MeshMap, "byUi" | "treePrefixIndex">,
+  cap: number = DESCENDANT_HARD_CAP,
 ): string[] {
   const row = map.byUi.get(ui);
   if (!row) return [ui];
@@ -1166,9 +1196,9 @@ function computeDescendants(
       if (seen.has(candUi)) continue;
       seen.add(candUi);
       result.push(candUi);
-      if (result.length >= DESCENDANT_HARD_CAP) return result;
+      if (result.length >= cap) return result;
     }
-    if (result.length >= DESCENDANT_HARD_CAP) return result;
+    if (result.length >= cap) return result;
   }
   return result;
 }
@@ -1590,6 +1620,16 @@ function buildMeshResolution(
   cand: { row: DescriptorRow },
   o: { matchedForm: string; confidence: MeshResolution["confidence"]; ambiguous: boolean },
 ): MeshResolution {
+  // §5.4.2 — Invariant: descendantUis[0] === descriptorUi.
+  const descendantUis = getOrComputeDescendants(map, cand.row.descriptorUi);
+  // Issue #2096 — only recompute at the raised cap when it actually differs
+  // from DESCENDANT_HARD_CAP; unset (or "200") reuses the same array so the
+  // flag-off path is byte-identical and does zero extra work.
+  const termsClauseCap = resolveDescendantTermsClauseCap(DESCENDANT_HARD_CAP);
+  const termsClauseDescendantUis =
+    termsClauseCap === DESCENDANT_HARD_CAP
+      ? descendantUis
+      : computeDescendants(cand.row.descriptorUi, map, termsClauseCap);
   return {
     descriptorUi: cand.row.descriptorUi,
     name: cand.row.name,
@@ -1598,8 +1638,8 @@ function buildMeshResolution(
     scopeNote: cand.row.scopeNote,
     entryTerms: cand.row.entryTerms,
     curatedTopicAnchors: map.anchorsByUi.get(cand.row.descriptorUi) ?? [],
-    // §5.4.2 — Invariant: descendantUis[0] === descriptorUi.
-    descendantUis: getOrComputeDescendants(map, cand.row.descriptorUi),
+    descendantUis,
+    termsClauseDescendantUis,
     // #1836 — ancestor tree-number closure for cap-free clinical subsumption.
     ancestorTreeNumbers: [
       ...new Set(cand.row.treeNumbers.flatMap((tn) => treeNumberPrefixes(tn))),

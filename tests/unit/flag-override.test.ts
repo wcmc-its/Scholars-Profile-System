@@ -22,6 +22,7 @@ import {
   resolveAreaBoostTopN,
   resolveAreaBoostWeights,
   resolveConceptConcentrationAlpha,
+  resolveDescendantTermsClauseCap,
   resolveMeshEntryTierParityEnabled,
   resolveMeshResolutionFallbackEnabled,
   resolvePeopleMethodFamilyBoost,
@@ -69,6 +70,12 @@ const CASES: Record<
     read: () => resolveAreaBoostWeights(WEIGHT_DEFAULTS).lo,
     dflt: 3,
     overridden: 9,
+  },
+  SEARCH_MESH_DESCENDANT_TERMS_CAP: {
+    value: "5000",
+    read: () => resolveDescendantTermsClauseCap(200),
+    dflt: 200,
+    overridden: 5000,
   },
   SEARCH_MESH_ENTRY_TIER_PARITY: {
     value: "on",
