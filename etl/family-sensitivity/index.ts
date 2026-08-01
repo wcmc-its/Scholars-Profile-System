@@ -7,9 +7,12 @@
  *   1. Read + validate the curated CSV (supercategory, family_label, source_note).
  *   2. SEED-SAFE reseed (DB-as-source-of-truth, spec §5/§10.3): only insert/replace
  *      rows whose `source='seed'`; NEVER delete or overwrite a `source='steward'`
- *      row (a tier set from the /edit/methods surface). Steward-owned keys are
- *      skipped entirely, stale seed rows that left the CSV are dropped, all inside
- *      one $transaction so a failure rolls the whole reseed back. The curated CSV
+ *      row (a tier set from the /edit/methods surface), NOR resurrect a family
+ *      that has ANY row in `family_tier_decision` (#1993 — this is what makes a
+ *      steward's Public decision, which leaves no overlay row at all, survive a
+ *      reseed). Steward-owned and decision-owned keys are skipped entirely,
+ *      stale seed rows that left the CSV are dropped, all inside one
+ *      $transaction so a failure rolls the whole reseed back. The curated CSV
  *      is a one-time bootstrap, not a recurring truncate.
  *   3. Record the run in `etl_run` under source="FamilySensitivity".
  *
@@ -105,6 +108,30 @@ export function findUnknownFamilies(
 }
 
 /**
+ * The full reseed skip-set (#1993): every (supercategory, family_label) key that
+ * this loader must never insert, update, or delete. Union of two independent
+ * sources —
+ *
+ *   - `source='steward'` rows in THIS loader's own overlay table (the original
+ *     #2053 guard; catches Sensitive today).
+ *   - EVERY key in `family_tier_decision`, regardless of its recorded tier. This
+ *     is the part that closes #1993: a family a steward set to Public has NO row
+ *     in `family_sensitivity_overlay` at all, so the steward-rows check above
+ *     never sees it — only the decision table does.
+ *
+ * Exported for unit test; the surrounding DB queries are trivial.
+ */
+export function computeSkipKeys(
+  stewardRows: { supercategory: string; familyLabel: string }[],
+  decisionRows: { supercategory: string; familyLabel: string }[],
+): Set<string> {
+  const keys = new Set<string>();
+  for (const r of stewardRows) keys.add(rowKey(r.supercategory, r.familyLabel));
+  for (const r of decisionRows) keys.add(rowKey(r.supercategory, r.familyLabel));
+  return keys;
+}
+
+/**
  * Fail closed when a curated label matches no family. Throwing here leaves the overlay
  * exactly as it was — `replaceRows` has not run — so a bad CSV never strips existing
  * gating; it just refuses to apply. That is the safe direction: with
@@ -156,17 +183,23 @@ type ReseedCounts = { inserted: number; updated: number; deleted: number };
  *
  * All inside one $transaction so a partial failure rolls back the whole reseed.
  */
-async function replaceRows(rows: SensitiveRow[]): Promise<ReseedCounts> {
+export async function replaceRows(rows: SensitiveRow[]): Promise<ReseedCounts> {
   return db.write.$transaction(
     async (tx) => {
-      // Steward-owned keys are off-limits — never insert, overwrite, or delete them.
-      const stewardRows = await tx.familySensitivityOverlay.findMany({
-        where: { source: "steward" },
-        select: { supercategory: true, familyLabel: true },
-      });
-      const stewardKeys = new Set(
-        stewardRows.map((r) => rowKey(r.supercategory, r.familyLabel)),
-      );
+      // Steward-owned keys (this overlay's own `source='steward'` rows) plus every
+      // key with an explicit FamilyTierDecision (#1993 — catches Public, which has
+      // no overlay row in either table) are off-limits: never insert, overwrite, or
+      // delete them.
+      const [stewardRows, decisionRows] = await Promise.all([
+        tx.familySensitivityOverlay.findMany({
+          where: { source: "steward" },
+          select: { supercategory: true, familyLabel: true },
+        }),
+        tx.familyTierDecision.findMany({
+          select: { supercategory: true, familyLabel: true },
+        }),
+      ]);
+      const stewardKeys = computeSkipKeys(stewardRows, decisionRows);
 
       // Snapshot the seed rows BEFORE the upsert loop so the run can report what actually
       // changed. `rowsProcessed` on its own is the CSV length, which cannot distinguish a

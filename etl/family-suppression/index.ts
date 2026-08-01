@@ -10,10 +10,13 @@
  *      exact string, so an unmatched label would seed a row that hides nothing.
  *   2. SEED-SAFE reseed (DB-as-source-of-truth): only insert/replace rows whose
  *      `source='seed'`; NEVER delete or overwrite a `source='steward'` row (a tier
- *      set from the /edit/methods surface). Steward-owned keys are skipped entirely,
- *      stale seed rows that left the CSV are dropped, all inside one $transaction so
- *      a failure rolls the whole reseed back. The curated CSV is a one-time
- *      bootstrap, not a recurring truncate.
+ *      set from the /edit/methods surface), NOR resurrect a family that has ANY
+ *      row in `family_tier_decision` (#1993 — this is what makes a steward's
+ *      Public decision, which leaves no overlay row at all, survive a reseed).
+ *      Steward-owned and decision-owned keys are skipped entirely, stale seed rows
+ *      that left the CSV are dropped, all inside one $transaction so a failure
+ *      rolls the whole reseed back. The curated CSV is a one-time bootstrap, not a
+ *      recurring truncate.
  *   3. Record the run in `etl_run` under source="FamilySuppression".
  *
  * Editorial / data-steward-owned, on demand (NOT in etl/orchestrate.ts — the seed
@@ -110,6 +113,32 @@ export function findUnknownFamilies(
 }
 
 /**
+ * The full reseed skip-set (#1993): every (supercategory, family_label) key that
+ * this loader must never insert, update, or delete. Union of two independent
+ * sources —
+ *
+ *   - `source='steward'` rows in THIS loader's own overlay table (catches
+ *     Suppressed today).
+ *   - EVERY key in `family_tier_decision`, regardless of its recorded tier. This
+ *     is the part that closes #1993: a family a steward set to Public has NO row
+ *     in `family_suppression_overlay` at all — and, per the #1993 thread, setting
+ *     Suppressed also deletes the family's #801 sensitivity row, so the
+ *     SENSITIVITY loader's own steward-rows check never sees that key either.
+ *     Only the decision table sees both cases.
+ *
+ * Exported for unit test; the surrounding DB queries are trivial.
+ */
+export function computeSkipKeys(
+  stewardRows: { supercategory: string; familyLabel: string }[],
+  decisionRows: { supercategory: string; familyLabel: string }[],
+): Set<string> {
+  const keys = new Set<string>();
+  for (const r of stewardRows) keys.add(rowKey(r.supercategory, r.familyLabel));
+  for (const r of decisionRows) keys.add(rowKey(r.supercategory, r.familyLabel));
+  return keys;
+}
+
+/**
  * Fail closed when a curated label matches no family. Queries via `db.write` so the single
  * `db.write.$disconnect()` in the finally block covers it — a `db.read` query under a set
  * DATABASE_URL_RO opens a second pool nothing ever closes, which hangs the run.
@@ -156,17 +185,23 @@ type ReseedCounts = { inserted: number; updated: number; deleted: number };
  *
  * All inside one $transaction so a partial failure rolls back the whole reseed.
  */
-async function replaceRows(rows: SuppressedRow[]): Promise<ReseedCounts> {
+export async function replaceRows(rows: SuppressedRow[]): Promise<ReseedCounts> {
   return db.write.$transaction(
     async (tx) => {
-      // Steward-owned keys are off-limits — never insert, overwrite, or delete them.
-      const stewardRows = await tx.familySuppressionOverlay.findMany({
-        where: { source: "steward" },
-        select: { supercategory: true, familyLabel: true },
-      });
-      const stewardKeys = new Set(
-        stewardRows.map((r) => rowKey(r.supercategory, r.familyLabel)),
-      );
+      // Steward-owned keys (this overlay's own `source='steward'` rows) plus every
+      // key with an explicit FamilyTierDecision (#1993 — catches Public, which has
+      // no overlay row in either table) are off-limits: never insert, overwrite, or
+      // delete them.
+      const [stewardRows, decisionRows] = await Promise.all([
+        tx.familySuppressionOverlay.findMany({
+          where: { source: "steward" },
+          select: { supercategory: true, familyLabel: true },
+        }),
+        tx.familyTierDecision.findMany({
+          select: { supercategory: true, familyLabel: true },
+        }),
+      ]);
+      const stewardKeys = computeSkipKeys(stewardRows, decisionRows);
 
       // Snapshot the seed rows BEFORE the upsert loop so the run can report what actually
       // changed. `rowsProcessed` on its own is the CSV length, which cannot distinguish a
