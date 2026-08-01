@@ -89,7 +89,7 @@ function evidenceSummary(
       // usually land here — and a magnitude with no share is the honest degrade. Falling
       // back to `pubCount` would restore the exact lie this removes.
       return methodPubCount != null
-        ? `${evidence.count ?? 0} of ${methodPubCount} method-indexed publications used ${evidence.family}`
+        ? `${evidence.count ?? 0} of ${methodPubCount} eligible publications used ${evidence.family}`
         : `${evidence.count ?? 0} publication${evidence.count === 1 ? "" : "s"} used ${evidence.family}`;
     case "topic":
       return `${evidence.count ?? 0} of ${pubCount} publications in ${evidence.label}`;

@@ -77,11 +77,11 @@ describe("<ResultEvidence> — one render per kind", () => {
     // provenance datum, and painting every non-mention lead green would resolve one value
     // across ~98% of rows — the exact failure #1913 retired.
     expect(pillsIn(container)).toEqual([]);
-    // count-first: emphasized count + muted "of 98 method-indexed publications used" +
+    // count-first: emphasized count + muted "of 98 eligible publications used" +
     // underlined family. "method-indexed" names the pool the M is the size of: extraction
     // is post-2020 by design, so the whole-career `pubCount` would be the wrong word for it.
     expect(screen.getByText("Method")).toBeTruthy();
-    expect(container.textContent).toMatch(/4 of 98 method-indexed publications used/);
+    expect(container.textContent).toMatch(/4 of 98 eligible publications used/);
     const fam = screen.getByText("CRISPR");
     expect(fam.tagName).toBe("SPAN");
     expect(fam.className).toMatch(/underline/);
@@ -179,7 +179,7 @@ describe("<ResultEvidence> — one render per kind", () => {
         stacked
       />,
     );
-    expect(m.container.textContent).toMatch(/1 of 538 method-indexed publications/);
+    expect(m.container.textContent).toMatch(/1 of 538 eligible publications/);
     expect(screen.getAllByText("Mass spectrometry")[0]!.className).toMatch(
       /text-\[var\(--evidence-body\)\]/,
     ); // it really is dim
@@ -993,7 +993,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
 });
 
 describe("<ResultEvidence> — #1366 count suffix (method / research area)", () => {
-  it("method with a count + methodPubCount renders 'N of M method-indexed publications'", () => {
+  it("method with a count + methodPubCount renders 'N of M eligible publications'", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{ kind: "method", family: "Anti-obesity pharmacotherapy", tools: [], count: 7 }}
@@ -1004,13 +1004,13 @@ describe("<ResultEvidence> — #1366 count suffix (method / research area)", () 
         methodPubCount={41}
       />,
     );
-    // #1381 count-first: emphasized count, muted "of 41 method-indexed publications used",
+    // #1381 count-first: emphasized count, muted "of 41 eligible publications used",
     // underlined family.
     const fam = screen.getByText("Anti-obesity pharmacotherapy");
     expect(fam.tagName).toBe("SPAN");
     expect(fam.className).toMatch(/underline/);
     expect(container.textContent).toMatch(
-      /7 of 41 method-indexed publications used Anti-obesity pharmacotherapy/,
+      /7 of 41 eligible publications used Anti-obesity pharmacotherapy/,
     );
     // …and NEVER the career total, which is the sentence this replaces.
     expect(container.textContent).not.toMatch(/of 900/);
@@ -1352,7 +1352,7 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance signals on the p
     expect(container.textContent).not.toMatch(/of this scholar’s output/);
     // The ratio is NOT lost — it moves into the sentence, where the base is stated in words
     // and cannot be read off against a neighbouring card's cell.
-    expect(container.textContent).toMatch(/3 of 13 method-indexed publications used/);
+    expect(container.textContent).toMatch(/3 of 13 eligible publications used/);
   });
 
   it("the method DIM measures against the method-indexed pool, NOT pubCount", () => {
@@ -1977,7 +1977,7 @@ describe("<ResultEvidence> — the primary lead degrades instead of collapsing o
       />,
     );
     expect(method.container.querySelector(".tabular-nums")).toBeNull();
-    expect(method.container.textContent).toMatch(/4 of 98 method-indexed publications used/);
+    expect(method.container.textContent).toMatch(/4 of 98 eligible publications used/);
   });
 
   it("the lesser row drops its pill at a NARROWER breakpoint — it loses less to it", () => {
