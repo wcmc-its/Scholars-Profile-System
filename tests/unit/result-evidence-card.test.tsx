@@ -250,6 +250,70 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(container.textContent).not.toMatch(/of 44/);
   });
 
+  it("#1367 Gap 2 — clinical WITH expertise appends a 'Clinical expertise:' clause alongside the specialty", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{
+          kind: "clinical",
+          specialty: "Cardiology",
+          boardCertified: true,
+          expertise: ["Heart failure management"],
+        }}
+        pubCount={44}
+        stacked
+      />,
+    );
+    expect(container.textContent).toMatch(/Board certified in Cardiology/);
+    expect(container.textContent).toMatch(/Clinical expertise: Heart failure management/);
+    // the expertise text is its own underlined entity, same treatment as the specialty.
+    const exp = screen.getByText("Heart failure management");
+    expect(exp.tagName).toBe("SPAN");
+    expect(exp.className).toMatch(/underline/);
+  });
+
+  it("#1367 Gap 2 — multiple expertise entries join with a comma", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{
+          kind: "clinical",
+          specialty: "Cardiology",
+          boardCertified: true,
+          expertise: ["Heart failure management", "Echocardiography"],
+        }}
+        pubCount={44}
+        stacked
+      />,
+    );
+    expect(container.textContent).toMatch(
+      /Clinical expertise: Heart failure management, Echocardiography/,
+    );
+  });
+
+  it("#1367 Gap 2 — expertise-only match (no specialty at all) renders the expertise clause alone, no 'Board certified'/specialty text", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "clinical", boardCertified: false, expertise: ["Hip replacement surgery"] }}
+        pubCount={44}
+        stacked
+      />,
+    );
+    expect(container.textContent).toMatch(/Clinical expertise: Hip replacement surgery/);
+    expect(container.textContent).not.toMatch(/Board certified/);
+    // no specialty entity was rendered at all — the specialty span never appears.
+    expect(screen.queryByText("Cardiology")).toBeNull();
+  });
+
+  it("#1367 Gap 2 — no expertise field ⇒ unchanged from Gap 1 (no 'Clinical expertise:' text at all)", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "clinical", specialty: "Cardiology", boardCertified: true }}
+        pubCount={44}
+        stacked
+      />,
+    );
+    expect(container.textContent).not.toMatch(/Clinical expertise/);
+  });
+
   it("shows a real disclosure chevron BUTTON on method AND topic badges when canExpand", () => {
     // The chevron is now a real clickable `<button>` (replaces the hover ▾); it
     // must appear for both kinds, and only when canExpand + onToggle are given.
@@ -998,6 +1062,35 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
     expect(container.textContent).toMatch(/Clinical.?Cardiology/);
     expect(container.textContent).not.toMatch(/of 44/);
     expect(pillsIn(container)).toEqual([]);
+  });
+
+  it("#1367 Gap 2 — clinical lesser WITH expertise appends the 'Clinical expertise:' clause", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{
+          kind: "clinical",
+          specialty: "Cardiology",
+          boardCertified: false,
+          expertise: ["Heart failure management"],
+        }}
+        pubCount={44}
+        tier="lesser"
+      />,
+    );
+    expect(container.textContent).toMatch(/Clinical.?Cardiology/);
+    expect(container.textContent).toMatch(/Clinical expertise: Heart failure management/);
+  });
+
+  it("#1367 Gap 2 — clinical lesser, expertise-only (no specialty) renders the expertise clause alone", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "clinical", boardCertified: false, expertise: ["Hip replacement surgery"] }}
+        pubCount={44}
+        tier="lesser"
+      />,
+    );
+    expect(container.textContent).toMatch(/Clinical expertise: Hip replacement surgery/);
+    expect(screen.queryByText("Cardiology")).toBeNull();
   });
 
   it("uniform fold rule — a board-certified clinical lesser row carries the 'credential' pill", () => {

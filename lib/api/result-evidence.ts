@@ -118,13 +118,28 @@ export type ResultEvidence =
    *  doc has been reindexed since #1367 landed; when either is absent the label
    *  renders exactly as before (board-cert/specialty text only, no count clause).
    *  NEVER read by the precedence gates above (`SEARCH_PEOPLE_CLINICAL_
-   *  {BOARD,SPECIALTY}_OVER_TAGGED`) — those stay count-blind by design. */
+   *  {BOARD,SPECIALTY}_OVER_TAGGED`) — those stay count-blind by design.
+   *  `specialty` (#1367 Gap 2 — clinical-expertise fold-in) is now OPTIONAL: a
+   *  scholar can have a query-matching `popsExpertise` (raw POPS
+   *  `problem_procedure` string, see {@link clinicalExpertiseMatch}) with no
+   *  matching specialty/board-cert at all, in which case this line still fires
+   *  with `specialty` absent, `boardCertified: false`, and only `expertise` set —
+   *  there is no other clinical line for it to attach to (under-claim rather
+   *  than drop the signal). `expertise` — the raw problem_procedure string(s)
+   *  that matched the query (same exact-tier token-subset/phrase-equality test
+   *  as the specialty match, run against `clinicalExpertise` instead), rendered
+   *  as an ADDITIONAL "Clinical expertise: {x, y}" clause alongside the
+   *  specialty clause when both are present, or alone when `specialty` is
+   *  absent. Never given a count — `popsExpertise` is not MeSH-anchored, so
+   *  there is no on-topic pub count to attach (that mechanism is Gap 1's, and
+   *  stays specialty-only). */
   | {
       kind: "clinical";
-      specialty: string;
+      specialty?: string;
       boardCertified: boolean;
       count?: number;
       eligiblePubCount?: number;
+      expertise?: string[];
     }
   /** Matched curated research-area parent topic (v1 keeps the parent label).
    *  `id` is the topic SLUG (= `Topic.id` = `PublicationTopic.parentTopicId`) so
@@ -458,8 +473,16 @@ export type SelectEvidenceInput = {
    *  its eligible-pool denominator, read from the hit's `_source.clinicalOnTopicCounts`
    *  / `_source.meshTaggedPubCount`. Forwarded verbatim onto the constructed
    *  `clinical` evidence; NEVER read by the count-gated precedence logic below
-   *  (that stays exactly as it was). */
-  clinical?: { specialty: string; boardCertified: boolean; count?: number; eligiblePubCount?: number };
+   *  (that stays exactly as it was).
+   *  `specialty` optional / `expertise` (#1367 Gap 2) — see the matching doc on
+   *  the `ResultEvidence` `clinical` variant above; both fields forward verbatim. */
+  clinical?: {
+    specialty?: string;
+    boardCertified: boolean;
+    count?: number;
+    eligiblePubCount?: number;
+    expertise?: string[];
+  };
   /** Count thresholds for the clinical:exact-vs-publications:tagged precedence
    *  (env-tunable). clinical:exact outranks a `tagged` reason only when the tagged
    *  pub count is below `boardOverTagged` (board-certified match) or
@@ -551,6 +574,58 @@ export function clinicalExactMatch(
   return null;
 }
 
+/** Cap on the number of `popsExpertise` strings a single {@link clinicalExpertiseMatch}
+ *  call can return — mirrors the small caps elsewhere in this module ({@link AREAS_CAP},
+ *  the 3-exemplar-tool cap on `method`) so a scholar with a long POPS problem_procedure
+ *  list can't turn the "Clinical expertise:" clause into its own paragraph. */
+const CLINICAL_EXPERTISE_CAP = 3;
+
+/**
+ * #1367 Gap 2 (clinical-expertise fold-in) — the `popsExpertise` counterpart to
+ * {@link clinicalExactMatch}. Runs the SAME exact-tier test (token-subset OR phrase
+ * equality against the normalized query) over the hit's raw POPS `problem_procedure`
+ * strings (`_source.clinicalExpertise`) instead of its specialty set, and returns
+ * EVERY qualifying entry (deduped case-insensitively, capped to
+ * {@link CLINICAL_EXPERTISE_CAP}) rather than the first — unlike a specialty set,
+ * `popsExpertise` entries are typically distinct problem/procedure phrases, not
+ * near-duplicates of one canonical name, so more than one can legitimately match
+ * (e.g. a query for "hip" matching both "hip replacement" and "hip fracture").
+ *
+ * Independent of {@link clinicalExactMatch}: a hit can have an expertise match with
+ * no specialty match at all (no board cert / primary specialty names the query), in
+ * which case the caller still constructs a `clinical` evidence object — specialty
+ * absent, `expertise` populated — rather than dropping the signal (see the
+ * `clinical` field doc on `ResultEvidence` / `SelectEvidenceInput`).
+ *
+ * Returns `[]` (never null) when nothing qualifies — the empty-array vs. null
+ * distinction doesn't matter to callers (both mean "no expertise clause"), but an
+ * array keeps the call site's `.length > 0` checks uniform with the other list-typed
+ * evidence fields (`descendantTerms`, `pubs`, …).
+ *
+ * Same known v1 gap as `clinicalExactMatch`: a synonym/abbreviation query won't earn
+ * a match here either; it still contributes to ranking via the existing loose
+ * `clinicalExpertise` multi_match.
+ */
+export function clinicalExpertiseMatch(contentQuery: string, expertise: string[]): string[] {
+  const nq = normalize(contentQuery);
+  const tokens = nq.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0 || expertise.length === 0) return [];
+  const seen = new Set<string>();
+  const matches: string[] = [];
+  for (const e of expertise) {
+    if (matches.length >= CLINICAL_EXPERTISE_CAP) break;
+    const ne = normalize(e);
+    if (!ne || seen.has(ne)) continue;
+    const tokenSubset = tokens.every((t) => ne.includes(t));
+    const phrase = ne === nq;
+    if (tokenSubset || phrase) {
+      seen.add(ne);
+      matches.push(e);
+    }
+  }
+  return matches;
+}
+
 /**
  * THE precedence function (handoff §4 principle 2). Returns exactly one
  * `ResultEvidence`, strongest-first. Order is the single source of truth for
@@ -583,12 +658,17 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
     if (!tagged || tagged.count < limit)
       return {
         kind: "clinical",
-        specialty: input.clinical.specialty,
         boardCertified: input.clinical.boardCertified,
+        // #1367 Gap 2 — `specialty` is optional (an expertise-only match carries none).
+        ...(input.clinical.specialty ? { specialty: input.clinical.specialty } : {}),
         // #1367 Gap 1 — display-only; does not affect the gate above.
         ...(input.clinical.count != null ? { count: input.clinical.count } : {}),
         ...(input.clinical.eligiblePubCount != null
           ? { eligiblePubCount: input.clinical.eligiblePubCount }
+          : {}),
+        // #1367 Gap 2 — the clinical-expertise fold-in; see the field doc above.
+        ...(input.clinical.expertise && input.clinical.expertise.length > 0
+          ? { expertise: input.clinical.expertise }
           : {}),
       };
     // strong tagged signal ⇒ fall through to the tagged return below.
@@ -802,11 +882,16 @@ export function selectEvidenceLines(input: SelectEvidenceInput): ResultEvidence[
   if (input.clinical)
     lines.push({
       kind: "clinical",
-      specialty: input.clinical.specialty,
       boardCertified: input.clinical.boardCertified,
+      // #1367 Gap 2 — `specialty` is optional (an expertise-only match carries none).
+      ...(input.clinical.specialty ? { specialty: input.clinical.specialty } : {}),
       ...(input.clinical.count != null ? { count: input.clinical.count } : {}),
       ...(input.clinical.eligiblePubCount != null
         ? { eligiblePubCount: input.clinical.eligiblePubCount }
+        : {}),
+      // #1367 Gap 2 — the clinical-expertise fold-in; see the field doc above.
+      ...(input.clinical.expertise && input.clinical.expertise.length > 0
+        ? { expertise: input.clinical.expertise }
         : {}),
     });
   // 6 — nothing first-class matched ⇒ the single-evidence tail (concept-text /

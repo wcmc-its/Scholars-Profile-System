@@ -216,14 +216,28 @@ export function ResultEvidence({
             onToggle={onToggle}
             panelId={panelId}
           >
-            {evidence.boardCertified ? (
-              <>
-                Board certified in{" "}
+            {/* #1367 Gap 2 — `specialty` is now optional (an expertise-only match
+                carries none), so the specialty clause is gated on its presence; when
+                it IS present the render is byte-identical to before. */}
+            {evidence.specialty ? (
+              evidence.boardCertified ? (
+                <>
+                  Board certified in{" "}
+                  <span className={`font-[450] text-[var(--evidence-anchor)] ${ENTITY_UNDERLINE}`}>{evidence.specialty}</span>
+                </>
+              ) : (
                 <span className={`font-[450] text-[var(--evidence-anchor)] ${ENTITY_UNDERLINE}`}>{evidence.specialty}</span>
+              )
+            ) : null}
+            {evidence.expertise && evidence.expertise.length > 0 ? (
+              <>
+                {evidence.specialty ? " · " : null}
+                Clinical expertise:{" "}
+                <span className={`font-[450] text-[var(--evidence-anchor)] ${ENTITY_UNDERLINE}`}>
+                  {evidence.expertise.join(", ")}
+                </span>
               </>
-            ) : (
-              <span className={`font-[450] text-[var(--evidence-anchor)] ${ENTITY_UNDERLINE}`}>{evidence.specialty}</span>
-            )}
+            ) : null}
           </LesserReason>
         );
       case "publications": {
@@ -445,7 +459,16 @@ export function ResultEvidence({
       // `eligiblePubCount` must be present (see `lib/api/search.ts` — the pair travels
       // together) or nothing renders: the label reads exactly as it did before this change,
       // never a fabricated 0.
+      //
+      // #1367 Gap 2 (clinical-expertise fold-in) — `specialty` is now optional: a
+      // scholar can have a query-matching `popsExpertise` entry with no specialty/
+      // board-cert match at all, in which case there is no specialty clause to
+      // render at all and the line leads straight with "Clinical expertise: X".
+      // When a specialty IS present, the render up to `hasCount` is byte-identical
+      // to before; the expertise clause (if any) is a further `&middot;`-joined
+      // addition after it, same styling as the count clause above.
       const hasCount = evidence.count != null && evidence.eligiblePubCount != null;
+      const expertise = evidence.expertise;
       return (
         <MatchAwareReason
           kind="clinical"
@@ -455,9 +478,15 @@ export function ResultEvidence({
           onToggle={onToggle}
           panelId={panelId}
         >
-          {evidence.boardCertified ? <span className="text-[var(--evidence-body)]">Board certified in </span> : null}
-          <CountFirst entity={evidence.specialty} underline />
-          {hasCount ? (
+          {evidence.specialty ? (
+            <>
+              {evidence.boardCertified ? (
+                <span className="text-[var(--evidence-body)]">Board certified in </span>
+              ) : null}
+              <CountFirst entity={evidence.specialty} underline />
+            </>
+          ) : null}
+          {evidence.specialty && hasCount ? (
             <span className="text-[var(--evidence-body)]">
               {" "}
               &middot;{" "}
@@ -468,6 +497,20 @@ export function ResultEvidence({
                 entity=""
                 underline={false}
               />
+            </span>
+          ) : null}
+          {expertise && expertise.length > 0 ? (
+            <span className="text-[var(--evidence-body)]">
+              {evidence.specialty ? (
+                <>
+                  {" "}
+                  &middot;{" "}
+                </>
+              ) : null}
+              Clinical expertise:{" "}
+              <span className={`font-[450] text-[var(--evidence-anchor)] ${ENTITY_UNDERLINE}`}>
+                {expertise.join(", ")}
+              </span>
             </span>
           ) : null}
         </MatchAwareReason>

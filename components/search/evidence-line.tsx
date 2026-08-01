@@ -93,10 +93,24 @@ function evidenceSummary(
         : `${evidence.count ?? 0} publication${evidence.count === 1 ? "" : "s"} used ${evidence.family}`;
     case "topic":
       return `${evidence.count ?? 0} of ${pubCount} publications in ${evidence.label}`;
-    case "clinical":
-      return evidence.boardCertified
-        ? `Board certified in ${evidence.specialty}`
-        : `Clinical specialty: ${evidence.specialty}`;
+    case "clinical": {
+      // #1367 Gap 2 (clinical-expertise fold-in) — `specialty` is optional (an
+      // expertise-only match carries none, see `lib/api/result-evidence.ts`), so
+      // this surface — which shares the same `ResultEvidence` construction as the
+      // People card — has to tolerate its absence too, not just restate it as
+      // "undefined". When `specialty` IS present the sentence is unchanged;
+      // `expertise`, when present, appends as its own clause either way.
+      const specialtyText = evidence.specialty
+        ? evidence.boardCertified
+          ? `Board certified in ${evidence.specialty}`
+          : `Clinical specialty: ${evidence.specialty}`
+        : null;
+      const expertiseText =
+        evidence.expertise && evidence.expertise.length > 0
+          ? `Clinical expertise: ${evidence.expertise.join(", ")}`
+          : null;
+      return [specialtyText, expertiseText].filter((t): t is string => t != null).join(" · ");
+    }
     // Identity kinds are filtered out server-side and cannot reach a sponsor card.
     default:
       return "";

@@ -1102,3 +1102,85 @@ describe("searchPeople — clinical evidence on-topic pub count (#1367 Gap 1)", 
     expect(body._source).not.toContain("meshTaggedPubCount");
   });
 });
+
+// #1367 Gap 2 — the clinical-expertise fold-in. `clinicalExpertise` (raw POPS
+// `problem_procedure` strings) is now read from `_source` (same gate as
+// `clinicalSpecialties`) and matched against the content query the same
+// exact-tier way `clinicalExactMatch` matches specialties. A match either folds
+// onto an existing clinical:exact evidence object (specialty present) or, when
+// no specialty matched at all, still emits its own clinical evidence — specialty
+// absent, `boardCertified: false` — rather than dropping the signal.
+describe("searchPeople — clinical-expertise fold-in (#1367 Gap 2)", () => {
+  const CLINICAL_FLAG = "SEARCH_PEOPLE_CLINICAL_FN";
+
+  afterEach(() => {
+    delete process.env[CLINICAL_FLAG];
+  });
+
+  const runClinical = (q: string, source: Record<string, unknown>) => {
+    process.env[EVIDENCE] = "on";
+    process.env[CLINICAL_FLAG] = "on";
+    hitSourcePatch = source;
+    return searchPeople({
+      q,
+      relevanceMode: "v3",
+      shape: "topic",
+      matchAwareContext: { methodFamily: null, topics: [] },
+    });
+  };
+
+  it("expertise match folds onto an existing specialty match as an additive field", async () => {
+    const result = await runClinical("cardiology", {
+      clinicalSpecialties: ["Cardiology"],
+      clinicalBoardSet: ["Cardiology"],
+      clinicalExpertise: ["Cardiology consultations"],
+    });
+    expect(result.hits[0].evidence).toEqual({
+      kind: "clinical",
+      specialty: "Cardiology",
+      boardCertified: true,
+      expertise: ["Cardiology consultations"],
+    });
+  });
+
+  it("expertise match with NO specialty match at all still emits a clinical evidence line — specialty absent", async () => {
+    const result = await runClinical("hip", {
+      clinicalSpecialties: ["Cardiology"],
+      clinicalBoardSet: ["Cardiology"],
+      clinicalExpertise: ["Hip replacement surgery"],
+    });
+    expect(result.hits[0].evidence).toEqual({
+      kind: "clinical",
+      boardCertified: false,
+      expertise: ["Hip replacement surgery"],
+    });
+  });
+
+  it("no expertise match and no specialty match ⇒ no clinical evidence at all", async () => {
+    const result = await runClinical("nephrology", {
+      clinicalSpecialties: ["Cardiology"],
+      clinicalBoardSet: ["Cardiology"],
+      clinicalExpertise: ["Hip replacement surgery"],
+    });
+    expect(result.hits[0].evidence).not.toMatchObject({ kind: "clinical" });
+  });
+
+  it("requests `clinicalExpertise` in the people `_source` when SEARCH_PEOPLE_CLINICAL_FN is on", async () => {
+    await runClinical("cardiology", { clinicalSpecialties: ["Cardiology"], clinicalBoardSet: [] });
+    const peopleCall = mockSearch.mock.calls.find(
+      ([a]) => (a as { index?: string })?.index !== PUBLICATIONS_INDEX,
+    );
+    const body = (peopleCall?.[0] as { body: { _source: string[] } }).body;
+    expect(body._source).toContain("clinicalExpertise");
+  });
+
+  it("does NOT request `clinicalExpertise` when the flag is off — every other search keeps today's `_source` shape", async () => {
+    process.env[EVIDENCE] = "on";
+    await searchPeople({ q: "cardiology", relevanceMode: "v3" });
+    const peopleCall = mockSearch.mock.calls.find(
+      ([a]) => (a as { index?: string })?.index !== PUBLICATIONS_INDEX,
+    );
+    const body = (peopleCall?.[0] as { body: { _source: string[] } }).body;
+    expect(body._source).not.toContain("clinicalExpertise");
+  });
+});
