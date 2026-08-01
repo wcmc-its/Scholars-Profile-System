@@ -2644,6 +2644,45 @@ model FamilySensitivityOverlay {
   @@map("family_sensitivity_overlay")
 }
 
+/// The #1993 fix: a durable, explicit record of a comms-steward's Method-Family
+/// tier decision, independent of overlay-row MEMBERSHIP. Both #800/#801 seed
+/// reseeds skip a `source='steward'` row in their OWN overlay table, but that
+/// check cannot see a Public decision — "public" is encoded as NO row in
+/// EITHER overlay, so a family a steward set to Public contributed no key to
+/// either skip-set and the next reseed silently re-added it as `source='seed'`.
+/// (The Suppressed tier has the same shape: setting it deletes the family's
+/// #801 sensitivity row, so the SENSITIVITY loader's skip-set — built only from
+/// its own table — never saw that key either.)
+///
+/// `etl/family-sensitivity` and `etl/family-suppression` both load every key in
+/// THIS table (regardless of the tier value) and skip it entirely, in addition
+/// to their existing `source='steward'` overlay-row check (kept as
+/// belt-and-braces). Any future alias/anchor-curation loader (#2093) that needs
+/// the same "an automated reseed must never clobber an explicit human
+/// decision" guarantee should consult it too.
+///
+/// The tier route (`app/api/edit/methods/families/tier/route.ts`) upserts this
+/// row in the SAME transaction as the overlay write(s) and the `family_tier_set`
+/// audit row, so the decision and its effect can never be split by a mid-write
+/// failure. `decidedBy` is nullable so the migration backfill (inferred from
+/// existing `source='steward'` overlay rows) can leave it unset — those rows
+/// predate this table and their actor is not reconstructable from the overlay
+/// alone. Historical Public decisions cannot be backfilled at all: they left no
+/// row anywhere, which is the defect this table closes going forward.
+model FamilyTierDecision {
+  supercategory String   @db.VarChar(128)
+  familyLabel   String   @map("family_label") @db.VarChar(255)
+  /// 'public' | 'suppressed' | 'sensitive' — the LATEST steward decision. Not
+  /// necessarily mirrored by a row in either overlay table (a 'public' decision
+  /// never has one, by design).
+  tier          String   @db.VarChar(16)
+  decidedBy     String?  @map("decided_by") @db.VarChar(32)
+  decidedAt     DateTime @map("decided_at")
+
+  @@id([supercategory, familyLabel])
+  @@map("family_tier_decision")
+}
+
 /// Comms-steward Method-Family surfacing ledger
 /// (`docs/comms-steward-methods-visibility-spec.md` §5/§6). A deterministic,
 /// allow-by-default review queue: the surfacing pass decorates every distinct

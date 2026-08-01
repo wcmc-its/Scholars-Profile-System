@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { findUnknownFamilies } from "@/etl/family-suppression";
+import { computeSkipKeys, findUnknownFamilies } from "@/etl/family-suppression";
 
 const row = (supercategory: string, familyLabel: string) => ({
   supercategory,
@@ -19,12 +19,14 @@ const row = (supercategory: string, familyLabel: string) => ({
 });
 
 // Mirrors the loader's rowKey — the join is the exact pair, not the label alone.
+const key = (supercategory: string, familyLabel: string) => `${supercategory} ${familyLabel}`;
+
 const known = new Set(
   [
     ["computational_statistical", "Regression modeling"],
     ["computational_statistical", "Observational study design"],
     ["animal_cell_models", "Regression modeling"],
-  ].map(([s, l]) => `${s} ${l}`),
+  ].map(([s, l]) => key(s, l)),
 );
 
 describe("findUnknownFamilies", () => {
@@ -63,5 +65,37 @@ describe("findUnknownFamilies", () => {
 
   it("treats an empty curated set as clean", () => {
     expect(findUnknownFamilies([], known)).toEqual([]);
+  });
+});
+
+describe("computeSkipKeys (#1993)", () => {
+  it("skips a family with NO steward overlay row but a Public FamilyTierDecision", () => {
+    // The exact #1993 defect: a Public tier leaves nothing in either overlay
+    // table, so the steward-rows query alone would miss it entirely.
+    const skip = computeSkipKeys(
+      [],
+      [{ supercategory: "animal_cell_models", familyLabel: "Xenograft tumor models" }],
+    );
+    expect(skip.has(key("animal_cell_models", "Xenograft tumor models"))).toBe(true);
+  });
+
+  it("still skips a family via the steward overlay row alone (belt-and-braces)", () => {
+    const skip = computeSkipKeys(
+      [{ supercategory: "computational_statistical", familyLabel: "Regression modeling" }],
+      [],
+    );
+    expect(skip.has(key("computational_statistical", "Regression modeling"))).toBe(true);
+  });
+
+  it("does not skip a family present in neither source", () => {
+    const skip = computeSkipKeys(
+      [{ supercategory: "computational_statistical", familyLabel: "Regression modeling" }],
+      [{ supercategory: "animal_cell_models", familyLabel: "Regression modeling" }],
+    );
+    expect(skip.has(key("clinical_translational", "Regression modeling"))).toBe(false);
+  });
+
+  it("returns an empty set when both sources are empty", () => {
+    expect(computeSkipKeys([], []).size).toBe(0);
   });
 });

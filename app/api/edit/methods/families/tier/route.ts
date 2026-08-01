@@ -18,6 +18,13 @@
  * `family_tier_set` / `method_family` audit row inside the SAME transaction. The
  * change is a query-time-merged overlay write: reversible, no reindex, no ETL.
  *
+ * Also upserts `FamilyTierDecision` in the SAME transaction (#1993) — a durable
+ * record of the decision that survives even the "public" tier, which otherwise
+ * leaves NO row in either overlay table. Both `etl:family-sensitivity` and
+ * `etl:family-suppression` skip any key present here before reseeding from their
+ * curated CSVs, so a steward's Public decision (or any other tier) can no longer
+ * be silently overwritten by the next scheduled reseed.
+ *
  * Gate order (§7/§9): COMMS_STEWARD_ENABLED off => 404; anonymous => 401 (via the
  * shared preamble); non-steward/superuser => 403 (`not_comms_steward`, logged).
  */
@@ -126,6 +133,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         }
       }
 
+      // #1993 — the durable decision record both seed reseeds consult. Written
+      // for EVERY tier, including "public": that is the one case with no overlay
+      // row anywhere, so this upsert is the only trace of the decision at all.
+      const decidedAt = new Date();
+      await tx.familyTierDecision.upsert({
+        where: { supercategory_familyLabel: { supercategory, familyLabel } },
+        create: {
+          supercategory,
+          familyLabel,
+          tier: nextTier,
+          decidedBy: realCwid,
+          decidedAt,
+        },
+        update: { tier: nextTier, decidedBy: realCwid, decidedAt },
+      });
+
       await appendAuditRow(tx, {
         actorCwid: realCwid,
         impersonatedCwid,
@@ -135,7 +158,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         fieldsChanged: ["tier"],
         beforeValues: { tier: beforeTier },
         afterValues: { tier: nextTier, supercategory, family_label: familyLabel },
-        ts: new Date(),
+        ts: decidedAt,
         requestId,
       });
     });
