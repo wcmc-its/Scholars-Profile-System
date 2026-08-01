@@ -31,10 +31,9 @@ ARCH_DROP="${ARCH_DROP:-0.20}"
 # Pinned top-anchors: {q, cwid, maxRank, who}. A pin fails if the scholar is missing
 # from the fresh run for that query or ranks worse than maxRank. Keep this list small and
 # well-justified; every entry is a documented, stable #1–#3 anchor (see README + audit docs).
-PINS='[
-  {"q":"hypertension","cwid":"rbdevere","maxRank":3,"who":"Devereux (top-1 in all three 2026-07-02 A/B cells; issue #1444)"},
-  {"q":"pediatric congenital heart surgery","cwid":"emb9016","maxRank":3,"who":"Bacha (analyst anchor; the #1344 multi-word regression victim)"}
-]'
+# Lives in pins.json (not inline) so the post-deploy canary (canary.ts, #1444) checks the
+# SAME anchors as the full compare — one source of truth, not two lists that can drift.
+PINS="$(cat "$DIR/pins.json")"
 
 REPORT="$(jq -n \
   --slurpfile base "$BASE" \

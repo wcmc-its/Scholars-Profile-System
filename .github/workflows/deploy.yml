@@ -113,6 +113,10 @@ jobs:
           # step below self-skips (with a warning). Once present, a FAILED verify
           # hard-fails the deploy (fails-closed -- the load-bearing grant gate).
           verify_family=$(echo "$out" | jq -r '.[]|select(.OutputKey=="EcsVerifyGrantsTaskFamily").OutputValue // empty')
+          # post-deploy search-eval canary task family (#1444 remainder). Same
+          # non-fatal pattern: absent until `cdk deploy Sps-App-<env>` ships the
+          # new task def, so the step below self-skips (with a warning).
+          canary_family=$(echo "$out" | jq -r '.[]|select(.OutputKey=="EcsSearchEvalCanaryTaskFamily").OutputValue // empty')
           {
             echo "ecr_uri=$ecr_uri"
             echo "cluster=$cluster"
@@ -122,6 +126,7 @@ jobs:
             echo "etl_ecr_uri=$etl_ecr_uri"
             echo "bootstrap_family=$bootstrap_family"
             echo "verify_family=$verify_family"
+            echo "canary_family=$canary_family"
           } >> "$GITHUB_OUTPUT"
 
       - name: ECR login
@@ -261,6 +266,13 @@ jobs:
             echo "verify_taskdef=$(register_pinned "$verify_family" verify-grants "$etl_image")" >> "$GITHUB_OUTPUT"
           else
             echo "verify_taskdef=$verify_family" >> "$GITHUB_OUTPUT"
+          fi
+
+          canary_family="${{ steps.outputs.outputs.canary_family }}"
+          if [ -n "$etl_image" ] && [ -n "$canary_family" ]; then
+            echo "canary_taskdef=$(register_pinned "$canary_family" search-eval-canary "$etl_image")" >> "$GITHUB_OUTPUT"
+          else
+            echo "canary_taskdef=$canary_family" >> "$GITHUB_OUTPUT"
           fi
 
       # Static-asset sync to S3 (#700) — make old content-hashed chunks survive a
@@ -443,3 +455,47 @@ jobs:
             echo "::error::Service not fully running after rollout (desired=$desired running=$running)."
             exit 1
           fi
+
+      # Post-deploy search-eval canary (issue #1444 remainder) — staging only:
+      # the checked-in baseline/pins (scripts/search-eval/) were captured
+      # against staging's corpus; prod's is not yet fully populated (#445), so
+      # a prod run is left for that follow-up. Runs AFTER the rollout is
+      # already confirmed healthy above, so a breach here never blocks or
+      # rolls back the deploy that already happened -- it fails/alerts this
+      # workflow run so a relevance regression doesn't go unnoticed (#1444
+      # acceptance test). Reuses this same OIDC-authenticated job's
+      # `ecs:RunTask` -- no new scheduled/always-on task, no runner network
+      # access to the deployed app needed (scripts/search-eval/canary.ts's
+      # header comment has the full network rationale).
+      - name: Run search-eval canary (staging post-deploy smoke check, #1444)
+        if: ${{ steps.target.outputs.env == 'staging' && steps.pin.outputs.canary_taskdef != '' }}
+        run: |
+          set -euo pipefail
+          netcfg=$(aws ecs describe-services \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --services "${{ steps.outputs.outputs.service }}" \
+            --query 'services[0].networkConfiguration' --output json)
+          task_arn=$(aws ecs run-task \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --task-definition "${{ steps.pin.outputs.canary_taskdef }}" \
+            --launch-type FARGATE \
+            --network-configuration "$netcfg" \
+            --query 'tasks[0].taskArn' --output text)
+          echo "search-eval canary task: $task_arn"
+          aws ecs wait tasks-stopped \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --tasks "$task_arn"
+          exit_code=$(aws ecs describe-tasks \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --tasks "$task_arn" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          if [ "$exit_code" != "0" ]; then
+            echo "::error::search-eval canary exited $exit_code -- a pinned top-anchor may have regressed (scripts/search-eval/pins.json, issue #1444). Logs: /aws/ecs/sps-search-eval-canary-staging"
+            exit 1
+          fi
+          echo "search-eval canary passed -- pinned anchors hold."
+
+      - name: Skipped search-eval canary (task family not yet provisioned, #1444)
+        if: ${{ steps.target.outputs.env == 'staging' && steps.pin.outputs.canary_taskdef == '' }}
+        run: |
+          echo "::warning::EcsSearchEvalCanaryTaskFamily not found on ${{ steps.target.outputs.stack }}. Post-deploy relevance canary skipped (#1444). Run 'cdk deploy ${{ steps.target.outputs.stack }}' to create sps-search-eval-canary-staging, then re-run this workflow."

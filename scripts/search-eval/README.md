@@ -16,6 +16,8 @@ public from WCM, no SSO).
 | `score_query.jq` | scores one query's results against an expected list (rank, MRR, top-N) |
 | `compare.sh` | diffs a fresh run against `baselines/staging.json`, fails on a threshold breach |
 | `baselines/staging.json` | checked-in scored baseline (`JSON_OUT` results + run metadata) |
+| `pins.json` | pinned top-anchors (`compare.sh`'s anchor gate + `canary.ts`'s post-deploy smoke check share this one list) |
+| `canary.ts` | post-deploy canary (#1444): checks `pins.json` against the just-deployed env; runs in-VPC via `deploy.yml` |
 
 ## Quick start
 
@@ -83,6 +85,17 @@ A/B cells; extend the `PINS` array in `compare.sh` as new anchors are agreed.
    of minutes), then rebuild `baselines/staging.json` with a refreshed `meta` block.
 3. Open a PR — the reviewer eyeballs the score movement before it becomes the new floor.
    Never re-baseline to make a red `compare.sh` pass without that review.
+
+## Post-deploy canary (`canary.ts`)
+
+`deploy.yml` runs `canary.ts` in-VPC (via `ecs run-task` on `sps-search-eval-canary-<env>`,
+`cdk/lib/app-stack.ts`) right after a staging roll stabilizes. It checks only `pins.json` —
+the same top-anchors `compare.sh` gates on — against the app just deployed, and fails the
+workflow run if one regressed. It is deliberately **not** the full 20-query eval (that stays
+a separately-scoped nightly in-VPC run): GitHub-hosted runners can't reach the deployed app
+directly (the edge WAF is WCM-CIDR-only, #1434), so the canary runs as a one-off ECS task
+that hits the public ALB directly, bypassing CloudFront/the WAF. See `canary.ts`'s header
+comment for the full network rationale.
 
 ### Metrics
 - **rank** — position among all results (`MISS` = beyond `MAX_PAGES`; bump it for deep checks).
