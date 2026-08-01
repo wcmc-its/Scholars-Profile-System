@@ -81,6 +81,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
       "Description": "SPS one-shot prisma migrate deploy task family",
       "Value": "sps-migrate-prod",
     },
+    "EcsSearchEvalCanaryTaskFamily": {
+      "Description": "SPS one-shot post-deploy search-eval canary task family - run after rollout is confirmed healthy (#1444)",
+      "Value": "sps-search-eval-canary-prod",
+    },
     "EcsServiceName": {
       "Description": "SPS ECS service name",
       "Value": {
@@ -1988,6 +1992,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ecs:us-east-1:123456789012:task-definition/sps-search-eval-canary-prod:*",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -2055,6 +2071,12 @@ service:
                 {
                   "Fn::GetAtt": [
                     "TaskRole30FC0FBB",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "SearchEvalCanaryExecutionRole464F1E01",
                     "Arn",
                   ],
                 },
@@ -2894,6 +2916,293 @@ service:
         },
       },
       "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "SearchEvalCanaryExecutionRole464F1E01": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "SPS search-eval canary task-execution role (prod). Reads only the origin-verify shared secret -- no DB DSNs (#1444).",
+        "RoleName": "sps-search-eval-canary-exec-prod",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "SearchEvalCanaryExecutionRoleDefaultPolicyFC978439": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecr:GetAuthorizationToken",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EtlEcrRepository058F5EEC",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": "secretsmanager:GetSecretValue",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "SearchEvalCanaryLogGroup434F45BC",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "SearchEvalCanaryLogGroup434F45BC",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "SearchEvalCanaryLogGroup434F45BC",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "SearchEvalCanaryExecutionRoleDefaultPolicyFC978439",
+        "Roles": [
+          {
+            "Ref": "SearchEvalCanaryExecutionRole464F1E01",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "SearchEvalCanaryLogGroup434F45BC": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/ecs/sps-search-eval-canary-prod",
+        "RetentionInDays": 90,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "SearchEvalCanaryTaskDefinitionEA26D4B7": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "EntryPoint": [
+              "npx",
+              "tsx",
+              "scripts/search-eval/canary.ts",
+            ],
+            "Environment": [
+              {
+                "Name": "CANARY_HOST",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Fn::GetAtt": [
+                          "PublicAlb84330974",
+                          "DNSName",
+                        ],
+                      },
+                    ],
+                  ],
+                },
+              },
+            ],
+            "Essential": true,
+            "Image": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      4,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::GetAtt": [
+                              "EtlEcrRepository058F5EEC",
+                              "Arn",
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".dkr.ecr.",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::GetAtt": [
+                              "EtlEcrRepository058F5EEC",
+                              "Arn",
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".",
+                  {
+                    "Ref": "AWS::URLSuffix",
+                  },
+                  "/",
+                  {
+                    "Ref": "EtlEcrRepository058F5EEC",
+                  },
+                  ":latest",
+                ],
+              ],
+            },
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "SearchEvalCanaryLogGroup434F45BC",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "search-eval-canary",
+              },
+            },
+            "Name": "search-eval-canary",
+            "Secrets": [
+              {
+                "Name": "CANARY_ORIGIN_VERIFY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret",
+                    ],
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+        "Cpu": "512",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "SearchEvalCanaryExecutionRole464F1E01",
+            "Arn",
+          ],
+        },
+        "Family": "sps-search-eval-canary-prod",
+        "Memory": "1024",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "SearchEvalCanaryTaskDefinitionTaskRoleE68C849D",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
+    },
+    "SearchEvalCanaryTaskDefinitionTaskRoleE68C849D": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
     },
     "SecretsManagerEndpoint5E83C66B": {
       "Properties": {
@@ -3996,6 +4305,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
     "EcsMigrationTaskFamily": {
       "Description": "SPS one-shot prisma migrate deploy task family",
       "Value": "sps-migrate-staging",
+    },
+    "EcsSearchEvalCanaryTaskFamily": {
+      "Description": "SPS one-shot post-deploy search-eval canary task family - run after rollout is confirmed healthy (#1444)",
+      "Value": "sps-search-eval-canary-staging",
     },
     "EcsServiceName": {
       "Description": "SPS ECS service name",
@@ -5953,6 +6266,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ecs:us-east-1:123456789012:task-definition/sps-search-eval-canary-staging:*",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -6020,6 +6345,12 @@ service:
                 {
                   "Fn::GetAtt": [
                     "TaskRole30FC0FBB",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "SearchEvalCanaryExecutionRole464F1E01",
                     "Arn",
                   ],
                 },
@@ -6819,6 +7150,293 @@ service:
         "VpcId": "vpc-08a1873fc8eebae28",
       },
       "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+    },
+    "SearchEvalCanaryExecutionRole464F1E01": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "SPS search-eval canary task-execution role (staging). Reads only the origin-verify shared secret -- no DB DSNs (#1444).",
+        "RoleName": "sps-search-eval-canary-exec-staging",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "SearchEvalCanaryExecutionRoleDefaultPolicyFC978439": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecr:GetAuthorizationToken",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EtlEcrRepository058F5EEC",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": "secretsmanager:GetSecretValue",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "SearchEvalCanaryLogGroup434F45BC",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "SearchEvalCanaryLogGroup434F45BC",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "SearchEvalCanaryLogGroup434F45BC",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "SearchEvalCanaryExecutionRoleDefaultPolicyFC978439",
+        "Roles": [
+          {
+            "Ref": "SearchEvalCanaryExecutionRole464F1E01",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "SearchEvalCanaryLogGroup434F45BC": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/ecs/sps-search-eval-canary-staging",
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "SearchEvalCanaryTaskDefinitionEA26D4B7": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "EntryPoint": [
+              "npx",
+              "tsx",
+              "scripts/search-eval/canary.ts",
+            ],
+            "Environment": [
+              {
+                "Name": "CANARY_HOST",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Fn::GetAtt": [
+                          "PublicAlb84330974",
+                          "DNSName",
+                        ],
+                      },
+                    ],
+                  ],
+                },
+              },
+            ],
+            "Essential": true,
+            "Image": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      4,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::GetAtt": [
+                              "EtlEcrRepository058F5EEC",
+                              "Arn",
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".dkr.ecr.",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::GetAtt": [
+                              "EtlEcrRepository058F5EEC",
+                              "Arn",
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".",
+                  {
+                    "Ref": "AWS::URLSuffix",
+                  },
+                  "/",
+                  {
+                    "Ref": "EtlEcrRepository058F5EEC",
+                  },
+                  ":latest",
+                ],
+              ],
+            },
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "SearchEvalCanaryLogGroup434F45BC",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "search-eval-canary",
+              },
+            },
+            "Name": "search-eval-canary",
+            "Secrets": [
+              {
+                "Name": "CANARY_ORIGIN_VERIFY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret",
+                    ],
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+        "Cpu": "512",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "SearchEvalCanaryExecutionRole464F1E01",
+            "Arn",
+          ],
+        },
+        "Family": "sps-search-eval-canary-staging",
+        "Memory": "1024",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "SearchEvalCanaryTaskDefinitionTaskRoleE68C849D",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
+    },
+    "SearchEvalCanaryTaskDefinitionTaskRoleE68C849D": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
     },
     "TaskExecutionRole250D2532": {
       "Properties": {

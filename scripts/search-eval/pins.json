@@ -1,0 +1,14 @@
+[
+  {
+    "q": "hypertension",
+    "cwid": "rbdevere",
+    "maxRank": 3,
+    "who": "Devereux (top-1 in all three 2026-07-02 A/B cells; issue #1444)"
+  },
+  {
+    "q": "pediatric congenital heart surgery",
+    "cwid": "emb9016",
+    "maxRank": 3,
+    "who": "Bacha (analyst anchor; the #1344 multi-word regression victim)"
+  }
+]

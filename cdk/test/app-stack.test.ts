@@ -242,12 +242,13 @@ describe("AppStack", () => {
     });
 
     describe("Resource counts (the plan's § Acceptance criteria)", () => {
-      it("creates exactly two ECR repositories (app + ETL), one ECS cluster, three task definitions, one ECS service", () => {
+      it("creates exactly two ECR repositories (app + ETL), one ECS cluster, five task definitions, one ECS service", () => {
         // App image repo + the dedicated ETL batch-image repo (#454).
         template.resourceCountIs("AWS::ECR::Repository", 2);
         template.resourceCountIs("AWS::ECS::Cluster", 1);
-        // app + migrate + db-bootstrap (#493) + verify-grants (ADR-009).
-        template.resourceCountIs("AWS::ECS::TaskDefinition", 4);
+        // app + migrate + db-bootstrap (#493) + verify-grants (ADR-009) +
+        // search-eval canary (#1444).
+        template.resourceCountIs("AWS::ECS::TaskDefinition", 5);
         template.resourceCountIs("AWS::ECS::Service", 1);
       });
 
@@ -271,13 +272,15 @@ describe("AppStack", () => {
         expect(schemes).toEqual(["internal", "internet-facing"]);
       });
 
-      it("creates the three task-side IAM roles plus the GitHub Actions OIDC deploy role", () => {
+      it("creates the four task-side IAM roles plus the GitHub Actions OIDC deploy role", () => {
         // Match by role name rather than raw count: in the owner env the OIDC
         // provider custom resource adds its own Lambda execution role, and any
         // env may carry other framework-generated roles. prod imports the
         // provider (issue #491) so has no such custom-resource role, but the
         // name-based assertion holds either way. The deploy execution role
-        // (sps-deploy-exec, ADR-009) is the third task-side role.
+        // (sps-deploy-exec, ADR-009) is the third task-side role; the
+        // search-eval canary execution role (#1444) -- deliberately separate
+        // from sps-deploy-exec so it never gains DB DSN access -- is the fourth.
         const roles = template.findResources("AWS::IAM::Role");
         const roleNames = Object.values(roles)
           .map((r) => r.Properties?.RoleName as string | undefined)
@@ -287,6 +290,7 @@ describe("AppStack", () => {
           [
             "sps-deploy-prod",
             "sps-deploy-exec-prod",
+            "sps-search-eval-canary-exec-prod",
             "sps-task-exec-prod",
             "sps-task-prod",
           ].sort(),
@@ -386,8 +390,8 @@ describe("AppStack", () => {
           .toMatch(/\.s3"\s*\]/);
       });
 
-      it("creates exactly five CloudWatch log groups (app + migrate + db-bootstrap + verify-grants + otel-collector sidecar)", () => {
-        template.resourceCountIs("AWS::Logs::LogGroup", 5);
+      it("creates exactly six CloudWatch log groups (app + migrate + db-bootstrap + verify-grants + search-eval canary + otel-collector sidecar)", () => {
+        template.resourceCountIs("AWS::Logs::LogGroup", 6);
         const groups = template.findResources("AWS::Logs::LogGroup");
         const names = Object.values(groups)
           .map((r) => r.Properties?.LogGroupName as string | undefined)
@@ -397,6 +401,7 @@ describe("AppStack", () => {
           "/aws/ecs/sps-db-bootstrap-prod",
           "/aws/ecs/sps-migrate-prod",
           "/aws/ecs/sps-otel-prod",
+          "/aws/ecs/sps-search-eval-canary-prod",
           "/aws/ecs/sps-verify-grants-prod",
         ]);
       });
@@ -1115,10 +1120,10 @@ describe("AppStack", () => {
         expect(serialized).toContain("EtlEcrRepository");
       });
 
-      it("the OIDC deploy role can RunTask on the migrate, db-bootstrap and verify-grants families (#493 / ADR-009)", () => {
-        // The workflow runs db-bootstrap -> verify-grants -> migrate; the deploy
-        // role must be scoped to all three task-definition families and no
-        // broader `*`.
+      it("the OIDC deploy role can RunTask on the migrate, db-bootstrap, verify-grants and search-eval-canary families (#493 / ADR-009 / #1444)", () => {
+        // The workflow runs db-bootstrap -> verify-grants -> migrate -> (roll)
+        // -> search-eval canary; the deploy role must be scoped to all four
+        // task-definition families and no broader `*`.
         const statements = findDeployStatements();
         const runTask = statements.find((stmt) => {
           const action = stmt.Action as string | string[];
@@ -1132,6 +1137,68 @@ describe("AppStack", () => {
         expect(serialized).toContain("sps-migrate-prod:*");
         expect(serialized).toContain("sps-db-bootstrap-prod:*");
         expect(serialized).toContain("sps-verify-grants-prod:*");
+        expect(serialized).toContain("sps-search-eval-canary-prod:*");
+      });
+
+      it("the search-eval canary execution role can read exactly ONE secret -- the origin-verify shared secret, never a DB DSN (#1444)", () => {
+        // Deliberately NOT on deployTaskExecutionRole (asserted elsewhere to
+        // read exactly the four DB DSNs) -- its own dedicated role, scoped to
+        // exactly the one secret it needs.
+        const policies = template.findResources("AWS::IAM::Policy");
+        const canaryExecPolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) =>
+              typeof r.Ref === "string" &&
+              r.Ref.includes("SearchEvalCanaryExecutionRole"),
+          );
+        });
+        expect(canaryExecPolicy).toBeDefined();
+        const statements = canaryExecPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        const secretsStmt = statements?.find((s) => {
+          const action = s.Action;
+          return Array.isArray(action)
+            ? action.includes("secretsmanager:GetSecretValue")
+            : action === "secretsmanager:GetSecretValue";
+        });
+        expect(secretsStmt).toBeDefined();
+        const resourceList = Array.isArray(secretsStmt?.Resource)
+          ? (secretsStmt?.Resource as unknown[])
+          : [secretsStmt?.Resource];
+        expect(resourceList).toHaveLength(1);
+        const serialized = JSON.stringify(resourceList);
+        expect(serialized).toContain("edge/origin-shared-secret");
+        expect(serialized).not.toContain("db/migrate");
+        expect(serialized).not.toContain("db/bootstrap");
+        expect(serialized).not.toContain("db/app-rw");
+        expect(serialized).not.toContain("db/app-ro");
+      });
+
+      it("the deploy role's iam:PassRole covers the search-eval canary execution role (#1444)", () => {
+        const policies = template.findResources("AWS::IAM::Policy");
+        const deployPolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) => typeof r.Ref === "string" && r.Ref.includes("DeployRole"),
+          );
+        });
+        const statements = deployPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        const passRoleStmt = statements?.find((s) => {
+          const action = s.Action;
+          return Array.isArray(action)
+            ? action.includes("iam:PassRole")
+            : action === "iam:PassRole";
+        });
+        expect(passRoleStmt).toBeDefined();
+        expect(JSON.stringify(passRoleStmt?.Resource)).toContain(
+          "SearchEvalCanaryExecutionRole",
+        );
       });
     });
 

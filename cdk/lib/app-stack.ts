@@ -154,6 +154,12 @@ export class AppStack extends Stack {
   public readonly dbBootstrapTaskDefinition: ecs.FargateTaskDefinition;
   /** Family-only handle to the one-shot grant-equality verify task (ADR-009). */
   public readonly verifyGrantsTaskDefinition: ecs.FargateTaskDefinition;
+  /**
+   * Family-only handle to the one-shot post-deploy search-eval canary task
+   * (#1444 remainder) — checks `scripts/search-eval/pins.json` against the
+   * just-deployed app, run in-VPC via `deploy.yml`'s existing OIDC role.
+   */
+  public readonly searchEvalCanaryTaskDefinition: ecs.FargateTaskDefinition;
   /** Public, internet-facing ALB. */
   public readonly publicAlb: elbv2.ApplicationLoadBalancer;
   /** Internal ALB — reachable only from inside the VPC. */
@@ -240,6 +246,15 @@ export class AppStack extends Stack {
       this,
       "OpensearchAppSecret",
       `scholars/${env}/opensearch/app`,
+    );
+    // B07 CloudFront-to-ALB origin shared secret, referenced a second time
+    // here (as an ISecret rather than the SecretValue dynamic-ref used below
+    // for the ALB listener rule) so the search-eval canary task (#1444) can
+    // read it via its own dedicated, minimally-scoped execution role.
+    const originSharedSecretForCanary = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "OriginSharedSecretForCanary",
+      `scholars/${env}/edge/origin-shared-secret`,
     );
     const revalidateTokenSecret = secretsmanager.Secret.fromSecretNameV2(
       this,
@@ -481,6 +496,14 @@ export class AppStack extends Stack {
       retention: logRetention,
       removalPolicy: RemovalPolicy.RETAIN,
     });
+    // Post-deploy search-eval canary task log group (#1444 remainder) — its
+    // own stream, distinct from the DB-role deploy tasks above (this one
+    // never touches the database at all).
+    const searchEvalCanaryLogGroup = new logs.LogGroup(this, "SearchEvalCanaryLogGroup", {
+      logGroupName: `/aws/ecs/sps-search-eval-canary-${env}`,
+      retention: logRetention,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
     // ADOT collector sidecar log group (B24). Same retention as the app log
     // group; env-prefixed per Footgun #4. Created here -- not in
     // ObservabilityStack -- because the sidecar lives inside the AppStack
@@ -627,6 +650,60 @@ export class AppStack extends Stack {
           `${dbBootstrapLogGroup.logGroupArn}:*`,
           verifyGrantsLogGroup.logGroupArn,
           `${verifyGrantsLogGroup.logGroupArn}:*`,
+        ],
+      }),
+    );
+
+    // ------------------------------------------------------------------
+    // search-eval canary execution role (#1444 remainder).
+    //
+    // A DEDICATED role, not a reuse of `deployTaskExecutionRole` above: that
+    // role's `secretsmanager:GetSecretValue` resource list is asserted to be
+    // exactly the four DB DSNs (ADR-009, app-stack.test.ts) — adding the
+    // origin-verify secret to it would both break that assertion and hand
+    // migrate/db-bootstrap/verify-grants a secret none of them need. This
+    // role reads ONLY the origin-verify shared secret and nothing else — no
+    // DB DSN reaches it, ever.
+    // ------------------------------------------------------------------
+    const canaryTaskExecutionRole = new iam.Role(this, "SearchEvalCanaryExecutionRole", {
+      roleName: `sps-search-eval-canary-exec-${env}`,
+      assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+      description: `SPS search-eval canary task-execution role (${env}). Reads only the origin-verify shared secret -- no DB DSNs (#1444).`,
+    });
+    canaryTaskExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["ecr:GetAuthorizationToken"],
+        resources: ["*"],
+      }),
+    );
+    canaryTaskExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+        ],
+        // Only the ETL repo -- the canary runs scripts/search-eval/canary.ts
+        // on the ETL image (the only one carrying tsx + the source tree).
+        resources: [this.etlEcrRepository.repositoryArn],
+      }),
+    );
+    canaryTaskExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["secretsmanager:GetSecretValue"],
+        resources: [originSharedSecretForCanary.secretArn],
+      }),
+    );
+    canaryTaskExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["logs:CreateLogStream", "logs:PutLogEvents"],
+        resources: [
+          searchEvalCanaryLogGroup.logGroupArn,
+          `${searchEvalCanaryLogGroup.logGroupArn}:*`,
         ],
       }),
     );
@@ -2962,6 +3039,58 @@ export class AppStack extends Stack {
     });
 
     // ------------------------------------------------------------------
+    // search-eval canary task definition (#1444 remainder).
+    //
+    // Fast post-deploy relevance smoke check: confirms the pinned top-anchors
+    // (scripts/search-eval/pins.json -- the same anchors `compare.sh` checks)
+    // still rank in the JUST-DEPLOYED image, before a human notices a
+    // regression. Runs `scripts/search-eval/canary.ts` on the ETL image (the
+    // only one carrying tsx + the source tree).
+    //
+    // GitHub-hosted runners sit off the WCM network and the edge WAF is
+    // WCM-CIDR-only (#1434), so `deploy.yml` can't just `curl` the deployed
+    // hostname itself. Instead this runs in-VPC -- reusing the app service's
+    // network config exactly like migrate/db-bootstrap/verify-grants above --
+    // and hits the PUBLIC ALB's DNS name directly, bypassing CloudFront/the
+    // WAF entirely (issue #1444: skipping CloudFront is a determinism plus,
+    // not a workaround). The ALB's public listener still gates every request
+    // on the X-Origin-Verify shared secret (B07), so the container gets it
+    // injected via its OWN dedicated execution role (canaryTaskExecutionRole
+    // above) -- never the shared deploy execution role, which must stay
+    // scoped to exactly the four DB DSNs (ADR-009, asserted in
+    // app-stack.test.ts).
+    //
+    // No `taskRole` grant: the canary makes outbound HTTP calls only and
+    // touches no AWS API at runtime.
+    // ------------------------------------------------------------------
+    this.searchEvalCanaryTaskDefinition = new ecs.FargateTaskDefinition(
+      this,
+      "SearchEvalCanaryTaskDefinition",
+      {
+        family: `sps-search-eval-canary-${env}`,
+        cpu: envConfig.migrationTaskCpu,
+        memoryLimitMiB: envConfig.migrationTaskMemoryMiB,
+        executionRole: canaryTaskExecutionRole,
+      },
+    );
+    this.searchEvalCanaryTaskDefinition.addContainer("search-eval-canary", {
+      image: etlContainerImage,
+      containerName: "search-eval-canary",
+      essential: true,
+      entryPoint: ["npx", "tsx", "scripts/search-eval/canary.ts"],
+      environment: {
+        CANARY_HOST: `http://${this.publicAlb.loadBalancerDnsName}`,
+      },
+      logging: ecs.LogDriver.awsLogs({
+        logGroup: searchEvalCanaryLogGroup,
+        streamPrefix: "search-eval-canary",
+      }),
+      secrets: {
+        CANARY_ORIGIN_VERIFY: ecs.Secret.fromSecretsManager(originSharedSecretForCanary),
+      },
+    });
+
+    // ------------------------------------------------------------------
     // ECS service.
     //
     // - Fargate launch.
@@ -3237,6 +3366,13 @@ export class AppStack extends Stack {
             resource: "task-definition",
             resourceName: `${this.verifyGrantsTaskDefinition.family}:*`,
           }),
+          // The post-deploy search-eval canary, run after the service rolls
+          // and is confirmed healthy (#1444 remainder).
+          Stack.of(this).formatArn({
+            service: "ecs",
+            resource: "task-definition",
+            resourceName: `${this.searchEvalCanaryTaskDefinition.family}:*`,
+          }),
         ],
       }),
     );
@@ -3287,6 +3423,9 @@ export class AppStack extends Stack {
           // the deploy execution role, so the deploy principal must be able to.
           deployTaskExecutionRole.roleArn,
           taskRole.roleArn,
+          // #1444: RunTask for the search-eval canary passes its own dedicated
+          // execution role (never deployTaskExecutionRole -- see above).
+          canaryTaskExecutionRole.roleArn,
         ],
         conditions: {
           StringEquals: {
@@ -3430,6 +3569,11 @@ export class AppStack extends Stack {
       value: this.verifyGrantsTaskDefinition.family,
       description:
         "SPS one-shot grant-equality verify task family - run after db-bootstrap, before the service rolls (ADR-009)",
+    });
+    new CfnOutput(this, "EcsSearchEvalCanaryTaskFamily", {
+      value: this.searchEvalCanaryTaskDefinition.family,
+      description:
+        "SPS one-shot post-deploy search-eval canary task family - run after rollout is confirmed healthy (#1444)",
     });
     new CfnOutput(this, "PublicAlbDns", {
       value: this.publicAlb.loadBalancerDnsName,
