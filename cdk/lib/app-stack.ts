@@ -1673,6 +1673,20 @@ export class AppStack extends Stack {
         // --exclusively Sps-App-prod` activates it, the facet stays invisible until
         // the prod publications index is reindexed (search:index:publications).
         SEARCH_PUB_DEPARTMENT_FILTER: "on",
+        // #718 -- publications-index exclusion of pubs with zero displayable
+        // WCM authors (isRequireDisplayableAuthorEnabled, lib/search-index-docs.ts).
+        // Read by both the layer-1 synchronous suppress/revoke fast-path
+        // (lib/edit/search-suppression.ts, called from the app's own
+        // /api/edit/{suppress,revoke,reject} routes -- hence needed HERE, in
+        // the app env, not just the ETL env) and the nightly search:index
+        // build. Reindex-then-flip, same shape as SEARCH_PUB_DEPARTMENT_FILTER
+        // above: flipping this on before a reindex leaves already-indexed
+        // author-less docs in place (buildPublicationDoc only drops them going
+        // forward) but does make new suppress/revoke fast-path writes apply
+        // the gate immediately. DEFAULT OFF BOTH ENVS -- wiring only; the
+        // staging-first flip + publications reindex are separate operator
+        // rollout steps (#718 activation checklist), not part of this change.
+        SEARCH_REQUIRE_DISPLAYABLE_AUTHOR: "off",
         // #396 -- Publications-tab "Show only MeSH-tagged matches" filter.
         // NO reindex prereq (unlike SEARCH_PUB_DEPARTMENT_FILTER above):
         // `meshDescriptorUi` is already indexed, so the `exists` predicate is

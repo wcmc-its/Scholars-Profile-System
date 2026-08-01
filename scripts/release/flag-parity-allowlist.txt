@@ -7,9 +7,6 @@
 # cdk/lib/app-stack.ts (or etl-stack.ts), regenerate the snapshot
 # (cd cdk && npm test -- -u), and delete its line here.
 
-# --- tracked gaps: flags waiting on an open issue to wire + flip ---
-SEARCH_REQUIRE_DISPLAYABLE_AUTHOR   # 718: wire cdk ETL+app, reindex, then flip
-
 # --- runtime/system (injected by platform, test runner, or build) ---
 AWS_DEFAULT_REGION
 AWS_REGION
