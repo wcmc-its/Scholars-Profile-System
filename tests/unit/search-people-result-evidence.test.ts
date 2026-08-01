@@ -248,6 +248,77 @@ describe("searchPeople — evidence emission gated on SEARCH_RESULT_EVIDENCE", (
   });
 });
 
+// #2071 (E1b) — the topic evidence line's count, resolved query-time via
+// `publicationTopic.groupBy` instead of read from the index-time `_source`
+// total. Mirrors the "methodPubCount on the hit" block below.
+describe("searchPeople — topic evidence count (#2071 E1b)", () => {
+  const runWithTopic = () =>
+    searchPeople({
+      q: "single cell spatial biology",
+      relevanceMode: "v3",
+      shape: "topic",
+      matchAwareContext: {
+        methodFamily: null,
+        topics: [{ slug: "single_cell_spatial_biology", label: "Single-cell & spatial biology" }],
+      },
+    });
+
+  it("carries a count sourced from the live groupBy, not a doc field", async () => {
+    process.env[EVIDENCE] = "on";
+    // `count` only surfaces on the stacked (#1366) evidence path — the single-
+    // evidence `evidence` object never carries one, by design.
+    process.env.SEARCH_EVIDENCE_REASON_COUNTS = "on";
+    mockPubTopicGroupBy.mockResolvedValue([
+      { cwid: "el1", parentTopicId: "single_cell_spatial_biology", _count: { pmid: 9 } },
+    ]);
+    const result = await runWithTopic();
+    expect(result.hits[0].evidenceLines).toEqual([
+      {
+        kind: "topic",
+        label: "Single-cell & spatial biology",
+        id: "single_cell_spatial_biology",
+        count: 9,
+      },
+    ]);
+    delete process.env.SEARCH_EVIDENCE_REASON_COUNTS;
+  });
+
+  it("the query is scoped to the page cwids and to the topics THIS query resolved to", async () => {
+    process.env[EVIDENCE] = "on";
+    mockPubTopicGroupBy.mockResolvedValue([]);
+    await runWithTopic();
+    expect(mockPubTopicGroupBy).toHaveBeenCalledTimes(1);
+    const args = mockPubTopicGroupBy.mock.calls[0][0];
+    expect(args.where.cwid).toEqual({ in: ["el1"] });
+    expect(args.where.parentTopicId).toEqual({ in: ["single_cell_spatial_biology"] });
+  });
+
+  it("nothing matched ⇒ NO groupBy query is issued", async () => {
+    process.env[EVIDENCE] = "on";
+    const result = await searchPeople({
+      q: "single cell rna sequencing",
+      relevanceMode: "v3",
+      shape: "topic",
+      matchAwareContext: { methodFamily: null, topics: [] },
+    });
+    expect(mockPubTopicGroupBy).not.toHaveBeenCalled();
+    expect(result.hits[0].evidence?.kind).not.toBe("topic");
+  });
+
+  it("a row for a DIFFERENT cwid never leaks onto this scholar's count", async () => {
+    process.env[EVIDENCE] = "on";
+    process.env.SEARCH_EVIDENCE_REASON_COUNTS = "on";
+    mockPubTopicGroupBy.mockResolvedValue([
+      { cwid: "someone-else", parentTopicId: "single_cell_spatial_biology", _count: { pmid: 400 } },
+    ]);
+    const result = await runWithTopic();
+    delete process.env.SEARCH_EVIDENCE_REASON_COUNTS;
+    const ev = result.hits[0].evidenceLines?.[0];
+    if (ev?.kind !== "topic") throw new Error("expected topic");
+    expect(ev.count).toBeUndefined();
+  });
+});
+
 // Rep-papers disclosure (#1) — the content-shaped free-text mention path. A query
 // that resolves to NO concept (`meshDescendantUis` empty, `queryShape` ===
 // "restructured_msm") must, ONLY when the evidence flag is on, run the reason
