@@ -149,12 +149,10 @@ async function handleSearch(request: NextRequest) {
     // short-circuit and fails closed to null.
     let mesh = await resolveMeshDescriptor(q);
     // Issue #692 §4.1, mesh-only shape — retry the stripped content query on a
-    // resolution miss. The full path below additionally requires a curated-
-    // match miss before retrying; curated state isn't computed here, so in the
-    // rare case where the full query curated-matches a topic label WITHOUT
-    // MeSH-resolving, this retry can resolve a descriptor the people/SSR path
-    // would not. Strictly more-resolved for branches that only consume the
-    // descriptor; accepted to keep this path off the candidate/count queries.
+    // weak MeSH resolution. #1982 — the full path below no longer requires a
+    // curated-match miss before retrying either (it merges only `meshResolution`
+    // when the curated side already matched), so this arm and that one now trigger
+    // on the same condition; this arm just has no curated `state` to preserve.
     // #1972 — same rule as the full path below: a `partial` is the window fallback's
     // guess, not a resolution, so it must not count as "already resolved" here. But a
     // retry may only RAISE THE CONFIDENCE of the descriptor the full query already
