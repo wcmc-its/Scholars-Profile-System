@@ -1093,6 +1093,30 @@ export class EtlStack extends Stack {
       // role (no per-source secret). A no-op while SCHOLAR_TOOL_SOURCE=ddb;
       // the sole scholar_tool writer once flipped to s3.
       { id: "Tools", npmScript: "etl:scholar-tool", external: true, tier: "continue" },
+      // #2051 part B — family_sensitivity_overlay (#801) and
+      // family_suppression_overlay (#800) were on-demand only, so each env held
+      // whatever the last manual run left behind and nothing kept staging/prod
+      // in sync: prod's suppression overlay sat empty for an unknown period on
+      // a surface whose entire purpose is controlling public visibility. Both
+      // read a checked-in curated CSV (etl/family-sensitivity|suppression/
+      // curated.csv) and write SPS-DB only via a SEED-SAFE reseed that never
+      // touches a steward-owned row, so external:false, no per-source secret.
+      // MUST follow Tools (etl:scholar-tool) -- the sole writer of
+      // `scholar_family`, which suppression validates every curated label
+      // against and both overlays join on the exact (supercategory,
+      // family_label) string.
+      {
+        id: "FamilySensitivityNightly",
+        npmScript: "etl:family-sensitivity",
+        external: false,
+        tier: "continue",
+      },
+      {
+        id: "FamilySuppressionNightly",
+        npmScript: "etl:family-suppression",
+        external: false,
+        tier: "continue",
+      },
       {
         id: "MeshCoverageNightly",
         npmScript: "etl:mesh-coverage",
