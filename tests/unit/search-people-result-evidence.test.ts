@@ -801,7 +801,7 @@ describe("searchPeople — #1977 provenance reads its own set, not the boost uni
  * where 923 is the scholar's TOTAL authored output. Method extraction covers 2020+ BY
  * DESIGN, so the numerator was drawn from a ~27-paper eligible pool and divided by a
  * 923-paper one — and at 1.2% the card's low-coverage rule then dimmed the scholar's
- * strongest signal. The honest line is "11 of 27 method-indexed publications", i.e. 41%.
+ * strongest signal. The honest line is "11 of 27 eligible publications", i.e. 41%.
  *
  * SPS stores no method-eligible count anywhere, so it is folded at query time from the
  * union of `ScholarFamily.pmids` over the scholar's publicly-visible families. The union

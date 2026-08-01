@@ -347,7 +347,7 @@ export function ResultEvidence({
   // publications beat Crystal's HUNDRED AND FORTY. Two pipelines, one frame, again.
   //
   // The share is not lost, it moves into the sentence, where the base is stated in words
-  // ("3 of 13 method-indexed publications") and cannot be read off against a neighbour's
+  // ("3 of 13 eligible publications") and cannot be read off against a neighbour's
   // cell. Withholding the cell is the honest option because this column's own contract,
   // stated above, is "% of this scholar's OUTPUT" — which a method ratio is not.
   //
@@ -375,17 +375,17 @@ export function ResultEvidence({
           onToggle={onToggle}
           panelId={panelId}
         >
-          {/* "method-indexed publications", not "publications": the M is the size of the
-              pool method extraction actually covers (post-2020 by design), so calling it
+          {/* "eligible publications", not "publications": the M is the size of the pool
+              method extraction actually covers (post-2020 by design), so calling it
               "publications" would put the scholar's whole career behind a number that is
               only a slice of it — the same over-claim in the opposite direction. When
               `methodPubCount` is absent `CountFirst` drops the "of M" clause and keeps the
               count, so the line reads "11 publications used AAV gene-therapy vectors" —
-              the word "method-indexed" goes with the denominator it qualifies. */}
+              "eligible" names the denominator it qualifies (#2155). */}
           <CountFirst
             n={evidence.count}
             m={methodPubCount}
-            thing={methodPubCount != null ? "method-indexed publications" : "publications"}
+            thing={methodPubCount != null ? "eligible publications" : "publications"}
             relation="used"
             entity={evidence.family}
             underline
