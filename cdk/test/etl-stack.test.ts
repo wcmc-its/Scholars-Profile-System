@@ -1488,6 +1488,24 @@ describe("EtlStack", () => {
       expect(prodNightly).toMatch(/etl:mesh-aliases/);
     });
 
+    it("includes etl:family-sensitivity and etl:family-suppression in BOTH nightly cadences (#2051 part B)", () => {
+      // family_sensitivity_overlay / family_suppression_overlay previously only
+      // refreshed on an on-demand run, per env, with nothing keeping staging and
+      // prod in sync — prod's suppression overlay sat empty for an unknown period.
+      const stagingNightly = getStateMachineDefinitionText(
+        template,
+        "scholars-nightly-staging",
+      );
+      expect(stagingNightly).toMatch(/etl:family-sensitivity/);
+      expect(stagingNightly).toMatch(/etl:family-suppression/);
+      const prodNightly = getStateMachineDefinitionText(
+        buildEtlStack("prod").template,
+        "scholars-nightly-prod",
+      );
+      expect(prodNightly).toMatch(/etl:family-sensitivity/);
+      expect(prodNightly).toMatch(/etl:family-suppression/);
+    });
+
     it("keeps prod's derived-anchor kill-switch ON — promoting the step must not promote derived rows", () => {
       // The two gates are independent and this pins that. If a future change drops
       // MESH_ANCHOR_SCORE_MIN to 0.9 for prod it should be a deliberate, separately
