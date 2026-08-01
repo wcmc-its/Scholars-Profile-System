@@ -723,6 +723,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SEARCH_MESH_DESCENDANT_TERMS_CAP",
+                "Value": "200",
+              },
+              {
                 "Name": "SEARCH_MESH_QUERY_NORMALIZATION",
                 "Value": "on",
               },
@@ -4619,6 +4623,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_MESH_ENTRY_TIER_PARITY",
                 "Value": "on",
+              },
+              {
+                "Name": "SEARCH_MESH_DESCENDANT_TERMS_CAP",
+                "Value": "5000",
               },
               {
                 "Name": "SEARCH_MESH_QUERY_NORMALIZATION",

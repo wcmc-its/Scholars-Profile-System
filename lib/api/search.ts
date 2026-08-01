@@ -4549,10 +4549,17 @@ export async function searchPublications(opts: {
     });
     // Clause 3: terms on the descriptor + descendants. PR 2's eager
     // precompute populates `descendantUis` with self at index 0, bounded
-    // at DESCENDANT_HARD_CAP (200). Read as-is; no re-cap here.
+    // at DESCENDANT_HARD_CAP (200). Issue #2096 — this is the ONE consumer
+    // that reads the raised-cap `termsClauseDescendantUis` instead (falls
+    // back to `descendantUis` for older fixtures / when the cap flag is
+    // unset, so this is byte-identical to the pre-#2096 clause by default).
+    // Every other reader of the resolved descriptor's descendant set (People
+    // attribution/concept-scope gate, funding concept gate,
+    // collectGrantMatchedCwids, getConceptScholarConcentration, the Matcha
+    // grants spine) stays on `descendantUis` — deliberately not widened here.
     topLevelShould.push({
       terms: {
-        meshDescriptorUi: resolution.descendantUis,
+        meshDescriptorUi: resolution.termsClauseDescendantUis ?? resolution.descendantUis,
         boost: 8,
       },
     });

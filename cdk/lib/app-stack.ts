@@ -2121,6 +2121,28 @@ export class AppStack extends Stack {
         //   Resolve-time only: no reindex. Flip is env-only via cdk deploy
         //   Sps-App-<env> (CD re-rolls the image only) -- the flag-parity rule.
         SEARCH_MESH_ENTRY_TIER_PARITY: "on",
+        // #2096 -- descendant-set size for ONLY the pub-tab concept_expanded terms
+        //   clause (`terms { meshDescriptorUi }`, lib/api/search.ts Clause 3, via
+        //   MeshResolution.termsClauseDescendantUis). computeDescendants is a
+        //   lex-ordered tree-number walk that stops the instant it reaches
+        //   DESCENDANT_HARD_CAP (200) -- a contiguous PREFIX of a broad descriptor's
+        //   subtree, not an even sample. Neoplasms (C04, 702 true descendants) fills
+        //   the cap inside C04.557 (Neoplasms by Histologic Type) and never reaches
+        //   C04.588 (Neoplasms by Site), so Breast/Lung/Prostatic/Colorectal
+        //   Neoplasms and Melanoma are structurally absent from a `cancer` pub search
+        //   (docs/spec-snapshots/mesh-broad-descriptors-2026-05.json: 161 of 587
+        //   broad descriptors truncated this way; max true count 4175, "Amino Acids,
+        //   Peptides, and Proteins"). 5000 clears every one of them with room, well
+        //   under OpenSearch's index.max_terms_count (65536). Every OTHER consumer of
+        //   descendantUis (People attribution/concept-scope gate, funding concept
+        //   gate, collectGrantMatchedCwids, getConceptScholarConcentration, the
+        //   Matcha grants spine) stays on DESCENDANT_HARD_CAP -- deliberately NOT
+        //   widened by this flag; only Clause 3 reads termsClauseDescendantUis.
+        //   resolveDescendantTermsClauseCap reads this via search-flags.ts.
+        //   STAGING-FIRST to soak; PROD stays at the DESCENDANT_HARD_CAP default
+        //   pending eval. Resolve-time only: no reindex. Flip is env-only via cdk
+        //   deploy Sps-App-<env> (CD re-rolls the image only) -- the flag-parity rule.
+        SEARCH_MESH_DESCENDANT_TERMS_CAP: env === "staging" ? "5000" : "200",
         // #1342 -- query-side morphology retry. When ON, resolveMeshDescriptor, after
         //   the exact lookup misses, retries the SINGULARIZED query ("melanomas" ->
         //   "melanoma") against the same index and, on a hit, returns the descriptor at

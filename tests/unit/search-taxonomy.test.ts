@@ -1253,6 +1253,52 @@ describe("resolveMeshDescriptor × descendantUis (§5.4.2)", () => {
     expect(r?.descendantUis[0]).toBe("D_PARENT");
     expect(r?.descendantUis[1]).toBe("D_C_001");
     expect(r?.descendantUis[199]).toBe("D_C_199");
+    // Issue #2096 — with the cap flag unset, termsClauseDescendantUis is
+    // byte-identical to (the same array as) descendantUis: zero behavior
+    // change, zero extra compute, when the flag is dark.
+    expect(r?.termsClauseDescendantUis).toBe(r?.descendantUis);
+  });
+
+  it("#2096 — SEARCH_MESH_DESCENDANT_TERMS_CAP raises ONLY termsClauseDescendantUis; descendantUis stays at 200", async () => {
+    // Same 500-children fixture as the cap-saturation test above, so the
+    // true descendant count (501, including the parent) safely exceeds any
+    // cap we exercise here.
+    const parent = {
+      descriptorUi: "D_PARENT",
+      name: "Parent",
+      entryTerms: [],
+      scopeNote: null,
+      dateRevised: null,
+      treeNumbers: ["A01"],
+    };
+    const children = Array.from({ length: 500 }, (_, i) => {
+      const n = String(i + 1).padStart(3, "0");
+      return {
+        descriptorUi: `D_C_${n}`,
+        name: `Child ${n}`,
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+        treeNumbers: [`A01.${n}`],
+      };
+    });
+    mockMeshFindMany.mockResolvedValue([parent, ...children]);
+    const saved = process.env.SEARCH_MESH_DESCENDANT_TERMS_CAP;
+    try {
+      process.env.SEARCH_MESH_DESCENDANT_TERMS_CAP = "5000";
+      const r = await resolveMeshDescriptor("parent");
+      // The OTHER consumer field — untouched, still capped at 200.
+      expect(r?.descendantUis).toHaveLength(200);
+      // The terms-clause field — grows to the true size (parent + 500
+      // children), proving a broad descriptor's full by-site/histologic-type
+      // subtree survives past the old 200 cutoff once this flag is raised.
+      expect(r?.termsClauseDescendantUis).toHaveLength(501);
+      expect(r?.termsClauseDescendantUis?.[0]).toBe("D_PARENT");
+      expect(r?.termsClauseDescendantUis?.[500]).toBe("D_C_500");
+    } finally {
+      if (saved === undefined) delete process.env.SEARCH_MESH_DESCENDANT_TERMS_CAP;
+      else process.env.SEARCH_MESH_DESCENDANT_TERMS_CAP = saved;
+    }
   });
 
   it("cache reuse: precompute runs once per cache load", async () => {
