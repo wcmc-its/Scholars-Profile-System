@@ -2033,3 +2033,52 @@ describe("resolveQueryTaxonomy (#2115) — #1980 stripKeptEnough guard", () => {
     expect(taxonomyMatch.meshResolution?.confidence).toBe("exact");
   });
 });
+
+/**
+ * #1980 fix (2) — the residual rows a token-BUDGET guard cannot reach: both strip
+ * exactly HALF their typed tokens (same ratio as an admitted 2→1 strip), so
+ * `stripKeptEnough` alone admits both, and the retry's descriptor is disjoint from the
+ * word the strip dropped. Real descriptor rows (name + entry terms) taken from the
+ * live MeSH map, 2026-07-31.
+ */
+describe("resolveQueryTaxonomy (#2115) — #1980 fix (2) dropped-word-disjoint guard", () => {
+  const D_PUBLIC_POLICY = {
+    descriptorUi: "D011640",
+    name: "Public Policy",
+    entryTerms: ["Policy, Public", "Social Policy", "Migration Policy"],
+    scopeNote: null,
+    dateRevised: null,
+    localPubCoverage: null as number | null,
+    treeNumbers: ["N03.623.500.608"],
+  };
+  const D_CORONARY_VESSELS = {
+    descriptorUi: "D003331",
+    name: "Coronary Vessels",
+    entryTerms: ["Coronary Artery", "Coronary Arteries", "Coronary Veins"],
+    scopeNote: null,
+    dateRevised: null,
+    localPubCoverage: null as number | null,
+    treeNumbers: ["A07.015.114.269"],
+  };
+
+  beforeEach(() => {
+    process.env.SEARCH_GENERIC_TERM_DEMOTE = "resolve";
+    mockMeshFindMany.mockResolvedValue([D_PUBLIC_POLICY, D_CORONARY_VESSELS]);
+  });
+
+  afterEach(() => {
+    delete process.env.SEARCH_GENERIC_TERM_DEMOTE;
+  });
+
+  it("rejects public health policy — Public Policy shares no token with dropped `health`", async () => {
+    const { taxonomyMatch } = await resolveQueryTaxonomy("public health policy");
+    expect(taxonomyMatch.meshResolution).toBeNull();
+  });
+
+  it("rejects coronary artery disease patients — Coronary Vessels shares no token with dropped `disease`/`patients`", async () => {
+    const { taxonomyMatch } = await resolveQueryTaxonomy(
+      "coronary artery disease patients",
+    );
+    expect(taxonomyMatch.meshResolution).toBeNull();
+  });
+});

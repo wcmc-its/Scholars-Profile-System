@@ -14,6 +14,7 @@ import {
   MESH_RANK_VERBATIM,
   meshRetryIsSameDescriptorUpgrade,
   meshStripRemovedAtMostHalf,
+  meshRetryDroppedWordUnrelated,
 } from "@/lib/search";
 import {
   searchFunding,
@@ -163,9 +164,12 @@ async function handleSearch(request: NextRequest) {
       if (mesh === null || isAllDeprioritized(mesh.matchedForm)) {
         // #1980 — nothing to compare the retry against on this arm, so an over-aggressive
         // strip is adopted whatever it names. Require the strip to have kept at least half
-        // the typed tokens.
+        // the typed tokens, AND (fix (2)) that a multi-word retry's descriptor isn't
+        // disjoint from the words the strip dropped — see `meshRetryDroppedWordUnrelated`'s
+        // docblock in lib/search.ts; mirrors the same-named guard in `resolveQueryTaxonomy`.
         if (
           stripKeptEnough &&
+          !meshRetryDroppedWordUnrelated(contentQuery, genericRemoved, retry) &&
           meshConfidenceRank(retry?.confidence) > meshConfidenceRank(mesh?.confidence)
         ) {
           mesh = retry;

@@ -69,6 +69,7 @@ import {
   MESH_RANK_VERBATIM,
   meshRetryIsSameDescriptorUpgrade,
   meshStripRemovedAtMostHalf,
+  meshRetryDroppedWordUnrelated,
 } from "@/lib/search";
 import { familySynonymKeys } from "@/lib/methods/family-synonyms";
 import {
@@ -908,8 +909,16 @@ export async function resolveQueryTaxonomy(
       // curated match, and a strip destructive enough to ruin the descriptor makes the
       // curated reading of the same wreckage equally suspect. Conservative on purpose —
       // measurement can relax it to the MeSH arm alone.
+      //
+      // #1980 fix (2) — `stripKeptEnough` counts what fraction of the query survived and
+      // cannot separate `public health policy` / `coronary artery disease patients` (both
+      // strip exactly half, same ratio as the admitted 2→1 class) from the wins. This
+      // second guard asks whether the retry's own descriptor is disjoint from the words
+      // the strip dropped — an orthogonal axis, applied ONLY when the retry's match is
+      // itself multi-word (see `meshRetryDroppedWordUnrelated`'s docblock).
       if (
         stripKeptEnough &&
+        !meshRetryDroppedWordUnrelated(contentQuery, genericRemoved, retry.meshResolution) &&
         (retry.state === "matches" ||
           meshConfidenceRank(retry.meshResolution?.confidence) >
             meshConfidenceRank(current?.confidence))

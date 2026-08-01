@@ -12,6 +12,10 @@
  */
 import { Client, type ClientOptions } from "@opensearch-project/opensearch";
 import { isInOsRequestScope, recordOsRoundTrip } from "@/lib/api/os-round-trips";
+// #1980 fix (2) — dependency-free leaf module (no Prisma graph), so importing it here
+// carries none of the risk `isFullQueryMeshMatch`'s docblock (lib/api/normalize.ts)
+// warns about for THIS module's own wholesale `vi.mock("@/lib/search")` suites.
+import { singularizeForMatch } from "@/lib/api/normalize";
 
 let _client: Client | null = null;
 
@@ -890,8 +894,9 @@ export const MESH_RANK_VERBATIM = 2;
  *   public health policy              → `public policy`   (1/3) → Public Policy
  *   coronary artery disease patients  → `coronary artery` (2/4) → Coronary Vessels
  *
- * Those need #1980's fix (2) (reject a retry whose descriptor is token-disjoint from the
- * typed query) or the longest-span window fallback, and are deliberately left open here.
+ * Those need #1980's fix (2), `meshRetryDroppedWordUnrelated` below (reject a retry whose
+ * descriptor is token-disjoint from the dropped words) or the longest-span window
+ * fallback; fix (2) is now applied alongside this rule at both call sites.
  *
  * Deliberately does NOT gate the same-descriptor-upgrade arm: that one cannot swap the
  * concept, so how much was stripped to reach it does not matter.
@@ -901,6 +906,56 @@ export function meshStripRemovedAtMostHalf(
   totalCount: number,
 ): boolean {
   return removedCount * 2 <= totalCount;
+}
+
+/**
+ * #1980 fix (2) — may a #692 generic-strip retry be adopted when its winning descriptor
+ * is a MULTI-WORD match? Only when the descriptor's own vocabulary (its name or one of
+ * its entry terms, tokenized) contains at least one of the words the strip DROPPED.
+ *
+ * Orthogonal to `meshStripRemovedAtMostHalf`, which counts what fraction of the query
+ * survived — that budget is exhausted by these two rows, which both strip only HALF
+ * their tokens (the same ratio as the admitted 2→1 class) yet land on the wrong concept:
+ *
+ *   public health policy              strip `health`             → Public Policy    (wrong)
+ *   coronary artery disease patients  strip `disease`, `patients` → Coronary Vessels (wrong)
+ *
+ * Neither `Public Policy` nor `Coronary Vessels` — name or entry terms — contains
+ * `health` or `disease` (verified against the real MeSH map, 2026-07-31). The dropped
+ * word carried meaning the retry's descriptor doesn't capture; the query's actual concept
+ * (`Health Policy`, `Coronary Artery Disease`) is exactly the compound that word would
+ * have formed with what survived.
+ *
+ * Scoped to a MULTI-WORD retry match (`matchedContentQuery` has ≥2 tokens): a single
+ * surviving token has no compound for a dropped word to have been absorbed into, so the
+ * check does not apply and the #1972 2→1 class (49 measured wins) stays admitted —
+ *
+ *   asthma patients   strip `patients` → Asthma     (single-word match, exempt)
+ *   cancer research   strip `research` → Neoplasms  (single-word match, exempt)
+ *
+ * — even though `Asthma`/`Neoplasms` ALSO share no token with `patients`/`research`
+ * (verified the same way). Gating on the retry's own word count, not on the overlap
+ * itself, is what keeps those admitted: this rule reaches the two-token rows the budget
+ * rule cannot, without re-tightening the budget rule that would break the wins.
+ */
+export function meshRetryDroppedWordUnrelated(
+  matchedContentQuery: string,
+  droppedWords: readonly string[],
+  retry: { name: string; entryTerms: readonly string[] } | null | undefined,
+): boolean {
+  if (!retry || droppedWords.length === 0) return false;
+  const contentTokenCount = matchedContentQuery.trim().split(/\s+/).filter(Boolean).length;
+  if (contentTokenCount < 2) return false;
+  const wordTokens = (text: string): string[] =>
+    text
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean)
+      .map((t) => singularizeForMatch(t));
+  const descriptorTokens = new Set(
+    [retry.name, ...retry.entryTerms].flatMap(wordTokens),
+  );
+  return !droppedWords.some((w) => wordTokens(w).some((t) => descriptorTokens.has(t)));
 }
 
 /**
