@@ -716,7 +716,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_MESH_RESOLUTION_FALLBACK",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_MESH_RESOLVE_TOKEN_COVERAGE",
