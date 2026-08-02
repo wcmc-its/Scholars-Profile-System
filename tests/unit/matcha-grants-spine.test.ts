@@ -31,9 +31,14 @@ vi.mock("@/lib/search", () => ({
 
 import { rankGrantsForDescriptionSpine } from "@/lib/api/matcha-grants-spine";
 
-/** A taxonomy resolution stub — the grant spine reads only `meshResolution.descendantUis`. */
-function meshRes(descriptorUi: string, descendantUis: string[]) {
-  return { state: "none" as const, meshResolution: { descriptorUi, descendantUis } };
+/** A taxonomy resolution stub — the grant spine reads `meshResolution.descendantUis` and,
+ *  since #1972, `.confidence` (threaded onto the wire concept as `meshConfidence`). */
+function meshRes(
+  descriptorUi: string,
+  descendantUis: string[],
+  confidence?: "exact" | "entry-term" | "partial",
+) {
+  return { state: "none" as const, meshResolution: { descriptorUi, descendantUis, confidence } };
 }
 
 /** An opportunities-index hit `_source` with all hydrated fields. */
@@ -146,5 +151,37 @@ describe("rankGrantsForDescriptionSpine", () => {
     expect(r.candidates).toEqual([]);
     expect(r.concepts).toEqual([]);
     expect(mockSearch).not.toHaveBeenCalled();
+  });
+
+  // #1972 side-finding — same gap as the people spine: the MeSH resolution confidence tier
+  // must reach `MatchaConcept.meshConfidence` here too, and stay absent for an unresolved term.
+  it("threads the MeSH resolution confidence tier through to the wire concept", async () => {
+    mockExtract.mockResolvedValue({
+      concepts: [
+        { term: "diabetes", kind: "concept", centrality: 1.0 },
+        { term: "partialterm", kind: "concept", centrality: 0.7 },
+        { term: "novelunresolved", kind: "concept", centrality: 0.5 },
+      ],
+    });
+    mockTaxonomy.mockImplementation((term: string) =>
+      Promise.resolve(
+        term === "diabetes"
+          ? meshRes("D-dia", ["U1"], "exact")
+          : term === "partialterm"
+            ? meshRes("D-part", ["U2"], "partial")
+            : { state: "none" as const, meshResolution: null },
+      ),
+    );
+    mockSearch.mockImplementation(() =>
+      Promise.resolve({ body: { hits: { hits: [oppHit("o1")] } } }),
+    );
+
+    const { concepts } = await rankGrantsForDescriptionSpine(
+      "diabetes and partialterm and novelunresolved",
+    );
+
+    expect(concepts.find((c) => c.term === "diabetes")!.meshConfidence).toBe("exact");
+    expect(concepts.find((c) => c.term === "partialterm")!.meshConfidence).toBe("partial");
+    expect(concepts.find((c) => c.term === "novelunresolved")!.meshConfidence).toBeUndefined();
   });
 });

@@ -178,13 +178,24 @@ export async function rankGrantsForDescriptionSpine(
 
   // Resolve → cluster → cap to MAX_TERMS distinct axes (method floor reserved). Identical to the
   // people spine's #1838 order (cluster before capping) — the shared helpers do the work.
+  //
+  // #1972 side-finding — `confidenceByTerm` rides alongside `descendantUis` so the wire concept
+  // can surface `meshConfidence` below. `ClusterTerm` itself stays untouched (it is the shared
+  // clustering type both spines feed into `mergeTermClusters`/`selectWithMethodFloor`); confidence
+  // is a concept-display concern, not a clustering input, so it is threaded via a side map keyed
+  // on the raw extracted term instead.
+  const confidenceByTerm = new Map<string, NonNullable<MatchaConcept["meshConfidence"]>>();
   const clusterTerms: ClusterTerm[] = await Promise.all(
-    extraction.concepts.map(async (c) => ({
-      term: c.term,
-      centrality: c.centrality,
-      kind: c.kind,
-      descendantUis: (await matchQueryToTaxonomy(c.term)).meshResolution?.descendantUis ?? [],
-    })),
+    extraction.concepts.map(async (c) => {
+      const resolution = (await matchQueryToTaxonomy(c.term)).meshResolution;
+      if (resolution) confidenceByTerm.set(c.term, resolution.confidence);
+      return {
+        term: c.term,
+        centrality: c.centrality,
+        kind: c.kind,
+        descendantUis: resolution?.descendantUis ?? [],
+      };
+    }),
   );
   const allClusters = mergeTermClusters(clusterTerms, CLUSTER_TAU).map((c) => ({
     ...c,
@@ -206,12 +217,17 @@ export async function rankGrantsForDescriptionSpine(
     // The fixed half of the fusion weight (the slider owns the other half). Same rule as the people
     // spine: a cluster whose kind matches the ask's target kind is weighted up.
     const weightFactor = cluster.kind === targetKind ? KIND_ALIGNED : KIND_OFF_TARGET;
+    const meshConfidence = confidenceByTerm.get(term);
     const concept: MatchaConcept = {
       term,
       kind: cluster.kind,
       members: cluster.members,
       centrality: cluster.centrality,
       weightFactor,
+      // #1972 side-finding — absent when the representative term never resolved to a MeSH
+      // descriptor at all; distinct from `"partial"`, which means it DID resolve, just via the
+      // decompose-and-resolve fallback window.
+      ...(meshConfidence ? { meshConfidence } : {}),
     };
     concepts.push(concept);
 

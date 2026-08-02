@@ -88,6 +88,12 @@
  */
 import { taggedPubCount, type ResultEvidence } from "@/lib/api/result-evidence";
 import { careerStageBucket, type CareerStage } from "@/lib/career-stage";
+// Type-only — erased at compile time, so this does NOT pull `search-taxonomy.ts` (which imports
+// `@/lib/db`) into any client bundle that imports this contract (`matcha-panel.tsx` is
+// `"use client"`). Reused rather than redefined so the two stay structurally identical by
+// construction: a drift in `MeshResolution.confidence`'s union is a compile error here, not a
+// silent mismatch.
+import type { MeshResolution } from "@/lib/api/search-taxonomy";
 
 /**
  * RRF damping (pivot handoff §4). The head is damped so one concept's #1 hit cannot
@@ -346,6 +352,21 @@ export type MatchaConcept = {
    * than invent a gloss. DISPLAY value only on the wire; the retrieval use happens server-side.
    */
   gloss?: string;
+  /**
+   * #1972 side-finding — the MeSH resolution confidence of this concept's representative term,
+   * mirroring `MeshResolution.confidence` (`search-taxonomy.ts`). The ranker already weights on
+   * this internally: `meshMatchTier` (read at the `retrieveCluster` call in
+   * `matcha-spine-run.ts`) drives a 10x difference between `MESH_ADMIT_WEIGHT` at `exact` vs
+   * `partial`, but until this field existed NO consumer of this contract — the sponsor-match
+   * rail, a human reviewer, anything built on top — could see that a concept's ranking rested on
+   * a shakier `partial` (decompose-and-resolve fallback) match rather than a verbatim one.
+   *
+   * DISPLAY ONLY — never a ranking input on this side of the wire; the fusion weight is already
+   * baked into `weightFactor`/`centrality` by the time this ships. ABSENT when the term did not
+   * resolve to a MeSH descriptor at all (no taxonomy match), which is different from `"partial"`
+   * (resolved, but only via the fallback window).
+   */
+  meshConfidence?: MeshResolution["confidence"];
 };
 
 /**

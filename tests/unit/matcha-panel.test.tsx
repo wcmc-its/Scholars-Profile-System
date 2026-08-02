@@ -498,6 +498,25 @@ describe("MatchaPanel", () => {
     expect(screen.queryByText("·rare")).toBeNull();
   });
 
+  // #1972 side-finding — the ranker weights on MeSH resolution confidence internally (a 10x
+  // difference between `exact` and `partial`); this badge is the first place any consumer of
+  // the contract can actually see that a concept's ranking rests on a shakier match.
+  it("badges a concept whose meshConfidence is 'partial', and says nothing when confident or absent", async () => {
+    stubFetch({
+      concepts: [
+        { ...CONCEPTS[0], meshConfidence: "partial" },
+        { ...CONCEPTS[1], meshConfidence: "exact" },
+        // CONCEPTS[2] (CRISPR screening) carries no `meshConfidence` at all — never resolved.
+      ],
+      candidates: THREE,
+    });
+    await renderAndSearch();
+    const badges = screen.getAllByText("·weak match");
+    expect(badges).toHaveLength(1);
+    const tip = await tooltipTextOf(badges[0]);
+    expect(tip).toMatch(/partial/);
+  });
+
   it("shows the funder's gloss behind the concept's provenance ⓘ ('From the ask')", async () => {
     stubFetch({
       concepts: [

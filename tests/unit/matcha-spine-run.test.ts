@@ -241,15 +241,20 @@ describe("distinctiveGlossTerms (in-their-words highlight eligibility)", () => {
 });
 
 /** A MeSH resolution stub — spine-run reads descriptorUi/descendantUis/confidence/
- *  curatedTopicAnchors/ambiguous/matchedForm/name. */
-function meshRes(descriptorUi: string, descendantUis: string[]) {
+ *  curatedTopicAnchors/ambiguous/matchedForm/name. `confidence` defaults to "exact"
+ *  (the pre-existing default every call site before #1972 relied on implicitly). */
+function meshRes(
+  descriptorUi: string,
+  descendantUis: string[],
+  confidence: "exact" | "entry-term" | "partial" = "exact",
+) {
   return {
     state: "none" as const,
     meshResolution: {
       descriptorUi,
       name: descriptorUi,
       matchedForm: descriptorUi,
-      confidence: "exact" as const,
+      confidence,
       scopeNote: null,
       entryTerms: [] as string[],
       curatedTopicAnchors: [] as string[],
@@ -663,6 +668,46 @@ describe("rankResearchersForDescriptionSpine", () => {
     expect(rare.corpusCoverage).toBe(0.001);
     expect(zerocov.corpusCoverage).toBeUndefined();
     expect(nocov.corpusCoverage).toBeUndefined();
+  });
+
+  // #1972 side-finding — the ranker already weights on `resolution.confidence` internally
+  // (`meshMatchTier` at the `retrieveCluster` call site, a 10x MESH_ADMIT_WEIGHT/
+  // MESH_ATTRIBUTION_WEIGHT difference between `exact` and `partial`), but nothing on the
+  // wire said so before this fix. This asserts the tier a term resolved at actually reaches
+  // the returned `MatchaConcept.meshConfidence`, for every tier, and that an unresolved term
+  // ships no field at all (never a fabricated tier).
+  it("threads the MeSH resolution confidence tier through to the wire concept", async () => {
+    mockTopicFindMany.mockResolvedValue([
+      { label: "exactone" },
+      { label: "entryone" },
+      { label: "partone" },
+      { label: "noneone" },
+    ]);
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) => {
+      if (q === "exactone") return meshRes("D_EXACT", ["D_EXACT"], "exact");
+      if (q === "entryone") return meshRes("D_ENTRY", ["D_ENTRY"], "entry-term");
+      if (q === "partone") return meshRes("D_PART", ["D_PART"], "partial");
+      return { state: "none" as const, meshResolution: null }; // noneone: never resolved
+    });
+    mockSearchPeople.mockImplementation(async ({ q }: { q: string }) =>
+      q === "exactone"
+        ? people(["a"])
+        : q === "entryone"
+          ? people(["b"])
+          : q === "partone"
+            ? people(["c"])
+            : people(["d"]),
+    );
+
+    const { concepts } = await rankResearchersForDescriptionSpine(
+      "exactone and entryone and partone and noneone studies",
+    );
+
+    expect(concepts.find((c) => c.term === "exactone")!.meshConfidence).toBe("exact");
+    expect(concepts.find((c) => c.term === "entryone")!.meshConfidence).toBe("entry-term");
+    expect(concepts.find((c) => c.term === "partone")!.meshConfidence).toBe("partial");
+    // Never resolved to a descriptor at all ⇒ absent, not a guessed/default tier.
+    expect(concepts.find((c) => c.term === "noneone")!.meshConfidence).toBeUndefined();
   });
 
   it("loads the vocab with a deterministic order (label asc)", async () => {
@@ -1132,6 +1177,7 @@ describe("rankResearchersForDescriptionSpine", () => {
         centrality: 0.9, // max across the merged members, not oncology's 0.4
         weightFactor: expect.closeTo(1.25, 6), // aligned kind prior, full stop
         corpusCoverage: 0.5, // the raw measured fraction, for the badge only
+        meshConfidence: "exact", // #1972 — the meshRes() stub's default tier
       },
       {
         term: "CAR-T",
@@ -1140,6 +1186,7 @@ describe("rankResearchersForDescriptionSpine", () => {
         centrality: 0.7,
         weightFactor: expect.closeTo(0.8, 6), // off-target kind prior
         corpusCoverage: 0.001,
+        meshConfidence: "exact",
       },
     ]);
 
