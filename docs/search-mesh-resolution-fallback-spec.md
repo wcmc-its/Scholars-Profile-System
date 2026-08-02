@@ -1,11 +1,21 @@
 # Search: graceful MeSH resolution (decompose-and-resolve fallback + curated aliases)
 
-**Status:** Draft spec — awaiting approval before implementation.
+**Status:** Implemented and shipped to both environments (`SEARCH_MESH_RESOLUTION_FALLBACK=on` in prod as of 2026-08-02, #2169). See "Implementation history" below for what shipped vs. what changed from this original draft.
 **Author:** (investigation 2026-06-17)
 **Scope:** `/search` query → MeSH-descriptor resolution. People, Publications, and
 Funding tabs all consume the same resolver, so all three improve.
 
 ---
+
+## 0. Implementation history (added 2026-08-02)
+
+The mechanism below shipped substantially as designed, in stages, tracked under issue #1972 (which also gates #1348):
+
+- **#1975** (merged) — the fallback's `partial` confidence no longer unconditionally suppresses the generic-term-strip retry in `app/api/search/route.ts`. Fixed `chronic fatigue` outright.
+- **#1979** (merged) — the retry's guard was tightened (`meshRetryIsSameDescriptorUpgrade`, `meshRetryDroppedWordUnrelated`) rather than simply dropped, because a naive "retry always wins" rule imported 9 measured concept regressions (e.g. `stem cells effects` → wrong descriptor). The rule instead discriminates on whether the window fallback's match was real content or filler (`isAllDeprioritized`).
+- **#2161** (merged, #1982) — dropped a separate, narrower suppressor (`taxonomyMatch.state === "none"`) once #1979's guard was confirmed to already block the same 9 regressions independent of that clause. This is what fixed the last of the three originally-measured demotions, `breast cancer screening` (now `Breast Neoplasms`/`entry-term`, matching prod's pre-fallback behavior).
+- **`foreign policy` → `Policy`** is the one case left deliberately unfixed. Its candidate fix, a per-conjunct token-coverage guard (`SEARCH_MESH_RESOLVE_TOKEN_COVERAGE`), was built, flipped on in staging, A/B'd on the live deployed index, and reverted the same day: it cost 11 *other* resolutions and made `policy and health outcomes` worse (`Health Policy` → `Policy` — the guard rejects the good cross-conjunct window and admits the bad single-token one). Neither "foreign" nor "policy" appears in the filler-word list (`data/search/deprioritized-terms.json`), so no realistic reorder of retry-vs-fallback fixes this case; it would need its own admission-threshold change to the window fallback (`windowCoversMajority`'s 1/2 threshold currently admits a match on half a query's content). Left as an accepted trap — no research work here touches foreign policy.
+- **#2168** (merged) — a related gap, not in this doc's original scope: Matcha's ranking already weighted internally on this confidence tier (a 10x `MESH_ADMIT_WEIGHT`/`MESH_ATTRIBUTION_WEIGHT` difference between `exact` and `partial`) with no visibility into it downstream. `MatchaConcept` now carries `meshConfidence`, and the Matcha panel UI shows a "weak match" badge when it's `partial`.
 
 ## 1. Problem
 
