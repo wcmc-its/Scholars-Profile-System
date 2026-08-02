@@ -780,6 +780,11 @@ export async function rankResearchersForDescriptionSpine(
       glossInWordsOn && clusterGloss
         ? distinctiveGlossTerms(clusterGloss, cluster.members) || undefined
         : undefined;
+    // Representative resolution = the first member's (drives name/tier, and now `meshConfidence`
+    // visibility on the wire — #1972 side-finding: the ranker already weighted on this internally
+    // via `meshMatchTier` below, but no consumer of the contract could see a concept's ranking
+    // rested on a shakier `partial` match rather than a verbatim one).
+    const rep = repByTerm.get(term) ?? null;
     const concept: MatchaConcept = {
       term,
       kind: cluster.kind,
@@ -792,6 +797,9 @@ export async function rankResearchersForDescriptionSpine(
       ...(maxCoverage > 0 ? { corpusCoverage: maxCoverage } : {}),
       // The funder's qualifying context, when the extractor gave one. Absent otherwise (never "").
       ...(clusterGloss ? { gloss: clusterGloss } : {}),
+      // Absent when the term never resolved to a MeSH descriptor at all — distinct from
+      // `"partial"`, which means it DID resolve, just via the fallback window.
+      ...(rep ? { meshConfidence: rep.confidence } : {}),
     };
     concepts.push(concept);
 
@@ -813,8 +821,6 @@ export async function rankResearchersForDescriptionSpine(
     // both gloss compositions, and the eval-gate are gone; retrieval keeps the measured winner.
     const clusterQuery = cluster.members.join(" ");
 
-    // Representative resolution = the first member's (drives name/tier only).
-    const rep = repByTerm.get(term) ?? null;
     const { ranked, hits } = await retrieveCluster(
       clusterQuery,
       cluster.descendantUis,

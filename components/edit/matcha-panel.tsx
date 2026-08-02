@@ -2248,6 +2248,24 @@ function ConceptRail({
                     </span>
                   </HoverTooltip>
                 ) : null}
+                {/* #1972 side-finding — the ranker already weights on MeSH resolution confidence
+                    internally (a 10x difference between `exact` and `partial` in the fusion), but
+                    until now nothing on the wire said so. Surface only the uncertain case: `exact`/
+                    `entry-term` are the default, unremarkable path and would just be noise on every
+                    row. Absent `meshConfidence` (never resolved to a descriptor at all) is not this
+                    case either — that concept still searches on bare text, just without the MeSH
+                    boost, and is not what this badge is warning about. */}
+                {c.meshConfidence === "partial" ? (
+                  <HoverTooltip
+                    wide
+                    triggerClassName="ml-1.5"
+                    text="This concept only matched a MeSH term via a partial (word-window) resolution, not a verbatim one — the topical boost behind it is weaker and less certain."
+                  >
+                    <span className="border-apollo-amber-tint-border bg-apollo-amber-tint text-apollo-amber rounded-full border px-1.5 py-0.5 text-xs">
+                      ·weak match
+                    </span>
+                  </HoverTooltip>
+                ) : null}
                 {/* Warm-palette redesign — provenance `ⓘ` on EVERY concept/method, replacing the old
                     inline gloss paragraph AND the inline member chips. Reuses the SAME `HoverTooltip`
                     primitive `·rare` uses (no Radix-in-server-component hazard). Leads with "From the
