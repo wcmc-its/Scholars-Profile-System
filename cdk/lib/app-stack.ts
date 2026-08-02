@@ -2101,10 +2101,21 @@ export class AppStack extends Stack {
         //     reach its dominant descriptor instead of degrading to free-text.
         //     Guardrail: a single-token window resolves ONLY on an exact descriptor-
         //     NAME match, so a short/common word can't mis-map (the "Seahorse ->
-        //     Smegmamorpha" trap). STAGING ON to soak + measure; PROD OFF pending eval.
+        //     Smegmamorpha" trap). ON in BOTH envs as of #1972's resolution (2026-08-02):
+        //     of the 3 originally-measured demotions, `chronic fatigue` was fixed by
+        //     #1975, `breast cancer screening` is fixed by #1979/#2161's same-descriptor
+        //     retry-upgrade (verified live on staging: entry-term, matches prod's prior
+        //     behavior), and `foreign policy` -> Policy is an accepted, deliberately
+        //     unfixed trap -- see the SEARCH_MESH_RESOLVE_TOKEN_COVERAGE note below for
+        //     why its fix is worse than the defect (11 lost resolutions, and it makes
+        //     `policy and health outcomes` WORSE, not better). Net measured effect:
+        //     16 gained resolutions, 0 remaining demotions worth blocking on. Matcha's
+        //     ranking already weighted on this confidence tier internally; #2168 made
+        //     that tier visible on the returned MatchaConcept contract so a `partial`
+        //     admission is no longer invisible to a downstream consumer.
         //     Resolve-time only: no reindex. Flip is env-only via cdk deploy
         //     Sps-App-<env> (CD re-rolls the image only) -- the flag-parity rule.
-        SEARCH_MESH_RESOLUTION_FALLBACK: env === "staging" ? "on" : "off",
+        SEARCH_MESH_RESOLUTION_FALLBACK: "on",
         // #1348 -- SEARCH_MESH_RESOLVE_TOKEN_COVERAGE. Admission rule for the fallback
         //   above: a matched window must cover a STRICT MAJORITY of ITS CONJUNCT's tokens
         //   (the query split on & / , and). Replaces the hand-curated
@@ -2150,8 +2161,10 @@ export class AppStack extends Stack {
         //   question is handling the one-token case by SCORING rather than rejecting, so a
         //   generic latch cannot earn a confident `subject-tagged` badge. See #1348.
         //
-        //   NOTE: prod runs SEARCH_MESH_RESOLUTION_FALLBACK=off, so this guard is a NO-OP
-        //   in prod regardless -- the prod-facing decision is about the fallback flag.
+        //   NOTE: SEARCH_MESH_RESOLUTION_FALLBACK is now ON in both envs (#1972), so this
+        //   guard is a live no-op by its OWN rejected A/B, not by the fallback being off --
+        //   it stays off on its own merits (11 lost resolutions for 1 trap closed, and it
+        //   makes `policy and health outcomes` worse, not better).
         //   Resolve-time only: no reindex. Flip is env-only via cdk deploy
         //   Sps-App-<env> -- the flag-parity rule.
         SEARCH_MESH_RESOLVE_TOKEN_COVERAGE: "off",
