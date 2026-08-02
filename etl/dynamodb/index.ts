@@ -3,8 +3,10 @@
  *
  * Four projection blocks land ReCiterAI ground truth into MySQL:
  *
- *   1. TAXONOMY#  → topic                  (parent topic catalog; Block 1 logs the
- *                                          live row count and warns off the expected one)
+ *   1. TAXONOMY#  → topic                  (parent topic catalog; #2166 full reconcile —
+ *                                          upserts current topics, skips ReciterAI's
+ *                                          excluded_topics, prunes anything this run
+ *                                          didn't write)
  *   2. TOPIC#     → publication_topic      (~78,103 rows; per-pub × scholar × parent_topic triples)
  *   3. FACULTY#   → topic_assignment       (Q6 minimal projection — preserved unchanged)
  *   4. IMPACT#    → publication             (issue #316; global per-pmid impact score + GPT justification)
@@ -69,6 +71,8 @@ import { resolveScholarToolSource } from "../../lib/etl/scholar-tool-source";
 import { projectGrantOpportunities } from "./grant-opportunity-etl";
 import { guardedReplace } from "./projection-replace";
 import { partitionRecords } from "./partition";
+import { fetchExcludedTopicIds } from "./excluded-topics";
+import { planTopicPrune } from "./topic-prune";
 
 const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
@@ -136,7 +140,17 @@ async function main() {
     // The probe confirms there is exactly one TAXONOMY#taxonomy_v2 record carrying
     // the full topics[] array; we still iterate defensively so a future taxonomy_v3
     // record (if added) lands without code changes.
+    //
+    // #2166 — TAXONOMY# is additive-only ground truth: it never drops a retired
+    // topic, and it doesn't filter out ReciterAI's excluded_topics (governance
+    // list co-published in the hierarchy artifact; see ./excluded-topics.ts).
+    // Skip excluded ids here, then prune (below) any existing `topic` row this
+    // run didn't (re)write — retired-from-TAXONOMY# and newly-excluded topics
+    // are the same case: absent from this run's write set.
+    const excludedTopicIds = await fetchExcludedTopicIds();
     let topicRowsUpserted = 0;
+    let topicRowsExcluded = 0;
+    const upsertedTopicIds: string[] = [];
     for (const tax of taxItems) {
       const taxonomyVersion = String(tax.taxonomy_version ?? tax.PK.replace("TAXONOMY#", ""));
       const source = `reciterai-${taxonomyVersion}`;
@@ -148,6 +162,10 @@ async function main() {
       // for FK targets used by the TOPIC# block below.
       for (const t of topics) {
         if (!t || typeof t.id !== "string" || typeof t.label !== "string") continue;
+        if (excludedTopicIds.has(t.id)) {
+          topicRowsExcluded += 1;
+          continue;
+        }
         await db.write.topic.upsert({
           where: { id: t.id },
           create: {
@@ -165,14 +183,48 @@ async function main() {
           },
         });
         topicRowsUpserted += 1;
+        upsertedTopicIds.push(t.id);
       }
     }
-    console.log(`Topic upserts complete: ${topicRowsUpserted} rows.`);
+    console.log(
+      `Topic upserts complete: ${topicRowsUpserted} rows (${topicRowsExcluded} skipped as excluded).`,
+    );
+
+    // #2166 keyed prune — retire `topic` rows this run's TAXONOMY# scan (minus
+    // exclusions) no longer covers. Gated by the same guardedReplace floor as
+    // the publication_topic prune below, so a partial/empty scan never wipes
+    // the catalog.
+    const existingTopicIds = (await db.write.topic.findMany({ select: { id: true } })).map(
+      (t) => t.id,
+    );
+    const topicPrunePlan = planTopicPrune(
+      upsertedTopicIds,
+      existingTopicIds,
+      existingTopicIds.length,
+    );
+    if (!topicPrunePlan.prune) {
+      console.warn(
+        `topic prune SKIPPED -- ${topicPrunePlan.reason}; retaining stale/excluded topic rows this run.`,
+      );
+    } else if (topicPrunePlan.stale.length === 0) {
+      console.log("topic prune: no stale topics.");
+    } else {
+      const pruneRes = await db.write.topic.deleteMany({
+        where: { id: { in: topicPrunePlan.stale } },
+      });
+      console.log(
+        `topic prune: removed ${pruneRes.count} retired/excluded topic row(s): ${topicPrunePlan.stale.join(", ")}.`,
+      );
+    }
 
     const topicCount = await db.write.topic.count();
-    console.log(`topic table count: ${topicCount} (expected 67 for taxonomy_v2)`);
-    if (topicCount !== 67) {
-      console.warn(`WARN: topic count ${topicCount} != 67 — investigate TAXONOMY# probe output.`);
+    console.log(
+      `topic table count: ${topicCount} (expected ${upsertedTopicIds.length} from this run's TAXONOMY# scan).`,
+    );
+    if (topicCount !== upsertedTopicIds.length) {
+      console.warn(
+        `WARN: topic count ${topicCount} != ${upsertedTopicIds.length} upserted this run — investigate TAXONOMY# probe output / prune-skip reason above.`,
+      );
     }
 
     // ===================================================================
