@@ -1,12 +1,20 @@
 # POPS clinical fields in people search — scope
 
-**Status:** scope for review (not approved to build)
+**Status:** Deliverables 1 and 2 built and live. Deliverable 3 (search explanation) is built for board-cert/specialty (this was already true before this scope doc) plus on-topic pub count and clinical-expertise typing (#1367 Gaps 1 and 2); the primary-vs-subspecialty distinction from Gap 2 remains unbuilt. See "Implementation history" below.
 **Date:** 2026-06-28
 **Goal:** Index POPS / weillcornell.org **board certifications**, **specialties**, and **clinical expertise** so a people search for a specialty (e.g. "cardiology") surfaces the matching clinician *and* explains why ("Board certified in Cardiology"). Three deliverables: (1) a POPS ETL ingestion job, (2) search relevance, (3) search explanation.
 
 Grounded on `origin/master` (working branch is drifted; symbol names are load-bearing, exact line numbers are not).
 
 ---
+
+## Implementation history (added 2026-08-02)
+
+Carved into follow-up work under issue #1367 once this scope landed:
+
+- **Gap 1 (on-topic pub count for the clinical evidence line)** — shipped via PR #2157. The `clinical` evidence kind (§4 below) now carries a display-only `count`/`eligiblePubCount` when the specialty has a curated MeSH anchor and the doc has been reindexed since. Does not affect the board-cert/specialty precedence gates, which stay count-blind by design.
+- **Gap 2, expertise-typing half** — shipped via PR #2163. `popsExpertise` (`problem_procedure` strings), previously ranking-only (`clinicalExpertise` in `lib/search-index-docs.ts`), is now folded onto the existing `clinical` evidence object as an optional `expertise?: string[]` field and rendered as "Clinical expertise: X" — a fold-in, not a new evidence kind, matching what was already wired for ranking.
+- **Gap 2, subspecialty-typing half** — **not built.** `normalizeClinical()` (`etl/pops/index.ts`) still flattens board-cert ∪ primary-specialty ∪ subspecialty into one deduped `popsSpecialties` set, so the evidence line can say "Clinical specialty: X" but not distinguish a subspecialty from a primary one. Parked deliberately (issue #1367, 2026-08-02 comment): a real schema-touching build (typed fields in `prisma/schema.prisma`, un-flattening the ETL ingest, re-indexing, threading the type through `result-evidence.ts` and the renderer), and nobody's asked for the finer distinction beyond this doc's own original scope.
 
 ## 0. The thing that makes this non-trivial
 
