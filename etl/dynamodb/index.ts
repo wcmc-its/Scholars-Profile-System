@@ -190,40 +190,70 @@ async function main() {
       `Topic upserts complete: ${topicRowsUpserted} rows (${topicRowsExcluded} skipped as excluded).`,
     );
 
+    // #2166 follow-up — TAXONOMY# (parent catalog) and TOPIC# (per-paper
+    // scores) can drift out of sync: a topic absent from this run's
+    // TAXONOMY# scan may still have live TOPIC# entries (ReciterAI dropped
+    // it from the catalog before finishing per-paper rescoring). Deleting it
+    // anyway would silently orphan those papers' topic assignment. Tally
+    // which parent topic ids this run's TOPIC# scan actually references —
+    // buckets.topics is already fully materialized from the single scan
+    // above — so the prune can tell "genuinely retired" (zero live entries)
+    // apart from "catalog/per-paper desync" (still has entries). Excluded
+    // topics are NOT given this protection: exclusion is a deliberate
+    // governance decision that overrides any live per-paper data.
+    const topicActivityCounts = new Map<string, number>();
+    for (const it of buckets.topics) {
+      if (typeof it.PK !== "string" || !it.PK.startsWith("TOPIC#")) continue;
+      const id = it.PK.slice("TOPIC#".length);
+      topicActivityCounts.set(id, (topicActivityCounts.get(id) ?? 0) + 1);
+    }
+
     // #2166 keyed prune — retire `topic` rows this run's TAXONOMY# scan (minus
-    // exclusions) no longer covers. Gated by the same guardedReplace floor as
-    // the publication_topic prune below, so a partial/empty scan never wipes
-    // the catalog.
+    // exclusions) no longer covers, UNLESS they still have live TOPIC# entries
+    // (held back instead — see above). Gated by the same guardedReplace floor
+    // as the publication_topic prune below, so a partial/empty scan never
+    // wipes the catalog.
     const existingTopicIds = (await db.write.topic.findMany({ select: { id: true } })).map(
       (t) => t.id,
     );
-    const topicPrunePlan = planTopicPrune(
-      upsertedTopicIds,
-      existingTopicIds,
-      existingTopicIds.length,
-    );
+    const topicPrunePlan = planTopicPrune(upsertedTopicIds, existingTopicIds, existingTopicIds.length, {
+      excludedIds: excludedTopicIds,
+      liveActivityIds: new Set(topicActivityCounts.keys()),
+    });
     if (!topicPrunePlan.prune) {
       console.warn(
         `topic prune SKIPPED -- ${topicPrunePlan.reason}; retaining stale/excluded topic rows this run.`,
       );
-    } else if (topicPrunePlan.stale.length === 0) {
-      console.log("topic prune: no stale topics.");
     } else {
-      const pruneRes = await db.write.topic.deleteMany({
-        where: { id: { in: topicPrunePlan.stale } },
-      });
-      console.log(
-        `topic prune: removed ${pruneRes.count} retired/excluded topic row(s): ${topicPrunePlan.stale.join(", ")}.`,
-      );
+      if (topicPrunePlan.held.length > 0) {
+        console.warn(
+          `topic prune HELD BACK ${topicPrunePlan.held.length} topic(s) absent from TAXONOMY# but still ` +
+            `carrying live TOPIC# entries this run (taxonomy/per-paper desync -- investigate upstream): ` +
+            topicPrunePlan.held.map((id) => `${id}=${topicActivityCounts.get(id) ?? 0}`).join(", "),
+        );
+      }
+      if (topicPrunePlan.stale.length === 0) {
+        console.log("topic prune: no stale topics.");
+      } else {
+        const pruneRes = await db.write.topic.deleteMany({
+          where: { id: { in: topicPrunePlan.stale } },
+        });
+        console.log(
+          `topic prune: removed ${pruneRes.count} retired/excluded topic row(s): ${topicPrunePlan.stale.join(", ")}.`,
+        );
+      }
     }
 
     const topicCount = await db.write.topic.count();
+    const heldCount = topicPrunePlan.prune ? topicPrunePlan.held.length : 0;
     console.log(
-      `topic table count: ${topicCount} (expected ${upsertedTopicIds.length} from this run's TAXONOMY# scan).`,
+      `topic table count: ${topicCount} (this run wrote ${upsertedTopicIds.length}` +
+        (heldCount > 0 ? `, held back ${heldCount} pending taxonomy/TOPIC# desync` : "") +
+        `).`,
     );
-    if (topicCount !== upsertedTopicIds.length) {
+    if (topicCount < upsertedTopicIds.length) {
       console.warn(
-        `WARN: topic count ${topicCount} != ${upsertedTopicIds.length} upserted this run — investigate TAXONOMY# probe output / prune-skip reason above.`,
+        `WARN: topic count ${topicCount} is below this run's ${upsertedTopicIds.length} upserted ids — investigate TAXONOMY# probe output / prune-skip reason above.`,
       );
     }
 
