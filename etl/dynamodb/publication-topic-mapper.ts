@@ -13,6 +13,16 @@
  * empty string never matches, so the row now lands with authorPosition=""
  * and the rollups stay correct. pmid / score / year remain genuinely
  * required — pmid and year are NOT NULL columns and pmid is an FK.
+ *
+ * #2166 follow-up: the TOPIC# item's own `year` is absent on ~100% of
+ * scores for the Aug-2026 taxonomy-split topics (anesthesiology,
+ * basic_neuroscience, clinical_neurology, pain_medicine, and the
+ * not-yet-fully-retired neuroscience_neurology) even though every one of
+ * those papers already has a `publication.year` from the separate PubMed
+ * ETL. Falling back to `publication.year` (via `pubYearByPmid`, already
+ * FK-verified below) recovers those associations instead of silently
+ * dropping them — that dropped-everything state was surfacing as a
+ * publicly visible "0 publications" for whole research areas.
  */
 import { Prisma } from "@/lib/generated/prisma/client";
 
@@ -76,9 +86,10 @@ function stripCwidPrefix(raw: string): string {
  * four FK/field guards. Skip categories are counted (not thrown) so a partial
  * upstream day is fail-isolated — the index.ts caller logs the tally.
  *
- * Guard order mirrors index.ts Block 2: parent topic -> scholar -> required
- * fields -> publication. `author_position` is intentionally NOT a required
- * field (#348) — an empty value lands as "".
+ * Guard order mirrors index.ts Block 2: parent topic -> scholar -> pmid/score
+ * -> publication -> year (with publication.year fallback, #2166). `author_
+ * position` is intentionally NOT a required field (#348) — an empty value
+ * lands as "".
  */
 export function buildPublicationTopicWrites(
   records: ReadonlyArray<TopicRecordInput>,
@@ -86,9 +97,11 @@ export function buildPublicationTopicWrites(
     knownTopicIds: ReadonlySet<string>;
     ourCwidSet: ReadonlySet<string>;
     knownPmidSet: ReadonlySet<string>;
+    /** pmid -> publication.year, for pmids with a non-null year. Fallback only. */
+    pubYearByPmid: ReadonlyMap<string, number>;
   },
 ): PublicationTopicMapResult {
-  const { knownTopicIds, ourCwidSet, knownPmidSet } = sets;
+  const { knownTopicIds, ourCwidSet, knownPmidSet, pubYearByPmid } = sets;
   const writes: PubTopicWrite[] = [];
   let skippedMissingTopic = 0;
   let skippedMissingScholar = 0;
@@ -118,18 +131,26 @@ export function buildPublicationTopicWrites(
           ? it.pmid.trim()
           : "";
     const score = typeof it.score === "number" ? it.score : NaN;
-    const yearNum = typeof it.year === "number" ? it.year : NaN;
+    const itemYear = typeof it.year === "number" ? it.year : NaN;
     const authorPosition = typeof it.author_position === "string" ? it.author_position : "";
 
-    // pmid / score / year stay required. author_position does NOT (#348): an
-    // empty value lands as "" rather than discarding the whole association.
-    if (!pmidStr || !Number.isFinite(score) || !Number.isFinite(yearNum)) {
+    // pmid / score stay required. author_position does NOT (#348): an empty
+    // value lands as "" rather than discarding the whole association.
+    if (!pmidStr || !Number.isFinite(score)) {
       skippedMissingFields += 1;
       continue;
     }
 
     if (!knownPmidSet.has(pmidStr)) {
       skippedMissingPublication += 1;
+      continue;
+    }
+
+    // year stays required too, but falls back to publication.year (#2166)
+    // when the TOPIC# item's own year is absent.
+    const yearNum = Number.isFinite(itemYear) ? itemYear : (pubYearByPmid.get(pmidStr) ?? NaN);
+    if (!Number.isFinite(yearNum)) {
+      skippedMissingFields += 1;
       continue;
     }
 
