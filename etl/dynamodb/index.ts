@@ -281,8 +281,13 @@ async function main() {
     // PubMed ETL runs separately); upserting those would violate
     // publication_topic.pmid → publication.pmid FK. Skip them with a counted
     // log line, same pattern as the scholar/parent-topic guards.
-    const knownPubs = await db.write.publication.findMany({ select: { pmid: true } });
+    const knownPubs = await db.write.publication.findMany({ select: { pmid: true, year: true } });
     const knownPmidSet = new Set(knownPubs.map((p) => p.pmid));
+    // Fallback for TOPIC# items missing their own `year` (#2166) — see
+    // ./publication-topic-mapper.ts for why this is needed.
+    const pubYearByPmid = new Map(
+      knownPubs.filter((p) => p.year !== null).map((p) => [p.pmid, p.year as number]),
+    );
 
     console.log(`Scanning ${TABLE} for TOPIC# records (paginated)...`);
     const topicItems = buckets.topics;
@@ -297,6 +302,7 @@ async function main() {
       knownTopicIds,
       ourCwidSet,
       knownPmidSet,
+      pubYearByPmid,
     });
     const writes = mapResult.writes;
     let pubTopicRowsUpserted = 0;

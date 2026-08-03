@@ -11,6 +11,7 @@
  *   - emptyAuthorPosition counts only landed rows
  *   - Each skip category (topic, scholar, required fields, publication)
  *   - pmid / score / year are still required
+ *   - year falls back to publication.year when the TOPIC# item lacks one (#2166)
  *   - Numeric pmid normalized to string
  *   - Empty input -> all-zero result
  */
@@ -24,6 +25,7 @@ const SETS = {
   knownTopicIds: new Set(["neuro_oncology", "digital_health_telemedicine"]),
   ourCwidSet: new Set(["abc1234"]),
   knownPmidSet: new Set(["30418319"]),
+  pubYearByPmid: new Map<string, number>(),
 };
 
 /** A record that clears every guard, with per-test overrides. */
@@ -115,6 +117,26 @@ describe("buildPublicationTopicWrites (#348 Block 2 mapper)", () => {
     expect(buildPublicationTopicWrites([rec({ year: undefined })], SETS).skippedMissingFields).toBe(
       1,
     );
+  });
+
+  it("falls back to publication.year when the TOPIC# item's own year is absent (#2166)", () => {
+    const sets = { ...SETS, pubYearByPmid: new Map([["30418319", 2020]]) };
+    const r = buildPublicationTopicWrites([rec({ year: undefined })], sets);
+    expect(r.writes).toHaveLength(1);
+    expect(r.writes[0].year).toBe(2020);
+    expect(r.skippedMissingFields).toBe(0);
+  });
+
+  it("prefers the TOPIC# item's own year over the publication.year fallback", () => {
+    const sets = { ...SETS, pubYearByPmid: new Map([["30418319", 1999]]) };
+    const r = buildPublicationTopicWrites([rec({ year: 2020 })], sets);
+    expect(r.writes[0].year).toBe(2020);
+  });
+
+  it("still skips as missing fields when both the item and publication lack a year", () => {
+    const r = buildPublicationTopicWrites([rec({ year: undefined })], SETS);
+    expect(r.writes).toHaveLength(0);
+    expect(r.skippedMissingFields).toBe(1);
   });
 
   it("normalizes a numeric pmid to a string", () => {
