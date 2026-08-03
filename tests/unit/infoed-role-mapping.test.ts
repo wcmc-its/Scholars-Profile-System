@@ -105,20 +105,36 @@ describe("InfoEd role mapping", () => {
     expect("Co-Investigator".endsWith("PI")).toBe(false);
   });
 
-  // #2174 — the pgm_type codetab join is LEFT, so ct.code_desc can be NULL. The
-  // outer query filters `v.program_type <> 'Contract without funding'`, and
-  // NULL <> 'x' is UNKNOWN, so an un-defaulted Program_Type would let the WHERE
-  // silently delete the same 18,113 rows the INNER JOIN used to delete — no
-  // error, no type change, just a third of the feed gone again.
-  it("keeps Program_Type NULL-safe while the pgm_type join is LEFT", () => {
-    const ctJoin = SRC.split("\n").find(
-      (l) => l.includes("AS ct ") && l.includes("prop.pgm_type"),
+  // #2173 — the project period must come from an ACCOUNT-level aggregate over
+  // dbo.proposal, never from a per-CWID one. Re-keying this subquery on cwid
+  // (or re-pointing it at infoed_all, which is already personnel-filtered)
+  // reinstates the exact bug: a CWID attached only to a dateless
+  // child/amendment stops seeing the parent proposal's real dates. That is
+  // invisible to tsc, to every mock, and to the prune guard.
+  it("derives begin_date/end_date from an account-level proposal aggregate", () => {
+    const end = SRC.indexOf(") AS acct");
+    expect(end).toBeGreaterThan(0);
+    const sub = SRC.slice(SRC.lastIndexOf("LEFT JOIN (", end), end);
+    const acct = SRC.slice(SRC.lastIndexOf("LEFT JOIN (", end), end + 120);
+
+    expect(sub).toMatch(/FROM\s+wc_infoedprod\.dbo\.proposal\s+AS p\b/i);
+    expect(sub).not.toMatch(/infoed_all/i);
+    // No personnel/faculty join may narrow the date source.
+    expect(sub).not.toMatch(/proppds|faculty/i);
+    // Grouped by the account key alone — a cwid in the GROUP BY is the bug.
+    expect(sub).toMatch(/GROUP BY CASE WHEN p\.parentprop_no IS NULL/i);
+    expect(sub.slice(sub.indexOf("GROUP BY"))).not.toMatch(/\bcwid\b/i);
+    // Joined on the account only.
+    expect(acct).toMatch(
+      /\)\s+AS acct\s+ON acct\.Account_Number = v\.Account_Number/i,
     );
-    expect(ctJoin).toBeDefined();
-    if (/LEFT/i.test(ctJoin!)) {
-      expect(SRC).toMatch(
-        /(ISNULL|COALESCE)\(\s*ct\.code_desc\s*,[^)]*\)\s+AS Program_Type/i,
-      );
-    }
+    // Flat MIN/MAX: a parent-preference tie-break narrows live periods, and
+    // choosing start and end independently can emit start > end.
+    expect(sub).toMatch(/MIN\(p\.app_st_dt\)\s+AS begin_date/i);
+    expect(sub).toMatch(/MAX\(p\.app_end_dt\)\s+AS end_date/i);
+
+    // The old per-CWID date aggregate is gone for good.
+    expect(SRC).not.toMatch(/MIN\(Project_Period_Start\)/i);
+    expect(SRC).not.toMatch(/MAX\(Project_Period_End\)/i);
   });
 });

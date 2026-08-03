@@ -137,14 +137,15 @@ WITH infoed_all AS (
     CASE WHEN prop.parentprop_no IS NULL THEN prop.prop_no ELSE prop.parentprop_no END AS Account_Number,
     prop.inst_no        AS RecordID,
     ct.code_desc        AS Submission_Status,
-    -- #2174 — pgm_type is NULL on 29% of in-scope proposal rows (18,113 of
-    -- 62,474, measured against InfoEd prod 2026-08-03) and the join below was
-    -- INNER, so a missing program type silently deleted the ENTIRE row, not
-    -- just its label. Fall back to the same literal the TS layer already
-    -- substitutes (r.program_type?.trim() || "Grant"), which also keeps the
-    -- outer program_type <> 'Contract without funding' filter from deleting
-    -- the row a second time on a NULL comparison (NULL <> 'x' is UNKNOWN).
-    ISNULL(ct.code_desc, 'Grant') AS Program_Type,
+    -- NOTE (#2174): pgm_type is NULL on 29% of in-scope proposal rows (18,113
+    -- of 62,474, measured against InfoEd prod 2026-08-03), and the INNER JOIN
+    -- on ct below silently deletes every one of those rows -- the whole row,
+    -- not just this label. That is a real defect, but a bare INNER -> LEFT
+    -- swap admits +13,922 (cwid, account) pairs and grows the OSRA date-gap
+    -- worklist ~4.3x, so it is tracked separately in #2174 and NOT fixed here.
+    -- The account-level date source below reads dbo.proposal upstream of this
+    -- join, so #2173's recovery does not depend on #2174 being fixed first.
+    ct.code_desc        AS Program_Type,
     p_udf.p_sin_5       AS intake_type,
     ct2.code_desc       AS Proposal_Type,
     cdp.code_desc       AS Project_Status,
@@ -176,7 +177,7 @@ WITH infoed_all AS (
   FROM   wc_infoedprod.dbo.proposal AS prop
   LEFT OUTER JOIN wc_infoedprod.dbo.pt_project AS subp
     ON subp.child = prop.prop_no AND subp.inst_code = prop.inst_code
-  LEFT OUTER JOIN wc_infoedprod.dbo.codetab AS ct ON prop.pgm_type   = ct.codeid
+  INNER JOIN wc_infoedprod.dbo.codetab    AS ct   ON prop.pgm_type   = ct.codeid
   INNER JOIN wc_infoedprod.dbo.codetab    AS ct2  ON prop.prop_type  = ct2.codeid
   INNER JOIN wc_infoedprod.dbo.projstatxref AS ps ON prop.prop_stat  = ps.appr_stat
   INNER JOIN wc_infoedprod.dbo.codetab    AS cdp  ON ps.projstat     = cdp.codeid
@@ -243,21 +244,27 @@ LEFT JOIN (SELECT cwid, Account_Number, MAX(Award_Number) AS Award_Number FROM i
 -- re-aggregating infoed_all is the point — an infoed_all re-aggregation only
 -- sees rows that already survived the personnel join, which is the bug.
 --
--- Scoped exactly as the CTE scopes itself, status filter included: dates on a
--- 'Not Funded' / 'Award Under Review' sibling must NOT be adopted (that would
--- publish a period for money never granted), and a Confidential row stays
--- do-not-publish. 8 and 6 accounts respectively; both correctly stay blocked.
+-- Scoped with the CTE's four WHERE predicates, status filter included: dates
+-- on a 'Not Funded' / 'Award Under Review' sibling must NOT be adopted (that
+-- would publish a period for money never granted), and a Confidential row
+-- stays do-not-publish. 8 and 6 accounts respectively; both stay blocked.
+-- Deliberately NOT reproduced here are the CTE's ct2/projmain/sponspas inner
+-- joins: they were measured at zero drops in this scope, and omitting them
+-- keeps this row set a strict superset of the rows behind any dated
+-- infoed_all row, which is what guarantees no pair can go dated -> undated.
 --
--- ponytail: parent-first, family MIN/MAX only as fallback. No per-child period
--- reconstruction, no configurable strategy. Ceiling: on an account whose
--- family periods genuinely diverge AND whose parent row is dateless, the
--- MIN/MAX span can be wider than any single sibling's. Measured blast radius
--- is 4 of 13,724 currently-dated (cwid, account) pairs (0.03%); revisit only
--- if that number moves.
+-- ponytail: flat family MIN/MAX, matching #2173's text. No parent-preference
+-- tie-break — preferring the parent's own pair NARROWS the period on accounts
+-- whose continuations extend past it, which silently flips grants Active ->
+-- Past via isFundingActive, and picking start and end independently can emit
+-- start > end. Ceiling: on an account whose family periods genuinely diverge,
+-- the span can be wider than any single sibling's. Measured blast radius is 4
+-- of 13,724 currently-dated (cwid, account) pairs (0.03%); revisit only if
+-- that number moves.
 LEFT JOIN (
   SELECT CASE WHEN p.parentprop_no IS NULL THEN p.prop_no ELSE p.parentprop_no END AS Account_Number,
-    COALESCE(MIN(CASE WHEN p.parentprop_no IS NULL THEN p.app_st_dt  END), MIN(p.app_st_dt))  AS begin_date,
-    COALESCE(MAX(CASE WHEN p.parentprop_no IS NULL THEN p.app_end_dt END), MAX(p.app_end_dt)) AS end_date
+    MIN(p.app_st_dt)  AS begin_date,
+    MAX(p.app_end_dt) AS end_date
   FROM   wc_infoedprod.dbo.proposal AS p
   LEFT OUTER JOIN wc_infoedprod.dbo.pt_project AS psub ON psub.child = p.prop_no AND psub.inst_code = p.inst_code
   LEFT OUTER JOIN wc_infoedprod.dbo.prop_u     AS pu   ON pu.prop_no = p.prop_no AND pu.inst_code = p.inst_code
