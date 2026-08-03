@@ -104,4 +104,21 @@ describe("InfoEd role mapping", () => {
     // branch would have swallowed every co-investigator.
     expect("Co-Investigator".endsWith("PI")).toBe(false);
   });
+
+  // #2174 — the pgm_type codetab join is LEFT, so ct.code_desc can be NULL. The
+  // outer query filters `v.program_type <> 'Contract without funding'`, and
+  // NULL <> 'x' is UNKNOWN, so an un-defaulted Program_Type would let the WHERE
+  // silently delete the same 18,113 rows the INNER JOIN used to delete — no
+  // error, no type change, just a third of the feed gone again.
+  it("keeps Program_Type NULL-safe while the pgm_type join is LEFT", () => {
+    const ctJoin = SRC.split("\n").find(
+      (l) => l.includes("AS ct ") && l.includes("prop.pgm_type"),
+    );
+    expect(ctJoin).toBeDefined();
+    if (/LEFT/i.test(ctJoin!)) {
+      expect(SRC).toMatch(
+        /(ISNULL|COALESCE)\(\s*ct\.code_desc\s*,[^)]*\)\s+AS Program_Type/i,
+      );
+    }
+  });
 });
