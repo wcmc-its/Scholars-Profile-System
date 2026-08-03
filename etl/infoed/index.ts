@@ -239,8 +239,12 @@ LEFT JOIN (SELECT cwid, Account_Number, MAX(Award_Number) AS Award_Number FROM i
 -- prop_no a given person's personnel record happens to hang off. This used to
 -- aggregate infoed_all GROUP BY cwid, Account_Number, so a CWID attached only
 -- to a dateless child/amendment never saw the parent proposal's real dates:
--- 296 of prod's 1,988 backlogged accounts have dates somewhere in the family
--- (measured 2026-08-03). Reading dbo.proposal directly rather than
+-- 296 of prod's 1,988 backlogged accounts have dates somewhere in the family;
+-- end-to-end this recovers 415 worklist rows across 282 accounts, the rest
+-- being policy-blocked (measured against prod InfoEd 2026-08-03). Note the
+-- dated parent row often has pgm_type NULL, so the CTE's INNER JOIN on
+-- codetab deletes it -- reading dbo.proposal here is upstream of that join,
+-- which is why this does not depend on #2174. Reading dbo.proposal rather than
 -- re-aggregating infoed_all is the point — an infoed_all re-aggregation only
 -- sees rows that already survived the personnel join, which is the bug.
 --
@@ -258,8 +262,10 @@ LEFT JOIN (SELECT cwid, Account_Number, MAX(Award_Number) AS Award_Number FROM i
 -- whose continuations extend past it, which silently flips grants Active ->
 -- Past via isFundingActive, and picking start and end independently can emit
 -- start > end. Ceiling: on an account whose family periods genuinely diverge,
--- the span can be wider than any single sibling's. Measured blast radius is 4
--- of 13,724 currently-dated (cwid, account) pairs (0.03%); revisit only if
+-- the span can be wider than any single sibling's. Measured end-to-end against
+-- prod: of 13,725 currently-dated (cwid, account) pairs, 6 pairs across 4
+-- accounts widen and 0 narrow, 0 lose a date, 0 emit start > end, and 0 flip
+-- a grant Active -> Past under isFundingActive. Revisit only if
 -- that number moves.
 LEFT JOIN (
   SELECT CASE WHEN p.parentprop_no IS NULL THEN p.prop_no ELSE p.parentprop_no END AS Account_Number,
