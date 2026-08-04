@@ -194,9 +194,10 @@ Listed here for completeness so §1–§8 stay focused.
   drafts `outreach/wave1-center-admins.md`, `outreach/wave1-superusers-library.md`,
   `outreach/wave2-scholars.md`,
   `outreach/wave3-doctoral-students.md`, `outreach/wave4-public-launch.md`
-- ServiceNow KB (launch support, #506 D3): `kb/01-scholars.md`, `kb/03-superusers.md`,
-  `kb/04-itsops.md` drafted; `kb/02-dept-admins.md` deferred (gated on #540); index in `kb/README.md`.
-  Routing destinations are owned by `feedback-handling-matrix.md` (§8), not restated in the articles.
+- ServiceNow KB (launch support, #506 D3): `kb/01-scholars.md` (Scholars) and `kb/02-dept-admins.md`
+  (dept/division/center Owners+Curators) — task-based, one screenshot per action, captured live
+  2026-08-01, published to ServiceNow 2026-08-04; index in `kb/README.md`. Routing destinations are
+  owned by `feedback-handling-matrix.md` (§8), not restated in the articles.
 - Snapshots/fixtures: `spec-snapshots/`
 
 ---
