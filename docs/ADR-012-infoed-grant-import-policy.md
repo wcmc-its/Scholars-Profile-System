@@ -2,8 +2,15 @@
 
 **Status:** **Partially accepted, nothing yet in production.** D1, D3, D4a and D9 are merged to master (#2176, #2140) but **dark** — `etl:infoed` is excluded from the staging cadence and prod requires a manual `workflow_dispatch` deploy, so no behaviour has changed for any user yet. D5 and D4b are decisions *not* to act, and are live by default. D10 is unresolved and blocked on OSRA.
 **Date:** 2026-08-04
-**Revision:** 1
+**Revision:** 2
 **Authors:** Scholars Profile System development team
+
+**Revision 2 corrects two claims made by revision 1**, both found by diagnosing a department administrator's report that grants were missing from four investigators.
+
+| revision 1 claimed | measured |
+|---|---|
+| the backlog is 1,988 actionable accounts, and D1 is independent of D5 | **Understated, and independent in only one direction.** `grant_date_gap` is written from the `CONSOLIDATED_QUERY` recordset, so a `pgm_type`-blocked row can never be logged as a date gap at all. Every backlog figure was measured on a population D5 had already removed |
+| D4b's mirror scoping is why disease-filtered views are empty | **Necessary but not sufficient.** The dominant cause is downstream: `pref_terms` carries no MeSH descriptor names, and 7 of 16 already-enriched on-disease grants still resolve to nothing |
 **Supersedes:** —
 **Superseded by:** —
 
@@ -19,7 +26,9 @@ Each of those was settled by measurement against prod InfoEd. This record exists
 
 ## The population, stated once
 
-Prod's actionable `grant_date_gap` backlog is **1,988 distinct accounts**. Splitting it correctly is a precondition for most decisions below, and it was got wrong twice before it was got right:
+Prod's actionable `grant_date_gap` backlog is **1,988 distinct accounts**. Splitting it correctly is a precondition for most decisions below, and it was got wrong twice before it was got right.
+
+⚠ **Every figure in this section is a LOWER BOUND (revision 2).** `grant_date_gap` is written from the `CONSOLIDATED_QUERY` recordset — `reconcileDateGaps(undated, …)` at `etl/infoed/index.ts:647` consumes rows derived from `result.recordset` at :487. A `pgm_type IS NULL` row never enters `infoed_all`, so it can never be logged as a date gap **at all**. The worklist is structurally blind to D5's population, and the true backlog is larger by an unmeasured amount. A concrete instance: account `0000071336`, an active breast-cancer award, is both `pgm_type`-blocked and dateless, and appears nowhere in the worklist. Re-measuring means reading `dbo.proposal` directly rather than the worklist, the same way D1's date source does.
 
 | | accounts | |
 |---|---|---|
@@ -49,6 +58,8 @@ Two sub-decisions that are load-bearing and easy to undo by accident:
 
 **The aggregate reads `dbo.proposal` directly, not `infoed_all`.** Re-aggregating `infoed_all` would be cosmetic: it only ever sees rows that already survived the personnel join, which is the bug. It also has a second effect nobody predicted — `dbo.proposal` sits *upstream* of the `pgm_type` join in D5, so the fix works even though the dated parent row is usually deleted by that join. This is why D1 did not have to wait for D5.
 
+**Independence holds in one direction only (revision 2).** D1's *date derivation* genuinely does not need D5: all five accounts named in #2173 resolve without it, and the 415-row / 282-account recovery was measured on the query's own output. But D1's *sizing* does depend on D5, because the worklist those figures came from cannot see `pgm_type`-blocked records at all (see the population note above). A record can be blocked by both, in which case neither fix alone recovers it — account `0000071336` is exactly that case. Do not read "D1 is independent of D5" as covering anything beyond the date derivation.
+
 **Flat family `MIN`/`MAX`, with no parent-preference tie-break.** A first draft preferred the parent `prop_no`'s own period when it had one. Review found two defects: it *narrows* the period on accounts whose continuations run past the parent's end date, silently flipping published grants from Active to Past via `isFundingActive`; and choosing `begin_date` and `end_date` from independently-selected rows can emit `startDate > endDate`, a state the previous per-CWID `MIN`/`MAX` could not produce.
 
 **Consequence accepted:** on an account whose family periods genuinely diverge, the span can be wider than any single sibling's. Measured at 6 pairs across 4 accounts out of 13,725 currently-dated pairs.
@@ -77,7 +88,15 @@ Critically, **a backfilled row keeps its `grant_date_gap` row OPEN**. A derived 
 
 **D4b — enrichment (not yet done, #2182).** `etl/reporter` still reads `reciterdb.grant_reporter_project` for `applId`, `abstract`, `keywords` and `meshDescriptorUis` — the entire topical signal for every grant in the system — and `reciterdb.grant_provenance` for `grant_publication`.
 
-That mirror holds exactly **one** distinct `org_name`. An incoming subaward's core project number belongs to the *prime* institution, so it can never match. Measured over 66 grants belonging to four investigators named in an administrator report: **0 of 19 subaward grants are enriched**, and **50 of 66 (76%) carry no topical signal at all**, including 18 of the 28 currently active. Those grants render on a profile but are invisible to every disease-filtered view — which is the entire content of the "missing grants" report that prompted this work.
+That mirror holds exactly **one** distinct `org_name`. An incoming subaward's core project number belongs to the *prime* institution, so it can never match. Measured over 66 grants belonging to four investigators named in an administrator report: **0 of 19 subaward grants are enriched**, and **50 of 66 (76%) carry no topical signal at all**, including 18 of the 28 currently active.
+
+**Revision 2 — this is not the whole cause, and fixing it alone changes nothing a user sees.** D4b governs *which* grants receive keywords. A second defect, downstream, governs whether those keywords resolve to a disease, and it is the dominant one:
+
+`lib/reporter-terms.ts`'s `parseReporterTerms` prefers `pref_terms` whenever it holds one non-empty entry and **discards the legacy `terms` field entirely**. `pref_terms` is RCDC/UMLS vocabulary carrying **no MeSH neoplasm descriptor names**; `terms` does carry `Breast Neoplasms` and `Breast Cancer`. `resolveGrantKeywords` then performs an exact normalized lookup, so the stored `malignant breast neoplasm` never matches MeSH `Breast Neoplasms` — and word order compounds it, since MeSH's own entry term is `Breast Malignant Neoplasm`. **7 of the 16 already-enriched grants across those four investigators are on-disease and still resolve to nothing.** `MAX_GRANT_KEYWORDS = 50` contributes (these awards carry 89–124 `pref_terms`) without being sufficient alone.
+
+**The empty surface is not the profile.** `components/profile/grants-section.tsx` filters by role bucket only and has no topic filter; the grants in question render there today. The artifact that reads zero is the Meyer Cancer Center disease-assignment sheet (`scripts/cancer-center-disease-assignments.ts`), columns `grants_led` / `grants_support`, whose grant axis reads `grant.mesh_descriptor_uis` from Aurora directly. Its publication and clinical-trial axes work off the same anchors, which rules out the taxonomy and pins the defect on the grant vocabulary.
+
+Note also that the live funding concept gate reads `fundedPubMeshUi`, a **different** column derived from `grant_publication` ← `reciterdb.grant_provenance`. That linkage is PubMed-derived and not WCM-prime-scoped, so a subaward grant may have a non-empty `fundedPubMeshUi` despite zero `keywords`. Unmeasured. The live-search story and the sheet's story are not the same story, and conflating them has already misdirected one investigation.
 
 ### D5 — The `pgm_type` INNER JOIN stays, deliberately, and its replacement must separate two concerns
 
