@@ -1,8 +1,9 @@
 /**
  * RePORTER ETL — two steps:
  *
- *   1. Populate grant.{applId, abstract, abstractFetchedAt} from
- *      reciterdb.grant_reporter_project (idempotent; only writes diffs).
+ *   1. Populate grant.{applId, abstract, keywords} straight from NIH
+ *      RePORTER's /projects/search, keyed by core project number
+ *      (idempotent; only writes diffs).
  *
  *   2. Materialize grant_publication from reciterdb.grant_provenance,
  *      bridging the two databases so the Funding API can serve pub counts
@@ -11,10 +12,25 @@
  *      in our Postgres and the pmid exists in our Publication table.
  *
  * Source of truth chain:
- *   NIH RePORTER (/projects/search + /publications/search)
- *     → reciterdb.grant_reporter_project + grant_provenance
- *       (populated by ReCiterDB's update/retrieveReporter.py — issue #85)
- *     → grant.{applId, abstract} + grant_publication  (this script)
+ *   step 1: NIH RePORTER /projects/search → grant.{applId, abstract, keywords}
+ *   step 2: NIH RePORTER /publications/search
+ *             → reciterdb.grant_provenance
+ *               (populated by ReCiterDB's update/retrieveReporter.py — #85)
+ *             → grant_publication
+ *
+ * #2182 — step 1 read `reciterdb.grant_reporter_project` until 2026-08-04.
+ * That mirror is scoped to WCM-as-prime-org (one distinct `org_name`), and an
+ * incoming subaward's core project number belongs to the PRIME institution,
+ * so no subaward could ever match: enrichment on subaward grants measured 0
+ * of 19, and 50 of 66 grants sampled across four investigators carried no
+ * topical signal at all. Since those fields are the ONLY topical signal a
+ * grant has, such grants render on a profile but are invisible to every
+ * disease-filtered view. Fetching by `project_nums` applies no org filter.
+ *
+ * Step 2 still reads reciterdb and is the remaining violation of the
+ * InfoEd-and-RePORTER-only rule (ADR-012 D4). /publications/search is the
+ * direct equivalent; it is deliberately a separate change because publication
+ * linkage has different volume and matching characteristics.
  *
  * Why this lives here and not in etl/reciter: that pipeline rebuilds
  * publications/authorships from scratch each run. This one operates on
@@ -34,19 +50,12 @@ import { db, disconnect } from "../../lib/db";
 import { repairEncodingOrNull } from "@/lib/text/repair-encoding";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
+import { fetchProjectEnrichmentByCoreProjectNums } from "../nih-profile/fetcher";
 import { coreProjectNum } from "@/lib/award-number";
 import { parseReporterTerms } from "@/lib/reporter-terms";
 import { resolveGrantKeywords } from "./mesh";
 import { withEtlRun } from "@/lib/etl-run";
 import { assertSourceVolume } from "../../lib/etl-guard";
-
-type ReporterRow = {
-  core_project_num: string;
-  appl_id: number;
-  abstract_text: string | null;
-  project_terms: string | null;
-  pref_terms: string | null;
-};
 
 const UPDATE_BATCH = 200;
 
@@ -69,37 +78,6 @@ type ProvenanceRow = {
 async function step1_GrantAbstracts() {
   console.log("\n=== Step 1: Grant abstracts + applId ===");
 
-  console.log("Loading RePORTER projects from reciterdb.grant_reporter_project...");
-  const reporterByCoreProject = new Map<string, ReporterRow>();
-  await withReciterConnection(async (conn) => {
-    // Pick MAX(appl_id) per core_project_num — the most recent FY's award.
-    // Take its abstract too (abstracts can vary slightly across renewal
-    // years; the latest is most useful for the Funding UI).
-    const rows = (await conn.query(`
-      SELECT
-        p.core_project_num,
-        p.appl_id,
-        p.abstract_text,
-        p.project_terms,
-        p.pref_terms
-      FROM grant_reporter_project p
-      INNER JOIN (
-        SELECT core_project_num, MAX(appl_id) AS max_appl_id
-        FROM grant_reporter_project
-        WHERE core_project_num IS NOT NULL
-        GROUP BY core_project_num
-      ) latest
-        ON p.core_project_num = latest.core_project_num
-       AND p.appl_id = latest.max_appl_id
-    `)) as ReporterRow[];
-    for (const r of rows) {
-      if (r.core_project_num) {
-        reporterByCoreProject.set(r.core_project_num.toUpperCase(), r);
-      }
-    }
-  });
-  console.log(`Loaded ${reporterByCoreProject.size} distinct core_project_num records from RePORTER.`);
-
   console.log("Loading WCM grants from Postgres...");
   const grants = await db.write.grant.findMany({
     where: { awardNumber: { not: null } },
@@ -112,6 +90,27 @@ async function step1_GrantAbstracts() {
     },
   });
   console.log(`${grants.length} grants with non-null awardNumber.`);
+
+  // #2182 — fetch only the cores we actually hold, straight from RePORTER.
+  // Was a full load of `reciterdb.grant_reporter_project`; that mirror is
+  // scoped to WCM-as-prime-org, so no incoming subaward could ever match it
+  // (0 of 19 enriched when measured). `/projects/search` by `project_nums`
+  // applies no org filter.
+  const cores = [
+    ...new Set(
+      grants
+        .map((g) => coreProjectNum(g.awardNumber))
+        .filter((c): c is string => c !== null),
+    ),
+  ];
+  console.log(
+    `Fetching RePORTER enrichment for ${cores.length} distinct core project numbers...`,
+  );
+  const reporterByCoreProject =
+    await fetchProjectEnrichmentByCoreProjectNums(cores);
+  console.log(
+    `RePORTER returned ${reporterByCoreProject.size} of ${cores.length} cores.`,
+  );
 
   let matched = 0;
   const toUpdate: Array<{
@@ -135,25 +134,24 @@ async function step1_GrantAbstracts() {
       continue;
     }
     matched++;
-    const keywords = parseReporterTerms(r.pref_terms, r.project_terms);
+    const keywords = parseReporterTerms(r.prefTerms, r.projectTerms);
     // Only update when something actually changed — avoids churning
     // abstractFetchedAt / keywordsFetchedAt on no-op runs. `keywords` is an
     // array; compare by canonical JSON since parseReporterTerms is deterministic.
     const keywordsChanged =
       JSON.stringify(g.keywords ?? null) !== JSON.stringify(keywords);
-    // A partially-populated grant_reporter_project mirror carries NULL
-    // abstract_text on rows RePORTER has already published abstracts for —
-    // never replace a real abstract with upstream NULL (applId/keywords
-    // still update normally).
-    const abstract = repairEncodingOrNull(r.abstract_text) ?? g.abstract;
+    // Never replace a real abstract with an upstream NULL: RePORTER returns
+    // no abstract on some awards it has otherwise published (and the mirror
+    // this replaced had the same hole). applId/keywords still update normally.
+    const abstract = repairEncodingOrNull(r.abstractText) ?? g.abstract;
     if (
-      g.applId !== r.appl_id ||
+      g.applId !== r.applId ||
       g.abstract !== abstract ||
       keywordsChanged
     ) {
       toUpdate.push({
         id: g.id,
-        applId: r.appl_id,
+        applId: r.applId,
         abstract,
         keywords,
       });

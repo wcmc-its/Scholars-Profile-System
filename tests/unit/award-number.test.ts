@@ -187,3 +187,40 @@ describe("gatesGrantId", () => {
     expect(gatesGrantId("")).toBeNull();
   });
 });
+
+describe("#2182 — 4-character activity codes", () => {
+  // CDC/HRSA use a 4-character activity code. The width was fixed at 3, so
+  // these could not parse at all and the grant got no topical signal.
+  it("parses CDC 4-character activity codes", () => {
+    expect(coreProjectNum("1 NU58DP007916-01-00")).toBe("NU58DP007916");
+    expect(parseNihAward("1 NU58DP007916-01-00").mechanism).toBe("NU58");
+    expect(isNihAwardNumber("1 NU58DP007916-01-00")).toBe(true);
+  });
+
+  // The regression the widening could plausibly cause: a greedy 4-character
+  // match stealing the IC prefix's first letter. It cannot, because a real IC
+  // prefix is two letters then a digit, so the 4-char attempt always backtracks.
+  it("does not change any 3-character activity code", () => {
+    expect(coreProjectNum("1R01 CA245678-01A1")).toBe("R01CA245678");
+    expect(coreProjectNum("5U2GGH000545-05")).toBe("U2GGH000545");
+    expect(coreProjectNum("5 R34 HL117352-02 EW")).toBe("R34HL117352");
+    expect(parseNihAward("1R01 CA245678-01A1").mechanism).toBe("R01");
+    expect(parseNihAward("5U2GGH000545-05").mechanism).toBe("U2G");
+  });
+
+  // Real non-NIH award numbers seen in prod must still be rejected, or they
+  // would acquire a bogus mechanism and a core that matches nothing.
+  it("still rejects non-NIH award numbers", () => {
+    for (const s of [
+      "SAC210104", // Komen
+      "RSGI-22-130-01-HOPS", // ACS
+      "HT9425-23-1-1028", // DOD
+      "CER-2019C2-17372", // PCORI
+      "PCF 243159-01",
+      "1593675",
+    ]) {
+      expect(coreProjectNum(s)).toBeNull();
+      expect(isNihAwardNumber(s)).toBe(false);
+    }
+  });
+});
