@@ -10,12 +10,22 @@
  *   - scholar.role_category = 'full_time_faculty', active, not deleted
  *   - publication.publication_type = 'Academic Article'
  *   - year >= 2020 (D-15 ReCiterAI scoring data floor)
- * Order: dateAddedToEntrez DESC, year DESC, impactScore DESC.
+ * Order: spotlightScore DESC (relevance-weighted, see spotlightScore below),
+ * tiebroken by dateAddedToEntrez DESC → year DESC.
+ *
+ * Relevance vs. impact weighting: the impact floor alone let a paper with a
+ * merely-on-topic `publication_topic.score` (as low as the upstream 0.3
+ * floor) outrank a strongly on-topic one purely on recency + impact — e.g. a
+ * paper scoring 0.35 relevance to a topic still won that topic's Spotlight
+ * slot over more central papers because it was recently added to Entrez and
+ * had high impact. `spotlightScore` weights relevance (1.4) above impact
+ * (1.2) so on-topic-ness dominates the ranking, per user report.
  *
  * Impact source: `Publication.impactScore` (canonical column from the IMPACT#
  * DynamoDB ETL, issue #316 PR-A). Before #316 PR-B-finalize this was read
  * through the `publication_topic.impact_score` mirror; that column has been
- * dropped and is no longer queried.
+ * dropped and is no longer queried. Relevance source: `PublicationTopic.score`
+ * (ReciterAI's 0-1 parent-topic relevance value).
  *
  * Note: the legacy code in `lib/api/topics.ts:getRecentHighlightsForTopic`
  * filtered on `score` (the 0-1 relevance value) instead of `impact_score`
@@ -37,6 +47,19 @@ const RECITERAI_YEAR_FLOOR = 2020;
 const HIGHLIGHTS_IMPACT_FLOOR = 40;
 const SPOTLIGHT_TARGET = 3;
 
+// Relevance counts for more than impact in the Spotlight ranking — a
+// barely-on-topic paper (score near the upstream 0.3 floor) shouldn't beat
+// a strongly on-topic one just because it's more recent or higher-impact.
+// Both factors are normalized to 0-1 before weighting (impactScore's raw
+// range is ~9-83, so an un-normalized sum would be impact in all but name).
+const SPOTLIGHT_RELEVANCE_WEIGHT = 1.4;
+const SPOTLIGHT_IMPACT_WEIGHT = 1.2;
+
+/** Weighted 0-1-normalized relevance + impact, higher is more spotlight-worthy. */
+export function spotlightScore(relevanceScore: number, impactScore: number): number {
+  return relevanceScore * SPOTLIGHT_RELEVANCE_WEIGHT + (impactScore / 100) * SPOTLIGHT_IMPACT_WEIGHT;
+}
+
 export type SpotlightCard = {
   pmid: string;
   kicker: string;
@@ -55,12 +78,14 @@ export type SpotlightData = {
   viewAllHref: string;
 };
 
-type CandidateRow = {
+export type CandidateRow = {
   pmid: string;
   cwid: string;
   parentTopicId: string;
   primarySubtopicId: string | null;
   impactScore: number;
+  /** ReciterAI's 0-1 parent-topic relevance value (publication_topic.score). */
+  relevanceScore: number;
   /** Issue #68 — author position on this paper for the entity scholar.
    *  null for tier-1 (first/last) rows where position isn't decisive;
    *  populated for tier-2 (middle-author) rows so the per-tier sort can
@@ -78,42 +103,50 @@ type CandidateRow = {
 };
 
 /**
- * Dedupe per pmid, keeping the row with the highest impact so the kicker
- * reflects the publication's most-relevant topic for this entity.
+ * Dedupe per pmid, keeping the row with the highest spotlightScore so the
+ * kicker reflects the publication's most-relevant topic for this entity.
  */
 function dedupeByPmid(rows: CandidateRow[]): CandidateRow[] {
   const best = new Map<string, CandidateRow>();
   for (const r of rows) {
     const existing = best.get(r.pmid);
-    if (!existing || r.impactScore > existing.impactScore) {
+    if (
+      !existing ||
+      spotlightScore(r.relevanceScore, r.impactScore) >
+        spotlightScore(existing.relevanceScore, existing.impactScore)
+    ) {
       best.set(r.pmid, r);
     }
   }
   return Array.from(best.values());
 }
 
-/** Sort: dateAddedToEntrez desc → year desc → impactScore desc. */
-function sortForSpotlight(rows: CandidateRow[]): CandidateRow[] {
+/** Sort: spotlightScore desc (relevance-weighted) → dateAddedToEntrez desc → year desc. */
+export function sortForSpotlight(rows: CandidateRow[]): CandidateRow[] {
   return [...rows].sort((a, b) => {
+    const as = spotlightScore(a.relevanceScore, a.impactScore);
+    const bs = spotlightScore(b.relevanceScore, b.impactScore);
+    if (bs !== as) return bs - as;
     const at = a.publication.dateAddedToEntrez?.getTime() ?? 0;
     const bt = b.publication.dateAddedToEntrez?.getTime() ?? 0;
     if (bt !== at) return bt - at;
     const ay = a.publication.year ?? 0;
     const by = b.publication.year ?? 0;
-    if (by !== ay) return by - ay;
-    return b.impactScore - a.impactScore;
+    return by - ay;
   });
 }
 
 /**
  * Issue #68 — middle-author top-up for sparse entities (Library is the
- * canonical case). Tier-2 sort is impact-led with author-position as a
- * tiebreaker (earlier = better), so a 2nd-of-7 middle author outranks a
- * 5th-of-7 on the same paper.
+ * canonical case). Tier-2 sort is spotlightScore-led (relevance-weighted,
+ * same as tier 1) with author-position as a tiebreaker (earlier = better),
+ * so a 2nd-of-7 middle author outranks a 5th-of-7 on an equally-ranked paper.
  */
 function sortTier2(rows: CandidateRow[]): CandidateRow[] {
   return [...rows].sort((a, b) => {
-    if (b.impactScore !== a.impactScore) return b.impactScore - a.impactScore;
+    const as = spotlightScore(a.relevanceScore, a.impactScore);
+    const bs = spotlightScore(b.relevanceScore, b.impactScore);
+    if (bs !== as) return bs - as;
     const ap = a.position ?? Number.POSITIVE_INFINITY;
     const bp = b.position ?? Number.POSITIVE_INFINITY;
     if (ap !== bp) return ap - bp;
@@ -212,6 +245,7 @@ async function fillTier2(
       pmid: true,
       parentTopicId: true,
       primarySubtopicId: true,
+      score: true,
       publication: { select: { impactScore: true } },
     },
   });
@@ -219,13 +253,16 @@ async function fillTier2(
     parentTopicId: string;
     primarySubtopicId: string | null;
     impactScore: number;
+    relevanceScore: number;
   };
   const bestTopicByPmid = new Map<string, Best>();
   for (const t of topicRows) {
     // Post-#316 PR-B-finalize: every publication_topic row for a pmid has the
     // same global impact value via the publication relation. The "best topic"
     // pick degenerates to "first topic seen" — keep the loop for clarity even
-    // though the MAX collapse is now a no-op.
+    // though the MAX collapse is now a no-op. relevanceScore rides along with
+    // whichever row wins this pick (it DOES vary by topic, but we're not
+    // re-deciding topic attribution here, just carrying its relevance).
     const score = Number(t.publication.impactScore);
     const cur = bestTopicByPmid.get(t.pmid);
     if (!cur || score > cur.impactScore) {
@@ -233,6 +270,7 @@ async function fillTier2(
         parentTopicId: t.parentTopicId,
         primarySubtopicId: t.primarySubtopicId,
         impactScore: score,
+        relevanceScore: Number(t.score),
       });
     }
   }
@@ -247,6 +285,7 @@ async function fillTier2(
       parentTopicId: topic.parentTopicId,
       primarySubtopicId: topic.primarySubtopicId,
       impactScore: topic.impactScore,
+      relevanceScore: topic.relevanceScore,
       position: authorRow.position,
       publication: authorRow.publication,
     });
@@ -290,6 +329,7 @@ export async function getSpotlightCardsForTopic(
       cwid: true,
       parentTopicId: true,
       primarySubtopicId: true,
+      score: true,
       publication: {
         select: {
           pmid: true,
@@ -304,7 +344,8 @@ export async function getSpotlightCardsForTopic(
       },
     },
   })) as unknown as Array<
-    Omit<CandidateRow, "impactScore" | "position"> & {
+    Omit<CandidateRow, "impactScore" | "relevanceScore" | "position"> & {
+      score: unknown;
       publication: { impactScore: unknown } & CandidateRow["publication"];
     }
   >;
@@ -312,6 +353,7 @@ export async function getSpotlightCardsForTopic(
   const normalized: CandidateRow[] = rows.map((r) => ({
     ...r,
     impactScore: Number(r.publication.impactScore),
+    relevanceScore: Number(r.score),
     position: null,
   }));
   // #356 — a taken-down or derived-dark publication is never a Spotlight card.
@@ -411,6 +453,7 @@ async function getSpotlightCardsForEntity(
       cwid: true,
       parentTopicId: true,
       primarySubtopicId: true,
+      score: true,
       publication: {
         select: {
           pmid: true,
@@ -425,7 +468,8 @@ async function getSpotlightCardsForEntity(
       },
     },
   })) as unknown as Array<
-    Omit<CandidateRow, "impactScore" | "position"> & {
+    Omit<CandidateRow, "impactScore" | "relevanceScore" | "position"> & {
+      score: unknown;
       publication: { impactScore: unknown } & CandidateRow["publication"];
     }
   >;
@@ -433,6 +477,7 @@ async function getSpotlightCardsForEntity(
   const normalized: CandidateRow[] = rows.map((r) => ({
     ...r,
     impactScore: Number(r.publication.impactScore),
+    relevanceScore: Number(r.score),
     position: null,
   }));
   // #356 — a taken-down or derived-dark publication is never a Spotlight card.
@@ -443,8 +488,9 @@ async function getSpotlightCardsForEntity(
   let top = sortForSpotlight(dedupeByPmid(visible)).slice(0, SPOTLIGHT_TARGET);
 
   // Issue #68 — top up sparse entity Spotlights (Library is the canonical
-  // case) with middle-author publications. The tier-2 sort favors high
-  // impact, then earlier author position, so a 2nd-of-7 outranks a 5th-of-7.
+  // case) with middle-author publications. The tier-2 sort is spotlightScore
+  // -led (relevance-weighted), then earlier author position, so a 2nd-of-7
+  // outranks a 5th-of-7 on an equally-ranked paper.
   if (top.length < SPOTLIGHT_TARGET) {
     const seenPmids = new Set(top.map((r) => r.pmid));
     const tier2 = await fillTier2(
