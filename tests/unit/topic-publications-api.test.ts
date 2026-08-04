@@ -729,22 +729,21 @@ describe("getSubtopicsForTopic", () => {
     ]);
     const result = await getSubtopicsForTopic(TOPIC_SLUG);
     expect(result).not.toBeNull();
-    expect(result!.length).toBe(3);
+    expect(result!.length).toBe(2); // rare_tumors (pubCount 0) excluded
     expect(result![0].id).toBe("lung_cancer"); // highest pubCount
     expect(result![0].pubCount).toBe(15);
     expect(result![1].id).toBe("breast_screening");
     expect(result![1].pubCount).toBe(10);
-    expect(result![2].id).toBe("rare_tumors"); // pubCount 0
-    expect(result![2].pubCount).toBe(0);
+    expect(result!.find((s) => s.id === "rare_tumors")).toBeUndefined();
   });
 
-  it("includes subtopics with pubCount 0 (sorted last)", async () => {
+  it("excludes subtopics with pubCount 0", async () => {
     mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
     mockSubtopicFindMany.mockResolvedValue([
       { id: "common_one", label: "Common One", description: null },
       { id: "rare_one", label: "Rare One", description: null },
     ]);
-    // rare_one absent from the grouped rows → pubCount 0
+    // rare_one absent from the grouped rows → pubCount 0 → filtered out
     mockPublicationTopicGroupBy.mockResolvedValue(
       Array.from({ length: 20 }, (_, i) => ({
         primarySubtopicId: "common_one",
@@ -753,10 +752,9 @@ describe("getSubtopicsForTopic", () => {
     );
     const result = await getSubtopicsForTopic(TOPIC_SLUG);
     expect(result).not.toBeNull();
-    const rareEntry = result!.find((s) => s.id === "rare_one");
-    expect(rareEntry).toBeDefined();
-    expect(rareEntry!.pubCount).toBe(0);
-    expect(result![result!.length - 1].id).toBe("rare_one"); // sorted last
+    expect(result!.length).toBe(1);
+    expect(result!.find((s) => s.id === "rare_one")).toBeUndefined();
+    expect(result![0].id).toBe("common_one");
   });
 
   it("returns correct shape: { id, label, description, pubCount }", async () => {
