@@ -42,12 +42,29 @@ function clean(awardNumber: string): string {
   return repairEncoding(awardNumber).trim();
 }
 
-/** Activity code: 1 letter + 2 alphanumerics (R01, K23, UG3, U2C, S10,
- *  DP1, etc.). May be preceded by an optional support-type digit. Then
- *  2-letter IC prefix + 6/7-digit serial, with optional dash-/space-
- *  separated sequence and any number of trailing annotation tokens
- *  (e.g. InfoEd's "5 R34 HL117352-02 EW"). */
-const NIH_AWARD_RE = /^\s*[1-9]?\s*([A-Z][A-Z0-9][A-Z0-9])\s*([A-Z]{2})\s*(\d{6,7})(?:[-\s][\w]+)*\s*$/i;
+/** Activity code: 1 letter + 2-3 alphanumerics (R01, K23, UG3, U2C, S10,
+ *  DP1, and CDC/HRSA's 4-character NU58, NE11, etc.). May be preceded by an
+ *  optional support-type digit. Then 2-letter IC prefix + 6/7-digit serial,
+ *  with optional dash-/space-separated sequence and any number of trailing
+ *  annotation tokens (e.g. InfoEd's "5 R34 HL117352-02 EW").
+ *
+ *  #2182 — the width was fixed at 3, so CDC awards such as
+ *  "1 NU58DP007916-01-00" could not parse at all and got no topical signal.
+ *  Widening is safe against the 3-character forms because a real IC prefix is
+ *  two letters followed by a digit: a greedy 4-character attempt consumes the
+ *  first IC letter and leaves only one letter before the serial, so it always
+ *  backtracks (e.g. "R01CA245678" tries "R01C"+"A2", fails, retries "R01"+"CA").
+ *
+ *  KNOWN FALSE POSITIVE, unfixed: "FHCRC 203865-01" parses as activity "FHC",
+ *  prefix "RC", serial "203865". It is structurally indistinguishable from a
+ *  real award number, so no regex change catches it. The principled guard is
+ *  an IC-prefix allowlist, but `NIH_INSTITUTE_BY_PREFIX` holds only the 26 NIH
+ *  institutes -- it has no "DP" (CDC) or "GH" (CDC global health), so gating on
+ *  it today would drop real CDC awards. Extending that map to the HHS operating
+ *  divisions is the actual fix and needs its own data-gathering pass. Harm is
+ *  currently limited: a bogus core simply fails to match anything in RePORTER,
+ *  so no wrong data is written -- only a bogus `mechanism` on the Grant row. */
+const NIH_AWARD_RE = /^\s*[1-9]?\s*([A-Z][A-Z0-9]{2,3})\s*([A-Z]{2})\s*(\d{6,7})(?:[-\s][\w]+)*\s*$/i;
 
 export function parseNihAward(awardNumber: string | null | undefined): ParsedAward {
   if (!awardNumber) return EMPTY;

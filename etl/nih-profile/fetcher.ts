@@ -447,6 +447,110 @@ export async function fetchProjectPeriodsByCoreProjectNums(
   return out;
 }
 
+/** Enrichment fields for one core project number, taken from its latest
+ *  `appl_id`. `projectTerms` is RePORTER's `terms` (angle-bracket delimited);
+ *  `prefTerms` is `pref_terms` (semicolon delimited). Both are passed to
+ *  `parseReporterTerms` unchanged. */
+export type ReporterEnrichment = {
+  applId: number;
+  abstractText: string | null;
+  projectTerms: string | null;
+  prefTerms: string | null;
+};
+
+/**
+ * #2182 — abstract / terms / applId straight from RePORTER, keyed by core
+ * project number.
+ *
+ * Replaces a read of `reciterdb.grant_reporter_project`, a mirror synced by a
+ * script in another repository. That mirror is scoped to WCM-as-prime-org (a
+ * single distinct `org_name`), and an incoming subaward's core project number
+ * belongs to the PRIME institution — so no subaward could ever match it, and
+ * enrichment on subaward grants was 0 of 19 when measured. `/projects/search`
+ * filtered by `project_nums` applies no org filter, so the same lookup that
+ * failed against the mirror succeeds here.
+ *
+ * Semantics match the query this replaces: one row per core, taken from
+ * MAX(appl_id) — the most recent fiscal year's award. Abstracts vary slightly
+ * across renewal years and the latest is the one the Funding UI wants.
+ */
+export async function fetchProjectEnrichmentByCoreProjectNums(
+  coreNums: string[],
+): Promise<Map<string, ReporterEnrichment>> {
+  const out = new Map<string, ReporterEnrichment>();
+  const cores = [...new Set(coreNums.filter((c) => !!c && c.trim().length > 0))];
+  if (cores.length === 0) return out;
+
+  for (let i = 0; i < cores.length; i += CORE_NUMS_BATCH) {
+    const batch = cores.slice(i, i + CORE_NUMS_BATCH);
+    let offset = 0;
+    let total: number | null = null;
+    while (true) {
+      const resp = await fetchReporterWithRetry(NIH_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          criteria: { project_nums: batch },
+          include_fields: [
+            "ApplId",
+            "CoreProjectNum",
+            "AbstractText",
+            "Terms",
+            "PrefTerms",
+          ],
+          limit: PAGE_LIMIT,
+          offset,
+        }),
+        cache: "no-store",
+      });
+      if (!resp.ok) {
+        throw new Error(
+          `NIH RePORTER project_nums enrichment search failed: HTTP ${resp.status} ` +
+            `(${batch.length} cores, offset ${offset})`,
+        );
+      }
+      const data = (await resp.json()) as {
+        meta?: { total?: number };
+        results?: Array<{
+          appl_id?: number | null;
+          core_project_num?: string | null;
+          abstract_text?: string | null;
+          terms?: string | null;
+          pref_terms?: string | null;
+        }>;
+      };
+      const results = data.results ?? [];
+      for (const r of results) {
+        if (!r.core_project_num || typeof r.appl_id !== "number") continue;
+        const cpn = r.core_project_num.toUpperCase();
+        const prev = out.get(cpn);
+        // Keep the highest appl_id per core, mirroring the MAX(appl_id) the
+        // replaced SQL picked. RePORTER returns one row per fiscal year, so
+        // without this a later page could overwrite a newer award.
+        if (prev && prev.applId >= r.appl_id) continue;
+        out.set(cpn, {
+          applId: r.appl_id,
+          abstractText: r.abstract_text ?? null,
+          projectTerms: r.terms ?? null,
+          prefTerms: r.pref_terms ?? null,
+        });
+      }
+      if (total === null) total = data.meta?.total ?? 0;
+      offset += results.length;
+      if (results.length < PAGE_LIMIT || offset >= total) break;
+      if (offset >= 9999) {
+        throw new Error(
+          `project_nums batch [${batch.join(",")}] exceeds the 9,999-offset ` +
+            `cap (total ${total}). Sub-batch before fetching further.`,
+        );
+      }
+      await sleep(REQ_DELAY_MS);
+    }
+    await sleep(REQ_DELAY_MS);
+  }
+  return out;
+}
+
 /** A RePORTER project row with the fiscal/financial fields the grant
  *  materialization (`etl/reporter-grants`) needs to build a `Grant` row —
  *  richer than {@link ReporterProject}, which only carries what the
