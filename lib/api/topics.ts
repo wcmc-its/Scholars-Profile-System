@@ -552,8 +552,11 @@ export type SubtopicWithCount = {
  * Returns all subtopics for a topic with pubCount per subtopic for rail ordering.
  *
  * Implements D-07: count by primarySubtopicId only (not the union with subtopicIds
- * JSON array) for query performance. Subtopics with pubCount 0 are included; they
- * render below the "Less common" divider in the rail.
+ * JSON array) for query performance. Subtopics with pubCount 0 are excluded — the
+ * Hierarchy ETL's subtopic catalog can carry entries no WCM paper actually lands
+ * in (e.g. a niche conceptual slot ReciterAI discovered elsewhere in the corpus),
+ * and listing those at "0" in the rail read as a data gap rather than the
+ * legitimate empty long-tail entry it is.
  *
  * Design note: counting via primarySubtopicId only was chosen over the union of
  * primarySubtopicId + subtopicIds JSON array. The JSON array union approach was
@@ -614,6 +617,7 @@ export async function getSubtopicsForTopic(topicSlug: string): Promise<SubtopicW
         pubCount: countMap.get(s.id) ?? 0,
       };
     })
+    .filter((s) => s.pubCount > 0)
     .sort((a, b) => b.pubCount - a.pubCount);
 }
 
