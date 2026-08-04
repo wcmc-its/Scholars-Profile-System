@@ -1,7 +1,10 @@
+"use client";
+
 /**
  * §16 Spotlight surface — unified ReCiterAI publication highlight.
  *
- * Server Component. Cream surface, 1-3 publication cards in equal-width
+ * Client Component (title click opens the shared publication modal — see
+ * card title below). Cream surface, 1-3 publication cards in equal-width
  * columns separated by 1px vertical rules, with a singular/plural caveat
  * and a "View all N publications →" link. Renders nothing when given zero
  * cards (per spec: omit the surface entirely, no empty state).
@@ -17,6 +20,7 @@ import Link from "next/link";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { sanitizePubTitle } from "@/lib/utils";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
+import { usePublicationModal } from "@/components/publication/publication-modal";
 import type { SpotlightData, SpotlightCard } from "@/lib/api/spotlight";
 
 export function Spotlight({ data }: { data: SpotlightData | null }) {
@@ -70,9 +74,8 @@ function SpotlightPubCard({
   index: number;
   total: number;
 }) {
+  const { open } = usePublicationModal();
   const titleHtml = sanitizePubTitle(card.title);
-  const titleHref = card.pubmedUrl ?? card.doi ?? "#";
-  const isExternal = titleHref !== "#";
 
   // First card has no left rule; subsequent cards add a left rule on md+.
   // On mobile (single column), each card after the first gets a top rule.
@@ -96,18 +99,21 @@ function SpotlightPubCard({
           {card.kicker}
         </span>
       )}
-      {/* line-clamp lives on the <a>, not the <h3>: the link is the text+click
-          target, and clamping it keeps its bounding box equal to the visible 3
-          lines. With the clamp on the h3 instead, the inner <a>'s box spanned the
-          full (un-clamped) title and overlapped the author-chip row below it,
-          tripping axe target-size (WCAG 2.5.8) even though the layout looked fine
-          (#586). Same visual result, link box now matches the clamp. */}
+      {/* line-clamp lives on the click target, not the <h3>: clamping it
+          keeps its bounding box equal to the visible 3 lines. With the
+          clamp on the h3 instead, the inner target's box spanned the full
+          (un-clamped) title and overlapped the author-chip row below it,
+          tripping axe target-size (WCAG 2.5.8) even though the layout
+          looked fine (#586). Same visual result, target box now matches
+          the clamp. Opens the shared publication modal on click, same as
+          every other publication surface (profile, topic-feed, search) —
+          previously linked straight to PubMed/DOI, inconsistent with the
+          rest of the site. */}
       <h3 className="m-0 text-[15px] font-medium leading-[1.35] tracking-[-0.005em] text-foreground">
-        <a
-          href={titleHref}
-          target={isExternal ? "_blank" : undefined}
-          rel={isExternal ? "noopener noreferrer" : undefined}
-          className="line-clamp-3 text-foreground no-underline hover:underline"
+        <button
+          type="button"
+          onClick={() => open(card.pmid)}
+          className="line-clamp-3 text-left text-foreground hover:underline"
           dangerouslySetInnerHTML={{ __html: titleHtml }}
         />
       </h3>
