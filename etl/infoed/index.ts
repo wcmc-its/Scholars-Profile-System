@@ -137,6 +137,14 @@ WITH infoed_all AS (
     CASE WHEN prop.parentprop_no IS NULL THEN prop.prop_no ELSE prop.parentprop_no END AS Account_Number,
     prop.inst_no        AS RecordID,
     ct.code_desc        AS Submission_Status,
+    -- NOTE (#2174): pgm_type is NULL on 29% of in-scope proposal rows (18,113
+    -- of 62,474, measured against InfoEd prod 2026-08-03), and the INNER JOIN
+    -- on ct below silently deletes every one of those rows -- the whole row,
+    -- not just this label. That is a real defect, but a bare INNER -> LEFT
+    -- swap admits +13,922 (cwid, account) pairs and grows the OSRA date-gap
+    -- worklist ~4.3x, so it is tracked separately in #2174 and NOT fixed here.
+    -- The account-level date source below reads dbo.proposal upstream of this
+    -- join, so #2173's recovery does not depend on #2174 being fixed first.
     ct.code_desc        AS Program_Type,
     p_udf.p_sin_5       AS intake_type,
     ct2.code_desc       AS Proposal_Type,
@@ -195,7 +203,7 @@ WITH infoed_all AS (
     AND  ISNULL(p_udf.p_log_50, 0) <> 1
 )
 SELECT DISTINCT
-  v.CWID, v.Account_Number, x.Award_Number, y.begin_date, z.end_date,
+  v.CWID, v.Account_Number, x.Award_Number, acct.begin_date, acct.end_date,
   REPLACE(REPLACE(REPLACE(z.proj_title, CHAR(13), ' '), CHAR(10), ' '), '    ', '') AS proj_title,
   z.unit_name, z.int_unit_code, z.program_type, z.Orig_Sponsor, z.Project_Status,
   CASE WHEN z.Sponsor = z.Orig_Sponsor THEN NULL ELSE z.Sponsor END AS Subward_Sponsor,
@@ -227,11 +235,58 @@ SELECT DISTINCT
 FROM infoed_all AS v
 LEFT JOIN (SELECT cwid, Account_Number, MAX(Award_Number) AS Award_Number FROM infoed_all GROUP BY cwid, Account_Number) AS x
   ON x.cwid = v.cwid AND x.Account_Number = v.Account_Number
-LEFT JOIN (SELECT cwid, Account_Number, MIN(Project_Period_Start) AS begin_date FROM infoed_all GROUP BY cwid, Account_Number) AS y
-  ON y.cwid = v.cwid AND y.Account_Number = v.Account_Number
+-- #2173 — the project period is a property of the ACCOUNT, not of whichever
+-- prop_no a given person's personnel record happens to hang off. This used to
+-- aggregate infoed_all GROUP BY cwid, Account_Number, so a CWID attached only
+-- to a dateless child/amendment never saw the parent proposal's real dates:
+-- 296 of prod's 1,988 backlogged accounts have dates somewhere in the family;
+-- end-to-end this recovers 415 worklist rows across 282 accounts, the rest
+-- being policy-blocked (measured against prod InfoEd 2026-08-03). Note the
+-- dated parent row often has pgm_type NULL, so the CTE's INNER JOIN on
+-- codetab deletes it -- reading dbo.proposal here is upstream of that join,
+-- which is why this does not depend on #2174. Reading dbo.proposal rather than
+-- re-aggregating infoed_all is the point — an infoed_all re-aggregation only
+-- sees rows that already survived the personnel join, which is the bug.
+--
+-- Scoped with the CTE's four WHERE predicates, status filter included: dates
+-- on a 'Not Funded' / 'Award Under Review' sibling must NOT be adopted (that
+-- would publish a period for money never granted), and a Confidential row
+-- stays do-not-publish. 8 and 6 accounts respectively; both stay blocked.
+-- Deliberately NOT reproduced here are the CTE's ct2/projmain/sponspas inner
+-- joins: they were measured at zero drops in this scope, and omitting them
+-- keeps this row set a strict superset of the rows behind any dated
+-- infoed_all row, which is what guarantees no pair can go dated -> undated.
+--
+-- ponytail: flat family MIN/MAX, matching #2173's text. No parent-preference
+-- tie-break — preferring the parent's own pair NARROWS the period on accounts
+-- whose continuations extend past it, which silently flips grants Active ->
+-- Past via isFundingActive, and picking start and end independently can emit
+-- start > end. Ceiling: on an account whose family periods genuinely diverge,
+-- the span can be wider than any single sibling's. Measured end-to-end against
+-- prod: of 13,725 currently-dated (cwid, account) pairs, 6 pairs across 4
+-- accounts widen and 0 narrow, 0 lose a date, 0 emit start > end, and 0 flip
+-- a grant Active -> Past under isFundingActive. Revisit only if
+-- that number moves.
+LEFT JOIN (
+  SELECT CASE WHEN p.parentprop_no IS NULL THEN p.prop_no ELSE p.parentprop_no END AS Account_Number,
+    MIN(p.app_st_dt)  AS begin_date,
+    MAX(p.app_end_dt) AS end_date
+  FROM   wc_infoedprod.dbo.proposal AS p
+  LEFT OUTER JOIN wc_infoedprod.dbo.pt_project AS psub ON psub.child = p.prop_no AND psub.inst_code = p.inst_code
+  LEFT OUTER JOIN wc_infoedprod.dbo.prop_u     AS pu   ON pu.prop_no = p.prop_no AND pu.inst_code = p.inst_code
+  INNER JOIN wc_infoedprod.dbo.projstatxref    AS pps  ON p.prop_stat  = pps.appr_stat
+  INNER JOIN wc_infoedprod.dbo.codetab         AS pcd  ON pps.projstat = pcd.codeid
+  WHERE  p.system = 'PT'
+    AND  p.inst_code = 'WCORNELLMC'
+    AND  psub.child IS NULL
+    AND  pcd.code_desc IN ('Active Award', 'Expired Award', 'In Process')
+    AND  ISNULL(pu.p_log_50, 0) <> 1
+  GROUP BY CASE WHEN p.parentprop_no IS NULL THEN p.prop_no ELSE p.parentprop_no END
+) AS acct
+  ON acct.Account_Number = v.Account_Number
 LEFT JOIN (
   SELECT cwid, Account_Number,
-    MAX(Project_Period_End) AS end_date, MAX(Sponsor) AS Sponsor, MAX(Orig_Sponsor) AS Orig_Sponsor,
+    MAX(Sponsor) AS Sponsor, MAX(Orig_Sponsor) AS Orig_Sponsor,
     MAX(spon_code) AS spon_code, MAX(proj_title) AS proj_title,
     -- The outer WHERE drops 'Contract without funding' row-by-row (on v), but
     -- this aggregate ran over EVERY row of the account — so on an account that
