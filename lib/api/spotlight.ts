@@ -240,6 +240,17 @@ async function fillTier2(
     where: {
       pmid: { in: pmids },
       publication: { impactScore: { gte: HIGHLIGHTS_IMPACT_FLOOR } },
+      // A paper commonly carries a publication_topic row per topic it
+      // touches, each with its OWN relevance score (impact is publication-
+      // level and identical across all of them). Scoped to topicSlug, only
+      // that topic's row can win the pick below — otherwise the "best
+      // topic" pick is impact-tied across every topic the paper touches and
+      // degenerates to an arbitrary row (whichever the DB returns first),
+      // which could carry a wildly different relevance score than the
+      // topic actually being paged. Unscoped (dept/division/center callers,
+      // topicSlug null) there's no single "correct" topic, so any of the
+      // paper's topics is an equally valid attribution.
+      ...(topicSlug ? { parentTopicId: topicSlug } : {}),
     },
     select: {
       pmid: true,
@@ -258,11 +269,10 @@ async function fillTier2(
   const bestTopicByPmid = new Map<string, Best>();
   for (const t of topicRows) {
     // Post-#316 PR-B-finalize: every publication_topic row for a pmid has the
-    // same global impact value via the publication relation. The "best topic"
-    // pick degenerates to "first topic seen" — keep the loop for clarity even
-    // though the MAX collapse is now a no-op. relevanceScore rides along with
-    // whichever row wins this pick (it DOES vary by topic, but we're not
-    // re-deciding topic attribution here, just carrying its relevance).
+    // same global impact value via the publication relation. Scoped to
+    // topicSlug there's at most one row per pmid anyway; unscoped, the
+    // "best topic" pick degenerates to "first topic seen" (documented
+    // limitation above) — keep the loop for clarity either way.
     const score = Number(t.publication.impactScore);
     const cur = bestTopicByPmid.get(t.pmid);
     if (!cur || score > cur.impactScore) {
