@@ -45,6 +45,11 @@ export interface VolumeHistory {
   readonly source: string;
   readonly latest: number;
   readonly previous: number;
+  /**
+   * When the `latest` sample completed. Undefined/null means "unknown age", which
+   * grades the source as before — the staleness skip below is fail-safe.
+   */
+  readonly latestAt?: Date | null;
 }
 
 export interface VolumeRegression {
@@ -52,6 +57,40 @@ export interface VolumeRegression {
   readonly latest: number;
   readonly previous: number;
   readonly dropPct: number;
+}
+
+/**
+ * Grade only sources that produced a fresh sample in the cycle now running.
+ *
+ * #2038 — the nightly and the weekly run the SAME `npm run etl:integrity`, and
+ * the guard graded every `etl_run` source regardless of which state machine
+ * invoked it. A weekly source therefore got re-graded by every nightly in
+ * between, against a pair of samples that cannot move until its next weekly
+ * run: prod News sat pinned at (1595 backfill -> 5 delta) and failed the
+ * nightly identically every night, ~6 nights wide on a Sunday cadence.
+ *
+ * A source that has not completed since the last cycle produced no new
+ * observation, so there is nothing for this run to grade. Deriving that from
+ * the sample's own age fixes the general case (any weekly/monthly/ad-hoc
+ * source) without a per-source cadence table to keep in sync with
+ * `cdk/lib/etl-stack.ts`.
+ *
+ * This deliberately does NOT cover "a source stopped running entirely" — that
+ * is the freshness guard's job (`etl:freshness`), which grades recency; this
+ * one grades volume. Splitting them that way is why the skip is safe.
+ */
+export const MAX_SAMPLE_AGE_HOURS = 26; // one nightly cycle + schedule drift
+
+/** Sources whose newest sample predates the current cycle — graded by nobody this run. */
+export function staleSources(
+  history: readonly VolumeHistory[],
+  now: Date = new Date(),
+  maxSampleAgeHours: number = MAX_SAMPLE_AGE_HOURS,
+): string[] {
+  const maxAgeMs = maxSampleAgeHours * 3600_000;
+  return history
+    .filter((h) => h.latestAt && now.getTime() - h.latestAt.getTime() > maxAgeMs)
+    .map((h) => h.source);
 }
 
 /**
@@ -63,12 +102,25 @@ export interface VolumeRegression {
  */
 export function findVolumeRegressions(
   history: readonly VolumeHistory[],
-  opts: { maxDropPct?: number; minPreviousRows?: number } = {},
+  opts: {
+    maxDropPct?: number;
+    minPreviousRows?: number;
+    maxSampleAgeHours?: number;
+    now?: Date;
+  } = {},
 ): VolumeRegression[] {
-  const { maxDropPct = 50, minPreviousRows = 100 } = opts;
+  const {
+    maxDropPct = 50,
+    minPreviousRows = 100,
+    maxSampleAgeHours = MAX_SAMPLE_AGE_HOURS,
+    now = new Date(),
+  } = opts;
+  const maxAgeMs = maxSampleAgeHours * 3600_000;
   const out: VolumeRegression[] = [];
   for (const h of history) {
     if (h.previous < minPreviousRows) continue;
+    // #2038 — stale sample, i.e. this source did not run in the current cycle.
+    if (h.latestAt && now.getTime() - h.latestAt.getTime() > maxAgeMs) continue;
     const dropPct = ((h.previous - h.latest) / h.previous) * 100;
     if (dropPct > maxDropPct) {
       out.push({ source: h.source, latest: h.latest, previous: h.previous, dropPct });
@@ -105,13 +157,14 @@ async function loadVolumeHistory(): Promise<VolumeHistory[]> {
       where: { source, status: "success", rowsProcessed: { gt: 0 } },
       orderBy: { completedAt: "desc" },
       take: 2,
-      select: { rowsProcessed: true },
+      select: { rowsProcessed: true, completedAt: true },
     });
     if (last2.length < 2) continue;
     out.push({
       source,
       latest: last2[0].rowsProcessed,
       previous: last2[1].rowsProcessed,
+      latestAt: last2[0].completedAt,
     });
   }
   return out;
@@ -141,7 +194,15 @@ async function main(): Promise<void> {
       `rowsProcessed fell ${r.dropPct.toFixed(1)}% (${r.previous} -> ${r.latest})`,
     );
   }
-  console.log(`[integrity] volume history checked for ${history.length} sources`);
+  // #2038 — name the sources this run did not grade. A silent skip is how a
+  // real regression hides; the whole point of the cadence rule is that the
+  // OWNING cycle grades them instead, so it must be visible which those are.
+  const stale = staleSources(history);
+  console.log(
+    `[integrity] volume history checked for ${history.length - stale.length} of ` +
+      `${history.length} sources` +
+      (stale.length ? ` (skipped, no run this cycle: ${stale.join(", ")})` : ""),
+  );
 
   // 2. Spine-table floors (mirror the PR-1 per-source guard floors).
   const activeScholars = await db.read.scholar.count({ where: { deletedAt: null } });
