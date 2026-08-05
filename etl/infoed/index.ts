@@ -203,7 +203,7 @@ WITH infoed_all AS (
     AND  ISNULL(p_udf.p_log_50, 0) <> 1
 )
 SELECT DISTINCT
-  v.CWID, v.Account_Number, x.Award_Number, acct.begin_date, acct.end_date,
+  v.CWID, v.Account_Number, x.Award_Number,
   REPLACE(REPLACE(REPLACE(z.proj_title, CHAR(13), ' '), CHAR(10), ' '), '    ', '') AS proj_title,
   z.unit_name, z.int_unit_code, z.program_type, z.Orig_Sponsor, z.Project_Status,
   CASE WHEN z.Sponsor = z.Orig_Sponsor THEN NULL ELSE z.Sponsor END AS Subward_Sponsor,
@@ -235,55 +235,6 @@ SELECT DISTINCT
 FROM infoed_all AS v
 LEFT JOIN (SELECT cwid, Account_Number, MAX(Award_Number) AS Award_Number FROM infoed_all GROUP BY cwid, Account_Number) AS x
   ON x.cwid = v.cwid AND x.Account_Number = v.Account_Number
--- #2173 — the project period is a property of the ACCOUNT, not of whichever
--- prop_no a given person's personnel record happens to hang off. This used to
--- aggregate infoed_all GROUP BY cwid, Account_Number, so a CWID attached only
--- to a dateless child/amendment never saw the parent proposal's real dates:
--- 296 of prod's 1,988 backlogged accounts have dates somewhere in the family;
--- end-to-end this recovers 415 worklist rows across 282 accounts, the rest
--- being policy-blocked (measured against prod InfoEd 2026-08-03). Note the
--- dated parent row often has pgm_type NULL, so the CTE's INNER JOIN on
--- codetab deletes it -- reading dbo.proposal here is upstream of that join,
--- which is why this does not depend on #2174. Reading dbo.proposal rather than
--- re-aggregating infoed_all is the point — an infoed_all re-aggregation only
--- sees rows that already survived the personnel join, which is the bug.
---
--- Scoped with the CTE's four WHERE predicates, status filter included: dates
--- on a 'Not Funded' / 'Award Under Review' sibling must NOT be adopted (that
--- would publish a period for money never granted), and a Confidential row
--- stays do-not-publish. 8 and 6 accounts respectively; both stay blocked.
--- Deliberately NOT reproduced here are the CTE's ct2/projmain/sponspas inner
--- joins: they were measured at zero drops in this scope, and omitting them
--- keeps this row set a strict superset of the rows behind any dated
--- infoed_all row, which is what guarantees no pair can go dated -> undated.
---
--- ponytail: flat family MIN/MAX, matching #2173's text. No parent-preference
--- tie-break — preferring the parent's own pair NARROWS the period on accounts
--- whose continuations extend past it, which silently flips grants Active ->
--- Past via isFundingActive, and picking start and end independently can emit
--- start > end. Ceiling: on an account whose family periods genuinely diverge,
--- the span can be wider than any single sibling's. Measured end-to-end against
--- prod: of 13,725 currently-dated (cwid, account) pairs, 6 pairs across 4
--- accounts widen and 0 narrow, 0 lose a date, 0 emit start > end, and 0 flip
--- a grant Active -> Past under isFundingActive. Revisit only if
--- that number moves.
-LEFT JOIN (
-  SELECT CASE WHEN p.parentprop_no IS NULL THEN p.prop_no ELSE p.parentprop_no END AS Account_Number,
-    MIN(p.app_st_dt)  AS begin_date,
-    MAX(p.app_end_dt) AS end_date
-  FROM   wc_infoedprod.dbo.proposal AS p
-  LEFT OUTER JOIN wc_infoedprod.dbo.pt_project AS psub ON psub.child = p.prop_no AND psub.inst_code = p.inst_code
-  LEFT OUTER JOIN wc_infoedprod.dbo.prop_u     AS pu   ON pu.prop_no = p.prop_no AND pu.inst_code = p.inst_code
-  INNER JOIN wc_infoedprod.dbo.projstatxref    AS pps  ON p.prop_stat  = pps.appr_stat
-  INNER JOIN wc_infoedprod.dbo.codetab         AS pcd  ON pps.projstat = pcd.codeid
-  WHERE  p.system = 'PT'
-    AND  p.inst_code = 'WCORNELLMC'
-    AND  psub.child IS NULL
-    AND  pcd.code_desc IN ('Active Award', 'Expired Award', 'In Process')
-    AND  ISNULL(pu.p_log_50, 0) <> 1
-  GROUP BY CASE WHEN p.parentprop_no IS NULL THEN p.prop_no ELSE p.parentprop_no END
-) AS acct
-  ON acct.Account_Number = v.Account_Number
 LEFT JOIN (
   SELECT cwid, Account_Number,
     MAX(Sponsor) AS Sponsor, MAX(Orig_Sponsor) AS Orig_Sponsor,
@@ -318,6 +269,107 @@ WHERE v.unit_name IS NOT NULL
   AND v.program_type <> 'Contract without funding'
 ORDER BY v.CWID, v.Account_Number;
 `;
+
+/**
+ * #2173 — the account-level project period, lifted OUT of CONSOLIDATED_QUERY.
+ *
+ * This SQL is byte-identical to the derived table #2176 embedded there; only
+ * its PLACEMENT changed. It was a `LEFT JOIN (...) AS acct ON
+ * acct.Account_Number = v.Account_Number`, and the join key is a CASE
+ * expression that is also the GROUP BY key — so SQL Server could not seek it
+ * and had to materialize the whole aggregate inside a 30-table plan.
+ *
+ * Measured against InfoEd prod: standalone this returns 29,326 account rows in
+ * **1.0s** (2026-08-05). The identical SQL, embedded, could not finish inside
+ * the 2,400,000ms tedious requestTimeout — three nightly attempts died at
+ * ~2427s each and the prod grant import stalled from 08-04. Consolidated +
+ * period together run 499.2s, inside the 425-524s band the nightly
+ * historically took and ~4.8x under the timeout.
+ *
+ * The LEFT JOIN becomes {@link joinAccountPeriods} — a Map lookup, exact
+ * because the GROUP BY makes Account_Number unique (verified on prod: 0
+ * duplicate Account_Number across 29,326 rows, and 0 of 17,974 joined rows
+ * emit start > end).
+ *
+ * Rationale below carried over verbatim from #2176, measured against InfoEd
+ * prod 2026-08-03:
+ *
+ * #2173 — the project period is a property of the ACCOUNT, not of whichever
+ * prop_no a given person's personnel record happens to hang off. This used to
+ * aggregate infoed_all GROUP BY cwid, Account_Number, so a CWID attached only
+ * to a dateless child/amendment never saw the parent proposal's real dates:
+ * 296 of prod's 1,988 backlogged accounts have dates somewhere in the family;
+ * end-to-end this recovers 415 worklist rows across 282 accounts, the rest
+ * being policy-blocked (measured against prod InfoEd 2026-08-03). Note the
+ * dated parent row often has pgm_type NULL, so the CTE's INNER JOIN on
+ * codetab deletes it -- reading dbo.proposal here is upstream of that join,
+ * which is why this does not depend on #2174. Reading dbo.proposal rather than
+ * re-aggregating infoed_all is the point — an infoed_all re-aggregation only
+ * sees rows that already survived the personnel join, which is the bug.
+ * 
+ * Scoped with the CTE's four WHERE predicates, status filter included: dates
+ * on a 'Not Funded' / 'Award Under Review' sibling must NOT be adopted (that
+ * would publish a period for money never granted), and a Confidential row
+ * stays do-not-publish. 8 and 6 accounts respectively; both stay blocked.
+ * Deliberately NOT reproduced here are the CTE's ct2/projmain/sponspas inner
+ * joins: they were measured at zero drops in this scope, and omitting them
+ * keeps this row set a strict superset of the rows behind any dated
+ * infoed_all row, which is what guarantees no pair can go dated -> undated.
+ * 
+ * ponytail: flat family MIN/MAX, matching #2173's text. No parent-preference
+ * tie-break — preferring the parent's own pair NARROWS the period on accounts
+ * whose continuations extend past it, which silently flips grants Active ->
+ * Past via isFundingActive, and picking start and end independently can emit
+ * start > end. Ceiling: on an account whose family periods genuinely diverge,
+ * the span can be wider than any single sibling's. Measured end-to-end against
+ * prod: of 13,725 currently-dated (cwid, account) pairs, 6 pairs across 4
+ * accounts widen and 0 narrow, 0 lose a date, 0 emit start > end, and 0 flip
+ * a grant Active -> Past under isFundingActive. Revisit only if
+ * that number moves.
+ */
+const ACCOUNT_PERIOD_QUERY = `
+SELECT CASE WHEN p.parentprop_no IS NULL THEN p.prop_no ELSE p.parentprop_no END AS Account_Number,
+  MIN(p.app_st_dt)  AS begin_date,
+  MAX(p.app_end_dt) AS end_date
+FROM   wc_infoedprod.dbo.proposal AS p
+LEFT OUTER JOIN wc_infoedprod.dbo.pt_project AS psub ON psub.child = p.prop_no AND psub.inst_code = p.inst_code
+LEFT OUTER JOIN wc_infoedprod.dbo.prop_u     AS pu   ON pu.prop_no = p.prop_no AND pu.inst_code = p.inst_code
+INNER JOIN wc_infoedprod.dbo.projstatxref    AS pps  ON p.prop_stat  = pps.appr_stat
+INNER JOIN wc_infoedprod.dbo.codetab         AS pcd  ON pps.projstat = pcd.codeid
+WHERE  p.system = 'PT'
+  AND  p.inst_code = 'WCORNELLMC'
+  AND  psub.child IS NULL
+  AND  pcd.code_desc IN ('Active Award', 'Expired Award', 'In Process')
+  AND  ISNULL(pu.p_log_50, 0) <> 1
+GROUP BY CASE WHEN p.parentprop_no IS NULL THEN p.prop_no ELSE p.parentprop_no END
+`;
+
+/** One account's flat-family project period, keyed by Account_Number. */
+export type AccountPeriodRow = {
+  Account_Number: string;
+  begin_date: Date | null;
+  end_date: Date | null;
+};
+
+type GrantRowSansPeriod = Omit<GrantRow, "begin_date" | "end_date">;
+
+/**
+ * The `LEFT JOIN ... ON acct.Account_Number = v.Account_Number` that used to
+ * live in SQL. Exact, not approximate: ACCOUNT_PERIOD_QUERY groups by
+ * Account_Number, so at most one period row exists per account and a Map
+ * lookup is the same relation. A miss is the LEFT JOIN's NULL.
+ */
+export function joinAccountPeriods(
+  grantRows: readonly GrantRowSansPeriod[],
+  periodRows: readonly AccountPeriodRow[],
+): GrantRow[] {
+  const byAccount = new Map<string, AccountPeriodRow>();
+  for (const p of periodRows) byAccount.set(p.Account_Number, p);
+  return grantRows.map((r) => {
+    const p = byAccount.get(r.Account_Number);
+    return { ...r, begin_date: p?.begin_date ?? null, end_date: p?.end_date ?? null };
+  });
+}
 
 /** createdBy marker for the title-based confidentiality safety net (below).
  *  A manual revoke (a human confirming the title is a false positive, e.g.
@@ -486,8 +538,22 @@ async function main() {
     const queryStart = Date.now();
     const result = await pool.request().query(CONSOLIDATED_QUERY);
     const queryElapsed = Math.round((Date.now() - queryStart) / 1000);
-    const rows = result.recordset as GrantRow[];
-    console.log(`InfoEd returned ${rows.length} grant rows in ${queryElapsed}s.`);
+    const bare = result.recordset as GrantRowSansPeriod[];
+
+    // #2173 — the account periods are a SECOND query joined in TS rather than a
+    // derived table, because as a derived table this stalled the whole import
+    // (see ACCOUNT_PERIOD_QUERY). Timed separately on purpose: the failure that
+    // caused that was a query getting slower with nothing in the log to show it.
+    const periodStart = Date.now();
+    const periodResult = await pool.request().query(ACCOUNT_PERIOD_QUERY);
+    const periodElapsed = Math.round((Date.now() - periodStart) / 1000);
+    const periodRows = periodResult.recordset as AccountPeriodRow[];
+
+    const rows = joinAccountPeriods(bare, periodRows);
+    console.log(
+      `InfoEd returned ${rows.length} grant rows in ${queryElapsed}s; ` +
+        `${periodRows.length} account periods in ${periodElapsed}s.`,
+    );
 
     // Filter to our active CWIDs, then split on whether InfoEd gave us a
     // project period. #2020 — these two losses used to share one predicate and
@@ -671,12 +737,16 @@ async function main() {
   }
 }
 
-main()
-  .catch((err) => {
-    console.error(err);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await db.write.$disconnect();
-    await closeInfoedPool();
-  });
+// Guarded so the pure helpers above (joinAccountPeriods) are unit-testable
+// without running the ETL on import — same contract as etl/integrity/index.ts.
+if (!process.env.VITEST) {
+  main()
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await db.write.$disconnect();
+      await closeInfoedPool();
+    });
+}

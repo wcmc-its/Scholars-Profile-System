@@ -111,11 +111,18 @@ describe("InfoEd role mapping", () => {
   // reinstates the exact bug: a CWID attached only to a dateless
   // child/amendment stops seeing the parent proposal's real dates. That is
   // invisible to tsc, to every mock, and to the prune guard.
+  // Relocated, not weakened: the aggregate moved OUT of CONSOLIDATED_QUERY into
+  // its own ACCOUNT_PERIOD_QUERY, because as a derived table joined on a CASE
+  // expression SQL Server could not seek it and the whole import blew the 40-min
+  // requestTimeout (measured 2026-08-05: 338.5s without it, >2400s with it).
+  // Every invariant below still holds; only the last one — "joined on the
+  // account only" — changed form, from a SQL ON clause to the Map key in
+  // joinAccountPeriods, which tests/unit/infoed-account-periods.test.ts covers
+  // behaviourally.
   it("derives begin_date/end_date from an account-level proposal aggregate", () => {
-    const end = SRC.indexOf(") AS acct");
-    expect(end).toBeGreaterThan(0);
-    const sub = SRC.slice(SRC.lastIndexOf("LEFT JOIN (", end), end);
-    const acct = SRC.slice(SRC.lastIndexOf("LEFT JOIN (", end), end + 120);
+    const m = SRC.match(/const ACCOUNT_PERIOD_QUERY = `\n([\s\S]*?)\n`;/);
+    expect(m).not.toBeNull();
+    const sub = m![1];
 
     expect(sub).toMatch(/FROM\s+wc_infoedprod\.dbo\.proposal\s+AS p\b/i);
     expect(sub).not.toMatch(/infoed_all/i);
@@ -124,10 +131,9 @@ describe("InfoEd role mapping", () => {
     // Grouped by the account key alone — a cwid in the GROUP BY is the bug.
     expect(sub).toMatch(/GROUP BY CASE WHEN p\.parentprop_no IS NULL/i);
     expect(sub.slice(sub.indexOf("GROUP BY"))).not.toMatch(/\bcwid\b/i);
-    // Joined on the account only.
-    expect(acct).toMatch(
-      /\)\s+AS acct\s+ON acct\.Account_Number = v\.Account_Number/i,
-    );
+    // Keyed on the account only — Account_Number is the sole grouping key, so
+    // the TS Map join is exactly the LEFT JOIN it replaced.
+    expect(sub).toMatch(/END AS Account_Number/i);
     // Flat MIN/MAX: a parent-preference tie-break narrows live periods, and
     // choosing start and end independently can emit start > end.
     expect(sub).toMatch(/MIN\(p\.app_st_dt\)\s+AS begin_date/i);
