@@ -346,12 +346,9 @@ The Aurora-derived cadence check the original spec mentioned (Lambda polls `SELE
 `config.ts.etlSchedulesEnabled` controls whether the EventBridge rules ship enabled on first deploy:
 
 - **Staging:** `true` — rules ramp up immediately so the cadence runs the moment the first deploy lands.
-- **Production:** `false` — first deploy ships rules disabled. Flip them on after the first operator-driven run via:
-  ```
-  aws events enable-rule --name sps-etl-nightly-prod
-  aws events enable-rule --name sps-etl-weekly-prod
-  aws events enable-rule --name sps-etl-annual-prod
-  ```
+- **Production:** `false` — first deploy ships rules disabled. After the first operator-driven run, turn them on by **flipping `etlSchedulesEnabled` to `true` in `cdk/lib/config.ts` and running `cdk deploy Sps-Etl-prod`**.
+
+  🔴 **Do NOT use `aws events enable-rule`.** The rules synthesize `enabled: envConfig.etlSchedulesEnabled`, so an out-of-band enable drifts from the deployed template and the next `Sps-Etl-prod` deploy that touches a rule silently reverts it to DISABLED — stopping the prod nightly with no failing run to alarm on. The config flag is the single source of truth. This has already happened once in prod (enabled out-of-band 2026-07-07; config and the deployed template still say DISABLED) — see #1512.
 
 ### Operator runbook — start, skip ahead, re-run from a step
 
@@ -403,7 +400,7 @@ cdk deploy --exclusively Sps-Etl-${env} -c env=${env}
    ```
    Verify the EcsRunTask resolves, the container runs, the SNS topic doesn't fire, and the state machine reaches `Succeeded`.
 2. **Force a failure** for the alarm verification: start the state machine with an obviously broken `startFrom` value or temporarily push an image that exits non-zero. Verify the failure SNS message lands; subscribe an email to `etl-failures-staging` temporarily.
-3. **Production** after staging signoff. Same `--exclusively` deploy. The EventBridge rules ship `Enabled=false` in prod (`etlSchedulesEnabled=false`). Run the first execution manually, then enable each rule via `aws events enable-rule`.
+3. **Production** after staging signoff. Same `--exclusively` deploy. The EventBridge rules ship `Enabled=false` in prod (`etlSchedulesEnabled=false`). Run the first execution manually, then enable the cadence by flipping `etlSchedulesEnabled` to `true` and redeploying — **never** with `aws events enable-rule` (see the drift warning above, #1512).
 
 ## ObservabilityStack
 

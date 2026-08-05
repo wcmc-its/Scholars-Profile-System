@@ -99,7 +99,20 @@ Being *in* the nightly chain is not the same as *running*:
 
 - **Staging** — the nightly schedule is enabled, so the gap closes on the next nightly run
   automatically.
-- **Production** — Step Functions schedules are disabled by design until launch, so the
-  step does not auto-run yet. The residual retracted originals stay visible in prod until
-  the schedules are enabled at launch, or someone runs `npm run etl:pubmed-retractions`
-  followed by a reindex manually.
+- **Production** — the step **does** auto-run. The four prod cadence rules have been
+  ENABLED since 2026-07-07 and `TaskPubMedRetractions` runs nightly, immediately before
+  `TaskSearchIndexNightly`, so a stamp is always followed by a reindex. Verified
+  2026-08-05: `Retracted papers held: 73; to stamp: 6 → Stamped 6`, reindex at 10:02.
+  A manual `npm run etl:pubmed-retractions` is normally a no-op.
+
+  ⚠ **The prod enable is out-of-band drift, and it is load-bearing here.** `cdk/lib/config.ts`
+  still carries `etlSchedulesEnabled: false` for prod and the deployed CloudFormation
+  template still declares `State=DISABLED`, so the next `cdk deploy Sps-Etl-prod` that
+  touches a rule reverts the nightly to DISABLED — which silently stops this step and
+  reopens the retraction gap with every alarm green (the runs would not fail, they would
+  not happen). Tracked in #1512.
+
+**Why `to stamp` is a steady non-zero number, not a backlog.** `TaskReciter` runs earlier in
+the same nightly and overwrites `publication_type` from ReciterDB, so the same handful of
+papers get re-stamped each night. A constant small value is the designed steady state; a
+*climbing* value is the anomaly.

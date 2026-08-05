@@ -6,7 +6,7 @@ The rest of the launch chain proves the **pipes** work — #554 (latency/through
 
 This is a **sample-based** smoke pass, not an exhaustive audit. It is **read-only** except where a section is explicitly marked *staging-only round-trip*. Do not write test data to prod.
 
-> **⚠️ Launch precondition — retracted papers (#63 / #604).** The read-side exclusion of `Retraction` / `Erratum` is fully implemented, but in **prod** the `PubMedRetractions` ETL that *stamps* the type onto retracted originals does **not auto-run** — Step Functions schedules are disabled by design until launch (`docs/retracted-publications.md:100-104`). Until that step runs, residual retracted originals **stay visible in prod**. **Before this QA pass on prod, run `npm run etl:pubmed-retractions` then rebuild the search index**, or enable the nightly schedule. Confirm the residual count is zero (§4) before sign-off.
+> **✅ Launch precondition — retracted papers (#63 / #604) — MET as of 2026-08-05; no manual run needed.** This callout previously told you to run `npm run etl:pubmed-retractions` + reindex before the pass, because prod Step Functions schedules were disabled by design. That is no longer true: the prod cadence rules have been ENABLED since 2026-07-07, and `TaskPubMedRetractions` runs nightly immediately before `TaskSearchIndexNightly` (27 of the last 33 executions; never once hit its failure catch). A manual run is a no-op. **Still confirm the residual is zero at QA time — see §4, and read the query note there, because the obvious SQL does not measure what you want.**
 
 ---
 
@@ -106,11 +106,26 @@ Suppressions are whole-entity or per-author takedowns in the `Suppression` table
 
 `Retraction` and `Erratum` publication types are excluded everywhere via `NEVER_DISPLAY_TYPES` (`lib/publication-types.ts:17`), applied in `lib/api/profile.ts`, `lib/api/topics.ts`, `lib/api/home.ts`, `lib/api/methods.ts`, and the index build `lib/search-index-docs.ts`. The exclusion only fires once a retracted original has been **stamped** with the type by the `PubMedRetractions` ETL (`cdk/lib/etl-stack.ts:773`).
 
-- [ ] **Precondition met** — `npm run etl:pubmed-retractions` has run on this env and the index was rebuilt since (see launch-precondition callout). Confirm residual count:
+- [ ] **Precondition met** — the step ran on this env and the index was rebuilt after it. Read it off the ETL's own bookkeeping rather than the corpus:
   ```sql
-  -- against the target env DB (read-only); expect ~0 (only arrivals since the last run)
-  SELECT COUNT(*) FROM publication WHERE publication_type IN ('Retraction','Erratum');
+  -- residual = how many retracted originals were still UNSTAMPED at the last run.
+  -- Steady-state is a small constant (prod: 6/night — TaskReciter overwrites
+  -- publication_type from ReciterDB earlier in the same nightly). A CLIMBING
+  -- value is the anomaly; a zero here means nothing was left to stamp.
+  SELECT started_at, status, rows_processed
+    FROM etl_run
+   WHERE source = 'PubMedRetractions'
+   ORDER BY started_at DESC
+   LIMIT 5;
+  -- then confirm a SearchIndex run STARTED AFTER the newest row above.
   ```
+  > **⚠️ Do not use `SELECT COUNT(*) FROM publication WHERE publication_type IN ('Retraction','Erratum')`** — earlier revisions of this runbook did, with "expect ~0". That query counts the rows the ETL *creates*, so it only ever grows (prod 2026-08-05: **1222** = 116 Retraction + 1106 Erratum) and can never reach zero. It measures the set that is correctly hidden, not the residual leak. Run as written it reads a healthy system as a failed gate.
+- [ ] **Exclusion actually holds in the index** — the arithmetic is exact, so this is a strong check:
+  ```
+  DB publication rows  −  rows typed Retraction/Erratum  =  index doc count
+  prod 2026-08-05:  190,366 − 1,222 = 189,144 ✅
+  ```
+  Then `terms`-query those PMIDs against the publications index and confirm **0 hits**.
 - [ ] **Read-side holds** — pick a known-retracted PMID (recent examples in `docs/retracted-publications.md`) and confirm it does **not** appear on any scholar profile, in the home feed, in topic pages, or in `${BASE}/api/search?q=<title>&type=publications`, and is not in any pub count.
 - [ ] **Spotlight defense-in-depth** — confirm the live Spotlight artifact carries no retracted papers (§8). The SPS read path trusts the upstream artifact to be pre-clean; if a retracted paper surfaces in a spotlight, file a defense-in-depth follow-up to add an explicit type filter to `getSpotlights()`.
 
@@ -208,7 +223,7 @@ File a discrete issue per content defect (slug + surface + screenshot). Do **not
 
 ## Known gaps / watch-items (revisit each run)
 
-- **#63 prod ETL schedule** — retracted-original stamping does not auto-run in prod until launch (`docs/retracted-publications.md:100-104`); the §4 precondition covers it, but confirm it became part of the prod cutover sequence.
+- **#63 prod ETL schedule** — stamping auto-runs in prod today, but only because the cadence rules were enabled **out of band** on 2026-07-07 while `cdk/lib/config.ts` still says `etlSchedulesEnabled: false`. The next `cdk deploy Sps-Etl-prod` that touches a rule reverts the nightly to DISABLED and silently stops this step, with no failing run to alarm on. Re-check the rule state on every run of this QA pass until #1512 is resolved in config.
 - **Spotlight retraction filter** — `getSpotlights()` trusts the upstream artifact; if §8 ever surfaces a retracted paper, harden with an explicit `NEVER_DISPLAY_TYPES` filter at read time.
 - **Suppression search-reflection** — if search lags the profile on a suppressed item, the #393 reconciler / reindex is the cause (§3 spot-check).
 
