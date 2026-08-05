@@ -294,8 +294,9 @@ Suggested sequencing: OPS-0 now → PR-1 → PR-2 → PR-4+PR-5 → PR-3 → PR-
 - **Blast radius:** All clinical trials and person-trial links user-visible on profiles vanish from the DB (and from search after the next reindex) until a manual re-run. Affects both entrypoints (index.ts:63 and import.ts:158).
 - **Recommendation:** Wrap delete + insert in a single db.write.$transaction (row counts ~thousands, well within Aurora limits), or insert into shadow tables / use a diff-based upsert+prune instead of delete-all-first.
 
-### [MEDIUM] family-sensitivity: missing curated CSV silently deletes the entire seed sensitivity overlay and records SUCCESS (under-suppression)
+### [MEDIUM, FIXED by #1432] family-sensitivity: missing curated CSV silently deletes the entire seed sensitivity overlay and records SUCCESS (under-suppression)
 
+- **Status:** Fixed. `readCurated` now throws on ENOENT instead of returning `[]` (`etl/family-sensitivity/index.ts:61-70`, landed via PR #1432, predates this line-number snapshot). The failure scenario below is historical.
 - **Where:** `etl/family-sensitivity/index.ts:61` · category: partial-source
 - **Verification:** CONFIRMED (1 independent adversarial verifier, 1 affirmed)
 - **Failure scenario:** readCurated (index.ts:56-69) treats ENOENT as warn-and-return-[] rather than abort. main then calls replaceRows([]) where seedKeysToKeep stays empty, so the stale-seed cleanup (147-163) deletes EVERY source='seed' row of family_sensitivity_overlay in one committed transaction, and recordRun writes status=success rowsProcessed=0 (173). Trigger is a plain config slip: running from a cwd where the relative default path doesn't resolve, a mis-set FAMILY_SENSITIVITY_CURATED_PATH, or a container image that didn't bake the CSV.
