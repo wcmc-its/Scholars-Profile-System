@@ -226,10 +226,12 @@ describe("EtlStack", () => {
         template.hasResourceProperties("AWS::SNS::Topic", { TopicName: "etl-page-prod" });
       });
 
-      it("creates eleven CloudWatch alarms (4 status + nightly/weekly/heartbeat cadence + reconciler status/cadence + cdn reconciler status/cadence)", () => {
-        // 7 cadence-machine alarms (4 status + 3 cadence: nightly/weekly/heartbeat)
-        // + 2 reconciler alarms (#393) + 2 cdn reconciler alarms (#353).
-        template.resourceCountIs("AWS::CloudWatch::Alarm", 11);
+      it("creates fourteen CloudWatch alarms (4 status + 3 cadence + 3 duration + reconciler status/cadence + cdn reconciler status/cadence)", () => {
+        // 10 cadence-machine alarms (4 status + 3 cadence: nightly/weekly/heartbeat
+        // + 3 duration: nightly/weekly/heartbeat, #2190 -- annual is excluded, its
+        // ExecutionTime is approval-gate wait) + 2 reconciler alarms (#393)
+        // + 2 cdn reconciler alarms (#353).
+        template.resourceCountIs("AWS::CloudWatch::Alarm", 14);
       });
 
       it("creates six ECS task definitions (4 ETL credential-split defs + lean reconciler + lean cdn reconciler) and one SG-to-SG ingress rule on the internal ALB SG", () => {
@@ -575,9 +577,11 @@ describe("EtlStack", () => {
     describe("Alarms (D4 -- ExecutionsFailed sum>0 + ExecutionsStarted sum<1)", () => {
       it("every alarm publishes to the etl-failures-${env} SNS topic", () => {
         const alarms = template.findResources("AWS::CloudWatch::Alarm");
-        // 7 cadence-machine alarms (4 status + 3 cadence) + 2 reconciler alarms
-        // (#393) + 2 cdn reconciler alarms (#353); all share the topic.
-        expect(Object.keys(alarms)).toHaveLength(11);
+        // 10 cadence-machine alarms (4 status + 3 cadence + 3 duration, #2190)
+        // + 2 reconciler alarms (#393) + 2 cdn reconciler alarms (#353); all
+        // share the topic -- a duration alarm that routed elsewhere would be
+        // invisible, so it is covered by the same loop below.
+        expect(Object.keys(alarms)).toHaveLength(14);
         for (const [id, alarm] of Object.entries(alarms)) {
           const actions = (alarm.Properties?.AlarmActions ?? []) as unknown[];
           expect({ id, hasAction: actions.length > 0 }).toEqual({
@@ -1784,6 +1788,50 @@ describe("EtlStack", () => {
         expect(clobbering).toEqual([]);
       },
     );
+
+    it("duration alarms exist per cadence, in MILLISECONDS, and skip the annual machine", () => {
+      const alarms = template.findResources("AWS::CloudWatch::Alarm");
+      const byName = new Map(
+        Object.values(alarms).map((a) => [String(a.Properties?.AlarmName ?? ""), a.Properties]),
+      );
+      // ExecutionTime is emitted in ms. A threshold written in SECONDS would be
+      // ~3.6M times too small and every run would alarm -- and a threshold in
+      // MINUTES would never alarm at all. Pin the real numbers.
+      const expected: Record<string, number> = {
+        [`sps-etl-nightly-duration-staging`]: 150 * 60 * 1000,
+        [`sps-etl-weekly-duration-staging`]: 3 * 60 * 60 * 1000,
+        [`sps-etl-heartbeat-duration-staging`]: 30 * 60 * 1000,
+      };
+      for (const [name, threshold] of Object.entries(expected)) {
+        const p = byName.get(name);
+        expect(p).toBeDefined();
+        expect(p?.Threshold).toBe(threshold);
+        expect(p?.MetricName).toBe("ExecutionTime");
+        expect(p?.Statistic).toBe("Maximum");
+        expect(p?.ComparisonOperator).toBe("GreaterThanThreshold");
+        // Missing data means "no execution ended this hour", not "healthy for
+        // 0ms" -- breaching here would alarm continuously between runs.
+        expect(p?.TreatMissingData).toBe("notBreaching");
+      }
+      // Annual is excluded on purpose: its ExecutionTime is dominated by the
+      // manual approval gate's wait, so this would page for a slow human.
+      expect(byName.has("sps-etl-annual-duration-staging")).toBe(false);
+    });
+
+    it("every duration threshold sits above the observed prod p90 for that cadence", () => {
+      // Guards against a threshold tightened to the point of chronic noise --
+      // the failure mode this whole area exists to avoid. Observed prod maxima
+      // over 120d: nightly p90 1.55h, weekly p90 1.89h, heartbeat max 0.10h.
+      const alarms = template.findResources("AWS::CloudWatch::Alarm");
+      const thresholdOf = (n: string): number =>
+        Number(
+          Object.values(alarms).find((a) => a.Properties?.AlarmName === n)?.Properties?.Threshold,
+        );
+      const H = 60 * 60 * 1000;
+      expect(thresholdOf("sps-etl-nightly-duration-staging")).toBeGreaterThan(1.55 * H);
+      expect(thresholdOf("sps-etl-weekly-duration-staging")).toBeGreaterThan(1.89 * H);
+      expect(thresholdOf("sps-etl-heartbeat-duration-staging")).toBeGreaterThan(0.1 * H);
+    });
 
     it("nightly: a continue-tier failure still runs the remaining steps", () => {
       const states = aslOf("scholars-nightly-staging").States;

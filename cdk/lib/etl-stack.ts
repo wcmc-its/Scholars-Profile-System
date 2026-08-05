@@ -1470,6 +1470,23 @@ export class EtlStack extends Stack {
        * `evaluationPeriods * period <= 604800s` per the constraint above.
        */
       readonly statusPeriod?: Duration;
+      /**
+       * #2190 -- ceiling on how long one execution may take. A step can creep
+       * from healthy to its own timeout with nothing watching: prod InfoEd went
+       * ~500s -> 2,400,000ms ETIMEOUT and the only signal was the failure
+       * itself, a day late (#2189/#2191).
+       *
+       * `ExecutionTime` is a whole-run proxy, deliberately: it needs no new
+       * instrumentation and it would have caught the real incident (the nightly
+       * ran 3.28h against a 1.27h median). It will NOT catch one step creeping
+       * inside an otherwise stable total -- that needs per-step durations off
+       * the ETL logs, which is the rest of #2190.
+       *
+       * Thresholds are set from 120 days of prod `ExecutionTime`, at roughly
+       * 2x median / well clear of p90, so ordinary variation stays quiet.
+       * Omitted => no duration alarm.
+       */
+      readonly maxDuration?: Duration;
     }
     const cadences: ReadonlyArray<CadenceArgs> = [
       {
@@ -1477,6 +1494,9 @@ export class EtlStack extends Stack {
         cadenceLabel: "nightly",
         // 25 % grace on top of 24h; 108000s <= 604800s.
         cadenceWindow: Duration.hours(30),
+        // prod 120d: median 1.27h, p90 1.55h. The 2026-08-05 InfoEd run took
+        // 3.28h (3 x ~2427s ETIMEOUT inside a continue-tier step).
+        maxDuration: Duration.minutes(150),
         stateMachine: this.nightlyStateMachine,
       },
       {
@@ -1485,12 +1505,19 @@ export class EtlStack extends Stack {
         // Capped at the CloudWatch max (7d = 604800s); the 7-day cadence
         // leaves no room for grace within the limit.
         cadenceWindow: Duration.days(7),
+        // prod 120d: median 1.50h, p90 1.89h.
+        maxDuration: Duration.hours(3),
         stateMachine: this.weeklyStateMachine,
       },
       {
         id: "Annual",
         cadenceLabel: "annual",
         // No cadence alarm -- see the deploy-only-constraint note above.
+        // No DURATION alarm either, and not by omission: the annual machine
+        // sits on a WAIT_FOR_TASK_TOKEN approval gate with a 7-day timeout, so
+        // its ExecutionTime measures how fast a human answered, not how long
+        // the work took. The one recorded run is 6.86h for that reason.
+        // Alarming on it would page for a slow approver.
         stateMachine: this.annualStateMachine,
       },
       {
@@ -1512,6 +1539,9 @@ export class EtlStack extends Stack {
         // irrelevant here — a daily job cannot fail faster than daily, and the
         // cadence alarm (30h) still owns "the heartbeat itself went dark".
         statusPeriod: Duration.days(1),
+        // prod 120d: median 0.09h (~5.4 min), max 0.10h. A freshness check that
+        // suddenly takes 30 min is wedged on the DB, not slow.
+        maxDuration: Duration.minutes(30),
         stateMachine: this.heartbeatStateMachine,
       },
     ];
@@ -1536,6 +1566,34 @@ export class EtlStack extends Stack {
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       });
       statusAlarm.addAlarmAction(alarmAction);
+      // #2190 -- margin alarm. The status alarm only speaks once a step has
+      // already failed; this one speaks while there is still headroom.
+      if (c.maxDuration !== undefined) {
+        const durationMetric = new cloudwatch.Metric({
+          namespace: "AWS/States",
+          // NOTE: ExecutionTime is MILLISECONDS, so the threshold is too.
+          metricName: "ExecutionTime",
+          // MAXIMUM, not Average: one slow run inside a period is the whole
+          // point, and averaging it against fast runs would hide it.
+          statistic: cloudwatch.Stats.MAXIMUM,
+          // 1h regardless of statusPeriod. The metric is emitted once, when an
+          // execution ends, so a short period + NOT_BREACHING yields exactly
+          // one notification per slow run rather than a sticky alarm. 1 * 3600
+          // <= 604800, so the deploy-only constraint above holds.
+          period: Duration.hours(1),
+          dimensionsMap: dimensions,
+        });
+        const durationAlarm = new cloudwatch.Alarm(this, `${c.id}DurationAlarm`, {
+          alarmName: `sps-etl-${c.cadenceLabel}-duration-${env}`,
+          alarmDescription: `SPS ETL ${c.cadenceLabel} (${env}) -- execution ran longer than ${c.maxDuration.toHumanString()}. Next: compare per-step elapsed in the ETL logs against the previous run; a step approaching its own timeout fails hard and silently once it crosses (#2189). Nothing is broken yet -- this is the margin warning.`,
+          metric: durationMetric,
+          evaluationPeriods: 1,
+          threshold: c.maxDuration.toMilliseconds(),
+          comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+          treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+        });
+        durationAlarm.addAlarmAction(alarmAction);
+      }
       if (c.cadenceWindow !== undefined) {
         const startedMetric = new cloudwatch.Metric({
           namespace: "AWS/States",
