@@ -1708,11 +1708,15 @@ describe("EtlStack", () => {
     // DefinitionString is an Fn::Join whose intrinsic chunks sit INSIDE JSON
     // string values -- rendering them as JSON would inject quotes and break the
     // parse, so each collapses to an opaque literal.
+    // Throws rather than expect()s: this also runs at describe time, where a
+    // failed expectation would not be attributed to any test.
     const aslOf = (name: string): { States: Record<string, Record<string, unknown>> } => {
       const sms = template.findResources("AWS::StepFunctions::StateMachine");
       const match = Object.values(sms).find((r) => r.Properties?.StateMachineName === name);
-      expect(match).toBeDefined();
-      const def = match?.Properties?.DefinitionString as
+      if (match === undefined) {
+        throw new Error(`no state machine named ${name}`);
+      }
+      const def = match.Properties?.DefinitionString as
         | { "Fn::Join"?: [string, unknown[]] }
         | string;
       const parts = typeof def === "string" ? [def] : (def?.["Fn::Join"]?.[1] ?? []);
@@ -1723,10 +1727,35 @@ describe("EtlStack", () => {
     const isTask = (s: Record<string, unknown>, kind: string): boolean =>
       s.Type === "Task" && String(s.Resource ?? "").includes(kind);
 
-    it.each(["nightly", "weekly", "annual", "heartbeat"])(
+    // DISCOVER the graded machines instead of listing them. A fifth cadence
+    // added later is then covered automatically -- a hardcoded list would stop
+    // applying at exactly the moment someone is most able to reintroduce this
+    // bug. An `*Outcome` state is buildStateMachine's signature; the reconcile
+    // and backup machines are built separately and legitimately lack one.
+    const gradedMachines = Object.values(
+      template.findResources("AWS::StepFunctions::StateMachine"),
+    )
+      .map((r) => String(r.Properties?.StateMachineName ?? ""))
+      .filter((n) => n !== "")
+      .filter((n) => Object.keys(aslOf(n).States).some((s) => s.endsWith("Outcome")))
+      .sort();
+
+    // Without this, a discovery bug that returned [] would make every it.each
+    // below vacuous -- zero tests, all green. Adding a real fifth machine is
+    // meant to fail here once, deliberately.
+    it("discovers exactly the machines buildStateMachine produces", () => {
+      expect(gradedMachines).toEqual([
+        "scholars-annual-staging",
+        "scholars-heartbeat-staging",
+        "scholars-nightly-staging",
+        "scholars-weekly-staging",
+      ]);
+    });
+
+    it.each(gradedMachines)(
       "%s ends in a Choice that fails the run when $.error is present",
-      (cadence) => {
-        const states = aslOf(`scholars-${cadence}-staging`).States;
+      (name) => {
+        const states = aslOf(name).States;
         const outcome = Object.entries(states).find(([n]) => n.endsWith("Outcome"));
         expect(outcome).toBeDefined();
         const [, choice] = outcome!;
@@ -1746,10 +1775,10 @@ describe("EtlStack", () => {
       },
     );
 
-    it.each(["nightly", "weekly", "annual", "heartbeat"])(
+    it.each(gradedMachines)(
       "%s: no Task state overwrites `$`, so the $.error a Catch writes survives to the Outcome",
-      (cadence) => {
-        const states = aslOf(`scholars-${cadence}-staging`).States;
+      (name) => {
+        const states = aslOf(name).States;
         // ASL default ResultPath is `$`: any Task that does not explicitly
         // discard would overwrite the whole state -- and the marker with it.
         const clobbering = Object.entries(states)
