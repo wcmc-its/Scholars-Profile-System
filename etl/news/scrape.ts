@@ -48,6 +48,35 @@ const TITLE_MAX = 512;
 const EXCERPT_MAX = 2000;
 const BODY_MAX = 60000;
 
+/**
+ * Ignore articles published before this date.
+ *
+ * The newsroom archive reaches 1997, but it is pre-VIVO: sampled pages covering
+ * 2014/2002/2001/1999 carry ZERO `cwid-` links across 327 articles, so the whole
+ * archive can only ever produce prose NAME candidates — thousands of PENDING
+ * rows into a review queue that currently has none of its 484 worked. The old
+ * research-site corpus started in 2019, so this floor holds ingestion at parity
+ * rather than dumping 3.7k unreviewable candidates on curators.
+ *
+ * It also gives the walk a real termination condition: the feed is newest-first,
+ * so a page entirely below the floor means every older page is too. Without it
+ * the incremental exit can never fire, because an article that yields no mention
+ * row never enters news_mention and so is never "known".
+ *
+ * Override with NEWS_MIN_PUBLISHED=YYYY-MM-DD (empty string disables the floor).
+ */
+const MIN_PUBLISHED_DEFAULT = "2019-01-01";
+
+function minPublished(): string {
+  const raw = process.env.NEWS_MIN_PUBLISHED;
+  if (raw === undefined) return MIN_PUBLISHED_DEFAULT;
+  if (raw === "") return ""; // explicit opt-out: walk the whole archive
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    throw new Error(`[News] NEWS_MIN_PUBLISHED must be YYYY-MM-DD, got ${JSON.stringify(raw)}`);
+  }
+  return raw;
+}
+
 export type Fetcher = (url: string) => Promise<string | null>;
 
 /** Fetch one page, or null when it is genuinely unavailable. Retries transient
@@ -83,12 +112,29 @@ export function stripTags(s: string): string {
     .trim();
 }
 
-/** Drop C0/C7F control bytes — a stray NUL must never reach the DB or a profile. */
+/**
+ * Drop C0/DEL/C1 control bytes — a stray NUL must never reach the DB or a
+ * profile, and a C1 (U+0080-U+009F) is what a cp1252 smart quote decodes to when
+ * the upstream double-encodes: it renders as a box glyph mid-word rather than
+ * failing loudly. Must stay in lockstep with CONTROL_RE in ./seed.
+ */
 export function stripControl(s: string): string {
-  return s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
+  return s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, "");
 }
 
 const clean = (s: string): string => stripControl(stripTags(s));
+
+/**
+ * Cap at `max`, cutting on a word boundary and marking the elision. The
+ * newsroom teaser is a full lede, not a listing blurb, and it renders verbatim
+ * on a public profile — a hard slice lands mid-word.
+ */
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max - 1);
+  const sp = cut.lastIndexOf(" ");
+  return `${(sp > max * 0.5 ? cut.slice(0, sp) : cut).trimEnd()}…`;
+}
 
 /**
  * VIVO-linked cwids in the article body HTML (lowercased, deduped). Exported for
@@ -139,6 +185,24 @@ export function feedStories(json: string): ScrapedArticle[] {
   const list = (parsed as { news_stories?: unknown }).news_stories;
   if (!Array.isArray(list)) throw new Error("[News] feed.json: missing news_stories array");
 
+  // `field_story_body` is the ONLY carrier of the VIVO cwid links — the whole
+  // trusted join. If upstream renames it or re-types it (Drupal's formatted-text
+  // shape is {value, format}, not a bare string), every story would silently
+  // yield zero cwids and the run would record a hollow success. Measured 100%
+  // non-empty across all 50 live pages, so a half-empty page is a shape change,
+  // not thin content. Fail loudly instead.
+  const withBody = list.filter(
+    (e) => typeof (e as { story?: { field_story_body?: unknown } })?.story?.field_story_body ===
+      "string" &&
+      ((e as { story: { field_story_body: string } }).story.field_story_body.length > 0),
+  ).length;
+  if (list.length >= 20 && withBody / list.length < 0.5) {
+    throw new Error(
+      `[News] feed.json: only ${withBody}/${list.length} stories carry a non-empty ` +
+        `field_story_body — upstream shape changed; the VIVO join would silently empty`,
+    );
+  }
+
   const out: ScrapedArticle[] = [];
   for (const entry of list) {
     const story = (entry as { story?: unknown })?.story;
@@ -148,7 +212,7 @@ export function feedStories(json: string): ScrapedArticle[] {
     const path = typeof s.path === "string" ? s.path : "";
     if (!path.startsWith(NEWS_ORIGIN + NEWS_PATH_PREFIX)) continue;
 
-    const title = clean(typeof s.title === "string" ? s.title : "").slice(0, TITLE_MAX);
+    const title = truncate(clean(typeof s.title === "string" ? s.title : ""), TITLE_MAX);
     if (!title) continue;
 
     const bodyHtml = typeof s.field_story_body === "string" ? s.field_story_body : "";
@@ -157,7 +221,7 @@ export function feedStories(json: string): ScrapedArticle[] {
     out.push({
       url: path,
       title,
-      excerpt: clean(teaser).slice(0, EXCERPT_MAX) || null,
+      excerpt: truncate(clean(teaser), EXCERPT_MAX) || null,
       thumbnailUrl: thumbnailOf(s.field_story_featured_image),
       publishedAt: parseDate(
         typeof s.field_story_post_date === "string" ? s.field_story_post_date : "",
@@ -182,10 +246,11 @@ export function feedStories(json: string): ScrapedArticle[] {
  */
 export async function scrapeNews(
   knownUrls: Set<string>,
-  opts: { get?: Fetcher; maxPages?: number } = {},
+  opts: { get?: Fetcher; maxPages?: number; minPublished?: string } = {},
 ): Promise<ScrapedArticle[]> {
   const get = opts.get ?? defaultFetch;
   const maxPages = opts.maxPages ?? MAX_FEED_PAGES_DEFAULT;
+  const floor = opts.minPublished ?? minPublished();
   const articles: ScrapedArticle[] = [];
   const seen = new Set<string>();
 
@@ -201,21 +266,28 @@ export async function scrapeNews(
       if (page === 0) throw new Error("[News] feed returned 0 stories — upstream changed?");
       break;
     }
-    const fresh = stories.filter((a) => !seen.has(a.url));
+    // Dedupe in ONE place: filtering and marking separately would let two
+    // entries sharing a path on the SAME page both through, and validateArticles
+    // rejects a duplicate url by failing the entire run.
+    const fresh = stories.filter((a) => (seen.has(a.url) ? false : (seen.add(a.url), true)));
     if (fresh.length === 0) break; // the pager repeated a page
+
+    // Newest-first: once a whole page sits below the floor, so does every older
+    // page. This is the walk's real terminator — see MIN_PUBLISHED_DEFAULT.
+    const inWindow = floor
+      ? fresh.filter((a) => a.publishedAt === null || a.publishedAt >= floor)
+      : fresh;
+    if (floor && inWindow.length === 0) break;
+
     let added = 0;
-    for (const a of fresh) {
-      seen.add(a.url);
+    for (const a of inWindow) {
       if (!knownUrls.has(a.url)) {
         articles.push(a);
         added++;
       }
     }
-    // Incremental early-exit: a populated table + a page whose every article is
-    // already ingested means all older pages are too.
-    // ponytail: an article that yields no mention rows never enters news_mention,
-    // so it is never "known" and keeps this page from exiting. At 100 stories a
-    // page that costs one extra JSON read, not 100 detail fetches — left as is.
+    // Incremental early-exit: a populated table plus a page that contributed
+    // nothing new means the older pages are already ingested too.
     if (knownUrls.size > 0 && added === 0) break;
   }
 

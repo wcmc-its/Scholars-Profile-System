@@ -617,14 +617,11 @@ export default function DocsPage() {
               <tr>
                 <td>News mentions</td>
                 <td>
-                  WCM Research news site (
-                  <a
-                    href="https://research.weill.cornell.edu/about-us/news-updates"
-                    className={LINK}
-                  >
-                    research.weill.cornell.edu
+                  WCM Newsroom (
+                  <a href="https://news.weill.cornell.edu/news" className={LINK}>
+                    news.weill.cornell.edu
                   </a>
-                  ), scraped for articles that mention you
+                  ), read for articles that mention you
                 </td>
                 <td>Weekly</td>
                 <td>

@@ -141,4 +141,90 @@ describe("scrapeNews (incremental)", () => {
       /0 stories/,
     );
   });
+
+  it("does not throw on two entries sharing a path on the SAME page", async () => {
+    // Both survive a filter that marks `seen` only afterwards, and
+    // validateArticles rejects a duplicate url by failing the whole run.
+    const dupPage = feed([story({ slug: "same" }), story({ slug: "same" })]);
+    const got = await scrapeNews(new Set(), { get: fetcher({ "0": dupPage, "1": empty }) });
+    expect(got.map((a) => a.url)).toEqual([u("same")]);
+  });
+});
+
+describe("published-date floor", () => {
+  const old = (slug: string, date: string) =>
+    JSON.stringify({
+      news_stories: [
+        {
+          story: {
+            title: slug,
+            path: `${ORIGIN}/news/2001/01/${slug}`,
+            field_story_post_date: date,
+            field_story_body: "<p>b</p>",
+            field_story_teaser: "t",
+            field_story_featured_image: null,
+          },
+        },
+      ],
+    });
+
+  it("stops the walk at the first page entirely below the floor", async () => {
+    const get = async (url: string) => {
+      const p = url.match(/page=(\d+)/)?.[1] ?? "0";
+      if (p === "0") return old("recent", "March 3, 2026");
+      if (p === "1") return old("ancient", "March 3, 2001");
+      throw new Error("walk should have stopped before page 2");
+    };
+    const got = await scrapeNews(new Set(), { get, minPublished: "2019-01-01" });
+    expect(got.map((a) => a.title)).toEqual(["recent"]);
+  });
+
+  it("an empty NEWS_MIN_PUBLISHED walks the whole archive", async () => {
+    const get = async (url: string) => {
+      const p = url.match(/page=(\d+)/)?.[1] ?? "0";
+      if (p === "0") return old("recent", "March 3, 2026");
+      if (p === "1") return old("ancient", "March 3, 2001");
+      return JSON.stringify({ news_stories: [] });
+    };
+    const got = await scrapeNews(new Set(), { get, minPublished: "" });
+    expect(got.map((a) => a.title).sort()).toEqual(["ancient", "recent"]);
+  });
+});
+
+describe("feedStories body-shape guard", () => {
+  const page = (n: number, body: unknown) =>
+    JSON.stringify({
+      news_stories: Array.from({ length: n }, (_, i) => ({
+        story: {
+          title: `t${i}`,
+          path: `${ORIGIN}/news/2026/07/s${i}`,
+          field_story_post_date: "July 1, 2026",
+          field_story_body: body,
+          field_story_teaser: "x",
+          field_story_featured_image: null,
+        },
+      })),
+    });
+
+  it("throws when the body field is re-typed away from a string", () => {
+    // Drupal's formatted-text shape; every cwid would silently vanish.
+    expect(() => feedStories(page(40, { value: "<p>b</p>", format: "full_html" }))).toThrow(
+      /field_story_body/,
+    );
+  });
+
+  it("tolerates a thin page below the 20-story sample size", () => {
+    expect(() => feedStories(page(5, ""))).not.toThrow();
+  });
+});
+
+describe("truncation", () => {
+  it("cuts a long excerpt on a word boundary and marks the elision", () => {
+    const long = `${"word ".repeat(600)}end`;
+    const [a] = feedStories(feed([story({ slug: "t", teaser: long })]));
+    expect(a.excerpt!.length).toBeLessThanOrEqual(2000);
+    expect(a.excerpt!.endsWith("…")).toBe(true);
+    // No dangling partial word before the ellipsis.
+    expect(a.excerpt).not.toMatch(/\bwor…$/);
+  });
 });

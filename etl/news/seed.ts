@@ -36,7 +36,10 @@ export type ScrapedArticle = {
 /** Shared with the scraper so a cwid it emits can never fail validation here. */
 export const CWID_RE = /^[a-z0-9]{2,32}$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const CONTROL_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
+// C0 + DEL + C1. A C1 (U+0080-U+009F) is a double-encoded cp1252 punctuation
+// byte; it renders as a box glyph on a profile. Lockstep with stripControl in
+// ./scrape.
+const CONTROL_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/;
 const TITLE_MAX = 512;
 const EXCERPT_MAX = 2000;
 const BODY_MAX = 60000;
