@@ -1688,4 +1688,100 @@ describe("EtlStack", () => {
     });
   });
 
+  // #2191 -- a continue-tier step that fails all its retries notifies and hands
+  // on to its successor, so every remaining step runs; the execution used to
+  // then report SUCCEEDED with the step dead inside it. Measured on prod: 2 of
+  // the 20 nightlies from 2026-07-17 to 08-05 ended green with a dead step.
+  //
+  // The whole mechanism is `$.error` (written by every Catch) surviving to a
+  // terminal Choice. It survives ONLY because the states in between discard
+  // their results -- the ASL default ResultPath of `$` would overwrite it. That
+  // is the fragile part, so it is what these tests pin.
+  describe("degraded-run detection (#2191)", () => {
+    const { template } = buildEtlStack("staging");
+    // Parse a definition into real ASL rather than grepping the text, so these
+    // assert on structure (which state points where) instead of substrings.
+    // DefinitionString is an Fn::Join whose intrinsic chunks sit INSIDE JSON
+    // string values -- rendering them as JSON would inject quotes and break the
+    // parse, so each collapses to an opaque literal.
+    const aslOf = (name: string): { States: Record<string, Record<string, unknown>> } => {
+      const sms = template.findResources("AWS::StepFunctions::StateMachine");
+      const match = Object.values(sms).find((r) => r.Properties?.StateMachineName === name);
+      expect(match).toBeDefined();
+      const def = match?.Properties?.DefinitionString as
+        | { "Fn::Join"?: [string, unknown[]] }
+        | string;
+      const parts = typeof def === "string" ? [def] : (def?.["Fn::Join"]?.[1] ?? []);
+      const text = parts.map((p) => (typeof p === "string" ? p : "REF")).join("");
+      return JSON.parse(text) as { States: Record<string, Record<string, unknown>> };
+    };
+
+    const isTask = (s: Record<string, unknown>, kind: string): boolean =>
+      s.Type === "Task" && String(s.Resource ?? "").includes(kind);
+
+    it.each(["nightly", "weekly", "annual", "heartbeat"])(
+      "%s ends in a Choice that fails the run when $.error is present",
+      (cadence) => {
+        const states = aslOf(`scholars-${cadence}-staging`).States;
+        const outcome = Object.entries(states).find(([n]) => n.endsWith("Outcome"));
+        expect(outcome).toBeDefined();
+        const [, choice] = outcome!;
+        expect(choice.Type).toBe("Choice");
+        const choices = choice.Choices as Array<Record<string, unknown>>;
+        expect(choices).toHaveLength(1);
+        expect(choices[0].Variable).toBe("$.error");
+        expect(choices[0].IsPresent).toBe(true);
+
+        // The degraded branch must FAIL -- a Pass or a Succeed here would keep
+        // the lie this exists to remove.
+        const degraded = states[String(choices[0].Next)];
+        expect(degraded.Type).toBe("Fail");
+        expect(degraded.Error).toBe("DegradedRun");
+        // ...and the clean branch must still succeed, or every run goes red.
+        expect(states[String(choice.Default)].Type).toBe("Succeed");
+      },
+    );
+
+    it.each(["nightly", "weekly", "annual", "heartbeat"])(
+      "%s: no Task state overwrites `$`, so the $.error a Catch writes survives to the Outcome",
+      (cadence) => {
+        const states = aslOf(`scholars-${cadence}-staging`).States;
+        // ASL default ResultPath is `$`: any Task that does not explicitly
+        // discard would overwrite the whole state -- and the marker with it.
+        const clobbering = Object.entries(states)
+          .filter(([, s]) => isTask(s, "ecs:runTask") || isTask(s, "sns:publish"))
+          .filter(([, s]) => s.ResultPath !== null)
+          .map(([n]) => n);
+        expect(clobbering).toEqual([]);
+      },
+    );
+
+    it("nightly: a continue-tier failure still runs the remaining steps", () => {
+      const states = aslOf("scholars-nightly-staging").States;
+      // Asms is continue-tier: its Catch goes to NotifyAsms, which must hand on
+      // to the NEXT STEP rather than jumping to the Outcome. Losing this turns
+      // "warn and carry on" into "abort", which is a much worse regression than
+      // the one being fixed.
+      const catches = states.TaskAsms.Catch as Array<Record<string, unknown>>;
+      expect(catches[0].Next).toBe("NotifyAsms");
+      expect(catches[0].ResultPath).toBe("$.error");
+      const next = String(states.NotifyAsms.Next);
+      expect(next).not.toMatch(/Outcome$/);
+      expect(states[next].Type).toBe("Task");
+    });
+
+    it("nightly: only the last step feeds the Outcome, and abort-tier steps still stop at their own Fail", () => {
+      const states = aslOf("scholars-nightly-staging").States;
+      const feeders = Object.entries(states)
+        .filter(([, s]) => String(s.Next ?? "").endsWith("Outcome"))
+        .map(([n]) => n);
+      expect(feeders).toEqual(["TaskIntegrityNightly"]);
+      // IntegrityNightly is abort-tier: its own failure must still terminate at
+      // FailIntegrityNightly, never fall through to the degraded-but-complete
+      // branch, which would understate a volume-gate breach.
+      const catches = states.TaskIntegrityNightly.Catch as Array<Record<string, unknown>>;
+      expect(states[String(catches[0].Next)].Next).toBe("FailIntegrityNightly");
+      expect(states.FailIntegrityNightly.Type).toBe("Fail");
+    });
+  });
 });
