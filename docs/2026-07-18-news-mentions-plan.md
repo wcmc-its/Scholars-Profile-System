@@ -1,5 +1,13 @@
 # News Mentions — build plan
 
+> **Superseded in part (#2200).** The ingestion half of this plan — the
+> `research.weill.cornell.edu/about-us/news-updates` listing crawl described
+> under "Scrape" below — was replaced by a read of the WCM Newsroom feed
+> `news.weill.cornell.edu/news/feed.json`. The research site turned out to be a
+> syndication target of the newsroom, not a source. Everything else here (the
+> mention model, the VIVO-vs-name join, the review queue, the profile section)
+> still describes what is built. See the header of `etl/news/scrape.ts`.
+
 Add a "News mentions" feature to the Scholars Profile System: scrape the WCM
 Research news feed, attach articles to scholars, review the ambiguous ones in
 an admin queue, and surface them on the profile and in the per-scholar `/edit`

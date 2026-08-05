@@ -4,10 +4,11 @@
  * Run via `npm run etl:news`; wired into the weekly chain in cdk/lib/etl-stack.ts
  * (and etl/orchestrate.ts for the local prototype runner). One run does:
  *
- *   1. Scrape the WCM Research news feed for NEW articles (or read NEWS_SEED_PATH
- *      when set — the offline path for local dev and CI). Incremental: the crawl
- *      stops once a listing page is entirely already ingested. NEWS_BACKFILL=1
- *      walks the whole feed and re-reconciles every article.
+ *   1. Read the WCM Newsroom feed (news.weill.cornell.edu/news/feed.json) for NEW
+ *      articles (or read NEWS_SEED_PATH when set — the offline path for local dev
+ *      and CI). Incremental: the walk stops after the first feed page that is
+ *      entirely already ingested. NEWS_BACKFILL=1 walks the whole feed and
+ *      re-reconciles every article.
  *   2. Build a scholar-name index and, per article, form mention rows:
  *        VIVO-linked cwid  -> status='published' (trusted identifier join)
  *        prose name match  -> status='pending'   (queued for /edit/news-queue)
@@ -22,7 +23,7 @@
  * Env:
  *   NEWS_SEED_PATH   read this JSON (ScrapedArticle[]) instead of scraping.
  *   NEWS_BACKFILL=1  ignore the already-ingested set; walk the full feed.
- *   NEWS_MAX_PAGES   listing-page ceiling for a backfill (default 400).
+ *   NEWS_MAX_PAGES   feed-page ceiling for a backfill (default 60; 100 stories/page).
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -285,17 +286,9 @@ async function main(): Promise<void> {
           ),
         );
     const maxPages = Number(process.env.NEWS_MAX_PAGES) || undefined;
-    const result = await scrapeNews(knownUrls, { maxPages });
-    // A crawl that fetched stubs but couldn't load their detail pages is the
-    // site being down/rate-limiting, not "no news" — fail rather than record a
-    // hollow success (the volume guard scholar_technology needs is unnecessary
-    // here because we never delete, but a fetch collapse still must not pass).
-    if (result.fetchFailed > Math.max(5, result.stubs * 0.2)) {
-      throw new Error(
-        `[News] ${result.fetchFailed}/${result.stubs} detail pages failed to fetch — WCM down or rate-limiting?`,
-      );
-    }
-    articles = result.articles;
+    // scrapeNews throws on an unreadable or empty feed, so a site outage or
+    // rate-limit fails the run rather than recording a hollow success.
+    articles = await scrapeNews(knownUrls, { maxPages });
     source = "scrape";
   }
 
