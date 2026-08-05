@@ -6,11 +6,16 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { articlesToMentions, reconcile, type ExistingMention } from "@/etl/news/index";
+import {
+  articlesToMentions,
+  assertNoLegacyOriginRows,
+  reconcile,
+  type ExistingMention,
+} from "@/etl/news/index";
 import type { ScrapedArticle } from "@/etl/news/seed";
 
-const ORIGIN = "https://research.weill.cornell.edu";
-const URL = `${ORIGIN}/about-us/news-updates/some-article`;
+const ORIGIN = "https://news.weill.cornell.edu";
+const URL = `${ORIGIN}/news/2026/07/some-article`;
 
 const existing = (over: Partial<ExistingMention>): ExistingMention => ({
   status: "pending",
@@ -117,5 +122,19 @@ describe("articlesToMentions", () => {
     // ghost99 has no scholar row -> no VIVO row; Jane Roe still name-matched.
     expect(rows.find((r) => r.cwid === "ghost99")).toBeUndefined();
     expect(rows.find((r) => r.cwid === "jro1")).toBeTruthy();
+  });
+});
+
+describe("assertNoLegacyOriginRows (#2200 source-repoint interlock)", () => {
+  it("passes on a table with no rows under a previous origin", async () => {
+    await expect(assertNoLegacyOriginRows(async () => 0)).resolves.toBeUndefined();
+  });
+
+  it("refuses to run while pre-repoint rows survive", async () => {
+    // Running would re-key every article, reverting scholar hides and reviewer
+    // rejections — a runbook line cannot gate a scheduled state machine.
+    await expect(assertNoLegacyOriginRows(async () => 1_595)).rejects.toThrow(
+      /1595 news_mention row\(s\) predate the current source origin/,
+    );
   });
 });
