@@ -850,6 +850,11 @@ export class EtlStack extends Stack {
           execution: sfn.JsonPath.executionName,
           error: sfn.JsonPath.stringAt("$.error"),
         }),
+        // #2191 -- keep `$` (and the `$.error` the Catch just wrote) instead of
+        // replacing it with the SNS MessageId. Without this the marker a
+        // continue-tier failure leaves behind dies at the very next state, and
+        // the terminal DegradedRun check below can never see it.
+        resultPath: sfn.JsonPath.DISCARD,
       });
 
     // ------------------------------------------------------------------
@@ -883,6 +888,11 @@ export class EtlStack extends Stack {
         // nightly from colliding with the (now noon) Sunday weekly. The
         // machine-level 24h timeout (buildStateMachine) is the outer backstop.
         taskTimeout: sfn.Timeout.duration(Duration.hours(4)),
+        // #2191 -- a step's ECS result is never read by any downstream state
+        // (the only `$.` reads in this stack are `$.error`), and the ASL default
+        // ResultPath of `$` would overwrite the whole state with it. Discarding
+        // it lets `$.error` survive to the end of the chain.
+        resultPath: sfn.JsonPath.DISCARD,
       });
       task.addRetry({
         errors: ["States.TaskFailed", "States.Timeout"],
@@ -909,8 +919,40 @@ export class EtlStack extends Stack {
       if (steps.length === 0) {
         throw new Error("state machine requires at least one step");
       }
+      // #2191 -- terminal outcome. A continue-tier step that fails all its
+      // retries notifies and hands on to its successor, so every remaining step
+      // still runs -- but the execution then reported SUCCEEDED with the step
+      // dead inside it. Measured on prod: 2 of the 20 nightlies from 2026-07-17
+      // to 08-05 ended green with a dead step (Infoed 08-05, Tools 07-17), and
+      // the InfoEd one hid a dead grant import for a day.
+      //
+      // `$.error` is written by every Catch below and, now that the step task
+      // and its notify both DISCARD their results, survives to here. Its mere
+      // PRESENCE is the signal -- the value is the last error, and which steps
+      // died is already on `etl-failures-<env>` / `etl-page-<env>`.
+      //
+      // This deliberately re-points `sps-etl-<cadence>-status`: it used to mean
+      // "the pipeline stopped early", it now means "the pipeline did not fully
+      // succeed". A degraded run shows FAILED even though every step ran, so
+      // read the `Notify*` states to see which one died.
+      const outcome = new sfn.Choice(this, `${smId}Outcome`)
+        .when(
+          sfn.Condition.isPresent("$.error"),
+          new sfn.Fail(this, `${smId}Degraded`, {
+            error: "DegradedRun",
+            cause:
+              "every step ran, but at least one continue-tier step failed all retries " +
+              "-- see the Notify* states and the etl-failures topic for which",
+          }),
+        )
+        .otherwise(new sfn.Succeed(this, `${smId}Complete`));
+      // The annual machine passes an approval-gate tail; the outcome check goes
+      // after it either way, so no machine can end without being graded.
+      const end: sfn.IChainable =
+        tail !== undefined ? sfn.Chain.start(tail).next(outcome) : outcome;
+
       // Build each step task once, then wire BOTH transitions per step: the
-      // success edge to its successor (task[i] -> task[i+1] -> ... -> tail) and
+      // success edge to its successor (task[i] -> task[i+1] -> ... -> end) and
       // the tiered failure edge (PR-7). The Choice below fans into this same
       // graph, so entering mid-chain still walks the rest of the sequence.
       const stepTasks = steps.map((s) => buildStep(s));
@@ -918,13 +960,11 @@ export class EtlStack extends Stack {
       for (let i = 0; i < steps.length; i++) {
         const spec = steps[i];
         const task = startStates[i];
-        // Successor: the next step, else the tail (annual's approval gate),
-        // else nothing (last step of a tail-less machine).
-        const successor: sfn.IChainable | undefined =
-          i < startStates.length - 1 ? startStates[i + 1] : tail;
-        if (successor !== undefined) {
-          task.next(successor);
-        }
+        // Successor: the next step, else the tail + outcome check (annual), else
+        // the outcome check on its own.
+        const successor: sfn.IChainable =
+          i < startStates.length - 1 ? startStates[i + 1] : end;
+        task.next(successor);
         // Failure wiring by tier (StepSpec.tier):
         //   continue -> warn (etl-failures) then CONTINUE to the successor;
         //   abort    -> page (etl-page) then STOP (Fail);
@@ -933,9 +973,6 @@ export class EtlStack extends Stack {
         // continue-successor harmlessly (steps use static container overrides,
         // never state input; the startFrom Choice runs once at the top).
         if (spec.tier === "continue") {
-          if (successor === undefined) {
-            throw new Error(`continue-tier step ${spec.id} has no successor to continue to`);
-          }
           task.addCatch(buildNotify(spec, this.failureTopic).next(successor), {
             errors: ["States.ALL"],
             resultPath: "$.error",
@@ -1273,12 +1310,22 @@ export class EtlStack extends Stack {
       // 7 day cap on the approval window -- if no one approves in a week
       // the execution fails and pages.
       taskTimeout: sfn.Timeout.duration(Duration.days(7)),
+      // #2191 -- same reason as buildStep/buildNotify: this state sits between
+      // the steps and the Outcome check, so letting the operator's
+      // send-task-success payload replace `$` would erase `$.error`. Inert
+      // today (annualSteps is a single legacy-tier step, which stops at its own
+      // Fail), but it would silently un-fix this bug the day a continue-tier
+      // step is added to the annual chain.
+      resultPath: sfn.JsonPath.DISCARD,
     });
     approvalGate.addCatch(
       new tasks.SnsPublish(this, "NotifyAnnualApprovalGate", {
         topic: this.failureTopic,
         subject: `SPS annual ETL ${env} -- approval gate failed/timed out`,
         message: sfn.TaskInput.fromObject({ env, step: "AnnualApprovalGate" }),
+        // Inert -- this one runs straight into a Fail. Discarding anyway keeps
+        // #2191's rule free of exceptions: no Task state overwrites `$`.
+        resultPath: sfn.JsonPath.DISCARD,
       }).next(new sfn.Fail(this, "FailAnnualApprovalGate", { cause: "approval gate failed" })),
       { errors: ["States.ALL"], resultPath: "$.error" },
     );
