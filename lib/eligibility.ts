@@ -58,34 +58,73 @@ export const PUBLICLY_DISPLAYED_ROLES: ReadonlyArray<RoleCategory> = [
   "emeritus",
 ] as const;
 
-const HIDDEN_DISPLAY_ROLES: ReadonlySet<RoleCategory> = new Set([
+/**
+ * The concrete `scholar.role_category` values the #536 carve hides, spelled out
+ * for use in a Prisma where-clause (`PEOPLE_INDEX_WHERE`). Prisma cannot express
+ * the `doctoral_student*` prefix that `isPubliclyDisplayed` matches, so the
+ * suffixed variants are enumerated. `tests/unit/eligibility.test.ts` asserts every
+ * entry here fails `isPubliclyDisplayed`, so the two halves cannot drift apart.
+ */
+export const HIDDEN_ROLE_CATEGORIES: ReadonlyArray<string> = [
   "doctoral_student",
+  "doctoral_student_md",
+  "doctoral_student_phd",
+  "doctoral_student_mdphd",
   "affiliate_alumni",
+] as const;
+
+/**
+ * Legacy `role_category` values the current ED ETL can no longer emit —
+ * `deriveRoleCategory` (etl/ed/index.ts) folds voluntary / adjunct / courtesy /
+ * emeritus into `affiliated_faculty` and has no `research_staff` branch — but which
+ * pre-rewrite or out-of-band rows may still carry. The suffixed `doctoral_student_*`
+ * values are proof that out-of-band writes happen: 1,875 staging rows carry them and
+ * no version of this repo ever emitted them. Listed so the fail-closed check below
+ * cannot hide a legitimately-visible historical row.
+ *
+ * ponytail: drop once a prod census of `SELECT role_category, COUNT(*) FROM scholar`
+ * shows zero rows carrying these.
+ */
+const LEGACY_VISIBLE_ROLES = [
+  "voluntary_faculty",
+  "adjunct_faculty",
+  "courtesy_faculty",
+  "faculty_emeritus",
+  "research_staff",
+] as const;
+
+const VISIBLE_ROLE_KEYS: ReadonlySet<string> = new Set<string>([
+  ...PUBLICLY_DISPLAYED_ROLES,
+  ...LEGACY_VISIBLE_ROLES,
 ]);
 
 /**
  * Whether a scholar with this role may be surfaced on a public directed-traffic
  * surface (search/browse/profile/home) and rendered as a clickable profile link.
  *
- * Fail-open for display: a `null`/`undefined`/unknown role is treated as publicly
- * displayed — only the explicit hidden identity classes (`doctoral_student`,
- * `affiliate_alumni`) are suppressed. This mirrors the index/route/link sites all
- * reading the same column.
+ * **Fails CLOSED on an unrecognized role (#2202).** It used to fail open, which is
+ * how a humanized display label (`"Doctoral student"`, `"MD student"` — produced by
+ * `formatRoleCategory`) sailed through where the raw enum (`doctoral_student`) was
+ * caught, publishing 684 doctoral students by name on public unit rosters. Anything
+ * that is not a known visible role is now hidden, so a label/enum mixup de-links a
+ * row instead of leaking one.
+ *
+ * `null`/`undefined` still returns true. That is absence of data (an un-backfilled
+ * scholar), not an unrecognized token, and 21 of the 22 call sites read the raw
+ * nullable column — failing closed on null would drop those scholars from the
+ * profile route, the A–Z browse, the people index and the CSV export.
  */
 export function isPubliclyDisplayed(
   role: RoleCategory | string | null | undefined,
 ): boolean {
   if (role == null) return true;
-  // #1026 / docs/student-profile-visibility.md ("Caveat: the role-name carve
-  // does not match the live data") — the ED ETL writes SUFFIXED student roles
-  // (doctoral_student_md / _phd / _mdphd) which are NOT in HIDDEN_DISPLAY_ROLES,
-  // so a bare exact-match check failed OPEN (returned true = linkable) for live
-  // students. Treat ANY `doctoral_student*` role as hidden by prefix. This only
-  // ever TIGHTENS the carve and incidentally fixes the #847 export profile_url
-  // fail-open for suffixed students. `affiliate_alumni` stays exact-match.
-  const r = String(role);
+  // #1026 — the DB carries SUFFIXED student roles (doctoral_student_md / _phd /
+  // _mdphd) that an exact-match check missed. Prefix-match covers every variant.
+  // Case-folded because ROLE_DISPLAY carries an UPPER_SNAKE_CASE half and some
+  // fixtures/legacy rows use it.
+  const r = String(role).trim().toLowerCase();
   if (r.startsWith("doctoral_student")) return false;
-  return !HIDDEN_DISPLAY_ROLES.has(role as RoleCategory);
+  return VISIBLE_ROLE_KEYS.has(r);
 }
 
 /**

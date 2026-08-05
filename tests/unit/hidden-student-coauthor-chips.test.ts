@@ -52,10 +52,11 @@ describe("isPubliclyDisplayed — #1026 doctoral_student prefix hardening", () =
     }
   });
 
-  it("preserves fail-open for null / undefined / unknown roles", () => {
+  it("preserves fail-open for null / undefined, but fails closed on unknown (#2202)", () => {
     expect(isPubliclyDisplayed(null)).toBe(true);
     expect(isPubliclyDisplayed(undefined)).toBe(true);
-    expect(isPubliclyDisplayed("some_future_role")).toBe(true);
+    // Was `true` until #2202: an unrecognized token (a display label) leaked.
+    expect(isPubliclyDisplayed("some_future_role")).toBe(false);
   });
 });
 

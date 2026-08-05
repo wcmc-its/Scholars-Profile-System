@@ -12,9 +12,14 @@ hidden at launch" shipped). Last verified on staging **2026-06-12** (evidence be
 ## TL;DR
 
 - **No — doctoral students have no public profile**, and there is **no feature flag** that
-  reveals them. Hiding is a property of the **data** (`scholar.deleted_at` is set on every
-  student) enforced by **hardcoded query filters**, not a togglable flag. It behaves
-  identically on staging and prod.
+  reveals them. Hiding is enforced by **hardcoded query filters**, not a togglable flag.
+- ⚠️ **The two environments hide them by different mechanisms.** On **staging**, every student
+  is soft-deleted (`scholar.deleted_at` set) *and* carries a suffixed role, so `deleted_at`
+  does the work. On **prod**, 690 students carry the bare `doctoral_student` with
+  `deleted_at IS NULL`, so the **role carve is the only gate** — and it failed open on display
+  labels until #2202. This doc asserted "identical on staging and prod" until 2026-08-05; it
+  was wrong, and the wrongness is why 684 students were published by name. **Verify this carve
+  against prod data shape; a staging pass proves nothing.**
 - The flag people reach for — `SEARCH_REQUIRE_DISPLAYABLE_AUTHOR` — is **off**, but it does
   **not** govern profile visibility. It only affects whether a student's *publication* rows
   are kept in the publications search index (issue
@@ -58,7 +63,17 @@ to a whole population at the data layer.
 
 ---
 
-## The mechanism — `deleted_at` is the load-bearing gate
+## The mechanism — `deleted_at` is the load-bearing gate **on staging only**
+
+> **Correction, 2026-08-05 (#2202).** Everything below this heading was measured on
+> **staging** and does **not** hold in production. On staging every doctoral student
+> carries a *suffixed* role (`doctoral_student_md` etc.) **and** a soft-delete, so
+> `deleted_at` does all the work and the role guard is inert. **On prod, 690 students
+> carry the bare `doctoral_student` with `deleted_at IS NULL`** — the exact inverse.
+> There, the role guard is the *only* gate, and it was failing open on display labels,
+> publishing 684 students by name on public unit rosters. Read the staging census in
+> "Verification" as a staging fact, never as an invariant: prod violates it 690 times.
+> A fix validated on staging proves almost nothing about this carve.
 
 Every doctoral student carries a **soft-delete**: `scholar.deleted_at` is set (the #536
 hide-flag), while `scholar.status` stays `active`. That single data fact is enforced at every
@@ -71,37 +86,40 @@ site where a profile link could be generated, because each site filters on `dele
    old slug/alias can't sneak a student back in.)
 
 2. **People search + autocomplete → excluded at the query layer.** The people index source
-   query is `PEOPLE_INDEX_WHERE = { deletedAt: null, status: "active" }`
-   (`lib/search-index-docs.ts`). Students never enter the people index, so they don't appear
-   in people search, browse, or autocomplete.
+   query is `PEOPLE_INDEX_WHERE` (`lib/search-index-docs.ts`). **Since #2202 it carries the
+   role carve too**, not just `{ deletedAt: null, status: "active" }` — because the
+   soft-delete half alone left a hole: `buildScholarOps` (`lib/edit/search-suppression.ts`)
+   re-indexes whatever passes this clause, so an /edit reflect on a *prod* student (bare
+   role, no soft-delete) would have put them back into the people index.
 
-3. **Secondary role guard (belt-and-suspenders).** `etl/search-index/index.ts` and
-   `profile-view.tsx` additionally call `isPubliclyDisplayed(roleCategory)`
-   (`lib/eligibility.ts`), which suppresses the `doctoral_student` and `affiliate_alumni` role
-   classes. **See the caveat below — for live data this check is effectively inert; the
-   `deleted_at` soft-delete above is what actually does the work.**
+3. **The role guard — belt-and-suspenders on staging, the SOLE gate on prod.**
+   `etl/search-index/index.ts` and `profile-view.tsx` call `isPubliclyDisplayed(roleCategory)`
+   (`lib/eligibility.ts`), which suppresses `doctoral_student*` (prefix) and
+   `affiliate_alumni`. It is inert on staging only because everything there is also
+   soft-deleted. **Do not treat it as redundant.** Since #2202 it also **fails closed** on any
+   unrecognized value, so feeding it a humanized label de-links a row instead of leaking one.
 
-### Caveat: the role-name carve does not match the live data
+### Caveat (RESOLVED — kept because the reasoning here was wrong twice)
 
-`HIDDEN_DISPLAY_ROLES` in `lib/eligibility.ts` contains the bare values `doctoral_student` and
-`affiliate_alumni`. But the ED ETL writes **suffixed** role categories — the live staging data
-is `doctoral_student_md`, `doctoral_student_phd`, `doctoral_student_mdphd` (the
-`role_category` column is a free `VarChar(32)`). Those suffixed values are **not** in
-`HIDDEN_DISPLAY_ROLES`, so `isPubliclyDisplayed("doctoral_student_md")` returns **`true`**.
+This section used to say the suffixed roles (`doctoral_student_md` / `_phd` / `_mdphd`) escaped
+`HIDDEN_DISPLAY_ROLES`, and concluded that the `deleted_at` soft-delete was therefore "the sole
+load-bearing guarantee." Both halves have since been overtaken:
 
-Consequences:
+- **#1026** replaced the exact-match check with a `doctoral_student*` **prefix** match, so every
+  suffixed variant is caught. The predicate is no longer inert on role name.
+- **#2202** disproved the conclusion. "Soft-delete is the sole guarantee" was a *staging*
+  observation. Prod has 690 students with `deleted_at IS NULL`, so the role guard is the only
+  thing standing between them and a public profile link — and it was being handed a display
+  label (`"Doctoral student"`), which it did not recognize and therefore let through.
 
-- The role-based carve is **not** what hides students today. The **`deleted_at` soft-delete is
-  the sole load-bearing guarantee** — and it holds, because every student row has it set.
-- The **`#847` export `profile_url` blanking** (table above) goes through the *same*
-  `isPubliclyDisplayed(roleCategory)` call, so it is inert for suffixed roles for the same
-  reason — like the role guard, the blanking actually fires because the soft-deleted student
-  never reaches the export's `deletedAt: null` cohort, not because the role name is matched.
-- **Latent fragility:** if a student's `deleted_at` were ever cleared while keeping a suffixed
-  `doctoral_student_*` role, the role guard would *not* catch them and the profile would
-  render. The safe invariant to preserve is "every hidden-role scholar stays soft-deleted,"
-  which the ED ETL maintains. (A hardening option is to match `doctoral_student*` by prefix in
-  `isPubliclyDisplayed`; not done here — flagged for awareness.)
+The invariant to preserve is **not** "every hidden-role scholar stays soft-deleted" — prod has
+never satisfied it. It is: **the role carve must hold on its own, with no help from
+`deleted_at`.** Two mechanisms enforce that now: `isPubliclyDisplayed` fails closed on anything
+it does not recognize, and `PEOPLE_INDEX_WHERE` carries the carve in the query itself
+(`HIDDEN_ROLE_CATEGORIES`). Never pass `formatRoleCategory` output to an eligibility predicate;
+the loaders carry `roleCategoryRaw` alongside the label for exactly this reason.
+
+Note the **#847** export `profile_url` blanking reads the same predicate, so it inherits both.
 
 ---
 
@@ -127,7 +145,7 @@ publications* are governed by a flag that is currently off.
 
 ---
 
-## Verification (staging, 2026-06-12)
+## Verification (staging, 2026-06-12) — **staging-only; prod contradicts it**
 
 Read-only query against the staging Aurora DB (one-off `ecs run-task` on `sps-etl-staging`,
 see `project_sps_prod_db_readonly_query`) and live `curl` against
@@ -151,8 +169,13 @@ Live routes:
   GET /            (control, faculty home)→ 200
 ```
 
-**Conclusion:** 1,875 doctoral students, all soft-deleted, **zero** in a displayable state;
-every tested student route 404s. No flag flip changes this.
+**Conclusion (staging):** 1,875 doctoral students, all soft-deleted, **zero** in a displayable
+state; every tested student route 404s. No flag flip changes this.
+
+**Prod, 2026-08-05 (#2202):** the same query returns **690**, not 0 — bare `doctoral_student`,
+`deleted_at IS NULL`, `status='active'`. The displayable-hidden-role invariant below is a
+staging property, not a system property. Run it against **both** environments or it will
+mislead you.
 
 ### How to re-verify
 
@@ -160,14 +183,14 @@ every tested student route 404s. No flag flip changes this.
 - **Data invariant:** the "displayable hidden role" count must stay **0**:
   `SELECT COUNT(*) FROM scholar WHERE (role_category LIKE 'doctoral%' OR role_category='affiliate_alumni') AND deleted_at IS NULL AND status='active';`
 - **Code:** `lib/url-resolver.ts` (resolver `deletedAt: null` filter), `lib/search-index-docs.ts`
-  (`PEOPLE_INDEX_WHERE`), `lib/eligibility.ts` (`isPubliclyDisplayed` / `HIDDEN_DISPLAY_ROLES`),
+  (`PEOPLE_INDEX_WHERE`), `lib/eligibility.ts` (`isPubliclyDisplayed` / `HIDDEN_ROLE_CATEGORIES`),
   `components/profile/profile-view.tsx` (`notFound()` call).
 
 ---
 
 ## Related
 
-- `lib/eligibility.ts` — `PUBLICLY_DISPLAYED_ROLES`, `HIDDEN_DISPLAY_ROLES`, `isPubliclyDisplayed`.
+- `lib/eligibility.ts` — `PUBLICLY_DISPLAYED_ROLES`, `HIDDEN_ROLE_CATEGORIES`, `isPubliclyDisplayed`.
 - `docs/kb/01-scholars.md` — user-facing FAQ ("I'm a doctoral student — where's my profile?").
 - `docs/outreach/wave3-doctoral-students.md` — the "hidden at launch" comms note + open WCGS privacy question.
 - `ADR-005-manual-override-layer.md`, `docs/self-edit-spec.md` — suppression as the urgent (sub-cycle) form of the same FERPA/HIPAA carve.

@@ -308,8 +308,16 @@ export type DepartmentFacultyHit = {
   divisionName: string | null;
   departmentName: string;
   identityImageEndpoint: string;
-  /** Role tag — Full-time faculty / Postdoc / etc. */
+  /** Role tag — Full-time faculty / Postdoc / etc. A display LABEL, not the enum:
+   *  it is what `RoleChipRow` / `filterByRoleCategory` and `roleCategoryCounts`
+   *  match on. Never pass it to an eligibility predicate — use `roleCategoryRaw`. */
   roleCategory: string | null;
+  /** Raw `scholar.role_category`. The value `isPubliclyDisplayed` must see (#2202):
+   *  the label above is not in its allow-list, so feeding it the label used to fail
+   *  OPEN and published 684 doctoral students by name on public unit rosters.
+   *  Optional so existing hit fixtures still typecheck — a producer that forgets it
+   *  now falls back to the label, which fails CLOSED (de-links) rather than leaking. */
+  roleCategoryRaw?: string | null;
   /** First ~120 chars of the scholar's research overview for the person-row snippet */
   overview: string | null;
   pubCount: number;
@@ -481,6 +489,7 @@ async function getDepartmentFacultyUncached(
       "",
     identityImageEndpoint: identityImageEndpoint(s.cwid),
     roleCategory: normalizeRoleCategory(s.roleCategory),
+    roleCategoryRaw: s.roleCategory,
     overview: s.overview ? s.overview.slice(0, 120).trimEnd() + (s.overview.length > 120 ? "…" : "") : null,
     pubCount: pubMap.get(s.cwid) ?? 0,
     grantCount: grantMap.get(s.cwid) ?? 0,

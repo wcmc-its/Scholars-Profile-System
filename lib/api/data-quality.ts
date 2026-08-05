@@ -55,7 +55,7 @@ export type { EditRosterUnitFilter };
 export { PI_ROLES };
 
 /** #536 hidden identity classes — not publicly displayed; mirrors
- *  `HIDDEN_DISPLAY_ROLES` in `lib/eligibility.ts`. Excluded when the viewer turns
+ *  `isPubliclyDisplayed` in `lib/eligibility.ts`. Excluded when the viewer turns
  *  the hidden-scholars filter off (the dashboard defaults to including them). */
 const HIDDEN_ROLES = ["doctoral_student", "affiliate_alumni"] as const;
 
