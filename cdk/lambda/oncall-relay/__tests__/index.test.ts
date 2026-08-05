@@ -245,6 +245,84 @@ describe("oncall-relay handler", () => {
     expect(delivered).toContain('"severity":"warn"');
   });
 
+  // A step-failure event only reaches etl-failures via the step's `Catch`,
+  // which Step Functions runs ONLY after the `Retry` policy (MaxAttempts 2) is
+  // exhausted -- so it is terminal by construction, never a transient blip.
+  // These steps are tier:"continue", so the execution still reports SUCCEEDED
+  // and this alert is the only signal that a source is dead. Measured
+  // 2026-08-05: prod InfoEd failed all three attempts, published one message
+  // here, was graded `warn`, and the grant import stayed dead for a day.
+  it("a TERMINAL nightly step failure is a page, not a warn", async () => {
+    sendMock.mockResolvedValueOnce({ SecretString: WEBHOOK_URL });
+    fetchMock.mockResolvedValueOnce(new Response("ok", { status: 202 }));
+
+    await handler(
+      snsEvent(
+        {
+          AlarmName: undefined,
+          env: "prod",
+          step: "Infoed",
+          stateMachine: "scholars-nightly-prod",
+          error: { Error: "States.TaskFailed" },
+        },
+        ETL_TOPIC_ARN,
+      ),
+      {} as never,
+      () => undefined,
+    );
+
+    const logs = consoleLogSpy.mock.calls.map((c) => String(c[0]));
+    const delivered = logs.find((l) => l.includes('"outcome":"delivered"'));
+    expect(delivered).toContain('"severity":"page"');
+  });
+
+  it("a WEEKLY step failure stays a warn — days of slack before it matters", async () => {
+    sendMock.mockResolvedValueOnce({ SecretString: WEBHOOK_URL });
+    fetchMock.mockResolvedValueOnce(new Response("ok", { status: 202 }));
+
+    await handler(
+      snsEvent(
+        {
+          AlarmName: undefined,
+          env: "prod",
+          step: "News",
+          stateMachine: "scholars-weekly-prod",
+          error: { Error: "States.TaskFailed" },
+        },
+        ETL_TOPIC_ARN,
+      ),
+      {} as never,
+      () => undefined,
+    );
+
+    const logs = consoleLogSpy.mock.calls.map((c) => String(c[0]));
+    const delivered = logs.find((l) => l.includes('"outcome":"delivered"'));
+    expect(delivered).toContain('"severity":"warn"');
+  });
+
+  it("an approval-gate event on the same topic stays a warn (no step/error)", async () => {
+    sendMock.mockResolvedValueOnce({ SecretString: WEBHOOK_URL });
+    fetchMock.mockResolvedValueOnce(new Response("ok", { status: 202 }));
+
+    await handler(
+      snsEvent(
+        {
+          AlarmName: undefined,
+          env: "prod",
+          action: "approval-required",
+          stateMachine: "scholars-nightly-prod",
+        },
+        ETL_TOPIC_ARN,
+      ),
+      {} as never,
+      () => undefined,
+    );
+
+    const logs = consoleLogSpy.mock.calls.map((c) => String(c[0]));
+    const delivered = logs.find((l) => l.includes('"outcome":"delivered"'));
+    expect(delivered).toContain('"severity":"warn"');
+  });
+
   it("warn-secret read failure falls back to the primary channel (never drops the alert)", async () => {
     process.env.TEAMS_WARN_WEBHOOK_SECRET_ARN = WARN_SECRET_ARN;
     sendMock.mockImplementation(

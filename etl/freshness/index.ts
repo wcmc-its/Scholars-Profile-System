@@ -77,13 +77,40 @@ export const SLA_HOURS: Readonly<Record<Cadence, number>> = {
 };
 
 /**
+ * Known, ACCEPTED staleness — with a mandatory expiry.
+ *
+ * The failure this exists to prevent is not a missing alarm, it is a permanent
+ * one. `scholars-heartbeat-prod` failed EVERY day from at least 2026-07-30
+ * through 2026-08-05 on a single source (Spotlight, whose producer is not
+ * deployed and whose age climbs 1.0d/day forever). Three runs a night, each
+ * paging, each identical. When the prod InfoEd import then died on 08-04, its
+ * staleness would have been one more line in a message that had already cried
+ * wolf ~60 times — so the signal existed and was worthless.
+ *
+ * An ack keeps the source TRACKED and REPORTED (printed as `ACK`, never
+ * hidden) but stops it failing the check, so the heartbeat can sit green and a
+ * NEW stale source is a state change rather than noise.
+ *
+ * `until` is mandatory and enforced: past that date the ack stops applying and
+ * the source fails normally. An ack that could not expire would be exactly the
+ * permanent blind spot this is meant to remove. An unparseable `until` is
+ * treated as NO ack (fail closed) and warned about.
+ */
+export type FreshnessAck = {
+  /** ISO date. After this instant the ack no longer applies. */
+  readonly until: string;
+  /** Why this staleness is accepted, and what would end it. */
+  readonly reason: string;
+};
+
+/**
  * `etl_run.source` string -> cadence. The source strings are the exact values
  * the ETLs write (verified against the per-source `etlRun.create` calls under
  * etl/), NOT the StepSpec ids in etl-stack.ts (e.g. step "Ed" writes source
  * "ED", step "Dynamodb" writes "ReCiterAI-projection").
  */
 export const TRACKED: Readonly<
-  Record<string, { cadence: Cadence; envs?: readonly string[] }>
+  Record<string, { cadence: Cadence; envs?: readonly string[]; ack?: FreshnessAck }>
 > = {
   // Nightly cadence (cron 0 7 * * ? *)
   ED: { cadence: "nightly" },
@@ -155,7 +182,22 @@ export const TRACKED: Readonly<
   // --publish` by hand, most recently 2026-06-15. So this SLA describes the
   // INTENDED cadence; until the producer is actually deployed, expect staleness
   // and fix it upstream rather than by widening this number again. See SPS #1813.
-  Spotlight: { cadence: "monthly" },
+  Spotlight: {
+    cadence: "monthly",
+    // Not a widened SLA — the comment above is explicit that widening is the
+    // wrong response. This keeps the 40d SLA and the STALE computation intact,
+    // and only stops a producer outage we do not own from failing OUR
+    // heartbeat every night. Revisit at `until`: either the producer is
+    // deployed (drop this ack) or it is not (renew it deliberately, with a
+    // fresh date, as a decision rather than by default).
+    ack: {
+      until: "2026-09-30",
+      reason:
+        "producer not deployed — reciterai-spotlight-monthly rule + orchestrator " +
+        "Lambda are declared in IaC but absent; every artifact so far is a hand-run " +
+        "cli/backfill_spotlight.py --publish, last 2026-06-15 (SPS #1813)",
+    },
+  },
   // Annual cadence (cron 0 9 1 7 ? *)
   Hierarchy: { cadence: "annual" },
 };
@@ -167,6 +209,30 @@ interface SourceStatus {
   readonly ageHours: number | null;
   readonly slaHours: number;
   readonly stale: boolean;
+  /** Stale, but covered by an ack that has not expired — reported, not failed. */
+  readonly acknowledged: boolean;
+  /** The ack on record, whether or not it still applies. */
+  readonly ack?: FreshnessAck;
+  /** An ack exists but its `until` has passed — this source fails again now. */
+  readonly ackExpired: boolean;
+}
+
+/**
+ * Whether an ack applies right now. Pure so the expiry rule is testable without
+ * a database — the expiry IS the safety property, so it needs real coverage.
+ *
+ * Fails CLOSED on a malformed `until`: an unparseable date grades the source
+ * normally rather than silencing it. A typo that suppressed a source forever
+ * would be strictly worse than the noise this feature exists to remove.
+ */
+export function ackState(
+  ack: FreshnessAck | undefined,
+  now: number,
+): "none" | "active" | "expired" | "invalid" {
+  if (ack === undefined) return "none";
+  const until = Date.parse(ack.until);
+  if (Number.isNaN(until)) return "invalid";
+  return now < until ? "active" : "expired";
 }
 
 async function evaluate(now: number): Promise<SourceStatus[]> {
@@ -200,7 +266,30 @@ async function evaluate(now: number): Promise<SourceStatus[]> {
     const slaHours = SLA_HOURS[cadence];
     // No success on record OR older than the SLA => stale.
     const stale = ageHours === null || ageHours > slaHours;
-    out.push({ source, cadence, lastSuccessAt, ageHours, slaHours, stale });
+
+    // An ack suppresses the FAILURE, never the staleness itself: `stale` above
+    // is untouched so the report still tells the truth.
+    const ack = spec.ack;
+    const state = ackState(ack, now);
+    if (state === "invalid") {
+      console.warn(
+        `[freshness] WARN  ${source}: ack.until "${ack?.until}" is not a parseable ` +
+          `date — ignoring the ack and grading this source normally.`,
+      );
+    }
+    const ackActive = state === "active";
+    const ackExpired = state === "expired";
+    out.push({
+      source,
+      cadence,
+      lastSuccessAt,
+      ageHours,
+      slaHours,
+      stale,
+      acknowledged: stale && ackActive,
+      ack,
+      ackExpired,
+    });
   }
   return out;
 }
@@ -209,6 +298,16 @@ function fmtAge(ageHours: number | null): string {
   if (ageHours === null) return "never";
   if (ageHours < 48) return `${ageHours.toFixed(1)}h`;
   return `${(ageHours / 24).toFixed(1)}d`;
+}
+
+/**
+ * The nightly SLA is 30h, and `(30/24).toFixed(0)` printed it as "1d" — so the
+ * log read `last_success=29.5h sla=1d`, which looks like a guard that is
+ * ignoring its own threshold. It was correct; the label was not. Print hours
+ * below 48 so the number shown is the number compared.
+ */
+function fmtSla(slaHours: number): string {
+  return slaHours < 48 ? `${slaHours}h` : `${(slaHours / 24).toFixed(0)}d`;
 }
 
 async function main(): Promise<void> {
@@ -223,12 +322,26 @@ async function main(): Promise<void> {
   });
   console.log(`[freshness] checked ${statuses.length} tracked sources @ ${new Date(now).toISOString()}`);
   for (const s of ordered) {
-    const mark = s.stale ? "STALE" : "ok";
+    const mark = s.acknowledged ? "ACK" : s.stale ? "STALE" : "ok";
     console.log(
       `[freshness] ${mark.padEnd(5)} ${s.source.padEnd(22)} cadence=${s.cadence.padEnd(7)} ` +
-        `last_success=${fmtAge(s.ageHours)} sla=${(s.slaHours / 24).toFixed(0)}d ` +
+        `last_success=${fmtAge(s.ageHours)} sla=${fmtSla(s.slaHours)} ` +
         `(${s.lastSuccessAt?.toISOString() ?? "none"})`,
     );
+    // An ack is never silent: whoever reads this must be able to see what was
+    // suppressed, why, and when it stops being suppressed, without opening the
+    // source. That is the whole difference between an ack and a blind spot.
+    if (s.acknowledged && s.ack !== undefined) {
+      console.log(`[freshness]       acknowledged until ${s.ack.until} — ${s.ack.reason}`);
+    }
+    // An ack outliving its usefulness is clutter that will one day suppress a
+    // real regression, so say so while the source is healthy and it is free to
+    // remove.
+    if (!s.stale && s.ack !== undefined) {
+      console.log(
+        `[freshness]       NOTE ack on ${s.source} is no longer needed (source is within SLA) — remove it`,
+      );
+    }
   }
 
   // Surface sources present in etl_run but not in the SLA table, so a new
@@ -245,17 +358,29 @@ async function main(): Promise<void> {
     console.log(`[freshness] untracked sources (not alarmed): ${untracked.join(", ")}`);
   }
 
-  const stale = statuses.filter((s) => s.stale);
+  const acked = statuses.filter((s) => s.acknowledged);
+  const stale = statuses.filter((s) => s.stale && !s.acknowledged);
   if (stale.length > 0) {
     const summary = stale
-      .map((s) => `${s.source} (${fmtAge(s.ageHours)} > ${s.slaHours / 24}d)`)
+      .map((s) => {
+        const expired = s.ackExpired ? ` [ack expired ${s.ack?.until}]` : "";
+        return `${s.source} (${fmtAge(s.ageHours)} > ${fmtSla(s.slaHours)})${expired}`;
+      })
       .join(", ");
     // stderr so it stands out in the log; the non-zero exit drives the alarm.
-    console.error(`[freshness] FAIL — ${stale.length} stale source(s): ${summary}`);
+    console.error(
+      `[freshness] FAIL — ${stale.length} stale source(s): ${summary}` +
+        (acked.length > 0 ? ` (${acked.length} acknowledged, not counted)` : ""),
+    );
     process.exitCode = 1;
     return;
   }
-  console.log("[freshness] OK — all tracked sources within SLA");
+  console.log(
+    `[freshness] OK — all tracked sources within SLA` +
+      (acked.length > 0
+        ? `, ${acked.length} acknowledged (${acked.map((s) => s.source).join(", ")})`
+        : ""),
+  );
 }
 
 main()

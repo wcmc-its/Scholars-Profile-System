@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SLA_HOURS, TRACKED } from "@/etl/freshness/index";
+import { SLA_HOURS, TRACKED, ackState } from "@/etl/freshness/index";
 
 describe("freshness SLAs", () => {
   // Spotlight's producer lives in ReciterAI, not this repo, and publishes
@@ -57,5 +57,74 @@ describe("freshness SLAs", () => {
         `${source} has cadence "${spec.cadence}" with no SLA`,
       ).toBeGreaterThan(0);
     }
+  });
+});
+
+/**
+ * Acknowledgements exist because a permanently-red check is worse than no
+ * check. scholars-heartbeat-prod FAILED every day from at least 2026-07-30 to
+ * 2026-08-05 on Spotlight alone — three pages a night, all identical — so when
+ * the prod InfoEd import died on 08-04 its staleness would have been one more
+ * line in a message that had already cried wolf ~60 times.
+ *
+ * The expiry is the whole safety property: an ack that cannot expire is just a
+ * blind spot with paperwork. These test that, not the happy path.
+ */
+describe("freshness acknowledgements", () => {
+  const ACK = { until: "2026-09-30", reason: "producer not deployed" };
+  const at = (iso: string) => Date.parse(iso);
+
+  it("applies before the expiry and STOPS applying after it", () => {
+    expect(ackState(ACK, at("2026-09-29T23:00:00Z"))).toBe("active");
+    expect(ackState(ACK, at("2026-10-01T00:00:00Z"))).toBe("expired");
+  });
+
+  it("fails CLOSED on an unparseable date — a typo must not silence a source forever", () => {
+    expect(ackState({ until: "not-a-date", reason: "x" }, at("2026-08-05T00:00:00Z"))).toBe(
+      "invalid",
+    );
+    expect(ackState({ until: "", reason: "x" }, at("2026-08-05T00:00:00Z"))).toBe("invalid");
+  });
+
+  it("reports no ack when none is configured", () => {
+    expect(ackState(undefined, at("2026-08-05T00:00:00Z"))).toBe("none");
+  });
+
+  it("every configured ack has a parseable expiry and a substantive reason", () => {
+    for (const [source, spec] of Object.entries(TRACKED)) {
+      if (spec.ack === undefined) continue;
+      expect(
+        Number.isNaN(Date.parse(spec.ack.until)),
+        `${source}: ack.until "${spec.ack.until}" does not parse, so the ack is silently ignored`,
+      ).toBe(false);
+      // A reason a reader can act on, not "TODO" or "known issue".
+      expect(
+        spec.ack.reason.length,
+        `${source}: ack.reason is too thin to act on`,
+      ).toBeGreaterThan(30);
+    }
+  });
+
+  // An ack until 2099 is a permanent blind spot wearing an expiry's clothes.
+  // Pinned to a fixed anchor rather than Date.now() so CI cannot start failing
+  // on a date with no code change — this bounds how far ahead an ack may be
+  // WRITTEN, and the runtime expiry does the rest.
+  it("bounds how far out an ack may reach", () => {
+    const ANCHOR = at("2026-08-05T00:00:00Z");
+    const MAX_DAYS = 365;
+    for (const [source, spec] of Object.entries(TRACKED)) {
+      if (spec.ack === undefined) continue;
+      const days = (Date.parse(spec.ack.until) - ANCHOR) / (24 * 60 * 60 * 1000);
+      expect(days, `${source}: ack reaches ${days.toFixed(0)}d out — too far to be an ack`).toBeLessThanOrEqual(
+        MAX_DAYS,
+      );
+    }
+  });
+
+  // Documents the decision, so removing the ack when the producer finally
+  // deploys is a deliberate act rather than something nobody remembers.
+  it("Spotlight is acknowledged, not silently untracked", () => {
+    expect(TRACKED.Spotlight?.ack).toBeDefined();
+    expect(TRACKED.Spotlight?.cadence).toBe("monthly");
   });
 });

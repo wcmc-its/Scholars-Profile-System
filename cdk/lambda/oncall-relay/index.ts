@@ -130,6 +130,44 @@ function severityForRecord(topicArn: string): AlertSeverity {
 }
 
 /**
+ * Refine an `etl-failures-<env>` event by IMPACT, because the topic alone
+ * cannot tell "a gate is waiting for approval" from "a nightly source is dead".
+ *
+ * The key fact is structural: the Step Functions state that publishes a step
+ * failure sits on that step's `Catch`, and `Catch` only runs once the `Retry`
+ * policy (MaxAttempts 2) is exhausted. A step-failure event on this topic is
+ * therefore TERMINAL BY CONSTRUCTION -- a transient blip that succeeded on
+ * retry never publishes at all. "Review this morning" is the wrong tier for a
+ * message that can only mean "this did not run today".
+ *
+ * It matters because these steps are `tier:"continue"`: the execution reports
+ * SUCCEEDED with the step dead inside it, so this alert is the only signal.
+ * Measured on 2026-08-05: prod InfoEd failed all three attempts (~2427s each,
+ * ETIMEOUT), published exactly one message here, was graded `warn`, landed in
+ * the page channel indistinguishable from noise, and the prod grant import
+ * stayed dead for a day.
+ *
+ * All three predicates are load-bearing:
+ *   - `step`         -- it is a step event, not an approval gate (`action`)
+ *   - `error`        -- it is a failure, not an informational notify
+ *   - `-nightly-`    -- a daily source missing a run is >=1 day stale. Weekly
+ *                       and monthly machines keep `warn`: they have days of
+ *                       slack, and the freshness ACK/STALE report is the right
+ *                       net for them.
+ * Anything else on this topic keeps the topic-derived tier.
+ */
+export function severityForEtlEvent(
+  evt: EtlEventPayload,
+  base: AlertSeverity,
+): AlertSeverity {
+  if (base === "page") return base;
+  const isStepFailure =
+    typeof evt.step === "string" && evt.step.length > 0 && evt.error !== undefined;
+  const isNightly = (evt.stateMachine ?? "").includes("-nightly-");
+  return isStepFailure && isNightly ? "page" : base;
+}
+
+/**
  * Log a structured outcome line. The URL is never logged -- only the alarm
  * name + HTTP status + outcome class + severity/channel. Audited by an
  * index.test.ts case.
@@ -152,7 +190,7 @@ function logOutcome(
 
 export const handler: SNSHandler = async (event: SNSEvent): Promise<void> => {
   for (const record of event.Records) {
-    const severity = severityForRecord(record.Sns.TopicArn);
+    let severity = severityForRecord(record.Sns.TopicArn);
     const raw = record.Sns.Message;
     let parsed: unknown;
     try {
@@ -176,6 +214,8 @@ export const handler: SNSHandler = async (event: SNSEvent): Promise<void> => {
       label = parsed.AlarmName;
     } else {
       const evt = parsed as EtlEventPayload;
+      // Refined here, before the warn/page channel order is chosen below.
+      severity = severityForEtlEvent(evt, severity);
       card = buildEtlCard(evt);
       label = evt.step ?? evt.action ?? "etl-event";
     }
