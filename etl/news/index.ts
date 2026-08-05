@@ -4,10 +4,11 @@
  * Run via `npm run etl:news`; wired into the weekly chain in cdk/lib/etl-stack.ts
  * (and etl/orchestrate.ts for the local prototype runner). One run does:
  *
- *   1. Scrape the WCM Research news feed for NEW articles (or read NEWS_SEED_PATH
- *      when set — the offline path for local dev and CI). Incremental: the crawl
- *      stops once a listing page is entirely already ingested. NEWS_BACKFILL=1
- *      walks the whole feed and re-reconciles every article.
+ *   1. Read the WCM Newsroom feed (news.weill.cornell.edu/news/feed.json) for NEW
+ *      articles (or read NEWS_SEED_PATH when set — the offline path for local dev
+ *      and CI). Incremental: the walk stops after the first feed page that is
+ *      entirely already ingested. NEWS_BACKFILL=1 walks the whole feed and
+ *      re-reconciles every article.
  *   2. Build a scholar-name index and, per article, form mention rows:
  *        VIVO-linked cwid  -> status='published' (trusted identifier join)
  *        prose name match  -> status='pending'   (queued for /edit/news-queue)
@@ -22,14 +23,14 @@
  * Env:
  *   NEWS_SEED_PATH   read this JSON (ScrapedArticle[]) instead of scraping.
  *   NEWS_BACKFILL=1  ignore the already-ingested set; walk the full feed.
- *   NEWS_MAX_PAGES   listing-page ceiling for a backfill (default 400).
+ *   NEWS_MAX_PAGES   feed-page ceiling for a backfill (default 60; 100 stories/page).
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { db } from "@/lib/db";
 import { scrapeNews } from "./scrape";
 import { buildNameIndex, detectMentions } from "./names";
-import { parseSeed, type ScrapedArticle } from "./seed";
+import { NEWS_ORIGIN, NEWS_PATH_PREFIX, parseSeed, type ScrapedArticle } from "./seed";
 
 const SEED_PATH = process.env.NEWS_SEED_PATH;
 const BACKFILL = process.env.NEWS_BACKFILL === "1";
@@ -258,8 +259,50 @@ async function upsertMentions(rows: MentionUpsert[]): Promise<{
   return { inserted, updated, preserved };
 }
 
+/**
+ * Refuse to run while rows survive from a PREVIOUS NEWS_ORIGIN (#2200).
+ *
+ * `url` is half the row identity (`@@unique([cwid, url])`), so changing the
+ * origin re-keys the whole table. Rows under the old origin become unreachable
+ * — this ETL only ever touches urls the feed emits — and every article is
+ * re-created under its new url. That is not merely duplicate profile entries:
+ * a scholar's /edit hide lives as `showOnProfile=false` on the OLD row, and a
+ * reviewer's `rejected` status likewise, so both silently revert to defaults.
+ * reconcile()'s "never resurrect a rejected row" invariant is url-keyed and is
+ * bypassed wholesale rather than violated.
+ *
+ * This is a code gate rather than a runbook line on purpose: NewsWeekly is a
+ * scheduled Step Functions step and NEWS_ORIGIN is a hardcoded constant, not a
+ * task-def flag — so there is no "merged but dark until cdk deploy" window in
+ * which to do the data step. Merging alone would arm it.
+ *
+ * Clearing it means rewriting each `news_mention.url` (and the `source_ref`
+ * stem) to its twin on the new origin. The slug is NOT a mechanical transform
+ * — the sites differ on stopwords ("biology-glioma-progression" vs
+ * "biology-of-glioma-progression") — so match on the canonical link each old
+ * article page carries, not on a string substitution.
+ */
+export async function assertNoLegacyOriginRows(
+  // db.write (the primary) deliberately: a lagging replica could report a
+  // false all-clear and let the run proceed against un-migrated rows.
+  countLegacy: () => Promise<number> = () =>
+    db.write.newsMention.count({
+      where: { NOT: { url: { startsWith: NEWS_ORIGIN + NEWS_PATH_PREFIX } } },
+    }),
+): Promise<void> {
+  const legacy = await countLegacy();
+  if (legacy === 0) return;
+  throw new Error(
+    `[News] ${legacy} news_mention row(s) predate the current source origin ` +
+      `(${NEWS_ORIGIN}${NEWS_PATH_PREFIX}). Running now would re-create every ` +
+      `article under a new url, reverting scholar hides and reviewer rejections. ` +
+      `Migrate those rows to their twins on the new origin first (#2200).`,
+  );
+}
+
 async function main(): Promise<void> {
   const startedAt = Date.now();
+  await assertNoLegacyOriginRows();
   const scholars = await db.write.scholar.findMany({
     where: { deletedAt: null },
     select: {
@@ -285,17 +328,9 @@ async function main(): Promise<void> {
           ),
         );
     const maxPages = Number(process.env.NEWS_MAX_PAGES) || undefined;
-    const result = await scrapeNews(knownUrls, { maxPages });
-    // A crawl that fetched stubs but couldn't load their detail pages is the
-    // site being down/rate-limiting, not "no news" — fail rather than record a
-    // hollow success (the volume guard scholar_technology needs is unnecessary
-    // here because we never delete, but a fetch collapse still must not pass).
-    if (result.fetchFailed > Math.max(5, result.stubs * 0.2)) {
-      throw new Error(
-        `[News] ${result.fetchFailed}/${result.stubs} detail pages failed to fetch — WCM down or rate-limiting?`,
-      );
-    }
-    articles = result.articles;
+    // scrapeNews throws on an unreadable or empty feed, so a site outage or
+    // rate-limit fails the run rather than recording a hollow success.
+    articles = await scrapeNews(knownUrls, { maxPages });
     source = "scrape";
   }
 

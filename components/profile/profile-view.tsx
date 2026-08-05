@@ -679,13 +679,13 @@ export async function ProfileView({ slug }: { slug: string }) {
               }}
               headerAction={
                 <a
-                  href="https://research.weill.cornell.edu/about-us/news-updates"
+                  href="https://news.weill.cornell.edu/news"
                   target="_blank"
                   rel="noopener noreferrer"
-                  title="Opens the full WCM Research news feed"
+                  title="Opens the full WCM Newsroom feed"
                   className="text-sm whitespace-nowrap text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
                 >
-                  View all WCM research news ↗
+                  View all WCM news ↗
                 </a>
               }
             >

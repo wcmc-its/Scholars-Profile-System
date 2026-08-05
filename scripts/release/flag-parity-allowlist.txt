@@ -93,7 +93,8 @@ TECHNOLOGIES_MIN_RETAIN             # CTL volume-guard floor (code default 0.8)
 TECHNOLOGIES_SEED_PATH              # read the committed seed instead of scraping CTL
 NEWS_SEED_PATH                      # news: read the committed seed instead of scraping the newsroom
 NEWS_BACKFILL                       # news: walk the full feed + re-reconcile every article (default incremental)
-NEWS_MAX_PAGES                      # news: listing-page ceiling for a backfill (code default 400)
+NEWS_MAX_PAGES                      # news: feed-page ceiling for a backfill (code default 60; 100 stories/page)
+NEWS_MIN_PUBLISHED                  # news: ignore articles published before this date (code default 2019-01-01; "" walks the 1997 archive)
 SCHOLARS_VIVO_ORG_CROSSWALK
 SCHOLARS_VIVO_ORG_REDIRECT_OUTPUT
 SCHOLARS_VIVO_PUB_REDIRECT_OUTPUT

@@ -1,5 +1,5 @@
 /**
- * Scrape the WCM Research news feed (research.weill.cornell.edu/about-us/news-updates).
+ * Read the WCM Newsroom feed (news.weill.cornell.edu/news/feed.json).
  *
  * Attribution to a scholar comes first from the VIVO link an article prints
  * beside a faculty name (`vivo.weill.cornell.edu/display/cwid-<cwid>`), joined by
@@ -7,31 +7,75 @@
  * VIVO link are handled downstream by the name-dictionary matcher (names.ts),
  * which proposes a PENDING candidate for a human to confirm.
  *
- * Two page shapes:
- *   LISTING  ?page=N — 5 `view-teaser` cards per page: slug, title, excerpt,
- *            thumbnail. No date, no scholars. Sorted newest-first, so the weekly
- *            run crawls from page 0 and STOPS once a page is entirely already
- *            ingested (unlike the CTL scraper, which must walk the whole listing).
- *   DETAIL   the article page: publication date (`pane-node-created post-date`)
- *            and the body prose + faculty VIVO links (`pane-node-body`).
+ * #2200 — this used to crawl research.weill.cornell.edu/about-us/news-updates,
+ * which is a SYNDICATION TARGET of the newsroom, not a source: every article
+ * there carries a `news.weill.cornell.edu` canonical link, and the two publish
+ * identical VIVO cwid sets. The newsroom is the upstream superset (~4.9k articles
+ * back to 1997 vs ~1.2k back to 2019), and it exposes `feed.json` — one paginated
+ * JSON endpoint carrying title, post date, canonical path, teaser, featured
+ * image, and the FULL body HTML. That retires ~250 listing-page fetches plus one
+ * detail fetch per article (~1,500 requests for a backfill) in favour of ~50 JSON
+ * reads, and deletes the Drupal-markup regexes this file used to need.
  *
- * ponytail: regexes over Drupal HTML because the feed exposes no structured
- * export. Shape assumptions are asserted, so a markup change surfaces as a failed
- * run (backfill) or an empty delta, never silent corruption. If WCM ships a JSON
- * feed, delete this and read it.
+ * The RSS sibling (`/news/feed`) is NOT usable: it is capped at 15 items and
+ * ignores `?page=` / `?items_per_page=` entirely.
+ *
+ * One page = 100 stories, newest first. The weekly run stops after the first
+ * page that contributes nothing new; a backfill walks to the end.
  */
-import { NEWS_ORIGIN, type ScrapedArticle } from "./seed";
+import {
+  CWID_RE,
+  NEWS_ORIGIN,
+  NEWS_PATH_PREFIX,
+  validateArticles,
+  type ScrapedArticle,
+} from "./seed";
 import { detectMentions, type NameIndexEntry } from "./names";
 
-const LISTING = `${NEWS_ORIGIN}/about-us/news-updates`;
+const FEED = `${NEWS_ORIGIN}/news/feed.json`;
 
-/** Hard ceiling on listing pages, so a pager bug can't spin forever. */
-const MAX_LISTING_PAGES_DEFAULT = 400; // > the ~248 live pages, with margin
+/** Hard ceiling on feed pages, so a pager bug can't spin forever. */
+const MAX_FEED_PAGES_DEFAULT = 60; // > the ~50 live pages, with margin
 
 const MONTHS: Record<string, number> = {
   january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
   july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
 };
+
+// Mirror the seed validator's caps, so a long upstream field is truncated here
+// rather than failing the whole run at validation.
+const TITLE_MAX = 512;
+const EXCERPT_MAX = 2000;
+const BODY_MAX = 60000;
+
+/**
+ * Ignore articles published before this date.
+ *
+ * The newsroom archive reaches 1997, but it is pre-VIVO: sampled pages covering
+ * 2014/2002/2001/1999 carry ZERO `cwid-` links across 327 articles, so the whole
+ * archive can only ever produce prose NAME candidates — thousands of PENDING
+ * rows into a review queue that currently has none of its 484 worked. The old
+ * research-site corpus started in 2019, so this floor holds ingestion at parity
+ * rather than dumping 3.7k unreviewable candidates on curators.
+ *
+ * It also gives the walk a real termination condition: the feed is newest-first,
+ * so a page entirely below the floor means every older page is too. Without it
+ * the incremental exit can never fire, because an article that yields no mention
+ * row never enters news_mention and so is never "known".
+ *
+ * Override with NEWS_MIN_PUBLISHED=YYYY-MM-DD (empty string disables the floor).
+ */
+const MIN_PUBLISHED_DEFAULT = "2019-01-01";
+
+function minPublished(): string {
+  const raw = process.env.NEWS_MIN_PUBLISHED;
+  if (raw === undefined) return MIN_PUBLISHED_DEFAULT;
+  if (raw === "") return ""; // explicit opt-out: walk the whole archive
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    throw new Error(`[News] NEWS_MIN_PUBLISHED must be YYYY-MM-DD, got ${JSON.stringify(raw)}`);
+  }
+  return raw;
+}
 
 export type Fetcher = (url: string) => Promise<string | null>;
 
@@ -63,68 +107,52 @@ export function stripTags(s: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
+    .replace(/ /g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-/** Drop C0/C7F control bytes — a stray NUL must never reach the DB or a profile. */
+/**
+ * Drop C0/DEL/C1 control bytes — a stray NUL must never reach the DB or a
+ * profile, and a C1 (U+0080-U+009F) is what a cp1252 smart quote decodes to when
+ * the upstream double-encodes: it renders as a box glyph mid-word rather than
+ * failing loudly. Must stay in lockstep with CONTROL_RE in ./seed.
+ */
 export function stripControl(s: string): string {
-  return s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
+  return s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, "");
 }
 
-export type ArticleStub = {
-  url: string;
-  title: string;
-  excerpt: string | null;
-  thumbnailUrl: string | null;
-};
+const clean = (s: string): string => stripControl(stripTags(s));
 
-/** Parse the 5 `view-teaser` cards on one listing page. Exported for tests. */
-export function listingRows(html: string): ArticleStub[] {
-  // Each feed card is a `views-row-* … view-teaser` div; split on the opener and
-  // keep the blocks. A card carries its own title link, excerpt, and thumbnail.
-  const blocks = html.split(/<div class="views-row[^"]*view-teaser">/i).slice(1);
-  const out: ArticleStub[] = [];
-  const seen = new Set<string>();
-  for (const block of blocks) {
-    // The article path may be single- OR double-quoted in this markup.
-    const slug = block.match(/\/about-us\/news-updates\/[a-z0-9][a-z0-9-]*/i)?.[0];
-    if (!slug) continue;
-    const url = NEWS_ORIGIN + slug;
-    if (seen.has(url)) continue;
-    seen.add(url);
-    const titleInner = block.match(/teaser-title"><a\b[^>]*>([\s\S]*?)<\/a>/i)?.[1] ?? "";
-    const title = stripControl(stripTags(titleInner));
-    if (!title) continue;
-    const excerptInner = block.match(/teaser-text"[^>]*>\s*(?:<p>)?([\s\S]*?)(?:<\/p>)?\s*<\/div>/i)?.[1] ?? "";
-    const excerpt = stripControl(stripTags(excerptInner)) || null;
-    const thumb =
-      block.match(/<img\b[^>]*class="news-thumb[^"]*"[^>]*src="([^"]+)"/i)?.[1] ??
-      block.match(/src="([^"]*\/news_images\/[^"]+)"/i)?.[1] ??
-      null;
-    const thumbnailUrl = thumb && thumb.startsWith(NEWS_ORIGIN + "/") ? thumb : null;
-    out.push({ url, title, excerpt, thumbnailUrl });
+/**
+ * Cap at `max`, cutting on a word boundary and marking the elision. The
+ * newsroom teaser is a full lede, not a listing blurb, and it renders verbatim
+ * on a public profile — a hard slice lands mid-word.
+ */
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max - 1);
+  const sp = cut.lastIndexOf(" ");
+  return `${(sp > max * 0.5 ? cut.slice(0, sp) : cut).trimEnd()}…`;
+}
+
+/**
+ * VIVO-linked cwids in the article body HTML (lowercased, deduped). Exported for
+ * tests. Malformed ids are DROPPED, not emitted: the live path validates now, so
+ * a single typo'd `cwid-` link upstream would otherwise fail the whole run.
+ */
+export function parseCwids(html: string): string[] {
+  const out = new Set<string>();
+  for (const m of html.matchAll(/cwid-([A-Za-z0-9]+)/gi)) {
+    const cwid = m[1].toLowerCase();
+    if (CWID_RE.test(cwid)) out.add(cwid);
   }
-  return out;
+  return [...out];
 }
 
-/** The article body pane (`pane-node-body`) up to the next pane. Exported for tests. */
-export function bodyRegion(html: string): string {
-  const start = html.search(/panel-pane[^"]*pane-node-body/i);
-  if (start < 0) return "";
-  // Start after the pane div's opening `>` so the class attribute text
-  // ("pane-node-body …") doesn't leak into the body.
-  const open = html.indexOf(">", start);
-  const rest = html.slice(open >= 0 ? open + 1 : start);
-  const next = rest.search(/panel-pane pane-/i);
-  return next >= 0 ? rest.slice(0, next) : rest;
-}
-
-/** Publication date as an ISO YYYY-MM-DD, or null. Exported for tests. */
-export function parseDate(html: string): string | null {
-  // The date sits inside the `pane-node-created post-date` pane.
-  const pane = html.match(/pane-node-created[\s\S]{0,600}?<\/div>/i)?.[0] ?? "";
-  const m = pane.match(
+/** `field_story_post_date` ("August 5, 2026") as ISO YYYY-MM-DD, or null. Exported for tests. */
+export function parseDate(text: string): string | null {
+  const m = text.match(
     /(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(\d{4})/i,
   );
   if (!m) return null;
@@ -136,83 +164,136 @@ export function parseDate(html: string): string | null {
   return new Date(Date.UTC(year, month, day)).toISOString().slice(0, 10);
 }
 
-/** VIVO-linked cwids in the article body (lowercased, deduped). Exported for tests. */
-export function parseCwids(html: string): string[] {
-  const region = bodyRegion(html) || html;
-  const out = new Set<string>();
-  for (const m of region.matchAll(/cwid-([A-Za-z0-9]+)/gi)) out.add(m[1].toLowerCase());
-  return [...out];
-}
-
-/** Parse one detail page into (publishedAt, cwids, bodyText). Exported for tests. */
-export function parseDetail(html: string): {
-  publishedAt: string | null;
-  cwids: string[];
-  bodyText: string;
-} {
-  const region = bodyRegion(html) || html;
-  return {
-    publishedAt: parseDate(html),
-    cwids: parseCwids(html),
-    bodyText: stripControl(stripTags(region)).slice(0, 60000),
-  };
+/** The `{src, alt}` featured image, when it is a same-origin absolute URL. */
+function thumbnailOf(raw: unknown): string | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const src = (raw as { src?: unknown }).src;
+  if (typeof src !== "string") return null;
+  // The JSON HTML-escapes the cache-buster query string (`&amp;`).
+  const url = stripTags(src);
+  return url.startsWith(NEWS_ORIGIN + "/") ? url : null;
 }
 
 /**
- * Crawl the listing newest-first and return NEW article stubs (url not in
- * `knownUrls`). Stops once a page contributes nothing new to the DB — older
- * pages are all already ingested. A backfill passes an empty `knownUrls` (and a
- * larger `maxPages`) to walk the whole feed.
+ * Parse one `feed.json` page into articles. A story whose `path` is not a
+ * same-origin news URL, or which has no title, is dropped rather than throwing —
+ * the archive reaches back to 1997 and carries a few odd nodes; one bad row must
+ * not sink a backfill. Exported for tests.
  */
-export async function crawlNewStubs(
-  get: Fetcher,
-  knownUrls: Set<string>,
-  maxPages = MAX_LISTING_PAGES_DEFAULT,
-): Promise<ArticleStub[]> {
-  const stubs: ArticleStub[] = [];
-  const seen = new Set<string>();
-  for (let page = 0; page < maxPages; page++) {
-    const html = await get(`${LISTING}?page=${page}`);
-    if (html === null) break;
-    const rows = listingRows(html);
-    if (rows.length === 0) break; // past the end
-    const freshToCrawl = rows.filter((r) => !seen.has(r.url));
-    if (freshToCrawl.length === 0) break; // Drupal repeats the last page past the end
-    for (const r of freshToCrawl) {
-      seen.add(r.url);
-      if (!knownUrls.has(r.url)) stubs.push(r);
-    }
-    // Incremental early-exit: a populated table + a page whose every article is
-    // already ingested means all older pages are too.
-    if (knownUrls.size > 0 && freshToCrawl.every((r) => knownUrls.has(r.url))) break;
+export function feedStories(json: string): ScrapedArticle[] {
+  const parsed: unknown = JSON.parse(json);
+  const list = (parsed as { news_stories?: unknown }).news_stories;
+  if (!Array.isArray(list)) throw new Error("[News] feed.json: missing news_stories array");
+
+  // `field_story_body` is the ONLY carrier of the VIVO cwid links — the whole
+  // trusted join. If upstream renames it or re-types it (Drupal's formatted-text
+  // shape is {value, format}, not a bare string), every story would silently
+  // yield zero cwids and the run would record a hollow success. Measured 100%
+  // non-empty across all 50 live pages, so a half-empty page is a shape change,
+  // not thin content. Fail loudly instead.
+  const withBody = list.filter(
+    (e) => typeof (e as { story?: { field_story_body?: unknown } })?.story?.field_story_body ===
+      "string" &&
+      ((e as { story: { field_story_body: string } }).story.field_story_body.length > 0),
+  ).length;
+  if (list.length >= 20 && withBody / list.length < 0.5) {
+    throw new Error(
+      `[News] feed.json: only ${withBody}/${list.length} stories carry a non-empty ` +
+        `field_story_body — upstream shape changed; the VIVO join would silently empty`,
+    );
   }
-  return stubs;
+
+  const out: ScrapedArticle[] = [];
+  for (const entry of list) {
+    const story = (entry as { story?: unknown })?.story;
+    if (typeof story !== "object" || story === null) continue;
+    const s = story as Record<string, unknown>;
+
+    const path = typeof s.path === "string" ? s.path : "";
+    if (!path.startsWith(NEWS_ORIGIN + NEWS_PATH_PREFIX)) continue;
+
+    const title = truncate(clean(typeof s.title === "string" ? s.title : ""), TITLE_MAX);
+    if (!title) continue;
+
+    const bodyHtml = typeof s.field_story_body === "string" ? s.field_story_body : "";
+    const teaser = typeof s.field_story_teaser === "string" ? s.field_story_teaser : "";
+
+    out.push({
+      url: path,
+      title,
+      excerpt: truncate(clean(teaser), EXCERPT_MAX) || null,
+      thumbnailUrl: thumbnailOf(s.field_story_featured_image),
+      publishedAt: parseDate(
+        typeof s.field_story_post_date === "string" ? s.field_story_post_date : "",
+      ),
+      // cwids come from the raw HTML (the link href); bodyText is the prose the
+      // name matcher scans.
+      cwids: parseCwids(bodyHtml),
+      bodyText: clean(bodyHtml).slice(0, BODY_MAX),
+    });
+  }
+  return out;
 }
 
 /**
- * Full scrape: crawl new stubs, fetch each detail page, and return the scraped
- * articles. `nameIndex` is unused here (the importer runs name detection so it
- * can exclude VIVO-linked cwids and reconcile against existing rows) — it stays
- * out of the scraper.
+ * Walk the feed newest-first and return NEW articles (url not in `knownUrls`).
+ * Stops after the first page that contributes nothing new — older pages are all
+ * already ingested. A backfill passes an empty `knownUrls` to walk the whole feed.
+ *
+ * Throws if a page cannot be read. A feed page dropped mid-walk means articles
+ * missing with no way to know which, so there is no partial-credit path here —
+ * unlike the old per-article detail fetches, where skipping one was safe.
  */
 export async function scrapeNews(
   knownUrls: Set<string>,
-  opts: { get?: Fetcher; maxPages?: number } = {},
-): Promise<{ articles: ScrapedArticle[]; stubs: number; fetchFailed: number }> {
+  opts: { get?: Fetcher; maxPages?: number; minPublished?: string } = {},
+): Promise<ScrapedArticle[]> {
   const get = opts.get ?? defaultFetch;
-  const stubs = await crawlNewStubs(get, knownUrls, opts.maxPages);
+  const maxPages = opts.maxPages ?? MAX_FEED_PAGES_DEFAULT;
+  const floor = opts.minPublished ?? minPublished();
   const articles: ScrapedArticle[] = [];
-  let fetchFailed = 0;
-  for (const stub of stubs) {
-    const html = await get(stub.url);
-    if (html === null) {
-      fetchFailed++;
-      continue;
+  const seen = new Set<string>();
+
+  for (let page = 0; page < maxPages; page++) {
+    const json = await get(`${FEED}?page=${page}`);
+    if (json === null) {
+      if (page === 0) throw new Error(`[News] feed unavailable: ${FEED}`);
+      throw new Error(`[News] feed page ${page} unavailable — refusing a truncated crawl`);
     }
-    const { publishedAt, cwids, bodyText } = parseDetail(html);
-    articles.push({ ...stub, publishedAt, cwids, bodyText });
+    const stories = feedStories(json);
+    if (stories.length === 0) {
+      // Past the end. Page 0 empty is a feed collapse, not an empty corpus.
+      if (page === 0) throw new Error("[News] feed returned 0 stories — upstream changed?");
+      break;
+    }
+    // Dedupe in ONE place: filtering and marking separately would let two
+    // entries sharing a path on the SAME page both through, and validateArticles
+    // rejects a duplicate url by failing the entire run.
+    const fresh = stories.filter((a) => (seen.has(a.url) ? false : (seen.add(a.url), true)));
+    if (fresh.length === 0) break; // the pager repeated a page
+
+    // Newest-first: once a whole page sits below the floor, so does every older
+    // page. This is the walk's real terminator — see MIN_PUBLISHED_DEFAULT.
+    const inWindow = floor
+      ? fresh.filter((a) => a.publishedAt === null || a.publishedAt >= floor)
+      : fresh;
+    if (floor && inWindow.length === 0) break;
+
+    let added = 0;
+    for (const a of inWindow) {
+      if (!knownUrls.has(a.url)) {
+        articles.push(a);
+        added++;
+      }
+    }
+    // Incremental early-exit: a populated table plus a page that contributed
+    // nothing new means the older pages are already ingested too.
+    if (knownUrls.size > 0 && added === 0) break;
   }
-  return { articles, stubs: stubs.length, fetchFailed };
+
+  // These urls and image srcs become hrefs and <img src> on public profiles. The
+  // seed path has always validated; the live path did not until #2200.
+  return validateArticles(articles);
 }
 
 // `detectMentions` / `NameIndexEntry` are re-exported so index.ts and tests can
