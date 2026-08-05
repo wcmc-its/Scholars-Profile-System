@@ -1,9 +1,11 @@
 # docs/ADR-012 — InfoEd grant import: what we admit, what we publish as a date, and where dates may come from
 
-**Status:** **Partially accepted, nothing yet in production.** D1, D3, D4a and D9 are merged to master (#2176, #2140) but **dark** — `etl:infoed` is excluded from the staging cadence and prod requires a manual `workflow_dispatch` deploy, so no behaviour has changed for any user yet. D5 and D4b are decisions *not* to act, and are live by default. D10 is unresolved and blocked on OSRA.
-**Date:** 2026-08-04
-**Revision:** 2
+**Status:** **Partially accepted, nothing yet in production.** D1, D3, D4a and D9 are merged to master (#2176, #2140) but **dark** — `etl:infoed` is excluded from the staging cadence and prod requires a manual `workflow_dispatch` deploy, so no behaviour has changed for any user yet. D5 and D4b are decisions *not* to act, and are live by default. D10 is unresolved and blocked on OSRA. D11 is accepted and describes behaviour already shipped — it requires no code change, only that the mapping not be widened.
+**Date:** 2026-08-05
+**Revision:** 3
 **Authors:** Scholars Profile System development team
+
+**Revision 3 adds D11**, the investigator-role contract, settled by a written OSRA ruling on 2026-08-05.
 
 **Revision 2 corrects two claims made by revision 1**, both found by diagnosing a department administrator's report that grants were missing from four investigators.
 
@@ -174,6 +176,22 @@ The 33 Outgoing Consulting Agreements are the unambiguous case: the faculty memb
 
 D9's title-based suppression already removes some of the MTA/DUA/CDA rows incidentally, but only those whose title reveals the type. It is not a substitute for a decision here.
 
+### D11 — Investigator role is whatever OSRA recorded, and the PI set is only as complete as the sponsor's award document
+
+The role rendered on a profile is a mapping of InfoEd's `pers.dd_role` and `pers.first_pd`, done in `CONSOLIDATED_QUERY` (`etl/infoed/index.ts:169`). A record resolves to `PI` when `first_pd = '1'` or `dd_role` is exactly one of `PD/PI`, `Principal Investigator`, `Qatar PI`. Everything else falls through, and the catch-all `dd_role LIKE '%co-%'` lands on `Co-Investigator`.
+
+**OSRA's convention, stated in writing on 2026-08-05:** they do not use `Co-PI` or `Co-Principal Investigator`. On a multi-PI award **every named investigator is recorded as a PD/PI**, matching NIH, which does not formally recognise the Co-PI designation. The three-value `IN` list is therefore complete against the convention as stated, and no mapping change is warranted.
+
+**The `IN` list is the contract; the catch-all is not a safety net.** An unrecognised PD/PI spelling does not fail loudly — it silently resolves to `Co-Investigator` and publishes a full PI as a junior collaborator. The failure is asymmetric: it understates seniority on a public profile, and the person affected is the last to see it. If OSRA's convention ever changes, or a new sponsor-specific variant appears, the value goes in the `IN` list. Do not widen the catch-all.
+
+**The real completeness limit is upstream, and is not ours to fix.** OSRA identifies PD/PIs from **sponsor-issued award documentation**. An NIH Notice of Award names the contact PI and any additional PD/PIs; **many non-NIH sponsors name only the contact PI**, and on those awards the additional PD/PIs are simply absent from InfoEd at intake. Such a record is correct with respect to its source and incomplete in fact. A confirmed instance: on a 2026 Prostate Cancer Foundation award the investigator was carried as `dd_role = 'Co-Investigator'`, `first_pd = 0` while sponsor-facing material identified them as a PI; OSRA verified and corrected the record on request.
+
+**The correction path is per-record and human, by design.** Faculty report → OSRA checks the award documents → WRG is updated → the profile follows on the next nightly `etl:infoed` run. Nothing in this repository shortcuts it: `/edit` is hide/show only and no request path writes `Grant.role`. **We must not infer PI standing from any other signal** — authorship, a sponsor's web page, a screenshot from the investigator — because doing so would put the profile ahead of the system of record and make the two permanently disagree. The screenshot is evidence for OSRA, not an input to the ETL.
+
+Once such a correction lands, the second PD/PI survives account-level aggregation only because `Any_Pd_Pi` tests `role_category = 'PI'` exactly (#2090). `MIN(role_category)` is alphabetical and prefers `Co-investigator`; the earlier `MIN(Role_Category) LIKE '%PI'` form lost 121 pairs. That fix is merged and dark with the rest of this ADR — until `etl:infoed` actually runs in prod, an OSRA correction to a multi-PI award can still be flattened on the way out.
+
+**Unmeasured, and cheap to measure:** how many published awards have exactly one `role_category = 'PI'` row under a non-NIH sponsor. That is the upper bound on this population, and it has never been counted. It is a worklist for OSRA, not a code change.
+
 ## Consequences
 
 - The `grant_date_gap` worklist means "awarded but carrying no awarded period", not "no date anywhere". Anyone quoting its size externally must say which they mean; the two differ by roughly 9×.
@@ -181,6 +199,7 @@ D9's title-based suppression already removes some of the MTA/DUA/CDA rows incide
 - D5 means the published feed remains ~29% smaller than InfoEd's in-scope population, and the OSRA worklist remains correspondingly smaller. Both are deliberate.
 - D4b remaining open means subaward-funded and non-NIH-funded investigators have systematically worse topical coverage than NIH-prime-funded ones. This is not a random gap — it is correlated with funding structure, and therefore with discipline.
 - D2 means 1,521 accounts stay invisible on profiles despite InfoEd holding a date for them. That is the correct trade, and it is a real cost.
+- D11 means a multi-PI award from a sponsor whose award letter names only the contact PI will publish the other PD/PIs as Co-Investigators until someone reports it. Like D4b, this is not a random gap: it is correlated with sponsor type, so foundation- and industry-funded investigators absorb it disproportionately.
 
 ## Verification
 
@@ -212,6 +231,7 @@ Note also that this change is a **SQL string**. `tsc`, the unit suite, and CI ca
 3. **Non-NIH topical signal.** Komen, ACS, DOD, PCORI and CDC awards have no RePORTER record, so D4b cannot help them. `Grant.abstractSource` already anticipates `'nsf' | 'pcori' | 'cdmrp' | 'gates'` and fetchers exist under `etl/nsf` and `etl/gates`, but they evidently do not reach these rows.
 4. **`NIH_AWARD_RE` rejects 4-character activity codes** (`lib/award-number.ts`), so CDC awards such as `1 NU58DP007916-01-00` cannot parse. Separately, `FHCRC 203865-01` **false-positive parses** to core `FHCRC203865`, treating a Fred Hutch reference number as an NIH award.
 5. **OSRA intends to formally award these contract types in future**, which will resolve part of the 711 without any code change. No date given.
+6. **How many published non-NIH awards carry exactly one PD/PI** (D11). Never counted; it bounds the under-stated-role population and is answerable from Aurora alone.
 
 ## Related
 
@@ -223,4 +243,6 @@ Note also that this change is a **SQL string**. `tsc`, the unit suite, and CI ca
 - #2182 — D4b, and the enrichment defect it causes
 - #2020 / #2026 — the original undated-award investigation and the RePORTER backfill
 - #2038 — the prod nightly's `IntegrityNightly` failure, downstream of `TaskInfoed`
+- #2090 — `Any_Pd_Pi`, which is what keeps a corrected non-contact PD/PI from being flattened by `MIN(role_category)` (D11)
+- OSRA Sponsored Programs, written ruling of 2026-08-05 — the source for D11's role convention and the sponsor-documentation limit
 - [`ADR-005`](./ADR-005-manual-override-layer.md) — the suppression/override layer D9 writes into
