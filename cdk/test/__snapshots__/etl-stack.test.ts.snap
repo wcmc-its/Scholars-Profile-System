@@ -3908,6 +3908,34 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
+    "HeartbeatDurationAlarmBD15807D": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS ETL heartbeat (prod) -- execution ran longer than 30 minutes. Next: compare per-step elapsed in the ETL logs against the previous run; a step approaching its own timeout fails hard and silently once it crosses (#2189). Nothing is broken yet -- this is the margin warning.",
+        "AlarmName": "sps-etl-heartbeat-duration-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions": [
+          {
+            "Name": "StateMachineArn",
+            "Value": {
+              "Ref": "HeartbeatStateMachine01CA14FE",
+            },
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "ExecutionTime",
+        "Namespace": "AWS/States",
+        "Period": 3600,
+        "Statistic": "Maximum",
+        "Threshold": 1800000,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
     "HeartbeatScheduleRuleF9DC8C97": {
       "Properties": {
         "Description": "SPS ETL heartbeat cadence (prod). D7.",
@@ -4335,6 +4363,34 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "Statistic": "Sum",
         "Threshold": 1,
         "TreatMissingData": "breaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "NightlyDurationAlarmB25E4A36": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS ETL nightly (prod) -- execution ran longer than 2 hours 30 minutes. Next: compare per-step elapsed in the ETL logs against the previous run; a step approaching its own timeout fails hard and silently once it crosses (#2189). Nothing is broken yet -- this is the margin warning.",
+        "AlarmName": "sps-etl-nightly-duration-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions": [
+          {
+            "Name": "StateMachineArn",
+            "Value": {
+              "Ref": "NightlyStateMachineFAE492F4",
+            },
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "ExecutionTime",
+        "Namespace": "AWS/States",
+        "Period": 3600,
+        "Statistic": "Maximum",
+        "Threshold": 9000000,
+        "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
@@ -6108,6 +6164,34 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "Statistic": "Sum",
         "Threshold": 1,
         "TreatMissingData": "breaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "WeeklyDurationAlarmE6D6A726": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS ETL weekly (prod) -- execution ran longer than 3 hours. Next: compare per-step elapsed in the ETL logs against the previous run; a step approaching its own timeout fails hard and silently once it crosses (#2189). Nothing is broken yet -- this is the margin warning.",
+        "AlarmName": "sps-etl-weekly-duration-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions": [
+          {
+            "Name": "StateMachineArn",
+            "Value": {
+              "Ref": "WeeklyStateMachineEC3FFB0B",
+            },
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "ExecutionTime",
+        "Namespace": "AWS/States",
+        "Period": 3600,
+        "Statistic": "Maximum",
+        "Threshold": 10800000,
+        "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
@@ -11771,6 +11855,34 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
+    "HeartbeatDurationAlarmBD15807D": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS ETL heartbeat (staging) -- execution ran longer than 30 minutes. Next: compare per-step elapsed in the ETL logs against the previous run; a step approaching its own timeout fails hard and silently once it crosses (#2189). Nothing is broken yet -- this is the margin warning.",
+        "AlarmName": "sps-etl-heartbeat-duration-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions": [
+          {
+            "Name": "StateMachineArn",
+            "Value": {
+              "Ref": "HeartbeatStateMachine01CA14FE",
+            },
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "ExecutionTime",
+        "Namespace": "AWS/States",
+        "Period": 3600,
+        "Statistic": "Maximum",
+        "Threshold": 1800000,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
     "HeartbeatScheduleRuleF9DC8C97": {
       "Properties": {
         "Description": "SPS ETL heartbeat cadence (staging). D7.",
@@ -12198,6 +12310,34 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         "Statistic": "Sum",
         "Threshold": 1,
         "TreatMissingData": "breaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "NightlyDurationAlarmB25E4A36": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS ETL nightly (staging) -- execution ran longer than 2 hours 30 minutes. Next: compare per-step elapsed in the ETL logs against the previous run; a step approaching its own timeout fails hard and silently once it crosses (#2189). Nothing is broken yet -- this is the margin warning.",
+        "AlarmName": "sps-etl-nightly-duration-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions": [
+          {
+            "Name": "StateMachineArn",
+            "Value": {
+              "Ref": "NightlyStateMachineFAE492F4",
+            },
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "ExecutionTime",
+        "Namespace": "AWS/States",
+        "Period": 3600,
+        "Statistic": "Maximum",
+        "Threshold": 9000000,
+        "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
@@ -13955,6 +14095,34 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         "Statistic": "Sum",
         "Threshold": 1,
         "TreatMissingData": "breaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "WeeklyDurationAlarmE6D6A726": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS ETL weekly (staging) -- execution ran longer than 3 hours. Next: compare per-step elapsed in the ETL logs against the previous run; a step approaching its own timeout fails hard and silently once it crosses (#2189). Nothing is broken yet -- this is the margin warning.",
+        "AlarmName": "sps-etl-weekly-duration-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions": [
+          {
+            "Name": "StateMachineArn",
+            "Value": {
+              "Ref": "WeeklyStateMachineEC3FFB0B",
+            },
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "ExecutionTime",
+        "Namespace": "AWS/States",
+        "Period": 3600,
+        "Statistic": "Maximum",
+        "Threshold": 10800000,
+        "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
