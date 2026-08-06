@@ -136,6 +136,28 @@ export const TRACKED: Readonly<
   // #794 — A2 tools taxonomy → scholar_tool. Writes a row every nightly run
   // (a 0-row success in ddb mode), so it is freshness-tracked from the start.
   Tools: { cadence: "nightly" },
+  // #2051 part B — deployed nightly steps (cdk/lib/etl-stack.ts
+  // FamilySensitivityNightly / FamilySuppressionNightly, both tier:"continue",
+  // both envs, no env split) writing sources "FamilySensitivity" /
+  // "FamilySuppression". Freshness is their ONLY detector, on both counts:
+  // continue-tier means a failure never reaches the ExecutionsFailed alarm, and
+  // the etl:integrity volume guard cannot see them either — each records
+  // `rowsProcessed` = the line count of a curated CSV checked into this repo
+  // (33 and 8 rows), which is below the guard's minPreviousRows=100 floor AND
+  // constant between two runs of the same image, so its drop ratio is 0 by
+  // construction. Lowering that floor would add nothing; see the note above
+  // findVolumeRegressions in etl/integrity/index.ts.
+  //
+  // Suppression is the load-bearing one. family_suppression_overlay is an
+  // UNCONDITIONAL hard-hide on the public profile (lib/api/profile.ts
+  // partitionScholarFamilies filters on it before any flag check), so an
+  // overlay that silently stops being reseeded un-hides method families on
+  // live profiles with nothing alarming. That is not hypothetical: the
+  // etl-stack.ts comment on these two steps records that prod's suppression
+  // overlay "sat empty for an unknown period" already, which is the incident
+  // this entry exists to make noisy.
+  FamilySensitivity: { cadence: "nightly" },
+  FamilySuppression: { cadence: "nightly" },
   MeshCoverage: { cadence: "nightly" },
   // #1258/#2016 — both envs. The `envs: ["staging"]` restriction is retired with
   // the nightlySteps env split it mirrored. Tracking prod is the POINT of this
@@ -144,6 +166,17 @@ export const TRACKED: Readonly<
   // alarmed precisely because prod was excluded here. A promoted step that is not
   // freshness-tracked would re-accumulate that staleness silently.
   MeshAnchor: { cadence: "nightly" },
+  // Deployed nightly step (cdk/lib/etl-stack.ts MeshAliasNightly,
+  // tier:"continue", both envs) writing source "MeshAlias". Added to the same
+  // curated-MeSH block as MeshAnchor directly above, in the same style, one
+  // after the other — and only MeshAnchor was tracked, which was an oversight
+  // rather than a decision. Same two-way blind spot as the family overlays:
+  // continue-tier hides it from the status alarm, and its 77-row curated CSV
+  // is both under the volume guard's 100-row floor and constant run to run.
+  // The loader is a full deleteMany + re-insert, so a silent failure leaves
+  // query→descriptor aliases missing from the search resolver
+  // (lib/api/search-taxonomy.ts) with no other signal.
+  MeshAlias: { cadence: "nightly" },
   PubMedRetractions: { cadence: "nightly" },
   // Terminal steps — run in BOTH cadences; the nightly SLA is the binding one.
   SearchIndex: { cadence: "nightly" },

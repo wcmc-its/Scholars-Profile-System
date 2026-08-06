@@ -1448,10 +1448,12 @@ export class EtlStack extends Stack {
     // machines (nightly + weekly + heartbeat = 3), seven total. (#595 added the
     // heartbeat machine + its two alarms.)
     //
-    // - **Status alarm** -- ExecutionsFailed sum > 0 over one period at
-    //   the cadence interval. Catches every failed execution including
+    // - **Status alarm** -- unsuccessful terminations, sum > 0 over one period
+    //   at the cadence interval. Catches every failed execution including
     //   ones that crash before the per-step Catch block runs. Created for
-    //   all three machines.
+    //   all three machines. "Unsuccessful" is ExecutionsFailed PLUS
+    //   ExecutionsTimedOut PLUS ExecutionsAborted -- see `unsuccessfulMetric`
+    //   below for why the first of those three is not enough on its own.
     // - **Cadence alarm** -- ExecutionsStarted sum < 1 over `cadenceWindow`.
     //   Catches EventBridge-rule disable / IAM gap / etc.
     //   `treatMissingData: BREACHING` so a total absence of metric data
@@ -1471,6 +1473,55 @@ export class EtlStack extends Stack {
     //   in the tests asserts the <=604800 product for every alarm.
     // ------------------------------------------------------------------
     const alarmAction = new cloudwatchActions.SnsAction(this.failureTopic);
+    /**
+     * Every way a state machine can end WITHOUT succeeding, as one metric:
+     * ExecutionsFailed + ExecutionsTimedOut + ExecutionsAborted.
+     *
+     * ExecutionsFailed alone -- what every status alarm here used to watch --
+     * covers only one of the three unsuccessful terminal states, and it is the
+     * one that already notifies by another route (a Catch publishes to
+     * etl-failures before the Fail state runs). The other two are silent:
+     *
+     * - TIMED_OUT. A machine that hits its own `timeout:` is terminated by
+     *   Step Functions; NO Catch runs, so nothing publishes to etl-failures
+     *   and ExecutionsFailed stays at zero. The run vanishes. This is not
+     *   hypothetical on the short-lived machines: their per-task retry budget
+     *   exceeds the machine timeout (reconcile/cdn-reconcile allow 3 x 14 min
+     *   of attempts under a 15 min cap), so a hung task CONVERTS a failure
+     *   that would have notified into one that does not.
+     * - ABORTED. An operator StopExecution, and the "did someone stop the
+     *   nightly and forget?" question is exactly the one worth asking.
+     *
+     * Summing with `+` rather than one alarm per metric keeps the alarm count
+     * (and the notification count for a single bad run) unchanged. The
+     * arithmetic is safe on these sparse metrics: CloudWatch metric math
+     * treats a MISSING value in a time series as 0 for the arithmetic
+     * operators, so a period in which only ExecutionsTimedOut reported still
+     * sums to that value. A period in which none of the three reported stays
+     * empty, and `treatMissingData` decides -- same as today.
+     */
+    const unsuccessfulMetric = (
+      dimensionsMap: Record<string, string>,
+      period: Duration,
+    ): cloudwatch.IMetric => {
+      const outcome = (metricName: string): cloudwatch.Metric =>
+        new cloudwatch.Metric({
+          namespace: "AWS/States",
+          metricName,
+          statistic: cloudwatch.Stats.SUM,
+          period,
+          dimensionsMap,
+        });
+      return new cloudwatch.MathExpression({
+        expression: "failed + timedOut + aborted",
+        usingMetrics: {
+          failed: outcome("ExecutionsFailed"),
+          timedOut: outcome("ExecutionsTimedOut"),
+          aborted: outcome("ExecutionsAborted"),
+        },
+        period,
+      });
+    };
     interface CadenceArgs {
       readonly id: string;
       readonly cadenceLabel: string;
@@ -1569,17 +1620,10 @@ export class EtlStack extends Stack {
       const dimensions = {
         StateMachineArn: c.stateMachine.stateMachineArn,
       };
-      const failedMetric = new cloudwatch.Metric({
-        namespace: "AWS/States",
-        metricName: "ExecutionsFailed",
-        statistic: cloudwatch.Stats.SUM,
-        period: c.statusPeriod ?? Duration.hours(1),
-        dimensionsMap: dimensions,
-      });
       const statusAlarm = new cloudwatch.Alarm(this, `${c.id}StatusAlarm`, {
         alarmName: `sps-etl-${c.cadenceLabel}-status-${env}`,
-        alarmDescription: `SPS ETL ${c.cadenceLabel} (${env}) -- execution failed. Next: check the Step Functions execution and the failing step's logs; data freshness lags until it reruns.`,
-        metric: failedMetric,
+        alarmDescription: `SPS ETL ${c.cadenceLabel} (${env}) -- the run did not finish successfully: it failed, ran out of time, or was stopped. Next: open the Step Functions execution for scholars-${c.cadenceLabel}-${env}, find the step marked red, and read that step's logs. The website stays up and keeps showing the data from the last good run; it just stops getting newer. Nothing retries on its own before the next scheduled ${c.cadenceLabel} run, so a run that must not wait has to be started by hand.`,
+        metric: unsuccessfulMetric(dimensions, c.statusPeriod ?? Duration.hours(1)),
         evaluationPeriods: 1,
         threshold: 0,
         comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
@@ -1860,14 +1904,8 @@ export class EtlStack extends Stack {
     };
     const reconcileStatusAlarm = new cloudwatch.Alarm(this, "ReconcileStatusAlarm", {
       alarmName: `sps-reconcile-status-${env}`,
-      alarmDescription: `SPS reconciler (${env}) -- run failed (>=1 suppression row could not be reflected into the index). Next: check the Step Functions execution for the failing row; it self-heals once the underlying write succeeds.`,
-      metric: new cloudwatch.Metric({
-        namespace: "AWS/States",
-        metricName: "ExecutionsFailed",
-        statistic: cloudwatch.Stats.SUM,
-        period: Duration.minutes(15),
-        dimensionsMap: reconcileDimensions,
-      }),
+      alarmDescription: `SPS reconciler (${env}) -- runs have not finished successfully for ~30 min (failed, ran out of time, or were stopped), so >=1 hidden scholar or publication may still be showing in search results. Next: open the Step Functions execution for scholars-reconcile-${env} and read the failing row's logs. It self-heals once the underlying write succeeds; if it does not clear within an hour, the hidden record needs a manual re-save.`,
+      metric: unsuccessfulMetric(reconcileDimensions, Duration.minutes(15)),
       // Require ~30 min of sustained failure (2 consecutive 15 min windows)
       // before alerting. The reconciler runs every 5 min and is idempotent,
       // so a single failed run self-heals on the next fire and is not worth a
@@ -2131,14 +2169,8 @@ export class EtlStack extends Stack {
     };
     const cdnReconcileStatusAlarm = new cloudwatch.Alarm(this, "CdnReconcileStatusAlarm", {
       alarmName: `sps-cdn-reconcile-status-${env}`,
-      alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- run failed (>=1 pending edge purge could not be replayed). Next: check the Step Functions execution for the failing purge; it replays on the next run once CloudFront accepts it.`,
-      metric: new cloudwatch.Metric({
-        namespace: "AWS/States",
-        metricName: "ExecutionsFailed",
-        statistic: cloudwatch.Stats.SUM,
-        period: Duration.minutes(15),
-        dimensionsMap: cdnReconcileDimensions,
-      }),
+      alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- runs have not finished successfully for ~30 min (failed, ran out of time, or were stopped), so >=1 edited page may still be serving its old cached version to the public. Next: open the Step Functions execution for scholars-cdn-reconcile-${env} and read the failing purge's logs. It replays on the next run once CloudFront accepts it.`,
+      metric: unsuccessfulMetric(cdnReconcileDimensions, Duration.minutes(15)),
       // Require ~30 min of sustained failure (2 consecutive 15 min windows)
       // before alerting. The reconciler runs every 5 min and is idempotent,
       // so a single failed run self-heals on the next fire and is not worth a

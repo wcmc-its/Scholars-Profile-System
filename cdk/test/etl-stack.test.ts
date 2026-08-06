@@ -33,6 +33,69 @@ function buildEtlStack(
   return { template: Template.fromStack(stack), stack };
 }
 
+/**
+ * Read an alarm's metric shape regardless of HOW the alarm expresses it.
+ *
+ * A single-metric alarm carries `MetricName`/`Statistic`/`Period` at the top
+ * level. A metric-math alarm carries NONE of those: it has a `Metrics` array
+ * whose entries each nest a `MetricStat`, plus one entry holding the
+ * `Expression`. So an assertion written against the top-level properties does
+ * not fail when an alarm is converted to an expression -- it silently matches
+ * nothing and stops checking. That is a live hazard for the <=604800s
+ * evaluation-window guard below, which reads `Period` and would have gone
+ * blind on all six status alarms the moment they started summing
+ * failed + timedOut + aborted.
+ */
+function alarmMetricShape(props: Record<string, unknown> | undefined): {
+  names: string[];
+  stats: string[];
+  periods: number[];
+  expression: string | undefined;
+} {
+  const metrics: unknown[] = Array.isArray(props?.Metrics) ? (props.Metrics as unknown[]) : [];
+  if (metrics.length === 0) {
+    const name = props?.MetricName;
+    const stat = props?.Statistic;
+    const period = props?.Period;
+    return {
+      names: typeof name === "string" ? [name] : [],
+      stats: typeof stat === "string" ? [stat] : [],
+      periods: typeof period === "number" ? [period] : [],
+      expression: undefined,
+    };
+  }
+  const entries = metrics as ReadonlyArray<{
+    Expression?: unknown;
+    MetricStat?: { Period?: unknown; Stat?: unknown; Metric?: { MetricName?: unknown } };
+  }>;
+  const stats = entries.map((m) => m.MetricStat?.Stat);
+  return {
+    names: entries
+      .map((m) => m.MetricStat?.Metric?.MetricName)
+      .filter((n): n is string => typeof n === "string")
+      .sort(),
+    stats: stats.filter((s): s is string => typeof s === "string"),
+    periods: entries
+      .map((m) => m.MetricStat?.Period)
+      .filter((p): p is number => typeof p === "number"),
+    expression: entries.map((m) => m.Expression).find((e): e is string => typeof e === "string"),
+  };
+}
+
+/**
+ * The three ways a Step Functions execution can end without succeeding.
+ *
+ * ExecutionsFailed alone -- what these alarms watched before -- is the only
+ * one of the three that ALREADY notifies by another route (a Catch publishes
+ * to etl-failures before the Fail state). TIMED_OUT runs no Catch at all, and
+ * ABORTED is an operator StopExecution; both were entirely silent.
+ */
+const UNSUCCESSFUL_METRICS = [
+  "ExecutionsAborted",
+  "ExecutionsFailed",
+  "ExecutionsTimedOut",
+] as const;
+
 // Re-asserted per Footgun #6 / feedback_ec2_descriptions_ascii_only.
 // The allow-set matches the regex documented in app-stack.test.ts.
 const EC2_DESCRIPTION_ALLOWED = /^[a-zA-Z0-9. _\-:/()#,@[\]+=&;{}!$*]+$/;
@@ -630,11 +693,11 @@ describe("EtlStack", () => {
         }
       });
 
-      it("cadence status alarms watch ExecutionsFailed sum > 0", () => {
+      it("cadence status alarms watch failed + timed-out + aborted, sum > 0", () => {
         const alarms = template.findResources("AWS::CloudWatch::Alarm");
         // Scope to the cadence machines (sps-etl-*); the #393 reconciler's
         // status alarm has its own focused test below.
-        const statusAlarms = Object.values(alarms).filter((a) => {
+        const statusAlarms = Object.entries(alarms).filter(([, a]) => {
           const name = a.Properties?.AlarmName as string | undefined;
           return (
             typeof name === "string" &&
@@ -643,9 +706,21 @@ describe("EtlStack", () => {
           );
         });
         expect(statusAlarms).toHaveLength(4);
-        for (const a of statusAlarms) {
-          expect(a.Properties?.MetricName).toBe("ExecutionsFailed");
-          expect(a.Properties?.Statistic).toBe("Sum");
+        for (const [, a] of statusAlarms) {
+          const shape = alarmMetricShape(a.Properties);
+          // Dropping any one of the three re-opens a silent terminal state:
+          // a machine that hits its own `timeout:` is killed as TIMED_OUT
+          // with no Catch and no SNS publish, so ExecutionsFailed stays 0 and
+          // the run disappears entirely.
+          expect({
+            alarm: a.Properties?.AlarmName as string,
+            watches: shape.names,
+          }).toEqual({
+            alarm: a.Properties?.AlarmName as string,
+            watches: [...UNSUCCESSFUL_METRICS],
+          });
+          expect(shape.expression).toBe("failed + timedOut + aborted");
+          expect(shape.stats).toEqual(["Sum", "Sum", "Sum"]);
           expect(a.Properties?.ComparisonOperator).toBe(
             "GreaterThanThreshold",
           );
@@ -694,9 +769,14 @@ describe("EtlStack", () => {
         const alarms = template.findResources("AWS::CloudWatch::Alarm");
         const violations: string[] = [];
         for (const [id, a] of Object.entries(alarms)) {
-          const period = a.Properties?.Period as number | undefined;
           const evals = a.Properties?.EvaluationPeriods as number | undefined;
-          if (typeof period === "number" && period >= 3600) {
+          // Every period the alarm actually evaluates on -- top-level for a
+          // single-metric alarm, per-MetricStat for a metric-math one. Reading
+          // only `Properties.Period` would skip all six status alarms, which
+          // includes the heartbeat's 86400s one, and this guard exists because
+          // a violation rolled staging back once.
+          for (const period of new Set(alarmMetricShape(a.Properties).periods)) {
+            if (period < 3600) continue;
             const window = period * (evals ?? 1);
             if (window > 604800) {
               violations.push(
@@ -706,6 +786,17 @@ describe("EtlStack", () => {
           }
         }
         expect(violations).toEqual([]);
+      });
+
+      // The guard above is only as good as its reach. If a future change
+      // converts an alarm to a shape neither branch of alarmMetricShape
+      // understands, the loop reads zero periods and passes vacuously.
+      it("the <=604800s guard can read a period for every alarm", () => {
+        const alarms = template.findResources("AWS::CloudWatch::Alarm");
+        const unreadable = Object.entries(alarms)
+          .filter(([, a]) => alarmMetricShape(a.Properties).periods.length === 0)
+          .map(([id, a]) => `${id}: ${a.Properties?.AlarmName}`);
+        expect(unreadable).toEqual([]);
       });
     });
 
@@ -831,15 +922,24 @@ describe("EtlStack", () => {
         }
       });
 
-      it("the status alarm watches ExecutionsFailed sum > 0 (idle window not breaching)", () => {
+      it("the status alarm watches failed + timed-out + aborted sum > 0 (idle window not breaching)", () => {
         template.hasResourceProperties("AWS::CloudWatch::Alarm", {
           AlarmName: "sps-reconcile-status-prod",
-          MetricName: "ExecutionsFailed",
-          Statistic: "Sum",
           ComparisonOperator: "GreaterThanThreshold",
           Threshold: 0,
           TreatMissingData: "notBreaching",
         });
+        // The timeout arm matters most on THIS machine: its per-task retry
+        // budget (3 attempts x 14 min + backoff) outlives the 15 min machine
+        // timeout, so a hung run is killed as TIMED_OUT mid-retry -- no Catch,
+        // no SNS publish, and ExecutionsFailed never moves.
+        const alarm = Object.values(template.findResources("AWS::CloudWatch::Alarm")).find(
+          (a) => a.Properties?.AlarmName === "sps-reconcile-status-prod",
+        );
+        const shape = alarmMetricShape(alarm?.Properties);
+        expect(shape.names).toEqual([...UNSUCCESSFUL_METRICS]);
+        expect(shape.stats).toEqual(["Sum", "Sum", "Sum"]);
+        expect(shape.periods).toEqual([900, 900, 900]);
       });
 
       it("the cadence alarm watches ExecutionsStarted sum < 1 with treatMissingData=breaching (silent schedule death)", () => {
@@ -985,15 +1085,22 @@ describe("EtlStack", () => {
         expect(serialized).not.toMatch(/secretsmanager:/);
       });
 
-      it("the status alarm watches ExecutionsFailed sum > 0 (idle window not breaching)", () => {
+      it("the status alarm watches failed + timed-out + aborted sum > 0 (idle window not breaching)", () => {
         template.hasResourceProperties("AWS::CloudWatch::Alarm", {
           AlarmName: "sps-cdn-reconcile-status-prod",
-          MetricName: "ExecutionsFailed",
-          Statistic: "Sum",
           ComparisonOperator: "GreaterThanThreshold",
           Threshold: 0,
           TreatMissingData: "notBreaching",
         });
+        // Same retry-budget-outlives-machine-timeout shape as the #393
+        // reconciler above: 3 x 14 min of attempts under a 15 min cap.
+        const alarm = Object.values(template.findResources("AWS::CloudWatch::Alarm")).find(
+          (a) => a.Properties?.AlarmName === "sps-cdn-reconcile-status-prod",
+        );
+        const shape = alarmMetricShape(alarm?.Properties);
+        expect(shape.names).toEqual([...UNSUCCESSFUL_METRICS]);
+        expect(shape.stats).toEqual(["Sum", "Sum", "Sum"]);
+        expect(shape.periods).toEqual([900, 900, 900]);
       });
 
       it("the cadence alarm watches ExecutionsStarted sum < 1 with treatMissingData=breaching (silent schedule death)", () => {

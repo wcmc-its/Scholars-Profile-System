@@ -58,6 +58,47 @@ describe("freshness SLAs", () => {
       ).toBeGreaterThan(0);
     }
   });
+
+  // These three are the sources with NO other detector, so dropping one out of
+  // TRACKED restores a total blind spot rather than merely losing a second
+  // opinion. Each is a continue-tier nightly step, so a failure never reaches
+  // the sps-etl-nightly-status-<env> ExecutionsFailed alarm; and each records
+  // `rowsProcessed` = the line count of a curated CSV checked into this repo
+  // (33 / 8 / 77), which sits under etl:integrity's minPreviousRows=100 floor
+  // AND is constant between two runs of the same image, so the volume guard's
+  // drop ratio is 0 by construction and lowering that floor would change
+  // nothing. Freshness is the whole net.
+  //
+  // FamilySuppression is the one to protect hardest: family_suppression_overlay
+  // is an unconditional hard-hide on the public profile, so a silently
+  // un-reseeded overlay un-hides content. Prod's already sat empty once.
+  const SOLE_DETECTOR_SOURCES = ["FamilySensitivity", "FamilySuppression", "MeshAlias"] as const;
+
+  it.each(SOLE_DETECTOR_SOURCES)(
+    "tracks %s — freshness is its only silent-failure detector",
+    (source) => {
+      expect(TRACKED[source], `${source} dropped out of TRACKED`).toBeDefined();
+      // Nightly, because all three are unconditional steps in the nightly
+      // chain (cdk/lib/etl-stack.ts). A longer cadence here would mean a dead
+      // step goes unreported for days.
+      expect(TRACKED[source]?.cadence).toBe("nightly");
+    },
+  );
+
+  // All three run in BOTH envs — they are in the shared nightlySteps array,
+  // outside the `env === "staging"` split that scopes InfoEd. Narrowing one to
+  // a single env would silently restore the blind spot in the other, which is
+  // exactly how prod's MeshAnchor staleness went unnoticed for eight weeks.
+  it.each(SOLE_DETECTOR_SOURCES)("tracks %s in every env, not just one", (source) => {
+    expect(TRACKED[source]?.envs).toBeUndefined();
+  });
+
+  // An ack silences a source, so an ack on one of these is the blind spot
+  // returning with paperwork. If one is ever genuinely needed, this test is
+  // the place to record the decision — deliberately, not by default.
+  it.each(SOLE_DETECTOR_SOURCES)("does not silence %s with an ack", (source) => {
+    expect(TRACKED[source]?.ack).toBeUndefined();
+  });
 });
 
 /**
