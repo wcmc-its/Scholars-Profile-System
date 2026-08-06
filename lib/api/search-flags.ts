@@ -56,6 +56,24 @@ export function resolvePeopleRelevanceMode(): PeopleRelevanceMode {
 }
 
 /**
+ * Issue #1106/#1107 — the People-tab sort used when the request carries no
+ * explicit `?sort=`.
+ *
+ * An empty-query "Browse" has no relevance signal: `searchPeople` issues a
+ * `match_all`, so every hit scores identically and "Relevance" surfaces an
+ * arbitrary (index-order) ranking under a label that promises one. Fall back to
+ * last-name A–Z, which is deterministic and consistent with the A–Z directory
+ * strip already shown in browse mode. Relevance remains the default the moment
+ * a query is present, and an explicit `?sort=` always wins at the call site.
+ *
+ * Not a flag — it lives here because this module is the shared, dependency-free
+ * home both the SSR page and the JSON API already import from. #2228: the route
+ * handler had no such branch and served the uniform-score `match_all` under a
+ * "relevance" label, so the two surfaces disagreed for the identical request.
+ */
+export const EMPTY_QUERY_PEOPLE_SORT = "lastname";
+
+/**
  * SPEC §6.2. Parse `?mesh=…` honoring off-wins precedence regardless of URL
  * order. Accepts either a Web `URLSearchParams` (route handler) or a Next.js
  * searchParams object (page) — same precedence applied at both call sites by

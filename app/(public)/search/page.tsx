@@ -55,6 +55,7 @@ import {
   computeConceptFallback,
   CONCEPT_FALLBACK_CAP,
   CONCEPT_FALLBACK_SPARSE_THRESHOLD,
+  EMPTY_QUERY_PEOPLE_SORT,
 } from "@/lib/api/search-flags";
 import { resolveAreaConcentration } from "@/lib/api/area-concentration";
 import { isFullQueryMeshMatch } from "@/lib/api/normalize";
@@ -197,14 +198,12 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // preserves the original `year` default so behaviour is unchanged.
   const pubImpactFlag = (process.env.SEARCH_PUB_TAB_IMPACT ?? "off") === "on";
   const emptyPubDefault = pubImpactFlag ? "recency" : "year";
-  // Issue #1106 — empty-query "Browse" has no relevance signal: searchPeople
-  // issues a `match_all`, so every hit scores equally under `_score` and
-  // "Relevance" surfaces an arbitrary (index-order) ranking under a label
-  // that promises one. Mirror the pub-tab flip above and default the people
-  // tab to last-name A–Z when q="" — deterministic and consistent with the
-  // A–Z directory strip already shown in browse mode. Relevance remains the
-  // default the moment a query is present; an explicit ?sort= still wins.
-  const emptyPeopleDefault = "lastname";
+  // Issue #1106/#1107 — empty-query "Browse" has no relevance signal, so the
+  // people tab defaults to last-name A–Z. The value now lives in
+  // `EMPTY_QUERY_PEOPLE_SORT` (see its docblock for the reasoning) because
+  // `/api/search` had no such branch and disagreed with this page for the
+  // identical request (#2228).
+  const emptyPeopleDefault = EMPTY_QUERY_PEOPLE_SORT;
   const sort =
     rawSort ??
     (q === ""
