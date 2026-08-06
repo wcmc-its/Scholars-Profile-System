@@ -5,6 +5,7 @@
  * dependency — see `Phase 1 Design Decisions - 2026-04-29.md` § decision #1.
  */
 import { prisma } from "@/lib/db";
+import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
 import { gateEmailForViewer } from "@/lib/profile/email-display-gate";
@@ -34,6 +35,16 @@ export type ScholarPayload = {
  * Look up a scholar by CWID. Excludes soft-deleted and suppressed scholars.
  * Returns `null` if not found (caller maps to 404).
  *
+ * #2221 — ALSO excludes the #536 hidden identity classes (doctoral students,
+ * alumni). This endpoint is public and unauthenticated and returns MORE than the
+ * popover card named in the issue — full name, title, department, the gated
+ * email, the overview and the entire appointment history — and it gated on
+ * `deletedAt` + `status` only. Against the prod data shape (690 scholars with a
+ * bare `doctoral_student` role and `deleted_at IS NULL`) neither of those gates
+ * fires, so the role carve is the only one that does. `null` is returned for a
+ * hidden scholar and a nonexistent CWID alike, so the 404 is identical and the
+ * endpoint is not an existence oracle.
+ *
  * NOTE: this lookup does NOT chase cwid_aliases. The HTML route
  * `/scholars/by-cwid/:cwid` chases aliases via lib/url-resolver and emits 301s.
  * The API endpoint is identity-stable and does not redirect — clients should
@@ -42,7 +53,10 @@ export type ScholarPayload = {
  */
 export async function getScholarByCwid(cwid: string): Promise<ScholarPayload | null> {
   const scholar = await prisma.scholar.findFirst({
-    where: { cwid, deletedAt: null, status: "active" },
+    // Query layer, not post-filter — an anonymous boundary's where-clause IS its
+    // access control. `publicRoleWhere()` admits `role_category IS NULL`
+    // explicitly (a bare `notIn` drops NULLs and would 404 un-backfilled rows).
+    where: { cwid, deletedAt: null, status: "active", ...publicRoleWhere() },
     include: {
       appointments: {
         orderBy: [{ isPrimary: "desc" }, { endDate: "asc" }, { startDate: "desc" }],
@@ -50,6 +64,10 @@ export async function getScholarByCwid(cwid: string): Promise<ScholarPayload | n
     },
   });
   if (!scholar) return null;
+  // Belt-and-braces on the RAW column: Prisma can't express the
+  // `doctoral_student*` prefix the predicate matches, and the predicate fails
+  // closed on roles the enumeration hasn't caught up with.
+  if (!isPubliclyDisplayed(scholar.roleCategory)) return null;
 
   return {
     cwid: scholar.cwid,

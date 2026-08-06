@@ -108,6 +108,37 @@ export function publicRoleWhere(): PublicRoleWhere {
 }
 
 /**
+ * The #536 carve as a Prisma `where` FRAGMENT, for per-scholar lookups on public
+ * endpoints (`getScholarByCwid`, `fetchPopoverHeader` — #2221). Spread it into an
+ * existing where-clause: `where: { cwid, deletedAt: null, ...publicRoleWhere() }`.
+ *
+ * Why a query-layer carve and not an in-memory filter: these are anonymous,
+ * unauthenticated API boundaries, so the filter IS the access control. It also
+ * keeps the hidden row from ever entering the process.
+ *
+ * Why `OR` with an explicit NULL branch: `notIn` alone ALSO drops
+ * `role_category IS NULL` rows (SQL three-valued logic — `NULL NOT IN (...)`
+ * evaluates to NULL, not true), which would 404 every un-backfilled scholar.
+ * NULL means absence of data, not a hidden identity class, and
+ * `isPubliclyDisplayed(null)` is true for the same reason.
+ *
+ * NOT sufficient on its own: Prisma cannot express the `doctoral_student*`
+ * prefix, so this enumerates HIDDEN_ROLE_CATEGORIES and an out-of-band suffix
+ * (the DB demonstrably receives those — see the note above) would slip through.
+ * Every caller must ALSO run the raw `role_category` through
+ * `isPubliclyDisplayed`, which prefix-matches and fails closed.
+ *
+ * Returns a fresh object each call so no caller can mutate a shared literal.
+ */
+export function publicRoleWhere(): {
+  OR: Array<{ roleCategory: null } | { roleCategory: { notIn: string[] } }>;
+} {
+  return {
+    OR: [{ roleCategory: null }, { roleCategory: { notIn: [...HIDDEN_ROLE_CATEGORIES] } }],
+  };
+}
+
+/**
  * Legacy `role_category` values the current ED ETL can no longer emit —
  * `deriveRoleCategory` (etl/ed/index.ts) folds voluntary / adjunct / courtesy /
  * emeritus into `affiliated_faculty` and has no `research_staff` branch — but which
