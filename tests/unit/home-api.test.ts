@@ -104,7 +104,7 @@ import {
   getHomeMethodCategories,
   getHomeStats,
 } from "@/lib/api/home";
-import { NOT_HIDDEN_ROLE_WHERE } from "@/lib/eligibility";
+import { publicRoleWhere } from "@/lib/eligibility";
 
 const NOW = new Date("2026-04-01");
 
@@ -634,7 +634,7 @@ describe("getHomeStats — advertised scholars == findable scholars (#2222)", ()
     expect(capturedScholarWhere()).toEqual({
       deletedAt: null,
       status: "active",
-      ...NOT_HIDDEN_ROLE_WHERE,
+      ...publicRoleWhere(),
     });
   });
 

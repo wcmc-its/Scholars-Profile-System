@@ -51,7 +51,7 @@ import { extractLastNameSort } from "@/lib/name-sort";
 import { isCenterMembershipActive } from "@/lib/api/centers";
 import { isTrainingOnlyGrant } from "@/lib/grants/training-exclusions";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
-import { NOT_HIDDEN_ROLE_WHERE } from "@/lib/eligibility";
+import { publicRoleWhere } from "@/lib/eligibility";
 
 // ---------------------------------------------------------------------------
 // Authorship weights — publications-doc index-time term repetition.
@@ -495,7 +495,7 @@ export const PEOPLE_INDEX_WHERE = {
   // #2222 — the carve now lives in lib/eligibility.ts so the home hero count can
   // spread the SAME fragment: "advertised" and "findable" must be one predicate,
   // not two that agree by hand.
-  ...NOT_HIDDEN_ROLE_WHERE,
+  ...publicRoleWhere(),
 } satisfies Prisma.ScholarWhereInput;
 
 export const PEOPLE_INDEX_SELECT = {

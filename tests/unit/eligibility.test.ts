@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ELIGIBLE_ROLES,
   HIDDEN_ROLE_CATEGORIES,
-  NOT_HIDDEN_ROLE_WHERE,
+  publicRoleWhere,
   PUBLICLY_DISPLAYED_ROLES,
   TOP_SCHOLARS_ELIGIBLE_ROLES,
   isPubliclyDisplayed,
@@ -113,24 +113,24 @@ describe("isPubliclyDisplayed / PUBLICLY_DISPLAYED_ROLES (#536)", () => {
   });
 });
 
-describe("NOT_HIDDEN_ROLE_WHERE — the shared #536 carve as a where-fragment (#2222)", () => {
+describe("publicRoleWhere() — the shared #536 carve as a where-fragment (#2222)", () => {
   it("admits NULL role_category EXPLICITLY — a bare notIn drops NULL rows", () => {
     // SQL three-valued logic: `NULL NOT IN (...)` is NULL, not TRUE. Without the
     // explicit `{ roleCategory: null }` arm every un-backfilled scholar would
     // silently vanish from the people index, the home hero count and the sitemap.
-    expect(NOT_HIDDEN_ROLE_WHERE.OR).toContainEqual({ roleCategory: null });
+    expect(publicRoleWhere().OR).toContainEqual({ roleCategory: null });
   });
 
   it("enumerates exactly HIDDEN_ROLE_CATEGORIES in the notIn arm", () => {
-    expect(NOT_HIDDEN_ROLE_WHERE.OR).toContainEqual({
+    expect(publicRoleWhere().OR).toContainEqual({
       roleCategory: { notIn: [...HIDDEN_ROLE_CATEGORIES] },
     });
     // Two arms, no third: anything else here would widen or narrow the carve.
-    expect(NOT_HIDDEN_ROLE_WHERE.OR).toHaveLength(2);
+    expect(publicRoleWhere().OR).toHaveLength(2);
   });
 
   it("every enumerated value is one the predicate also hides", () => {
-    const arm = NOT_HIDDEN_ROLE_WHERE.OR.find(
+    const arm = publicRoleWhere().OR.find(
       (o): o is { roleCategory: { notIn: string[] } } =>
         typeof o.roleCategory === "object" && o.roleCategory !== null,
     )!;

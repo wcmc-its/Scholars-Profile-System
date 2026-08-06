@@ -30,7 +30,7 @@ import {
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
-import { NOT_HIDDEN_ROLE_WHERE, isPubliclyDisplayed } from "@/lib/eligibility";
+import { publicRoleWhere, isPubliclyDisplayed } from "@/lib/eligibility";
 import { resolveHiddenStudentCoauthorChips } from "@/lib/api/search-flags";
 import { sampleSpotlightPapers } from "@/lib/spotlight-sampling";
 import { getSupercategoryHubEntries } from "@/lib/api/methods";
@@ -648,11 +648,11 @@ async function getHomeStatsUncached(): Promise<HomeStats> {
   // people index is built from (`PEOPLE_INDEX_WHERE` spreads this identical
   // fragment; `tests/unit/home-api.test.ts` pins the two together), so
   // "advertised" and "findable" cannot drift again. NULL role_category is
-  // admitted explicitly — see NOT_HIDDEN_ROLE_WHERE for the three-valued-logic
+  // admitted explicitly — see publicRoleWhere() for the three-valued-logic
   // trap that makes a bare `notIn` hide every un-backfilled scholar.
   const [scholarCount, publicationCount, researchAreaCount] = await Promise.all([
     prisma.scholar.count({
-      where: { deletedAt: null, status: "active", ...NOT_HIDDEN_ROLE_WHERE },
+      where: { deletedAt: null, status: "active", ...publicRoleWhere() },
     }),
     prisma.publication.count({
       where: { publicationType: { notIn: [...NEVER_DISPLAY_TYPES] } },

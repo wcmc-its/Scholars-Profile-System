@@ -9,7 +9,7 @@ import {
   type PublicationForIndex,
   type ScholarForIndex,
 } from "@/lib/search-index-docs";
-import { NOT_HIDDEN_ROLE_WHERE } from "@/lib/eligibility";
+import { publicRoleWhere } from "@/lib/eligibility";
 
 // Empty suppression set — the C2 baseline assumption is "no suppressions";
 // the C3-updated builder signature requires it explicitly. With empty sup
@@ -631,14 +631,14 @@ describe("authorRole — the per-person fact the facet union cannot express", ()
 describe("PEOPLE_INDEX_WHERE — the findable population (#2202, #2222)", () => {
   it("is exactly soft-delete + status + the SHARED role carve", () => {
     // The home hero count (`getHomeStatsUncached`) spreads the same
-    // NOT_HIDDEN_ROLE_WHERE fragment, which is the whole point of #2222: the
+    // publicRoleWhere() fragment, which is the whole point of #2222: the
     // number the front page advertises and the number of people `/search` can
     // actually return are one predicate, not two that happen to agree. If this
     // ever needs to change, it changes for both surfaces at once.
     expect(PEOPLE_INDEX_WHERE).toEqual({
       deletedAt: null,
       status: "active",
-      ...NOT_HIDDEN_ROLE_WHERE,
+      ...publicRoleWhere(),
     });
   });
 });
