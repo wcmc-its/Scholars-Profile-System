@@ -2514,23 +2514,19 @@ export class EtlStack extends Stack {
       // x 1h plus a 1 min interval = 121 min under a 65 min cap, so a wedged
       // reciterai scan is killed as TIMED_OUT with no Catch and no publish. The
       // cadence alarm cannot see it, because the execution did start.
-      const projectionStatusAlarm = new cloudwatch.Alarm(
-        this,
-        "OpportunityProjectionStatusAlarm",
-        {
-          alarmName: `sps-opportunity-projection-status-${env}`,
-          alarmDescription: `SPS opportunity projection (${env}) -- a run did not finish successfully: it failed, ran out of time, or was stopped. The funding-matcher corpus keeps serving the last good projection; newly-published opportunities will 404 until this lands. Next: open the Step Functions execution for scholars-opportunity-projection-${env} and read the task's logs. Nothing retries before tomorrow's 06:30 UTC fire -- run 'npm run etl:dynamodb' via run-task to close the gap.`,
-          // Daily cadence => 1 day period; 1 * 86400 <= 604800.
-          metric: unsuccessfulMetric(
-            { StateMachineArn: opportunityProjectionStateMachine.stateMachineArn },
-            Duration.days(1),
-          ),
-          evaluationPeriods: 1,
-          threshold: 0,
-          comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-          treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-        },
-      );
+      const projectionStatusAlarm = new cloudwatch.Alarm(this, "OpportunityProjectionStatusAlarm", {
+        alarmName: `sps-opportunity-projection-status-${env}`,
+        alarmDescription: `SPS opportunity projection (${env}) -- a run did not finish successfully: it failed, ran out of time, or was stopped. The funding-matcher corpus keeps serving the last good projection; newly-published opportunities will 404 until this lands. Next: open the Step Functions execution for scholars-opportunity-projection-${env} and read the task's logs. Nothing retries before tomorrow's 06:30 UTC fire -- run 'npm run etl:dynamodb' via run-task to close the gap.`,
+        // Daily cadence => 1 day period; 1 * 86400 <= 604800.
+        metric: unsuccessfulMetric(
+          { StateMachineArn: opportunityProjectionStateMachine.stateMachineArn },
+          Duration.days(1),
+        ),
+        evaluationPeriods: 1,
+        threshold: 0,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
       projectionStatusAlarm.addAlarmAction(alarmAction);
     }
 
@@ -2751,24 +2747,20 @@ export class EtlStack extends Stack {
       // min against the machine's 1h timeout, so an LDAP bind that hangs takes
       // the machine over its cap and it dies as TIMED_OUT: no Catch, no publish,
       // and the cadence alarm stays green because the execution did start.
-      const edBridgeStatusAlarm = new cloudwatch.Alarm(
-        this,
-        "EdEmailVisibilityBridgeStatusAlarm",
-        {
-          alarmName: `sps-ed-email-visibility-status-${env}`,
-          alarmDescription: `SPS ED email-visibility bridge (${env}) -- a run did not finish successfully: it failed, ran out of time, or was stopped. Scholar email visibility keeps the values from the last good run; new release-code changes are not applied. Next: open the Step Functions execution for scholars-ed-email-visibility-${env}, see which half (export or import) is red, and read its logs -- an export failure usually means the on-prem LDAP path is down. Nothing retries before next Sunday 05:00 UTC.`,
-          // Weekly cadence => 7 day period, the same shape (and the same
-          // ceiling) as the cadence alarm above: 1 * 604800 <= 604800.
-          metric: unsuccessfulMetric(
-            { StateMachineArn: edBridgeStateMachine.stateMachineArn },
-            Duration.days(7),
-          ),
-          evaluationPeriods: 1,
-          threshold: 0,
-          comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-          treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-        },
-      );
+      const edBridgeStatusAlarm = new cloudwatch.Alarm(this, "EdEmailVisibilityBridgeStatusAlarm", {
+        alarmName: `sps-ed-email-visibility-status-${env}`,
+        alarmDescription: `SPS ED email-visibility bridge (${env}) -- a run did not finish successfully: it failed, ran out of time, or was stopped. Scholar email visibility keeps the values from the last good run; new release-code changes are not applied. Next: open the Step Functions execution for scholars-ed-email-visibility-${env}, see which half (export or import) is red, and read its logs -- an export failure usually means the on-prem LDAP path is down. Nothing retries before next Sunday 05:00 UTC.`,
+        // Weekly cadence => 7 day period, the same shape (and the same
+        // ceiling) as the cadence alarm above: 1 * 604800 <= 604800.
+        metric: unsuccessfulMetric(
+          { StateMachineArn: edBridgeStateMachine.stateMachineArn },
+          Duration.days(7),
+        ),
+        evaluationPeriods: 1,
+        threshold: 0,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
       edBridgeStatusAlarm.addAlarmAction(alarmAction);
 
       new CfnOutput(this, "EdEmailVisibilityBridgeStateMachineArn", {

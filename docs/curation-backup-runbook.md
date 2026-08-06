@@ -154,7 +154,7 @@ see — a run that **times out** or is **aborted** never executes its Catch, so 
 publishes nothing; and a **cadence alarm**
 (`sps-curation-backup-cadence-<env>`) fires if no run starts for ~2 days
 (silent schedule death — the failure mode that hurts a backup most). Note the
-cadence alarm cannot substitute for the status alarm: a timed-out run *started*,
+cadence alarm cannot substitute for the status alarm: a timed-out run _started_,
 so `ExecutionsStarted` still increments and the cadence alarm stays green.
 Spot-check freshness anytime via the `latest` manifest's `generatedAt` (§ 3).
 
