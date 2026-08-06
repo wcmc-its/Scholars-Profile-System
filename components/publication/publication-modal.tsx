@@ -930,8 +930,17 @@ function CitingPubsSection({
   const [expanded, setExpanded] = useState(false);
   const hasList = citingPubs !== null && citingPubs.length > 0;
   const showCountChip = citationCount > 0;
-  const showCsvDownload =
-    citingPubsTotal !== null && citingPubsTotal > 0;
+  // #2201 — gate the download on the LIST, not the total. These are different
+  // populations: `citingPubsTotal` counts the iCite edge table unfiltered, while
+  // the list (and the CSV) inner-join to WCM-indexed article metadata. On
+  // 99 of 238 sampled prod publications the total was non-zero and the list
+  // empty, so the link offered a CSV with a header row and no data.
+  //
+  // `hasList` is exact for "the CSV will contain >= 1 data row" in both
+  // postures: on the bridge path list and CSV parse the SAME stored JSON, and
+  // on the live path the CSV runs the same inner join with a larger cap, so an
+  // empty 500-row window implies an empty 50k one.
+  const showCsvDownload = hasList;
 
   const visible =
     !hasList

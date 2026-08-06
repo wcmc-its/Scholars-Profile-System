@@ -742,6 +742,36 @@ describe("PublicationModal — Cited by section", { retry: 2 }, () => {
     expect(screen.getByText("5")).toBeDefined();
   });
 
+  // #2201 — the state 41.6% of sampled prod publications are actually in, and
+  // the one combination this suite never covered: a NON-ZERO total over an
+  // EMPTY list. Every other empty-list case here pins citingPubsTotal to 0, so
+  // the CSV gate (which keyed on the total) was green while offering a download
+  // that produced a header row and nothing else. The two populations differ by
+  // an inner join to WCM-indexed metadata, so this state is normal, not rare.
+  it("offers no CSV download when the total is non-zero but the list is empty", async () => {
+    mockFetch(
+      makePayload({
+        pub: { ...makePayload().pub, citationCount: 105 },
+        citingPubs: [],
+        citingPubsTotal: 88,
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.queryByRole("link", { name: /Download CSV/i })).toBeNull();
+    // The Scopus chip is unaffected — this fix is about the download, not the count.
+    expect(screen.getByText("105")).toBeDefined();
+  });
+
+  it("still offers the CSV download when the list has rows", async () => {
+    mockFetch(makePayload({ citingPubsTotal: 88 }));
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.getByRole("link", { name: /Download CSV/i })).toBeDefined();
+  });
+
   it("renders 'No citing publications.' when both citationCount and list are zero", async () => {
     mockFetch(
       makePayload({
