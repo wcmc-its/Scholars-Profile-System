@@ -100,39 +100,23 @@ export type PublicRoleWhere = {
  * unit's members: #718 retains a hidden scholar's PUBLICATIONS, so carving the
  * member set that feeds those aggregates would silently delete real research
  * output from unit totals. Only surfaces that name or count PEOPLE carve.
+ *
+ * NOT SUFFICIENT ON ITS OWN. This is a DENYLIST and cannot fail closed: it
+ * enumerates `HIDDEN_ROLE_CATEGORIES` because Prisma cannot express the
+ * `doctoral_student*` prefix that `isPubliclyDisplayed` matches, so an
+ * out-of-band suffixed value slips through it. (Those demonstrably exist — 1,875
+ * staging rows carry suffixes no version of this repo ever wrote.) Any surface
+ * that renders a per-row link or publishes a URL must ALSO run the raw
+ * `role_category` through `isPubliclyDisplayed`, which prefix-matches and fails
+ * closed. This fragment is the population gate; that predicate is the link gate.
+ * On an anonymous, unauthenticated endpoint the pair IS the access control.
+ *
+ * Deliberately NOT typed as `Prisma.ScholarWhereInput`: this module is imported
+ * by client components (e.g. `components/department/person-row.tsx`), and it must
+ * stay free of generated-Prisma imports so nothing drags the mariadb driver into
+ * the client bundle and breaks `next build` on `fs`/`net`.
  */
 export function publicRoleWhere(): PublicRoleWhere {
-  return {
-    OR: [{ roleCategory: null }, { roleCategory: { notIn: [...HIDDEN_ROLE_CATEGORIES] } }],
-  };
-}
-
-/**
- * The #536 carve as a Prisma `where` FRAGMENT, for per-scholar lookups on public
- * endpoints (`getScholarByCwid`, `fetchPopoverHeader` — #2221). Spread it into an
- * existing where-clause: `where: { cwid, deletedAt: null, ...publicRoleWhere() }`.
- *
- * Why a query-layer carve and not an in-memory filter: these are anonymous,
- * unauthenticated API boundaries, so the filter IS the access control. It also
- * keeps the hidden row from ever entering the process.
- *
- * Why `OR` with an explicit NULL branch: `notIn` alone ALSO drops
- * `role_category IS NULL` rows (SQL three-valued logic — `NULL NOT IN (...)`
- * evaluates to NULL, not true), which would 404 every un-backfilled scholar.
- * NULL means absence of data, not a hidden identity class, and
- * `isPubliclyDisplayed(null)` is true for the same reason.
- *
- * NOT sufficient on its own: Prisma cannot express the `doctoral_student*`
- * prefix, so this enumerates HIDDEN_ROLE_CATEGORIES and an out-of-band suffix
- * (the DB demonstrably receives those — see the note above) would slip through.
- * Every caller must ALSO run the raw `role_category` through
- * `isPubliclyDisplayed`, which prefix-matches and fails closed.
- *
- * Returns a fresh object each call so no caller can mutate a shared literal.
- */
-export function publicRoleWhere(): {
-  OR: Array<{ roleCategory: null } | { roleCategory: { notIn: string[] } }>;
-} {
   return {
     OR: [{ roleCategory: null }, { roleCategory: { notIn: [...HIDDEN_ROLE_CATEGORIES] } }],
   };
