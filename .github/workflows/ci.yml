@@ -89,6 +89,14 @@ jobs:
         run: npm test
         working-directory: cdk
 
+      # cdk's jest testMatch is <rootDir>/test/** only, so it never reaches the
+      # lambda workspaces — they are vitest (ESM, NodeNext ".js" specifiers,
+      # vi.mock/vi.stubGlobal) and cannot be collected by ts-jest's CJS resolver.
+      # Run them where they live instead of porting them (#2193).
+      - name: Lambda workspace tests
+        run: npm run test --workspaces --if-present
+        working-directory: cdk
+
       - name: Flag parity (code vs cdk wiring)
         run: node scripts/release/flag-parity.mjs
 

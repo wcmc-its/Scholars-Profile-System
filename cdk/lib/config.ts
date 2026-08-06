@@ -803,12 +803,15 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // enforce. The policy value is identical to report-only, so revert =
     // flip back + cdk deploy.
     cspMode: "enforce",
-    // Prod schedules ship disabled — first run is operator-driven after
-    // runbook review. To turn them on, flip this flag to true and
-    // `cdk deploy Sps-Etl-prod` (NOT `aws events enable-rule` — see the flag
-    // JSDoc: out-of-band enable drifts and gets reverted by the next deploy).
-    // Verified DISABLED in AWS 2026-07-07, so config == live state (no drift).
-    etlSchedulesEnabled: false,
+    // Prod cadences are LIVE: the runbook gate was cleared and the four rules
+    // were enabled out of band on 2026-07-07, exactly the way the flag JSDoc
+    // says not to. This flag stayed false for ~4 weeks, so the deployed template
+    // said DISABLED while AWS said ENABLED. CloudFormation only reconciles
+    // resources whose definition changed, which is why two `cdk deploy
+    // Sps-Etl-prod` runs on 2026-08-05 left the rules alone — but any changeset
+    // that did touch a rule would have silently switched the prod ETL off.
+    // Flipped to true to make the template match live (#1512).
+    etlSchedulesEnabled: true,
     // #393 — the reconciler backstop runs in prod from launch (empty-queue-safe
     // pre-launch), unlike the runbook-gated cadences above. See flag JSDoc.
     reconcileScheduleEnabled: true,

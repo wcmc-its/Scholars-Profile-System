@@ -5,7 +5,7 @@
   "description": "Nightly Athena rollup of CloudFront access logs into the daily_usage partition-projected table (usage analytics).",
   "main": "index.ts",
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

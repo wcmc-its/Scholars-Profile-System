@@ -83,7 +83,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "Description": "SPS ETL annual cadence (prod). D7.",
         "Name": "sps-etl-annual-prod",
         "ScheduleExpression": "cron(0 9 1 7 ? *)",
-        "State": "DISABLED",
+        "State": "ENABLED",
         "Targets": [
           {
             "Arn": {
@@ -3941,7 +3941,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "Description": "SPS ETL heartbeat cadence (prod). D7.",
         "Name": "sps-etl-heartbeat-prod",
         "ScheduleExpression": "cron(0 13 * * ? *)",
-        "State": "DISABLED",
+        "State": "ENABLED",
         "Targets": [
           {
             "Arn": {
@@ -4399,7 +4399,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "Description": "SPS ETL nightly cadence (prod). D7.",
         "Name": "sps-etl-nightly-prod",
         "ScheduleExpression": "cron(0 7 * * ? *)",
-        "State": "DISABLED",
+        "State": "ENABLED",
         "Targets": [
           {
             "Arn": {
@@ -6200,7 +6200,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "Description": "SPS ETL weekly cadence (prod). D7.",
         "Name": "sps-etl-weekly-prod",
         "ScheduleExpression": "cron(0 12 ? * SUN *)",
-        "State": "DISABLED",
+        "State": "ENABLED",
         "Targets": [
           {
             "Arn": {

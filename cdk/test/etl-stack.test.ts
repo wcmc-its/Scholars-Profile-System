@@ -548,7 +548,7 @@ describe("EtlStack", () => {
         },
       );
 
-      it("prod CADENCE schedules ship disabled (etlSchedulesEnabled=false)", () => {
+      it("prod CADENCE schedules ship ENABLED (etlSchedulesEnabled=true)", () => {
         const rules = template.findResources("AWS::Events::Rule");
         // The #393 reconciler runs on its own flag (reconcileScheduleEnabled),
         // enabled in prod -- so scope this to the four sps-etl-* rules
@@ -560,8 +560,10 @@ describe("EtlStack", () => {
         expect(cadenceRules).toHaveLength(4);
         for (const [id, rule] of cadenceRules) {
           const state = rule.Properties?.State as string | undefined;
-          // CDK serializes enabled=false as State=DISABLED.
-          expect({ id, state }).toEqual({ id, state: "DISABLED" });
+          // Prod cadences went live 2026-07-07. This asserts the TEMPLATE says so
+          // too: while it said DISABLED, the first deploy whose changeset touched
+          // these rules would have silently switched the prod ETL off (#1512).
+          expect({ id, state }).toEqual({ id, state: "ENABLED" });
         }
       });
 
