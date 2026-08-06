@@ -11,7 +11,9 @@
  *   - each child serves a `<urlset>` slice; an out-of-range shard is empty, a
  *     non-`.xml` segment 404s
  *   - entries include all active scholars, topics, departments, centers, and
- *     static pages; exclude /search and soft-deleted scholars
+ *     static pages; exclude /search, soft-deleted scholars, and (#2205) every
+ *     scholar the #536 carve hides — the profile route 404s those, so a sitemap
+ *     that advertises them publishes both a student name and a dead link
  *   - priority / changeFrequency per D-08:
  *       Home 1.0/weekly · Scholars 0.8/weekly · Topics/depts/centers 0.6/monthly
  *       · Static (browse, about) 0.5/monthly
@@ -29,6 +31,7 @@ import {
   siteBaseUrl,
   type SitemapEntry,
 } from "@/lib/sitemap";
+import { HIDDEN_ROLE_CATEGORIES } from "@/lib/eligibility";
 
 const { mockScholarFindMany, mockTopicFindMany, mockDeptFindMany, mockCenterFindMany } = vi.hoisted(
   () => ({
@@ -195,6 +198,158 @@ describe("lib/sitemap — buildSitemapEntries", () => {
     const entries = await buildSitemapEntries();
     expect(entries).toHaveLength(3); // /, /browse, /about
     expect(entries.every((e) => !e.url.includes("/scholars/"))).toBe(true);
+  });
+});
+
+/**
+ * #2205 — the #536 public-display carve on the scholar query.
+ *
+ * These are written against the **prod** row shape, which is the mirror image of
+ * staging's: on prod ~690 doctoral students carry the BARE `doctoral_student`
+ * with `deleted_at IS NULL`, so `deletedAt`/`status` gate nothing and the role
+ * carve is the ONLY thing standing between an enrolled student's name and every
+ * crawler that reads the sitemap. (On staging the same cohort is suffixed AND
+ * soft-deleted, so `deletedAt` does the work and this carve is inert — a staging
+ * check proves nothing here.)
+ *
+ * `mockScholarFindMany` ignores the `where` it is handed, exactly like a DB that
+ * has not been backfilled: the rows it returns are what the entry list is built
+ * from. So the "excluded" assertions below exercise the in-memory
+ * `isPubliclyDisplayed` filter, and the where-clause is asserted separately.
+ */
+describe("lib/sitemap — #536 role carve on scholar entries (#2205)", () => {
+  const slugsOf = (entries: SitemapEntry[]) =>
+    entries.filter((e) => e.url.includes("/scholars/")).map((e) => e.url);
+
+  it("admits role_category IS NULL in the where-clause, not just notIn", async () => {
+    await buildSitemapEntries();
+    expect(mockScholarFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          deletedAt: null,
+          status: "active",
+          OR: [{ roleCategory: null }, { roleCategory: { notIn: [...HIDDEN_ROLE_CATEGORIES] } }],
+        }),
+      }),
+    );
+  });
+
+  it("selects roleCategory so the carve has something to read", async () => {
+    await buildSitemapEntries();
+    expect(mockScholarFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ roleCategory: true }),
+      }),
+    );
+  });
+
+  it("drops the prod shape: bare doctoral_student with deletedAt null", async () => {
+    mockScholarFindMany.mockResolvedValue([
+      { slug: "jane-doe", updatedAt: new Date("2026-01-15"), roleCategory: "full_time_faculty" },
+      {
+        slug: "hidden-student",
+        updatedAt: new Date("2026-01-15"),
+        roleCategory: "doctoral_student",
+      },
+    ]);
+    const urls = slugsOf(await buildSitemapEntries());
+    expect(urls).toEqual(["https://scholars.weill.cornell.edu/scholars/jane-doe"]);
+  });
+
+  it("drops every enumerated hidden role", async () => {
+    mockScholarFindMany.mockResolvedValue(
+      HIDDEN_ROLE_CATEGORIES.map((role, i) => ({
+        slug: `hidden-${i}`,
+        updatedAt: new Date("2026-01-15"),
+        roleCategory: role,
+      })),
+    );
+    expect(slugsOf(await buildSitemapEntries())).toEqual([]);
+  });
+
+  it("drops an UN-enumerated doctoral_student_* variant the where-clause would admit", async () => {
+    // `notIn HIDDEN_ROLE_CATEGORIES` cannot express the prefix, so this row
+    // survives the query; only isPubliclyDisplayed catches it. Suffixed student
+    // roles are proof out-of-band writes happen (lib/eligibility.ts).
+    expect(HIDDEN_ROLE_CATEGORIES).not.toContain("doctoral_student_dnp");
+    mockScholarFindMany.mockResolvedValue([
+      {
+        slug: "hidden-dnp",
+        updatedAt: new Date("2026-01-15"),
+        roleCategory: "doctoral_student_dnp",
+      },
+    ]);
+    expect(slugsOf(await buildSitemapEntries())).toEqual([]);
+  });
+
+  it("drops an unrecognized role — the profile route 404s it, so advertising it is a dead link", async () => {
+    mockScholarFindMany.mockResolvedValue([
+      { slug: "mystery", updatedAt: new Date("2026-01-15"), roleCategory: "not_a_real_role" },
+    ]);
+    expect(slugsOf(await buildSitemapEntries())).toEqual([]);
+  });
+
+  it("KEEPS an un-backfilled scholar (role_category IS NULL) — the three-valued-logic trap", async () => {
+    mockScholarFindMany.mockResolvedValue([
+      { slug: "no-role-yet", updatedAt: new Date("2026-01-15"), roleCategory: null },
+    ]);
+    expect(slugsOf(await buildSitemapEntries())).toEqual([
+      "https://scholars.weill.cornell.edu/scholars/no-role-yet",
+    ]);
+  });
+
+  it("keeps every publicly-displayed role, including the emeritus split (#2211)", async () => {
+    const visible = [
+      "full_time_faculty",
+      "affiliated_faculty",
+      "postdoc",
+      "fellow",
+      "non_faculty_academic",
+      "non_academic",
+      "instructor",
+      "lecturer",
+      "emeritus",
+    ];
+    mockScholarFindMany.mockResolvedValue(
+      visible.map((role, i) => ({
+        slug: `visible-${i}`,
+        updatedAt: new Date("2026-01-15"),
+        roleCategory: role,
+      })),
+    );
+    expect(slugsOf(await buildSitemapEntries())).toHaveLength(visible.length);
+  });
+
+  it("preserves slug order after the carve, so shard assignment stays stable", async () => {
+    mockScholarFindMany.mockResolvedValue([
+      { slug: "a-faculty", updatedAt: new Date("2026-01-15"), roleCategory: "full_time_faculty" },
+      { slug: "b-student", updatedAt: new Date("2026-01-15"), roleCategory: "doctoral_student" },
+      { slug: "c-faculty", updatedAt: new Date("2026-01-15"), roleCategory: "postdoc" },
+    ]);
+    expect(slugsOf(await buildSitemapEntries())).toEqual([
+      "https://scholars.weill.cornell.edu/scholars/a-faculty",
+      "https://scholars.weill.cornell.edu/scholars/c-faculty",
+    ]);
+  });
+
+  it("reconciles with #2222: 9,412 active rows minus 690 hidden = 8,722 advertised", async () => {
+    // The prod census in #2205/#2222. The people index reports total=8722 and the
+    // home hero says 9,412; the gap IS this cohort. Same arithmetic, one list.
+    const rows = [
+      ...Array.from({ length: 8_722 }, (_, i) => ({
+        slug: `visible-${i}`,
+        updatedAt: new Date("2026-01-15"),
+        roleCategory: "full_time_faculty",
+      })),
+      ...Array.from({ length: 690 }, (_, i) => ({
+        slug: `student-${i}`,
+        updatedAt: new Date("2026-01-15"),
+        roleCategory: "doctoral_student",
+      })),
+    ];
+    expect(rows).toHaveLength(9_412);
+    mockScholarFindMany.mockResolvedValue(rows);
+    expect(slugsOf(await buildSitemapEntries())).toHaveLength(8_722);
   });
 });
 
