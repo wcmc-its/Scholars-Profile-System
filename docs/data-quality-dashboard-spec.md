@@ -155,7 +155,7 @@ hIndex + faculty boost mirror the org's tuned search ranking.
 
 1. Build the candidate `where`: `deletedAt: null`, `status: 'active'`; **include hidden roles by
    default** (`includeHidden` true), else exclude `doctoral_student` / `affiliate_alumni`
-   (`HIDDEN_DISPLAY_ROLES`, `lib/eligibility.ts`); apply `roleCategory` filter when chosen; apply
+   (`HIDDEN_ROLE_CATEGORIES`, `lib/eligibility.ts`); apply `roleCategory` filter when chosen; apply
    `deptCode` filter; apply **scope** (unit codes for unit editors).
 2. Select identity + prominence inputs (`cwid, preferredName, slug, primaryTitle, primaryDepartment,
    roleCategory, deptCode, overview, hIndex, scoredPubCount, hasHeadshot, headshotCheckedAt`).

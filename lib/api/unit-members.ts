@@ -184,6 +184,7 @@ async function buildHits(cwids: string[]): Promise<DepartmentFacultyHit[]> {
       departmentName: s.department?.name ?? s.primaryDepartment ?? "",
       identityImageEndpoint: identityImageEndpoint(s.cwid),
       roleCategory: formatRoleCategory(s.roleCategory),
+      roleCategoryRaw: s.roleCategory,
       overview: s.overview
         ? s.overview.slice(0, 120).trimEnd() + (s.overview.length > 120 ? "…" : "")
         : null,

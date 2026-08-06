@@ -112,4 +112,48 @@ describe("PersonRow", () => {
   it("component exports (RED: implementation pending Plan 08)", () => {
     expect(typeof PersonRow).toBe("function");
   });
+
+  // #2202 — the four unit-roster loaders put a display LABEL in `roleCategory`.
+  // Before the fix, `isPubliclyDisplayed("Doctoral student")` returned true and
+  // every hidden student rendered as a clickable link to a route that 404s.
+  describe("#536 carve reads the raw role, not the display label (#2202)", () => {
+    const studentHit = {
+      ...baseHit,
+      preferredName: "Alex Doe",
+      roleCategory: "Doctoral student",
+      roleCategoryRaw: "doctoral_student",
+    };
+
+    it("renders a doctoral student as plain text, never a profile link", () => {
+      const { container } = render(<PersonRow hit={studentHit} />);
+      expect(container.textContent).toContain("Alex Doe");
+      expect(container.querySelector("a")).toBeNull();
+    });
+
+    it("hides the suffixed variants too", () => {
+      for (const raw of ["doctoral_student_md", "doctoral_student_phd", "doctoral_student_mdphd"]) {
+        const { container } = render(
+          <PersonRow hit={{ ...studentHit, roleCategory: "MD student", roleCategoryRaw: raw }} />
+        );
+        expect(container.querySelector("a")).toBeNull();
+      }
+    });
+
+    it("still links faculty", () => {
+      const { container } = render(
+        <PersonRow
+          hit={{ ...baseHit, roleCategory: "Full-time faculty", roleCategoryRaw: "full_time_faculty" }}
+        />
+      );
+      expect(container.querySelector("a")).not.toBeNull();
+    });
+
+    it("de-links rather than leaks when a producer omits roleCategoryRaw", () => {
+      // Fail-closed fallback: the label alone is unrecognized.
+      const { container } = render(
+        <PersonRow hit={{ ...baseHit, roleCategory: "Doctoral student" }} />
+      );
+      expect(container.querySelector("a")).toBeNull();
+    });
+  });
 });

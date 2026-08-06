@@ -51,6 +51,7 @@ import { extractLastNameSort } from "@/lib/name-sort";
 import { isCenterMembershipActive } from "@/lib/api/centers";
 import { isTrainingOnlyGrant } from "@/lib/grants/training-exclusions";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
+import { HIDDEN_ROLE_CATEGORIES } from "@/lib/eligibility";
 
 // ---------------------------------------------------------------------------
 // Authorship weights — publications-doc index-time term repetition.
@@ -477,15 +478,23 @@ export const PEOPLE_INDEX_WHERE = {
   // — Phase 4b's build-time half is publication-suppression only (the spike's
   // reassuring scoping finding); scholar suppression is already correct here.
   //
-  // NOT the whole eligibility carve: #536's isPubliclyDisplayed(roleCategory)
-  // is a SECOND, downstream filter applied in-memory in etl/search-index/index.ts
-  // (`eligible = scholars.filter(...)`), not here. It's why a scholar can pass
-  // this where-clause and still have no people doc — #1970 measured 690
-  // Aurora-eligible-but-unindexed scholars on staging, and all 690 (100%) were
-  // `doctoral_student`. Diffing against PEOPLE_INDEX_WHERE alone will always
-  // look like a gap; check role_category before assuming a bug.
   deletedAt: null,
   status: "active",
+  // #2202 — this NOW carries the whole eligibility carve. It used to be the
+  // soft-delete half only, with #536's isPubliclyDisplayed(roleCategory) applied
+  // separately in-memory in etl/search-index/index.ts. That split left a hole:
+  // buildScholarOps (lib/edit/search-suppression.ts) re-indexes anything passing
+  // this where-clause, so an /edit reflect on a prod doctoral student — bare
+  // `doctoral_student`, no soft-delete — would have put them back into the people
+  // index. The ETL's in-memory filter stays as belt-and-braces.
+  //
+  // `notIn` alone would also drop role_category IS NULL rows (SQL three-valued
+  // logic: NULL NOT IN (...) is NULL, not true), so NULL is admitted explicitly.
+  // NULL means un-backfilled, not hidden — isPubliclyDisplayed(null) is true too.
+  OR: [
+    { roleCategory: null },
+    { roleCategory: { notIn: [...HIDDEN_ROLE_CATEGORIES] } },
+  ],
 } satisfies Prisma.ScholarWhereInput;
 
 export const PEOPLE_INDEX_SELECT = {

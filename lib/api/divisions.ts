@@ -330,7 +330,10 @@ export type DivisionFacultyResult = {
     divisionName: string | null;
     departmentName: string;
     identityImageEndpoint: string;
+    /** Display LABEL (see DepartmentFacultyHit) — never feed it to a predicate. */
     roleCategory: string | null;
+    /** Raw `scholar.role_category` for `isPubliclyDisplayed` (#2202). */
+    roleCategoryRaw?: string | null;
     overview: string | null;
     pubCount: number;
     grantCount: number;
@@ -471,6 +474,8 @@ async function getDivisionFacultyUncached(
     // division SSR view, not just after a method is selected. (roleCategoryCounts at
     // L386 already normalizes; the hit was the lone raw outlier.)
     roleCategory: formatRoleCategory(r.roleCategory),
+    // #2202 — the label above is display-only; the #536 carve reads this.
+    roleCategoryRaw: r.roleCategory,
     overview: r.overview ? r.overview.slice(0, 120) : null,
     pubCount: pubByCwid.get(r.cwid) ?? 0,
     grantCount: grantByCwid.get(r.cwid) ?? 0,

@@ -58,7 +58,12 @@ export function PersonRow({
       </div>
       <div className="flex min-w-0 flex-col">
         <div className="mb-[3px] flex flex-wrap items-center gap-2 text-[15px] font-medium leading-[1.3]">
-          {isPubliclyDisplayed(hit.roleCategory) ? (
+          {/* #2202 — `hit.roleCategory` is a display LABEL ("Doctoral student"),
+              which is not a value isPubliclyDisplayed knows; it must see the raw
+              enum. The fallback keeps older payloads working — and now that the
+              predicate fails closed, an unrecognized label de-links rather than
+              leaks. */}
+          {isPubliclyDisplayed(hit.roleCategoryRaw ?? hit.roleCategory) ? (
             <PersonPopover cwid={hit.cwid} surface="facet">
               <a
                 href={profilePath(hit.slug)}

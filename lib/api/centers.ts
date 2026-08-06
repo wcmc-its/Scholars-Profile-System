@@ -432,6 +432,7 @@ async function buildCenterMemberHits(
     departmentName: s.department?.name ?? s.primaryDepartment ?? "",
     identityImageEndpoint: identityImageEndpoint(s.cwid),
     roleCategory: formatRoleCategory(s.roleCategory),
+    roleCategoryRaw: s.roleCategory,
     overview: s.overview,
     professorialRank: s.professorialRank,
     pubCount: pubMap.get(s.cwid) ?? 0,
