@@ -1230,7 +1230,12 @@ export class EtlStack extends Stack {
       // know presence otherwise (it derives the URL from the cwid, client-side).
       // Reads the directory over NAT egress with no credential (like etl:nsf), so
       // external:false; mutates SPS-DB only. Weekly cadence is plenty for a slow-
-      // changing signal; incremental by default (re-probes never-checked + >30d-stale).
+      // changing signal; incremental by default (re-probes never-checked + rows
+      // older than HEADSHOT_STALE_DAYS = 6, `lib/headshot-presence.ts`). That
+      // threshold is pinned UNDER this rule's 7-day period on purpose (#2210):
+      // at the previous 30 days each row was only re-probed every 30-37 days, so
+      // a scholar who gained a photo stayed listed as missing for five weeks.
+      // Measured cost of a full wave in prod (2026-07-06): 9,389 probes in 3m21s.
       { id: "HeadshotPresence", npmScript: "etl:headshot", external: false, tier: "continue" },
       { id: "Spotlight", npmScript: "etl:spotlight", external: true, tier: "continue" },
       // Grant-enrichment sources (#608). They key off the `grant` table that

@@ -24,6 +24,42 @@ import { identityImageEndpoint } from "@/lib/headshot";
 export type HeadshotVerdict = boolean | null;
 
 /**
+ * How stale a persisted verdict may be before `etl/headshot` re-probes it in
+ * incremental mode (#2210).
+ *
+ * MUST NOT be an exact multiple of the 7-day weekly cadence
+ * (`cron(0 12 ? * SUN *)`, `cdk/lib/etl-stack.ts`). Run N stamps
+ * `headshot_checked_at` a few minutes AFTER its 12:00 UTC start, so a cutoff of
+ * exactly 7 or 14 days lands a few minutes BEFORE that stamp at the run that
+ * should refresh it: every row reads as fresh, the whole cohort is skipped, and
+ * the refresh silently halves — **with the job still exiting 0 on a near-empty
+ * scan**. 13 absorbs the in-run drift plus a late start, giving a true
+ * fortnightly refresh on a weekly job.
+ *
+ * The previous value was 30 days, which on a weekly cron re-probes each row
+ * every 30–37 days, so a scholar who gains a directory photo shows
+ * `has_headshot = 0` on the Data Quality dashboard for up to five weeks. That is
+ * exactly #2210: prod's column was a single 2026-07-06 full-backfill snapshot and
+ * the QA pass that found the wrong row ran on day 30 of that window.
+ *
+ * ponytail: 13 (fortnightly), not 6 (weekly), on purpose. Both fix #2210 — the
+ * bound drops from ~5 weeks to ~2 rather than ~1 — but the ~9,400-URL wave hits a
+ * directory service another team owns, and we have not asked them. Peak load per
+ * wave is identical either way (the whole cohort is stamped in one run, so it
+ * comes due in one run); only the frequency differs. Drop to 6 if the directory
+ * owners confirm weekly is fine.
+ */
+export const HEADSHOT_STALE_DAYS = 13;
+
+/**
+ * The `headshot_checked_at` cutoff for incremental mode: rows checked strictly
+ * before this instant (plus rows never checked) are due for a re-probe.
+ */
+export function headshotStaleBefore(now: Date = new Date()): Date {
+  return new Date(now.getTime() - HEADSHOT_STALE_DAYS * 24 * 60 * 60 * 1000);
+}
+
+/**
  * Map an HTTP status from the directory headshot endpoint to a presence verdict.
  * 200/206 → present; 404 → absent; anything else → indeterminate (`null`), so a
  * transient directory problem never flips a known value to a wrong one.
