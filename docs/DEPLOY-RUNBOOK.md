@@ -261,33 +261,39 @@ Kill-switching prod is a P0 action. Notify any active operators before doing it;
 
 Backfills are one-shot data jobs that run AFTER a successful deploy of the expand migration that created the column they populate. They are not migrations and they don't gate deploys. Per `scripts/backfills/README.md`:
 
+**Run them on the ETL task family, not the app family.** A backfill is a `.ts` file executed with `tsx`, and the app image ships neither: the `runtime` stage is Next standalone (`.next/standalone` + the Prisma CLI closure), so `scripts/`, `etl/`, `lib/` and `tsx` are all absent and the task dies at start with `Error: Cannot find module 'tsx/cjs'`. The `etl` stage exists precisely for this — full dependency tree including `tsx`, whole source subset, Prisma client regenerated in-image (#454, see the stage comments in `Dockerfile`). Pick the ETL family the same way a manual `etl:*` run does — by credential group, per [`./OPERATIONS-RUNBOOK.md`](./OPERATIONS-RUNBOOK.md) §4; a backfill that only touches Aurora belongs on the base `sps-etl-${env}`.
+
 ```sh
 # Build + push an image containing the backfill script (normal deploy
-# pipeline does this).
+# pipeline does this -- the ETL image is a separate ECR repo, scholars-etl-*).
 
-# Run the backfill as a one-shot task using the app task family (NOT the
-# migration task family -- backfills need the full app code, not just Prisma).
-cluster=$(aws cloudformation describe-stacks --stack-name Sps-App-${env} \
-  --query 'Stacks[0].Outputs[?OutputKey==`EcsClusterName`].OutputValue' --output text)
-service=$(aws cloudformation describe-stacks --stack-name Sps-App-${env} \
-  --query 'Stacks[0].Outputs[?OutputKey==`EcsServiceName`].OutputValue' --output text)
-app_family=$(aws cloudformation describe-stacks --stack-name Sps-App-${env} \
-  --query 'Stacks[0].Outputs[?OutputKey==`EcsAppTaskFamily`].OutputValue' --output text)
-netcfg=$(aws ecs describe-services --cluster "$cluster" --services "$service" \
-  --query 'services[0].networkConfiguration' --output json)
+# Resolve the live ETL network config for $ENV. NEVER hardcode subnet/SG ids --
+# see data-population-runbook.md section 3 for this snippet and why.
+read ETL_SUBNETS ETL_SG < <(aws stepfunctions describe-state-machine \
+  --state-machine-arn "$(aws stepfunctions list-state-machines \
+     --query "stateMachines[?contains(name,'scholars-nightly-$ENV')].stateMachineArn|[0]" --output text)" \
+  --query definition --output text \
+  | python3 -c 'import sys,re
+t=sys.stdin.read()
+m=re.search(r"\"Subnets\"\s*:\s*\[([^\]]*)\].*?\"SecurityGroups\"\s*:\s*\[([^\]]*)\]", t, re.S)
+print(",".join(s.strip().strip("\"") for s in m.group(1).split(",")), m.group(2).strip().strip("\""))')
 
 backfill_script="2026-05-21-populate-author-orcid.ts"
 
-aws ecs run-task --cluster "$cluster" \
-  --task-definition "$app_family" \
+aws ecs run-task --cluster sps-cluster-$ENV \
+  --task-definition sps-etl-$ENV \
   --launch-type FARGATE \
-  --network-configuration "$netcfg" \
+  --network-configuration "awsvpcConfiguration={subnets=[$ETL_SUBNETS],securityGroups=[$ETL_SG],assignPublicIp=DISABLED}" \
   --overrides "$(jq -nc \
     --arg script "$backfill_script" \
-    '{containerOverrides:[{name:"app",command:["node","-r","tsx/cjs",("scripts/backfills/"+$script),"--dry-run"]}]}')"
+    '{containerOverrides:[{name:"etl",command:["npx","tsx",("scripts/backfills/"+$script),"--dry-run"]}]}')"
 ```
 
-Run with `--dry-run` first. Inspect logs at `/aws/ecs/sps-app-${env}`. Re-run without `--dry-run` once satisfied. Re-runnability of the script (idempotent `WHERE` predicates, row-limit flag) is the script's responsibility, per the convention in `scripts/backfills/README.md`.
+Run with `--dry-run` first. Inspect logs at `/aws/ecs/sps-etl-${env}` — the stream is `etl/etl/<task-id>`, so `aws logs get-log-events --log-stream-name "etl/etl/${task_arn##*/}"` reads back exactly the run you launched rather than whatever else the group is carrying. Re-run without `--dry-run` once satisfied. Re-runnability of the script (idempotent `WHERE` predicates, row-limit flag) is the script's responsibility, per the convention in `scripts/backfills/README.md`.
+
+The container name is `etl`, not `app` — a `containerOverrides` entry naming a container the task definition does not have is rejected at task-start, not ignored.
+
+⚠️ A backfill that imports `@/lib/db` must close its pools with the exported `disconnect()` — **not** `db.write.$disconnect()`, which leaves `db.read`'s second mariadb pool holding the event loop open whenever `DATABASE_URL_RO` is set. The task then sits in `RUNNING` long after printing its summary, holding 15 Aurora connections: the leak behind [`./OPERATIONS-RUNBOOK.md`](./OPERATIONS-RUNBOOK.md) §4 #14. Wrapping the container command in `timeout 600` is the belt-and-braces version.
 
 ## Pre-deploy checklist (production)
 
