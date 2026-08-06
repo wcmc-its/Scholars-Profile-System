@@ -274,7 +274,16 @@ async function buildReflectionOps(
  */
 async function buildGrantOps(externalId: string): Promise<Op[]> {
   const ext = parseExternalId(externalId);
-  if (!ext) return []; // Not an InfoEd grant id — never indexed, nothing to do.
+  // Not an InfoEd grant id — never indexed, nothing to do. This is the COMMON
+  // case, not an edge case: `etl/reporter-grants/transform.ts` writes
+  // `reporter:{cwid}:{core}` ids, and `groupGrantsByProject` drops anything
+  // `parseExternalId` rejects, so RePORTER grants have no funding doc to
+  // delete. Measured on prod 2026-08-06: 295 of 311 active grant suppressions
+  // are `reporter:*`. Returning [] is correct — but it must still STAMP, which
+  // is the caller's job and was the #2204 defect: 295 unstamped rows pinned the
+  // reconciler's `take: 200` batch head forever and starved the 16 InfoEd rows
+  // (positions 284-311) that DO have a doc to delete. Those were #2203's leak.
+  if (!ext) return [];
 
   const suppressed = await loadAllGrantSuppressions(db.read);
   // Cheap two-column scan: only externalId + awardNumber drive the group key,
