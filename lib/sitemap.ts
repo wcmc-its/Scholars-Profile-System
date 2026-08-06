@@ -17,6 +17,7 @@
  * and gives one source of truth (`buildSitemapEntries`) for the shard count.
  */
 import { prisma } from "@/lib/db";
+import { HIDDEN_ROLE_CATEGORIES, isPubliclyDisplayed } from "@/lib/eligibility";
 import { canonicalProfilePath } from "@/lib/profile-url";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import {
@@ -60,6 +61,10 @@ export { siteBaseUrl };
  * `orderBy` and the sections concatenate in a fixed sequence — so a given URL
  * always lands in the same child shard when sliced by `URLS_PER_SITEMAP`.
  *
+ * Scholar entries carry the #536 public-display carve (#2205): a URL is only
+ * advertised if the profile route would actually render it. See the query and
+ * the `isPubliclyDisplayed` filter below.
+ *
  * In build environments without a DB (CI on a fresh checkout) the dynamic
  * queries fail soft and only the static entries are emitted; ISR repopulates
  * the full set on first production hit. Mirrors app/(public)/scholars/[slug].
@@ -67,15 +72,38 @@ export { siteBaseUrl };
 export async function buildSitemapEntries(): Promise<SitemapEntry[]> {
   const base = siteBaseUrl();
 
-  let scholars: Array<{ slug: string; updatedAt: Date | null }> = [];
+  let scholars: Array<{
+    slug: string;
+    updatedAt: Date | null;
+    roleCategory: string | null;
+  }> = [];
   let topics: Array<{ id: string; refreshedAt: Date | null }> = [];
   let departments: Array<{ slug: string; updatedAt: Date | null }> = [];
   let centers: Array<{ slug: string; updatedAt: Date | null }> = [];
   try {
     [scholars, topics, departments, centers] = await Promise.all([
       prisma.scholar.findMany({
-        where: { deletedAt: null, status: "active" },
-        select: { slug: true, updatedAt: true },
+        // #2205 — the #536 role carve, which this query used to omit entirely.
+        // `deletedAt: null, status: "active"` alone matched 9,412 prod rows, ~690
+        // of them doctoral students carrying the BARE `doctoral_student` with
+        // `deleted_at IS NULL` — so the soft-delete half gated nothing and the
+        // sitemap advertised their name-bearing slugs to crawlers, every one of
+        // which 404s at `components/profile/profile-view.tsx` (the profile route's
+        // `isPubliclyDisplayed(profile.roleCategory)` gate). Note staging is the
+        // MIRROR IMAGE — its students are both suffixed and soft-deleted — so a
+        // staging check cannot exercise this carve at all.
+        //
+        // Same shape as PEOPLE_INDEX_WHERE (lib/search-index-docs.ts): `notIn`
+        // alone would also drop `role_category IS NULL` rows (SQL three-valued
+        // logic — `NULL NOT IN (...)` is NULL, not true), so NULL is admitted
+        // explicitly. NULL means un-backfilled, not hidden, and
+        // `isPubliclyDisplayed(null)` is true for the same reason.
+        where: {
+          deletedAt: null,
+          status: "active",
+          OR: [{ roleCategory: null }, { roleCategory: { notIn: [...HIDDEN_ROLE_CATEGORIES] } }],
+        },
+        select: { slug: true, updatedAt: true, roleCategory: true },
         orderBy: { slug: "asc" },
       }),
       prisma.topic.findMany({
@@ -103,12 +131,24 @@ export async function buildSitemapEntries(): Promise<SitemapEntry[]> {
     { url: `${base}/about`, lastModified: now, changeFrequency: "monthly", priority: 0.5 },
   ];
 
-  const scholarEntries: SitemapEntry[] = scholars.map((s) => ({
-    url: `${base}${canonicalProfilePath(s.slug)}`,
-    lastModified: s.updatedAt ?? now,
-    changeFrequency: "weekly",
-    priority: 0.8,
-  }));
+  // #2205 — the where-clause carve above is NOT sufficient on its own, and this
+  // filter is not belt-and-braces. `HIDDEN_ROLE_CATEGORIES` is an ENUMERATION
+  // (the five known hidden values); `isPubliclyDisplayed` is a PREDICATE that
+  // additionally (a) prefix-matches every `doctoral_student*` variant, including
+  // ones nobody has enumerated yet — out-of-band writes provably happen, see the
+  // LEGACY_VISIBLE_ROLES note in lib/eligibility.ts — and (b) fails CLOSED on any
+  // unrecognized role since #2202. A row `notIn` admits but the predicate rejects
+  // is exactly a published URL that 404s, which is the defect. The profile route
+  // gates on this predicate, so the sitemap must too, or the two disagree about
+  // what "visible" means. Order is preserved, so shard assignment stays stable.
+  const scholarEntries: SitemapEntry[] = scholars
+    .filter((s) => isPubliclyDisplayed(s.roleCategory))
+    .map((s) => ({
+      url: `${base}${canonicalProfilePath(s.slug)}`,
+      lastModified: s.updatedAt ?? now,
+      changeFrequency: "weekly",
+      priority: 0.8,
+    }));
 
   const topicEntries: SitemapEntry[] = topics.map((t) => ({
     url: `${base}/topics/${t.id}`,
