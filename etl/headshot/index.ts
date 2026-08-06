@@ -12,24 +12,26 @@
  * SPS-DB only.
  *
  * Usage:
- *   npm run etl:headshot           incremental — never-checked + stale (> 30d)
+ *   npm run etl:headshot           incremental — never-checked + stale
+ *                                  (older than HEADSHOT_STALE_DAYS)
  *   npm run etl:headshot -- --full re-probe every active scholar
  *
  * Exits 0 on success, 1 on failure. STDOUT carries one structured result line.
  */
 import { db } from "../../lib/db";
-import { probeHeadshot } from "../../lib/headshot-presence";
+import { headshotStaleBefore, probeHeadshot } from "../../lib/headshot-presence";
 import { withEtlRun } from "@/lib/etl-run";
 
 /** Concurrent in-flight directory probes. The directory is a shared WCM service;
  *  keep this modest so the weekly job is a good citizen. */
 const CONCURRENCY = 12;
-/** Incremental mode re-probes a scholar whose last check is older than this. */
-const STALE_DAYS = 30;
 
 async function main(): Promise<void> {
   const full = process.argv.includes("--full");
-  const staleBefore = new Date(Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000);
+  // Incremental mode re-probes a scholar whose last check is older than this.
+  // The threshold is pinned to the weekly cadence in `lib/headshot-presence.ts`
+  // — see HEADSHOT_STALE_DAYS for why it must stay under 7 days (#2210).
+  const staleBefore = headshotStaleBefore();
 
   const scholars = await db.write.scholar.findMany({
     where: full
@@ -51,6 +53,14 @@ async function main(): Promise<void> {
   const previouslyTrue = scholars.filter((s) => s.hasHeadshot === true).length;
   const maxAbsentFlips = Math.max(25, Math.ceil(previouslyTrue * 0.2));
   let absentFlips = 0;
+  // The mirror-image count: rows that were persisted `false` and now probe
+  // present. This is exactly the #2210 population — a scholar whose photo
+  // landed after the last probe, whom the dashboard has been listing under
+  // `?gap=no-headshot` ever since. `absent`/`present` below count the whole
+  // scanned cohort and cannot separate "still absent" from "just corrected",
+  // so the flips are what makes the correction rate observable at all. Both
+  // are reported, not just the one the abort guard reads.
+  let presentFlips = 0;
 
   // Bounded-concurrency pool over a shared index — each worker pulls the next
   // cwid until the list is drained.
@@ -64,6 +74,9 @@ async function main(): Promise<void> {
         // Indeterminate — do NOT overwrite a known value or stamp checkedAt.
         indeterminate++;
         continue;
+      }
+      if (verdict === true && scholar.hasHeadshot === false) {
+        presentFlips++;
       }
       if (verdict === false && scholar.hasHeadshot === true) {
         absentFlips++;
@@ -95,6 +108,8 @@ async function main(): Promise<void> {
       present,
       absent,
       indeterminate,
+      flippedToPresent: presentFlips,
+      flippedToAbsent: absentFlips,
       ts: new Date().toISOString(),
     }),
   );
