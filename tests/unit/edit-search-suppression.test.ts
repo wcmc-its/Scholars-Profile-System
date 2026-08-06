@@ -191,7 +191,7 @@ describe("reflectSearchSuppression — scholar suppress", () => {
       affectedCwids: ["ann1234"],
     });
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, stamped: true });
     expect(hoisted.mockBulk).toHaveBeenCalledTimes(1);
     expect(hoisted.mockBulk).toHaveBeenCalledWith({
       refresh: true,
@@ -372,7 +372,7 @@ describe("reflectSearchSuppression — failure handling (D4b.4 best-effort)", ()
 
     expect(consoleError).not.toHaveBeenCalled();
     // 404-on-delete is treated as success (idempotent missing doc) — stamped.
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, stamped: true });
     expect(hoisted.mockSuppressionUpdate).toHaveBeenCalledTimes(1);
     consoleError.mockRestore();
   });
@@ -424,7 +424,7 @@ describe("reflectSearchSuppression — grant funding fast-path (#481(a))", () =>
       affectedCwids: [],
     });
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, stamped: true });
     expect(hoisted.mockBulk).toHaveBeenCalledTimes(1);
     const body = hoisted.mockBulk.mock.calls[0][0].body as Array<
       Record<string, unknown>
@@ -463,7 +463,7 @@ describe("reflectSearchSuppression — grant funding fast-path (#481(a))", () =>
       affectedCwids: [],
     });
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, stamped: true });
     expect(hoisted.mockGrantFindMany).toHaveBeenCalledTimes(1);
     expect(hoisted.mockBulk).toHaveBeenCalledWith({
       refresh: true,
@@ -505,16 +505,21 @@ describe("reflectSearchSuppression — grant funding fast-path (#481(a))", () =>
       contributorCwid: null,
       affectedCwids: [],
     });
-    // parseExternalId fails before any query → no scan, no bulk, no stamp.
-    expect(result).toEqual({ ok: true });
+    // parseExternalId fails before any query → no scan, no bulk. It IS stamped
+    // (#2204): the row was never indexed, so "nothing in the index" is the
+    // correct reflected state. This assertion used to demand the opposite, and
+    // that is the defect — `grant` is in RECONCILABLE_ENTITY_TYPES, so an
+    // unstamped grant row is re-selected by the reconciler on every 5 min run
+    // forever and, at `take: 200` ordered by created_at, starves the tail.
+    expect(result).toEqual({ ok: true, stamped: true });
     expect(hoisted.mockGrantFindMany).not.toHaveBeenCalled();
     expect(hoisted.mockBulk).not.toHaveBeenCalled();
-    expect(hoisted.mockSuppressionUpdate).not.toHaveBeenCalled();
+    expect(hoisted.mockSuppressionUpdate).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("reflectSearchSuppression — unsupported entity type", () => {
-  it("is a no-op (no bulk, no stamp) for education / appointment", async () => {
+  it("issues no bulk for education / appointment, and stamps unconditionally", async () => {
     const result = await reflectSearchSuppression({
       suppressionId: "sup-edu",
       entityType: "education",
@@ -523,8 +528,46 @@ describe("reflectSearchSuppression — unsupported entity type", () => {
       affectedCwids: [],
     });
     expect(hoisted.mockBulk).not.toHaveBeenCalled();
-    // No ops → ok, but no stamp (the reconciler excludes these by entity type).
-    expect(result).toEqual({ ok: true });
-    expect(hoisted.mockSuppressionUpdate).not.toHaveBeenCalled();
+    // Stamped even though these types have no OpenSearch projection. The
+    // sentinel means "latest transition reflected", which is vacuously true
+    // when there is nothing to reflect — and stamping unconditionally removes
+    // the paired edit that would otherwise be required here every time
+    // RECONCILABLE_ENTITY_TYPES grows. Missing that paired edit is what made
+    // `grant` a poison pill (#2204). Inert either way: the reconciler still
+    // excludes these types by entity type.
+    expect(result).toEqual({ ok: true, stamped: true });
+    expect(hoisted.mockSuppressionUpdate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("reflectSearchSuppression — sentinel stamp failure (#2204)", () => {
+  it("reports stamped:false and logs when the sentinel update throws", async () => {
+    // The check that was missing. `markSearchReflected` used to swallow this
+    // with a bare `catch {}` and return void, so a permanently-NULL sentinel
+    // was indistinguishable from a healthy one — the reconciler reported
+    // reflected:200 / failed:0 against 317/317 NULL for the life of the system.
+    hoisted.mockBulk.mockResolvedValue({ body: { errors: false, items: [] } });
+    hoisted.mockSuppressionUpdate.mockRejectedValue(
+      new Error("UPDATE command denied to user"),
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await reflectSearchSuppression({
+      suppressionId: "sup-stamp-denied",
+      entityType: "scholar",
+      entityId: "ann1234",
+      contributorCwid: null,
+      affectedCwids: ["ann1234"],
+    });
+
+    // The INDEX write landed, so ok stays true — the route call sites must not
+    // roll back. But the sentinel did NOT advance, and that is now visible.
+    expect(result).toEqual({ ok: true, stamped: false });
+    const stampLog = consoleError.mock.calls
+      .map((c) => JSON.parse(c[0] as string))
+      .find((l) => l.event === "edit_search_reflect_stamp_failed");
+    expect(stampLog).toMatchObject({ suppressionId: "sup-stamp-denied" });
+    expect(stampLog.error).toContain("denied");
+    consoleError.mockRestore();
   });
 });

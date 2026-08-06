@@ -116,12 +116,27 @@ export type ReflectSearchSuppressionArgs = {
 };
 
 /**
- * The outcome of a reflection. The route call sites ignore it (best-effort
- * contract unchanged); the #393 reconciler reads `.ok` to log a retry-shaped
- * failure. Note the stamp-on-success lives inside the reflector itself, so
- * `{ ok: true }` already means the sentinel was advanced (best-effort).
+ * The outcome of a reflection. The route call sites ignore it entirely
+ * (best-effort contract unchanged); the #393 reconciler reads it.
+ *
+ * `ok` and `stamped` are SEPARATE on purpose (#2204). `ok` is about the
+ * OpenSearch write; `stamped` is about the `searchReflectedAt` sentinel that
+ * decides whether the reconciler ever stops re-processing this row. They can
+ * disagree — the index write can land while the sentinel advance fails — and
+ * conflating them is exactly how this ran green for the life of the system:
+ * `{ ok: true }` was returned on a path that never stamped, so the reconciler
+ * counted 200 rows `reflected` against 317/317 NULL, forever, and the alarm
+ * keyed on a failure event the broken path could not emit.
+ *
+ * The reconciler now counts `ok && !stamped` as a FAILED row, so a
+ * non-advancing sentinel exits the worker non-zero and reaches the existing
+ * `sps-reconcile-status-<env>` ExecutionsFailed alarm. That is the alarm
+ * inversion #2204 asks for: it pages when the sentinel stops advancing, for
+ * ANY cause, rather than on an error string.
  */
-export type ReflectResult = { ok: true } | { ok: false; error: unknown };
+export type ReflectResult =
+  | { ok: true; stamped: boolean }
+  | { ok: false; error: unknown };
 
 type Op =
   | { type: "delete"; index: string; id: string }
@@ -138,10 +153,18 @@ export async function reflectSearchSuppression(
   try {
     const ops = await buildReflectionOps(args);
     if (ops.length === 0) {
-      // Non-search entity type (education / appointment / grant): nothing to
-      // reflect. We do NOT stamp — the reconciler excludes these by entity
-      // type, so the sentinel staying NULL for them is inert.
-      return { ok: true };
+      // Nothing to project. The old comment here claimed this meant a
+      // "non-search entity type (education / appointment / grant)" the
+      // reconciler excludes by type — but `grant` IS in
+      // RECONCILABLE_ENTITY_TYPES, and `buildGrantOps` returns [] for any
+      // entityId `parseExternalId` rejects. So a single such row returned
+      // `{ ok: true }` unstamped forever, and because the reconciler orders by
+      // created_at and takes a fixed batch, it sat at the head of every run
+      // starving the tail behind it.
+      //
+      // An empty op list IS a successful reflection: the index correctly holds
+      // nothing for this row. Stamp it so it drains.
+      return { ok: true, stamped: await markSearchReflected(args.suppressionId) };
     }
     const client = searchClient();
     const body: Array<Record<string, unknown>> = [];
@@ -169,10 +192,10 @@ export async function reflectSearchSuppression(
       }
     }
     // Full success — advance the reconciler sentinel so this row is not
-    // re-processed. Best-effort: a stamp failure leaves the (already-correct)
-    // index untouched and the reconciler re-reflects idempotently.
-    await markSearchReflected(args.suppressionId);
-    return { ok: true };
+    // re-processed. Still best-effort for the ROUTE call sites (a stamp failure
+    // leaves the already-correct index untouched), but the outcome is now
+    // reported so the reconciler can treat it as the failure it is.
+    return { ok: true, stamped: await markSearchReflected(args.suppressionId) };
   } catch (err) {
     logReflectFailure(args, err);
     return { ok: false, error: err };
@@ -182,16 +205,31 @@ export async function reflectSearchSuppression(
 /**
  * Stamp `searchReflectedAt = now()` on a suppression row after a successful
  * reflection. Never throws — the OpenSearch write already succeeded; only the
- * sentinel advance can fail here, and the reconciler is the backstop.
+ * sentinel advance can fail here.
+ *
+ * Returns whether the stamp LANDED, and logs when it does not (#2204). The
+ * previous `catch {}` returned void and swallowed silently, which made a
+ * permanently-NULL sentinel indistinguishable from a healthy one: the
+ * reconciler is the backstop for a lost INDEX write, but nothing was the
+ * backstop for a lost STAMP, and a lost stamp means the backstop itself spins
+ * on the same rows forever.
  */
-async function markSearchReflected(suppressionId: string): Promise<void> {
+async function markSearchReflected(suppressionId: string): Promise<boolean> {
   try {
     await db.write.suppression.update({
       where: { id: suppressionId },
       data: { searchReflectedAt: new Date() },
     });
-  } catch {
-    // Swallow — see the function contract above.
+    return true;
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        event: "edit_search_reflect_stamp_failed",
+        suppressionId,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return false;
   }
 }
 
