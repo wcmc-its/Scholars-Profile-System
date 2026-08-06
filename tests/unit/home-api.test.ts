@@ -613,15 +613,22 @@ describe("getHomeMethodCategories (home Browse by research method)", () => {
 // ---------------------------------------------------------------------------
 
 describe("getHomeStats — advertised scholars == findable scholars (#2222)", () => {
-  /** The `where` handed to prisma.scholar.count on the most recent call. */
+  /** The `where` handed to prisma.scholar.findMany on the most recent call. */
   function capturedScholarWhere(): Record<string, unknown> {
-    const call = mockScholarCount.mock.calls.at(-1);
+    const call = mockScholarFindMany.mock.calls.at(-1);
     const arg = call?.[0] as { where?: Record<string, unknown> } | undefined;
     return arg?.where ?? {};
   }
 
+  /** N visible rows, as the where-fragment would return them. */
+  function visibleRows(n: number) {
+    return Array.from({ length: n }, () => ({
+      roleCategory: "full_time_faculty",
+    }));
+  }
+
   beforeEach(() => {
-    mockScholarCount.mockResolvedValue(8722);
+    mockScholarFindMany.mockResolvedValue(visibleRows(8722));
     mockPublicationCount.mockResolvedValue(189_144);
     mockTopicCount.mockResolvedValue(67);
   });
@@ -662,11 +669,57 @@ describe("getHomeStats — advertised scholars == findable scholars (#2222)", ()
     expect(or).toContainEqual({ roleCategory: null });
   });
 
-  it("passes the count straight through (no post-hoc adjustment)", async () => {
+  it("counts the rows the where-fragment admits, unadjusted, when all are visible", async () => {
     const stats = await getHomeStats();
     expect(stats.scholarCount).toBe(8722);
     expect(stats.publicationCount).toBe(189_144);
     expect(stats.researchAreaCount).toBe(67);
+  });
+
+  it("ALSO applies isPubliclyDisplayed — an out-of-band suffixed student passes the denylist and must not be advertised", async () => {
+    // publicRoleWhere() is a DENYLIST: it can only name the suffixes this repo
+    // knows. `doctoral_student_dds` is not in HIDDEN_ROLE_CATEGORIES, so the
+    // where-fragment ADMITS it — exactly as the real query would. The people
+    // index drops it anyway, because etl/search-index/index.ts filters the
+    // result through isPubliclyDisplayed, which prefix-matches. The hero has to
+    // do the same or it re-advertises an unfindable scholar.
+    mockScholarFindMany.mockResolvedValue([
+      ...visibleRows(3),
+      { roleCategory: "doctoral_student_dds" },
+    ]);
+    const stats = await getHomeStats();
+    expect(stats.scholarCount).toBe(3);
+  });
+
+  it("ALSO drops a role the DB has but VISIBLE_ROLE_KEYS does not — the predicate fails CLOSED", async () => {
+    // The #2202 shape, arriving from the other direction: a role value that
+    // reaches the DB before it reaches the allowlist. The denylist cannot name
+    // it; isPubliclyDisplayed hides it.
+    mockScholarFindMany.mockResolvedValue([
+      ...visibleRows(2),
+      { roleCategory: "visiting_scientist_2027" },
+    ]);
+    const stats = await getHomeStats();
+    expect(stats.scholarCount).toBe(2);
+  });
+
+  it("keeps counting NULL role_category — absence of data is not an unrecognized token", async () => {
+    // isPubliclyDisplayed(null) === true, and the where-fragment admits NULL
+    // explicitly. Both halves must agree here or the fix under-counts every
+    // un-backfilled scholar — a worse defect than the one it repairs.
+    mockScholarFindMany.mockResolvedValue([
+      ...visibleRows(2),
+      { roleCategory: null },
+    ]);
+    const stats = await getHomeStats();
+    expect(stats.scholarCount).toBe(3);
+  });
+
+  it("selects only role_category — the hero never loads identity for a count", async () => {
+    await getHomeStats();
+    const call = mockScholarFindMany.mock.calls.at(-1);
+    const arg = call?.[0] as { select?: Record<string, unknown> } | undefined;
+    expect(arg?.select).toEqual({ roleCategory: true });
   });
 });
 
