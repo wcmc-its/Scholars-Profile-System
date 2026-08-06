@@ -1006,10 +1006,27 @@ export function resolveSearchPeopleConceptHint(): boolean {
  * `isPubliclyDisplayed(roleCategory)` (the existing #536 chip path); this flag
  * only governs whether they are pulled into the hydration at all.
  *
- * Default OFF (`COAUTHOR_HIDDEN_STUDENT_CHIPS=on` enables). When OFF, the chip
- * hydration filter and every renderable-chip predicate behave byte-identically
- * to today (no hidden-class student is in the hydration, so the relaxed
- * predicates never match anyone).
+ * Default OFF (`COAUTHOR_HIDDEN_STUDENT_CHIPS=on` enables).
+ *
+ * #2223 — what OFF means, corrected. It used to mean only "do not ADDITIONALLY
+ * hydrate the soft-deleted student cohort", and only on the surfaces fed by
+ * `fetchWcmAuthorsForPmids`. That made the name a promise the flag could not
+ * keep: prod's 690 doctoral students are NOT soft-deleted (bare
+ * `doctoral_student`, `deleted_at IS NULL`, `status='active'`), so they sailed
+ * through the flag-off filter, and the two surfaces the QA runbook §5 actually
+ * names — the profile publication chips (`lib/api/profile.ts`) and the home
+ * spotlight author lists (`lib/api/home.ts`) — never read the flag at all. An
+ * operator could not have used it to roll back chip exposure in an incident.
+ *
+ * All three chip surfaces now honour it, with one rule:
+ *   - ON  — hidden-class students may appear, always as a NON-LINKED chip
+ *           (enforced at render by `isPubliclyDisplayed`). The topic/search/
+ *           methods resolver additionally hydrates the SOFT-DELETED cohort, per
+ *           #1026; the profile and home surfaces are unchanged from today.
+ *   - OFF — no hidden-class student is in ANY chip row, on either data shape.
+ *
+ * ON is the live value in every env, so the corrected OFF branch is dark until
+ * someone deliberately flips it.
  */
 export function resolveHiddenStudentCoauthorChips(): boolean {
   return process.env.COAUTHOR_HIDDEN_STUDENT_CHIPS === "on";

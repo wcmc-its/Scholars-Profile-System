@@ -191,6 +191,61 @@ describe("fetchWcmAuthorsForPmids — #1026 hidden-student chip filter shape", (
     expect(chip.slug).toBeNull();
     expect(chip.roleCategory).toBe("doctoral_student_md");
   });
+
+  // -------------------------------------------------------------------------
+  // #2223 — flag OFF must mean ABSENT on the PROD data shape, not just staging's
+  // -------------------------------------------------------------------------
+  //
+  // The where-clause above only RELAXES the soft-delete gate when the flag is
+  // on. It never tightened it when off — so a student who is not soft-deleted
+  // sailed straight through the flag-off filter. That is exactly prod: 690
+  // doctoral students carry the bare `doctoral_student` with `deleted_at IS
+  // NULL` and `status='active'`. On staging every student is suffixed AND
+  // soft-deleted, so the query alone hides them and this defect is invisible —
+  // these cases are written against the prod shape deliberately.
+  it("flag OFF drops a NON-soft-deleted doctoral student the query still returns", async () => {
+    delete process.env[FLAG];
+    mockPublicationAuthorFindMany.mockResolvedValue([
+      authorRow("100", "aaa1111", "Ada First", { isFirst: true }),
+      authorRow("100", "stu3333", "Prod Student", {
+        isLast: true,
+        roleCategory: "doctoral_student",
+      }),
+    ]);
+    const byPmid = await fetchWcmAuthorsForPmids(["100"]);
+    expect((byPmid.get("100") ?? []).map((c) => c.cwid)).toEqual(["aaa1111"]);
+  });
+
+  it("flag OFF drops an alumni co-author too (the other hidden identity class)", async () => {
+    delete process.env[FLAG];
+    mockPublicationAuthorFindMany.mockResolvedValue([
+      authorRow("100", "aaa1111", "Ada First"),
+      authorRow("100", "alu4444", "Al Umni", { roleCategory: "affiliate_alumni" }),
+    ]);
+    const byPmid = await fetchWcmAuthorsForPmids(["100"]);
+    expect((byPmid.get("100") ?? []).map((c) => c.cwid)).toEqual(["aaa1111"]);
+  });
+
+  it("flag OFF keeps NULL-role and ordinary-role co-authors (carve, not a cull)", async () => {
+    delete process.env[FLAG];
+    mockPublicationAuthorFindMany.mockResolvedValue([
+      authorRow("100", "aaa1111", "Ada First", { roleCategory: "full_time_faculty" }),
+      authorRow("100", "nul5555", "Not Backfilled", { roleCategory: null }),
+    ]);
+    const byPmid = await fetchWcmAuthorsForPmids(["100"]);
+    expect((byPmid.get("100") ?? []).map((c) => c.cwid)).toEqual(["aaa1111", "nul5555"]);
+  });
+
+  it("flag ON keeps the student — ON is unchanged, so the live surfaces do not move", async () => {
+    process.env[FLAG] = "on";
+    mockSuppressionFindMany.mockResolvedValue([]);
+    mockPublicationAuthorFindMany.mockResolvedValue([
+      authorRow("100", "aaa1111", "Ada First"),
+      authorRow("100", "stu3333", "Prod Student", { roleCategory: "doctoral_student" }),
+    ]);
+    const byPmid = await fetchWcmAuthorsForPmids(["100"]);
+    expect((byPmid.get("100") ?? []).map((c) => c.cwid)).toEqual(["aaa1111", "stu3333"]);
+  });
 });
 
 // ---------------------------------------------------------------------------

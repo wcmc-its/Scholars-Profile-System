@@ -28,6 +28,8 @@ import { isFundingActive } from "@/lib/funding-active";
 import { multiPiExternalIds } from "@/lib/funding-projection";
 import { loadProjectSiblingRows } from "@/lib/api/project-siblings";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { resolveHiddenStudentCoauthorChips } from "@/lib/api/search-flags";
 import {
   isMethodsLensEnabled,
   isMethodsLensSensitiveGateOn,
@@ -1230,6 +1232,11 @@ export const getScholarFullProfileBySlug = cache(
             ).map((r) => r.pmid),
           );
 
+    // #2223 — the co-author chip kill switch. Resolved once per profile render
+    // and applied to `wcmAuthors` below; see the filter there for why the
+    // pre-existing deletedAt/status test was not the gate its name suggested.
+    const includeHiddenStudentChips = resolveHiddenStudentCoauthorChips();
+
     const rankablePubs = visibleAuthorships.map((a) => {
       // ReCiterAI publication score for this scholar+pmid pair (D-08). Source
       // chain after issue #316 PR-A: prefer the per-scholar PublicationScore
@@ -1278,6 +1285,16 @@ export const getScholarFullProfileBySlug = cache(
                 au.scholar &&
                 !au.scholar.deletedAt &&
                 au.scholar.status === "active" &&
+                // #2223 — COAUTHOR_HIDDEN_STUDENT_CHIPS now governs THIS surface,
+                // which §5 of the QA runbook names but which never read the flag.
+                // The three tests above are not a hidden-student gate on prod
+                // data: 690 doctoral students carry the bare `doctoral_student`
+                // with `deleted_at IS NULL` and `status='active'`, so they pass
+                // unconditionally and flag-off removed nobody from this chip row.
+                // Flag ON is byte-identical to before (they render NON-LINKED via
+                // isPubliclyDisplayed in the chip component, per #1026); flag OFF
+                // now means what the runbook says — absent entirely.
+                (includeHiddenStudentChips || isPubliclyDisplayed(au.scholar.roleCategory)) &&
                 // #356 — a co-author who hid this publication drops from its chips.
                 !isAuthorHidden(suppressions, a.publication.pmid, au.scholar.cwid),
             )
