@@ -35,6 +35,41 @@ export type ScrapedArticle = {
 
 /** Shared with the scraper so a cwid it emits can never fail validation here. */
 export const CWID_RE = /^[a-z0-9]{2,32}$/;
+
+/**
+ * A publication-identity key for one article: publication date + the title's
+ * words, SORTED (#2241).
+ *
+ * The upstream feed publishes some stories twice under different slugs, and the
+ * titles are word-order variants of each other rather than identical:
+ *
+ *   /april-awards-honors   "April: Awards & Honors"
+ *   /awards-honors-april   "Awards & Honors: April"
+ *
+ * Same date, same excerpt, same body — but `(cwid, url)`, the table's dedup key,
+ * sees two rows, so the story renders twice on a profile. Sorting the tokens
+ * collapses the word-order variant; a plain normalized title would not. Two
+ * genuinely distinct stories sharing a date AND a word multiset is not a real
+ * headline shape.
+ *
+ * Returns null when the article has no date — with only one weak signal left,
+ * callers must fall back to the url and keep both rows rather than risk merging
+ * two unrelated stories.
+ */
+export function storyKey(title: string, publishedAt: Date | string | null): string | null {
+  if (publishedAt === null) return null;
+  const day =
+    typeof publishedAt === "string" ? publishedAt.slice(0, 10) : publishedAt.toISOString().slice(0, 10);
+  const tokens = title
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .sort();
+  if (tokens.length === 0) return null;
+  return `${day}|${tokens.join(" ")}`;
+}
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // C0 + DEL + C1. A C1 (U+0080-U+009F) is a double-encoded cp1252 punctuation
 // byte; it renders as a box glyph on a profile. Lockstep with stripControl in

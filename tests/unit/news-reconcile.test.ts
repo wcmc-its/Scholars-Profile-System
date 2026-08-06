@@ -12,7 +12,7 @@ import {
   reconcile,
   type ExistingMention,
 } from "@/etl/news/index";
-import type { ScrapedArticle } from "@/etl/news/seed";
+import { storyKey, type ScrapedArticle } from "@/etl/news/seed";
 
 const ORIGIN = "https://news.weill.cornell.edu";
 const URL = `${ORIGIN}/news/2026/07/some-article`;
@@ -122,6 +122,96 @@ describe("articlesToMentions", () => {
     // ghost99 has no scholar row -> no VIVO row; Jane Roe still name-matched.
     expect(rows.find((r) => r.cwid === "ghost99")).toBeUndefined();
     expect(rows.find((r) => r.cwid === "jro1")).toBeTruthy();
+  });
+});
+
+describe("storyKey (#2241 — one story, two slugs)", () => {
+  const D = new Date("2024-04-30T00:00:00Z");
+
+  it("collapses the real prod pair: word-order variants on the same date", () => {
+    // /april-awards-honors vs /awards-honors-april — same date, same excerpt,
+    // same body, two urls. A plain normalized title would NOT match these.
+    expect(storyKey("April: Awards & Honors", D)).toBe(storyKey("Awards & Honors: April", D));
+  });
+
+  it("ignores punctuation, case and runs of whitespace", () => {
+    // Titles reach the DB already entity-decoded by the scraper's clean(), so
+    // this only has to be robust to real punctuation, not to "&amp;".
+    expect(storyKey("Awards & Honors: April", D)).toBe(storyKey("awards   honors,  april", D));
+  });
+
+  it("does NOT collapse different stories on the same date", () => {
+    expect(storyKey("A New Kind of Cold Sensor", D)).not.toBe(
+      storyKey("Nerves in Skin Can Slow Melanoma Growth", D),
+    );
+  });
+
+  it("does NOT collapse the same title on different dates", () => {
+    expect(storyKey("Awards & Honors: April", D)).not.toBe(
+      storyKey("Awards & Honors: April", new Date("2025-04-30T00:00:00Z")),
+    );
+  });
+
+  it("returns null without a date — one weak signal must not merge two stories", () => {
+    expect(storyKey("Awards & Honors: April", null)).toBeNull();
+  });
+
+  it("returns null for a title with no word characters", () => {
+    expect(storyKey("—", D)).toBeNull();
+  });
+
+  it("accepts an ISO string as well as a Date", () => {
+    expect(storyKey("Awards & Honors: April", "2024-04-30")).toBe(
+      storyKey("Awards & Honors: April", D),
+    );
+  });
+});
+
+describe("articlesToMentions — story dedup (#2241)", () => {
+  const scholars = [
+    {
+      cwid: "dcl2001",
+      fullName: "David Lyden",
+      preferredName: "David Lyden",
+      primaryTitle: null,
+      primaryDepartment: null,
+    },
+  ];
+  const art = (slug: string, title: string): ScrapedArticle => ({
+    url: `https://news.weill.cornell.edu/news/2024/04/${slug}`,
+    title,
+    excerpt: "Dr. Eloise Chapman-Davis, associate...",
+    thumbnailUrl: null,
+    publishedAt: "2024-04-30",
+    cwids: ["dcl2001"],
+    bodyText: "Dr. David Lyden, the Stavros S. Niarchos Professor...",
+  });
+
+  it("emits ONE row when the feed carries the story under two slugs", () => {
+    const rows = articlesToMentions(
+      [art("april-awards-honors", "April: Awards & Honors"), art("awards-honors-april", "Awards & Honors: April")],
+      scholars,
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it("still emits both when the two articles are genuinely different stories", () => {
+    const rows = articlesToMentions(
+      [art("a-cold-sensor", "A New Kind of Cold Sensor"), art("melanoma", "Nerves in Skin Slow Melanoma")],
+      scholars,
+    );
+    expect(rows).toHaveLength(2);
+  });
+
+  it("falls back to the url when an article has no date, keeping both", () => {
+    const rows = articlesToMentions(
+      [
+        { ...art("a", "April: Awards & Honors"), publishedAt: null },
+        { ...art("b", "Awards & Honors: April"), publishedAt: null },
+      ],
+      scholars,
+    );
+    expect(rows).toHaveLength(2);
   });
 });
 
