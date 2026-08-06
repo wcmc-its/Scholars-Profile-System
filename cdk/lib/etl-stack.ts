@@ -822,8 +822,21 @@ export class EtlStack extends Stack {
       displayName: `SPS ETL failures (${env})`,
     });
 
-    // Allow Step Functions and EventBridge to publish failure notifications.
+    // Allow Step Functions AND CloudWatch Alarms to publish.
+    //
+    // ⚠ Both principals are REQUIRED, and the second one is not optional polish.
+    // `grantPublish` materializes an explicit AWS::SNS::TopicPolicy, which
+    // REPLACES the implicit default policy SNS would otherwise apply — the one
+    // that lets the owning account (and therefore CloudWatch) publish. Granting
+    // only `states` therefore silently revokes every alarm action on this topic:
+    // alarms still transition to ALARM, and every send returns "Failed to
+    // execute action". Measured 2026-08-06: 30 alarms mute, six real prod
+    // transitions dropped between 07-13 and 08-04.
+    //
+    // Verify with `describe-alarm-history --history-item-type Action`, never
+    // `describe-alarms` — the alarm looks healthy either way.
     this.failureTopic.grantPublish(new iam.ServicePrincipal("states.amazonaws.com"));
+    this.failureTopic.grantPublish(new iam.ServicePrincipal("cloudwatch.amazonaws.com"));
 
     // PR-7 — P1 page topic. Abort-tier step failures publish here (vs the
     // warn-tier etl-failures topic); the relay's severityForRecord defaults any
@@ -832,7 +845,9 @@ export class EtlStack extends Stack {
       topicName: `etl-page-${env}`,
       displayName: `SPS ETL page (${env})`,
     });
+    // Same two principals, same reason as failureTopic above.
     this.pageTopic.grantPublish(new iam.ServicePrincipal("states.amazonaws.com"));
+    this.pageTopic.grantPublish(new iam.ServicePrincipal("cloudwatch.amazonaws.com"));
 
     // ------------------------------------------------------------------
     // Helper -- build a step's SNS-notify state. The topic depends on the

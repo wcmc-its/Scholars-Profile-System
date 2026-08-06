@@ -1295,6 +1295,17 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               "Sid": "0",
             },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudwatch.amazonaws.com",
+              },
+              "Resource": {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "Sid": "1",
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -1850,6 +1861,17 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Ref": "EtlPageTopic608308D6",
               },
               "Sid": "0",
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudwatch.amazonaws.com",
+              },
+              "Resource": {
+                "Ref": "EtlPageTopic608308D6",
+              },
+              "Sid": "1",
             },
           ],
           "Version": "2012-10-17",
@@ -9237,6 +9259,17 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               "Sid": "0",
             },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudwatch.amazonaws.com",
+              },
+              "Resource": {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "Sid": "1",
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -9792,6 +9825,17 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Ref": "EtlPageTopic608308D6",
               },
               "Sid": "0",
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudwatch.amazonaws.com",
+              },
+              "Resource": {
+                "Ref": "EtlPageTopic608308D6",
+              },
+              "Sid": "1",
             },
           ],
           "Version": "2012-10-17",
