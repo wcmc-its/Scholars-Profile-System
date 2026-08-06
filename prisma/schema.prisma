@@ -1110,7 +1110,19 @@ model PublicationAuthor {
   cwid            String?     @db.VarChar(32) // NULL for non-WCM authors
   scholar         Scholar?    @relation(fields: [cwid], references: [cwid], onDelete: SetNull)
   externalName    String?     @map("external_name") @db.VarChar(255) // for non-WCM authors
-  position        Int // 1-based author position
+  // 1-based author position, with `0` as a documented sentinel (#2227): the
+  // ReCiter `analysis_summary_author_list` row that carries the real numeric
+  // rank was not matched for this (pmid, cwid), and the categorical
+  // `authorPosition` on `analysis_summary_author` only distinguishes
+  // first / last / penultimate — so a middle author with no list row has no
+  // resolvable rank and is written as 0 (see `buildAuthorshipRows` in
+  // etl/reciter/index.ts). 0 means "middle author, rank unknown", NOT
+  // "the zeroth author". Never sort or filter on `position` without handling
+  // it: `orderBy: { position: "asc" }` sorts every such row to the front
+  // (see `ensureOwnerInChipWindow` in lib/api/profile.ts). Authorship ROLE
+  // comes from isFirst / isLast / isPenultimate, which are correct on these
+  // rows (all three false), never from `position`.
+  position        Int
   totalAuthors    Int         @map("total_authors")
   isFirst         Boolean     @default(false) @map("is_first")
   isLast          Boolean     @default(false) @map("is_last")

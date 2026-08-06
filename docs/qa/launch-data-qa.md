@@ -77,8 +77,8 @@ For each sampled profile, open `${BASE}/scholars/<slug>` (or `${BASE}/<slug>` wh
 
 - [ ] **Identity** — published name, primary title, post-nominal degrees, department/division correct.
 - [ ] **Headshot** — present and correct person (or a clean placeholder, not a broken image).
-- [ ] **Appointments** — active appointments only; title / org / year-range plausible.
-- [ ] **Publications** — author-order badges correct (first / senior / middle, from `PublicationAuthor.position`); titles render; no obviously-foreign papers (wrong-person disambiguation).
+- [ ] **Appointments** — active appointments only; title / org / year-range plausible. A row whose `start_date` is NULL renders with no year range at all (#2225) — that is the intended suppression, not a defect, so a card mixing dated and undated rows is expected.
+- [ ] **Publications** — author-order badges correct (first / senior / middle, from `PublicationAuthor.isFirst` / `isLast` / `isPenultimate` via `deriveAuthorPositionRole` — NOT from `PublicationAuthor.position`, whose `0` sentinel means "middle author, rank unknown", see #2227); titles render; no obviously-foreign papers (wrong-person disambiguation).
 - [ ] **Counts** — publication count and active-grant count are sane for the person (not 0 for a prolific PI, not absurdly high).
 - [ ] **Research areas / topics** — present and on-topic; no empty or garbled chips.
 - [ ] **Overview / synopsis** — reads cleanly; no truncation mid-word, no template artifacts, no obviously-stale facts. Staleness is a **read**, not a filter (#2212 — see the `overviewAge` note in §1): check the prose against the profile's own appointments and grant end-dates, e.g. present-tense work funded by an award that ended years ago, or a title the person no longer holds.

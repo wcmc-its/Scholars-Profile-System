@@ -352,6 +352,16 @@ export async function ProfileView({ slug }: { slug: string }) {
                           <Badge variant="secondary" className="ml-2 align-middle">Primary</Badge>
                         ) : null}
                       </div>
+                      {/* #2225 — 32.6% of active appointments carry no
+                          start_date in ED. Those rows render organization
+                          only: the range (and its "·" separator) is
+                          SUPPRESSED, never replaced by a placeholder, so a
+                          card can legitimately mix dated and undated rows.
+                          Every other appointment renderer suppresses the same
+                          way (Past Appointments below,
+                          components/edit/appointments-card.tsx,
+                          components/edit/profile-appointments-card.tsx) —
+                          keep them in step. */}
                       <div className="text-muted-foreground mt-0.5 text-xs">
                         {a.organization}
                         {a.startDate ? ` · ${a.startDate.slice(0, 4)}–` : ""}

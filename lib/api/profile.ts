@@ -815,9 +815,15 @@ function collapseToSingleVisiblePrimary<
  *
  * If the owner is already in the visible window we leave the order
  * untouched. Otherwise we move them into the last visible slot,
- * preserving their first/last role styling. This is a rendering guard,
- * not a fix for the upstream data issue — the underlying position rows
- * still need to be corrected during the ETL.
+ * preserving their first/last role styling.
+ *
+ * #2227 — this guard is PERMANENT, not a stopgap. `position = 0` is a
+ * sentinel for "middle author, rank unknown" (3,917 confirmed WCM
+ * authorships), emitted when ReCiter's `analysis_summary_author_list` has no
+ * row for that (pmid, cwid) and only the categorical first/last/penultimate
+ * signal survives. There is no upstream rank to backfill, so the sort will
+ * keep floating those rows to the front — see the `position` comment in
+ * prisma/schema.prisma.
  */
 const CHIP_CAP_VISIBLE = 5;
 function ensureOwnerInChipWindow<T extends { cwid: string }>(authors: T[], ownerCwid: string): T[] {
