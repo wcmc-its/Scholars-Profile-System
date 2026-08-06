@@ -50,6 +50,10 @@ type OverrideReadClient = Pick<PrismaClient, "fieldOverride">;
  * is legacy VIVO rich text seeded from a source that can carry unsanitized
  * markup, and it renders through the same raw `dangerouslySetInnerHTML`.
  *
+ * `sanitizeOverviewHtml` also strips the #2207 truncation tail (`<p></p>
+ * <p>[...]</p>`, on 59 seeded bodies) on BOTH branches, so a rendered overview
+ * is clean whether or not the one-time backfill has run against this database.
+ *
  * Returns `null` for "no overview" — an absent column, or an override whose
  * sanitized value is the empty string.
  */

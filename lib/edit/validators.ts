@@ -30,6 +30,7 @@ import { CWID_PATTERN } from "@/lib/cwid";
 import { containsProfanity } from "@/lib/edit/profanity";
 import { isChairTitleFor } from "@/lib/leadership";
 import { isNameBasedSlug, RESERVED_SLUGS } from "@/lib/slug";
+import { stripOverviewTailArtifacts } from "@/lib/text/overview-artifacts";
 import { repairEncoding } from "@/lib/text/repair-encoding";
 
 /**
@@ -199,6 +200,10 @@ export type SanitizeResult =
  * checks; the read-merge (`lib/api/manual-layer.ts` `getEffectiveOverview`)
  * calls it bare, re-sanitizing a stored override as defense-in-depth before
  * the public profile's raw `dangerouslySetInnerHTML` render.
+ *
+ * Also the corpus-hygiene boundary: `repairEncoding` (cp1252 mojibake) and
+ * `stripOverviewTailArtifacts` (#2207 VIVO truncation sentinel) run here so the
+ * read-merge heals already-stored bodies, not only new saves.
  */
 export function sanitizeOverviewHtml(input: string): string {
   // Add the link-hardening hook only for the span of this synchronous call,
@@ -212,7 +217,18 @@ export function sanitizeOverviewHtml(input: string): string {
     // (12 scholars on 2026-07-30, e.g. "Dr. Zarnegar□s primary clinical
     // interests"). The DB rows still want the one-time
     // `scripts/repair-text-encoding.ts` pass so the search index sees clean text.
-    return DOMPurify.sanitize(normalizeBoldItalic(repairEncoding(input)), OVERVIEW_CONFIG);
+    //
+    // #2207 — `stripOverviewTailArtifacts` LAST, for the same reason and with the
+    // same caveat: 59 seeded bios end in `<p></p> <p>[...]</p>`, an upstream
+    // truncation sentinel that DOMPurify has no reason to touch (it is valid
+    // markup with visible text). Running it after the sanitizer means the regexes
+    // see normalized tags, and removing markup from sanitized output can only
+    // shrink the allowed set. The DB rows still want the one-time
+    // `scripts/backfills/2026-08-05-strip-overview-tail-artifacts.ts` pass — the
+    // people index and the generator's "existing bio" fact read the raw column.
+    return stripOverviewTailArtifacts(
+      DOMPurify.sanitize(normalizeBoldItalic(repairEncoding(input)), OVERVIEW_CONFIG),
+    );
   } finally {
     DOMPurify.removeHook("afterSanitizeAttributes");
   }
