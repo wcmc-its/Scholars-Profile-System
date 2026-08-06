@@ -19,13 +19,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
-const { mockSession, mockDenial, mockFindFirst, mockRedirect } = vi.hoisted(() => ({
+const {
+  mockSession,
+  mockDenial,
+  mockFindFirst,
+  mockRedirect,
+  mockPendingHonors,
+  mockHonorsTabVisible,
+} = vi.hoisted(() => ({
   mockSession: vi.fn(),
   mockDenial: vi.fn(),
   mockFindFirst: vi.fn(),
   mockRedirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
   }),
+  mockPendingHonors: vi.fn(),
+  mockHonorsTabVisible: vi.fn(() => false),
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
@@ -36,8 +45,8 @@ vi.mock("@/lib/edit/slug-request", () => ({
   isSlugRequestEnabled: () => false,
 }));
 vi.mock("@/lib/edit/honor-queue", () => ({
-  countPendingHonors: vi.fn(),
-  isHonorsQueueTabVisible: () => false,
+  countPendingHonors: mockPendingHonors,
+  isHonorsQueueTabVisible: mockHonorsTabVisible,
 }));
 vi.mock("@/lib/db", () => ({ db: { read: { etlRun: { findFirst: mockFindFirst } } } }));
 // The shell mounts the account menu (a client island that probes
@@ -56,6 +65,7 @@ import {
   type EtlSuccessRow,
   RUNNING_TIMEOUT_HOURS,
   loadEtlStatus,
+  needsAttention,
   toSourceRow,
 } from "@/lib/api/etl-status";
 import { TRACKED, type TrackedSpec } from "@/lib/etl/freshness-policy";
@@ -83,8 +93,15 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
-  vi.stubEnv("SCHOLARS_ENV", "prod");
+  // The env var the APP task def actually carries (cdk/lib/app-stack.ts).
+  // SCHOLARS_ENV lives on the ETL task defs only, so stubbing that one here
+  // would let a page that reads the wrong variable in prod stay green.
+  vi.stubEnv("SPS_ENV", "prod");
   fixtures = {};
+  // clearAllMocks() clears CALLS, not implementations — re-assert the default
+  // shape of the honors gate so a per-test override cannot leak sideways.
+  mockHonorsTabVisible.mockReturnValue(false);
+  mockPendingHonors.mockResolvedValue(0);
   mockSession.mockResolvedValue({ cwid: "edt1", isSuperuser: true, isCommsSteward: false });
   mockFindFirst.mockImplementation((args: { where: { source: string; status?: string } }) => {
     const f = fixtures[args.where.source];
@@ -108,6 +125,8 @@ const expectedSources = () =>
     .map(([source]) => source);
 
 const nightly: TrackedSpec = { cadence: "nightly" };
+/** Hierarchy's real cadence — one of the two genuinely manifest-anchored sources. */
+const annual: TrackedSpec = { cadence: "annual" };
 
 /** The loader needs exactly one Prisma model, so the fake is one method. */
 const fakeClient = () => ({ etlRun: { findFirst: mockFindFirst } }) as unknown as EtlStatusClient;
@@ -143,16 +162,20 @@ describe("etl-status state mapping", () => {
     expect(old.state).toBe("late");
   });
 
-  // 🔴 The single most important rule on this page. The Spotlight/Hierarchy/Tools
-  // loaders write a fresh SUCCESS row with zero rows when the artifact's sha256
-  // is unchanged, so `completedAt` advances nightly while the data underneath is
-  // frozen. Anchoring on completedAt would paint a dead producer green.
+  // 🔴 The single most important rule on this page. The Spotlight and Hierarchy
+  // loaders write a fresh SUCCESS row when the artifact's sha256 is unchanged, so
+  // `completedAt` advances while the data underneath is frozen. Anchoring on
+  // completedAt would paint a dead producer green. Those two are also the ONLY
+  // sources that write `manifestGeneratedAt` (`grep -rn manifestGeneratedAt etl/`)
+  // — Tools short-circuits identically but stays completedAt-anchored on purpose,
+  // so a Tools fixture with a manifest timestamp would test a row production
+  // cannot produce.
   it("anchors freshness on the producer's manifest timestamp, not the row's completion time", () => {
     const row = toSourceRow(
-      "Tools",
-      nightly,
-      // Finished a minute ago; the artifact it re-read is ten days old.
-      { completedAt: new Date(NOW - 1 * HOUR), manifestGeneratedAt: new Date(NOW - 10 * DAY) },
+      "Hierarchy",
+      annual,
+      // Finished an hour ago; the artifact it re-read is well past the annual ceiling.
+      { completedAt: new Date(NOW - 1 * HOUR), manifestGeneratedAt: new Date(NOW - 500 * DAY) },
       {
         status: "success",
         startedAt: new Date(NOW - 2 * HOUR),
@@ -162,7 +185,7 @@ describe("etl-status state mapping", () => {
       NOW,
     );
     expect(row.state).toBe("late");
-    expect(row.lastSuccessAt).toEqual(new Date(NOW - 10 * DAY));
+    expect(row.lastSuccessAt).toEqual(new Date(NOW - 500 * DAY));
   });
 
   it("falls back to completedAt for a source with no manifest", () => {
@@ -257,6 +280,60 @@ describe("etl-status state mapping", () => {
     expect(row.ackExpired).toBe(true);
   });
 
+  // An acked source with NO row at all: the missing row wins the state (nothing
+  // on record is a real gap, not an accepted staleness), but losing the ack there
+  // is how the page ends up red, counted, and silent about the one fact that
+  // explains it — that somebody already decided to live with this.
+  it("keeps a never-ran source red but still carries its live acknowledgement", () => {
+    const spec: TrackedSpec = {
+      cadence: "monthly",
+      ack: { until: "2026-12-31", reason: "producer not deployed" },
+    };
+    const row = toSourceRow("Spotlight", spec, null, null, NOW);
+    expect(row.state).toBe("never-ran");
+    expect(row.ackActive).toBe(true);
+    expect(row.ack?.reason).toBe("producer not deployed");
+    // …and it is not one of the rows an operator is being asked to chase.
+    expect(needsAttention(row)).toBe(false);
+  });
+
+  it("still counts a crash and a vanished task even under a live ack", () => {
+    const spec: TrackedSpec = {
+      cadence: "monthly",
+      ack: { until: "2026-12-31", reason: "producer not deployed" },
+    };
+    const stale: EtlSuccessRow = {
+      completedAt: new Date(NOW - 60 * DAY),
+      manifestGeneratedAt: new Date(NOW - 60 * DAY),
+    };
+    const failed = toSourceRow(
+      "Spotlight",
+      spec,
+      stale,
+      {
+        status: "failed",
+        startedAt: new Date(NOW - 2 * HOUR),
+        completedAt: new Date(NOW - HOUR),
+        errorMessage: "S3 403",
+      },
+      NOW,
+    );
+    expect(needsAttention(failed)).toBe(true);
+    const stopped = toSourceRow(
+      "Spotlight",
+      spec,
+      stale,
+      {
+        status: "running",
+        startedAt: new Date(NOW - (RUNNING_TIMEOUT_HOURS + 1) * HOUR),
+        completedAt: null,
+        errorMessage: null,
+      },
+      NOW,
+    );
+    expect(needsAttention(stopped)).toBe(true);
+  });
+
   it("does not let an acknowledgement swallow a crash", () => {
     const spec: TrackedSpec = {
       cadence: "monthly",
@@ -288,10 +365,24 @@ describe("loadEtlStatus", () => {
     expect(summary.sources.find((s) => s.source === "ED")?.state).toBe("up-to-date");
     expect(summary.sources.find((s) => s.source === "Hierarchy")?.state).toBe("never-ran");
     // An acknowledged source is NOT counted as needing attention — that is the
-    // decision the ack records.
-    expect(summary.needsAttention).toBe(
-      summary.sources.filter((s) => s.state !== "up-to-date" && s.state !== "known-issue").length,
-    );
+    // decision the ack records — whether its ack shows up as the "known issue"
+    // state or is outranked by a rowless "never ran". Only ED is current here,
+    // so the count is everything else minus whatever is live-acked.
+    const liveAcked = summary.sources.filter((s) => s.ackActive).length;
+    expect(summary.needsAttention).toBe(summary.sources.length - 1 - liveAcked);
+  });
+
+  // 🔴 The deployed page calls loadEtlStatus with NO env argument, so the DEFAULT
+  // is the only code path prod ever takes. `SCHOLARS_ENV` is set on the ETL task
+  // defs (cdk/lib/etl-stack.ts) and NOWHERE on the app task def, which carries
+  // `SPS_ENV` (cdk/lib/app-stack.ts). Defaulting to the ETL variable left `env`
+  // undefined in the running app, so every env-scoped source was filtered out —
+  // dropping InfoEd, the prod-only import whose failure this page was built for.
+  it("defaults to the env var the APP task def carries, so prod keeps its prod-only sources", async () => {
+    vi.stubEnv("SCHOLARS_ENV", undefined);
+    vi.stubEnv("SPS_ENV", "prod");
+    const summary = await loadEtlStatus(fakeClient(), new Date(NOW));
+    expect(summary.sources.map((s) => s.source)).toContain("InfoEd");
   });
 
   it("skips a source scoped to another env rather than reporting it missing", async () => {
@@ -345,12 +436,16 @@ describe("/edit/etl-status page", () => {
     expect(hierarchy.textContent).toContain("Never ran");
   });
 
+  // Hierarchy, not Tools: Hierarchy is one of the two loaders that actually
+  // writes `manifestGeneratedAt` (the other is Spotlight, which carries an ack
+  // and so grades to "known issue" here). Tools is completedAt-anchored by
+  // design, so a Tools fixture would assert on a row prod cannot emit.
   it("paints a frozen artifact as late even though the import finished minutes ago", async () => {
     fixtures = {
-      Tools: {
+      Hierarchy: {
         success: {
           completedAt: new Date(NOW - 5 * 60 * 1000),
-          manifestGeneratedAt: new Date(NOW - 10 * DAY),
+          manifestGeneratedAt: new Date(NOW - 500 * DAY),
         },
         attempt: {
           status: "success",
@@ -362,9 +457,9 @@ describe("/edit/etl-status page", () => {
       ED: success({ completedAt: new Date(NOW - 2 * HOUR), manifestGeneratedAt: null }),
     };
     render(await Page());
-    const tools = screen.getByTestId("etl-status-row-Tools");
-    expect(tools.getAttribute("data-state")).toBe("late");
-    expect(tools.textContent).toContain("Late");
+    const frozen = screen.getByTestId("etl-status-row-Hierarchy");
+    expect(frozen.getAttribute("data-state")).toBe("late");
+    expect(frozen.textContent).toContain("Late");
     // The control: a source with no manifest and a fresh completion is green,
     // so the assertion above is about the anchor and not about the whole page.
     expect(screen.getByTestId("etl-status-row-ED").getAttribute("data-state")).toBe("up-to-date");
@@ -447,14 +542,49 @@ describe("/edit/etl-status page", () => {
     expect(row.textContent).toContain("Stopped unexpectedly");
   });
 
+  it("names whoever accepted a never-ran source, and stops counting it against the operator", async () => {
+    const acked = Object.entries(TRACKED).find(([, s]) => s.ack !== undefined);
+    expect(acked?.[1].ack, "no source carries an ack any more").toBeDefined();
+    const [source, spec] = acked!;
+    const ack = spec.ack!;
+    vi.setSystemTime(Date.parse(ack.until) - DAY);
+    // `fixtures` stays empty, so EVERY source — the acked one included — has no
+    // etl_run row at all. Precedence keeps it red; the ack has to be visible
+    // anyway, or the page sends someone chasing an already-accepted gap.
+    render(await Page());
+    const row = screen.getByTestId(`etl-status-row-${source}`);
+    expect(row.getAttribute("data-state")).toBe("never-ran");
+    expect(row.textContent).toContain(ack.until);
+    expect(row.textContent).toContain(ack.reason);
+    // Every other source is never-ran too, so this one is the single exclusion.
+    const total = expectedSources().length;
+    expect(screen.getByTestId("etl-status-headline").textContent).toContain(
+      `${total - 1} of ${total} imports need attention`,
+    );
+  });
+
   it("keeps the copy free of internal jargon", async () => {
     fixtures = {
       ED: success({ completedAt: new Date(NOW - 2 * HOUR), manifestGeneratedAt: null }),
     };
-    render(await Page());
-    const text = screen.getByTestId("etl-status-table").textContent ?? "";
+    // The WHOLE rendered page, not just the table: the heading and the notices
+    // around it are copy a superuser reads too, and a table-only guard cannot
+    // see a word that leaks into them.
+    const { container } = render(await Page());
+    const text = container.textContent ?? "";
     for (const jargon of ["DegradedRun", "SLA", "manifestSha256", "manifestGeneratedAt", "etl_run"])
       expect(text, `"${jargon}" leaked into the page copy`).not.toContain(jargon);
+  });
+
+  // The badge counts hit the SAME database as etl_run. Read outside the try, a
+  // DB outage 500s the page instead of rendering the notice below — on exactly
+  // the page an operator opens when the database is unhappy.
+  it("falls soft to the unavailable notice when a tab-badge count fails", async () => {
+    mockHonorsTabVisible.mockReturnValue(true);
+    mockPendingHonors.mockRejectedValue(new Error("SELECT command denied"));
+    const { container } = render(await Page());
+    expect(screen.getByTestId("etl-status-unavailable")).toBeTruthy();
+    expect(container.querySelector("[data-testid='etl-status-table']")).toBeNull();
   });
 
   it("falls soft to an unavailable notice when etl_run cannot be read", async () => {

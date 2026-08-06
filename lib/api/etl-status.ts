@@ -82,9 +82,13 @@ export type EtlSourceRow = {
   /**
    * Freshness anchor of the newest successful run: the producer's
    * `manifestGeneratedAt` when it has one, else `completedAt`. NEVER
-   * `completedAt` alone — the Spotlight/Hierarchy/Tools loaders write a fresh
-   * success row with zero rows on an unchanged-artifact short-circuit, so
-   * `completedAt` advances while the artifact stays frozen.
+   * `completedAt` alone — the Spotlight and Hierarchy loaders write a fresh
+   * success row on an unchanged-sha256 short-circuit, so `completedAt` advances
+   * while the artifact stays frozen. Those two are the only sources that write
+   * `manifestGeneratedAt`. Tools short-circuits the same way but stays
+   * completedAt-anchored ON PURPOSE — its producer is hand-run, so anchoring it
+   * on the manifest would false-alarm while healthy (etl/tools/index.ts) — which
+   * means Tools gets job-liveness coverage here and no artifact-age coverage.
    */
   lastSuccessAt: Date | null;
   ageHours: number | null;
@@ -99,6 +103,12 @@ export type EtlSourceRow = {
   errorMessage: string | null;
   /** The acknowledgement on record, whether or not it still applies. */
   ack?: FreshnessAck;
+  /**
+   * The ack applies right now. Distinct from `state === "known-issue"`: a
+   * failure, a vanished task and a missing row all outrank the ack in the state,
+   * so this is how a row still says WHO already accepted the staleness.
+   */
+  ackActive: boolean;
   /** An ack exists but its date has passed — this source counts against us again. */
   ackExpired: boolean;
 };
@@ -107,10 +117,18 @@ export type EtlStatusSummary = {
   checkedAt: Date;
   runningTimeoutHours: number;
   sources: EtlSourceRow[];
-  /** Everything except `up-to-date` and `known-issue` — an ack is the decision
-   *  that this one does NOT need attention today. */
+  /** Everything except `up-to-date`, `known-issue`, and a `never-ran` source
+   *  whose ack is still live — an ack is the decision that this one does NOT
+   *  need attention today. A crash or a vanished task still counts: an ack
+   *  covers a known staleness, never a job that died. */
   needsAttention: number;
 };
+
+/** @see EtlStatusSummary.needsAttention */
+export function needsAttention(row: EtlSourceRow): boolean {
+  if (row.state === "up-to-date" || row.state === "known-issue") return false;
+  return !(row.state === "never-ran" && row.ackActive);
+}
 
 /** Problems first; alphabetical inside a state so the order is stable. */
 const STATE_RANK: Readonly<Record<EtlSourceState, number>> = {
@@ -125,10 +143,12 @@ const STATE_RANK: Readonly<Record<EtlSourceState, number>> = {
 /**
  * Grade one source. Pure, so every state is testable without a database.
  *
- * Precedence is deliberate: a hard failure or a vanished task outranks an
- * acknowledgement, because an ack covers a known STALENESS we do not own — not
- * a job that crashed. Suppressing a crash under an ack written about an
- * upstream producer is exactly the blind spot acks exist to avoid.
+ * Precedence is deliberate: a hard failure, a vanished task or a missing row
+ * outranks an acknowledgement, because an ack covers a known STALENESS we do not
+ * own — not a job that crashed. Suppressing a crash under an ack written about
+ * an upstream producer is exactly the blind spot acks exist to avoid. An ack
+ * that lost the precedence race is still carried on the row (`ackActive`) so the
+ * page can say who already accepted it instead of just painting it red.
  */
 export function toSourceRow(
   source: string,
@@ -161,6 +181,7 @@ export function toSourceRow(
     lastAttemptStatus: lastAttempt?.status ?? null,
     errorMessage: state === "failed" ? (lastAttempt?.errorMessage ?? null) : null,
     ack: graded.ack,
+    ackActive: graded.acknowledged,
     ackExpired: graded.ackExpired,
   };
 }
@@ -175,15 +196,26 @@ export function toSourceRow(
  * both, so a source can be an hour into an outage and still look merely fresh.
  *
  * Throws if `etl_run` is unreadable. The caller renders an "unavailable" notice.
+ *
+ * `env` defaults to the APP's env identifier, `SPS_ENV` (wired per-env and
+ * unconditionally on the app task def, cdk/lib/app-stack.ts). NOT `SCHOLARS_ENV`
+ * — that one exists only on the ETL task defs (cdk/lib/etl-stack.ts), so reading
+ * it here would leave `env` undefined in the running app and silently drop every
+ * env-scoped source, InfoEd included. The `SCHOLARS_ENV` fallback keeps this
+ * loader usable from an ETL-family task without a second argument.
  */
 export async function loadEtlStatus(
   client: EtlStatusClient,
   now: Date = new Date(),
-  env: string | undefined = process.env.SCHOLARS_ENV,
+  env: string | undefined = process.env.SPS_ENV ?? process.env.SCHOLARS_ENV,
 ): Promise<EtlStatusSummary> {
   const ts = now.getTime();
   const expected = Object.entries(TRACKED).filter(([, spec]) => isTrackedInEnv(spec, env));
 
+  // ponytail: ~62 index-covered point lookups, unbounded fan-out — fine for a
+  // superuser-only uncached page over ~31 sources, not for a wider audience or a
+  // bigger TRACKED. Upgrade path when it stops being fine: bounded concurrency,
+  // or collapse to one groupBy over `etl_run`.
   const sources = await Promise.all(
     expected.map(async ([source, spec]) => {
       const [lastSuccess, lastAttempt] = await Promise.all([
@@ -210,7 +242,6 @@ export async function loadEtlStatus(
     checkedAt: now,
     runningTimeoutHours: RUNNING_TIMEOUT_HOURS,
     sources,
-    needsAttention: sources.filter((s) => s.state !== "up-to-date" && s.state !== "known-issue")
-      .length,
+    needsAttention: sources.filter(needsAttention).length,
   };
 }

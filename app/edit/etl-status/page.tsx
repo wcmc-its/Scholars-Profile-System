@@ -125,12 +125,22 @@ function Explanation({ row, timeoutHours }: { row: EtlSourceRow; timeoutHours: n
     ) : null;
 
   if (row.state === "never-ran") {
+    // A missing row outranks the acknowledgement — nothing on record is a real
+    // gap, not an accepted staleness — but the ack still has to be SAID, or the
+    // reader is sent chasing something somebody already decided to live with.
+    const accepted =
+      row.ackActive && row.ack !== undefined ? (
+        <p className="text-muted-foreground mt-1">
+          Somebody has already accepted this until {row.ack.until}: {row.ack.reason}
+        </p>
+      ) : null;
     return (
       <>
         <p>
           Nothing has ever been recorded for this import. Either it stopped before it got this far,
           or it is not switched on here.
         </p>
+        {accepted}
         {expired}
       </>
     );
@@ -274,14 +284,17 @@ export default async function EtlStatusPage() {
     return <ForbiddenEditPage />;
   }
 
-  const pendingSlugRequests = isSlugRequestEnabled()
-    ? await countPendingSlugRequests(db.read)
-    : null;
-  const pendingHonors = isHonorsQueueTabVisible(session) ? await countPendingHonors(db.read) : null;
-
+  let pendingSlugRequests: number | null = null;
+  let pendingHonors: number | null = null;
   let summary: EtlStatusSummary | null = null;
   let unavailable = false;
   try {
+    // The two tab-badge counts read the SAME database as etl_run, so they belong
+    // INSIDE the fail-soft boundary: left outside, a DB outage 500s the one page
+    // an operator opens precisely when the database is unhappy, and the notice
+    // below could never render. Degraded badges are the cheaper loss.
+    pendingSlugRequests = isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
+    pendingHonors = isHonorsQueueTabVisible(session) ? await countPendingHonors(db.read) : null;
     summary = await loadEtlStatus(db.read);
   } catch (err) {
     unavailable = true;
