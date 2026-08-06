@@ -34,6 +34,15 @@ model Scholar {
   emailVisibility        String?   @map("email_visibility") @db.VarChar(16)
   headshotUrl            String?   @map("headshot_url") @db.VarChar(512)
   overview               String?   @db.Text
+  /// 🔴 ORPHANED AND MISLEADING — do NOT read this as content age (#2212).
+  /// No application code writes or reads it. Every seeded row carries the
+  /// identical corpus-LOAD date (prod: 2026-05-06 on all 552), stamped by the
+  /// one-time bulk load in `scripts/interim-populate/`, because the upstream
+  /// VIVO export carried no per-bio authored/modified date. "When was this bio
+  /// last changed" lives in `overview_provenance.updatedAt` (an /edit save);
+  /// its ABSENCE means "still the import, never edited" — which is the only
+  /// staleness signal the corpus has. Keep/drop is an open decision recorded in
+  /// `docs/self-edit-spec.md` § Open questions 4.
   overviewUpdatedAt      DateTime? @map("overview_updated_at")
   slug                   String    @unique @db.VarChar(255)
   status                 String    @default("active") @db.VarChar(32) // 'active' | 'suppressed'

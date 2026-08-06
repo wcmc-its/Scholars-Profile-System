@@ -139,6 +139,15 @@ const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
  *                 seed, never edited in /edit) → no genuine last-edited date
  *  - "lt1yr"/"1to2yr"/"gt2yr" — edited in /edit; bucketed by the provenance date
  * `Scholar.overviewUpdatedAt` is dormant (never written) so it is NOT used.
+ *
+ * #2212 — `updatedAt` here is `OverviewProvenance.updatedAt`, the date the bio
+ * was last saved IN /edit. It is NOT content age: the /edit clock started in
+ * 2026, so `gt2yr` cannot match until 2028, and a never-edited seed classifies
+ * as "imported" rather than into any age bucket. That is correct, and "imported"
+ * — not "gt2yr" — is the stale-overview stratum (`docs/qa/launch-data-qa.md`
+ * §1). Do NOT paper over it by falling back to `Scholar.overviewUpdatedAt`:
+ * every seeded row holds the same corpus-LOAD date, so that fallback would
+ * classify all 552 as freshly edited. There is no true authored date upstream.
  */
 function classifyOverview(
   hasOverview: boolean,

@@ -41,12 +41,14 @@ The sample must span roles, unit sizes, and completeness so the pass is represen
 
 **Preferred tool — the Data Quality dashboard (#1081), `/edit/data-quality`.** It is the operational tool for sourcing the sample. Its filters map directly onto the dimensions below:
 
-- `?gap=no-overview` — sparse profiles (overview only seeded from VIVO, never edited).
-- `?overviewAge=gt2yr` — stale overviews.
+- `?gap=no-overview` — profiles with **no** overview at all (neither a VIVO seed nor an /edit bio).
+- `?overviewAge=imported` — **the stale-overview stratum.** A bio exists but has no `overview_provenance` row, i.e. it is still the VIVO seed and has never been edited in /edit. This is the only staleness signal the corpus carries — use it, not `gt2yr`.
 - `?gap=no-headshot` — leaders/faculty without photos.
 - `?type=full_time_faculty` / `affiliate` / `emeritus` / `postdoc` — role strata.
 - `?unit=dept:CODE` / `div:CODE` / `center:CODE` — unit strata.
 - Default sort is by **prominence** (Dean → Deanery → Chair/Chief → score), so the top of the list is the highest-visibility, highest-reputational-risk set — sample those first.
+
+> **`?overviewAge=gt2yr` returns zero rows and will keep doing so until 2028 (#2212).** The three age buckets (`lt1yr` / `1to2yr` / `gt2yr`) are measured from `overview_provenance.updated_at` — the date the bio was last saved **in /edit**. That clock started when the self-editor shipped in 2026, so no row can yet be older than two years, and a never-edited VIVO seed has no provenance row at all (it classifies as `imported`, never as an age bucket). `Scholar.overviewUpdatedAt` is **not** the source: it is an orphaned column holding the one-time corpus-load date (identical on all 552 seeded rows) and nothing reads it. **There is therefore no metadata path to true content age** — a seeded bio's authored date was never captured upstream. Assessing "no obviously-stale facts" needs per-person verification against the profile's own grants/appointments, not a filter.
 
 > **Note — dashboard is prod-dark at launch.** `EDIT_DATA_QUALITY_DASHBOARD` is `on` for staging, `off` for prod. If it is still off at prod launch, source the sample from **staging** (same corpus shape) or fall back to `/browse` + manual `/edit` discovery on prod. Decide and record which you used.
 
@@ -79,7 +81,7 @@ For each sampled profile, open `${BASE}/scholars/<slug>` (or `${BASE}/<slug>` wh
 - [ ] **Publications** — author-order badges correct (first / senior / middle, from `PublicationAuthor.position`); titles render; no obviously-foreign papers (wrong-person disambiguation).
 - [ ] **Counts** — publication count and active-grant count are sane for the person (not 0 for a prolific PI, not absurdly high).
 - [ ] **Research areas / topics** — present and on-topic; no empty or garbled chips.
-- [ ] **Overview / synopsis** — reads cleanly; no truncation mid-word, no template artifacts, no obviously-stale facts.
+- [ ] **Overview / synopsis** — reads cleanly; no truncation mid-word, no template artifacts, no obviously-stale facts. Staleness is a **read**, not a filter (#2212 — see the `overviewAge` note in §1): check the prose against the profile's own appointments and grant end-dates, e.g. present-tense work funded by an award that ended years ago, or a title the person no longer holds.
 - [ ] **Publication modal** — open one publication; author order and Impact render (Impact only when `SEARCH_PUB_TAB_IMPACT=on`).
 
 Log any defect as a follow-on issue (see § follow-on issues) with the slug, the surface, and a screenshot. Defects do **not** block the flip unless egregious — they are filed and triaged.
@@ -213,7 +215,7 @@ The functional-owner sign-off here is the artifact that feeds Terrie's Gate B ap
 
 - **Environment / date:** _______
 - **Flag state captured:** `SEARCH_PUB_MESH_ONLY_FILTER=…`, `SEARCH_RESULT_EVIDENCE=…`, `SEARCH_PEOPLE_MATCH_EXPLAIN=…`, `SEARCH_PUB_TAB_IMPACT=…`, `COAUTHOR_HIDDEN_STUDENT_CHIPS=…`, `EDIT_DATA_QUALITY_DASHBOARD=…`
-- **Selection method:** dashboard filters used (e.g. `gap=no-overview&overviewAge=gt2yr`, prominence top-N) / `/browse` fallback.
+- **Selection method:** dashboard filters used (e.g. `gap=no-overview`, `overviewAge=imported`, prominence top-N) / `/browse` fallback.
 - **Profiles sampled (slug / cwid · role · unit · why chosen):**
   1. _______
 
