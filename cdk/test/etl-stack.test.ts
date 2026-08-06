@@ -593,6 +593,43 @@ describe("EtlStack", () => {
         }
       });
 
+      // The test ABOVE asserts an alarm has an action. That is not the same as
+      // the action being deliverable, and the difference was a real prod outage:
+      // `grantPublish` materializes an explicit AWS::SNS::TopicPolicy which
+      // REPLACES SNS's implicit default policy, so granting only `states` revoked
+      // CloudWatch's ability to publish. Every alarm still had an action and
+      // every send returned "Failed to execute action" — 30 alarms mute, six real
+      // prod transitions dropped 07-13..08-04, and `hasAction: true` stayed green
+      // throughout. Assert the principal, not the wiring.
+      it("both alarm topics let cloudwatch.amazonaws.com publish, or every alarm action fails", () => {
+        const policies = template.findResources("AWS::SNS::TopicPolicy");
+        expect(Object.keys(policies).length).toBeGreaterThan(0);
+
+        const principalsOf = (policy: Record<string, unknown>): string[] => {
+          const doc = (policy.Properties as Record<string, unknown> | undefined)
+            ?.PolicyDocument as { Statement?: unknown[] } | undefined;
+          return (doc?.Statement ?? []).flatMap((raw) => {
+            const st = raw as { Principal?: { Service?: unknown } };
+            const svc = st.Principal?.Service;
+            return typeof svc === "string" ? [svc] : Array.isArray(svc) ? (svc as string[]) : [];
+          });
+        };
+
+        for (const [id, policy] of Object.entries(policies)) {
+          const services = principalsOf(policy as Record<string, unknown>);
+          expect({ id, cloudwatch: services.includes("cloudwatch.amazonaws.com") }).toEqual({
+            id,
+            cloudwatch: true,
+          });
+          // states must survive the fix — it is what publishes step-failure
+          // notifications from the state machines themselves.
+          expect({ id, states: services.includes("states.amazonaws.com") }).toEqual({
+            id,
+            states: true,
+          });
+        }
+      });
+
       it("cadence status alarms watch ExecutionsFailed sum > 0", () => {
         const alarms = template.findResources("AWS::CloudWatch::Alarm");
         // Scope to the cadence machines (sps-etl-*); the #393 reconciler's
