@@ -58,7 +58,14 @@ decoder = ("const z=require('zlib'),fs=require('fs'),cp=require('child_process')
            # (Keep apostrophes out of this heredoc: bash parses it inside $(...).)
            "if(process.env.PROBE_KEEP_RW)process.env.DATABASE_URL_RW=process.env.DATABASE_URL;"
            "if(process.env.DATABASE_URL_RO)process.env.DATABASE_URL=process.env.DATABASE_URL_RO;"
-           "const f='/tmp/__probe.ts';"
+           # Land the probe in scripts/ inside the app tree, NOT /tmp. Node resolves
+           # bare specifiers by walking UP from the importing file, so a probe in
+           # /tmp missed /app/node_modules entirely and any `import ... from "mariadb"`
+           # died with MODULE_NOT_FOUND -- as did any relative `./db-bootstrap`.
+           # Writing it where the real scripts live makes bare deps, sibling-relative
+           # imports and the @/ tsconfig alias all resolve exactly as they do locally.
+           "const f=p.join(process.cwd(),'scripts','__probe.ts');"
+           "fs.mkdirSync(p.dirname(f),{recursive:true});"
            "fs.writeFileSync(f,z.gunzipSync(Buffer.from(process.env.PROBE_B64,'base64')));"
            "cp.execSync('node_modules/.bin/tsx --tsconfig '+p.join(process.cwd(),'tsconfig.json')+' '+f,{stdio:'inherit'})")
 environment = [{"name": "PROBE_B64", "value": os.environ["B64"]}]
