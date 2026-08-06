@@ -57,6 +57,36 @@ import {
   openLdap,
 } from "@/lib/sources/ldap";
 
+/** Level2 names that should be promoted to dept (level1) status. The
+ *  WCM Library appears as level2 under Information Technologies and
+ *  Services in LDAP, but is an academic dept in its own right.
+ *  Scholars whose primary appointment has level2 == one of these get
+ *  level2 used as their dept (level2 code → deptCode, level2 name →
+ *  deptName) and no division — see `resolveOrgUnit` in main(). */
+const PROMOTE_LEVEL2_TO_DEPT = new Set<string>(["Library"]);
+
+/**
+ * #2226 — the organization label an Appointment row carries.
+ *
+ * `EdFacultyAppointment.organization` is the RAW level1 org-unit name, so a
+ * promoted level2 unit (see PROMOTE_LEVEL2_TO_DEPT) would write its
+ * non-academic parent — Library appointments landed as "Information
+ * Technologies and Services". The scholar's unit line and department page
+ * already resolve through the promotion, so the sidebar contradicted itself:
+ * the affiliation read Library while the Appointments card below it read ITS.
+ *
+ * Apply the same promotion here so both surfaces name the same unit. The
+ * label is the ED level2 name, which is exactly what `resolveOrgUnit` stores
+ * as `Department.name` for the promoted code.
+ */
+export function appointmentOrganization(a: {
+  organization: string | null;
+  divName: string | null;
+}): string {
+  if (a.divName && PROMOTE_LEVEL2_TO_DEPT.has(a.divName)) return a.divName;
+  return a.organization ?? "Weill Cornell Medicine";
+}
+
 /**
  * Derive the role-category bucket for the algorithmic-surface eligibility carve.
  *
@@ -255,7 +285,7 @@ async function refreshEdAppointments(
   const incoming = appts.map((a) => ({
     cwid: a.cwid,
     title: a.title,
-    organization: a.organization ?? "Weill Cornell Medicine",
+    organization: appointmentOrganization(a),
     startDate: a.startDate,
     endDate: a.endDate,
     isPrimary: a.isPrimary,
@@ -358,7 +388,7 @@ async function refreshHistoricalAppointments(
   const incoming = appts.map((a) => ({
     cwid: a.cwid,
     title: a.title,
-    organization: a.organization ?? "Weill Cornell Medicine",
+    organization: appointmentOrganization(a),
     startDate: a.startDate,
     endDate: a.endDate,
     isPrimary: a.isPrimary,
@@ -728,14 +758,6 @@ async function main() {
       "Information Technologies and Services",
       "Administration & Finance",
     ]);
-
-    /** Level2 names that should be promoted to dept (level1) status. The
-     *  WCM Library appears as level2 under Information Technologies and
-     *  Services in LDAP, but is an academic dept in its own right.
-     *  Scholars whose primary appointment has level2 == one of these get
-     *  level2 used as their dept (level2 code → deptCode, level2 name →
-     *  deptName) and no division. */
-    const PROMOTE_LEVEL2_TO_DEPT = new Set<string>(["Library"]);
 
     /** Manual rename map: LDAP returns these org-unit names, but the
      *  display should reflect the WCM academic department they roll up
