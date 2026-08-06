@@ -51,7 +51,7 @@ import { extractLastNameSort } from "@/lib/name-sort";
 import { isCenterMembershipActive } from "@/lib/api/centers";
 import { isTrainingOnlyGrant } from "@/lib/grants/training-exclusions";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
-import { HIDDEN_ROLE_CATEGORIES } from "@/lib/eligibility";
+import { NOT_HIDDEN_ROLE_WHERE } from "@/lib/eligibility";
 
 // ---------------------------------------------------------------------------
 // Authorship weights — publications-doc index-time term repetition.
@@ -491,10 +491,11 @@ export const PEOPLE_INDEX_WHERE = {
   // `notIn` alone would also drop role_category IS NULL rows (SQL three-valued
   // logic: NULL NOT IN (...) is NULL, not true), so NULL is admitted explicitly.
   // NULL means un-backfilled, not hidden — isPubliclyDisplayed(null) is true too.
-  OR: [
-    { roleCategory: null },
-    { roleCategory: { notIn: [...HIDDEN_ROLE_CATEGORIES] } },
-  ],
+  //
+  // #2222 — the carve now lives in lib/eligibility.ts so the home hero count can
+  // spread the SAME fragment: "advertised" and "findable" must be one predicate,
+  // not two that agree by hand.
+  ...NOT_HIDDEN_ROLE_WHERE,
 } satisfies Prisma.ScholarWhereInput;
 
 export const PEOPLE_INDEX_SELECT = {

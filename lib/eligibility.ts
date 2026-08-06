@@ -108,6 +108,35 @@ export function publicRoleWhere(): PublicRoleWhere {
 }
 
 /**
+ * The #536 role carve as a reusable Prisma `where` fragment — spread it into any
+ * scholar query whose result is a PUBLIC population (`PEOPLE_INDEX_WHERE`, the
+ * home hero count, the sitemap). Written once because the NULL clause is the
+ * whole point and is easy to omit:
+ *
+ *   `notIn` / `NOT` on a NULLABLE column also drops NULL rows (SQL three-valued
+ *   logic — `NULL NOT IN (...)` is NULL, not TRUE), so a bare `notIn` silently
+ *   hides every un-backfilled scholar. NULL means "no role recorded yet", not
+ *   "hidden" — `isPubliclyDisplayed(null)` is true — so it is admitted explicitly.
+ *
+ * Denylist, not allowlist: unlike `isPubliclyDisplayed` (which fails CLOSED on an
+ * unrecognized token since #2202) this cannot enumerate the unknown. Surfaces that
+ * render a per-row link must still call `isPubliclyDisplayed` on the raw column at
+ * render time; this fragment is the population gate, not the link gate.
+ *
+ * Not typed as `Prisma.ScholarWhereInput` on purpose: this module is imported by
+ * client components (`components/home/spotlight-section.tsx`), and it stays free of
+ * generated-Prisma imports so nothing can drag the driver into the client bundle.
+ */
+export const NOT_HIDDEN_ROLE_WHERE: {
+  OR: Array<{ roleCategory: null } | { roleCategory: { notIn: string[] } }>;
+} = {
+  OR: [
+    { roleCategory: null },
+    { roleCategory: { notIn: [...HIDDEN_ROLE_CATEGORIES] } },
+  ],
+};
+
+/**
  * Legacy `role_category` values the current ED ETL can no longer emit —
  * `deriveRoleCategory` (etl/ed/index.ts) folds voluntary / adjunct / courtesy /
  * emeritus into `affiliated_faculty` and has no `research_staff` branch — but which
