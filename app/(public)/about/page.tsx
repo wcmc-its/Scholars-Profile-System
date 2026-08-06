@@ -993,9 +993,10 @@ export default function DocsPage() {
             paper can be highly relevant to an area yet modest in Impact, or the reverse. Relevance is
             used mainly to order publications within a research area (combined with Impact, so a
             paper ranks high on an area page when it is both central to the area and notable). Unlike
-            Impact, it does not appear on publication cards or listings; it surfaces only when you
-            open a publication&apos;s detail view. So in everyday browsing the one score you see is
-            Impact (&ldquo;Impact: NN&rdquo;), with relevance available a click deeper.
+            Impact, it does not appear on publication cards or listings. Neither score appears in
+            listings today: publication lists and search results show no number at all, and Impact
+            surfaces when you open a publication&apos;s detail view, where it reads
+            &ldquo;Impact&rdquo; followed by a value out of 100.
           </p>
         </Callout>
         <p>
@@ -1080,7 +1081,7 @@ export default function DocsPage() {
         <h2 id="impact">The Impact score</h2>
         <p>
           The Impact score is a number from 0 to 100 that ReciterAI assigns to a publication, shown
-          as &ldquo;Impact: NN&rdquo;. It weighs three things about the paper: its citation
+          when you open the publication&apos;s detail view. It weighs three things about the paper: its citation
           signal (the iCite citation count, plus the paper&apos;s NIH percentile and Relative
           Citation Ratio once those exist), the standing of the journal it appeared in, and how
           recent it is. A calibrated model combines them into a single number by comparing
@@ -1229,7 +1230,7 @@ export default function DocsPage() {
                 <td>Impact score</td>
                 <td>A publication&apos;s overall standing</td>
                 <td>per publication</td>
-                <td>Yes (&ldquo;Impact: NN&rdquo;)</td>
+                <td>Yes, in a publication&apos;s detail view</td>
               </tr>
               <tr>
                 <td>Research-area relevance score</td>
@@ -1429,7 +1430,7 @@ export default function DocsPage() {
         <h2 id="glossary">Glossary</h2>
         <dl className="mt-4 space-y-5">
           {[
-            { term: "Impact score", def: "A score from 0 to 100 that ReciterAI assigns to a publication: a calibrated model weighs its citation signal (iCite count, plus NIH percentile and RCR once they exist), journal standing, and recency against a fixed ladder of about 200 reference points. Publication-level and not author-relative: the same number for every co-author. Field-aware but not a literal cross-field ranking. Used mainly to help decide which of a scholar’s papers to surface; not a ranking of people. High scores are rare (the scale is demanding and the 90 to 100 band is reserved for historic landmarks), so a mid-range score can still mark a top paper. Shown as “Impact: NN”." },
+            { term: "Impact score", def: "A score from 0 to 100 that ReciterAI assigns to a publication: a calibrated model weighs its citation signal (iCite count, plus NIH percentile and RCR once they exist), journal standing, and recency against a fixed ladder of about 200 reference points. Publication-level and not author-relative: the same number for every co-author. Field-aware but not a literal cross-field ranking. Used mainly to help decide which of a scholar’s papers to surface; not a ranking of people. High scores are rare (the scale is demanding and the 90 to 100 band is reserved for historic landmarks), so a mid-range score can still mark a top paper. Shown when you open a publication’s detail view." },
             { term: "Author Position", def: "Your place in a publication’s author list (first / middle / senior). This, not Impact, conveys your role on a paper." },
             { term: "ReCiter", def: "WCM’s author-disambiguation engine. Decides which publications are yours, from PubMed. Runs nightly." },
             { term: "ReCiter Publication Manager", def: "The curation interface at reciter.weill.cornell.edu where a publication’s attribution is corrected. A misattributed paper is rejected here; a missing one is added here." },

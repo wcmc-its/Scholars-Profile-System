@@ -82,7 +82,7 @@ For each sampled profile, open `${BASE}/scholars/<slug>` (or `${BASE}/<slug>` wh
 - [ ] **Counts** — publication count and active-grant count are sane for the person (not 0 for a prolific PI, not absurdly high).
 - [ ] **Research areas / topics** — present and on-topic; no empty or garbled chips.
 - [ ] **Overview / synopsis** — reads cleanly; no truncation mid-word, no template artifacts, no obviously-stale facts. Staleness is a **read**, not a filter (#2212 — see the `overviewAge` note in §1): check the prose against the profile's own appointments and grant end-dates, e.g. present-tense work funded by an award that ended years ago, or a title the person no longer holds.
-- [ ] **Publication modal** — open one publication; author order and Impact render (Impact only when `SEARCH_PUB_TAB_IMPACT=on`).
+- [ ] **Publication modal** — open one publication; author order and Impact render. The modal's Impact section is **not** gated: `components/publication/publication-modal.tsx` reads no flag, so it shows "Impact — NN / 100" whenever the score exists. `SEARCH_PUB_TAB_IMPACT` gates the *inline* score on search / research-area / methods-lens hit rows, and it is unset in both deployed envs — so the modal is the only place a public reader sees a score today, and an absent score there is a data gap, not a flag.
 
 Log any defect as a follow-on issue (see § follow-on issues) with the slug, the surface, and a screenshot. Defects do **not** block the flip unless egregious — they are filed and triaged.
 

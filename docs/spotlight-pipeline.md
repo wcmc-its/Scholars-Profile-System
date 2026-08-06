@@ -32,8 +32,11 @@ are easy to conflate, so:
   originality, methodology, translational relevance, evidence of uptake, citation signals
   (NIH iCite percentile, RCR, counts), and venue prestige — with an explicit parity constraint so
   clinical and basic work are scored on the same bar. It is **not topic-specific**: one paper has
-  one impact score everywhere. This is the only score that surfaces to users (rendered inline as
-  `Impact: NN`).
+  one impact score everywhere. It is the only score that surfaces to a public reader, and it does so
+  in the publication detail modal ("Impact — NN / 100"), not inline in listings: the inline
+  `Impact: NN` on hit rows is gated behind `SEARCH_PUB_TAB_IMPACT`, which is unwired in
+  `cdk/lib/app-stack.ts` and therefore off in both deployed envs. Staff also see `Impact: NN`
+  ungated in the `/edit` publication pickers.
 
 - **Relevance score** — *"How well does this paper fit **this** topic?"* A **per-(publication,
   subtopic)** float on a **0.0–1.0** scale, LLM-generated (Haiku screening pass → Sonnet dense

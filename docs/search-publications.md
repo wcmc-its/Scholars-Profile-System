@@ -316,7 +316,7 @@ The `mesh` precedence rule (`off` wins) is enforced both server-side in the rout
 |---|---|---|
 | `SEARCH_PUB_TAB_CONCEPT_MODE` | `expanded` | Set to `strict` to revert to PR-3-merge admission (today's `concept_filtered` body). Set to `off` for pre-§1.6 fallback (resolution logged but not applied). |
 | `SEARCH_PUB_TAB_MSM` | `on` | Set to `off` to remove the `minimum_should_match` floor on unresolved-query multi_match. Pre-§1.2 behavior. |
-| `SEARCH_PUB_TAB_IMPACT` | `off` | Set to `on` to surface Impact + Recency sort options + display `impactScore` / `conceptImpactScore` in hit rows. |
+| `SEARCH_PUB_TAB_IMPACT` | `off` | Set to `on` to surface Impact + Recency sort options + display `impactScore` / `conceptImpactScore` in hit rows. Gates **hit rows only** — the publication modal and the `/edit` pickers render Impact ungated. Not wired in `cdk/lib/app-stack.ts` (it sits in `scripts/release/flag-parity-allowlist.txt`), so it is undefined and off in staging and prod alike. |
 | `SEARCH_PUB_RELEVANCE_RECENCY` | `gentle` | Recency tilt on the Relevance sort (issue #645). `off` reverts to pure BM25 (body byte-identical to pre-#645); `strong` switches the bounded `1 + 2·gauss` multiplier for a pure-multiplicative `gauss` decay. |
 | `SEARCH_PUB_FACET_SPLIT` | `off` | Set to `on` (staging-on, prod-off) to issue hits and facet aggregations as two parallel OpenSearch requests, with the agg side cached ~5 min and degrading to empty facets on timeout. `off` reverts to the single-request body that returns hits + aggs together. |
 
@@ -377,7 +377,9 @@ If a pub-tab search returns zero hits but `q=` would return 12 scholars on the P
 
 #### Concept-impact scoring is gated off
 
-The `impactScore` and `conceptImpactScore` per-hit fields are computed by ReciterAI synthesis and written to the index, but the UI is gated on `SEARCH_PUB_TAB_IMPACT=on`. Default off pending a quality bar on the impact rollup — the gate is intentional, not forgotten. When enabled, hits show a small "Impact: X" or "Concept impact: X" badge and the sort dropdown gains Impact + Recency options.
+The `impactScore` and `conceptImpactScore` per-hit fields are computed by ReciterAI synthesis and written to the index, but the UI is gated on `SEARCH_PUB_TAB_IMPACT=on`. Default off pending a quality bar on the impact rollup — the gate is intentional, not forgotten. When enabled, hits show a small inline `Impact: NN · Concept: NN` (`components/publication/publication-meta.tsx`) and the sort dropdown gains Impact + Recency options.
+
+What the gate does **not** cover: the publication modal. `ImpactSection` in `components/publication/publication-modal.tsx` reads no flag and renders "Impact — NN / 100" whenever the score exists, so opening a paper shows a score even with the flag off. The `/edit` publication pickers (`components/edit/highlights-card.tsx`, `components/edit/biosketch-result-card.tsx`, fed by `pickable[].impact` in `lib/api/edit-context.ts`) are likewise ungated. So "gated off" means *listings are dark*, not *Impact is invisible*.
 
 ### Upstream constraints we can't control
 
