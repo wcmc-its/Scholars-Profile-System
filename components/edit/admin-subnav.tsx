@@ -41,6 +41,7 @@ export type AdminSubnavActive =
   | "data-quality"
   | "activity"
   | "usage"
+  | "etl-status"
   | "cores"
   | "find-researchers"
   | "matcha"
@@ -90,6 +91,7 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   "data-quality": "insights",
   activity: "insights",
   usage: "insights",
+  "etl-status": "insights",
   /** Paste an input, get a ranked result. */
   "find-researchers": "tools",
   matcha: "tools",
@@ -235,6 +237,9 @@ export function AdminSubnav({
       // Wider audience than the other superuser tabs: a superuser OR any unit admin
       // (via `usageTab`, set when `canViewUsage` passes).
       { show: superuserSurfaces || usageTab, id: "usage", href: "/edit/usage", label: "Usage" },
+      // Read-only ETL health board. Superuser-only; no separate flag — same
+      // rationale as Activity above, the superuser gate on the page IS the control.
+      { show: superuserSurfaces, id: "etl-status", href: "/edit/etl-status", label: "ETL status" },
       // Gated on the same `CORE_PAGES` flag as the public core surfaces, so it stays
       // dark in any env where cores aren't live yet (staging-on / prod-off).
       { show: superuserSurfaces && isCorePagesEnabled(), id: "cores", href: "/edit/core", label: "Cores" },
