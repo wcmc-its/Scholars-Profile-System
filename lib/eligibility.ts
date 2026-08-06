@@ -100,6 +100,21 @@ export type PublicRoleWhere = {
  * unit's members: #718 retains a hidden scholar's PUBLICATIONS, so carving the
  * member set that feeds those aggregates would silently delete real research
  * output from unit totals. Only surfaces that name or count PEOPLE carve.
+ *
+ * NOT SUFFICIENT ON ITS OWN. This is a DENYLIST and cannot fail closed: it
+ * enumerates `HIDDEN_ROLE_CATEGORIES` because Prisma cannot express the
+ * `doctoral_student*` prefix that `isPubliclyDisplayed` matches, so an
+ * out-of-band suffixed value slips through it. (Those demonstrably exist — 1,875
+ * staging rows carry suffixes no version of this repo ever wrote.) Any surface
+ * that renders a per-row link or publishes a URL must ALSO run the raw
+ * `role_category` through `isPubliclyDisplayed`, which prefix-matches and fails
+ * closed. This fragment is the population gate; that predicate is the link gate.
+ * On an anonymous, unauthenticated endpoint the pair IS the access control.
+ *
+ * Deliberately NOT typed as `Prisma.ScholarWhereInput`: this module is imported
+ * by client components (e.g. `components/department/person-row.tsx`), and it must
+ * stay free of generated-Prisma imports so nothing drags the mariadb driver into
+ * the client bundle and breaks `next build` on `fs`/`net`.
  */
 export function publicRoleWhere(): PublicRoleWhere {
   return {

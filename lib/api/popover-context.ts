@@ -12,6 +12,7 @@
 import { prisma } from "@/lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
 import { loadHiddenAuthorshipCounts } from "@/lib/api/manual-layer";
+import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 
 export type PopoverContextHeader = {
   cwid: string;
@@ -55,12 +56,31 @@ export type TopicRankSummary = {
  * from the mockup) is *not* computed here — that would require the caller's
  * full filter state. Use this all-time top topic as the default; surfaces that
  * have filter context can override `topTopic` at render time.
+ *
+ * #2221 — this is the ONLY gate on a PUBLIC, UNAUTHENTICATED endpoint
+ * (`/api/scholars/[cwid]/popover-context`): the route 404s the whole request the
+ * moment this returns null, so every #536 hidden identity class must be dropped
+ * HERE. It used to gate on `deletedAt` alone, which is inert against the prod
+ * data shape — 690 scholars carry the BARE `doctoral_student` role with
+ * `deleted_at IS NULL` — so an anonymous caller with a CWID harvested from a
+ * department page (#2202) got a full identity card: degree postnominal,
+ * "Graduate Student" title, school affiliation, headshot, pub/grant counts.
+ * (On staging the same students are suffixed AND soft-deleted, so `deletedAt`
+ * masks the hole entirely; a staging-only test proves nothing here.)
+ *
+ * Returning `null` — not a distinguishable error — is deliberate: a hidden
+ * scholar and a nonexistent CWID must produce the identical 404, or the endpoint
+ * becomes an existence oracle for exactly the population it is hiding.
  */
 export async function fetchPopoverHeader(
   cwid: string,
 ): Promise<PopoverContextHeader | null> {
-  const scholar = await prisma.scholar.findUnique({
-    where: { cwid },
+  const scholar = await prisma.scholar.findFirst({
+    // The carve runs at the QUERY layer, not as a post-filter: this is an
+    // anonymous API boundary, so the where-clause is the access control.
+    // `publicRoleWhere()` admits `role_category IS NULL` explicitly — a bare
+    // `notIn` would also drop NULL rows and 404 every un-backfilled scholar.
+    where: { cwid, deletedAt: null, ...publicRoleWhere() },
     select: {
       cwid: true,
       preferredName: true,
@@ -70,6 +90,7 @@ export async function fetchPopoverHeader(
       slug: true,
       status: true,
       deletedAt: true,
+      roleCategory: true,
       _count: {
         select: {
           authorships: true,
@@ -87,6 +108,12 @@ export async function fetchPopoverHeader(
   });
   if (!scholar) return null;
   if (scholar.deletedAt) return null;
+  // Belt-and-braces on the RAW `role_category` column — never a humanized label
+  // (that mixup was the #2202 bug). Prisma can't express the `doctoral_student*`
+  // prefix, so `publicRoleWhere()` only enumerates the known suffixes; this
+  // predicate prefix-matches AND fails closed on any unrecognized role, so an
+  // out-of-band value the enum hasn't caught up with hides rather than leaks.
+  if (!isPubliclyDisplayed(scholar.roleCategory)) return null;
 
   // #356 — a per-author hide lowers the scholar's public publication count.
   const hiddenPubs =
