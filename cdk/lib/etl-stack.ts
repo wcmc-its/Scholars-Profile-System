@@ -2756,7 +2756,7 @@ export class EtlStack extends Stack {
         "EdEmailVisibilityBridgeStatusAlarm",
         {
           alarmName: `sps-ed-email-visibility-status-${env}`,
-          alarmDescription: `SPS ED email-visibility bridge (${env}) -- a run did not finish successfully: it failed, ran out of time, or was stopped. Scholar email visibility keeps the values from the last good run; new release-code changes are not applied. Next: open the Step Functions execution for scholars-ed-email-visibility-${env}, see which half (export or import) is red, and read its logs -- an export failure usually means the on-prem LDAP path is down. Nothing retries before next Sunday 05:00 UTC. See docs/onprem-ed-export-runbook.md.`,
+          alarmDescription: `SPS ED email-visibility bridge (${env}) -- a run did not finish successfully: it failed, ran out of time, or was stopped. Scholar email visibility keeps the values from the last good run; new release-code changes are not applied. Next: open the Step Functions execution for scholars-ed-email-visibility-${env}, see which half (export or import) is red, and read its logs -- an export failure usually means the on-prem LDAP path is down. Nothing retries before next Sunday 05:00 UTC.`,
           // Weekly cadence => 7 day period, the same shape (and the same
           // ceiling) as the cadence alarm above: 1 * 604800 <= 604800.
           metric: unsuccessfulMetric(

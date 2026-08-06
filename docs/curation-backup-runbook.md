@@ -148,10 +148,15 @@ config flag:
   the first prod deploy and the first run must be verified by hand.
 
 Observability: a failed run **Catches to the ETL failure topic**
-(`etl-failures-<env>` → Teams), and a **cadence alarm**
+(`etl-failures-<env>` → Teams); a **status alarm**
+(`sps-curation-backup-status-<env>`) covers the terminations the Catch cannot
+see — a run that **times out** or is **aborted** never executes its Catch, so it
+publishes nothing; and a **cadence alarm**
 (`sps-curation-backup-cadence-<env>`) fires if no run starts for ~2 days
-(silent schedule death — the failure mode that hurts a backup most). Spot-check
-freshness anytime via the `latest` manifest's `generatedAt` (§ 3).
+(silent schedule death — the failure mode that hurts a backup most). Note the
+cadence alarm cannot substitute for the status alarm: a timed-out run *started*,
+so `ExecutionsStarted` still increments and the cadence alarm stays green.
+Spot-check freshness anytime via the `latest` manifest's `generatedAt` (§ 3).
 
 To change the cadence, edit the `events.Schedule.cron(...)` in the
 `CurationBackupScheduleRule` block (e.g. `{ minute: "0", hour: "6", weekDay:

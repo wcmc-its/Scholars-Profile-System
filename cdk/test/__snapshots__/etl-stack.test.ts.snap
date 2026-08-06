@@ -9753,7 +9753,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ED email-visibility bridge (staging) -- a run did not finish successfully: it failed, ran out of time, or was stopped. Scholar email visibility keeps the values from the last good run; new release-code changes are not applied. Next: open the Step Functions execution for scholars-ed-email-visibility-staging, see which half (export or import) is red, and read its logs -- an export failure usually means the on-prem LDAP path is down. Nothing retries before next Sunday 05:00 UTC. See docs/onprem-ed-export-runbook.md.",
+        "AlarmDescription": "SPS ED email-visibility bridge (staging) -- a run did not finish successfully: it failed, ran out of time, or was stopped. Scholar email visibility keeps the values from the last good run; new release-code changes are not applied. Next: open the Step Functions execution for scholars-ed-email-visibility-staging, see which half (export or import) is red, and read its logs -- an export failure usually means the on-prem LDAP path is down. Nothing retries before next Sunday 05:00 UTC.",
         "AlarmName": "sps-ed-email-visibility-status-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "EvaluationPeriods": 1,
