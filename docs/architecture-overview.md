@@ -108,8 +108,8 @@ running **ECS Fargate tasks** (not Lambda — see corrections below).
   pubmed-retractions → search-index → revalidate → integrity`; staging drops `infoed` — its
   internal host overlaps the VPC CIDR — and inserts `mesh-anchors` before
   `pubmed-retractions`), weekly (`completeness → headshot → spotlight → reporter → nsf →
-  gates → nih-profile → pops → reporter-grants → clinical-trials → search-index → revalidate
-  → integrity`), annual (`hierarchy` + manual approval gate). Step Functions enforces
+  gates → nih-profile → pops → reporter-grants → clinical-trials → technologies → news →
+  search-index → revalidate → integrity`), annual (`hierarchy` + manual approval gate). Step Functions enforces
   ordering (`reciter` cascades into `dynamodb` within the nightly run) and classifies each
   step by failure tier (reliability-audit #1438): an **abort**-tier step (the spine —
   `ed`/`reciter`/`dynamodb`/`search-index` plus the terminal `integrity` gate) pages P1 via

@@ -29,6 +29,7 @@ const nodes = {
   nsf:    { x: AX, y: 574, w: SW, h: SH, kind: "ext", title: "NSF Awards", sub: ["HTTPS · federal awards"], chip: { tone: "ondemand", text: "on-demand" } },
   mesh:   { x: BX, y: 574, w: SW, h: SH, kind: "ext", title: "NLM MeSH", sub: ["HTTPS · taxonomy"], chip: { tone: "annual", text: "annual" } },
   ctl:    { x: AX, y: 634, w: SW, h: SH, kind: "ext", title: "CTL portfolio", sub: ["HTTPS · WCM licensable technologies"], chip: { tone: "weekly", text: "weekly" } },
+  news:   { x: BX, y: 634, w: SW, h: SH, kind: "ext", title: "WCM Newsroom", sub: ["feed.json · scholar news mentions"], chip: { tone: "weekly", text: "weekly" } },
   // ----- center: the platform -----
   etl:    { x: 738, y: 172, w: 320, h: 54, kind: "app", title: "ETL pipeline", sub: ["Step Functions · nightly / weekly / annual"] },
   aur:    { x: 738, y: 284, w: 154, h: 60, kind: "data", title: "Aurora MySQL", sub: ["canonical store"] },
@@ -118,6 +119,13 @@ export const meta = {
     "tables (<code>clinical_trials</code> / <code>clinical_trials_enriched</code>, the latter pulled " +
     "upstream by ReciterAI) that the nightly ETL reads — SPS never calls ClinicalTrials.gov directly. " +
     "<b>CTL portfolio</b> (available technologies) is WCM's own Center for Technology Licensing, " +
-    "scraped weekly from its public portal (<code>innovation.weill.cornell.edu</code>).",
-  source: "docs/architecture-overview.md · cdk/lib/etl-stack.ts · lib/headshot.ts · ETL connectors in lib/sources/ · etl/pops/index.ts · docs/pops-clinical-search-spec.md · etl/clinical-trials/* · docs/clinical-trials-source-spec.md",
+    "scraped weekly from its public portal (<code>innovation.weill.cornell.edu</code>). " +
+    "<b>WCM Newsroom</b> is read weekly for articles that mention a scholar " +
+    "(<code>news.weill.cornell.edu/news/feed.json</code>, <code>etl/news/*</code>) — one paginated " +
+    "JSON read covers the archive back to 1997. A <code>vivo.weill.cornell.edu</code> link in the " +
+    "article body publishes the mention outright; a prose name-match queues it for human review in " +
+    "<code>/edit</code>. The Research office's news page " +
+    "(<code>research.weill.cornell.edu/about-us/news-updates</code>) is a <b>syndication target</b> of " +
+    "the newsroom, not a source — SPS scraped it until #2200/#2231.",
+  source: "docs/architecture-overview.md · cdk/lib/etl-stack.ts · lib/headshot.ts · ETL connectors in lib/sources/ · etl/pops/index.ts · docs/pops-clinical-search-spec.md · etl/clinical-trials/* · docs/clinical-trials-source-spec.md · etl/news/* · docs/2026-07-18-news-mentions-plan.md",
 };
