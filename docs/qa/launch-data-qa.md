@@ -129,20 +129,23 @@ Suppressions are whole-entity or per-author takedowns in the `Suppression` table
   ```
   Then `terms`-query those PMIDs against the publications index and confirm **0 hits**.
 - [ ] **Read-side holds** — pick a known-retracted PMID (recent examples in `docs/retracted-publications.md`) and confirm it does **not** appear on any scholar profile, in the home feed, in topic pages, or in `${BASE}/api/search?q=<title>&type=publications`, and is not in any pub count.
-- [ ] **Spotlight defense-in-depth** — confirm the live Spotlight artifact carries no retracted papers (§8). The SPS read path trusts the upstream artifact to be pre-clean; if a retracted paper surfaces in a spotlight, file a defense-in-depth follow-up to add an explicit type filter to `getSpotlights()`.
+- [ ] **Spotlight defense-in-depth** — confirm the live Spotlight artifact carries no retracted papers (§8). The read path no longer trusts the artifact to be pre-clean: since #2219 `getSpotlights()` drops any paper whose `publication` row carries a `NEVER_DISPLAY_TYPES` value, alongside the existing suppression check. That matters because the artifact is republished on the producer's cadence (51 days stale at the 2026-08-05 pass) while the nightly `PubMedRetractions` ETL keeps stamping rows underneath it. A retracted paper still visible in a spotlight is now a **read-path bug**, not a producer-only one.
 
 ---
 
 ## 5. Doctoral-student hiding (#536) + co-author chip exception (#1026)
 
-Doctoral students and `affiliate_alumni` are hidden from directed surfaces by `isPubliclyDisplayed()` (`lib/eligibility.ts`, prefix-hardened for `doctoral_student*`) and soft-delete (`Scholar.deletedAt`); the people index excludes them via `PEOPLE_INDEX_WHERE = { deletedAt: null, status: "active" }`. By design (#1026, flag `COAUTHOR_HIDDEN_STUDENT_CHIPS`) they may still appear as **non-linked** co-author chips on publications.
+Doctoral students and `affiliate_alumni` are hidden from directed surfaces by `isPubliclyDisplayed()` (`lib/eligibility.ts`, prefix-hardened for `doctoral_student*`, fail-CLOSED on an unrecognized role since #2202) and soft-delete (`Scholar.deletedAt`); the people index excludes them via `PEOPLE_INDEX_WHERE`, which carries the role carve as well as `deletedAt`/`status` (#2202). Note the two data shapes: on **staging** the students are suffixed AND soft-deleted, so `deletedAt` does the work; on **prod** ~690 carry the bare `doctoral_student` with `deleted_at IS NULL`, so the role carve is the only gate. **A check that passes on staging proves little — reason against the prod shape.**
+
+By design (#1026, flag `COAUTHOR_HIDDEN_STUDENT_CHIPS`) they may still appear as **non-linked** co-author chips on publications. A chip is a *relational mention*; the FERPA constraint is on the link/searchability, not on the name, which is part of the public PubMed record.
 
 Pick a known doctoral-student CWID who co-authors with a faculty member:
 
 - [ ] **No standalone profile** — `${BASE}/scholars/<student-slug>` returns 404.
 - [ ] **Not in search / browse** — people search for the student's name and the relevant department/division listing do not surface them as a standalone scholar.
-- [ ] **Not in algorithmic surfaces** — absent from home "recent contributions" / top-scholars and from spotlight author lists.
-- [ ] **Allowed as a non-linked chip (only if `COAUTHOR_HIDDEN_STUDENT_CHIPS=on`)** — on the faculty co-author's profile, the shared publication lists the student as **plain text, not a link** (inspect the chip: no `<a>`/`<Link>`). If the flag is `off`, the student should be absent from the chip row entirely.
+- [ ] **Not in algorithmic surfaces** — absent from home "recent contributions" / top-scholars. (Spotlight **author lists** are a chip surface, not an algorithmic one — they are governed by the next bullet. #2223: this bullet used to say "and from spotlight author lists", contradicting it, and produced a false failure or a false pass depending on which bullet the runner read.)
+- [ ] **Allowed as a non-linked chip when `COAUTHOR_HIDDEN_STUDENT_CHIPS=on`** — on the faculty co-author's profile, and in home spotlight author lists, the student may render as **plain text, never a link** (inspect the chip: no `<a>`/`<Link>`, no navigating popover). A LINKED hidden student is a failure on any surface, flag state notwithstanding.
+- [ ] **Flag `off` means absent** — with the flag off the student must be absent from **every** chip row: profile publication chips (`lib/api/profile.ts`), home spotlight author lists (`lib/api/home.ts`), and the search / topic-feed / methods surfaces fed by `fetchWcmAuthorsForPmids` (`lib/api/topics.ts`). Before #2223 only the last group read the flag at all, and even there flag-off only withheld the *soft-deleted* cohort — so on prod the switch removed nobody. If you are testing this, test it on the prod data shape.
 - [ ] **Record the flag state** — note whether `COAUTHOR_HIDDEN_STUDENT_CHIPS` is on/off in this env so the expected behavior above is unambiguous.
 
 ---
