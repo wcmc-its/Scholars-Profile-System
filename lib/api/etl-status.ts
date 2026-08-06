@@ -105,8 +105,9 @@ export type EtlSourceRow = {
   ack?: FreshnessAck;
   /**
    * The ack applies right now. Distinct from `state === "known-issue"`: a
-   * failure, a vanished task and a missing row all outrank the ack in the state,
-   * so this is how a row still says WHO already accepted the staleness.
+   * failure, a vanished task and a missing row all outrank the ack in the state.
+   * Only the missing-row branch surfaces this today — a crash is news even under
+   * an ack, so `failed`/`stopped` deliberately say nothing about it.
    */
   ackActive: boolean;
   /** An ack exists but its date has passed — this source counts against us again. */

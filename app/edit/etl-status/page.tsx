@@ -288,13 +288,25 @@ export default async function EtlStatusPage() {
   let pendingHonors: number | null = null;
   let summary: EtlStatusSummary | null = null;
   let unavailable = false;
+  // The two tab-badge counts read the SAME database as etl_run, so they need their
+  // own fail-soft boundary: left unguarded, a DB outage 500s the one page an
+  // operator opens precisely when the database is unhappy. They get a SEPARATE
+  // try from the board on purpose — a badge is decoration, and losing it must not
+  // blank the status table when etl_run itself reads fine.
   try {
-    // The two tab-badge counts read the SAME database as etl_run, so they belong
-    // INSIDE the fail-soft boundary: left outside, a DB outage 500s the one page
-    // an operator opens precisely when the database is unhappy, and the notice
-    // below could never render. Degraded badges are the cheaper loss.
     pendingSlugRequests = isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
     pendingHonors = isHonorsQueueTabVisible(session) ? await countPendingHonors(db.read) : null;
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        event: "etl_status_badge_count_failed",
+        path: "/edit/etl-status",
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+
+  try {
     summary = await loadEtlStatus(db.read);
   } catch (err) {
     unavailable = true;

@@ -579,12 +579,15 @@ describe("/edit/etl-status page", () => {
   // The badge counts hit the SAME database as etl_run. Read outside the try, a
   // DB outage 500s the page instead of rendering the notice below — on exactly
   // the page an operator opens when the database is unhappy.
-  it("falls soft to the unavailable notice when a tab-badge count fails", async () => {
+  // A badge is decoration; the board is the point. Losing the former must not
+  // take the latter with it — this page's whole job is to still work when the
+  // database is unhappy.
+  it("still renders the board when only a tab-badge count fails", async () => {
     mockHonorsTabVisible.mockReturnValue(true);
     mockPendingHonors.mockRejectedValue(new Error("SELECT command denied"));
     const { container } = render(await Page());
-    expect(screen.getByTestId("etl-status-unavailable")).toBeTruthy();
-    expect(container.querySelector("[data-testid='etl-status-table']")).toBeNull();
+    expect(container.querySelector("[data-testid='etl-status-unavailable']")).toBeNull();
+    expect(screen.getByTestId("etl-status-table")).toBeTruthy();
   });
 
   it("falls soft to an unavailable notice when etl_run cannot be read", async () => {
