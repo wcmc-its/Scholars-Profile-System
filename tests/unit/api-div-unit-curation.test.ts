@@ -18,6 +18,7 @@ const {
   mockDivisionMembershipFindMany,
   mockScholarFindUnique,
   mockScholarFindMany,
+  mockScholarCount,
   mockAppointmentFindFirst,
   mockGrantFindMany,
   mockTopicFindMany,
@@ -34,6 +35,7 @@ const {
   mockDivisionMembershipFindMany: vi.fn(),
   mockScholarFindUnique: vi.fn(),
   mockScholarFindMany: vi.fn(),
+  mockScholarCount: vi.fn(),
   mockAppointmentFindFirst: vi.fn(),
   mockGrantFindMany: vi.fn(),
   mockTopicFindMany: vi.fn(),
@@ -56,6 +58,7 @@ vi.mock("@/lib/db", () => ({
     scholar: {
       findUnique: mockScholarFindUnique,
       findMany: mockScholarFindMany,
+      count: mockScholarCount,
     },
     appointment: { findFirst: mockAppointmentFindFirst },
     grant: { findMany: mockGrantFindMany },
@@ -107,6 +110,13 @@ function defaultBaselineMocks() {
   mockQueryRawUnsafe.mockResolvedValue([]);
   mockTopicFindMany.mockResolvedValue([]);
   mockScholarFindMany.mockResolvedValue([]);
+  // #2202 — `stats.scholars` is now a carved `scholar.count` over the union
+  // rather than `memberCwids.length`, because the roster it labels drops hidden
+  // identity classes. No fixture here carries one, so the count is the union
+  // size and every edge-13/15/19 expectation below is unchanged.
+  mockScholarCount.mockImplementation((args?: { where?: { cwid?: { in?: string[] } } }) =>
+    Promise.resolve(args?.where?.cwid?.in?.length ?? 0),
+  );
   mockPublicationAuthorFindMany.mockResolvedValue([]);
   mockPublicationCount.mockResolvedValue(0);
   mockSuppressionFindMany.mockResolvedValue([]);

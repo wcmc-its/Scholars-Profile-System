@@ -23,6 +23,7 @@ import { cachedRead } from "@/lib/api/swr-cache";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
+import { publicRoleWhere } from "@/lib/eligibility";
 import type { LeaderRole } from "@/components/scholar/leader-card";
 import {
   isUnitSuppressed,
@@ -255,7 +256,21 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
   // --- Stats ---
   const now = new Date();
   const [scholarsCount, pubCount, grantCount] = await Promise.all([
-    prisma.scholar.count({ where: { deptCode: dept.code, deletedAt: null, status: "active" } }),
+    // #2202 — the hero "N scholars" and the Scholars tab label are BOTH this
+    // number, and they sit on the same page as the roster, whose `total` now
+    // carries the #536 carve (`getDepartmentFacultyUncached`). Carving here too
+    // is what keeps "590 scholars" from sitting above an empty roster.
+    prisma.scholar.count({
+      where: {
+        deptCode: dept.code,
+        deletedAt: null,
+        status: "active",
+        ...publicRoleWhere(),
+      },
+    }),
+    // NOT carved (deliberate): #718 retains a hidden scholar's publications and
+    // grants. The unit's publication / grant / research-area aggregates below
+    // keep counting them — only the counts of PEOPLE carve.
     prisma.publicationTopic.count({
       where: { scholar: { deptCode: dept.code, deletedAt: null, status: "active" } },
     }),
@@ -365,18 +380,27 @@ const normalizeRoleCategory = formatRoleCategory;
  * preferredName ASC is used as the deterministic fallback for Phase 3 first pass.
  * If pub-count ordering becomes a hard requirement, add a prisma.$queryRaw variant.
  *
- * No eligibility carve — all roles shown per UI-SPEC §6.10.
+ * Eligibility: UI-SPEC §6.10 shows all ELIGIBILITY roles, but the #536 public-display
+ * carve is an identity-class rule that overrides it (#2202) — doctoral students and
+ * `affiliate_alumni` are not enumerable on a directed, crawlable surface. The carve
+ * lives in `baseWhere` below, so a hidden scholar is never LOADED; the render-time
+ * guard in `person-row.tsx` is now a second line of defense, not the only one.
  */
 async function getDepartmentFacultyUncached(
   deptCode: string,
   opts: { divCode?: string; page?: number },
 ): Promise<DepartmentFacultyResult> {
   const page = Math.max(0, opts.page ?? 0);
+  // ONE where drives `total`, `roleCategoryCounts`, the chief row, the page rows
+  // and the methodFacet cwid select — so the #536 carve shrinks all five together
+  // and nothing can desync. The "Doctoral students" chip then counts 0 and
+  // `role-chip-row.tsx` omits it.
   const baseWhere = {
     deptCode,
     deletedAt: null,
     status: "active" as const,
     ...(opts.divCode ? { divCode: opts.divCode } : {}),
+    ...publicRoleWhere(),
   };
 
   const total = await prisma.scholar.count({ where: baseWhere });

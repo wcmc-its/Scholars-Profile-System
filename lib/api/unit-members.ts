@@ -24,6 +24,7 @@
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { formatRoleCategory } from "@/lib/role-display";
+import { publicRoleWhere } from "@/lib/eligibility";
 import { loadDivisionMemberCwids } from "@/lib/api/divisions";
 import type { DepartmentFacultyHit } from "@/lib/api/departments";
 import {
@@ -59,12 +60,22 @@ export async function getUnitMembersByMethods(
   };
 
   // (1) Full active member cwids for the unit.
+  // #2202 edit 1 of 3 — the department branch carves here. The division branch
+  // CANNOT: `loadDivisionMemberCwids` is `cache()`d and shared with the pubs /
+  // grants / topics loaders, which must keep counting student-authored output
+  // (#718). Step (3) below re-gates BOTH kinds through the `scholar:` relation
+  // filter, so a division's hidden members are dropped there instead.
   const memberCwids =
     kind === "division"
       ? await loadDivisionMemberCwids(code)
       : (
           await prisma.scholar.findMany({
-            where: { deptCode: code, deletedAt: null, status: "active" },
+            where: {
+              deptCode: code,
+              deletedAt: null,
+              status: "active",
+              ...publicRoleWhere(),
+            },
             select: { cwid: true },
           })
         ).map((r) => r.cwid);
@@ -87,11 +98,18 @@ export async function getUnitMembersByMethods(
   if (publicPairs.length === 0) return empty;
 
   // (3) Members having ≥1 of the selected public families (OR within facet).
+  // #2202 edit 2 of 3 — THIS query produces `total`. Carving only the page-rows
+  // query in `buildHits` would leave `total` counting hidden members while the
+  // rows omit them, so the last page would render short (or empty). The carve
+  // goes inside the `scholar:` relation filter, NOT at the top level: the outer
+  // where already owns `OR: publicPairs` (the method facet), and
+  // `publicRoleWhere()` also carries an `OR` — spreading it here would clobber
+  // the facet and match every family.
   const matchRows = (await prisma.scholarFamily.findMany({
     where: {
       cwid: { in: memberCwids },
       OR: publicPairs,
-      scholar: { deletedAt: null, status: "active" },
+      scholar: { deletedAt: null, status: "active", ...publicRoleWhere() },
     },
     select: { cwid: true },
     distinct: ["cwid"],
@@ -127,8 +145,16 @@ async function buildHits(cwids: string[]): Promise<DepartmentFacultyHit[]> {
     division: { select: { name: true } },
   } as const;
 
+  // #2202 edit 3 of 3 — the page-rows query. Redundant with the carve in step
+  // (3), and deliberately so: this is the query that actually emits names, so it
+  // carries the guard itself rather than trusting its caller's cwid list.
   const rows = (await prisma.scholar.findMany({
-    where: { cwid: { in: cwids }, deletedAt: null, status: "active" },
+    where: {
+      cwid: { in: cwids },
+      deletedAt: null,
+      status: "active",
+      ...publicRoleWhere(),
+    },
     orderBy: [{ preferredName: "asc" }],
     include: includeClause,
   })) as Array<{

@@ -15,6 +15,7 @@
  * data layer and the editor without either pulling a driver into the browser.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { publicRoleWhere } from "@/lib/eligibility";
 
 /**
  * #552 § 3.3 — the load-bearing membership active predicate. A membership is
@@ -62,10 +63,20 @@ export type CenterMemberCountClient = Pick<PrismaClient, "centerMembership" | "s
  *
  * Two queries regardless of center count, matching the batched posture of the
  * directory loader that calls it.
+ *
+ * `opts.publicOnly` (#2202) additionally applies the #536 identity-class carve.
+ * PUBLIC callers must pass it: `/browse` renders "N members" on a card that links
+ * straight to the center page, whose hero stat and roster total are both carved,
+ * so an uncarved browse count would advertise members the page does not list.
+ * `/edit/units` deliberately does NOT pass it — a curator has to see and manage
+ * the members they administer, and the dept/division counts in that same table
+ * come from the uncarved ED-maintained `scholarCount` column, so leaving centers
+ * uncarved is what keeps that column comparable across all three kinds.
  */
 export async function countActiveCenterMembersByCode(
   client: CenterMemberCountClient,
   centerCodes: string[],
+  opts: { publicOnly?: boolean } = {},
 ): Promise<Map<string, number>> {
   const counts = new Map<string, number>();
   if (centerCodes.length === 0) return counts;
@@ -88,6 +99,7 @@ export async function countActiveCenterMembersByCode(
       cwid: { in: [...new Set(active.map((r) => r.cwid))] },
       deletedAt: null,
       status: "active",
+      ...(opts.publicOnly ? publicRoleWhere() : {}),
     },
     select: { cwid: true },
   });

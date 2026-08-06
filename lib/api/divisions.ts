@@ -29,6 +29,7 @@ import type {
 } from "@/lib/api/dept-lists";
 import type { AuthorChip } from "@/components/publication/author-chip-row";
 import { formatRoleCategory } from "@/lib/role-display";
+import { publicRoleWhere } from "@/lib/eligibility";
 import {
   isAuthorHidden,
   isUnitSuppressed,
@@ -64,6 +65,14 @@ const GRANT_PAGE_SIZE = 20;
  *
  * `opts.source` is an optional shortcut for callers that already loaded the
  * division row; passing it elides one point lookup.
+ *
+ * DO NOT apply the #536 / #2202 role carve here. This loader is `cache()`d and
+ * shared by six call sites — division stats, top research areas, the roster, the
+ * publications list, the grants list and `lib/api/unit-members.ts`. Carving here
+ * would silently drop student-authored publications and grants out of the
+ * division's totals, which #718 explicitly retains. The carve belongs at the
+ * PEOPLE-facing call sites: `getDivisionFacultyUncached` (roster) and the
+ * `stats.scholars` count in `getDivisionUncached`.
  */
 export const loadDivisionMemberCwids = cache(async (
   divCode: string,
@@ -224,7 +233,7 @@ async function getDivisionUncached(
     source: division.source,
   });
 
-  const [pubCount, grantCount] = await Promise.all([
+  const [pubCount, grantCount, visibleScholarCount] = await Promise.all([
     memberCwids.length === 0
       ? Promise.resolve(0)
       : (async () => {
@@ -256,6 +265,21 @@ async function getDivisionUncached(
           },
           "most_recent",
         ).then((projects) => projects.length),
+    // #2202 — the hero "N scholars" and the Scholars tab label sit on the SAME
+    // page as the roster, whose `total` now carries the #536 carve. `memberCwids`
+    // is deliberately left uncarved above (it feeds the publication/grant totals,
+    // which #718 retains), so the people count needs its own carved query rather
+    // than `memberCwids.length`.
+    memberCwids.length === 0
+      ? Promise.resolve(0)
+      : prisma.scholar.count({
+          where: {
+            cwid: { in: memberCwids },
+            deletedAt: null,
+            status: "active",
+            ...publicRoleWhere(),
+          },
+        }),
   ]);
 
   return {
@@ -272,7 +296,7 @@ async function getDivisionUncached(
     topResearchAreas,
     siblingDivisions,
     stats: {
-      scholars: memberCwids.length,
+      scholars: visibleScholarCount,
       publications: pubCount,
       activeGrants: grantCount,
     },
@@ -367,9 +391,32 @@ async function getDivisionFacultyUncached(
   });
   const chiefCwid = div?.chiefCwid ?? null;
 
-  const memberCwids = await loadDivisionMemberCwids(divCode, {
+  const allMemberCwids = await loadDivisionMemberCwids(divCode, {
     source: div?.source,
   });
+  if (allMemberCwids.length === 0) {
+    return { hits: [], total: 0, roleCategoryCounts: {}, page, pageSize: FACULTY_PAGE_SIZE };
+  }
+
+  // #2202 — apply the #536 carve HERE, at the roster call site, not inside the
+  // `cache()`d `loadDivisionMemberCwids` (see its docstring: six call sites, four
+  // of which must keep counting student-authored pubs/grants).
+  //
+  // Carving only `where` below would NOT be enough: `total` is derived from this
+  // list, and so is the `methodFacet` member set. Leaving them on the uncarved
+  // list would overcount the total and render phantom trailing pages — a
+  // "Showing 481–500 of 590" that resolves to an empty list.
+  const memberCwids = (
+    await prisma.scholar.findMany({
+      where: {
+        cwid: { in: allMemberCwids },
+        deletedAt: null,
+        status: "active",
+        ...publicRoleWhere(),
+      },
+      select: { cwid: true },
+    })
+  ).map((r) => r.cwid);
   const total = memberCwids.length;
   if (total === 0) {
     return { hits: [], total: 0, roleCategoryCounts: {}, page, pageSize: FACULTY_PAGE_SIZE };
@@ -379,6 +426,10 @@ async function getDivisionFacultyUncached(
     cwid: { in: memberCwids },
     deletedAt: null,
     status: "active" as const,
+    // Redundant with the carved `memberCwids` above, and deliberately so: if a
+    // future refactor re-widens that list, the row query still cannot load a
+    // hidden identity class.
+    ...publicRoleWhere(),
   };
 
   const roleCategoryCounts = await (async () => {
@@ -404,7 +455,10 @@ async function getDivisionFacultyUncached(
   let chiefRow: Awaited<ReturnType<typeof prisma.scholar.findFirst>> | null = null;
   if (chiefCwid && page === 0 && memberCwidSet.has(chiefCwid)) {
     chiefRow = await prisma.scholar.findFirst({
-      where: { cwid: chiefCwid, deletedAt: null, status: "active" },
+      // #2202 — `memberCwidSet` is already carved, so this can only match a
+      // displayable chief; the carve is repeated so the query is self-describing
+      // and survives a refactor of the set above.
+      where: { cwid: chiefCwid, deletedAt: null, status: "active", ...publicRoleWhere() },
       include: includeClause,
     });
   }
