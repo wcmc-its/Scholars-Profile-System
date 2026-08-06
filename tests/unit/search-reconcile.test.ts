@@ -36,7 +36,7 @@ beforeEach(() => {
   for (const m of Object.values(hoisted)) m.mockReset();
   hoisted.mockFindMany.mockResolvedValue([]);
   hoisted.mockResolveAffected.mockResolvedValue([]);
-  hoisted.mockReflect.mockResolvedValue({ ok: true });
+  hoisted.mockReflect.mockResolvedValue({ ok: true, stamped: true });
   // Silence the run-summary line; failure tests spy console.error locally.
   vi.spyOn(console, "log").mockImplementation(() => {});
 });
@@ -68,7 +68,7 @@ describe("reconcileSearchSuppressions — stale-row selection", () => {
 
   it("empty stale set → no reflect calls, zero summary", async () => {
     const summary = await reconcileSearchSuppressions({ now: NOW });
-    expect(summary).toEqual({ scanned: 0, reflected: 0, failed: 0 });
+    expect(summary).toEqual({ scanned: 0, reflected: 0, failed: 0, stalled: 0 });
     expect(hoisted.mockReflect).not.toHaveBeenCalled();
   });
 });
@@ -85,7 +85,7 @@ describe("reconcileSearchSuppressions — reflect each stale row", () => {
 
     const summary = await reconcileSearchSuppressions({ now: NOW });
 
-    expect(summary).toEqual({ scanned: 2, reflected: 2, failed: 0 });
+    expect(summary).toEqual({ scanned: 2, reflected: 2, failed: 0, stalled: 0 });
     expect(hoisted.mockResolveAffected).toHaveBeenNthCalledWith(1, "scholar", "ann", null);
     expect(hoisted.mockResolveAffected).toHaveBeenNthCalledWith(2, "publication", "999", "bob");
     expect(hoisted.mockReflect).toHaveBeenNthCalledWith(1, {
@@ -112,7 +112,7 @@ describe("reconcileSearchSuppressions — reflect each stale row", () => {
 
     const summary = await reconcileSearchSuppressions({ now: NOW });
 
-    expect(summary).toEqual({ scanned: 1, reflected: 1, failed: 0 });
+    expect(summary).toEqual({ scanned: 1, reflected: 1, failed: 0, stalled: 0 });
     expect(hoisted.mockReflect).toHaveBeenCalledWith({
       suppressionId: "g1",
       entityType: "grant",
@@ -132,7 +132,7 @@ describe("reconcileSearchSuppressions — reflect each stale row", () => {
 
     const summary = await reconcileSearchSuppressions({ now: NOW });
 
-    expect(summary).toEqual({ scanned: 1, reflected: 0, failed: 1 });
+    expect(summary).toEqual({ scanned: 1, reflected: 0, failed: 1, stalled: 0 });
     const failLog = consoleError.mock.calls
       .map((c) => JSON.parse(c[0] as string))
       .find((l) => l.event === "edit_search_reconcile_failed");
@@ -151,11 +151,37 @@ describe("reconcileSearchSuppressions — reflect each stale row", () => {
     ]);
     hoisted.mockResolveAffected.mockResolvedValue([{ slug: "x", cwid: "x" }]);
     hoisted.mockReflect
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true, stamped: true })
       .mockResolvedValueOnce({ ok: false, error: "boom" });
     vi.spyOn(console, "error").mockImplementation(() => {});
 
     const summary = await reconcileSearchSuppressions({ now: NOW });
-    expect(summary).toEqual({ scanned: 2, reflected: 1, failed: 1 });
+    expect(summary).toEqual({ scanned: 2, reflected: 1, failed: 1, stalled: 0 });
+  });
+
+  // #2204 — the case that ran green in prod for the life of the system. The
+  // index write lands, the sentinel does not advance, and the old tally called
+  // that success. If this ever passes with `reflected: 1` again, the reconciler
+  // is once more reporting a no-op as progress and nothing will page.
+  it("counts an unstamped reflect as FAILED and stalled, so the run exits non-zero", async () => {
+    hoisted.mockFindMany.mockResolvedValue([
+      { id: "g1", entityType: "grant", entityId: "INFOED-ACCT1-ann", contributorCwid: null },
+    ]);
+    hoisted.mockResolveAffected.mockResolvedValue([]);
+    hoisted.mockReflect.mockResolvedValue({ ok: true, stamped: false });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const summary = await reconcileSearchSuppressions({ now: NOW });
+
+    expect(summary).toEqual({ scanned: 1, reflected: 0, failed: 1, stalled: 1 });
+    const stallLog = consoleError.mock.calls
+      .map((c) => JSON.parse(c[0] as string))
+      .find((l) => l.event === "edit_search_reconcile_stalled");
+    expect(stallLog).toMatchObject({
+      suppressionId: "g1",
+      entityType: "grant",
+      entityId: "INFOED-ACCT1-ann",
+    });
+    consoleError.mockRestore();
   });
 });

@@ -33,6 +33,21 @@
  * owned by the infra workstream (B21 / #121); this emits the structured lines
  * it keys on. The EventBridge ≤5 min schedule is the infra follow-on (#393 PR-2,
  * coordinated with #353).
+ *
+ * Monitoring, and why it had to change (#2204) — the alarm used to key on an
+ * explicit failure event, which the actual broken path could not emit. In prod
+ * this reported `reflected:200 / failed:0` every five minutes for the life of
+ * the system while 317/317 rows sat at `searchReflectedAt IS NULL`: the
+ * reflector returned `{ ok: true }` on paths that never stamped, so a total
+ * no-op was indistinguishable from full success, by construction.
+ *
+ * The signal is now the sentinel itself. A row only counts as `reflected` when
+ * its stamp LANDED; an unstamped row is `failed` (and broken out as `stalled`),
+ * so the worker exits non-zero and the existing
+ * `sps-reconcile-status-<env>` ExecutionsFailed alarm fires. That means the
+ * page happens when `searchReflectedAt` stops advancing — whatever the cause —
+ * rather than when a particular error string appears. No new alarm, no metric
+ * filter over log text.
  */
 import { db } from "@/lib/db";
 import { resolveAffectedProfiles } from "@/lib/edit/revalidation";
@@ -68,10 +83,18 @@ export type ReconcileOptions = {
 export type ReconcileSummary = {
   /** Stale rows selected this run. */
   scanned: number;
-  /** Rows brought into agreement with the index. */
+  /** Rows brought into agreement with the index AND stamped, so they drain. */
   reflected: number;
-  /** Rows whose re-reflect failed again (left NULL, retried next run). */
+  /** Rows left NULL and retried next run — `stalled` plus index-write failures. */
   failed: number;
+  /**
+   * Of `failed`, the rows whose INDEX write succeeded but whose sentinel did
+   * not advance (#2204). Broken out because the two need opposite triage: an
+   * index failure is usually one bad row, a stall is usually systemic (the
+   * worker cannot write to `suppression` at all) and will pin `scanned` at the
+   * batch cap forever.
+   */
+  stalled: number;
 };
 
 /**
@@ -114,6 +137,7 @@ export async function reconcileSearchSuppressions(
 
   let reflected = 0;
   let failed = 0;
+  let stalled = 0;
 
   for (const row of stale) {
     // Re-derive the affected profile set from current DB state — identical to
@@ -131,10 +155,30 @@ export async function reconcileSearchSuppressions(
       contributorCwid: row.contributorCwid,
       affectedCwids: affected.map((a) => a.cwid),
     });
-    if (result.ok) {
-      // The reflector stamped `searchReflectedAt` on success, so this row drops
-      // out of the next run's candidate set.
+    if (result.ok && result.stamped) {
+      // Sentinel advanced, so this row drops out of the next run's candidate
+      // set. This is the ONLY outcome that counts as progress (#2204): an
+      // unstamped row is re-selected forever, and at `take: batchSize` it also
+      // starves every row behind it.
       reflected += 1;
+    } else if (result.ok) {
+      // The index write landed but the sentinel did not advance. This is the
+      // #2204 signature — 200 rows "reflected" against 317/317 NULL, run after
+      // run, with `failed: 0`. Counting it as FAILED is the alarm inversion:
+      // the worker now exits non-zero, which reaches the existing
+      // `sps-reconcile-status-<env>` ExecutionsFailed alarm. No new metric
+      // filter, and it fires for any cause of a stalled sentinel, not just a
+      // recognised error string.
+      failed += 1;
+      stalled += 1;
+      console.error(
+        JSON.stringify({
+          event: "edit_search_reconcile_stalled",
+          suppressionId: row.id,
+          entityType: row.entityType,
+          entityId: row.entityId,
+        }),
+      );
     } else {
       failed += 1;
       // The row stays NULL and is retried next run. The reflector already
@@ -155,6 +199,7 @@ export async function reconcileSearchSuppressions(
     scanned: stale.length,
     reflected,
     failed,
+    stalled,
   };
   console.log(JSON.stringify({ event: "edit_search_reconcile_complete", ...summary }));
   return summary;

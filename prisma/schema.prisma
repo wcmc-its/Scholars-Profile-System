@@ -2058,9 +2058,16 @@ model Suppression {
   /// transition has not been reflected into the OpenSearch index." It defaults
   /// NULL on create and is RESET to NULL on revoke; a successful
   /// `reflectSearchSuppression` stamps it to now(). The reconciler treats any
-  /// scholar/publication row with NULL past a short grace as stale and
-  /// re-reflects it. Scoped to scholar/publication — other entity types have no
-  /// OpenSearch fast-path, so this stays NULL for them and the reconciler
+  /// row of a reconcilable type with NULL past a short grace as stale and
+  /// re-reflects it.
+  ///
+  /// Scoped to scholar / publication / GRANT — grant joined in #481(a) with the
+  /// funding-index fast-path, and RECONCILABLE_ENTITY_TYPES
+  /// (lib/edit/search-reconcile.ts) is the authority. This comment used to say
+  /// scholar/publication only, which contradicted that constant and sent #2204
+  /// triage the wrong way: the 311 grant rows it implied were inert are in fact
+  /// the bulk of what the reconciler processes. Education / appointment have no
+  /// OpenSearch projection, so this stays NULL for them and the reconciler
   /// excludes them by entity type.
   searchReflectedAt DateTime?  @map("search_reflected_at")
 

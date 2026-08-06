@@ -22,6 +22,10 @@
  *     a live index that diverges >20% below its source table means a partial
  *     or stale index is serving.
  *
+ * Plus one reported-not-graded observation: the count of active grant
+ * suppressions whose `entityId` resolves to no `Grant.externalId` (#2224).
+ * Logged rather than checked — see the rationale at the call site.
+ *
  * Aggregate canaries (e.g. "most active scholars have at least one
  * publication") are preferred over named-cwid canaries: they catch the same
  * mass-attribution-loss failure without going red when one person's record
@@ -32,6 +36,7 @@
  */
 import { db } from "@/lib/db";
 import { withEtlRun } from "@/lib/etl-run";
+import { EntityType } from "@/lib/generated/prisma/client";
 import {
   FUNDING_INDEX,
   OPPORTUNITIES_INDEX,
@@ -299,6 +304,42 @@ async function main(): Promise<void> {
       `${OPPORTUNITIES_INDEX} is empty while opportunity has ${opportunities} rows`,
     );
   }
+
+  // 4. Orphaned grant suppressions (#2224) — VISIBILITY ONLY, never a violation.
+  //
+  // ADR-005 § Keying deliberately lets a suppression row outlive a hard-deleted
+  // target, so an orphan is not by itself a bug. What is missing is any surface
+  // distinguishing "this takedown is still enforcing" from "this takedown became
+  // a no-op when InfoEd reissued the row under a new external_id" — in which case
+  // the curator's takedown is silently void and nobody is told.
+  //
+  // ponytail: logged, not graded. The count drifts upward on legitimate InfoEd
+  // churn, so a page-on-movement alarm would fire on normal reissues; the log
+  // line puts the trend in CloudWatch for free. Promote to a note() with a
+  // budget only once the trend shows it moving faster than reissue churn
+  // explains. The curator-facing report is the real fix and is what remains on
+  // #2224.
+  //
+  // Suppression ids only — the entityId embeds a CWID and this line goes to a
+  // shared log group. An id is enough to look the row up.
+  const grantSuppressions = await db.read.suppression.findMany({
+    where: { entityType: EntityType.grant, revokedAt: null },
+    select: { id: true, entityId: true },
+  });
+  const resolved = new Set(
+    (
+      await db.read.grant.findMany({
+        where: { externalId: { in: grantSuppressions.map((s) => s.entityId) } },
+        select: { externalId: true },
+      })
+    ).map((g) => g.externalId),
+  );
+  const orphaned = grantSuppressions.filter((s) => !resolved.has(s.entityId));
+  console.log(
+    `[integrity] grant suppressions: ${grantSuppressions.length} active, ` +
+      `${orphaned.length} orphaned (entityId matches no Grant.externalId)` +
+      (orphaned.length > 0 ? ` — suppression ids: ${orphaned.map((s) => s.id).join(", ")}` : ""),
+  );
 
   if (violations.length > 0) {
     for (const v of violations) console.error(v);
