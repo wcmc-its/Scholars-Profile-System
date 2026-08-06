@@ -22,6 +22,9 @@ const FACULTY: ReadonlySet<string> = new Set([
   "adjunct_faculty",
   "courtesy_faculty",
   "faculty_emeritus",
+  // #2211 — the code the ED ETL now writes is bare `emeritus`; without it an
+  // emeritus respondent opens the form with Q6 unselected instead of "Faculty".
+  "emeritus",
   "instructor",
   "lecturer",
 ]);

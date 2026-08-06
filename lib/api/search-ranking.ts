@@ -87,12 +87,16 @@ const KIND_ORDER_WITH_CONCEPT: EntityKind[] = [
 
 // Real codes from etl/ed/index.ts deriveRoleCategory. The spec used placeholder
 // names; this map is the authoritative one. Full-time faculty rank first;
-// affiliated faculty (voluntary, adjunct, emeritus, visiting) ahead of postdoc
-// because the WCM scholar audience recognizes voluntary faculty as professors,
-// not trainees.
+// affiliated faculty (voluntary, adjunct, visiting) and emeritus ahead of
+// postdoc because the WCM scholar audience recognizes voluntary and emeritus
+// faculty as professors, not trainees.
 const PERSON_ROLE_RANK: Record<string, number> = {
   full_time_faculty: 0,
   affiliated_faculty: 1,
+  // #2211 — emeritus used to arrive here spelled `affiliated_faculty`. Ranked
+  // identically so splitting the bucket does not move anyone: an unmapped code
+  // falls to PERSON_ROLE_RANK_OTHER (9), i.e. below `non_academic`.
+  emeritus: 1,
   postdoc: 2,
   fellow: 3,
   non_faculty_academic: 4,

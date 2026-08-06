@@ -169,8 +169,23 @@ export function deriveRoleCategory(f: EdFacultyEntry): RoleCategory {
   // for forward-compat in case the schema starts emitting a fellow-only code.
   if (has("academic-nonfaculty-postdoc-fellow")) return "fellow";
 
+  // Emeritus — its own RoleCategory, and a terminal, publicly meaningful
+  // faculty status. #2211: this leaf used to be folded into the affiliated
+  // bucket below, so `role_category='emeritus'` had ZERO rows in prod and no
+  // consumer (dashboard strata, the #506 dean's-office outreach cascade) could
+  // segment emeritus faculty at all.
+  //
+  // Placement is load-bearing. BEFORE the affiliated bucket, because an
+  // emeritus professor almost always also carries
+  // `faculty-affiliated-non-employee` / voluntary / courtesy — leaving the
+  // check below would make the branch unreachable all over again. AFTER
+  // full-time / postdoc / fellow, because an ACTIVE appointment still wins: no
+  // scholar leaves `full_time_faculty`, so the eligibility carve
+  // (ELIGIBLE_ROLES / TOP_SCHOLARS_ELIGIBLE_ROLES) is untouched by this change.
+  if (has("academic-faculty-emeritus")) return "emeritus";
+
   // Affiliated faculty — the dominant bucket: voluntary, adjunct, courtesy,
-  // emeritus, part-time, and the catch-all "faculty-affiliated-non-employee"
+  // part-time, visiting, and the catch-all "faculty-affiliated-non-employee"
   // primary value. Per design-spec-v1.7.1.md:354 these are explicitly NOT
   // eligible-carve scholars.
   if (
@@ -178,7 +193,6 @@ export function deriveRoleCategory(f: EdFacultyEntry): RoleCategory {
     has("academic-faculty-voluntary") ||
     has("academic-faculty-adjunct") ||
     has("academic-faculty-courtesy") ||
-    has("academic-faculty-emeritus") ||
     has("academic-faculty-weillparttime") ||
     has("academic-faculty-visiting")
   ) {

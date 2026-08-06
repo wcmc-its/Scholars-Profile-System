@@ -12,6 +12,11 @@ export const ROLE_DISPLAY: Record<string, string> = {
   ADJUNCT_FACULTY: "Adjunct faculty",
   COURTESY_FACULTY: "Courtesy faculty",
   FACULTY_EMERITUS: "Faculty emeritus",
+  // #2211 — the value the ED ETL actually writes is bare `emeritus`; the
+  // `FACULTY_EMERITUS`/`faculty_emeritus` keys are the older fixture spelling.
+  // Both map to the same label so the department role-chip row (which groups on
+  // the LABEL, not the code) keeps counting emeritus under "Affiliated faculty".
+  EMERITUS: "Faculty emeritus",
   INSTRUCTOR: "Instructor",
   LECTURER: "Lecturer",
   POSTDOC: "Postdoc",
@@ -29,6 +34,7 @@ export const ROLE_DISPLAY: Record<string, string> = {
   adjunct_faculty: "Adjunct faculty",
   courtesy_faculty: "Courtesy faculty",
   faculty_emeritus: "Faculty emeritus",
+  emeritus: "Faculty emeritus",
   instructor: "Instructor",
   lecturer: "Lecturer",
   postdoc: "Postdoc",
