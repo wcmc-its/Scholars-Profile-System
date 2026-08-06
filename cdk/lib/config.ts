@@ -180,17 +180,18 @@ export interface SpsEnvConfig {
 
   /**
    * Whether the EventBridge schedules that fire the nightly / weekly /
-   * annual state machines are enabled at deploy time. `true` in staging so
-   * the cadence runs immediately after the first deploy; `false` in prod so
-   * the first deploy never auto-starts a run before the runbook is reviewed.
+   * annual state machines are enabled at deploy time. `true` in BOTH envs
+   * now: prod shipped `false` behind a one-time runbook gate, and that gate
+   * was cleared at the 2026-07-07 launch.
    *
-   * To turn prod schedules on: flip THIS flag to `true` and
-   * `cdk deploy Sps-Etl-prod`. Do NOT enable the rules out of band with
-   * `aws events enable-rule` — the rules synthesize `enabled:
-   * envConfig.etlSchedulesEnabled` (etl-stack.ts), so an out-of-band enable
-   * drifts from the template and the next Sps-Etl-prod deploy that touches a
-   * rule silently reverts it to DISABLED. The config flag is the single source
-   * of truth (#1512).
+   * Do NOT change a schedule's state with `aws events enable-rule` /
+   * `disable-rule` — the rules synthesize `enabled:
+   * envConfig.etlSchedulesEnabled` (etl-stack.ts), so an out-of-band change
+   * drifts from the template and the next Sps-Etl-prod deploy whose changeset
+   * touches a rule silently reverts it. That is not hypothetical: prod was
+   * enabled out of band at launch while this flag stayed `false`, and ran
+   * drifted for ~4 weeks before it was reconciled. This flag is the single
+   * source of truth (#1512).
    */
   readonly etlSchedulesEnabled: boolean;
   /**
@@ -198,8 +199,9 @@ export interface SpsEnvConfig {
    * reconciler (ADR-005 layer 3) is enabled at deploy time. Distinct from
    * {@link etlSchedulesEnabled} on purpose: the reconciler is a CONTINUOUS
    * durability backstop that must run in prod from launch, whereas the
-   * nightly / weekly / annual cadences ship disabled in prod behind a one-time
-   * runbook gate. Reusing the cadence flag would couple the two — flipping the
+   * nightly / weekly / annual cadences shipped disabled in prod behind a
+   * one-time runbook gate (cleared 2026-07-07). Reusing the cadence flag would
+   * couple the two — flipping the
    * reconciler on would also auto-start the heavy cadences. `true` in both envs;
    * safe to enable in prod pre-launch because the candidate query returns empty
    * (no suppressions yet) so the run is a no-op.
@@ -403,9 +405,10 @@ export interface SpsEnvConfig {
    * the first deploy means the durable `daily_usage` history starts
    * accumulating immediately -- and the rollups must survive the raw CF
    * logs' 90-day expiry, so the earlier they start the more history we keep.
-   * Distinct from {@link etlSchedulesEnabled} (which ships prod disabled
-   * behind a runbook gate) because this rollup reads existing logs only and
-   * never starts an ETL run. Flip to `false` to ship the rollup paused
+   * Distinct from {@link etlSchedulesEnabled} (which shipped prod disabled
+   * behind a runbook gate, cleared 2026-07-07) because this rollup reads
+   * existing logs only and never starts an ETL run. Flip to `false` to ship
+   * the rollup paused
    * without a code change.
    */
   readonly usageRollupScheduleEnabled: boolean;
