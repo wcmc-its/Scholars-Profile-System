@@ -57,6 +57,7 @@ import {
   computeConceptFallback,
   CONCEPT_FALLBACK_CAP,
   CONCEPT_FALLBACK_SPARSE_THRESHOLD,
+  EMPTY_QUERY_PEOPLE_SORT,
 } from "@/lib/api/search-flags";
 import { isFullQueryMeshMatch } from "@/lib/api/normalize";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
@@ -521,7 +522,16 @@ async function handleSearch(request: NextRequest) {
     );
   }
 
-  const sort = (params.get("sort") ?? "relevance") as PeopleSort;
+  // Issue #2228 — mirror the SSR page's #1106/#1107 empty-query default
+  // (`app/(public)/search/page.tsx`, same `EMPTY_QUERY_PEOPLE_SORT` constant).
+  // Without this branch `?q=&type=people` fell through to "relevance", which on
+  // an empty query is a `match_all`: every hit scores 1 and the JSON API served
+  // index order under a label promising a ranking, disagreeing with the page for
+  // the identical request. Consistency only — a NON-empty query is untouched and
+  // still defaults to relevance, and an explicit `?sort=` still wins on both
+  // surfaces.
+  const sort = (params.get("sort") ??
+    (q === "" ? EMPTY_QUERY_PEOPLE_SORT : "relevance")) as PeopleSort;
   // Issue #8/#9: facets are repeated params, OR'd within a group.
   const deptDiv = params.getAll("deptDiv");
   const personType = params.getAll("personType");
