@@ -2255,17 +2255,23 @@ export class AppStack extends Stack {
         //   matches (DNA/RNA) are kept. Resolve-time only: no reindex. STAGING ON; PROD
         //   OFF pending eval. Flip env-only via cdk deploy Sps-App-<env> (flag-parity).
         SEARCH_ACRONYM_SENSE_GUARD: "on", // Prod flipped 2026-07-07 (#1346; resolve-time, no reindex).
-        // #1026 -- surface soft-deleted doctoral-student co-authors as NON-LINKED
+        // #1026 -- surface hidden-class doctoral-student co-authors as NON-LINKED
         // chips (name + headshot, no profile link, never faceted/searchable) on
         // publication chip surfaces site-wide (search, topic feeds, methods pages,
-        // home spotlight). FERPA carve (docs/student-profile-visibility.md): the
-        // constraint is on the link/searchability, not the public PubMed name. The
-        // code checks `=== "on"`; the non-linked rendering itself is enforced by the
-        // prefix-hardened isPubliclyDisplayed regardless of this flag. Flag-off is
-        // byte-identical (every hidden-class scholar is soft-deleted, so the relaxed
-        // hydration matches no one new). STAGING-FIRST: on in staging to soak pending
-        // the WCGS sign-off (docs/outreach/wave3-doctoral-students.md Q2); prod stays
-        // off until then. Env-only flip via `cdk deploy --exclusively Sps-App-<env>`.
+        // home spotlight, profile publication chips). FERPA carve
+        // (docs/student-profile-visibility.md): the constraint is on the
+        // link/searchability, not the public PubMed name. The code checks
+        // `=== "on"`; the non-linked rendering itself is enforced by the
+        // prefix-hardened isPubliclyDisplayed regardless of this flag.
+        // #2223 CORRECTION -- the old claim here ("flag-off is byte-identical;
+        // every hidden-class scholar is soft-deleted") was FALSE on prod, where
+        // ~690 students carry the bare `doctoral_student` with `deleted_at IS
+        // NULL`: they passed the flag-off filter, and profile.ts / home.ts did not
+        // read the flag at all, so OFF was not the kill switch its name implied.
+        // OFF now means absent from every chip row, on both data shapes. ON is
+        // unchanged, so flipping this to "off" is a REAL rollback lever now --
+        // treat it as a behavior change, not a no-op. Env-only flip via
+        // `cdk deploy --exclusively Sps-App-<env>`.
         COAUTHOR_HIDDEN_STUDENT_CHIPS: "on", // Prod flipped 2026-07-07 (#1026 FERPA non-linked chips; operator-approved).
         // #637 "View as" impersonation -- the global feature gate. The code
         // checks `=== "true"` exactly (lib/auth/effective-identity.ts,

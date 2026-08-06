@@ -38,6 +38,7 @@ import { scorePublication, type RankablePublication } from "@/lib/ranking";
 import {
   SEARCH_BOOST_ELIGIBLE_ROLES,
   TOP_SCHOLARS_ELIGIBLE_ROLES,
+  isPubliclyDisplayed,
   type RoleCategory,
 } from "@/lib/eligibility";
 import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
@@ -1184,6 +1185,14 @@ export async function fetchWcmAuthorsForPmids(
     // author chips across every surface this resolver feeds (topic feed,
     // publication search, spotlight).
     if (isAuthorHidden(suppressions, row.pmid, row.scholar.cwid)) continue;
+    // #2223 — flag OFF ⇒ ABSENT, on the PROD data shape too. The where-clause
+    // above only *relaxes* the soft-delete gate when the flag is on; it never
+    // tightened it when off, so the 690 prod students who carry the bare
+    // `doctoral_student` with `deleted_at IS NULL` passed the flag-off filter
+    // unchanged and the switch removed nobody. The runbook's stated flag-off
+    // behavior ("absent from the chip row entirely") now actually holds.
+    if (!includeHiddenStudents && !isPubliclyDisplayed(row.scholar.roleCategory))
+      continue;
     const arr = byPmid.get(row.pmid) ?? [];
     arr.push({
       name: row.scholar.preferredName,

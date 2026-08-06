@@ -500,3 +500,75 @@ describe("getScholarFullProfileBySlug — historical appointment reveal split (#
     expect((payload?.pastAppointments ?? []).map((a) => a.title)).toEqual(["Fellow"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #2223 — COAUTHOR_HIDDEN_STUDENT_CHIPS governs the profile chip row
+// ---------------------------------------------------------------------------
+//
+// QA runbook §5 names this surface, but `lib/api/profile.ts` never read the
+// flag: the chip filter was `!deletedAt && status === "active"`, which the 690
+// prod doctoral students pass unconditionally (bare `doctoral_student`,
+// `deleted_at IS NULL`). Flipping the flag off removed nobody here — the switch
+// was not the kill switch its name implied. These cases are written against the
+// prod data shape; on the staging shape the soft-delete alone would hide them
+// and prove nothing.
+
+/** `authorship`, with the co-author's raw role_category set. */
+function authorshipWithCoRole(pmid: string, coCwid: string, roleCategory: string | null) {
+  const row = authorship(pmid, coCwid) as unknown as {
+    publication: { authors: Array<{ scholar: Record<string, unknown> }> };
+  };
+  row.publication.authors[1].scholar.roleCategory = roleCategory;
+  return row;
+}
+
+describe("getScholarFullProfileBySlug — hidden-student chip flag (#2223)", () => {
+  const FLAG = "COAUTHOR_HIDDEN_STUDENT_CHIPS";
+  const saved = process.env[FLAG];
+  afterEach(() => {
+    if (saved === undefined) delete process.env[FLAG];
+    else process.env[FLAG] = saved;
+  });
+
+  async function chipCwids(): Promise<string[]> {
+    const payload = await getScholarFullProfileBySlug("owner-one");
+    const pub = (payload?.publications ?? []).find((p) => p.pmid === "100");
+    return [...(pub?.wcmAuthors ?? [])].map((w) => w.cwid);
+  }
+
+  it("flag ON — a non-soft-deleted doctoral student stays as a chip (#1026, non-linked)", async () => {
+    process.env[FLAG] = "on";
+    mockScholarFindFirst.mockResolvedValue(scholarRow());
+    mockPublicationAuthorFindMany.mockResolvedValue([
+      authorshipWithCoRole("100", "stu001", "doctoral_student"),
+    ]);
+    expect((await chipCwids()).sort()).toEqual([OWNER, "stu001"].sort());
+  });
+
+  it("flag OFF — the same student is ABSENT from the chip row", async () => {
+    delete process.env[FLAG];
+    mockScholarFindFirst.mockResolvedValue(scholarRow());
+    mockPublicationAuthorFindMany.mockResolvedValue([
+      authorshipWithCoRole("100", "stu001", "doctoral_student"),
+    ]);
+    expect(await chipCwids()).toEqual([OWNER]);
+  });
+
+  it("flag OFF — an ordinary co-author is untouched (this is a carve, not a cull)", async () => {
+    delete process.env[FLAG];
+    mockScholarFindFirst.mockResolvedValue(scholarRow());
+    mockPublicationAuthorFindMany.mockResolvedValue([
+      authorshipWithCoRole("100", "co001", "full_time_faculty"),
+    ]);
+    expect((await chipCwids()).sort()).toEqual([OWNER, "co001"].sort());
+  });
+
+  it("flag OFF — a NULL role_category co-author is kept (un-backfilled, not hidden)", async () => {
+    delete process.env[FLAG];
+    mockScholarFindFirst.mockResolvedValue(scholarRow());
+    mockPublicationAuthorFindMany.mockResolvedValue([
+      authorshipWithCoRole("100", "co002", null),
+    ]);
+    expect((await chipCwids()).sort()).toEqual([OWNER, "co002"].sort());
+  });
+});
