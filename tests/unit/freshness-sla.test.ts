@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { SLA_HOURS, TRACKED, ackState } from "@/etl/freshness/index";
+// The policy module, not `etl/freshness/index` — that script runs `main()` and
+// `$disconnect()`s both Prisma clients on import, which a test (and the
+// `/edit/etl-status` page) must never trigger just to read the SLA table.
+import { SLA_HOURS, TRACKED, ackState } from "@/lib/etl/freshness-policy";
 
 describe("freshness SLAs", () => {
   // Spotlight's producer lives in ReciterAI, not this repo, and publishes
