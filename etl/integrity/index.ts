@@ -94,6 +94,36 @@ export function staleSources(
 }
 
 /**
+ * Sources whose `rowsProcessed` is a CHANGE count, not a volume — ungradeable
+ * by any percentage threshold, because the number does not measure the size of
+ * anything (#2200).
+ *
+ * News (`etl/news/index.ts`) records `inserted + updated`, and is a delta on two
+ * independent axes: the INPUT is incremental (only feed urls absent from
+ * `news_mention` are read) and the COUNT is change-only (a row reconciling to an
+ * empty patch is `preserved` and excluded). So a steady week scores ~5 while any
+ * one-off widening scores thousands, and the ratio between two consecutive
+ * samples carries no information about whether the source is healthy.
+ *
+ * Measured, on staging 2026-08-06: the #2232 source repoint made the first
+ * post-migration run score 2,495 — from an ORDINARY incremental run, no
+ * `NEWS_BACKFILL`, simply because the newsroom corpus is deeper than the site it
+ * replaced (1,341 in-window articles never seen before). The next ordinary ~5-row
+ * delta would then read as a 99.8% collapse. Nothing was wrong either time.
+ *
+ * This is deliberately a NAMED, REASONED exemption and not a wider threshold:
+ * #1679 showed that loosening this guard hides real losses. A source belongs here
+ * only if its `rowsProcessed` is a change count — not merely because it is small,
+ * bursty, or noisy. Volume for News is instead covered by `etl:freshness` (it is
+ * in that guard's TRACKED map since #2231) plus the spine-table floors below.
+ *
+ * COI-Gap is the other input-incremental source but is exempt by accident of
+ * magnitude — it has never recorded a >= 100 sample, so `minPreviousRows` catches
+ * it first. If that ever changes, it belongs here too.
+ */
+export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set(["News"]);
+
+/**
  * A >50% overnight drop on a source that previously processed a substantial
  * row count (>= 100) is a truncated read or a mass-delete that slipped past
  * the per-module guards. Sources that legitimately hover near zero (Tools in
@@ -118,6 +148,9 @@ export function findVolumeRegressions(
   const maxAgeMs = maxSampleAgeHours * 3600_000;
   const out: VolumeRegression[] = [];
   for (const h of history) {
+    // #2200 — rowsProcessed is a change count for this source, so no ratio
+    // between two samples means anything. See CHANGE_COUNT_SOURCES.
+    if (CHANGE_COUNT_SOURCES.has(h.source)) continue;
     if (h.previous < minPreviousRows) continue;
     // #2038 — stale sample, i.e. this source did not run in the current cycle.
     if (h.latestAt && now.getTime() - h.latestAt.getTime() > maxAgeMs) continue;
@@ -198,10 +231,14 @@ async function main(): Promise<void> {
   // real regression hides; the whole point of the cadence rule is that the
   // OWNING cycle grades them instead, so it must be visible which those are.
   const stale = staleSources(history);
+  // #2200 — likewise name the change-count sources. This exemption is permanent
+  // rather than cadence-driven, so it is the easier one to forget is in force.
+  const exempt = history.map((h) => h.source).filter((s) => CHANGE_COUNT_SOURCES.has(s));
   console.log(
-    `[integrity] volume history checked for ${history.length - stale.length} of ` +
+    `[integrity] volume history checked for ${history.length - stale.length - exempt.length} of ` +
       `${history.length} sources` +
-      (stale.length ? ` (skipped, no run this cycle: ${stale.join(", ")})` : ""),
+      (stale.length ? ` (skipped, no run this cycle: ${stale.join(", ")})` : "") +
+      (exempt.length ? ` (exempt, rowsProcessed is a change count: ${exempt.join(", ")})` : ""),
   );
 
   // 2. Spine-table floors (mirror the PR-1 per-source guard floors).

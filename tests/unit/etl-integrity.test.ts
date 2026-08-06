@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { findVolumeRegressions, staleSources } from "@/etl/integrity";
+import { CHANGE_COUNT_SOURCES, findVolumeRegressions, staleSources } from "@/etl/integrity";
 
 describe("findVolumeRegressions", () => {
   it("flags a >50% overnight drop on a substantial source", () => {
@@ -42,43 +42,95 @@ describe("findVolumeRegressions", () => {
 
 // #2038 — the nightly and the weekly run the same `etl:integrity`, so a weekly
 // source used to be re-graded by every nightly against a pair that cannot move
-// until its next weekly run. Prod News: backfill 1595 -> first delta 5, pinned,
-// failing the nightly identically every night 08-03 .. 08-09.
+// until its next weekly run.
+//
+// These used to be written against News, which was the source that exposed the
+// bug. News is now permanently exempt (#2200, below), so the cadence rule is
+// exercised here through Technology — also a weekly, tier:"continue" step — to
+// keep #2038 covered by a source the rule can actually reach.
 describe("findVolumeRegressions — cycle-window scoping (#2038)", () => {
   const NOW = new Date("2026-08-04T04:25:00Z");
   const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3600_000);
 
-  // The real prod pair, verbatim.
-  const NEWS = { source: "News", latest: 5, previous: 1_595 } as const;
+  const WEEKLY = { source: "Technology", latest: 5, previous: 1_595 } as const;
 
   it("does not grade a weekly source on a nightly that did not run it", () => {
     expect(
-      findVolumeRegressions([{ ...NEWS, latestAt: hoursAgo(48) }], { now: NOW }),
+      findVolumeRegressions([{ ...WEEKLY, latestAt: hoursAgo(48) }], { now: NOW }),
     ).toEqual([]);
   });
 
   it("STILL grades that same pair in the cycle that produced it", () => {
-    // Guards against "fixed" by simply never grading News again.
-    const out = findVolumeRegressions([{ ...NEWS, latestAt: hoursAgo(1) }], {
+    // Guards against "fixed" by simply never grading the source again.
+    const out = findVolumeRegressions([{ ...WEEKLY, latestAt: hoursAgo(1) }], {
       now: NOW,
     });
     expect(out).toHaveLength(1);
-    expect(out[0].source).toBe("News");
+    expect(out[0].source).toBe("Technology");
     expect(out[0].dropPct).toBeCloseTo(99.7, 1);
   });
 
   it("grades a sample with unknown age, as before (fail-safe)", () => {
-    expect(findVolumeRegressions([NEWS], { now: NOW })).toHaveLength(1);
+    expect(findVolumeRegressions([WEEKLY], { now: NOW })).toHaveLength(1);
     expect(
-      findVolumeRegressions([{ ...NEWS, latestAt: null }], { now: NOW }),
+      findVolumeRegressions([{ ...WEEKLY, latestAt: null }], { now: NOW }),
     ).toHaveLength(1);
   });
 
   it("names the skipped sources so the gap is never silent", () => {
     const history = [
-      { ...NEWS, latestAt: hoursAgo(48) },
+      { ...WEEKLY, latestAt: hoursAgo(48) },
       { source: "ED", latest: 9_100, previous: 8_900, latestAt: hoursAgo(1) },
     ];
-    expect(staleSources(history, NOW)).toEqual(["News"]);
+    expect(staleSources(history, NOW)).toEqual(["Technology"]);
+  });
+});
+
+// #2200 — News's rowsProcessed is `inserted + updated`: a CHANGE count, delta on
+// both the input and the count. No ratio between two such samples means anything.
+describe("findVolumeRegressions — change-count sources (#2200)", () => {
+  const NOW = new Date("2026-08-10T07:00:00Z");
+  const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3600_000);
+
+  it("never grades News, even on a fresh sample in its own cycle", () => {
+    // This deliberately REVERSES the #2038 tripwire above, which asserted the
+    // owning cycle still grades this pair. The pair itself was never evidence of
+    // anything: 1595 was an operator backfill and 5 an ordinary weekly delta.
+    expect(
+      findVolumeRegressions([{ source: "News", latest: 5, previous: 1_595, latestAt: hoursAgo(1) }], {
+        now: NOW,
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not grade the staging repoint pair either (measured 2026-08-06)", () => {
+    // 2,495 came from an ORDINARY incremental run with no NEWS_BACKFILL — the
+    // newsroom corpus is simply deeper than the site it replaced. The next ~5-row
+    // delta reads as a 99.8% collapse and nothing is wrong.
+    expect(
+      findVolumeRegressions([{ source: "News", latest: 5, previous: 2_495, latestAt: hoursAgo(1) }], {
+        now: NOW,
+      }),
+    ).toEqual([]);
+  });
+
+  it("is a NAMED exemption, not a widened threshold — peers still fail loudly", () => {
+    const out = findVolumeRegressions(
+      [
+        { source: "News", latest: 5, previous: 2_495, latestAt: hoursAgo(1) },
+        { source: "ReCiter", latest: 5, previous: 2_495, latestAt: hoursAgo(1) },
+      ],
+      { now: NOW },
+    );
+    expect(out.map((r) => r.source)).toEqual(["ReCiter"]);
+  });
+
+  it("exempts by exact source name, so a lookalike is still graded", () => {
+    expect(CHANGE_COUNT_SOURCES.has("News")).toBe(true);
+    const out = findVolumeRegressions(
+      [{ source: "NewsMentions", latest: 5, previous: 2_495, latestAt: hoursAgo(1) }],
+      { now: NOW },
+    );
+    expect(out).toHaveLength(1);
   });
 });
