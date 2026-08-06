@@ -18,6 +18,7 @@ const {
   mockCenterMembershipFindMany,
   mockScholarFindUnique,
   mockScholarFindMany,
+  mockScholarCount,
   mockCenterProgramFindUnique,
   mockCenterProgramFindMany,
   mockPublicationTopicGroupBy,
@@ -29,6 +30,7 @@ const {
   mockCenterMembershipFindMany: vi.fn(),
   mockScholarFindUnique: vi.fn(),
   mockScholarFindMany: vi.fn(),
+  mockScholarCount: vi.fn(),
   mockCenterProgramFindUnique: vi.fn(),
   mockCenterProgramFindMany: vi.fn(),
   mockPublicationTopicGroupBy: vi.fn(),
@@ -40,7 +42,11 @@ vi.mock("@/lib/db", () => ({
     center: { findUnique: mockCenterFindUnique },
     suppression: { findFirst: mockSuppressionFindFirst, findMany: mockSuppressionFindMany },
     centerMembership: { findMany: mockCenterMembershipFindMany },
-    scholar: { findUnique: mockScholarFindUnique, findMany: mockScholarFindMany },
+    scholar: {
+      findUnique: mockScholarFindUnique,
+      findMany: mockScholarFindMany,
+      count: mockScholarCount,
+    },
     centerProgram: {
       findUnique: mockCenterProgramFindUnique,
       findMany: mockCenterProgramFindMany,
@@ -107,6 +113,12 @@ beforeEach(() => {
     { code: "CT", label: "Cancer Therapeutics" },
   ]);
   mockScholarFindMany.mockImplementation(routeScholarFindMany);
+  // #2202 — `getCenter`'s `scholarCount` hero stat is now a carved `scholar.count`
+  // over the active member cwids (it labels a roster that drops hidden identity
+  // classes). No fixture here carries one, so it stays the active-member count.
+  mockScholarCount.mockImplementation((args?: { where?: { cwid?: { in?: string[] } } }) =>
+    Promise.resolve(args?.where?.cwid?.in?.length ?? 0),
+  );
   mockPublicationTopicGroupBy.mockResolvedValue([]);
   mockGrantFindMany.mockResolvedValue([]);
   // program row (#1117 — leaders are a relation, empty by default)

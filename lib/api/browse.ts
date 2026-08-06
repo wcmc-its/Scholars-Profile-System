@@ -249,9 +249,12 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
   });
   if (centers.length === 0) return [];
 
+  // #2202 — `publicOnly` applies the #536 carve, so the "N members" on a browse
+  // card equals the hero stat and roster total on the center page it links to.
   const centerCounts = await countActiveCenterMembersByCode(
     prisma,
     centers.map((c) => c.code),
+    { publicOnly: true },
   );
 
   const directorCwids = centers

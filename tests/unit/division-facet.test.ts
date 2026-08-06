@@ -131,13 +131,17 @@ describe("getDivisionFaculty — #974 Phase 2 facet", () => {
     expect(result.methodFacet).toEqual([
       { value: "imaging_x::Segmentation", label: "Segmentation", count: 4 },
     ]);
-    // The aggregation reuses the in-hand memberCwids — only the member-cwid query
-    // (loadDivisionMemberCwids) + the page-rows query ran; no third cwid select.
+    // The aggregation still reuses an in-hand cwid list rather than issuing a
+    // per-member query. Exactly TWO cwid-only selects run: `loadDivisionMemberCwids`
+    // and the #2202 visibility carve that narrows it. The carve is a deliberate
+    // added query (the cached loader must stay uncarved for the pubs/grants
+    // totals) — asserting the exact count still catches an accidental third.
     const cwidOnlyCalls = mockScholarFindMany.mock.calls.filter(
       (c) => !("include" in (c[0] ?? {})),
     );
-    expect(cwidOnlyCalls).toHaveLength(1);
-    // The aggregation received the in-hand member cwid set.
+    expect(cwidOnlyCalls).toHaveLength(2);
+    expect(cwidOnlyCalls.filter((c) => "OR" in (c[0]?.where ?? {}))).toHaveLength(1);
+    // The aggregation received the CARVED member cwid set, not the raw one.
     expect(mockScholarFamilyGroupBy.mock.calls[0][0].where.cwid.in).toEqual(["d1", "d2"]);
   });
 });

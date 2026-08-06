@@ -201,6 +201,7 @@ describe("getDivisionFaculty method chips (#974)", () => {
     mockDivisionFindFirst.mockResolvedValue({ chiefCwid: null, source: "ED" });
     mockScholarFindMany
       .mockResolvedValueOnce([{ cwid: "div00001" }]) // loadDivisionMemberCwids LDAP read
+      .mockResolvedValueOnce([{ cwid: "div00001" }]) // #2202 public-role carve
       .mockResolvedValueOnce([scholarRow("div00001")]); // the page rows
     mockScholarFamilyFindMany.mockResolvedValue([
       famRow("div00001", "G1", "fam_0001", 30),
@@ -230,6 +231,7 @@ describe("getDivisionFaculty method chips (#974)", () => {
     mockDivisionFindFirst.mockResolvedValue({ chiefCwid: null, source: "ED" });
     mockScholarFindMany
       .mockResolvedValueOnce([{ cwid: "div00001" }])
+      .mockResolvedValueOnce([{ cwid: "div00001" }]) // #2202 public-role carve
       .mockResolvedValueOnce([scholarRow("div00001")]);
     mockScholarFamilyFindMany.mockResolvedValue([
       famRow("div00001", "Suppressed", "fam_0009", 99),
@@ -248,6 +250,7 @@ describe("getDivisionFaculty method chips (#974)", () => {
     mockDivisionFindFirst.mockResolvedValue({ chiefCwid: null, source: "ED" });
     mockScholarFindMany
       .mockResolvedValueOnce([{ cwid: "div00001" }])
+      .mockResolvedValueOnce([{ cwid: "div00001" }]) // #2202 public-role carve
       .mockResolvedValueOnce([scholarRow("div00001")]);
 
     const result = await getDivisionFaculty("CARDIO", {});

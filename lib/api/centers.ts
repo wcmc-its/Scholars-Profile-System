@@ -25,6 +25,7 @@ export {
 import { identityImageEndpoint } from "@/lib/headshot";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
+import { publicRoleWhere } from "@/lib/eligibility";
 import { extractLastNameSort } from "@/lib/name-sort";
 import type {
   DepartmentFacultyHit,
@@ -59,6 +60,12 @@ import { isCenterMethodsFacetEnabled } from "@/lib/profile/methods-lens-flags";
  * `loadDivisionMemberCwids` applies. Every public center read funnels through
  * this so the page, stats, highlights, topics, publications, grants and
  * spotlight all agree on who counts.
+ *
+ * DO NOT apply the #536 / #2202 role carve here — same reasoning as
+ * `loadDivisionMemberCwids`. This feeds the center's publications, grants,
+ * topics and spotlight, and #718 retains a hidden scholar's publications. The
+ * carve is applied by the PEOPLE-facing callers: the `scholarCount` hero stat in
+ * `getCenterUncached` and the roster query in `getCenterMembersUncached`.
  */
 export const loadActiveCenterMemberCwids = cache(async (
   centerCode: string,
@@ -348,7 +355,21 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
   // #552 Phase 4 — the header/tab "scholars" count reflects the active roster
   // (§ 3.3), not the denormalized `center.scholar_count` seed column, so a
   // lapsed member drops out of the count just as they drop off the roster.
-  const scholarCount = (await loadActiveCenterMemberCwids(center.code)).length;
+  // #2202 — and it now carries the #536 carve, because the roster it labels does:
+  // `getCenterMembersUncached` no longer loads a hidden identity class, so
+  // counting the uncached member list would put "N scholars" above N−k rows.
+  const activeMemberCwids = await loadActiveCenterMemberCwids(center.code);
+  const scholarCount =
+    activeMemberCwids.length === 0
+      ? 0
+      : await prisma.scholar.count({
+          where: {
+            cwid: { in: activeMemberCwids },
+            deletedAt: null,
+            status: "active",
+            ...publicRoleWhere(),
+          },
+        });
 
   return {
     code: center.code,
@@ -522,8 +543,17 @@ async function getCenterMembersUncached(
   };
 
   // edge 10 — drop dormant / soft-deleted scholars from the public roster.
+  // #2202 — plus the #536 identity-class carve. ONE query drives `total`, the
+  // flat page slice AND the grouped-by-program branch, so all three shrink
+  // together; `getCenterProgram`'s `scholarCount` reads `members.length` off
+  // this same result and follows for free.
   const scholars = (await prisma.scholar.findMany({
-    where: { cwid: { in: activeCwids }, deletedAt: null, status: "active" },
+    where: {
+      cwid: { in: activeCwids },
+      deletedAt: null,
+      status: "active",
+      ...publicRoleWhere(),
+    },
     orderBy: [{ preferredName: "asc" }],
     select: {
       cwid: true,

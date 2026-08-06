@@ -73,6 +73,40 @@ export const HIDDEN_ROLE_CATEGORIES: ReadonlyArray<string> = [
   "affiliate_alumni",
 ] as const;
 
+/** The `OR` arm shape {@link publicRoleWhere} produces. */
+export type PublicRoleWhere = {
+  OR: Array<{ roleCategory: null } | { roleCategory: { notIn: string[] } }>;
+};
+
+/**
+ * Prisma where-FRAGMENT admitting only publicly-displayable scholars — the
+ * loader-level half of the #536 carve (#2202). Spread into a `scholar` where
+ * clause (or into a `scholar: { … }` relation filter) so a hidden identity class
+ * is never LOADED, rather than being loaded and then de-linked at render time.
+ *
+ * The `OR` is load-bearing, not stylistic. A bare
+ * `{ roleCategory: { notIn: HIDDEN_ROLE_CATEGORIES } }` compiles to SQL
+ * `role_category NOT IN (…)`, and in three-valued logic `NULL NOT IN (…)` is
+ * NULL — not TRUE — so it silently DROPS every un-backfilled scholar. Admitting
+ * NULL explicitly keeps `isPubliclyDisplayed(null) === true` and the where-clause
+ * saying the same thing.
+ *
+ * Returns a FRESH object each call: it carries an `OR` key, so spreading it into
+ * a where that already has its own `OR` would clobber that arm. Every call site
+ * in `lib/api/{departments,divisions,centers,unit-members}.ts` was checked to
+ * have no competing `OR` at the level it is spread into.
+ *
+ * Deliberately NOT applied to publication / grant / topic queries scoped to a
+ * unit's members: #718 retains a hidden scholar's PUBLICATIONS, so carving the
+ * member set that feeds those aggregates would silently delete real research
+ * output from unit totals. Only surfaces that name or count PEOPLE carve.
+ */
+export function publicRoleWhere(): PublicRoleWhere {
+  return {
+    OR: [{ roleCategory: null }, { roleCategory: { notIn: [...HIDDEN_ROLE_CATEGORIES] } }],
+  };
+}
+
 /**
  * Legacy `role_category` values the current ED ETL can no longer emit —
  * `deriveRoleCategory` (etl/ed/index.ts) folds voluntary / adjunct / courtesy /
