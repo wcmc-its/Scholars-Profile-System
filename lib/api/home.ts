@@ -644,21 +644,41 @@ async function getHomeStatsUncached(): Promise<HomeStats> {
   // 8,722. The gap was exactly the #536 hidden-role cohort — 690 prod doctoral
   // students carrying the BARE `doctoral_student` with `deleted_at IS NULL`, so
   // the soft-delete gate never touched them and 7.3% of the advertised
-  // population was unreachable. The hero now counts the SAME predicate the
-  // people index is built from (`PEOPLE_INDEX_WHERE` spreads this identical
-  // fragment; `tests/unit/home-api.test.ts` pins the two together), so
-  // "advertised" and "findable" cannot drift again. NULL role_category is
-  // admitted explicitly — see publicRoleWhere() for the three-valued-logic
+  // population was unreachable.
+  //
+  // The findable population is gated in TWO parts, and the hero has to apply
+  // BOTH or it drifts again. `PEOPLE_INDEX_WHERE` (the where-fragment below) is
+  // a DENYLIST — it enumerates HIDDEN_ROLE_CATEGORIES because Prisma cannot
+  // express the `doctoral_student*` prefix — and `etl/search-index/index.ts:228`
+  // then filters the result through `isPubliclyDisplayed`, which prefix-matches
+  // and fails CLOSED on any unrecognized role. Counting with the where-fragment
+  // alone re-advertises exactly the rows the denylist cannot name: an
+  // out-of-band suffixed student (`doctoral_student_dds` — 1,875 such rows exist
+  // on staging, written by no version of this repo) or any newly-added role
+  // that reaches the DB before it reaches VISIBLE_ROLE_KEYS.
+  //
+  // So: where-fragment as the cheap population gate, predicate on top as the
+  // link gate — the same pair the index build applies, in the same order. NULL
+  // role_category is admitted by both (an un-backfilled scholar is absent data,
+  // not an unrecognized token); see publicRoleWhere() for the three-valued-logic
   // trap that makes a bare `notIn` hide every un-backfilled scholar.
-  const [scholarCount, publicationCount, researchAreaCount] = await Promise.all([
-    prisma.scholar.count({
+  const [publicScholars, publicationCount, researchAreaCount] = await Promise.all([
+    prisma.scholar.findMany({
       where: { deletedAt: null, status: "active", ...publicRoleWhere() },
+      select: { roleCategory: true },
     }),
     prisma.publication.count({
       where: { publicationType: { notIn: [...NEVER_DISPLAY_TYPES] } },
     }),
     prisma.topic.count(),
   ]);
+  // ponytail: counted in-process over one column for ~8.7k rows, behind
+  // cachedHomeRead. If the corpus ever outgrows that, push the prefix into SQL
+  // (`NOT LIKE 'doctoral_student%'`) rather than reintroducing a count that
+  // knows only half the gate.
+  const scholarCount = publicScholars.filter((s) =>
+    isPubliclyDisplayed(s.roleCategory),
+  ).length;
   return { scholarCount, publicationCount, researchAreaCount };
 }
 
