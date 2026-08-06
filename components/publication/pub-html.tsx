@@ -22,7 +22,7 @@
  * never inline `{pub.title}` / `<em>{pub.journal}</em>` etc.
  */
 import * as React from "react";
-import { sanitizePubmedHtml } from "@/lib/utils";
+import { cn, htmlToPlainText, sanitizePubmedHtml } from "@/lib/utils";
 
 /**
  * Any intrinsic element tag (`"span"`, `"p"`, `"em"`, `"h2"`, …). Restricting
@@ -117,4 +117,67 @@ export function PubJournal({ as = "em", ...props }: PubHtmlBaseProps & { as?: In
  */
 export function PubAbstract({ as = "div", ...props }: PubHtmlBaseProps & { as?: IntrinsicTag }) {
   return <PubHtml as={as} {...props} />;
+}
+
+/**
+ * Visible + announced stand-in for a publication that has no usable title
+ * (#2209). Deliberately a human sentence, not `(untitled, pmid 12345)`: it is
+ * what a screen reader reads out and what a sighted user sees on the row.
+ */
+export const UNTITLED_PUBLICATION = "Untitled publication";
+
+/** Muted italic so the stand-in never reads as the paper's actual title. */
+const UNTITLED_CLASS = "text-muted-foreground font-normal italic";
+
+/**
+ * Plain-text accessible name for a publication title. GUARANTEED non-empty —
+ * falls back to {@link UNTITLED_PUBLICATION} when the title is missing, blank,
+ * or nothing but markup.
+ */
+export function pubTitleAccessibleName(titleHtml: string | null | undefined): string {
+  return htmlToPlainText(titleHtml ?? "", Number.POSITIVE_INFINITY) || UNTITLED_PUBLICATION;
+}
+
+/**
+ * Props for the element that RENDERS a publication title as its whole content —
+ * the `<button>` that opens the detail modal, an `<a>` to PubMed, the modal's
+ * own `<h2>` (which names the dialog via `aria-labelledby`).
+ *
+ * Two guarantees, both of which #2209 broke in prod:
+ *
+ *  1. **A discernible accessible name, always.** Those elements name themselves
+ *     from their own content, so a blank title produced a button with NO
+ *     accessible name — a WCAG 4.1.2 failure, and the button's entire purpose
+ *     is to open the detail modal. The `aria-label` is set unconditionally, so
+ *     the name is a property of the component rather than an accident of
+ *     whether that row's title happens to be populated. It is the plain text of
+ *     the very markup being rendered, so WCAG 2.5.3 (Label in Name) holds.
+ *  2. **Never an empty box.** A title-less publication renders the stand-in
+ *     text instead of collapsing to a zero-height, unlabeled click target.
+ *
+ * `titleHtml` must ALREADY be sanitized — `sanitizePubTitle` for a plain title,
+ * `highlightedTitleHtml` for a search fragment. Re-sanitizing here would strip
+ * the `<mark>` pills the highlight path exists to produce.
+ *
+ * @example
+ *   <button type="button" aria-haspopup="dialog" onClick={…}
+ *           {...pubTitleProps(titleHtml, "text-left hover:underline")} />
+ */
+export function pubTitleProps(
+  titleHtml: string | null | undefined,
+  className?: string,
+): {
+  className?: string;
+  "aria-label": string;
+  dangerouslySetInnerHTML: { __html: string };
+} {
+  const plain = htmlToPlainText(titleHtml ?? "", Number.POSITIVE_INFINITY);
+  const untitled = plain === "";
+  return {
+    className: untitled ? cn(className, UNTITLED_CLASS) : className,
+    "aria-label": untitled ? UNTITLED_PUBLICATION : plain,
+    // The stand-in is a plain ASCII literal, so it needs no escaping; the real
+    // title arrives pre-sanitized (see above).
+    dangerouslySetInnerHTML: { __html: untitled ? UNTITLED_PUBLICATION : (titleHtml as string) },
+  };
 }

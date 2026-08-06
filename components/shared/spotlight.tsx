@@ -18,6 +18,7 @@
  */
 import Link from "next/link";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
+import { pubTitleProps } from "@/components/publication/pub-html";
 import { sanitizePubTitle } from "@/lib/utils";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { usePublicationModal } from "@/components/publication/publication-modal";
@@ -113,8 +114,8 @@ function SpotlightPubCard({
         <button
           type="button"
           onClick={() => open(card.pmid)}
-          className="line-clamp-3 text-left text-foreground hover:underline"
-          dangerouslySetInnerHTML={{ __html: titleHtml }}
+          aria-haspopup="dialog"
+          {...pubTitleProps(titleHtml, "line-clamp-3 text-left text-foreground hover:underline")}
         />
       </h3>
       <AuthorChipRow authors={card.authors} pmid={card.pmid} />

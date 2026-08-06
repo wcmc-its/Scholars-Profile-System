@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Compass } from "lucide-react";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
+import { pubTitleProps } from "@/components/publication/pub-html";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { usePublicationModal } from "@/components/publication/publication-modal";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -482,8 +483,8 @@ function PubRow({ hit, topicSlug }: { hit: Hit; topicSlug: string }) {
         <button
           type="button"
           onClick={() => openModal(hit.pmid, { currentTopicSlug: topicSlug })}
-          className="text-left hover:underline"
-          dangerouslySetInnerHTML={{ __html: titleHtml }}
+          aria-haspopup="dialog"
+          {...pubTitleProps(titleHtml, "text-left hover:underline")}
         />
       </div>
       {(hit.journal || hit.year) && (

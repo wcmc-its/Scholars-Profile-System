@@ -4,6 +4,7 @@
  * state. Embeds <AuthorChipRow> which is its own client island.
  */
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
+import { pubTitleProps } from "@/components/publication/pub-html";
 import { sanitizePubTitle } from "@/lib/utils";
 import type { DeptPublicationCard } from "@/lib/api/dept-highlights";
 
@@ -30,14 +31,18 @@ export function PublicationCard({ pub }: { pub: DeptPublicationCard }) {
           href={href}
           target="_blank"
           rel="noreferrer noopener"
-          className="text-[13px] font-medium leading-[1.4] text-[var(--color-text-primary)] hover:underline"
           style={{ textDecoration: "none" }}
-          dangerouslySetInnerHTML={{ __html: titleHtml }}
+          {...pubTitleProps(
+            titleHtml,
+            "text-[13px] font-medium leading-[1.4] text-[var(--color-text-primary)] hover:underline",
+          )}
         />
       ) : (
         <span
-          className="text-[13px] font-medium leading-[1.4] text-[var(--color-text-primary)]"
-          dangerouslySetInnerHTML={{ __html: titleHtml }}
+          {...pubTitleProps(
+            titleHtml,
+            "text-[13px] font-medium leading-[1.4] text-[var(--color-text-primary)]",
+          )}
         />
       )}
       {pub.authors.length > 0 && <AuthorChipRow authors={pub.authors} pmid={pub.pmid} />}

@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { PubJournal, PubTitle } from "@/components/publication/pub-html";
+import { PubJournal, PubTitle, pubTitleProps } from "@/components/publication/pub-html";
 import { RepresentativePapers, type ExemplarFetchStatus } from "@/components/search/match-reason";
 import { ResultEvidence } from "@/components/search/result-evidence";
 import { DESCENDANT_SEPARATOR } from "@/lib/search/descendant-summary";
 import { highlightedTitleHtml } from "@/lib/search/highlight-title";
 import { profilePath } from "@/lib/profile-url";
+import { sanitizePubmedHtml } from "@/lib/utils";
 import { grantRoleShortLabel } from "@/lib/funding-roles";
 import type {
   EvidenceGrant,
@@ -274,25 +275,24 @@ function ArtifactRow({ pub }: { pub: EvidencePub }) {
         PUB
       </span>
       <div className="min-w-0 flex-1">
+        {/* `titleHtml` is a HIGHLIGHT fragment, so it must render through the mark-preserving
+            path — `sanitizePubmedHtml`'s whitelist is i/em/b/strong/sup/sub, so routing the
+            fragment through it DELETED every `<mark>` OpenSearch returned. That silently killed
+            the #1351 concept-label mark on this surface, and would have made MATCHA_GLOSS_INWORDS
+            a no-op: the request and the cached fragment both change, and nothing reaches the
+            screen. Same helper, same pale-red pill, as the key-papers disclosure
+            (`RepresentativePapers` → match-reason.tsx) and the Publications tab.
+            #2209 — the title is the link's ENTIRE content, so `pubTitleProps` goes on the <a>
+            itself: a blank title otherwise leaves a link with no accessible name. */}
         <a
           href={`https://pubmed.ncbi.nlm.nih.gov/${pub.pmid}/`}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-foreground text-sm leading-snug underline-offset-4 hover:underline"
-        >
-          {/* `titleHtml` is a HIGHLIGHT fragment, so it must render through the mark-preserving
-              path — `PubTitle` sanitizes with `sanitizePubmedHtml`, whose whitelist is
-              i/em/b/strong/sup/sub, and every `<mark>` OpenSearch returned was being DELETED here.
-              That silently killed the #1351 concept-label mark on this surface, and would have
-              made MATCHA_GLOSS_INWORDS a no-op: the request and the cached fragment both change,
-              and nothing reaches the screen. Same helper, same pale-red pill, as the key-papers
-              disclosure (`RepresentativePapers` → match-reason.tsx) and the Publications tab. */}
-          {pub.titleHtml ? (
-            <span dangerouslySetInnerHTML={{ __html: highlightedTitleHtml(pub.titleHtml) }} />
-          ) : (
-            <PubTitle value={pub.title} />
+          {...pubTitleProps(
+            pub.titleHtml ? highlightedTitleHtml(pub.titleHtml) : sanitizePubmedHtml(pub.title),
+            "text-foreground text-sm leading-snug underline-offset-4 hover:underline",
           )}
-        </a>
+        />
         {pub.journal || pub.year != null || pub.role ? (
           <div className="text-muted-foreground mt-0.5 text-xs">
             {[

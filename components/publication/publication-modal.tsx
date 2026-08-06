@@ -14,7 +14,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { HelpCircle } from "lucide-react";
 import { CopyButton } from "@/components/publication/copy-button";
-import { PubJournal } from "@/components/publication/pub-html";
+import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { highlightSnippet } from "@/components/method/highlight-snippet";
 import { methodologyHref } from "@/lib/methodology-anchors";
@@ -328,10 +328,13 @@ function ModalContent({
   return (
     <>
       <header className="border-border relative shrink-0 border-b p-6 pr-12">
+        {/* #2209 — this heading is the dialog's `aria-labelledby` target, so a
+            blank title left the whole modal without an accessible name.
+            `pubTitleProps` renders the "Untitled publication" stand-in and
+            carries a matching aria-label. */}
         <h2
           id={titleId}
-          className="text-lg font-semibold leading-snug"
-          dangerouslySetInnerHTML={{ __html: sanitizePubTitle(pub.title) }}
+          {...pubTitleProps(sanitizePubTitle(pub.title), "text-lg font-semibold leading-snug")}
         />
         {citationJournal || citationTail ? (
           <p className="text-muted-foreground mt-1 text-sm">
@@ -1014,8 +1017,10 @@ function CitingPubsSection({
                   href={`https://pubmed.ncbi.nlm.nih.gov/${c.pmid}/`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="hover:text-[var(--color-accent-slate)] hover:underline"
-                  dangerouslySetInnerHTML={{ __html: sanitizePubTitle(c.title) }}
+                  {...pubTitleProps(
+                    sanitizePubTitle(c.title),
+                    "hover:text-[var(--color-accent-slate)] hover:underline",
+                  )}
                 />
                 <div className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
                   <PubJournal value={c.journal} className="not-italic" />

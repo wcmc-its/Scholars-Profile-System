@@ -1,6 +1,7 @@
 "use client";
 
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
+import { pubTitleProps } from "@/components/publication/pub-html";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { usePublicationModal } from "@/components/publication/publication-modal";
 import {
@@ -50,8 +51,11 @@ export function PublicationRow({
         <button
           type="button"
           onClick={() => open(pub.pmid)}
-          className="text-left hover:text-[var(--color-accent-slate)] hover:underline"
-          dangerouslySetInnerHTML={{ __html: titleHtml }}
+          aria-haspopup="dialog"
+          {...pubTitleProps(
+            titleHtml,
+            "text-left hover:text-[var(--color-accent-slate)] hover:underline",
+          )}
         />
       </div>
       {pub.journal || pub.year ? (

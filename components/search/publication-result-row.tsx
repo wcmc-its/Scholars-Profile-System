@@ -1,7 +1,7 @@
 "use client";
 
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
-import { PubJournal } from "@/components/publication/pub-html";
+import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { usePublicationModal } from "@/components/publication/publication-modal";
 import { MatchReason } from "@/components/search/match-reason";
@@ -29,8 +29,11 @@ export function PublicationResultRow({ hit }: { hit: PublicationHit }) {
         <button
           type="button"
           onClick={() => open(hit.pmid)}
-          className="text-left text-[#1a1a1a] hover:text-[#2c4f6e] hover:underline"
-          dangerouslySetInnerHTML={{ __html: titleHtml }}
+          aria-haspopup="dialog"
+          {...pubTitleProps(
+            titleHtml,
+            "text-left text-[#1a1a1a] hover:text-[#2c4f6e] hover:underline",
+          )}
         />
       </div>
       <div className="mb-2 text-[13px] leading-snug text-[#4a4a4a]">
