@@ -140,22 +140,24 @@ export const TRACKED: Readonly<
   // FamilySensitivityNightly / FamilySuppressionNightly, both tier:"continue",
   // both envs, no env split) writing sources "FamilySensitivity" /
   // "FamilySuppression". Freshness is their ONLY detector, on both counts:
-  // continue-tier means a failure never reaches the ExecutionsFailed alarm, and
-  // the etl:integrity volume guard cannot see them either — each records
+  // continue-tier means a failure never reaches the status alarm, and the
+  // etl:integrity volume guard cannot see them either — each records
   // `rowsProcessed` = the line count of a curated CSV checked into this repo
   // (33 and 8 rows), which is below the guard's minPreviousRows=100 floor AND
   // constant between two runs of the same image, so its drop ratio is 0 by
   // construction. Lowering that floor would add nothing; see the note above
   // findVolumeRegressions in etl/integrity/index.ts.
   //
-  // Suppression is the load-bearing one. family_suppression_overlay is an
-  // UNCONDITIONAL hard-hide on the public profile (lib/api/profile.ts
-  // partitionScholarFamilies filters on it before any flag check), so an
-  // overlay that silently stops being reseeded un-hides method families on
-  // live profiles with nothing alarming. That is not hypothetical: the
-  // etl-stack.ts comment on these two steps records that prod's suppression
-  // overlay "sat empty for an unknown period" already, which is the incident
-  // this entry exists to make noisy.
+  // SCOPE — what an entry here does and does not catch. `evaluate()` grades a
+  // source on the recency of its most recent `status:'success'` row and never
+  // reads `rowsProcessed`. So this catches the step DYING (a failed run writes
+  // no success row, so the age keeps growing past the SLA), the step being
+  // dropped from the nightly step list, and the step never being deployed to an
+  // env. It does NOT catch a run that succeeds having done nothing: a zero-row
+  // success is indistinguishable from a full one here. That case is closed at
+  // the source instead — both loaders now refuse a curated CSV that parses to
+  // zero rows (readCurated), so the wipe path records status='failed', which is
+  // a state this entry does detect.
   FamilySensitivity: { cadence: "nightly" },
   FamilySuppression: { cadence: "nightly" },
   MeshCoverage: { cadence: "nightly" },
@@ -173,9 +175,10 @@ export const TRACKED: Readonly<
   // rather than a decision. Same two-way blind spot as the family overlays:
   // continue-tier hides it from the status alarm, and its 77-row curated CSV
   // is both under the volume guard's 100-row floor and constant run to run.
-  // The loader is a full deleteMany + re-insert, so a silent failure leaves
-  // query→descriptor aliases missing from the search resolver
-  // (lib/api/search-taxonomy.ts) with no other signal.
+  // Same scope note as the family overlays above: this detects the step dying,
+  // being dropped from the nightly list, or never being deployed — not a
+  // success that processed nothing. The loader's own zero-row guard covers that
+  // half, turning a truncate-to-empty into a failed run this entry can see.
   MeshAlias: { cadence: "nightly" },
   PubMedRetractions: { cadence: "nightly" },
   // Terminal steps — run in BOTH cadences; the nightly SLA is the binding one.

@@ -4436,7 +4436,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ETL heartbeat (prod) -- the run did not finish successfully: it failed, ran out of time, or was stopped. Next: open the Step Functions execution for scholars-heartbeat-prod, find the step marked red, and read that step's logs. The website stays up and keeps showing the data from the last good run; it just stops getting newer. Nothing retries on its own before the next scheduled heartbeat run, so a run that must not wait has to be started by hand.",
+        "AlarmDescription": "SPS ETL freshness check (prod) -- one or more data sources have not refreshed within their deadline. Nothing crashed: this is the monitor that watches the other jobs. Next: open the latest execution of scholars-heartbeat-prod and read its log. The line starting "[freshness] FAIL" lists every stale source with its age and its deadline, and the "[freshness] STALE" lines above it give the per-source detail. The fix belongs to the ETL step that feeds the named source; re-running this check changes nothing, it will just report the same sources again.",
         "AlarmName": "sps-etl-heartbeat-status-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "EvaluationPeriods": 1,
@@ -9114,6 +9114,89 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::IAM::Policy",
     },
+    "CurationBackupStatusAlarm35C76148": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS curated-tables backup (staging) -- a run did not finish successfully: it failed, ran out of time, or was stopped. The last good snapshot is still in S3; this one did not land, so the restore window is a day older than it looks. Next: open the Step Functions execution for scholars-curation-backup-staging and read the task's logs. Nothing retries before tomorrow's 06:00 UTC fire -- run 'npm run backup:curated' via run-task to close the gap.",
+        "AlarmName": "sps-curation-backup-status-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "EvaluationPeriods": 1,
+        "Metrics": [
+          {
+            "Expression": "failed + timedOut + aborted",
+            "Id": "expr_1",
+            "ReturnData": true,
+          },
+          {
+            "Id": "failed",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "CurationBackupStateMachineE55D38A8",
+                    },
+                  },
+                ],
+                "MetricName": "ExecutionsFailed",
+                "Namespace": "AWS/States",
+              },
+              "Period": 86400,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+          {
+            "Id": "timedOut",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "CurationBackupStateMachineE55D38A8",
+                    },
+                  },
+                ],
+                "MetricName": "ExecutionsTimedOut",
+                "Namespace": "AWS/States",
+              },
+              "Period": 86400,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+          {
+            "Id": "aborted",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "CurationBackupStateMachineE55D38A8",
+                    },
+                  },
+                ],
+                "MetricName": "ExecutionsAborted",
+                "Namespace": "AWS/States",
+              },
+              "Period": 86400,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+        ],
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
     "EdEmailVisibilityBridgeCadenceAlarmA35F6990": {
       "Properties": {
         "AlarmActions": [
@@ -9662,6 +9745,89 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::IAM::Role",
+    },
+    "EdEmailVisibilityBridgeStatusAlarmE7CB7888": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS ED email-visibility bridge (staging) -- a run did not finish successfully: it failed, ran out of time, or was stopped. Scholar email visibility keeps the values from the last good run; new release-code changes are not applied. Next: open the Step Functions execution for scholars-ed-email-visibility-staging, see which half (export or import) is red, and read its logs -- an export failure usually means the on-prem LDAP path is down. Nothing retries before next Sunday 05:00 UTC. See docs/onprem-ed-export-runbook.md.",
+        "AlarmName": "sps-ed-email-visibility-status-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "EvaluationPeriods": 1,
+        "Metrics": [
+          {
+            "Expression": "failed + timedOut + aborted",
+            "Id": "expr_1",
+            "ReturnData": true,
+          },
+          {
+            "Id": "failed",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "EdEmailVisibilityBridgeStateMachineB7173A01",
+                    },
+                  },
+                ],
+                "MetricName": "ExecutionsFailed",
+                "Namespace": "AWS/States",
+              },
+              "Period": 604800,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+          {
+            "Id": "timedOut",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "EdEmailVisibilityBridgeStateMachineB7173A01",
+                    },
+                  },
+                ],
+                "MetricName": "ExecutionsTimedOut",
+                "Namespace": "AWS/States",
+              },
+              "Period": 604800,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+          {
+            "Id": "aborted",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "EdEmailVisibilityBridgeStateMachineB7173A01",
+                    },
+                  },
+                ],
+                "MetricName": "ExecutionsAborted",
+                "Namespace": "AWS/States",
+              },
+              "Period": 604800,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+        ],
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
     },
     "EdExportSg72D4CEF3": {
       "Properties": {
@@ -12735,7 +12901,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ETL heartbeat (staging) -- the run did not finish successfully: it failed, ran out of time, or was stopped. Next: open the Step Functions execution for scholars-heartbeat-staging, find the step marked red, and read that step's logs. The website stays up and keeps showing the data from the last good run; it just stops getting newer. Nothing retries on its own before the next scheduled heartbeat run, so a run that must not wait has to be started by hand.",
+        "AlarmDescription": "SPS ETL freshness check (staging) -- one or more data sources have not refreshed within their deadline. Nothing crashed: this is the monitor that watches the other jobs. Next: open the latest execution of scholars-heartbeat-staging and read its log. The line starting "[freshness] FAIL" lists every stale source with its age and its deadline, and the "[freshness] STALE" lines above it give the per-source detail. The fix belongs to the ETL step that feeds the named source; re-running this check changes nothing, it will just report the same sources again.",
         "AlarmName": "sps-etl-heartbeat-status-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "EvaluationPeriods": 1,

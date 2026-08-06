@@ -27,8 +27,15 @@
  * METHODS_LENS_SENSITIVE_GATE), `loadFamilyOverlayGate` reads the suppression
  * overlay on every request. It is only CONSULTED where the methods lens renders
  * families (`partitionScholarFamilies`), so a populated CSV takes effect wherever
- * `METHODS_LENS_ENABLED=on` (staging today; prod at the lens go-live). An empty
- * CSV is a clean no-op; truncating it (empty CSV) cleanly un-hides every seed row.
+ * `METHODS_LENS_ENABLED=on` (staging today; prod at the lens go-live).
+ *
+ * An EMPTY curated CSV is refused, not honoured. A zero-row parse would delete
+ * every `source='seed'` row and record status='success' — the un-hide would be
+ * invisible to the freshness monitor, which grades on the recency of the last
+ * SUCCESS and never reads rowsProcessed. Throwing converts that into a FAILED
+ * run, which is a signal something watches. To retire the seed layer
+ * deliberately, remove the step or clear the table explicitly — not by
+ * truncating the CSV.
  *
  * Env: FAMILY_SUPPRESSION_CURATED_PATH (default etl/family-suppression/curated.csv)
  */
@@ -62,10 +69,23 @@ function parseCsv(text: string): SuppressedRow[] {
   return out;
 }
 
-function readCurated(): SuppressedRow[] {
+/**
+ * Read + parse the curated CSV, refusing both ways it can yield zero rows.
+ *
+ * Exported for unit test. The two guards close the SAME hole from opposite
+ * ends: `replaceRows([])` keeps no seed key, so every `source='seed'` row is
+ * pruned as stale inside the transaction and `main()` still records
+ * status='success' with rowsProcessed=0. Freshness cannot see that — it grades
+ * a source on the recency of its last SUCCESS row and never reads
+ * rowsProcessed — so a wipe-to-empty would look perfectly healthy. Throwing
+ * here leaves the overlay untouched (replaceRows has not run) and records
+ * status='failed', which the freshness entry for FamilySuppression does catch.
+ */
+export function readCurated(): SuppressedRow[] {
   const abs = resolve(process.cwd(), CURATED_PATH);
+  let rows: SuppressedRow[];
   try {
-    return parseCsv(readFileSync(abs, "utf-8"));
+    rows = parseCsv(readFileSync(abs, "utf-8"));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       // The curated CSV is checked into the repo — its absence is a packaging
@@ -77,6 +97,14 @@ function readCurated(): SuppressedRow[] {
     }
     throw err;
   }
+  // Present but empty (header-only, truncated, or a bad checkout) — same
+  // destructive outcome as ENOENT, so it gets the same answer.
+  if (rows.length === 0) {
+    throw new Error(
+      `[FamilySuppression] curated CSV parsed to 0 rows at ${abs} — refusing to wipe the overlay`,
+    );
+  }
+  return rows;
 }
 
 async function recordRun(args: {
