@@ -272,6 +272,30 @@ export class SpsObservabilityStack extends Stack {
     this.notifyTopic.addSubscription(
       new snsSubs.EmailSubscription(NOTIFY_SUBSCRIBER_EMAIL),
     );
+    // Same defect #2279 fixed on the ETL topics, third instance. The prod-only
+    // cost grantPublish() calls further down materialize an explicit
+    // AWS::SNS::TopicPolicy, which REPLACES the implicit default policy that
+    // let same-account CloudWatch publish — silently denying
+    // sps-oncall-relay-errors-prod, i.e. the one alarm whose entire job is to
+    // fire when the alert relay itself is broken.
+    //
+    // Granted in BOTH envs so the two topics keep one policy shape, and note
+    // what that costs on staging: sps-notify-staging has no cost publishers, so
+    // this call is what materializes a TopicPolicy there at all, deliberately
+    // narrowing that topic from the permissive implicit default to
+    // CloudWatch-only. Nothing else publishes to it today; anyone adding a
+    // staging publisher must grant it here explicitly or be denied.
+    //
+    // aws:SourceAccount is the confused-deputy guard the default policy gave
+    // away — a bare grantPublish would be broader than what we are restoring.
+    this.notifyTopic.addToResourcePolicy(
+      new iam.PolicyStatement({
+        principals: [new iam.ServicePrincipal("cloudwatch.amazonaws.com")],
+        actions: ["sns:Publish"],
+        resources: [this.notifyTopic.topicArn],
+        conditions: { StringEquals: { "aws:SourceAccount": this.account } },
+      }),
+    );
 
     // Warn topic carries the P2 tier: data-freshness / reconciler / resource-
     // pressure alarms that warrant attention but are not "wake on-call". The
