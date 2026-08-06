@@ -55,20 +55,43 @@ const CONCURRENCY =
 /**
  * The newsroom canonical an article page links back to, or null.
  *
- * Prefers `<link rel="canonical">`/`og:url` when they point at the newsroom, and
- * otherwise falls back to any newsroom article href in the document. Exported
- * for tests.
+ * Read ONLY from the article's "Source link" field — the `pane-node-field-source-link`
+ * pane the research site renders to point at the newsroom original — or from the
+ * self-labelled anchor that same field emits (visible text == href).
+ *
+ * There is deliberately NO general "any newsroom href" fallback (#2241). Article
+ * bodies carry inline prose links to OTHER newsroom stories, and those appear
+ * BEFORE the source-link pane in document order, so a loose match silently
+ * returns a real-but-wrong article:
+ *
+ *   page:  "NIH Grant Aims for Childhood Vaccine Against HIV"
+ *   prose: .../2024/08/childhood-hiv-vaccination-strategy-shows-promise-in-study  <- "Prior studies"
+ *   prose: .../2025/08/the-quest-for-an-hiv-vaccine                               <- "research spanning"
+ *   FIELD: .../2025/09/nih-grant-aims-for-childhood-vaccine-against-hiv           <- the answer
+ *
+ * The first version of this script took the first match and mis-mapped 53 of 139
+ * staging urls (38%) to plausible, wrong, existing articles. An unresolved url is
+ * reported and left under the old origin — loud and harmless. A wrong one is
+ * silent and points a scholar's profile at someone else's story.
+ *
+ * Exported for tests.
  */
 export function newsroomCanonical(html: string, origin: string = NEWS_ORIGIN): string | null {
-  const path = `(${origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/news/\\d{4}/\\d{2}/[a-z0-9%-]+)`;
-  for (const re of [
-    new RegExp(`<link[^>]+rel=["']canonical["'][^>]+href=["']${path}["']`, "i"),
-    new RegExp(`<meta[^>]+property=["']og:url["'][^>]+content=["']${path}["']`, "i"),
-    new RegExp(path, "i"),
-  ]) {
-    const m = html.match(re);
-    if (m) return m[1];
-  }
+  const esc = origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const article = `${esc}/news/\\d{4}/\\d{2}/[A-Za-z0-9%._-]+`;
+
+  // 1. The source-link pane itself.
+  const pane = html.match(/pane-node-field-source-link[\s\S]{0,1500}/i)?.[0];
+  const inPane = pane?.match(new RegExp(`href=["'](${article})["']`, "i"));
+  if (inPane) return inPane[1];
+
+  // 2. The same field under a different theme: an anchor whose visible text IS
+  //    the url. Prose links never label themselves that way.
+  const selfLabelled = html.match(
+    new RegExp(`<a\\b[^>]*href=["'](${article})["'][^>]*>\\s*(?:<[^>]+>\\s*)*${esc}`, "i"),
+  );
+  if (selfLabelled) return selfLabelled[1];
+
   return null;
 }
 

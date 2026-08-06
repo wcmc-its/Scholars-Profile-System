@@ -30,7 +30,13 @@ import { resolve } from "node:path";
 import { db } from "@/lib/db";
 import { scrapeNews } from "./scrape";
 import { buildNameIndex, detectMentions } from "./names";
-import { NEWS_ORIGIN, NEWS_PATH_PREFIX, parseSeed, type ScrapedArticle } from "./seed";
+import {
+  NEWS_ORIGIN,
+  NEWS_PATH_PREFIX,
+  parseSeed,
+  storyKey,
+  type ScrapedArticle,
+} from "./seed";
 
 const SEED_PATH = process.env.NEWS_SEED_PATH;
 const BACKFILL = process.env.NEWS_BACKFILL === "1";
@@ -102,7 +108,10 @@ export function articlesToMentions(
       thumbnailUrl: a.thumbnailUrl,
     };
     const put = (row: MentionUpsert) => {
-      const k = `${row.cwid} ${row.url}`;
+      // #2241 — key on the STORY, not the url: the feed publishes some articles
+      // twice under different slugs, and (cwid, url) sees those as two rows.
+      // Falls back to the url when the article has no date to key on.
+      const k = `${row.cwid} ${storyKey(row.title, row.publishedAt) ?? row.url}`;
       if (!byKey.has(k)) byKey.set(k, row); // VIVO added before NAME, so VIVO wins a tie
     };
 
@@ -191,6 +200,7 @@ async function upsertMentions(rows: MentionUpsert[]): Promise<{
   inserted: number;
   updated: number;
   preserved: number;
+  deduped: number;
 }> {
   const urls = [...new Set(rows.map((r) => r.url))];
   const existing = urls.length
@@ -215,15 +225,48 @@ async function upsertMentions(rows: MentionUpsert[]): Promise<{
     : [];
   const byKey = new Map(existing.map((e) => [`${e.cwid} ${e.url}`, e]));
 
+  // #2241 — the batch is deduped by story, but a run only ever loads `existing`
+  // by URL, so a story already stored under the feed's OTHER slug is invisible
+  // here and would be created a second time. Look the affected scholars up by
+  // story key as well, and skip a create that would duplicate one.
+  const cwids = [...new Set(rows.map((r) => r.cwid))];
+  /** `"<cwid> <storyKey>"` -> the urls this scholar already has it stored under. */
+  const storedStories = new Map<string, Set<string>>();
+  if (cwids.length) {
+    for (const e of await db.write.newsMention.findMany({
+      where: { cwid: { in: cwids } },
+      select: { cwid: true, url: true, title: true, publishedAt: true },
+    })) {
+      const k = storyKey(e.title, e.publishedAt);
+      if (!k) continue;
+      const key = `${e.cwid} ${k}`;
+      storedStories.set(key, (storedStories.get(key) ?? new Set()).add(e.url));
+    }
+  }
+  /** True when this scholar already has the same story under a DIFFERENT url. */
+  const storedElsewhere = (r: MentionUpsert): boolean => {
+    const k = storyKey(r.title, r.publishedAt);
+    if (!k) return false;
+    const urlsForStory = storedStories.get(`${r.cwid} ${k}`);
+    return urlsForStory !== undefined && !urlsForStory.has(r.url);
+  };
+
   let inserted = 0;
   let updated = 0;
   let preserved = 0;
+  let deduped = 0;
 
   await db.write.$transaction(
     async (tx) => {
       for (const r of rows) {
         const cur = byKey.get(`${r.cwid} ${r.url}`);
         if (!cur) {
+          // #2241 — same story, other slug, already stored. Creating it would
+          // render the article twice on the profile.
+          if (storedElsewhere(r)) {
+            deduped++;
+            continue;
+          }
           await tx.newsMention.create({
             data: {
               cwid: r.cwid,
@@ -256,7 +299,7 @@ async function upsertMentions(rows: MentionUpsert[]): Promise<{
     { timeout: 5 * 60 * 1000, maxWait: 30 * 1000 },
   );
 
-  return { inserted, updated, preserved };
+  return { inserted, updated, preserved, deduped };
 }
 
 /**
@@ -335,7 +378,7 @@ async function main(): Promise<void> {
   }
 
   const rows = articlesToMentions(articles, scholars);
-  const { inserted, updated, preserved } = await upsertMentions(rows);
+  const { inserted, updated, preserved, deduped } = await upsertMentions(rows);
   await recordRun({ status: "success", rowsProcessed: inserted + updated });
 
   console.log(
@@ -347,6 +390,9 @@ async function main(): Promise<void> {
       inserted,
       updated,
       preserved,
+      // #2241 — creates skipped because the scholar already has the story under
+      // the feed's other slug. Logged so a silent rise is visible upstream drift.
+      deduped,
       pending: rows.filter((r) => r.status === "pending").length,
       durationMs: Date.now() - startedAt,
     })}`,
