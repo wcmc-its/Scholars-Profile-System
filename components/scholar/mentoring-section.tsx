@@ -4,7 +4,7 @@ import * as React from "react";
 import { ChevronDown } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { PersonPopover } from "@/components/scholar/person-popover";
-import { PubJournal } from "@/components/publication/pub-html";
+import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
 import { Badge } from "@/components/ui/badge";
 import { sanitizePubTitle } from "@/lib/utils";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
@@ -550,8 +550,7 @@ function CoPubInlinePanel({
               href={`https://pubmed.ncbi.nlm.nih.gov/${p.pmid}/`}
               target="_blank"
               rel="noopener noreferrer"
-              className="font-medium hover:underline"
-              dangerouslySetInnerHTML={{ __html: sanitizePubTitle(p.title) }}
+              {...pubTitleProps(sanitizePubTitle(p.title), "font-medium hover:underline")}
             />
             {(p.journal || p.year) && (
               <div className="text-muted-foreground mt-0.5">

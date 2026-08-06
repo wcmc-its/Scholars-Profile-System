@@ -20,6 +20,7 @@ import {
 } from "@/lib/api/mentoring";
 import { AuthorChipRow, type AuthorChip } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
+import { pubTitleProps } from "@/components/publication/pub-html";
 import { sanitizePubTitle } from "@/lib/utils";
 import { formatPublishedName } from "@/lib/postnominal";
 import { profilePath } from "@/lib/profile-url";
@@ -246,8 +247,7 @@ function CoPubCitation({
           href={pubmedUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="hover:text-[var(--color-accent-slate)] hover:underline"
-          dangerouslySetInnerHTML={{ __html: titleHtml }}
+          {...pubTitleProps(titleHtml, "hover:text-[var(--color-accent-slate)] hover:underline")}
         />
       </div>
       {(pub.journal || pub.year) && (

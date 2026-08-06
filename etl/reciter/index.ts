@@ -49,6 +49,7 @@ import {
   planAuthorshipReconcile,
   type IncomingAuthorship,
 } from "./change-detection";
+import { fetchPubmedTitles, isBlankTitle } from "./pubmed-titles";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 
 type AuthorRow = {
@@ -354,6 +355,34 @@ async function main() {
     const pubKey = (pmid: number): string =>
       articleIdByPmid.get(pmid) ?? String(pmid);
 
+    // #2209 — ReCiterDB delivers a BLANK articleTitle for PubMed records whose
+    // <ArticleTitle> carries a self-closing inline tag (`…extracellular NAD<sup/>.`),
+    // which rendered as an empty, unlabeled publication row on 4 public profiles.
+    // PubMed still has the title, so recover it from ESummary for exactly those
+    // pmids; a converged corpus makes zero network calls. NON-FATAL by design:
+    // E-utilities is a public third party and this is a cosmetic repair on a
+    // handful of rows — a failure must never take down the nightly's publication
+    // upsert, so the affected rows just fall through to the placeholder below.
+    const blankTitlePmids = Array.from(articleByPmid.values())
+      .filter((a) => a.article_id == null && isBlankTitle(a.articleTitle))
+      .map((a) => Number(a.pmid));
+    let recoveredTitles = new Map<number, string>();
+    if (blankTitlePmids.length > 0) {
+      console.log(
+        `${blankTitlePmids.length} article(s) have a blank upstream title; asking PubMed...`,
+      );
+      try {
+        recoveredTitles = await fetchPubmedTitles(blankTitlePmids, {
+          apiKey: process.env.NCBI_API_KEY,
+        });
+        console.log(`Recovered ${recoveredTitles.size} title(s) from PubMed.`);
+      } catch (err) {
+        console.warn(
+          `Title recovery from PubMed failed (continuing with placeholders): ${String(err)}`,
+        );
+      }
+    }
+
     // ReciterDB's analysis_summary_* tables are themselves rebuilt nightly; a
     // read overlapping that rebuild (or an auth-scope change) succeeds with a
     // truncated set. The corpus only grows in normal operation, so a >20%
@@ -622,7 +651,18 @@ async function main() {
         // abstract and renders as a black box. Repaired here, at the boundary:
         // the signature diff below then rewrites any already-stored dirty row on
         // the next run, so no separate backfill is needed for these two columns.
-        title: repairEncoding(a.articleTitle ?? `(untitled, pmid ${a.pmid})`),
+        //
+        // #2209 — the fallback chain is upstream title → PubMed ESummary →
+        // placeholder. The old `??` only caught NULL, and what ReCiterDB actually
+        // sends for a `<sup/>` title is an EMPTY STRING, which sailed past it and
+        // stored a blank title that rendered as an unlabeled row. `isBlankTitle`
+        // closes that; the placeholder now only survives for a pub PubMed cannot
+        // name (external-source rows, or E-utilities unreachable this run).
+        title: repairEncoding(
+          !isBlankTitle(a.articleTitle)
+            ? a.articleTitle
+            : (recoveredTitles.get(Number(a.pmid)) ?? `(untitled, pmid ${a.pmid})`),
+        ),
         authorsString,
         fullAuthorsString: fullAuthorsByPmid.get(Number(a.pmid)) ?? null,
         journal: a.journalTitleVerbose,

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { sanitizePubTitle } from "@/lib/utils";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
-import { PubJournal } from "@/components/publication/pub-html";
+import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
 
 /**
  * Shared expand UX for grant rows. Used by:
@@ -127,8 +127,10 @@ export function ExpandedGrant({
                   href={`https://pubmed.ncbi.nlm.nih.gov/${p.pmid}/`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[var(--color-accent-slate)] hover:underline"
-                  dangerouslySetInnerHTML={{ __html: sanitizePubTitle(p.title) }}
+                  {...pubTitleProps(
+                    sanitizePubTitle(p.title),
+                    "text-[var(--color-accent-slate)] hover:underline",
+                  )}
                 />
                 {p.isLowerConfidence ? <LowerConfidenceBadge /> : null}
               </div>

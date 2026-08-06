@@ -19,6 +19,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { highlightSnippet } from "@/components/method/highlight-snippet";
 import { SnippetUsageBadge } from "@/components/method/snippet-usage-badge";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
+import { pubTitleProps } from "@/components/publication/pub-html";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { usePublicationModal } from "@/components/publication/publication-modal";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -336,8 +337,8 @@ function PubRow({ hit, entityTerm }: { hit: Hit; entityTerm: string | null }) {
         <button
           type="button"
           onClick={() => openModal(hit.pmid)}
-          className="text-left hover:underline"
-          dangerouslySetInnerHTML={{ __html: titleHtml }}
+          aria-haspopup="dialog"
+          {...pubTitleProps(titleHtml, "text-left hover:underline")}
         />
       </div>
       {(hit.journal || hit.year) && (
