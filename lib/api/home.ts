@@ -30,6 +30,8 @@ import {
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
+import { NOT_HIDDEN_ROLE_WHERE, isPubliclyDisplayed } from "@/lib/eligibility";
+import { resolveHiddenStudentCoauthorChips } from "@/lib/api/search-flags";
 import { sampleSpotlightPapers } from "@/lib/spotlight-sampling";
 import { getSupercategoryHubEntries } from "@/lib/api/methods";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
@@ -71,12 +73,12 @@ const RECITERAI_YEAR_FLOOR = 2020;
 //   author on the same paper).
 //
 //   SPS-side resolution: read `PublicationAuthor` for each paper's PMID,
-//   keep only rows where `cwid IS NOT NULL` AND the joined Scholar is
-//   non-deleted + active, sort by byline `position`, render with no upper
-//   bound at this layer (the component caps display + adds an ellipsis for
-//   the surplus). Papers with zero WCM-resolved authors are dropped from the
-//   spotlight; spotlights with zero surviving papers are dropped from the
-//   carousel.
+//   keep only rows where the authorship `isConfirmed` (#2220) AND
+//   `cwid IS NOT NULL` AND the joined Scholar is non-deleted + active, sort by
+//   byline `position`, render with no upper bound at this layer (the component
+//   caps display + adds an ellipsis for the surplus). Papers with zero
+//   WCM-resolved authors are dropped from the spotlight; spotlights with zero
+//   surviving papers are dropped from the carousel.
 export type SpotlightAuthor = {
   cwid: string;
   displayName: string;
@@ -111,8 +113,14 @@ export type SpotlightCard = {
   // spotlight count line (`N publications · M scholars`) and by the
   // "Browse all N publications →" link copy. Grants are intentionally
   // omitted in v1 — Grant has no topic linkage in the current schema.
-  publicationCount: number;
-  scholarCount: number;
+  //
+  // #2218 — `null` means NO aggregate row exists for this (parent, subtopic)
+  // pair, which is NOT the same as a count of zero: the subtopic may have been
+  // retired from the taxonomy underneath a still-published artifact. Render the
+  // count line as absent, never as "0" — and never link "browse all 0
+  // publications" at a subtopic that may no longer exist.
+  publicationCount: number | null;
+  scholarCount: number | null;
   // Up to 3 representative WCM publications, seeded-sampled per publish cycle
   // from the artifact pool by `sampleSpotlightPapers` (#286).
   papers: SpotlightPaperCard[];
@@ -283,6 +291,13 @@ function cachedHomeRead<T>(key: string, load: () => Promise<T>): Promise<T> {
  * floor is an absolute defensive minimum, independent of the (now variable, up
  * to 25) producer card count.
  *
+ * The artifact is a SNAPSHOT of a taxonomy that keeps moving under it (#2218),
+ * so every card is validated against the live catalog before it renders: a card
+ * whose parent topic no longer resolves is dropped, and a (parent, subtopic)
+ * pair with no aggregate row reports `null` counts rather than a confident zero.
+ * Papers are additionally dropped for suppression (#356) and for
+ * `NEVER_DISPLAY_TYPES` (#2219) — the artifact is not trusted to be pre-clean.
+ *
  * Render-order: deterministic alphabetical by `parentTopicId`. The artifact
  * does not ship a position field; if editorial-priority ordering is ever
  * required, add a column in a follow-up phase.
@@ -344,11 +359,46 @@ async function getSpotlightsUncached(): Promise<SpotlightCard[] | null> {
   // #356 — publication suppression for the home Spotlight papers.
   const suppressions = await loadPublicationSuppressions(pmids, prisma);
   const darkPmids = await resolveDarkPmids(pmids, suppressions, prisma);
+  // #2219 — defense-in-depth against a STALE artifact. The read path used to
+  // trust the producer to ship a pre-clean pool, but the artifact is republished
+  // on the producer's cadence (51 days stale at #576 QA time) while the nightly
+  // `PubMedRetractions` ETL keeps stamping `Retraction`/`Erratum` onto rows
+  // underneath it — so any paper retracted AFTER the publish would render in the
+  // spotlight indefinitely. Resolved as an explicit pmid set, mirroring
+  // `darkPmids`, rather than a nested relation filter: a paper must be dropped
+  // for a NAMED reason, not by the side effect of losing its authors.
+  const neverDisplayPmids = new Set(
+    pmids.length > 0
+      ? (
+          await prisma.publication.findMany({
+            where: {
+              pmid: { in: pmids },
+              publicationType: { in: [...NEVER_DISPLAY_TYPES] },
+            },
+            select: { pmid: true },
+          })
+        ).map((p) => p.pmid)
+      : [],
+  );
+  // #2223 — the kill switch actually governs this surface now. OFF means a
+  // hidden-class student is ABSENT from the chip row (what the QA runbook has
+  // always claimed), not merely "not additionally hydrated": on prod the 690
+  // doctoral students are NOT soft-deleted, so the deletedAt/status filter below
+  // admits them unconditionally and flipping the flag off changed nothing here.
+  const includeHiddenStudents = resolveHiddenStudentCoauthorChips();
   const authorRows =
     pmids.length > 0
       ? await prisma.publicationAuthor.findMany({
           where: {
             pmid: { in: pmids },
+            // #2220 — every other publication read path in lib/api filters
+            // confirmed authorships (profile, centers, divisions, dept-lists,
+            // publication-detail, …), and `resolveDarkPmids` — called above on
+            // these very pmids — derives darkness over `isConfirmed: true`
+            // authors only. Without this the two halves of THIS function
+            // disagreed about who counts as an author, and a ReCiter-unconfirmed
+            // authorship could put a wrong name on the home page.
+            isConfirmed: true,
             cwid: { not: null },
             scholar: { deletedAt: null, status: "active" },
           },
@@ -362,6 +412,11 @@ async function getSpotlightsUncached(): Promise<SpotlightCard[] | null> {
   for (const row of authorRows) {
     // #356 — a per-author hide drops the scholar from the Spotlight paper.
     if (!row.scholar || isAuthorHidden(suppressions, row.pmid, row.scholar.cwid))
+      continue;
+    // #2223 — flag OFF ⇒ no hidden-class student in the hydration at all.
+    // (Flag ON keeps today's behavior exactly: they render as a NON-LINKED chip,
+    // enforced at render by isPubliclyDisplayed in components/home/spotlight-section.)
+    if (!includeHiddenStudents && !isPubliclyDisplayed(row.scholar.roleCategory))
       continue;
     const list = authorsByPmid.get(row.pmid) ?? [];
     list.push({
@@ -419,12 +474,39 @@ async function getSpotlightsUncached(): Promise<SpotlightCard[] | null> {
   // drop spotlights whose papers all dropped out.
   const cards: SpotlightCard[] = [];
   for (const row of rows) {
+    // #2218 — the artifact outlives the taxonomy it was published against. On
+    // 2026-08-01 the producer split `neuroscience_neurology` into
+    // `basic_neuroscience` + `clinical_neurology` WITHOUT moving
+    // `taxonomy_version`, and the spotlight artifact has not been republished
+    // since 2026-06-15 — so one card still names a parent topic that the SPS
+    // taxonomy no longer has. Every ETL step behaved correctly; the defect was
+    // that this read path rendered the survivor anyway, with `?? row.parentTopicId`
+    // printing the raw machine slug as the kicker and all four hrefs pointing at
+    // a `/topics/<slug>` that 404s. Drop the card: `lib/api/spotlight.ts` nulls
+    // the kicker href in the same situation, and here there is nothing left to
+    // link to at all.
+    const parentTopicLabel = parentLabelById.get(row.parentTopicId);
+    if (parentTopicLabel === undefined) {
+      logSparseHide("home_spotlight_dropped_unresolved_topic", 0, 1, {
+        subtopicId: row.subtopicId,
+        parentTopicId: row.parentTopicId,
+        artifactVersion: row.artifactVersion,
+      });
+      continue;
+    }
     const artifactPapers = row.papers as unknown as ArtifactPaper[];
     const papers: SpotlightPaperCard[] = [];
     for (const p of artifactPapers) {
       const authors = authorsByPmid.get(p.pmid) ?? [];
       // #356 — drop a paper taken down whole, or with zero displayed authors.
-      if (authors.length === 0 || darkPmids.has(p.pmid)) continue;
+      // #2219 — and never a Retraction / Erratum, however clean the artifact
+      // looked when it was published.
+      if (
+        authors.length === 0 ||
+        darkPmids.has(p.pmid) ||
+        neverDisplayPmids.has(p.pmid)
+      )
+        continue;
       papers.push({
         pmid: p.pmid,
         title: p.title,
@@ -440,10 +522,14 @@ async function getSpotlightsUncached(): Promise<SpotlightCard[] | null> {
       });
       continue;
     }
-    const counts = countByPair.get(`${row.parentTopicId}::${row.subtopicId}`) ?? {
-      pubs: 0,
-      scholars: 0,
-    };
+    // #2218 — a MISSING count row is not a count of zero. The aggregate above
+    // returns no row both when the subtopic no longer exists in the local
+    // taxonomy (its `publication_topic` rows were cascade-deleted with the
+    // retired parent) and when it exists but has no 2020+ publications from
+    // active scholars. Neither case licenses "0 publications · 0 scholars" —
+    // that is a confident false statement next to three representative papers.
+    // Surface it as unknown and let the component omit the line.
+    const counts = countByPair.get(`${row.parentTopicId}::${row.subtopicId}`) ?? null;
     // Issue #286 — seeded 3-of-N sample of the artifact pool, stable per
     // publish cycle (keyed on artifactVersion + subtopicId) and rotating
     // across cycles. Deterministic, so it is SSR-safe; the component no
@@ -455,12 +541,12 @@ async function getSpotlightsUncached(): Promise<SpotlightCard[] | null> {
     cards.push({
       subtopicId: row.subtopicId,
       parentTopicSlug: row.parentTopicId,
-      parentTopicLabel: parentLabelById.get(row.parentTopicId) ?? row.parentTopicId,
+      parentTopicLabel,
       displayName: row.displayName,
       shortDescription: row.shortDescription,
       lede: row.lede,
-      publicationCount: counts.pubs,
-      scholarCount: counts.scholars,
+      publicationCount: counts?.pubs ?? null,
+      scholarCount: counts?.scholars ?? null,
       papers: sampledPapers,
       artifactVersion: row.artifactVersion,
     });
@@ -552,8 +638,22 @@ async function getHomeStatsUncached(): Promise<HomeStats> {
   // etl/search-index/index.ts:412). Issue #216 — without this filter the
   // hero stat over-counts by ~1.1k (Retractions + Errata that are never
   // surfaced anywhere else).
+  //
+  // #2222 — same class of defect on the scholar stat: a `deletedAt`-only gate
+  // advertised 9,412 scholars while the people index `/search` queries held
+  // 8,722. The gap was exactly the #536 hidden-role cohort — 690 prod doctoral
+  // students carrying the BARE `doctoral_student` with `deleted_at IS NULL`, so
+  // the soft-delete gate never touched them and 7.3% of the advertised
+  // population was unreachable. The hero now counts the SAME predicate the
+  // people index is built from (`PEOPLE_INDEX_WHERE` spreads this identical
+  // fragment; `tests/unit/home-api.test.ts` pins the two together), so
+  // "advertised" and "findable" cannot drift again. NULL role_category is
+  // admitted explicitly — see NOT_HIDDEN_ROLE_WHERE for the three-valued-logic
+  // trap that makes a bare `notIn` hide every un-backfilled scholar.
   const [scholarCount, publicationCount, researchAreaCount] = await Promise.all([
-    prisma.scholar.count({ where: { deletedAt: null, status: "active" } }),
+    prisma.scholar.count({
+      where: { deletedAt: null, status: "active", ...NOT_HIDDEN_ROLE_WHERE },
+    }),
     prisma.publication.count({
       where: { publicationType: { notIn: [...NEVER_DISPLAY_TYPES] } },
     }),

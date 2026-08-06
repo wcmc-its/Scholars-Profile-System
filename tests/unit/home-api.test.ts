@@ -9,7 +9,7 @@
  * contains 68 rows — ALL parents — with no `parentId` column.
  */
 
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 
 // Prisma mock — adjust per actual lib/db export. Three model accessors are
 // exercised: publicationTopic, topic, and prisma.$queryRawUnsafe / $queryRaw
@@ -22,10 +22,13 @@ const mocks = vi.hoisted(() => ({
   pubTopicFindMany: vi.fn(),
   pubTopicGroupBy: vi.fn(),
   topicFindMany: vi.fn(),
+  topicCount: vi.fn(),
   publicationFindMany: vi.fn(),
+  publicationCount: vi.fn(),
   subtopicFindMany: vi.fn().mockResolvedValue([]),
   spotlightFindMany: vi.fn(),
   scholarFindMany: vi.fn(),
+  scholarCount: vi.fn(),
   publicationAuthorFindMany: vi.fn(),
   suppressionFindMany: vi.fn().mockResolvedValue([]),
   queryRaw: vi.fn(),
@@ -34,9 +37,12 @@ const {
   pubTopicFindMany: mockPubTopicFindMany,
   pubTopicGroupBy: mockPubTopicGroupBy,
   topicFindMany: mockTopicFindMany,
+  topicCount: mockTopicCount,
   publicationFindMany: mockPublicationFindMany,
+  publicationCount: mockPublicationCount,
   spotlightFindMany: mockSpotlightFindMany,
   scholarFindMany: mockScholarFindMany,
+  scholarCount: mockScholarCount,
   publicationAuthorFindMany: mockPublicationAuthorFindMany,
   queryRaw: mockQueryRaw,
 } = mocks;
@@ -49,18 +55,21 @@ vi.mock("@/lib/db", () => ({
     },
     topic: {
       findMany: mocks.topicFindMany,
+      count: mocks.topicCount,
     },
     subtopic: {
       findMany: mocks.subtopicFindMany,
     },
     publication: {
       findMany: mocks.publicationFindMany,
+      count: mocks.publicationCount,
     },
     spotlight: {
       findMany: mocks.spotlightFindMany,
     },
     scholar: {
       findMany: mocks.scholarFindMany,
+      count: mocks.scholarCount,
     },
     publicationAuthor: {
       findMany: mocks.publicationAuthorFindMany,
@@ -93,7 +102,9 @@ import {
   getSpotlights,
   getBrowseAllResearchAreas,
   getHomeMethodCategories,
+  getHomeStats,
 } from "@/lib/api/home";
+import { NOT_HIDDEN_ROLE_WHERE } from "@/lib/eligibility";
 
 const NOW = new Date("2026-04-01");
 
@@ -101,15 +112,31 @@ beforeEach(() => {
   mockPubTopicFindMany.mockReset();
   mockPubTopicGroupBy.mockReset();
   mockTopicFindMany.mockReset();
+  mockTopicCount.mockReset();
   mockPublicationFindMany.mockReset();
+  mockPublicationCount.mockReset();
   mockSpotlightFindMany.mockReset();
   mockScholarFindMany.mockReset();
+  mockScholarCount.mockReset();
   mockPublicationAuthorFindMany.mockReset();
   mockQueryRaw.mockReset();
   methodMocks.getSupercategoryHubEntries.mockReset();
   methodMocks.isMethodPagesEnabled.mockReset();
   // Default the page flag on so most cases exercise the happy path.
   methodMocks.isMethodPagesEnabled.mockReturnValue(true);
+  // #2219 — getSpotlights now resolves a NEVER_DISPLAY_TYPES pmid set. Default
+  // it to "no retracted papers in the pool" so the pre-existing cases are
+  // unaffected; the #2219 case overrides it.
+  mockPublicationFindMany.mockResolvedValue([]);
+  // Flag ON is the live value in every env — default the suite to it so the
+  // pre-existing spotlight cases keep exercising the production path (#2223).
+  process.env.COAUTHOR_HIDDEN_STUDENT_CHIPS = "on";
+});
+
+const SAVED_CHIP_FLAG = process.env.COAUTHOR_HIDDEN_STUDENT_CHIPS;
+afterEach(() => {
+  if (SAVED_CHIP_FLAG === undefined) delete process.env.COAUTHOR_HIDDEN_STUDENT_CHIPS;
+  else process.env.COAUTHOR_HIDDEN_STUDENT_CHIPS = SAVED_CHIP_FLAG;
 });
 
 // ---------- helpers for spotlight fixtures ----------
@@ -150,6 +177,8 @@ function makeAuthorRow(over: {
   position: number;
   preferredName?: string;
   slug?: string;
+  /** #2223 — raw scholar.role_category, NEVER a humanized display label. */
+  roleCategory?: string | null;
 }) {
   return {
     id: `${over.pmid}-${over.cwid}`,
@@ -167,6 +196,7 @@ function makeAuthorRow(over: {
       cwid: over.cwid,
       slug: over.slug ?? `slug-${over.cwid}`,
       preferredName: over.preferredName ?? `Name ${over.cwid}`,
+      roleCategory: over.roleCategory ?? "full_time_faculty",
     },
   };
 }
@@ -575,5 +605,330 @@ describe("getHomeMethodCategories (home Browse by research method)", () => {
     ]);
     const result = await getHomeMethodCategories();
     expect(result!.categories[0].representativeFamilies).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #2222 — the hero stat must advertise the FINDABLE population
+// ---------------------------------------------------------------------------
+
+describe("getHomeStats — advertised scholars == findable scholars (#2222)", () => {
+  /** The `where` handed to prisma.scholar.count on the most recent call. */
+  function capturedScholarWhere(): Record<string, unknown> {
+    const call = mockScholarCount.mock.calls.at(-1);
+    const arg = call?.[0] as { where?: Record<string, unknown> } | undefined;
+    return arg?.where ?? {};
+  }
+
+  beforeEach(() => {
+    mockScholarCount.mockResolvedValue(8722);
+    mockPublicationCount.mockResolvedValue(189_144);
+    mockTopicCount.mockResolvedValue(67);
+  });
+
+  it("counts with the SAME predicate the people index is built from", async () => {
+    await getHomeStats();
+    // Not "a carve that looks equivalent" — the identical fragment. Prod
+    // advertised 9,412 while /search could return 8,722; the 690-row gap was
+    // this predicate disagreeing with PEOPLE_INDEX_WHERE.
+    expect(capturedScholarWhere()).toEqual({
+      deletedAt: null,
+      status: "active",
+      ...NOT_HIDDEN_ROLE_WHERE,
+    });
+  });
+
+  it("excludes the hidden roles by NAME, so the PROD data shape is covered", async () => {
+    await getHomeStats();
+    const or = capturedScholarWhere().OR as Array<{
+      roleCategory: null | { notIn: string[] };
+    }>;
+    const notIn = or.find((o) => o.roleCategory !== null)!.roleCategory as {
+      notIn: string[];
+    };
+    // Staging's students are soft-deleted, so `deletedAt` hides them there and
+    // the role carve looks inert. Prod's 690 carry the BARE value with
+    // deleted_at IS NULL — this arm is the only thing that excludes them.
+    expect(notIn.notIn).toContain("doctoral_student");
+    expect(notIn.notIn).toContain("affiliate_alumni");
+  });
+
+  it("still admits scholars with a NULL role_category (three-valued-logic trap)", async () => {
+    await getHomeStats();
+    const or = capturedScholarWhere().OR as Array<unknown>;
+    // `NULL NOT IN (...)` is NULL, not TRUE. Without this arm the fix would
+    // have UNDER-counted by every un-backfilled scholar — a worse defect than
+    // the one it fixes, and invisible in staging fixtures.
+    expect(or).toContainEqual({ roleCategory: null });
+  });
+
+  it("passes the count straight through (no post-hoc adjustment)", async () => {
+    const stats = await getHomeStats();
+    expect(stats.scholarCount).toBe(8722);
+    expect(stats.publicationCount).toBe(189_144);
+    expect(stats.researchAreaCount).toBe(67);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #2219 / #2220 / #2223 / #2218 — getSpotlights read-path guards
+// ---------------------------------------------------------------------------
+
+/** Six-card fixture at the SPOTLIGHT_FLOOR, one paper each. */
+function sixSpotlights(pmids: string[]) {
+  mockSpotlightFindMany.mockResolvedValue(
+    pmids.map((pmid, i) =>
+      makeSpotlightRow({
+        subtopicId: `sub_${i}`,
+        parentTopicId: `parent_${i}`,
+        pmids: [pmid],
+      }),
+    ),
+  );
+  mockTopicFindMany.mockResolvedValue(
+    pmids.map((_, i) => ({ id: `parent_${i}`, label: `Parent ${i}` })),
+  );
+  mockQueryRaw.mockResolvedValue(
+    pmids.map((_, i) => ({
+      parent_topic_id: `parent_${i}`,
+      primary_subtopic_id: `sub_${i}`,
+      publication_count: 40 + i,
+      scholar_count: 8 + i,
+    })),
+  );
+}
+
+describe("getSpotlights — confirmed authorships only (#2220)", () => {
+  it("filters isConfirmed: true, like every sibling publication read path", async () => {
+    const pmids = ["5000", "5001", "5002", "5003", "5004", "5005"];
+    sixSpotlights(pmids);
+    mockPublicationAuthorFindMany.mockResolvedValue(
+      pmids.map((pmid, i) => makeAuthorRow({ pmid, cwid: `c${i}`, position: 1 })),
+    );
+    await getSpotlights();
+    const where = (
+      mockPublicationAuthorFindMany.mock.calls.at(-1)?.[0] as {
+        where: Record<string, unknown>;
+      }
+    ).where;
+    // resolveDarkPmids — called on these very pmids — derives darkness over
+    // confirmed authors only. Without this the two halves of getSpotlights
+    // disagreed about who counts as an author, and an unconfirmed authorship
+    // could put a wrong name on the home page.
+    expect(where.isConfirmed).toBe(true);
+    expect(where.cwid).toEqual({ not: null });
+  });
+});
+
+describe("getSpotlights — NEVER_DISPLAY_TYPES defense-in-depth (#2219)", () => {
+  it("drops a paper the artifact shipped clean but that has since been retracted", async () => {
+    const pmids = ["6000", "6001", "6002", "6003", "6004", "6005"];
+    sixSpotlights(pmids);
+    mockPublicationAuthorFindMany.mockResolvedValue(
+      pmids.map((pmid, i) => makeAuthorRow({ pmid, cwid: `c${i}`, position: 1 })),
+    );
+    // The nightly PubMedRetractions ETL stamped 6000 AFTER the artifact was
+    // published — the artifact still lists it and always will until the
+    // producer republishes.
+    mockPublicationFindMany.mockResolvedValue([{ pmid: "6000" }]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = await getSpotlights();
+    warn.mockRestore();
+    // Its only paper is gone, so the card drops too — and with 5 left we fall
+    // under the floor of 6 rather than rendering a retraction.
+    expect(result).toBeNull();
+  });
+
+  it("queries the exclusion by publicationType, scoped to the artifact's pmids", async () => {
+    const pmids = ["6100", "6101", "6102", "6103", "6104", "6105"];
+    sixSpotlights(pmids);
+    mockPublicationAuthorFindMany.mockResolvedValue(
+      pmids.map((pmid, i) => makeAuthorRow({ pmid, cwid: `c${i}`, position: 1 })),
+    );
+    await getSpotlights();
+    const call = mockPublicationFindMany.mock.calls.at(-1)?.[0] as {
+      where: { pmid: { in: string[] }; publicationType: { in: string[] } };
+    };
+    expect(call.where.publicationType.in).toEqual(["Retraction", "Erratum"]);
+    expect(call.where.pmid.in).toEqual(pmids);
+  });
+
+  it("keeps every paper when nothing in the pool is retracted", async () => {
+    const pmids = ["6200", "6201", "6202", "6203", "6204", "6205"];
+    sixSpotlights(pmids);
+    mockPublicationAuthorFindMany.mockResolvedValue(
+      pmids.map((pmid, i) => makeAuthorRow({ pmid, cwid: `c${i}`, position: 1 })),
+    );
+    const result = await getSpotlights();
+    expect(result).not.toBeNull();
+    expect(result!.length).toBe(6);
+  });
+});
+
+describe("getSpotlights — COAUTHOR_HIDDEN_STUDENT_CHIPS governs this surface (#2223)", () => {
+  const pmids = ["7100", "7101", "7102", "7103", "7104", "7105"];
+
+  function fixtureWithStudentCoauthor() {
+    sixSpotlights(pmids);
+    mockPublicationAuthorFindMany.mockResolvedValue([
+      // A prod-shaped hidden student: BARE role, not soft-deleted, active.
+      makeAuthorRow({
+        pmid: "7100",
+        cwid: "stu1",
+        position: 1,
+        preferredName: "Student One",
+        roleCategory: "doctoral_student",
+      }),
+      makeAuthorRow({
+        pmid: "7100",
+        cwid: "fac1",
+        position: 2,
+        preferredName: "Faculty One",
+      }),
+      ...pmids.slice(1).map((pmid, i) => makeAuthorRow({ pmid, cwid: `c${i}`, position: 1 })),
+    ]);
+  }
+
+  it("flag ON — the student stays in the chip row (#1026 non-linked chip)", async () => {
+    process.env.COAUTHOR_HIDDEN_STUDENT_CHIPS = "on";
+    fixtureWithStudentCoauthor();
+    const result = await getSpotlights();
+    const names = result!
+      .find((c) => c.papers.some((p) => p.pmid === "7100"))!
+      .papers.find((p) => p.pmid === "7100")!
+      .authors.map((a) => a.displayName);
+    expect(names).toEqual(["Student One", "Faculty One"]);
+  });
+
+  it("flag OFF — the student is ABSENT, on the prod data shape", async () => {
+    // The pre-#2223 filter was { deletedAt: null, status: 'active' }, which the
+    // 690 prod students pass unconditionally: flipping this flag off used to
+    // remove nobody from the home spotlight. This is the whole defect.
+    process.env.COAUTHOR_HIDDEN_STUDENT_CHIPS = "off";
+    fixtureWithStudentCoauthor();
+    const result = await getSpotlights();
+    const names = result!
+      .find((c) => c.papers.some((p) => p.pmid === "7100"))!
+      .papers.find((p) => p.pmid === "7100")!
+      .authors.map((a) => a.displayName);
+    expect(names).toEqual(["Faculty One"]);
+  });
+
+  it("flag OFF — the raw role is what gets tested, and unknown tokens fail CLOSED", async () => {
+    process.env.COAUTHOR_HIDDEN_STUDENT_CHIPS = "off";
+    sixSpotlights(pmids);
+    mockPublicationAuthorFindMany.mockResolvedValue([
+      // #2202 — a humanized display label ("Doctoral student") must never be
+      // what a predicate sees; isPubliclyDisplayed now fails closed on it.
+      makeAuthorRow({
+        pmid: "7100",
+        cwid: "stu2",
+        position: 1,
+        preferredName: "Student Two",
+        roleCategory: "Doctoral student",
+      }),
+      makeAuthorRow({
+        pmid: "7100",
+        cwid: "fac2",
+        position: 2,
+        preferredName: "Faculty Two",
+      }),
+      ...pmids.slice(1).map((pmid, i) => makeAuthorRow({ pmid, cwid: `c${i}`, position: 1 })),
+    ]);
+    const result = await getSpotlights();
+    const names = result!
+      .find((c) => c.papers.some((p) => p.pmid === "7100"))!
+      .papers.find((p) => p.pmid === "7100")!
+      .authors.map((a) => a.displayName);
+    expect(names).toEqual(["Faculty Two"]);
+  });
+
+  it("flag OFF — a NULL role_category is still a co-author (un-backfilled, not hidden)", async () => {
+    process.env.COAUTHOR_HIDDEN_STUDENT_CHIPS = "off";
+    sixSpotlights(pmids);
+    mockPublicationAuthorFindMany.mockResolvedValue([
+      makeAuthorRow({
+        pmid: "7100",
+        cwid: "nul1",
+        position: 1,
+        preferredName: "Unbackfilled Person",
+        roleCategory: null,
+      }),
+      ...pmids.slice(1).map((pmid, i) => makeAuthorRow({ pmid, cwid: `c${i}`, position: 1 })),
+    ]);
+    const result = await getSpotlights();
+    const names = result!
+      .find((c) => c.papers.some((p) => p.pmid === "7100"))!
+      .papers.find((p) => p.pmid === "7100")!
+      .authors.map((a) => a.displayName);
+    expect(names).toEqual(["Unbackfilled Person"]);
+  });
+});
+
+describe("getSpotlights — the artifact outlives its taxonomy (#2218)", () => {
+  it("drops a card whose parent topic no longer resolves, instead of printing the slug", async () => {
+    const pmids = ["8000", "8001", "8002", "8003", "8004", "8005"];
+    sixSpotlights(pmids);
+    // Reproduces 2026-08-01: `parent_0` was split away upstream while the
+    // artifact (published 2026-06-15) still names it, and `taxonomy_version`
+    // never moved so no drift check fired.
+    mockTopicFindMany.mockResolvedValue(
+      pmids.slice(1).map((_, i) => ({ id: `parent_${i + 1}`, label: `Parent ${i + 1}` })),
+    );
+    mockPublicationAuthorFindMany.mockResolvedValue(
+      pmids.map((pmid, i) => makeAuthorRow({ pmid, cwid: `c${i}`, position: 1 })),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = await getSpotlights();
+    // 5 survivors — below the floor — rather than 6 cards one of which reads
+    // "PARENT_0" with four hrefs to a /topics/parent_0 that 404s.
+    expect(result).toBeNull();
+    const dropped = warn.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("home_spotlight_dropped_unresolved_topic"),
+    )?.[0] as string | undefined;
+    expect(dropped).toBeTruthy();
+    const parsed = JSON.parse(dropped!);
+    expect(parsed.parentTopicId).toBe("parent_0");
+    expect(parsed.subtopicId).toBe("sub_0");
+    warn.mockRestore();
+  });
+
+  it("never renders a raw parentTopicId as the kicker label", async () => {
+    const pmids = ["8100", "8101", "8102", "8103", "8104", "8105"];
+    sixSpotlights(pmids);
+    mockPublicationAuthorFindMany.mockResolvedValue(
+      pmids.map((pmid, i) => makeAuthorRow({ pmid, cwid: `c${i}`, position: 1 })),
+    );
+    const result = await getSpotlights();
+    for (const card of result!) {
+      expect(card.parentTopicLabel).not.toBe(card.parentTopicSlug);
+    }
+  });
+
+  it("reports MISSING counts as null, not as a confident zero", async () => {
+    const pmids = ["8200", "8201", "8202", "8203", "8204", "8205"];
+    sixSpotlights(pmids);
+    mockPublicationAuthorFindMany.mockResolvedValue(
+      pmids.map((pmid, i) => makeAuthorRow({ pmid, cwid: `c${i}`, position: 1 })),
+    );
+    // The subtopic's publication_topic rows were cascade-deleted with the
+    // retired parent, so the aggregate returns no row for sub_0.
+    mockQueryRaw.mockResolvedValue(
+      pmids.slice(1).map((_, i) => ({
+        parent_topic_id: `parent_${i + 1}`,
+        primary_subtopic_id: `sub_${i + 1}`,
+        publication_count: 40,
+        scholar_count: 8,
+      })),
+    );
+    const result = await getSpotlights();
+    const stale = result!.find((c) => c.subtopicId === "sub_0")!;
+    // "0 publications · 0 scholars" next to three real papers is a confident
+    // false statement; null lets the component omit the line.
+    expect(stale.publicationCount).toBeNull();
+    expect(stale.scholarCount).toBeNull();
+    const live = result!.find((c) => c.subtopicId === "sub_1")!;
+    expect(live.publicationCount).toBe(40);
+    expect(live.scholarCount).toBe(8);
   });
 });

@@ -131,3 +131,53 @@ describe("SpotlightSection — representative-paper title (#947)", { retry: 2 },
     expect(payload.pmid).toBe("12345");
   });
 });
+
+describe("SpotlightSection — absent counts are not zero counts (#2218)", () => {
+  function renderCard(over: Partial<SpotlightCard>) {
+    return render(
+      <PublicationModalProvider>
+        <SpotlightSection items={[{ ...card, ...over }]} />
+      </PublicationModalProvider>,
+    );
+  }
+
+  it("renders both count links when the aggregate row exists", () => {
+    renderCard({});
+    const pubs = screen.getByRole("link", {
+      name: /Browse all 42 publications in Widget Design/,
+    });
+    expect(pubs.getAttribute("href")).toBe(
+      "/topics/widget_science?subtopic=sub_1#publications",
+    );
+    expect(
+      screen.getByRole("link", { name: /Browse all 7 scholars working in Widget Design/ }),
+    ).toBeDefined();
+  });
+
+  it("never prints '0 publications · 0 scholars' when the counts are unknown", () => {
+    // The 2026-08-01 taxonomy split retired a subtopic under a still-published
+    // artifact; the aggregate returns no row, which the DAL now reports as null.
+    // Rendering it as a confident zero — beside a real representative paper —
+    // is the user-facing half of #2218.
+    renderCard({ publicationCount: null, scholarCount: null });
+    expect(screen.queryByText(/publications/)).toBeNull();
+    expect(screen.queryByText(/scholars/)).toBeNull();
+    expect(screen.queryAllByRole("link", { name: /Browse all/ })).toHaveLength(0);
+  });
+
+  it("falls back to the parent topic page rather than deep-linking a subtopic that may be gone", () => {
+    renderCard({ publicationCount: null, scholarCount: null });
+    const title = screen.getByRole("link", { name: "View subarea Widget Design" });
+    expect(title.getAttribute("href")).toBe("/topics/widget_science");
+    // The paper itself still renders — only the dead subtopic links are dropped.
+    expect(screen.getByRole("button", { name: "A study of widgets" })).toBeDefined();
+  });
+
+  it("degrades one side at a time (scholars known, publications not)", () => {
+    renderCard({ publicationCount: null });
+    expect(screen.queryByText(/publications/)).toBeNull();
+    expect(
+      screen.getByRole("link", { name: /Browse all 7 scholars working in Widget Design/ }),
+    ).toBeDefined();
+  });
+});

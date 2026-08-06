@@ -120,9 +120,18 @@ function SpotlightDetail({ card }: { card: SpotlightCard }) {
   // the top of the topic page. The topic page exposes a stable
   // id="publications" anchor on the SubtopicPublicationLayout root (#3).
   const subtopicBase = `/topics/${card.parentTopicSlug}?subtopic=${card.subtopicId}`;
-  const subtopicHref = `${subtopicBase}#publications`;
   const parentHref = `/topics/${card.parentTopicSlug}`;
-  const pubsHref = subtopicHref;
+  // #2218 — null counts mean the (parent, subtopic) pair has no aggregate row:
+  // either the subtopic was retired from the taxonomy underneath this artifact,
+  // or it has nothing to browse. Either way the three subtopic-scoped deep links
+  // have no destination worth sending anyone to, so the title falls back to the
+  // parent topic page (which is known to resolve — `getSpotlights` drops cards
+  // whose parent does not) and the count line is omitted entirely rather than
+  // rendering "0 publications · 0 scholars" beside three real papers.
+  const hasPubCount = card.publicationCount !== null;
+  const hasScholarCount = card.scholarCount !== null;
+  const subtopicHref = hasPubCount ? `${subtopicBase}#publications` : parentHref;
+  const pubsHref = `${subtopicBase}#publications`;
   const scholarsHref = `${subtopicBase}#top-scholars`;
   const noUnderlineHover =
     "no-underline hover:underline underline-offset-4 decoration-1";
@@ -151,28 +160,34 @@ function SpotlightDetail({ card }: { card: SpotlightCard }) {
       </h3>
       <p className="text-muted-foreground text-sm leading-relaxed">{card.lede}</p>
 
-      <div className="flex flex-wrap gap-x-6 gap-y-1 border-y border-zinc-200 py-3 text-sm text-zinc-600">
-        <a
-          href={pubsHref}
-          aria-label={`Browse all ${card.publicationCount.toLocaleString()} publications in ${card.displayName}`}
-          className={`text-zinc-600 ${noUnderlineHover}`}
-        >
-          <span className="font-medium text-zinc-900">
-            {card.publicationCount.toLocaleString()}
-          </span>{" "}
-          publications
-        </a>
-        <a
-          href={scholarsHref}
-          aria-label={`Browse all ${card.scholarCount.toLocaleString()} scholars working in ${card.displayName}`}
-          className={`text-zinc-600 ${noUnderlineHover}`}
-        >
-          <span className="font-medium text-zinc-900">
-            {card.scholarCount.toLocaleString()}
-          </span>{" "}
-          scholars
-        </a>
-      </div>
+      {hasPubCount || hasScholarCount ? (
+        <div className="flex flex-wrap gap-x-6 gap-y-1 border-y border-zinc-200 py-3 text-sm text-zinc-600">
+          {hasPubCount ? (
+            <a
+              href={pubsHref}
+              aria-label={`Browse all ${card.publicationCount!.toLocaleString()} publications in ${card.displayName}`}
+              className={`text-zinc-600 ${noUnderlineHover}`}
+            >
+              <span className="font-medium text-zinc-900">
+                {card.publicationCount!.toLocaleString()}
+              </span>{" "}
+              publications
+            </a>
+          ) : null}
+          {hasScholarCount ? (
+            <a
+              href={scholarsHref}
+              aria-label={`Browse all ${card.scholarCount!.toLocaleString()} scholars working in ${card.displayName}`}
+              className={`text-zinc-600 ${noUnderlineHover}`}
+            >
+              <span className="font-medium text-zinc-900">
+                {card.scholarCount!.toLocaleString()}
+              </span>{" "}
+              scholars
+            </a>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-5">
         <div className="text-[10.5px] font-medium uppercase tracking-[0.13em] text-zinc-500">
@@ -341,12 +356,16 @@ function SpotlightCardButton({
       <div className="text-[13px] font-medium leading-tight text-zinc-900">
         {card.displayName}
       </div>
-      <div className="mt-auto text-[11px] text-zinc-500">
-        <span className="font-medium text-zinc-700">
-          {card.publicationCount.toLocaleString()}
-        </span>{" "}
-        pubs · {card.scholarCount.toLocaleString()} scholars
-      </div>
+      {/* #2218 — same rule as the detail pane: an absent aggregate row is not
+          "0 pubs · 0 scholars". Omit the line rather than assert a false zero. */}
+      {card.publicationCount !== null && card.scholarCount !== null ? (
+        <div className="mt-auto text-[11px] text-zinc-500">
+          <span className="font-medium text-zinc-700">
+            {card.publicationCount.toLocaleString()}
+          </span>{" "}
+          pubs · {card.scholarCount.toLocaleString()} scholars
+        </div>
+      ) : null}
     </button>
   );
 }
