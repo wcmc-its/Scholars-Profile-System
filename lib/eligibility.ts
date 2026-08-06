@@ -167,6 +167,12 @@ export const TOP_SCHOLARS_ELIGIBLE_ROLES: ReadonlyArray<RoleCategory> = [
 export const SEARCH_BOOST_ELIGIBLE_ROLES: ReadonlyArray<RoleCategory> = [
   "full_time_faculty",
   "affiliated_faculty",
+  // #2211 — emeritus faculty were indistinguishable from `affiliated_faculty`
+  // until the ED derivation stopped folding them in, so they have always been
+  // boost-eligible. Listing them keeps the ranking IDENTICAL across that split;
+  // omitting it would silently drop ~hundreds of senior scholars out of the
+  // #1363 concentration lift as a side effect of a segmentation fix.
+  "emeritus",
   "postdoc",
   "fellow",
 ] as const;

@@ -78,7 +78,10 @@ function compareGroups(a: HonorQueueGroup, b: HonorQueueGroup, key: SortKey): nu
 /** Which filter bucket a scholar's roleCategory falls in. */
 function personBucket(roleCategory: string | null): Exclude<PersonFilter, "all"> {
   if (isFullTimeFaculty(roleCategory)) return "faculty";
-  if (roleCategory === "affiliated_faculty") return "affiliated";
+  // #2211 — `emeritus` used to arrive spelled `affiliated_faculty`; keep it in
+  // the same curator filter so splitting the ED bucket doesn't drop emeritus
+  // honor candidates out of the "Affiliated" view into "Other".
+  if (roleCategory === "affiliated_faculty" || roleCategory === "emeritus") return "affiliated";
   return "other";
 }
 

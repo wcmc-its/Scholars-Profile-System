@@ -161,10 +161,57 @@ export function parseEmailReleaseAudience(values: unknown): EmailReleaseAudience
   return "none";
 }
 
+/**
+ * Internal HR appointment-workflow annotations that ED appends to a title in
+ * parentheses. These describe where a person sits in the HR workflow, not what
+ * they are, and must never reach a public surface (#2208: `(Pending Appointment
+ * at Rank)` rendered in the profile `<title>`, the `<meta name="description">`,
+ * the name subtitle and the Appointments card — so it would also have shown in
+ * search-engine result snippets).
+ *
+ * This is deliberately a NARROW rule, not "strip every trailing parenthetical".
+ * Enumerated 2026-08-05 over the 7,635 indexed scholars matching the
+ * professor / instructor / lecturer title slices, every parenthetical in an ED
+ * title is one of exactly three kinds:
+ *   - rank modifiers that ARE public credentials — `(Voluntary)`, `(Courtesy)`;
+ *   - sub-specialty qualifiers — `(Plastic Surgery)`, `(Transplantation)`,
+ *     `(Vascular Surgery)`, `(Dentistry, Oral and Maxillofacial Surgery)`, … ;
+ *   - `(Pending Appointment at Rank)`, the only workflow annotation present.
+ * A blanket strip would delete ~2,100 legitimate credentials to remove ~58
+ * annotations, so the rule keys on the leading word "Pending" — no WCM academic
+ * credential starts with it, and it also covers any `(Pending …)` variant HR
+ * emits later. Add alternatives here if another workflow state shows up.
+ */
+const INTERNAL_HR_ANNOTATION_RE = /\s*\(\s*pending\b[^)]*\)/gi;
+
+/**
+ * Strip internal HR annotations from an ED-sourced title. Applied at the LDAP
+ * projection boundary so every consumer of an ED title — Scholar.primaryTitle,
+ * Appointment.title (active AND historical), the /edit directory typeaheads —
+ * gets the cleaned value, and no future render surface has to re-learn to strip
+ * it. Whitespace left behind by the removal is collapsed.
+ *
+ * Returns null only for null/absent input. A title that is *nothing but* an
+ * annotation keeps its raw value: an empty subtitle is a worse public defect
+ * than the annotation it replaced.
+ *
+ * Exported for unit tests (tests/unit/ldap-title-normalisation.test.ts).
+ */
+export function stripInternalHrAnnotation(raw: string | null): string | null {
+  if (raw === null) return null;
+  const stripped = raw
+    .replace(INTERNAL_HR_ANNOTATION_RE, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return stripped.length > 0 ? stripped : raw;
+}
+
 export type EdFacultyEntry = {
   cwid: string;
   preferredName: string;
   fullName: string;
+  /** ED title with internal HR annotations removed — see
+   *  {@link stripInternalHrAnnotation}. */
   primaryTitle: string | null;
   primaryDepartment: string | null;
   email: string | null;
@@ -341,7 +388,8 @@ async function fetchFacultyAppointmentsByFilter(
   const out: EdFacultyAppointment[] = [];
   for (const e of searchEntries) {
     const cwid = firstString(e.weillCornellEduCWID);
-    const title = firstString(e.title);
+    // #2208 — the SOR `title` reaches the public Appointments card verbatim.
+    const title = stripInternalHrAnnotation(firstString(e.title));
     const sorId = firstString(e.weillCornellEduSORID);
     if (!cwid || !title || !sorId) continue;
 
@@ -905,7 +953,9 @@ function projectEntries(
       cwid,
       preferredName: preferredName || cwid,
       fullName: fullName || preferredName || cwid,
-      primaryTitle: firstString(e.weillCornellEduPrimaryTitle) ?? firstString(e.title) ?? null,
+      primaryTitle: stripInternalHrAnnotation(
+        firstString(e.weillCornellEduPrimaryTitle) ?? firstString(e.title) ?? null,
+      ),
       primaryDepartment:
         firstString(r["weillCornellEduPrimaryDepartment"]) ??
         firstString(e.weillCornellEduDepartment) ??
@@ -1083,7 +1133,9 @@ function projectDirectoryPerson(entry: Record<string, unknown>): DirectoryPerson
   return {
     cwid,
     name,
-    title: firstString(entry.weillCornellEduPrimaryTitle),
+    // Internal /edit surface, but stripped too so there is ONE rule for an
+    // ED title rather than a per-surface one (#2208).
+    title: stripInternalHrAnnotation(firstString(entry.weillCornellEduPrimaryTitle)),
     dept: firstString(entry.weillCornellEduDepartment),
     firstName: given,
     lastName: sn,
