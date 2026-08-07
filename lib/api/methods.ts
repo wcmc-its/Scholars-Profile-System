@@ -33,7 +33,11 @@
  */
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
-import { TOP_SCHOLARS_ELIGIBLE_ROLES, isPubliclyDisplayed } from "@/lib/eligibility";
+import {
+  TOP_SCHOLARS_ELIGIBLE_ROLES,
+  isPubliclyDisplayed,
+  publicRoleWhere,
+} from "@/lib/eligibility";
 import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
 import {
   isMethodsLensEnabled,
@@ -1574,7 +1578,10 @@ function mapPublicationHit(
 // Enumerative "all scholars in this family" (§5 /scholars page)
 // ---------------------------------------------------------------------------
 
-export type MethodScholarRole = "all" | "faculty" | "postdocs" | "doctoral_students";
+// #2270 — no `doctoral_students` arm: the #536 hidden identity classes are
+// carved out of the loader, so the facet could only ever count and list zero.
+// `lib/eligibility.ts` forbids faceting them regardless of what it would return.
+export type MethodScholarRole = "all" | "faculty" | "postdocs";
 export const METHOD_ALL_SCHOLARS_PAGE_SIZE = 22;
 
 export type MethodScholarRow = {
@@ -1591,7 +1598,7 @@ export type MethodScholarRow = {
 
 export type MethodScholarsResult = {
   total: number;
-  roleCounts: { all: number; faculty: number; postdocs: number; doctoralStudents: number };
+  roleCounts: { all: number; faculty: number; postdocs: number };
   hits: MethodScholarRow[];
   page: number;
   pageSize: number;
@@ -1600,14 +1607,21 @@ export type MethodScholarsResult = {
 const ROLE_FILTER_CATEGORIES: Record<Exclude<MethodScholarRole, "all">, string[]> = {
   faculty: ["full_time_faculty"],
   postdocs: ["postdoc"],
-  doctoral_students: ["doctoral_student"],
 };
 
 /**
  * Comprehensive enumerative scholar list for a family — alphabetical by surname,
- * role-filterable, name-searchable, paginated. NO eligibility carve (anyone with a
- * `scholar_family` row in this family), active-only. Mirrors `getTopicScholars`.
+ * role-filterable, name-searchable, paginated. Active-only, and no ALGORITHMIC
+ * eligibility carve (anyone with a `scholar_family` row in this family qualifies).
  * Lens-off / gated ⇒ null.
+ *
+ * #2270 — it DOES apply the #536 hidden-identity carve, which the #2202 loader
+ * hardening missed here while landing it in eight sibling loaders. This is a
+ * public, unauthenticated surface (`METHODS_LENS_PAGES` is on in prod for all 741
+ * families) that emits name, postnominal, title and headshot endpoint per row, so
+ * the loader must never LOAD a hidden class rather than merely de-link it. Zero
+ * hidden scholars are enumerable today only because the ReciterAI artifact that
+ * populates `scholar_family` happens to carry none — that is data, not a guard.
  */
 export async function getMethodScholars(
   supercategory: string,
@@ -1622,10 +1636,14 @@ export async function getMethodScholars(
   const role: MethodScholarRole = opts.role ?? "all";
   const q = opts.q?.trim() ?? "";
 
-  const scholarFilter: Record<string, unknown> = { deletedAt: null, status: "active" };
+  const scholarFilter: Record<string, unknown> = {
+    deletedAt: null,
+    status: "active",
+    ...publicRoleWhere(),
+  };
   if (q.length > 0) scholarFilter.preferredName = { contains: q };
 
-  const rows = await prisma.scholarFamily.findMany({
+  const loaded = await prisma.scholarFamily.findMany({
     where: { supercategory, familyLabel, scholar: scholarFilter },
     select: {
       pmidCount: true,
@@ -1641,19 +1659,21 @@ export async function getMethodScholars(
       },
     },
   });
+  // Fail-closed on the RAW column, before anything counts or renders: the
+  // where-clause is a denylist that cannot express the `doctoral_student*`
+  // prefix, so an out-of-band suffix passes it and only this catches it.
+  const rows = loaded.filter((r) => r.scholar && isPubliclyDisplayed(r.scholar.roleCategory));
 
   // Role counts within the name-filtered universe (does NOT apply the role filter
   // — each chip badge reflects its own bucket regardless of the active chip).
   let allCount = 0;
   let facultyCount = 0;
   let postdocsCount = 0;
-  let doctoralCount = 0;
   for (const r of rows) {
     if (!r.scholar) continue;
     allCount += 1;
     if (r.scholar.roleCategory === "full_time_faculty") facultyCount += 1;
     else if (r.scholar.roleCategory === "postdoc") postdocsCount += 1;
-    else if (r.scholar.roleCategory === "doctoral_student") doctoralCount += 1;
   }
 
   const filtered =
@@ -1685,12 +1705,7 @@ export async function getMethodScholars(
 
   return {
     total,
-    roleCounts: {
-      all: allCount,
-      faculty: facultyCount,
-      postdocs: postdocsCount,
-      doctoralStudents: doctoralCount,
-    },
+    roleCounts: { all: allCount, faculty: facultyCount, postdocs: postdocsCount },
     hits: slice.map((s) => ({
       cwid: s.cwid,
       slug: s.slug,

@@ -30,12 +30,9 @@ import {
 // the page honor it. (Restoring ISR + purge-on-edit for perf is the #985 follow-up.)
 export const dynamic = "force-dynamic";
 
-const VALID_ROLES: ReadonlyArray<MethodScholarRole> = [
-  "all",
-  "faculty",
-  "postdocs",
-  "doctoral_students",
-];
+// #2270 — `doctoral_students` is gone: the loader carves the #536 hidden
+// identity classes, so `?role=doctoral_students` now falls back to "all".
+const VALID_ROLES: ReadonlyArray<MethodScholarRole> = ["all", "faculty", "postdocs"];
 
 const MAX_PAGE = 500;
 const MAX_QUERY_LEN = 80;
