@@ -24,6 +24,7 @@
  * UPDATE rollback is invisible to readers.
  */
 import { db } from "@/lib/db";
+import { processStartedAt } from "@/lib/etl-run";
 import { percentiles } from "../mesh-anchors/derive";
 
 async function recordRun(args: {
@@ -35,6 +36,7 @@ async function recordRun(args: {
     data: {
       source: "MeshCoverage",
       status: args.status,
+      startedAt: processStartedAt,
       completedAt: new Date(),
       rowsProcessed: args.rowsProcessed,
       errorMessage: args.errorMessage ?? null,

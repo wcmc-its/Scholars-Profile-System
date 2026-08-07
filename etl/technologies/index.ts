@@ -36,6 +36,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { db } from "@/lib/db";
+import { processStartedAt } from "@/lib/etl-run";
 import { scrapePortfolio } from "./scrape";
 import { parseSeed, validateRows, type TechnologyRow } from "./seed";
 
@@ -56,6 +57,7 @@ async function recordRun(args: {
     data: {
       source: "Technology",
       status: args.status,
+      startedAt: processStartedAt,
       completedAt: new Date(),
       rowsProcessed: args.rowsProcessed,
       errorMessage: args.errorMessage ?? null,

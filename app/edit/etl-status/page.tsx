@@ -72,6 +72,31 @@ function formatAge(ageHours: number | null): string {
   return `${d} day${d === 1 ? "" : "s"} ago`;
 }
 
+/**
+ * How long the newest attempt took, start to finish.
+ *
+ * The sub-second floor is not cosmetic. Ten sources used to write a single
+ * terminal `etl_run` row, leaving `startedAt` to `@default(now())` so it landed
+ * on the same instant as `completedAt` — start and finish indistinguishable.
+ * Those writers now record a real start, but the board reads the LATEST row, so
+ * every one of them keeps serving a legacy zero until it next runs (up to a
+ * month for the monthly ones). "Not recorded" is the honest answer for those;
+ * printing "0 sec" would claim a measurement nobody took.
+ */
+function formatDuration(startedAt: Date | null, endedAt: Date | null): string {
+  if (startedAt === null || Number.isNaN(startedAt.getTime())) return "—";
+  if (endedAt === null || Number.isNaN(endedAt.getTime())) return "still running";
+  const ms = endedAt.getTime() - startedAt.getTime();
+  if (ms < 1000) return "not recorded";
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds} sec`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours} hr` : `${hours} hr ${rest} min`;
+}
+
 /** How long this import may go quiet before it counts as late, spelled out. */
 function expectedEvery(slaHours: number): string {
   if (slaHours < 48) return `${slaHours} hours`;
@@ -272,9 +297,17 @@ function Explanation({ row, timeoutHours }: { row: EtlSourceRow; timeoutHours: n
  * `ackActive` is only ever true on a source that is genuinely stale
  * (`gradeSource` sets it from `stale && ack active`), so a healthy source that
  * happens to carry an ack stays in the collapsed section where it belongs.
+ *
+ * `ackExpired` is the case that does NOT follow that rule. `gradeSource` sets it
+ * from `state === "expired"` alone, never gated on `stale`, so a source whose
+ * data recovered while its ack quietly lapsed grades `up-to-date` and carries a
+ * dead acceptance nobody renewed. That used to surface in the table's prose
+ * cell; the cell is now a duration, so without this clause the lapse would be
+ * stated nowhere. Spotlight's ack lapses 2026-09-30 and its producer has begun
+ * publishing, which is exactly that shape.
  */
 function inAttentionSection(row: EtlSourceRow): boolean {
-  return needsAttention(row) || row.ackActive;
+  return needsAttention(row) || row.ackActive || row.ackExpired;
 }
 
 /** One row that needs reading, with everything a reader needs in one block. */
@@ -431,7 +464,7 @@ function StatusBody({ summary }: { summary: EtlStatusSummary }) {
                 <th className={thClass}>How often</th>
                 <th className={thClass}>Status</th>
                 <th className={thClass}>Last good data</th>
-                <th className={thClass}>What this means</th>
+                <th className={thClass}>Run duration</th>
               </tr>
             </thead>
             <tbody>
@@ -464,8 +497,8 @@ function StatusBody({ summary }: { summary: EtlStatusSummary }) {
                     <span className="whitespace-nowrap">{formatTs(row.lastSuccessAt)}</span>
                     <span className="text-muted-foreground block">{formatAge(row.ageHours)}</span>
                   </td>
-                  <td className={`${tdClass} max-w-xl`}>
-                    <Explanation row={row} timeoutHours={summary.runningTimeoutHours} />
+                  <td className={`${tdClass} whitespace-nowrap`}>
+                    {formatDuration(row.lastAttemptStartedAt, row.lastAttemptEndedAt)}
                   </td>
                 </tr>
               ))}
@@ -475,6 +508,8 @@ function StatusBody({ summary }: { summary: EtlStatusSummary }) {
       </details>
 
       <p className="text-muted-foreground mt-4 text-sm">
+        &ldquo;Run duration&rdquo; is how long the most recent attempt took; &ldquo;not
+        recorded&rdquo; means that import has not logged a start time we can measure from yet.
         &ldquo;Last good data&rdquo; is when the information itself was produced, which is not
         always when the import last ran: some imports check whether anything changed and finish
         without replacing anything. If a row needs attention, contact ITS Support with the name of

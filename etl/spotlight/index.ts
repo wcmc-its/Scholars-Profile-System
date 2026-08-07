@@ -31,6 +31,7 @@ import { createHash } from "node:crypto";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import Ajv from "ajv/dist/2020"; // ajv v8+ with JSON Schema 2020-12 support
 import { db } from "../../lib/db";
+import { processStartedAt } from "../../lib/etl-run";
 import { parseManifestGeneratedAt } from "../freshness/anchor";
 
 // ---------------------------------------------------------------------------
@@ -162,6 +163,7 @@ async function recordRun(args: {
     data: {
       source: "Spotlight",
       status: args.status,
+      startedAt: processStartedAt,
       completedAt: new Date(),
       rowsProcessed: args.rowsProcessed,
       errorMessage: args.errorMessage ?? null,

@@ -42,6 +42,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { db } from "@/lib/db";
+import { processStartedAt } from "@/lib/etl-run";
 
 const CURATED_PATH =
   process.env.FAMILY_SUPPRESSION_CURATED_PATH ?? "etl/family-suppression/curated.csv";
@@ -116,6 +117,7 @@ async function recordRun(args: {
     data: {
       source: "FamilySuppression",
       status: args.status,
+      startedAt: processStartedAt,
       completedAt: new Date(),
       rowsProcessed: args.rowsProcessed,
       errorMessage: args.errorMessage ?? null,

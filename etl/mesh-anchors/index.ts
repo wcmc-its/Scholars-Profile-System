@@ -35,6 +35,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { db } from "@/lib/db";
+import { processStartedAt } from "@/lib/etl-run";
 import { parseCuratedCsv } from "./csv";
 import { filterDerived, mergeAnchors, percentiles } from "./derive";
 import type { AnchorRow, DerivedRowRaw } from "./types";
@@ -56,6 +57,7 @@ async function recordRun(args: {
     data: {
       source: "MeshAnchor",
       status: args.status,
+      startedAt: processStartedAt,
       completedAt: new Date(),
       rowsProcessed: args.rowsProcessed,
       errorMessage: args.errorMessage ?? null,
