@@ -13,6 +13,7 @@
  * row failed to invalidate again, so the scheduler / alarm sees a failed run.
  */
 import { reconcileCdnInvalidations } from "@/lib/edit/cdn-reconcile";
+import { withEtlRun } from "@/lib/etl-run";
 
 function parseIntArg(argv: string[], flag: string): number | undefined {
   const i = argv.indexOf(flag);
@@ -33,8 +34,25 @@ async function main() {
   }
   const batchSize = parseIntArg(argv, "--batch");
   const graceSeconds = parseIntArg(argv, "--grace-seconds");
-  const summary = await reconcileCdnInvalidations({ batchSize, graceSeconds });
-  process.exit(summary.failed > 0 ? 1 : 0);
+  // The row has to open AND close before any process.exit(). Exiting inside the
+  // wrapped fn would kill the process between withEtlRun's create and its
+  // update, stranding every run as 'running' — so argv parsing, which exits on
+  // --help and on a bad flag, stays above this line.
+  await withEtlRun("CdnReconcile", async () => {
+    const summary = await reconcileCdnInvalidations({ batchSize, graceSeconds });
+    if (summary.failed > 0) {
+      // Throwing is what makes the row say 'failed'. Returning normally would
+      // write a green etl_run row beside a red Step Functions execution — the
+      // green-while-broken shape this whole change exists to close. withEtlRun
+      // re-throws, so the catch below still exits 1 and the Catch -> SNS path
+      // is untouched.
+      throw new Error(
+        `${summary.failed} of ${summary.scanned} pending CloudFront invalidation(s) failed to replay`,
+      );
+    }
+    return summary.reflected;
+  });
+  process.exit(0);
 }
 
 main().catch((err) => {
