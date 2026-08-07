@@ -63,6 +63,7 @@ import {
   buildPublicationDoc,
   isRequireDisplayableAuthorEnabled,
   computePubCountBuckets,
+  loadEsiEligibilityByCwid,
   loadMeshAncestorContext,
   loadOverviewOverrides,
 } from "@/lib/search-index-docs";
@@ -210,6 +211,15 @@ async function indexPeople(concreteIndex: string) {
   // `""`) is honored in the index instead of the raw ETL column staying
   // indexed forever.
   const overviewOverrides = await loadOverviewOverrides(prisma);
+  // #2300 — bulk-load "Early Stage Investigator" eligibility ONCE per build
+  // (mirroring the `gate` / `meshAncestors` / `overviewOverrides` loads
+  // above) and pass it to every `buildPeopleDoc`. Deliberately a SEPARATE
+  // query from `PEOPLE_INDEX_SELECT`'s `grants` relation below — that
+  // relation is filtered (`source: { not: "RePORTER" }`) for the
+  // grantCount / hasActiveGrants / activePiGrantCount signals; ESI
+  // eligibility needs the scholar's FULL unfiltered grant history (see
+  // `loadEsiEligibilityByCwid`'s doc comment in `lib/search-index-docs.ts`).
+  const esiEligibleByCwid = await loadEsiEligibilityByCwid(prisma);
   const scholars = await prisma.scholar.findMany({
     where: PEOPLE_INDEX_WHERE,
     select: PEOPLE_INDEX_SELECT,
@@ -241,7 +251,15 @@ async function indexPeople(concreteIndex: string) {
     // `methodFamily` rollup (suppressed + sensitive families always excluded).
     const built = await Promise.all(
       batch.map((s) =>
-        buildPeopleDoc(s, prisma, sup, gate, meshAncestors, overviewOverrides),
+        buildPeopleDoc(
+          s,
+          prisma,
+          sup,
+          gate,
+          meshAncestors,
+          overviewOverrides,
+          esiEligibleByCwid,
+        ),
       ),
     );
     built.forEach((doc, j) => {

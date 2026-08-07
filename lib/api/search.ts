@@ -112,8 +112,10 @@ import {
   resolveSearchPeopleClinicalFn,
   resolveSearchPeopleClinicalFnWeight,
   resolveSearchPeopleClinicalMeshAnchor,
+  resolveSearchPeopleClinicalRankFacets,
   resolveSearchPeopleClinicalReasonThresholds,
   resolveSearchPeopleConceptHint,
+  resolveSearchPeopleEsiFacet,
   resolveSearchPeoplePubCountDampen,
   type PeoplePubCountDampenMode,
   resolveSearchResultEvidence,
@@ -220,6 +222,35 @@ export type PeopleFilters = {
   deptDiv?: string[];
   personType?: string[];
   activity?: ActivityFilter[];
+  /**
+   * #2300 — direct copy of `Scholar.hasClinicalProfile`. Single boolean
+   * checkbox facet (closer in shape to `activity`'s `hasActiveGrants` boolean
+   * than to `personType`'s multi-select keyword). Gated behind
+   * `SEARCH_PEOPLE_CLINICAL_RANK_FACETS`: accepted regardless of the flag,
+   * but a no-op (no clause, no facet) while it's off / pre-reindex.
+   */
+  isClinical?: boolean;
+  /**
+   * #2300 — direct copy of `Scholar.professorialRank` ('Assistant Professor'
+   * | 'Associate Professor' | 'Professor'). Multi-select keyword facet, same
+   * shape as `personType`. Gated behind `SEARCH_PEOPLE_CLINICAL_RANK_FACETS`
+   * (same flag + no-op posture as `isClinical`).
+   */
+  professorialRank?: string[];
+  /**
+   * #2306 — "Early Stage Investigator" (labeled that way in every
+   * human-facing surface; `earlyStageInvestigator` is the param name so no
+   * bare "ESI" ever appears in a URL). Backed by the index-doc-only
+   * `esiEligible` field (`lib/search-index-docs.ts`'s
+   * `loadEsiEligibilityByCwid`, reusing `deriveGrantSignals` from
+   * `lib/api/match-researchers.ts` UNCHANGED). Single boolean checkbox facet,
+   * same shape as `isClinical`. Gated behind its OWN flag,
+   * `SEARCH_PEOPLE_ESI_FACET` — an independent kill switch from
+   * `SEARCH_PEOPLE_CLINICAL_RANK_FACETS` because this derivation is novel and
+   * riskier than the two direct-column facets above. Accepted regardless of
+   * the flag, but a no-op (no clause, no facet) while it's off / pre-reindex.
+   */
+  earlyStageInvestigator?: boolean;
   /** Issue #233 — Principal Investigator facet. Absent = "no filter". */
   pi?: PiFilter;
   /** Issue #233 — threshold for `pi=multi`. Clamped to [PI_MIN_FLOOR,
@@ -1088,6 +1119,27 @@ export type PeopleSearchResult = {
      *  current `piMin`. `none` is the baseline (all results matching the
      *  other filters; used as the count beside the "No filter" radio). */
     pi: { none: number; any: number; active: number; multi: number };
+    /**
+     * #2300 — `isClinical` checkbox facet bucket counts, excluding-self
+     * (`filtersExcept("isClinical")`), same pattern as `activity`. Both
+     * `true` and `false` are reported so a caller can label either state.
+     * `{ true: 0, false: 0 }` while `SEARCH_PEOPLE_CLINICAL_RANK_FACETS` is
+     * off (or pre-reindex) — never omitted, so a consumer never has to
+     * special-case an absent key.
+     */
+    isClinical: { true: number; false: number };
+    /**
+     * #2300 — `professorialRank` multi-select facet buckets, same shape as
+     * `personTypes` (excluding-self counts). Empty while
+     * `SEARCH_PEOPLE_CLINICAL_RANK_FACETS` is off (or pre-reindex).
+     */
+    professorialRank: SearchFacetBucket[];
+    /**
+     * #2306 — "Early Stage Investigator" checkbox facet bucket counts, same
+     * shape as `isClinical`. `{ true: 0, false: 0 }` while
+     * `SEARCH_PEOPLE_ESI_FACET` is off (or pre-reindex).
+     */
+    earlyStageInvestigator: { true: number; false: number };
   };
 };
 
@@ -2041,6 +2093,9 @@ export async function searchPeople(opts: {
           personTypes: [],
           activity: { hasGrants: 0, recentPub: 0 },
           pi: { none: 0, any: 0, active: 0, multi: 0 },
+          isClinical: { true: 0, false: 0 },
+          professorialRank: [],
+          earlyStageInvestigator: { true: 0, false: 0 },
         },
       };
     }
@@ -2389,6 +2444,31 @@ export async function searchPeople(opts: {
     }
     activityClauses.push({ bool: { should, minimum_should_match: 1 } });
   }
+  // #2300 — `isClinical` / `professorialRank` clauses, gated behind
+  // `SEARCH_PEOPLE_CLINICAL_RANK_FACETS`. Off (or the caller didn't pass the
+  // filter) ⇒ `null`, so the query body + facet aggs are byte-identical to
+  // today — the params are accepted (route.ts always parses them) but the
+  // clause never materializes pre-flip/pre-reindex.
+  const clinicalRankFacetsOn = resolveSearchPeopleClinicalRankFacets();
+  // Closer in shape to `activityClauses`' single-boolean `term` clause than
+  // to `personTypeClause`'s multi-select `terms` — a plain `term` match.
+  const isClinicalClause =
+    clinicalRankFacetsOn && filters.isClinical === true
+      ? { term: { isClinical: true } }
+      : null;
+  // Multi-select keyword, same `terms` shape as `personTypeClause`.
+  const professorialRankClause =
+    clinicalRankFacetsOn && filters.professorialRank && filters.professorialRank.length > 0
+      ? { terms: { professorialRank: filters.professorialRank } }
+      : null;
+  // #2306 — "Early Stage Investigator" clause, gated behind its OWN flag
+  // (`SEARCH_PEOPLE_ESI_FACET`) — an independent kill switch from the
+  // clinical/rank pair above, since `esiEligible` is a novel derivation, not
+  // a direct column copy. Same single-boolean `term` shape as `isClinical`.
+  const earlyStageInvestigatorClause =
+    resolveSearchPeopleEsiFacet() && filters.earlyStageInvestigator === true
+      ? { term: { esiEligible: true } }
+      : null;
   const sparseClause = applySparseFilter ? { term: { isComplete: true } } : null;
   const topicClause = topicCwidFilter && topicCwidFilter.length > 0
     ? { terms: { cwid: topicCwidFilter } }
@@ -2705,6 +2785,9 @@ export async function searchPeople(opts: {
         personTypes: [],
         activity: { hasGrants: 0, recentPub: 0 },
         pi: { none: 0, any: 0, active: 0, multi: 0 },
+        isClinical: { true: 0, false: 0 },
+        professorialRank: [],
+        earlyStageInvestigator: { true: 0, false: 0 },
       },
     };
   }
@@ -2714,16 +2797,32 @@ export async function searchPeople(opts: {
   if (personTypeClause) userAxisFilters.push(personTypeClause);
   for (const c of activityClauses) userAxisFilters.push(c);
   if (piClause) userAxisFilters.push(piClause);
+  if (isClinicalClause) userAxisFilters.push(isClinicalClause);
+  if (professorialRankClause) userAxisFilters.push(professorialRankClause);
+  if (earlyStageInvestigatorClause) userAxisFilters.push(earlyStageInvestigatorClause);
 
   // Helper: user-axis filters with one axis omitted, for that axis's
   // excluding-self aggregation. Always-on filters are inherited from the
   // main query context, so they don't appear here.
-  const filtersExcept = (axis: "deptDiv" | "personType" | "activity" | "pi") => {
+  const filtersExcept = (
+    axis:
+      | "deptDiv"
+      | "personType"
+      | "activity"
+      | "pi"
+      | "isClinical"
+      | "professorialRank"
+      | "earlyStageInvestigator",
+  ) => {
     const out: Record<string, unknown>[] = [];
     if (axis !== "deptDiv" && deptDivClause) out.push(deptDivClause);
     if (axis !== "personType" && personTypeClause) out.push(personTypeClause);
     if (axis !== "activity") for (const c of activityClauses) out.push(c);
     if (axis !== "pi" && piClause) out.push(piClause);
+    if (axis !== "isClinical" && isClinicalClause) out.push(isClinicalClause);
+    if (axis !== "professorialRank" && professorialRankClause) out.push(professorialRankClause);
+    if (axis !== "earlyStageInvestigator" && earlyStageInvestigatorClause)
+      out.push(earlyStageInvestigatorClause);
     return out;
   };
 
@@ -2817,6 +2916,62 @@ export async function searchPeople(opts: {
         },
       },
     },
+    // #2300 — `isClinical` / `professorialRank` facet aggs, attached ONLY
+    // when `SEARCH_PEOPLE_CLINICAL_RANK_FACETS` is on — while off, neither
+    // key exists on `aggs` so the request body (and the facets response,
+    // which falls back to `0` / `[]` for an absent key below) is
+    // byte-identical to today.
+    ...(clinicalRankFacetsOn
+      ? {
+          // Excluding-self true/false counts, matching `activityHasGrants`'s
+          // filter+term-clause template (the closer shape per spec) — one agg
+          // per boolean state rather than a `terms` agg on the field, so both
+          // counts share the exact-same filtersExcept reconstruction.
+          isClinicalTrue: {
+            filter: {
+              bool: { filter: [...filtersExcept("isClinical"), { term: { isClinical: true } }] },
+            },
+          },
+          isClinicalFalse: {
+            filter: {
+              bool: { filter: [...filtersExcept("isClinical"), { term: { isClinical: false } }] },
+            },
+          },
+          // Multi-select keyword buckets, same `terms` shape as `personTypes`.
+          // size 10 gives headroom past the 3 known values (Assistant /
+          // Associate / Professor) without needing per-release tuning.
+          professorialRanks: {
+            filter: { bool: { filter: filtersExcept("professorialRank") } },
+            aggs: { keys: { terms: { field: "professorialRank", size: 10 } } },
+          },
+        }
+      : {}),
+    // #2306 — "Early Stage Investigator" facet agg, attached ONLY when
+    // `SEARCH_PEOPLE_ESI_FACET` is on — independent flag from the pair above.
+    ...(resolveSearchPeopleEsiFacet()
+      ? {
+          earlyStageInvestigatorTrue: {
+            filter: {
+              bool: {
+                filter: [
+                  ...filtersExcept("earlyStageInvestigator"),
+                  { term: { esiEligible: true } },
+                ],
+              },
+            },
+          },
+          earlyStageInvestigatorFalse: {
+            filter: {
+              bool: {
+                filter: [
+                  ...filtersExcept("earlyStageInvestigator"),
+                  { term: { esiEligible: false } },
+                ],
+              },
+            },
+          },
+        }
+      : {}),
     // Issue #310 / SPEC §9 — `attributionBoostFired` telemetry. Counts docs in
     // the scored set (must + always-on filters, i.e. the function_score scope,
     // before post_filter) that ALSO carry a descendant UI. `doc_count > 0`
@@ -3430,6 +3585,13 @@ export async function searchPeople(opts: {
       piAny?: { doc_count: number };
       piActive?: { doc_count: number };
       piMulti?: { doc_count: number };
+      // #2300 — present only when SEARCH_PEOPLE_CLINICAL_RANK_FACETS is on.
+      isClinicalTrue?: { doc_count: number };
+      isClinicalFalse?: { doc_count: number };
+      professorialRanks?: { keys: { buckets: Bucket[] } };
+      // #2306 — present only when SEARCH_PEOPLE_ESI_FACET is on.
+      earlyStageInvestigatorTrue?: { doc_count: number };
+      earlyStageInvestigatorFalse?: { doc_count: number };
       attributionMatch?: { doc_count: number };
     };
   };
@@ -4327,6 +4489,23 @@ export async function searchPeople(opts: {
         any: r.aggregations?.piAny?.doc_count ?? 0,
         active: r.aggregations?.piActive?.doc_count ?? 0,
         multi: r.aggregations?.piMulti?.doc_count ?? 0,
+      },
+      // #2300 — `0`/`0` (never omitted) while SEARCH_PEOPLE_CLINICAL_RANK_FACETS
+      // is off / pre-reindex (the aggs are absent from `r.aggregations` in
+      // that case, so both `?? 0` fall through).
+      isClinical: {
+        true: r.aggregations?.isClinicalTrue?.doc_count ?? 0,
+        false: r.aggregations?.isClinicalFalse?.doc_count ?? 0,
+      },
+      professorialRank: (r.aggregations?.professorialRanks?.keys.buckets ?? []).map((b) => ({
+        value: b.key,
+        count: b.doc_count,
+      })),
+      // #2306 — same absent-agg → `0`/`0` fallback while SEARCH_PEOPLE_ESI_FACET
+      // is off / pre-reindex.
+      earlyStageInvestigator: {
+        true: r.aggregations?.earlyStageInvestigatorTrue?.doc_count ?? 0,
+        false: r.aggregations?.earlyStageInvestigatorFalse?.doc_count ?? 0,
       },
     },
   };

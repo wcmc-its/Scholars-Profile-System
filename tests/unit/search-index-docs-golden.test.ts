@@ -266,6 +266,9 @@ describe("buildPeopleDoc — golden snapshots", () => {
       primaryDepartment: "Department of Medicine",
       overview: "<p>Bio.</p>",
       roleCategory: "faculty",
+      // #2300 — direct-copy scalars (PEOPLE_INDEX_SELECT now selects both).
+      hasClinicalProfile: true,
+      professorialRank: "Associate Professor",
       deptCode: "MED",
       divCode: "CARD",
       department: { name: "Medicine" },
@@ -355,6 +358,10 @@ describe("buildPeopleDoc — golden snapshots", () => {
       primaryDepartment: "Department of Misc",
       overview: null,
       roleCategory: "faculty",
+      // #2300 — direct-copy scalars: no clinical profile, un-backfilled rank
+      // (OMIT-on-empty for professorialRank — see the "no rank" branch).
+      hasClinicalProfile: false,
+      professorialRank: null,
       deptCode: null,
       divCode: null,
       department: null,

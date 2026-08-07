@@ -324,6 +324,20 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   const activity = parseList(sp.activity).filter(
     (a): a is ActivityFilter => a === "has_grants" || a === "recent_pub",
   );
+  // #2300 — `isClinical` (boolean-ish) + `professorialRank` (repeated
+  // multi-select), same URL-param shapes as `app/api/search/route.ts`.
+  // Accepted regardless of `SEARCH_PEOPLE_CLINICAL_RANK_FACETS` — searchPeople
+  // no-ops the filter (and FacetSidebar hides the controls below) while the
+  // flag is off / the people index is pre-reindex.
+  const isClinical = (Array.isArray(sp.isClinical) ? sp.isClinical[0] : sp.isClinical) === "true";
+  const professorialRank = parseList(sp.professorialRank);
+  // #2306 — "Early Stage Investigator" boolean param, named
+  // `earlyStageInvestigator` (never `esi`) so a bookmarked URL never carries
+  // the bare acronym. Gated behind its own `SEARCH_PEOPLE_ESI_FACET` flag.
+  const earlyStageInvestigator =
+    (Array.isArray(sp.earlyStageInvestigator)
+      ? sp.earlyStageInvestigator[0]
+      : sp.earlyStageInvestigator) === "true";
 
   // Issue #233 — Principal Investigator facet. Single-select; `none` and
   // unset both mean "no filter" (URL contract). `pi_min` is meaningful only
@@ -467,6 +481,11 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             activity: activity.length > 0 ? activity : undefined,
             pi,
             piMin,
+            // #2300 / #2306 — accepted unconditionally; searchPeople gates each
+            // behind its own flag and no-ops while off / pre-reindex.
+            isClinical: isClinical ? true : undefined,
+            professorialRank: professorialRank.length > 0 ? professorialRank : undefined,
+            earlyStageInvestigator: earlyStageInvestigator ? true : undefined,
           },
           relevanceMode: peopleRelevanceMode,
           shape: peopleQueryShape,
@@ -628,6 +647,10 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
         activity: activity.length > 0 ? activity : undefined,
         pi,
         piMin,
+        // #2300 / #2306 — same no-op-while-off posture as the list query above.
+        isClinical: isClinical ? true : undefined,
+        professorialRank: professorialRank.length > 0 ? professorialRank : undefined,
+        earlyStageInvestigator: earlyStageInvestigator ? true : undefined,
       },
       // PR-5: route the §6.1 shape templates on the SSR path too.
       relevanceMode: peopleRelevanceMode,
@@ -868,6 +891,9 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 activity={activity}
                 pi={pi}
                 piMin={piMin}
+                isClinical={isClinical}
+                professorialRank={professorialRank}
+                earlyStageInvestigator={earlyStageInvestigator}
                 scope={scope}
                 concept={concept}
                 scopeHrefs={scopeHrefs}
@@ -1138,6 +1164,9 @@ async function PeopleResults({
   activity,
   pi,
   piMin,
+  isClinical,
+  professorialRank,
+  earlyStageInvestigator,
   scope,
   concept,
   scopeHrefs,
@@ -1156,6 +1185,17 @@ async function PeopleResults({
   activity: ActivityFilter[];
   pi: PiFilter | undefined;
   piMin: number;
+  /** #2300 — active `isClinical` boolean filter. Accepted regardless of
+   *  `SEARCH_PEOPLE_CLINICAL_RANK_FACETS`; FacetSidebar hides the checkbox
+   *  while the facet is absent from the response (flag off / pre-reindex). */
+  isClinical: boolean;
+  /** #2300 — active `professorialRank` multi-select filter, same shape as
+   *  `personType`. */
+  professorialRank: string[];
+  /** #2306 — active "Early Stage Investigator" boolean filter. Accepted
+   *  regardless of `SEARCH_PEOPLE_ESI_FACET`; FacetSidebar hides the checkbox
+   *  while the facet is absent from the response. */
+  earlyStageInvestigator: boolean;
   scope: Scope;
   concept: ConceptInfo | null;
   scopeHrefs: Record<Scope, string>;
@@ -1205,6 +1245,10 @@ async function PeopleResults({
     for (const v of deptDiv) sp.append("deptDiv", v);
     for (const v of personType) sp.append("personType", v);
     for (const v of activity) sp.append("activity", v);
+    // #2300 / #2306 — same URL-param shapes as `app/api/search/route.ts`.
+    if (isClinical) sp.set("isClinical", "true");
+    for (const v of professorialRank) sp.append("professorialRank", v);
+    if (earlyStageInvestigator) sp.set("earlyStageInvestigator", "true");
     if (pi) sp.set("pi", pi);
     // `pi_min` is only meaningful for pi=multi; default value is dropped
     // from the URL to keep saved bookmarks tidy.
@@ -1232,6 +1276,17 @@ async function PeopleResults({
       const current = sp.getAll(axis);
       sp.delete(axis);
       for (const v of current) if (v !== value) sp.append(axis, v);
+    });
+
+  // #2300 / #2306 — single-boolean facet toggle (`isClinical` /
+  // `earlyStageInvestigator`), same "set to true / delete" shape as the
+  // `isClinical`/`earlyStageInvestigator` param contract in
+  // `app/api/search/route.ts`. Distinct from `toggleHref` above because these
+  // axes are single boolean-ish params, not repeated multi-select values.
+  const toggleBooleanHref = (axis: string, currentlyActive: boolean) =>
+    buildUrl((sp) => {
+      if (currentlyActive) sp.delete(axis);
+      else sp.set(axis, "true");
     });
 
   // Issue #233 — single-select PI radio. `null` clears the filter (returns
@@ -1287,6 +1342,27 @@ async function PeopleResults({
     chips.push({
       label: v === "has_grants" ? "Has active grants" : "Published in last 2 years",
       removeHref: removeHref("activity", v),
+    });
+  }
+  // #2300 — `isClinical` + `professorialRank` chips.
+  if (isClinical) {
+    chips.push({
+      label: "Clinical",
+      removeHref: toggleBooleanHref("isClinical", true),
+    });
+  }
+  for (const v of professorialRank) {
+    chips.push({
+      label: v,
+      removeHref: removeHref("professorialRank", v),
+    });
+  }
+  // #2306 — "Early Stage Investigator" chip. Full term, per the no-bare-ESI
+  // rule — see the FacetSidebar checkbox below for the definition tooltip.
+  if (earlyStageInvestigator) {
+    chips.push({
+      label: "Early Stage Investigator",
+      removeHref: toggleBooleanHref("earlyStageInvestigator", true),
     });
   }
   if (pi) {
@@ -1348,12 +1424,19 @@ async function PeopleResults({
         personTypes={result.facets.personTypes}
         activity={result.facets.activity}
         piFacets={result.facets.pi}
+        isClinicalFacet={result.facets.isClinical}
+        professorialRanks={result.facets.professorialRank}
+        earlyStageInvestigatorFacet={result.facets.earlyStageInvestigator}
         activeDeptDiv={deptDiv}
         activePersonType={personType}
         activeActivity={activity}
         activePi={pi}
         activePiMin={piMin}
+        activeIsClinical={isClinical}
+        activeProfessorialRank={professorialRank}
+        activeEarlyStageInvestigator={earlyStageInvestigator}
         toggleHref={toggleHref}
+        toggleBooleanHref={toggleBooleanHref}
         setPiHref={setPiHref}
         setPiMinHref={setPiMinHref}
         clearAllHref={clearAllHref}
@@ -2607,17 +2690,32 @@ function ResultsToolbar({
 /* ============================================================
  * Sidebar — checkbox-style facet lists
  * ============================================================ */
+// #2306 — full NIH-style definition surfaced by the "Early Stage Investigator"
+// facet's info affordance. The bare "(ESI)" here is parenthetical INSIDE the
+// full term's own definition — the one place this repo's "no bare ESI as a
+// primary label" rule allows it (see `resolveSearchPeopleEsiFacet`'s
+// doc-comment in `lib/api/search-flags.ts`).
+const EARLY_STAGE_INVESTIGATOR_DEFINITION =
+  "Within 10 years of their terminal research or clinical degree, with no prior major independent research award as principal investigator — the NIH's definition of an Early Stage Investigator (ESI).";
+
 function FacetSidebar({
   deptDivs,
   personTypes,
   activity,
   piFacets,
+  isClinicalFacet,
+  professorialRanks,
+  earlyStageInvestigatorFacet,
   activeDeptDiv,
   activePersonType,
   activeActivity,
   activePi,
   activePiMin,
+  activeIsClinical,
+  activeProfessorialRank,
+  activeEarlyStageInvestigator,
   toggleHref,
+  toggleBooleanHref,
   setPiHref,
   setPiMinHref,
   clearAllHref,
@@ -2627,17 +2725,44 @@ function FacetSidebar({
   personTypes: SearchFacetBucket[];
   activity: { hasGrants: number; recentPub: number };
   piFacets: { none: number; any: number; active: number; multi: number };
+  /** #2300 — `isClinical` checkbox facet bucket counts. `{ true: 0, false: 0 }`
+   *  while `SEARCH_PEOPLE_CLINICAL_RANK_FACETS` is off / pre-reindex — the
+   *  checkbox renders only when at least one count is nonzero, same
+   *  defensive posture as `personTypes.length > 0` above. */
+  isClinicalFacet: { true: number; false: number };
+  /** #2300 — `professorialRank` multi-select facet buckets, same shape as
+   *  `personTypes`. Empty while the flag is off / pre-reindex. */
+  professorialRanks: SearchFacetBucket[];
+  /** #2306 — "Early Stage Investigator" checkbox facet bucket counts, same
+   *  shape/gating as `isClinicalFacet`, behind the independent
+   *  `SEARCH_PEOPLE_ESI_FACET` flag. */
+  earlyStageInvestigatorFacet: { true: number; false: number };
   activeDeptDiv: string[];
   activePersonType: string[];
   activeActivity: ActivityFilter[];
   activePi: PiFilter | undefined;
   activePiMin: number;
+  activeIsClinical: boolean;
+  activeProfessorialRank: string[];
+  activeEarlyStageInvestigator: boolean;
   toggleHref: (axis: string, value: string) => string;
+  /** #2300 / #2306 — single-boolean toggle for `isClinical` /
+   *  `earlyStageInvestigator` (set-to-true / delete, not the multi-select
+   *  append/remove `toggleHref` uses). */
+  toggleBooleanHref: (axis: string, currentlyActive: boolean) => string;
   setPiHref: (next: PiFilter | null) => string;
   setPiMinHref: (next: number) => string;
   clearAllHref: string;
   hasActiveFilters: boolean;
 }) {
+  // #2300 — both facets share `SEARCH_PEOPLE_CLINICAL_RANK_FACETS`, so a flag-
+  // off (or pre-reindex) backend zeroes/empties both at once; gate each
+  // control on its own bucket presence anyway (mirrors `personTypes.length >
+  // 0`) so neither renders inert if the two ever drift.
+  const isClinicalFacetPresent = isClinicalFacet.true > 0 || isClinicalFacet.false > 0;
+  // #2306 — independent flag/gate from the pair above.
+  const earlyStageInvestigatorFacetPresent =
+    earlyStageInvestigatorFacet.true > 0 || earlyStageInvestigatorFacet.false > 0;
   // Issue #233 — `pi=active|multi` is a strict subset of `hasActiveGrants:true`,
   // so the Activity checkbox is presentational-only disabled with a tooltip
   // to prevent dead-click confusion. URL contract still accepts both.
@@ -2673,6 +2798,40 @@ function FacetSidebar({
         </FacetGroup>
       ) : null}
 
+      {/* #2300 — direct copy of `Scholar.professorialRank`, same
+          multi-select shape/treatment as "Scholar type" above. Renders only
+          when the API response actually carries rank buckets (flag off /
+          pre-reindex ⇒ empty array ⇒ no group, never an inert control). */}
+      {professorialRanks.length > 0 ? (
+        <FacetGroup label="Professorial rank">
+          {sortActiveFirst(professorialRanks, (r) =>
+            activeProfessorialRank.includes(r.value),
+          ).map((r) => (
+            <FacetCheckbox
+              key={r.value}
+              label={r.value}
+              count={r.count}
+              isActive={activeProfessorialRank.includes(r.value)}
+              href={toggleHref("professorialRank", r.value)}
+            />
+          ))}
+        </FacetGroup>
+      ) : null}
+
+      {/* #2300 — direct copy of `Scholar.hasClinicalProfile`; single boolean
+          toggle, same treatment as the Activity checkboxes below. Renders
+          only when the facet bucket is present in the response. */}
+      {isClinicalFacetPresent ? (
+        <FacetGroup label="Clinical">
+          <FacetCheckbox
+            label="Clinical"
+            count={isClinicalFacet.true}
+            isActive={activeIsClinical}
+            href={toggleBooleanHref("isClinical", activeIsClinical)}
+          />
+        </FacetGroup>
+      ) : null}
+
       {deptDivs.length > 0 ? (
         <FacetGroup label="Department / division / center" collapseAfter={5}>
           {sortActiveFirst(deptDivs, (d) => activeDeptDiv.includes(d.value)).map((d) => (
@@ -2704,6 +2863,40 @@ function FacetSidebar({
           href={toggleHref("activity", "recent_pub")}
         />
       </FacetGroup>
+
+      {/* #2306 — "Early Stage Investigator" checkbox, behind its own
+          `SEARCH_PEOPLE_ESI_FACET` kill switch (independent of the
+          clinical/rank pair above — this derivation is novel/riskier).
+          Renders only when the facet bucket is present in the response. The
+          "(?)" affordance is the smallest safe way to surface the NIH
+          definition inline: it's a plain `<span>` HoverTooltip trigger (no
+          nested link/button), and HoverTooltip is already a "use client"
+          leaf (components/ui/hover-tooltip.tsx) reused here as-is — adding
+          "use client" to this server component (or to page.tsx) would break
+          its SSR facet-toggle URL-state architecture. */}
+      {earlyStageInvestigatorFacetPresent ? (
+        <FacetGroup label="Early Stage Investigator">
+          <FacetCheckbox
+            label={
+              <span className="inline-flex items-center gap-1">
+                Early Stage Investigator
+                <HoverTooltip text={EARLY_STAGE_INVESTIGATOR_DEFINITION} wide>
+                  <span
+                    aria-label={`What is an Early Stage Investigator? ${EARLY_STAGE_INVESTIGATOR_DEFINITION}`}
+                    tabIndex={0}
+                    className="shrink-0 text-[12px] leading-none text-[#5a5a5a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#2c4f6e]"
+                  >
+                    (?)
+                  </span>
+                </HoverTooltip>
+              </span>
+            }
+            count={earlyStageInvestigatorFacet.true}
+            isActive={activeEarlyStageInvestigator}
+            href={toggleBooleanHref("earlyStageInvestigator", activeEarlyStageInvestigator)}
+          />
+        </FacetGroup>
+      ) : null}
 
       {/* Issue #233 — Principal Investigator facet. Single-select radio
           immediately after Activity; numeric stepper renders only when
