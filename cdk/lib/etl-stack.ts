@@ -835,8 +835,21 @@ export class EtlStack extends Stack {
     //
     // Verify with `describe-alarm-history --history-item-type Action`, never
     // `describe-alarms` — the alarm looks healthy either way.
+    //
+    // The CloudWatch grant carries an aws:SourceAccount condition on purpose.
+    // A bare grantPublish is BROADER than the implicit default policy it is
+    // restoring: the default let only the owning account publish, so granting
+    // the service principal unconditionally hands any account's alarms a path
+    // in. The condition is the confused-deputy guard the default gave away.
     this.failureTopic.grantPublish(new iam.ServicePrincipal("states.amazonaws.com"));
-    this.failureTopic.grantPublish(new iam.ServicePrincipal("cloudwatch.amazonaws.com"));
+    this.failureTopic.addToResourcePolicy(
+      new iam.PolicyStatement({
+        principals: [new iam.ServicePrincipal("cloudwatch.amazonaws.com")],
+        actions: ["sns:Publish"],
+        resources: [this.failureTopic.topicArn],
+        conditions: { StringEquals: { "aws:SourceAccount": this.account } },
+      }),
+    );
 
     // PR-7 — P1 page topic. Abort-tier step failures publish here (vs the
     // warn-tier etl-failures topic); the relay's severityForRecord defaults any
@@ -845,9 +858,19 @@ export class EtlStack extends Stack {
       topicName: `etl-page-${env}`,
       displayName: `SPS ETL page (${env})`,
     });
-    // Same two principals, same reason as failureTopic above.
+    // Same two principals, same reason, same source-account condition as
+    // failureTopic above. No alarm points here today, so the replaced default
+    // policy is latent rather than live — it would deny the first alarm ever
+    // pointed at the page tier.
     this.pageTopic.grantPublish(new iam.ServicePrincipal("states.amazonaws.com"));
-    this.pageTopic.grantPublish(new iam.ServicePrincipal("cloudwatch.amazonaws.com"));
+    this.pageTopic.addToResourcePolicy(
+      new iam.PolicyStatement({
+        principals: [new iam.ServicePrincipal("cloudwatch.amazonaws.com")],
+        actions: ["sns:Publish"],
+        resources: [this.pageTopic.topicArn],
+        conditions: { StringEquals: { "aws:SourceAccount": this.account } },
+      }),
+    );
 
     // ------------------------------------------------------------------
     // Helper -- build a step's SNS-notify state. The topic depends on the

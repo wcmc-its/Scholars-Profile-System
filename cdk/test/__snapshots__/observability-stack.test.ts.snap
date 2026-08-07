@@ -739,9 +739,14 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
           "Statement": [
             {
               "Action": "sns:Publish",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": "123456789012",
+                },
+              },
               "Effect": "Allow",
               "Principal": {
-                "Service": "budgets.amazonaws.com",
+                "Service": "cloudwatch.amazonaws.com",
               },
               "Resource": {
                 "Ref": "NotifyTopic5FFA0016",
@@ -752,12 +757,23 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
               "Action": "sns:Publish",
               "Effect": "Allow",
               "Principal": {
-                "Service": "costalerts.amazonaws.com",
+                "Service": "budgets.amazonaws.com",
               },
               "Resource": {
                 "Ref": "NotifyTopic5FFA0016",
               },
               "Sid": "1",
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "costalerts.amazonaws.com",
+              },
+              "Resource": {
+                "Ref": "NotifyTopic5FFA0016",
+              },
+              "Sid": "2",
             },
           ],
           "Version": "2012-10-17",
@@ -2056,6 +2072,37 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         "TopicName": "sps-notify-staging",
       },
       "Type": "AWS::SNS::Topic",
+    },
+    "NotifyTopicPolicy23E22CE3": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sns:Publish",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": "123456789012",
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudwatch.amazonaws.com",
+              },
+              "Resource": {
+                "Ref": "NotifyTopic5FFA0016",
+              },
+              "Sid": "0",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Topics": [
+          {
+            "Ref": "NotifyTopic5FFA0016",
+          },
+        ],
+      },
+      "Type": "AWS::SNS::TopicPolicy",
     },
     "NotifyTopicpaa2013medcornelledu2E34CAB1": {
       "Properties": {
