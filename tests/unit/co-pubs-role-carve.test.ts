@@ -16,6 +16,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
+import { HIDDEN_ROLE_CATEGORIES } from "@/lib/eligibility";
 
 const { mockNotFound } = vi.hoisted(() => ({
   mockNotFound: vi.fn(() => {
@@ -113,20 +114,63 @@ describe("co-pubs child routes — a hidden mentor is a 404, not a name", () => 
 });
 
 describe("co-pubs child routes — the carve is in the query too", () => {
-  it("carves at the QUERY layer and selects the column the post-filter reads", async () => {
-    scholarFindFirst.mockResolvedValue(null);
-    await expect(RollupPage(rollupParams)).rejects.toThrow("NEXT_NOT_FOUND");
-
-    const { where, select } = scholarFindFirst.mock.calls[0][0];
+  /** `assertRoleCarve` from `tests/unit/url-resolver.test.ts`, same shape. */
+  function assertRoleCarve(where: Record<string, unknown>) {
     expect(where.slug).toBe(SLUG);
     expect(where.deletedAt).toBeNull();
     expect(where.status).toBe("active");
-    expect(where.OR).toContainEqual({ roleCategory: null });
-    const notInBranch = (where.OR as Array<Record<string, { notIn?: string[] }>>).find(
-      (b) => b.roleCategory?.notIn,
-    );
-    expect(notInBranch?.roleCategory.notIn).toContain("doctoral_student");
-    // Drop this and the post-filter reads `undefined`, which passes: fails OPEN.
+    const or = where.OR as Array<Record<string, { notIn?: string[] }>> | undefined;
+    expect(or).toContainEqual({ roleCategory: null });
+    const notIn = or?.find((b) => b.roleCategory?.notIn)?.roleCategory.notIn;
+    for (const hidden of HIDDEN_ROLE_CATEGORIES) expect(notIn).toContain(hidden);
+  }
+
+  /** Drop `roleCategory` from the select and the post-filter reads `undefined`,
+   *  which `isPubliclyDisplayed` passes: the second layer fails OPEN. */
+  function assertSelectsRole(select: Record<string, unknown>) {
     expect(select.roleCategory).toBe(true);
-  });
+  }
+
+  // Each route resolves its mentor with its OWN findFirst; one route's carve
+  // vouches for nothing about the other three, so each gets its own assertion.
+  const routes: Array<[string, () => Promise<void>]> = [
+    [
+      "rollup page",
+      async () => {
+        await expect(RollupPage(rollupParams)).rejects.toThrow("NEXT_NOT_FOUND");
+      },
+    ],
+    [
+      "per-mentee page",
+      async () => {
+        await expect(MenteePage(menteeParams)).rejects.toThrow("NEXT_NOT_FOUND");
+      },
+    ],
+    [
+      "rollup export",
+      async () => {
+        expect((await rollupExport(exportRequest("export"), rollupParams)).status).toBe(404);
+      },
+    ],
+    [
+      "per-mentee export",
+      async () => {
+        expect((await menteeExport(exportRequest("zzz9999/export"), menteeParams)).status).toBe(
+          404,
+        );
+      },
+    ],
+  ];
+
+  it.each(routes)(
+    "%s carves at the QUERY layer and selects the column the post-filter reads",
+    async (_label, drive) => {
+      scholarFindFirst.mockResolvedValue(null);
+      await drive();
+
+      const { where, select } = scholarFindFirst.mock.calls[0][0];
+      assertRoleCarve(where);
+      assertSelectsRole(select);
+    },
+  );
 });
