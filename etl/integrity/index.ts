@@ -1,6 +1,6 @@
 /**
  * Post-ETL data-integrity gate — reliability-audit PR-5
- * (docs/etl-reliability-audit-2026-07-02.md).
+ * (docs/audits/etl-reliability-audit-2026-07-02.md).
  *
  * Runs as the TERMINAL step of each cadence state machine, after search:index
  * and revalidate, and fails (exit 1 -> States.TaskFailed -> Catch -> SNS ->

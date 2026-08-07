@@ -510,7 +510,7 @@ describe("rankResearchersForDescriptionSpine", () => {
     // sponsor's words, but it must NOT enter the BM25 query. Searching it was tried behind
     // MATCHA_GLOSS_QUERY and REJECTED on measurement: a long prose gloss narrows retrieval, and
     // the best gloss variant lost 15 judged-relevant scholars to gain 1 (see the spine's own
-    // comment and docs/2026-07-19-matcha-gloss-query-concept-vs-keyword-handoff.md).
+    // comment and docs/audits/matcha-gloss-query-ab-2026-07-19.md).
     //
     // This is the regression guard for that decision: the query is the bare member tokens, and
     // neither the gloss alone nor token+gloss may reappear as a query.

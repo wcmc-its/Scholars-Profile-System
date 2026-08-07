@@ -807,7 +807,7 @@ export async function rankResearchersForDescriptionSpine(
     // NOT in here — it is display-only (see `clusterGloss` above, which still rides the wire for
     // the rail's "sponsor's words" line).
     //
-    // MEASURED AND REJECTED (2026-07-19, `docs/2026-07-19-matcha-gloss-query-concept-vs-keyword-handoff.md`).
+    // MEASURED AND REJECTED (2026-07-19, `docs/audits/matcha-gloss-query-ab-2026-07-19.md`).
     // Searching the gloss was tried behind `MATCHA_GLOSS_QUERY` on the premise that it ADDS recall
     // for the sponsor's sense. A three-arm in-VPC A/B over the 15 sponsor fixtures says the premise
     // was backwards — a long prose gloss NARROWS the BM25 query:

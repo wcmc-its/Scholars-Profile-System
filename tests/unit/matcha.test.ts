@@ -1,5 +1,6 @@
 /**
- * CTL sponsor match (`docs/2026-07-09-ctl-technologies-handoff.md` §2):
+ * CTL sponsor match — a pasted sponsor description ranked on topical fit alone
+ * (no stage axis, no ESI demotion, unlike the Funding matcher):
  *  - the (cwid, pmid) dedupe — `publication_topic` keys on (pmid, cwid,
  *    parentTopicId), so one paper yields one row PER PARENT TOPIC and must be
  *    credited once (max-`score` row), never once per topic;

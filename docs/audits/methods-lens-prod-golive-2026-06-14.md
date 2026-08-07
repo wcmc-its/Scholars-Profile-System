@@ -1,5 +1,9 @@
 # Methods lens — production go-live runbook
 
+> **Snapshot as of 2026-06-14 — point-in-time; not maintained.** Kept for provenance under [Audits & snapshots](../DOCUMENTATION-REGISTRY.md).
+>
+> **The cutover this describes was EXECUTED.** Prod flipped 2026-07-05 (#962/#1481): `METHODS_LENS_ENABLED`, `METHODS_LENS_SENSITIVE_GATE`, `METHODS_LENS_FAMILY_FILTER`, `METHODS_LENS_FAMILY_DEFINITIONS`, `CENTER_METHODS_FACET`, `ORG_UNIT_METHODS_CHIPS` and `ORG_UNIT_METHODS_FACET` are now unconditional `"on"` in `cdk/lib/app-stack.ts`, not the `env === "staging" ? "on" : "off"` this runbook describes. Every claim below that methods is prod-dark is FALSE as of that date. Read this as the plan of record for how the flip was done, never as current state.
+
 Status: **PREP / planning.** The methods suite is staging-live + verified, prod-dark. This runbook is the operator package for flipping it on in prod. Diffs captured 2026-06-14 against `origin/master` @ `9511b550`; **re-diff immediately before deploying** (master is moving under an active parallel session).
 
 ## What "methods go-live" covers

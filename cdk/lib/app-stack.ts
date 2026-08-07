@@ -1425,7 +1425,7 @@ export class AppStack extends Stack {
         // MATCHA_GLOSS_QUERY was the other one and is GONE — its A/B ran on 2026-07-19 and it lost
         // on every metric (nDCG 0.613 off vs 0.535 best gloss variant; 15 judged-relevant scholars
         // lost to gain 1). Retrieval now always uses the bare member tokens, so there is no flag
-        // left to set. See docs/2026-07-19-matcha-gloss-query-concept-vs-keyword-handoff.md.
+        // left to set. See docs/audits/matcha-gloss-query-ab-2026-07-19.md.
         MATCHA_RECENCY: env === "staging" ? "on" : "off",
         // MATCHA_GLOSS_RERANK — gloss as an OpenSearch rescore that re-orders the per-cluster pool
         // by BM25(gloss). A RANKING change ⇒ eval-gated. The 2026-07-22 in-VPC λ-sweep cleared the
@@ -1836,7 +1836,7 @@ export class AppStack extends Stack {
         // clinicalSpecialties match the query; lifts thin-publication clinician-experts
         // (measured: obesity Igel #183->#12). No reindex (query-time boost). Query-tunable
         // weight via SEARCH_PEOPLE_CLINICAL_FN_WEIGHT (code default 3). Staging-on after the
-        // 2026-07-02 A/B (docs/search-area-boost-ab-2026-07-02.md): strict win over the
+        // 2026-07-02 A/B (docs/audits/search-area-boost-ab-2026-07-02.md): strict win over the
         // staging default — clinician-expert medRank 14->9, zero per-query regressions.
         // Prod flipped on 2026-07-04 (#1466); clinicalSpecialties backfilled on prod (#1481).
         SEARCH_PEOPLE_CLINICAL_FN: "on",

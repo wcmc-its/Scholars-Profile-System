@@ -1,6 +1,6 @@
 /**
  * Volume guards for mirror-the-source ETL steps
- * (docs/etl-reliability-audit-2026-07-02.md, PR-1).
+ * (docs/audits/etl-reliability-audit-2026-07-02.md, PR-1).
  *
  * The mirror design deletes/tombstones whatever SPS holds that the source did
  * not return, which is correct on a healthy read and catastrophic on a

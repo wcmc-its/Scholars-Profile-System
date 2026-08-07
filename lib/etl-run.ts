@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 
 /**
  * Record an `etl_run` row around a step's main() — the audit-table contract
- * the `etl:freshness` heartbeat reads (docs/etl-reliability-audit-2026-07-02.md,
+ * the `etl:freshness` heartbeat reads (docs/audits/etl-reliability-audit-2026-07-02.md,
  * PR-4). Most ETL modules inline this create/update pattern themselves; this
  * helper exists for the steps that predate the etl_run table (search:index,
  * revalidate, the weekly grant enrichers, ...) so they become
