@@ -8,16 +8,20 @@
  *     client, so an anchoring or gating regression fails here rather than in
  *     prod. `@/lib/db` is mocked, so nothing constructs a connection.
  *
- * The three regressions this file exists to catch:
+ * The regressions this file exists to catch:
  *  - the "Never ran" row silently disappearing (it is the ONLY thing that
  *    separates "the chain aborted before this step" from "not deployed here");
  *  - an acknowledged staleness rendering as green or red instead of its own
  *    state;
  *  - freshness drifting back onto `completedAt` and letting a frozen artifact
- *    read as fresh.
+ *    read as fresh;
+ *  - a row that needs attention being filed into the COLLAPSED section, where
+ *    the whole point of the triage layout is that nobody has to open it;
+ *  - a source with no plain-language copy rendering as a blank name;
+ *  - the status emoji becoming the only carrier of the status.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 
 const {
   mockSession,
@@ -68,6 +72,7 @@ import {
   needsAttention,
   toSourceRow,
 } from "@/lib/api/etl-status";
+import { SOURCE_COPY, sourceDescription, sourceLabel } from "@/lib/edit/etl-source-copy";
 import { TRACKED, type TrackedSpec } from "@/lib/etl/freshness-policy";
 
 const HOUR = 60 * 60 * 1000;
@@ -123,6 +128,31 @@ const expectedSources = () =>
   Object.entries(TRACKED)
     .filter(([, spec]) => spec.envs === undefined || spec.envs.includes("prod"))
     .map(([source]) => source);
+
+/**
+ * Every expected source with a successful run two hours ago — the shape of a
+ * healthy night. The triage layout is only testable against this: with the
+ * empty default fixture every source is "never ran", so nothing lands in the
+ * collapsed section and a routing bug has nowhere to show up.
+ */
+const allHealthy = (at = NOW): Record<string, Fixture> =>
+  Object.fromEntries(
+    expectedSources().map((source) => [
+      source,
+      success({ completedAt: new Date(at - 2 * HOUR), manifestGeneratedAt: null }),
+    ]),
+  );
+
+/** A crashed attempt sitting on top of a still-recent success. */
+const crashed = (at = NOW): Fixture => ({
+  success: { completedAt: new Date(at - 26 * HOUR), manifestGeneratedAt: null },
+  attempt: {
+    status: "failed",
+    startedAt: new Date(at - 3 * HOUR),
+    completedAt: new Date(at - 2 * HOUR),
+    errorMessage: "connect ETIMEDOUT",
+  },
+});
 
 const nightly: TrackedSpec = { cadence: "nightly" };
 /** Hierarchy's real cadence — one of the two genuinely manifest-anchored sources. */
@@ -595,5 +625,178 @@ describe("/edit/etl-status page", () => {
     const { container } = render(await Page());
     expect(screen.getByTestId("etl-status-unavailable")).toBeTruthy();
     expect(container.querySelector("[data-testid='etl-status-table']")).toBeNull();
+  });
+});
+
+/**
+ * The triage layout. On a normal night 30 of 31 rows are green, so the ONE row
+ * an operator has to read is the whole product — everything here is about that
+ * row being in front of them rather than inside a collapsed table.
+ */
+describe("/edit/etl-status triage layout", () => {
+  const total = () => expectedSources().length;
+
+  it("keeps a row that needs attention out of the collapsed section", async () => {
+    fixtures = allHealthy();
+    fixtures.ASMS = crashed();
+    render(await Page());
+    const attention = screen.getByTestId("etl-status-attention");
+    const table = screen.getByTestId("etl-status-table");
+    // 🔴 The regression this whole file's layout half exists for: a failing
+    // import filed under "Running normally" is invisible behind a shut
+    // <details>, which is strictly worse than the flat table it replaced.
+    expect(within(attention).getByTestId("etl-status-row-ASMS")).toBeTruthy();
+    expect(within(table).queryByTestId("etl-status-row-ASMS")).toBeNull();
+    expect(attention.textContent).toContain("Needs attention (1)");
+    // …and the converse, so this is about routing and not about an empty table.
+    expect(within(table).getByTestId("etl-status-row-ED")).toBeTruthy();
+    expect(within(attention).queryByTestId("etl-status-row-ED")).toBeNull();
+    expect(within(table).getAllByTestId(/^etl-status-row-/).length).toBe(total() - 1);
+  });
+
+  it("collapses the healthy imports behind a native disclosure, shut by default", async () => {
+    fixtures = allHealthy();
+    render(await Page());
+    const details = screen.getByTestId("etl-status-normal");
+    // A native <details> is the entire feature: this page is a server
+    // component, and a client island here would be state nobody needs.
+    expect(details.tagName).toBe("DETAILS");
+    expect(details.hasAttribute("open")).toBe(false);
+    const summary = details.querySelector("summary");
+    expect(summary?.textContent).toContain(`Running normally (${total()})`);
+    // The collapsed line has to carry a fact, not just a count.
+    expect(summary?.textContent).toContain(`All ${total()} imports are up to date.`);
+    expect(summary?.textContent).toContain("Most recent:");
+  });
+
+  it("says so plainly when nothing needs attention, rather than showing an empty box", async () => {
+    fixtures = allHealthy();
+    render(await Page());
+    const attention = screen.getByTestId("etl-status-attention");
+    expect(attention.textContent).toContain("Needs attention (0)");
+    expect(attention.textContent).toContain(
+      `All ${total()} imports are current or already accounted for.`,
+    );
+    expect(attention.querySelectorAll("[data-testid^='etl-status-row-']").length).toBe(0);
+  });
+
+  it("still renders a source with no etl_run row at all, up in the attention section", async () => {
+    fixtures = allHealthy();
+    // Everything ran but Hierarchy, which has no row at all — the one signal
+    // that separates "the chain aborted before this step" from "not deployed".
+    delete fixtures.Hierarchy;
+    render(await Page());
+    const row = within(screen.getByTestId("etl-status-attention")).getByTestId(
+      "etl-status-row-Hierarchy",
+    );
+    expect(row.getAttribute("data-state")).toBe("never-ran");
+    expect(row.textContent).toContain("Never ran");
+    expect(
+      within(screen.getByTestId("etl-status-table")).queryByTestId("etl-status-row-Hierarchy"),
+    ).toBeNull();
+  });
+
+  // The one deliberate difference between the SECTION and the COUNT. An ack is
+  // the decision that nobody has to chase this today, so it must not be counted
+  // as a failure — but it is also the single row on a healthy page that is
+  // neither green nor actionable, and burying it inside a shut <details> is how
+  // it gets rediscovered from scratch every month.
+  it("shows a live acknowledgement up top without counting it as a failure", async () => {
+    const acked = Object.entries(TRACKED).find(([, s]) => s.ack !== undefined);
+    expect(acked?.[1].ack, "no source carries an ack any more").toBeDefined();
+    const [source, spec] = acked!;
+    const now = Date.parse(spec.ack!.until) - DAY;
+    vi.setSystemTime(now);
+    fixtures = allHealthy(now);
+    // Stale enough to trip the SLA, so the ack is live rather than moot.
+    fixtures[source] = {
+      success: {
+        completedAt: new Date(now - 60 * DAY),
+        manifestGeneratedAt: new Date(now - 60 * DAY),
+      },
+      attempt: {
+        status: "success",
+        startedAt: new Date(now - HOUR),
+        completedAt: new Date(now - HOUR),
+        errorMessage: null,
+      },
+    };
+    render(await Page());
+    const attention = screen.getByTestId("etl-status-attention");
+    const row = within(attention).getByTestId(`etl-status-row-${source}`);
+    expect(row.getAttribute("data-state")).toBe("known-issue");
+    expect(row.textContent).toContain("Known issue");
+    // Neither of the two lies a status board can tell about an accepted staleness.
+    expect(row.textContent).not.toContain("Up to date");
+    expect(row.textContent).not.toContain("Failed");
+    expect(row.querySelector("[data-testid='etl-status-pill']")?.className).not.toMatch(
+      /emerald|green|red/,
+    );
+    expect(row.textContent).toContain(spec.ack!.until);
+    expect(attention.textContent).toContain("Needs attention (1)");
+    // NOT counted: the headline still reports a clean board.
+    expect(screen.getByTestId("etl-status-headline").textContent).toContain(
+      `All ${total()} imports are current or already accounted for.`,
+    );
+    expect(
+      within(screen.getByTestId("etl-status-table")).queryByTestId(`etl-status-row-${source}`),
+    ).toBeNull();
+  });
+
+  it("names each import in plain language and keeps the raw key beside it", async () => {
+    fixtures = allHealthy();
+    fixtures["COI-Gap"] = crashed();
+    render(await Page());
+    for (const testid of ["etl-status-row-COI-Gap", "etl-status-row-ED"]) {
+      const row = screen.getByTestId(testid);
+      const source = testid.replace("etl-status-row-", "");
+      const copy = SOURCE_COPY[source];
+      expect(row.textContent).toContain(copy.label);
+      // The raw `etl_run.source` key stays on the page — it is what anyone
+      // reporting the problem onward has to quote — just not as the name.
+      expect(within(row).getByTestId("etl-status-source-key").textContent).toBe(source);
+    }
+    // The description is the point of the label: it says what breaks.
+    expect(screen.getByTestId("etl-status-row-COI-Gap").textContent).toContain(
+      SOURCE_COPY["COI-Gap"].description,
+    );
+  });
+
+  it("pairs the status emoji with the worded pill, and hides the emoji from assistive tech", async () => {
+    fixtures = allHealthy();
+    fixtures.ASMS = crashed();
+    render(await Page());
+    // The emoji must never be the ONLY carrier of the status: the pill beside
+    // it is what a screen reader gets, and what survives a font that has no
+    // colour glyph.
+    for (const [testid, emoji, label] of [
+      ["etl-status-row-ASMS", "🔴", "Failed"],
+      ["etl-status-row-ED", "🟢", "Up to date"],
+    ] as const) {
+      const row = screen.getByTestId(testid);
+      const icon = row.querySelector("[data-testid='etl-status-emoji']");
+      expect(icon?.textContent).toBe(emoji);
+      expect(icon?.getAttribute("aria-hidden")).toBe("true");
+      expect(row.querySelector("[data-testid='etl-status-pill']")?.textContent).toBe(label);
+    }
+  });
+});
+
+describe("etl source copy", () => {
+  // A source with no entry must render as ITSELF. A status board whose first
+  // column is empty for the newest import is worse than one that shows jargon.
+  it("falls back to the raw source key for a source it has no copy for yet", () => {
+    expect(sourceLabel("Brand-New-Import")).toBe("Brand-New-Import");
+    expect(sourceDescription("Brand-New-Import")).toBeNull();
+  });
+
+  it("gives every tracked source a plain-language name and description", () => {
+    for (const source of Object.keys(TRACKED)) {
+      // If this fails on a source you just added: add its copy, do not delete
+      // the assertion. The fallback above keeps the page honest meanwhile.
+      expect(SOURCE_COPY[source]?.label, `${source} has no plain-language label`).toBeTruthy();
+      expect(SOURCE_COPY[source]?.description, `${source} has no description`).toBeTruthy();
+      expect(SOURCE_COPY[source]?.label, `${source} is labelled with its raw key`).not.toBe(source);
+    }
   });
 });
