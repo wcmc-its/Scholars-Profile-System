@@ -61,6 +61,62 @@ describe("freshness SLAs", () => {
       ).toBeGreaterThan(0);
     }
   });
+
+  // These three are the sources with NO other detector, so dropping one out of
+  // TRACKED restores a total blind spot rather than merely losing a second
+  // opinion. Each is a continue-tier nightly step, so a failure never reaches
+  // the sps-etl-nightly-status-<env> alarm; and each records `rowsProcessed` =
+  // the line count of a curated CSV checked into this repo (33 / 8 / 77), which
+  // sits under etl:integrity's minPreviousRows=100 floor AND is constant
+  // between two runs of the same image, so the volume guard's drop ratio is 0
+  // by construction and lowering that floor would change nothing. Freshness is
+  // the whole net.
+  //
+  // What that net catches: the step DYING, the step being dropped from the
+  // nightly step list, and the step never being deployed to an env. `evaluate()`
+  // grades on the recency of the last `status:'success'` row and never reads
+  // `rowsProcessed`, so it does NOT catch a run that succeeds having processed
+  // nothing — that half is closed in each loader's readCurated, which refuses a
+  // curated CSV parsing to zero rows (tests/unit/etl-curated-csv-empty-guard).
+  const SOLE_DETECTOR_SOURCES = ["FamilySensitivity", "FamilySuppression", "MeshAlias"] as const;
+
+  // Resolve ONCE and assert it exists, rather than re-reading `TRACKED[source]?`
+  // in each assertion. Optional chaining makes `?.envs` and `?.ack` undefined —
+  // and therefore PASSING — when the entry is absent, so the two guards below
+  // used to go green on exactly the removal they exist to catch.
+  const trackedEntry = (source: (typeof SOLE_DETECTOR_SOURCES)[number]) => {
+    const entry = TRACKED[source];
+    expect(
+      entry,
+      `${source} dropped out of TRACKED — freshness is its only silent-failure detector`,
+    ).toBeDefined();
+    return entry!;
+  };
+
+  it.each(SOLE_DETECTOR_SOURCES)(
+    "tracks %s — freshness is its only silent-failure detector",
+    (source) => {
+      // Nightly, because all three are unconditional steps in the nightly
+      // chain (cdk/lib/etl-stack.ts). A longer cadence here would mean a dead
+      // step goes unreported for days.
+      expect(trackedEntry(source).cadence).toBe("nightly");
+    },
+  );
+
+  // All three run in BOTH envs — they are in the shared nightlySteps array,
+  // outside the `env === "staging"` split that scopes InfoEd. Narrowing one to
+  // a single env would silently restore the blind spot in the other, which is
+  // exactly how prod's MeshAnchor staleness went unnoticed for eight weeks.
+  it.each(SOLE_DETECTOR_SOURCES)("tracks %s in every env, not just one", (source) => {
+    expect(trackedEntry(source).envs).toBeUndefined();
+  });
+
+  // An ack silences a source, so an ack on one of these is the blind spot
+  // returning with paperwork. If one is ever genuinely needed, this test is
+  // the place to record the decision — deliberately, not by default.
+  it.each(SOLE_DETECTOR_SOURCES)("does not silence %s with an ack", (source) => {
+    expect(trackedEntry(source).ack).toBeUndefined();
+  });
 });
 
 /**

@@ -22,8 +22,10 @@ were never pulled. But the deeper finding was that **nobody had noticed for 8+ n
   aborting at its first step (`etl:ed` → `Connecting to ED LDAP… Error: Connection
   timeout`). Because the cadence is a sequential chain, a step-1 failure means
   `etl:reciter` and every downstream step **never ran** — the whole dataset froze.
-- The failures **did** raise signals — a per-step SNS publish *and* a CloudWatch
-  `ExecutionsFailed` alarm, both to the `etl-failures-<env>` SNS topic.
+- The failures **did** raise signals — a per-step SNS publish *and* the CloudWatch
+  status alarm (then `ExecutionsFailed` alone; now the
+  `ExecutionsFailed + ExecutionsTimedOut + ExecutionsAborted` sum), both to the
+  `etl-failures-<env>` SNS topic.
 - **That topic had no subscriber.** Every alert published into the void.
 
 So the gap was not missing alarms — it was an **unsubscribed alarm topic**. #595 wired the
@@ -42,7 +44,7 @@ payloads (`adaptive-card.ts`).
 | Signal | Source | Catches | Routing |
 |---|---|---|---|
 | **Per-step failure** | `NotifyX` SnsPublish in each step's `Catch` (etl-stack `buildStep`) | A specific step that threw — names the step (`Ed`, `Reciter`, …) and the execution | → `etl-failures` (custom payload) |
-| **Status alarm** | CloudWatch `ExecutionsFailed > 0` per state machine (`sps-etl-<cadence>-status-<env>`) | Any failed execution, *including* crashes before the per-step Catch runs | → `etl-failures` (alarm payload) |
+| **Status alarm** | CloudWatch metric math `ExecutionsFailed + ExecutionsTimedOut + ExecutionsAborted > 0` per state machine (`sps-etl-<cadence>-status-<env>`) | Any execution that ended *without succeeding*, including crashes before the per-step Catch runs, machine `timeout:` kills (which run **no** Catch, so nothing else notifies) and operator `StopExecution` | → `etl-failures` (alarm payload) |
 | **Cadence alarm** | CloudWatch `ExecutionsStarted < 1` over the cadence window, `treatMissingData: BREACHING` (`sps-etl-<cadence>-cadence-<env>`; nightly + weekly + heartbeat) | The schedule **never fired** — EventBridge rule disabled, IAM gap, etc. | → `etl-failures` (alarm payload) |
 | **Freshness heartbeat** | `etl:freshness` (daily `scholars-heartbeat-<env>` state machine) exits non-zero → its status alarm fires | **Green-but-stale**: an execution reported success while a source's data did not refresh; a source quietly dropped from the cadence; a partial run whose success row is now old | → `etl-failures` (alarm payload) |
 

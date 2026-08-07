@@ -17,6 +17,14 @@
  * until the next ≤1h refresh tick, so an aborted run causes no visible
  * breakage and a successful run is picked up within the hour (or on restart).
  *
+ * An EMPTY curated CSV is refused, not honoured. Step 3 is an unconditional
+ * `deleteMany({})`, so a zero-row parse truncates `mesh_curated_alias` and
+ * still records status='success' — invisible to the freshness monitor, which
+ * grades on the recency of the last SUCCESS and never reads rowsProcessed.
+ * Throwing converts that into a FAILED run, which is a signal something
+ * watches. To retire the alias layer deliberately, remove the step or clear
+ * the table explicitly — not by truncating the CSV.
+ *
  * Env:
  *   MESH_ALIAS_CURATED_PATH  (default etl/mesh-aliases/curated.csv)
  */
@@ -45,7 +53,22 @@ async function recordRun(args: {
   });
 }
 
-function readCurated(): AliasRow[] {
+/**
+ * Read + parse the curated CSV, refusing both ways it can yield zero rows.
+ *
+ * Exported for unit test. The two guards close the SAME hole from opposite
+ * ends: `replaceAliases([])` runs the unconditional `deleteMany({})` and then
+ * inserts nothing, and `main()` still records status='success' with
+ * rowsProcessed=0. Freshness cannot see that — it grades a source on the
+ * recency of its last SUCCESS row and never reads rowsProcessed — so a
+ * truncate-to-empty would look perfectly healthy. Throwing here leaves the
+ * table untouched (replaceAliases has not run) and records status='failed',
+ * which the freshness entry for MeshAlias does catch.
+ *
+ * A header-only file is the realistic shape: `parseAliasCsv` accepts it and
+ * returns [], which is why the ENOENT guard alone was not enough.
+ */
+export function readCurated(): AliasRow[] {
   const abs = resolve(process.cwd(), CURATED_PATH);
   let text: string;
   try {
@@ -58,10 +81,17 @@ function readCurated(): AliasRow[] {
     }
     throw err;
   }
-  return parseAliasCsv(text);
+  const rows = parseAliasCsv(text);
+  if (rows.length === 0) {
+    throw new Error(
+      `[MeshAlias] curated CSV parsed to 0 rows at ${abs} — refusing to wipe the alias table`,
+    );
+  }
+  return rows;
 }
 
-async function replaceAliases(rows: AliasRow[]): Promise<void> {
+/** Truncate + re-insert, in one transaction. Exported for unit test. */
+export async function replaceAliases(rows: AliasRow[]): Promise<void> {
   const CHUNK = 500;
   await db.write.$transaction(
     async (tx) => {
@@ -106,13 +136,22 @@ async function main(): Promise<void> {
   );
 }
 
-main()
-  .catch(async (err) => {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[MeshAlias] ${JSON.stringify({ event: "fatal", error: message })}`);
-    await recordRun({ status: "failed", rowsProcessed: 0, errorMessage: message }).catch(() => {});
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await db.write.$disconnect();
-  });
+// Guarded so the module can be imported by a unit test without running the ETL
+// (mirrors etl/family-suppression and etl/family-sensitivity). Verified true
+// under the `tsx etl/mesh-aliases/index.ts` invocation this ships as.
+const isDirectInvocation =
+  typeof process !== "undefined" &&
+  process.argv[1] !== undefined &&
+  import.meta.url === `file://${process.argv[1]}`;
+if (isDirectInvocation) {
+  main()
+    .catch(async (err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[MeshAlias] ${JSON.stringify({ event: "fatal", error: message })}`);
+      await recordRun({ status: "failed", rowsProcessed: 0, errorMessage: message }).catch(() => {});
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await db.write.$disconnect();
+    });
+}

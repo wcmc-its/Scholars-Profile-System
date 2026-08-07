@@ -1471,10 +1471,12 @@ export class EtlStack extends Stack {
     // machines (nightly + weekly + heartbeat = 3), seven total. (#595 added the
     // heartbeat machine + its two alarms.)
     //
-    // - **Status alarm** -- ExecutionsFailed sum > 0 over one period at
-    //   the cadence interval. Catches every failed execution including
+    // - **Status alarm** -- unsuccessful terminations, sum > 0 over one period
+    //   at the cadence interval. Catches every failed execution including
     //   ones that crash before the per-step Catch block runs. Created for
-    //   all three machines.
+    //   all three machines. "Unsuccessful" is ExecutionsFailed PLUS
+    //   ExecutionsTimedOut PLUS ExecutionsAborted -- see `unsuccessfulMetric`
+    //   below for why the first of those three is not enough on its own.
     // - **Cadence alarm** -- ExecutionsStarted sum < 1 over `cadenceWindow`.
     //   Catches EventBridge-rule disable / IAM gap / etc.
     //   `treatMissingData: BREACHING` so a total absence of metric data
@@ -1494,6 +1496,55 @@ export class EtlStack extends Stack {
     //   in the tests asserts the <=604800 product for every alarm.
     // ------------------------------------------------------------------
     const alarmAction = new cloudwatchActions.SnsAction(this.failureTopic);
+    /**
+     * Every way a state machine can end WITHOUT succeeding, as one metric:
+     * ExecutionsFailed + ExecutionsTimedOut + ExecutionsAborted.
+     *
+     * ExecutionsFailed alone -- what every status alarm here used to watch --
+     * covers only one of the three unsuccessful terminal states, and it is the
+     * one that already notifies by another route (a Catch publishes to
+     * etl-failures before the Fail state runs). The other two are silent:
+     *
+     * - TIMED_OUT. A machine that hits its own `timeout:` is terminated by
+     *   Step Functions; NO Catch runs, so nothing publishes to etl-failures
+     *   and ExecutionsFailed stays at zero. The run vanishes. This is not
+     *   hypothetical on the short-lived machines: their per-task retry budget
+     *   exceeds the machine timeout (reconcile/cdn-reconcile allow 3 x 14 min
+     *   of attempts under a 15 min cap), so a hung task CONVERTS a failure
+     *   that would have notified into one that does not.
+     * - ABORTED. An operator StopExecution, and the "did someone stop the
+     *   nightly and forget?" question is exactly the one worth asking.
+     *
+     * Summing with `+` rather than one alarm per metric keeps the alarm count
+     * (and the notification count for a single bad run) unchanged. The
+     * arithmetic is safe on these sparse metrics: CloudWatch metric math
+     * treats a MISSING value in a time series as 0 for the arithmetic
+     * operators, so a period in which only ExecutionsTimedOut reported still
+     * sums to that value. A period in which none of the three reported stays
+     * empty, and `treatMissingData` decides -- same as today.
+     */
+    const unsuccessfulMetric = (
+      dimensionsMap: Record<string, string>,
+      period: Duration,
+    ): cloudwatch.IMetric => {
+      const outcome = (metricName: string): cloudwatch.Metric =>
+        new cloudwatch.Metric({
+          namespace: "AWS/States",
+          metricName,
+          statistic: cloudwatch.Stats.SUM,
+          period,
+          dimensionsMap,
+        });
+      return new cloudwatch.MathExpression({
+        expression: "failed + timedOut + aborted",
+        usingMetrics: {
+          failed: outcome("ExecutionsFailed"),
+          timedOut: outcome("ExecutionsTimedOut"),
+          aborted: outcome("ExecutionsAborted"),
+        },
+        period,
+      });
+    };
     interface CadenceArgs {
       readonly id: string;
       readonly cadenceLabel: string;
@@ -1513,6 +1564,19 @@ export class EtlStack extends Stack {
        * `evaluationPeriods * period <= 604800s` per the constraint above.
        */
       readonly statusPeriod?: Duration;
+      /**
+       * Override for the shared status-alarm description below. The shared
+       * string is written for a CADENCE machine: it talks about a multi-step
+       * run that failed part-way, tells the reader to find the step marked red,
+       * and reassures them the site keeps serving the last good data.
+       *
+       * The #595 heartbeat is none of those things. It is a SINGLE-step monitor
+       * (`freshnessSteps` is one entry), it goes red because `etl:freshness`
+       * exited 1 -- a data source is past its SLA -- not because a run failed to
+       * finish, and telling the reader to re-run it by hand invites re-running a
+       * check that will report exactly the same thing. Omitted => shared string.
+       */
+      readonly statusDescription?: string;
       /**
        * #2190 -- ceiling on how long one execution may take. A step can creep
        * from healthy to its own timeout with nothing watching: prod InfoEd went
@@ -1582,6 +1646,11 @@ export class EtlStack extends Stack {
         // irrelevant here — a daily job cannot fail faster than daily, and the
         // cadence alarm (30h) still owns "the heartbeat itself went dark".
         statusPeriod: Duration.days(1),
+        // The shared status description below is wrong in every clause for this
+        // machine -- see `statusDescription` on CadenceArgs. This one names the
+        // real symptom (a source past its SLA), points at the log lines that
+        // identify it, and says plainly that re-running the check fixes nothing.
+        statusDescription: `SPS ETL freshness check (${env}) -- one or more data sources have not refreshed within their deadline. Nothing crashed: this is the monitor that watches the other jobs. Next: open the latest execution of scholars-heartbeat-${env} and read its log. The line starting "[freshness] FAIL" lists every stale source with its age and its deadline, and the "[freshness] STALE" lines above it give the per-source detail. The fix belongs to the ETL step that feeds the named source; re-running this check changes nothing, it will just report the same sources again.`,
         // prod 120d: median 0.09h (~5.4 min), max 0.10h. A freshness check that
         // suddenly takes 30 min is wedged on the DB, not slow.
         maxDuration: Duration.minutes(30),
@@ -1592,17 +1661,12 @@ export class EtlStack extends Stack {
       const dimensions = {
         StateMachineArn: c.stateMachine.stateMachineArn,
       };
-      const failedMetric = new cloudwatch.Metric({
-        namespace: "AWS/States",
-        metricName: "ExecutionsFailed",
-        statistic: cloudwatch.Stats.SUM,
-        period: c.statusPeriod ?? Duration.hours(1),
-        dimensionsMap: dimensions,
-      });
       const statusAlarm = new cloudwatch.Alarm(this, `${c.id}StatusAlarm`, {
         alarmName: `sps-etl-${c.cadenceLabel}-status-${env}`,
-        alarmDescription: `SPS ETL ${c.cadenceLabel} (${env}) -- execution failed. Next: check the Step Functions execution and the failing step's logs; data freshness lags until it reruns.`,
-        metric: failedMetric,
+        alarmDescription:
+          c.statusDescription ??
+          `SPS ETL ${c.cadenceLabel} (${env}) -- the run did not finish successfully: it failed, ran out of time, or was stopped. Next: open the Step Functions execution for scholars-${c.cadenceLabel}-${env}, find the step marked red, and read that step's logs. The website stays up and keeps showing the data from the last good run; it just stops getting newer. Nothing retries on its own before the next scheduled ${c.cadenceLabel} run, so a run that must not wait has to be started by hand.`,
+        metric: unsuccessfulMetric(dimensions, c.statusPeriod ?? Duration.hours(1)),
         evaluationPeriods: 1,
         threshold: 0,
         comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
@@ -1883,14 +1947,8 @@ export class EtlStack extends Stack {
     };
     const reconcileStatusAlarm = new cloudwatch.Alarm(this, "ReconcileStatusAlarm", {
       alarmName: `sps-reconcile-status-${env}`,
-      alarmDescription: `SPS reconciler (${env}) -- run failed (>=1 suppression row could not be reflected into the index). Next: check the Step Functions execution for the failing row; it self-heals once the underlying write succeeds.`,
-      metric: new cloudwatch.Metric({
-        namespace: "AWS/States",
-        metricName: "ExecutionsFailed",
-        statistic: cloudwatch.Stats.SUM,
-        period: Duration.minutes(15),
-        dimensionsMap: reconcileDimensions,
-      }),
+      alarmDescription: `SPS reconciler (${env}) -- runs have not finished successfully for ~30 min (failed, ran out of time, or were stopped), so >=1 hidden scholar or publication may still be showing in search results. Next: open the Step Functions execution for scholars-reconcile-${env} and read the failing row's logs. It self-heals once the underlying write succeeds; if it does not clear within an hour, the hidden record needs a manual re-save.`,
+      metric: unsuccessfulMetric(reconcileDimensions, Duration.minutes(15)),
       // Require ~30 min of sustained failure (2 consecutive 15 min windows)
       // before alerting. The reconciler runs every 5 min and is idempotent,
       // so a single failed run self-heals on the next fire and is not worth a
@@ -2154,14 +2212,8 @@ export class EtlStack extends Stack {
     };
     const cdnReconcileStatusAlarm = new cloudwatch.Alarm(this, "CdnReconcileStatusAlarm", {
       alarmName: `sps-cdn-reconcile-status-${env}`,
-      alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- run failed (>=1 pending edge purge could not be replayed). Next: check the Step Functions execution for the failing purge; it replays on the next run once CloudFront accepts it.`,
-      metric: new cloudwatch.Metric({
-        namespace: "AWS/States",
-        metricName: "ExecutionsFailed",
-        statistic: cloudwatch.Stats.SUM,
-        period: Duration.minutes(15),
-        dimensionsMap: cdnReconcileDimensions,
-      }),
+      alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- runs have not finished successfully for ~30 min (failed, ran out of time, or were stopped), so >=1 edited page may still be serving its old cached version to the public. Next: open the Step Functions execution for scholars-cdn-reconcile-${env} and read the failing purge's logs. It replays on the next run once CloudFront accepts it.`,
+      metric: unsuccessfulMetric(cdnReconcileDimensions, Duration.minutes(15)),
       // Require ~30 min of sustained failure (2 consecutive 15 min windows)
       // before alerting. The reconciler runs every 5 min and is idempotent,
       // so a single failed run self-heals on the next fire and is not worth a
@@ -2320,6 +2372,34 @@ export class EtlStack extends Stack {
         treatMissingData: cloudwatch.TreatMissingData.BREACHING,
       });
       curationBackupCadenceAlarm.addAlarmAction(alarmAction);
+
+      // Status alarm -- the cadence alarm above CANNOT stand in for this one.
+      // A TIMED_OUT execution STARTED, so ExecutionsStarted is 1 and the cadence
+      // alarm stays green; and a machine killed at its own `timeout:` runs no
+      // Catch, so the SnsPublish above never fires either. That is a fully
+      // silent backup failure, and it is reachable here rather than theoretical:
+      // the task allows 2 attempts x 30 min plus a 1 min interval = 61 min of
+      // retry budget under a 35 min machine timeout, so a hung task lands on the
+      // machine timeout every time. Same expression as the cadence machines
+      // (failed + timedOut + aborted) via the shared helper.
+      const curationBackupStatusAlarm = new cloudwatch.Alarm(this, "CurationBackupStatusAlarm", {
+        alarmName: `sps-curation-backup-status-${env}`,
+        alarmDescription: `SPS curated-tables backup (${env}) -- a run did not finish successfully: it failed, ran out of time, or was stopped. The last good snapshot is still in S3; this one did not land, so the restore window is a day older than it looks. Next: open the Step Functions execution for scholars-curation-backup-${env} and read the task's logs. Nothing retries before tomorrow's 06:00 UTC fire -- run 'npm run backup:curated' via run-task to close the gap.`,
+        // 1 day, matching the daily cadence: a 1h period would clear a few hours
+        // after each fire and re-alarm on the next run, turning one continuous
+        // condition into a notification per day (the #595 heartbeat lesson).
+        // 1 * 86400 <= 604800, so the deploy-only evaluation-window cap holds.
+        metric: unsuccessfulMetric(
+          { StateMachineArn: curationBackupStateMachine.stateMachineArn },
+          Duration.days(1),
+        ),
+        evaluationPeriods: 1,
+        threshold: 0,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        // A day with no execution is absence, which the cadence alarm owns.
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      curationBackupStatusAlarm.addAlarmAction(alarmAction);
     }
 
     // ------------------------------------------------------------------
@@ -2451,6 +2531,26 @@ export class EtlStack extends Stack {
         },
       );
       projectionCadenceAlarm.addAlarmAction(alarmAction);
+
+      // Status alarm -- see the note on CurationBackupStatusAlarm above. The
+      // retry budget overruns the machine timeout by even more here: 2 attempts
+      // x 1h plus a 1 min interval = 121 min under a 65 min cap, so a wedged
+      // reciterai scan is killed as TIMED_OUT with no Catch and no publish. The
+      // cadence alarm cannot see it, because the execution did start.
+      const projectionStatusAlarm = new cloudwatch.Alarm(this, "OpportunityProjectionStatusAlarm", {
+        alarmName: `sps-opportunity-projection-status-${env}`,
+        alarmDescription: `SPS opportunity projection (${env}) -- a run did not finish successfully: it failed, ran out of time, or was stopped. The funding-matcher corpus keeps serving the last good projection; newly-published opportunities will 404 until this lands. Next: open the Step Functions execution for scholars-opportunity-projection-${env} and read the task's logs. Nothing retries before tomorrow's 06:30 UTC fire -- run 'npm run etl:dynamodb' via run-task to close the gap.`,
+        // Daily cadence => 1 day period; 1 * 86400 <= 604800.
+        metric: unsuccessfulMetric(
+          { StateMachineArn: opportunityProjectionStateMachine.stateMachineArn },
+          Duration.days(1),
+        ),
+        evaluationPeriods: 1,
+        threshold: 0,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      projectionStatusAlarm.addAlarmAction(alarmAction);
     }
 
     // ------------------------------------------------------------------
@@ -2664,6 +2764,27 @@ export class EtlStack extends Stack {
         },
       );
       edBridgeCadenceAlarm.addAlarmAction(alarmAction);
+
+      // Status alarm -- see the note on CurationBackupStatusAlarm above. The
+      // export half alone allows 2 attempts x 30 min plus a 1 min interval = 61
+      // min against the machine's 1h timeout, so an LDAP bind that hangs takes
+      // the machine over its cap and it dies as TIMED_OUT: no Catch, no publish,
+      // and the cadence alarm stays green because the execution did start.
+      const edBridgeStatusAlarm = new cloudwatch.Alarm(this, "EdEmailVisibilityBridgeStatusAlarm", {
+        alarmName: `sps-ed-email-visibility-status-${env}`,
+        alarmDescription: `SPS ED email-visibility bridge (${env}) -- a run did not finish successfully: it failed, ran out of time, or was stopped. Scholar email visibility keeps the values from the last good run; new release-code changes are not applied. Next: open the Step Functions execution for scholars-ed-email-visibility-${env}, see which half (export or import) is red, and read its logs -- an export failure usually means the on-prem LDAP path is down. Nothing retries before next Sunday 05:00 UTC.`,
+        // Weekly cadence => 7 day period, the same shape (and the same
+        // ceiling) as the cadence alarm above: 1 * 604800 <= 604800.
+        metric: unsuccessfulMetric(
+          { StateMachineArn: edBridgeStateMachine.stateMachineArn },
+          Duration.days(7),
+        ),
+        evaluationPeriods: 1,
+        threshold: 0,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      edBridgeStatusAlarm.addAlarmAction(alarmAction);
 
       new CfnOutput(this, "EdEmailVisibilityBridgeStateMachineArn", {
         value: edBridgeStateMachine.stateMachineArn,

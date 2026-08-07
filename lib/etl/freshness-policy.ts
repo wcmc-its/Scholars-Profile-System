@@ -117,6 +117,30 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // #794 — A2 tools taxonomy → scholar_tool. Writes a row every nightly run
   // (a 0-row success in ddb mode), so it is freshness-tracked from the start.
   Tools: { cadence: "nightly" },
+  // #2051 part B — deployed nightly steps (cdk/lib/etl-stack.ts
+  // FamilySensitivityNightly / FamilySuppressionNightly, both tier:"continue",
+  // both envs, no env split) writing sources "FamilySensitivity" /
+  // "FamilySuppression". Freshness is their ONLY detector, on both counts:
+  // continue-tier means a failure never reaches the status alarm, and the
+  // etl:integrity volume guard cannot see them either — each records
+  // `rowsProcessed` = the line count of a curated CSV checked into this repo
+  // (33 and 8 rows), which is below the guard's minPreviousRows=100 floor AND
+  // constant between two runs of the same image, so its drop ratio is 0 by
+  // construction. Lowering that floor would add nothing; see the note above
+  // findVolumeRegressions in etl/integrity/index.ts.
+  //
+  // SCOPE — what an entry here does and does not catch. `evaluate()` grades a
+  // source on the recency of its most recent `status:'success'` row and never
+  // reads `rowsProcessed`. So this catches the step DYING (a failed run writes
+  // no success row, so the age keeps growing past the SLA), the step being
+  // dropped from the nightly step list, and the step never being deployed to an
+  // env. It does NOT catch a run that succeeds having done nothing: a zero-row
+  // success is indistinguishable from a full one here. That case is closed at
+  // the source instead — both loaders now refuse a curated CSV that parses to
+  // zero rows (readCurated), so the wipe path records status='failed', which is
+  // a state this entry does detect.
+  FamilySensitivity: { cadence: "nightly" },
+  FamilySuppression: { cadence: "nightly" },
   MeshCoverage: { cadence: "nightly" },
   // #1258/#2016 — both envs. The `envs: ["staging"]` restriction is retired with
   // the nightlySteps env split it mirrored. Tracking prod is the POINT of this
@@ -125,6 +149,18 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // alarmed precisely because prod was excluded here. A promoted step that is not
   // freshness-tracked would re-accumulate that staleness silently.
   MeshAnchor: { cadence: "nightly" },
+  // Deployed nightly step (cdk/lib/etl-stack.ts MeshAliasNightly,
+  // tier:"continue", both envs) writing source "MeshAlias". Added to the same
+  // curated-MeSH block as MeshAnchor directly above, in the same style, one
+  // after the other — and only MeshAnchor was tracked, which was an oversight
+  // rather than a decision. Same two-way blind spot as the family overlays:
+  // continue-tier hides it from the status alarm, and its 77-row curated CSV
+  // is both under the volume guard's 100-row floor and constant run to run.
+  // Same scope note as the family overlays above: this detects the step dying,
+  // being dropped from the nightly list, or never being deployed — not a
+  // success that processed nothing. The loader's own zero-row guard covers that
+  // half, turning a truncate-to-empty into a failed run this entry can see.
+  MeshAlias: { cadence: "nightly" },
   PubMedRetractions: { cadence: "nightly" },
   // Terminal steps — run in BOTH cadences; the nightly SLA is the binding one.
   SearchIndex: { cadence: "nightly" },

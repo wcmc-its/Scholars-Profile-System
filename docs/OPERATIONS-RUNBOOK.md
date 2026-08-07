@@ -380,7 +380,7 @@ State machines `scholars-{nightly,weekly,annual,heartbeat}-${env}`; EventBridge 
 | Signal | Source | Catches |
 |---|---|---|
 | Per-step failure | `NotifyX` SnsPublish in each step's `Catch` | A specific step that threw |
-| Status alarm `sps-etl-<cadence>-status-${env}` | `ExecutionsFailed` > 0 | Any failed execution |
+| Status alarm `sps-etl-<cadence>-status-${env}` | `ExecutionsFailed + ExecutionsTimedOut + ExecutionsAborted` > 0 (metric math) | Any execution that ended without succeeding — it threw, it hit the machine `timeout:` (no `Catch` runs, so nothing else notifies), or an operator stopped it |
 | Cadence alarm `sps-etl-<cadence>-cadence-${env}` | `ExecutionsStarted` < 1 over window (`treatMissingData: BREACHING`) | Schedule never fired |
 | Freshness heartbeat | `etl:freshness` exits non-zero → its status alarm | **Green-but-stale** |
 
