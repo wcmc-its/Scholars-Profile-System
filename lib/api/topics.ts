@@ -39,6 +39,7 @@ import {
   SEARCH_BOOST_ELIGIBLE_ROLES,
   TOP_SCHOLARS_ELIGIBLE_ROLES,
   isPubliclyDisplayed,
+  publicRoleWhere,
   type RoleCategory,
 } from "@/lib/eligibility";
 import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
@@ -1304,14 +1305,22 @@ export async function getDistinctScholarCountForTopic(topicSlug: string): Promis
  * Spec §13 "All scholars in this area" — comprehensive enumerative list.
  *
  * Surface: white, alphabetical by preferredName, role-filterable, name-searchable,
- * paginated. NO eligibility carve (anyone with at least one publication in this
- * area, per §13). Role filter is a presentation-only narrowing affordance.
+ * paginated. No ALGORITHMIC eligibility carve (anyone with at least one
+ * publication in this area, per §13). Role filter is a presentation-only
+ * narrowing affordance.
+ *
+ * It DOES apply the #536 hidden-identity carve, which the #2202 loader hardening
+ * missed here exactly as it missed `getMethodScholars` (#2270). The page is
+ * public, unauthenticated and ISR-cached, and each row carries name, postnominal,
+ * title and the headshot endpoint — while `app/(public)/about/page.tsx` tells the
+ * public these scholars are "not shown on any public surface". Carving the
+ * methods twin and leaving this one would have shipped a dedicated chip that
+ * enumerates them BY NAME.
  */
-export type TopicAllScholarRole =
-  | "all"
-  | "faculty"
-  | "postdocs"
-  | "doctoral_students";
+// No `doctoral_students` arm (sibling of #2270): the #536 hidden identity
+// classes are carved out of the loader, so the facet could only ever count and
+// list zero. `lib/eligibility.ts` forbids faceting them regardless.
+export type TopicAllScholarRole = "all" | "faculty" | "postdocs";
 
 export const TOPIC_ALL_SCHOLARS_PAGE_SIZE = 22;
 
@@ -1330,12 +1339,7 @@ export type TopicScholarRow = {
 
 export type TopicScholarsResult = {
   total: number;
-  roleCounts: {
-    all: number;
-    faculty: number;
-    postdocs: number;
-    doctoralStudents: number;
-  };
+  roleCounts: { all: number; faculty: number; postdocs: number };
   hits: TopicScholarRow[];
   page: number;
   pageSize: number;
@@ -1344,7 +1348,6 @@ export type TopicScholarsResult = {
 const ROLE_FILTER_CATEGORIES: Record<Exclude<TopicAllScholarRole, "all">, string[]> = {
   faculty: ["full_time_faculty"],
   postdocs: ["postdoc"],
-  doctoral_students: ["doctoral_student"],
 };
 
 export async function getTopicScholars(
@@ -1364,6 +1367,7 @@ export async function getTopicScholars(
     deletedAt: null,
     status: "active",
     publicationTopics: { some: { parentTopicId: topicSlug } },
+    ...publicRoleWhere(),
   };
   if (q.length > 0) {
     baseScholarFilter.preferredName = { contains: q };
@@ -1403,22 +1407,26 @@ export async function getTopicScholars(
       },
     }),
   ]);
+  // Fail-closed on the RAW column, before anything counts or renders: the
+  // where-clause is a denylist and cannot express the `doctoral_student*`
+  // prefix, so an out-of-band suffix passes it and only this catches it.
   let allCount = 0;
   let facultyCount = 0;
   let postdocsCount = 0;
-  let doctoralCount = 0;
   for (const r of roleGroup) {
+    if (!isPubliclyDisplayed(r.roleCategory)) continue;
     const n = r._count._all;
     allCount += n;
     if (r.roleCategory === "full_time_faculty") facultyCount += n;
     else if (r.roleCategory === "postdoc") postdocsCount += n;
-    else if (r.roleCategory === "doctoral_student") doctoralCount += n;
   }
 
-  const enriched = scholarsAll.map((s) => ({
-    ...s,
-    lastName: extractLastName(s.preferredName),
-  }));
+  const enriched = scholarsAll
+    .filter((s) => isPubliclyDisplayed(s.roleCategory))
+    .map((s) => ({
+      ...s,
+      lastName: extractLastName(s.preferredName),
+    }));
   enriched.sort(
     (a, b) =>
       a.lastName.localeCompare(b.lastName) ||
@@ -1437,12 +1445,7 @@ export async function getTopicScholars(
 
   return {
     total,
-    roleCounts: {
-      all: allCount,
-      faculty: facultyCount,
-      postdocs: postdocsCount,
-      doctoralStudents: doctoralCount,
-    },
+    roleCounts: { all: allCount, faculty: facultyCount, postdocs: postdocsCount },
     hits: slice.map((s) => ({
       cwid: s.cwid,
       slug: s.slug,
