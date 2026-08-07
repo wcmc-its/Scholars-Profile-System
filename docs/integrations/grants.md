@@ -14,11 +14,20 @@ writes to the same `Grant` table, repairs dates InfoEd left blank, and creates n
 never held. Splitting the two into separate documents would put the failure modes in two files, so
 both live here: InfoEd first, RePORTER in §6.
 
-**Deployment caveat.** ADR-012's Status header records D1, D3, D4a and D9 as merged to master but
-**dark** as of 2026-08-05: `etl:infoed` never runs on staging, and prod needs a manual deploy.
-Everything in §2, §5 and §6 therefore describes **master**, not necessarily what is running. Confirm
-against the running `sps-etl-prod` task definition and the latest `etl_run` row before asserting any
-of it is live — the 2026-08-05 prod nightly was still running the pre-#2173 query.
+**Deployment status — verified 2026-08-07.** D1, D3, D4a and D9 are **live in production**. The
+2026-08-07 nightly ran `TaskInfoed` to completion on ETL image `727f0d23` (pushed 2026-08-06 23:58
+ET), which contains #2173, #2176 and #2140; `NotifyInfoed` did not fire, and the log carries the
+per-account period line that #2173 introduced.
+
+ADR-012's Status header said "nothing yet in production". That was true when written on 2026-08-05
+and is **not** true now. The gate it describes — "prod requires a manual `workflow_dispatch` deploy"
+— governs the task definition's **environment**, not its **code**: `cdk/lib/etl-stack.ts:551` binds
+the ETL task to the mutable `:latest` tag, so pushing an image to ECR ships ETL code on the very next
+nightly with no `cdk deploy` at all. Anything gated on a task-def env var is still dark until that
+env changes; plain code changes are not.
+
+Still true: `etl:infoed` never runs against staging (its on-premises address overlaps the VPC range),
+so any "go look at this record" instruction must name production.
 
 **Every count in this document carries its measurement date inline.** A count without a date is a
 lie within a month. Where the source of a count records no date, that is said explicitly. Re-measure
@@ -115,8 +124,8 @@ accuracy on active awards is the highest-leverage thing available.
 | **Pool** | One module-level pool, `max: 4`, `min: 0`, `idleTimeoutMillis: 30_000`, closed in the ETL's `.finally()` |
 | **Timeouts** | `requestTimeout: 2_400_000` ms = **40 minutes** per query. `connectionTimeout: 30_000` ms. Step Functions per-attempt task timeout is 4h, `maxAttempts: 2` plus the initial attempt |
 | **Retries** | **Zero on the MSSQL side.** No retry wrapper anywhere. A failure propagates straight to `main()`'s catch. The only retry is Step Functions' own attempt count |
-| **Latency** | Both queries together: **499.2s**, historical band **425–524s** (recorded in `etl/infoed/index.ts`; the comment records **no measurement date** for this figure). That is ~4.8x under the 40-minute request timeout. Standalone, the account-period query returns its 29,326 rows in **1.0s** (measured 2026-08-05). The prior embedded-derived-table form died at ~2427s on all three Step Functions attempts of a single nightly (2026-08-05), ≈3.28h |
-| **Volume** | ~**17,974** grant rows returned per run and **29,326** account-period rows (`etl/infoed/index.ts`; 29,326 measured 2026-08-05, while the 17,974 figure carries **no measurement date**). In-scope proposal rows before filtering: **62,474** (measured 2026-08-03) |
+| **Latency** | **291s** end to end on the 2026-08-07 prod nightly — consolidated query **273s**, account-period query **<1s** (measured, image `727f0d23`). ~8x under the 40-minute request timeout. `etl/infoed/index.ts` still records an older **499.2s** and a **425–524s** band with no measurement date; the deployed run is well inside it. The prior embedded-derived-table form died at ~2427s on all three Step Functions attempts of a single nightly (2026-08-05), ≈3.28h |
+| **Volume** | **17,874** grant rows and **29,275** account-period rows per run, yielding **10,354** grants across **9,417** active scholars (all measured on the 2026-08-07 prod nightly). `etl/infoed/index.ts` records ~17,974 / 29,326 from earlier runs — the feed moves nightly, so treat any single figure as a sample, not a constant. In-scope proposal rows before filtering: **62,474** (measured 2026-08-03) |
 | **Write batching** | `createMany` in chunks of **1000**. Updates are **one round trip per changed row**, unbatched. Same for date-gap upserts and confidential-title suppressions |
 | **Local writes** | Prisma over the MariaDB adapter, all through `db.write` (the writer endpoint) |
 
@@ -306,7 +315,7 @@ The extract runs one query for grant rows (`CONSOLIDATED_QUERY`) and a second fo
 | `prop.system = 'PT'` and `prop.inst_code = 'WCORNELLMC'` | Scope | WCM proposal-tracking records only. InfoEd also carries other systems and institutions |
 | `subp.child IS NULL` (anti-join on `pt_project`) | Drops child proposals | The parent account carries the row. Without this the same award appears once per amendment |
 | `Project_Status IN ('Active Award', 'Expired Award', 'In Process')` | Admits three statuses | **Expired awards are deliberately included.** There is no date cutoff, no lookback window and no "ends after today" filter anywhere in the import. `In Process` is kept on purpose: those are real awards mid-setup, verified 2026-07-14 against funders' own records (an R35 and an NSF award). ADR-012 D7 |
-| `ISNULL(prop_u.p_log_50, 0) <> 1` | Drops Confidential-flagged records | InfoEd's own Confidential checkbox. Honoured **at source**, so a flagged award cannot reach a public profile by any later path **once the image carrying it is deployed** (ADR-012 D9, merged but dark). This predicate was previously computed and then ignored; 18 accounts were being published, one of them as active funding (**the source comment records no measurement date**) |
+| `ISNULL(prop_u.p_log_50, 0) <> 1` | Drops Confidential-flagged records | InfoEd's own Confidential checkbox. Honoured **at source**, so a flagged award cannot reach a public profile by any later path (ADR-012 D9, live in prod since the 2026-08-07 nightly). This predicate was previously computed and then ignored; 18 accounts were being published, one of them as active funding (**the source comment records no measurement date**) |
 | `proppds.role_key = 'KEY'` (inside the nested INNER, not the outer `WHERE`) | Nulls the CWID rather than dropping the row; the TS filter drops it afterwards (§4) | Scholars publishes investigators, not full personnel rosters |
 | `pt_unit.prim = '1'` (LEFT-join condition) | Selects the primary unit per **proposal**; drops nothing on its own | Keeps one unit per proposal so department rollups do not double-count |
 | `unit_name IS NOT NULL` | Drops accounts with no resolvable primary unit | A grant with no department cannot be attributed on any org-unit surface |
@@ -660,7 +669,7 @@ The entire detection ladder for InfoEd volume:
 
 So the band **above 0% and up to 10% is graded by nothing**. What happens in that band is a
 `deleteMany` scoped to `source = 'InfoEd'`: a **hard delete**, no tombstone, no soft-delete column.
-On a feed of ~17,974 rows (see §2 for the measurement) that is up to **~1,797 grants deleted per run
+On a feed of ~17,874 rows (see §2 for the measurement) that is up to **~1,787 grants deleted per run
 with zero signal**. The nightly search-index rebuild runs later the same night, so the loss
 propagates to funding search the same night too.
 
@@ -746,13 +755,13 @@ production nightlies between 2026-07-17 and 2026-08-05**. Use `/edit/etl-status`
    SELECT source, status, started_at, completed_at, rows_processed, error_message
    FROM etl_run WHERE source = 'InfoEd' ORDER BY started_at DESC LIMIT 10;
    ```
-   Compare `rows_processed` against ~17,974. A number that is close but not equal is the silent band.
+   Compare `rows_processed` against ~17,900 (17,874 on 2026-08-07). Close but not equal is the silent band.
    A number that is 0 is invisible to every alarm.
 3. **Read the step log.** Log group `/aws/ecs/sps-etl-<env>`, stream `etl/etl/<task-id>`. The state
    machine log is `/aws/states/nightly-<env>`. The success line to look for names both query timings
    separately, on purpose, because the failure that motivated it was a query getting slower with
    nothing in the log to show it:
-   `InfoEd returned ~17,974 grant rows in ~500s; 29,326 account periods in ~1s.`
+   `InfoEd returned 17874 grant rows in 273s; 29275 account periods in 0s.` (observed 2026-08-07)
 4. **Check the image tag before diagnosing anything.** `sps-etl-prod` binds the **mutable `:latest`**
    tag, so what ran is not pinned to a commit the way the app task def is. A feature-branch staging
    deploy rebuilds the staging ETL image from that branch, silently rolling ETL code back to its
