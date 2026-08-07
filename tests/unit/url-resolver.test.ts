@@ -8,8 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/db", () => ({
   prisma: {
     scholar: { findFirst: vi.fn() },
-    slugHistory: { findFirst: vi.fn() },
-    cwidAlias: { findFirst: vi.fn() },
+    slugHistory: { findUnique: vi.fn() },
+    cwidAlias: { findUnique: vi.fn() },
   },
 }));
 
@@ -19,14 +19,14 @@ import { resolveByCwidOrAlias, resolveBySlugOrHistory } from "@/lib/url-resolver
 
 const mockedPrisma = prisma as unknown as {
   scholar: { findFirst: ReturnType<typeof vi.fn> };
-  slugHistory: { findFirst: ReturnType<typeof vi.fn> };
-  cwidAlias: { findFirst: ReturnType<typeof vi.fn> };
+  slugHistory: { findUnique: ReturnType<typeof vi.fn> };
+  cwidAlias: { findUnique: ReturnType<typeof vi.fn> };
 };
 
 beforeEach(() => {
   mockedPrisma.scholar.findFirst.mockReset();
-  mockedPrisma.slugHistory.findFirst.mockReset();
-  mockedPrisma.cwidAlias.findFirst.mockReset();
+  mockedPrisma.slugHistory.findUnique.mockReset();
+  mockedPrisma.cwidAlias.findUnique.mockReset();
 });
 
 afterEach(() => {
@@ -42,7 +42,7 @@ describe("resolveBySlugOrHistory", () => {
 
   it("returns 'redirect' when the slug is in slug_history for an active scholar", async () => {
     mockedPrisma.scholar.findFirst.mockResolvedValueOnce(null);
-    mockedPrisma.slugHistory.findFirst.mockResolvedValueOnce({
+    mockedPrisma.slugHistory.findUnique.mockResolvedValueOnce({
       current: { slug: "sarah-johnson", deletedAt: null, status: "active" },
     });
     const result = await resolveBySlugOrHistory("sarah-davies");
@@ -51,7 +51,7 @@ describe("resolveBySlugOrHistory", () => {
 
   it("returns 'not-found' when slug_history points to a soft-deleted scholar", async () => {
     mockedPrisma.scholar.findFirst.mockResolvedValueOnce(null);
-    mockedPrisma.slugHistory.findFirst.mockResolvedValueOnce({
+    mockedPrisma.slugHistory.findUnique.mockResolvedValueOnce({
       current: { slug: "robert-wilson", deletedAt: new Date(), status: "active" },
     });
     const result = await resolveBySlugOrHistory("rob-wilson");
@@ -60,7 +60,7 @@ describe("resolveBySlugOrHistory", () => {
 
   it("returns 'not-found' when slug_history points to a suppressed scholar", async () => {
     mockedPrisma.scholar.findFirst.mockResolvedValueOnce(null);
-    mockedPrisma.slugHistory.findFirst.mockResolvedValueOnce({
+    mockedPrisma.slugHistory.findUnique.mockResolvedValueOnce({
       current: { slug: "x-y", deletedAt: null, status: "suppressed" },
     });
     const result = await resolveBySlugOrHistory("old-slug");
@@ -69,7 +69,7 @@ describe("resolveBySlugOrHistory", () => {
 
   it("returns 'not-found' for an unknown slug", async () => {
     mockedPrisma.scholar.findFirst.mockResolvedValueOnce(null);
-    mockedPrisma.slugHistory.findFirst.mockResolvedValueOnce(null);
+    mockedPrisma.slugHistory.findUnique.mockResolvedValueOnce(null);
     const result = await resolveBySlugOrHistory("nobody-here");
     expect(result).toEqual({ type: "not-found" });
   });
@@ -90,7 +90,7 @@ describe("resolveByCwidOrAlias", () => {
 
   it("returns 'redirect' when the CWID is in cwid_aliases", async () => {
     mockedPrisma.scholar.findFirst.mockResolvedValueOnce(null);
-    mockedPrisma.cwidAlias.findFirst.mockResolvedValueOnce({
+    mockedPrisma.cwidAlias.findUnique.mockResolvedValueOnce({
       current: { slug: "diana-patel", deletedAt: null, status: "active" },
     });
     const result = await resolveByCwidOrAlias("dpa1010");
@@ -99,7 +99,7 @@ describe("resolveByCwidOrAlias", () => {
 
   it("returns 'not-found' when cwid_aliases points to a soft-deleted scholar", async () => {
     mockedPrisma.scholar.findFirst.mockResolvedValueOnce(null);
-    mockedPrisma.cwidAlias.findFirst.mockResolvedValueOnce({
+    mockedPrisma.cwidAlias.findUnique.mockResolvedValueOnce({
       current: { slug: "x", deletedAt: new Date(), status: "active" },
     });
     const result = await resolveByCwidOrAlias("old1234");
@@ -108,7 +108,7 @@ describe("resolveByCwidOrAlias", () => {
 
   it("returns 'not-found' for an unknown CWID", async () => {
     mockedPrisma.scholar.findFirst.mockResolvedValueOnce(null);
-    mockedPrisma.cwidAlias.findFirst.mockResolvedValueOnce(null);
+    mockedPrisma.cwidAlias.findUnique.mockResolvedValueOnce(null);
     const result = await resolveByCwidOrAlias("zzz9999");
     expect(result).toEqual({ type: "not-found" });
   });
@@ -142,41 +142,59 @@ describe("#2268 url-resolver — hidden identity classes do not resolve", () => 
     expect(notIn).toContain("doctoral_student");
   }
 
+  /**
+   * The post-filter reads the RAW column, so the select must carry it: drop
+   * `roleCategory` from the select and `isPubliclyDisplayed(undefined)` is TRUE —
+   * the second layer fails OPEN and every out-of-band suffix resolves again.
+   */
+  function assertSelectsRole(select: Record<string, unknown>) {
+    expect(select.roleCategory).toBe(true);
+  }
+
   it("carves the direct-slug and slug_history arms at the QUERY layer", async () => {
     mockedPrisma.scholar.findFirst.mockResolvedValueOnce(null);
-    mockedPrisma.slugHistory.findFirst.mockResolvedValueOnce(null);
+    mockedPrisma.slugHistory.findUnique.mockResolvedValueOnce(null);
 
     await resolveBySlugOrHistory("test-person");
 
-    const direct = mockedPrisma.scholar.findFirst.mock.calls[0][0].where as Record<string, unknown>;
+    const directCall = mockedPrisma.scholar.findFirst.mock.calls[0][0];
+    const direct = directCall.where as Record<string, unknown>;
     expect(direct.slug).toBe("test-person");
     expect(direct.deletedAt).toBeNull();
     expect(direct.status).toBe("active");
     assertRoleCarve(direct);
+    assertSelectsRole(directCall.select as Record<string, unknown>);
 
-    const rel = mockedPrisma.slugHistory.findFirst.mock.calls[0][0].where as Record<
-      string,
-      unknown
-    >;
+    const relCall = mockedPrisma.slugHistory.findUnique.mock.calls[0][0];
+    const rel = relCall.where as Record<string, unknown>;
     expect(rel.oldSlug).toBe("test-person");
     assertRoleCarve(rel.current as Record<string, unknown>);
+    assertSelectsRole(
+      (relCall.select as { current: { select: Record<string, unknown> } }).current.select,
+    );
   });
 
   it("carves the direct-cwid and cwid_alias arms at the QUERY layer", async () => {
     mockedPrisma.scholar.findFirst.mockResolvedValueOnce(null);
-    mockedPrisma.cwidAlias.findFirst.mockResolvedValueOnce(null);
+    mockedPrisma.cwidAlias.findUnique.mockResolvedValueOnce(null);
 
     await resolveByCwidOrAlias("zzz9999");
 
-    const direct = mockedPrisma.scholar.findFirst.mock.calls[0][0].where as Record<string, unknown>;
+    const directCall = mockedPrisma.scholar.findFirst.mock.calls[0][0];
+    const direct = directCall.where as Record<string, unknown>;
     expect(direct.cwid).toBe("zzz9999");
     expect(direct.deletedAt).toBeNull();
     expect(direct.status).toBe("active");
     assertRoleCarve(direct);
+    assertSelectsRole(directCall.select as Record<string, unknown>);
 
-    const rel = mockedPrisma.cwidAlias.findFirst.mock.calls[0][0].where as Record<string, unknown>;
+    const relCall = mockedPrisma.cwidAlias.findUnique.mock.calls[0][0];
+    const rel = relCall.where as Record<string, unknown>;
     expect(rel.oldCwid).toBe("zzz9999");
     assertRoleCarve(rel.current as Record<string, unknown>);
+    assertSelectsRole(
+      (relCall.select as { current: { select: Record<string, unknown> } }).current.select,
+    );
   });
 
   it("post-filter rejects an out-of-band suffix the enumeration cannot express (cwid arms)", async () => {
@@ -185,11 +203,11 @@ describe("#2268 url-resolver — hidden identity classes do not resolve", () => 
       slug: "test-person",
       roleCategory: "doctoral_student_dds",
     });
-    mockedPrisma.cwidAlias.findFirst.mockResolvedValueOnce(null);
+    mockedPrisma.cwidAlias.findUnique.mockResolvedValueOnce(null);
     expect(await resolveByCwidOrAlias("zzz9999")).toEqual({ type: "not-found" });
 
     mockedPrisma.scholar.findFirst.mockResolvedValueOnce(null);
-    mockedPrisma.cwidAlias.findFirst.mockResolvedValueOnce({
+    mockedPrisma.cwidAlias.findUnique.mockResolvedValueOnce({
       current: {
         slug: "test-person",
         deletedAt: null,
@@ -206,11 +224,11 @@ describe("#2268 url-resolver — hidden identity classes do not resolve", () => 
       slug: "test-person",
       roleCategory: "doctoral_student_dds",
     });
-    mockedPrisma.slugHistory.findFirst.mockResolvedValueOnce(null);
+    mockedPrisma.slugHistory.findUnique.mockResolvedValueOnce(null);
     expect(await resolveBySlugOrHistory("test-person")).toEqual({ type: "not-found" });
 
     mockedPrisma.scholar.findFirst.mockResolvedValueOnce(null);
-    mockedPrisma.slugHistory.findFirst.mockResolvedValueOnce({
+    mockedPrisma.slugHistory.findUnique.mockResolvedValueOnce({
       current: {
         slug: "test-person",
         deletedAt: null,
@@ -223,7 +241,7 @@ describe("#2268 url-resolver — hidden identity classes do not resolve", () => 
 
   it("a hidden CWID is indistinguishable from one that never existed", async () => {
     mockedPrisma.scholar.findFirst.mockResolvedValueOnce(null);
-    mockedPrisma.cwidAlias.findFirst.mockResolvedValueOnce(null);
+    mockedPrisma.cwidAlias.findUnique.mockResolvedValueOnce(null);
     const missing = await resolveByCwidOrAlias("zzz9999");
 
     mockedPrisma.scholar.findFirst.mockResolvedValueOnce({
@@ -231,7 +249,7 @@ describe("#2268 url-resolver — hidden identity classes do not resolve", () => 
       slug: "test-person",
       roleCategory: "doctoral_student",
     });
-    mockedPrisma.cwidAlias.findFirst.mockResolvedValueOnce(null);
+    mockedPrisma.cwidAlias.findUnique.mockResolvedValueOnce(null);
     const hidden = await resolveByCwidOrAlias("zzz9998");
 
     expect(missing).toEqual({ type: "not-found" });

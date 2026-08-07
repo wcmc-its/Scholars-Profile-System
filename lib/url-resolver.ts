@@ -39,9 +39,7 @@ export async function resolveBySlugOrHistory(slug: string): Promise<ResolveResul
     return { type: "found", cwid: direct.cwid, slug: direct.slug };
   }
 
-  // findFirst, not findUnique: the carve is a relation filter on `current`, and
-  // findUnique's where accepts unique fields only. `oldSlug` is still the PK.
-  const history = await prisma.slugHistory.findFirst({
+  const history = await prisma.slugHistory.findUnique({
     where: { oldSlug: slug, current: { ...publicRoleWhere() } },
     select: {
       current: { select: { slug: true, deletedAt: true, status: true, roleCategory: true } },
@@ -75,7 +73,7 @@ export async function resolveByCwidOrAlias(cwid: string): Promise<ResolveResult>
     return { type: "redirect", targetSlug: direct.slug };
   }
 
-  const alias = await prisma.cwidAlias.findFirst({
+  const alias = await prisma.cwidAlias.findUnique({
     where: { oldCwid: cwid, current: { ...publicRoleWhere() } },
     select: {
       current: { select: { slug: true, deletedAt: true, status: true, roleCategory: true } },
