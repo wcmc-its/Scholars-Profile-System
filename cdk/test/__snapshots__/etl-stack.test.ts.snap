@@ -1297,6 +1297,11 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             },
             {
               "Action": "sns:Publish",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": "123456789012",
+                },
+              },
               "Effect": "Allow",
               "Principal": {
                 "Service": "cloudwatch.amazonaws.com",
@@ -1864,6 +1869,11 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             },
             {
               "Action": "sns:Publish",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": "123456789012",
+                },
+              },
               "Effect": "Allow",
               "Principal": {
                 "Service": "cloudwatch.amazonaws.com",
@@ -9261,6 +9271,11 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             },
             {
               "Action": "sns:Publish",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": "123456789012",
+                },
+              },
               "Effect": "Allow",
               "Principal": {
                 "Service": "cloudwatch.amazonaws.com",
@@ -9828,6 +9843,11 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             },
             {
               "Action": "sns:Publish",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": "123456789012",
+                },
+              },
               "Effect": "Allow",
               "Principal": {
                 "Service": "cloudwatch.amazonaws.com",

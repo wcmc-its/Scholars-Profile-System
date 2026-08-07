@@ -503,6 +503,38 @@ describe("SpsObservabilityStack", () => {
       expect(services).toContain("costalerts.amazonaws.com");
     });
 
+    // #2279 fixed this on the ETL topics and left sps-notify carrying the same
+    // defect: an explicit TopicPolicy REPLACES SNS's implicit default, so a
+    // topic that grants any service principal without also granting CloudWatch
+    // silently denies every alarm pointed at it. Here that is
+    // sps-oncall-relay-errors-prod — the alarm whose whole job is to fire when
+    // the relay is broken. Asserted over EVERY policy in the stack so the next
+    // topic to acquire one fails here instead of in production.
+    it("every explicit SNS topic policy lets cloudwatch publish, source-account scoped", () => {
+      const policies = template.findResources("AWS::SNS::TopicPolicy");
+      expect(Object.keys(policies).length).toBeGreaterThan(0);
+      const missing: string[] = [];
+      for (const [id, policy] of Object.entries(policies)) {
+        const statements = (policy?.Properties?.PolicyDocument?.Statement ??
+          []) as Array<{
+          Action?: unknown;
+          Principal?: { Service?: unknown };
+          Condition?: { StringEquals?: Record<string, unknown> };
+        }>;
+        const ok = statements.some((s) => {
+          const svc = s.Principal?.Service;
+          const services = typeof svc === "string" ? [svc] : Array.isArray(svc) ? svc : [];
+          if (!services.includes("cloudwatch.amazonaws.com")) return false;
+          const actions = typeof s.Action === "string" ? [s.Action] : (s.Action as string[]) ?? [];
+          if (!actions.includes("sns:Publish")) return false;
+          // A bare grant is broader than the default policy it restores.
+          return s.Condition?.StringEquals?.["aws:SourceAccount"] !== undefined;
+        });
+        if (!ok) missing.push(id);
+      }
+      expect(missing).toEqual([]);
+    });
+
     it("emits AlarmTopicArn, NotifyTopicArn, and OncallRelayFunctionArn CFN outputs", () => {
       template.hasOutput("AlarmTopicArn", {});
       template.hasOutput("NotifyTopicArn", {});
@@ -1251,6 +1283,34 @@ describe("SpsObservabilityStack", () => {
         .filter((s): s is string => typeof s === "string");
       expect(services).not.toContain("budgets.amazonaws.com");
       expect(services).not.toContain("costalerts.amazonaws.com");
+    });
+
+    // Staging had NO topic policy before this grant, so the CloudWatch statement
+    // is what materializes one — deliberately narrowing sps-notify-staging from
+    // the permissive implicit default. Kept identical to prod so the two envs
+    // cannot drift into different policy shapes.
+    it("every explicit SNS topic policy lets cloudwatch publish, source-account scoped", () => {
+      const policies = template.findResources("AWS::SNS::TopicPolicy");
+      expect(Object.keys(policies).length).toBeGreaterThan(0);
+      const missing: string[] = [];
+      for (const [id, policy] of Object.entries(policies)) {
+        const statements = (policy?.Properties?.PolicyDocument?.Statement ??
+          []) as Array<{
+          Action?: unknown;
+          Principal?: { Service?: unknown };
+          Condition?: { StringEquals?: Record<string, unknown> };
+        }>;
+        const ok = statements.some((s) => {
+          const svc = s.Principal?.Service;
+          const services = typeof svc === "string" ? [svc] : Array.isArray(svc) ? svc : [];
+          if (!services.includes("cloudwatch.amazonaws.com")) return false;
+          const actions = typeof s.Action === "string" ? [s.Action] : (s.Action as string[]) ?? [];
+          if (!actions.includes("sns:Publish")) return false;
+          return s.Condition?.StringEquals?.["aws:SourceAccount"] !== undefined;
+        });
+        if (!ok) missing.push(id);
+      }
+      expect(missing).toEqual([]);
     });
 
     // --------------------------------------------------------------------
