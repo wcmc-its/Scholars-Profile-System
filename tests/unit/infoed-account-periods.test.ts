@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { joinAccountPeriods } from "@/etl/infoed";
+import { joinAccountPeriods, planSuppressionRepoints } from "@/etl/infoed";
 
 /**
  * #2173 — the account-level project period used to be a `LEFT JOIN (...) AS
@@ -121,5 +121,79 @@ describe("ACCOUNT_PERIOD_QUERY shape", () => {
     const consolidated = SRC.match(/const CONSOLIDATED_QUERY = `\n([\s\S]*?)\n`;/)![1];
     expect(consolidated).not.toContain("AS acct");
     expect(consolidated).not.toContain("acct.begin_date");
+  });
+});
+
+/**
+ * #2224 — the Account_Number re-key. `external_id` is
+ * `INFOED-{Account_Number}-{CWID}` and Account_Number flips from `prop_no` to
+ * `parentprop_no` the moment a proposal joins a family, so the same award is
+ * hard-deleted under the old id and re-created under a new one. Without the
+ * re-point the curator's takedown silently becomes a no-op.
+ */
+describe("planSuppressionRepoints (#2224)", () => {
+  const stale = (account: string, cwid: string, award: string | null) => ({
+    externalId: `INFOED-${account}-${cwid}`,
+    cwid,
+    awardNumber: award,
+  });
+
+  it("follows the award when InfoEd re-keys prop_no -> parentprop_no", () => {
+    expect(
+      planSuppressionRepoints(
+        [stale("111111", "abc1234", "R01AG012345")],
+        [stale("900001", "abc1234", "R01AG012345")],
+      ),
+    ).toEqual([
+      { from: "INFOED-111111-abc1234", to: "INFOED-900001-abc1234" },
+    ]);
+  });
+
+  it("does not follow across investigators — the pair is (cwid, awardNumber)", () => {
+    expect(
+      planSuppressionRepoints(
+        [stale("111111", "abc1234", "R01AG012345")],
+        [stale("900001", "xyz9876", "R01AG012345")],
+      ),
+    ).toEqual([]);
+  });
+
+  it("leaves an award that simply left the feed orphaned, not re-pointed", () => {
+    expect(
+      planSuppressionRepoints([stale("111111", "abc1234", "R01AG012345")], []),
+    ).toEqual([]);
+  });
+
+  it("skips a null awardNumber — nothing else identifies the award across the re-key", () => {
+    expect(
+      planSuppressionRepoints(
+        [stale("111111", "abc1234", null)],
+        [stale("900001", "abc1234", null)],
+      ),
+    ).toEqual([]);
+  });
+
+  it("skips an ambiguous pair rather than guess which suppression follows which id", () => {
+    // One stale row, two new accounts under the same (cwid, award): a takedown
+    // moved onto the wrong one is worse than the orphan.
+    expect(
+      planSuppressionRepoints(
+        [stale("111111", "abc1234", "R01AG012345")],
+        [
+          stale("900001", "abc1234", "R01AG012345"),
+          stale("900002", "abc1234", "R01AG012345"),
+        ],
+      ),
+    ).toEqual([]);
+    // ...and symmetrically, two stale rows collapsing into one new account.
+    expect(
+      planSuppressionRepoints(
+        [
+          stale("111111", "abc1234", "R01AG012345"),
+          stale("111112", "abc1234", "R01AG012345"),
+        ],
+        [stale("900001", "abc1234", "R01AG012345")],
+      ),
+    ).toEqual([]);
   });
 });

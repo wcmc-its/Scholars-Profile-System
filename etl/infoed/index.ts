@@ -434,6 +434,105 @@ async function reconcileConfidentialTitles(
   }
 }
 
+/** A grant row reduced to what identifies a reissue. */
+type ReissueKey = { externalId: string; cwid: string; awardNumber: string | null };
+
+/**
+ * #2224 — match a stale `external_id` to the new one the SAME award came back
+ * under, so a curator's takedown survives an InfoEd re-key.
+ *
+ * `external_id` is `INFOED-{Account_Number}-{CWID}`, and `Account_Number` is a
+ * mutable CASE (`prop_no` unless the proposal has a parent, then
+ * `parentprop_no`). The moment InfoEd links a standalone proposal into a
+ * family, the same investigator's same award re-keys: the old id lands in
+ * `staleExternalIds` and is hard-deleted, while the award returns in
+ * `toCreate` under a new key — UNSUPPRESSED, silently, forever. A
+ * `(cwid, awardNumber)` pair appearing on both sides IS that reissue.
+ *
+ * Strictly 1:1. An `awardNumber` is required (nothing else identifies the
+ * award across the re-key), and a pair that is ambiguous on EITHER side — a
+ * renewal split across two accounts, say — is skipped rather than guessed at:
+ * moving a takedown onto the wrong award is worse than leaving the orphan the
+ * integrity check already reports.
+ */
+export function planSuppressionRepoints(
+  stale: readonly ReissueKey[],
+  toCreate: readonly ReissueKey[],
+): Array<{ from: string; to: string }> {
+  const index = (rows: readonly ReissueKey[]) => {
+    const byPair = new Map<string, string[]>();
+    for (const r of rows) {
+      const award = r.awardNumber?.trim();
+      if (!award) continue;
+      const pair = `${r.cwid} ${award}`;
+      byPair.set(pair, [...(byPair.get(pair) ?? []), r.externalId]);
+    }
+    return byPair;
+  };
+  const created = index(toCreate);
+  const out: Array<{ from: string; to: string }> = [];
+  for (const [pair, fromIds] of index(stale)) {
+    const toIds = created.get(pair);
+    if (fromIds.length !== 1 || toIds?.length !== 1) continue;
+    if (fromIds[0] === toIds[0]) continue;
+    out.push({ from: fromIds[0], to: toIds[0] });
+  }
+  return out;
+}
+
+/**
+ * Apply {@link planSuppressionRepoints} to the ACTIVE grant suppressions on the
+ * stale ids, and reflect the moved rows (#2284) so the takedown lands in the
+ * funding index immediately rather than at the next nightly rebuild.
+ *
+ * No audit row: no ETL suppression write records one (see
+ * `reconcileConfidentialTitles`), and adding an audit action here would need
+ * the TS union plus all four ENUM sites in `scripts/sql/audit-log.sql` — a
+ * MySQL 1265 rollback of every write if either half is missed. The console line
+ * plus the integrity keyspace split is the trail.
+ */
+async function repointReissuedSuppressions(
+  staleExternalIds: readonly string[],
+  existingGrants: readonly ReissueKey[],
+  toCreate: readonly ReissueKey[],
+): Promise<void> {
+  if (staleExternalIds.length === 0) return;
+  const staleSet = new Set(staleExternalIds);
+  const repoints = planSuppressionRepoints(
+    existingGrants.filter((g) => staleSet.has(g.externalId)),
+    toCreate,
+  );
+  if (repoints.length === 0) return;
+
+  const byFrom = new Map(repoints.map((r) => [r.from, r.to]));
+  const active = await db.write.suppression.findMany({
+    where: {
+      entityType: "grant",
+      revokedAt: null,
+      entityId: { in: [...byFrom.keys()] },
+    },
+    select: { id: true, entityId: true },
+  });
+  const moved: Array<{ suppressionId: string; entityId: string }> = [];
+  for (const s of active) {
+    const to = byFrom.get(s.entityId)!;
+    // searchReflectedAt back to NULL: the row's latest transition is now
+    // unreflected, so the #393 reconciler is the backstop if the reflect below
+    // is lost. A second active row already on `to` would be inert anyway —
+    // loadAllGrantSuppressions is a Set of entityIds.
+    await db.write.suppression.update({
+      where: { id: s.id },
+      data: { entityId: to, searchReflectedAt: null },
+    });
+    moved.push({ suppressionId: s.id, entityId: to });
+  }
+  if (moved.length === 0) return;
+  console.log(
+    `[InfoEd] re-pointed ${moved.length} grant suppression(s) onto a reissued external_id.`,
+  );
+  await reflectGrantSuppressions(moved);
+}
+
 /**
  * #2020 — reconcile the undated-award worklist.
  *
@@ -718,6 +817,11 @@ async function main() {
     console.log(
       `Grant reconcile complete: +${plan.toCreate.length} ~${plan.toUpdate.length} -${tombstoned}`,
     );
+    // AFTER the deleteMany on purpose: a crash between the two leaves an
+    // orphaned suppression (the status quo, which integrity now reports),
+    // whereas re-pointing FIRST and then crashing would un-hide the stale row
+    // that is still there.
+    await repointReissuedSuppressions(plan.staleExternalIds, existingGrants, plan.toCreate);
 
     await reconcileDateGaps(undated, backfilledIds);
     await reconcileConfidentialTitles(inserts);
