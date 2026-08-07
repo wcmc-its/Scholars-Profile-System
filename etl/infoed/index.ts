@@ -491,7 +491,7 @@ export function planSuppressionRepoints(
  * MySQL 1265 rollback of every write if either half is missed. The console line
  * plus the integrity keyspace split is the trail.
  */
-async function repointReissuedSuppressions(
+export async function repointReissuedSuppressions(
   staleExternalIds: readonly string[],
   existingGrants: readonly ReissueKey[],
   toCreate: readonly ReissueKey[],

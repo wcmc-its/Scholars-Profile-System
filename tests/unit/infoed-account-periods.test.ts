@@ -1,9 +1,37 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { joinAccountPeriods, planSuppressionRepoints } from "@/etl/infoed";
+const hoisted = vi.hoisted(() => ({
+  suppressionFindMany: vi.fn(),
+  suppressionUpdate: vi.fn(),
+  reflectGrantSuppressions: vi.fn(),
+}));
+
+vi.mock("@/lib/db", () => ({
+  db: {
+    read: {},
+    write: {
+      suppression: {
+        findMany: hoisted.suppressionFindMany,
+        update: hoisted.suppressionUpdate,
+      },
+    },
+  },
+  disconnect: vi.fn(),
+  prisma: {},
+}));
+
+vi.mock("@/lib/edit/search-suppression", () => ({
+  reflectGrantSuppressions: hoisted.reflectGrantSuppressions,
+}));
+
+import {
+  joinAccountPeriods,
+  planSuppressionRepoints,
+  repointReissuedSuppressions,
+} from "@/etl/infoed";
 
 /**
  * #2173 — the account-level project period used to be a `LEFT JOIN (...) AS
@@ -195,5 +223,84 @@ describe("planSuppressionRepoints (#2224)", () => {
         [stale("900001", "abc1234", "R01AG012345")],
       ),
     ).toEqual([]);
+  });
+});
+
+/**
+ * The two lines the plan alone does not cover: which suppressions are eligible
+ * to move, and what the move does to the reflection sentinel.
+ */
+describe("repointReissuedSuppressions (#2224)", () => {
+  const OLD = "INFOED-111111-abc1234";
+  const NEW = "INFOED-900001-abc1234";
+  const key = (externalId: string) => ({
+    externalId,
+    cwid: "abc1234",
+    awardNumber: "R01AG012345",
+  });
+
+  beforeEach(() => {
+    hoisted.suppressionFindMany.mockReset().mockResolvedValue([]);
+    hoisted.suppressionUpdate.mockReset().mockResolvedValue({});
+    hoisted.reflectGrantSuppressions.mockReset().mockResolvedValue([]);
+  });
+
+  it("moves the row, resets searchReflectedAt, and reflects it", async () => {
+    hoisted.suppressionFindMany.mockResolvedValue([{ id: "sup-1", entityId: OLD }]);
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await repointReissuedSuppressions([OLD], [key(OLD)], [key(NEW)]);
+
+    // searchReflectedAt back to NULL is load-bearing, not cosmetic: the #393
+    // reconciler selects on that NULL sentinel, so a moved row that kept a
+    // stale non-NULL stamp is skipped forever if the reflect below is lost.
+    expect(hoisted.suppressionUpdate).toHaveBeenCalledWith({
+      where: { id: "sup-1" },
+      data: { entityId: NEW, searchReflectedAt: null },
+    });
+    expect(hoisted.reflectGrantSuppressions).toHaveBeenCalledWith([
+      { suppressionId: "sup-1", entityId: NEW },
+    ]);
+    log.mockRestore();
+  });
+
+  it("considers only un-revoked takedowns — re-pointing a revoked one re-hides the award", async () => {
+    await repointReissuedSuppressions([OLD], [key(OLD)], [key(NEW)]);
+
+    expect(hoisted.suppressionFindMany.mock.calls[0][0].where).toEqual({
+      entityType: "grant",
+      revokedAt: null,
+      entityId: { in: [OLD] },
+    });
+    expect(hoisted.suppressionUpdate).not.toHaveBeenCalled();
+    expect(hoisted.reflectGrantSuppressions).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Wiring. A mutation run deleted each call below and left the suite green: the
+ * helpers are well pinned, but nothing asserted they are ever CALLED, so
+ * reverting the whole delivered payload cost nothing. Source-text assertions,
+ * because both call sites live inside `main()` — which opens MSSQL.
+ */
+describe("the grant-suppression call sites are wired into the ETLs", () => {
+  const INFOED = readFileSync(join(process.cwd(), "etl/infoed/index.ts"), "utf8");
+  const REPORTER = readFileSync(
+    join(process.cwd(), "etl/reporter-grants/index.ts"),
+    "utf8",
+  );
+
+  it("InfoEd main() re-points reissued suppressions (#2224)", () => {
+    expect(INFOED).toMatch(
+      /await repointReissuedSuppressions\(\s*plan\.staleExternalIds,\s*existingGrants,\s*plan\.toCreate,?\s*\)/,
+    );
+  });
+
+  it("the InfoEd confidential-title net reflects what it mints (#2284)", () => {
+    expect(INFOED).toContain("await reflectGrantSuppressions(minted)");
+  });
+
+  it("the RePORTER recency default-hide reflects what it mints (#2284)", () => {
+    expect(REPORTER).toContain("await reflectGrantSuppressions(minted)");
   });
 });
