@@ -58,7 +58,7 @@ The **taxonomy resolver** runs at the top of the request, but since [#1421](http
 
 The resolver result feeds `searchPublications`, which constructs the OpenSearch body and returns hits, facet counts, and telemetry fields.
 
-Under `SEARCH_PUB_FACET_SPLIT` (staging-on, prod-off) the hits and facet aggregations are issued as **two parallel OpenSearch requests**; the agg side is cached ~5 min and degrades to empty facets on timeout (see [Rollback knobs](#rollback-knobs)).
+Under `SEARCH_PUB_FACET_SPLIT` (**`"on"` in BOTH envs**; prod flipped 2026-07-05, #506) the hits and facet aggregations are issued as **two parallel OpenSearch requests**; the agg side is cached ~5 min and degrades to empty facets on timeout (see [Rollback knobs](#rollback-knobs)).
 
 ---
 
@@ -318,7 +318,7 @@ The `mesh` precedence rule (`off` wins) is enforced both server-side in the rout
 | `SEARCH_PUB_TAB_MSM` | `on` | Set to `off` to remove the `minimum_should_match` floor on unresolved-query multi_match. Pre-§1.2 behavior. |
 | `SEARCH_PUB_TAB_IMPACT` | `off` | Set to `on` to surface Impact + Recency sort options + display `impactScore` / `conceptImpactScore` in hit rows. Gates **hit rows only** — the publication modal and the `/edit` pickers render Impact ungated. Not wired in `cdk/lib/app-stack.ts` (it sits in `scripts/release/flag-parity-allowlist.txt`), so it is undefined and off in staging and prod alike. |
 | `SEARCH_PUB_RELEVANCE_RECENCY` | `gentle` | Recency tilt on the Relevance sort (issue #645). `off` reverts to pure BM25 (body byte-identical to pre-#645); `strong` switches the bounded `1 + 2·gauss` multiplier for a pure-multiplicative `gauss` decay. |
-| `SEARCH_PUB_FACET_SPLIT` | `off` | Set to `on` (staging-on, prod-off) to issue hits and facet aggregations as two parallel OpenSearch requests, with the agg side cached ~5 min and degrading to empty facets on timeout. `off` reverts to the single-request body that returns hits + aggs together. |
+| `SEARCH_PUB_FACET_SPLIT` | `on` in both envs (prod flipped 2026-07-05, #506) | Issues hits and facet aggregations as two parallel OpenSearch requests, with the agg side cached ~5 min and degrading to empty facets on timeout. `off` reverts to the single-request body that returns hits + aggs together. |
 
 The first four are env-flips, no redeploy required. `SEARCH_PUB_FACET_SPLIT` is wired per-env in `cdk/lib/app-stack.ts`, so flipping it in a deployed environment needs a `cdk deploy Sps-App-<env>`.
 

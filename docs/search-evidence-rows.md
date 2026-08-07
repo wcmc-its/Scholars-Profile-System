@@ -48,7 +48,7 @@ Three properties that matter to anyone consuming them:
 
 ## Evidence rows — the three disclosures
 
-Flag: `SEARCH_EVIDENCE_ROWS` (`resolveSearchEvidenceRows`, `lib/api/search-flags.ts`). Env state: **staging `on`, prod `off`** (`cdk/lib/app-stack.ts` — `env === "staging" ? "on" : "off"`). Off ⇒ the fetchers return empty and the rows never render, so prod is inert and the routes can't be probed for data early.
+Flag: `SEARCH_EVIDENCE_ROWS` (`resolveSearchEvidenceRows`, `lib/api/search-flags.ts`). Env state: **`"on"` in BOTH envs** (`cdk/lib/app-stack.ts:1873` — an unconditional literal, not the `env === "staging" ? "on" : "off"` ternary this line used to describe). Off ⇒ the fetchers return empty and the rows never render.
 
 | Disclosure | Fetch | Query it matches on | Admission |
 |---|---|---|---|

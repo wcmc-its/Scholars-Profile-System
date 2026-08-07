@@ -1,9 +1,9 @@
 # Spec — #1366: counted, stacked evidence reason lines on People cards
 
 **Issue:** #1366 · **Date:** 2026-06-30 · **Status:** SIGNED-OFF model, ready to build
-**Supersedes scope of:** `docs/1366-evidence-row-counts-handoff.md` (counts only). Adds line **stacking** + exemplar **de-dup**.
+**Supersedes scope of:** the earlier counts-only handoff (no longer in this repo). Adds line **stacking** + exemplar **de-dup**.
 **Follow-up (deferred):** #1367 — clinical MeSH-mapped count + subspecialty/expertise-type ETL.
-**Flag:** `SEARCH_EVIDENCE_REASON_COUNTS` (staging-on / prod-off). Off ⇒ today's single-line, label-only behavior.
+**Flag:** `SEARCH_EVIDENCE_REASON_COUNTS` — **`"on"` in BOTH envs** (prod flipped 2026-07-04, #1464; `methodFamilyCounts`/`areaCounts` backfilled #1481). This line previously read "staging-on / prod-off"; that has been false since the flip. Off ⇒ the single-line, label-only behavior this spec replaced.
 
 ## Goal
 
@@ -72,7 +72,7 @@ Counts may overlap; **representative papers must be globally disjoint** across t
 ## 6. Flag + infra
 
 - `lib/api/search-flags.ts` — add `SEARCH_EVIDENCE_REASON_COUNTS` (default off). Off ⇒ single-line, label-only, no stacking, no counts (byte-identical to today).
-- `cdk/lib/app-stack.ts` — wire per-env (staging on, prod off); regen snapshot (`cd cdk && npm ci && npm test -- -u`, commit only the `.snap`).
+- `cdk/lib/app-stack.ts` — wire the flag; regen snapshot (`cd cdk && npm ci && npm test -- -u`, commit only the `.snap`).
 
 ## 7. Tests (vitest)
 

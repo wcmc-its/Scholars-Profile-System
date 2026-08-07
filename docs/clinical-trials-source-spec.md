@@ -137,7 +137,7 @@ Plus a `clinicalTrials PersonClinicalTrial[]` relation on `Scholar`. One migrati
   title, status (+ "as of" `statusDate`), phase, sponsor, role, conditions; expand
   reveals summary/enrollment and a ClinicalTrials.gov link when `nctNumber` present.
 - Insert in `profile-view.tsx` after the Grants section (research-activity grouping).
-- **Gated** behind a `CLINICAL_TRIALS_SECTION` flag (app-stack, staging-on/prod-off),
+- **Gated** behind a `CLINICAL_TRIALS_SECTION` flag — **`"on"` in BOTH envs** (prod flipped 2026-07-07; presence-gated, hidden when empty),
   per the repo's ship-dark convention.
 
 ## 8. Future third-party swap-point

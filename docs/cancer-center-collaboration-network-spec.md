@@ -1,7 +1,7 @@
 # Cancer Center collaboration network — spec
 
 **Status:** Draft for approval · **Owner:** Paul Albert · **Date:** 2026-06-19
-**Flag:** `CENTER_COLLABORATION_NETWORK` (staging-on / prod-off, env-conditional)
+**Flag:** `CENTER_COLLABORATION_NETWORK` — **`"on"` in BOTH envs** (prod flipped 2026-07-05, #506 launch flag-parity batch 1). No longer env-conditional.
 **Gate:** data-driven — appears only for centers that have a `CenterProgram` taxonomy (today: Meyer Cancer Center). No hardcoded center code, matching the existing `CenterProgram`/`CENTER_METHODS_FACET` precedent.
 
 ---
