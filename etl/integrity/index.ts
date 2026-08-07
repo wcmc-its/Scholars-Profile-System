@@ -22,9 +22,11 @@
  *     a live index that diverges >20% below its source table means a partial
  *     or stale index is serving.
  *
- * Plus one reported-not-graded observation: the count of active grant
- * suppressions whose `entityId` resolves to no `Grant.externalId` (#2224).
- * Logged rather than checked — see the rationale at the call site.
+ * Plus orphaned grant suppressions — active rows whose `entityId` resolves to
+ * no `Grant.externalId` (#2224), split by keyspace: `reporter:` is reported and
+ * never graded (that keyspace self-heals on re-add), `INFOED-` is a violation
+ * (its re-key un-hides the award permanently). See the rationale at the call
+ * site.
  *
  * Aggregate canaries (e.g. "most active scholars have at least one
  * publication") are preferred over named-cwid canaries: they catch the same
@@ -167,6 +169,40 @@ export function findVolumeRegressions(
   return out;
 }
 
+/**
+ * The two grant-suppression keyspaces, split because they have OPPOSITE
+ * consequences when the suppression outlives its target (#2224).
+ *
+ * `reporter:{cwid}:{core}` is deterministic (etl/reporter-grants/transform.ts),
+ * so a re-added grant returns under the SAME id and the surviving suppression
+ * re-attaches — the orphan is the re-add protection working as designed.
+ * `INFOED-{account}-{cwid}` is NOT: `Account_Number` re-keys from `prop_no` to
+ * `parentprop_no` the moment a proposal joins a family, so the award can come
+ * back under a new id, unsuppressed, permanently.
+ *
+ * Measured on prod 2026-08-05: all 5 orphans were `reporter:` / `system-recency`,
+ * minted inside a nine-minute window on 2026-07-07. Zero were `INFOED-`.
+ */
+export type OrphanKeyspace = "infoed" | "reporter" | "other";
+
+/** Suppression IDS per keyspace — never entityIds, which embed a CWID. */
+export type OrphanSplit = Record<OrphanKeyspace, string[]>;
+
+export function splitOrphansByKeyspace(
+  orphans: ReadonlyArray<{ id: string; entityId: string }>,
+): OrphanSplit {
+  const split: OrphanSplit = { infoed: [], reporter: [], other: [] };
+  for (const s of orphans) {
+    const ks: OrphanKeyspace = s.entityId.startsWith("INFOED-")
+      ? "infoed"
+      : s.entityId.startsWith("reporter:")
+        ? "reporter"
+        : "other";
+    split[ks].push(s.id);
+  }
+  return split;
+}
+
 function bypassed(guard: string): boolean {
   const raw = process.env.ETL_GUARD_BYPASS;
   if (!raw) return false;
@@ -305,7 +341,8 @@ async function main(): Promise<void> {
     );
   }
 
-  // 4. Orphaned grant suppressions (#2224) — VISIBILITY ONLY, never a violation.
+  // 4. Orphaned grant suppressions (#2224), SPLIT BY KEYSPACE — one number
+  //    could not be graded because it summed two opposite meanings.
   //
   // ADR-005 § Keying deliberately lets a suppression row outlive a hard-deleted
   // target, so an orphan is not by itself a bug. What is missing is any surface
@@ -313,14 +350,19 @@ async function main(): Promise<void> {
   // a no-op when InfoEd reissued the row under a new external_id" — in which case
   // the curator's takedown is silently void and nobody is told.
   //
-  // ponytail: logged, not graded. The count drifts upward on legitimate InfoEd
-  // churn, so a page-on-movement alarm would fire on normal reissues; the log
-  // line puts the trend in CloudWatch for free. Promote to a note() with a
-  // budget only once the trend shows it moving faster than reissue churn
-  // explains. The curator-facing report is the real fix and is what remains on
-  // #2224.
+  // `reporter:` stays VISIBILITY ONLY, never a violation: the id is
+  // deterministic, so the orphan IS the re-add protection working (see
+  // splitOrphansByKeyspace). All 5 orphans measured on prod are this half.
   //
-  // Suppression ids only — the entityId embeds a CWID and this line goes to a
+  // `INFOED-` is graded. The re-key un-hides a live grant permanently, and the
+  // re-point at etl/infoed/index.ts now catches the reissue in the act, so a
+  // surviving InfoEd orphan means either an award that left the feed outright
+  // (inert, and the bypass below is the right response) or a re-key the
+  // re-point missed (the confidentiality consequence #2224 is about). Baseline
+  // is ZERO, which is what makes it gradeable at all; bypass with
+  // ETL_GUARD_BYPASS=integrity:suppression:orphan-infoed.
+  //
+  // Suppression ids only — the entityId embeds a CWID and these lines go to a
   // shared log group. An id is enough to look the row up.
   const grantSuppressions = await db.read.suppression.findMany({
     where: { entityType: EntityType.grant, revokedAt: null },
@@ -335,11 +377,27 @@ async function main(): Promise<void> {
     ).map((g) => g.externalId),
   );
   const orphaned = grantSuppressions.filter((s) => !resolved.has(s.entityId));
+  const split = splitOrphansByKeyspace(orphaned);
   console.log(
     `[integrity] grant suppressions: ${grantSuppressions.length} active, ` +
-      `${orphaned.length} orphaned (entityId matches no Grant.externalId)` +
-      (orphaned.length > 0 ? ` — suppression ids: ${orphaned.map((s) => s.id).join(", ")}` : ""),
+      `${orphaned.length} orphaned (entityId matches no Grant.externalId) — ` +
+      `infoed=${split.infoed.length} reporter=${split.reporter.length} ` +
+      `other=${split.other.length}` +
+      (split.reporter.length > 0
+        ? `; reporter (self-healing keyspace, benign) suppression ids: ${split.reporter.join(", ")}`
+        : "") +
+      (split.other.length > 0
+        ? `; other suppression ids: ${split.other.join(", ")}`
+        : ""),
   );
+  if (split.infoed.length > 0) {
+    note(
+      "suppression:orphan-infoed",
+      `${split.infoed.length} InfoEd-keyed grant suppression(s) point at no ` +
+        `Grant.externalId — an InfoEd re-key un-hides the award permanently. ` +
+        `Suppression ids: ${split.infoed.join(", ")}`,
+    );
+  }
 
   if (violations.length > 0) {
     for (const v of violations) console.error(v);

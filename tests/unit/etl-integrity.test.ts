@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { CHANGE_COUNT_SOURCES, findVolumeRegressions, staleSources } from "@/etl/integrity";
+import {
+  CHANGE_COUNT_SOURCES,
+  findVolumeRegressions,
+  splitOrphansByKeyspace,
+  staleSources,
+} from "@/etl/integrity";
 
 describe("findVolumeRegressions", () => {
   it("flags a >50% overnight drop on a substantial source", () => {
@@ -132,5 +137,36 @@ describe("findVolumeRegressions — change-count sources (#2200)", () => {
       { now: NOW },
     );
     expect(out).toHaveLength(1);
+  });
+});
+
+// #2224 — one orphan count summed two opposite meanings: a `reporter:` orphan
+// is the re-add protection working (deterministic id, re-attaches on re-add),
+// an `INFOED-` orphan is a live un-hiding (the Account_Number re-key).
+describe("splitOrphansByKeyspace (#2224)", () => {
+  it("separates the self-healing keyspace from the one that pages", () => {
+    expect(
+      splitOrphansByKeyspace([
+        { id: "s1", entityId: "reporter:aaa1111:R01CA000001" },
+        { id: "s2", entityId: "INFOED-90210-aaa1111" },
+        { id: "s3", entityId: "reporter:bbb2222:R01CA000002" },
+        { id: "s4", entityId: "legacy-91" },
+      ]),
+    ).toEqual({ infoed: ["s2"], reporter: ["s1", "s3"], other: ["s4"] });
+  });
+
+  it("carries suppression ids only — never the entityId, which embeds a CWID", () => {
+    const split = splitOrphansByKeyspace([
+      { id: "s1", entityId: "INFOED-90210-aaa1111" },
+    ]);
+    expect(JSON.stringify(split)).not.toContain("aaa1111");
+  });
+
+  it("is empty per keyspace when there are no orphans, so nothing is graded", () => {
+    expect(splitOrphansByKeyspace([])).toEqual({
+      infoed: [],
+      reporter: [],
+      other: [],
+    });
   });
 });
