@@ -654,14 +654,17 @@ describe("/edit/etl-status triage layout", () => {
     expect(within(table).getAllByTestId(/^etl-status-row-/).length).toBe(total() - 1);
   });
 
-  it("collapses the healthy imports behind a native disclosure, shut by default", async () => {
+  it("puts the healthy imports in a native disclosure, open by default", async () => {
     fixtures = allHealthy();
     render(await Page());
     const details = screen.getByTestId("etl-status-normal");
     // A native <details> is the entire feature: this page is a server
     // component, and a client island here would be state nobody needs.
     expect(details.tagName).toBe("DETAILS");
-    expect(details.hasAttribute("open")).toBe(false);
+    // OPEN by default: the section split already does the triage, so hiding the
+    // healthy detail behind a click bought nothing and took every raw source key
+    // out of find-in-page range. Still a <details>, so it can still be collapsed.
+    expect(details.hasAttribute("open")).toBe(true);
     const summary = details.querySelector("summary");
     expect(summary?.textContent).toContain(`Running normally (${total()})`);
     // The collapsed line has to carry a fact, not just a count.
