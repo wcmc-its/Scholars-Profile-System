@@ -24,7 +24,7 @@
  *
  * Usage: `npm run etl:reporter-grants`
  */
-import { db } from "../../lib/db";
+import { db, disconnect } from "../../lib/db";
 import { assertPruneVolume } from "../../lib/etl-guard";
 import { withEtlRun } from "@/lib/etl-run";
 import type { Prisma } from "@/lib/generated/prisma/client";
@@ -547,10 +547,15 @@ async function main() {
 // Records an etl_run row (source "ReporterGrants") so the freshness heartbeat
 // tracks this weekly step (PR-7). main() does not disconnect internally, so the
 // success/failure etl_run update runs before the outer disconnect below.
+//
+// `disconnect()`, not `db.write.$disconnect()`: reflectGrantSuppressions reads
+// through `db.read`. This step routes to the `baseUnit` task def, the one that
+// injects DATABASE_URL_RO, so the reader really is a second mariadb pool here —
+// leaving it open holds the event loop open after main() resolves.
 withEtlRun("ReporterGrants", main)
-  .then(() => db.write.$disconnect())
+  .then(() => disconnect())
   .catch(async (err) => {
     console.error(err);
-    await db.write.$disconnect();
+    await disconnect();
     process.exit(1);
   });

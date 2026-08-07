@@ -36,7 +36,7 @@
  *
  * Usage: `npm run etl:infoed`
  */
-import { db } from "../../lib/db";
+import { db, disconnect } from "../../lib/db";
 import { assertPruneVolume } from "../../lib/etl-guard";
 import { closeInfoedPool, getInfoedPool } from "@/lib/sources/mssql-infoed";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
@@ -859,7 +859,11 @@ if (!process.env.VITEST) {
       process.exit(1);
     })
     .finally(async () => {
-      await db.write.$disconnect();
+      // `disconnect()`, not `db.write.$disconnect()`: reflectGrantSuppressions
+      // reads through `db.read`, which is a SECOND pool wherever
+      // DATABASE_URL_RO is set. Leaving it open holds the event loop and the
+      // task burns its full Step Functions `.sync` timeout after main() resolves.
+      await disconnect();
       await closeInfoedPool();
     });
 }
