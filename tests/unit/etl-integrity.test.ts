@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -168,5 +171,24 @@ describe("splitOrphansByKeyspace (#2224)", () => {
       reporter: [],
       other: [],
     });
+  });
+});
+
+/**
+ * The split above is only worth having because the `infoed` side GRADES: it
+ * goes through `note()`, which pushes a violation and fails the nightly.
+ * Swapping that one call for `console.log`/`console.warn` deletes the whole
+ * behaviour and every test above stays green — nothing here reaches `main()`,
+ * which opens Prisma and OpenSearch. Hence a source-text assertion, comments
+ * stripped first (same as `tests/unit/etl-disconnect-guard.test.ts`) so a
+ * commented-out call fails it too.
+ */
+describe("the InfoEd-orphan split is graded, not just logged (#2224)", () => {
+  const SRC = readFileSync(join(process.cwd(), "etl/integrity/index.ts"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+
+  it("routes the infoed keyspace through note(), which is what fails the run", () => {
+    expect(SRC).toMatch(/\bnote\(\s*"suppression:orphan-infoed",/);
   });
 });
