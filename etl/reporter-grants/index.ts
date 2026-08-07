@@ -34,6 +34,7 @@ import {
   type Candidate,
   type InfoedGrant,
 } from "@/lib/edit/reporter-grants";
+import { reflectGrantSuppressions } from "@/lib/edit/search-suppression";
 import {
   fetchGrantProjectsByProfileIds,
   fetchPublicationsByCoreProjectNums,
@@ -402,9 +403,15 @@ async function main() {
   const erroredCwids = new Set<string>();
   let processed = 0;
   let grantsUpserted = 0;
-  let newlySuppressed = 0;
   let skippedNoDate = 0;
   let errored = 0;
+  // #2284 — ADR-005 layer 1 for the recency default-hides minted below.
+  // Collected across the whole run and reflected ONCE after the loop: the
+  // reflect must happen after its transaction commits, and batching pays for
+  // the corpus key scan once. `reporter:{cwid}:{core}` ids parse to nothing, so
+  // in practice the batch emits no index op at all — but it still STAMPS
+  // `searchReflectedAt`, which is the #2204 defect.
+  const minted: Array<{ suppressionId: string; entityId: string }> = [];
 
   const scholars = [...profilesByCwid.entries()];
   for (const [cwid, profileIds] of scholars) {
@@ -464,7 +471,7 @@ async function main() {
             recencyShouldSuppress(maxFiscalYear, currentYear) &&
             !existingRecencyHides.has(row.externalId)
           ) {
-            await tx.suppression.create({
+            const sup = await tx.suppression.create({
               data: {
                 entityType: "grant",
                 entityId: row.externalId,
@@ -476,7 +483,7 @@ async function main() {
               },
             });
             existingRecencyHides.add(row.externalId);
-            newlySuppressed++;
+            minted.push({ suppressionId: sup.id, entityId: row.externalId });
           }
         }
       });
@@ -493,10 +500,12 @@ async function main() {
     await sleepBetweenRequests();
   }
 
+  await reflectGrantSuppressions(minted);
+
   console.log(
     `\nMaterialized ${grantsUpserted} net-new RePORTER grants across ` +
       `${processed} scholars ` +
-      `(${newlySuppressed} default-hidden by age, ${skippedNoDate} skipped: no dates, ` +
+      `(${minted.length} default-hidden by age, ${skippedNoDate} skipped: no dates, ` +
       `${errored} fetch errors).`,
   );
 

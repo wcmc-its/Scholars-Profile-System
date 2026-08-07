@@ -93,7 +93,10 @@ vi.mock("@/lib/search", () => ({
   searchClient: () => ({ bulk: hoisted.mockBulk }),
 }));
 
-import { reflectSearchSuppression } from "@/lib/edit/search-suppression";
+import {
+  reflectGrantSuppressions,
+  reflectSearchSuppression,
+} from "@/lib/edit/search-suppression";
 
 const OK_BULK_RESPONSE = { body: { errors: false, items: [] } };
 
@@ -515,6 +518,85 @@ describe("reflectSearchSuppression — grant funding fast-path (#481(a))", () =>
     expect(hoisted.mockGrantFindMany).not.toHaveBeenCalled();
     expect(hoisted.mockBulk).not.toHaveBeenCalled();
     expect(hoisted.mockSuppressionUpdate).toHaveBeenCalledTimes(1);
+  });
+});
+
+// #2284 — the ETL-writer entry point. The single-row path above is what the
+// /edit routes use; ETLs mint suppressions in bulk, and the expensive half of
+// buildGrantOps is entityId-independent.
+describe("reflectGrantSuppressions — ETL batch (#2284)", () => {
+  it("pays for ONE corpus key scan across the whole batch", async () => {
+    // Two InfoEd rows on two different projects, each its project's only role
+    // → both go dark, so no per-project refetch runs and every grant.findMany
+    // call is a key scan. One call means the scan was hoisted; two means the
+    // batch degenerated into N single reflects.
+    hoisted.mockSuppressionFindMany.mockResolvedValue([
+      { entityId: "INFOED-ACCT1-ann" },
+      { entityId: "INFOED-ACCT2-bob" },
+    ]);
+    hoisted.mockGrantFindMany.mockResolvedValue([
+      { externalId: "INFOED-ACCT1-ann", awardNumber: "OCRA-2024-091" },
+      { externalId: "INFOED-ACCT2-bob", awardNumber: "OCRA-2024-092" },
+    ]);
+
+    const results = await reflectGrantSuppressions([
+      { suppressionId: "sup-b1", entityId: "INFOED-ACCT1-ann" },
+      { suppressionId: "sup-b2", entityId: "INFOED-ACCT2-bob" },
+      // The reporter-grants half: unparseable, no index op, still stamped.
+      { suppressionId: "sup-b3", entityId: "reporter:ann:R01CA000001" },
+    ]);
+
+    expect(results).toEqual([
+      { ok: true, stamped: true },
+      { ok: true, stamped: true },
+      { ok: true, stamped: true },
+    ]);
+    expect(hoisted.mockSuppressionFindMany).toHaveBeenCalledTimes(1);
+    expect(hoisted.mockGrantFindMany).toHaveBeenCalledTimes(1);
+    expect(hoisted.mockBulk).toHaveBeenCalledTimes(2);
+    expect(hoisted.mockBulk.mock.calls.map((c) => c[0].body)).toEqual([
+      [{ delete: { _index: "scholars-funding", _id: "ACCT1" } }],
+      [{ delete: { _index: "scholars-funding", _id: "ACCT2" } }],
+    ]);
+    // Every row stamps, including the one with nothing to project (#2204).
+    expect(hoisted.mockSuppressionUpdate).toHaveBeenCalledTimes(3);
+  });
+
+  it("skips the scan entirely when no id in the batch parses", async () => {
+    // The reporter-grants ETL's whole batch. A corpus scan here is pure waste.
+    const results = await reflectGrantSuppressions([
+      { suppressionId: "sup-r1", entityId: "reporter:ann:R01CA000001" },
+      { suppressionId: "sup-r2", entityId: "reporter:bob:R01CA000002" },
+    ]);
+
+    expect(results).toEqual([
+      { ok: true, stamped: true },
+      { ok: true, stamped: true },
+    ]);
+    expect(hoisted.mockSuppressionFindMany).not.toHaveBeenCalled();
+    expect(hoisted.mockGrantFindMany).not.toHaveBeenCalled();
+    expect(hoisted.mockBulk).not.toHaveBeenCalled();
+    expect(hoisted.mockSuppressionUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let one row's failure abort the batch", async () => {
+    hoisted.mockSuppressionFindMany.mockResolvedValue([
+      { entityId: "INFOED-ACCT1-ann" },
+    ]);
+    hoisted.mockGrantFindMany.mockResolvedValue([
+      { externalId: "INFOED-ACCT1-ann", awardNumber: "OCRA-2024-091" },
+    ]);
+    hoisted.mockBulk.mockRejectedValueOnce(new Error("cluster unreachable"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const results = await reflectGrantSuppressions([
+      { suppressionId: "sup-f1", entityId: "INFOED-ACCT1-ann" },
+      { suppressionId: "sup-f2", entityId: "reporter:ann:R01CA000001" },
+    ]);
+
+    expect(results[0].ok).toBe(false);
+    expect(results[1]).toEqual({ ok: true, stamped: true });
+    consoleError.mockRestore();
   });
 });
 

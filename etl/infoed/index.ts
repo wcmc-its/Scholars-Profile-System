@@ -43,6 +43,7 @@ import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { repairEncodingOrNull } from "@/lib/text/repair-encoding";
 import { coreProjectNum, parseNihAward } from "@/lib/award-number";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
+import { reflectGrantSuppressions } from "@/lib/edit/search-suppression";
 import { isConfidentialTitle } from "@/lib/grant-confidentiality";
 import { fetchProjectPeriodsByCoreProjectNums } from "../nih-profile/fetcher";
 import {
@@ -388,6 +389,12 @@ const SYSTEM_CONFIDENTIAL_TITLE = "system-confidential-title";
  * instead of a silent drop: the false-positive rate on a bare keyword match is
  * real (see lib/grant-confidentiality.ts), so "hidden pending review" is the
  * safe default, not "hidden forever" or "published anyway."
+ *
+ * #2284 — every row minted here is reflected into the funding index before this
+ * returns (ADR-005 layer 1). Without it the only remover was the nightly
+ * rebuild, so a standalone `npm run etl:infoed` (which rebuilds no index) left a
+ * ≤24h exposure window on a CDA/NDA control. Batched: one corpus key scan for
+ * the whole run, not one per suppression.
  */
 async function reconcileConfidentialTitles(
   inserts: Array<{ externalId: string; title: string }>,
@@ -401,10 +408,10 @@ async function reconcileConfidentialTitles(
     ).map((s) => s.entityId),
   );
 
-  let newlySuppressed = 0;
+  const minted: Array<{ suppressionId: string; entityId: string }> = [];
   for (const { externalId, title } of inserts) {
     if (!isConfidentialTitle(title) || existing.has(externalId)) continue;
-    await db.write.suppression.create({
+    const row = await db.write.suppression.create({
       data: {
         entityType: "grant",
         entityId: externalId,
@@ -416,8 +423,10 @@ async function reconcileConfidentialTitles(
       },
     });
     existing.add(externalId);
-    newlySuppressed++;
+    minted.push({ suppressionId: row.id, entityId: externalId });
   }
+  await reflectGrantSuppressions(minted);
+  const newlySuppressed = minted.length;
   if (newlySuppressed > 0) {
     console.log(
       `[InfoEd] ${newlySuppressed} grant(s) auto-suppressed on a confidential-looking title.`,
