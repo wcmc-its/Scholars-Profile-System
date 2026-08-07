@@ -36,7 +36,8 @@ const ROLE_CHIPS: Array<{ id: TopicAllScholarRole; label: string; countKey: keyo
   { id: "all", label: "All", countKey: "all" },
   { id: "faculty", label: "Faculty", countKey: "faculty" },
   { id: "postdocs", label: "Postdocs", countKey: "postdocs" },
-  { id: "doctoral_students", label: "Doctoral students", countKey: "doctoralStudents" },
+  // No "Doctoral students" chip (sibling of #2270): the loader carves the #536
+  // hidden identity classes, so the facet could only ever offer an empty list.
 ];
 
 function buildHref(

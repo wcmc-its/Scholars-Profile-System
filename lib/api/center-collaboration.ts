@@ -3,7 +3,8 @@
  *
  * Computes the on-demand co-authorship graph for one center from live data —
  * no schema change, no precompute. Privacy rides on the SAME public gate the
- * roster uses (`deletedAt: null, status: "active"` + active-membership predicate),
+ * roster uses (`deletedAt: null, status: "active"` + `publicRoleWhere()` + the
+ * active-membership predicate, then a fail-closed `isPubliclyDisplayed` pass),
  * so #536-hidden faculty and soft-deleted students can appear in NEITHER a node
  * NOR an edge. Edges/rollups/filters are built in the browser from this payload
  * (`lib/center-collaboration/graph.ts`); this module is filter-agnostic.
@@ -18,6 +19,7 @@
  * `docs/grant-coinvestigator-axis-handoff.md` §7.
  */
 import { prisma } from "@/lib/db";
+import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { isCenterMembershipActive } from "@/lib/api/centers";
 import { resolveActiveGrantSuppression } from "@/lib/api/manual-layer";
 import { extractLastNameSort } from "@/lib/name-sort";
@@ -92,11 +94,26 @@ export async function buildCenterCollaboration(
   if (activeCwids.length === 0) return emptyPayload(center, grantAxis);
 
   // 2. Public-display gate — identical to the public roster (drop dormant /
-  //    soft-deleted). A scholar dropped here is dropped from nodes AND edges.
-  const scholars = (await prisma.scholar.findMany({
-    where: { cwid: { in: activeCwids }, deletedAt: null, status: "active" },
-    select: { cwid: true, preferredName: true, slug: true },
-  })) as Array<{ cwid: string; preferredName: string; slug: string | null }>;
+  //    soft-deleted / #536-hidden). A scholar dropped here is dropped from nodes
+  //    AND edges. #2271 — the role carve was asserted in three places but never
+  //    applied here; #2256 added it to `centers.ts` and parity was lost.
+  const loaded = (await prisma.scholar.findMany({
+    where: {
+      cwid: { in: activeCwids },
+      deletedAt: null,
+      status: "active",
+      ...publicRoleWhere(),
+    },
+    select: { cwid: true, preferredName: true, slug: true, roleCategory: true },
+  })) as Array<{
+    cwid: string;
+    preferredName: string;
+    slug: string | null;
+    roleCategory: string | null;
+  }>;
+  // Fail-closed on the RAW column: `publicRoleWhere()` is a denylist that cannot
+  // express the `doctoral_student*` prefix, so an out-of-band suffix passes it.
+  const scholars = loaded.filter((s) => isPubliclyDisplayed(s.roleCategory));
   if (scholars.length === 0) return emptyPayload(center, grantAxis);
 
   // Stable, legible node order: surname A–Z (preferredName is "Given … Last").

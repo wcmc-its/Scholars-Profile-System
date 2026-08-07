@@ -28,7 +28,7 @@ import { isFundingActive } from "@/lib/funding-active";
 import { multiPiExternalIds } from "@/lib/funding-projection";
 import { loadProjectSiblingRows } from "@/lib/api/project-siblings";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
-import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { resolveHiddenStudentCoauthorChips } from "@/lib/api/search-flags";
 import {
   isMethodsLensEnabled,
@@ -323,16 +323,34 @@ export async function loadSensitiveScholarFamilies(cwid: string): Promise<Schola
  * email-visibility-spec § Cache-safety — the cache-unsafe reveal of a scholar's
  * email for the /api/profile/[cwid]/contact-email endpoint. Returns the raw email
  * + release audience (the endpoint applies table A against the resolved
- * internal-viewer signal); `null` for an unknown or soft-deleted scholar.
+ * internal-viewer signal); `null` for an unknown, soft-deleted, inactive or
+ * #536-hidden scholar.
+ *
+ * #2269 — the route is NOT SSO-gated (`middleware.ts` does not match
+ * `/api/profile/*`), so this loader is the access control and needs the same
+ * two-layer carve as the other public per-CWID endpoints (#2257). `deletedAt`
+ * alone is inert against the prod data shape: the ED ETL soft-deletes
+ * `affiliate_alumni` but has no equivalent pass for doctoral students, so 690
+ * prod rows carry a bare `doctoral_student` with `deleted_at IS NULL` — and
+ * their `email` / `email_visibility` columns are populated by the same upsert
+ * used for faculty. Hidden and nonexistent both return `null`, so the endpoint
+ * is not an existence oracle.
+ *
+ * `status: "active"` matches the profile-page loader this backs. Without it a
+ * scholar whose profile page 404s on status still had their email revealed here,
+ * which is the whole failure mode the route-is-not-SSO-gated note above is about.
  */
 export async function loadScholarContactEmail(
   cwid: string,
 ): Promise<{ email: string | null; emailVisibility: string | null } | null> {
-  const scholar = await prisma.scholar.findUnique({
-    where: { cwid },
-    select: { email: true, emailVisibility: true, deletedAt: true },
+  const scholar = await prisma.scholar.findFirst({
+    where: { cwid, deletedAt: null, status: "active", ...publicRoleWhere() },
+    select: { email: true, emailVisibility: true, deletedAt: true, roleCategory: true },
   });
   if (!scholar || scholar.deletedAt) return null;
+  // Fail-closed on the RAW column: `publicRoleWhere()` is a denylist that cannot
+  // express the `doctoral_student*` prefix, so an out-of-band suffix passes it.
+  if (!isPubliclyDisplayed(scholar.roleCategory)) return null;
   return { email: scholar.email, emailVisibility: scholar.emailVisibility };
 }
 

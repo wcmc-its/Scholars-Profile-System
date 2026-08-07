@@ -65,10 +65,12 @@ vi.mock("@/lib/profile/email-visibility-flags", () => ({
 
 import {
   buildScholarExport,
+  commonCells,
   isSupercategoryExportInRange,
   SCHOLAR_EXPORT_CAP,
   SCOPE_HEADERS,
 } from "@/lib/api/export-scholars";
+import { HIDDEN_ROLE_CATEGORIES } from "@/lib/eligibility";
 import { getFamily, getSupercategory } from "@/lib/api/methods";
 import { getTopic } from "@/lib/api/topics";
 import { loadFamilyOverlayGate, isFamilyPubliclyVisible } from "@/lib/api/methods-overlay";
@@ -150,11 +152,11 @@ describe("buildScholarExport — method-family scope", () => {
 
     // Header is exactly the documented per-scope header set.
     expect(header).toEqual([...SCOPE_HEADERS["method-family"]]);
-    // The loader fetches CAP + 1 (51) so an over-cap cohort is DETECTABLE — the
-    // builder refuses > 50 rather than the DB silently truncating to a partial 50.
-    expect(mockScholarFamilyFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({ take: SCHOLAR_EXPORT_CAP + 1 }),
-    );
+    // The loader carries NO DB-level `take`: it must carve the hidden roles
+    // BEFORE truncating to CAP + 1, or one hidden row inside a `take: 51` window
+    // shrinks the roster to 50 and the over-cap guard silently emits a partial
+    // top-50 instead of refusing (#2272).
+    expect(mockScholarFamilyFindMany.mock.calls[0][0]).not.toHaveProperty("take");
     // In-range cohort exports complete (all 50 rows).
     expect(body.length).toBe(SCHOLAR_EXPORT_CAP);
     expect(body.length).toBeLessThanOrEqual(50);
@@ -180,7 +182,33 @@ describe("buildScholarExport — method-family scope", () => {
     expect(header.some((h) => h.toLowerCase().includes("phone"))).toBe(false);
   });
 
-  it("blanks profile_url for hidden-display roles (doctoral students), matching the unlinked public roster (#536)", async () => {
+  it("carves hidden-display roles in the loader WHERE clause, admitting NULL explicitly (#2272)", async () => {
+    vi.mocked(getFamily).mockResolvedValue({
+      supercategory: "animal_cell_models",
+      supercategorySlug: "animal-cell-models",
+      familyId: "fam_x",
+      familyLabel: "CRISPR screens",
+      familySlug: "crispr-screens-fam_x",
+    } as never);
+    mockScholarFamilyFindMany.mockResolvedValue([]);
+
+    await buildScholarExport("method-family", {
+      supercategory: "animal-cell-models",
+      family: "crispr-screens-fam_x",
+    });
+
+    const scholarFilter = mockScholarFamilyFindMany.mock.calls[0][0].where.scholar;
+    expect(scholarFilter.deletedAt).toBeNull();
+    expect(scholarFilter.status).toBe("active");
+    // NULL admitted EXPLICITLY — a bare `notIn` on a nullable column drops NULL
+    // rows (SQL three-valued logic) and would hide un-backfilled scholars.
+    expect(scholarFilter.OR).toContainEqual({ roleCategory: null });
+    expect(scholarFilter.OR).toContainEqual({
+      roleCategory: { notIn: [...HIDDEN_ROLE_CATEGORIES] },
+    });
+  });
+
+  it("emits NO ROW at all for a hidden-display role — not a named row with a blank link (#2272)", async () => {
     vi.mocked(getFamily).mockResolvedValue({
       supercategory: "animal_cell_models",
       supercategorySlug: "animal-cell-models",
@@ -189,10 +217,13 @@ describe("buildScholarExport — method-family scope", () => {
       familySlug: "crispr-screens-fam_x",
     } as never);
 
-    // A faculty scholar (linked) and a doctoral student (listed but unlinked).
+    // `doctoral_student_dvm` is NOT in HIDDEN_ROLE_CATEGORIES, so it passes the
+    // where-clause; only the fail-closed prefix match catches it. This is the
+    // #2202 shape: the carve used to sit on the profile_url/email CELLS while
+    // the row still shipped name, cwid, title and department.
     mockScholarFamilyFindMany.mockResolvedValue([
       { pmidCount: 9, scholar: scholar(0) },
-      { pmidCount: 8, scholar: { ...scholar(1), roleCategory: "doctoral_student" } },
+      { pmidCount: 8, scholar: { ...scholar(1), roleCategory: "doctoral_student_dvm" } },
     ]);
 
     const result = await buildScholarExport("method-family", {
@@ -201,15 +232,12 @@ describe("buildScholarExport — method-family scope", () => {
     });
 
     const table = parseCsv(result!.csv);
-    const header = table[0];
     const body = table.slice(1);
-    const urlIdx = header.indexOf("profile_url");
-
-    // Both scholars are present (all roles), but only the publicly-displayed
-    // one carries a link; the doctoral student's URL cell is blank.
-    expect(body.length).toBe(2);
-    expect(body[0][urlIdx]).toBe("/slug-0");
-    expect(body[1][urlIdx]).toBe("");
+    expect(body.length).toBe(1);
+    expect(result!.rowCount).toBe(1);
+    expect(result!.csv).not.toContain("Scholar 1");
+    expect(result!.csv).not.toContain("cwid1");
+    expect(result!.csv).not.toContain("Dept 1");
   });
 
   it("returns null when the family does not resolve", async () => {
@@ -441,11 +469,13 @@ describe("buildScholarExport — includeEmail option (#866 UC-B)", () => {
     expect(body[1][emailIdx]).toBe("scholar1@med.cornell.edu");
   });
 
-  it("blanks email for hidden-display roles (doctoral / affiliate alumni), mirroring profile_url", async () => {
+  it("drops hidden-display roles (doctoral / affiliate alumni) entirely — no row, so no email (#2272)", async () => {
     resolveCrisprFamily();
+    // Suffixed variants that the where-clause denylist cannot express, so they
+    // reach the fail-closed post-filter — the only layer that can catch them.
     mockScholarFamilyFindMany.mockResolvedValue([
       { pmidCount: 9, scholar: scholar(0) },
-      { pmidCount: 8, scholar: { ...scholar(1), roleCategory: "doctoral_student" } },
+      { pmidCount: 8, scholar: { ...scholar(1), roleCategory: "doctoral_student_dvm" } },
       { pmidCount: 7, scholar: { ...scholar(2), roleCategory: "affiliate_alumni" } },
     ]);
 
@@ -462,13 +492,12 @@ describe("buildScholarExport — includeEmail option (#866 UC-B)", () => {
     const emailIdx = header.indexOf("email");
     const urlIdx = header.indexOf("profile_url");
 
-    // Faculty: email + link present. Hidden-display roles: BOTH blank, in lockstep.
+    // Only the faculty row survives; the hidden rows are absent, not blanked.
+    expect(body.length).toBe(1);
     expect(body[0][emailIdx]).toBe("scholar0@med.cornell.edu");
     expect(body[0][urlIdx]).toBe("/slug-0");
-    expect(body[1][emailIdx]).toBe("");
-    expect(body[1][urlIdx]).toBe("");
-    expect(body[2][emailIdx]).toBe("");
-    expect(body[2][urlIdx]).toBe("");
+    expect(result!.csv).not.toContain("scholar1@med.cornell.edu");
+    expect(result!.csv).not.toContain("scholar2@med.cornell.edu");
   });
 
   it("emits a blank email cell (not the column's absence) when a faculty scholar has no email", async () => {
@@ -627,13 +656,13 @@ describe("buildScholarExport — release-code row filter (SPEC §B.2)", () => {
     expect(table.slice(1)[0][header.indexOf("email")]).toBe("scholar0@med.cornell.edu");
   });
 
-  it("release-code blanking stacks WITH the #536 hidden-role carve (both blank)", async () => {
+  it("release-code blanking stacks WITH the #536 hidden-role carve (row dropped, then cell blanked)", async () => {
     vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
     resolveCrispr();
     mockScholarFamilyFindMany.mockResolvedValue([
-      // public email but hidden role => blank (role carve wins)
-      { pmidCount: 9, scholar: { ...scholar(0, "public"), roleCategory: "doctoral_student" } },
-      // faculty but 'none' => blank (release code wins)
+      // public email but hidden role => the whole ROW is dropped (#2272)
+      { pmidCount: 9, scholar: { ...scholar(0, "public"), roleCategory: "doctoral_student_dvm" } },
+      // faculty but 'none' => row kept, email cell blank (release code wins)
       { pmidCount: 8, scholar: scholar(1, "none") },
       // faculty + public => present
       { pmidCount: 7, scholar: scholar(2, "public") },
@@ -644,9 +673,10 @@ describe("buildScholarExport — release-code row filter (SPEC §B.2)", () => {
     const header = table[0];
     const body = table.slice(1);
     const emailIdx = header.indexOf("email");
+    expect(body.length).toBe(2);
+    expect(result!.csv).not.toContain("Scholar 0");
     expect(body[0][emailIdx]).toBe("");
-    expect(body[1][emailIdx]).toBe("");
-    expect(body[2][emailIdx]).toBe("scholar2@med.cornell.edu");
+    expect(body[1][emailIdx]).toBe("scholar2@med.cornell.edu");
   });
 });
 
@@ -693,6 +723,54 @@ describe("buildScholarExport — HARD <=50 cohort cap (SPEC §B.3)", () => {
     expect(parseCsv(result!.csv).slice(1).length).toBe(50);
   });
 
+  it("carves BEFORE truncating to CAP + 1 — 50 displayable behind 10 hidden rows exports COMPLETE", async () => {
+    resolveCrispr();
+    // Ranked desc with the 10 top rows hidden. Truncate-then-carve keeps rows
+    // 0..50, drops the 10 hidden, and emits a 41-row "complete" cohort; carve-
+    // then-truncate sees the real cohort (50), in range, and exports it whole.
+    const rows = [
+      ...Array.from({ length: 10 }, (_, i) => ({
+        pmidCount: 100 - i,
+        scholar: { ...scholar(i), roleCategory: "doctoral_student_dvm" },
+      })),
+      ...Array.from({ length: 50 }, (_, i) => ({
+        pmidCount: 50 - i,
+        scholar: scholar(100 + i),
+      })),
+    ];
+    mockScholarFamilyFindMany.mockResolvedValue(rows);
+
+    const result = await buildScholarExport("method-family", {
+      supercategory: "animal-cell-models",
+      family: "crispr-screens-fam_x",
+    });
+    expect(parseCsv(result!.csv).slice(1).length).toBe(50);
+    expect(result!.csv).not.toContain("doctoral_student_dvm");
+  });
+
+  it("the cap counts the DISPLAYABLE cohort — 51 displayable behind hidden rows still REFUSES", async () => {
+    resolveCrispr();
+    // Same shape, one more displayable scholar: 51 > 50, so the builder must
+    // refuse. Truncate-then-carve would have emitted a 41-row partial instead.
+    const rows = [
+      ...Array.from({ length: 10 }, (_, i) => ({
+        pmidCount: 100 - i,
+        scholar: { ...scholar(i), roleCategory: "doctoral_student_dvm" },
+      })),
+      ...Array.from({ length: 51 }, (_, i) => ({
+        pmidCount: 51 - i,
+        scholar: scholar(100 + i),
+      })),
+    ];
+    mockScholarFamilyFindMany.mockResolvedValue(rows);
+
+    const result = await buildScholarExport("method-family", {
+      supercategory: "animal-cell-models",
+      family: "crispr-screens-fam_x",
+    });
+    expect(result).toBeNull();
+  });
+
   it("a small cohort (3) exports complete — the cap never truncates in range", async () => {
     resolveCrispr();
     mockScholarFamilyFindMany.mockResolvedValue([
@@ -710,21 +788,23 @@ describe("buildScholarExport — HARD <=50 cohort cap (SPEC §B.3)", () => {
 });
 
 describe("isSupercategoryExportInRange — button-visibility gate (SPEC §B.3)", () => {
+  /** The gate's own select shape: cwid + the RAW role column it fails closed on. */
+  function gateRow(cwid: string, roleCategory: string | null = "full_time_faculty") {
+    return { familyLabel: "Family A", scholar: { cwid, roleCategory } };
+  }
+
   it("true when the DISTINCT publicly-visible cohort is <= 50 (de-dups co-membership)", async () => {
     // 3 family rows across 2 distinct scholars => distinct cohort = 2 (<= 50).
     mockScholarFamilyFindMany.mockResolvedValue([
-      { familyLabel: "Family A", scholar: { cwid: "c0" } },
-      { familyLabel: "Family B", scholar: { cwid: "c0" } },
-      { familyLabel: "Family A", scholar: { cwid: "c1" } },
+      gateRow("c0"),
+      { ...gateRow("c0"), familyLabel: "Family B" },
+      gateRow("c1"),
     ]);
     await expect(isSupercategoryExportInRange("animal_cell_models")).resolves.toBe(true);
   });
 
   it("false when more than 50 DISTINCT scholars qualify", async () => {
-    const rows = Array.from({ length: 51 }, (_, i) => ({
-      familyLabel: "Family A",
-      scholar: { cwid: `c${i}` },
-    }));
+    const rows = Array.from({ length: 51 }, (_, i) => gateRow(`c${i}`));
     mockScholarFamilyFindMany.mockResolvedValue(rows);
     await expect(isSupercategoryExportInRange("animal_cell_models")).resolves.toBe(false);
   });
@@ -733,10 +813,82 @@ describe("isSupercategoryExportInRange — button-visibility gate (SPEC §B.3)",
     // 60 rows, but every family is gated out => distinct visible cohort = 0.
     vi.mocked(isFamilyPubliclyVisible).mockReturnValue(false);
     const rows = Array.from({ length: 60 }, (_, i) => ({
+      ...gateRow(`c${i}`),
       familyLabel: `Family ${i}`,
-      scholar: { cwid: `c${i}` },
     }));
     mockScholarFamilyFindMany.mockResolvedValue(rows);
     await expect(isSupercategoryExportInRange("animal_cell_models")).resolves.toBe(true);
+  });
+
+  it("does not count a hidden-display role toward the cap (#2272)", async () => {
+    // 51 rows, one an out-of-band suffixed student the where-clause denylist
+    // cannot express => 50 displayable, in range. Without the fail-closed pass
+    // the gate counts 51 and hides a button the export would happily serve.
+    const rows = [
+      ...Array.from({ length: 50 }, (_, i) => gateRow(`c${i}`)),
+      gateRow("c50", "doctoral_student_dvm"),
+    ];
+    mockScholarFamilyFindMany.mockResolvedValue(rows);
+    await expect(isSupercategoryExportInRange("animal_cell_models")).resolves.toBe(true);
+  });
+
+  it("selects the RAW role column it fails closed on (#2272)", async () => {
+    mockScholarFamilyFindMany.mockResolvedValue([]);
+    await isSupercategoryExportInRange("animal_cell_models");
+    expect(mockScholarFamilyFindMany.mock.calls[0][0].select.scholar.select).toEqual({
+      cwid: true,
+      roleCategory: true,
+    });
+  });
+
+  it("agrees with buildScholarExport on the same cohort — gate false ⇒ builder refuses", async () => {
+    // 60 distinct scholars, the top-ranked one hidden => 59 displayable, over
+    // cap. Carving AFTER the CAP + 1 truncation made the builder emit 50 rows
+    // here while this gate (which never truncates) said false — the exact drift
+    // the function's docblock exists to prevent.
+    vi.mocked(getSupercategory).mockResolvedValue({
+      id: "animal_cell_models",
+      slug: "animal-cell-models",
+      label: "Animal & Cell Models",
+      description: "",
+    } as never);
+    const rows = [
+      {
+        familyLabel: "Family A",
+        pmidCount: 999,
+        scholar: { ...scholar(0), roleCategory: "doctoral_student_dvm" },
+      },
+      ...Array.from({ length: 59 }, (_, i) => ({
+        familyLabel: "Family A",
+        pmidCount: 59 - i,
+        scholar: scholar(i + 1),
+      })),
+    ];
+
+    mockScholarFamilyFindMany.mockResolvedValue(rows);
+    await expect(isSupercategoryExportInRange("animal_cell_models")).resolves.toBe(false);
+
+    mockScholarFamilyFindMany.mockResolvedValue(rows);
+    await expect(
+      buildScholarExport("supercategory", { supercategory: "animal-cell-models" }),
+    ).resolves.toBeNull();
+  });
+});
+
+describe("commonCells — belt-and-braces cell guards (#2272)", () => {
+  // Since the loaders carve, a hidden-display role cannot reach this projection
+  // through `buildScholarExport` at all, so these guards are only pinnable here.
+  // They are the degradation path if the row-level carve ever regresses: a blank
+  // URL rather than a link the /{slug} route itself 404s.
+  it("blanks profile_url and email for a hidden-display role", () => {
+    const cells = commonCells({ ...scholar(0), roleCategory: "doctoral_student_dvm" }, 1);
+    expect(cells.profile_url).toBe("");
+    expect(cells.email).toBe("");
+  });
+
+  it("emits both for a publicly-displayed role", () => {
+    const cells = commonCells(scholar(0), 1);
+    expect(cells.profile_url).toBe("/slug-0");
+    expect(cells.email).toBe("scholar0@med.cornell.edu");
   });
 });

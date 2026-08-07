@@ -53,7 +53,8 @@ against `origin/master prisma/schema.prisma`).
 ### 3.3 Privacy gate (load-bearing — this is a PUBLIC surface)
 Reuse the exact public gate already in `lib/api/centers.ts`:
 ```
-scholar where: { cwid: { in: activeCwids }, deletedAt: null, status: "active" }
+scholar where: { cwid: { in: activeCwids }, deletedAt: null, status: "active",
+                 ...publicRoleWhere() }
 ```
 plus `isPubliclyDisplayed(role)` from `lib/eligibility.ts`. Consequences:
 - **#536-hidden faculty and soft-deleted doctoral students never appear** as nodes

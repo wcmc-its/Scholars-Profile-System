@@ -26,12 +26,9 @@ import {
 export const revalidate = 21600;
 export const dynamicParams = true;
 
-const VALID_ROLES: ReadonlyArray<TopicAllScholarRole> = [
-  "all",
-  "faculty",
-  "postdocs",
-  "doctoral_students",
-];
+// No `doctoral_students` (sibling of #2270): the loader carves the #536 hidden
+// identity classes, so `?role=doctoral_students` now falls back to "all".
+const VALID_ROLES: ReadonlyArray<TopicAllScholarRole> = ["all", "faculty", "postdocs"];
 
 const MAX_PAGE = 500;
 const MAX_QUERY_LEN = 80;

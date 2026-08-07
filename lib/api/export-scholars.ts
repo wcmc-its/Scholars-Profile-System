@@ -16,7 +16,14 @@
  * but hard-capped well below 50 and carved to FT faculty (`getFamilyScholarRows`
  * / `getSubtopicScholars` / `getTopScholarsForSupercategory`). So each scope gets
  * a small ranked loader here that ranks by the per-scholar publication count
- * within the scope, ALL roles, fetching CAP + 1 to detect the over-cap case.
+ * within the scope, keeping CAP + 1 to detect the over-cap case.
+ *
+ * #2272 — every one of those loaders carries the #536 hidden-identity carve
+ * (`publicRoleWhere()` + the fail-closed `displayableTop` pass), so a hidden row
+ * is never emitted. The carve used to sit on two CELLS while the loaders emitted
+ * the whole row. It runs BEFORE the CAP + 1 truncation, so the cap measures the
+ * displayable cohort itself and not the displayable subset of a truncated
+ * window — carving after a DB `take` turns a refusal into a partial top-50.
  *
  * Method scopes (method-family, supercategory) inherit the public
  * #800-suppression / #801-sensitivity overlay gate VERBATIM — the resolver
@@ -33,7 +40,7 @@
 import { prisma } from "@/lib/db";
 import { toCsv, type CsvCell } from "@/lib/csv";
 import { profilePath } from "@/lib/profile-url";
-import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
 import {
   loadFamilyOverlayGate,
@@ -50,12 +57,13 @@ import { getTopic } from "@/lib/api/topics";
  * (<= 50) the COMPLETE cohort is exported (no truncation — a <= 50 cohort is
  * complete by definition).
  *
- * The loaders fetch one row beyond the cap (CAP + 1) precisely so the builder
- * can detect an over-cap cohort and refuse rather than silently emit a partial
+ * The loaders keep one row beyond the cap (CAP + 1) precisely so the builder can
+ * detect an over-cap cohort and refuse rather than silently emit a partial
  * top-50.
  */
 export const SCHOLAR_EXPORT_CAP = 50;
-/** Loaders fetch this many rows so an over-cap cohort is detectable. */
+/** Loaders truncate to this many rows — AFTER the carve — so an over-cap cohort
+ *  is detectable. */
 const ROSTER_FETCH_LIMIT = SCHOLAR_EXPORT_CAP + 1;
 
 export type ScholarExportScope =
@@ -181,8 +189,14 @@ function isEmailExportableByReleaseCode(emailVisibility: string | null): boolean
   return emailVisibility === "public" || emailVisibility === "institution";
 }
 
-/** Common identity cells in COMMON_HEADERS order. `rank` is 1-indexed. */
-function commonCells(row: ScholarIdentity, rank: number): Record<string, CsvCell> {
+/**
+ * Common identity cells in COMMON_HEADERS order. `rank` is 1-indexed.
+ *
+ * Exported ONLY so the two belt-and-braces guards below stay pinned: since
+ * #2272 carved the loaders, a hidden-display role cannot reach this projection
+ * through `buildScholarExport` at all, so nothing else can exercise them.
+ */
+export function commonCells(row: ScholarIdentity, rank: number): Record<string, CsvCell> {
   // The email cell stacks two filters: the #536 hidden-display-role carve (a
   // hidden role's email is blank, matching the unlinked public roster) AND the
   // SPEC §B.2 release-code filter (gated by PROFILE_EMAIL_RELEASE_GATE).
@@ -196,10 +210,10 @@ function commonCells(row: ScholarIdentity, rank: number): Record<string, CsvCell
     primary_title: row.primaryTitle,
     primary_department: row.primaryDepartment,
     role_category: row.roleCategory,
-    // Parity with the public roster: hidden-display roles (#536 doctoral
-    // students / affiliate-alumni) are listed by name but NOT linked there, and
-    // the /{slug} route itself 404s for them. Emit a blank URL rather than a
-    // dead link the public surface deliberately withholds.
+    // Belt-and-braces since #2272 carved the loaders: a hidden-display role
+    // (#536 doctoral students / affiliate-alumni) can no longer reach this
+    // projection at all. Kept so a regression in the row carve degrades to a
+    // blank URL rather than to a link the /{slug} route itself 404s.
     profile_url: isPubliclyDisplayed(row.roleCategory) ? profilePath(row.slug) : "",
     // #866 UC-B email column (only emitted when `includeEmail`; see headersFor).
     // `headersFor`/`projectRows` drop the key entirely when email is not
@@ -209,10 +223,33 @@ function commonCells(row: ScholarIdentity, rank: number): Record<string, CsvCell
 }
 
 // ---------------------------------------------------------------------------
-// Ranked top-50 loaders (one per scope) — all roles, ranked by the per-scholar
-// publication count within the scope. Inherit the same active-scholar join +
-// (method scopes) overlay gate the public page loaders use.
+// Ranked top-50 loaders (one per scope) — every ALGORITHMICALLY-eligible role,
+// ranked by the per-scholar publication count within the scope. Inherit the same
+// active-scholar join + (method scopes) overlay gate the public page loaders use.
+//
+// #2272 — they also carry `publicRoleWhere()`, so a #536 hidden identity class is
+// never LOADED. The carve used to sit at two CELLS (`profile_url`, `email`) while
+// the loaders emitted the whole row, which shipped a hidden student's name, CWID,
+// title and department into the CSV. That is the #2202 structural shape exactly,
+// and #2202's remedy was loader-level carving.
 // ---------------------------------------------------------------------------
+
+/** The active-scholar join every ranked loader applies, with the #536 carve. */
+const EXPORT_SCHOLAR_WHERE = () => ({ deletedAt: null, status: "active", ...publicRoleWhere() });
+
+/**
+ * The fail-closed half of the #536 carve, applied BEFORE the CAP + 1
+ * truncation so the over-cap check in `buildScholarExport` measures the
+ * DISPLAYABLE cohort rather than the displayable subset of an already-truncated
+ * window. `publicRoleWhere()` is a denylist that cannot express the
+ * `doctoral_student*` prefix, so an out-of-band suffix passes it and only this
+ * predicate catches it — and run AFTER a `take: 51` it would shrink 51 to 50 and
+ * turn a refusal into a silent partial top-50, which SPEC §B.3 forbids. Hence
+ * none of the loaders carry a DB-level `take`: they rank, carve, then truncate.
+ */
+function displayableTop<T extends { roleCategory: string | null }>(rows: T[]): T[] {
+  return rows.filter((r) => isPubliclyDisplayed(r.roleCategory)).slice(0, ROSTER_FETCH_LIMIT);
+}
 
 /** method-family: per-scholar `scholar_family.pmidCount` desc, top 50. The
  *  resolver already gated the family; re-applied here defensively per row. */
@@ -228,16 +265,17 @@ async function loadFamilyRoster(
     where: {
       supercategory,
       familyLabel,
-      scholar: { deletedAt: null, status: "active" },
+      scholar: EXPORT_SCHOLAR_WHERE(),
     },
     orderBy: [{ pmidCount: "desc" }, { familyId: "asc" }],
-    take: ROSTER_FETCH_LIMIT,
     select: { pmidCount: true, scholar: { select: SCHOLAR_SELECT } },
   });
 
-  return rows
-    .filter((r) => r.scholar)
-    .map((r) => ({ ...(r.scholar as ScholarIdentity), count: r.pmidCount }));
+  return displayableTop(
+    rows
+      .filter((r) => r.scholar)
+      .map((r) => ({ ...(r.scholar as ScholarIdentity), count: r.pmidCount })),
+  );
 }
 
 /** supercategory: aggregate per-scholar `pmidCount` across the supercategory's
@@ -252,7 +290,7 @@ async function loadSupercategoryRoster(
   const rows = await db.scholarFamily.findMany({
     where: {
       supercategory,
-      scholar: { deletedAt: null, status: "active" },
+      scholar: EXPORT_SCHOLAR_WHERE(),
     },
     select: {
       familyLabel: true,
@@ -277,10 +315,11 @@ async function loadSupercategoryRoster(
     byCwid.set(r.scholar.cwid, entry);
   }
 
-  return Array.from(byCwid.values())
-    .sort((a, b) => b.total - a.total || a.scholar.cwid.localeCompare(b.scholar.cwid))
-    .slice(0, ROSTER_FETCH_LIMIT)
-    .map((e) => ({ ...e.scholar, count: e.total, topFamily: e.topFamily }));
+  return displayableTop(
+    Array.from(byCwid.values())
+      .sort((a, b) => b.total - a.total || a.scholar.cwid.localeCompare(b.scholar.cwid))
+      .map((e) => ({ ...e.scholar, count: e.total, topFamily: e.topFamily })),
+  );
 }
 
 /**
@@ -291,6 +330,12 @@ async function loadSupercategoryRoster(
  * visible scholars exactly as `loadSupercategoryRoster` does — same active-join +
  * overlay gate — and returns true iff that distinct count is <= the cap. Kept
  * here so the page's button gate cannot drift from what the export would emit.
+ *
+ * The two agree only because `loadSupercategoryRoster` also carves BEFORE it
+ * truncates to CAP + 1: were it to truncate first, this function (which never
+ * truncates) would hide the button on a 60-scholar supercategory while the route
+ * still served 50 rows — the route has no cap check of its own, it just 404s on
+ * the builder's null.
  *
  * `supercategoryId` is the resolved supercategory id (`getSupercategory(...).id`),
  * matching `loadSupercategoryRoster`'s `supercategory` arg.
@@ -303,13 +348,16 @@ export async function isSupercategoryExportInRange(
   const rows = await prismaRead.scholarFamily.findMany({
     where: {
       supercategory: supercategoryId,
-      scholar: { deletedAt: null, status: "active" },
+      scholar: EXPORT_SCHOLAR_WHERE(),
     },
-    select: { familyLabel: true, scholar: { select: { cwid: true } } },
+    select: { familyLabel: true, scholar: { select: { cwid: true, roleCategory: true } } },
   });
   const distinct = new Set<string>();
   for (const r of rows) {
     if (!r.scholar) continue;
+    // Same fail-closed pass `buildScholarExport` applies, so the button gate
+    // counts exactly what the export would emit (#2272).
+    if (!isPubliclyDisplayed(r.scholar.roleCategory)) continue;
     if (!isFamilyPubliclyVisible(supercategoryId, r.familyLabel, gate)) continue;
     distinct.add(r.scholar.cwid);
     if (distinct.size > SCHOLAR_EXPORT_CAP) return false;
@@ -324,11 +372,10 @@ async function loadTopicRoster(db: PrismaRead, topicSlug: string): Promise<Expor
     by: ["cwid"],
     where: {
       parentTopicId: topicSlug,
-      scholar: { deletedAt: null, status: "active" },
+      scholar: EXPORT_SCHOLAR_WHERE(),
     },
     _count: { pmid: true },
     orderBy: { _count: { pmid: "desc" } },
-    take: ROSTER_FETCH_LIMIT,
   });
 
   const cwids = counts.map((c) => c.cwid).filter((c): c is string => c !== null);
@@ -347,7 +394,7 @@ async function loadTopicRoster(db: PrismaRead, topicSlug: string): Promise<Expor
     if (!s) continue;
     out.push({ ...s, count: c._count.pmid });
   }
-  return out;
+  return displayableTop(out);
 }
 
 /** subtopic: rank by distinct publication count per scholar within the subtopic;
@@ -363,11 +410,10 @@ async function loadSubtopicRoster(
     where: {
       parentTopicId: topicSlug,
       primarySubtopicId: subtopicId,
-      scholar: { deletedAt: null, status: "active" },
+      scholar: EXPORT_SCHOLAR_WHERE(),
     },
     _count: { pmid: true },
     orderBy: { _count: { pmid: "desc" } },
-    take: ROSTER_FETCH_LIMIT,
   });
 
   const cwids = counts.map((c) => c.cwid).filter((c): c is string => c !== null);
@@ -392,7 +438,7 @@ async function loadSubtopicRoster(
     if (!s) continue;
     out.push({ ...s, count: c._count.pmid, total: totalByCwid.get(c.cwid) ?? 0 });
   }
-  return out;
+  return displayableTop(out);
 }
 
 // ---------------------------------------------------------------------------
@@ -495,9 +541,11 @@ export async function buildScholarExport(
     roster = await loadSubtopicRoster(prismaRead, topic.id, subtopic.id);
   }
 
-  // HARD cohort cap (SPEC §B.3): the loaders fetched CAP + 1 rows so an over-cap
-  // cohort is detectable. Refuse > 50 with the same dark-feature semantics as an
-  // unresolved scope (route 404, UI hides the button) — never a partial top-50.
+  // HARD cohort cap (SPEC §B.3): every loader carved (`displayableTop`) and THEN
+  // truncated to CAP + 1, so this length is the displayable cohort's, and an
+  // over-cap cohort is detectable. Refuse > 50 with the same dark-feature
+  // semantics as an unresolved scope (route 404, UI hides the button) — never a
+  // partial top-50.
   if (roster.length > SCHOLAR_EXPORT_CAP) return null;
 
   const headers = headersFor(scope, includeEmail);
