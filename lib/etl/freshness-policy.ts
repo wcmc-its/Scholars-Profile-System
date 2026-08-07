@@ -229,6 +229,20 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
         "was 15 June 2026. Tracked as SPS #1813; there is nothing to do here.",
     },
   },
+  // #2293 — durable reconcilers (ADR-005 layer 3), each its own `rate(5 min)`
+  // state machine outside the nightly/weekly chains, not deployed steps within
+  // them. Both got a CDK status + cadence alarm at 15 min resolution when they
+  // shipped (#353/#393) -- THAT is what catches a wedged run or a disabled
+  // schedule in real time. This entry adds none of that; it exists so the two
+  // show up on `/edit/etl-status` at all (TRACKED x etl_run is what the page
+  // reads) now that #2297 makes them write a row per run. `nightly`'s 30h SLA
+  // is a slow backstop behind the 15 min alarms, not a replacement for them --
+  // a source running every 5 min has to go dark for six hours before this adds
+  // anything the CDK alarms had not already caught. Both run unconditionally in
+  // BOTH envs (`reconcileScheduleEnabled` / `cdnReconcileScheduleEnabled` are
+  // true in both staging and prod, cdk/lib/config.ts), so no `envs` restriction.
+  SearchReconcile: { cadence: "nightly" },
+  CdnReconcile: { cadence: "nightly" },
   // Annual cadence (cron 0 9 1 7 ? *)
   Hierarchy: { cadence: "annual" },
 };
