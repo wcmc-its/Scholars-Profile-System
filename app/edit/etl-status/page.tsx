@@ -389,8 +389,15 @@ function StatusBody({ summary }: { summary: EtlStatusSummary }) {
 
       {/* Native disclosure — no client component, no state. The two label spans
           swap on [open] through descendant selectors, which is how the rest of
-          this codebase does it (components/search/funder-facet.tsx). */}
+          this codebase does it (components/search/funder-facet.tsx).
+
+          OPEN by default. The split already does the triage work — problems are
+          up top and read first — so shutting this as well hid the healthy detail
+          behind a click for no gain, and put every raw `etl_run.source` key out
+          of reach of browser find-in-page, which is the affordance ITS actually
+          uses. Collapsing stays available; it is just not the default. */}
       <details
+        open
         className="mt-8 [&:not([open])_.etl-hide]:hidden [&[open]_.etl-show]:hidden"
         data-testid="etl-status-normal"
       >
