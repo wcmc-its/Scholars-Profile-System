@@ -80,10 +80,16 @@ hide-flag), while `scholar.status` stays `active`. That single data fact is enfo
 site where a profile link could be generated, because each site filters on `deletedAt: null`:
 
 1. **Profile route → 404.** `lib/url-resolver.ts` (`resolveBySlugOrHistory`,
-   `resolveByCwidOrAlias`) resolves only `where: { …, deletedAt: null, status: "active" }`. A
-   soft-deleted student never resolves, so `components/profile/profile-view.tsx` calls
-   `notFound()` → HTTP 404. (Slug-history and cwid-alias lookups apply the same filter, so an
-   old slug/alias can't sneak a student back in.)
+   `resolveByCwidOrAlias`) resolves `where: { …, deletedAt: null, status: "active",
+   ...publicRoleWhere() }` and then re-checks the RAW `role_category` through
+   `isPubliclyDisplayed`. **Since #2268 the carve lives in the resolver**, not only at render
+   in `components/profile/profile-view.tsx` — both resolvers feed anonymous routes that
+   `permanentRedirect()`, and slugs are name-derived, so a resolved row left the building as a
+   student's NAME in the `Location` header before any render-time guard ran. A hidden student
+   now returns `not-found`, identical to a slug/CWID that never existed, so `/scholars/[slug]`,
+   `/[slug]` and `/scholars/by-cwid/[cwid]` all 404 with no existence oracle. (Slug-history and
+   cwid-alias lookups apply both layers too, so an old slug/alias can't sneak a student back
+   in; the `/scholars/{slug}/co-pubs*` child routes carry the same pair.)
 
 2. **People search + autocomplete → excluded at the query layer.** The people index source
    query is `PEOPLE_INDEX_WHERE` (`lib/search-index-docs.ts`). **Since #2202 it carries the

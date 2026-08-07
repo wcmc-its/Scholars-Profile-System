@@ -12,6 +12,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { identityImageEndpoint } from "@/lib/headshot";
 import {
   menteeProgramLabel,
@@ -30,11 +31,26 @@ export const dynamicParams = true;
 
 type Params = { slug: string };
 
+/**
+ * #2268 — this anonymous child route publishes the mentor's NAME in `<title>`,
+ * the meta description and the `<h1>`, so it carries the same two-layer #536
+ * carve as the parent profile route (`lib/url-resolver.ts`): `publicRoleWhere()`
+ * in the where-clause, then a fail-closed `isPubliclyDisplayed` on the RAW
+ * column, because Prisma cannot express the `doctoral_student*` prefix. Without
+ * it `/scholars/{hidden-slug}` 404s while this route still serves the name.
+ */
 async function resolveMentor(slug: string) {
-  return prisma.scholar.findFirst({
-    where: { slug, deletedAt: null, status: "active" },
-    select: { cwid: true, slug: true, preferredName: true, postnominal: true },
+  const mentor = await prisma.scholar.findFirst({
+    where: { slug, deletedAt: null, status: "active", ...publicRoleWhere() },
+    select: {
+      cwid: true,
+      slug: true,
+      preferredName: true,
+      postnominal: true,
+      roleCategory: true,
+    },
   });
+  return mentor && isPubliclyDisplayed(mentor.roleCategory) ? mentor : null;
 }
 
 function publishedName(s: {

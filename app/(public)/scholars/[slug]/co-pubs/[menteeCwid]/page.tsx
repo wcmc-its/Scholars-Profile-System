@@ -15,6 +15,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { identityImageEndpoint } from "@/lib/headshot";
 import {
   getCoPublications,
@@ -32,11 +33,20 @@ export const dynamicParams = true;
 
 type Params = { slug: string; menteeCwid: string };
 
+/** #2268 — same two-layer #536 carve as the rollup page: this route publishes the
+ *  mentor's name in `<title>` and the meta description. */
 async function resolveMentor(slug: string) {
-  return prisma.scholar.findFirst({
-    where: { slug, deletedAt: null, status: "active" },
-    select: { cwid: true, slug: true, preferredName: true, postnominal: true },
+  const mentor = await prisma.scholar.findFirst({
+    where: { slug, deletedAt: null, status: "active", ...publicRoleWhere() },
+    select: {
+      cwid: true,
+      slug: true,
+      preferredName: true,
+      postnominal: true,
+      roleCategory: true,
+    },
   });
+  return mentor && isPubliclyDisplayed(mentor.roleCategory) ? mentor : null;
 }
 
 export async function generateMetadata({

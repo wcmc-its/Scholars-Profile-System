@@ -28,6 +28,7 @@ import {
   TextRun,
 } from "docx";
 import { prisma } from "@/lib/db";
+import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import {
   copubId,
   menteeProgramLabel,
@@ -60,11 +61,13 @@ export async function GET(
     return NextResponse.json({ error: "invalid format" }, { status: 400 });
   }
 
+  // #2268 — same two-layer #536 carve as the page this exports: the download
+  // publishes the mentor's name in every citation row.
   const mentor = await prisma.scholar.findFirst({
-    where: { slug, deletedAt: null, status: "active" },
-    select: { cwid: true, preferredName: true, postnominal: true },
+    where: { slug, deletedAt: null, status: "active", ...publicRoleWhere() },
+    select: { cwid: true, preferredName: true, postnominal: true, roleCategory: true },
   });
-  if (!mentor) {
+  if (!mentor || !isPubliclyDisplayed(mentor.roleCategory)) {
     return NextResponse.json({ error: "mentor not found" }, { status: 404 });
   }
 
