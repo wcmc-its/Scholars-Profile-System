@@ -362,7 +362,12 @@ async function buildGrantOps(
   // are `reporter:*`. Returning [] is correct — but it must still STAMP, which
   // is the caller's job and was the #2204 defect: 295 unstamped rows pinned the
   // reconciler's `take: 200` batch head forever and starved the 16 InfoEd rows
-  // (positions 284-311) that DO have a doc to delete. Those were #2203's leak.
+  // (positions 284-311) that DO have a doc to delete.
+  //
+  // The starvation is measured and is the #2204 defect. The funding-index leak
+  // it was once blamed for is NOT: a prod probe on 2026-08-06 found ZERO
+  // suppressed projects present in the funding index. So #2203's leak has some
+  // other cause, still unidentified — do not read this comment as naming it.
   if (!ext) return [];
 
   const { keyRows, byProject } = scan ?? (await scanGrantKeys());
