@@ -323,8 +323,8 @@ export async function loadSensitiveScholarFamilies(cwid: string): Promise<Schola
  * email-visibility-spec § Cache-safety — the cache-unsafe reveal of a scholar's
  * email for the /api/profile/[cwid]/contact-email endpoint. Returns the raw email
  * + release audience (the endpoint applies table A against the resolved
- * internal-viewer signal); `null` for an unknown, soft-deleted or #536-hidden
- * scholar.
+ * internal-viewer signal); `null` for an unknown, soft-deleted, inactive or
+ * #536-hidden scholar.
  *
  * #2269 — the route is NOT SSO-gated (`middleware.ts` does not match
  * `/api/profile/*`), so this loader is the access control and needs the same
@@ -335,12 +335,16 @@ export async function loadSensitiveScholarFamilies(cwid: string): Promise<Schola
  * their `email` / `email_visibility` columns are populated by the same upsert
  * used for faculty. Hidden and nonexistent both return `null`, so the endpoint
  * is not an existence oracle.
+ *
+ * `status: "active"` matches the profile-page loader this backs. Without it a
+ * scholar whose profile page 404s on status still had their email revealed here,
+ * which is the whole failure mode the route-is-not-SSO-gated note above is about.
  */
 export async function loadScholarContactEmail(
   cwid: string,
 ): Promise<{ email: string | null; emailVisibility: string | null } | null> {
   const scholar = await prisma.scholar.findFirst({
-    where: { cwid, deletedAt: null, ...publicRoleWhere() },
+    where: { cwid, deletedAt: null, status: "active", ...publicRoleWhere() },
     select: { email: true, emailVisibility: true, deletedAt: true, roleCategory: true },
   });
   if (!scholar || scholar.deletedAt) return null;

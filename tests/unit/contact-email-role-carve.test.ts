@@ -42,6 +42,9 @@ describe("loadScholarContactEmail — #536 role carve", () => {
     const where = findFirst.mock.calls[0][0].where as Record<string, unknown>;
     expect(where.cwid).toBe(CWID);
     expect(where.deletedAt).toBeNull();
+    // Same gate as the profile-page loader this backs: without it a scholar
+    // whose profile 404s on status still had their email revealed here.
+    expect(where.status).toBe("active");
     const or = where.OR as Array<Record<string, unknown>>;
     // NULL admitted EXPLICITLY — a bare `notIn` on a nullable column drops NULL
     // rows (SQL three-valued logic) and would blank every un-backfilled scholar.
