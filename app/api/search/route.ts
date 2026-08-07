@@ -539,6 +539,18 @@ async function handleSearch(request: NextRequest) {
   const activity = activityRaw.filter(
     (a): a is "has_grants" | "recent_pub" => a === "has_grants" || a === "recent_pub",
   );
+  // #2300 — `isClinical` (boolean-ish) + `professorialRank` (repeated
+  // multi-select, same shape as `personType`). Parsed regardless of
+  // `SEARCH_PEOPLE_CLINICAL_RANK_FACETS` — `searchPeople` degrades the
+  // params to a no-op while the flag is off / the people index is
+  // pre-reindex.
+  const isClinical = params.get("isClinical") === "true";
+  const professorialRank = params.getAll("professorialRank");
+  // #2306 — "Early Stage Investigator" boolean param. Named
+  // `earlyStageInvestigator`, never `esi`, so a bookmarked URL never carries
+  // the bare acronym. Parsed regardless of `SEARCH_PEOPLE_ESI_FACET`, same
+  // no-op-while-off posture as `isClinical`.
+  const earlyStageInvestigator = params.get("earlyStageInvestigator") === "true";
   // URL contract: `?includeIncomplete=false` opts INTO the sparse-profile
   // cull (only scholars with overview + ≥3 pubs + active grant). Any other
   // value — including the param being absent — leaves the filter unset so
@@ -634,6 +646,12 @@ async function handleSearch(request: NextRequest) {
       personType: personType.length > 0 ? personType : undefined,
       activity: activity.length > 0 ? activity : undefined,
       includeIncomplete,
+      // #2300 / #2306 — accepted unconditionally; `searchPeople` gates each
+      // behind its own flag (`SEARCH_PEOPLE_CLINICAL_RANK_FACETS` /
+      // `SEARCH_PEOPLE_ESI_FACET`) and no-ops while off / pre-reindex.
+      isClinical: isClinical ? true : undefined,
+      professorialRank: professorialRank.length > 0 ? professorialRank : undefined,
+      earlyStageInvestigator: earlyStageInvestigator ? true : undefined,
     },
     topic,
     // Issue #309 / SPEC §6.1.2 — hand the already-computed relevance mode and
@@ -729,7 +747,15 @@ async function handleSearch(request: NextRequest) {
       resultCount: result.total,
       queryShape,
       appliedRelevanceMode,
-      filters: { deptDiv, personType, activity, includeIncomplete },
+      filters: {
+        deptDiv,
+        personType,
+        activity,
+        includeIncomplete,
+        isClinical,
+        professorialRank,
+        earlyStageInvestigator,
+      },
       meshResolutionDescriptorUi,
       meshResolutionConfidence,
       meshDescendantSetSize: peopleDescendantSetSize,

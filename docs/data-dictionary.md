@@ -43,7 +43,7 @@ DB column name. FKs reference `scholar.cwid` (CWID-canonical). Soft delete is
 
 | Table | SOR | Purpose & key fields |
 |---|---|---|
-| **`scholar`** (`Scholar`) | ED (+ Manual for `overview`/`slug`) | One row per actively-affiliated WCM scholar; **PK = `cwid`**. `preferredName`, `fullName`, `postnominal` (degree string), `primaryTitle`, `primaryDepartment`, `email`, `headshotUrl`, `overview` (manual-editable bio), `slug` (unique URL key), `status` (`active`/`suppressed`), `roleCategory` (eligibility carve), `deptCode`/`divCode` (org-unit FKs), `hasClinicalProfile`/`clinicalProfileUrl` (weillcornell.org link), `postdoctoralMentorCwid`, `orcid`, `deletedAt` (soft delete). |
+| **`scholar`** (`Scholar`) | ED (+ Manual for `overview`/`slug`) | One row per actively-affiliated WCM scholar; **PK = `cwid`**. `preferredName`, `fullName`, `postnominal` (degree string), `primaryTitle`, `primaryDepartment`, `email`, `headshotUrl`, `overview` (manual-editable bio), `slug` (unique URL key), `status` (`active`/`suppressed`), `roleCategory` (eligibility carve), `deptCode`/`divCode` (org-unit FKs), `hasClinicalProfile`/`clinicalProfileUrl` (weillcornell.org link), `professorialRank` (`Assistant Professor`/`Associate Professor`/`Professor`; ASMS-authoritative, derived by `lib/faculty-rank.ts`'s `deriveProfessorialRank`; drives the People-search "Professorial rank" facet), `postdoctoralMentorCwid`, `orcid`, `deletedAt` (soft delete). |
 | **`appointment`** (`Appointment`) | ED | Titles/affiliations; `isPrimary`, `isInterim`, `startDate`/`endDate` (NULL end = current). `externalId` = ED appointment ID (#352 reconcile key). |
 | **`education`** (`Education`) | ASMS | Degrees/training: `degree`, `institution`, `year`, `field`. |
 | **`person_nih_profile`** (`PersonNihProfile`) | RePORTER | Maps a scholar to NIH RePORTER PI `nihProfileId` for the "View NIH portfolio" link. Composite PK `(cwid, nihProfileId)`; one `isPreferred` row per scholar; `resolutionSource` ∈ `grant_join_contact` / `grant_join_pi` / `name_match` / `name_query` (the `pi_names` subaward probe). A row exists **only when a RePORTER PI profile resolves** — scholars who appear on NIH grants solely as Co-I / Key Personnel / subaward have no RePORTER PI profile and correctly get no row (no link). |
@@ -165,6 +165,12 @@ not in these tables. See [`ADR-005`](./ADR-005-manual-override-layer.md) and
   format/length/reserved/numeric/profanity/collision but **not** name-derivation; custom-slug
   requests arrive as ServiceNow tickets and are actualized via the superuser override. Full design:
   [`ADR-005`](./ADR-005-manual-override-layer.md), [`slug-personalization-spec.md`](./slug-personalization-spec.md).
+- **`esiEligible` (Early Stage Investigator) is index-only, not a Prisma column** — computed
+  at OpenSearch people-index build time (`etl/search-index/index.ts`), never persisted to
+  Aurora. It backs the People-search "Early Stage Investigator" facet
+  (`SEARCH_PEOPLE_ESI_FACET`). Derivation logic lives entirely in
+  [`deriveGrantSignals`](../lib/api/match-researchers.ts) (~line 180) — see that function for
+  the exact rule, not restated here.
 - This dictionary covers the **public/runtime model** (Aurora). The B03 audit schema is
   documented separately; upstream source schemas (ReciterDB, InfoEd, etc.) are owned by
   those systems.

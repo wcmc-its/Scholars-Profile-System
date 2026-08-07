@@ -1339,6 +1339,51 @@ export function resolveSearchPeopleClinicalFnWeight(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : CLINICAL_FN_WEIGHT_DEFAULT;
 }
 
+/**
+ * #2300 — gates the `isClinical` + `professorialRank` People-search facets
+ * together. Both are direct copies of already-correct `Scholar` columns
+ * (`hasClinicalProfile`, `professorialRank` — see `lib/search-index-docs.ts`'s
+ * `PEOPLE_INDEX_SELECT`), so they ship as one low-risk lever rather than two.
+ * `searchPeople` and `/api/search` accept the `isClinical` / `professorialRank`
+ * request params regardless of this flag; while OFF (or before the people
+ * index has been rebuilt with the two new fields) the params are silently
+ * no-ops — no clause, no facet aggregation, never a 500 — the same
+ * reindex-then-flip posture as `SEARCH_PEOPLE_METHOD_FAMILY`.
+ *
+ * Default OFF in both envs at merge (see the #1836
+ * `SEARCH_PEOPLE_CLINICAL_MESH_ANCHOR` precedent above) — flip only after the
+ * people index has been rebuilt. Flag-parity: wire
+ * `SEARCH_PEOPLE_CLINICAL_RANK_FACETS` in `cdk/lib/app-stack.ts`.
+ */
+export function resolveSearchPeopleClinicalRankFacets(): boolean {
+  return process.env.SEARCH_PEOPLE_CLINICAL_RANK_FACETS === "on";
+}
+
+/**
+ * #2306 — gates the `earlyStageInvestigator` People-search facet (backed by
+ * the index-doc-only `esiEligible` field — see `loadEsiEligibilityByCwid` in
+ * `lib/search-index-docs.ts`). Kept as an INDEPENDENT kill switch from
+ * `resolveSearchPeopleClinicalRankFacets` — this is the riskier, novel
+ * derivation (reused `deriveGrantSignals`, `lib/api/match-researchers.ts`),
+ * so it needs to be rollback-able without touching the two direct-copy
+ * facets. `searchPeople` / `/api/search` accept the `earlyStageInvestigator`
+ * request param regardless of this flag; while OFF (or pre-reindex) the param
+ * is a silent no-op — no clause, no facet aggregation, never a 500.
+ *
+ * Default OFF in both envs at merge — flip only after the people index has
+ * been rebuilt with `esiEligible`. Flag-parity: wire `SEARCH_PEOPLE_ESI_FACET`
+ * in `cdk/lib/app-stack.ts`.
+ *
+ * NOTE — internal code identifier only. The UI-facing label for this facet is
+ * "Early Stage Investigator", never a bare "ESI" (see `lib/search.ts`'s
+ * `esiEligible` mapping comment); `esiEligible`/`ESI_FACET` are the
+ * pre-existing internal vocabulary this repo already uses
+ * (`lib/api/match-researchers.ts`) and are kept as-is here.
+ */
+export function resolveSearchPeopleEsiFacet(): boolean {
+  return process.env.SEARCH_PEOPLE_ESI_FACET === "on";
+}
+
 /** #1343/#1363 — area-boost tier weights, env-tunable (same shape as the clinical-fn
  *  weight above) so weight cells A/B on staging as task-def env edits, no rebuild.
  *  Code defaults are the softened `AREA_BOOST_W_*` constants in lib/search.ts.

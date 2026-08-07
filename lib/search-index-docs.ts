@@ -36,6 +36,9 @@ import {
 import { isFamilyPubliclyVisible } from "@/lib/api/methods-overlay";
 import type { FamilyOverlayGate } from "@/lib/api/methods-overlay";
 import { isFundingActive } from "@/lib/api/search-funding";
+// #2300 — reused UNCHANGED for the `esiEligible` ("Early Stage Investigator")
+// people-doc field; see `loadEsiEligibilityByCwid` below.
+import { deriveGrantSignals } from "@/lib/api/match-researchers";
 // `lib/funding-roles.ts` is deliberately import-free — safe here, unlike
 // `lib/api/data-quality.ts`, which re-exports the same PI_ROLES but constructs Prisma.
 import { isPiRole } from "@/lib/funding-roles";
@@ -249,6 +252,50 @@ export async function loadOverviewOverrides(
   });
   const byCwid = new Map<string, string>();
   for (const r of rows) byCwid.set(r.entityId, r.value);
+  return byCwid;
+}
+
+/**
+ * #2300 — bulk-load `esiEligible` (labeled "Early Stage Investigator" in the
+ * UI — see `lib/search.ts`'s mapping comment) into a `cwid -> boolean` map,
+ * for the ETL to stamp onto every people doc via `buildPeopleDoc`'s
+ * `esiEligibleByCwid` parameter. Reuses `deriveGrantSignals`
+ * (`lib/api/match-researchers.ts`) UNCHANGED — this loader's only job is to
+ * feed it the right rows.
+ *
+ * CRITICAL: this query is DELIBERATELY UNFILTERED on `grants` — no
+ * `source: { not: "RePORTER" }` where-clause, unlike `PEOPLE_INDEX_SELECT`'s
+ * `grants` relation (which intentionally scopes grantCount / hasActiveGrants /
+ * activePiGrantCount to WCM-administered awards only). `deriveGrantSignals`'
+ * ESI-forfeiture check needs a scholar's FULL grant history, including
+ * prior-institution RePORTER-sourced records — a RePORTER-only major-PI award
+ * still forfeits ESI eligibility. Feeding it the filtered relation would
+ * silently mislabel those scholars as ESI-eligible. Mirrors the same
+ * unfiltered read `matchaMeasuresFrom`'s grant-Matcha hydration already uses
+ * (`lib/api/matcha-spine-run.ts`, `eligibilitySignals` branch).
+ *
+ * Scoped to `PEOPLE_INDEX_WHERE` — the same scholar set the ETL indexes —
+ * so this is one bounded bulk read, not a whole-table scan.
+ */
+export async function loadEsiEligibilityByCwid(
+  client: Pick<PrismaClient, "scholar">,
+): Promise<Map<string, boolean>> {
+  const rows = await client.scholar.findMany({
+    where: PEOPLE_INDEX_WHERE,
+    select: {
+      cwid: true,
+      grants: { select: { endDate: true, role: true, mechanism: true } },
+      educations: { select: { year: true, degree: true } },
+    },
+  });
+  const now = new Date();
+  const byCwid = new Map<string, boolean>();
+  for (const s of rows) {
+    byCwid.set(
+      s.cwid,
+      deriveGrantSignals({ grants: s.grants, educations: s.educations }, now).esiEligible,
+    );
+  }
   return byCwid;
 }
 
@@ -553,6 +600,12 @@ export const PEOPLE_INDEX_SELECT = {
   popsBoardCertifications: true,
   popsSpecialties: true,
   popsExpertise: true,
+  // #2300 — plain scalar columns, no relation complexity. `hasClinicalProfile`
+  // (ED-LDAP-derived) feeds the `isClinical` facet; `professorialRank`
+  // (ASMS-authoritative, see `lib/faculty-rank.ts`) feeds the `professorialRank`
+  // facet. Both are direct copies onto the doc in `buildPeopleDoc` below.
+  hasClinicalProfile: true,
+  professorialRank: true,
 } satisfies Prisma.ScholarSelect;
 
 export type ScholarForIndex = Prisma.ScholarGetPayload<{
@@ -850,6 +903,19 @@ export async function buildPeopleDoc(
   // doesn't pass it — the builder falls back to the raw ETL column for
   // every scholar, so the produced doc is byte-identical to today.
   overviewOverrides?: Map<string, string>,
+  // #2300 — OPTIONAL corpus-wide `esiEligible` map (from
+  // `loadEsiEligibilityByCwid`), keyed by cwid. Labeled "Early Stage
+  // Investigator" everywhere a human reads it (facet label / chip / tooltip);
+  // `esiEligible` is the pre-existing internal code vocabulary
+  // (`lib/api/match-researchers.ts`) and is kept as-is. When PROVIDED, the
+  // builder writes `doc.esiEligible` as an explicit boolean for every scholar
+  // in the map (`false` when the map has no entry for this cwid — matches
+  // `deriveGrantSignals`' own conservative "unknown degree year -> not
+  // eligible" posture, never a different default). When OMITTED — every
+  // existing test, and any caller that doesn't pass it (e.g. the
+  // single-doc fast-path, until it's wired) — the field is never emitted,
+  // so the produced doc is byte-identical to today.
+  esiEligibleByCwid?: Map<string, boolean>,
 ): Promise<Record<string, unknown> | null> {
   // #2113 — effective overview, read-merged against the override map (see
   // the parameter doc above). Drives both `overview` / `overviewLength`
@@ -1585,6 +1651,27 @@ export async function buildPeopleDoc(
     // `meshSubtreeCounts`) for the clinical evidence line's "N of M eligible
     // publications" display. OMIT-on-empty.
     ...(clinicalOnTopicCounts ? { clinicalOnTopicCounts } : {}),
+    // #2300 — direct copy of `Scholar.hasClinicalProfile` (ED-LDAP-derived,
+    // non-nullable, `@default(false)`), for the `isClinical` facet. Always a
+    // plain boolean, no omit-on-empty (mirrors `hasActiveGrants` / `isComplete`
+    // above, not the sparse-signal fields).
+    isClinical: s.hasClinicalProfile,
+    // #2300 — direct copy of `Scholar.professorialRank` (ASMS-authoritative,
+    // see `lib/faculty-rank.ts`'s `deriveProfessorialRank`), for the
+    // `professorialRank` facet. Nullable on non-faculty / un-backfilled rows —
+    // OMIT-on-empty (mirrors `leadership` / `methodFamily` above), so
+    // `_source` consumers and the `exists` filter distinguish "no rank" from
+    // an empty string.
+    ...(s.professorialRank ? { professorialRank: s.professorialRank } : {}),
+    // #2300 — "Early Stage Investigator" in every human-facing surface (facet
+    // label / chip / tooltip); `esiEligible` is the pre-existing internal
+    // code name (`lib/api/match-researchers.ts`) and is kept as-is here. See
+    // the `esiEligibleByCwid` parameter doc above for the omit/default
+    // contract: present (true or false) for every scholar once the ETL passes
+    // the map, omitted entirely for any caller that doesn't.
+    ...(esiEligibleByCwid
+      ? { esiEligible: esiEligibleByCwid.get(s.cwid) ?? false }
+      : {}),
   };
 }
 

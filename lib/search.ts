@@ -377,6 +377,31 @@ export const peopleIndexMapping = {
       // row for a disease-subtree match. `enabled: false` so it is stored but not
       // indexed. OMIT-on-empty.
       clinicalAnchors: { type: "object", enabled: false },
+      // #2300 — direct copy of `Scholar.hasClinicalProfile` (ED-LDAP-derived).
+      // Plain `boolean` (not omit-on-empty — the column defaults false, so
+      // every scholar carries an explicit value), for a `term` filter behind
+      // the `SEARCH_PEOPLE_CLINICAL_RANK_FACETS` flag. UI label: "Clinical"
+      // (not the internal field name).
+      isClinical: { type: "boolean" },
+      // #2300 — direct copy of `Scholar.professorialRank` (ASMS-authoritative;
+      // `lib/faculty-rank.ts`'s `deriveProfessorialRank`), one of 'Assistant
+      // Professor' | 'Associate Professor' | 'Professor'. `keyword` (exact
+      // multi-select `terms` filter, mirrors `personType`), behind the same
+      // `SEARCH_PEOPLE_CLINICAL_RANK_FACETS` flag as `isClinical`.
+      // OMIT-on-empty in `buildPeopleDoc`: non-faculty / un-backfilled
+      // scholars carry no value for this field.
+      professorialRank: { type: "keyword" },
+      // #2300 — computed, INDEX-DOC-ONLY field (never persisted to MySQL —
+      // there is no `Scholar.esiEligible` column). Labeled "Early Stage
+      // Investigator" in every human-facing surface (facet checkbox / active-
+      // filter chip / tooltip); `esiEligible` is the pre-existing internal
+      // code vocabulary this repo already uses (`lib/api/match-researchers.ts`'s
+      // `deriveGrantSignals`, reused UNCHANGED via
+      // `loadEsiEligibilityByCwid` in `lib/search-index-docs.ts`). Plain
+      // `boolean`, written explicitly (true/false) for every scholar the ETL
+      // could derive it for — not omit-on-empty, so the boolean `term` filter
+      // behind `SEARCH_PEOPLE_ESI_FACET` gets correct counts on both sides.
+      esiEligible: { type: "boolean" },
     },
   },
 };
