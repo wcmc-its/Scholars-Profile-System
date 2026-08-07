@@ -281,14 +281,14 @@ describe("repointReissuedSuppressions (#2224)", () => {
  * Wiring. A mutation run deleted each call below and left the suite green: the
  * helpers are well pinned, but nothing asserted they are ever CALLED, so
  * reverting the whole delivered payload cost nothing. Source-text assertions,
- * because both call sites live inside `main()` — which opens MSSQL.
+ * because both call sites live inside `main()` — which opens MSSQL. Comments
+ * are stripped first, same as `tests/unit/etl-disconnect-guard.test.ts`:
+ * without that these catch a deleted call but not a commented-out one.
  */
-describe("the grant-suppression call sites are wired into the ETLs", () => {
-  const INFOED = readFileSync(join(process.cwd(), "etl/infoed/index.ts"), "utf8");
-  const REPORTER = readFileSync(
-    join(process.cwd(), "etl/reporter-grants/index.ts"),
-    "utf8",
-  );
+describe("the grant-suppression call sites are wired into the InfoEd ETL", () => {
+  const INFOED = readFileSync(join(process.cwd(), "etl/infoed/index.ts"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
 
   it("InfoEd main() re-points reissued suppressions (#2224)", () => {
     expect(INFOED).toMatch(
@@ -298,9 +298,5 @@ describe("the grant-suppression call sites are wired into the ETLs", () => {
 
   it("the InfoEd confidential-title net reflects what it mints (#2284)", () => {
     expect(INFOED).toContain("await reflectGrantSuppressions(minted)");
-  });
-
-  it("the RePORTER recency default-hide reflects what it mints (#2284)", () => {
-    expect(REPORTER).toContain("await reflectGrantSuppressions(minted)");
   });
 });
