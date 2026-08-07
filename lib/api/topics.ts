@@ -36,6 +36,7 @@ import { Prisma } from "@/lib/generated/prisma/client";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { scorePublication, type RankablePublication } from "@/lib/ranking";
 import {
+  HIDDEN_ROLE_CATEGORIES,
   SEARCH_BOOST_ELIGIBLE_ROLES,
   TOP_SCHOLARS_ELIGIBLE_ROLES,
   isPubliclyDisplayed,
@@ -1280,25 +1281,39 @@ export async function fetchAuthorBylineForPmids(
 /**
  * D-10 — Distinct active-scholar count for a topic.
  *
- * Powers the "View all N scholars in this area →" affordance on the topic page.
- * All-roles count (NO eligibility carve) — this is an enumerative surface, not
- * algorithmic. Returns 0 when the topic has no attributed scholars.
+ * Powers the "+ N more scholars →" affordance on the topic page (and its
+ * `<meta description>`). No ALGORITHMIC eligibility carve — this is an
+ * enumerative surface. Returns 0 when the topic has no attributed scholars.
+ *
+ * It DOES apply the #536 hidden-identity carve, in both layers, because the link
+ * it labels opens `getTopicScholars` — a count that skipped the carve would
+ * advertise more scholars than the page it opens can list.
  */
 export async function getDistinctScholarCountForTopic(topicSlug: string): Promise<number> {
   // #1504 — COUNT(DISTINCT cwid) instead of groupBy(["cwid"]).length, which
   // shipped one row per distinct scholar just to read its length (this runs
   // twice per topic-page render). Mirrors the Prisma relation filter
-  // `scholar: { deletedAt: null, status: "active" }` via an inner join
-  // (publication_topic.cwid -> scholar.cwid is a required FK).
-  const rows = await prisma.$queryRaw<Array<{ c: bigint }>>`
-    SELECT COUNT(DISTINCT pt.cwid) AS c
+  // `scholar: { deletedAt: null, status: "active", ...publicRoleWhere() }` via an
+  // inner join (publication_topic.cwid -> scholar.cwid is a required FK). NULL is
+  // admitted EXPLICITLY: `NULL NOT IN (…)` is NULL, not true, in three-valued
+  // logic, so a bare NOT IN would drop every un-backfilled scholar.
+  //
+  // Grouped by role_category so the fail-closed pass can run on the RAW value —
+  // the denylist cannot express the `doctoral_student*` prefix. A scholar row has
+  // exactly one role_category, so the per-role distinct counts sum to the overall
+  // distinct count.
+  const rows = await prisma.$queryRaw<Array<{ role: string | null; c: bigint }>>`
+    SELECT s.role_category AS role, COUNT(DISTINCT pt.cwid) AS c
     FROM publication_topic pt
     JOIN scholar s ON s.cwid = pt.cwid
     WHERE pt.parent_topic_id = ${topicSlug}
       AND s.deleted_at IS NULL
       AND s.status = 'active'
+      AND (s.role_category IS NULL
+           OR s.role_category NOT IN (${Prisma.join([...HIDDEN_ROLE_CATEGORIES])}))
+    GROUP BY s.role_category
   `;
-  return Number(rows[0]?.c ?? 0);
+  return rows.reduce((n, r) => (isPubliclyDisplayed(r.role) ? n + Number(r.c) : n), 0);
 }
 
 /**

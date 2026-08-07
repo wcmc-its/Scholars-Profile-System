@@ -692,13 +692,18 @@ export async function getFamiliesForSupercategory(
   if (!isMethodsLensEnabled()) return [];
   const overlayGate = gate ?? (await loadFamilyOverlayGate());
 
-  // ponytail: each card's `scholarCount` is this groupBy's `_count.cwid` — no
-  // scholar join at all, not even deletedAt/status, so it can advertise more
-  // scholars than the /methods/{sc}/{family}/scholars page it links to now that
-  // #2270 carved that loader. Pre-existing and only widened by the carve; adding
-  // the join changes every family card's number, so it needs a staging eyeball
-  // (and the counts are also used for the hub's ordering) rather than a
-  // drive-by. Filed rather than fixed here.
+  // ponytail: three counts could drift from the carved scholar LISTS they link
+  // to. Two are user-visible and are now fixed in place:
+  //   - `getDistinctScholarCountForFamily` — the family page's "N scholars" stat,
+  //     its "+ N more scholars →" link and its <meta description>;
+  //   - `getDistinctScholarCountForTopic` (lib/api/topics.ts) — the topic page's
+  //     "+ N more scholars →" chip and its <meta description>.
+  // This one is the third and STAYS DEFERRED: each card's `scholarCount` is this
+  // groupBy's `_count.cwid` — no scholar join at all, not even deletedAt/status.
+  // It renders only inside the family rail's aria-label (the visible number is
+  // `pubCount`, see components/method/family-rail.tsx), and the same `_count.cwid`
+  // orders the hub, so adding the join reorders every supercategory page. That
+  // needs a staging eyeball rather than a drive-by. Filed, not fixed.
   const groups = await prisma.scholarFamily.groupBy({
     by: ["familyLabel"],
     where: { supercategory },
@@ -971,24 +976,34 @@ async function loadSupercategoryRollup(
 
 /**
  * Distinct ACTIVE-scholar count for a family (`(supercategory, familyLabel)`).
- * All-roles (no eligibility carve) — powers the "View all N scholars" affordance.
+ * No ALGORITHMIC eligibility carve — powers the "N scholars" stat, the
+ * "+ N more scholars →" link and the page `<meta description>`.
  * Returns 0 when the lens is off. `@@unique([cwid, familyId])` makes one row per
- * `(cwid, family)`, so the distinct-cwid groupBy length IS the scholar count.
+ * `(cwid, family)`, so the distinct-cwid count IS the scholar count.
+ *
+ * It DOES apply the #536 hidden-identity carve, in both layers, because the link
+ * it labels opens `getMethodScholars` (#2270) — a count that skipped the carve
+ * would advertise more scholars than the page it opens can list.
  */
 export async function getDistinctScholarCountForFamily(
   supercategory: string,
   familyLabel: string,
 ): Promise<number> {
   if (!isMethodsLensEnabled()) return 0;
-  const rows = await prisma.scholarFamily.groupBy({
-    by: ["cwid"],
+  const rows = await prisma.scholarFamily.findMany({
     where: {
       supercategory,
       familyLabel,
-      scholar: { deletedAt: null, status: "active" },
+      scholar: { deletedAt: null, status: "active", ...publicRoleWhere() },
     },
+    select: { cwid: true, scholar: { select: { roleCategory: true } } },
   });
-  return rows.length;
+  // Fail-closed on the RAW column, exactly as `getMethodScholars` does: the
+  // where-clause is a denylist that cannot express the `doctoral_student*`
+  // prefix, so an out-of-band suffix passes it and only this catches it.
+  return new Set(
+    rows.filter((r) => isPubliclyDisplayed(r.scholar.roleCategory)).map((r) => r.cwid),
+  ).size;
 }
 
 /**
