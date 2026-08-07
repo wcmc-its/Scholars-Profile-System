@@ -33,8 +33,10 @@
  * mass-attribution-loss failure without going red when one person's record
  * legitimately changes.
  *
- * Operator bypass: the same ETL_GUARD_BYPASS contract as lib/etl-guard.ts
- * (guard names below are prefixed "integrity:").
+ * Operator bypass: the same ETL_GUARD_BYPASS contract as lib/etl-guard.ts.
+ * The token is the BARE guard name — `note()` and `bypassed()` add the
+ * "integrity:" prefix to the log label and the violation line only, and
+ * `bypassed()` matches the env list against the bare name.
  */
 import { db } from "@/lib/db";
 import { withEtlRun } from "@/lib/etl-run";
@@ -360,7 +362,8 @@ async function main(): Promise<void> {
   // (inert, and the bypass below is the right response) or a re-key the
   // re-point missed (the confidentiality consequence #2224 is about). Baseline
   // is ZERO, which is what makes it gradeable at all; bypass with
-  // ETL_GUARD_BYPASS=integrity:suppression:orphan-infoed.
+  // ETL_GUARD_BYPASS=suppression:orphan-infoed (bare name — the "integrity:"
+  // in the log label is not part of the token).
   //
   // Suppression ids only — the entityId embeds a CWID and these lines go to a
   // shared log group. An id is enough to look the row up.
