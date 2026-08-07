@@ -32,7 +32,7 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
   },
   "ED-Admins": {
     label: "Department Editor Access",
-    description: "Sets which staff may edit the profiles in their department or division.",
+    description: "Sets which staff may edit the profiles in their department, division or center.",
   },
   ReCiter: {
     label: "Publications",
@@ -40,7 +40,7 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
   },
   "ReCiter-COI-Statements": {
     label: "Competing Interest Statements",
-    description: "The competing-interests note printed on each paper; feeds the COI check.",
+    description: "The competing-interests note on each paper; feeds Conflict-of-Interest Gaps.",
   },
   ASMS: {
     label: "Education & Training",
@@ -52,7 +52,7 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
   },
   COI: {
     label: "Conflict-of-Interest Disclosures",
-    description: "Outside company ties in the profile's External relationships section.",
+    description: "Outside organization ties in the profile's External relationships section.",
   },
   "COI-Gap": {
     label: "Conflict-of-Interest Gaps",
@@ -84,15 +84,15 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
   },
   MeshCoverage: {
     label: "Search Topic Weighting",
-    description: "Measures how common each research topic is here, to sharpen search matches.",
+    description: "Measures how common each subject heading is in WCM papers, to rank search.",
   },
   MeshAnchor: {
     label: "Research Area Links",
-    description: "Connects research topic tags to the site's broad research areas in search.",
+    description: "Links paper subject headings to the research areas people browse by.",
   },
   MeshAlias: {
     label: "Search Term Synonyms",
-    description: "Maps WCM specialty names, like Cardiothoracic Surgery, to the right topic.",
+    description: "Maps WCM specialty names, like Cardiothoracic Surgery, to subject headings.",
   },
   PubMedRetractions: {
     label: "Retracted Paper Removal",
@@ -116,51 +116,51 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
   },
   Headshot: {
     label: "Profile Photo Check",
-    description: "Checks which scholars are missing a photo in the campus directory",
+    description: "Checks which scholars are missing a photo in the campus directory.",
   },
   Reporter: {
     label: "NIH Award Details",
-    description: "Adds NIH award summaries and the papers each award funded",
+    description: "Adds NIH award summaries and the papers each award funded.",
   },
   NSF: {
     label: "NSF Award Summaries",
-    description: "Adds project summaries to National Science Foundation awards",
+    description: "Adds project summaries to National Science Foundation awards.",
   },
   Gates: {
     label: "Gates Foundation Summaries",
-    description: "Adds project summaries to Gates Foundation awards",
+    description: "Adds project summaries to Gates Foundation awards.",
   },
   NihProfile: {
     label: "NIH Researcher Match",
-    description: "Matches scholars to their NIH researcher ID for the NIH portfolio link",
+    description: "Matches scholars to their NIH researcher ID for the NIH portfolio link.",
   },
   POPS: {
     label: "Clinical Specialties",
-    description: "Adds board certifications and specialties so clinicians turn up in search",
+    description: "Adds board certifications and specialties so clinicians turn up in search.",
   },
   ReporterGrants: {
     label: "NIH Awards From Elsewhere",
-    description: "Adds NIH awards from prior institutions to a scholar's funding list",
+    description: "Adds NIH awards from prior institutions to a scholar's funding list.",
   },
   ClinicalTrials: {
     label: "Clinical Trials",
-    description: "Adds the clinical trials each scholar leads or takes part in",
+    description: "Adds the clinical trials each scholar leads or takes part in.",
   },
   Technology: {
     label: "Available Technologies",
-    description: "Adds a scholar's licensable inventions from the WCM technology portfolio",
+    description: "Adds a scholar's licensable inventions from the WCM technology portfolio.",
   },
   News: {
     label: "News Mentions",
-    description: "Adds WCM Newsroom stories that mention a scholar to their profile",
+    description: "Adds WCM Newsroom stories that mention a scholar to their profile.",
   },
   Spotlight: {
     label: "Homepage Spotlight",
-    description: "Refreshes the Spotlight research cards on the home page",
+    description: "Refreshes the Spotlight research cards on the home page.",
   },
   Hierarchy: {
     label: "Research Subareas",
-    description: "Refreshes the subarea names listed under each research area",
+    description: "Refreshes the subarea names listed under each research area.",
   },
 };
 

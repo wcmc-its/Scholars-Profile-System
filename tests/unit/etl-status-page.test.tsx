@@ -666,7 +666,9 @@ describe("/edit/etl-status triage layout", () => {
     expect(summary?.textContent).toContain(`Running normally (${total()})`);
     // The collapsed line has to carry a fact, not just a count.
     expect(summary?.textContent).toContain(`All ${total()} imports are up to date.`);
-    expect(summary?.textContent).toContain("Most recent:");
+    // The OLDEST healthy import, not the freshest — every row here is up to date
+    // by construction, so the freshest is trivially fresh and says nothing.
+    expect(summary?.textContent).toContain("Oldest:");
   });
 
   it("says so plainly when nothing needs attention, rather than showing an empty box", async () => {
@@ -734,10 +736,14 @@ describe("/edit/etl-status triage layout", () => {
     );
     expect(row.textContent).toContain(spec.ack!.until);
     expect(attention.textContent).toContain("Needs attention (1)");
-    // NOT counted: the headline still reports a clean board.
-    expect(screen.getByTestId("etl-status-headline").textContent).toContain(
-      `All ${total()} imports are current or already accounted for.`,
-    );
+    // NOT counted as a failure — but the headline must not then claim a clean
+    // board, or the page reads "Needs attention (1)" directly above "All N
+    // imports are current". The heading counts SECTION MEMBERSHIP; this line
+    // counts FAILURES; when they differ the line has to say why.
+    const headline = screen.getByTestId("etl-status-headline").textContent ?? "";
+    expect(headline).toContain("Nothing is failing.");
+    expect(headline).toContain("already accepted");
+    expect(headline).not.toContain(`All ${total()} imports are current`);
     expect(
       within(screen.getByTestId("etl-status-table")).queryByTestId(`etl-status-row-${source}`),
     ).toBeNull();

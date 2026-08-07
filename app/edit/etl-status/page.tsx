@@ -109,8 +109,10 @@ const STATE_STYLE: Record<EtlSourceState, { label: string; emoji: string; classN
     className: "border-red-300 bg-red-50 text-red-700",
   },
   "never-ran": {
+    // 🔴 not ⚪: needsAttention() already treats never-ran like failed/stopped, and
+    // the pill is red. A neutral dot on a red row makes the two carriers disagree.
     label: "Never ran",
-    emoji: "⚪",
+    emoji: "🔴",
     className: "border-red-300 bg-red-50 text-red-700",
   },
   "known-issue": {
@@ -317,16 +319,21 @@ function StatusBody({ summary }: { summary: EtlStatusSummary }) {
   const normal = summary.sources.filter((row) => !inAttentionSection(row));
   // Shown above, not counted as a failure. See inAttentionSection.
   const accepted = attention.length - summary.needsAttention;
-  // Everything in `normal` is up to date by construction, so "most recent" is
-  // the freshest of them — a single concrete fact that says the chain ran, and
-  // saves opening the table to find out.
-  const mostRecent = normal.reduce<EtlSourceRow | null>(
-    (best, row) =>
-      row.ageHours !== null && (best === null || row.ageHours < (best.ageHours ?? Infinity))
+  // Everything in `normal` is up to date by construction, so the FRESHEST of them
+  // is trivially fresh and says nothing. The OLDEST is the informative one: it is
+  // the worst case in the healthy set, so "nothing here is staler than X" is a
+  // real statement about whether the chain has converged.
+  const oldestHealthy = normal.reduce<EtlSourceRow | null>(
+    (worst, row) =>
+      row.ageHours !== null && (worst === null || row.ageHours > (worst.ageHours ?? -Infinity))
         ? row
-        : best,
+        : worst,
     null,
   );
+  const oldestLine =
+    oldestHealthy === null
+      ? null
+      : `Oldest: ${sourceLabel(oldestHealthy.source)}, ${formatAge(oldestHealthy.ageHours)}.`;
   return (
     <>
       <p className="text-muted-foreground mt-2">
@@ -338,20 +345,34 @@ function StatusBody({ summary }: { summary: EtlStatusSummary }) {
       <section className="mt-6" data-testid="etl-status-attention">
         <h2 className="text-base font-semibold">Needs attention ({attention.length})</h2>
         <p className="text-muted-foreground mt-1 text-sm" data-testid="etl-status-headline">
+          {/*
+            The <h2> count is SECTION MEMBERSHIP (failures + live acks); this line
+            is the FAILURE count. They differ on the ordinary day — one acked row,
+            nothing broken — so the reconciling clause must not be gated on there
+            being a failure, or the page reads "Needs attention (1)" directly above
+            "All 34 imports are current".
+          */}
           {summary.needsAttention === 0 ? (
-            <>All {total} imports are current or already accounted for.</>
+            accepted === 0 ? (
+              <>All {total} imports are current or already accounted for.</>
+            ) : (
+              <>
+                Nothing is failing. {accepted === 1 ? "One import is" : `${accepted} imports are`}{" "}
+                listed here as already accepted.
+              </>
+            )
           ) : (
             <>
               <strong>{summary.needsAttention}</strong> of {total} imports need attention.
+              {accepted > 0 ? (
+                <>
+                  {" "}
+                  {accepted === 1 ? "One more is" : `${accepted} more are`} listed here as already
+                  accepted.
+                </>
+              ) : null}
             </>
           )}
-          {summary.needsAttention > 0 && accepted > 0 ? (
-            <>
-              {" "}
-              {accepted === 1 ? "One more is" : `${accepted} more are`} listed here as already
-              accepted.
-            </>
-          ) : null}
         </p>
         {attention.length === 0 ? null : (
           <ul className="mt-3 flex list-none flex-col gap-3 p-0">
@@ -374,7 +395,10 @@ function StatusBody({ summary }: { summary: EtlStatusSummary }) {
         data-testid="etl-status-normal"
       >
         <summary className="cursor-pointer">
-          <span className="text-base font-semibold">Running normally ({normal.length})</span>
+          {/* A heading, not a styled span — <summary> permits heading content, and
+              without it a screen reader navigating by heading finds only one of
+              this page's two sections. */}
+          <h2 className="inline text-base font-semibold">Running normally ({normal.length})</h2>
           <span className="text-apollo-slate ml-2 text-sm underline">
             <span className="etl-show">show</span>
             <span className="etl-hide">hide</span>
@@ -386,12 +410,7 @@ function StatusBody({ summary }: { summary: EtlStatusSummary }) {
               <>
                 <StateIcon state="up-to-date" /> All {normal.length}
                 {attention.length === 0 ? "" : " other"} imports are up to date.
-                {mostRecent === null ? null : (
-                  <>
-                    {" "}
-                    Most recent: {sourceLabel(mostRecent.source)}, {formatAge(mostRecent.ageHours)}.
-                  </>
-                )}
+                {oldestLine === null ? null : <> {oldestLine}</>}
               </>
             )}
           </span>
@@ -418,6 +437,17 @@ function StatusBody({ summary }: { summary: EtlStatusSummary }) {
                 >
                   <td className={tdClass}>
                     <SourceName source={row.source} />
+                    {/* The descriptions are the point of the rename; showing them only
+                        on attention cards means 33 of 34 imports never explain
+                        themselves on an ordinary day. */}
+                    {sourceDescription(row.source) === null ? null : (
+                      <span
+                        className="text-muted-foreground mt-0.5 block text-xs font-normal"
+                        data-testid="etl-status-description"
+                      >
+                        {sourceDescription(row.source)}
+                      </span>
+                    )}
                   </td>
                   <td className={`${tdClass} whitespace-nowrap`}>{CADENCE_LABEL[row.cadence]}</td>
                   <td className={`${tdClass} whitespace-nowrap`}>
