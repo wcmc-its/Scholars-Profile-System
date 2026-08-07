@@ -692,6 +692,13 @@ export async function getFamiliesForSupercategory(
   if (!isMethodsLensEnabled()) return [];
   const overlayGate = gate ?? (await loadFamilyOverlayGate());
 
+  // ponytail: each card's `scholarCount` is this groupBy's `_count.cwid` — no
+  // scholar join at all, not even deletedAt/status, so it can advertise more
+  // scholars than the /methods/{sc}/{family}/scholars page it links to now that
+  // #2270 carved that loader. Pre-existing and only widened by the carve; adding
+  // the join changes every family card's number, so it needs a staging eyeball
+  // (and the counts are also used for the hub's ordering) rather than a
+  // drive-by. Filed rather than fixed here.
   const groups = await prisma.scholarFamily.groupBy({
     by: ["familyLabel"],
     where: { supercategory },

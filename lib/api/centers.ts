@@ -25,7 +25,7 @@ export {
 import { identityImageEndpoint } from "@/lib/headshot";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
-import { publicRoleWhere } from "@/lib/eligibility";
+import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { extractLastNameSort } from "@/lib/name-sort";
 import type {
   DepartmentFacultyHit,
@@ -358,18 +358,24 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
   // #2202 — and it now carries the #536 carve, because the roster it labels does:
   // `getCenterMembersUncached` no longer loads a hidden identity class, so
   // counting the uncached member list would put "N scholars" above N−k rows.
+  // #2271 — a `count()` cannot fail closed, and `publicRoleWhere()` is a denylist
+  // that cannot express the `doctoral_student*` prefix, so a suffixed member used
+  // to count here while being absent from the roster AND from the collaboration
+  // graph. Select the raw column and count what `isPubliclyDisplayed` admits.
   const activeMemberCwids = await loadActiveCenterMemberCwids(center.code);
-  const scholarCount =
+  const countRows =
     activeMemberCwids.length === 0
-      ? 0
-      : await prisma.scholar.count({
+      ? []
+      : await prisma.scholar.findMany({
           where: {
             cwid: { in: activeMemberCwids },
             deletedAt: null,
             status: "active",
             ...publicRoleWhere(),
           },
+          select: { roleCategory: true },
         });
+  const scholarCount = countRows.filter((s) => isPubliclyDisplayed(s.roleCategory)).length;
 
   return {
     code: center.code,
@@ -547,7 +553,10 @@ async function getCenterMembersUncached(
   // flat page slice AND the grouped-by-program branch, so all three shrink
   // together; `getCenterProgram`'s `scholarCount` reads `members.length` off
   // this same result and follows for free.
-  const scholars = (await prisma.scholar.findMany({
+  // #2271 — plus the fail-closed pass on the RAW column below, since the
+  // where-clause is a denylist that cannot express the `doctoral_student*`
+  // prefix and an out-of-band suffix passes it.
+  const loaded = (await prisma.scholar.findMany({
     where: {
       cwid: { in: activeCwids },
       deletedAt: null,
@@ -568,6 +577,7 @@ async function getCenterMembersUncached(
       division: { select: { name: true } },
     },
   })) as CenterScholarRow[];
+  const scholars = loaded.filter((s) => isPubliclyDisplayed(s.roleCategory));
   // Order by surname, then full name (last-name-first), matching the People
   // search "Last name (A–Z)" sort. `preferredName` is "Given … Last", so the
   // DB's name sort would order by first name; re-sort by the extracted surname.
