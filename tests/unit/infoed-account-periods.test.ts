@@ -1,9 +1,37 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { joinAccountPeriods } from "@/etl/infoed";
+const hoisted = vi.hoisted(() => ({
+  suppressionFindMany: vi.fn(),
+  suppressionUpdate: vi.fn(),
+  reflectGrantSuppressions: vi.fn(),
+}));
+
+vi.mock("@/lib/db", () => ({
+  db: {
+    read: {},
+    write: {
+      suppression: {
+        findMany: hoisted.suppressionFindMany,
+        update: hoisted.suppressionUpdate,
+      },
+    },
+  },
+  disconnect: vi.fn(),
+  prisma: {},
+}));
+
+vi.mock("@/lib/edit/search-suppression", () => ({
+  reflectGrantSuppressions: hoisted.reflectGrantSuppressions,
+}));
+
+import {
+  joinAccountPeriods,
+  planSuppressionRepoints,
+  repointReissuedSuppressions,
+} from "@/etl/infoed";
 
 /**
  * #2173 — the account-level project period used to be a `LEFT JOIN (...) AS
@@ -121,5 +149,154 @@ describe("ACCOUNT_PERIOD_QUERY shape", () => {
     const consolidated = SRC.match(/const CONSOLIDATED_QUERY = `\n([\s\S]*?)\n`;/)![1];
     expect(consolidated).not.toContain("AS acct");
     expect(consolidated).not.toContain("acct.begin_date");
+  });
+});
+
+/**
+ * #2224 — the Account_Number re-key. `external_id` is
+ * `INFOED-{Account_Number}-{CWID}` and Account_Number flips from `prop_no` to
+ * `parentprop_no` the moment a proposal joins a family, so the same award is
+ * hard-deleted under the old id and re-created under a new one. Without the
+ * re-point the curator's takedown silently becomes a no-op.
+ */
+describe("planSuppressionRepoints (#2224)", () => {
+  const stale = (account: string, cwid: string, award: string | null) => ({
+    externalId: `INFOED-${account}-${cwid}`,
+    cwid,
+    awardNumber: award,
+  });
+
+  it("follows the award when InfoEd re-keys prop_no -> parentprop_no", () => {
+    expect(
+      planSuppressionRepoints(
+        [stale("111111", "abc1234", "R01AG012345")],
+        [stale("900001", "abc1234", "R01AG012345")],
+      ),
+    ).toEqual([
+      { from: "INFOED-111111-abc1234", to: "INFOED-900001-abc1234" },
+    ]);
+  });
+
+  it("does not follow across investigators — the pair is (cwid, awardNumber)", () => {
+    expect(
+      planSuppressionRepoints(
+        [stale("111111", "abc1234", "R01AG012345")],
+        [stale("900001", "xyz9876", "R01AG012345")],
+      ),
+    ).toEqual([]);
+  });
+
+  it("leaves an award that simply left the feed orphaned, not re-pointed", () => {
+    expect(
+      planSuppressionRepoints([stale("111111", "abc1234", "R01AG012345")], []),
+    ).toEqual([]);
+  });
+
+  it("skips a null awardNumber — nothing else identifies the award across the re-key", () => {
+    expect(
+      planSuppressionRepoints(
+        [stale("111111", "abc1234", null)],
+        [stale("900001", "abc1234", null)],
+      ),
+    ).toEqual([]);
+  });
+
+  it("skips an ambiguous pair rather than guess which suppression follows which id", () => {
+    // One stale row, two new accounts under the same (cwid, award): a takedown
+    // moved onto the wrong one is worse than the orphan.
+    expect(
+      planSuppressionRepoints(
+        [stale("111111", "abc1234", "R01AG012345")],
+        [
+          stale("900001", "abc1234", "R01AG012345"),
+          stale("900002", "abc1234", "R01AG012345"),
+        ],
+      ),
+    ).toEqual([]);
+    // ...and symmetrically, two stale rows collapsing into one new account.
+    expect(
+      planSuppressionRepoints(
+        [
+          stale("111111", "abc1234", "R01AG012345"),
+          stale("111112", "abc1234", "R01AG012345"),
+        ],
+        [stale("900001", "abc1234", "R01AG012345")],
+      ),
+    ).toEqual([]);
+  });
+});
+
+/**
+ * The two lines the plan alone does not cover: which suppressions are eligible
+ * to move, and what the move does to the reflection sentinel.
+ */
+describe("repointReissuedSuppressions (#2224)", () => {
+  const OLD = "INFOED-111111-abc1234";
+  const NEW = "INFOED-900001-abc1234";
+  const key = (externalId: string) => ({
+    externalId,
+    cwid: "abc1234",
+    awardNumber: "R01AG012345",
+  });
+
+  beforeEach(() => {
+    hoisted.suppressionFindMany.mockReset().mockResolvedValue([]);
+    hoisted.suppressionUpdate.mockReset().mockResolvedValue({});
+    hoisted.reflectGrantSuppressions.mockReset().mockResolvedValue([]);
+  });
+
+  it("moves the row, resets searchReflectedAt, and reflects it", async () => {
+    hoisted.suppressionFindMany.mockResolvedValue([{ id: "sup-1", entityId: OLD }]);
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await repointReissuedSuppressions([OLD], [key(OLD)], [key(NEW)]);
+
+    // searchReflectedAt back to NULL is load-bearing, not cosmetic: the #393
+    // reconciler selects on that NULL sentinel, so a moved row that kept a
+    // stale non-NULL stamp is skipped forever if the reflect below is lost.
+    expect(hoisted.suppressionUpdate).toHaveBeenCalledWith({
+      where: { id: "sup-1" },
+      data: { entityId: NEW, searchReflectedAt: null },
+    });
+    expect(hoisted.reflectGrantSuppressions).toHaveBeenCalledWith([
+      { suppressionId: "sup-1", entityId: NEW },
+    ]);
+    log.mockRestore();
+  });
+
+  it("considers only un-revoked takedowns — re-pointing a revoked one re-hides the award", async () => {
+    await repointReissuedSuppressions([OLD], [key(OLD)], [key(NEW)]);
+
+    expect(hoisted.suppressionFindMany.mock.calls[0][0].where).toEqual({
+      entityType: "grant",
+      revokedAt: null,
+      entityId: { in: [OLD] },
+    });
+    expect(hoisted.suppressionUpdate).not.toHaveBeenCalled();
+    expect(hoisted.reflectGrantSuppressions).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Wiring. A mutation run deleted each call below and left the suite green: the
+ * helpers are well pinned, but nothing asserted they are ever CALLED, so
+ * reverting the whole delivered payload cost nothing. Source-text assertions,
+ * because both call sites live inside `main()` — which opens MSSQL. Comments
+ * are stripped first, same as `tests/unit/etl-disconnect-guard.test.ts`:
+ * without that these catch a deleted call but not a commented-out one.
+ */
+describe("the grant-suppression call sites are wired into the InfoEd ETL", () => {
+  const INFOED = readFileSync(join(process.cwd(), "etl/infoed/index.ts"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+
+  it("InfoEd main() re-points reissued suppressions (#2224)", () => {
+    expect(INFOED).toMatch(
+      /await repointReissuedSuppressions\(\s*plan\.staleExternalIds,\s*existingGrants,\s*plan\.toCreate,?\s*\)/,
+    );
+  });
+
+  it("the InfoEd confidential-title net reflects what it mints (#2284)", () => {
+    expect(INFOED).toContain("await reflectGrantSuppressions(minted)");
   });
 });

@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 import {
   RECENCY_YEARS,
@@ -124,5 +127,26 @@ describe("buildReporterGrantRow", () => {
   it("returns null when the award has no usable project period (NOT NULL date columns)", () => {
     expect(buildReporterGrantRow("abc1234", grouped({ startDate: null }))).toBeNull();
     expect(buildReporterGrantRow("abc1234", grouped({ endDate: null }))).toBeNull();
+  });
+});
+
+/**
+ * Wiring. A mutation run deleted this call and left the suite green: the
+ * mint is well pinned, but nothing asserted the reflect is ever CALLED, so
+ * reverting the delivered payload of #2284 cost nothing. A source-text
+ * assertion, because the call site lives inside `main()`. Comments are
+ * stripped first, same as `tests/unit/etl-disconnect-guard.test.ts`: without
+ * that this catches a deleted call but not a commented-out one.
+ */
+describe("the grant-suppression call site is wired into the RePORTER ETL", () => {
+  const REPORTER = readFileSync(
+    join(process.cwd(), "etl/reporter-grants/index.ts"),
+    "utf8",
+  )
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+
+  it("the recency default-hide reflects what it mints (#2284)", () => {
+    expect(REPORTER).toContain("await reflectGrantSuppressions(minted)");
   });
 });

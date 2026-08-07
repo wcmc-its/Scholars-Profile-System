@@ -151,55 +151,116 @@ export async function reflectSearchSuppression(
   args: ReflectSearchSuppressionArgs,
 ): Promise<ReflectResult> {
   try {
-    const ops = await buildReflectionOps(args);
-    if (ops.length === 0) {
-      // Nothing to project. The old comment here claimed this meant a
-      // "non-search entity type (education / appointment / grant)" the
-      // reconciler excludes by type — but `grant` IS in
-      // RECONCILABLE_ENTITY_TYPES, and `buildGrantOps` returns [] for any
-      // entityId `parseExternalId` rejects. So a single such row returned
-      // `{ ok: true }` unstamped forever, and because the reconciler orders by
-      // created_at and takes a fixed batch, it sat at the head of every run
-      // starving the tail behind it.
-      //
-      // An empty op list IS a successful reflection: the index correctly holds
-      // nothing for this row. Stamp it so it drains.
-      return { ok: true, stamped: await markSearchReflected(args.suppressionId) };
-    }
-    const client = searchClient();
-    const body: Array<Record<string, unknown>> = [];
-    for (const op of ops) {
-      if (op.type === "delete") {
-        body.push({ delete: { _index: op.index, _id: op.id } });
-      } else {
-        body.push({ index: { _index: op.index, _id: op.id } });
-        body.push(op.doc);
-      }
-    }
-    const resp = await client.bulk({ refresh: true, body });
-    if (resp.body.errors) {
-      // OpenSearch 404 on a `delete` is fine — the doc may already be
-      // absent on a stale rebuild or a never-built index. Surface any
-      // OTHER per-item error.
-      const failed = (resp.body.items as BulkItem[]).filter((it) => {
-        if (it.delete?.error && it.delete?.status !== 404) return true;
-        if (it.index?.error) return true;
-        return false;
-      });
-      if (failed.length > 0) {
-        logReflectFailure(args, failed);
-        return { ok: false, error: failed };
-      }
-    }
-    // Full success — advance the reconciler sentinel so this row is not
-    // re-processed. Still best-effort for the ROUTE call sites (a stamp failure
-    // leaves the already-correct index untouched), but the outcome is now
-    // reported so the reconciler can treat it as the failure it is.
-    return { ok: true, stamped: await markSearchReflected(args.suppressionId) };
+    return await applyOps(args, await buildReflectionOps(args));
   } catch (err) {
     logReflectFailure(args, err);
     return { ok: false, error: err };
   }
+}
+
+/**
+ * ADR-005 layer 1 for MACHINE-minted grant suppressions (#2284).
+ *
+ * `reflectSearchSuppression` is called only from the /edit routes and the #393
+ * reconciler, so the two ETL writers that mint grant suppressions — the InfoEd
+ * confidential-title net and the RePORTER recency default-hide — had no fast
+ * path at all: their rows waited on the ≤24h nightly rebuild, which is a ≤24h
+ * exposure window on a CDA/NDA control whenever the step runs out of band
+ * (`npm run etl:infoed` rebuilds no index).
+ *
+ * What "batch" buys is ONE KEY SCAN, not one round trip. `applyOps` still
+ * issues a `client.bulk({ refresh: true })` per row, so N rows with index ops
+ * are N bulks and N refreshes. Collapsing them would mean attributing the
+ * response `items` back to rows to keep the per-row best-effort result and
+ * stamp, which is not worth it here: the reporter-grants batch emits no op at
+ * all, and the InfoEd confidential-title net mints a handful.
+ *
+ * ONE key scan for the whole batch. The expensive half of `buildGrantOps`
+ * (`loadAllGrantSuppressions` + a full `GRANT_INDEX_WHERE` scan) is
+ * entityId-INDEPENDENT, so reflecting N rows one at a time repeats it N times;
+ * hoisting it is the whole reason this entry point exists rather than a loop
+ * over `reflectSearchSuppression` at the call site. It is loaded lazily and at
+ * most once: a batch whose ids all fail `parseExternalId` (every
+ * `reporter:{cwid}:{core}` id) needs no scan, and must still STAMP — that
+ * stamp is the #2204 defect.
+ *
+ * Best-effort per row, exactly like the single-row path: one row's failure is
+ * logged and does not abort the batch, and nothing throws into the ETL.
+ */
+export async function reflectGrantSuppressions(
+  rows: ReadonlyArray<{ suppressionId: string; entityId: string }>,
+): Promise<ReflectResult[]> {
+  const results: ReflectResult[] = [];
+  let scan: GrantKeyScan | undefined;
+  for (const row of rows) {
+    const args: ReflectSearchSuppressionArgs = {
+      suppressionId: row.suppressionId,
+      entityType: "grant",
+      entityId: row.entityId,
+      contributorCwid: null,
+      affectedCwids: [],
+    };
+    try {
+      if (!scan && parseExternalId(row.entityId)) scan = await scanGrantKeys();
+      results.push(await applyOps(args, await buildGrantOps(row.entityId, scan)));
+    } catch (err) {
+      logReflectFailure(args, err);
+      results.push({ ok: false, error: err });
+    }
+  }
+  return results;
+}
+
+/** Issue `ops` (possibly none) as one bulk, then advance the sentinel. Throws
+ *  on an OpenSearch transport failure — every caller wraps it. */
+async function applyOps(
+  args: ReflectSearchSuppressionArgs,
+  ops: Op[],
+): Promise<ReflectResult> {
+  if (ops.length === 0) {
+    // Nothing to project. The old comment here claimed this meant a
+    // "non-search entity type (education / appointment / grant)" the
+    // reconciler excludes by type — but `grant` IS in
+    // RECONCILABLE_ENTITY_TYPES, and `buildGrantOps` returns [] for any
+    // entityId `parseExternalId` rejects. So a single such row returned
+    // `{ ok: true }` unstamped forever, and because the reconciler orders by
+    // created_at and takes a fixed batch, it sat at the head of every run
+    // starving the tail behind it.
+    //
+    // An empty op list IS a successful reflection: the index correctly holds
+    // nothing for this row. Stamp it so it drains.
+    return { ok: true, stamped: await markSearchReflected(args.suppressionId) };
+  }
+  const client = searchClient();
+  const body: Array<Record<string, unknown>> = [];
+  for (const op of ops) {
+    if (op.type === "delete") {
+      body.push({ delete: { _index: op.index, _id: op.id } });
+    } else {
+      body.push({ index: { _index: op.index, _id: op.id } });
+      body.push(op.doc);
+    }
+  }
+  const resp = await client.bulk({ refresh: true, body });
+  if (resp.body.errors) {
+    // OpenSearch 404 on a `delete` is fine — the doc may already be
+    // absent on a stale rebuild or a never-built index. Surface any
+    // OTHER per-item error.
+    const failed = (resp.body.items as BulkItem[]).filter((it) => {
+      if (it.delete?.error && it.delete?.status !== 404) return true;
+      if (it.index?.error) return true;
+      return false;
+    });
+    if (failed.length > 0) {
+      logReflectFailure(args, failed);
+      return { ok: false, error: failed };
+    }
+  }
+  // Full success — advance the reconciler sentinel so this row is not
+  // re-processed. Still best-effort for the ROUTE call sites (a stamp failure
+  // leaves the already-correct index untouched), but the outcome is now
+  // reported so the reconciler can treat it as the failure it is.
+  return { ok: true, stamped: await markSearchReflected(args.suppressionId) };
 }
 
 /**
@@ -256,6 +317,28 @@ async function buildReflectionOps(
   return [];
 }
 
+type GrantKeyRow = { externalId: string | null; awardNumber: string | null };
+
+type GrantKeyScan = {
+  keyRows: GrantKeyRow[];
+  byProject: Map<string, GrantKeyRow[]>;
+};
+
+/** The entityId-INDEPENDENT half of {@link buildGrantOps}: every active grant
+ *  suppression plus the corpus key scan, grouped into projects. Hoisted so a
+ *  batch (`reflectGrantSuppressions`) pays for it once, not once per row. */
+async function scanGrantKeys(): Promise<GrantKeyScan> {
+  const suppressed = await loadAllGrantSuppressions(db.read);
+  // Cheap two-column scan: only externalId + awardNumber drive the group key,
+  // so we avoid pulling the heavy GRANT_INDEX_SELECT (nested publications,
+  // abstracts) across the whole corpus just to locate one project.
+  const keyRows = await db.read.grant.findMany({
+    where: GRANT_INDEX_WHERE,
+    select: { externalId: true, awardNumber: true },
+  });
+  return { keyRows, byProject: groupGrantsByProject(keyRows, suppressed) };
+}
+
 /**
  * Funding-search fast-path for a grant suppress / revoke (#481(a)).
  *
@@ -270,9 +353,13 @@ async function buildReflectionOps(
  * excludes suppressed grant rows; on a best-effort failure it degrades to that
  * same rebuild (≤24h) and the #393 reconciler (≤5 min). Heavier than the
  * scholar / publication paths (one full-corpus key scan), but a grant suppress
- * is a rare curator / self action.
+ * is a rare curator / self action — and a BATCH caller passes `scan` so the
+ * whole batch shares one.
  */
-async function buildGrantOps(externalId: string): Promise<Op[]> {
+async function buildGrantOps(
+  externalId: string,
+  scan?: GrantKeyScan,
+): Promise<Op[]> {
   const ext = parseExternalId(externalId);
   // Not an InfoEd grant id — never indexed, nothing to do. This is the COMMON
   // case, not an edge case: `etl/reporter-grants/transform.ts` writes
@@ -282,18 +369,15 @@ async function buildGrantOps(externalId: string): Promise<Op[]> {
   // are `reporter:*`. Returning [] is correct — but it must still STAMP, which
   // is the caller's job and was the #2204 defect: 295 unstamped rows pinned the
   // reconciler's `take: 200` batch head forever and starved the 16 InfoEd rows
-  // (positions 284-311) that DO have a doc to delete. Those were #2203's leak.
+  // (positions 284-311) that DO have a doc to delete.
+  //
+  // The starvation is measured and is the #2204 defect. The funding-index leak
+  // it was once blamed for is NOT: a prod probe on 2026-08-06 found ZERO
+  // suppressed projects present in the funding index. So #2203's leak has some
+  // other cause, still unidentified — do not read this comment as naming it.
   if (!ext) return [];
 
-  const suppressed = await loadAllGrantSuppressions(db.read);
-  // Cheap two-column scan: only externalId + awardNumber drive the group key,
-  // so we avoid pulling the heavy GRANT_INDEX_SELECT (nested publications,
-  // abstracts) across the whole corpus just to locate one project.
-  const keyRows = await db.read.grant.findMany({
-    where: GRANT_INDEX_WHERE,
-    select: { externalId: true, awardNumber: true },
-  });
-  const byProject = groupGrantsByProject(keyRows, suppressed);
+  const { keyRows, byProject } = scan ?? (await scanGrantKeys());
 
   // This grant's project key — the same derivation groupGrantsByProject uses,
   // so it matches the key its surviving siblings group under. The target row is

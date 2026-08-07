@@ -1,6 +1,14 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import { CHANGE_COUNT_SOURCES, findVolumeRegressions, staleSources } from "@/etl/integrity";
+import {
+  CHANGE_COUNT_SOURCES,
+  findVolumeRegressions,
+  splitOrphansByKeyspace,
+  staleSources,
+} from "@/etl/integrity";
 
 describe("findVolumeRegressions", () => {
   it("flags a >50% overnight drop on a substantial source", () => {
@@ -132,5 +140,55 @@ describe("findVolumeRegressions — change-count sources (#2200)", () => {
       { now: NOW },
     );
     expect(out).toHaveLength(1);
+  });
+});
+
+// #2224 — one orphan count summed two opposite meanings: a `reporter:` orphan
+// is the re-add protection working (deterministic id, re-attaches on re-add),
+// an `INFOED-` orphan is a live un-hiding (the Account_Number re-key).
+describe("splitOrphansByKeyspace (#2224)", () => {
+  it("separates the self-healing keyspace from the one that pages", () => {
+    expect(
+      splitOrphansByKeyspace([
+        { id: "s1", entityId: "reporter:aaa1111:R01CA000001" },
+        { id: "s2", entityId: "INFOED-90210-aaa1111" },
+        { id: "s3", entityId: "reporter:bbb2222:R01CA000002" },
+        { id: "s4", entityId: "legacy-91" },
+      ]),
+    ).toEqual({ infoed: ["s2"], reporter: ["s1", "s3"], other: ["s4"] });
+  });
+
+  it("carries suppression ids only — never the entityId, which embeds a CWID", () => {
+    const split = splitOrphansByKeyspace([
+      { id: "s1", entityId: "INFOED-90210-aaa1111" },
+    ]);
+    expect(JSON.stringify(split)).not.toContain("aaa1111");
+  });
+
+  it("is empty per keyspace when there are no orphans, so nothing is graded", () => {
+    expect(splitOrphansByKeyspace([])).toEqual({
+      infoed: [],
+      reporter: [],
+      other: [],
+    });
+  });
+});
+
+/**
+ * The split above is only worth having because the `infoed` side GRADES: it
+ * goes through `note()`, which pushes a violation and fails the nightly.
+ * Swapping that one call for `console.log`/`console.warn` deletes the whole
+ * behaviour and every test above stays green — nothing here reaches `main()`,
+ * which opens Prisma and OpenSearch. Hence a source-text assertion, comments
+ * stripped first (same as `tests/unit/etl-disconnect-guard.test.ts`) so a
+ * commented-out call fails it too.
+ */
+describe("the InfoEd-orphan split is graded, not just logged (#2224)", () => {
+  const SRC = readFileSync(join(process.cwd(), "etl/integrity/index.ts"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+
+  it("routes the infoed keyspace through note(), which is what fails the run", () => {
+    expect(SRC).toMatch(/\bnote\(\s*"suppression:orphan-infoed",/);
   });
 });

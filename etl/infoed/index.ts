@@ -36,13 +36,14 @@
  *
  * Usage: `npm run etl:infoed`
  */
-import { db } from "../../lib/db";
+import { db, disconnect } from "../../lib/db";
 import { assertPruneVolume } from "../../lib/etl-guard";
 import { closeInfoedPool, getInfoedPool } from "@/lib/sources/mssql-infoed";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { repairEncodingOrNull } from "@/lib/text/repair-encoding";
 import { coreProjectNum, parseNihAward } from "@/lib/award-number";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
+import { reflectGrantSuppressions } from "@/lib/edit/search-suppression";
 import { isConfidentialTitle } from "@/lib/grant-confidentiality";
 import { fetchProjectPeriodsByCoreProjectNums } from "../nih-profile/fetcher";
 import {
@@ -388,6 +389,12 @@ const SYSTEM_CONFIDENTIAL_TITLE = "system-confidential-title";
  * instead of a silent drop: the false-positive rate on a bare keyword match is
  * real (see lib/grant-confidentiality.ts), so "hidden pending review" is the
  * safe default, not "hidden forever" or "published anyway."
+ *
+ * #2284 — every row minted here is reflected into the funding index before this
+ * returns (ADR-005 layer 1). Without it the only remover was the nightly
+ * rebuild, so a standalone `npm run etl:infoed` (which rebuilds no index) left a
+ * ≤24h exposure window on a CDA/NDA control. Batched: one corpus key scan for
+ * the whole run, not one per suppression.
  */
 async function reconcileConfidentialTitles(
   inserts: Array<{ externalId: string; title: string }>,
@@ -401,10 +408,10 @@ async function reconcileConfidentialTitles(
     ).map((s) => s.entityId),
   );
 
-  let newlySuppressed = 0;
+  const minted: Array<{ suppressionId: string; entityId: string }> = [];
   for (const { externalId, title } of inserts) {
     if (!isConfidentialTitle(title) || existing.has(externalId)) continue;
-    await db.write.suppression.create({
+    const row = await db.write.suppression.create({
       data: {
         entityType: "grant",
         entityId: externalId,
@@ -416,13 +423,125 @@ async function reconcileConfidentialTitles(
       },
     });
     existing.add(externalId);
-    newlySuppressed++;
+    minted.push({ suppressionId: row.id, entityId: externalId });
   }
+  await reflectGrantSuppressions(minted);
+  const newlySuppressed = minted.length;
   if (newlySuppressed > 0) {
     console.log(
       `[InfoEd] ${newlySuppressed} grant(s) auto-suppressed on a confidential-looking title.`,
     );
   }
+}
+
+/** A grant row reduced to what identifies a reissue. */
+type ReissueKey = { externalId: string; cwid: string; awardNumber: string | null };
+
+/**
+ * #2224 — match a stale `external_id` to the new one the SAME award came back
+ * under, so a curator's takedown survives an InfoEd re-key.
+ *
+ * `external_id` is `INFOED-{Account_Number}-{CWID}`, and `Account_Number` is a
+ * mutable CASE (`prop_no` unless the proposal has a parent, then
+ * `parentprop_no`). The moment InfoEd links a standalone proposal into a
+ * family, the same investigator's same award re-keys: the old id lands in
+ * `staleExternalIds` and is hard-deleted, while the award returns in
+ * `toCreate` under a new key — UNSUPPRESSED, silently, forever. A
+ * `(cwid, awardNumber)` pair appearing on both sides IS that reissue.
+ *
+ * Strictly 1:1. An `awardNumber` is required (nothing else identifies the
+ * award across the re-key), and a pair that is ambiguous on EITHER side — a
+ * renewal split across two accounts, say — is skipped rather than guessed at:
+ * moving a takedown onto the wrong award is worse than leaving the orphan the
+ * integrity check already reports.
+ */
+export function planSuppressionRepoints(
+  stale: readonly ReissueKey[],
+  toCreate: readonly ReissueKey[],
+): Array<{ from: string; to: string }> {
+  const index = (rows: readonly ReissueKey[]) => {
+    const byPair = new Map<string, string[]>();
+    for (const r of rows) {
+      const award = r.awardNumber?.trim();
+      if (!award) continue;
+      const pair = JSON.stringify([r.cwid, award]);
+      byPair.set(pair, [...(byPair.get(pair) ?? []), r.externalId]);
+    }
+    return byPair;
+  };
+  const created = index(toCreate);
+  const out: Array<{ from: string; to: string }> = [];
+  for (const [pair, fromIds] of index(stale)) {
+    const toIds = created.get(pair);
+    if (fromIds.length !== 1 || toIds?.length !== 1) continue;
+    if (fromIds[0] === toIds[0]) continue;
+    out.push({ from: fromIds[0], to: toIds[0] });
+  }
+  return out;
+}
+
+/**
+ * Apply {@link planSuppressionRepoints} to the ACTIVE grant suppressions on the
+ * stale ids, and reflect the moved rows (#2284).
+ *
+ * The DB re-point is complete for every award. The immediate FUNDING-INDEX
+ * landing is not: `buildGrantOps` keys the funding doc
+ * `coreProjectNum(awardNumber) ?? ext.accountNumber`, and `coreProjectNum`
+ * returns null for every non-NIH format InfoEd carries (NSF, foundation,
+ * industry). For those the key IS the account number — precisely what the
+ * re-key changed — so the reflect below writes the NEW key and the OLD key's
+ * funding doc survives until the nightly rebuild. NIH-format awards keep the
+ * same core project number across the re-key and do land on this run.
+ *
+ * No audit row: no ETL suppression write records one (see
+ * `reconcileConfidentialTitles`), and adding an audit action here would need
+ * the TS union plus all four ENUM sites in `scripts/sql/audit-log.sql` — a
+ * MySQL 1265 rollback of every write if either half is missed. The console line
+ * plus the integrity keyspace split is the trail.
+ */
+export async function repointReissuedSuppressions(
+  staleExternalIds: readonly string[],
+  existingGrants: readonly ReissueKey[],
+  toCreate: readonly ReissueKey[],
+): Promise<void> {
+  if (staleExternalIds.length === 0) return;
+  const staleSet = new Set(staleExternalIds);
+  const repoints = planSuppressionRepoints(
+    existingGrants.filter((g) => staleSet.has(g.externalId)),
+    toCreate,
+  );
+  if (repoints.length === 0) return;
+
+  const byFrom = new Map(repoints.map((r) => [r.from, r.to]));
+  const active = await db.write.suppression.findMany({
+    where: {
+      entityType: "grant",
+      revokedAt: null,
+      entityId: { in: [...byFrom.keys()] },
+    },
+    select: { id: true, entityId: true },
+  });
+  const moved: Array<{ suppressionId: string; entityId: string }> = [];
+  for (const s of active) {
+    const to = byFrom.get(s.entityId)!;
+    // searchReflectedAt back to NULL: the row's latest transition is now
+    // unreflected, so the #393 reconciler is the backstop if the reflect below
+    // is lost. A second active row already on `to` would be inert anyway —
+    // loadAllGrantSuppressions is a Set of entityIds.
+    await db.write.suppression.update({
+      where: { id: s.id },
+      data: { entityId: to, searchReflectedAt: null },
+    });
+    moved.push({ suppressionId: s.id, entityId: to });
+  }
+  if (moved.length === 0) return;
+  console.log(
+    `[InfoEd] re-pointed ${moved.length} grant suppression(s) onto a reissued external_id.`,
+  );
+  // ponytail: non-NIH re-keys leave the OLD account-number funding doc in the
+  // index until the nightly rebuild. Clearing it needs the `from` id threaded
+  // through reflectGrantSuppressions, which no other caller has a use for.
+  await reflectGrantSuppressions(moved);
 }
 
 /**
@@ -709,6 +828,11 @@ async function main() {
     console.log(
       `Grant reconcile complete: +${plan.toCreate.length} ~${plan.toUpdate.length} -${tombstoned}`,
     );
+    // AFTER the deleteMany on purpose: a crash between the two leaves an
+    // orphaned suppression (the status quo, which integrity now reports),
+    // whereas re-pointing FIRST and then crashing would un-hide the stale row
+    // that is still there.
+    await repointReissuedSuppressions(plan.staleExternalIds, existingGrants, plan.toCreate);
 
     await reconcileDateGaps(undated, backfilledIds);
     await reconcileConfidentialTitles(inserts);
@@ -746,7 +870,11 @@ if (!process.env.VITEST) {
       process.exit(1);
     })
     .finally(async () => {
-      await db.write.$disconnect();
+      // `disconnect()`, not `db.write.$disconnect()`: reflectGrantSuppressions
+      // reads through `db.read`, which is a SECOND pool wherever
+      // DATABASE_URL_RO is set. Leaving it open holds the event loop and the
+      // task burns its full Step Functions `.sync` timeout after main() resolves.
+      await disconnect();
       await closeInfoedPool();
     });
 }
