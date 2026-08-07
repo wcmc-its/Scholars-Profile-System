@@ -2,9 +2,10 @@
 
 /**
  * CTL sponsor match — paste a commercial sponsor's description (an email or a
- * call transcript), rank WCM researchers on topical fit ALONE
- * (`docs/2026-07-09-ctl-technologies-handoff.md` §2). One POST to
- * `/api/edit/matcha`; no stage axis, no ESI, no intake queue.
+ * call transcript), rank WCM researchers on topical fit ALONE. One POST to
+ * `/api/edit/matcha`; no stage axis, no ESI, no intake queue — those axes belong
+ * to the Funding matcher, whose URL-scrape intake cannot take a sponsor's email
+ * in the first place, which is why this is a separate surface at all.
  *
  * THE SLIDERS DO NOT TALK TO THE SERVER. The response carries the decomposed score
  * inputs — each concept's editable `centrality` and fixed `weightFactor`, and each candidate's

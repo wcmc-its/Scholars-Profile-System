@@ -1,9 +1,11 @@
 /**
- * `/edit/matcha` — the CTL sponsor-match surface
- * (`docs/2026-07-09-ctl-technologies-handoff.md` §2): paste a commercial
- * sponsor's description of their interest (it arrives as an email or a call,
- * not a URL), rank WCM researchers on topical fit ALONE — no stage axis, no
- * ESI demotion, unlike the Funding matcher next door.
+ * `/edit/matcha` — the CTL sponsor-match surface: paste a commercial sponsor's
+ * description of their interest (it arrives as an email or a call, not a URL),
+ * rank WCM researchers on topical fit ALONE — no stage axis, no ESI demotion,
+ * unlike the Funding matcher next door. It is a thin surface of its own for
+ * exactly that reason: the Funding matcher's URL-scrape intake and its
+ * stage/ESI axes are wrong for an inbound commercial inquiry, even though its
+ * ranking engine is reusable.
  *
  * Audience: superuser OR development role — the same gate as
  * `/edit/find-researchers`; the data route (`/api/edit/matcha`) is the

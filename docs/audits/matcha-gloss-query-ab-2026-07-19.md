@@ -1,5 +1,7 @@
 # Matcha: concept-canonicalization vs. the sponsor's literal phrasing (gloss-query) — exploration handoff
 
+> **Snapshot as of 2026-07-19 — point-in-time; not maintained.** Kept for provenance under [Audits & snapshots](../DOCUMENTATION-REGISTRY.md).
+
 Written 2026-07-19. Prompted by a live observation: an ask that says **"cognitive decline"** is
 extracted as the concept **"cognitive dysfunction"** (the MeSH-preferred term), and those two return
 materially different people. This doc captures what the pipeline already does, why it is a

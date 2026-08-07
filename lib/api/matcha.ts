@@ -1,6 +1,5 @@
 /**
- * CTL sponsor match — rank WCM researchers against a pasted sponsor description
- * (`docs/2026-07-09-ctl-technologies-handoff.md` §2).
+ * CTL sponsor match — rank WCM researchers against a pasted sponsor description.
  *
  * Sponsor interest arrives as an email or a call, not a URL, and the licensing
  * officers' question is purely topical: "who at WCM works on THIS?" So the

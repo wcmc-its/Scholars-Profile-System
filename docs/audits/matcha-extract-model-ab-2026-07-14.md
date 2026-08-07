@@ -1,5 +1,7 @@
 # Sponsor-match — findings (2026-07-14)
 
+> **Snapshot as of 2026-07-14 — point-in-time; not maintained.** Kept for provenance under [Audits & snapshots](../DOCUMENTATION-REGISTRY.md).
+
 Written against `origin/master` @ `487b9eab`. Four issues closed this session: #1696, #1697, #1698,
 #1700. This document records what was **learned**, not what was shipped — the PRs record that. Read
 §1 before running any ranking experiment; it invalidates a class of claim this subsystem has been
@@ -137,17 +139,7 @@ Now: `null` (never answered) is excluded from the mean and from coverage; `[]` (
 is still a legitimate 0; and a run with any unmeasured fixture **exits 2**, so a degraded box stops the
 experiment instead of lying to it.
 
-## 7. What is now stale in the older docs
-
-| Doc | Stale claim |
-|---|---|
-| `2026-07-13-sponsor-weighting-reskin-handoff.md` §9 | "Tuning constants were NOT swept" — they were (#1681); rarity is deleted, not bounded |
-| same, §4 | "Local OpenSearch is a 1 GiB heap" — master carries `-Xms4g -Xmx4g` |
-| `2026-07-13-sponsor-match-next-steps-handoff.md` §2b | 3 of 5 "blocked on a producer" rows have shipped |
-| `2026-07-13-sponsor-optimization-session-handoff.md` | Corrected in-place when it merged (#1701); its §0a landmine is FIXED, kept as a lesson |
-| Any doc citing `dampedIdf` as the fusion weight | It is deleted (#1698). The weight is `centrality^3 x kindPrior` |
-
-## 8. The through-line
+## 7. The through-line
 
 Four of the six findings above are the same failure wearing different clothes: **an assertion that was
 never checked against the thing it described.** A comment that said rarity was the weight. A guard that

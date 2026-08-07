@@ -1,4 +1,9 @@
-// Arm → env for the MATCHA_GLOSS_RERANK λ-sweep (docs/2026-07-22-gloss-rerank-eval-runbook.md).
+// Arm → env for the MATCHA_GLOSS_RERANK λ-sweep: the offline eval that gates the flag, run as
+// arms `base` / `gloss-0.25` / `gloss-0.5` / `gloss-1.0` over the sponsor fixtures. It splits
+// across two environments because neither has both dependencies — extraction needs Bedrock
+// (laptop; the `sps-etl` role has no Bedrock grant), retrieval needs OpenSearch (in-VPC only) —
+// and the in-VPC image must already CONTAIN the rescore code, since the flags are supplied per
+// arm at run time but the code is not: a stale image makes every arm run the base path.
 //
 // The in-VPC vehicle varies exactly ONE thing between arms: the gloss rescore. `base` leaves it
 // off (today's ordering, the ablation); `gloss-<λ>` turns it on at that `rescore_query_weight`.

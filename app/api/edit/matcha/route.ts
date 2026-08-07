@@ -1,6 +1,8 @@
 /**
  * `/api/edit/matcha` — rank WCM researchers against a pasted sponsor
- * description (`docs/2026-07-09-ctl-technologies-handoff.md` §2).
+ * description, on topical fit alone: inbound commercial interest arrives as an
+ * email or a call rather than a scrapeable URL, so it gets its own thin surface
+ * instead of the Funding matcher's URL intake and its stage/ESI axes.
  *
  * POST `{ description }` → `MatchaResponse` (`lib/api/sponsor-match-contract.ts`):
  * `{ ok, concepts, candidates }`. One engine call.

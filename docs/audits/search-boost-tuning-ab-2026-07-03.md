@@ -2,7 +2,7 @@
 
 > **Snapshot as of 2026-07-03 — point-in-time; not maintained.** Kept for provenance under [Audits & snapshots](../DOCUMENTATION-REGISTRY.md).
 
-Follow-up to `docs/search-area-boost-ab-2026-07-02.md`, running the three levers
+Follow-up to `search-area-boost-ab-2026-07-02.md`, running the three levers
 that verdict left open: weight tuning (#1343), the unblocked faculty re-eval
 (#1345), and the newly-wired phrase boost (#1344). All four cells ran on ONE
 pinned image digest `sha256:47389c58…` (git `abf823ac`, master after PR #1470),

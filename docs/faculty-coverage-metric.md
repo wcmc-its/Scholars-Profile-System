@@ -55,11 +55,16 @@ staging.**
 - **"Expert" means the top-7 surface (10%), not the subtopic rail (50%).** Calling the
   ~50% C2 figure "experts" overstates it; that population is "ranked contributor in a
   research area." Reserve "expert" for C1.
-- **Methods-lens is environment-dependent.** Signal B only populates where the
-  methods-lens backfill has run — **staging yes, prod not yet** (see
-  `methods-lens-prod-golive-runbook.md`). If a public claim must reflect prod before that
-  rollout, use the *without methods-lens* rows (~50% any-surface, ~15% selective). The
-  probe prints both so you can pick the row matching the live environment at publish time.
+- **Methods-lens is environment-dependent — but no longer prod-dark.** Signal B only
+  populates where the methods-lens backfill has run. This section previously read
+  "staging yes, prod not yet"; that is **false as of 2026-07-05**, when `METHODS_LENS_ENABLED`
+  and its siblings were flipped to unconditional `"on"` in `cdk/lib/app-stack.ts` (#962/#1481),
+  and the `Tools` loader (`etl:scholar-tool`) is an ungated nightly step in both envs. The
+  cutover record is `audits/methods-lens-prod-golive-2026-06-14.md` — a point-in-time plan,
+  not current state. **Re-run the probe against prod before publishing a coverage figure**
+  rather than defaulting to the *without methods-lens* rows (~50% any-surface, ~15%
+  selective); those now understate prod. The repo can confirm the flags and the schedule but
+  not that the prod rows are populated, so measure, don't assume.
 - **Local ≈ staging.** A local snapshot reports the same denominator (2,416), so quick
   iteration can run locally; the authoritative number comes from staging.
 

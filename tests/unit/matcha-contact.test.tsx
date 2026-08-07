@@ -9,8 +9,11 @@
  * mount and this file must go red; if it stays green the test is worthless.
  *
  * Everything else here is the consent story, which is the reason this button is per-card and not
- * the mockup's `Contact selected` + compose modal (bulk email: a standing policy no-go, and out
- * of scope by name in `docs/2026-07-14-sponsor-reskin-handoff.md` §3). `/api/profile/[cwid]/
+ * the mockup's `Contact selected` + compose modal (bulk email: a standing policy no-go; and the
+ * reskin scoped `Contact selected` and the compose modal OUT by name, because address resolution
+ * is a separate directory lookup outside the ranking contract, no address may enter the match
+ * payload, and handing a commercial sponsor a list of colleagues' addresses needs its own design
+ * decision rather than being folded into a reskin). `/api/profile/[cwid]/
  * contact-email` fails CLOSED — release gate off, external viewer, or an unreleased
  * `email_visibility` each return `{ email: null }` — so the null path is not an edge case, it is
  * PROD'S CURRENT STATE (the release gate is off and the backfill has never run). It gets a test.

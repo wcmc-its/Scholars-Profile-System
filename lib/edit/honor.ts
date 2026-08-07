@@ -57,12 +57,14 @@ export const HONOR_CATEGORY_LABELS: Record<HonorCategory, string> = {
 
 /**
  * Seed dropdown options for the `organization` field — the conferring bodies
- * behind the honors in the spec appendix (docs/2026-07-15-honors-distinctions-spec.md).
+ * behind a proposed seed list of target honors (academy memberships, pinnacle
+ * prizes, named investigatorships).
  * Alphabetical: the card renders them as datalist/select options over a free-text
  * input, so this is a typing aid that keeps "Howard Hughes Medical Institute"
- * from being stored five ways — NOT an allowlist. The spec is explicit that the
- * appendix is "a proposed seed, not the source of truth"; WCM Faculty Affairs'
- * list is authoritative and this should be reconciled against it.
+ * from being stored five ways — NOT an allowlist. That seed was explicitly "a
+ * proposed seed, not the source of truth": WCM Faculty Affairs / the Dean's
+ * office maintain the authoritative distinguished-faculty-honors list, and this
+ * should be reconciled against theirs before it is treated as complete.
  */
 export const CONFERRING_BODIES: readonly string[] = [
   "Albert and Mary Lasker Foundation",
