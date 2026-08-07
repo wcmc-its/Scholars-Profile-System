@@ -23,7 +23,7 @@ import { identityImageEndpoint } from "@/lib/headshot";
 import type { AuthorRole } from "@/lib/search-index-docs";
 import { prisma } from "@/lib/db";
 import { profilePath } from "@/lib/profile-url";
-import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { fetchAuthorBylineForPmids, fetchWcmAuthorsForPmids } from "@/lib/api/topics";
 import { cachedReasonAgg, reasonAggKey } from "@/lib/api/reason-agg-cache";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
@@ -5305,16 +5305,49 @@ export async function searchPublications(opts: {
     // (bounded to PAGE_SIZE) still runs so the preview rows render. With aggs
     // skipped `facetCwidList` is already empty, so this gate is self-documenting.
     opts.hitsOnly === true || facetCwidList.length === 0
-      ? Promise.resolve([] as { cwid: string; preferredName: string; slug: string }[])
+      ? Promise.resolve(
+          [] as {
+            cwid: string;
+            preferredName: string;
+            slug: string;
+            roleCategory: string | null;
+          }[],
+        )
       : prisma.scholar.findMany({
-          where: { cwid: { in: facetCwidList }, deletedAt: null, status: "active" },
-          select: { cwid: true, preferredName: true, slug: true },
+          // #2267 — the #536 carve, both halves. `wcmAuthorCwids` (the indexed
+          // field these buckets key on) is built in lib/search-index-docs.ts
+          // with NO role carve, so the aggregation hands us hidden identity
+          // classes and this is the only gate on the path. `publicRoleWhere()`
+          // is the population half; `isPubliclyDisplayed` below is the
+          // fail-closed half — the denylist cannot name an out-of-band
+          // suffixed role, and a facet chip mints a profile link.
+          where: {
+            cwid: { in: facetCwidList },
+            deletedAt: null,
+            status: "active",
+            ...publicRoleWhere(),
+          },
+          select: {
+            cwid: true,
+            preferredName: true,
+            slug: true,
+            roleCategory: true,
+          },
         }),
     // Enrich hits with topic-page-style chip data (avatar + isFirst/isLast)
     // by querying publication_author for the page's pmids. Bounded to PAGE_SIZE.
     fetchWcmAuthorsForPmids(pmids),
   ]);
-  const scholarByCwid = new Map(scholarRows.map((s) => [s.cwid, s]));
+  // #2267 — filter at the MAP, not per consumer: both the bucket path below and
+  // the pinned-selection path (`filters.wcmAuthor`, which hydrates regardless of
+  // top-500 membership and is therefore a per-CWID lookup) read through this one
+  // map, and both already handle a missing entry. One gate, no second call site
+  // to forget.
+  const scholarByCwid = new Map(
+    scholarRows
+      .filter((s) => isPubliclyDisplayed(s.roleCategory))
+      .map((s) => [s.cwid, s]),
+  );
   const wcmAuthorBuckets: WcmAuthorFacetBucket[] = authorBuckets.flatMap((b) => {
     const s = scholarByCwid.get(b.key);
     if (!s) return []; // scholar deleted/suppressed since the index was built

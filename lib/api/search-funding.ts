@@ -30,6 +30,7 @@ import {
   PUBLICATIONS_RESTRUCTURED_MSM,
   searchClient,
 } from "@/lib/search";
+import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { coreProjectNum } from "@/lib/award-number";
 import {
   resolveFundingConceptEnabled,
@@ -1031,10 +1032,32 @@ export async function searchFunding(opts: {
         })
       : Promise.resolve([] as { cwid: string; roleCategory: string | null }[]),
     facetCwidList.length === 0
-      ? Promise.resolve([] as { cwid: string; preferredName: string; slug: string }[])
+      ? Promise.resolve(
+          [] as {
+            cwid: string;
+            preferredName: string;
+            slug: string;
+            roleCategory: string | null;
+          }[],
+        )
       : prisma.scholar.findMany({
-          where: { cwid: { in: facetCwidList }, deletedAt: null, status: "active" },
-          select: { cwid: true, preferredName: true, slug: true },
+          // #2267 — same carve as the publications-tab author facet. Note the
+          // asymmetry this closes: `roleByCwid` above already selects
+          // roleCategory so funding-result-row.tsx can de-link a hidden class
+          // per row, while this facet linked the same person in the left rail
+          // of the same page.
+          where: {
+            cwid: { in: facetCwidList },
+            deletedAt: null,
+            status: "active",
+            ...publicRoleWhere(),
+          },
+          select: {
+            cwid: true,
+            preferredName: true,
+            slug: true,
+            roleCategory: true,
+          },
         }),
   ]);
   const roleByCwid = new Map(roleRows.map((s) => [s.cwid, s.roleCategory]));
@@ -1184,7 +1207,13 @@ export async function searchFunding(opts: {
   // were resolved above (the facet display-name lookup runs in the same
   // Promise.all as the per-row role lookup). Active selections may not appear in
   // the top-500 result set, so they were already folded into `facetCwidList`.
-  const scholarByCwid = new Map(facetScholarRows.map((s) => [s.cwid, s]));
+  // #2267 — fail-closed half, applied at the map so both the bucket path and the
+  // pinned-selection path below inherit it (both already handle a missing entry).
+  const scholarByCwid = new Map(
+    facetScholarRows
+      .filter((s) => isPubliclyDisplayed(s.roleCategory))
+      .map((s) => [s.cwid, s]),
+  );
   const investigators: WcmInvestigatorFacetBucket[] = investigatorBuckets.flatMap((b) => {
     const s = scholarByCwid.get(b.key);
     if (!s) return []; // scholar deleted/suppressed since the index was built
