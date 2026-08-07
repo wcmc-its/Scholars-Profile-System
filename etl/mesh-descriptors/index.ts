@@ -37,6 +37,7 @@ import { Readable, PassThrough } from "node:stream";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "@/lib/db";
+import { processStartedAt } from "@/lib/etl-run";
 import { parseMeshXmlStream, type ParsedDescriptor } from "./parser";
 import { buildSynonyms } from "./synonyms";
 
@@ -117,6 +118,7 @@ async function recordRun(args: {
     data: {
       source: "MeSH",
       status: args.status,
+      startedAt: processStartedAt,
       completedAt: new Date(),
       rowsProcessed: args.rowsProcessed,
       errorMessage: args.errorMessage ?? null,

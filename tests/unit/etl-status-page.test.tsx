@@ -789,6 +789,73 @@ describe("/edit/etl-status triage layout", () => {
       expect(row.querySelector("[data-testid='etl-status-pill']")?.textContent).toBe(label);
     }
   });
+
+  it("gives the healthy table a run-duration column instead of a permanently blank one", async () => {
+    fixtures = allHealthy();
+    render(await Page());
+    // The column this replaced ("What this means") could only ever be an em
+    // dash here: the collapsed section is up-to-date rows ONLY, and that is the
+    // one state the explanation has nothing to say about. Pinning the whole
+    // header list means a future column cannot be appended without a decision.
+    expect(
+      Array.from(screen.getByTestId("etl-status-table").querySelectorAll("thead th")).map(
+        (th) => th.textContent,
+      ),
+    ).toEqual(["Data import", "How often", "Status", "Last good data", "Run duration"]);
+  });
+
+  it("reports how long the newest attempt took", async () => {
+    fixtures = allHealthy();
+    fixtures.ED = success(
+      { completedAt: new Date(NOW - 2 * HOUR), manifestGeneratedAt: null },
+      new Date(NOW - 2 * HOUR),
+    );
+    fixtures.ED.attempt = {
+      status: "success",
+      startedAt: new Date(NOW - 2 * HOUR - 7 * 60 * 1000),
+      completedAt: new Date(NOW - 2 * HOUR),
+      errorMessage: null,
+    };
+    render(await Page());
+    expect(screen.getByTestId("etl-status-row-ED").textContent).toContain("7 min");
+  });
+
+  it("says a duration was not recorded rather than claiming a run took no time", async () => {
+    fixtures = allHealthy();
+    // Ten sources used to write one terminal etl_run row, leaving startedAt to
+    // the schema default so it landed on the same instant as completedAt. They
+    // record a real start now, but the board reads the LATEST row — every one of
+    // them serves a legacy zero until it next runs, up to a month for a monthly
+    // source. "0 sec" would present that gap as a measurement.
+    fixtures.News = success({ completedAt: new Date(NOW - 2 * HOUR), manifestGeneratedAt: null });
+    render(await Page());
+    const row = screen.getByTestId("etl-status-row-News");
+    expect(row.textContent).toContain("not recorded");
+    expect(row.textContent).not.toContain("0 sec");
+  });
+
+  it("keeps a lapsed acknowledgement in the attention section even once the data is fresh", async () => {
+    const acked = Object.entries(TRACKED).find(([, s]) => s.ack !== undefined);
+    expect(acked?.[1].ack, "no source carries an ack any more").toBeDefined();
+    const [source, spec] = acked!;
+    // Past `until`, so the ack is DEAD — but the producer recovered, so the row
+    // itself grades up to date. `ackExpired` is set from the ack's own state and
+    // is never gated on staleness, so without explicit routing this row would
+    // file itself into the collapsed healthy list carrying an acceptance that
+    // nobody renewed. The prose cell that used to say so is now a duration.
+    const now = Date.parse(spec.ack!.until) + DAY;
+    vi.setSystemTime(now);
+    fixtures = allHealthy(now);
+    render(await Page());
+    const row = within(screen.getByTestId("etl-status-attention")).getByTestId(
+      `etl-status-row-${source}`,
+    );
+    expect(row.getAttribute("data-state")).toBe("up-to-date");
+    expect(row.textContent).toContain("That date has passed");
+    expect(
+      within(screen.getByTestId("etl-status-table")).queryByTestId(`etl-status-row-${source}`),
+    ).toBeNull();
+  });
 });
 
 describe("etl source copy", () => {

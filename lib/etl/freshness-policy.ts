@@ -217,10 +217,16 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
     // fresh date, as a decision rather than by default).
     ack: {
       until: "2026-09-30",
+      // Reader-facing copy, deliberately. #2281 started rendering this string to
+      // superusers on /edit/etl-status, where it was the most technical sentence
+      // on the page and the only card visible on an otherwise green day. The
+      // engineering record did not move: the comment above this block is the
+      // canonical technical account and is richer than this string ever was. Do
+      // not re-technicalise this to match its neighbour — edit the comment.
       reason:
-        "producer not deployed — reciterai-spotlight-monthly rule + orchestrator " +
-        "Lambda are declared in IaC but absent; every artifact so far is a hand-run " +
-        "cli/backfill_spotlight.py --publish, last 2026-06-15 (SPS #1813)",
+        "This data is still published by hand because its automatic monthly " +
+        "refresh has not been switched on yet. The last hand-published update " +
+        "was 15 June 2026. Tracked as SPS #1813; there is nothing to do here.",
     },
   },
   // Annual cadence (cron 0 9 1 7 ? *)

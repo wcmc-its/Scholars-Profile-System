@@ -48,6 +48,7 @@ import { createHash } from "node:crypto";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "../../lib/db";
+import { processStartedAt } from "../../lib/etl-run";
 import { repairEncoding, repairEncodingOrNull } from "@/lib/text/repair-encoding";
 import { assertSourceVolume } from "../../lib/etl-guard";
 import { loadAllPublicationSuppressions } from "@/lib/api/manual-layer";
@@ -149,6 +150,7 @@ async function recordRun(args: {
     data: {
       source: SOURCE,
       status: args.status,
+      startedAt: processStartedAt,
       completedAt: new Date(),
       rowsProcessed: args.rowsProcessed,
       errorMessage: args.errorMessage ?? null,
