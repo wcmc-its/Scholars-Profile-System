@@ -69,6 +69,7 @@ import {
   SCHOLAR_EXPORT_CAP,
   SCOPE_HEADERS,
 } from "@/lib/api/export-scholars";
+import { HIDDEN_ROLE_CATEGORIES } from "@/lib/eligibility";
 import { getFamily, getSupercategory } from "@/lib/api/methods";
 import { getTopic } from "@/lib/api/topics";
 import { loadFamilyOverlayGate, isFamilyPubliclyVisible } from "@/lib/api/methods-overlay";
@@ -180,7 +181,33 @@ describe("buildScholarExport — method-family scope", () => {
     expect(header.some((h) => h.toLowerCase().includes("phone"))).toBe(false);
   });
 
-  it("blanks profile_url for hidden-display roles (doctoral students), matching the unlinked public roster (#536)", async () => {
+  it("carves hidden-display roles in the loader WHERE clause, admitting NULL explicitly (#2272)", async () => {
+    vi.mocked(getFamily).mockResolvedValue({
+      supercategory: "animal_cell_models",
+      supercategorySlug: "animal-cell-models",
+      familyId: "fam_x",
+      familyLabel: "CRISPR screens",
+      familySlug: "crispr-screens-fam_x",
+    } as never);
+    mockScholarFamilyFindMany.mockResolvedValue([]);
+
+    await buildScholarExport("method-family", {
+      supercategory: "animal-cell-models",
+      family: "crispr-screens-fam_x",
+    });
+
+    const scholarFilter = mockScholarFamilyFindMany.mock.calls[0][0].where.scholar;
+    expect(scholarFilter.deletedAt).toBeNull();
+    expect(scholarFilter.status).toBe("active");
+    // NULL admitted EXPLICITLY — a bare `notIn` on a nullable column drops NULL
+    // rows (SQL three-valued logic) and would hide un-backfilled scholars.
+    expect(scholarFilter.OR).toContainEqual({ roleCategory: null });
+    expect(scholarFilter.OR).toContainEqual({
+      roleCategory: { notIn: [...HIDDEN_ROLE_CATEGORIES] },
+    });
+  });
+
+  it("emits NO ROW at all for a hidden-display role — not a named row with a blank link (#2272)", async () => {
     vi.mocked(getFamily).mockResolvedValue({
       supercategory: "animal_cell_models",
       supercategorySlug: "animal-cell-models",
@@ -189,10 +216,13 @@ describe("buildScholarExport — method-family scope", () => {
       familySlug: "crispr-screens-fam_x",
     } as never);
 
-    // A faculty scholar (linked) and a doctoral student (listed but unlinked).
+    // `doctoral_student_dvm` is NOT in HIDDEN_ROLE_CATEGORIES, so it passes the
+    // where-clause; only the fail-closed prefix match catches it. This is the
+    // #2202 shape: the carve used to sit on the profile_url/email CELLS while
+    // the row still shipped name, cwid, title and department.
     mockScholarFamilyFindMany.mockResolvedValue([
       { pmidCount: 9, scholar: scholar(0) },
-      { pmidCount: 8, scholar: { ...scholar(1), roleCategory: "doctoral_student" } },
+      { pmidCount: 8, scholar: { ...scholar(1), roleCategory: "doctoral_student_dvm" } },
     ]);
 
     const result = await buildScholarExport("method-family", {
@@ -201,15 +231,12 @@ describe("buildScholarExport — method-family scope", () => {
     });
 
     const table = parseCsv(result!.csv);
-    const header = table[0];
     const body = table.slice(1);
-    const urlIdx = header.indexOf("profile_url");
-
-    // Both scholars are present (all roles), but only the publicly-displayed
-    // one carries a link; the doctoral student's URL cell is blank.
-    expect(body.length).toBe(2);
-    expect(body[0][urlIdx]).toBe("/slug-0");
-    expect(body[1][urlIdx]).toBe("");
+    expect(body.length).toBe(1);
+    expect(result!.rowCount).toBe(1);
+    expect(result!.csv).not.toContain("Scholar 1");
+    expect(result!.csv).not.toContain("cwid1");
+    expect(result!.csv).not.toContain("Dept 1");
   });
 
   it("returns null when the family does not resolve", async () => {
@@ -441,11 +468,13 @@ describe("buildScholarExport — includeEmail option (#866 UC-B)", () => {
     expect(body[1][emailIdx]).toBe("scholar1@med.cornell.edu");
   });
 
-  it("blanks email for hidden-display roles (doctoral / affiliate alumni), mirroring profile_url", async () => {
+  it("drops hidden-display roles (doctoral / affiliate alumni) entirely — no row, so no email (#2272)", async () => {
     resolveCrisprFamily();
+    // Suffixed variants that the where-clause denylist cannot express, so they
+    // reach the fail-closed post-filter — the only layer that can catch them.
     mockScholarFamilyFindMany.mockResolvedValue([
       { pmidCount: 9, scholar: scholar(0) },
-      { pmidCount: 8, scholar: { ...scholar(1), roleCategory: "doctoral_student" } },
+      { pmidCount: 8, scholar: { ...scholar(1), roleCategory: "doctoral_student_dvm" } },
       { pmidCount: 7, scholar: { ...scholar(2), roleCategory: "affiliate_alumni" } },
     ]);
 
@@ -462,13 +491,12 @@ describe("buildScholarExport — includeEmail option (#866 UC-B)", () => {
     const emailIdx = header.indexOf("email");
     const urlIdx = header.indexOf("profile_url");
 
-    // Faculty: email + link present. Hidden-display roles: BOTH blank, in lockstep.
+    // Only the faculty row survives; the hidden rows are absent, not blanked.
+    expect(body.length).toBe(1);
     expect(body[0][emailIdx]).toBe("scholar0@med.cornell.edu");
     expect(body[0][urlIdx]).toBe("/slug-0");
-    expect(body[1][emailIdx]).toBe("");
-    expect(body[1][urlIdx]).toBe("");
-    expect(body[2][emailIdx]).toBe("");
-    expect(body[2][urlIdx]).toBe("");
+    expect(result!.csv).not.toContain("scholar1@med.cornell.edu");
+    expect(result!.csv).not.toContain("scholar2@med.cornell.edu");
   });
 
   it("emits a blank email cell (not the column's absence) when a faculty scholar has no email", async () => {
@@ -627,13 +655,13 @@ describe("buildScholarExport — release-code row filter (SPEC §B.2)", () => {
     expect(table.slice(1)[0][header.indexOf("email")]).toBe("scholar0@med.cornell.edu");
   });
 
-  it("release-code blanking stacks WITH the #536 hidden-role carve (both blank)", async () => {
+  it("release-code blanking stacks WITH the #536 hidden-role carve (row dropped, then cell blanked)", async () => {
     vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
     resolveCrispr();
     mockScholarFamilyFindMany.mockResolvedValue([
-      // public email but hidden role => blank (role carve wins)
-      { pmidCount: 9, scholar: { ...scholar(0, "public"), roleCategory: "doctoral_student" } },
-      // faculty but 'none' => blank (release code wins)
+      // public email but hidden role => the whole ROW is dropped (#2272)
+      { pmidCount: 9, scholar: { ...scholar(0, "public"), roleCategory: "doctoral_student_dvm" } },
+      // faculty but 'none' => row kept, email cell blank (release code wins)
       { pmidCount: 8, scholar: scholar(1, "none") },
       // faculty + public => present
       { pmidCount: 7, scholar: scholar(2, "public") },
@@ -644,9 +672,10 @@ describe("buildScholarExport — release-code row filter (SPEC §B.2)", () => {
     const header = table[0];
     const body = table.slice(1);
     const emailIdx = header.indexOf("email");
+    expect(body.length).toBe(2);
+    expect(result!.csv).not.toContain("Scholar 0");
     expect(body[0][emailIdx]).toBe("");
-    expect(body[1][emailIdx]).toBe("");
-    expect(body[2][emailIdx]).toBe("scholar2@med.cornell.edu");
+    expect(body[1][emailIdx]).toBe("scholar2@med.cornell.edu");
   });
 });
 

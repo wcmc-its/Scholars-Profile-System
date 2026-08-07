@@ -16,7 +16,12 @@
  * but hard-capped well below 50 and carved to FT faculty (`getFamilyScholarRows`
  * / `getSubtopicScholars` / `getTopScholarsForSupercategory`). So each scope gets
  * a small ranked loader here that ranks by the per-scholar publication count
- * within the scope, ALL roles, fetching CAP + 1 to detect the over-cap case.
+ * within the scope, fetching CAP + 1 to detect the over-cap case.
+ *
+ * #2272 — every one of those loaders carries the #536 hidden-identity carve
+ * (`publicRoleWhere()` + the fail-closed post-filter in `buildScholarExport`), so
+ * a hidden row is never emitted. The carve used to sit on two CELLS while the
+ * loaders emitted the whole row.
  *
  * Method scopes (method-family, supercategory) inherit the public
  * #800-suppression / #801-sensitivity overlay gate VERBATIM — the resolver
@@ -33,7 +38,7 @@
 import { prisma } from "@/lib/db";
 import { toCsv, type CsvCell } from "@/lib/csv";
 import { profilePath } from "@/lib/profile-url";
-import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
 import {
   loadFamilyOverlayGate,
@@ -196,10 +201,10 @@ function commonCells(row: ScholarIdentity, rank: number): Record<string, CsvCell
     primary_title: row.primaryTitle,
     primary_department: row.primaryDepartment,
     role_category: row.roleCategory,
-    // Parity with the public roster: hidden-display roles (#536 doctoral
-    // students / affiliate-alumni) are listed by name but NOT linked there, and
-    // the /{slug} route itself 404s for them. Emit a blank URL rather than a
-    // dead link the public surface deliberately withholds.
+    // Belt-and-braces since #2272 carved the loaders: a hidden-display role
+    // (#536 doctoral students / affiliate-alumni) can no longer reach this
+    // projection at all. Kept so a regression in the row carve degrades to a
+    // blank URL rather than to a link the /{slug} route itself 404s.
     profile_url: isPubliclyDisplayed(row.roleCategory) ? profilePath(row.slug) : "",
     // #866 UC-B email column (only emitted when `includeEmail`; see headersFor).
     // `headersFor`/`projectRows` drop the key entirely when email is not
@@ -209,10 +214,19 @@ function commonCells(row: ScholarIdentity, rank: number): Record<string, CsvCell
 }
 
 // ---------------------------------------------------------------------------
-// Ranked top-50 loaders (one per scope) — all roles, ranked by the per-scholar
-// publication count within the scope. Inherit the same active-scholar join +
-// (method scopes) overlay gate the public page loaders use.
+// Ranked top-50 loaders (one per scope) — every ALGORITHMICALLY-eligible role,
+// ranked by the per-scholar publication count within the scope. Inherit the same
+// active-scholar join + (method scopes) overlay gate the public page loaders use.
+//
+// #2272 — they also carry `publicRoleWhere()`, so a #536 hidden identity class is
+// never LOADED. The carve used to sit at two CELLS (`profile_url`, `email`) while
+// the loaders emitted the whole row, which shipped a hidden student's name, CWID,
+// title and department into the CSV. That is the #2202 structural shape exactly,
+// and #2202's remedy was loader-level carving.
 // ---------------------------------------------------------------------------
+
+/** The active-scholar join every ranked loader applies, with the #536 carve. */
+const EXPORT_SCHOLAR_WHERE = () => ({ deletedAt: null, status: "active", ...publicRoleWhere() });
 
 /** method-family: per-scholar `scholar_family.pmidCount` desc, top 50. The
  *  resolver already gated the family; re-applied here defensively per row. */
@@ -228,7 +242,7 @@ async function loadFamilyRoster(
     where: {
       supercategory,
       familyLabel,
-      scholar: { deletedAt: null, status: "active" },
+      scholar: EXPORT_SCHOLAR_WHERE(),
     },
     orderBy: [{ pmidCount: "desc" }, { familyId: "asc" }],
     take: ROSTER_FETCH_LIMIT,
@@ -252,7 +266,7 @@ async function loadSupercategoryRoster(
   const rows = await db.scholarFamily.findMany({
     where: {
       supercategory,
-      scholar: { deletedAt: null, status: "active" },
+      scholar: EXPORT_SCHOLAR_WHERE(),
     },
     select: {
       familyLabel: true,
@@ -303,13 +317,16 @@ export async function isSupercategoryExportInRange(
   const rows = await prismaRead.scholarFamily.findMany({
     where: {
       supercategory: supercategoryId,
-      scholar: { deletedAt: null, status: "active" },
+      scholar: EXPORT_SCHOLAR_WHERE(),
     },
-    select: { familyLabel: true, scholar: { select: { cwid: true } } },
+    select: { familyLabel: true, scholar: { select: { cwid: true, roleCategory: true } } },
   });
   const distinct = new Set<string>();
   for (const r of rows) {
     if (!r.scholar) continue;
+    // Same fail-closed pass `buildScholarExport` applies, so the button gate
+    // counts exactly what the export would emit (#2272).
+    if (!isPubliclyDisplayed(r.scholar.roleCategory)) continue;
     if (!isFamilyPubliclyVisible(supercategoryId, r.familyLabel, gate)) continue;
     distinct.add(r.scholar.cwid);
     if (distinct.size > SCHOLAR_EXPORT_CAP) return false;
@@ -324,7 +341,7 @@ async function loadTopicRoster(db: PrismaRead, topicSlug: string): Promise<Expor
     by: ["cwid"],
     where: {
       parentTopicId: topicSlug,
-      scholar: { deletedAt: null, status: "active" },
+      scholar: EXPORT_SCHOLAR_WHERE(),
     },
     _count: { pmid: true },
     orderBy: { _count: { pmid: "desc" } },
@@ -363,7 +380,7 @@ async function loadSubtopicRoster(
     where: {
       parentTopicId: topicSlug,
       primarySubtopicId: subtopicId,
-      scholar: { deletedAt: null, status: "active" },
+      scholar: EXPORT_SCHOLAR_WHERE(),
     },
     _count: { pmid: true },
     orderBy: { _count: { pmid: "desc" } },
@@ -494,6 +511,12 @@ export async function buildScholarExport(
     if (!subtopic) return null;
     roster = await loadSubtopicRoster(prismaRead, topic.id, subtopic.id);
   }
+
+  // #2272 — fail-closed on the RAW role column, BEFORE the cap check so the cap
+  // measures the displayable cohort. `publicRoleWhere()` in the loaders is a
+  // denylist that cannot express the `doctoral_student*` prefix, so an
+  // out-of-band suffix passes it and only this predicate catches it.
+  roster = roster.filter((r) => isPubliclyDisplayed(r.roleCategory));
 
   // HARD cohort cap (SPEC §B.3): the loaders fetched CAP + 1 rows so an over-cap
   // cohort is detectable. Refuse > 50 with the same dark-feature semantics as an
