@@ -13,11 +13,25 @@
  * alarm sees a failed run.
  */
 import { runReciterRefresh } from "@/lib/reciter/refresh";
+import { withEtlRun } from "@/lib/etl-run";
 
 async function main() {
-  const summary = await runReciterRefresh();
-  const failed = summary.goldstandardFailed > 0 || summary.uidsFailed > 0;
-  process.exit(failed ? 1 : 0);
+  // Operator-run, so this row is a record of a HUMAN run, not of a schedule.
+  // That is exactly why "ReciterRefresh" must NOT be added to TRACKED in
+  // lib/etl/freshness-policy.ts: a step nobody runs on a cadence goes stale by
+  // design, and tracking it would turn the freshness heartbeat red for doing
+  // nothing wrong.
+  await withEtlRun("ReciterRefresh", async () => {
+    const summary = await runReciterRefresh();
+    if (summary.goldstandardFailed > 0 || summary.uidsFailed > 0) {
+      throw new Error(
+        `${summary.goldstandardFailed} gold-standard POST(s) and ` +
+          `${summary.uidsFailed} re-score(s) failed`,
+      );
+    }
+    return summary.uidsRefreshed;
+  });
+  process.exit(0);
 }
 
 main().catch((err) => {
