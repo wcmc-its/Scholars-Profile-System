@@ -85,7 +85,9 @@ export type HistoricalSlugRow = {
   /** ISO-serialized for the client island. */
   recordedAt: string;
   /** When `false`, the old URL 404s instead of redirecting — the current
-   *  scholar is soft-deleted or suppressed (`url-resolver.ts`). Badge it. */
+   *  scholar is soft-deleted or suppressed (`url-resolver.ts`). Badge it.
+   *  `true` is necessary but no longer sufficient: since #2268 the resolver
+   *  also 404s a #536 hidden identity class, which this flag does not read. */
   redirects: boolean;
 };
 
@@ -261,6 +263,10 @@ async function loadCollisions(
  * Segment B (`historical`) — `slug_history` rows, newest first. Each row is
  * flagged for whether it still redirects: a dead-end (the current scholar is
  * soft-deleted or suppressed) resolves to 404, not a 301 (`url-resolver.ts`).
+ * The flag reads those two gates only — `url-resolver.ts` gained a third since
+ * #2268 (the #536 role carve), so a hidden-role row is badged as redirecting
+ * while the public route 404s it. Superuser-only surface, so this over-reports
+ * rather than leaking.
  */
 async function loadHistorical(
   opts: SlugRegistryOptions,
