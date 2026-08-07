@@ -464,7 +464,7 @@ export function planSuppressionRepoints(
     for (const r of rows) {
       const award = r.awardNumber?.trim();
       if (!award) continue;
-      const pair = `${r.cwid} ${award}`;
+      const pair = JSON.stringify([r.cwid, award]);
       byPair.set(pair, [...(byPair.get(pair) ?? []), r.externalId]);
     }
     return byPair;
