@@ -168,6 +168,13 @@ export async function reflectSearchSuppression(
  * exposure window on a CDA/NDA control whenever the step runs out of band
  * (`npm run etl:infoed` rebuilds no index).
  *
+ * What "batch" buys is ONE KEY SCAN, not one round trip. `applyOps` still
+ * issues a `client.bulk({ refresh: true })` per row, so N rows with index ops
+ * are N bulks and N refreshes. Collapsing them would mean attributing the
+ * response `items` back to rows to keep the per-row best-effort result and
+ * stamp, which is not worth it here: the reporter-grants batch emits no op at
+ * all, and the InfoEd confidential-title net mints a handful.
+ *
  * ONE key scan for the whole batch. The expensive half of `buildGrantOps`
  * (`loadAllGrantSuppressions` + a full `GRANT_INDEX_WHERE` scan) is
  * entityId-INDEPENDENT, so reflecting N rows one at a time repeats it N times;

@@ -482,8 +482,16 @@ export function planSuppressionRepoints(
 
 /**
  * Apply {@link planSuppressionRepoints} to the ACTIVE grant suppressions on the
- * stale ids, and reflect the moved rows (#2284) so the takedown lands in the
- * funding index immediately rather than at the next nightly rebuild.
+ * stale ids, and reflect the moved rows (#2284).
+ *
+ * The DB re-point is complete for every award. The immediate FUNDING-INDEX
+ * landing is not: `buildGrantOps` keys the funding doc
+ * `coreProjectNum(awardNumber) ?? ext.accountNumber`, and `coreProjectNum`
+ * returns null for every non-NIH format InfoEd carries (NSF, foundation,
+ * industry). For those the key IS the account number — precisely what the
+ * re-key changed — so the reflect below writes the NEW key and the OLD key's
+ * funding doc survives until the nightly rebuild. NIH-format awards keep the
+ * same core project number across the re-key and do land on this run.
  *
  * No audit row: no ETL suppression write records one (see
  * `reconcileConfidentialTitles`), and adding an audit action here would need
@@ -530,6 +538,9 @@ export async function repointReissuedSuppressions(
   console.log(
     `[InfoEd] re-pointed ${moved.length} grant suppression(s) onto a reissued external_id.`,
   );
+  // ponytail: non-NIH re-keys leave the OLD account-number funding doc in the
+  // index until the nightly rebuild. Clearing it needs the `from` id threaded
+  // through reflectGrantSuppressions, which no other caller has a use for.
   await reflectGrantSuppressions(moved);
 }
 
