@@ -46,9 +46,16 @@
  *   --dry-run              report what would happen; write nothing.
  *   --limit=<n>            cap the number of rows processed (sampling / smoke test).
  *   --concurrency=<n>      parallel Bedrock calls (default 5).
+ *   --members-only         scope the run to Meyer Cancer Center members only — a row
+ *                          is kept only when its award number resolves (uniquely) to a
+ *                          cwid that has ANY Meyer `CenterMembership` row, program
+ *                          assigned or not. An unresolved or ambiguous award number has
+ *                          no identity to check membership against, so it's skipped too
+ *                          (see `filterMembersOnly`). Applied BEFORE `--limit`, so a
+ *                          small `--limit` run samples real member rows.
  *
  * Run: npx tsx scripts/backfills/2026-08-08-cancer-center-nci-2a-import.ts \
- *        --file=/path/to/nci-table-2a-import.json [--dry-run] [--limit=N]
+ *        --file=/path/to/nci-table-2a-import.json [--dry-run] [--limit=N] [--members-only]
  */
 import "dotenv/config";
 import { readFileSync } from "node:fs";
@@ -79,6 +86,7 @@ export type ImportOptions = {
   limit: number | null;
   concurrency: number;
   file: string;
+  membersOnly: boolean;
 };
 
 /** The narrow Prisma surface this script touches — structural so unit tests can
@@ -92,7 +100,7 @@ export type Nci2aImportDb = {
   };
   centerMembership: {
     findMany(args: {
-      where: { centerCode: string; programCode: { not: null } };
+      where: { centerCode: string; programCode?: { not: null } };
       select: { cwid: true; programCode: true };
     }): Promise<{ cwid: string; programCode: string | null }[]>;
   };
@@ -144,7 +152,9 @@ export function parseArgs(argv: string[]): ImportOptions {
     concurrency = n;
   }
 
-  return { dryRun, limit, concurrency, file };
+  const membersOnly = argv.includes("--members-only");
+
+  return { dryRun, limit, concurrency, file, membersOnly };
 }
 
 /** Trim + collapse whitespace + uppercase — OSRA and InfoEd both use the spaced
@@ -179,6 +189,73 @@ export function buildAwardNumberIndex(
     index.set(key, cwids.size === 1 ? [...cwids][0] : "ambiguous");
   }
   return index;
+}
+
+/** cwid -> programCode, ONLY for memberships that already have one assigned.
+ *  Deliberately narrower than "is a member" (`buildMembershipExistenceSet`) —
+ *  a Meyer member with no program yet must still count as a member for
+ *  `--members-only`, even though `planRow` has no program to hand them. */
+export function buildMembershipIndex(memberships: { cwid: string; programCode: string | null }[]): Map<string, string> {
+  const index = new Map<string, string>();
+  for (const m of memberships) {
+    if (m.programCode) index.set(m.cwid, m.programCode);
+  }
+  return index;
+}
+
+/** Every cwid with ANY Meyer `CenterMembership` row, program-assigned or not.
+ *  This is the "is a member" test `--members-only` scopes against — separate
+ *  from `buildMembershipIndex` because membership and program-assignment are
+ *  different facts (see the module doc's PROGRAM ASSIGNMENT section). */
+export function buildMembershipExistenceSet(memberships: { cwid: string }[]): Set<string> {
+  return new Set(memberships.map((m) => m.cwid));
+}
+
+/** Scope rows to Meyer Cancer Center members for `--members-only`. Reuses the
+ *  same award-number resolution `planRow` uses: only a UNIQUELY matched award
+ *  number yields a cwid to check. A row with no resolved cwid (unmatched OR
+ *  ambiguous) has no identity to confirm membership against, so it's skipped,
+ *  not kept. */
+export function filterMembersOnly(
+  rows: readonly ImportRow[],
+  awardIndex: Map<string, string | "ambiguous">,
+  memberCwids: ReadonlySet<string>,
+): { kept: ImportRow[]; skipped: number } {
+  const kept: ImportRow[] = [];
+  let skipped = 0;
+  for (const row of rows) {
+    const matched = awardIndex.get(normalizeAwardNumber(row.sourceAwardNumber));
+    const grantCwid = matched && matched !== "ambiguous" ? matched : null;
+    if (grantCwid && memberCwids.has(grantCwid)) {
+      kept.push(row);
+    } else {
+      skipped += 1;
+    }
+  }
+  return { kept, skipped };
+}
+
+/** Compose `--members-only` scoping with `--limit`, in that exact order — the
+ *  ordering guarantee `--members-only` depends on (see the module doc's flag
+ *  description). Pulled out of `main()` as a pure function so this ordering
+ *  is unit-testable without exercising the rest of the run (DB import,
+ *  Bedrock calls, process.argv). */
+export function scopeAndLimitRows(
+  allRows: readonly ImportRow[],
+  opts: Pick<ImportOptions, "membersOnly" | "limit">,
+  awardIndex: Map<string, string | "ambiguous">,
+  memberships: { cwid: string }[],
+): { rows: ImportRow[]; scopedCount: number; skipped: number } {
+  let scopedRows: ImportRow[] = [...allRows];
+  let skipped = 0;
+  if (opts.membersOnly) {
+    const memberCwids = buildMembershipExistenceSet(memberships);
+    const result = filterMembersOnly(allRows, awardIndex, memberCwids);
+    scopedRows = result.kept;
+    skipped = result.skipped;
+  }
+  const rows = opts.limit != null ? scopedRows.slice(0, opts.limit) : scopedRows;
+  return { rows, scopedCount: scopedRows.length, skipped };
 }
 
 /** Run `fn` over `items` with at most `limit` in flight at once. No new
@@ -388,27 +465,36 @@ export async function applyPlan(
 const main = async () => {
   const opts = parseArgs(process.argv.slice(2));
   log(
-    `NCI Table 2A import${opts.dryRun ? " [DRY RUN — no writes]" : ""}` +
+    `NCI Table 2A import${opts.dryRun ? " [DRY RUN — no writes]" : ""}${opts.membersOnly ? " [members-only]" : ""}` +
       `${opts.limit != null ? ` [limit=${opts.limit}]` : ""} [concurrency=${opts.concurrency}]\n  source: ${opts.file}`,
   );
 
   const allRows = loadImportRows(opts.file);
-  const rows = opts.limit != null ? allRows.slice(0, opts.limit) : allRows;
-  log(`Loaded ${allRows.length} row(s)${opts.limit != null ? `, processing first ${rows.length}` : ""}.`);
+  log(`Loaded ${allRows.length} row(s).`);
 
   // Imported lazily so the structural Nci2aImportDb type stays the contract and
-  // the unit tests never load the real client.
+  // the unit tests never load the real client. Fetched BEFORE --limit is
+  // applied — --members-only (and the awardIndex it needs) must see every row.
   const { db } = await import("../../lib/db");
   const w = db.write as unknown as Nci2aImportDb;
 
   const [grants, memberships, programs] = await Promise.all([
     w.grant.findMany({ where: { awardNumber: { not: null } }, select: { awardNumber: true, cwid: true } }),
-    w.centerMembership.findMany({ where: { centerCode: CENTER_CODE, programCode: { not: null } }, select: { cwid: true, programCode: true } }),
+    w.centerMembership.findMany({ where: { centerCode: CENTER_CODE }, select: { cwid: true, programCode: true } }),
     w.centerProgram.findMany({ where: { centerCode: CENTER_CODE }, orderBy: { sortOrder: "asc" }, select: { code: true, label: true } }),
   ]);
   const awardIndex = buildAwardNumberIndex(grants);
-  const membershipIndex = new Map(memberships.map((m) => [m.cwid, m.programCode!]));
+  const membershipIndex = buildMembershipIndex(memberships);
   log(`Indexed ${grants.length} grant award numbers, ${memberships.length} Meyer memberships, ${programs.length} programs.`);
+
+  const { rows, scopedCount, skipped } = scopeAndLimitRows(allRows, opts, awardIndex, memberships);
+  if (opts.membersOnly) {
+    log(
+      `--members-only: kept ${scopedCount}/${allRows.length} row(s); skipped ${skipped} ` +
+        `(not a Meyer member, including rows whose award number didn't resolve to any cwid at all).`,
+    );
+  }
+  if (opts.limit != null) log(`Processing first ${rows.length} of ${scopedCount} row(s).`);
 
   log(`Planning ${rows.length} row(s) (Bedrock calls, concurrency=${opts.concurrency})...`);
   const plans = await mapWithConcurrency(rows, opts.concurrency, (row) =>
