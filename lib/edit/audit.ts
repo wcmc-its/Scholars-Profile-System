@@ -172,7 +172,17 @@ export type AuditAction =
    *  the GENERATION ran under, not this delete's) and never its prose. Requires
    *  the `scholars_audit` action ENUM be extended — see
    *  `scripts/sql/audit-log.sql`. */
-  | "biosketch_generation_delete";
+  | "biosketch_generation_delete"
+  /** a superuser/comms-steward overrode a `CancerCenterFundingAward` row's
+   *  LLM-proposed `cancerRelevantPercent` and/or replaced its
+   *  `CancerCenterProgramAllocation` set, on the Meyer Cancer Center NCI
+   *  Table 2A tab (`/edit/center/[slug]?attr=nci-2a`). `targetEntityType=
+   *  'cancer_funding_award'`, `targetEntityId` is the award `id`; before/after
+   *  carry whichever of {cancerRelevantPercent, allocations} changed. Marks the
+   *  touched field(s) `source: "human"` — a later cycle re-import must never
+   *  overwrite them. Requires the `scholars_audit` action ENUM be extended —
+   *  see `scripts/sql/audit-log.sql`. */
+  | "cancer_funding_override";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -219,7 +229,13 @@ export type AuditEntityType =
   /** one biosketch generation run erased from the /edit history (#1992);
    *  `targetEntityId` is the (already deleted) `biosketch_generation.id`, so it
    *  names WHAT was erased rather than something to look up. */
-  | "biosketch_generation";
+  | "biosketch_generation"
+  /** an NCI Table 2A funding row overridden on `/edit/center/[slug]?attr=nci-2a`
+   *  (`cancer_funding_override`); `targetEntityId` is the
+   *  `cancer_center_funding_award.id`. The cycle IMPORT that produces the row is
+   *  machine-run (`scripts/backfills/*-cancer-center-nci-2a-import.ts`) and is
+   *  NOT audited — same posture as every ETL ingest (e.g. news mentions). */
+  | "cancer_funding_award";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

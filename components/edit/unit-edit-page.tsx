@@ -21,6 +21,7 @@
  * restore it). The `retire` panel renders normally so they can Restore; every
  * other panel shows a "Retired — restore to edit" notice instead of its editor.
  */
+import { Nci2aCard } from "@/components/edit/cancer-center-nci-2a-card";
 import { CenterProgramCard } from "@/components/edit/center-program-card";
 import { CenterRosterCard } from "@/components/edit/center-roster-card";
 import { CenterTypeCard } from "@/components/edit/center-type-card";
@@ -45,6 +46,7 @@ type AttrKey =
   | "leader"
   | "roster"
   | "programs"
+  | "nci-2a"
   | "access"
   | "name"
   | "slug"
@@ -99,6 +101,14 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   {
     key: "programs",
     label: "Programs",
+    visible: (ctx) => ctx.unit.unitType === "center" && (ctx.programs?.length ?? 0) > 0,
+  },
+  // Same data-driven gate as Programs — a center with a program taxonomy is
+  // exactly the population this report's Program Code column can resolve
+  // against (`CenterMembership.programCode`).
+  {
+    key: "nci-2a",
+    label: "NCI Table 2A",
     visible: (ctx) => ctx.unit.unitType === "center" && (ctx.programs?.length ?? 0) > 0,
   },
   { key: "access", label: "Access", visible: (ctx) => isOwnerPlus(ctx.actorRole) },
@@ -261,6 +271,11 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
       return (
         <CenterProgramCard centerCode={ctx.unit.code} programs={ctx.programs ?? []} />
       );
+    case "nci-2a":
+      // Same gate as Programs — a data-driven Meyer-only surface, no hardcoded
+      // center check. Fetches its own data client-side (real award dollars,
+      // no need to thread it through the shared unit-edit-context loader).
+      return <Nci2aCard centerCode={ctx.unit.code} />;
     case "name":
       // The rail only surfaces this row for a manually-owned unit, so the
       // unitType is center | division here (never department).
