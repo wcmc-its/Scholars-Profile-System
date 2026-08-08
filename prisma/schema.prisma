@@ -16,24 +16,24 @@ datasource db {
 /// One row per actively-affiliated WCM scholar. PK is CWID.
 /// deleted_at != NULL marks a soft-deleted scholar; cleanup job hard-deletes after 60 days.
 model Scholar {
-  cwid                   String    @id @db.VarChar(32)
-  preferredName          String    @map("preferred_name") @db.VarChar(255)
-  fullName               String    @map("full_name") @db.VarChar(255)
+  cwid                    String    @id @db.VarChar(32)
+  preferredName           String    @map("preferred_name") @db.VarChar(255)
+  fullName                String    @map("full_name") @db.VarChar(255)
   /// Pre-concatenated degree string from `weillCornellEduDegree` on the WOOFA
   /// faculty SOR (e.g. "MD", "MD, MPH"). Appended after preferredName as a
   /// postnominal credential at render time. Null for scholars with no SOR
   /// row (postdocs, doctoral students, non-faculty).
-  postnominal            String?   @db.VarChar(64)
-  primaryTitle           String?   @map("primary_title") @db.VarChar(255)
-  primaryDepartment      String?   @map("primary_department") @db.VarChar(255)
-  email                  String?   @db.VarChar(255)
+  postnominal             String?   @db.VarChar(64)
+  primaryTitle            String?   @map("primary_title") @db.VarChar(255)
+  primaryDepartment       String?   @map("primary_department") @db.VarChar(255)
+  email                   String?   @db.VarChar(255)
   /// Effective email release audience derived from the multi-valued Web Directory
   /// attribute `weillCornellEduReleaseCode;mail` (most-permissive-wins, fail-closed).
   /// 'public' | 'institution' | 'none'. NULL until the first ED ETL backfill; treated
   /// as 'none' (fail-closed) by the display/export gate.
-  emailVisibility        String?   @map("email_visibility") @db.VarChar(16)
-  headshotUrl            String?   @map("headshot_url") @db.VarChar(512)
-  overview               String?   @db.Text
+  emailVisibility         String?   @map("email_visibility") @db.VarChar(16)
+  headshotUrl             String?   @map("headshot_url") @db.VarChar(512)
+  overview                String?   @db.Text
   /// 🔴 ORPHANED AND MISLEADING — do NOT read this as content age (#2212).
   /// No application code writes or reads it. Every seeded row carries the
   /// identical corpus-LOAD date (prod: 2026-05-06 on all 552), stamped by the
@@ -43,31 +43,31 @@ model Scholar {
   /// its ABSENCE means "still the import, never edited" — which is the only
   /// staleness signal the corpus has. Keep/drop is an open decision recorded in
   /// `docs/self-edit-spec.md` § Open questions 4.
-  overviewUpdatedAt      DateTime? @map("overview_updated_at")
-  slug                   String    @unique @db.VarChar(255)
-  status                 String    @default("active") @db.VarChar(32) // 'active' | 'suppressed'
+  overviewUpdatedAt       DateTime? @map("overview_updated_at")
+  slug                    String    @unique @db.VarChar(255)
+  status                  String    @default("active") @db.VarChar(32) // 'active' | 'suppressed'
   // Phase 2: derived in ED ETL per design-spec-v1.7.1.md:352-356.
   // Drives the algorithmic-surface eligibility carve (lib/eligibility.ts).
   // Nullable so the additive migration applies cleanly to existing rows;
   // ED ETL backfills on next refresh.
-  roleCategory           String?   @map("role_category") @db.VarChar(32)
+  roleCategory            String?   @map("role_category") @db.VarChar(32)
   // #1034 — professorial rank derived from the ASMS-authoritative ED person-type
   // leaf (academic-faculty-assistant|associate|fullprofessor; probe #1036), one of
   // 'Assistant Professor' | 'Associate Professor' | 'Professor'. NULL for
   // instructor/lecturer/non-faculty. Persisted here by the ED ETL and read by the
   // Jenzabar GS import to tie Grad-School appointment titles to ASMS rank (Rule B).
   // Nullable so the additive migration applies cleanly; backfilled on next ED ETL run.
-  professorialRank       String?   @map("professorial_rank") @db.VarChar(32)
+  professorialRank        String?   @map("professorial_rank") @db.VarChar(32)
   // Phase 3: org-unit FKs from ED LDAP. Nullable so additive migration applies cleanly;
   // backfilled on next ED ETL run. Joins on codes only per LOCKED constraint.
-  deptCode               String?   @map("dept_code") @db.VarChar(64)
-  divCode                String?   @map("div_code") @db.VarChar(64)
+  deptCode                String?   @map("dept_code") @db.VarChar(64)
+  divCode                 String?   @map("div_code") @db.VarChar(64)
   /// Derived from LDAP personTypeCodes — true when the scholar carries a
   /// clinical or NYP-credentialed signal, indicating they likely have a
   /// public physician profile at weillcornell.org. Drives whether the
   /// "Clinical profile →" link appears in the profile sidebar (absence-as-
   /// default per design spec v1.7.1). Backfilled on next ED ETL run.
-  hasClinicalProfile     Boolean   @default(false) @map("has_clinical_profile")
+  hasClinicalProfile      Boolean   @default(false) @map("has_clinical_profile")
   /// Issue #165 — canonical per-scholar weillcornell.org clinical profile
   /// URL, sourced from the ED `labeledURI;pops` attribute on the ou=people
   /// entry (e.g. https://weillcornell.org/matthewfink). When present, the
@@ -75,47 +75,47 @@ model Scholar {
   /// hasClinicalProfile is true, the sidebar falls back to a surname-search
   /// URL on weillcornell.org/doctors-directory. Normalized to https:// at
   /// ETL time even when LDAP returns http://.
-  clinicalProfileUrl     String?   @map("clinical_profile_url") @db.VarChar(512)
+  clinicalProfileUrl      String?   @map("clinical_profile_url") @db.VarChar(512)
   /// POPS clinical enrichment — nightly backfill via etl/pops/index.ts for
   /// scholars where hasClinicalProfile = true. These columns feed the
   /// clinicalSpecialties / clinicalExpertise / clinicalBoardSet fields on
   /// the OpenSearch people document (search-index ETL layer). All nullable
   /// so the migration applies cleanly; backfilled on the first POPS ETL run.
   popsBoardCertifications Json?     @map("pops_board_certifications") // [{ board, specialty }]
-  popsSpecialties         Json?     @map("pops_specialties")          // string[] — board-cert ∪ primary, deduped
-  popsExpertise           Json?     @map("pops_expertise")            // string[] — problem_procedure
+  popsSpecialties         Json?     @map("pops_specialties") // string[] — board-cert ∪ primary, deduped
+  popsExpertise           Json?     @map("pops_expertise") // string[] — problem_procedure
   popsRefreshedAt         DateTime? @map("pops_refreshed_at")
   /// Issue #5 — postdoc mentor (manager) CWID, populated only when
   /// roleCategory === 'postdoc'. Sourced from the `manager` attribute on
   /// the scholar's ou=employees,ou=sors entry (parsed by parseManagerCwid).
   /// Self-referential nullable FK with onDelete: SetNull so removing the
   /// mentor scholar doesn't cascade-delete the postdoc.
-  postdoctoralMentorCwid String?   @map("postdoctoral_mentor_cwid") @db.VarChar(32)
+  postdoctoralMentorCwid  String?   @map("postdoctoral_mentor_cwid") @db.VarChar(32)
   /// Issue #171 — ORCID iD (https://orcid.org/0000-0002-1825-0097 form,
   /// stored as the bare 19-char identifier "0000-0002-1825-0097"). Sourced
   /// from the WCM Identity DynamoDB table (etl/identity), keyed on `uid`
   /// (= cwid). Null when the scholar has not registered an ORCID. Used by
   /// `lib/seo/jsonld.ts` to append an `https://orcid.org/<id>` URL to the
   /// scholar's Person.sameAs for AI/LLM crawler entity resolution.
-  orcid                  String?   @db.VarChar(19)
+  orcid                   String?   @db.VarChar(19)
   /// Issue #742 v3.1 C3 — ReciterAI FACULTY# rollup metrics (DynamoDB), for the
   /// overview generator's faculty-scale framing. Nullable so the additive
   /// migration applies cleanly; backfilled by etl/dynamodb on next run.
-  hIndex                 Int?      @map("h_index")
-  firstAuthorCount       Int?      @map("first_author_count")
-  lastAuthorCount        Int?      @map("last_author_count")
-  scoredPubCount         Int?      @map("scored_pub_count")
+  hIndex                  Int?      @map("h_index")
+  firstAuthorCount        Int?      @map("first_author_count")
+  lastAuthorCount         Int?      @map("last_author_count")
+  scoredPubCount          Int?      @map("scored_pub_count")
   /// Headshot presence, backfilled weekly by etl/headshot — which probes the WCM
   /// directory (`identityImageEndpoint`, `returnGenericOn404=false`) that 404s when
   /// no photo exists. The dormant `headshot_url` column above is NOT read at render
   /// (the app always derives the directory URL from the cwid); this is the persisted
   /// presence signal the Data Quality dashboard (#data-quality-dashboard) sorts and
   /// filters on. NULL = never probed; backfilled on the next etl:headshot run.
-  hasHeadshot            Boolean?  @map("has_headshot")
-  headshotCheckedAt      DateTime? @map("headshot_checked_at")
-  deletedAt              DateTime? @map("deleted_at")
-  createdAt              DateTime  @default(now()) @map("created_at")
-  updatedAt              DateTime  @updatedAt @map("updated_at")
+  hasHeadshot             Boolean?  @map("has_headshot")
+  headshotCheckedAt       DateTime? @map("headshot_checked_at")
+  deletedAt               DateTime? @map("deleted_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
 
   appointments         Appointment[]
   educations           Education[]
@@ -127,8 +127,8 @@ model Scholar {
   topicAssignments     TopicAssignment[]
   publicationScores    PublicationScore[]
   publicationTopics    PublicationTopic[]
-  cwidAliasesAsCurrent CwidAlias[]              @relation("AliasCurrent")
-  slugHistoryAsCurrent SlugHistory[]            @relation("SlugHistoryCurrent")
+  cwidAliasesAsCurrent CwidAlias[]                @relation("AliasCurrent")
+  slugHistoryAsCurrent SlugHistory[]              @relation("SlugHistoryCurrent")
   coiActivities        CoiActivity[]
   coiGapCandidates     CoiGapCandidate[]
   nihProfiles          PersonNihProfile[]
@@ -142,10 +142,10 @@ model Scholar {
   scholarFamilies      ScholarFamily[]
   technologies         ScholarTechnology[]
   newsMentions         NewsMention[]
-  department           Department?              @relation(fields: [deptCode], references: [code], onDelete: SetNull)
-  division             Division?                @relation(fields: [divCode], references: [code], onDelete: SetNull)
-  postdoctoralMentor   Scholar?                 @relation("PostdocMentor", fields: [postdoctoralMentorCwid], references: [cwid], onDelete: SetNull)
-  postdocMentees       Scholar[]                @relation("PostdocMentor")
+  department           Department?                @relation(fields: [deptCode], references: [code], onDelete: SetNull)
+  division             Division?                  @relation(fields: [divCode], references: [code], onDelete: SetNull)
+  postdoctoralMentor   Scholar?                   @relation("PostdocMentor", fields: [postdoctoralMentorCwid], references: [cwid], onDelete: SetNull)
+  postdocMentees       Scholar[]                  @relation("PostdocMentor")
 
   @@index([deletedAt])
   @@index([status])
@@ -930,59 +930,59 @@ model GrantDateGap {
 /// rows are inserted only for WCM scholars; profile rendering overlays
 /// hyperlinks onto the matching substrings in authorsString.
 model Publication {
-  pmid                String    @id @db.VarChar(32)
-  title               String    @db.Text
-  authorsString       String?   @map("authors_string") @db.VarChar(2000)
+  pmid                  String    @id @db.VarChar(32)
+  title                 String    @db.Text
+  authorsString         String?   @map("authors_string") @db.VarChar(2000)
   /// Full author list (no truncation) sourced from
   /// `reciterdb.analysis_summary_author_all.authors` and reformatted
   /// from pipe-separated `Lastname, Initials` to comma-separated
   /// `Lastname Initials`. Used by the Word bibliography export (#89)
   /// where citations need every author present, including middle
   /// authors that the truncated `authorsString` drops.
-  fullAuthorsString   String?   @map("full_authors_string") @db.Text
-  journal             String?   @db.VarChar(512)
-  year                Int?
-  publicationType     String?   @map("publication_type") @db.VarChar(64) // publicationTypeCanonical
-  citationCount       Int       @default(0) @map("citation_count")
-  dateAddedToEntrez   DateTime? @map("date_added_to_entrez") @db.Date
-  doi                 String?   @db.VarChar(255)
+  fullAuthorsString     String?   @map("full_authors_string") @db.Text
+  journal               String?   @db.VarChar(512)
+  year                  Int?
+  publicationType       String?   @map("publication_type") @db.VarChar(64) // publicationTypeCanonical
+  citationCount         Int       @default(0) @map("citation_count")
+  dateAddedToEntrez     DateTime? @map("date_added_to_entrez") @db.Date
+  doi                   String?   @db.VarChar(255)
   /// PubMed Central identifier including the `PMC` prefix (e.g. "PMC11098699").
   /// Sourced from `analysis_summary_article.pmcid`. Surfaced on publication
   /// cards alongside DOI/PMID; signals NIH public-access compliance.
-  pmcid               String?   @db.VarChar(32)
+  pmcid                 String?   @db.VarChar(32)
   /// Issue #89 — Vancouver-style citation fields. Sourced from
   /// `analysis_summary_article.{volume,issue,pages}`. Stored as varchar
   /// since they're free-form ("12", "Suppl 1", "S5", "538-40").
-  volume              String?   @db.VarChar(64)
-  issue               String?   @db.VarChar(128)
-  pages               String?   @db.VarChar(128)
+  volume                String?   @db.VarChar(64)
+  issue                 String?   @db.VarChar(128)
+  pages                 String?   @db.VarChar(128)
   /// NLM/Index Medicus journal abbreviation (e.g., "Proc Natl Acad Sci U S A").
   /// Sourced from `reciterdb.person_article.journalTitleISOabbreviation` —
   /// despite the field name, the values are the standard NLM abbreviation
   /// form (no periods between abbreviated words). Used by the Word
   /// bibliography export; falls back to `journal` (full title) when null.
-  journalAbbrev       String?   @map("journal_abbrev") @db.VarChar(200)
-  pubmedUrl           String?   @map("pubmed_url") @db.VarChar(512)
+  journalAbbrev         String?   @map("journal_abbrev") @db.VarChar(200)
+  pubmedUrl             String?   @map("pubmed_url") @db.VarChar(512)
   /// #1567 — canonical handle URL in Cornell's eCommons institutional
   /// repository (e.g. "https://hdl.handle.net/1813/124348") when this PMID is
   /// deposited there. Sourced from `reciterdb.ecommons_pmid_link.ecommonslink`,
   /// joined by the weekly reciter ETL. NULL for the vast majority of pubs (not
   /// in the repository). Surfaced as an "eCommons" linkout on publication cards
   /// and the detail modal; never indexed.
-  ecommonsLink        String?   @map("ecommons_link") @db.VarChar(255)
+  ecommonsLink          String?   @map("ecommons_link") @db.VarChar(255)
   /// MeSH keywords from accepted publications, used by the profile Topics
   /// section (issue #73). Format: `[{ ui: "D015316", label: "Genetic Therapy" }, ...]`.
   /// `ui` is null for the rare label that doesn't resolve to a `mesh.DescriptorUI`
   /// in reciterdb. Source: `reciterdb.person_article_keyword` joined to
   /// `reciterdb.mesh`. Keyword sets are per-PMID, not per-(person, pmid) —
   /// verified during ETL design.
-  meshTerms           Json?     @map("mesh_terms")
+  meshTerms             Json?     @map("mesh_terms")
   /// Plain-text article abstract from ReciterDB.reporting_abstracts.abstractVarchar
   /// (capped at 15000 chars at the source). Used by the search-index ETL to
   /// emit `publicationAbstracts` on the people document for thematic-query
   /// recall (issue #21). Nullable — many older publications and many
   /// non-research article types have no abstract.
-  abstract            String?   @db.Text
+  abstract              String?   @db.Text
   /// Issue #329 — one-line plain-language synopsis from DynamoDB
   /// TOPIC#.synopsis. Lives on `Publication` because the value is per-pmid;
   /// the upstream denormalizes it across the N TOPIC# rows for one pmid
@@ -991,37 +991,37 @@ model Publication {
   /// publication detail modal (#288 PR-B) as the "Plain-language synopsis"
   /// section. Distinct from `abstract` (raw PubMed text); synopsis is a
   /// GPT-generated reader-facing summary.
-  synopsis            String?   @db.Text
+  synopsis              String?   @db.Text
   /// ReCiterAI per-publication impact score (0-100, GPT-rubric). Sourced from
   /// DynamoDB `IMPACT#pmid_<pmid>` records by the DynamoDB ETL (issue #316).
   /// Global per-pmid — no scholar or topic dimension. `PublicationTopic.impactScore`
   /// is a denormalized mirror kept for the transition; readers should migrate
   /// to this field, then the mirror can retire in a follow-up.
-  impactScore         Decimal?  @map("impact_score") @db.Decimal(8, 4)
+  impactScore           Decimal?  @map("impact_score") @db.Decimal(8, 4)
   /// GPT-generated natural-language justification for `impactScore` citing
   /// novelty / methodology / influence / translational relevance. Surfaced in
   /// hover tooltips by PR-C of issue #316.
-  impactJustification String?   @map("impact_justification") @db.Text
+  impactJustification   String?   @map("impact_justification") @db.Text
   /// Model identifier used to generate `impactScore` / `impactJustification`
   /// (e.g. "gpt-5.1"). Stored for ETL traceability and to flag regenerations
   /// when the upstream model bumps.
-  impactScoreModel    String?   @map("impact_score_model") @db.VarChar(64)
-  impactRefreshedAt   DateTime? @map("impact_refreshed_at")
+  impactScoreModel      String?   @map("impact_score_model") @db.VarChar(64)
+  impactRefreshedAt     DateTime? @map("impact_refreshed_at")
   /// NIH iCite Relative Citation Ratio (field- and time-normalized citation
   /// influence; ~1.0 = NIH-funded median for the field/year). Sourced from
   /// `reciterdb.analysis_nih.relative_citation_ratio`, keyed by pmid, refreshed
   /// by the weekly reciter ETL alongside `citationCount`. The field-normalized,
   /// most-defensible bibliometric for the NIH-biosketch impact grounding (#917
   /// v6); never surfaced in the public overview. NULL until the ETL backfills.
-  relativeCitationRatio Decimal? @map("relative_citation_ratio") @db.Decimal(6, 2)
+  relativeCitationRatio Decimal?  @map("relative_citation_ratio") @db.Decimal(6, 2)
   /// NIH iCite percentile (0-100) for the RCR within field/year. Sourced from
   /// `reciterdb.analysis_nih.nih_percentile`. Companion to `relativeCitationRatio`.
-  nihPercentile         Decimal? @map("nih_percentile") @db.Decimal(5, 2)
+  nihPercentile         Decimal?  @map("nih_percentile") @db.Decimal(5, 2)
   /// NIH iCite cumulative citation count (`reciterdb.analysis_nih.citation_count`).
   /// Distinct from `citationCount` (Scopus, `analysis_summary_article`); kept
   /// separately so the biosketch can cite the NIH-sourced figure that pairs with
   /// the RCR. NULL until the ETL backfills.
-  citedByCount          Int?     @map("cited_by_count")
+  citedByCount          Int?      @map("cited_by_count")
   /// Issue #325 — per-paper "top topic" (argmax of the topic-score vector
   /// among topics above the 0.3 floor; deterministic tiebreak upstream).
   /// Sourced from DynamoDB TOPIC# `top_topic_id`. Per-paper, not
@@ -1030,10 +1030,10 @@ model Publication {
   /// NULL when the upstream hasn't backfilled this pmid yet (rare post
   /// ReciterAI #68 rollout). Consumed by #327's inline "Top topic: X"
   /// label on /topics/<slug> citations.
-  topTopicId          String?   @map("top_topic_id") @db.VarChar(128)
-  topTopic            Topic?    @relation("PublicationTopTopic", fields: [topTopicId], references: [id], onDelete: SetNull)
-  source              String    @default("ReCiter") @db.VarChar(32)
-  lastRefreshedAt     DateTime  @default(now()) @map("last_refreshed_at")
+  topTopicId            String?   @map("top_topic_id") @db.VarChar(128)
+  topTopic              Topic?    @relation("PublicationTopTopic", fields: [topTopicId], references: [id], onDelete: SetNull)
+  source                String    @default("ReCiter") @db.VarChar(32)
+  lastRefreshedAt       DateTime  @default(now()) @map("last_refreshed_at")
 
   authors           PublicationAuthor[]
   publicationScores PublicationScore[]
@@ -1415,8 +1415,9 @@ model Center {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  members  CenterMembership[]
-  programs CenterProgram[]
+  members       CenterMembership[]
+  programs      CenterProgram[]
+  fundingAwards CancerCenterFundingAward[]
 
   @@index([slug])
   @@index([sortOrder])
@@ -1441,11 +1442,12 @@ model CenterProgram {
   /// writes it) and null by default, so the feature ships dark.
   description String? @map("description") @db.Text
 
-  center  Center                @relation(fields: [centerCode], references: [code], onDelete: Cascade)
-  members CenterMembership[]
+  center             Center                          @relation(fields: [centerCode], references: [code], onDelete: Cascade)
+  members            CenterMembership[]
   /// #1117 — the program's leaders (0..N). Replaces the single
   /// `leaderCwid`/`leaderInterim` columns (#1105), which could carry only one.
-  leaders CenterProgramLeader[]
+  leaders            CenterProgramLeader[]
+  fundingAllocations CancerCenterProgramAllocation[]
 
   @@id([centerCode, code])
   @@map("center_program")
@@ -1521,6 +1523,95 @@ model CenterMembership {
   @@map("center_membership")
 }
 
+/// NCI CCSG Data Table 2A — one row per (center, reporting cycle, OSRA award).
+/// The OSRA "Active Awards" workbook is the source of truth for money and dates
+/// (existing data, no LLM); `cancerRelevantPercent` has no source anywhere else
+/// and is always LLM-proposed until a reviewer overrides it in `/edit`. Program
+/// assignment (`CancerCenterProgramAllocation`) prefers the PI's real
+/// `CenterMembership.programCode` over an LLM guess — see
+/// `lib/edit/cancer-center-funding-generator.ts`.
+///
+/// `institutionNumber` is OSRA's own join key (column A) and doubles as this
+/// table's natural key per cycle — it is stable across re-imports of the same
+/// award even if the award number's formatting drifts cycle to cycle.
+/// `grantCwid` is a best-effort match against `Grant.awardNumber`; null means
+/// unresolved (surfaced in the UI as a gap, never silently dropped).
+///
+/// Re-import safety: `cancerRelevantPercentSource` and each allocation's
+/// `source` gate whether a re-run may overwrite a value — "human" always wins,
+/// mirroring the manual-layer non-clobber convention used elsewhere in /edit.
+model CancerCenterFundingAward {
+  id                          String   @id @default(uuid())
+  centerCode                  String   @map("center_code") @db.VarChar(64)
+  /// Tags which OSRA pull this row came from (e.g. "FYTD26-2026-07-14"), so
+  /// multiple cycles can coexist and a report can be pinned to one cycle.
+  reportingCycle              String   @map("reporting_cycle") @db.VarChar(64)
+  institutionNumber           Int      @map("institution_number")
+  sourceAwardNumber           String   @map("source_award_number") @db.VarChar(128)
+  grantCwid                   String?  @map("grant_cwid") @db.VarChar(32)
+  pi                          String   @db.VarChar(255)
+  specificFundingSource       String   @map("specific_funding_source") @db.VarChar(255)
+  projectNumber               String   @map("project_number") @db.VarChar(128)
+  projectTitle                String   @map("project_title") @db.Text
+  projectStartDate            DateTime @map("project_start_date") @db.Date
+  projectEndDate              DateTime @map("project_end_date") @db.Date
+  /// Retained direct cost (OSRA "Direct Cost Active Year" minus matching
+  /// outgoing-subaward direct costs) — existing data + arithmetic, never LLM.
+  annualProjectDirectCosts    Decimal  @map("annual_project_direct_costs") @db.Decimal(12, 2)
+  /// 0-100, or NULL = not yet inferred (a Bedrock call is fail-soft — see
+  /// `lib/edit/cancer-center-funding-generator.ts` — and must never block the
+  /// import on a row; a failed row surfaces in the UI as "not yet inferred",
+  /// distinct from a confirmed 0%, and the import can retry it later without
+  /// re-touching rows that already have a value). No data source anywhere in
+  /// SPS or OSRA — always LLM-proposed until a reviewer overrides it. The UI
+  /// must label a non-null, non-human value "AI-suggested, unconfirmed" until
+  /// NCI's own peer-review/relevance criteria are sourced and the prompt is
+  /// rewritten against them (see the handoff doc).
+  cancerRelevantPercent       Decimal? @map("cancer_relevant_percent") @db.Decimal(5, 2)
+  cancerRelevantPercentSource String   @default("llm") @map("cancer_relevant_percent_source") @db.VarChar(16)
+  /// The model's one-sentence rationale for `cancerRelevantPercent` — shown to
+  /// the reviewer, never used as a scoring input.
+  cancerRelevantRationale     String?  @map("cancer_relevant_rationale") @db.Text
+  lastRefreshedAt             DateTime @default(now()) @map("last_refreshed_at")
+  createdAt                   DateTime @default(now()) @map("created_at")
+  updatedAt                   DateTime @updatedAt @map("updated_at")
+
+  center      Center                          @relation(fields: [centerCode], references: [code], onDelete: Cascade)
+  allocations CancerCenterProgramAllocation[]
+
+  @@unique([centerCode, reportingCycle, institutionNumber])
+  @@index([centerCode, reportingCycle])
+  @@index([grantCwid])
+  @@map("cancer_center_funding_award")
+}
+
+/// One (award, program) split for `CancerCenterFundingAward` — normally one row
+/// at 100%, two-or-more when an award's science spans multiple programs. A
+/// `programCode` of null means "unresolved" (no membership match, no LLM
+/// guess yet) and renders as an explicit gap in the UI — NEVER silently
+/// defaulted to a program, which would misreport real NCI-facing numbers.
+model CancerCenterProgramAllocation {
+  id             String  @id @default(uuid())
+  awardId        String  @map("award_id")
+  centerCode     String  @map("center_code") @db.VarChar(64)
+  programCode    String? @map("program_code") @db.VarChar(16)
+  programPercent Decimal @map("program_percent") @db.Decimal(5, 2)
+  /// "membership" (from the PI's real CenterMembership — the common case),
+  /// "llm" (Bedrock gap-fill, tentative), or "human" (reviewer override).
+  source         String  @default("membership") @db.VarChar(16)
+  sortOrder      Int     @default(0) @map("sort_order")
+
+  award   CancerCenterFundingAward @relation(fields: [awardId], references: [id], onDelete: Cascade)
+  // RESTRICT-equivalent, same reasoning as CenterMembership.program above: no
+  // program-delete surface exists, and a composite FK with a NOT NULL half
+  // (centerCode) can't be ON DELETE SET NULL in MySQL/Prisma.
+  program CenterProgram?           @relation(fields: [centerCode, programCode], references: [centerCode, code], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([awardId])
+  @@index([centerCode, programCode])
+  @@map("cancer_center_program_allocation")
+}
+
 /// Per-scholar membership in a manually-created Division (`Division.source =
 /// 'manual'`). Mirrors `CenterMembership` exactly — added rows carry
 /// `source='manual-ui'`. No FK to `Scholar` (a roster row may exist before the
@@ -1551,22 +1642,22 @@ model DivisionMembership {
 /// row, and an Owner of a not-yet-coded informal subunit references a
 /// synthetic `code` only the manual layer knows about.
 model UnitAdmin {
-  entityType EntityType @map("entity_type")
-  entityId   String     @map("entity_id") @db.VarChar(64) // unit code
-  cwid       String     @db.VarChar(32) // grantee
-  role       UnitRole
-  grantedBy  String     @map("granted_by") @db.VarChar(32) // actor CWID (or "ED-ETL" sentinel)
+  entityType  EntityType @map("entity_type")
+  entityId    String     @map("entity_id") @db.VarChar(64) // unit code
+  cwid        String     @db.VarChar(32) // grantee
+  role        UnitRole
+  grantedBy   String     @map("granted_by") @db.VarChar(32) // actor CWID (or "ED-ETL" sentinel)
   // #728 — provenance. "manual" for human grants; "ED:DA" | "ED:DivA" | "ED:IAMDELA" |
   // "ED:DivA-IAMDELA" for ED-imported grants. Lets the per-source reconcile spare manual
   // rows (and other populations' rows) and lets the Administrators tab lock ED-sourced rows.
-  source     String     @default("manual") @db.VarChar(32)
+  source      String     @default("manual") @db.VarChar(32)
   // Grantee display name resolved FROM THE DIRECTORY AT PULL TIME (the ed-admins
   // ETL, where LDAP is reachable), so the Administrators roster shows a name for
   // NON-Scholar admins too. The app runtime cannot reach LDAP (#443), so resolving
   // on the fly at render falls back to the bare CWID — this stores it in the pull
   // instead. Null until an ed-admins run with LDAP reachability populates it.
   granteeName String?    @map("grantee_name") @db.VarChar(255)
-  createdAt  DateTime   @default(now()) @map("created_at")
+  createdAt   DateTime   @default(now()) @map("created_at")
 
   @@id([entityType, entityId, cwid])
   @@index([cwid])
@@ -2181,34 +2272,34 @@ model RequestChangeRateLimit {
 /// DML covers it, with no separate-schema GRANT to forget at deploy (cf. the #493
 /// audit-grant gap).
 model OverviewGeneration {
-  id            String   @id @default(uuid()) @db.VarChar(64)
-  cwid          String   @db.VarChar(32)
+  id               String   @id @default(uuid()) @db.VarChar(64)
+  cwid             String   @db.VarChar(32)
   // The sanitized HTML draft. NULLABLE: a FAILED generation is now persisted too
   // (status="failed") so EVERY attempt is recorded — a failed row has no draft.
   // Successful rows are always non-null.
-  text          String?  @db.Text // sanitized HTML draft (NULL on a failed run)
-  model         String   @db.VarChar(64) // gateway model string used
+  text             String?  @db.Text // sanitized HTML draft (NULL on a failed run)
+  model            String   @db.VarChar(64) // gateway model string used
   // Run outcome: "succeeded" (draft is in `text`) or "failed" (the gateway threw;
   // `error` carries the code, `text` is NULL). Every attempt is recorded so the
   // audit trail is complete; the history panel surfaces only "succeeded" rows.
-  status        String   @default("succeeded") @db.VarChar(16)
+  status           String   @default("succeeded") @db.VarChar(16)
   // The failure code for a "failed" run (e.g. "generation_failed"); NULL on success.
-  error         String?  @db.Text
+  error            String?  @db.Text
   // The PROMPT VERSION that generated this draft (#742, the versioning registry).
   // A dedicated column (not buried in `params`) so A/B analysis can GROUP BY it —
   // e.g. v3-vs-v2 edit-survival rates joined to overview_provenance. Nullable: rows
   // written before versioning shipped stay NULL.
-  promptVersion String?  @map("prompt_version") @db.VarChar(32)
-  params        Json // { voice, tone, length, elements[], instructions, promptVersion }
+  promptVersion    String?  @map("prompt_version") @db.VarChar(32)
+  params           Json // { voice, tone, length, elements[], instructions, promptVersion }
   // The ACCOUNTABLE HUMAN who ran the generation — the signed-in actor (self / superuser /
   // comms-steward / proxy / unit-admin), the same identity written to
   // `manual_edit_audit.actor_cwid`. NOT the impersonated overlay (see `impersonatedCwid`).
-  createdByCwid String   @map("created_by_cwid") @db.VarChar(32)
+  createdByCwid    String   @map("created_by_cwid") @db.VarChar(32)
   // The "View as" overlay target when a superuser/steward generated through impersonation;
   // NULL for a direct generation. Mirrors BiosketchGeneration + manual_edit_audit so a
   // delegated draft is attributed to the human who actually ran it (audit parity).
-  impersonatedCwid String? @map("impersonated_cwid") @db.VarChar(32)
-  createdAt     DateTime @default(now()) @map("created_at")
+  impersonatedCwid String?  @map("impersonated_cwid") @db.VarChar(32)
+  createdAt        DateTime @default(now()) @map("created_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 
@@ -2228,41 +2319,41 @@ model OverviewGeneration {
 /// add to the verify-db-grants golden list (ADR-009; cf. the canonical add-table
 /// migrations `add_opportunity_table` / `add_overview_source_selection`).
 model BiosketchGeneration {
-  id            String   @id @default(uuid()) @db.VarChar(64)
-  cwid          String   @db.VarChar(32)
+  id               String   @id @default(uuid()) @db.VarChar(64)
+  cwid             String   @db.VarChar(32)
   // The artifact: "contributions" (up to 5 entries) or "personal_statement" (1 narrative).
-  mode          String   @db.VarChar(32)
+  mode             String   @db.VarChar(32)
   // The generated entries — a JSON string[] of up to 5 char-capped, first-person, plain-text
   // contributions, or one personal statement. Stored exactly as generated (1..5); never
   // padded. Read back as an ordered set, never queried individually, so a JSON column (not
   // child rows) is the right shape — cf. OverviewGeneration storing compound `params` as Json.
-  entries       Json
+  entries          Json
   // Personal Statement only: the proposed project the statement was tailored to. NULL for
   // contributions. Persisted so a regenerate/audit can see what aims it was framed toward.
-  projectTitle  String?  @map("project_title") @db.VarChar(300)
-  projectAims   String?  @map("project_aims") @db.Text
-  model         String   @db.VarChar(64) // gateway model string used
+  projectTitle     String?  @map("project_title") @db.VarChar(300)
+  projectAims      String?  @map("project_aims") @db.Text
+  model            String   @db.VarChar(64) // gateway model string used
   // The biosketch prompt revision ("v5" / "v6") this draft was generated with — for A/B and
   // restore. #917 v6: a real version id from `biosketch-prompt-versions.ts`, not a free string.
-  promptVersion String?  @map("prompt_version") @db.VarChar(32)
-  params        Json // { mode, maxContributions, emphasis, instructions, promptVersion }
+  promptVersion    String?  @map("prompt_version") @db.VarChar(32)
+  params           Json // { mode, maxContributions, emphasis, instructions, promptVersion }
   // #917 v6 — the Products list (Contributions mode): { related, otherSignificant,
   // relatedFromAims }, each product { pmid, title, venue, year, contributionIndex, why }.
   // NULL for Personal Statement / empty corpus. JSON for the same reason `entries` is.
-  products      Json?
+  products         Json?
   // #917 v6 follow-up — per-contribution source PMIDs the draft draws from:
   // [{ contributionIndex, pmids: [...] }]. NULL for Personal Statement / empty / attribution
   // failure. Output traceability so a grounded claim can be checked against its source paper.
-  sources       Json?
+  sources          Json?
   // The ACCOUNTABLE HUMAN who ran the generation — the signed-in actor (self / superuser /
   // comms-steward / proxy / unit-admin curator), the same identity written to
   // `manual_edit_audit.actor_cwid`. NOT the impersonated overlay (see `impersonatedCwid`).
-  createdByCwid    String  @map("created_by_cwid") @db.VarChar(32)
+  createdByCwid    String   @map("created_by_cwid") @db.VarChar(32)
   // The "View as" overlay target when a superuser/steward generated through impersonation; NULL
   // for a direct generation. Mirrors `manual_edit_audit.impersonated_cwid` so the history panel
   // can attribute a delegated draft to the human who actually ran it.
-  impersonatedCwid String? @map("impersonated_cwid") @db.VarChar(32)
-  createdAt     DateTime @default(now()) @map("created_at")
+  impersonatedCwid String?  @map("impersonated_cwid") @db.VarChar(32)
+  createdAt        DateTime @default(now()) @map("created_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 
@@ -2357,31 +2448,31 @@ model ScholarTool {
 /// with several PIs repeats its title across rows. At 235 rows a join table
 /// would cost a file and buy nothing.
 model ScholarTechnology {
-  id   String @id @default(uuid()) @db.VarChar(64)
-  cwid String @db.VarChar(32)
+  id           String   @id @default(uuid()) @db.VarChar(64)
+  cwid         String   @db.VarChar(32)
   /// CTL's "Cornell Reference" docket number (e.g. "11166"). Null on ~35% of
   /// portfolio pages, which simply omit it.
-  reference   String?  @map("reference") @db.VarChar(32)
-  title       String   @db.Text
+  reference    String?  @map("reference") @db.VarChar(32)
+  title        String   @db.Text
   /// Absolute URL of the public technology detail page.
-  url         String   @db.VarChar(512)
+  url          String   @db.VarChar(512)
   /// CTL's patent status for the invention ("US Application Filed", "PCT
   /// Application Filed", "Issued"). Null on ~61% of portfolio pages.
-  patentStatus String? @map("patent_status") @db.VarChar(64)
+  patentStatus String?  @map("patent_status") @db.VarChar(64)
   /// PMIDs of the papers CTL lists under the technology's "Publications" pane,
   /// as a JSON array of digit strings. `[]` when the page lists none (~25%).
   /// Rendered as PubMed links: 95% of these papers are authored by the very PI
   /// CTL names on the page, which independently corroborates the cwid join.
-  pmids       Json
+  pmids        Json
   /// The page's "Technology Overview" section as plain text. Bullet form: the
   /// bullets joined one per line, labels ("The Technology:") kept inline as CTL
   /// wrote them; prose form: the paragraph text. Null when the page carries no
   /// overview section (~44% of pages). Rendered behind a per-row expander.
-  overview    String?  @db.Text
+  overview     String?  @db.Text
   /// True when the overview lists a "PoC Data" (proof-of-concept) bullet. Only
   /// ever set on bullet-form overviews; ~41% of the portfolio.
-  hasPocData  Boolean  @default(false) @map("has_poc_data")
-  refreshedAt DateTime @default(now()) @map("refreshed_at")
+  hasPocData   Boolean  @default(false) @map("has_poc_data")
+  refreshedAt  DateTime @default(now()) @map("refreshed_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 
@@ -2410,8 +2501,8 @@ model ScholarTechnology {
 ///          reviewer disambiguates by title/department and approving one rejects
 ///          its siblings.
 model NewsMention {
-  id   String @id @default(uuid()) @db.VarChar(64)
-  cwid String @db.VarChar(32)
+  id            String            @id @default(uuid()) @db.VarChar(64)
+  cwid          String            @db.VarChar(32)
   /// Absolute URL of the public news article — the (cwid, url) dedup key and the
   /// contested-group key stem.
   url           String            @db.VarChar(512)
@@ -2453,8 +2544,8 @@ model NewsMention {
 
 enum NewsMentionStatus {
   published // VIVO-linked (trusted) OR queue-approved — renders on the profile
-  pending   // NAME-matched candidate awaiting review in /edit/news-queue
-  rejected  // reviewer or scholar said "not this person" — hidden, terminal
+  pending // NAME-matched candidate awaiting review in /edit/news-queue
+  rejected // reviewer or scholar said "not this person" — hidden, terminal
 }
 
 /// Per-(scholar, method-family) rollup from the A2 canonical taxonomy (#799).
@@ -2603,25 +2694,25 @@ model FamilyEntity {
 /// `<mark>` (SPS `highlightSnippet` prefers them; falls back to term-match when
 /// null). Same stable (supercategory, family_label) key; full-replacement load.
 model FamilyEntityUsage {
-  id                 String   @id @default(uuid()) @db.VarChar(64)
-  supercategory      String   @db.VarChar(128)
-  familyLabel        String   @map("family_label") @db.VarChar(255)
-  normalizedEntityId String   @map("normalized_entity_id") @db.VarChar(128)
-  pmid               String   @db.VarChar(16)
-  usageSentence      String   @map("usage_sentence") @db.Text
-  matchedSpanStart   Int?     @map("matched_span_start")
-  matchedSpanEnd     Int?     @map("matched_span_end")
-  centralityScore    Decimal? @map("centrality_score") @db.Decimal(6, 4)
+  id                   String   @id @default(uuid()) @db.VarChar(64)
+  supercategory        String   @db.VarChar(128)
+  familyLabel          String   @map("family_label") @db.VarChar(255)
+  normalizedEntityId   String   @map("normalized_entity_id") @db.VarChar(128)
+  pmid                 String   @db.VarChar(16)
+  usageSentence        String   @map("usage_sentence") @db.Text
+  matchedSpanStart     Int?     @map("matched_span_start")
+  matchedSpanEnd       Int?     @map("matched_span_end")
+  centralityScore      Decimal? @map("centrality_score") @db.Decimal(6, 4)
   /// #1168 — WS-C usage signal (ReciterAI #253): `informativeness_score` in [0,1]
   /// + `mention_class` in {usage, mention} (-> snippet badge). Both null pre-#253.
   informativenessScore Decimal? @map("informativeness_score") @db.Decimal(6, 4)
-  mentionClass       String?  @map("mention_class") @db.VarChar(32)
+  mentionClass         String?  @map("mention_class") @db.VarChar(32)
   /// #254 — `usage_sentence` boundary-completeness hint (lets highlightSnippet
   /// skip its ellipsis heuristic). Null pre-#254.
-  sentenceComplete   Boolean? @map("sentence_complete")
-  entityRole         String?  @map("entity_role") @db.VarChar(64)
-  sourceArtifactSha  String?  @map("source_artifact_sha") @db.VarChar(64)
-  refreshedAt        DateTime @default(now()) @map("refreshed_at")
+  sentenceComplete     Boolean? @map("sentence_complete")
+  entityRole           String?  @map("entity_role") @db.VarChar(64)
+  sourceArtifactSha    String?  @map("source_artifact_sha") @db.VarChar(64)
+  refreshedAt          DateTime @default(now()) @map("refreshed_at")
 
   @@index([supercategory, familyLabel, normalizedEntityId])
   @@index([pmid])

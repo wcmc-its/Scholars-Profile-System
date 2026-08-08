@@ -31,6 +31,7 @@ SESSION_COOKIE_NAME       # falls back to "__Secure-sps_session"
 
 # --- code-default tunables: numeric/mode levers with baked-in defaults ---
 BIOSKETCH_GENERATE_MODEL
+CANCER_FUNDING_MODEL                # NCI Table 2A inference model rollback lever (code default Sonnet 4.5)
 EDIT_BIOSKETCH_GENERATE_RATE_LIMIT
 EDIT_CV_EXPORT_RATE_LIMIT           # CV-export Bedrock cap (code default 10/hr)
 GRANT_MATCHER_DENSE_REL

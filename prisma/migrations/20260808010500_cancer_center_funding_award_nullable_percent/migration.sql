@@ -1,0 +1,12 @@
+-- Superseded (code review, high-effort pass): the PLAUSIBLE finding was that
+-- shipping cancer_relevant_percent as NOT NULL and loosening it to nullable
+-- five minutes later, in a separate migration, opens a real window — if
+-- `prisma migrate deploy` were ever interrupted between the two, the table
+-- sits NOT NULL on exactly the column whose entire design point is
+-- representing "not yet inferred" as NULL (the common create-time outcome on
+-- a Bedrock failure). Neither migration had been applied anywhere but local
+-- dev when this was caught, so the fix is upstream, not here:
+-- 20260808010000_add_cancer_center_funding_award/migration.sql now declares
+-- the column NULL from the start. This file is kept (not deleted) so the
+-- migration history stays append-only and matches what already ran locally,
+-- but it is intentionally a no-op.
