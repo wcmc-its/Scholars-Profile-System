@@ -2,15 +2,23 @@
  * NCI Table 2A cycle import (`scripts/backfills/2026-08-08-cancer-center-nci-2a-import.ts`).
  * Drives the exported, dependency-injected functions with fake Prisma delegates and a
  * mocked Bedrock inference call — no live DB, no real Bedrock. Covers:
- *   1. Arg parsing: --file required, --dry-run, --limit/--concurrency validation.
+ *   1. Arg parsing: --file required, --dry-run, --limit/--concurrency validation,
+ *      --members-only.
  *   2. normalizeAwardNumber: whitespace collapse + case fold.
  *   3. buildAwardNumberIndex: unique match resolves; 2+ distinct cwids -> "ambiguous",
  *      never guessed.
- *   4. planRow: a membership match skips the Bedrock program ask entirely (source=
+ *   4. buildMembershipIndex / buildMembershipExistenceSet: the same membership rows
+ *      read two ways — program-if-any vs. membership-existence.
+ *   5. filterMembersOnly: keeps a row whose resolved cwid is a member; skips a resolved
+ *      non-member, an unmatched award number, and an ambiguous one.
+ *   6. scopeAndLimitRows: the ordering guarantee `main()` relies on but never exercises
+ *      itself — --members-only scoping runs BEFORE --limit slicing, proven with a
+ *      non-member row placed first in raw file order.
+ *   7. planRow: a membership match skips the Bedrock program ask entirely (source=
  *      "membership", no `programs` sent); no match asks Bedrock for a program guess
  *      (source="llm"); a failed Bedrock call (inference returns null) leaves the
  *      percent/rationale null and the allocation an explicit programCode:null gap.
- *   5. applyPlan (the non-clobber contract): new row creates; existing row updates
+ *   8. applyPlan (the non-clobber contract): new row creates; existing row updates
  *      both percent and allocations; a HUMAN-sourced percent is skipped on update; a
  *      HUMAN-sourced allocation blocks the WHOLE allocation replace (never partial);
  *      --dry-run writes nothing.
@@ -26,6 +34,10 @@ import {
   parseArgs,
   normalizeAwardNumber,
   buildAwardNumberIndex,
+  buildMembershipIndex,
+  buildMembershipExistenceSet,
+  filterMembersOnly,
+  scopeAndLimitRows,
   planRow,
   applyPlan,
   CENTER_CODE,
@@ -51,7 +63,7 @@ const ROW: ImportRow = {
 
 const PROGRAMS = [{ code: "CB", label: "Cancer Biology" }];
 
-const RUN: ImportOptions = { dryRun: false, limit: null, concurrency: 5, file: "x" };
+const RUN: ImportOptions = { dryRun: false, limit: null, concurrency: 5, file: "x", membersOnly: false };
 const DRY: ImportOptions = { ...RUN, dryRun: true };
 
 function emptyCounts(): ApplyCounts {
@@ -77,12 +89,16 @@ describe("parseArgs", () => {
   });
   it("parses --dry-run, --limit, --concurrency", () => {
     const opts = parseArgs(["--file=x.json", "--dry-run", "--limit=10", "--concurrency=3"]);
-    expect(opts).toEqual({ dryRun: true, limit: 10, concurrency: 3, file: "x.json" });
+    expect(opts).toEqual({ dryRun: true, limit: 10, concurrency: 3, file: "x.json", membersOnly: false });
   });
-  it("defaults concurrency to 5 and rejects a non-positive limit", () => {
+  it("defaults concurrency to 5, membersOnly to false, and rejects a non-positive limit", () => {
     expect(parseArgs(["--file=x.json"]).concurrency).toBe(5);
+    expect(parseArgs(["--file=x.json"]).membersOnly).toBe(false);
     expect(() => parseArgs(["--file=x.json", "--limit=0"])).toThrow(/--limit/);
     expect(() => parseArgs(["--file=x.json", "--concurrency=-1"])).toThrow(/--concurrency/);
+  });
+  it("parses --members-only", () => {
+    expect(parseArgs(["--file=x.json", "--members-only"]).membersOnly).toBe(true);
   });
 });
 
@@ -107,6 +123,108 @@ describe("buildAwardNumberIndex", () => {
   it("skips null award numbers", () => {
     const idx = buildAwardNumberIndex([{ awardNumber: null, cwid: "abc1234" }]);
     expect(idx.size).toBe(0);
+  });
+});
+
+describe("buildMembershipIndex", () => {
+  it("includes only memberships with a non-null programCode", () => {
+    const idx = buildMembershipIndex([
+      { cwid: "abc1234", programCode: "CB" },
+      { cwid: "xyz9999", programCode: null },
+    ]);
+    expect(idx.get("abc1234")).toBe("CB");
+    expect(idx.has("xyz9999")).toBe(false);
+  });
+});
+
+describe("buildMembershipExistenceSet", () => {
+  it("includes a cwid regardless of programCode nullity", () => {
+    const set = buildMembershipExistenceSet([{ cwid: "abc1234" }, { cwid: "xyz9999" }]);
+    expect(set.has("abc1234")).toBe(true);
+    expect(set.has("xyz9999")).toBe(true);
+  });
+});
+
+describe("filterMembersOnly", () => {
+  const memberSet = new Set(["abc1234"]);
+
+  it("keeps a row whose resolved cwid is a member", () => {
+    const awardIndex = new Map([["5 R01 CA059736-01", "abc1234"]]);
+    const { kept, skipped } = filterMembersOnly([ROW], awardIndex, memberSet);
+    expect(kept).toEqual([ROW]);
+    expect(skipped).toBe(0);
+  });
+
+  it("skips a row whose resolved cwid resolves but isn't a member", () => {
+    const awardIndex = new Map([["5 R01 CA059736-01", "notamember"]]);
+    const { kept, skipped } = filterMembersOnly([ROW], awardIndex, memberSet);
+    expect(kept).toEqual([]);
+    expect(skipped).toBe(1);
+  });
+
+  it("skips a row whose award number doesn't resolve to any cwid at all", () => {
+    const { kept, skipped } = filterMembersOnly([ROW], new Map(), memberSet);
+    expect(kept).toEqual([]);
+    expect(skipped).toBe(1);
+  });
+
+  it("skips a row whose award number is ambiguous (2+ distinct cwids)", () => {
+    const awardIndex = new Map<string, string | "ambiguous">([["5 R01 CA059736-01", "ambiguous"]]);
+    const { kept, skipped } = filterMembersOnly([ROW], awardIndex, memberSet);
+    expect(kept).toEqual([]);
+    expect(skipped).toBe(1);
+  });
+});
+
+describe("scopeAndLimitRows", () => {
+  it("applies --members-only BEFORE --limit — a small --limit samples the scoped set, not the raw file", () => {
+    // Non-member row appears FIRST in raw file order; the member row is second.
+    // If --limit sliced the raw rows before scoping, --limit=1 would keep the
+    // non-member row and the (correct) member row would never be reached.
+    const nonMemberRow: ImportRow = { ...ROW, institutionNumber: 1, sourceAwardNumber: "NONMEMBER-AWARD" };
+    const memberRow: ImportRow = { ...ROW, institutionNumber: 2, sourceAwardNumber: "MEMBER-AWARD" };
+    const awardIndex = new Map<string, string | "ambiguous">([
+      ["NONMEMBER-AWARD", "notamember"],
+      ["MEMBER-AWARD", "abc1234"],
+    ]);
+    const memberships = [{ cwid: "abc1234" }];
+
+    const { rows, scopedCount, skipped } = scopeAndLimitRows(
+      [nonMemberRow, memberRow],
+      { membersOnly: true, limit: 1 },
+      awardIndex,
+      memberships,
+    );
+
+    expect(rows).toEqual([memberRow]);
+    expect(scopedCount).toBe(1);
+    expect(skipped).toBe(1);
+  });
+
+  it("without --members-only, --limit slices the raw rows directly", () => {
+    const rowA: ImportRow = { ...ROW, institutionNumber: 1 };
+    const rowB: ImportRow = { ...ROW, institutionNumber: 2 };
+
+    const { rows, scopedCount, skipped } = scopeAndLimitRows(
+      [rowA, rowB],
+      { membersOnly: false, limit: 1 },
+      new Map(),
+      [],
+    );
+
+    expect(rows).toEqual([rowA]);
+    expect(scopedCount).toBe(2);
+    expect(skipped).toBe(0);
+  });
+
+  it("with no --limit, returns every scoped row", () => {
+    const memberRow: ImportRow = { ...ROW, institutionNumber: 1, sourceAwardNumber: "MEMBER-AWARD" };
+    const awardIndex = new Map<string, string | "ambiguous">([["MEMBER-AWARD", "abc1234"]]);
+    const memberships = [{ cwid: "abc1234" }];
+
+    const { rows } = scopeAndLimitRows([memberRow], { membersOnly: true, limit: null }, awardIndex, memberships);
+
+    expect(rows).toEqual([memberRow]);
   });
 });
 
