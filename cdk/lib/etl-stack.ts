@@ -500,6 +500,46 @@ export class EtlStack extends Stack {
     });
 
     // ------------------------------------------------------------------
+    // Bedrock grant for the NCI Table 2A cancer-relevance judgment calls
+    // (scripts/backfills/2026-08-08-cancer-center-nci-2a-import.ts, via
+    // lib/edit/cancer-center-funding-generator.ts's inferCancerFundingJudgments).
+    // That backfill runs on THIS task family (npx tsx, per
+    // docs/DEPLOY-RUNBOOK.md's Backfill task invocation section — the app
+    // image has no tsx/scripts/lib at all), so the ETL task role, not the
+    // app one, needs the grant.
+    //
+    // STAGING ONLY, deliberately: this is the ETL role's first-ever Bedrock
+    // grant (this repo's own CLAUDE.md flags the ETL role's Bedrock-lessness
+    // as intentional — "a 'cheap LLM call' is a second Sonnet call"), scoped
+    // narrowly to unblock the staging rollout of one backfill. Extending to
+    // prod is its own, separately-reviewed decision once that rollout is real.
+    //
+    // Sonnet 4.x family only, not Opus — inferCancerFundingJudgments always
+    // calls DEFAULT_EXTRACT_MODEL (lib/llm/models.ts), a Sonnet 4.5 id, and
+    // nothing in this CDK app overrides CANCER_FUNDING_MODEL to anything
+    // else. Same resource-ARN shape as the app task role's
+    // TaskRoleBedrockPolicy (app-stack.ts): the us. cross-region inference
+    // profile plus the underlying AWS-owned foundation model, region `*`
+    // because a us. profile call fans out across us-east-1/-2/us-west-2.
+    // ------------------------------------------------------------------
+    if (env === "staging") {
+      new iam.Policy(this, "EtlTaskRoleBedrockPolicy", {
+        policyName: `sps-etl-task-${env}-bedrock`,
+        roles: [taskRole],
+        statements: [
+          new iam.PolicyStatement({
+            effect: iam.Effect.ALLOW,
+            actions: ["bedrock:InvokeModel"],
+            resources: [
+              `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-sonnet-4-*`,
+              "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-*",
+            ],
+          }),
+        ],
+      });
+    }
+
+    // ------------------------------------------------------------------
     // Curated-tables logical-backup bucket (belt-and-suspenders over AWS
     // Backup / Aurora PITR).
     //
