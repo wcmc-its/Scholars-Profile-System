@@ -3973,6 +3973,36 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 ],
               },
             },
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "CurationBackupBucketE5A802A9",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "CurationBackupBucketE5A802A9",
+                          "Arn",
+                        ],
+                      },
+                      "/scratch-input/*",
+                    ],
+                  ],
+                },
+              ],
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -12466,6 +12496,36 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                   ],
                 ],
               },
+            },
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "CurationBackupBucketE5A802A9",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "CurationBackupBucketE5A802A9",
+                          "Arn",
+                        ],
+                      },
+                      "/scratch-input/*",
+                    ],
+                  ],
+                },
+              ],
             },
             {
               "Action": "s3:PutObject",

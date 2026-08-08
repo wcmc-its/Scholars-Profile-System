@@ -574,9 +574,20 @@ export class EtlStack extends Stack {
         },
       ],
     });
-    // The task role's ONLY write grant — PutObject (+ Abort*) on this bucket.
-    // The dump step uploads here; restores read it out-of-band by an operator.
+    // The task role's write grant — PutObject (+ Abort*) on this bucket. The
+    // dump step uploads here; restores read it out-of-band by an operator.
     curationBackupBucket.grantPut(taskRole);
+    // Scratch-input READ grant, `scratch-input/*` only — never the whole
+    // bucket (the `sps-curation-backups/` prefix above is backup output, not
+    // an input source the ETL role needs to read). A one-off TS backfill
+    // (scripts/backfills/*) sometimes needs an external data file too big for
+    // an ECS RunTask container override (8192-char cap, hit running the NCI
+    // Table 2A import against staging — a laptop-only 833KB OSRA-derived
+    // JSON). An operator uploads it here from a laptop (already has broader
+    // S3 access); the task downloads it back. Reuses the one bucket the ETL
+    // role already owns end-to-end rather than standing up a second bucket
+    // for a rare need.
+    curationBackupBucket.grantRead(taskRole, "scratch-input/*");
 
     // ------------------------------------------------------------------
     // ETL task family. One image, one container -- per-step
