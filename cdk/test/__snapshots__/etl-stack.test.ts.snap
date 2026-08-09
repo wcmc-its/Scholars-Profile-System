@@ -622,7 +622,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"StartAt":"TaskCdnReconcile","States":{"TaskCdnReconcile":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCdnReconcile"}],"Type":"Task","TimeoutSeconds":840,"Resource":"arn:",
+              "{"StartAt":"TaskCdnReconcile","States":{"TaskCdnReconcile":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":1,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCdnReconcile"}],"Type":"Task","TimeoutSeconds":240,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -5744,7 +5744,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"StartAt":"TaskReconcile","States":{"TaskReconcile":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReconcile"}],"Type":"Task","TimeoutSeconds":840,"Resource":"arn:",
+              "{"StartAt":"TaskReconcile","States":{"TaskReconcile":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":1,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReconcile"}],"Type":"Task","TimeoutSeconds":240,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -8000,7 +8000,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"StartAt":"TaskCdnReconcile","States":{"TaskCdnReconcile":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCdnReconcile"}],"Type":"Task","TimeoutSeconds":840,"Resource":"arn:",
+              "{"StartAt":"TaskCdnReconcile","States":{"TaskCdnReconcile":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":1,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCdnReconcile"}],"Type":"Task","TimeoutSeconds":240,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -8853,7 +8853,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"staging","step":"CurationBackup","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS curated-tables backup staging -- run failed"}},"FailCurationBackup":{"Type":"Fail","Cause":"curated-tables backup run failed"}},"TimeoutSeconds":2100}",
+              "","Message":{"env":"staging","step":"CurationBackup","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS curated-tables backup staging -- run failed"}},"FailCurationBackup":{"Type":"Fail","Cause":"curated-tables backup run failed"}},"TimeoutSeconds":4200}",
             ],
           ],
         },
@@ -9351,7 +9351,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"staging","step":"EdEmailVisibilityExport","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ED email-visibility bridge staging -- EdEmailVisibilityExport failed"}},"FailEdEmailVisibilityExport":{"Type":"Fail","Cause":"EdEmailVisibilityExport failed"}},"TimeoutSeconds":3600}",
+              "","Message":{"env":"staging","step":"EdEmailVisibilityExport","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ED email-visibility bridge staging -- EdEmailVisibilityExport failed"}},"FailEdEmailVisibilityExport":{"Type":"Fail","Cause":"EdEmailVisibilityExport failed"}},"TimeoutSeconds":8100}",
             ],
           ],
         },
@@ -14257,7 +14257,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"StartAt":"TaskReconcile","States":{"TaskReconcile":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReconcile"}],"Type":"Task","TimeoutSeconds":840,"Resource":"arn:",
+              "{"StartAt":"TaskReconcile","States":{"TaskReconcile":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":1,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReconcile"}],"Type":"Task","TimeoutSeconds":240,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },

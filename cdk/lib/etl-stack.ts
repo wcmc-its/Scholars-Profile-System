@@ -1925,13 +1925,21 @@ export class EtlStack extends Stack {
           command: ["npm", "run", "search:reconcile"],
         },
       ],
-      // Bounded well under the 15 min state-machine timeout so a wedged run
-      // dies before the next 5 min fire stacks on it.
-      taskTimeout: sfn.Timeout.duration(Duration.minutes(14)),
+      // #2286 -- 4 min per attempt, not 14: the worker is bounded to <=200
+      // rows (seconds of real work), and the OLD 14 min figure combined with
+      // the retry below to a 2610s worst-case retry budget against this
+      // machine's 900s timeout -- a hung task hit TIMED_OUT before the
+      // retries exhausted, and TIMED_OUT runs no Catch, so the failure that
+      // would have notified never did. 2 attempts * 4 min + 30s interval =
+      // 510s, comfortably under the 900s machine timeout below.
+      taskTimeout: sfn.Timeout.duration(Duration.minutes(4)),
     });
     reconcileTask.addRetry({
       errors: ["States.TaskFailed", "States.Timeout"],
-      maxAttempts: 2,
+      // #2286 -- 1, not 2: this reconciler self-heals on the next 5 min
+      // fire regardless, so a second retry buys little against the risk of
+      // outrunning the machine timeout again.
+      maxAttempts: 1,
       backoffRate: 2,
       interval: Duration.seconds(30),
     });
@@ -2187,13 +2195,17 @@ export class EtlStack extends Stack {
           command: ["npm", "run", "cdn:reconcile"],
         },
       ],
-      // Bounded well under the 15 min state-machine timeout so a wedged run
-      // dies before the next 5 min fire stacks on it.
-      taskTimeout: sfn.Timeout.duration(Duration.minutes(14)),
+      // #2286 -- 4 min per attempt, not 14: see the identical comment on the
+      // #393 reconciler's taskTimeout above -- same defect, same fix, same
+      // math (2 attempts * 4 min + 30s = 510s under this machine's 900s cap).
+      taskTimeout: sfn.Timeout.duration(Duration.minutes(4)),
     });
     cdnReconcileTask.addRetry({
       errors: ["States.TaskFailed", "States.Timeout"],
-      maxAttempts: 2,
+      // #2286 -- 1, not 2: this reconciler self-heals on the next 5 min
+      // fire regardless, so a second retry buys little against the risk of
+      // outrunning the machine timeout again.
+      maxAttempts: 1,
       backoffRate: 2,
       interval: Duration.seconds(30),
     });
@@ -2375,7 +2387,15 @@ export class EtlStack extends Stack {
         stateMachineName: `scholars-curation-backup-${env}`,
         stateMachineType: sfn.StateMachineType.STANDARD,
         definitionBody: sfn.DefinitionBody.fromChainable(backupTask),
-        timeout: Duration.minutes(35),
+        // #2286 -- 70 min, not 35: the task's own retry (30 min timeout x 2
+        // attempts + 1 min interval = 61 min worst case) exceeded the old 35
+        // min machine timeout, so a hung backup hit TIMED_OUT before its
+        // retry could exhaust -- and TIMED_OUT runs no Catch, so the failure
+        // that should have paged never did. Unlike the 5 min reconcilers
+        // above, the next backup is a day away, so widening this (still
+        // trivial next to the 24h cadence) beats shrinking the retry that
+        // buys a real day of coverage.
+        timeout: Duration.minutes(70),
         logs: {
           destination: backupSmLogGroup,
           level: sfn.LogLevel.ERROR,
@@ -2530,7 +2550,16 @@ export class EtlStack extends Stack {
           stateMachineName: `scholars-opportunity-projection-${env}`,
           stateMachineType: sfn.StateMachineType.STANDARD,
           definitionBody: sfn.DefinitionBody.fromChainable(projectionTask),
-          timeout: Duration.minutes(65),
+          // #2286 -- 135 min, not 65: the task's own retry (1h timeout x 2
+          // attempts + 1 min interval = 121 min worst case) exceeded the old
+          // 65 min machine timeout, so a hung projection hit TIMED_OUT
+          // before its retry could exhaust -- and TIMED_OUT runs no Catch,
+          // so the failure that should have paged never did. Next run is a
+          // day away, so widening this (still trivial next to the 24h
+          // cadence) beats shrinking a retry that buys a real day of
+          // coverage on a step whose own comment says it can genuinely take
+          // most of an hour.
+          timeout: Duration.minutes(135),
           logs: {
             destination: projectionSmLogGroup,
             level: sfn.LogLevel.ERROR,
@@ -2756,7 +2785,17 @@ export class EtlStack extends Stack {
           stateMachineName: `scholars-ed-email-visibility-${env}`,
           stateMachineType: sfn.StateMachineType.STANDARD,
           definitionBody: sfn.DefinitionBody.fromChainable(edExportTask),
-          timeout: Duration.hours(1),
+          // #2286 -- 135 min, not 60: TWO sequential steps each share the
+          // same buildBridgeStep retry shape (30 min timeout x 2 attempts +
+          // 1 min interval = 61 min worst case EACH), so the combined
+          // worst case is ~122 min -- already past the old 60 min machine
+          // timeout on the FIRST step alone. A hung export or import hit
+          // TIMED_OUT before its retry could exhaust, and TIMED_OUT runs no
+          // Catch, so the failure that should have paged never did. Next
+          // run is a week away, so widening this (still trivial next to the
+          // weekly cadence) beats shrinking a retry on the leg that talks to
+          // the flaky on-prem LDAP path (#443).
+          timeout: Duration.minutes(135),
           logs: {
             destination: edBridgeLogGroup,
             level: sfn.LogLevel.ERROR,
