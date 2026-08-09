@@ -216,7 +216,12 @@ export const handler: SNSHandler = async (event: SNSEvent): Promise<void> => {
       const evt = parsed as EtlEventPayload;
       // Refined here, before the warn/page channel order is chosen below.
       severity = severityForEtlEvent(evt, severity);
-      card = buildEtlCard(evt);
+      // TopicArn is `arn:aws:sns:<region>:<accountId>:<name>` -- index 4 is
+      // the account id. A malformed/short ARN (never seen from real SNS, but
+      // defend anyway) yields `undefined` here, and buildEtlCard degrades to
+      // the state-machine-list URL rather than throwing.
+      const accountId = record.Sns.TopicArn.split(":")[4];
+      card = buildEtlCard(evt, severity, accountId);
       label = evt.step ?? evt.action ?? "etl-event";
     }
 

@@ -411,4 +411,107 @@ describe("buildEtlCard", () => {
     const c = content(buildEtlCard({ error: { Error: "States.Timeout" } }));
     expect(fact(c, "Error")).toBe("States.Timeout");
   });
+
+  it("no severity arg keeps the alarm glyph and omits the Severity fact (back-compat)", () => {
+    const c = content(
+      buildEtlCard({ env: "staging", step: "Ed", error: "boom" }),
+    );
+    expect(header(c)).toBe("\u{1F6A8} SPS ETL staging \u{2014} Ed");
+    expect(fact(c, "Severity")).toBeUndefined();
+  });
+
+  it("warn severity leads with the warning glyph and renders a Severity fact", () => {
+    const c = content(
+      buildEtlCard({ env: "staging", step: "Ed", error: "boom" }, "warn"),
+    );
+    expect(header(c)).toBe("\u{26A0}\u{FE0F} SPS ETL staging \u{2014} Ed");
+    expect(fact(c, "Severity")).toBe("P2 (warn)");
+  });
+
+  it("page severity keeps the alarm glyph and renders a Severity fact", () => {
+    const c = content(
+      buildEtlCard({ env: "prod", step: "Infoed", error: "boom" }, "page"),
+    );
+    expect(header(c)).toBe("\u{1F6A8} SPS ETL prod \u{2014} Infoed");
+    expect(fact(c, "Severity")).toBe("P1 (page)");
+  });
+
+  it("links to the specific failing execution when accountId + stateMachine + execution are all present", () => {
+    const c = content(
+      buildEtlCard(
+        {
+          env: "prod",
+          step: "Infoed",
+          stateMachine: "scholars-nightly-prod",
+          execution: "abc-123",
+          error: "timeout",
+        },
+        "page",
+        "665083158573",
+      ),
+    );
+    expect(c.actions[0]!.title).toBe("View in Step Functions");
+    expect(c.actions[0]!.url).toBe(
+      "https://us-east-1.console.aws.amazon.com/states/v2/home?region=us-east-1#/executions/details/arn:aws:states:us-east-1:665083158573:execution:scholars-nightly-prod:abc-123",
+    );
+  });
+
+  it("falls back to the state-machine-list URL when accountId is missing", () => {
+    const c = content(
+      buildEtlCard({
+        env: "prod",
+        step: "Infoed",
+        stateMachine: "scholars-nightly-prod",
+        execution: "abc-123",
+        error: "timeout",
+      }),
+    );
+    expect(c.actions[0]!.url).toBe(
+      "https://us-east-1.console.aws.amazon.com/states/home?region=us-east-1#/statemachines",
+    );
+  });
+
+  it("falls back to the state-machine-list URL when stateMachine is missing", () => {
+    const c = content(
+      buildEtlCard(
+        { env: "prod", step: "Infoed", execution: "abc-123", error: "timeout" },
+        "page",
+        "665083158573",
+      ),
+    );
+    expect(c.actions[0]!.url).toContain("#/statemachines");
+  });
+
+  it("falls back to the state-machine-list URL when execution is missing", () => {
+    const c = content(
+      buildEtlCard(
+        {
+          env: "prod",
+          step: "Infoed",
+          stateMachine: "scholars-nightly-prod",
+          error: "timeout",
+        },
+        "page",
+        "665083158573",
+      ),
+    );
+    expect(c.actions[0]!.url).toContain("#/statemachines");
+  });
+
+  it("falls back to the state-machine-list URL when accountId is present but empty", () => {
+    const c = content(
+      buildEtlCard(
+        {
+          env: "prod",
+          step: "Infoed",
+          stateMachine: "scholars-nightly-prod",
+          execution: "abc-123",
+          error: "timeout",
+        },
+        "page",
+        "",
+      ),
+    );
+    expect(c.actions[0]!.url).toContain("#/statemachines");
+  });
 });
