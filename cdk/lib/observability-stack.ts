@@ -1298,12 +1298,30 @@ export class SpsObservabilityStack extends Stack {
     // because the page topic IS this Lambda; routing failure back through
     // itself either silently flaps or recursively masks the original alarm.
     // Email is the out-of-band fallback.
+    //
+    // Watches Errors + Throttles, not just Errors (#2302). A throttled async
+    // invocation (concurrency limit hit, or the relay's own reserved-
+    // concurrency cap) increments the separate Throttles metric and leaves
+    // Errors at zero, so an Errors-only alarm produces no signal on a
+    // sustained throttle -- even though the on-call relay is the paging path
+    // itself. Mirrors the `unsuccessfulMetric` MathExpression pattern in
+    // etl-stack.ts.
     const relayErrorsAlarm = new cloudwatch.Alarm(this, "OncallRelayErrors", {
       alarmName: `sps-oncall-relay-errors-${env}`,
-      alarmDescription: `On-call relay Lambda surfaced one or more invocation errors in the last minute (${env}). Paging-path delivery is at risk -- check Lambda CloudWatch logs and the Teams workflow URL in Secrets Manager. Routed to the notify topic (email) because the page topic flows through this Lambda.`,
-      metric: relay.metricErrors({
+      alarmDescription: `On-call relay Lambda surfaced one or more invocation errors or throttles in the last minute (${env}). Paging-path delivery is at risk -- check Lambda CloudWatch logs and the Teams workflow URL in Secrets Manager. Routed to the notify topic (email) because the page topic flows through this Lambda.`,
+      metric: new cloudwatch.MathExpression({
+        expression: "errors + throttles",
+        usingMetrics: {
+          errors: relay.metricErrors({
+            period: Duration.minutes(1),
+            statistic: "Sum",
+          }),
+          throttles: relay.metricThrottles({
+            period: Duration.minutes(1),
+            statistic: "Sum",
+          }),
+        },
         period: Duration.minutes(1),
-        statistic: "Sum",
       }),
       threshold: 1,
       evaluationPeriods: 1,

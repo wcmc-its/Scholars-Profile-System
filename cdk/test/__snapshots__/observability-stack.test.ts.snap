@@ -846,23 +846,58 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
             "Ref": "NotifyTopic5FFA0016",
           },
         ],
-        "AlarmDescription": "On-call relay Lambda surfaced one or more invocation errors in the last minute (prod). Paging-path delivery is at risk -- check Lambda CloudWatch logs and the Teams workflow URL in Secrets Manager. Routed to the notify topic (email) because the page topic flows through this Lambda.",
+        "AlarmDescription": "On-call relay Lambda surfaced one or more invocation errors or throttles in the last minute (prod). Paging-path delivery is at risk -- check Lambda CloudWatch logs and the Teams workflow URL in Secrets Manager. Routed to the notify topic (email) because the page topic flows through this Lambda.",
         "AlarmName": "sps-oncall-relay-errors-prod",
         "ComparisonOperator": "GreaterThanOrEqualToThreshold",
         "DatapointsToAlarm": 1,
-        "Dimensions": [
+        "EvaluationPeriods": 1,
+        "Metrics": [
           {
-            "Name": "FunctionName",
-            "Value": {
-              "Ref": "OncallRelayFunction9974C7E1",
+            "Expression": "errors + throttles",
+            "Id": "expr_1",
+            "ReturnData": true,
+          },
+          {
+            "Id": "errors",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "FunctionName",
+                    "Value": {
+                      "Ref": "OncallRelayFunction9974C7E1",
+                    },
+                  },
+                ],
+                "MetricName": "Errors",
+                "Namespace": "AWS/Lambda",
+              },
+              "Period": 60,
+              "Stat": "Sum",
             },
+            "ReturnData": false,
+          },
+          {
+            "Id": "throttles",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "FunctionName",
+                    "Value": {
+                      "Ref": "OncallRelayFunction9974C7E1",
+                    },
+                  },
+                ],
+                "MetricName": "Throttles",
+                "Namespace": "AWS/Lambda",
+              },
+              "Period": 60,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
           },
         ],
-        "EvaluationPeriods": 1,
-        "MetricName": "Errors",
-        "Namespace": "AWS/Lambda",
-        "Period": 60,
-        "Statistic": "Sum",
         "Threshold": 1,
         "TreatMissingData": "notBreaching",
       },
@@ -2164,23 +2199,58 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
             "Ref": "NotifyTopic5FFA0016",
           },
         ],
-        "AlarmDescription": "On-call relay Lambda surfaced one or more invocation errors in the last minute (staging). Paging-path delivery is at risk -- check Lambda CloudWatch logs and the Teams workflow URL in Secrets Manager. Routed to the notify topic (email) because the page topic flows through this Lambda.",
+        "AlarmDescription": "On-call relay Lambda surfaced one or more invocation errors or throttles in the last minute (staging). Paging-path delivery is at risk -- check Lambda CloudWatch logs and the Teams workflow URL in Secrets Manager. Routed to the notify topic (email) because the page topic flows through this Lambda.",
         "AlarmName": "sps-oncall-relay-errors-staging",
         "ComparisonOperator": "GreaterThanOrEqualToThreshold",
         "DatapointsToAlarm": 1,
-        "Dimensions": [
+        "EvaluationPeriods": 1,
+        "Metrics": [
           {
-            "Name": "FunctionName",
-            "Value": {
-              "Ref": "OncallRelayFunction9974C7E1",
+            "Expression": "errors + throttles",
+            "Id": "expr_1",
+            "ReturnData": true,
+          },
+          {
+            "Id": "errors",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "FunctionName",
+                    "Value": {
+                      "Ref": "OncallRelayFunction9974C7E1",
+                    },
+                  },
+                ],
+                "MetricName": "Errors",
+                "Namespace": "AWS/Lambda",
+              },
+              "Period": 60,
+              "Stat": "Sum",
             },
+            "ReturnData": false,
+          },
+          {
+            "Id": "throttles",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "FunctionName",
+                    "Value": {
+                      "Ref": "OncallRelayFunction9974C7E1",
+                    },
+                  },
+                ],
+                "MetricName": "Throttles",
+                "Namespace": "AWS/Lambda",
+              },
+              "Period": 60,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
           },
         ],
-        "EvaluationPeriods": 1,
-        "MetricName": "Errors",
-        "Namespace": "AWS/Lambda",
-        "Period": 60,
-        "Statistic": "Sum",
         "Threshold": 1,
         "TreatMissingData": "notBreaching",
       },
