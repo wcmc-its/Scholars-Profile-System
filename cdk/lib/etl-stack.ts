@@ -1004,6 +1004,7 @@ export class EtlStack extends Stack {
       cadenceName: string,
       steps: ReadonlyArray<StepSpec>,
       tail?: sfn.IChainable,
+      timeout: Duration = Duration.hours(24),
     ): sfn.StateMachine => {
       if (steps.length === 0) {
         throw new Error("state machine requires at least one step");
@@ -1117,8 +1118,10 @@ export class EtlStack extends Stack {
         stateMachineName: `scholars-${cadenceName}-${env}`,
         stateMachineType: sfn.StateMachineType.STANDARD,
         definitionBody: sfn.DefinitionBody.fromChainable(choice),
-        // 24 h hard cap so a wedged execution can't outlive its cadence.
-        timeout: Duration.hours(24),
+        // Hard cap so a wedged execution can't outlive its cadence. Defaults to
+        // 24h; callers with a legitimately longer worst-case chain (e.g. the
+        // annual machine's approval gate) pass an explicit override.
+        timeout,
         logs: {
           destination: logGroup,
           level: sfn.LogLevel.ERROR,
@@ -1431,6 +1434,14 @@ export class EtlStack extends Stack {
       "annual",
       annualSteps,
       approvalGate,
+      // #2303 -- the default 24h machine timeout would TIMED_OUT (no Catch
+      // runs) long before AnnualApprovalGate's own 7-day taskTimeout and its
+      // working Catch/notify ever got a chance to fire. Worst case here is the
+      // Hierarchy step's retry budget (buildStep: 3 attempts x 4h taskTimeout
+      // plus 2 backoff intervals =~ 12h) THEN up to 7 more days waiting on
+      // approval -- ~7.5 days. 9 days clears that with margin while still
+      // being a real backstop, not effectively infinite.
+      Duration.days(9),
     );
 
     // #595 — data-freshness heartbeat. A single step (`etl:freshness`) reads
@@ -1559,10 +1570,11 @@ export class EtlStack extends Stack {
      * - TIMED_OUT. A machine that hits its own `timeout:` is terminated by
      *   Step Functions; NO Catch runs, so nothing publishes to etl-failures
      *   and ExecutionsFailed stays at zero. The run vanishes. This is not
-     *   hypothetical on the short-lived machines: their per-task retry budget
-     *   exceeds the machine timeout (reconcile/cdn-reconcile allow 3 x 14 min
-     *   of attempts under a 15 min cap), so a hung task CONVERTS a failure
-     *   that would have notified into one that does not.
+     *   hypothetical on the short-lived machines: a per-task retry budget
+     *   that exceeds the machine timeout converts a failure that would have
+     *   notified into one that does not -- #2286 fixed exactly that on
+     *   reconcile/cdn-reconcile, which now cap it at 2 attempts x 4 min =
+     *   510s worst case, under the 900s/15 min cap.
      * - ABORTED. An operator StopExecution, and the "did someone stop the
      *   nightly and forget?" question is exactly the one worth asking.
      *
