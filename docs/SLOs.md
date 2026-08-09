@@ -62,7 +62,7 @@ Log groups owned by other stacks (ReCiter, ReciterAI, etc.) are out of scope for
 
 ## Alarm catalog
 
-Ten simple alarms per env plus one composite, all defined in `cdk/lib/observability-stack.ts`, split across two on-call **tiers** so the page channel carries only customer-facing problems:
+Ten simple alarms per env plus one composite, all defined in `cdk/lib/observability-stack.ts`, split across two on-call **tiers** so the page channel carries only customer-facing problems (§ ETL alarm catalog below covers the further 20 alarms `cdk/lib/etl-stack.ts` defines):
 
 - **P1 (page)** publishes to the **page** SNS topic `sps-alarms-${env}` -- the Teams on-call channel, via the B27 relay Lambda.
 - **P2 (warn)** publishes to the **warn** SNS topic `sps-warn-${env}` -- the same relay posts these to a separate, quieter Teams channel, falling back to the page channel if that channel's webhook (`scholars/${env}/oncall/teams-webhook-url-warn`) is not yet provisioned, so demoting an alarm never silently drops it. P2 = leading indicators and operational signals that warrant attention but are not "wake on-call": resource pressure, the security-probe counter, and (in `cdk/lib/etl-stack.ts`, topic `etl-failures-${env}`) every ETL/reconciler data-freshness alarm.
@@ -86,6 +86,22 @@ The operator email rides the sibling **notify** topic (`sps-notify-${env}`), use
 † These three serving-failure symptoms carry **no direct action** -- they feed the `sps-app-unavailable-${env}` composite (row C), which is the single P1 page for a serving cascade. Without the composite, one root cause (e.g. Aurora connection exhaustion) posted three separate page cards for one incident. The children still evaluate, so the reliability dashboard and the composite rule see them.
 
 Threshold values are calibrated for the current 1-2-task-per-env scale. Re-tune at the first SLO review after EdgeStack ships and CloudFront traffic is in the picture.
+
+### ETL alarm catalog
+
+`cdk/lib/etl-stack.ts` defines 20 further alarms (9 status + 3 duration + 8 cadence) across the nine ETL/reconciler state machines, all wired to the same `alarmAction` (a `cloudwatchActions.SnsAction` on `failureTopic` -- the P2 `etl-failures-${env}` topic in the tier list above; none of these 20 currently target the P1 `etl-page-${env}` topic, see [`docs/oncall.md`](./oncall.md) § Severity tiers). Same three-alarm shape per machine as the observability-stack table above -- status ("the run did not finish cleanly"), cadence ("no run started when one should have"), duration ("a run is taking longer than its own history warrants", #2190) -- except the annual machine, which by design carries status only (its `ExecutionTime` measures a human approval wait, not step work, and it has no fixed cadence to miss). The per-alarm What/Next detail lives in each alarm's `alarmDescription` in CDK, not duplicated here; for the operational read (which Teams card means what, SOP once one fires) see [`docs/etl-monitoring.md`](./etl-monitoring.md).
+
+| Machine | Status | Duration | Cadence |
+|---|---|---|---|
+| nightly | `sps-etl-nightly-status-${env}` | `sps-etl-nightly-duration-${env}` | `sps-etl-nightly-cadence-${env}` |
+| weekly | `sps-etl-weekly-status-${env}` | `sps-etl-weekly-duration-${env}` | `sps-etl-weekly-cadence-${env}` |
+| annual | `sps-etl-annual-status-${env}` | -- | -- |
+| heartbeat (#595 freshness) | `sps-etl-heartbeat-status-${env}` | `sps-etl-heartbeat-duration-${env}` | `sps-etl-heartbeat-cadence-${env}` |
+| search-index reconciler | `sps-reconcile-status-${env}` | -- | `sps-reconcile-cadence-${env}` |
+| CDN reconciler | `sps-cdn-reconcile-status-${env}` | -- | `sps-cdn-reconcile-cadence-${env}` |
+| curation-tables backup | `sps-curation-backup-status-${env}` | -- | `sps-curation-backup-cadence-${env}` |
+| opportunity projection | `sps-opportunity-projection-status-${env}` | -- | `sps-opportunity-projection-cadence-${env}` |
+| ED email-visibility bridge | `sps-ed-email-visibility-status-${env}` | -- | `sps-ed-email-visibility-cadence-${env}` |
 
 ## Cost guardrail
 
