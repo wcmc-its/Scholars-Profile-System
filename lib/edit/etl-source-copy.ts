@@ -162,6 +162,14 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     label: "Research Subareas",
     description: "Refreshes the subarea names listed under each research area.",
   },
+  SearchReconcile: {
+    label: "Search Update Safety Net",
+    description: "Retries a hide or suppression that didn't reach search results the first time.",
+  },
+  CdnReconcile: {
+    label: "Cached Page Refresh Retries",
+    description: "Retries clearing a page's cached copy after an edit, so visitors stop seeing the old version.",
+  },
 };
 
 /**
