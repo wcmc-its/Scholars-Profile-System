@@ -70,6 +70,61 @@ function buildObservabilityStack(
   };
 }
 
+/**
+ * Read an alarm's metric shape regardless of HOW the alarm expresses it.
+ *
+ * A single-metric alarm carries `MetricName`/`Statistic`/`Period` at the top
+ * level. A metric-math alarm (#2302's `errors + throttles`) carries NONE of
+ * those: it has a `Metrics` array whose entries each nest a `MetricStat`,
+ * plus one entry holding the `Expression`. An assertion written against the
+ * top-level properties would not fail when an alarm is converted to an
+ * expression -- it would silently match nothing and stop checking.
+ */
+function alarmMetricShape(props: Record<string, unknown> | undefined): {
+  names: string[];
+  stats: string[];
+  periods: number[];
+  expression: string | undefined;
+} {
+  const metrics: unknown[] = Array.isArray(props?.Metrics)
+    ? (props.Metrics as unknown[])
+    : [];
+  if (metrics.length === 0) {
+    const name = props?.MetricName;
+    const stat = props?.Statistic;
+    const period = props?.Period;
+    return {
+      names: typeof name === "string" ? [name] : [],
+      stats: typeof stat === "string" ? [stat] : [],
+      periods: typeof period === "number" ? [period] : [],
+      expression: undefined,
+    };
+  }
+  const entries = metrics as ReadonlyArray<{
+    Expression?: unknown;
+    MetricStat?: {
+      Period?: unknown;
+      Stat?: unknown;
+      Metric?: { MetricName?: unknown };
+    };
+  }>;
+  return {
+    names: entries
+      .map((m) => m.MetricStat?.Metric?.MetricName)
+      .filter((n): n is string => typeof n === "string")
+      .sort(),
+    stats: entries
+      .map((m) => m.MetricStat?.Stat)
+      .filter((s): s is string => typeof s === "string"),
+    periods: entries
+      .map((m) => m.MetricStat?.Period)
+      .filter((p): p is number => typeof p === "number"),
+    expression: entries
+      .map((m) => m.Expression)
+      .find((e): e is string => typeof e === "string"),
+  };
+}
+
 // CloudWatch alarm descriptions accept the full printable-ASCII set (broader
 // than EC2 SG-ingress descriptions). The invariant Footgun #6 protects
 // against is non-ASCII characters (`->`, `--`, paragraph-sign, etc.) that
@@ -923,20 +978,27 @@ describe("SpsObservabilityStack", () => {
       expect(sub?.Endpoint?.["Fn::GetAtt"]?.[0]).toMatch(/^OncallRelayFunction/);
     });
 
-    it("OncallRelayErrors alarm fires on Lambda Errors >= 1 over 1m and routes to the NOTIFY topic", () => {
+    it("OncallRelayErrors alarm watches Errors + Throttles (#2302) via a MathExpression, threshold >= 1 over 1m, routes to the NOTIFY topic", () => {
       const alarms = template.findResources("AWS::CloudWatch::Alarm", {
         Properties: { AlarmName: "sps-oncall-relay-errors-prod" },
       });
       expect(Object.keys(alarms)).toHaveLength(1);
       const props = Object.values(alarms)[0]?.Properties;
-      expect(props?.MetricName).toBe("Errors");
-      expect(props?.Namespace).toBe("AWS/Lambda");
+
+      // A throttled async invocation increments Throttles, not Errors, so an
+      // Errors-only alarm produces zero signal on a sustained throttle --
+      // even though this Lambda IS the paging path. Both metrics must be
+      // present and summed, not just Errors.
+      const shape = alarmMetricShape(props);
+      expect(shape.names).toEqual(["Errors", "Throttles"]);
+      expect(shape.expression).toBe("errors + throttles");
+      expect(shape.stats).toEqual(["Sum", "Sum"]);
+      expect(shape.periods).toEqual([60, 60]);
+
       expect(props?.Threshold).toBe(1);
       expect(props?.ComparisonOperator).toBe("GreaterThanOrEqualToThreshold");
       expect(props?.EvaluationPeriods).toBe(1);
       expect(props?.DatapointsToAlarm).toBe(1);
-      expect(props?.Period).toBe(60);
-      expect(props?.Statistic).toBe("Sum");
       expect(props?.TreatMissingData).toBe("notBreaching");
 
       // Routes to NOTIFY topic, not page -- SPEC § Failure-mode design.
@@ -952,6 +1014,39 @@ describe("SpsObservabilityStack", () => {
       const actions = props?.AlarmActions as Array<{ Ref?: string }> | undefined;
       expect(actions).toHaveLength(1);
       expect(actions?.[0]?.Ref).toBe(notifyLogicalId);
+    });
+
+    it("OncallRelayErrors alarm still fires on a Throttles-only breach (no Errors) -- the #2302 gap", () => {
+      // This test does not simulate a runtime breach (that's CloudWatch's
+      // job); it asserts the alarm's declared math is capable of one. A
+      // MathExpression's Metrics array carries an id per input plus one
+      // `ReturnData: true` entry for the expression result itself -- if the
+      // Throttles metric were ever dropped from `usingMetrics`, or the
+      // expression stopped summing it, a sustained Throttles-only signal
+      // (e.g. the reserved-concurrency mute path in docs/oncall.md) would
+      // again produce zero signal on this alarm, silently.
+      const alarms = template.findResources("AWS::CloudWatch::Alarm", {
+        Properties: { AlarmName: "sps-oncall-relay-errors-prod" },
+      });
+      const props = Object.values(alarms)[0]?.Properties;
+      const metrics = (
+        Array.isArray(props?.Metrics) ? props.Metrics : []
+      ) as ReadonlyArray<{
+        Id?: string;
+        Expression?: string;
+        ReturnData?: boolean;
+        MetricStat?: { Metric?: { MetricName?: string; Namespace?: string } };
+      }>;
+      const throttlesEntry = metrics.find(
+        (m) => m.MetricStat?.Metric?.MetricName === "Throttles",
+      );
+      expect(throttlesEntry).toBeDefined();
+      expect(throttlesEntry?.MetricStat?.Metric?.Namespace).toBe("AWS/Lambda");
+      const expressionEntry = metrics.find(
+        (m) => typeof m.Expression === "string",
+      );
+      expect(expressionEntry?.Expression).toContain("throttles");
+      expect(expressionEntry?.ReturnData).toBe(true);
     });
 
     it("Lambda function names, alarm name, OncallRelayFunctionArn output description are printable ASCII (Footgun #6)", () => {
