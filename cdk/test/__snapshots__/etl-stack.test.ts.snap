@@ -145,7 +145,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"prod","step":"Hierarchy","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- Hierarchy failed"}},"FailHierarchy":{"Type":"Fail","Cause":"Hierarchy failed"},"AnnualStateMachineUnknownStartFrom":{"Type":"Fail","Error":"UnknownStartFrom","Cause":"unknown startFrom step id"}},"TimeoutSeconds":86400}",
+              "","Message":{"env":"prod","step":"Hierarchy","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- Hierarchy failed"}},"FailHierarchy":{"Type":"Fail","Cause":"Hierarchy failed"},"AnnualStateMachineUnknownStartFrom":{"Type":"Fail","Error":"UnknownStartFrom","Cause":"unknown startFrom step id"}},"TimeoutSeconds":777600}",
             ],
           ],
         },
@@ -7523,7 +7523,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"staging","step":"Hierarchy","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- Hierarchy failed"}},"FailHierarchy":{"Type":"Fail","Cause":"Hierarchy failed"},"AnnualStateMachineUnknownStartFrom":{"Type":"Fail","Error":"UnknownStartFrom","Cause":"unknown startFrom step id"}},"TimeoutSeconds":86400}",
+              "","Message":{"env":"staging","step":"Hierarchy","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- Hierarchy failed"}},"FailHierarchy":{"Type":"Fail","Cause":"Hierarchy failed"},"AnnualStateMachineUnknownStartFrom":{"Type":"Fail","Error":"UnknownStartFrom","Cause":"unknown startFrom step id"}},"TimeoutSeconds":777600}",
             ],
           ],
         },
