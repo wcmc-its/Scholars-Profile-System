@@ -911,7 +911,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "b554c6f523f905efaf0f374014f750fb2cf01295571016dc8b133285bdd03b60.zip",
+          "S3Key": "40a6c38be9bee368944553200381739485999215aa5da304a54ed77717dcb3e2.zip",
         },
         "DeadLetterConfig": {
           "TargetArn": {
@@ -2264,7 +2264,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "b554c6f523f905efaf0f374014f750fb2cf01295571016dc8b133285bdd03b60.zip",
+          "S3Key": "40a6c38be9bee368944553200381739485999215aa5da304a54ed77717dcb3e2.zip",
         },
         "DeadLetterConfig": {
           "TargetArn": {

@@ -344,20 +344,46 @@ function stepFunctionsConsoleUrl(region: string): string {
 }
 
 /**
+ * Console deep-link to the specific FAILING EXECUTION, not just the
+ * state-machine list. Requires the account id (not present on the ETL
+ * payload itself -- the caller derives it from the SNS TopicArn) plus the
+ * state machine and execution names the payload already carries.
+ */
+function executionConsoleUrl(
+  region: string,
+  accountId: string,
+  stateMachine: string,
+  execution: string,
+): string {
+  const executionArn = `arn:aws:states:${region}:${accountId}:execution:${stateMachine}:${execution}`;
+  return `https://${region}.console.aws.amazon.com/states/v2/home?region=${region}#/executions/details/${executionArn}`;
+}
+
+/**
  * Card for an ETL Step Functions event (per-step failure or approval gate).
  * Same no-markdown, truncated, injection-safe posture as the alarm card. Only
  * the fields present on the payload are rendered, so it degrades cleanly as
- * the publisher's message shape evolves.
+ * the publisher's message shape evolves. `severity` and `accountId` are both
+ * optional for the same reason -- a caller (or test) without them still gets
+ * a working card, just without the Severity fact / execution-specific link.
  */
-export function buildEtlCard(payload: EtlEventPayload): AdaptiveCardEnvelope {
+export function buildEtlCard(
+  payload: EtlEventPayload,
+  severity?: AlertSeverity,
+  accountId?: string,
+): AdaptiveCardEnvelope {
   const region = "us-east-1";
   const what = payload.step ?? payload.action ?? "event";
   const env = payload.env ?? "(unknown)";
+  const leadEmoji = severity === "warn" ? WARN_EMOJI : "\u{1F6A8}";
 
   const facts: Array<{ title: string; value: string }> = [
     { title: "Env", value: env },
-    { title: "Step", value: what },
   ];
+  if (severity !== undefined) {
+    facts.push({ title: "Severity", value: severityLabel(severity) });
+  }
+  facts.push({ title: "Step", value: what });
   if (payload.stateMachine !== undefined) {
     facts.push({ title: "State machine", value: payload.stateMachine });
   }
@@ -369,17 +395,31 @@ export function buildEtlCard(payload: EtlEventPayload): AdaptiveCardEnvelope {
     facts.push({ title: "Runbook", value: truncate(payload.runbook, REASON_MAX_CHARS) });
   }
 
+  // Prefer the execution-specific deep link when the payload + caller
+  // together supply everything an execution ARN needs; otherwise fall back
+  // to the state-machine list exactly as today (this file's header promise:
+  // the card degrades cleanly as the publisher's message shape evolves).
+  const executionUrl =
+    accountId !== undefined &&
+    accountId.length > 0 &&
+    payload.stateMachine !== undefined &&
+    payload.stateMachine.length > 0 &&
+    payload.execution !== undefined &&
+    payload.execution.length > 0
+      ? executionConsoleUrl(region, accountId, payload.stateMachine, payload.execution)
+      : undefined;
+
   const actions = [
     {
       type: "Action.OpenUrl",
       title: "View in Step Functions",
-      url: stepFunctionsConsoleUrl(region),
+      url: executionUrl ?? stepFunctionsConsoleUrl(region),
     },
   ];
   const body: Array<Record<string, unknown>> = [
     {
       type: "TextBlock",
-      text: `\u{1F6A8} SPS ETL ${env} \u{2014} ${what}`,
+      text: `${leadEmoji} SPS ETL ${env} \u{2014} ${what}`,
       weight: "Bolder",
       size: "Medium",
       wrap: true,

@@ -62,6 +62,30 @@ function snsEvent(
   };
 }
 
+/** Pull the TextBlock text, FactSet facts, and actions out of a fetch() call's POST body. */
+function cardFromFetch(call: unknown[]): {
+  text: string;
+  facts: Array<{ title: string; value: string }>;
+  actions: Array<{ type: string; title: string; url: string }>;
+} {
+  const body = JSON.parse((call[1] as { body: string }).body) as {
+    attachments: Array<{
+      content: {
+        body: Array<{
+          type: string;
+          text?: string;
+          facts?: Array<{ title: string; value: string }>;
+        }>;
+        actions: Array<{ type: string; title: string; url: string }>;
+      };
+    }>;
+  };
+  const cardContent = body.attachments[0]!.content;
+  const text = cardContent.body.find((b) => b.type === "TextBlock")?.text ?? "";
+  const facts = cardContent.body.find((b) => b.type === "FactSet")?.facts ?? [];
+  return { text, facts, actions: cardContent.actions };
+}
+
 let fetchMock: ReturnType<typeof vi.fn>;
 let consoleLogSpy: ReturnType<typeof vi.spyOn>;
 
@@ -298,6 +322,89 @@ describe("oncall-relay handler", () => {
     const logs = consoleLogSpy.mock.calls.map((c) => String(c[0]));
     const delivered = logs.find((l) => l.includes('"outcome":"delivered"'));
     expect(delivered).toContain('"severity":"warn"');
+  });
+
+  it("ETL card threads the handler-computed severity + the topic ARN's account id into an execution-specific link (#2304)", async () => {
+    sendMock.mockResolvedValueOnce({ SecretString: WEBHOOK_URL });
+    fetchMock.mockResolvedValueOnce(new Response("ok", { status: 202 }));
+
+    await handler(
+      snsEvent(
+        {
+          AlarmName: undefined,
+          env: "prod",
+          step: "Infoed",
+          stateMachine: "scholars-nightly-prod",
+          execution: "abc-123",
+          error: { Error: "States.TaskFailed" },
+        },
+        ETL_TOPIC_ARN, // "arn:aws:sns:us-east-1:0:etl-failures-staging" -> account id "0"
+      ),
+      {} as never,
+      () => undefined,
+    );
+
+    const { text, facts, actions } = cardFromFetch(fetchMock.mock.calls[0]!);
+    // Terminal nightly step failure -> severity refined to "page".
+    expect(text).toBe("\u{1F6A8} SPS ETL prod \u{2014} Infoed");
+    expect(facts.find((f) => f.title === "Severity")?.value).toBe("P1 (page)");
+    expect(actions[0]!.url).toBe(
+      "https://us-east-1.console.aws.amazon.com/states/v2/home?region=us-east-1#/executions/details/arn:aws:states:us-east-1:0:execution:scholars-nightly-prod:abc-123",
+    );
+  });
+
+  it("ETL card leads with the warning glyph and renders a Severity fact for a warn-tier event", async () => {
+    sendMock.mockResolvedValueOnce({ SecretString: WEBHOOK_URL });
+    fetchMock.mockResolvedValueOnce(new Response("ok", { status: 202 }));
+
+    await handler(
+      snsEvent(
+        {
+          AlarmName: undefined,
+          env: "prod",
+          step: "News",
+          stateMachine: "scholars-weekly-prod", // weekly stays warn (days of slack)
+          execution: "def-456",
+          error: { Error: "States.TaskFailed" },
+        },
+        ETL_TOPIC_ARN,
+      ),
+      {} as never,
+      () => undefined,
+    );
+
+    const { text, facts, actions } = cardFromFetch(fetchMock.mock.calls[0]!);
+    expect(text).toBe("\u{26A0}\u{FE0F} SPS ETL prod \u{2014} News");
+    expect(facts.find((f) => f.title === "Severity")?.value).toBe("P2 (warn)");
+    // Execution link still fires regardless of severity tier.
+    expect(actions[0]!.url).toContain("/executions/details/");
+  });
+
+  it("a malformed TopicArn (too few segments) degrades to no account id -- ETL card falls back to the state-machine-list URL, not a throw", async () => {
+    sendMock.mockResolvedValueOnce({ SecretString: WEBHOOK_URL });
+    fetchMock.mockResolvedValueOnce(new Response("ok", { status: 202 }));
+
+    await handler(
+      snsEvent(
+        {
+          AlarmName: undefined,
+          env: "prod",
+          step: "Infoed",
+          stateMachine: "scholars-nightly-prod",
+          execution: "abc-123",
+          error: { Error: "States.TaskFailed" },
+        },
+        "arn:aws:sns:us-east-1", // malformed: no account id / topic name segments
+      ),
+      {} as never,
+      () => undefined,
+    );
+
+    const { actions } = cardFromFetch(fetchMock.mock.calls[0]!);
+    expect(actions[0]!.url).toBe(
+      "https://us-east-1.console.aws.amazon.com/states/home?region=us-east-1#/statemachines",
+    );
+    expect(actions[0]!.url).not.toContain("/executions/details/");
   });
 
   it("an approval-gate event on the same topic stays a warn (no step/error)", async () => {
