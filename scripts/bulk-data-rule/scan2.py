@@ -41,12 +41,19 @@ SIG = {
  #   Zenodo 10.5281/zenodo.<digits>, figshare 10.6084/m9.figshare.<digits>[.v<digits>],
  #   Dryad 10.5061/dryad.<alnum>, OSF 10.17605/osf.io/<alnum>, Mendeley 10.17632/<alnum>[.<digits>],
  #   Harvard Dataverse 10.7910/dvn/<alnum>.
+ #
+ # ponytail: the four `[a-z0-9]+`-suffix patterns below are length-capped at {4,20} — `full =
+ # "".join(root.itertext())` (below) glues adjacent XML text nodes with NO separator, and an
+ # unbounded alnum class run into whatever text immediately follows (a PMCID, a page number, an
+ # author surname) with no space to stop it at. Caught in production: a real row came back as
+ # `10.5061/dryad.rb1bt3jPMC651663431086362ChauJ` — real suffix `rb1bt3j`, then a PMCID/number/
+ # name all glued on. 20 is generous headroom above any real suffix length seen for these repos.
  "Zenodo":           ([], rx([r"10\.5281/zenodo\.\d+", r"zenodo\.org"]), rx([r"\bzenodo\b"])),
  "figshare":         ([], rx([r"10\.6084/m9\.figshare\.\d+(?:\.v\d+)?", r"figshare\.com"]), rx([r"\bfigshare\b"])),
- "Dryad":            ([], rx([r"10\.5061/dryad\.[a-z0-9]+", r"datadryad\.org"]), rx([r"\bdryad\b"])),
- "OSF":              ([], rx([r"10\.17605/osf\.io/[a-z0-9]+", r"osf\.io"]), rx([r"open science framework"])),
- "Mendeley Data":    ([], rx([r"10\.17632/[a-z0-9]+(?:\.\d+)?", r"data\.mendeley\.com"]), rx([r"mendeley data"])),
- "Harvard Dataverse":([], rx([r"10\.7910/dvn/[a-z0-9]+", r"dataverse\.harvard"]), rx([r"harvard dataverse"])),
+ "Dryad":            ([], rx([r"10\.5061/dryad\.[a-z0-9]{4,20}", r"datadryad\.org"]), rx([r"\bdryad\b"])),
+ "OSF":              ([], rx([r"10\.17605/osf\.io/[a-z0-9]{4,20}", r"osf\.io"]), rx([r"open science framework"])),
+ "Mendeley Data":    ([], rx([r"10\.17632/[a-z0-9]{4,20}(?:\.\d+)?", r"data\.mendeley\.com"]), rx([r"mendeley data"])),
+ "Harvard Dataverse":([], rx([r"10\.7910/dvn/[a-z0-9]{4,20}", r"dataverse\.harvard"]), rx([r"harvard dataverse"])),
 
  "OpenNeuro":        (rx([r"\bds\d{6}\b"]), rx([r"openneuro\.org"]), rx([r"openneuro"])),
  "NDA (NIMH Data Archive)":([], rx([r"nda\.nih\.gov"]), rx([r"nimh data archive", r"national database for autism"])),
