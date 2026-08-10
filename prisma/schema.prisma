@@ -134,6 +134,7 @@ model Scholar {
   nihProfiles          PersonNihProfile[]
   reporterCandidates   ReporterProfileCandidate[]
   clinicalTrials       PersonClinicalTrial[]
+  datasetDeposits      PersonDatasetDeposit[]
   overviewGenerations  OverviewGeneration[]
   biosketchGenerations BiosketchGeneration[]
   overviewProvenance   OverviewProvenance?
@@ -739,6 +740,61 @@ model PersonClinicalTrial {
   @@index([cwid])
   @@index([protocolNumber])
   @@map("person_clinical_trial")
+}
+
+/// A dataset deposit (S-Index / Bulk Data Rule spec). One row per
+/// (repository, accessionOrDoi) shared across every depositing/citing
+/// researcher — co-authors on the same dataset share one row; per-person
+/// attribution lives on `PersonDatasetDeposit`. Full-replaced each ETL run,
+/// same shape as `ClinicalTrial` above, except keyed by a generated id
+/// (unlike `ClinicalTrial.protocolNumber`) since accession/DOI strings need
+/// normalization before they're reliably usable as a literal primary key.
+model DatasetDeposit {
+  id             String    @id @default(uuid()) @db.VarChar(64)
+  repository     String    @db.VarChar(64) // canonical name, from catalog.py
+  accessionOrDoi String    @map("accession_or_doi") @db.VarChar(255)
+  /// DataCite resourceTypeGeneral; null for accession-based (non-DOI) repos.
+  resourceType   String?   @map("resource_type") @db.VarChar(32)
+  /// Repo-native bucket, or MeSH-derived; enrichment field, may be null.
+  dataType       String?   @map("data_type") @db.VarChar(64)
+  /// 'open' | 'controlled'.
+  accessModel    String?   @map("access_model") @db.VarChar(16)
+  /// Repo metadata where available, else pub year.
+  depositYear    Int?      @map("deposit_year")
+  /// 'databank' | 'fulltext-scan'.
+  provenance     String    @db.VarChar(16)
+  /// 'high' | 'low' | 'unclear' — null for databank rows.
+  confidence     String?   @db.VarChar(16)
+  source         String    @default("reciterdb.dataset_deposit") @db.VarChar(48)
+  lastRefreshedAt DateTime @default(now()) @map("last_refreshed_at")
+
+  deposits PersonDatasetDeposit[]
+
+  @@unique([repository, accessionOrDoi])
+  @@map("dataset_deposit")
+}
+
+/// A scholar's association with a dataset deposit (the cwid spine). One row
+/// per (cwid, datasetId) — a dataset with several WCM depositors/authors
+/// yields one `DatasetDeposit` and several of these.
+model PersonDatasetDeposit {
+  cwid            String         @db.VarChar(32)
+  scholar         Scholar        @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  datasetId       String         @map("dataset_id") @db.VarChar(64)
+  dataset         DatasetDeposit @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  /// 'first' | 'last' | 'middle' — required per spec Attribution: display vs.
+  /// metric. Display reads all rows; metric queries filter position IN
+  /// ('first','last').
+  authorPosition  String         @map("author_position") @db.VarChar(16)
+  /// Provenance pmids, JSON array — the citing publications for this
+  /// (cwid, dataset) pair.
+  pmids           Json
+  lastRefreshedAt DateTime       @default(now()) @map("last_refreshed_at")
+
+  @@id([cwid, datasetId])
+  @@index([cwid])
+  @@index([datasetId])
+  @@map("person_dataset_deposit")
 }
 
 /// Grants from InfoEd, filtered per spec line 125 (Confidential != 'Y',
@@ -2091,6 +2147,11 @@ enum EntityType {
   // role=owner), Superuser-granted — so they can review/claim that core's
   // candidate publications. Never a field_override or suppression target.
   core
+  // + data-sharing suppression (S-Index spec). entityId is DatasetDeposit.id;
+  // contributorCwid is set (per-person hide) — a wrong extraction on one
+  // researcher's profile shouldn't suppress it for every co-author.
+  // Suppression-only, like mentee — never a field_override or unit_admin target.
+  dataset_deposit
 }
 
 /// Per-unit administrator role (ADR-005 Amendment 1 § A1.2 / #540). One row

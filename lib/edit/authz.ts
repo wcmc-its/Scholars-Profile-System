@@ -105,6 +105,11 @@ export function authorizeFieldEdit(
  *   - publication, per-author                  → the actor suppressing *themselves* as a
  *                                                contributor, or a superuser
  *   - publication, whole-entity                → superuser only (retraction / takedown)
+ *   - dataset_deposit, per-contributor          → same as publication per-author (Phase 2
+ *                                                data-sharing) — a wrong extraction on one
+ *                                                co-author's profile shouldn't take down
+ *                                                the whole dataset row
+ *   - dataset_deposit, whole-entity             → superuser only, same as publication
  *
  * Scholar and grant/education/appointment/mentee suppressions never carry a
  * `contributorCwid`. For the whole-entity types the owning scholar's cwid
@@ -117,7 +122,14 @@ export function authorizeFieldEdit(
 export function authorizeSuppress(
   session: EditSession,
   target: {
-    entityType: "scholar" | "publication" | "grant" | "education" | "appointment" | "mentee";
+    entityType:
+      | "scholar"
+      | "publication"
+      | "grant"
+      | "education"
+      | "appointment"
+      | "mentee"
+      | "dataset_deposit";
     entityId: string;
     contributorCwid?: string | null;
     /** Owner cwid of a whole-entity grant/education/appointment/mentee target. */
@@ -150,13 +162,14 @@ export function authorizeSuppress(
       : { ok: false, reason: "not_self" };
   }
 
-  // publication
+  // publication / dataset_deposit — both are per-contributor, contributor
+  // optional (null = whole-entity takedown, superuser only).
   const contributor = target.contributorCwid ?? null;
   if (contributor === null) {
-    // whole-publication takedown — superuser only (handled above)
+    // whole-entity takedown — superuser only (handled above)
     return { ok: false, reason: "not_superuser" };
   }
-  // per-author hide — a scholar may suppress only themselves as a contributor
+  // per-author/per-contributor hide — a scholar may suppress only themselves
   return session.cwid === contributor ? ALLOW : { ok: false, reason: "not_self" };
 }
 

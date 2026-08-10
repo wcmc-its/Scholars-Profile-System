@@ -22,6 +22,7 @@ import { EditMyProfileButton } from "@/components/scholar/edit-my-profile-button
 import { Suspense } from "react";
 import { GrantsSection } from "@/components/profile/grants-section";
 import { ClinicalTrialsSection } from "@/components/profile/clinical-trials-section";
+import { DatasetsSection } from "@/components/profile/datasets-section";
 import { TechnologiesSection } from "@/components/profile/technologies-section";
 import { NewsSection } from "@/components/profile/news-section";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
@@ -645,6 +646,20 @@ export async function ProfileView({ slug }: { slug: string }) {
               }}
             >
               <ClinicalTrialsSection trials={profile.clinicalTrials} />
+            </Section>
+          ) : null}
+
+          {profile.datasets.length > 0 ? (
+            <Section
+              id="datasets"
+              title="Datasets"
+              headingLg
+              count={{
+                value: profile.datasets.length,
+                unit: profile.datasets.length === 1 ? "dataset" : "datasets",
+              }}
+            >
+              <DatasetsSection datasets={profile.datasets} />
             </Section>
           ) : null}
 

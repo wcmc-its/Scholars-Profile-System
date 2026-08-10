@@ -419,6 +419,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "DATA_SHARING_SECTION",
+                "Value": "off",
+              },
+              {
                 "Name": "AVAILABLE_TECHNOLOGIES_SECTION",
                 "Value": "on",
               },
@@ -4635,6 +4639,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "CLINICAL_TRIALS_SECTION",
+                "Value": "on",
+              },
+              {
+                "Name": "DATA_SHARING_SECTION",
                 "Value": "on",
               },
               {

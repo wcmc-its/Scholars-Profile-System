@@ -304,6 +304,52 @@ export async function loadAllPublicationSuppressions(
   return { darkPmids, hiddenAuthorsByPmid };
 }
 
+/** Same shape as {@link PublicationSuppressions}, generalized for any
+ *  per-contributor-suppressible entity type beyond publication. */
+export type ContributorSuppressions = {
+  readonly darkIds: ReadonlySet<string>;
+  readonly hiddenContributorsById: ReadonlyMap<string, ReadonlySet<string>>;
+};
+
+const NO_CONTRIBUTOR_SUPPRESSIONS: ContributorSuppressions = {
+  darkIds: new Set(),
+  hiddenContributorsById: new Map(),
+};
+
+/**
+ * Load every active per-contributor suppression covering `entityIds` of one
+ * entity type — same logic as {@link loadPublicationSuppressions}
+ * (`contributorCwid` null = whole-entity dark; else that one contributor
+ * hidden), generalized so a second per-contributor entity type (Phase 2
+ * `dataset_deposit`) doesn't need its own bespoke pmid-shaped loader. Kept
+ * separate from {@link loadEntitySuppressions} (whole-entity only, no
+ * contributor dimension) rather than merging the two shapes.
+ */
+export async function loadContributorSuppressions(
+  entityType: "dataset_deposit",
+  entityIds: readonly string[],
+  client: SuppressionReadClient,
+): Promise<ContributorSuppressions> {
+  if (entityIds.length === 0) return NO_CONTRIBUTOR_SUPPRESSIONS;
+  const rows = await client.suppression.findMany({
+    where: { entityType, entityId: { in: [...new Set(entityIds)] }, revokedAt: null },
+    select: { entityId: true, contributorCwid: true },
+  });
+  if (rows.length === 0) return NO_CONTRIBUTOR_SUPPRESSIONS;
+  const darkIds = new Set<string>();
+  const hiddenContributorsById = new Map<string, Set<string>>();
+  for (const row of rows) {
+    if (row.contributorCwid === null) {
+      darkIds.add(row.entityId);
+    } else {
+      const hidden = hiddenContributorsById.get(row.entityId) ?? new Set<string>();
+      hidden.add(row.contributorCwid);
+      hiddenContributorsById.set(row.entityId, hidden);
+    }
+  }
+  return { darkIds, hiddenContributorsById };
+}
+
 // ---------------------------------------------------------------------------
 // Whole-entity suppression (grant / education / appointment) — #160.
 //

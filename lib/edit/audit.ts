@@ -235,7 +235,11 @@ export type AuditEntityType =
    *  `cancer_center_funding_award.id`. The cycle IMPORT that produces the row is
    *  machine-run (`scripts/backfills/*-cancer-center-nci-2a-import.ts`) and is
    *  NOT audited — same posture as every ETL ingest (e.g. news mentions). */
-  | "cancer_funding_award";
+  | "cancer_funding_award"
+  /** a data-sharing suppression (Phase 2, S-Index spec) — per-contributor hide
+   *  or superuser whole-entity takedown of a `dataset_deposit` row via
+   *  `/api/edit/suppress`; `targetEntityId` is the `dataset_deposit.id`. */
+  | "dataset_deposit";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

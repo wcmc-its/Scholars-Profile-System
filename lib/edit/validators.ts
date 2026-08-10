@@ -67,6 +67,7 @@ export const SECTION_VISIBILITY_FIELDS = [
   "hideMethods",
   "hideTechnologies",
   "hideNews",
+  "hideDatasets",
 ] as const;
 export type SectionVisibilityField = (typeof SECTION_VISIBILITY_FIELDS)[number];
 
@@ -495,6 +496,26 @@ export async function publicationAuthorshipExists(
   const row = await client.publicationAuthor.findFirst({
     where: { pmid, cwid, isConfirmed: true },
     select: { id: true },
+  });
+  return row !== null;
+}
+
+/** The Prisma surface `datasetDepositExists` needs. */
+type DatasetDepositLookupClient = Pick<PrismaClient, "personDatasetDeposit">;
+
+/**
+ * Whether `cwid` has an attribution row on `datasetId` (any author position —
+ * display scope). Same role as `publicationAuthorshipExists`: a per-contributor
+ * dataset hide with no such attribution has nothing to suppress → 400.
+ */
+export async function datasetDepositExists(
+  datasetId: string,
+  cwid: string,
+  client: DatasetDepositLookupClient,
+): Promise<boolean> {
+  const row = await client.personDatasetDeposit.findUnique({
+    where: { cwid_datasetId: { cwid, datasetId } },
+    select: { cwid: true },
   });
   return row !== null;
 }

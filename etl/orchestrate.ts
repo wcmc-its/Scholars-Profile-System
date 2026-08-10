@@ -98,6 +98,11 @@ async function main() {
     // no-op-safe (0 rows when reciterdb is unreachable) like the other
     // reciterdb sources, so it is safe in the chain on the same footing.
     ["Clinical-Trials", "etl/clinical-trials/index.ts"],
+    // Data-sharing deposits (Phase 2, S-Index spec). Same reciterdb path and
+    // #443 dependency as Clinical-Trials above; full-replace and no-op-safe.
+    // Produces no real rows until the reciterdb-side dataset_deposit table
+    // lands (separate scripts/bulk-data-rule/ prerequisite, not yet built).
+    ["Data-Sharing", "etl/data-sharing/index.ts"],
     // CTL available technologies. Scrapes innovation.weill.cornell.edu (public
     // internet, not the WCM network) and joins on the cwid CTL embeds in each
     // PI's VIVO link. Its cwid FK targets `scholar`, so it must run after the ED

@@ -55,7 +55,7 @@ describe("isEditableField", () => {
 // ---------------------------------------------------------------------------
 
 describe("section visibility", () => {
-  it("SECTION_VISIBILITY_FIELDS lists the nine hideable sections + hideEducationYears", () => {
+  it("SECTION_VISIBILITY_FIELDS lists the ten hideable sections + hideEducationYears", () => {
     expect([...SECTION_VISIBILITY_FIELDS]).toEqual([
       "hideMentoring",
       "hideEducation",
@@ -69,6 +69,7 @@ describe("section visibility", () => {
       "hideMethods",
       "hideTechnologies",
       "hideNews",
+      "hideDatasets",
     ]);
   });
 

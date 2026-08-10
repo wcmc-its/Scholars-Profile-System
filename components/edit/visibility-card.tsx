@@ -83,7 +83,7 @@ export type SectionVisibilityCardState = {
   availableTechnologies?: boolean;
 };
 
-/** The eight hideable sections, in display order. `recordAttr` links the audit
+/** The nine hideable sections, in display order. `recordAttr` links the audit
  *  count to that section's record-level card; `null` = no per-record hiding.
  *  `hideTechnologies` is applicability-gated (see `SectionsPanel`) — it only
  *  renders for a scholar who actually has a CTL technologies section. */
@@ -96,6 +96,7 @@ const SECTION_PANEL_DEFS = [
   { key: "hideClinicalTrials", label: "Clinical research", recordAttr: null, countKey: null },
   { key: "hideMethods", label: "Methods & Tools", recordAttr: null, countKey: null },
   { key: "hideTechnologies", label: "Available technologies", recordAttr: null, countKey: null },
+  { key: "hideDatasets", label: "Datasets", recordAttr: null, countKey: null },
 ] as const;
 
 type SuppressionRow = { id: string; reason: string };
@@ -396,7 +397,7 @@ function SectionsPanel({
   const poss = showThirdPerson ? `${scholarName ?? "this scholar"}'s` : "your";
   const confirmDef = SECTION_PANEL_DEFS.find((d) => d.key === confirmKey);
 
-  // Applicability gate — only `hideTechnologies` is conditional; the other seven
+  // Applicability gate — only `hideTechnologies` is conditional; the other eight
   // render for every scholar. The CTL "Available technologies" section exists
   // only when AVAILABLE_TECHNOLOGIES_SECTION is on AND the scholar has ≥1
   // invention (`state.availableTechnologies`, the same gate the #1639 rail row
