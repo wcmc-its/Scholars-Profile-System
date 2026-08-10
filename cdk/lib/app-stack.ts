@@ -1861,14 +1861,16 @@ export class AppStack extends Stack {
         // read === "on"; a not-yet-reindexed cluster simply matches absent
         // fields (never a 500 -- the facet just renders as absent, since the
         // UI only shows a control once its facet bucket has a nonzero count).
-        // STAGING-FIRST like every flag above: on for staging (soak once
-        // staging is reindexed + the CDK app image is deployed there), off
-        // for prod until a staging eyeball + a separate prod reindex + flip.
-        // Two independent kill switches on purpose: SEARCH_PEOPLE_CLINICAL_RANK_FACETS
-        // is a low-risk direct-column copy; SEARCH_PEOPLE_ESI_FACET is the
-        // riskier, novel derivation and gets its own lever.
-        SEARCH_PEOPLE_CLINICAL_RANK_FACETS: env === "staging" ? "on" : "off",
-        SEARCH_PEOPLE_ESI_FACET: env === "staging" ? "on" : "off",
+        // Staging soaked + reindexed 2026-08-07 (API + browser eyeball both
+        // clean, incl. a live click-through: earlyStageInvestigator=true
+        // correctly narrowed a 4,280-result query to 841 and recomputed every
+        // other facet under it). Prod-on 2026-08-10, paired with a prod
+        // reindex on the same day. Two independent kill switches on purpose:
+        // SEARCH_PEOPLE_CLINICAL_RANK_FACETS is a low-risk direct-column
+        // copy; SEARCH_PEOPLE_ESI_FACET is the riskier, novel derivation and
+        // gets its own lever.
+        SEARCH_PEOPLE_CLINICAL_RANK_FACETS: "on",
+        SEARCH_PEOPLE_ESI_FACET: "on",
         // #824 follow-up -- match-aware People-results "why" line (method/topic/
         // humanized-areas snippet). APP-ONLY, no reindex: derives from
         // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-
