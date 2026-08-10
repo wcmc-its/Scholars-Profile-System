@@ -26,6 +26,7 @@
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
+import { normalizeAwardNumber } from "@/lib/award-number";
 import { db } from "@/lib/db";
 import { canEditUnit, getEffectiveUnitRole, logEditDenial, type UnitAdminLookup } from "@/lib/edit/authz";
 import { editError, editOk, resolveEditIdentity } from "@/lib/edit/request";
@@ -67,10 +68,16 @@ export async function GET(
   }
 
   const requestedCycle = request.nextUrl.searchParams.get("cycle");
-  // Independent reads — neither depends on the other's result — so they run
+  // Independent reads — none depends on another's result — so they run
   // concurrently (the import script's own analogous three-way read already
   // does this; this route didn't follow its own sibling's pattern).
-  const [programs, latestCycle] = await Promise.all([
+  //
+  // `grants` re-does the SAME award-number join the import script's own
+  // `normalizeAwardNumber` does to resolve `grantCwid`, but for `applId`
+  // instead — done at READ TIME (not backfilled onto the award row at import)
+  // so a later RePORTER-matching ETL run that fills in more `Grant.applId`
+  // values shows up here immediately, with no re-import needed.
+  const [programs, latestCycle, grants] = await Promise.all([
     db.read.centerProgram.findMany({
       where: { centerCode: center.code },
       orderBy: { sortOrder: "asc" },
@@ -83,8 +90,33 @@ export async function GET(
           orderBy: { reportingCycle: "desc" },
           select: { reportingCycle: true },
         }),
+    db.read.grant.findMany({
+      where: { awardNumber: { not: null } },
+      select: { awardNumber: true, applId: true },
+    }),
   ]);
   const programLabel = new Map(programs.map((p) => [p.code, p.label]));
+  // Mirrors `buildAwardNumberIndex`'s ambiguous-never-guessed posture (see
+  // `scripts/backfills/2026-08-08-cancer-center-nci-2a-import.ts`): when a
+  // normalized award number matches more than one DISTINCT applId across
+  // `Grant` rows, which one is "right" is undefined, so leave the key unset
+  // rather than picking whichever DB-ordering happens to come last — a wrong
+  // applId is a live outbound link to a specific (possibly wrong) RePORTER
+  // project page, silently wrong until clicked. Multiple Grant rows sharing
+  // the SAME award number and the SAME applId are not ambiguous and resolve
+  // normally.
+  const applIdsSeenByAwardNumber = new Map<string, Set<number>>();
+  for (const g of grants) {
+    if (!g.awardNumber || g.applId == null) continue;
+    const key = normalizeAwardNumber(g.awardNumber);
+    if (!applIdsSeenByAwardNumber.has(key)) applIdsSeenByAwardNumber.set(key, new Set());
+    applIdsSeenByAwardNumber.get(key)!.add(g.applId);
+  }
+  const applIdByAwardNumber = new Map<string, number>();
+  for (const [key, applIds] of applIdsSeenByAwardNumber) {
+    if (applIds.size === 1) applIdByAwardNumber.set(key, [...applIds][0]);
+    // size > 1: ambiguous — leave unset, resolves to null at lookup below.
+  }
 
   const cycle = requestedCycle ?? latestCycle?.reportingCycle ?? null;
   if (!cycle) return editOk({ cycle: null, programs, awards: [] });
@@ -119,6 +151,7 @@ export async function GET(
       cancerRelevantRationale: a.cancerRelevantRationale,
       cancerRelevantAnnualProjectDc,
       grantCwid: a.grantCwid,
+      applId: applIdByAwardNumber.get(normalizeAwardNumber(a.projectNumber)) ?? null,
       allocations: a.allocations.map((al) => {
         const programPercent = Number(al.programPercent);
         const annualProgramDirectCosts =

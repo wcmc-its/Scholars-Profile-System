@@ -28,6 +28,7 @@ const {
   mockAwardFindFirst,
   mockAwardFindUnique,
   mockTxAwardUpdate,
+  mockGrantFindMany,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -39,6 +40,7 @@ const {
   mockAwardFindFirst: vi.fn(),
   mockAwardFindUnique: vi.fn(),
   mockTxAwardUpdate: vi.fn(),
+  mockGrantFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
@@ -63,6 +65,7 @@ vi.mock("@/lib/db", () => ({
         findFirst: mockAwardFindFirst,
         findUnique: mockAwardFindUnique,
       },
+      grant: { findMany: mockGrantFindMany },
     },
     write: { $transaction: mockTransaction },
   },
@@ -103,6 +106,7 @@ beforeEach(() => {
   mockCenterFindUnique.mockResolvedValue(CENTER);
   mockUnitAdminFindMany.mockResolvedValue([{ entityType: "center", entityId: CENTER.code, role: "curator" }]);
   mockCenterProgramFindMany.mockResolvedValue(PROGRAMS);
+  mockGrantFindMany.mockResolvedValue([]);
   mockTransaction.mockImplementation(async (cb: (tx: typeof fakeTx) => unknown) => cb(fakeTx));
   mockExecuteRaw.mockResolvedValue(1);
   mockTxAwardUpdate.mockResolvedValue({ id: "award-1" });
@@ -143,6 +147,13 @@ describe("GET /api/edit/center/[code]/nci-2a", () => {
   });
 
   it("shapes allocations and computes the derived $ columns", async () => {
+    mockGrantFindMany.mockResolvedValue([
+      // Case/whitespace differ from the award's projectNumber — the
+      // normalize-and-match join must still resolve this.
+      { awardNumber: "5 r01   ca000000-01", applId: 999 },
+      // A match whose Grant has no applId yet — must not produce a value.
+      { awardNumber: "5 R01 CA111111-01", applId: null },
+    ]);
     mockAwardFindMany.mockResolvedValue([
       {
         id: "award-1",
@@ -159,6 +170,36 @@ describe("GET /api/edit/center/[code]/nci-2a", () => {
         grantCwid: "abc1234",
         allocations: [{ id: "alloc-1", programCode: "CB", programPercent: 40, source: "membership" }],
       },
+      {
+        id: "award-2",
+        pi: "Other, PI",
+        specificFundingSource: "NCI",
+        projectNumber: "5 R01 CA111111-01", // matches a Grant, but its applId is null
+        projectTitle: "Another project",
+        projectStartDate: new Date("2024-01-01T00:00:00Z"),
+        projectEndDate: new Date("2028-12-31T00:00:00Z"),
+        annualProjectDirectCosts: 100000,
+        cancerRelevantPercent: null,
+        cancerRelevantPercentSource: "llm",
+        cancerRelevantRationale: null,
+        grantCwid: null,
+        allocations: [],
+      },
+      {
+        id: "award-3",
+        pi: "Third, PI",
+        specificFundingSource: "NCI",
+        projectNumber: "OCRA-2024-091", // no Grant matches at all
+        projectTitle: "Unmatched project",
+        projectStartDate: new Date("2024-01-01T00:00:00Z"),
+        projectEndDate: new Date("2028-12-31T00:00:00Z"),
+        annualProjectDirectCosts: 50000,
+        cancerRelevantPercent: null,
+        cancerRelevantPercentSource: "llm",
+        cancerRelevantRationale: null,
+        grantCwid: null,
+        allocations: [],
+      },
     ]);
     const res = await GET(get("http://localhost/x?cycle=osra-2026-07-14"), {
       params: Promise.resolve({ code: "meyer_cancer_center" }),
@@ -168,6 +209,69 @@ describe("GET /api/edit/center/[code]/nci-2a", () => {
     expect(award.cancerRelevantAnnualProjectDc).toBe(100000); // 200000 * 50%
     expect(award.allocations[0].programLabel).toBe("Cancer Biology");
     expect(award.allocations[0].annualProgramDirectCosts).toBe(40000); // 100000 * 40%
+    expect(award.applId).toBe(999);
+    expect(json.awards[1].applId).toBeNull(); // matched Grant, but its applId is null
+    expect(json.awards[2].applId).toBeNull(); // no matching Grant at all
+  });
+
+  it("leaves applId null when the same award number resolves to two different Grant.applId values — never guesses", async () => {
+    mockGrantFindMany.mockResolvedValue([
+      { awardNumber: "5 R01 CA000000-01", applId: 111 },
+      // Same normalized award number, a DIFFERENT applId — ambiguous, must
+      // not silently pick one (mirrors buildAwardNumberIndex's cwid posture).
+      { awardNumber: "5 r01   ca000000-01", applId: 222 },
+    ]);
+    mockAwardFindMany.mockResolvedValue([
+      {
+        id: "award-1",
+        pi: "Test, PI",
+        specificFundingSource: "NCI",
+        projectNumber: "5 R01 CA000000-01",
+        projectTitle: "A cancer project",
+        projectStartDate: new Date("2024-01-01T00:00:00Z"),
+        projectEndDate: new Date("2028-12-31T00:00:00Z"),
+        annualProjectDirectCosts: 200000,
+        cancerRelevantPercent: 50,
+        cancerRelevantPercentSource: "llm",
+        cancerRelevantRationale: "because",
+        grantCwid: "abc1234",
+        allocations: [],
+      },
+    ]);
+    const res = await GET(get("http://localhost/x?cycle=osra-2026-07-14"), {
+      params: Promise.resolve({ code: "meyer_cancer_center" }),
+    });
+    const json = await res.json();
+    expect(json.awards[0].applId).toBeNull();
+  });
+
+  it("still resolves applId when multiple Grant rows share the same award number AND the same applId", async () => {
+    mockGrantFindMany.mockResolvedValue([
+      { awardNumber: "5 R01 CA000000-01", applId: 999 },
+      { awardNumber: "5 r01   ca000000-01", applId: 999 },
+    ]);
+    mockAwardFindMany.mockResolvedValue([
+      {
+        id: "award-1",
+        pi: "Test, PI",
+        specificFundingSource: "NCI",
+        projectNumber: "5 R01 CA000000-01",
+        projectTitle: "A cancer project",
+        projectStartDate: new Date("2024-01-01T00:00:00Z"),
+        projectEndDate: new Date("2028-12-31T00:00:00Z"),
+        annualProjectDirectCosts: 200000,
+        cancerRelevantPercent: 50,
+        cancerRelevantPercentSource: "llm",
+        cancerRelevantRationale: "because",
+        grantCwid: "abc1234",
+        allocations: [],
+      },
+    ]);
+    const res = await GET(get("http://localhost/x?cycle=osra-2026-07-14"), {
+      params: Promise.resolve({ code: "meyer_cancer_center" }),
+    });
+    const json = await res.json();
+    expect(json.awards[0].applId).toBe(999);
   });
 });
 

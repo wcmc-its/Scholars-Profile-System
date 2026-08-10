@@ -162,3 +162,20 @@ export function gatesGrantId(awardNumber: string | null | undefined): string | n
   const tail = prefix === "INV" && digits.length < 6 ? digits.padStart(6, "0") : digits;
   return `${prefix}-${tail}`;
 }
+
+/**
+ * Shared join-key normalizer for matching two verbatim award-number strings
+ * against each other for plain string equality — NOT NIH-structure parsing
+ * like `parseNihAward`/`coreProjectNum` above. Trims, collapses internal
+ * whitespace runs to a single space, and uppercases, tolerating the
+ * whitespace/case differences between two independently-typed award-number
+ * strings.
+ *
+ * Used by both the NCI Table 2A import script
+ * (`scripts/backfills/2026-08-08-cancer-center-nci-2a-import.ts`) and its GET
+ * route (`app/api/edit/center/[code]/nci-2a/route.ts`) to match OSRA/DB
+ * award-number strings against `Grant.awardNumber`.
+ */
+export function normalizeAwardNumber(raw: string): string {
+  return raw.trim().replace(/\s+/g, " ").toUpperCase();
+}
