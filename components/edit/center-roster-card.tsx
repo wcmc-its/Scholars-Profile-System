@@ -9,16 +9,18 @@
  * derived Active / Pending / Inactive status (the #552 §3.3 active filter,
  * inclusive boundaries, nulls open).
  *
- * Two ADDITIVE filters, both default OFF, so they read the same way: "show
- * inactive members" reveals Pending + Inactive, "show departed members" reveals
- * people who have left WCM. The default view is the current, non-departed
- * membership. (These used to have opposite polarity — a restrictive, default-ON
- * "show active only" beside an additive "show departed" — so seeing everything
- * meant unchecking one and checking the other.)
+ * ONE mutually-exclusive filter — All members (default) / Inactive members only
+ * / Departed members only — so the roster opens on the whole thing and nothing
+ * is ever silently hidden. Two independent "X only" checkboxes could not say
+ * this honestly: both unchecked reads as no restriction, both checked as an
+ * impossible intersection. (It was previously a restrictive, default-ON "show
+ * active only" beside an additive "show departed", opposite polarities for the
+ * same intent.)
  *
  * A row whose person has left WCM while the membership is still open is tinted
  * amber and its End field outlined, because that is the combination this card
- * exists to surface and the End date is what resolves it.
+ * exists to surface and the End date is what resolves it. The count of those
+ * rows drives the nudge above the table — outstanding work, not hidden rows.
  *
  * Inline edits POST `/api/edit/roster` `action:"set"` one field at a time
  * (a field present as `null` clears it). Add → `action:"add"`, Remove →
@@ -40,8 +42,8 @@ import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 export type RosterMember = {
   cwid: string;
@@ -74,6 +76,9 @@ export type CenterRosterCardProps = {
 
 type Status = "active" | "pending" | "inactive";
 
+/** The three mutually-exclusive roster views. `all` is the default. */
+type RosterFilter = "all" | "inactive" | "departed";
+
 /** #552 §3.3 active filter, inclusive boundaries, nulls open. */
 function statusOf(member: RosterMember, today: string): Status {
   if (member.startDate && member.startDate > today) return "pending";
@@ -96,15 +101,12 @@ export function CenterRosterCard({
   const hasPrograms = programs.length > 0;
 
   const [members, setMembers] = React.useState<RosterMember[]>(() => [...initial]);
-  // Both filters are ADDITIVE reveals, default OFF, so they read the same way.
-  // This was "Show active only" — restrictive and default ON — which meant
-  // seeing everything took UNchecking one box and CHECKING the other, opposite
-  // polarities for the same intent. The default view is unchanged: current,
-  // non-departed membership.
-  const [showInactive, setShowInactive] = React.useState(false);
-  // Default HIDDEN: the roster reads as the current membership until asked
-  // otherwise. The hidden-count hint below keeps that from being silent.
-  const [showDeparted, setShowDeparted] = React.useState(false);
+  // One mutually-exclusive filter, defaulting to the WHOLE roster. Two
+  // checkboxes could not express "only" honestly: two independent "X only"
+  // boxes both unchecked means no restriction, and both checked means an
+  // impossible intersection. A radio makes the three states the curator
+  // actually wants explicit, and nothing is ever silently hidden.
+  const [filter, setFilter] = React.useState<RosterFilter>("all");
   const [addValue, setAddValue] = React.useState<DirectoryValue | null>(null);
   const [adding, setAdding] = React.useState(false);
   const [removeTarget, setRemoveTarget] = React.useState<RosterMember | null>(null);
@@ -210,18 +212,19 @@ export function CenterRosterCard({
     void patch(m.cwid, { endDate });
   }
 
-  const visibleByStatus = showInactive
-    ? members
-    : members.filter((m) => statusOf(m, now) === "active");
-  // The two filters are independent axes: membership dates vs. whether the
-  // person is still at WCM. Departed members are hidden LAST so the count below
-  // reports what this specific toggle is holding back, not the combined effect.
-  const departedHidden = showDeparted
-    ? 0
-    : visibleByStatus.filter((m) => m.scholarState === "departed").length;
-  const visible = showDeparted
-    ? visibleByStatus
-    : visibleByStatus.filter((m) => m.scholarState !== "departed");
+  const needsCloseOutOf = (m: RosterMember) =>
+    m.scholarState === "departed" && statusOf(m, now) !== "inactive";
+
+  const visible =
+    filter === "inactive"
+      ? members.filter((m) => statusOf(m, now) === "inactive")
+      : filter === "departed"
+        ? members.filter((m) => m.scholarState === "departed")
+        : members;
+  // The nudge is about WORK OUTSTANDING, not about what the filter is hiding —
+  // "all" hides nothing now. These are the people who left WCM while their
+  // membership stayed open, which is the only state here needing a curator.
+  const needsCloseOut = members.filter(needsCloseOutOf).length;
   const colCount = hasPrograms ? 6 : 4;
 
   return (
@@ -244,7 +247,11 @@ export function CenterRosterCard({
         <div className="flex items-center justify-between gap-4">
           {exportEnabled ? (
             <a
-              href={`/edit/center/${encodeURIComponent(unitCode)}/export${showInactive ? "" : "?activeOnly=1"}`}
+              // No `?activeOnly=1`: "active only" stopped being one of the views,
+              // so the export is the whole roster and its `status` column (which
+              // matches the badge exactly — see the export route's docblock) is
+              // what distinguishes the rows.
+              href={`/edit/center/${encodeURIComponent(unitCode)}/export`}
               className="text-apollo-slate text-sm hover:underline"
               data-testid="center-roster-export-link"
             >
@@ -253,39 +260,41 @@ export function CenterRosterCard({
           ) : (
             <span />
           )}
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={showInactive}
-                onCheckedChange={(c) => setShowInactive(c === true)}
-                data-testid="roster-show-inactive"
-              />
-              Show inactive members
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={showDeparted}
-                onCheckedChange={(c) => setShowDeparted(c === true)}
-                data-testid="roster-show-departed"
-              />
-              Show departed members
-            </label>
-          </div>
+          <RadioGroup
+            className="flex items-center gap-4"
+            value={filter}
+            onValueChange={(v) => setFilter(v as RosterFilter)}
+            aria-label="Filter members"
+          >
+            {(
+              [
+                ["all", "All members"],
+                ["inactive", "Inactive members only"],
+                ["departed", "Departed members only"],
+              ] as ReadonlyArray<readonly [RosterFilter, string]>
+            ).map(([value, label]) => (
+              <label key={value} className="flex items-center gap-2 text-sm">
+                <RadioGroupItem value={value} data-testid={`roster-filter-${value}`} />
+                {label}
+              </label>
+            ))}
+          </RadioGroup>
         </div>
 
-        {departedHidden > 0 && (
-          <p className="text-muted-foreground text-sm" data-testid="roster-departed-hidden">
-            {departedHidden === 1
-              ? "1 member has left WCM and is hidden."
-              : `${departedHidden} members have left WCM and are hidden.`}{" "}
+        {needsCloseOut > 0 && filter !== "departed" && (
+          <p className="text-muted-foreground text-sm" data-testid="roster-needs-close-out">
+            {needsCloseOut === 1
+              ? "1 member has left WCM with their membership still open."
+              : `${needsCloseOut} members have left WCM with their membership still open.`}{" "}
             <button
               type="button"
               className="text-apollo-slate underline"
-              onClick={() => setShowDeparted(true)}
+              onClick={() => setFilter("departed")}
+              data-testid="roster-needs-close-out-jump"
             >
               Show them
             </button>{" "}
-            to set an end date on their membership.
+            to set an end date.
           </p>
         )}
 
@@ -311,9 +320,8 @@ export function CenterRosterCard({
               {visible.length === 0 ? (
                 <tr>
                   <td colSpan={colCount + 1} className="text-muted-foreground px-3 py-3">
-                    No members match the current filters. Turn on &ldquo;Show inactive
-                    members&rdquo; to see pending and lapsed memberships, or &ldquo;Show
-                    departed members&rdquo; to see people who have left WCM.
+                    No members match this filter. Choose &ldquo;All members&rdquo; to see
+                    the whole roster.
                   </td>
                 </tr>
               ) : (
@@ -326,15 +334,15 @@ export function CenterRosterCard({
                   // it is a data-quality gap to fix, not a failure. Mutually
                   // exclusive with the `opacity-50` inactive dimming by
                   // construction, so the two never compose.
-                  const needsCloseOut = m.scholarState === "departed" && status !== "inactive";
+                  const rowNeedsCloseOut = needsCloseOutOf(m);
                   return (
                     <tr
                       key={m.cwid}
                       className={`border-apollo-border border-b ${
                         status === "inactive" ? "opacity-50" : ""
-                      } ${needsCloseOut ? "bg-amber-50/60 dark:bg-amber-950/20" : ""}`}
+                      } ${rowNeedsCloseOut ? "bg-apollo-amber-tint" : ""}`}
                       data-testid={`center-roster-row-${m.cwid}`}
-                      data-needs-close-out={needsCloseOut ? "true" : undefined}
+                      data-needs-close-out={rowNeedsCloseOut ? "true" : undefined}
                     >
                       <td className="px-3 py-2">
                         <span className="font-medium">{m.name}</span>
@@ -342,7 +350,7 @@ export function CenterRosterCard({
                         {m.scholarState === "departed" && (
                           <Badge
                             variant="outline"
-                            className="border-apollo-border ml-2 rounded-full"
+                            className="bg-apollo-amber-tint text-apollo-amber border-apollo-amber-tint-border ml-2 rounded-full"
                             data-testid={`roster-scholar-state-${m.cwid}`}
                           >
                             Left WCM
@@ -407,14 +415,14 @@ export function CenterRosterCard({
                         <Input
                           type="date"
                           className={`h-8 w-36 ${
-                            needsCloseOut ? "border-amber-400 focus-visible:ring-amber-400" : ""
+                            rowNeedsCloseOut ? "border-apollo-amber focus-visible:ring-apollo-amber" : ""
                           }`}
                           value={m.endDate ?? ""}
                           onChange={(e) => onEndChange(m, e.target.value)}
                           data-testid={`roster-end-${m.cwid}`}
-                          aria-describedby={needsCloseOut ? `roster-end-hint-${m.cwid}` : undefined}
+                          aria-describedby={rowNeedsCloseOut ? `roster-end-hint-${m.cwid}` : undefined}
                         />
-                        {needsCloseOut && (
+                        {rowNeedsCloseOut && (
                           <span id={`roster-end-hint-${m.cwid}`} className="sr-only">
                             This person has left WCM. Set an end date to close out their
                             membership.
@@ -424,7 +432,11 @@ export function CenterRosterCard({
                       <td className="px-3 py-2">
                         <Badge
                           variant="outline"
-                          className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+                          className={`rounded-full ${
+                            status === "active"
+                              ? "bg-apollo-green-tint text-apollo-green border-apollo-green-tint-border"
+                              : "bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border"
+                          }`}
                           data-testid={`roster-status-${m.cwid}`}
                         >
                           {status === "active" ? "Active" : status === "pending" ? "Pending" : "Inactive"}
