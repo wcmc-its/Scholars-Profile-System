@@ -146,6 +146,10 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     label: "Clinical Trials",
     description: "Adds the clinical trials each scholar leads or takes part in.",
   },
+  DataSharing: {
+    label: "Dataset Deposits",
+    description: "Adds a scholar's shared research datasets to their profile's Datasets section.",
+  },
   Technology: {
     label: "Available Technologies",
     description: "Adds a scholar's licensable inventions from the WCM technology portfolio.",
