@@ -7,8 +7,18 @@
  * (`programs.length > 0`) — the data-driven "Cancer-Center-only" gate. Every
  * other center shows just Member / Start / End / Status. Start/End drive the
  * derived Active / Pending / Inactive status (the #552 §3.3 active filter,
- * inclusive boundaries, nulls open), and the "show active only" toggle (default
- * ON) hides Pending + Inactive — the dropped/lapsed-member visibility.
+ * inclusive boundaries, nulls open).
+ *
+ * Two ADDITIVE filters, both default OFF, so they read the same way: "show
+ * inactive members" reveals Pending + Inactive, "show departed members" reveals
+ * people who have left WCM. The default view is the current, non-departed
+ * membership. (These used to have opposite polarity — a restrictive, default-ON
+ * "show active only" beside an additive "show departed" — so seeing everything
+ * meant unchecking one and checking the other.)
+ *
+ * A row whose person has left WCM while the membership is still open is tinted
+ * amber and its End field outlined, because that is the combination this card
+ * exists to surface and the End date is what resolves it.
  *
  * Inline edits POST `/api/edit/roster` `action:"set"` one field at a time
  * (a field present as `null` clears it). Add → `action:"add"`, Remove →
@@ -86,7 +96,12 @@ export function CenterRosterCard({
   const hasPrograms = programs.length > 0;
 
   const [members, setMembers] = React.useState<RosterMember[]>(() => [...initial]);
-  const [showActiveOnly, setShowActiveOnly] = React.useState(true);
+  // Both filters are ADDITIVE reveals, default OFF, so they read the same way.
+  // This was "Show active only" — restrictive and default ON — which meant
+  // seeing everything took UNchecking one box and CHECKING the other, opposite
+  // polarities for the same intent. The default view is unchanged: current,
+  // non-departed membership.
+  const [showInactive, setShowInactive] = React.useState(false);
   // Default HIDDEN: the roster reads as the current membership until asked
   // otherwise. The hidden-count hint below keeps that from being silent.
   const [showDeparted, setShowDeparted] = React.useState(false);
@@ -195,9 +210,9 @@ export function CenterRosterCard({
     void patch(m.cwid, { endDate });
   }
 
-  const visibleByStatus = showActiveOnly
-    ? members.filter((m) => statusOf(m, now) === "active")
-    : members;
+  const visibleByStatus = showInactive
+    ? members
+    : members.filter((m) => statusOf(m, now) === "active");
   // The two filters are independent axes: membership dates vs. whether the
   // person is still at WCM. Departed members are hidden LAST so the count below
   // reports what this specific toggle is holding back, not the combined effect.
@@ -229,7 +244,7 @@ export function CenterRosterCard({
         <div className="flex items-center justify-between gap-4">
           {exportEnabled ? (
             <a
-              href={`/edit/center/${encodeURIComponent(unitCode)}/export${showActiveOnly ? "?activeOnly=1" : ""}`}
+              href={`/edit/center/${encodeURIComponent(unitCode)}/export${showInactive ? "" : "?activeOnly=1"}`}
               className="text-apollo-slate text-sm hover:underline"
               data-testid="center-roster-export-link"
             >
@@ -241,11 +256,11 @@ export function CenterRosterCard({
           <div className="flex items-center gap-4">
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
-                checked={showActiveOnly}
-                onCheckedChange={(c) => setShowActiveOnly(c === true)}
-                data-testid="roster-show-active-only"
+                checked={showInactive}
+                onCheckedChange={(c) => setShowInactive(c === true)}
+                data-testid="roster-show-inactive"
               />
-              Show active only
+              Show inactive members
             </label>
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
@@ -296,19 +311,30 @@ export function CenterRosterCard({
               {visible.length === 0 ? (
                 <tr>
                   <td colSpan={colCount + 1} className="text-muted-foreground px-3 py-3">
-                    No members match the current filters. Turn off &ldquo;Show active only&rdquo;
-                    to see pending and inactive memberships, or turn on &ldquo;Show departed
-                    members&rdquo; to see people who have left WCM.
+                    No members match the current filters. Turn on &ldquo;Show inactive
+                    members&rdquo; to see pending and lapsed memberships, or &ldquo;Show
+                    departed members&rdquo; to see people who have left WCM.
                   </td>
                 </tr>
               ) : (
                 visible.map((m) => {
                   const status = statusOf(m, now);
+                  // The case this card exists to surface (see the type docblock):
+                  // the person left WCM but nobody closed out their membership, so
+                  // it still reads Active. Amber is this UI's "needs attention"
+                  // (honors-queue contested groups, all-units-directory), not red —
+                  // it is a data-quality gap to fix, not a failure. Mutually
+                  // exclusive with the `opacity-50` inactive dimming by
+                  // construction, so the two never compose.
+                  const needsCloseOut = m.scholarState === "departed" && status !== "inactive";
                   return (
                     <tr
                       key={m.cwid}
-                      className={`border-apollo-border border-b ${status === "inactive" ? "opacity-50" : ""}`}
+                      className={`border-apollo-border border-b ${
+                        status === "inactive" ? "opacity-50" : ""
+                      } ${needsCloseOut ? "bg-amber-50/60 dark:bg-amber-950/20" : ""}`}
                       data-testid={`center-roster-row-${m.cwid}`}
+                      data-needs-close-out={needsCloseOut ? "true" : undefined}
                     >
                       <td className="px-3 py-2">
                         <span className="font-medium">{m.name}</span>
@@ -380,11 +406,20 @@ export function CenterRosterCard({
                       <td className="px-3 py-2">
                         <Input
                           type="date"
-                          className="h-8 w-36"
+                          className={`h-8 w-36 ${
+                            needsCloseOut ? "border-amber-400 focus-visible:ring-amber-400" : ""
+                          }`}
                           value={m.endDate ?? ""}
                           onChange={(e) => onEndChange(m, e.target.value)}
                           data-testid={`roster-end-${m.cwid}`}
+                          aria-describedby={needsCloseOut ? `roster-end-hint-${m.cwid}` : undefined}
                         />
+                        {needsCloseOut && (
+                          <span id={`roster-end-hint-${m.cwid}`} className="sr-only">
+                            This person has left WCM. Set an end date to close out their
+                            membership.
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2">
                         <Badge

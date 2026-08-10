@@ -102,22 +102,22 @@ describe("CenterRosterCard — Export CSV affordance (#1102)", () => {
     render(<CenterRosterCard {...base} members={[member({})]} programs={[]} exportEnabled />);
     const link = screen.getByTestId("center-roster-export-link") as HTMLAnchorElement;
     expect(link.textContent).toMatch(/export csv/i);
-    // Active-only is the default toggle state → ?activeOnly=1.
+    // Inactive are hidden by default → the export stays active-only.
     expect(link.getAttribute("href")).toBe(
       "/edit/center/meyer_cancer_center/export?activeOnly=1",
     );
   });
 
-  it("drops ?activeOnly=1 once the show-active-only toggle is turned off", () => {
+  it("drops ?activeOnly=1 once \"show inactive members\" is turned on", () => {
     render(<CenterRosterCard {...base} members={[member({})]} programs={[]} exportEnabled />);
-    fireEvent.click(screen.getByTestId("roster-show-active-only"));
+    fireEvent.click(screen.getByTestId("roster-show-inactive"));
     expect(
       screen.getByTestId("center-roster-export-link").getAttribute("href"),
     ).toBe("/edit/center/meyer_cancer_center/export");
   });
 });
 
-describe("CenterRosterCard — status + show-active-only", () => {
+describe("CenterRosterCard — status + show-inactive", () => {
   const members = [
     member({ cwid: "act", name: "Active" }), // null dates → active
     member({ cwid: "pen", name: "Pending", startDate: "2027-01-01" }),
@@ -130,7 +130,7 @@ describe("CenterRosterCard — status + show-active-only", () => {
     expect(screen.queryByTestId("center-roster-row-pen")).toBeNull();
     expect(screen.queryByTestId("center-roster-row-ina")).toBeNull();
 
-    fireEvent.click(screen.getByTestId("roster-show-active-only"));
+    fireEvent.click(screen.getByTestId("roster-show-inactive"));
     expect(screen.getByTestId("center-roster-row-pen")).toBeTruthy();
     expect(screen.getByTestId("roster-status-pen").textContent).toMatch(/pending/i);
     expect(screen.getByTestId("roster-status-ina").textContent).toMatch(/inactive/i);
@@ -293,5 +293,49 @@ describe("departed / unresolvable members (#2324)", () => {
   it("no hint when nothing is hidden", () => {
     render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
     expect(screen.queryByTestId("roster-departed-hidden")).toBeNull();
+  });
+});
+
+describe("CenterRosterCard — a departed person with an open membership needs closing out", () => {
+  // The combination the card exists to surface: scholarState "departed" while the
+  // membership dates still read Active, because nobody set an End date.
+  const openMembership = member({
+    cwid: "open1",
+    name: "Open One",
+    scholarState: "departed",
+  });
+  const closedOut = member({
+    cwid: "shut1",
+    name: "Shut One",
+    scholarState: "departed",
+    endDate: "2024-01-01",
+  });
+
+  it("tints the row and outlines the End field when the membership is still open", () => {
+    render(<CenterRosterCard {...base} members={[openMembership]} programs={[]} />);
+    fireEvent.click(screen.getByTestId("roster-show-departed"));
+
+    const row = screen.getByTestId("center-roster-row-open1");
+    expect(row.getAttribute("data-needs-close-out")).toBe("true");
+    expect(row.className).toMatch(/bg-amber/);
+    expect(screen.getByTestId("roster-end-open1").className).toMatch(/border-amber/);
+  });
+
+  it("does NOT flag a departed member whose membership was already closed out", () => {
+    render(<CenterRosterCard {...base} members={[closedOut]} programs={[]} />);
+    fireEvent.click(screen.getByTestId("roster-show-inactive"));
+    fireEvent.click(screen.getByTestId("roster-show-departed"));
+
+    const row = screen.getByTestId("center-roster-row-shut1");
+    expect(row.getAttribute("data-needs-close-out")).toBeNull();
+    expect(row.className).not.toMatch(/bg-amber/);
+    expect(screen.getByTestId("roster-end-shut1").className).not.toMatch(/border-amber/);
+  });
+
+  it("does NOT flag a still-employed member with an open membership", () => {
+    render(<CenterRosterCard {...base} members={[member({ cwid: "here1" })]} programs={[]} />);
+    const row = screen.getByTestId("center-roster-row-here1");
+    expect(row.getAttribute("data-needs-close-out")).toBeNull();
+    expect(row.className).not.toMatch(/bg-amber/);
   });
 });
