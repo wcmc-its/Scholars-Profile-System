@@ -1360,6 +1360,15 @@ export class AppStack extends Stack {
         // payload returns [] when off, so this is safe to leave off even after
         // the etl:clinical-trials backfill lands.
         CLINICAL_TRIALS_SECTION: "on", // Prod flipped 2026-07-07 (presence-gated, hidden when empty).
+        // DATA_SHARING_SECTION — the profile "Datasets" section (Phase 2,
+        // S-Index / Bulk Data Rule spec). The profile payload returns [] when
+        // off, and the section is presence-gated (hidden when a scholar has
+        // no deposits), so this is safe to leave off even after the
+        // etl:data-sharing backfill lands — it also produces no real rows yet
+        // (the reciterdb-side dataset_deposit table is a separate, not-yet-built
+        // prerequisite). Dark-launched staging-first, same precedent as
+        // CLINICAL_TRIALS_SECTION and NEWS_MENTIONS_SECTION.
+        DATA_SHARING_SECTION: env === "staging" ? "on" : "off",
         // AVAILABLE_TECHNOLOGIES_SECTION — the profile "Available technologies"
         // section, sourced from the CTL portfolio via `npm run etl:technologies`.
         // The profile payload returns [] when off, and the section is

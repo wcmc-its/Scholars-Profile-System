@@ -13,6 +13,7 @@ import {
   getEffectiveOverview,
   getSelectedHighlightPmids,
   isAuthorHidden,
+  loadContributorSuppressions,
   loadEntitySuppressions,
   loadPublicationSuppressions,
   pickManualHighlights,
@@ -675,6 +676,22 @@ export type ProfilePayload = {
      *  third-party swap-point. */
     enrichmentSource: string | null;
   }>;
+  /** Dataset deposits this scholar authored/deposited (S-Index / Bulk Data
+   *  Rule spec, Phase 2). Sourced from reciterdb by etl/data-sharing. EMPTY
+   *  unless DATA_SHARING_SECTION is on — ships dark, same precedent as
+   *  clinicalTrials. All author positions (display scope, not metric scope —
+   *  spec Attribution: display vs. metric). A per-contributor suppression
+   *  (this scholar hid their own row) drops it from THIS profile only; a
+   *  whole-entity suppression drops it everywhere. */
+  datasets: Array<{
+    datasetId: string;
+    repository: string;
+    accessionOrDoi: string;
+    resourceType: string | null;
+    dataType: string | null;
+    depositYear: number | null;
+    authorPosition: string;
+  }>;
   /** Licensable inventions from the WCM Center for Technology Licensing's public
    *  portfolio, attributed to this scholar by the CWID in the VIVO link CTL
    *  prints beside each PI. Ships dark behind AVAILABLE_TECHNOLOGIES_SECTION, so
@@ -955,6 +972,13 @@ export const getScholarFullProfileBySlug = cache(
         clinicalTrials: {
           include: { trial: true },
         },
+        // Dataset deposits (#data-sharing, Phase 2). Always joined (a small,
+        // usually-empty relation until the ETL bridge produces real rows);
+        // the payload is gated dark in the mapper below, same DATA_SHARING_SECTION
+        // precedent as clinicalTrials/CLINICAL_TRIALS_SECTION.
+        datasetDeposits: {
+          include: { dataset: true },
+        },
         // CTL available technologies. Always joined (a small, usually-empty
         // relation); the payload is gated dark in the mapper below, so an env
         // with AVAILABLE_TECHNOLOGIES_SECTION off returns [] even after the ETL
@@ -1223,6 +1247,21 @@ export const getScholarFullProfileBySlug = cache(
           prisma,
         ),
       ]);
+    // Dataset deposits (#data-sharing) — per-contributor suppression, same
+    // shape as publication (a wrong extraction on one co-author's profile
+    // shouldn't take the row down for every depositor). Flag-gated like the
+    // mapper below (dark unless DATA_SHARING_SECTION is on) so this never
+    // touches `scholar.datasetDeposits` in an env/test fixture that predates
+    // the relation.
+    const datasetsSectionOn =
+      process.env.DATA_SHARING_SECTION === "on" && !hiddenSections.has("hideDatasets");
+    const datasetSuppressions = datasetsSectionOn
+      ? await loadContributorSuppressions(
+          "dataset_deposit",
+          scholar.datasetDeposits.map((pd) => pd.datasetId),
+          prisma,
+        )
+      : { darkIds: new Set<string>(), hiddenContributorsById: new Map<string, ReadonlySet<string>>() };
     // Project keys with ≥2 distinct PI-standing cwids, resolved back to the
     // grant `externalId`s that belong to them (#2063 vocabulary, same rule as
     // `projectFromRows`). A Set lookup in the mapper below — no per-row work.
@@ -1656,6 +1695,35 @@ export const getScholarFullProfileBySlug = cache(
                 if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
                 return (b.statusDate ?? "").localeCompare(a.statusDate ?? "");
               })
+          : [],
+      // Dataset deposits (#data-sharing). Dark unless DATA_SHARING_SECTION is
+      // on, same precedent as clinicalTrials/CLINICAL_TRIALS_SECTION.
+      // section-visibility — `hideDatasets` drops the whole section. A
+      // whole-entity suppression (darkIds) drops the deposit for every
+      // scholar; a per-contributor suppression (hiddenContributorsById) drops
+      // it from just this profile. Sorted by deposit year descending — no
+      // active/completed split (nothing in the spec suggests a status
+      // dimension for datasets).
+      datasets:
+        datasetsSectionOn
+          ? scholar.datasetDeposits
+              .filter(
+                (pd) =>
+                  !datasetSuppressions.darkIds.has(pd.datasetId) &&
+                  !datasetSuppressions.hiddenContributorsById
+                    .get(pd.datasetId)
+                    ?.has(scholar.cwid),
+              )
+              .map((pd) => ({
+                datasetId: pd.datasetId,
+                repository: pd.dataset.repository,
+                accessionOrDoi: pd.dataset.accessionOrDoi,
+                resourceType: pd.dataset.resourceType,
+                dataType: pd.dataset.dataType,
+                depositYear: pd.dataset.depositYear,
+                authorPosition: pd.authorPosition,
+              }))
+              .sort((a, b) => (b.depositYear ?? 0) - (a.depositYear ?? 0))
           : [],
       // CTL available technologies. Dark unless AVAILABLE_TECHNOLOGIES_SECTION is
       // on: an unflagged env returns [] regardless of the table contents, so the

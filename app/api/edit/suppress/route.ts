@@ -32,6 +32,7 @@ import {
 } from "@/lib/edit/revalidation";
 import { reflectSearchSuppression } from "@/lib/edit/search-suppression";
 import {
+  datasetDepositExists,
   findSuppressibleEntityOwner,
   findUnit,
   isChairAppointment,
@@ -57,7 +58,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // per-(award, investigator), so suppressing it hides that one investigator's
   // role; a funding project goes dark only when all its rows are suppressed. A
   // mentee suppression hides one derived mentor↔mentee relationship from the
-  // mentor's profile.
+  // mentor's profile. dataset_deposit (Phase 2 data-sharing) is per-contributor
+  // like publication — a wrong extraction on one co-author's profile shouldn't
+  // suppress it for every depositor.
   if (
     entityType !== "scholar" &&
     entityType !== "publication" &&
@@ -67,7 +70,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     entityType !== "mentee" &&
     entityType !== "department" &&
     entityType !== "division" &&
-    entityType !== "center"
+    entityType !== "center" &&
+    entityType !== "dataset_deposit"
   ) {
     return editError(400, "invalid_entity_type", "entityType");
   }
@@ -81,10 +85,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     contributor = contributorCwid;
   }
-  // Only a publication suppression carries a contributor. Scholar, the
-  // whole-entity types (education / appointment / grant), and a unit retire
-  // (#540) are always whole-entity.
-  if (entityType !== "publication" && contributor !== null) {
+  // Only publication and dataset_deposit suppressions carry a contributor.
+  // Scholar, the whole-entity types (education / appointment / grant), and a
+  // unit retire (#540) are always whole-entity.
+  if (entityType !== "publication" && entityType !== "dataset_deposit" && contributor !== null) {
     return editError(400, "invalid_contributor", "contributorCwid");
   }
   // Set when a scholar-assigned proxy (#779) authorizes a per-author hide on
@@ -237,6 +241,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // --- per-author publication hide: the authorship must exist (400, edge 18) ---
   if (entityType === "publication" && contributor !== null) {
     const exists = await publicationAuthorshipExists(entityId, contributor, db.read);
+    if (!exists) return editError(400, "no_authorship", "contributorCwid");
+  }
+  // --- per-contributor dataset hide: the attribution row must exist (same as
+  //     the publication case above) ---
+  if (entityType === "dataset_deposit" && contributor !== null) {
+    const exists = await datasetDepositExists(entityId, contributor, db.read);
     if (!exists) return editError(400, "no_authorship", "contributorCwid");
   }
 
