@@ -1619,10 +1619,11 @@ model CancerCenterFundingAward {
   /// import on a row; a failed row surfaces in the UI as "not yet inferred",
   /// distinct from a confirmed 0%, and the import can retry it later without
   /// re-touching rows that already have a value). No data source anywhere in
-  /// SPS or OSRA — always LLM-proposed until a reviewer overrides it. The UI
-  /// must label a non-null, non-human value "AI-suggested, unconfirmed" until
-  /// NCI's own peer-review/relevance criteria are sourced and the prompt is
-  /// rewritten against them (see the handoff doc).
+  /// SPS or OSRA — always LLM-proposed until a reviewer overrides it. NCI
+  /// delegates the relevance methodology to the center (CCSG Data Guide p.7);
+  /// this IS Meyer's method, not a placeholder, so the UI labels a non-null,
+  /// non-human value "AI-suggested" (confirmable, not "unconfirmed pending a
+  /// real rubric" — see `lib/edit/cancer-center-funding-generator.ts`).
   cancerRelevantPercent       Decimal? @map("cancer_relevant_percent") @db.Decimal(5, 2)
   cancerRelevantPercentSource String   @default("llm") @map("cancer_relevant_percent_source") @db.VarChar(16)
   /// The model's one-sentence rationale for `cancerRelevantPercent` — shown to

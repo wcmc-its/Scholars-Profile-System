@@ -4,12 +4,15 @@
  * `nci-2a` attribute tab of `/edit/center/[code]` (Meyer Cancer Center only —
  * same data-driven "has a program taxonomy" gate as the Programs tab).
  *
- * Every column except two is existing OSRA/InfoEd data. The two judgment
- * columns — Cancer-Relevant % and Program Code (only when no
- * `CenterMembership` resolved one) — arrive `source: "llm"`, Bedrock-
- * proposed and clearly labeled unconfirmed; editing either one here sets
- * `source: "human"` via `PATCH .../nci-2a/[awardId]`, which is what makes the
- * import script's non-clobber contract hold on the next OSRA cycle.
+ * Every column except one is existing OSRA/InfoEd data. The one judgment
+ * column — Cancer-Relevant % — arrives `source: "llm"`, Bedrock-proposed per
+ * Meyer's own cancer-relevance method (see
+ * `lib/edit/cancer-center-funding-generator.ts`) and clearly labeled;
+ * editing it here sets `source: "human"` via `PATCH .../nci-2a/[awardId]`,
+ * which is what makes the import script's non-clobber contract hold on the
+ * next OSRA cycle. Program Code is never an LLM guess (PR #2326) — it
+ * resolves from the PI's real `CenterMembership.programCode` or is left an
+ * explicit gap.
  *
  * v1 scope: program-code editing is per-existing-allocation-row (a select
  * from the center's live program list, or "Unassigned"); ADDING or REMOVING a
@@ -273,7 +276,7 @@ export function Nci2aCard({ centerCode }: Nci2aCardProps) {
   return (
     <EditPanel
       heading="NCI Table 2A"
-      description="Cancer-Relevant Percent and Program Code marked AI-suggested are Bedrock proposals from the project title alone — NCI's own peer-review criteria aren't sourced yet (see the handoff doc). Review and correct before this leaves the building."
+      description="Cancer-Relevant Percent marked AI-suggested is a Bedrock proposal per Meyer's cancer-relevance method, from the project title alone. Confirming or correcting it here is what makes it defensible in peer-review — review before this leaves the building."
       headerAction={
         state?.awards.length ? (
           <Button size="sm" variant="outline" onClick={() => downloadCsv(state.cycle!, state.awards)}>
