@@ -92,9 +92,8 @@ describe("/edit/department/[code]/export", () => {
     expect(res.headers.get("Content-Type")).toContain("text/csv");
     expect(res.headers.get("Content-Disposition")).toContain('filename="department-N1280-faculty-');
     const body = await res.text();
-    expect(body.split("\r\n")[0]).toBe("cwid,name,title,role_category,division,department");
+    expect(body.split("\r\n")[0]).toBe("cwid,name,title,role_category,division,department,email");
     expect(body).toContain("abc1234");
-    expect(body).not.toContain("email");
   });
 });
 

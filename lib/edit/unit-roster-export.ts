@@ -44,9 +44,7 @@
  */
 import { toCsv, type CsvCell } from "@/lib/csv";
 import type { UnitEditContext } from "@/lib/api/unit-edit-context";
-import { isPubliclyDisplayed } from "@/lib/eligibility";
-import { isEmailExportableByReleaseCode } from "@/lib/profile/email-visibility-flags";
-import { isScholarListExportEmailEnabled } from "@/lib/export/scholar-export-flags";
+import { exportEmailCell } from "@/lib/profile/email-visibility-flags";
 
 /**
  * Whether the per-unit roster CSV export is enabled (off by default). When off
@@ -115,23 +113,11 @@ export type BuildRosterCsvOptions = {
   facultyByCwid?: ReadonlyMap<string, RosterFacultyMeta>;
 };
 
-/**
- * The email cell for one roster row. Blank unless ALL THREE gates pass:
- *   1. `SCHOLAR_LIST_EXPORT_EMAIL` — the operator kill switch (#866). Reused
- *      rather than newly invented: it is already the per-env switch for "email
- *      column in an internal roster CSV" and is already "on" in staging + prod
- *      (2026-07-07, operator-approved), so this surface inherits an OFF lever
- *      that does not need a revert + redeploy to pull.
- *   2. #536 — a hidden-display role never emits contact info.
- *   3. SPEC §B.2 — the scholar's Web Directory release code permits it.
- * Blank (not omitted) so the column count is identical on every row.
- */
+/** The email cell for one roster row — the shared three-gate rule, identical to
+ *  the department/division export's. Absent metadata (an external member with no
+ *  Scholar row) yields "". */
 function emailCellFor(meta: RosterFacultyMeta | undefined): string {
-  if (!meta?.email) return "";
-  if (!isScholarListExportEmailEnabled()) return "";
-  if (!isPubliclyDisplayed(meta.roleCategory)) return "";
-  if (!isEmailExportableByReleaseCode(meta.emailVisibility)) return "";
-  return meta.email;
+  return meta ? exportEmailCell(meta) : "";
 }
 
 /**

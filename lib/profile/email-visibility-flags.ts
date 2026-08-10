@@ -17,6 +17,9 @@
  * the image; it does not pick up new env keys) — the flag parity rule. Wiring the
  * flag in only one place is a silent shipping bug.
  */
+import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { isScholarListExportEmailEnabled } from "@/lib/export/scholar-export-flags";
+
 export function isEmailReleaseGateEnabled(): boolean {
   return process.env.PROFILE_EMAIL_RELEASE_GATE === "on";
 }
@@ -42,4 +45,34 @@ export function isEmailReleaseGateEnabled(): boolean {
 export function isEmailExportableByReleaseCode(emailVisibility: string | null): boolean {
   if (!isEmailReleaseGateEnabled()) return true;
   return emailVisibility === "public" || emailVisibility === "institution";
+}
+
+/**
+ * The `email` cell for one row of an /edit UNIT export — centers (roster shape,
+ * `lib/edit/unit-roster-export.ts`) and departments/divisions (faculty shape,
+ * `lib/edit/unit-faculty-export.ts`) alike. Returns "" (never undefined) so the
+ * column count is identical on every row of every unit type.
+ *
+ * THE one place the three gates compose. Both unit-export modules call this
+ * rather than keeping their own copy, because the failure mode of a duplicated
+ * consent rule is that the copies drift and one surface quietly starts emitting
+ * what the other withholds.
+ *
+ *   1. `SCHOLAR_LIST_EXPORT_EMAIL` — operator kill switch (#866), per-env.
+ *   2. #536 — a hidden-display role never emits contact info.
+ *   3. SPEC §B.2 — the scholar's Web Directory release code.
+ *
+ * Gate 1 is a policy lever and yours to pull. Gates 2 and 3 are not: `none`
+ * records an individual's own "do not release my address".
+ */
+export function exportEmailCell(row: {
+  email: string | null;
+  emailVisibility: string | null;
+  roleCategory: string | null;
+}): string {
+  if (!row.email) return "";
+  if (!isScholarListExportEmailEnabled()) return "";
+  if (!isPubliclyDisplayed(row.roleCategory)) return "";
+  if (!isEmailExportableByReleaseCode(row.emailVisibility)) return "";
+  return row.email;
 }

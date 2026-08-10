@@ -7,16 +7,18 @@
  *  - division loader: ED-only (divCode) vs manual (divCode ∪ DivisionMembership);
  *  - counts mirror the loaders.
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   FACULTY_CSV_HEADERS,
   buildFacultyCsv,
+  countFacultyEmailsEmitted,
   loadDepartmentRosterForExport,
   loadDivisionRosterForExport,
   countDepartmentRoster,
   countDivisionRoster,
   type FacultyExportClient,
+  type FacultyExportRow,
 } from "@/lib/edit/unit-faculty-export";
 
 const SCHOLAR_ROW = {
@@ -26,6 +28,8 @@ const SCHOLAR_ROW = {
   roleCategory: "full_time_faculty",
   department: { name: "Medicine" },
   division: { name: "Cardiology" },
+  email: "abc1234@med.cornell.edu",
+  emailVisibility: "institution",
 };
 
 function client(over?: {
@@ -45,23 +49,82 @@ function client(over?: {
 }
 
 describe("buildFacultyCsv", () => {
+  const prevGate = process.env.PROFILE_EMAIL_RELEASE_GATE;
+  const prevSwitch = process.env.SCHOLAR_LIST_EXPORT_EMAIL;
+  beforeEach(() => {
+    process.env.SCHOLAR_LIST_EXPORT_EMAIL = "on";
+  });
+  afterEach(() => {
+    if (prevGate === undefined) delete process.env.PROFILE_EMAIL_RELEASE_GATE;
+    else process.env.PROFILE_EMAIL_RELEASE_GATE = prevGate;
+    if (prevSwitch === undefined) delete process.env.SCHOLAR_LIST_EXPORT_EMAIL;
+    else process.env.SCHOLAR_LIST_EXPORT_EMAIL = prevSwitch;
+  });
+
+  const row = (over: Partial<FacultyExportRow> = {}): FacultyExportRow => ({
+    cwid: "abc1234",
+    preferredName: "Smith, Jane",
+    primaryTitle: null,
+    roleCategory: "full_time_faculty",
+    divisionName: null,
+    departmentName: "Medicine",
+    email: "abc1234@med.cornell.edu",
+    emailVisibility: "institution",
+    ...over,
+  });
+
   it("emits the faculty header order, quotes commas, and blanks nulls", () => {
-    const csv = buildFacultyCsv([
-      {
-        cwid: "abc1234",
-        preferredName: "Smith, Jane",
-        primaryTitle: null,
-        roleCategory: "full_time_faculty",
-        divisionName: null,
-        departmentName: "Medicine",
-      },
-    ]);
+    const csv = buildFacultyCsv([row()]);
     const lines = csv.split("\r\n");
     expect(lines[0]).toBe(FACULTY_CSV_HEADERS.join(","));
-    expect(lines[0]).not.toContain("email");
     expect(csv).toContain('"Smith, Jane"'); // comma quoted
-    // null title + null division → empty cells: ...,full_time_faculty,,Medicine
-    expect(lines[1]).toBe('abc1234,"Smith, Jane",,full_time_faculty,,Medicine');
+    // null title + null division → empty cells; email is the trailing column.
+    expect(lines[1]).toBe(
+      'abc1234,"Smith, Jane",,full_time_faculty,,Medicine,abc1234@med.cornell.edu',
+    );
+  });
+
+  it("appends email LAST so existing column indices do not shift", () => {
+    expect(FACULTY_CSV_HEADERS.indexOf("email")).toBe(FACULTY_CSV_HEADERS.length - 1);
+    expect(FACULTY_CSV_HEADERS.slice(0, -1)).toEqual([
+      "cwid",
+      "name",
+      "title",
+      "role_category",
+      "division",
+      "department",
+    ]);
+  });
+
+  it("release code `none` blanks the email when the gate is ON", () => {
+    process.env.PROFILE_EMAIL_RELEASE_GATE = "on";
+    const csv = buildFacultyCsv([row({ emailVisibility: "none" })]);
+    expect(csv).not.toContain("abc1234@med.cornell.edu");
+    expect(csv).toContain("full_time_faculty,,Medicine,");
+  });
+
+  it("a hidden-display role blanks the email even with the gate OFF (#536)", () => {
+    process.env.PROFILE_EMAIL_RELEASE_GATE = "off";
+    const csv = buildFacultyCsv([row({ roleCategory: "doctoral_student_phd" })]);
+    expect(csv).not.toContain("abc1234@med.cornell.edu");
+  });
+
+  it("SCHOLAR_LIST_EXPORT_EMAIL off blanks the email on this surface too", () => {
+    delete process.env.SCHOLAR_LIST_EXPORT_EMAIL;
+    const csv = buildFacultyCsv([row()]);
+    expect(csv).not.toContain("abc1234@med.cornell.edu");
+  });
+
+  it("countFacultyEmailsEmitted counts post-carve, not row count", () => {
+    process.env.PROFILE_EMAIL_RELEASE_GATE = "on";
+    const rows = [
+      row({ cwid: "ok1" }),
+      row({ cwid: "no1", emailVisibility: "none" }),
+      row({ cwid: "hid1", roleCategory: "doctoral_student_phd" }),
+      row({ cwid: "nomail", email: null }),
+    ];
+    expect(rows).toHaveLength(4);
+    expect(countFacultyEmailsEmitted(rows)).toBe(1);
   });
 });
 
@@ -80,8 +143,17 @@ describe("loadDepartmentRosterForExport", () => {
         roleCategory: "full_time_faculty",
         divisionName: "Cardiology",
         departmentName: "Medicine",
+        email: "abc1234@med.cornell.edu",
+        emailVisibility: "institution",
       },
     ]);
+    // The release audience must be SELECTED, not just the address — without it
+    // the gate has nothing to read and every cell fails open.
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ email: true, emailVisibility: true }),
+      }),
+    );
   });
 });
 
