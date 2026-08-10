@@ -15,19 +15,31 @@ OUT=os.path.dirname(os.path.abspath(__file__)); PROJ=os.path.expanduser("~/Dropb
 engine=create_engine(f"mysql+pymysql://{os.environ['DB_USERNAME']}:{os.environ['DB_PASSWORD']}@{os.environ['DB_HOST']}/{os.environ['DB_NAME']}")
 
 # ---------- 1. unified deposit set (academic + preprint; full-text high-conf + structured) ----------
-def load_ft(p):
-    d=pd.read_csv(p); return d[(d['confidence']=='high')&(d['context']!='use')][['pmid','repo']]
-def load_db(p):
+# Carries accession/resource_type through (used to stop at ['pmid','repo'] — fine for the landscape
+# report's per-repo counts, not enough for a per-deposit table keyed on (repo, accession)).
+def load_ft(p, provenance):
+    d=pd.read_csv(p)
+    d=d[(d['confidence']=='high')&(d['context']!='use')]
+    # kind=='acc': a real accession pattern matched. resource_bucket!='not-doi': a DOI pattern
+    # matched and DataCite-typed. Everything else (bare repo-name mentions, bare-domain URL hits)
+    # has no per-record locator — matched_val is just the matched text, not an id — so it can't
+    # populate accession_or_doi. Still valid signal for the aggregate landscape report; not here.
+    d=d[(d['kind']=='acc') | (d['resource_bucket']!='not-doi')]
+    d['accession']=d['matched_val']; d['provenance']=provenance
+    return d[['pmid','repo','accession','resource_type','confidence','provenance']]
+def load_db(p, provenance):
     d=pd.read_csv(p); d=d[d['year']>=2020] if 'year' in d else d
     if 'tier' in d:  # extract_databanks.py's classified+tagged shape: honor the registry/use exclusion
         d=d[(d['tier']!='REGISTRY') & (d['context']!='use')]
         d['repo']=d['canonical']
     else:            # legacy shape (e.g. preprint_databank.csv, not yet wired the same way)
         d['repo']=d['databank'].apply(lambda n: catalog.classify(name=str(n))['canonical'])
-    return d[['pmid','repo']]
-parts=[load_ft(f"{OUT}/deposits_v2.csv"), load_ft(f"{OUT}/preprint_deposits_v2.csv"),
-       load_db(f"{OUT}/deposits_databank.csv"), load_db(f"{OUT}/preprint_databank.csv")]
-dep=pd.concat(parts,ignore_index=True).drop_duplicates(['pmid','repo'])
+    d=d[d['accession'].notna()]  # a databank name with no accession listed has no per-record locator
+    d['resource_type']=None; d['confidence']=None; d['provenance']=provenance
+    return d[['pmid','repo','accession','resource_type','confidence','provenance']]
+parts=[load_ft(f"{OUT}/deposits_v2.csv","fulltext-scan"), load_ft(f"{OUT}/preprint_deposits_v2.csv","fulltext-scan"),
+       load_db(f"{OUT}/deposits_databank.csv","databank"), load_db(f"{OUT}/preprint_databank.csv","databank")]
+dep=pd.concat(parts,ignore_index=True).drop_duplicates(['pmid','repo','accession'])
 dep['pmid']=dep['pmid'].astype(int)
 for col in ['tier','country','access','bucket']:
     dep[col]=dep['repo'].map(lambda r: catalog.classify(name=r)[col])
@@ -110,3 +122,31 @@ for s in full['sensitive_subtypes'].dropna():
 for k,v in sorted(allsubs.items(),key=lambda x:-x[1]): print(f"  {v:4d}  {k}")
 print("\n=== NIH-funded share of depositing pubs ===")
 pub=full.drop_duplicates('pmid'); print(f"  NIH-funded: {pub['nih_funded'].sum()}/{len(pub)}   any US-gov: {pub['usgov_funded'].sum()}")
+
+# ---------- 7. optional: write per-deposit rows to reciterdb.dataset_deposit ----------
+# ponytail: additive, env-gated — the existing CSV/xlsx pipeline (coauthor_affil.py,
+# build_people.py still read attributed_deposits.csv) is untouched either way.
+# deposit_year is always the citing pub's year (no repo-native deposit-date extraction yet;
+# matches the SPS DatasetDeposit model's documented "else pub year" fallback).
+# cwid may be null (kept — see extract_databanks/scan2: a deposit can exist with no matched
+# WCM full-time first/last author; the SPS bridge dedups DatasetDeposit by (repo, accession)
+# before it ever looks at cwid, so these rows still populate the deposit catalog).
+if os.environ.get("WRITE_DATASET_DEPOSIT"):
+    import pymysql
+    def nz(v): return None if pd.isna(v) else v
+    def access_model(v):  # catalog.py's `access` is a free-text note, not the table's open|controlled enum
+        return "controlled" if "controlled" in str(v).lower() else "open"
+    recs=[(nz(r.cwid), r.repo, r.accession, nz(r.resource_type), nz(r.bucket), access_model(r.access),
+           int(r.year) if pd.notna(r.year) else None, r.provenance, nz(r.confidence),
+           nz(r.position), int(r.pmid))
+          for r in full.itertuples()]
+    conn=pymysql.connect(host=os.environ['DB_HOST'], user=os.environ['DB_USERNAME'],
+                          password=os.environ['DB_PASSWORD'], database=os.environ['DB_NAME'])
+    with conn.cursor() as cur:
+        cur.executemany("""INSERT IGNORE INTO dataset_deposit
+            (cwid, repository, accession_or_doi, resource_type, data_type, access_model,
+             deposit_year, provenance, confidence, author_position, pmid)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", recs)
+        written=cur.rowcount
+    conn.commit(); conn.close()
+    print(f"\nwrote {written} new rows to reciterdb.dataset_deposit ({len(recs)} candidates, dupes ignored)")
