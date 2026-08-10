@@ -1,0 +1,7 @@
+# These scripts write CSV intermediates next to themselves (script dir), and the root
+# .gitignore already blocks *.csv and data/ repo-wide — real reciterdb/PubMed content,
+# never commit. Belt-and-suspenders for the output shapes the root rule doesn't name.
+__pycache__/
+*.xlsx
+*.docx
+report_stats.txt
