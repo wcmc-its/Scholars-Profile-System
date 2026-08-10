@@ -24,6 +24,8 @@ import {
   buildUnitRosterCsv,
   countRosterCsvRows,
   isUnitRosterExportEnabled,
+  loadRosterFacultyMeta,
+  type RosterFacultyClient,
 } from "@/lib/edit/unit-roster-export";
 import { loadUnitEditContext } from "@/lib/api/unit-edit-context";
 
@@ -55,7 +57,18 @@ export async function GET(
 
   const activeOnly = request.nextUrl.searchParams.get("activeOnly") === "1";
   const today = new Date().toISOString().slice(0, 10);
-  const options = { today, activeOnly };
+
+  // Faculty block (email / role / dept / division) joined by cwid. Loaded HERE
+  // rather than on `UnitEditContext` — that context is serialized to the client
+  // for the Members tab, and email must not ride along into a browser payload.
+  // `as unknown as` matches the division export's `FacultyExportClient` cast —
+  // the narrow client type is a select-shaped subset Prisma's broad `findMany`
+  // signature doesn't structurally satisfy.
+  const facultyByCwid = await loadRosterFacultyMeta(
+    (ctx.roster ?? []).map((m) => m.cwid),
+    db.read as unknown as RosterFacultyClient,
+  );
+  const options = { today, activeOnly, facultyByCwid };
 
   const rows = countRosterCsvRows(ctx, options);
 
@@ -66,6 +79,11 @@ export async function GET(
       unitType: "center",
       unitCode: code,
       rows,
+      // Emails actually emitted, post-carve — the auditable number. Diverges
+      // from `rows` whenever a hidden role or a `none` release code blanks a
+      // cell, so a disclosure review can see the gate working (or not firing,
+      // while PROFILE_EMAIL_RELEASE_GATE is off).
+      emailRows: [...facultyByCwid.values()].filter((m) => m.email).length,
       activeOnly,
       ts: new Date().toISOString(),
     }),

@@ -20,3 +20,26 @@
 export function isEmailReleaseGateEnabled(): boolean {
   return process.env.PROFILE_EMAIL_RELEASE_GATE === "on";
 }
+
+/**
+ * Whether a scholar's email may be emitted in a CSV export under their Web
+ * Directory release code (SPEC §B.2). When the release gate is OFF this is
+ * always true (legacy behavior — email gated only by viewer-context +
+ * hidden-role). When ON the email is exportable only for `public` /
+ * `institution`; `none` and NULL (the fail-closed default until the ED ETL
+ * backfills `email_visibility`) blank the cell. Any internal viewer who clears
+ * the channel gate sees institution + public alike, so the looser display
+ * audience is irrelevant here.
+ *
+ * Lives here — NOT in `lib/api/export-scholars.ts` — because the unit-roster
+ * export (`lib/edit/unit-roster-export.ts`) reaches the CLIENT bundle via
+ * `components/edit/unit-edit-page.tsx`, and `export-scholars.ts` constructs
+ * `prisma` at module scope. This module is env-reads only, so both export
+ * surfaces can share ONE definition of the release-code rule without dragging
+ * the driver into the browser build. Two copies of a consent predicate is two
+ * places for it to drift.
+ */
+export function isEmailExportableByReleaseCode(emailVisibility: string | null): boolean {
+  if (!isEmailReleaseGateEnabled()) return true;
+  return emailVisibility === "public" || emailVisibility === "institution";
+}

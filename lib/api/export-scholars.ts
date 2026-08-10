@@ -41,7 +41,7 @@ import { prisma } from "@/lib/db";
 import { toCsv, type CsvCell } from "@/lib/csv";
 import { profilePath } from "@/lib/profile-url";
 import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
-import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
+import { isEmailExportableByReleaseCode } from "@/lib/profile/email-visibility-flags";
 import {
   loadFamilyOverlayGate,
   isFamilyPubliclyVisible,
@@ -173,20 +173,6 @@ export type ScholarExport = {
 
 function todayStamp(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-/**
- * Whether the scholar's email may be exported under the Web Directory release
- * code (SPEC §B.2). When the release gate is OFF this is always true (legacy
- * behavior — email gated only by viewer-context + hidden-role). When ON the
- * email is exportable only for `public` / `institution`; `none` and NULL (the
- * fail-closed default until the ED ETL backfills `email_visibility`) blank it.
- * Any internal viewer who clears the channel gate sees institution + public
- * alike, so the looser display audience is irrelevant here.
- */
-function isEmailExportableByReleaseCode(emailVisibility: string | null): boolean {
-  if (!isEmailReleaseGateEnabled()) return true;
-  return emailVisibility === "public" || emailVisibility === "institution";
 }
 
 /**
