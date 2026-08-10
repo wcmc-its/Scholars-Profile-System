@@ -122,14 +122,14 @@ function downloadCsv(cycle: string, awards: AwardRow[]) {
 function SourceBadge({ source }: { source: "membership" | "llm" | "human" }) {
   if (source === "llm") {
     return (
-      <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-800">
+      <span className="whitespace-nowrap rounded bg-amber-100 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-amber-800">
         AI-suggested
       </span>
     );
   }
   if (source === "human") {
     return (
-      <span className="ml-1.5 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-800">
+      <span className="whitespace-nowrap rounded bg-emerald-100 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-emerald-800">
         Confirmed
       </span>
     );
@@ -169,7 +169,7 @@ function PercentCell({
   }
 
   return (
-    <div className="flex items-center">
+    <div className="flex flex-col items-start gap-1">
       <input
         type="number"
         min={0}
@@ -211,7 +211,7 @@ function ProgramCell({
   }
 
   return (
-    <div className="flex items-center">
+    <div className="flex flex-col items-start gap-1">
       <select
         value={allocation.programCode ?? ""}
         disabled={busy}
