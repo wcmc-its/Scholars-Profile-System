@@ -29,7 +29,6 @@ const SCHOLAR_ROW = {
   department: { name: "Medicine" },
   division: { name: "Cardiology" },
   email: "abc1234@med.cornell.edu",
-  emailVisibility: "institution",
 };
 
 function client(over?: {
@@ -69,7 +68,6 @@ describe("buildFacultyCsv", () => {
     divisionName: null,
     departmentName: "Medicine",
     email: "abc1234@med.cornell.edu",
-    emailVisibility: "institution",
     ...over,
   });
 
@@ -96,15 +94,20 @@ describe("buildFacultyCsv", () => {
     ]);
   });
 
-  it("release code `none` blanks the email when the gate is ON", () => {
-    process.env.PROFILE_EMAIL_RELEASE_GATE = "on";
-    const csv = buildFacultyCsv([row({ emailVisibility: "none" })]);
-    expect(csv).not.toContain("abc1234@med.cornell.edu");
-    expect(csv).toContain("full_time_faculty,,Medicine,");
+  it("the release-code gate does NOT reach this surface, in EITHER position", () => {
+    // Departments get every member's address on file. `none` is inferred from
+    // missing ED data rather than chosen, so the filter was withholding on a data
+    // gap. Both flag positions asserted: prod's OFF position fails open and would
+    // mask a reinstated filter.
+    for (const gate of ["on", "off"]) {
+      process.env.PROFILE_EMAIL_RELEASE_GATE = gate;
+      expect(buildFacultyCsv([row()]), `release gate ${gate}`).toContain(
+        "abc1234@med.cornell.edu",
+      );
+    }
   });
 
-  it("a hidden-display role blanks the email even with the gate OFF (#536)", () => {
-    process.env.PROFILE_EMAIL_RELEASE_GATE = "off";
+  it("a hidden-display role still blanks the email (#536)", () => {
     const csv = buildFacultyCsv([row({ roleCategory: "doctoral_student_phd" })]);
     expect(csv).not.toContain("abc1234@med.cornell.edu");
   });
@@ -116,15 +119,14 @@ describe("buildFacultyCsv", () => {
   });
 
   it("countFacultyEmailsEmitted counts post-carve, not row count", () => {
-    process.env.PROFILE_EMAIL_RELEASE_GATE = "on";
     const rows = [
       row({ cwid: "ok1" }),
-      row({ cwid: "no1", emailVisibility: "none" }),
+      row({ cwid: "ok2" }),
       row({ cwid: "hid1", roleCategory: "doctoral_student_phd" }),
       row({ cwid: "nomail", email: null }),
     ];
     expect(rows).toHaveLength(4);
-    expect(countFacultyEmailsEmitted(rows)).toBe(1);
+    expect(countFacultyEmailsEmitted(rows)).toBe(2);
   });
 });
 
@@ -144,14 +146,13 @@ describe("loadDepartmentRosterForExport", () => {
         divisionName: "Cardiology",
         departmentName: "Medicine",
         email: "abc1234@med.cornell.edu",
-        emailVisibility: "institution",
       },
     ]);
-    // The release audience must be SELECTED, not just the address — without it
-    // the gate has nothing to read and every cell fails open.
+    // The address must be SELECTED — a loader that drops it silently exports an
+    // all-empty email column that looks like "nobody has an address on file".
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        select: expect.objectContaining({ email: true, emailVisibility: true }),
+        select: expect.objectContaining({ email: true }),
       }),
     );
   });

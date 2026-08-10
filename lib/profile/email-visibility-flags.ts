@@ -53,26 +53,31 @@ export function isEmailExportableByReleaseCode(emailVisibility: string | null): 
  * `lib/edit/unit-faculty-export.ts`) alike. Returns "" (never undefined) so the
  * column count is identical on every row of every unit type.
  *
- * THE one place the three gates compose. Both unit-export modules call this
- * rather than keeping their own copy, because the failure mode of a duplicated
- * consent rule is that the copies drift and one surface quietly starts emitting
- * what the other withholds.
+ * TWO gates, and DELIBERATELY NOT the release code:
  *
  *   1. `SCHOLAR_LIST_EXPORT_EMAIL` — operator kill switch (#866), per-env.
  *   2. #536 — a hidden-display role never emits contact info.
- *   3. SPEC §B.2 — the scholar's Web Directory release code.
  *
- * Gate 1 is a policy lever and yours to pull. Gates 2 and 3 are not: `none`
- * records an individual's own "do not release my address".
+ * The release-code filter (`isEmailExportableByReleaseCode`) is intentionally
+ * ABSENT here, and this is the one surface where that is correct. Per
+ * docs/email-visibility-spec.md ("The attribute (verified)"), only `institution`
+ * and `public` are ever OBSERVED in `weillCornellEduReleaseCode;mail` — `none` is
+ * *inferred*, never set by a person, and is simply what the parser emits for an
+ * absent / empty / unrecognized attribute. On a unit-scoped, authenticated /edit
+ * export the filter therefore withholds addresses for MISSING DATA rather than
+ * for anyone's choice, which is not a privacy control, just an incomplete roster.
+ * A unit admin is entitled to their own unit's directory data.
+ *
+ * `isEmailExportableByReleaseCode` still guards `lib/api/export-scholars.ts` (the
+ * #847 scope export), which has a different audience and its own cohort cap. Do
+ * NOT "unify" the two by deleting it there — the surfaces differ on purpose.
  */
 export function exportEmailCell(row: {
   email: string | null;
-  emailVisibility: string | null;
   roleCategory: string | null;
 }): string {
   if (!row.email) return "";
   if (!isScholarListExportEmailEnabled()) return "";
   if (!isPubliclyDisplayed(row.roleCategory)) return "";
-  if (!isEmailExportableByReleaseCode(row.emailVisibility)) return "";
   return row.email;
 }
