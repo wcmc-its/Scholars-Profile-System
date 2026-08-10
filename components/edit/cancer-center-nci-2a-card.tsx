@@ -282,7 +282,7 @@ export function Nci2aCard({ centerCode }: Nci2aCardProps) {
   return (
     <EditPanel
       heading="NCI Table 2A"
-      description="Cancer-Relevant Percent and Program Code marked AI-suggested are Bedrock proposals from the project title alone — NCI's own peer-review criteria aren't sourced yet (see the handoff doc). Review and correct before this leaves the building."
+      description="Cancer-Relevant Percent marked AI-suggested is a Bedrock proposal per Meyer's cancer-relevance method, from the project title alone. Confirming or correcting it here is what makes it defensible in peer-review — review before this leaves the building."
       headerAction={
         state?.awards.length ? (
           <Button size="sm" variant="outline" onClick={() => downloadCsv(state.cycle!, state.awards)}>
