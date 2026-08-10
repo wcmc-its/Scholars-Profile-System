@@ -27,7 +27,14 @@ type Opts = {
   accessRows?: Array<{ cwid: string; role: "owner" | "curator"; grantedBy: string | null; createdAt: Date }>;
   overrides?: Array<{ fieldName: string; value: string }>;
   suppression?: { id: string; createdAt: Date; createdBy: string } | null;
-  scholars?: Array<{ cwid: string; preferredName: string; primaryTitle: string | null }>;
+  /** `deletedAt` mirrors the real `resolveScholarNames` select — omit it for a
+   *  currently-employed scholar, set a Date for one the ED ETL soft-deleted. */
+  scholars?: Array<{
+    cwid: string;
+    preferredName: string;
+    primaryTitle: string | null;
+    deletedAt?: Date | null;
+  }>;
   siblings?: Array<{ code: string; name: string; slug: string }>;
   centerMembers?: Array<{
     cwid: string;
@@ -213,6 +220,107 @@ describe("loadUnitEditContext — department", () => {
   });
 });
 
+describe("loadUnitEditContext — roster scholarState (#2324)", () => {
+  const manualDivision = {
+    code: "N9001",
+    name: "New Division",
+    description: null,
+    slug: "new-division",
+    chiefCwid: null,
+    source: "manual",
+    deptCode: "N1280",
+    department: { name: "Medicine", slug: "medicine" },
+  };
+
+  async function rosterFor(
+    members: Array<{ cwid: string; source: string }>,
+    scholars: Array<{
+      cwid: string;
+      preferredName: string;
+      primaryTitle: string | null;
+      deletedAt: Date | null;
+    }>,
+  ) {
+    const ctx = await loadUnitEditContext(
+      "division",
+      "N9001",
+      SUPERUSER,
+      asClient(
+        fakeClient({ division: manualDivision, divisionMembers: members, scholars }),
+      ),
+    );
+    return ctx!.roster!;
+  }
+
+  it("a soft-deleted scholar is `departed` and KEEPS their name", async () => {
+    // The bug this fixes: the ED ETL soft-deletes departures (deletedAt), and
+    // resolveScholarNames does not filter on it — so before this, a person who
+    // left WCM rendered as an ordinary member with no signal whatsoever. The
+    // name must survive (the roster is a historical record) while the STATE
+    // changes.
+    const roster = await rosterFor(
+      [{ cwid: "gone1", source: "manual-ui" }],
+      [
+        {
+          cwid: "gone1",
+          preferredName: "Gone Person",
+          primaryTitle: "Professor",
+          deletedAt: new Date("2026-01-15"),
+        },
+      ],
+    );
+    expect(roster[0].scholarState).toBe("departed");
+    expect(roster[0].name).toBe("Gone Person");
+    expect(roster[0].title).toBe("Professor");
+  });
+
+  it("a cwid with NO scholar row is `unknown`, and the name still falls back to the cwid", async () => {
+    const roster = await rosterFor([{ cwid: "ghost1", source: "manual-ui" }], []);
+    expect(roster[0].scholarState).toBe("unknown");
+    expect(roster[0].name).toBe("ghost1");
+  });
+
+  it("distinguishes departed from unknown in one roster", async () => {
+    // These were indistinguishable before: one showed a name, one showed a bare
+    // cwid, and neither said why.
+    const roster = await rosterFor(
+      [
+        { cwid: "here1", source: "manual-ui" },
+        { cwid: "gone1", source: "manual-ui" },
+        { cwid: "ghost1", source: "manual-ui" },
+      ],
+      [
+        { cwid: "here1", preferredName: "Here Person", primaryTitle: null, deletedAt: null },
+        {
+          cwid: "gone1",
+          preferredName: "Gone Person",
+          primaryTitle: null,
+          deletedAt: new Date("2026-01-15"),
+        },
+      ],
+    );
+    expect(roster.map((r) => [r.cwid, r.scholarState])).toEqual([
+      ["here1", "active"],
+      ["gone1", "departed"],
+      ["ghost1", "unknown"],
+    ]);
+  });
+
+  it("the scholar lookup does NOT filter on deletedAt", async () => {
+    // Guard: adding `deletedAt: null` to that where-clause would turn every
+    // departure into a bare-cwid `unknown` row and destroy the history.
+    const client = fakeClient({
+      division: manualDivision,
+      divisionMembers: [{ cwid: "gone1", source: "manual-ui" }],
+      scholars: [],
+    });
+    await loadUnitEditContext("division", "N9001", SUPERUSER, asClient(client));
+    for (const call of client.scholar.findMany.mock.calls) {
+      expect(call[0].where).not.toHaveProperty("deletedAt");
+    }
+  });
+});
+
 describe("loadUnitEditContext — manual division roster", () => {
   it("a manual division carries a roster; an ED division does not", async () => {
     const manual = {
@@ -233,7 +341,9 @@ describe("loadUnitEditContext — manual division roster", () => {
         fakeClient({
           division: manual,
           divisionMembers: [{ cwid: "mem001", source: "manual-ui" }],
-          scholars: [{ cwid: "mem001", preferredName: "Morgan Member", primaryTitle: null }],
+          scholars: [
+            { cwid: "mem001", preferredName: "Morgan Member", primaryTitle: null, deletedAt: null },
+          ],
         }),
       ),
     );
@@ -248,6 +358,7 @@ describe("loadUnitEditContext — manual division roster", () => {
         programCode: null,
         startDate: null,
         endDate: null,
+        scholarState: "active",
       },
     ]);
     expect(ctx!.unit.deptName).toBe("Medicine");
@@ -328,6 +439,9 @@ describe("loadUnitEditContext — center", () => {
     expect(ctx!.roster).toEqual([
       {
         cwid: "mem9",
+        // No scholar row in this fixture, so the name falls back to the raw cwid
+        // — which is exactly the `unknown` state, now labelled instead of left
+        // looking like someone whose name we simply failed to render.
         name: "mem9",
         title: null,
         source: "manual",
@@ -335,6 +449,7 @@ describe("loadUnitEditContext — center", () => {
         programCode: "CT",
         startDate: "2024-07-01",
         endDate: null,
+        scholarState: "unknown",
       },
     ]);
     // #552/#1117 — the program taxonomy rides along (sorted by sortOrder) with

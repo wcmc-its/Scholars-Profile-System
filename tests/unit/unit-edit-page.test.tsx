@@ -189,7 +189,7 @@ describe("UnitEditPage — rail filtering", () => {
           actorRole: "curator",
           source: "manual",
           roster: [
-            { cwid: "m1", name: "M One", title: null, source: "manual-ui", membershipType: null, programCode: null, startDate: null, endDate: null },
+            { cwid: "m1", name: "M One", title: null, source: "manual-ui", membershipType: null, programCode: null, startDate: null, endDate: null, scholarState: "active" as const },
           ],
         })}
         attr="roster"
