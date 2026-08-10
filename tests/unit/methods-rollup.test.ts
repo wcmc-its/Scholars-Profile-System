@@ -72,14 +72,35 @@ import {
 
 const SC = "imaging_image_analysis";
 
-/** Dispatch the two distinct scholarFamily.findMany call-sites by their `select`. */
+/** A member row as getFamiliesForSupercategory now loads them (#2292). */
+type MemberRow = {
+  familyLabel: string;
+  familyId: string;
+  cwid: string;
+  pmidCount: number;
+  scholar: { roleCategory: string | null };
+};
+
+/** Terse member-row builder — the fixtures below are dense enough to warrant it. */
+const member = (
+  familyLabel: string,
+  familyId: string,
+  cwid: string,
+  pmidCount: number,
+  roleCategory: string | null,
+): MemberRow => ({ familyLabel, familyId, cwid, pmidCount, scholar: { roleCategory } });
+
+/** Dispatch the three distinct scholarFamily.findMany call-sites by their `select`. */
 function wireScholarFamilyFindMany(opts: {
   pmidRows: Array<{ familyLabel: string; pmids: string[] }>;
   exemplarRows: Array<{ familyLabel: string; exemplarTools: string[] }>;
+  memberRows?: MemberRow[];
 }) {
   mockScholarFamilyFindMany.mockImplementation((args: { select?: Record<string, unknown> }) => {
     if (args.select?.pmids) return Promise.resolve(opts.pmidRows);
     if (args.select?.exemplarTools) return Promise.resolve(opts.exemplarRows);
+    // #2292 — the member fetch that replaced the uncarved groupBy.
+    if (args.select?.cwid) return Promise.resolve(opts.memberRows ?? []);
     return Promise.resolve([]);
   });
 }
@@ -96,14 +117,18 @@ beforeEach(() => {
 
 describe("getSupercategoryRollup", () => {
   beforeEach(() => {
-    // groupBy by familyLabel (getFamiliesForSupercategory) — 3 families, one
-    // ("Secret") will be #800-suppressed.
-    mockScholarFamilyGroupBy.mockResolvedValue([
-      { familyLabel: "Deep learning", _count: { cwid: 3 }, _sum: { pmidCount: 10 }, _max: { familyId: "fam_0001" } },
-      { familyLabel: "MRI", _count: { cwid: 2 }, _sum: { pmidCount: 6 }, _max: { familyId: "fam_0002" } },
-      { familyLabel: "Secret", _count: { cwid: 1 }, _sum: { pmidCount: 2 }, _max: { familyId: "fam_0003" } },
-    ]);
+    // #2292 — getFamiliesForSupercategory aggregates member ROWS now (a groupBy
+    // cannot fail closed). 3 families, one ("Secret") will be #800-suppressed.
+    // Deep learning: 3 cwids / pmidSum 10; MRI: 2 / 6; Secret: 1 / 2.
     wireScholarFamilyFindMany({
+      memberRows: [
+        member("Deep learning", "fam_0001", "aaa1001", 4, "full_time_faculty"),
+        member("Deep learning", "fam_0001", "aaa1002", 3, "full_time_faculty"),
+        member("Deep learning", "fam_0001", "aaa1003", 3, null),
+        member("MRI", "fam_0002", "bbb2001", 3, "full_time_faculty"),
+        member("MRI", "fam_0002", "bbb2002", 3, "postdoc"),
+        member("Secret", "fam_0003", "ccc3001", 2, "full_time_faculty"),
+      ],
       pmidRows: [
         { familyLabel: "Deep learning", pmids: ["1", "2", "3"] },
         { familyLabel: "Deep learning", pmids: ["2", "3", "4"] }, // overlap → distinct {1,2,3,4}
@@ -168,22 +193,91 @@ describe("getSupercategoryRollup", () => {
     mockLensEnabled.mockReturnValue(false);
     const out = await getSupercategoryRollup(SC);
     expect(out).toEqual({ families: [], allWorkPubs: [] });
-    expect(mockScholarFamilyGroupBy).not.toHaveBeenCalled();
+    expect(mockScholarFamilyFindMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("#2292 — the family card's scholarCount runs both halves of the carve", () => {
+  beforeEach(() => {
+    mockSuppressionOverlayFindMany.mockResolvedValue([]);
+    mockPublicationFindMany.mockResolvedValue([]);
+  });
+
+  it("filters at the QUERY layer on deletedAt/status AND the role denylist", async () => {
+    wireScholarFamilyFindMany({ pmidRows: [], exemplarRows: [], memberRows: [] });
+    await getSupercategoryRollup(SC);
+
+    const memberCall = mockScholarFamilyFindMany.mock.calls.find(
+      (c) => (c[0] as { select?: Record<string, unknown> }).select?.cwid,
+    );
+    expect(memberCall, "getFamiliesForSupercategory must load member rows").toBeDefined();
+    const where = (memberCall![0] as { where: { scholar?: Record<string, unknown> } }).where;
+    // The uncarved groupBy had no scholar join at all — this is the #2292 defect.
+    expect(where.scholar).toBeDefined();
+    expect(where.scholar).toMatchObject({ deletedAt: null, status: "active" });
+    expect(where.scholar!.OR).toEqual(
+      expect.arrayContaining([expect.objectContaining({ roleCategory: null })]),
+    );
+    // And it must select the column the fail-closed half reads.
+    expect((memberCall![0] as { select: Record<string, unknown> }).select.scholar).toEqual({
+      select: { roleCategory: true },
+    });
+  });
+
+  it("fails CLOSED on an out-of-band suffix the denylist cannot name", async () => {
+    // `doctoral_student_dvm` is not in HIDDEN_ROLE_CATEGORIES, so publicRoleWhere()
+    // admits it — only isPubliclyDisplayed's prefix match rejects it. If the
+    // post-filter is removed this family reads 2 scholars instead of 1.
+    wireScholarFamilyFindMany({
+      pmidRows: [],
+      exemplarRows: [],
+      memberRows: [
+        member("MRI", "fam_0002", "bbb2001", 3, "full_time_faculty"),
+        member("MRI", "fam_0002", "zzz9999", 7, "doctoral_student_dvm"),
+      ],
+    });
+
+    const { families } = await getSupercategoryRollup(SC);
+    const mri = families.find((f) => f.familyLabel === "MRI")!;
+    expect(mri.scholarCount).toBe(1);
+    // The aggregates all describe the same carved population, so the hidden
+    // row's pmidCount must not inflate the sort tiebreak either.
+    expect(mri.pmidCountSum).toBe(3);
+  });
+
+  it("counts a scholar once per family and admits a null role", async () => {
+    wireScholarFamilyFindMany({
+      pmidRows: [],
+      exemplarRows: [],
+      memberRows: [
+        member("MRI", "fam_0002", "bbb2001", 2, null),
+        member("MRI", "fam_0009", "bbb2001", 2, null),
+      ],
+    });
+
+    const { families } = await getSupercategoryRollup(SC);
+    const mri = families.find((f) => f.familyLabel === "MRI")!;
+    expect(mri.scholarCount).toBe(1); // distinct cwids, not rows
+    expect(mri.familyId).toBe("fam_0009"); // lexicographic max, as MySQL MAX() was
   });
 });
 
 describe("getSupercategoryHubEntries", () => {
   it("carries each supercategory's visible families (id + label + scholar count) for the hub deep-links", async () => {
     mockSuppressionOverlayFindMany.mockResolvedValue([]);
-    // First groupBy: by supercategory. Then by familyLabel per supercategory.
-    mockScholarFamilyGroupBy.mockImplementation((args: { by: string[]; where?: { supercategory?: string } }) => {
-      if (args.by.includes("supercategory") && !args.by.includes("familyLabel")) {
-        return Promise.resolve([{ supercategory: SC }]);
-      }
-      return Promise.resolve([
-        { familyLabel: "Deep learning", _count: { cwid: 3 }, _sum: { pmidCount: 10 }, _max: { familyId: "fam_0001" } },
-        { familyLabel: "MRI", _count: { cwid: 2 }, _sum: { pmidCount: 6 }, _max: { familyId: "fam_0002" } },
-      ]);
+    // The remaining groupBy enumerates the supercategories; the per-family
+    // aggregation is a carved member fetch since #2292.
+    mockScholarFamilyGroupBy.mockResolvedValue([{ supercategory: SC }]);
+    wireScholarFamilyFindMany({
+      pmidRows: [],
+      exemplarRows: [],
+      memberRows: [
+        member("Deep learning", "fam_0001", "aaa1001", 4, "full_time_faculty"),
+        member("Deep learning", "fam_0001", "aaa1002", 3, "full_time_faculty"),
+        member("Deep learning", "fam_0001", "aaa1003", 3, null),
+        member("MRI", "fam_0002", "bbb2001", 3, "full_time_faculty"),
+        member("MRI", "fam_0002", "bbb2002", 3, "postdoc"),
+      ],
     });
 
     const entries = await getSupercategoryHubEntries();

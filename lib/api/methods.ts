@@ -692,25 +692,58 @@ export async function getFamiliesForSupercategory(
   if (!isMethodsLensEnabled()) return [];
   const overlayGate = gate ?? (await loadFamilyOverlayGate());
 
-  // ponytail: three counts could drift from the carved scholar LISTS they link
-  // to. Two are user-visible and are now fixed in place:
-  //   - `getDistinctScholarCountForFamily` — the family page's "N scholars" stat,
-  //     its "+ N more scholars →" link and its <meta description>;
-  //   - `getDistinctScholarCountForTopic` (lib/api/topics.ts) — the topic page's
-  //     "+ N more scholars →" chip and its <meta description>.
-  // This one is the third and STAYS DEFERRED: each card's `scholarCount` is this
-  // groupBy's `_count.cwid` — no scholar join at all, not even deletedAt/status.
-  // It renders only inside the family rail's aria-label (the visible number is
-  // `pubCount`, see components/method/family-rail.tsx), and the same `_count.cwid`
-  // orders the hub, so adding the join reorders every supercategory page. That
-  // needs a staging eyeball rather than a drive-by. Filed, not fixed.
-  const groups = await prisma.scholarFamily.groupBy({
-    by: ["familyLabel"],
-    where: { supercategory },
-    _sum: { pmidCount: true },
-    _count: { cwid: true },
-    _max: { familyId: true },
+  // #2292 — this was a `groupBy` with NO scholar join at all, not even
+  // deletedAt/status, so each card's `scholarCount` counted soft-deleted and
+  // inactive scholars. Measured on prod 2026-08-10: 131 of 786 families
+  // over-counted, 176 phantom rows, worst family off by 5 (PET/CT announced 23
+  // where 19 were live). That number is read aloud in the family rail's
+  // aria-label (`components/method/family-rail.tsx` — the visible figure is
+  // `pubCount`), so a screen reader was told a false count. It is ALSO the hub's
+  // sort key, which is why this moves 253 of 736 cards: ordering by a population
+  // that includes dead scholars was itself wrong, so the reorder IS the fix. No
+  // family drops to zero, so no card disappears (verified on prod beforehand).
+  //
+  // A `groupBy` cannot fail closed — the #2271 lesson, that a `count()` leaves no
+  // rows to run `isPubliclyDisplayed` over — so load the rows and aggregate in
+  // process, applying both halves of the carve. Bounded by one supercategory,
+  // the same shape `getSupercategoryFamilyPmids` below already uses. Every
+  // aggregate derives from the one carved row set, so `scholarCount`,
+  // `pmidCountSum` and the chosen `familyId` describe the same population.
+  const memberRows = await prisma.scholarFamily.findMany({
+    where: {
+      supercategory,
+      scholar: { deletedAt: null, status: "active", ...publicRoleWhere() },
+    },
+    select: {
+      familyLabel: true,
+      familyId: true,
+      cwid: true,
+      pmidCount: true,
+      scholar: { select: { roleCategory: true } },
+    },
   });
+
+  type FamilyAgg = {
+    familyLabel: string;
+    cwids: Set<string>;
+    pmidSum: number;
+    maxFamilyId: string | null;
+  };
+  const byLabel = new Map<string, FamilyAgg>();
+  for (const r of memberRows) {
+    if (!isPubliclyDisplayed(r.scholar.roleCategory)) continue;
+    let agg = byLabel.get(r.familyLabel);
+    if (!agg) {
+      agg = { familyLabel: r.familyLabel, cwids: new Set(), pmidSum: 0, maxFamilyId: null };
+      byLabel.set(r.familyLabel, agg);
+    }
+    agg.cwids.add(r.cwid);
+    agg.pmidSum += r.pmidCount ?? 0;
+    // Mirrors the previous `_max: { familyId }` — MySQL MAX on a VARCHAR is
+    // lexicographic, and so is a JS string compare.
+    if (agg.maxFamilyId === null || r.familyId > agg.maxFamilyId) agg.maxFamilyId = r.familyId;
+  }
+  const groups = [...byLabel.values()];
 
   // Resolve the latest exemplarTools per family label (one extra read, bounded by
   // the family count). Use the row carrying the chosen familyId.
@@ -722,7 +755,7 @@ export async function getFamiliesForSupercategory(
   const exemplarById = new Map<string, string[]>();
   if (!opts?.skipExemplars) {
     const chosenIds = visible
-      .map((g) => g._max.familyId)
+      .map((g) => g.maxFamilyId)
       .filter((id): id is string => id !== null);
     const exemplarRows = await prisma.scholarFamily.findMany({
       where: { supercategory, familyId: { in: chosenIds } },
@@ -739,14 +772,14 @@ export async function getFamiliesForSupercategory(
 
   return visible
     .map((g) => {
-      const familyId = g._max.familyId ?? "";
+      const familyId = g.maxFamilyId ?? "";
       return {
         familyId,
         familyLabel: g.familyLabel,
         familySlug: familySlug(g.familyLabel, familyId),
         supercategory,
-        scholarCount: g._count.cwid,
-        pmidCountSum: g._sum.pmidCount ?? 0,
+        scholarCount: g.cwids.size,
+        pmidCountSum: g.pmidSum,
         pubCount: null,
         exemplarTools: exemplarById.get(familyId) ?? [],
         definition: null,
