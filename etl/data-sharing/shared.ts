@@ -7,13 +7,12 @@
  * Keeping the join/build/replace logic here means the direct path and the
  * bridge can't drift — they produce identical rows from identical source data.
  *
- * ponytail: the raw row shape (`SourceRow`) below is a placeholder — the
- * upstream `reciterdb.dataset_deposit` table doesn't exist yet (it's the
- * separate scripts/bulk-data-rule/ Python prerequisite, not part of this
- * plan). Field names mirror the Phase 2 plan's DatasetDeposit/
- * PersonDatasetDeposit Prisma models 1:1, on the assumption the eventual
- * table shape follows the spec directly. Confirm against the real column
- * names once that table lands, before wiring readReciterdbTable() below.
+ * ponytail: the upstream `reciterdb.dataset_deposit` table doesn't exist yet
+ * — it's drafted in wcmc-its/ReCiterDB#131 (dev branch, unmerged), snake_case
+ * per that repo's column-naming convention. readSourceRows() below aliases
+ * each column back to this file's camelCase `SourceRow` shape. Re-verify
+ * against the real table once #131 lands and the table is actually created,
+ * before relying on this in a real run.
  */
 import { db } from "../../lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
@@ -87,8 +86,15 @@ export async function readSourceRows(): Promise<SourceRow[]> {
   let rows: SourceRow[] = [];
   await withReciterConnection(async (conn) => {
     rows = (await conn.query(`
-      SELECT cwid, repository, accessionOrDoi, resourceType, dataType,
-             accessModel, depositYear, provenance, confidence, authorPosition, pmid
+      SELECT cwid, repository,
+             accession_or_doi AS accessionOrDoi,
+             resource_type AS resourceType,
+             data_type AS dataType,
+             access_model AS accessModel,
+             deposit_year AS depositYear,
+             provenance, confidence,
+             author_position AS authorPosition,
+             pmid
       FROM dataset_deposit
     `)) as SourceRow[];
   });
