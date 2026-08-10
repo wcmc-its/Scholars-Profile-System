@@ -857,6 +857,7 @@ export class EtlStack extends Stack {
       "etl:jenzabar",
       "etl:reporter",
       "etl:clinical-trials",
+      "etl:data-sharing",
     ]);
     const taskUnitFor = (
       npmScript: string,
@@ -1367,6 +1368,19 @@ export class EtlStack extends Stack {
       {
         id: "ClinicalTrialsWeekly",
         npmScript: "etl:clinical-trials",
+        external: true,
+        tier: "continue",
+      },
+      // Dataset deposits — direct path (reads reciterdb.dataset_deposit), not the
+      // export/import bridge; #2337 decided this once the ClinicalTrialsWeekly step
+      // above already proved in-VPC reciterdb reachability in both envs. Weekly, not
+      // nightly: the upstream source is a manually-run compliance pipeline, not a
+      // daily feed. `continue` — a source outage or reciterdb hiccup must never abort
+      // the weekly chain. Records an etl_run row via withEtlRun("DataSharing", ...)
+      // for freshness tracking (lib/etl/freshness-policy.ts).
+      {
+        id: "DataSharingWeekly",
+        npmScript: "etl:data-sharing",
         external: true,
         tier: "continue",
       },

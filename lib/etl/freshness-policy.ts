@@ -180,6 +180,11 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   POPS: { cadence: "weekly" },
   ReporterGrants: { cadence: "weekly" },
   ClinicalTrials: { cadence: "weekly" },
+  // #2337 — deployed weekly step (cdk/lib/etl-stack.ts DataSharingWeekly,
+  // tier:"continue") that writes source "DataSharing" (etl/data-sharing/index.ts's
+  // withEtlRun("DataSharing", main) call). Continue-tier, so freshness is the only
+  // detector of a silently-dead schedule.
+  DataSharing: { cadence: "weekly" },
   // Deployed weekly step (cdk/lib/etl-stack.ts TechnologyWeekly, tier:"continue")
   // that writes source "Technology" (etl/technologies/index.ts) — continue-tier, so
   // freshness is the only detector of a silent no-op or a dropped schedule.
