@@ -89,6 +89,27 @@ const importsFromDb = (src: string, name: string) => {
 };
 
 /**
+ * Importing `disconnect` is not closing anything — the call has to be there too.
+ *
+ * Reverting `await disconnect()` to `db.write.$disconnect()` while LEAVING the
+ * import in place used to satisfy this guard, `npm run typecheck` and `npm run
+ * lint` (the now-unused import is not even warned on) — putting the 12h-stall
+ * shape documented above one line away from returning with every gate green
+ * (#2291). Drop the import that introduces the name, and any surviving mention
+ * is a real use: a call, or a bare reference like `.finally(disconnect)`.
+ *
+ * ponytail: token-presence, not a call-graph. A file that imports `disconnect`
+ * and only mentions it in a string would read as closing. Nothing in the repo
+ * does that; upgrade to an AST walk if one ever appears.
+ */
+const callsHelper = (src: string) => {
+  const withoutImport = src
+    .replace(/import\s*\{[^}]*\}\s*from\s*["'][^"']*lib\/db["']/g, "")
+    .replace(/\{[^}]*\}\s*=\s*await\s+import\s*\(\s*["'][^"']*lib\/db["']\s*\)/g, "");
+  return /(?<!\$)\bdisconnect\b/.test(withoutImport);
+};
+
+/**
  * Does this module reach the reader pool (either alias)?
  *
  * Matches bare `db.read`, not just `db.read.` — a client is just as opened when
@@ -131,7 +152,8 @@ describe("ETL entrypoints close every pool they open", () => {
   it.each(entrypoints.map((e) => [path.relative(ROOT, e), e] as const))("%s", (rel, entry) => {
     const src = read(entry);
     // `disconnect()` closes both pools; the `$disconnect` forms close exactly one.
-    const usesHelper = importsFromDb(src, "disconnect");
+    // Both the import AND the call are required — see `callsHelper` (#2291).
+    const usesHelper = importsFromDb(src, "disconnect") && callsHelper(src);
     const disconnectsAnything = usesHelper || /\$disconnect/.test(src);
     if (!disconnectsAnything) return; // process.exit() style — pools die with the process
 
@@ -152,7 +174,8 @@ describe("ETL entrypoints close every pool they open", () => {
       `${rel} queries the ${leaks.join(" and ")} pool (directly or via an import) but never ` +
         `closes it. With DATABASE_URL_RO set, the open pool keeps the event loop alive and the ` +
         `process hangs after main() resolves. Fix: ` +
-        `import { disconnect } from "../../lib/db"  →  .finally(disconnect)`,
+        `import { disconnect } from "../../lib/db"  →  .finally(disconnect). ` +
+        `Importing it is not enough — this guard requires the CALL (#2291).`,
     ).toEqual([]);
   });
 });
