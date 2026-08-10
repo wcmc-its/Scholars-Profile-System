@@ -119,7 +119,7 @@ describe("/edit/center/[code]/export gating", () => {
     const text = await res.text();
     const lines = text.trim().split("\r\n");
     expect(lines[0]).toBe(
-      "cwid,name,title,membership_type,program_code,program_label,start_date,end_date,status,source,email,role_category,department,division",
+      "cwid,name,title,membership_type,program_code,program_label,start_date,end_date,status,source,email,role_category,department,division,scholar_state",
     );
     // All three members present (active + pending + inactive) by default.
     expect(lines).toHaveLength(4);

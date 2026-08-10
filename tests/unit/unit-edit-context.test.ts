@@ -27,7 +27,14 @@ type Opts = {
   accessRows?: Array<{ cwid: string; role: "owner" | "curator"; grantedBy: string | null; createdAt: Date }>;
   overrides?: Array<{ fieldName: string; value: string }>;
   suppression?: { id: string; createdAt: Date; createdBy: string } | null;
-  scholars?: Array<{ cwid: string; preferredName: string; primaryTitle: string | null }>;
+  /** `deletedAt` mirrors the real `resolveScholarNames` select — omit it for a
+   *  currently-employed scholar, set a Date for one the ED ETL soft-deleted. */
+  scholars?: Array<{
+    cwid: string;
+    preferredName: string;
+    primaryTitle: string | null;
+    deletedAt?: Date | null;
+  }>;
   siblings?: Array<{ code: string; name: string; slug: string }>;
   centerMembers?: Array<{
     cwid: string;

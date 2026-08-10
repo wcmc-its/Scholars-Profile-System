@@ -127,6 +127,41 @@ describe("buildUnitRosterCsv", () => {
     expect(csv).toContain("d1,Div Member,,,,,,,active,manual,,,,");
   });
 
+  it("emits scholar_state, including the status=active + departed pair", () => {
+    // The audit case: the person left WCM but nobody closed out the membership,
+    // so the DATE-derived `status` still reads active. Filtering the CSV on
+    // `status` alone would never surface them — that pair is why the column
+    // exists, and it must be reachable without supplying facultyByCwid.
+    const mixed = [
+      {
+        cwid: "gone1",
+        name: "Gone One",
+        title: null,
+        source: "manual",
+        membershipType: null,
+        programCode: null,
+        startDate: null,
+        endDate: null,
+        scholarState: "departed" as const,
+      },
+      {
+        cwid: "ghost1",
+        name: "ghost1",
+        title: null,
+        source: "manual",
+        membershipType: null,
+        programCode: null,
+        startDate: null,
+        endDate: null,
+        scholarState: "unknown" as const,
+      },
+    ];
+    const csv = buildUnitRosterCsv(ctx(mixed, []), { today: TODAY });
+    expect(csv.split("\r\n")[0].endsWith(",scholar_state")).toBe(true);
+    expect(csv).toContain("active,manual,,,,,departed");
+    expect(csv).toContain("active,manual,,,,,unknown");
+  });
+
   it("handles a null roster (no members) → header only", () => {
     const csv = buildUnitRosterCsv(ctx(null, null), { today: TODAY });
     expect(csv.trim().split("\r\n")).toHaveLength(1);

@@ -67,9 +67,11 @@ export function rosterStatusOf(
 }
 
 /** Column order — the CSV header row + the per-row projection key order (#1102).
- *  The trailing four are the faculty block; they come through EMPTY when the
- *  caller supplies no `facultyByCwid`, so the header row is stable either way
- *  (a consumer's column indices never shift under them). */
+ *  `email`/`role_category`/`department`/`division` are the faculty block; they
+ *  come through EMPTY when the caller supplies no `facultyByCwid`, so the header
+ *  row is stable either way (a consumer's column indices never shift under them).
+ *  `scholar_state` is last and always populated — it comes off the roster row
+ *  itself, not the faculty join, so it is present even with no `facultyByCwid`. */
 export const ROSTER_CSV_HEADERS = [
   "cwid",
   "name",
@@ -85,6 +87,7 @@ export const ROSTER_CSV_HEADERS = [
   "role_category",
   "department",
   "division",
+  "scholar_state",
 ] as const;
 
 /** Per-scholar faculty metadata joined onto a roster row by cwid. Loaded in the
@@ -151,6 +154,12 @@ export function buildUnitRosterCsv(
       meta?.roleCategory ?? "",
       meta?.departmentName ?? "",
       meta?.divisionName ?? "",
+      // Whether the PERSON is still at WCM — an axis the `status` column above
+      // cannot express, since that one reads membership DATES. A row can be
+      // status=active AND scholar_state=departed: someone left and nobody
+      // closed out their membership. That pair is the audit this column exists
+      // for, and it is why filtering the CSV on `status` alone misses them.
+      m.scholarState,
     ]);
   }
   return toCsv(ROSTER_CSV_HEADERS, body);
