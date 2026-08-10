@@ -9,20 +9,22 @@
  * script never reads the workbook itself). Real award/PI data — the file lives
  * outside this repo and `--file` has no default; pass it explicitly.
  *
- * PROGRAM ASSIGNMENT — existing data first, Bedrock only for the gap:
+ * PROGRAM ASSIGNMENT — existing data ONLY, never a model guess:
  *   1. Normalize the OSRA "Award Number" and match it against `Grant.awardNumber`
  *      (both already use the same spaced NIH format in practice — see the
  *      feature plan). A normalized number matching MORE THAN ONE distinct
  *      `Grant.cwid` is treated as ambiguous, never guessed.
  *   2. A resolved cwid's `CenterMembership.programCode` for this center, if any,
- *      becomes the allocation directly — `source: "membership"`, 100%. No
- *      Bedrock call for the program on this path.
- *   3. Only when step 1 or 2 comes up empty does the row ask Bedrock to propose
- *      ONE program code from the center's live `CenterProgram` list (or `null`
- *      if none fit) — `source: "llm"`.
+ *      becomes the allocation directly — `source: "membership"`, 100%.
+ * Program assignment is a pre-existing person-level fact, not something an LLM
+ * should ever assert. A Meyer member with no program assigned yet (or a row
+ * whose award number doesn't resolve at all) gets `programCode: null,
+ * source: "membership"` — an explicit, honest gap, never a guess.
  * `cancerRelevantPercent` has no data source anywhere, so EVERY row asks
  * Bedrock for it regardless of program resolution — see
- * `lib/edit/cancer-center-funding-generator.ts`.
+ * `lib/edit/cancer-center-funding-generator.ts`. That is a fully separate
+ * concept from program assignment above: `cancerRelevantPercent` always
+ * carries its own Bedrock-sourced `source: "llm"`, untouched by this change.
  *
  * NON-CLOBBER — a reviewer's override always wins over a re-run of this script
  * for the SAME (centerCode, reportingCycle, institutionNumber): `update` skips
@@ -103,13 +105,6 @@ export type Nci2aImportDb = {
       where: { centerCode: string; programCode?: { not: null } };
       select: { cwid: true; programCode: true };
     }): Promise<{ cwid: string; programCode: string | null }[]>;
-  };
-  centerProgram: {
-    findMany(args: {
-      where: { centerCode: string };
-      orderBy: { sortOrder: "asc" };
-      select: { code: true; label: true };
-    }): Promise<{ code: string; label: string }[]>;
   };
   cancerCenterFundingAward: {
     findUnique(args: unknown): Promise<ExistingAward | null>;
@@ -284,37 +279,35 @@ export type RowPlan = {
   grantCwid: string | null;
   /** One allocation, always summing to 100% — a `programCode: null` row is an
    *  explicit, visible gap, never omitted (omitting would silently break the
-   *  "allocations sum to 100% of the award" invariant downstream). */
-  allocation: { programCode: string | null; source: "membership" | "llm" };
+   *  "allocations sum to 100% of the award" invariant downstream). `source`
+   *  is always `"membership"` — program assignment never comes from a model
+   *  guess, so there is no other literal it could ever be. */
+  allocation: { programCode: string | null; source: "membership" };
   cancerRelevantPercent: number | null;
   cancerRelevantRationale: string | null;
 };
 
-/** Decide one row's plan: resolve via Grant→CenterMembership first, Bedrock only
- *  for what that leaves open. Never throws — a Bedrock failure leaves the
+/** Decide one row's plan: resolve the program via Grant→CenterMembership only
+ *  (never a model guess), and independently ask Bedrock for the
+ *  cancer-relevant percent. Never throws — a Bedrock failure leaves the
  *  percent/rationale null (see `inferCancerFundingJudgments`'s own contract). */
 export async function planRow(
   row: ImportRow,
   awardIndex: Map<string, string | "ambiguous">,
   membershipIndex: Map<string, string>,
-  programs: readonly { code: string; label: string }[],
 ): Promise<RowPlan> {
   const matched = awardIndex.get(normalizeAwardNumber(row.sourceAwardNumber));
   const grantCwid = matched && matched !== "ambiguous" ? matched : null;
   const membershipProgram = grantCwid ? (membershipIndex.get(grantCwid) ?? null) : null;
 
-  const needsProgramGuess = membershipProgram === null;
   const inference = await inferCancerFundingJudgments({
     projectTitle: row.projectTitle,
     specificFundingSource: row.specificFundingSource,
     nihActivityCode: row.nihActivityCode,
     pi: row.pi,
-    programs: needsProgramGuess ? programs : [],
   });
 
-  const allocation: RowPlan["allocation"] = membershipProgram
-    ? { programCode: membershipProgram, source: "membership" }
-    : { programCode: inference?.programCode ?? null, source: "llm" };
+  const allocation: RowPlan["allocation"] = { programCode: membershipProgram, source: "membership" };
 
   return {
     row,
@@ -329,7 +322,6 @@ export type ApplyCounts = {
   created: number;
   updated: number;
   membershipResolved: number;
-  llmProgramResolved: number;
   unresolvedProgram: number;
   percentSkippedHuman: number;
   /** A re-run's Bedrock call failed this cycle, but a prior cycle's value
@@ -343,7 +335,6 @@ function emptyCounts(): ApplyCounts {
     created: 0,
     updated: 0,
     membershipResolved: 0,
-    llmProgramResolved: 0,
     unresolvedProgram: 0,
     percentSkippedHuman: 0,
     percentSkippedInferenceFailed: 0,
@@ -361,8 +352,7 @@ export async function applyPlan(
   counts: ApplyCounts,
 ): Promise<void> {
   const { row, allocation } = plan;
-  if (allocation.source === "membership") counts.membershipResolved += 1;
-  else if (allocation.programCode) counts.llmProgramResolved += 1;
+  if (allocation.programCode) counts.membershipResolved += 1;
   else counts.unresolvedProgram += 1;
 
   const existing = await db.cancerCenterFundingAward.findUnique({
@@ -478,14 +468,13 @@ const main = async () => {
   const { db } = await import("../../lib/db");
   const w = db.write as unknown as Nci2aImportDb;
 
-  const [grants, memberships, programs] = await Promise.all([
+  const [grants, memberships] = await Promise.all([
     w.grant.findMany({ where: { awardNumber: { not: null } }, select: { awardNumber: true, cwid: true } }),
     w.centerMembership.findMany({ where: { centerCode: CENTER_CODE }, select: { cwid: true, programCode: true } }),
-    w.centerProgram.findMany({ where: { centerCode: CENTER_CODE }, orderBy: { sortOrder: "asc" }, select: { code: true, label: true } }),
   ]);
   const awardIndex = buildAwardNumberIndex(grants);
   const membershipIndex = buildMembershipIndex(memberships);
-  log(`Indexed ${grants.length} grant award numbers, ${memberships.length} Meyer memberships, ${programs.length} programs.`);
+  log(`Indexed ${grants.length} grant award numbers, ${memberships.length} Meyer memberships.`);
 
   const { rows, scopedCount, skipped } = scopeAndLimitRows(allRows, opts, awardIndex, memberships);
   if (opts.membersOnly) {
@@ -498,7 +487,7 @@ const main = async () => {
 
   log(`Planning ${rows.length} row(s) (Bedrock calls, concurrency=${opts.concurrency})...`);
   const plans = await mapWithConcurrency(rows, opts.concurrency, (row) =>
-    planRow(row, awardIndex, membershipIndex, programs),
+    planRow(row, awardIndex, membershipIndex),
   );
 
   const counts = emptyCounts();
@@ -508,7 +497,7 @@ const main = async () => {
 
   log(
     `\nDone${opts.dryRun ? " (dry run)" : ""}. created=${counts.created}, updated=${counts.updated}, ` +
-      `program: membership=${counts.membershipResolved} llm=${counts.llmProgramResolved} unresolved=${counts.unresolvedProgram}, ` +
+      `program: membership=${counts.membershipResolved} unresolved=${counts.unresolvedProgram}, ` +
       `skipped-for-human-override: percent=${counts.percentSkippedHuman} allocations=${counts.allocationsSkippedHuman}, ` +
       `percent-skipped-failed-retry=${counts.percentSkippedInferenceFailed}.`,
   );

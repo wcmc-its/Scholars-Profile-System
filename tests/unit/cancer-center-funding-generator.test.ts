@@ -1,12 +1,6 @@
 /**
  * NCI Table 2A judgment-column inference (`cancer-center-funding-generator.ts`):
- *  - happy path returns percent (clamped 0-100) + rationale, and — when a program
- *    list is given — a program code + rationale;
- *  - the program-code gate is UNCONDITIONAL: a model-returned code absent from the
- *    input `programs` list is dropped to null, never trusted, regardless of what
- *    the model said (the load-bearing "never invents a code" property);
- *  - no `programs` given (or `[]`) ⇒ `programCode`/`programRationale` are absent,
- *    not null — the caller didn't ask;
+ *  - happy path returns percent (clamped 0-100) + rationale;
  *  - the model id defaults to the pinned Sonnet profile and honours the
  *    `CANCER_FUNDING_MODEL` override lever;
  *  - a Bedrock error, OR a non-finite percent, returns `null` — NEVER throws, so a
@@ -34,17 +28,10 @@ vi.mock("@aws-sdk/credential-providers", () => ({
 
 import { inferCancerFundingJudgments } from "@/lib/edit/cancer-center-funding-generator";
 
-function objectWith(fields: {
-  cancerRelevantPercent: number;
-  cancerRelevantRationale?: string;
-  programCode?: string | null;
-  programRationale?: string | null;
-}) {
+function objectWith(fields: { cancerRelevantPercent: number; cancerRelevantRationale?: string }) {
   return {
     object: {
       cancerRelevantRationale: "because the title says so",
-      programCode: null,
-      programRationale: null,
       ...fields,
     },
   };
@@ -55,11 +42,6 @@ const INPUT = {
   specificFundingSource: "National Cancer Institute",
   pi: "Alfred L",
 };
-
-const PROGRAMS = [
-  { code: "CB", label: "Cancer Biology" },
-  { code: "CGE", label: "Cancer Genetics & Epigenetics" },
-];
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -74,39 +56,6 @@ describe("inferCancerFundingJudgments", () => {
     const result = await inferCancerFundingJudgments(INPUT);
     expect(result?.cancerRelevantPercent).toBe(100); // clamped, not passed through
     expect(result?.cancerRelevantRationale).toBe("because the title says so");
-  });
-
-  it("omits programCode/programRationale entirely when no program list was given", async () => {
-    mockGenerateObject.mockResolvedValue(objectWith({ cancerRelevantPercent: 90 }));
-    const result = await inferCancerFundingJudgments(INPUT);
-    expect(result).not.toHaveProperty("programCode");
-    expect(result).not.toHaveProperty("programRationale");
-  });
-
-  it("passes through a program code that IS in the given list", async () => {
-    mockGenerateObject.mockResolvedValue(
-      objectWith({ cancerRelevantPercent: 100, programCode: "CGE", programRationale: "genetics focus" }),
-    );
-    const result = await inferCancerFundingJudgments({ ...INPUT, programs: PROGRAMS });
-    expect(result?.programCode).toBe("CGE");
-    expect(result?.programRationale).toBe("genetics focus");
-  });
-
-  it("drops a program code NOT in the given list to null — never trusts an invented code", async () => {
-    mockGenerateObject.mockResolvedValue(
-      objectWith({ cancerRelevantPercent: 80, programCode: "MADE_UP_CODE" }),
-    );
-    const result = await inferCancerFundingJudgments({ ...INPUT, programs: PROGRAMS });
-    expect(result?.programCode).toBeNull();
-  });
-
-  it("keeps an explicit null program code as null (no fit is a valid answer)", async () => {
-    mockGenerateObject.mockResolvedValue(
-      objectWith({ cancerRelevantPercent: 15, programCode: null, programRationale: "no listed program fits" }),
-    );
-    const result = await inferCancerFundingJudgments({ ...INPUT, programs: PROGRAMS });
-    expect(result?.programCode).toBeNull();
-    expect(result?.programRationale).toBe("no listed program fits");
   });
 
   it("defaults to the pinned Sonnet extract model, honours the override lever", async () => {

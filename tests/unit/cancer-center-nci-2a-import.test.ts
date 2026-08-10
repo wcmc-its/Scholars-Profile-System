@@ -14,10 +14,14 @@
  *   6. scopeAndLimitRows: the ordering guarantee `main()` relies on but never exercises
  *      itself — --members-only scoping runs BEFORE --limit slicing, proven with a
  *      non-member row placed first in raw file order.
- *   7. planRow: a membership match skips the Bedrock program ask entirely (source=
- *      "membership", no `programs` sent); no match asks Bedrock for a program guess
- *      (source="llm"); a failed Bedrock call (inference returns null) leaves the
- *      percent/rationale null and the allocation an explicit programCode:null gap.
+ *   7. planRow: program assignment ALWAYS comes from the membership index, never a
+ *      model guess — a membership match resolves { programCode, source: "membership" },
+ *      no match resolves { programCode: null, source: "membership" } (never "llm"), and
+ *      `inferCancerFundingJudgments` is called with no `programs` field at all (it no
+ *      longer accepts one). The percent/rationale inference is independent of program
+ *      resolution — it still runs either way, and a failed Bedrock call (inference
+ *      returns null) leaves percent/rationale null while the allocation resolves from
+ *      the membership index regardless.
  *   8. applyPlan (the non-clobber contract): new row creates; existing row updates
  *      both percent and allocations; a HUMAN-sourced percent is skipped on update; a
  *      HUMAN-sourced allocation blocks the WHOLE allocation replace (never partial);
@@ -61,8 +65,6 @@ const ROW: ImportRow = {
   nihActivityCode: "R01",
 };
 
-const PROGRAMS = [{ code: "CB", label: "Cancer Biology" }];
-
 const RUN: ImportOptions = { dryRun: false, limit: null, concurrency: 5, file: "x", membersOnly: false };
 const DRY: ImportOptions = { ...RUN, dryRun: true };
 
@@ -71,7 +73,6 @@ function emptyCounts(): ApplyCounts {
     created: 0,
     updated: 0,
     membershipResolved: 0,
-    llmProgramResolved: 0,
     unresolvedProgram: 0,
     percentSkippedHuman: 0,
     percentSkippedInferenceFailed: 0,
@@ -229,37 +230,42 @@ describe("scopeAndLimitRows", () => {
 });
 
 describe("planRow", () => {
-  it("uses the membership match and never asks Bedrock for a program", async () => {
+  it("resolves the allocation from a membership match, and calls inferCancerFundingJudgments with no `programs` field at all", async () => {
     mockInfer.mockResolvedValue({ cancerRelevantPercent: 90, cancerRelevantRationale: "r" });
     const awardIndex = new Map([["5 R01 CA059736-01", "abc1234"]]);
     const membershipIndex = new Map([["abc1234", "CB"]]);
 
-    const plan = await planRow(ROW, awardIndex, membershipIndex, PROGRAMS);
+    const plan = await planRow(ROW, awardIndex, membershipIndex);
 
     expect(plan.allocation).toEqual({ programCode: "CB", source: "membership" });
-    expect(mockInfer).toHaveBeenCalledWith(expect.objectContaining({ programs: [] }));
+    expect(mockInfer).toHaveBeenCalledTimes(1);
+    const calledWith = mockInfer.mock.calls[0][0];
+    expect(calledWith).not.toHaveProperty("programs");
   });
 
-  it("asks Bedrock for a program when there's no membership match", async () => {
-    mockInfer.mockResolvedValue({
-      cancerRelevantPercent: 40,
-      cancerRelevantRationale: "r",
-      programCode: "CB",
-      programRationale: "fits",
-    });
-    const plan = await planRow(ROW, new Map(), new Map(), PROGRAMS);
+  it("resolves { programCode: null, source: \"membership\" } — NEVER \"llm\" — when there's no membership match, and still asks Bedrock for the percent", async () => {
+    mockInfer.mockResolvedValue({ cancerRelevantPercent: 40, cancerRelevantRationale: "r" });
+    const plan = await planRow(ROW, new Map(), new Map());
 
-    expect(plan.allocation).toEqual({ programCode: "CB", source: "llm" });
-    expect(mockInfer).toHaveBeenCalledWith(expect.objectContaining({ programs: PROGRAMS }));
+    expect(plan.allocation).toEqual({ programCode: null, source: "membership" });
+    expect(plan.cancerRelevantPercent).toBe(40);
+    expect(mockInfer).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves an explicit gap (programCode: null) when Bedrock fails outright", async () => {
+  it("keeps the program allocation resolving correctly from the membership index even when the Bedrock percent call fails outright — the two are decoupled", async () => {
     mockInfer.mockResolvedValue(null);
-    const plan = await planRow(ROW, new Map(), new Map(), PROGRAMS);
 
-    expect(plan.allocation).toEqual({ programCode: null, source: "llm" });
-    expect(plan.cancerRelevantPercent).toBeNull();
-    expect(plan.cancerRelevantRationale).toBeNull();
+    const awardIndex = new Map([["5 R01 CA059736-01", "abc1234"]]);
+    const membershipIndex = new Map([["abc1234", "CB"]]);
+    const withMembership = await planRow(ROW, awardIndex, membershipIndex);
+    expect(withMembership.allocation).toEqual({ programCode: "CB", source: "membership" });
+    expect(withMembership.cancerRelevantPercent).toBeNull();
+    expect(withMembership.cancerRelevantRationale).toBeNull();
+
+    const withoutMembership = await planRow(ROW, new Map(), new Map());
+    expect(withoutMembership.allocation).toEqual({ programCode: null, source: "membership" });
+    expect(withoutMembership.cancerRelevantPercent).toBeNull();
+    expect(withoutMembership.cancerRelevantRationale).toBeNull();
   });
 });
 
@@ -279,7 +285,6 @@ function makeDb(
   const db: Nci2aImportDb = {
     grant: { findMany: vi.fn(async () => []) },
     centerMembership: { findMany: vi.fn(async () => []) },
-    centerProgram: { findMany: vi.fn(async () => []) },
     cancerCenterFundingAward: {
       findUnique: vi.fn(async (args: unknown) => {
         const key = `${(args as { where: { centerCode_reportingCycle_institutionNumber: { institutionNumber: number } } }).where.centerCode_reportingCycle_institutionNumber.institutionNumber}`;
