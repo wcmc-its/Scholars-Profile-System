@@ -33,6 +33,7 @@ import {
   type ProgramEdge,
 } from "@/lib/center-collaboration/graph";
 import type { CollabGroup } from "@/lib/center-collaboration/types";
+import { NAME_SUFFIXES, stripUnitDisambiguation } from "@/lib/name-sort";
 
 // ponytail: starting points, not a scoring rubric — tune once real output is
 // seen. PubMed-only collaboration count is the only signal here, so there's
@@ -106,11 +107,19 @@ function papersTouching(m: CenterMetrics, key: string): number {
 
 /** "Given ... Last" → { given, surname } by last-token split. `Scholar` has no
  *  authoritative first/last split (only `preferredName`/`fullName`), so this
- *  is a display heuristic for the report, not a canonical field. */
+ *  is a display heuristic for the report, not a canonical field. Mirrors
+ *  `extractLastNameSort`'s tokenization exactly (strip the curated name-
+ *  collision disambiguation suffixes, #2049/#2214, then drop a trailing
+ *  generational suffix) so a "Name - Department" or "Name (Unit)" published
+ *  name doesn't turn the unit into the surname — case preserved for display,
+ *  unlike that lowercased sort key. */
 export function splitName(preferredName: string): { given: string; surname: string } {
-  const tokens = preferredName.trim().split(/\s+/).filter(Boolean);
+  const base = stripUnitDisambiguation(preferredName) || preferredName;
+  const tokens = base.trim().split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return { given: "", surname: "" };
-  return { given: tokens.slice(0, -1).join(" "), surname: tokens[tokens.length - 1] };
+  let end = tokens.length;
+  while (end > 1 && NAME_SUFFIXES.test(tokens[end - 1])) end -= 1;
+  return { given: tokens.slice(0, end - 1).join(" "), surname: tokens[end - 1] };
 }
 
 /** Which current member an ADD candidate shares the most co-authored papers
@@ -207,6 +216,14 @@ export function perProgramBlock(before: CenterMetrics, after: CenterMetrics): st
 
 // --- self-check: DB-free synthetic fixture ---------------------------------
 export function selfCheck(): void {
+  // A curated name-collision disambiguation suffix (#2049) must not become
+  // the surname — real staging output surfaced this ("Kristen Marks -
+  // Infectious Diseases" → surname "Diseases" before this fix).
+  const split = splitName("Kristen Marks - Infectious Diseases");
+  if (split.surname !== "Marks" || split.given !== "Kristen") {
+    throw new Error(`splitName didn't strip the disambiguation suffix: ${JSON.stringify(split)}`);
+  }
+
   // 5 members: m1/m2 in P1, m3/m4 in P2, m5 in P1 with zero collaboration.
   // 1 non-member candidate c1, who co-authors 2 papers with m1 only.
   const members = [

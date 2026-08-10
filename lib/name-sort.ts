@@ -7,7 +7,7 @@
  */
 
 /** Generational / honorific suffix tokens dropped before the surname anchor. */
-const NAME_SUFFIXES = /^(Jr|Sr|I{1,3}|IV|V|VI{0,3}|Esq)\.?,?$/i;
+export const NAME_SUFFIXES = /^(Jr|Sr|I{1,3}|IV|V|VI{0,3}|Esq)\.?,?$/i;
 
 /**
  * One trailing balanced parenthetical, with the whitespace in front of it —
@@ -28,7 +28,7 @@ const STRIP_PASSES = 4;
  * `STRIP_PASSES` bounds it; each pass that changes anything removes at least
  * one suffix, so real names (zero suffixes) exit after the first pass.
  */
-function stripUnitDisambiguation(name: string): string {
+export function stripUnitDisambiguation(name: string): string {
   let s = name.trim();
   for (let i = 0; i < STRIP_PASSES; i++) {
     const before = s;
