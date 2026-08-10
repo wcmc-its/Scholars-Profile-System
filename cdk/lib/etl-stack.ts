@@ -508,11 +508,17 @@ export class EtlStack extends Stack {
     // image has no tsx/scripts/lib at all), so the ETL task role, not the
     // app one, needs the grant.
     //
-    // STAGING ONLY, deliberately: this is the ETL role's first-ever Bedrock
-    // grant (this repo's own CLAUDE.md flags the ETL role's Bedrock-lessness
-    // as intentional — "a 'cheap LLM call' is a second Sonnet call"), scoped
-    // narrowly to unblock the staging rollout of one backfill. Extending to
-    // prod is its own, separately-reviewed decision once that rollout is real.
+    // Originally STAGING ONLY (this was the ETL role's first-ever Bedrock
+    // grant — this repo's own CLAUDE.md flags the ETL role's Bedrock-lessness
+    // as intentional, "a 'cheap LLM call' is a second Sonnet call" — so it
+    // was scoped narrowly to unblock the staging rollout of one backfill
+    // first, prod deliberately excluded pending its own review). Now applies
+    // to prod too, so a prod run is POSSIBLE once someone chooses to run it —
+    // this grant alone is NOT a decision to actually import into prod. The
+    // staging rows this backfill has written so far are still 100%
+    // `source: "llm"`, unreviewed (the /edit tab's own banner says review
+    // before this leaves the building) — that review, not this IAM grant, is
+    // the real gate on a prod population run.
     //
     // Sonnet 4.x family only, not Opus — inferCancerFundingJudgments always
     // calls DEFAULT_EXTRACT_MODEL (lib/llm/models.ts), a Sonnet 4.5 id, and
@@ -522,22 +528,20 @@ export class EtlStack extends Stack {
     // profile plus the underlying AWS-owned foundation model, region `*`
     // because a us. profile call fans out across us-east-1/-2/us-west-2.
     // ------------------------------------------------------------------
-    if (env === "staging") {
-      new iam.Policy(this, "EtlTaskRoleBedrockPolicy", {
-        policyName: `sps-etl-task-${env}-bedrock`,
-        roles: [taskRole],
-        statements: [
-          new iam.PolicyStatement({
-            effect: iam.Effect.ALLOW,
-            actions: ["bedrock:InvokeModel"],
-            resources: [
-              `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-sonnet-4-*`,
-              "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-*",
-            ],
-          }),
-        ],
-      });
-    }
+    new iam.Policy(this, "EtlTaskRoleBedrockPolicy", {
+      policyName: `sps-etl-task-${env}-bedrock`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["bedrock:InvokeModel"],
+          resources: [
+            `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-sonnet-4-*`,
+            "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-*",
+          ],
+        }),
+      ],
+    });
 
     // ------------------------------------------------------------------
     // Curated-tables logical-backup bucket (belt-and-suspenders over AWS

@@ -3925,6 +3925,30 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::IAM::Policy",
     },
+    "EtlTaskRoleBedrockPolicyE450C272": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "bedrock:InvokeModel",
+              "Effect": "Allow",
+              "Resource": [
+                "arn:aws:bedrock:*:123456789012:inference-profile/us.anthropic.claude-sonnet-4-*",
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-*",
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-etl-task-prod-bedrock",
+        "Roles": [
+          {
+            "Ref": "EtlTaskRoleD514E3A1",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "EtlTaskRoleD514E3A1": {
       "Properties": {
         "AssumeRolePolicyDocument": {
