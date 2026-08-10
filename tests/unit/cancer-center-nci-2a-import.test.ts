@@ -26,7 +26,15 @@
  *      both percent and allocations; a HUMAN-sourced percent is skipped on update; a
  *      HUMAN-sourced allocation blocks the WHOLE allocation replace (never partial);
  *      --dry-run writes nothing.
+ *   9. isPeerReviewed (DT2A rule #4, deterministic): planRow computes it from the row's
+ *      own nihAward/specificFundingSource alone, independent of membership/Bedrock; it's
+ *      a plain scalar in applyPlan, so it ALWAYS overwrites on update -- unlike
+ *      cancerRelevantPercent there is no human override to clobber.
  */
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockInfer } = vi.hoisted(() => ({ mockInfer: vi.fn() }));
@@ -42,6 +50,7 @@ import {
   buildMembershipExistenceSet,
   filterMembersOnly,
   scopeAndLimitRows,
+  loadImportRows,
   planRow,
   applyPlan,
   CENTER_CODE,
@@ -63,6 +72,7 @@ const ROW: ImportRow = {
   projectEndDate: "2028-12-31",
   annualProjectDirectCosts: 200000,
   nihActivityCode: "R01",
+  nihAward: true,
 };
 
 const RUN: ImportOptions = { dryRun: false, limit: null, concurrency: 5, file: "x", membersOnly: false };
@@ -100,6 +110,30 @@ describe("parseArgs", () => {
   });
   it("parses --members-only", () => {
     expect(parseArgs(["--file=x.json", "--members-only"]).membersOnly).toBe(true);
+  });
+});
+
+describe("loadImportRows", () => {
+  function writeJsonFile(rows: unknown[]): string {
+    const dir = mkdtempSync(path.join(tmpdir(), "nci2a-import-test-"));
+    const file = path.join(dir, "rows.json");
+    writeFileSync(file, JSON.stringify(rows));
+    return file;
+  }
+
+  it("loads rows whose nihAward is a real boolean", () => {
+    const file = writeJsonFile([ROW]);
+    expect(loadImportRows(file)).toEqual([ROW]);
+  });
+
+  it("throws (rather than silently defaulting) when a row has no boolean nihAward -- a stale pre-nihAward JSON", () => {
+    // Regression: an unchecked `as ImportRow[]` cast would let this through as
+    // `nihAward: undefined`, which reads falsy and silently misclassifies a
+    // real NIH award as non-peer-reviewed instead of failing loudly.
+    const rowWithoutNihAward: Partial<ImportRow> = { ...ROW };
+    delete rowWithoutNihAward.nihAward;
+    const file = writeJsonFile([ROW, rowWithoutNihAward]);
+    expect(() => loadImportRows(file)).toThrow(/row 1 has no boolean "nihAward"/);
   });
 });
 
@@ -267,6 +301,18 @@ describe("planRow", () => {
     expect(withoutMembership.cancerRelevantPercent).toBeNull();
     expect(withoutMembership.cancerRelevantRationale).toBeNull();
   });
+
+  it("computes isPeerReviewed deterministically from the row's own nihAward/specificFundingSource -- independent of membership/Bedrock", async () => {
+    mockInfer.mockResolvedValue(null); // even when Bedrock fails outright
+    const nihRow = { ...ROW, nihAward: true, specificFundingSource: "National Cancer Institute" };
+    expect((await planRow(nihRow, new Map(), new Map())).isPeerReviewed).toBe(true);
+
+    const nonNihListedRow = { ...ROW, nihAward: false, specificFundingSource: "National Science Foundation" };
+    expect((await planRow(nonNihListedRow, new Map(), new Map())).isPeerReviewed).toBe(true);
+
+    const neitherRow = { ...ROW, nihAward: false, specificFundingSource: "Columbia University" };
+    expect((await planRow(neitherRow, new Map(), new Map())).isPeerReviewed).toBe(false);
+  });
 });
 
 /** Shape of an `update()` call this suite inspects — narrower than the real
@@ -308,6 +354,7 @@ const PLAN = {
   allocation: { programCode: "CB", source: "membership" as const },
   cancerRelevantPercent: 90,
   cancerRelevantRationale: "r",
+  isPeerReviewed: true,
 };
 
 describe("applyPlan", () => {
@@ -318,6 +365,17 @@ describe("applyPlan", () => {
     expect(created).toHaveLength(1);
     expect(counts.created).toBe(1);
     expect(counts.membershipResolved).toBe(1);
+    const data = (created[0] as { data: Record<string, unknown> }).data;
+    expect(data.isPeerReviewed).toBe(true);
+  });
+
+  it("always overwrites isPeerReviewed on update, even when the percent is human-sourced -- it's not an overridable judgment column", async () => {
+    const { db, updated } = makeDb({
+      "12345": { id: "award-1", cancerRelevantPercentSource: "human", allocations: [{ source: "llm" }] },
+    });
+    const counts = emptyCounts();
+    await applyPlan(db, { ...PLAN, isPeerReviewed: false }, RUN, counts);
+    expect(updated[0].data.isPeerReviewed).toBe(false);
   });
 
   it("updates both percent and allocations when neither is human-sourced", async () => {

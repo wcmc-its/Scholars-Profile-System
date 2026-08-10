@@ -150,6 +150,7 @@ export async function GET(
       cancerRelevantPercentSource: a.cancerRelevantPercentSource,
       cancerRelevantRationale: a.cancerRelevantRationale,
       cancerRelevantAnnualProjectDc,
+      isPeerReviewed: a.isPeerReviewed,
       grantCwid: a.grantCwid,
       applId: applIdByAwardNumber.get(normalizeAwardNumber(a.projectNumber)) ?? null,
       allocations: a.allocations.map((al) => {

@@ -1,0 +1,12 @@
+-- NCI CCSG Data Table 2A rule #4 (CCSG Data Guide p.7): "Only grant and
+-- contracts from NCI, NIH, or organizations listed in [the closed
+-- PeerReviewFundingOrganizations.pdf allowlist] are considered peer-reviewed.
+-- All others funding sources should be listed as non-peer reviewed." Fully
+-- deterministic (no Bedrock call) — see `lib/edit/cancer-center-peer-review.ts`.
+--
+-- Additive, defaulted false, no backfill here: the import script recomputes
+-- this scalar on every cycle re-run (like every other award scalar — it is
+-- not a judgment column, so there's no human override to clobber), so the
+-- next `2026-08-08-cancer-center-nci-2a-import.ts` run repopulates all
+-- existing rows for free.
+ALTER TABLE `cancer_center_funding_award` ADD COLUMN `is_peer_reviewed` BOOLEAN NOT NULL DEFAULT false;

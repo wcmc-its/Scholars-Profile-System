@@ -167,6 +167,7 @@ describe("GET /api/edit/center/[code]/nci-2a", () => {
         cancerRelevantPercent: 50,
         cancerRelevantPercentSource: "llm",
         cancerRelevantRationale: "because",
+        isPeerReviewed: true,
         grantCwid: "abc1234",
         allocations: [{ id: "alloc-1", programCode: "CB", programPercent: 40, source: "membership" }],
       },
@@ -207,6 +208,7 @@ describe("GET /api/edit/center/[code]/nci-2a", () => {
     const json = await res.json();
     const award = json.awards[0];
     expect(award.cancerRelevantAnnualProjectDc).toBe(100000); // 200000 * 50%
+    expect(award.isPeerReviewed).toBe(true);
     expect(award.allocations[0].programLabel).toBe("Cancer Biology");
     expect(award.allocations[0].annualProgramDirectCosts).toBe(40000); // 100000 * 40%
     expect(award.applId).toBe(999);
