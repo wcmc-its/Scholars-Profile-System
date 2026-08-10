@@ -293,18 +293,18 @@ export function Nci2aCard({ centerCode }: Nci2aCardProps) {
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <p className="mb-2 text-xs text-muted-foreground">Cycle: {state.cycle}</p>
+          <p className="mb-2 text-xs text-muted-foreground">Cycle: {state.cycle} &middot; all figures annual</p>
           <table className="w-full min-w-[1100px] border-collapse text-sm">
             <thead>
               <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <th className="py-1.5 pr-2">PI</th>
                 <th className="py-1.5 pr-2">Funding Source</th>
                 <th className="py-1.5 pr-2">Project</th>
-                <th className="py-1.5 pr-2 text-right">Annual Direct Costs</th>
+                <th className="py-1.5 pr-2 text-right">Direct Costs</th>
                 <th className="py-1.5 pr-2">Cancer-Relevant %</th>
-                <th className="py-1.5 pr-2 text-right">Cancer-Relevant DC</th>
+                <th className="py-1.5 pr-2 text-right">Relevant DC</th>
                 <th className="py-1.5 pr-2">Program</th>
-                <th className="py-1.5 pr-2 text-right">Annual Program DC</th>
+                <th className="py-1.5 pr-2 text-right">Program DC</th>
               </tr>
             </thead>
             <tbody>
