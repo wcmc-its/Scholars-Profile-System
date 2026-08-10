@@ -28,6 +28,7 @@ import * as React from "react";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { nihReporterProjectUrl } from "@/lib/nih-reporter";
 
 type ProgramOption = { code: string; label: string };
 
@@ -53,6 +54,8 @@ type AwardRow = {
   cancerRelevantPercentSource: "llm" | "human";
   cancerRelevantRationale: string | null;
   cancerRelevantAnnualProjectDc: number | null;
+  grantCwid: string | null;
+  applId: number | null;
   allocations: AllocationRow[];
 };
 
@@ -304,7 +307,6 @@ export function Nci2aCard({ centerCode }: Nci2aCardProps) {
                 <th className="py-1.5 pr-2">Cancer-Relevant %</th>
                 <th className="py-1.5 pr-2 text-right">Relevant DC</th>
                 <th className="py-1.5 pr-2">Program</th>
-                <th className="py-1.5 pr-2 text-right">Program DC</th>
               </tr>
             </thead>
             <tbody>
@@ -314,10 +316,27 @@ export function Nci2aCard({ centerCode }: Nci2aCardProps) {
                     <tr key={al.id} className="border-b border-border/50 align-top">
                       {i === 0 ? (
                         <>
-                          <td className="py-1.5 pr-2">{a.pi}</td>
+                          <td className="py-1.5 pr-2">
+                            {a.pi}
+                            {a.grantCwid != null && (
+                              <div className="text-xs italic text-muted-foreground">{a.grantCwid}</div>
+                            )}
+                          </td>
                           <td className="py-1.5 pr-2">{a.specificFundingSource}</td>
                           <td className="py-1.5 pr-2">
-                            <div className="font-medium">{a.projectNumber}</div>
+                            {a.applId != null ? (
+                              <a
+                                href={nihReporterProjectUrl(a.applId)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="View on NIH RePORTER"
+                                className="font-medium underline-offset-2 hover:underline"
+                              >
+                                {a.projectNumber}
+                              </a>
+                            ) : (
+                              <div className="font-medium">{a.projectNumber}</div>
+                            )}
                             <div className="text-xs text-muted-foreground">{a.projectTitle}</div>
                           </td>
                           <td className="py-1.5 pr-2 text-right">{money(a.annualProjectDirectCosts)}</td>
@@ -327,7 +346,10 @@ export function Nci2aCard({ centerCode }: Nci2aCardProps) {
                           <td className="py-1.5 pr-2 text-right">{money(a.cancerRelevantAnnualProjectDc)}</td>
                         </>
                       ) : (
-                        <td className="py-1.5 pr-2" colSpan={4} />
+                        // Skips the 6 columns rendered only on the first allocation row
+                        // (PI..Relevant DC) above -- kept in sync with that count, not the
+                        // Program column that follows unconditionally for every row.
+                        <td className="py-1.5 pr-2" colSpan={6} />
                       )}
                       <td className="py-1.5 pr-2">
                         <ProgramCell
@@ -340,7 +362,6 @@ export function Nci2aCard({ centerCode }: Nci2aCardProps) {
                           }
                         />
                       </td>
-                      <td className="py-1.5 pr-2 text-right">{money(al.annualProgramDirectCosts)}</td>
                     </tr>
                   ))}
                 </React.Fragment>

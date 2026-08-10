@@ -64,6 +64,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { normalizeAwardNumber } from "@/lib/award-number";
 import { inferCancerFundingJudgments } from "@/lib/edit/cancer-center-funding-generator";
 
 export const CENTER_CODE = "meyer_cancer_center";
@@ -152,13 +153,13 @@ export function parseArgs(argv: string[]): ImportOptions {
   return { dryRun, limit, concurrency, file, membersOnly };
 }
 
-/** Trim + collapse whitespace + uppercase — OSRA and InfoEd both use the spaced
- *  NIH format ("5 R01 CA059736-01") in the common case, so this is enough to
- *  join them; a non-NIH award number (an internal/foundation tracking id) just
- *  won't match anything, which is the correct, expected outcome for those. */
-export function normalizeAwardNumber(raw: string): string {
-  return raw.trim().replace(/\s+/g, " ").toUpperCase();
-}
+// Re-exported (not redefined) so this script's own call sites below keep
+// resolving `normalizeAwardNumber`, while also sharing it with the GET route
+// that serves this import's review panel
+// (`app/api/edit/center/[code]/nci-2a/route.ts`), which re-does this same
+// join against `Grant.awardNumber` at read time to resolve `applId` — see
+// `lib/award-number.ts` for the contract.
+export { normalizeAwardNumber };
 
 export function loadImportRows(filePath: string): ImportRow[] {
   const absPath = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);

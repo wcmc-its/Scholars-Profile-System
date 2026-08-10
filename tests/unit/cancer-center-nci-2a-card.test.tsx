@@ -13,6 +13,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 import { Nci2aCard } from "@/components/edit/cancer-center-nci-2a-card";
+import { nihReporterProjectUrl } from "@/lib/nih-reporter";
 
 const PAYLOAD = {
   cycle: "osra-2026-07-14",
@@ -34,6 +35,8 @@ const PAYLOAD = {
       cancerRelevantPercentSource: "llm",
       cancerRelevantRationale: "because the title says so",
       cancerRelevantAnnualProjectDc: 180000,
+      grantCwid: "abc1234",
+      applId: 999,
       allocations: [
         { id: "alloc-1", programCode: "CB", programLabel: "Cancer Biology", programPercent: 100, source: "membership", annualProgramDirectCosts: 180000 },
       ],
@@ -72,6 +75,53 @@ describe("Nci2aCard", () => {
     await waitFor(() => expect(screen.getByText("Test, PI")).toBeTruthy());
     expect(screen.getByText("AI-suggested")).toBeTruthy(); // percent, source=llm
     expect(screen.queryByText("Confirmed")).toBeNull(); // allocation, source=membership
+  });
+
+  it("does not render a Program DC column on screen", async () => {
+    mockFetch();
+    render(<Nci2aCard centerCode="meyer_cancer_center" />);
+    await waitFor(() => expect(screen.getByText("Test, PI")).toBeTruthy());
+    expect(screen.queryByText("Program DC")).toBeNull();
+  });
+
+  it("renders the grant CWID under the PI name when present", async () => {
+    mockFetch();
+    render(<Nci2aCard centerCode="meyer_cancer_center" />);
+    await waitFor(() => expect(screen.getByText("Test, PI")).toBeTruthy());
+    expect(screen.getByText("abc1234")).toBeTruthy();
+  });
+
+  it("does not render a CWID line when grantCwid is null", async () => {
+    const noCwidPayload = {
+      ...PAYLOAD,
+      awards: [{ ...PAYLOAD.awards[0], grantCwid: null }],
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => noCwidPayload })));
+    render(<Nci2aCard centerCode="meyer_cancer_center" />);
+    await waitFor(() => expect(screen.getByText("Test, PI")).toBeTruthy());
+    expect(screen.queryByText("abc1234")).toBeNull();
+  });
+
+  it("renders the project number as an NIH RePORTER link when applId is present", async () => {
+    mockFetch();
+    render(<Nci2aCard centerCode="meyer_cancer_center" />);
+    await waitFor(() => expect(screen.getByText("Test, PI")).toBeTruthy());
+    const link = screen.getByRole("link", { name: "5 R01 CA000000-01" }) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe(nihReporterProjectUrl(999));
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
+  it("renders the project number as plain text (no link) when applId is null", async () => {
+    const noApplIdPayload = {
+      ...PAYLOAD,
+      awards: [{ ...PAYLOAD.awards[0], applId: null }],
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => noApplIdPayload })));
+    render(<Nci2aCard centerCode="meyer_cancer_center" />);
+    await waitFor(() => expect(screen.getByText("Test, PI")).toBeTruthy());
+    expect(screen.getByText("5 R01 CA000000-01")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "5 R01 CA000000-01" })).toBeNull();
   });
 
   it("PATCHes cancerRelevantPercent on blur when the value changed", async () => {
