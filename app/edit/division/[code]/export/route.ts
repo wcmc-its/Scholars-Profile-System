@@ -24,6 +24,7 @@ import { loadUnitEditContext } from "@/lib/api/unit-edit-context";
 import { isUnitRosterExportEnabled } from "@/lib/edit/unit-roster-export";
 import {
   buildFacultyCsv,
+  countFacultyEmailsEmitted,
   loadDivisionRosterForExport,
   type FacultyExportClient,
 } from "@/lib/edit/unit-faculty-export";
@@ -66,6 +67,8 @@ export async function GET(
       unitType: "division",
       unitCode: code,
       rows: rows.length,
+      // Emails actually emitted, post-carve -- the auditable number.
+      emailRows: countFacultyEmailsEmitted(rows),
       ts: new Date().toISOString(),
     }),
   );

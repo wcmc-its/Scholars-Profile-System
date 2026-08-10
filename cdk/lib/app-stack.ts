@@ -2561,6 +2561,13 @@ export class AppStack extends Stack {
         //     EdgeStack edgeAllowedCidrs (#461). Prod EMPTY (network half matches
         //     nobody -- default-safe).
         INTERNAL_VIEWER_NETWORK_SIGNAL: "on", // Prod flipped 2026-07-07 (paired w/ prod CIDRs below; IP signal spoofable — accepted).
+        // WIDENED: this switch now also gates the `email` column on the /edit
+        // UNIT roster export (/edit/center/[code]/export). That surface is
+        // UNCAPPED -- unlike the #847 scope export's 50-scholar refusal, it
+        // downloads a center's FULL membership -- so pulling this flag to "off"
+        // is the one-line kill switch for unit-roster contact data. See the
+        // PROFILE_EMAIL_RELEASE_GATE note below for what "off" on THAT gate
+        // means for who lands in the column.
         SCHOLAR_LIST_EXPORT_EMAIL: "on", // Prod flipped 2026-07-07 (adds email col to internal roster CSV; operator-approved).
         INTERNAL_VIEWER_CIDRS:
           env === "staging" ? "157.139.83.164/32" : "140.251.0.0/16,157.139.0.0/16",
@@ -2578,6 +2585,17 @@ export class AppStack extends Stack {
         // scholars (verified). PROD stays OFF until its own backfill runs. Wire in
         // BOTH .env.local AND here per the flag-parity rule -- a manual
         // `cdk deploy Sps-App-<env>` is required (CD re-rolls the image only).
+        //
+        // BLAST RADIUS WIDENED: the /edit UNIT roster export now carries an
+        // `email` column too, and it is UNCAPPED (a center's full membership,
+        // not a <=50 cohort). Because this gate is OFF in prod and fails OPEN,
+        // that column currently emits EVERY member's address regardless of their
+        // Web Directory release code -- including scholars whose code is `none`
+        // (an explicit "do not release"). This is not fixable in app code: the
+        // gate cannot be flipped until the PROD ED backfill populates
+        // email_visibility, since NULL is fail-closed and would blank email
+        // site-wide (public profile Contact card included). Until then the
+        // compensating control is SCHOLAR_LIST_EXPORT_EMAIL above.
         PROFILE_EMAIL_RELEASE_GATE: env === "staging" ? "on" : "off",
         // Superuser tier, sourced from the ED group
         // `ITS:Library:Scholars/superuser-role`. isSuperuser()

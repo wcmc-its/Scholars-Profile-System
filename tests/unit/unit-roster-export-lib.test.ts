@@ -3,14 +3,16 @@
  * and the flag gate (#1102). The `status` column must match the Members-tab
  * `statusOf` in `center-roster-card.tsx`.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   buildUnitRosterCsv,
   countRosterCsvRows,
   isUnitRosterExportEnabled,
+  loadRosterFacultyMeta,
   rosterStatusOf,
   ROSTER_CSV_HEADERS,
+  type RosterFacultyMeta,
 } from "@/lib/edit/unit-roster-export";
 import type { UnitEditContext } from "@/lib/api/unit-edit-context";
 
@@ -70,11 +72,18 @@ describe("buildUnitRosterCsv", () => {
     { code: "CPC", label: "Cancer Prevention & Control", sortOrder: 0, description: null, leaders: [] },
   ];
 
-  it("emits the #1102 header order with no email column", () => {
+  it("emits the header order, now including the faculty block", () => {
     const csv = buildUnitRosterCsv(ctx(roster, programs), { today: TODAY });
     const header = csv.split("\r\n")[0];
     expect(header).toBe(ROSTER_CSV_HEADERS.join(","));
-    expect(header).not.toContain("email");
+    expect(header).toContain("email,role_category,department,division");
+  });
+
+  it("omitting facultyByCwid keeps the header stable and the block empty", () => {
+    const csv = buildUnitRosterCsv(ctx(roster, programs), { today: TODAY });
+    expect(csv.split("\r\n")[0]).toBe(ROSTER_CSV_HEADERS.join(","));
+    // 4 trailing empties — column indices never shift under a consumer.
+    expect(csv).toContain("active,manual,,,,");
   });
 
   it("resolves program_label from the taxonomy and quotes commas in names", () => {
@@ -112,12 +121,163 @@ describe("buildUnitRosterCsv", () => {
       },
     ];
     const csv = buildUnitRosterCsv(ctx(divRoster, []), { today: TODAY });
-    expect(csv).toContain("d1,Div Member,,,,,,,active,manual");
+    expect(csv).toContain("d1,Div Member,,,,,,,active,manual,,,,");
   });
 
   it("handles a null roster (no members) → header only", () => {
     const csv = buildUnitRosterCsv(ctx(null, null), { today: TODAY });
     expect(csv.trim().split("\r\n")).toHaveLength(1);
+  });
+});
+
+describe("email column gating", () => {
+  const prevGate = process.env.PROFILE_EMAIL_RELEASE_GATE;
+  const prevSwitch = process.env.SCHOLAR_LIST_EXPORT_EMAIL;
+  beforeEach(() => {
+    // The operator kill switch is ON in staging + prod; these tests exercise the
+    // consent filters BEHIND it, so default it on and pin it explicitly below.
+    process.env.SCHOLAR_LIST_EXPORT_EMAIL = "on";
+  });
+  afterEach(() => {
+    if (prevGate === undefined) delete process.env.PROFILE_EMAIL_RELEASE_GATE;
+    else process.env.PROFILE_EMAIL_RELEASE_GATE = prevGate;
+    if (prevSwitch === undefined) delete process.env.SCHOLAR_LIST_EXPORT_EMAIL;
+    else process.env.SCHOLAR_LIST_EXPORT_EMAIL = prevSwitch;
+  });
+
+  const member = (cwid: string) => ({
+    cwid,
+    name: cwid.toUpperCase(),
+    title: null,
+    source: "manual",
+    membershipType: null,
+    programCode: null,
+    startDate: null,
+    endDate: null,
+  });
+
+  const meta = (over: Partial<RosterFacultyMeta> = {}): RosterFacultyMeta => ({
+    email: "who@med.cornell.edu",
+    emailVisibility: "institution",
+    roleCategory: "full_time_faculty",
+    departmentName: "Medicine",
+    divisionName: "Cardiology",
+    ...over,
+  });
+
+  it("emits email + faculty metadata for a releasable faculty member", () => {
+    const csv = buildUnitRosterCsv(ctx([member("a1")], []), {
+      today: TODAY,
+      facultyByCwid: new Map([["a1", meta()]]),
+    });
+    expect(csv).toContain("who@med.cornell.edu,full_time_faculty,Medicine,Cardiology");
+  });
+
+  it("release code `none` blanks the email but keeps the other columns (gate ON)", () => {
+    process.env.PROFILE_EMAIL_RELEASE_GATE = "on";
+    const csv = buildUnitRosterCsv(ctx([member("a1")], []), {
+      today: TODAY,
+      facultyByCwid: new Map([["a1", meta({ emailVisibility: "none" })]]),
+    });
+    expect(csv).not.toContain("who@med.cornell.edu");
+    expect(csv).toContain(",,full_time_faculty,Medicine,Cardiology");
+  });
+
+  it("NULL release code is fail-closed when the gate is ON", () => {
+    process.env.PROFILE_EMAIL_RELEASE_GATE = "on";
+    const csv = buildUnitRosterCsv(ctx([member("a1")], []), {
+      today: TODAY,
+      facultyByCwid: new Map([["a1", meta({ emailVisibility: null })]]),
+    });
+    expect(csv).not.toContain("who@med.cornell.edu");
+  });
+
+  it("a hidden-display role blanks the email even with the gate OFF (#536)", () => {
+    process.env.PROFILE_EMAIL_RELEASE_GATE = "off";
+    const csv = buildUnitRosterCsv(ctx([member("a1")], []), {
+      today: TODAY,
+      facultyByCwid: new Map([["a1", meta({ roleCategory: "doctoral_student_phd" })]]),
+    });
+    expect(csv).not.toContain("who@med.cornell.edu");
+  });
+
+  it("documents the fail-open: gate OFF exports a `none` release code", () => {
+    // This is the prod state today (PROFILE_EMAIL_RELEASE_GATE off) and is the
+    // reason the column cannot be trusted on prod until the ED backfill lands
+    // and the gate flips. If this test ever goes RED, the gate got wired on --
+    // check the backfill ran before celebrating.
+    process.env.PROFILE_EMAIL_RELEASE_GATE = "off";
+    const csv = buildUnitRosterCsv(ctx([member("a1")], []), {
+      today: TODAY,
+      facultyByCwid: new Map([["a1", meta({ emailVisibility: "none" })]]),
+    });
+    expect(csv).toContain("who@med.cornell.edu");
+  });
+
+  it("SCHOLAR_LIST_EXPORT_EMAIL off blanks the email, keeping the other columns", () => {
+    // The kill switch: pulling this flag stops the column WITHOUT a revert or a
+    // code deploy. The faculty metadata is unaffected — only contact data goes.
+    delete process.env.SCHOLAR_LIST_EXPORT_EMAIL;
+    const csv = buildUnitRosterCsv(ctx([member("a1")], []), {
+      today: TODAY,
+      facultyByCwid: new Map([["a1", meta()]]),
+    });
+    expect(csv).not.toContain("who@med.cornell.edu");
+    expect(csv).toContain(",,full_time_faculty,Medicine,Cardiology");
+  });
+
+  it("an external member with no Scholar row exports the block empty", () => {
+    const csv = buildUnitRosterCsv(ctx([member("ext1")], []), {
+      today: TODAY,
+      facultyByCwid: new Map(),
+    });
+    expect(csv).toContain("active,manual,,,,");
+  });
+});
+
+describe("loadRosterFacultyMeta", () => {
+  it("issues no query for an empty roster", async () => {
+    let called = false;
+    const client = {
+      scholar: {
+        findMany: async () => {
+          called = true;
+          return [];
+        },
+      },
+    };
+    expect((await loadRosterFacultyMeta([], client)).size).toBe(0);
+    expect(called).toBe(false);
+  });
+
+  it("dedupes cwids and flattens the dept/div relations", async () => {
+    let seen: unknown = null;
+    const client = {
+      scholar: {
+        findMany: async (args: unknown) => {
+          seen = args;
+          return [
+            {
+              cwid: "a1",
+              email: "a1@med.cornell.edu",
+              emailVisibility: "public",
+              roleCategory: "full_time_faculty",
+              department: { name: "Medicine" },
+              division: null,
+            },
+          ];
+        },
+      },
+    };
+    const map = await loadRosterFacultyMeta(["a1", "a1", ""], client);
+    expect((seen as { where: { cwid: { in: string[] } } }).where.cwid.in).toEqual(["a1"]);
+    expect(map.get("a1")).toEqual({
+      email: "a1@med.cornell.edu",
+      emailVisibility: "public",
+      roleCategory: "full_time_faculty",
+      departmentName: "Medicine",
+      divisionName: null,
+    });
   });
 });
 

@@ -19,7 +19,11 @@ vi.mock("@/lib/edit/unit-roster-export", async (importActual) => {
   // Keep the real CSV builder / status derivation; mock only the flag gate.
   return { ...actual, isUnitRosterExportEnabled: mockEnabled };
 });
-vi.mock("@/lib/db", () => ({ db: { read: {} } }));
+// The route joins the faculty block (email / role / dept / division) via
+// `loadRosterFacultyMeta(…, db.read)`. Returns [] so these gating tests keep
+// asserting on status/authz alone — the email carve itself is covered in
+// unit-roster-export-lib.test.ts.
+vi.mock("@/lib/db", () => ({ db: { read: { scholar: { findMany: async () => [] } } } }));
 
 import { GET } from "@/app/edit/center/[code]/export/route";
 
@@ -115,7 +119,7 @@ describe("/edit/center/[code]/export gating", () => {
     const text = await res.text();
     const lines = text.trim().split("\r\n");
     expect(lines[0]).toBe(
-      "cwid,name,title,membership_type,program_code,program_label,start_date,end_date,status,source",
+      "cwid,name,title,membership_type,program_code,program_label,start_date,end_date,status,source,email,role_category,department,division",
     );
     // All three members present (active + pending + inactive) by default.
     expect(lines).toHaveLength(4);

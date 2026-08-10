@@ -57,11 +57,16 @@ vi.mock("@/lib/api/methods-overlay", () => ({
   isFamilyPubliclyVisible: vi.fn(),
 }));
 
-// Email-release gate (SPEC §B.2 row filter). Mocked so each test pins the flag;
-// the default in beforeEach is OFF, matching production-dark + the legacy tests.
-vi.mock("@/lib/profile/email-visibility-flags", () => ({
-  isEmailReleaseGateEnabled: vi.fn(),
-}));
+// Email-release gate (SPEC §B.2 row filter): driven through the real env var,
+// NOT a module mock. `isEmailExportableByReleaseCode` now lives alongside
+// `isEmailReleaseGateEnabled` (shared with the unit-roster export), and calls it
+// INTRA-module — a `vi.fn()` on the exported binding does not intercept that, so
+// a mocked gate would read as ON while the real rule read OFF. Setting the env
+// exercises the shipped path end to end. Default is OFF in beforeEach, matching
+// production-dark + the legacy tests.
+function setEmailReleaseGate(on: boolean): void {
+  process.env.PROFILE_EMAIL_RELEASE_GATE = on ? "on" : "off";
+}
 
 import {
   buildScholarExport,
@@ -74,7 +79,6 @@ import { HIDDEN_ROLE_CATEGORIES } from "@/lib/eligibility";
 import { getFamily, getSupercategory } from "@/lib/api/methods";
 import { getTopic } from "@/lib/api/topics";
 import { loadFamilyOverlayGate, isFamilyPubliclyVisible } from "@/lib/api/methods-overlay";
-import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
 
 /** A scholar identity row as SCHOLAR_SELECT projects it. `emailVisibility`
  *  defaults to "public" so the release-code gate (when on) exports the email;
@@ -112,13 +116,13 @@ beforeEach(() => {
   mockPublicationTopicGroupBy.mockReset();
   mockPublicationAuthorGroupBy.mockReset();
   mockSubtopicFindFirst.mockReset();
-  vi.mocked(isEmailReleaseGateEnabled).mockReset();
+  delete process.env.PROFILE_EMAIL_RELEASE_GATE;
 
   // Default: overlay gate present and every family publicly visible; the
   // email-release gate is OFF (production-dark + legacy export behavior).
   vi.mocked(loadFamilyOverlayGate).mockResolvedValue({} as never);
   vi.mocked(isFamilyPubliclyVisible).mockReturnValue(true);
-  vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(false);
+  setEmailReleaseGate(false);
 });
 
 describe("buildScholarExport — method-family scope", () => {
@@ -578,7 +582,7 @@ describe("buildScholarExport — release-code row filter (SPEC §B.2)", () => {
   }
 
   it("row 9 — gate ON, emailVisibility='institution': row included, email PRESENT", async () => {
-    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
+    setEmailReleaseGate(true);
     resolveCrispr();
     mockScholarFamilyFindMany.mockResolvedValue([
       { pmidCount: 9, scholar: scholar(0, "institution") },
@@ -595,7 +599,7 @@ describe("buildScholarExport — release-code row filter (SPEC §B.2)", () => {
   });
 
   it("row 9 — gate ON, emailVisibility='public': email PRESENT", async () => {
-    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
+    setEmailReleaseGate(true);
     resolveCrispr();
     mockScholarFamilyFindMany.mockResolvedValue([
       { pmidCount: 9, scholar: scholar(0, "public") },
@@ -608,7 +612,7 @@ describe("buildScholarExport — release-code row filter (SPEC §B.2)", () => {
   });
 
   it("row 10 — gate ON, emailVisibility NULL ('none'): row INCLUDED but email BLANK (fail-closed)", async () => {
-    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
+    setEmailReleaseGate(true);
     resolveCrispr();
     mockScholarFamilyFindMany.mockResolvedValue([
       { pmidCount: 9, scholar: scholar(0, null) },
@@ -626,7 +630,7 @@ describe("buildScholarExport — release-code row filter (SPEC §B.2)", () => {
   });
 
   it("row 10 — gate ON, explicit 'none'/unrecognized values blank the email", async () => {
-    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
+    setEmailReleaseGate(true);
     resolveCrispr();
     mockScholarFamilyFindMany.mockResolvedValue([
       { pmidCount: 9, scholar: scholar(0, "none") },
@@ -643,7 +647,7 @@ describe("buildScholarExport — release-code row filter (SPEC §B.2)", () => {
   });
 
   it("gate OFF: a 'none' scholar's email STILL exports (legacy behavior, row 13 analog)", async () => {
-    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(false);
+    setEmailReleaseGate(false);
     resolveCrispr();
     mockScholarFamilyFindMany.mockResolvedValue([
       { pmidCount: 9, scholar: scholar(0, "none") },
@@ -657,7 +661,7 @@ describe("buildScholarExport — release-code row filter (SPEC §B.2)", () => {
   });
 
   it("release-code blanking stacks WITH the #536 hidden-role carve (row dropped, then cell blanked)", async () => {
-    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
+    setEmailReleaseGate(true);
     resolveCrispr();
     mockScholarFamilyFindMany.mockResolvedValue([
       // public email but hidden role => the whole ROW is dropped (#2272)
