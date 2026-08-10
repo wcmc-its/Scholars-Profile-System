@@ -4,15 +4,16 @@
  * `nci-2a` attribute tab of `/edit/center/[code]` (Meyer Cancer Center only —
  * same data-driven "has a program taxonomy" gate as the Programs tab).
  *
- * Every column except one is existing OSRA/InfoEd data. The one judgment
- * column — Cancer-Relevant % — arrives `source: "llm"`, Bedrock-proposed per
- * Meyer's own cancer-relevance method (see
- * `lib/edit/cancer-center-funding-generator.ts`) and clearly labeled;
+ * Every column except one is existing OSRA/InfoEd data or a deterministic
+ * computation. The one judgment column — Cancer-Relevant % — arrives
+ * `source: "llm"`, Bedrock-proposed per Meyer's own cancer-relevance method
+ * (see `lib/edit/cancer-center-funding-generator.ts`) and clearly labeled;
  * editing it here sets `source: "human"` via `PATCH .../nci-2a/[awardId]`,
  * which is what makes the import script's non-clobber contract hold on the
  * next OSRA cycle. Program Code is never an LLM guess (PR #2326) — it
  * resolves from the PI's real `CenterMembership.programCode` or is left an
- * explicit gap.
+ * explicit gap. Peer-Reviewed is a fully deterministic lookup (NCI/NIH award,
+ * or the closed org allowlist) — no badge, not a judgment call either.
  *
  * v1 scope: program-code editing is per-existing-allocation-row (a select
  * from the center's live program list, or "Unassigned"); ADDING or REMOVING a
@@ -57,6 +58,9 @@ type AwardRow = {
   cancerRelevantPercentSource: "llm" | "human";
   cancerRelevantRationale: string | null;
   cancerRelevantAnnualProjectDc: number | null;
+  /** DT2A rule #4 — deterministic (NIH/NCI award or the closed org
+   *  allowlist), never an LLM guess; no badge, not editable here. */
+  isPeerReviewed: boolean;
   grantCwid: string | null;
   applId: number | null;
   allocations: AllocationRow[];
@@ -84,6 +88,7 @@ function downloadCsv(cycle: string, awards: AwardRow[]) {
     "Project End",
     "Project Title",
     "Annual Project Direct Costs",
+    "Peer-Reviewed",
     "Cancer-Relevant Percent",
     "Cancer-Relevant Annual Project DC",
     "Program Code",
@@ -103,6 +108,7 @@ function downloadCsv(cycle: string, awards: AwardRow[]) {
           first ? a.projectEndDate : "",
           first ? a.projectTitle : "",
           first ? a.annualProjectDirectCosts : "",
+          first ? (a.isPeerReviewed ? "Yes" : "No") : "",
           first ? (a.cancerRelevantPercent ?? "") : "",
           first ? (a.cancerRelevantAnnualProjectDc ?? "") : "",
           al.programCode ?? "",
@@ -307,6 +313,7 @@ export function Nci2aCard({ centerCode }: Nci2aCardProps) {
                 <th className="py-1.5 pr-2">Funding Source</th>
                 <th className="py-1.5 pr-2">Project</th>
                 <th className="py-1.5 pr-2 text-right">Direct Costs</th>
+                <th className="py-1.5 pr-2">Peer-Reviewed</th>
                 <th className="py-1.5 pr-2">Cancer-Relevant %</th>
                 <th className="py-1.5 pr-2 text-right">Relevant DC</th>
                 <th className="py-1.5 pr-2">Program</th>
@@ -343,16 +350,17 @@ export function Nci2aCard({ centerCode }: Nci2aCardProps) {
                             <div className="text-xs text-muted-foreground">{a.projectTitle}</div>
                           </td>
                           <td className="py-1.5 pr-2 text-right">{money(a.annualProjectDirectCosts)}</td>
+                          <td className="py-1.5 pr-2">{a.isPeerReviewed ? "Yes" : "No"}</td>
                           <td className="py-1.5 pr-2">
                             <PercentCell award={a} onSave={(v) => patchAward(a.id, { cancerRelevantPercent: v })} />
                           </td>
                           <td className="py-1.5 pr-2 text-right">{money(a.cancerRelevantAnnualProjectDc)}</td>
                         </>
                       ) : (
-                        // Skips the 6 columns rendered only on the first allocation row
+                        // Skips the 7 columns rendered only on the first allocation row
                         // (PI..Relevant DC) above -- kept in sync with that count, not the
                         // Program column that follows unconditionally for every row.
-                        <td className="py-1.5 pr-2" colSpan={6} />
+                        <td className="py-1.5 pr-2" colSpan={7} />
                       )}
                       <td className="py-1.5 pr-2">
                         <ProgramCell

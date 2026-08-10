@@ -1629,6 +1629,12 @@ model CancerCenterFundingAward {
   /// The model's one-sentence rationale for `cancerRelevantPercent` — shown to
   /// the reviewer, never used as a scoring input.
   cancerRelevantRationale     String?  @map("cancer_relevant_rationale") @db.Text
+  /// DT2A rule #4 (CCSG Data Guide p.7): "Only grant and contracts from NCI,
+  /// NIH, or organizations listed in [the closed allowlist] are considered
+  /// peer-reviewed." Fully deterministic — no Bedrock call, no `source`
+  /// tracking, no badge (see `lib/edit/cancer-center-peer-review.ts`);
+  /// recomputed on every import cycle re-run like every other award scalar.
+  isPeerReviewed              Boolean  @default(false) @map("is_peer_reviewed")
   lastRefreshedAt             DateTime @default(now()) @map("last_refreshed_at")
   createdAt                   DateTime @default(now()) @map("created_at")
   updatedAt                   DateTime @updatedAt @map("updated_at")

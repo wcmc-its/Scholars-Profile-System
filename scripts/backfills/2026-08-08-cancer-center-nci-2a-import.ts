@@ -26,6 +26,13 @@
  * concept from program assignment above: `cancerRelevantPercent` always
  * carries its own Bedrock-sourced `source: "llm"`, untouched by this change.
  *
+ * `isPeerReviewed` (DT2A rule #4) is a THIRD, fully separate concept again —
+ * deterministic, no Bedrock, no override — see
+ * `lib/edit/cancer-center-peer-review.ts`. Computed alongside the allocation
+ * in `planRow`, written as a plain scalar in `applyPlan` (always overwritten
+ * on a re-run, unlike `cancerRelevantPercent` — there is no human override
+ * to clobber).
+ *
  * NON-CLOBBER — a reviewer's override always wins over a re-run of this script
  * for the SAME (centerCode, reportingCycle, institutionNumber): `update` skips
  * `cancerRelevantPercent` when its `source` is already `"human"`, and skips
@@ -66,6 +73,7 @@ import { pathToFileURL } from "node:url";
 
 import { normalizeAwardNumber } from "@/lib/award-number";
 import { inferCancerFundingJudgments } from "@/lib/edit/cancer-center-funding-generator";
+import { isPeerReviewedFundingSource } from "@/lib/edit/cancer-center-peer-review";
 
 export const CENTER_CODE = "meyer_cancer_center";
 
@@ -82,6 +90,9 @@ export type ImportRow = {
   projectEndDate: string; // YYYY-MM-DD
   annualProjectDirectCosts: number;
   nihActivityCode: string | null;
+  /** OSRA's own "NIH Award" Y/N flag -- feeds the deterministic Peer-Reviewed
+   *  classification (DT2A rule #4), see `lib/edit/cancer-center-peer-review.ts`. */
+  nihAward: boolean;
 };
 
 export type ImportOptions = {
@@ -165,7 +176,20 @@ export function loadImportRows(filePath: string): ImportRow[] {
   const absPath = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
   const parsed: unknown = JSON.parse(readFileSync(absPath, "utf8"));
   if (!Array.isArray(parsed)) throw new Error(`${filePath} must contain a JSON array of rows`);
-  return parsed as ImportRow[];
+  const rows = parsed as ImportRow[];
+  // `nihAward` feeds the deterministic Peer-Reviewed classification (DT2A
+  // rule #4, see cancer-center-peer-review.ts) — a JSON file built before
+  // build-2a-skeleton.py grew this field would silently read `undefined`
+  // (falsy), misclassifying real NIH awards as non-peer-reviewed instead of
+  // failing loudly. Caught here, at load time, before any Bedrock spend.
+  const badRow = rows.findIndex((r) => typeof r.nihAward !== "boolean");
+  if (badRow !== -1) {
+    throw new Error(
+      `${filePath} row ${badRow} has no boolean "nihAward" field — regenerate with the current ` +
+        `build-2a-skeleton.py --import-json (must include OSRA's "NIH Award" flag).`,
+    );
+  }
+  return rows;
 }
 
 /** normalizedAwardNumber -> the ONE cwid it resolves to, or `"ambiguous"` when
@@ -286,6 +310,9 @@ export type RowPlan = {
   allocation: { programCode: string | null; source: "membership" };
   cancerRelevantPercent: number | null;
   cancerRelevantRationale: string | null;
+  /** Deterministic (DT2A rule #4) -- never a model guess, never overridable,
+   *  so unlike cancerRelevantPercent it always overwrites on a re-run. */
+  isPeerReviewed: boolean;
 };
 
 /** Decide one row's plan: resolve the program via Grant→CenterMembership only
@@ -316,6 +343,7 @@ export async function planRow(
     allocation,
     cancerRelevantPercent: inference?.cancerRelevantPercent ?? null,
     cancerRelevantRationale: inference?.cancerRelevantRationale ?? null,
+    isPeerReviewed: isPeerReviewedFundingSource(row.specificFundingSource, row.nihAward),
   };
 }
 
@@ -377,6 +405,7 @@ export async function applyPlan(
     projectStartDate: new Date(`${row.projectStartDate}T00:00:00Z`),
     projectEndDate: new Date(`${row.projectEndDate}T00:00:00Z`),
     annualProjectDirectCosts: row.annualProjectDirectCosts,
+    isPeerReviewed: plan.isPeerReviewed,
   };
 
   if (!existing) {

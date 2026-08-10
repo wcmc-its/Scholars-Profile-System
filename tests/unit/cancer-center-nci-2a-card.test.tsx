@@ -7,6 +7,7 @@
  *  - editing the Cancer-Relevant % input and blurring PATCHes
  *    `{cancerRelevantPercent}` and re-fetches;
  *  - changing the Program select PATCHes `{allocations:[{programCode,...}]}`;
+ *  - Peer-Reviewed renders Yes/No, no badge (deterministic, not a judgment call);
  *  - empty state when the center has no import cycle yet.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
@@ -35,6 +36,7 @@ const PAYLOAD = {
       cancerRelevantPercentSource: "llm",
       cancerRelevantRationale: "because the title says so",
       cancerRelevantAnnualProjectDc: 180000,
+      isPeerReviewed: true,
       grantCwid: "abc1234",
       applId: 999,
       allocations: [
@@ -82,6 +84,22 @@ describe("Nci2aCard", () => {
     render(<Nci2aCard centerCode="meyer_cancer_center" />);
     await waitFor(() => expect(screen.getByText("Test, PI")).toBeTruthy());
     expect(screen.queryByText("Program DC")).toBeNull();
+  });
+
+  it("renders Peer-Reviewed as Yes when isPeerReviewed is true", async () => {
+    mockFetch();
+    render(<Nci2aCard centerCode="meyer_cancer_center" />);
+    await waitFor(() => expect(screen.getByText("Test, PI")).toBeTruthy());
+    expect(screen.getByText("Peer-Reviewed")).toBeTruthy(); // column header
+    expect(screen.getByText("Yes")).toBeTruthy();
+  });
+
+  it("renders Peer-Reviewed as No when isPeerReviewed is false", async () => {
+    const noPayload = { ...PAYLOAD, awards: [{ ...PAYLOAD.awards[0], isPeerReviewed: false }] };
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => noPayload })));
+    render(<Nci2aCard centerCode="meyer_cancer_center" />);
+    await waitFor(() => expect(screen.getByText("Test, PI")).toBeTruthy());
+    expect(screen.getByText("No")).toBeTruthy();
   });
 
   it("renders the grant CWID under the PI name when present", async () => {
