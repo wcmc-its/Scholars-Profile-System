@@ -204,9 +204,94 @@ describe("CenterRosterCard — inline edits", () => {
     const fetchMock = stubOk();
     render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
     fireEvent.click(screen.getByTestId("roster-remove-m1"));
-    const confirmButtons = screen.getAllByRole("button", { name: "Remove" });
-    fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+    // The confirm is "Remove anyway" — the row trigger stays "Remove", so the
+    // two are distinguishable and this can't accidentally click the trigger.
+    fireEvent.click(screen.getByRole("button", { name: "Remove anyway" }));
     await waitFor(() => expect(screen.queryByTestId("center-roster-row-m1")).toBeNull());
     expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({ cwid: "m1", action: "remove" });
+  });
+
+  it("the remove dialog steers to an End date rather than framing removal as cheap", () => {
+    render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
+    fireEvent.click(screen.getByTestId("roster-remove-m1"));
+    expect(screen.getByText(/End date instead/i)).toBeTruthy();
+    expect(screen.getByText(/added in error/i)).toBeTruthy();
+    // The old copy invited removal as reversible; it must not come back.
+    expect(screen.queryByText(/add them back at any time/i)).toBeNull();
+  });
+
+  it("a member who already has an end date gets the erases-the-end-date warning", () => {
+    render(
+      // Future end date: an end date IS recorded, but the row stays
+      // membership-active so the default show-active-only filter keeps it visible.
+      <CenterRosterCard {...base} members={[member({ endDate: "2999-01-01" })]} programs={[]} />,
+    );
+    fireEvent.click(screen.getByTestId("roster-remove-m1"));
+    expect(screen.getByText(/including the end date already recorded/i)).toBeTruthy();
+  });
+});
+
+describe("departed / unresolvable members (#2324)", () => {
+  it("hides departed members by default and says how many are hidden", () => {
+    render(
+      <CenterRosterCard
+        {...base}
+        members={[member({}), member({ cwid: "gone1", name: "Gone One", scholarState: "departed" })]}
+        programs={[]}
+      />,
+    );
+    expect(screen.queryByTestId("center-roster-row-gone1")).toBeNull();
+    expect(screen.getByTestId("roster-departed-hidden").textContent).toMatch(
+      /1 member has left WCM and is hidden/i,
+    );
+  });
+
+  it("the Show departed toggle reveals them with a Left WCM badge", () => {
+    render(
+      <CenterRosterCard
+        {...base}
+        members={[member({ cwid: "gone1", name: "Gone One", scholarState: "departed" })]}
+        programs={[]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("roster-show-departed"));
+    expect(screen.getByTestId("center-roster-row-gone1")).toBeTruthy();
+    expect(screen.getByTestId("roster-scholar-state-gone1").textContent).toBe("Left WCM");
+  });
+
+  it("an unresolvable cwid is labelled rather than left as a bare id, and is NOT hidden", () => {
+    // "unknown" is a data gap, not a departure — hiding it would bury exactly the
+    // rows a center needs to clean up.
+    render(
+      <CenterRosterCard
+        {...base}
+        members={[member({ cwid: "ghost1", name: "ghost1", scholarState: "unknown" })]}
+        programs={[]}
+      />,
+    );
+    expect(screen.getByTestId("center-roster-row-ghost1")).toBeTruthy();
+    expect(screen.getByTestId("roster-scholar-state-ghost1").textContent).toBe("Not in directory");
+    expect(screen.queryByTestId("roster-departed-hidden")).toBeNull();
+  });
+
+  it("a departed member with a CURRENT membership is still hidden by default — the two axes are independent", () => {
+    // The dangerous state: person left WCM, nobody closed the membership. It is
+    // membership-Active, so the status filter cannot catch it.
+    render(
+      <CenterRosterCard
+        {...base}
+        members={[
+          member({ cwid: "gone2", name: "Gone Two", scholarState: "departed", startDate: "2020-01-01" }),
+        ]}
+        programs={[]}
+      />,
+    );
+    expect(screen.queryByTestId("center-roster-row-gone2")).toBeNull();
+    expect(screen.getByTestId("roster-departed-hidden")).toBeTruthy();
+  });
+
+  it("no hint when nothing is hidden", () => {
+    render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
+    expect(screen.queryByTestId("roster-departed-hidden")).toBeNull();
   });
 });

@@ -41,6 +41,12 @@ export type RosterMember = {
   programCode: string | null;
   startDate: string | null;
   endDate: string | null;
+  /** Whether the PERSON is still at WCM. Orthogonal to the membership dates:
+   *  a row can be membership-Active AND scholarState "departed" — someone who
+   *  left WCM with nobody having closed out their center membership. That
+   *  combination is the whole point of surfacing this. Optional so existing
+   *  fixtures/callers that predate #2324 still type-check; absent → "active". */
+  scholarState?: "active" | "departed" | "unknown";
 };
 
 export type CenterProgramOption = { code: string; label: string; sortOrder: number };
@@ -81,6 +87,9 @@ export function CenterRosterCard({
 
   const [members, setMembers] = React.useState<RosterMember[]>(() => [...initial]);
   const [showActiveOnly, setShowActiveOnly] = React.useState(true);
+  // Default HIDDEN: the roster reads as the current membership until asked
+  // otherwise. The hidden-count hint below keeps that from being silent.
+  const [showDeparted, setShowDeparted] = React.useState(false);
   const [addValue, setAddValue] = React.useState<DirectoryValue | null>(null);
   const [adding, setAdding] = React.useState(false);
   const [removeTarget, setRemoveTarget] = React.useState<RosterMember | null>(null);
@@ -186,9 +195,18 @@ export function CenterRosterCard({
     void patch(m.cwid, { endDate });
   }
 
-  const visible = showActiveOnly
+  const visibleByStatus = showActiveOnly
     ? members.filter((m) => statusOf(m, now) === "active")
     : members;
+  // The two filters are independent axes: membership dates vs. whether the
+  // person is still at WCM. Departed members are hidden LAST so the count below
+  // reports what this specific toggle is holding back, not the combined effect.
+  const departedHidden = showDeparted
+    ? 0
+    : visibleByStatus.filter((m) => m.scholarState === "departed").length;
+  const visible = showDeparted
+    ? visibleByStatus
+    : visibleByStatus.filter((m) => m.scholarState !== "departed");
   const colCount = hasPrograms ? 6 : 4;
 
   return (
@@ -220,15 +238,41 @@ export function CenterRosterCard({
           ) : (
             <span />
           )}
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={showActiveOnly}
-              onCheckedChange={(c) => setShowActiveOnly(c === true)}
-              data-testid="roster-show-active-only"
-            />
-            Show active only
-          </label>
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={showActiveOnly}
+                onCheckedChange={(c) => setShowActiveOnly(c === true)}
+                data-testid="roster-show-active-only"
+              />
+              Show active only
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={showDeparted}
+                onCheckedChange={(c) => setShowDeparted(c === true)}
+                data-testid="roster-show-departed"
+              />
+              Show departed members
+            </label>
+          </div>
         </div>
+
+        {departedHidden > 0 && (
+          <p className="text-muted-foreground text-sm" data-testid="roster-departed-hidden">
+            {departedHidden === 1
+              ? "1 member has left WCM and is hidden."
+              : `${departedHidden} members have left WCM and are hidden.`}{" "}
+            <button
+              type="button"
+              className="text-apollo-slate underline"
+              onClick={() => setShowDeparted(true)}
+            >
+              Show them
+            </button>{" "}
+            to set an end date on their membership.
+          </p>
+        )}
 
         {members.length === 0 ? (
           <p className="text-muted-foreground text-sm" data-testid="center-roster-empty">
@@ -252,8 +296,9 @@ export function CenterRosterCard({
               {visible.length === 0 ? (
                 <tr>
                   <td colSpan={colCount + 1} className="text-muted-foreground px-3 py-3">
-                    No active members. Turn off &ldquo;Show active only&rdquo; to see pending and
-                    inactive members.
+                    No members match the current filters. Turn off &ldquo;Show active only&rdquo;
+                    to see pending and inactive memberships, or turn on &ldquo;Show departed
+                    members&rdquo; to see people who have left WCM.
                   </td>
                 </tr>
               ) : (
@@ -268,6 +313,25 @@ export function CenterRosterCard({
                       <td className="px-3 py-2">
                         <span className="font-medium">{m.name}</span>
                         {m.title && <span className="text-muted-foreground"> · {m.title}</span>}
+                        {m.scholarState === "departed" && (
+                          <Badge
+                            variant="outline"
+                            className="border-apollo-border ml-2 rounded-full"
+                            data-testid={`roster-scholar-state-${m.cwid}`}
+                          >
+                            Left WCM
+                          </Badge>
+                        )}
+                        {m.scholarState === "unknown" && (
+                          <Badge
+                            variant="outline"
+                            className="border-apollo-border ml-2 rounded-full"
+                            data-testid={`roster-scholar-state-${m.cwid}`}
+                            title="No directory record matches this CWID, so we can't show a name."
+                          >
+                            Not in directory
+                          </Badge>
+                        )}
                       </td>
                       {hasPrograms && (
                         <td className="px-3 py-2">
@@ -374,9 +438,17 @@ export function CenterRosterCard({
           if (!open) setRemoveTarget(null);
         }}
         title={removeTarget ? `Remove ${removeTarget.name} from this center?` : ""}
-        description="They will no longer be listed as a member. You can add them back at any time."
+        // Steers to the End date. The previous copy ("You can add them back at
+        // any time") framed removal as cheap and reversible, which is how a
+        // roster loses its history: a member who LEFT and a member added in
+        // ERROR are different facts, and only the second one should be erased.
+        description={
+          removeTarget && removeTarget.endDate
+            ? "This erases the membership from the roster, including the end date already recorded. Remove only if this person was added in error — otherwise the end date alone is the correct record."
+            : "This erases the membership from the roster entirely, and the center loses any record that they were ever a member. If they have LEFT the center, close the row out with an End date instead — that keeps the history. Remove only if this person was added in error."
+        }
         reasonMode="none"
-        confirmLabel="Remove"
+        confirmLabel="Remove anyway"
         confirmVariant="destructive"
         onConfirm={confirmRemove}
       />

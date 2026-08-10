@@ -56,6 +56,7 @@ describe("buildUnitRosterCsv", () => {
       programCode: "CPC",
       startDate: null,
       endDate: null,
+      scholarState: "active" as const,
     },
     {
       cwid: "p1",
@@ -66,6 +67,7 @@ describe("buildUnitRosterCsv", () => {
       programCode: null,
       startDate: "2999-01-01",
       endDate: null,
+      scholarState: "active" as const,
     },
   ];
   const programs = [
@@ -118,6 +120,7 @@ describe("buildUnitRosterCsv", () => {
         programCode: null,
         startDate: null,
         endDate: null,
+        scholarState: "active" as const,
       },
     ];
     const csv = buildUnitRosterCsv(ctx(divRoster, []), { today: TODAY });
@@ -154,6 +157,7 @@ describe("email column gating", () => {
     programCode: null,
     startDate: null,
     endDate: null,
+    scholarState: "active" as const,
   });
 
   const meta = (over: Partial<RosterFacultyMeta> = {}): RosterFacultyMeta => ({
@@ -272,8 +276,8 @@ describe("loadRosterFacultyMeta", () => {
 
 describe("countRosterCsvRows", () => {
   const roster = [
-    { cwid: "a", name: "A", title: null, source: "manual", membershipType: null, programCode: null, startDate: null, endDate: null },
-    { cwid: "p", name: "P", title: null, source: "manual", membershipType: null, programCode: null, startDate: "2999-01-01", endDate: null },
+    { cwid: "a", name: "A", title: null, source: "manual", membershipType: null, programCode: null, startDate: null, endDate: null, scholarState: "active" as const },
+    { cwid: "p", name: "P", title: null, source: "manual", membershipType: null, programCode: null, startDate: "2999-01-01", endDate: null, scholarState: "active" as const },
   ];
   it("counts all rows by default", () => {
     expect(countRosterCsvRows(ctx(roster), { today: TODAY })).toBe(2);

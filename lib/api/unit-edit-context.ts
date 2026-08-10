@@ -118,6 +118,11 @@ export type UnitEditContext = {
     programCode: string | null;
     startDate: string | null;
     endDate: string | null;
+    /** Whether the PERSON is still at WCM — orthogonal to the membership dates.
+     *  `departed` = soft-deleted by the ED ETL (left WCM, or `affiliate_alumni`);
+     *  `unknown` = no Scholar row ever matched this cwid, which is why the `name`
+     *  above falls back to the raw cwid. */
+    scholarState: RosterScholarState;
   }> | null;
   /** The center's program taxonomy (#552), present for a center (empty when the
    *  center has none — the roster editor hides Type + Program then). null for a
@@ -171,22 +176,58 @@ export type UnitEditContextClient = Pick<
   | "centerProgram"
 >;
 
-/** Look up the leader / access / roster cwids' display name + title in one query. */
+/**
+ * Look up the leader / access / roster cwids' display name + title in one query.
+ *
+ * Reads WITHOUT a `deletedAt` filter on purpose: a scholar who has left WCM is
+ * SOFT-deleted by the ED ETL (`etl/ed/index.ts`, `data: { deletedAt: new Date() }`),
+ * and a curated center roster must still be able to show who they were. Filtering
+ * them out here would turn every departure into a bare-CWID row and destroy the
+ * historical record the roster exists to keep.
+ *
+ * `departed` rides along so callers can DISTINGUISH the two cases instead of
+ * conflating them, which is what the roster did before #2324:
+ *   - resolved + departed=false → currently at WCM
+ *   - resolved + departed=true  → left WCM (or `affiliate_alumni`, soft-hidden
+ *     the same way); name is still known and still shown
+ *   - NOT in the map at all     → no Scholar row has ever existed for this cwid
+ *     (a manually-added membership that never matched anyone)
+ */
 async function resolveScholarNames(
   cwids: ReadonlyArray<string>,
   client: UnitEditContextClient,
-): Promise<Map<string, { name: string; title: string | null }>> {
-  const out = new Map<string, { name: string; title: string | null }>();
+): Promise<Map<string, { name: string; title: string | null; departed: boolean }>> {
+  const out = new Map<string, { name: string; title: string | null; departed: boolean }>();
   const unique = [...new Set(cwids.filter((c) => c.length > 0))];
   if (unique.length === 0) return out;
   const rows = await client.scholar.findMany({
     where: { cwid: { in: unique } },
-    select: { cwid: true, preferredName: true, primaryTitle: true },
+    select: { cwid: true, preferredName: true, primaryTitle: true, deletedAt: true },
   });
   for (const row of rows) {
-    out.set(row.cwid, { name: row.preferredName, title: row.primaryTitle });
+    out.set(row.cwid, {
+      name: row.preferredName,
+      title: row.primaryTitle,
+      departed: row.deletedAt !== null,
+    });
   }
   return out;
+}
+
+/**
+ * Whether a roster member is still at WCM, has left, or was never resolvable.
+ * Derived from the `resolveScholarNames` lookup — NOT from membership dates,
+ * which are a separate axis (`rosterStatusOf`: a member can have a current
+ * membership AND have left the institution, which is exactly the state a center
+ * needs to notice).
+ */
+export type RosterScholarState = "active" | "departed" | "unknown";
+
+export function scholarStateOf(
+  resolved: { departed: boolean } | undefined,
+): RosterScholarState {
+  if (resolved === undefined) return "unknown";
+  return resolved.departed ? "departed" : "active";
 }
 
 export async function loadUnitEditContext(
@@ -426,16 +467,20 @@ export async function loadUnitEditContext(
     : null;
 
   const roster = hasRoster
-    ? rosterRows.map((r) => ({
-        cwid: r.cwid,
-        name: nameMap.get(r.cwid)?.name ?? r.cwid,
-        title: nameMap.get(r.cwid)?.title ?? null,
-        source: r.source,
-        membershipType: r.membershipType,
-        programCode: r.programCode,
-        startDate: r.startDate ? r.startDate.toISOString().slice(0, 10) : null,
-        endDate: r.endDate ? r.endDate.toISOString().slice(0, 10) : null,
-      }))
+    ? rosterRows.map((r) => {
+        const resolved = nameMap.get(r.cwid);
+        return {
+          cwid: r.cwid,
+          name: resolved?.name ?? r.cwid,
+          title: resolved?.title ?? null,
+          source: r.source,
+          membershipType: r.membershipType,
+          programCode: r.programCode,
+          startDate: r.startDate ? r.startDate.toISOString().slice(0, 10) : null,
+          endDate: r.endDate ? r.endDate.toISOString().slice(0, 10) : null,
+          scholarState: scholarStateOf(resolved),
+        };
+      })
     : null;
 
   // #1117 — resolve each program's leader cwids to display names for the editor.
