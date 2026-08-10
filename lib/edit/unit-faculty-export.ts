@@ -6,8 +6,8 @@
  * type / program / dates) via `unit-roster-export.ts`. Departments and divisions
  * have NO such curated roster — their members are the ED-derived faculty shown on
  * the public unit page. This module exports THAT member set, with faculty-shaped
- * columns (no membership type / program / dates — those are center-only; no email
- * per the #847 no-contact-column decision).
+ * columns (no membership type / program / dates — those are center-only) plus an
+ * `email` column gated by `exportEmailCell`.
  *
  * Member set, by unit type (mirrors the public page exactly):
  *   - department → active scholars with `deptCode = <code>`.
@@ -39,8 +39,7 @@ export const FACULTY_CSV_HEADERS = [
   "email",
 ] as const;
 
-/** One exportable faculty member. `emailVisibility` is the Web Directory release
- *  audience — it gates the email cell and is never emitted as a column. */
+/** One exportable faculty member. */
 export type FacultyExportRow = {
   cwid: string;
   preferredName: string;
@@ -49,7 +48,6 @@ export type FacultyExportRow = {
   divisionName: string | null;
   departmentName: string | null;
   email: string | null;
-  emailVisibility: string | null;
 };
 
 /** The narrow Prisma surface these loaders read — `db.read` satisfies it
@@ -65,7 +63,6 @@ export type FacultyExportClient = {
         department: { name: string } | null;
         division: { name: string } | null;
         email: string | null;
-        emailVisibility: string | null;
       }>
     >;
     count(args: unknown): Promise<number>;
@@ -83,7 +80,6 @@ const FACULTY_SELECT = {
   department: { select: { name: true } },
   division: { select: { name: true } },
   email: true,
-  emailVisibility: true,
 } as const;
 
 function toRows(
@@ -97,7 +93,6 @@ function toRows(
     divisionName: r.division?.name ?? null,
     departmentName: r.department?.name ?? null,
     email: r.email,
-    emailVisibility: r.emailVisibility,
   }));
 }
 
@@ -176,7 +171,7 @@ export async function countDivisionRoster(
 }
 
 /** Serialize faculty rows to CSV (`FACULTY_CSV_HEADERS`). The email cell runs the
- *  SHARED three-gate rule (`exportEmailCell`) — the same one the center roster
+ *  SHARED two-gate rule (`exportEmailCell`) — the same one the center roster
  *  export uses, so a scholar is never withheld on one unit page and emitted on
  *  another. */
 export function buildFacultyCsv(rows: ReadonlyArray<FacultyExportRow>): string {
@@ -194,7 +189,7 @@ export function buildFacultyCsv(rows: ReadonlyArray<FacultyExportRow>): string {
 
 /** Emails actually emitted by `buildFacultyCsv` for these rows, post-carve — the
  *  auditable number for the route's access log. Diverges from `rows.length`
- *  whenever a hidden role or a `none` release code blanks a cell. */
+ *  whenever a hidden role, a missing address, or the kill switch blanks a cell. */
 export function countFacultyEmailsEmitted(rows: ReadonlyArray<FacultyExportRow>): number {
   return rows.filter((r) => exportEmailCell(r) !== "").length;
 }

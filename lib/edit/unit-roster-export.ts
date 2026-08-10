@@ -15,22 +15,17 @@
  * EMAIL + faculty metadata (email / role_category / department / division) are
  * emitted when the caller supplies `facultyByCwid` — the #847 no-email decision
  * is superseded for THIS surface only (the per-unit roster an admin already has
- * edit rights over); the #847 scope export keeps its own cap. The email cell
- * still stacks the `SCHOLAR_LIST_EXPORT_EMAIL` operator switch plus two filters
- * that are NOT policy toggles: the #536 hidden-display-role carve, and the Web
- * Directory release code (`isEmailExportableByReleaseCode`) — a scholar whose
- * release code is `none` has declined to have their address released, and no
- * unit admin's edit rights override that.
- *
- * NOTE: the release-code filter is INERT while `PROFILE_EMAIL_RELEASE_GATE` is
- * off (fail-open, and prod is off) — so on prod today this column emits every
- * member's address regardless of release code. The gate cannot be flipped until
- * the prod ED backfill populates `Scholar.emailVisibility` (NULL is fail-closed
- * and would blank email site-wide). Staging's backfill landed 2026-06-11.
+ * edit rights over); the #847 scope export keeps its own cap AND its own
+ * release-code filter. Here the email cell runs `exportEmailCell`: the
+ * `SCHOLAR_LIST_EXPORT_EMAIL` operator switch plus the #536 hidden-display-role
+ * carve, and deliberately NOT the release code — see that function for why the
+ * filter is wrong on a unit-scoped internal export (`none` is inferred from
+ * missing data, never set by a person).
  *
  * The faculty columns are loaded by `loadRosterFacultyMeta` from the ROUTE, not
  * folded into `UnitEditContext` — that context is serialized to the client for
- * the Members tab, and email has no business in a browser payload.
+ * the Members tab, and email in a browser payload is a wider exposure than the
+ * download itself.
  *
  * GUARDRAIL: this module sources membership ONLY from the `UnitEditContext`
  * roster (Prisma, via `lib/api/centers.ts`/`loadUnitEditContext`), NEVER from the
@@ -96,9 +91,8 @@ export const ROSTER_CSV_HEADERS = [
  *  route via `loadRosterFacultyMeta` — never carried on `UnitEditContext`. */
 export type RosterFacultyMeta = {
   email: string | null;
-  /** The Web Directory release audience (`public` | `institution` | `none` |
-   *  null). Gates the email cell; never emitted as a column itself. */
-  emailVisibility: string | null;
+  /** Gates the email cell via the #536 hidden-display-role carve, AND is emitted
+   *  as its own `role_category` column. */
   roleCategory: string | null;
   departmentName: string | null;
   divisionName: string | null;
@@ -113,8 +107,8 @@ export type BuildRosterCsvOptions = {
   facultyByCwid?: ReadonlyMap<string, RosterFacultyMeta>;
 };
 
-/** The email cell for one roster row — the shared three-gate rule, identical to
- *  the department/division export's. Absent metadata (an external member with no
+/** The email cell for one roster row — the shared two-gate rule, identical to the
+ *  department/division export's. Absent metadata (an external member with no
  *  Scholar row) yields "". */
 function emailCellFor(meta: RosterFacultyMeta | undefined): string {
   return meta ? exportEmailCell(meta) : "";
@@ -171,7 +165,6 @@ export type RosterFacultyClient = {
       Array<{
         cwid: string;
         email: string | null;
-        emailVisibility: string | null;
         roleCategory: string | null;
         department: { name: string } | null;
         division: { name: string } | null;
@@ -198,7 +191,6 @@ export async function loadRosterFacultyMeta(
     select: {
       cwid: true,
       email: true,
-      emailVisibility: true,
       roleCategory: true,
       department: { select: { name: true } },
       division: { select: { name: true } },
@@ -207,7 +199,6 @@ export async function loadRosterFacultyMeta(
   for (const row of rows) {
     out.set(row.cwid, {
       email: row.email,
-      emailVisibility: row.emailVisibility,
       roleCategory: row.roleCategory,
       departmentName: row.department?.name ?? null,
       divisionName: row.division?.name ?? null,

@@ -135,7 +135,7 @@ describe("email column gating", () => {
   const prevSwitch = process.env.SCHOLAR_LIST_EXPORT_EMAIL;
   beforeEach(() => {
     // The operator kill switch is ON in staging + prod; these tests exercise the
-    // consent filters BEHIND it, so default it on and pin it explicitly below.
+    // carve BEHIND it, so default it on and pin it explicitly where it matters.
     process.env.SCHOLAR_LIST_EXPORT_EMAIL = "on";
   });
   afterEach(() => {
@@ -158,14 +158,13 @@ describe("email column gating", () => {
 
   const meta = (over: Partial<RosterFacultyMeta> = {}): RosterFacultyMeta => ({
     email: "who@med.cornell.edu",
-    emailVisibility: "institution",
     roleCategory: "full_time_faculty",
     departmentName: "Medicine",
     divisionName: "Cardiology",
     ...over,
   });
 
-  it("emits email + faculty metadata for a releasable faculty member", () => {
+  it("emits email + faculty metadata for a faculty member", () => {
     const csv = buildUnitRosterCsv(ctx([member("a1")], []), {
       today: TODAY,
       facultyByCwid: new Map([["a1", meta()]]),
@@ -173,26 +172,23 @@ describe("email column gating", () => {
     expect(csv).toContain("who@med.cornell.edu,full_time_faculty,Medicine,Cardiology");
   });
 
-  it("release code `none` blanks the email but keeps the other columns (gate ON)", () => {
-    process.env.PROFILE_EMAIL_RELEASE_GATE = "on";
-    const csv = buildUnitRosterCsv(ctx([member("a1")], []), {
-      today: TODAY,
-      facultyByCwid: new Map([["a1", meta({ emailVisibility: "none" })]]),
-    });
-    expect(csv).not.toContain("who@med.cornell.edu");
-    expect(csv).toContain(",,full_time_faculty,Medicine,Cardiology");
+  it("the release-code gate does NOT reach this surface, in EITHER position", () => {
+    // A unit-scoped /edit export deliberately skips the release-code filter: per
+    // the SPEC, `none` is inferred from missing ED data, never chosen by anyone,
+    // so filtering on it withheld addresses for a data gap. Asserted in BOTH flag
+    // positions -- a one-position test would still pass if someone reinstated the
+    // filter, since prod's OFF position fails open and looks identical.
+    for (const gate of ["on", "off"]) {
+      process.env.PROFILE_EMAIL_RELEASE_GATE = gate;
+      const csv = buildUnitRosterCsv(ctx([member("a1")], []), {
+        today: TODAY,
+        facultyByCwid: new Map([["a1", meta()]]),
+      });
+      expect(csv, `release gate ${gate}`).toContain("who@med.cornell.edu");
+    }
   });
 
-  it("NULL release code is fail-closed when the gate is ON", () => {
-    process.env.PROFILE_EMAIL_RELEASE_GATE = "on";
-    const csv = buildUnitRosterCsv(ctx([member("a1")], []), {
-      today: TODAY,
-      facultyByCwid: new Map([["a1", meta({ emailVisibility: null })]]),
-    });
-    expect(csv).not.toContain("who@med.cornell.edu");
-  });
-
-  it("a hidden-display role blanks the email even with the gate OFF (#536)", () => {
+  it("a hidden-display role still blanks the email (#536)", () => {
     process.env.PROFILE_EMAIL_RELEASE_GATE = "off";
     const csv = buildUnitRosterCsv(ctx([member("a1")], []), {
       today: TODAY,
@@ -201,17 +197,12 @@ describe("email column gating", () => {
     expect(csv).not.toContain("who@med.cornell.edu");
   });
 
-  it("documents the fail-open: gate OFF exports a `none` release code", () => {
-    // This is the prod state today (PROFILE_EMAIL_RELEASE_GATE off) and is the
-    // reason the column cannot be trusted on prod until the ED backfill lands
-    // and the gate flips. If this test ever goes RED, the gate got wired on --
-    // check the backfill ran before celebrating.
-    process.env.PROFILE_EMAIL_RELEASE_GATE = "off";
+  it("a member with no address on file exports an empty email cell", () => {
     const csv = buildUnitRosterCsv(ctx([member("a1")], []), {
       today: TODAY,
-      facultyByCwid: new Map([["a1", meta({ emailVisibility: "none" })]]),
+      facultyByCwid: new Map([["a1", meta({ email: null })]]),
     });
-    expect(csv).toContain("who@med.cornell.edu");
+    expect(csv).toContain(",,full_time_faculty,Medicine,Cardiology");
   });
 
   it("SCHOLAR_LIST_EXPORT_EMAIL off blanks the email, keeping the other columns", () => {
@@ -260,7 +251,6 @@ describe("loadRosterFacultyMeta", () => {
             {
               cwid: "a1",
               email: "a1@med.cornell.edu",
-              emailVisibility: "public",
               roleCategory: "full_time_faculty",
               department: { name: "Medicine" },
               division: null,
@@ -273,7 +263,6 @@ describe("loadRosterFacultyMeta", () => {
     expect((seen as { where: { cwid: { in: string[] } } }).where.cwid.in).toEqual(["a1"]);
     expect(map.get("a1")).toEqual({
       email: "a1@med.cornell.edu",
-      emailVisibility: "public",
       roleCategory: "full_time_faculty",
       departmentName: "Medicine",
       divisionName: null,

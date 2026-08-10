@@ -2567,9 +2567,9 @@ export class AppStack extends Stack {
         // UNIT roster export (/edit/center/[code]/export). That surface is
         // UNCAPPED -- unlike the #847 scope export's 50-scholar refusal, it
         // downloads a center's FULL membership -- so pulling this flag to "off"
-        // is the one-line kill switch for unit-roster contact data. See the
-        // PROFILE_EMAIL_RELEASE_GATE note below for what "off" on THAT gate
-        // means for who lands in the column.
+        // is the one-line kill switch for unit-roster contact data -- and, since
+        // those exports skip the release-code filter by design, the ONLY switch
+        // for them. See the PROFILE_EMAIL_RELEASE_GATE scope note below.
         SCHOLAR_LIST_EXPORT_EMAIL: "on", // Prod flipped 2026-07-07 (adds email col to internal roster CSV; operator-approved).
         INTERNAL_VIEWER_CIDRS:
           env === "staging" ? "157.139.83.164/32" : "140.251.0.0/16,157.139.0.0/16",
@@ -2588,16 +2588,16 @@ export class AppStack extends Stack {
         // BOTH .env.local AND here per the flag-parity rule -- a manual
         // `cdk deploy Sps-App-<env>` is required (CD re-rolls the image only).
         //
-        // BLAST RADIUS WIDENED: the /edit UNIT roster export now carries an
-        // `email` column too, and it is UNCAPPED (a center's full membership,
-        // not a <=50 cohort). Because this gate is OFF in prod and fails OPEN,
-        // that column currently emits EVERY member's address regardless of their
-        // Web Directory release code -- including scholars whose code is `none`
-        // (an explicit "do not release"). This is not fixable in app code: the
-        // gate cannot be flipped until the PROD ED backfill populates
-        // email_visibility, since NULL is fail-closed and would blank email
-        // site-wide (public profile Contact card included). Until then the
-        // compensating control is SCHOLAR_LIST_EXPORT_EMAIL above.
+        // SCOPE NOTE: this gate does NOT reach the /edit UNIT exports
+        // (center/department/division). Those deliberately skip the release-code
+        // filter -- see `exportEmailCell` in lib/profile/email-visibility-flags.ts.
+        // Rationale: per docs/email-visibility-spec.md, only `institution` and
+        // `public` are ever OBSERVED in the ED attribute; `none` is INFERRED from
+        // an absent/unrecognized value, never chosen by a person. On a unit-scoped
+        // authenticated export the filter withheld addresses for missing DATA, not
+        // for anyone's preference. The kill switch for those exports is
+        // SCHOLAR_LIST_EXPORT_EMAIL above; this gate still governs profile email
+        // DISPLAY (table A) and the #847 scope export row-filter.
         PROFILE_EMAIL_RELEASE_GATE: env === "staging" ? "on" : "off",
         // Superuser tier, sourced from the ED group
         // `ITS:Library:Scholars/superuser-role`. isSuperuser()
