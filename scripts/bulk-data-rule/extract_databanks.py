@@ -103,7 +103,9 @@ dep['canonical'], dep['tier'] = cls['canonical'], cls['tier']
 _fulltext_cache = {}  # pmcid -> raw xml bytes; benign race across threads, worst case a few dup fetches
 def context_for(row):
     if row['tier'] == 'REGISTRY':
-        return 'n/a'  # excluded on tier alone, no need to fetch full text
+        return 'excluded'  # excluded on tier alone, no need to fetch full text
+        # ponytail: was 'n/a' — pandas' read_csv treats that string as a missing-value token
+        # and silently turns it back into NaN on the next load. 'excluded' isn't in that list.
     pmcid = pmcid_of.get(row['pmid'])
     val = row['accession'] if isinstance(row['accession'], str) else row['databank']
     if not pmcid or not isinstance(val, str):

@@ -6,11 +6,12 @@ import os, re, urllib.request, urllib.parse
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
-import catalog
+import catalog, datacite
 
 OUT = os.path.dirname(os.path.abspath(__file__)); API=os.environ.get("PUBMED_API_KEY","")
 CANON = {rec[0]: dict(zip(["canonical","org","country","access","bucket","tier","note"],
                          (rec[0],rec[3],rec[4],rec[5],rec[6],rec[7],rec[8]))) for rec in catalog.R}
+DOI_REPOS = {"Zenodo","figshare","Dryad","OSF","Mendeley Data","Harvard Dataverse"}
 
 def rx(l): return [re.compile(p, re.I) for p in l]
 # canonical: (accession patterns, url patterns, word-bounded name patterns)
@@ -33,12 +34,19 @@ SIG = {
  "ArrayExpress/BioStudies":(rx([r"\bE-[A-Z]{4}-\d+\b", r"\bS-[A-Z]{4}\d+\b"]), rx([r"ebi\.ac\.uk/(arrayexpress|biostudies)"]), rx([r"arrayexpress"])),
  "ENA":              (rx([r"\bPRJEB\d+\b", r"\bER[RPSX]\d{5,}\b"]), rx([r"ebi\.ac\.uk/ena"]), rx([r"european nucleotide archive"])),
 
- "Zenodo":           ([], rx([r"zenodo\.org", r"10\.5281/zenodo"]), rx([r"\bzenodo\b"])),
- "figshare":         ([], rx([r"figshare\.com", r"10\.6084/m9\.figshare"]), rx([r"\bfigshare\b"])),
- "Dryad":            ([], rx([r"datadryad\.org", r"10\.5061/dryad"]), rx([r"\bdryad\b"])),
- "OSF":              ([], rx([r"osf\.io"]), rx([r"open science framework"])),
- "Mendeley Data":    ([], rx([r"data\.mendeley\.com"]), rx([r"mendeley data"])),
- "Harvard Dataverse":([], rx([r"dataverse\.harvard"]), rx([r"harvard dataverse"])),
+ # DOI-suffix pattern listed FIRST in each url list: scan()'s tie-break keeps the earliest
+ # candidate at equal rank, so when both the DOI and the bare domain appear in the same text,
+ # the resolvable full DOI wins over the domain-only match. Suffix shapes verified against the
+ # live DataCite API (one real example each, prefix confirmed by publisher name):
+ #   Zenodo 10.5281/zenodo.<digits>, figshare 10.6084/m9.figshare.<digits>[.v<digits>],
+ #   Dryad 10.5061/dryad.<alnum>, OSF 10.17605/osf.io/<alnum>, Mendeley 10.17632/<alnum>[.<digits>],
+ #   Harvard Dataverse 10.7910/dvn/<alnum>.
+ "Zenodo":           ([], rx([r"10\.5281/zenodo\.\d+", r"zenodo\.org"]), rx([r"\bzenodo\b"])),
+ "figshare":         ([], rx([r"10\.6084/m9\.figshare\.\d+(?:\.v\d+)?", r"figshare\.com"]), rx([r"\bfigshare\b"])),
+ "Dryad":            ([], rx([r"10\.5061/dryad\.[a-z0-9]+", r"datadryad\.org"]), rx([r"\bdryad\b"])),
+ "OSF":              ([], rx([r"10\.17605/osf\.io/[a-z0-9]+", r"osf\.io"]), rx([r"open science framework"])),
+ "Mendeley Data":    ([], rx([r"10\.17632/[a-z0-9]+(?:\.\d+)?", r"data\.mendeley\.com"]), rx([r"mendeley data"])),
+ "Harvard Dataverse":([], rx([r"10\.7910/dvn/[a-z0-9]+", r"dataverse\.harvard"]), rx([r"harvard dataverse"])),
 
  "OpenNeuro":        (rx([r"\bds\d{6}\b"]), rx([r"openneuro\.org"]), rx([r"openneuro"])),
  "NDA (NIMH Data Archive)":([], rx([r"nda\.nih\.gov"]), rx([r"nimh data archive", r"national database for autism"])),
@@ -111,6 +119,24 @@ def scan_corpus(cov, out_dep, out_status):
             if done%1000==0: print(f"  {done}/{len(rows)}", flush=True)
     d=pd.DataFrame(dep,columns=["pmid","year","pmcid","repo","tier","country","access","bucket","kind","matched_val","in_das","context","confidence"])
     s=pd.DataFrame(status,columns=["pmid","year","pmcid","has_fulltext","has_das","has_hit"])
+    # Type DOI-repo hits via DataCite (S-Index spec, Data sources: type everything, filter
+    # downstream — not an extraction-time drop). Only rows where the DOI pattern actually
+    # matched (not the bare-domain fallback) look DOI-shaped; dedupe by DOI, one lookup each.
+    is_doi = d['repo'].isin(DOI_REPOS) & d['matched_val'].astype(str).str.match(r"10\.")
+    # 'not-doi' not '' — pandas' read_csv treats '' as a missing-value token same as 'n/a' (see
+    # extract_databanks.py's context_for fix); this row genuinely isn't a DOI match, not unknown.
+    d['resource_type']=None; d['resource_bucket']='not-doi'
+    if is_doi.any():
+        uniq = d.loc[is_doi,'matched_val'].unique().tolist()
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            looked_up = dict(zip(uniq, ex.map(datacite.resource_type, uniq)))
+        d.loc[is_doi,'resource_type'] = d.loc[is_doi,'matched_val'].map(lambda v: looked_up[v][0])
+        d.loc[is_doi,'resource_bucket'] = d.loc[is_doi,'matched_val'].map(lambda v: looked_up[v][1])
+        print(f"  DataCite-typed {len(uniq)} unique DOIs: "
+              f"{sum(1 for v in looked_up.values() if v[1]=='dataset')} dataset, "
+              f"{sum(1 for v in looked_up.values() if v[1]=='software')} software, "
+              f"{sum(1 for v in looked_up.values() if v[1]=='residual')} residual, "
+              f"{sum(1 for v in looked_up.values() if v[1]=='unknown')} unresolved", flush=True)
     d.to_csv(out_dep,index=False); s.to_csv(out_status,index=False)
     return d,s
 
