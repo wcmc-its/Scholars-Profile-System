@@ -14,10 +14,23 @@
  * against the real table once #131 lands and the table is actually created,
  * before relying on this in a real run.
  */
+import { createHash } from "node:crypto";
 import { db } from "../../lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
 
 export const INSERT_BATCH = 1000;
+
+/** Deterministic DatasetDeposit.id, keyed on the same (repository,
+ *  accessionOrDoi) pair every scheduled run full-replaces on. It MUST be
+ *  deterministic, not random: a fresh crypto.randomUUID() per run would mint
+ *  a new id for the same real-world deposit on every weekly pass, silently
+ *  orphaning any /edit suppression or field-override that keys on this id
+ *  (unlike ClinicalTrial, which has a natural-key @id and doesn't need this).
+ *  sha256 hex is exactly 64 chars, matching DatasetDeposit.id's
+ *  `@db.VarChar(64)` with no migration needed. */
+export function depositId(repository: string, accessionOrDoi: string): string {
+  return createHash("sha256").update(`${repository}|${accessionOrDoi}`).digest("hex");
+}
 
 export function chunks<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -142,7 +155,7 @@ export function buildDepositsAndLinks(
     const depositKey = `${repository}|${accessionOrDoi}`;
     if (!deposits.has(depositKey)) {
       deposits.set(depositKey, {
-        id: crypto.randomUUID(),
+        id: depositId(repository, accessionOrDoi),
         repository,
         accessionOrDoi,
         resourceType: nonEmpty(r.resourceType),
