@@ -237,6 +237,14 @@ Listed here for completeness so §1–§8 stay focused.
   staging-soaked but **dark in prod** — `REPORTER_MATCH_V2` is `env === "staging" ? "on" : "off"`
   in both the app and ETL task-defs, so `reporter_profile_candidate` stays empty in prod until ops
   flip it. (v1 shipped and is indexed in §6.)
+- Cancer taxonomy generator — the two-axis (`cancer_relevant`/`topics`) MeSH-descriptor
+  closure replacing the hand-picked `docs/cancer-center-disease-taxonomy.csv`; the
+  admit-exclude-readmit algorithm, the paired-hash versioning, the rot-detection design, and
+  the "size before deciding" content-review discipline: `cancer-taxonomy-generator.md`. The
+  generator/table/ETL step are merged and have run for real against staging (#2356); content
+  refinements are in review (#2358). **Not wired to any reader** — the Reports tab, CSV
+  export, and modal still read the old taxonomy pending a person-level cutover diff. Promote
+  to §6 once that cutover ships.
 - Outreach (launch-window, #506 D5): `outreach/_skeleton.md` (shared 5-part template) + per-audience
   drafts `outreach/wave1-center-admins.md`, `outreach/wave1-superusers-library.md`,
   `outreach/wave2-scholars.md`,
