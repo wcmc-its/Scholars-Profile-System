@@ -22,6 +22,9 @@ function dataset(overrides: Partial<EditContextDataset>): EditContextDataset {
     depositYear: 2023,
     accessModel: "open",
     confidence: "high",
+    title: null,
+    provenance: "fulltext-scan",
+    pmids: ["36711842"],
     authorPosition: "first",
     state: "shown",
     suppressionId: null,
@@ -60,6 +63,51 @@ describe("DatasetsCard — empty state + rows", () => {
     expect(link.getAttribute("href")).toBe(
       "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE12345",
     );
+  });
+});
+
+describe("DatasetsCard — title + citation line (s-index-ui-proposal.html §5 follow-up)", () => {
+  it("appends the title to the headline when present, omits it when absent", () => {
+    render(
+      <DatasetsCard
+        cwid={CWID}
+        datasets={[dataset({ title: "Single-cell RNA-seq of human cardiac fibroblasts" })]}
+      />,
+    );
+    expect(screen.getByTestId("dataset-row-ds-1").textContent).toContain(
+      "GSE12345 — Single-cell RNA-seq of human cardiac fibroblasts",
+    );
+  });
+
+  it("renders From PMID (role) · method, confidence — the mockup's exact §5 line shape", () => {
+    render(
+      <DatasetsCard
+        cwid={CWID}
+        datasets={[dataset({ pmids: ["36711842"], authorPosition: "last", provenance: "fulltext-scan", confidence: "high" })]}
+      />,
+    );
+    expect(screen.getByTestId("dataset-row-ds-1").textContent).toContain(
+      "From PMID 36711842 (you are last author) · full-text scan, high confidence",
+    );
+  });
+
+  it("notes extra citing pmids without dropping the first", () => {
+    render(<DatasetsCard cwid={CWID} datasets={[dataset({ pmids: ["1", "2", "3"] })]} />);
+    expect(screen.getByTestId("dataset-row-ds-1").textContent).toContain(
+      "From PMID 1 (+2 more)",
+    );
+  });
+
+  it("databank provenance maps to the DataBankList label, confidence omitted when null", () => {
+    render(
+      <DatasetsCard
+        cwid={CWID}
+        datasets={[dataset({ provenance: "databank", confidence: null, pmids: [] })]}
+      />,
+    );
+    const text = screen.getByTestId("dataset-row-ds-1").textContent ?? "";
+    expect(text).toContain("You are first author · DataBankList");
+    expect(text).not.toContain("confidence");
   });
 });
 
