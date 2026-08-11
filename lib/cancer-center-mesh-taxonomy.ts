@@ -7,7 +7,19 @@
  * #2033, open/unfixed, and explicitly not reused here).
  *
  *   docs/cancer-center-disease-taxonomy.csv   18 disease codes -> NLM descriptors
+ *
+ * `loadTaxonomy` is the ONE place that reads the CSV + resolves it against the
+ * live `MeshDescriptor` table — the weekly ETL step and every read-time
+ * caller (the "How cancer-relevance is determined" modal, the per-paper
+ * "why" CSV export) call this instead of each keeping its own copy, so
+ * "cancer-related" can't quietly mean two different things depending on who
+ * asks. Today this taxonomy is ONE shared, backend-curated list applied to
+ * every Cancer Center system-wide — there's no per-center subset yet;
+ * narrowing it for a specific center is a change to the CSV file, not a
+ * self-service setting.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 export type Row = Record<string, string>;
 
@@ -82,4 +94,114 @@ export function buildCodeByUi(
  *  matched (that's #2033's layer, not this one's question). */
 export function isCancerRelated(meshUis: string[], codeByUi: Map<string, Set<string>>): boolean {
   return meshUis.some((ui) => codeByUi.has(ui));
+}
+
+/** Which disease code(s) a paper's own MeSH UIs actually matched — the exact
+ *  reasoning `isCancerRelated` throws away for its boolean-only callers. Used
+ *  by the per-paper "why" CSV export; never called from the weekly ETL step,
+ *  which only needs the boolean. */
+export function matchedCodes(meshUis: string[], codeByUi: Map<string, Set<string>>): string[] {
+  const out = new Set<string>();
+  for (const ui of meshUis) {
+    const codes = codeByUi.get(ui);
+    if (codes) for (const c of codes) out.add(c);
+  }
+  return [...out].sort();
+}
+
+export type MeshDescriptorReader = {
+  findMany: (args: {
+    select: { descriptorUi: true; name: true; treeNumbers: true };
+  }) => Promise<Array<{ descriptorUi: string; name: string; treeNumbers: unknown }>>;
+};
+
+let cached: { codeByUi: Map<string, Set<string>>; descriptors: Descriptor[]; taxonomy: Row[] } | null = null;
+
+/** Reads the taxonomy CSV + the full `MeshDescriptor` table once per process
+ *  and builds `codeByUi` — see the module doc comment for why every caller
+ *  shares this instead of re-resolving its own copy. */
+export async function loadTaxonomy(
+  db: MeshDescriptorReader,
+): Promise<{ codeByUi: Map<string, Set<string>>; descriptors: Descriptor[]; taxonomy: Row[] }> {
+  if (cached) return cached;
+  const csv = readFileSync(path.join(process.cwd(), "docs/cancer-center-disease-taxonomy.csv"), "utf8");
+  const taxonomy = parseCsv(csv);
+  const rows = await db.findMany({ select: { descriptorUi: true, name: true, treeNumbers: true } });
+  const descriptors: Descriptor[] = rows.map((d) => ({
+    ui: d.descriptorUi,
+    name: d.name,
+    treeNumbers: Array.isArray(d.treeNumbers) ? d.treeNumbers.filter((x): x is string => typeof x === "string") : [],
+  }));
+  const { codeByUi, missing } = buildCodeByUi(descriptors, taxonomy);
+  if (missing.length) throw new Error(`unresolved NLM descriptors: ${missing.join(", ")}`);
+  cached = { codeByUi, descriptors, taxonomy };
+  return cached;
+}
+
+export type CodeDetail = {
+  code: string;
+  disease: string;
+  anchors: Array<{ name: string; treeNumber: string }>;
+  descendantCount: number;
+  exampleDescendants: string[];
+};
+
+const EXAMPLE_CAP = 8;
+
+/** Each disease code's display name — a code maps 1:1 to one disease across
+ *  however many taxonomy rows/anchors share it. Shared so the modal and the
+ *  per-paper CSV export can't independently derive two different labels for
+ *  the same code. */
+export function diseaseByCode(taxonomy: Row[]): Map<string, string> {
+  return new Map(taxonomy.map((t) => [t.code, t.disease]));
+}
+
+/**
+ * Groups the taxonomy by disease code for display: each code's own anchor
+ * term(s) + real MeSH tree number(s), how many descriptors its subtree
+ * actually covers, and a capped sample of their names (excluding the anchors
+ * themselves, already shown separately). Built FROM `codeByUi` rather than
+ * re-walking tree numbers, so the modal can never show a broader or
+ * narrower subtree than what publications actually get matched against.
+ */
+export function buildTaxonomyDetail(
+  taxonomy: Row[],
+  descriptors: Descriptor[],
+  codeByUi: Map<string, Set<string>>,
+): CodeDetail[] {
+  const nameByUi = new Map(descriptors.map((d) => [d.ui, d.name]));
+  // A descriptor can carry MORE THAN ONE tree number (MeSH cross-lists some
+  // concepts under multiple branches — same reason `buildCodeByUi` walks
+  // every one of them as an independent match root, not just the first).
+  // Show every tree number an anchor actually matches on, or a display here
+  // would silently hide the exact branch that produced some of the
+  // descendant terms below.
+  const treesByName = new Map(descriptors.map((d) => [d.name, d.treeNumbers]));
+  const anchorNames = new Set(taxonomy.map((t) => t.nlm_descriptor));
+
+  const byCode = new Map<string, { disease: string; anchors: Array<{ name: string; treeNumber: string }> }>();
+  for (const t of taxonomy) {
+    const entry = byCode.get(t.code) ?? { disease: t.disease, anchors: [] };
+    const trees = treesByName.get(t.nlm_descriptor) ?? [];
+    for (const tn of trees.length > 0 ? trees : [""]) {
+      entry.anchors.push({ name: t.nlm_descriptor, treeNumber: tn });
+    }
+    byCode.set(t.code, entry);
+  }
+
+  const descendantsByCode = new Map<string, string[]>();
+  for (const [ui, codes] of codeByUi) {
+    const name = nameByUi.get(ui);
+    if (!name || anchorNames.has(name)) continue;
+    for (const code of codes) {
+      const arr = descendantsByCode.get(code) ?? [];
+      arr.push(name);
+      descendantsByCode.set(code, arr);
+    }
+  }
+
+  return [...byCode.entries()].map(([code, { disease, anchors }]) => {
+    const descendants = (descendantsByCode.get(code) ?? []).sort();
+    return { code, disease, anchors, descendantCount: descendants.length, exampleDescendants: descendants.slice(0, EXAMPLE_CAP) };
+  });
 }
