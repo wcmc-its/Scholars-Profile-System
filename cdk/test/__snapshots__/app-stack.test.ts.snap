@@ -856,7 +856,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "PROFILE_EMAIL_RELEASE_GATE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_SUPERUSER_GROUP_CN",
