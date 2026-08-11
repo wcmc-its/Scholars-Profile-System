@@ -45,6 +45,7 @@ RECITER_REFRESH_DELAY_MINUTES
 REPORTER_MATCH_V2_MAX_PER_RUN
 REPORTER_MATCH_V2_MIN_PMIDS
 FACULTY_REVIEW_TOKEN_PREVIOUS       # rotation slot; primary FACULTY_REVIEW_TOKEN wired in app-stack (#1855)
+RESEARCH_INFORMATICS_TOKEN_PREVIOUS # rotation slot; primary RESEARCH_INFORMATICS_TOKEN wired in app-stack (#2363)
 SCHOLARS_REVALIDATE_TOKEN_PREVIOUS
 SEARCH_AREA_BOOST_TOP_N             # area-boost scholar-list cap (code default 500) — A/B lever
 SEARCH_AREA_BOOST_W_MID             # area-boost tier weight (code default 1.5) — A/B lever

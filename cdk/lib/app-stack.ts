@@ -266,6 +266,13 @@ export class AppStack extends Stack {
       "FacultyReviewTokenSecret",
       `scholars/${env}/faculty-review-token`,
     );
+    // Second, independent bearer for the same route -- Research Informatics
+    // (#2363), alongside the Faculty Review Tool's token above.
+    const researchInformaticsTokenSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "ResearchInformaticsTokenSecret",
+      `scholars/${env}/research-informatics-token`,
+    );
     // SSO session-cookie encryption key (#100). getSessionConfig() requireEnv's
     // SESSION_COOKIE_SECRET; the middleware gate and the SAML callback both read
     // it, so without it the callback 500s minting the session (the gap sibling
@@ -2713,6 +2720,9 @@ export class AppStack extends Stack {
         // Read by app/api/faculty-review/[cwid]/grants as FACULTY_REVIEW_TOKEN --
         // the WCM Faculty Review Tool's shared bearer. Dark until seeded (#1855).
         FACULTY_REVIEW_TOKEN: ecs.Secret.fromSecretsManager(facultyReviewTokenSecret),
+        // Same route, second independent bearer -- Research Informatics
+        // (#2363). Dark until seeded, same as above.
+        RESEARCH_INFORMATICS_TOKEN: ecs.Secret.fromSecretsManager(researchInformaticsTokenSecret),
         // iron-session key read by lib/auth/config.ts getSessionConfig (#100).
         // Required by the /edit middleware gate and the SAML callback's
         // session minting; without it the callback 500s after a valid login.

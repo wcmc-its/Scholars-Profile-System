@@ -57,6 +57,8 @@ describe("GET /api/faculty-review/[cwid]/grants", () => {
     mockFindMany.mockReset();
     process.env.FACULTY_REVIEW_TOKEN = TOKEN;
     delete process.env.FACULTY_REVIEW_TOKEN_PREVIOUS;
+    delete process.env.RESEARCH_INFORMATICS_TOKEN;
+    delete process.env.RESEARCH_INFORMATICS_TOKEN_PREVIOUS;
   });
 
   it("401 when Authorization header is missing", async () => {
@@ -84,6 +86,49 @@ describe("GET /api/faculty-review/[cwid]/grants", () => {
     process.env.FACULTY_REVIEW_TOKEN_PREVIOUS = TOKEN;
     mockFindMany.mockResolvedValue([]);
     const resp = await call(makeRequest({ token: TOKEN }));
+    expect(resp.status).toBe(200);
+  });
+
+  it("accepts the Research Informatics token -- independent of the Faculty Review token (#2363)", async () => {
+    const RI_TOKEN = "research-informatics-secret";
+    process.env.RESEARCH_INFORMATICS_TOKEN = RI_TOKEN;
+    mockFindMany.mockResolvedValue([]);
+    const resp = await call(makeRequest({ token: RI_TOKEN }));
+    expect(resp.status).toBe(200);
+  });
+
+  it("Faculty Review Tool's token still works once Research Informatics also has one configured (no cross-interference)", async () => {
+    process.env.RESEARCH_INFORMATICS_TOKEN = "research-informatics-secret";
+    mockFindMany.mockResolvedValue([]);
+    const resp = await call(makeRequest({ token: TOKEN }));
+    expect(resp.status).toBe(200);
+  });
+
+  it("revoking the Faculty Review token does not revoke Research Informatics access", async () => {
+    delete process.env.FACULTY_REVIEW_TOKEN;
+    const RI_TOKEN = "research-informatics-secret";
+    process.env.RESEARCH_INFORMATICS_TOKEN = RI_TOKEN;
+    mockFindMany.mockResolvedValue([]);
+    const resp = await call(makeRequest({ token: RI_TOKEN }));
+    expect(resp.status).toBe(200);
+  });
+
+  it("a Research Informatics token does NOT authorize as the Faculty Review token, or vice versa", async () => {
+    process.env.RESEARCH_INFORMATICS_TOKEN = "research-informatics-secret";
+    // Presenting the RI token doesn't accidentally also equal TOKEN, and
+    // presenting an unconfigured guess for either consumer still 401s.
+    const resp = await call(makeRequest({ token: "not-either-token" }));
+    expect(resp.status).toBe(401);
+    expect(mockFindMany).not.toHaveBeenCalled();
+  });
+
+  it("accepts the Research Informatics rotation-previous token", async () => {
+    delete process.env.FACULTY_REVIEW_TOKEN;
+    const RI_TOKEN = "research-informatics-secret";
+    process.env.RESEARCH_INFORMATICS_TOKEN = "new-ri-token";
+    process.env.RESEARCH_INFORMATICS_TOKEN_PREVIOUS = RI_TOKEN;
+    mockFindMany.mockResolvedValue([]);
+    const resp = await call(makeRequest({ token: RI_TOKEN }));
     expect(resp.status).toBe(200);
   });
 

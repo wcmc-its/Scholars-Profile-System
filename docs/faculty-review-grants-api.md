@@ -1,7 +1,11 @@
 # Faculty Review Tool — Grants API
 
 Server-to-server read of a single scholar's **complete grant history** from the
-Scholars Profile System (SPS), for the WCM-internal Faculty Review Tool.
+Scholars Profile System (SPS). Built for the WCM-internal Faculty Review
+Tool; Research Informatics also reads this same endpoint for on-demand
+single-cwid lookups, alongside their separate nightly all-scholars S3 export
+([`grants-bulk-export.md`](./grants-bulk-export.md)) — same data, same
+shape, independent credential per consumer (see Authentication below).
 
 This endpoint is a plain data read. It is **not** the same as
 `/api/scholar/[cwid]/grants`, which is a session-gated topic-matching *search
@@ -34,11 +38,16 @@ variant — do not poll it as a sync feed.
 
 ## Authentication
 
-Every request must carry a shared bearer token:
+Every request must carry a bearer token:
 
 ```
-Authorization: Bearer <FACULTY_REVIEW_TOKEN>
+Authorization: Bearer <your-token>
 ```
+
+Each consumer gets its own independent token — the Faculty Review Tool's
+token and Research Informatics' token are separate secrets on the SPS side,
+so either can be rotated or revoked without touching the other. Use whichever
+one was issued to you; both are accepted on this same endpoint.
 
 - The token is issued out-of-band by the SPS operator (WCM secret). Store it as
   a secret in your service; never commit it or put it in a URL.
