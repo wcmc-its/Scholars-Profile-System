@@ -3,17 +3,20 @@
  *
  * The per-paper "why" behind the Collaboration & Cancer-Relevance report's
  * aggregate counts — CSV of one candidate's (`?cwid=`) or every candidate's
- * (no query param) post-cutoff Academic Article authorship: pmid, year,
- * publication type, and whether/why it matched the cancer taxonomy. Exists
- * so a curator can audit the classification directly instead of re-deriving
- * it by hand against reciterdb, the way this report's numbers were validated
- * once already.
+ * (no query param) post-cutoff Academic Article authorship: full citation
+ * detail (title, journal, year, publication type), the ReCiterAI synopsis
+ * and impact score/justification, and whether/why it matched the cancer
+ * taxonomy — including the specific MeSH term(s) matched, not just the
+ * rolled-up disease code. Exists so a curator can audit the classification
+ * directly instead of re-deriving it by hand against reciterdb, the way
+ * this report's numbers were validated once already.
  *
  * Re-derives per-paper detail at request time — the weekly
  * `CenterCollabCandidate` row only stores aggregate counts, not which papers
- * or which MeSH terms produced them — using the SAME `matchedCodes`/
- * `loadTaxonomy` the ETL step itself calls, so the export can't drift from
- * what was actually counted.
+ * or which MeSH terms produced them — using the SAME `loadTaxonomy` the ETL
+ * step calls (the ETL only needs its boolean `isCancerRelated`; this route
+ * additionally uses `matchedCodes`/`matchedUis` for the term-level "why"),
+ * so the export can't drift from what was actually counted.
  *
  * Authz mirrors the parent report: Curator/Owner of the center, or
  * Superuser/comms_steward (`canEditUnit`).
@@ -23,14 +26,17 @@
  * ~98k `PublicationAuthor` rows for Meyer (the only center with a program
  * taxonomy right now), same order of magnitude as what the weekly ETL step
  * already does for this center, but as an interactive request rather than a
- * background job. Fine for an occasional manual audit at today's scale; if
- * a future center is meaningfully larger, or this starts brushing
- * CloudFront's 30s origin budget, split into a background/streamed export
- * then rather than pre-building it now.
+ * background job. Rows are heavier now (title/journal/synopsis/impact text
+ * per row, not just a handful of scalars), so this is the mode most likely
+ * to actually need the streamed/background upgrade path someday. Fine for
+ * an occasional manual audit at today's scale; if a future center is
+ * meaningfully larger, or this starts brushing CloudFront's 30s origin
+ * budget, split into a background/streamed export then rather than
+ * pre-building it now.
  */
 import { NextResponse, type NextRequest } from "next/server";
 
-import { diseaseByCode, loadTaxonomy, matchedCodes } from "@/lib/cancer-center-mesh-taxonomy";
+import { diseaseByCode, loadTaxonomy, matchedCodes, matchedUis } from "@/lib/cancer-center-mesh-taxonomy";
 import { DEFAULT_CUTOFF_YEAR, splitName } from "@/lib/center-collaboration/recommendations-core";
 import { toCsv, type CsvCell } from "@/lib/csv";
 import { db } from "@/lib/db";
@@ -44,12 +50,22 @@ const HEADERS = [
   "surname",
   "given_name",
   "pmid",
-  "year",
+  "article_title",
+  "journal_title",
   "publication_type",
+  "year",
   "is_cancer_related",
+  "matched_terms",
   "matched_codes",
   "matched_diseases",
+  "impact_score",
+  "impact_justification",
+  "synopsis",
 ] as const;
+
+// Derived from HEADERS rather than hand-copied, so a future column reorder
+// can't silently point the sort at the wrong cell.
+const YEAR_COL = HEADERS.indexOf("year");
 
 // `cwid` is an attacker-controlled query param that lands in a response
 // header value (`Content-Disposition`) — strip it to the shape a real CWID
@@ -125,12 +141,24 @@ export async function GET(
     select: {
       pmid: true,
       cwid: true,
-      publication: { select: { year: true, publicationType: true, meshTerms: true } },
+      publication: {
+        select: {
+          title: true,
+          journal: true,
+          publicationType: true,
+          year: true,
+          meshTerms: true,
+          impactScore: true,
+          impactJustification: true,
+          synopsis: true,
+        },
+      },
     },
   });
 
-  const { codeByUi, taxonomy } = await loadTaxonomy(db.read.meshDescriptor);
+  const { codeByUi, descriptors, taxonomy } = await loadTaxonomy(db.read.meshDescriptor);
   const diseaseNameByCode = diseaseByCode(taxonomy);
+  const termNameByUi = new Map(descriptors.map((d) => [d.ui, d.name]));
 
   const rows: CsvCell[][] = authorRows
     .filter((r): r is typeof r & { cwid: string } => r.cwid !== null)
@@ -140,17 +168,24 @@ export async function GET(
         ? mt.flatMap((x) => (x && typeof x === "object" && "ui" in x && typeof x.ui === "string" ? [x.ui] : []))
         : [];
       const codes = matchedCodes(meshUis, codeByUi);
+      const terms = matchedUis(meshUis, codeByUi).map((ui) => termNameByUi.get(ui) ?? ui);
       const { given, surname } = nameByCwid.get(r.cwid) ?? { given: "", surname: r.cwid };
       return [
         r.cwid,
         surname,
         given,
         r.pmid,
-        r.publication.year,
+        r.publication.title,
+        r.publication.journal,
         r.publication.publicationType,
+        r.publication.year,
         codes.length > 0 ? "yes" : "no",
+        terms.join(";"),
         codes.join(";"),
         codes.map((c) => diseaseNameByCode.get(c) ?? c).join(";"),
+        r.publication.impactScore !== null ? Number(r.publication.impactScore) : null,
+        r.publication.impactJustification,
+        r.publication.synopsis,
       ];
     })
     // Plain ASCII comparison, not `localeCompare` — cwids have no locale to
@@ -159,7 +194,7 @@ export async function GET(
     .sort((a, b) => {
       const acwid = String(a[0]);
       const bcwid = String(b[0]);
-      return acwid < bcwid ? -1 : acwid > bcwid ? 1 : Number(a[4]) - Number(b[4]);
+      return acwid < bcwid ? -1 : acwid > bcwid ? 1 : Number(a[YEAR_COL]) - Number(b[YEAR_COL]);
     });
 
   return csvResponse(rows, center.code, cwidParam);

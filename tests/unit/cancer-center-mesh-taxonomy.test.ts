@@ -4,6 +4,7 @@ import {
   buildTaxonomyDetail,
   isCancerRelated,
   matchedCodes,
+  matchedUis,
   parseCsv,
   type Descriptor,
   type Row,
@@ -66,6 +67,24 @@ describe("matchedCodes", () => {
   it("dedupes when multiple UIs on the same paper hit the same code", () => {
     const { codeByUi } = buildCodeByUi(descriptors, taxonomy);
     expect(matchedCodes(["D001943", "D001944"], codeByUi)).toEqual(["BREAST"]);
+  });
+});
+
+describe("matchedUis", () => {
+  it("returns the UI(s) that actually matched, unlike matchedCodes it does NOT dedupe/roll up — every matching UI on the paper survives, term-level detail matchedCodes discards", () => {
+    const { codeByUi } = buildCodeByUi(descriptors, taxonomy);
+    expect(matchedUis(["D001943", "D001944"], codeByUi)).toEqual(["D001943", "D001944"]);
+  });
+
+  it("drops any UI that doesn't fall in the taxonomy, preserving input order", () => {
+    const { codeByUi } = buildCodeByUi(descriptors, taxonomy);
+    expect(matchedUis(["D008175", "D001943", "D002331"], codeByUi)).toEqual(["D001943"]);
+  });
+
+  it("returns an empty array for a paper with no MeSH tags, or none in the taxonomy", () => {
+    const { codeByUi } = buildCodeByUi(descriptors, taxonomy);
+    expect(matchedUis([], codeByUi)).toEqual([]);
+    expect(matchedUis(["D008175"], codeByUi)).toEqual([]);
   });
 });
 
