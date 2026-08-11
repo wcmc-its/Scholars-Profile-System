@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { buildDepositsAndLinks, depositId, type SourceRow } from "@/etl/data-sharing/shared";
+import {
+  buildDepositsAndLinks,
+  depositId,
+  nonEmpty,
+  type SourceRow,
+} from "@/etl/data-sharing/shared";
 
 const NOW = new Date("2026-06-19T00:00:00.000Z");
 
@@ -36,6 +41,23 @@ describe("depositId", () => {
   });
 });
 
+describe("nonEmpty", () => {
+  // Regression test: reciterdb.dataset_deposit.pmid is INT(11), not VARCHAR —
+  // the mariadb driver hands buildDepositsAndLinks a real JS number for it.
+  // nonEmpty used to assume a string and crash the whole weekly run
+  // (TypeError: (s ?? "").trim is not a function) the first time it saw one.
+  it("coerces a non-string value instead of throwing", () => {
+    expect(nonEmpty(12345678)).toBe("12345678");
+    expect(nonEmpty(0)).toBe("0");
+  });
+
+  it("still treats null/undefined/blank as empty", () => {
+    expect(nonEmpty(null)).toBeNull();
+    expect(nonEmpty(undefined)).toBeNull();
+    expect(nonEmpty("  ")).toBeNull();
+  });
+});
+
 describe("buildDepositsAndLinks", () => {
   const scholars = new Map<string, string>([["abc1234", "abc1234"]]);
 
@@ -56,6 +78,18 @@ describe("buildDepositsAndLinks", () => {
     expect(second.deposits).toHaveLength(1);
     expect(first.deposits[0].id).toBe(second.deposits[0].id);
     expect(first.links[0].datasetId).toBe(second.links[0].datasetId);
+  });
+
+  it("doesn't crash on a numeric pmid (defense-in-depth if the CAST(pmid AS CHAR) in readSourceRows is ever lost)", () => {
+    const rows: SourceRow[] = [
+      // @ts-expect-error — deliberately simulating the raw driver value SourceRow's
+      // type claims can't happen but does, pre-CAST (pmid is INT(11) in reciterdb).
+      row({ cwid: "abc1234", repository: "Dryad", accessionOrDoi: "10.5061/dryad.abc123", pmid: 111 }),
+    ];
+
+    const { links } = buildDepositsAndLinks(rows, scholars, NOW);
+
+    expect(links[0].pmids).toEqual(["111"]);
   });
 
   it("gives different (repository, accessionOrDoi) pairs different deposit ids", () => {

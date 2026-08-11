@@ -7,12 +7,14 @@
  * Keeping the join/build/replace logic here means the direct path and the
  * bridge can't drift — they produce identical rows from identical source data.
  *
- * ponytail: the upstream `reciterdb.dataset_deposit` table doesn't exist yet
- * — it's drafted in wcmc-its/ReCiterDB#131 (dev branch, unmerged), snake_case
- * per that repo's column-naming convention. readSourceRows() below aliases
- * each column back to this file's camelCase `SourceRow` shape. Re-verify
- * against the real table once #131 lands and the table is actually created,
- * before relying on this in a real run.
+ * Re-verified against the real table (ReCiterDB#131, merged) after the first
+ * live `DataSharingWeekly` run crashed on it 2026-08-10: `pmid` is `INT(11)`,
+ * not the string `SourceRow.pmid` claims — `readSourceRows()`'s `as
+ * SourceRow[]` cast is unchecked, so nothing caught the mismatch until
+ * `nonEmpty()` threw on a real row. Fixed by casting `pmid` to CHAR in the
+ * query (below) and by hardening `nonEmpty()` itself, since the unchecked
+ * cast means a future column-type drift could hit any other field here too.
+ * Every other column was checked against the DDL and does match.
  */
 import { createHash } from "node:crypto";
 import { db } from "../../lib/db";
@@ -53,8 +55,8 @@ export type SourceRow = {
   pmid: string | null; // the citing publication for this (cwid, dataset) pair
 };
 
-export function nonEmpty(s: string | null | undefined): string | null {
-  const t = (s ?? "").trim();
+export function nonEmpty(s: unknown): string | null {
+  const t = (s === null || s === undefined ? "" : String(s)).trim();
   return t.length > 0 ? t : null;
 }
 
@@ -107,7 +109,7 @@ export async function readSourceRows(): Promise<SourceRow[]> {
              deposit_year AS depositYear,
              provenance, confidence,
              author_position AS authorPosition,
-             pmid
+             CAST(pmid AS CHAR) AS pmid
       FROM dataset_deposit
     `)) as SourceRow[];
   });
