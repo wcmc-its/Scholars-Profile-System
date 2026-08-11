@@ -2587,15 +2587,17 @@ export class AppStack extends Stack {
         // respected across both profile-email DISPLAY (table A) and the #847
         // export row-filter (none blanks the cell). While off, email is shown
         // to everyone (legacy fail-open) and the export email column is gated
-        // only by viewer-context + hidden-role. STAGING ON; PROD OFF.
+        // only by viewer-context + hidden-role. BOTH ENVS ON.
         // Reindex-then-flip discipline: email_visibility is NULL until backfilled,
         // and NULL is treated as `none` (fail-closed), so flipping before the
-        // backfill would hide every email. Staging is now safe to flip: the
-        // backfill landed 2026-06-11 via the LDAP->S3 bridge (#898; the in-VPC ED
-        // ETL can't reach WCM LDAP -- #443), populating email_visibility for 8,895
-        // scholars (verified). PROD stays OFF until its own backfill runs. Wire in
-        // BOTH .env.local AND here per the flag-parity rule -- a manual
-        // `cdk deploy Sps-App-<env>` is required (CD re-rolls the image only).
+        // backfill would hide every email. Staging flipped once its backfill
+        // landed 2026-06-11 via the LDAP->S3 bridge (#898; the in-VPC ED ETL
+        // can't reach WCM LDAP -- #443), populating email_visibility for 8,895
+        // scholars (verified then). Prod's backfill was confirmed complete
+        // 2026-08-11 (#2327: 9,423/9,423 non-NULL, same public/institution/none
+        // shape as staging) -- flipped same day. Wire in BOTH .env.local AND
+        // here per the flag-parity rule -- a manual `cdk deploy Sps-App-<env>`
+        // is required (CD re-rolls the image only).
         //
         // SCOPE NOTE: this gate does NOT reach the /edit UNIT exports
         // (center/department/division). Those deliberately skip the release-code
@@ -2607,7 +2609,7 @@ export class AppStack extends Stack {
         // for anyone's preference. The kill switch for those exports is
         // SCHOLAR_LIST_EXPORT_EMAIL above; this gate still governs profile email
         // DISPLAY (table A) and the #847 scope export row-filter.
-        PROFILE_EMAIL_RELEASE_GATE: env === "staging" ? "on" : "off",
+        PROFILE_EMAIL_RELEASE_GATE: "on",
         // Superuser tier, sourced from the ED group
         // `ITS:Library:Scholars/superuser-role`. isSuperuser()
         // (lib/auth/superuser.ts, R1) checks the CWID allowlist first, then the
