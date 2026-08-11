@@ -31,14 +31,23 @@
 "use client";
 
 import * as React from "react";
-import { HelpCircle } from "lucide-react";
+import { Download, HelpCircle } from "lucide-react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ADD_THRESHOLD, pct } from "@/lib/center-collaboration/recommendations-core";
+import type { CodeDetail } from "@/lib/cancer-center-mesh-taxonomy";
 
 /** (?) icon that reveals `text` on hover/focus — the "explain the logic here"
  *  affordance next to each section heading / threshold control. */
@@ -137,6 +146,98 @@ function SectionHeading({ text, info }: { text: string; info: string }) {
   );
 }
 
+/**
+ * "How cancer-relevance is determined" — states the goal in plain language,
+ * explains the MeSH-tree subtree-match mechanism, and lists all 18 codes
+ * with their real anchor term(s), tree number(s), and a live sample of the
+ * descendant terms that actually count. Fetched lazily (only once the dialog
+ * opens) from `/api/edit/cancer-center-mesh-taxonomy`, which builds this from
+ * the SAME `codeByUi` the weekly ETL step matches papers against — so this
+ * can't show a broader or narrower subtree than what's actually counted.
+ */
+function MeshLogicModal() {
+  const [open, setOpen] = React.useState(false);
+  const [codes, setCodes] = React.useState<CodeDetail[] | null>(null);
+  const [error, setError] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!open || codes || error) return;
+    (async () => {
+      try {
+        const res = await fetch("/api/edit/cancer-center-mesh-taxonomy");
+        if (!res.ok) {
+          setError(true);
+          return;
+        }
+        const body = await res.json();
+        setCodes(body.codes);
+      } catch {
+        setError(true);
+      }
+    })();
+  }, [open, codes, error]);
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <HelpCircle className="size-3.5" aria-hidden />
+          How cancer-relevance is determined
+        </button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>How cancer-relevance is determined</DialogTitle>
+          <DialogDescription>
+            The goal: only count a paper toward this report&apos;s cancer-relevance axis when it&apos;s indexed
+            under one of the cancer-disease topics below — full-time faculty publishing outside that scope
+            shouldn&apos;t read as &ldquo;cancer-relevant&rdquo; just because they publish a lot.
+          </DialogDescription>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          Each topic is anchored to a real National Library of Medicine MeSH term. MeSH organizes every
+          biomedical concept into a hierarchy, encoded as a dotted &ldquo;tree number&rdquo; (e.g.{" "}
+          <code className="text-xs">C04.588.180</code> for Breast Neoplasms) — reading left to right goes from
+          broad to specific. A paper counts under a topic if any of its own MeSH terms fall anywhere in that
+          anchor&apos;s branch — the anchor itself or any narrower descendant — not just an exact match on the
+          named term.
+        </p>
+        <p className="text-sm text-muted-foreground">
+          This list is a single, backend-curated definition applied WCM-wide today, not a per-center
+          self-service setting — narrowing it for a specific center&apos;s actual scope is a change to{" "}
+          <code className="text-xs">docs/cancer-center-disease-taxonomy.csv</code>, not something adjustable
+          here.
+        </p>
+        {error && <p className="text-sm text-destructive">Failed to load.</p>}
+        {!error && !codes && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {codes && (
+          <ul className="divide-y divide-border text-sm">
+            {codes.map((c) => (
+              <li key={c.code} className="py-2">
+                <p className="font-medium">
+                  {c.disease}{" "}
+                  <span className="font-normal text-muted-foreground">
+                    ({c.anchors.map((a) => `${a.name} — ${a.treeNumber}`).join("; ")})
+                  </span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {c.descendantCount} descendant MeSH term{c.descendantCount === 1 ? "" : "s"} match
+                  {c.exampleDescendants.length > 0 && <>: {c.exampleDescendants.join(", ")}</>}
+                  {c.descendantCount > c.exampleDescendants.length &&
+                    ` (+${c.descendantCount - c.exampleDescendants.length} more)`}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 type SortKey = "name" | "department" | "papers" | "collab" | "relevant";
 
 const SORTERS: Record<SortKey, (a: Row, b: Row) => number> = {
@@ -154,7 +255,15 @@ const TH_CLASS = "sticky top-0 z-10 bg-background py-1.5 pr-2";
  *  unnavigable. `ScrollArea` bounds each section's own height (same `md:h-[60vh]`
  *  convention as `publications-card.tsx`/`highlights-card.tsx`) with a sticky header,
  *  instead of every section stacking into one very long page. */
-function RowTable({ rows, extraCol }: { rows: Row[]; extraCol?: (r: Row) => React.ReactNode }) {
+function RowTable({
+  rows,
+  centerCode,
+  extraCol,
+}: {
+  rows: Row[];
+  centerCode: string;
+  extraCol?: (r: Row) => React.ReactNode;
+}) {
   const [query, setQuery] = React.useState("");
   const [sort, setSort] = React.useState<SortKey>("name");
 
@@ -216,6 +325,9 @@ function RowTable({ rows, extraCol }: { rows: Row[]; extraCol?: (r: Row) => Reac
                   <th className={`${TH_CLASS} text-right`}>Collab.</th>
                   <th className={`${TH_CLASS} text-right`}>Cancer-Related</th>
                   {extraCol && <th className={TH_CLASS}>Program</th>}
+                  <th className={TH_CLASS}>
+                    <span className="sr-only">Download</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -233,6 +345,16 @@ function RowTable({ rows, extraCol }: { rows: Row[]; extraCol?: (r: Row) => Reac
                       {r.cancerRelatedPapers} ({pct(r.cancerRelatedPapers, r.totalPapersPostCutoff)}%)
                     </td>
                     {extraCol && <td className="py-1.5 pr-2">{extraCol(r)}</td>}
+                    <td className="py-1.5 pr-2">
+                      <a
+                        href={`/api/edit/center/${encodeURIComponent(centerCode)}/collab-report/export?cwid=${encodeURIComponent(r.cwid)}`}
+                        aria-label={`Download ${r.givenName} ${r.surname}'s papers (CSV)`}
+                        title="Download this person's papers (CSV)"
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <Download className="size-3.5" aria-hidden />
+                      </a>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -314,14 +436,31 @@ function CollabCancerRelevanceReport({ centerCode }: { centerCode: string }) {
 
   return (
     <div className="space-y-6">
-      <p className="text-xs text-muted-foreground">Last refreshed: {new Date(state.generatedAt!).toLocaleString()}</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          Last refreshed: {new Date(state.generatedAt!).toLocaleString()}
+        </p>
+        <div className="flex flex-wrap items-center gap-4">
+          <MeshLogicModal />
+          {/* Plain `<a download>` — no JS/blob dance, the browser handles the
+              download off the route's `Content-Disposition` header. */}
+          <a
+            href={`/api/edit/center/${encodeURIComponent(centerCode)}/collab-report/export`}
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            aria-label="Download full report (CSV)"
+          >
+            <Download className="size-3.5" aria-hidden />
+            Download full report (CSV)
+          </a>
+        </div>
+      </div>
 
       <section>
         <SectionHeading
           text="REMOVE — active member, zero collaboration"
           info="Full-time faculty who are currently active research members of this center but have zero PubMed co-authorship with any of this center's other active research members. Fixed at zero — not adjustable by the sliders below, unchanged from the standalone v1 report."
         />
-        <RowTable rows={remove} extraCol={(r) => r.currentProgramCode ?? "—"} />
+        <RowTable rows={remove} centerCode={centerCode} extraCol={(r) => r.currentProgramCode ?? "—"} />
       </section>
 
       <section>
@@ -349,7 +488,7 @@ function CollabCancerRelevanceReport({ centerCode }: { centerCode: string }) {
           text="ADD — collaborator + relevant"
           info="Full-time faculty who are NOT center members, already clear the Collaboration threshold above, AND clear the Cancer-relevance threshold — both bars must be cleared."
         />
-        <RowTable rows={collaboratorAndRelevant} />
+        <RowTable rows={collaboratorAndRelevant} centerCode={centerCode} />
       </section>
 
       <section>
@@ -357,7 +496,7 @@ function CollabCancerRelevanceReport({ centerCode }: { centerCode: string }) {
           text="ADD — recruit (relevant, not yet connected)"
           info="Full-time faculty who are NOT center members and clear the Cancer-relevance threshold on their own body of work, but do NOT already clear the Collaboration threshold — prolific cancer researchers this center hasn't worked with yet. Excludes anyone already listed under &quot;collaborator + relevant&quot; above."
         />
-        <RowTable rows={recruit} />
+        <RowTable rows={recruit} centerCode={centerCode} />
       </section>
     </div>
   );
