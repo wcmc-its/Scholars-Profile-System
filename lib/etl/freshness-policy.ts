@@ -170,6 +170,12 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // Weekly cadence (cron 0 12 ? * SUN *)
   Completeness: { cadence: "weekly" },
   Headshot: { cadence: "weekly" },
+  // Deployed weekly step (cdk/lib/etl-stack.ts CancerCenterCollabReport,
+  // tier:"continue") that writes source "CancerCenterCollabReport"
+  // (etl/cancer-center-collab-report/index.ts) via withEtlRun — same
+  // COMPUTED-step precedent as SearchIndex below: a source with no `etl_run`
+  // row is how `/edit/etl-status` tells "never deployed" from "step aborted".
+  CancerCenterCollabReport: { cadence: "weekly" },
   Reporter: { cadence: "weekly" },
   NSF: { cadence: "weekly" },
   Gates: { cadence: "weekly" },

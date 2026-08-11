@@ -118,6 +118,10 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     label: "Profile Photo Check",
     description: "Checks which scholars are missing a photo in the campus directory.",
   },
+  CancerCenterCollabReport: {
+    label: "Cancer Center Collaboration Report",
+    description: "Weekly collaboration and cancer-relevance numbers behind a Cancer Center's Reports tab.",
+  },
   Reporter: {
     label: "NIH Award Details",
     description: "Adds NIH award summaries and the papers each award funded.",

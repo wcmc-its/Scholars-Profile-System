@@ -1471,9 +1471,10 @@ model Center {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  members       CenterMembership[]
-  programs      CenterProgram[]
-  fundingAwards CancerCenterFundingAward[]
+  members          CenterMembership[]
+  programs         CenterProgram[]
+  fundingAwards    CancerCenterFundingAward[]
+  collabCandidates CenterCollabCandidate[]
 
   @@index([slug])
   @@index([sortOrder])
@@ -1577,6 +1578,42 @@ model CenterMembership {
   @@index([cwid])
   @@index([centerCode, programCode])
   @@map("center_membership")
+}
+
+/// Cancer Center collaboration-recommendations v2 Reports tab — one row per
+/// (center, full-time faculty member OR active research member), computed
+/// weekly by `etl/cancer-center-collab-report/index.ts` from the same pure
+/// core the standalone `scripts/cancer-center-collaboration-recommendations.ts`
+/// CLI uses (`lib/center-collaboration/recommendations-core.ts`).
+///
+/// No REMOVE/ADD/recruit classification is stored — the Reports tab applies
+/// threshold filtering (percentage or raw-count slider, one pair per axis)
+/// against these already-computed numbers at request time.
+///
+/// `isCurrentMember` mirrors v1's REMOVE-eligible population exactly: an
+/// active `CenterMembership` with `membershipType === "research"`, not "any
+/// membership type" — see `recommendations-core.ts` `CollabUniverseMember`.
+/// A full-time faculty member who IS a center member under some OTHER type
+/// gets no row for this center at all (already on the roster, out of both
+/// REMOVE's and the ADD/recruit candidate pool's scope).
+model CenterCollabCandidate {
+  centerCode               String   @map("center_code") @db.VarChar(64)
+  cwid                     String   @db.VarChar(32)
+  totalPapersPostCutoff    Int      @map("total_papers_post_cutoff")
+  collaborationsWithCenter Int      @map("collaborations_with_center")
+  /// Post-cutoff papers whose MeSH tags hit the cancer taxonomy
+  /// (`lib/cancer-center-mesh-taxonomy.ts`) — independent of collaboration.
+  cancerRelatedPapers      Int      @map("cancer_related_papers")
+  isCurrentMember          Boolean  @map("is_current_member")
+  currentProgramCode       String?  @map("current_program_code") @db.VarChar(16)
+  lastRefreshedAt          DateTime @default(now()) @map("last_refreshed_at")
+
+  center Center @relation(fields: [centerCode], references: [code], onDelete: Cascade)
+
+  @@id([centerCode, cwid])
+  @@index([centerCode, collaborationsWithCenter])
+  @@index([centerCode, cancerRelatedPapers])
+  @@map("center_collab_candidate")
 }
 
 /// NCI CCSG Data Table 2A — one row per (center, reporting cycle, OSRA award).

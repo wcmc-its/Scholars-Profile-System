@@ -21,6 +21,7 @@
  * restore it). The `retire` panel renders normally so they can Restore; every
  * other panel shows a "Retired — restore to edit" notice instead of its editor.
  */
+import { CancerCenterCollabReportCard } from "@/components/edit/cancer-center-collab-report-card";
 import { Nci2aCard } from "@/components/edit/cancer-center-nci-2a-card";
 import { CenterProgramCard } from "@/components/edit/center-program-card";
 import { CenterRosterCard } from "@/components/edit/center-roster-card";
@@ -47,6 +48,7 @@ type AttrKey =
   | "roster"
   | "programs"
   | "nci-2a"
+  | "reports"
   | "access"
   | "name"
   | "slug"
@@ -113,6 +115,14 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   },
   { key: "access", label: "Access", visible: (ctx) => isOwnerPlus(ctx.actorRole) },
   { key: "slug", label: "Profile URL", visible: (ctx) => isSuperuser(ctx.actorRole) },
+  // Cancer Center collaboration-recommendations v2. Same data-driven gate as
+  // Programs/NCI Table 2A — a center with a program taxonomy is exactly the
+  // population this report's collaboration + cancer-relevance axes cover.
+  {
+    key: "reports",
+    label: "Reports",
+    visible: (ctx) => ctx.unit.unitType === "center" && (ctx.programs?.length ?? 0) > 0,
+  },
   {
     key: "center-type",
     label: "Center type",
@@ -276,6 +286,10 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
       // center check. Fetches its own data client-side (real award dollars,
       // no need to thread it through the shared unit-edit-context loader).
       return <Nci2aCard centerCode={ctx.unit.code} />;
+    case "reports":
+      // Same gate as Programs/NCI Table 2A. Reads the precomputed weekly
+      // table client-side — no need to thread it through the shared loader.
+      return <CancerCenterCollabReportCard centerCode={ctx.unit.code} />;
     case "name":
       // The rail only surfaces this row for a manually-owned unit, so the
       // unitType is center | division here (never department).
