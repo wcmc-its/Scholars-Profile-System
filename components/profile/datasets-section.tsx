@@ -38,6 +38,20 @@ const ACCESSION_RESOLVERS: Record<string, (accession: string) => string> = {
 
 const DOI_PATTERN = /^10\.\d{4,9}\//;
 
+/** `dataset.accessModel` is the bare `"open" | "controlled"` enum
+ *  (`scripts/bulk-data-rule/attribute.py`'s `access_model()`) — readable
+ *  labels for public display. `confidence` ('high'|'low'|'unclear') is
+ *  deliberately NOT given the same treatment and NOT shown here at all: it's
+ *  the extraction pipeline's confidence that a citation is really a deposit
+ *  reference, not a fact about the dataset — a bare "high"/"low" on a public
+ *  profile reads as an endorsement of the dataset, which it isn't. Still used
+ *  for /edit's review-queue sort order (`lib/api/edit-context.ts`); just not
+ *  rendered to a public visitor. */
+const ACCESS_LABELS: Record<string, string> = {
+  open: "Open access",
+  controlled: "Controlled access",
+};
+
 /** Resolve a dataset's accession-or-DOI to a public link, or null when
  *  neither a known repository resolver nor the DOI pattern matches. Exported
  *  so the /edit Datasets card (#2348) links each row the same way the public
@@ -87,6 +101,7 @@ function DatasetRow({ dataset }: { dataset: Dataset }) {
   // the same meta line as the pre-existing fields. When there's no title yet
   // (repos Phase B doesn't cover, or before it's run at all), leave this
   // exactly as it was — a purely additive rendering path.
+  const accessLabel = dataset.accessModel ? ACCESS_LABELS[dataset.accessModel] ?? dataset.accessModel : null;
   const metaParts = (
     hasTitle
       ? [
@@ -98,14 +113,12 @@ function DatasetRow({ dataset }: { dataset: Dataset }) {
             : null,
           dataset.dataType,
           dataset.depositYear ? String(dataset.depositYear) : null,
-          dataset.accessModel,
-          dataset.confidence,
+          accessLabel,
         ]
       : [
           dataset.dataType,
           dataset.depositYear ? String(dataset.depositYear) : null,
-          dataset.accessModel,
-          dataset.confidence,
+          accessLabel,
         ]
   ).filter((p): p is string => Boolean(p));
 
