@@ -18,6 +18,15 @@
  *      (etl/mesh-descriptors/synonyms.ts) and upload to
  *      s3://${MESH_SYNONYM_BUCKET}/synonyms/mesh-<year>.txt.
  *   6. Record run in EtlRun with sha256 + year for next short-circuit pass.
+ *   7. Chain `etl/cancer-taxonomy/index.ts` (as a child process, same as
+ *      `etl/orchestrate.ts`'s own `runScript`) — that step's own paired-hash
+ *      short-circuit decides whether a re-generate is actually needed, so
+ *      chaining unconditionally after EITHER outcome above (short-circuit or
+ *      full replace) is nearly free. A new MeSH year with no chained trigger
+ *      would otherwise leave `CancerTaxonomyDescriptor` silently resolved
+ *      against descriptors that no longer exist. Isolated failure: a
+ *      cancer-taxonomy problem is logged loudly but does not fail THIS run
+ *      — the MeSH replace itself already succeeded.
  *
  * Out of scope (deferred to §1.5 / §1.10):
  *   - In-memory descriptor map for query-time concept resolution.
@@ -34,6 +43,9 @@
  */
 import { createHash } from "node:crypto";
 import { Readable, PassThrough } from "node:stream";
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "@/lib/db";
@@ -126,6 +138,39 @@ async function recordRun(args: {
       manifestTaxonomyVersion: args.year ?? null,
     },
   });
+}
+
+/**
+ * Chain `etl/cancer-taxonomy/index.ts` as a child process — mirrors
+ * `etl/orchestrate.ts`'s own `runScript` helper (spawn, not import: every
+ * ETL step's index.ts self-executes `main()` on load, so a direct import
+ * here would run it twice over and fight this file's own db.write lifecycle).
+ * Failure is logged loudly but never rejects — see the module doc comment
+ * for why a dependent-step failure must not fail the MeSH replace itself.
+ */
+async function chainCancerTaxonomy(): Promise<void> {
+  // NOTE: one level deeper than orchestrate.ts's own copy of this line
+  // (etl/mesh-descriptors/index.ts vs. etl/orchestrate.ts) — needs a THIRD
+  // ".." to reach repo root from here.
+  const repo = path.resolve(fileURLToPath(import.meta.url), "../../..");
+  const start = Date.now();
+  const ok = await new Promise<boolean>((resolve) => {
+    const child = spawn("node", ["--import", "tsx/esm", path.join(repo, "etl/cancer-taxonomy/index.ts")], {
+      stdio: "inherit",
+      env: process.env,
+      cwd: repo,
+    });
+    child.on("close", (code) => resolve(code === 0));
+    child.on("error", () => resolve(false));
+  });
+  console.log(
+    `[MeSH] ${JSON.stringify({
+      event: "cancer_taxonomy_chained",
+      ts: Date.now(),
+      ok,
+      duration_ms: Date.now() - start,
+    })}`,
+  );
 }
 
 async function uploadSynonyms(year: string, body: string): Promise<string> {
@@ -236,6 +281,10 @@ async function main(): Promise<void> {
       })}`,
     );
     await recordRun({ status: "success", rowsProcessed: 0, sha256, year: src.year });
+    // Step 7: chain even on a short-circuited MeSH run — the ruleset CSV
+    // could have changed independently of the MeSH release; the dependent
+    // step's own paired-hash short-circuit decides whether it has real work.
+    await chainCancerTaxonomy();
     return;
   }
 
@@ -280,6 +329,9 @@ async function main(): Promise<void> {
       duration_ms: Date.now() - startedAt,
     })}`,
   );
+
+  // Step 7: chain the dependent cancer-taxonomy generate step.
+  await chainCancerTaxonomy();
 }
 
 main()

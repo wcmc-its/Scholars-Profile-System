@@ -65,6 +65,15 @@ seed-output/
 # Exception: #1836 curated clinical specialty → MeSH disease anchor — checked in so
 # curation edits flow through PR review; the ETL image reads it at index build.
 !etl/clinical-mesh/specialty-anchors.csv
+# Exception: cancer taxonomy versioned redesign — curated ruleset generator
+# input, checked in so ruleset edits flow through PR review (same posture as
+# docs/cancer-center-disease-taxonomy.csv). etl/cancer-taxonomy/index.ts
+# reads it at run time.
+!docs/cancer-taxonomy-ruleset.csv
+# Exception: golden-file fixture (tests/unit/cancer-taxonomy-generate.test.ts)
+# — the real Python generator's output on a pinned MeSH XML slice, proving
+# the TS port's equivalence. A test input, not ETL output.
+!etl/cancer-taxonomy/testdata/golden-expected.csv
 # Exception: VIVO pageview baseline raw New Relic exports (issue #595) — checked
 # in so the baseline isn't a secondary analysis. Public URLs only (no PII).
 !docs/data/vivo-pageview-baseline/*.csv

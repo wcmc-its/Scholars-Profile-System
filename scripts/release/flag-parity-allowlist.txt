@@ -72,6 +72,7 @@ SPS_TRACE_REDACT
 TELEMETRY_SALT
 
 # --- manual ETL knobs: overrides supplied per one-off task run, never baked ---
+CANCER_TAXONOMY_FORCE_REPLACE       # bypass the ruleset+MeSH paired-hash short-circuit
 ETL_GUARD_BYPASS
 FAMILY_REVIEW_TERMS_PATH
 FAMILY_SENSITIVITY_CURATED_PATH

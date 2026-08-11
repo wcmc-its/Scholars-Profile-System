@@ -1,0 +1,155 @@
+rule,descriptor,topic,fallback,flag,note
+rel_include_subtree,Neoplasms,,,,"Root of C04. Everything below is cancer-relevant unless excluded."
+rel_exclude_subtree,Cysts,,,,"C04 but overwhelmingly non-neoplastic: chalazion, ganglion, ranula, pilonidal sinus, ovarian cysts."
+rel_exclude_subtree,Hamartoma,,,,"Developmental malformation; predisposition syndromes readmitted individually."
+rel_readmit_term,Dermoid Cyst,,,,"Mature cystic teratoma; genuinely neoplastic despite sitting under Cysts."
+rel_readmit_term,Tuberous Sclerosis,,,,"Tumor predisposition syndrome."
+rel_readmit_term,"Hamartoma Syndrome, Multiple",,,,"Cowden syndrome; cancer predisposition."
+rel_exclude_term,"Leukoplakia, Hairy",,,,"EBV-associated lesion, not premalignant. Present today via Head and Neck anchor."
+rel_exclude_term,"Anemia, Sideroblastic",,,,"Congenital forms are non-clonal. Present today via MDS anchor."
+rel_exclude_term,Multiple Pulmonary Nodules,,,review,"Mostly benign/incidental in the literature. Present today via Lung anchor."
+rel_exclude_term,"Hemoglobinuria, Paroxysmal",,,review,"PNH is clonal but not malignant. Site call for your heme SME."
+rel_exclude_term,"Anemia, Myelophthisic",,,review,"Consequence of marrow infiltration rather than a neoplasm."
+rel_exclude_term,Avian Leukosis,,,review,"Veterinary/virology. Keep only if avian retrovirus work counts."
+rel_exclude_term,Enzootic Bovine Leukosis,,,review,"Veterinary."
+rel_include_term,Antineoplastic Agents,,,,
+rel_include_term,Antineoplastic Combined Chemotherapy Protocols,,,,
+rel_include_term,Antineoplastic Protocols,,,,
+rel_include_term,Cancer Vaccines,,,,
+rel_include_term,"Drug Screening Assays, Antitumor",,,,
+rel_include_term,"Chemotherapy, Cancer, Regional Perfusion",,,,
+rel_include_term,Medical Oncology,,,,
+rel_include_term,Radiation Oncology,,,,
+rel_include_term,Surgical Oncology,,,,
+rel_include_term,Oncology Nursing,,,,
+rel_include_term,"Oncology Service, Hospital",,,,
+rel_include_term,Cancer Care Facilities,,,,
+rel_include_term,Cancer Survivors,,,,
+rel_include_term,Early Detection of Cancer,,,,
+rel_include_term,Cancer Pain,,,,
+rel_include_term,Breast Cancer Lymphedema,,,,
+rel_include_term,"Biomarkers, Tumor",,,,
+rel_include_term,"Genes, Neoplasm",,,,
+rel_include_term,"Genes, Tumor Suppressor",,,,
+rel_include_term,Oncogenes,,,,
+rel_include_term,Neoplastic Stem Cells,,,,
+rel_include_term,Tumor Microenvironment,,,,
+rel_include_term,Cancer-Associated Fibroblasts,,,,
+rel_include_term,Carcinogenesis,,,,
+rel_include_term,Carcinogens,,,review,"Broad; admits some environmental-health work with no cancer endpoint."
+rel_include_term,"Receptors, Chimeric Antigen",,,review,"CAR constructs; near-universally oncology but not formally a neoplasm term."
+rel_include_term,"National Cancer Institute (U.S.)",,,,
+rel_include_term,National Program of Cancer Registries,,,,
+rel_include_term,BRCA1 Protein,,,review,"Admits pure structural-biology work with no neoplasm term. Deliberate call needed."
+rel_include_term,BRCA2 Protein,,,review,"As above."
+topic_subtree,Breast Neoplasms,breast,,,
+topic_subtree,"Breast Neoplasms, Male",breast,,,
+topic_subtree,Lung Neoplasms,lung-thoracic,,,
+topic_subtree,Mesothelioma,lung-thoracic,,,
+topic_subtree,Thymus Neoplasms,lung-thoracic,,,
+topic_subtree,Mediastinal Neoplasms,lung-thoracic,,,
+topic_subtree,Tracheal Neoplasms,lung-thoracic,,,
+topic_subtree,Pleural Neoplasms,lung-thoracic,,,
+topic_subtree,Heart Neoplasms,lung-thoracic,,review,"Cardiac tumors sit oddly under a thoracic label; consider own row."
+topic_subtree,Colorectal Neoplasms,colorectal,,,
+topic_subtree,Anus Neoplasms,colorectal,,,
+topic_subtree,Appendiceal Neoplasms,colorectal,,,
+topic_subtree,Intestinal Neoplasms,gi-other,,,"New topic: small bowel and GI NOS."
+topic_subtree,Duodenal Neoplasms,gi-other,,,
+topic_subtree,Jejunal Neoplasms,gi-other,,,
+topic_subtree,Ileal Neoplasms,gi-other,,,
+topic_subtree,Gastrointestinal Stromal Tumors,gi-other,,,
+topic_subtree,Pancreatic Neoplasms,pancreatic,,,
+topic_subtree,Liver Neoplasms,liver-biliary,,,
+topic_subtree,Biliary Tract Neoplasms,liver-biliary,,,
+topic_subtree,Stomach Neoplasms,esophageal-gastric,,,
+topic_subtree,Esophageal Neoplasms,esophageal-gastric,,,
+topic_subtree,Prostatic Neoplasms,prostate,,,
+topic_subtree,Kidney Neoplasms,kidney-bladder-testicular,,,
+topic_subtree,Urinary Bladder Neoplasms,kidney-bladder-testicular,,,
+topic_subtree,Testicular Neoplasms,kidney-bladder-testicular,,,
+topic_subtree,Ureteral Neoplasms,kidney-bladder-testicular,,,
+topic_subtree,Urethral Neoplasms,kidney-bladder-testicular,,,
+topic_subtree,Penile Neoplasms,kidney-bladder-testicular,,,
+topic_subtree,Urologic Neoplasms,kidney-bladder-testicular,yes,,"Fallback only when nothing more specific matched."
+topic_subtree,Ovarian Neoplasms,gynecologic,,,
+topic_subtree,Uterine Cervical Neoplasms,gynecologic,,,
+topic_subtree,Endometrial Neoplasms,gynecologic,,,
+topic_subtree,Uterine Neoplasms,gynecologic,,,
+topic_subtree,Vulvar Neoplasms,gynecologic,,,
+topic_subtree,Vaginal Neoplasms,gynecologic,,,
+topic_subtree,Fallopian Tube Neoplasms,gynecologic,,,
+topic_subtree,Trophoblastic Neoplasms,gynecologic,,,
+topic_subtree,Leukemia,leukemia,,,
+topic_subtree,Lymphoma,lymphoma,,,
+topic_subtree,"Neoplasms, Plasma Cell",multiple-myeloma,,,"Raised from Multiple Myeloma; adds plasmacytoma."
+topic_subtree,Paraproteinemias,multiple-myeloma,,review,"Adds MGUS/Waldenstrom; some non-malignant."
+topic_subtree,Myelodysplastic Syndromes,mds-mpn,,,
+topic_subtree,Myeloproliferative Disorders,mds-mpn,,,
+topic_subtree,Hematologic Neoplasms,hematologic-other,yes,,"Fallback for heme not otherwise classified."
+topic_subtree,"Histiocytic Disorders, Malignant",hematologic-other,,,
+topic_subtree,"Mastocytosis, Systemic",hematologic-other,,,
+topic_subtree,Central Nervous System Neoplasms,brain-cns,,,
+topic_subtree,Peripheral Nervous System Neoplasms,brain-cns,,,"New anchor: schwannoma, MPNST, NF-associated."
+topic_subtree,"Neoplasms, Nerve Tissue",brain-cns,yes,,
+topic_subtree,Head and Neck Neoplasms,head-neck,,,
+topic_subtree,Odontogenic Tumors,head-neck,,,
+topic_subtree,Melanoma,melanoma-skin,,,
+topic_subtree,Skin Neoplasms,melanoma-skin,,,
+topic_subtree,Nevi and Melanomas,melanoma-skin,,,
+topic_subtree,Sarcoma,sarcoma-bone,,,
+topic_subtree,Bone Neoplasms,sarcoma-bone,,,
+topic_subtree,Soft Tissue Neoplasms,sarcoma-bone,,,
+topic_subtree,"Neoplasms, Connective and Soft Tissue",sarcoma-bone,yes,,
+topic_subtree,Muscle Neoplasms,sarcoma-bone,,,
+topic_subtree,Thyroid Neoplasms,thyroid-neuroendocrine,,,
+topic_subtree,Neuroendocrine Tumors,thyroid-neuroendocrine,,,
+topic_subtree,Adrenal Gland Neoplasms,endocrine-other,,,"New topic."
+topic_subtree,Pituitary Neoplasms,endocrine-other,,,
+topic_subtree,Parathyroid Neoplasms,endocrine-other,,,
+topic_subtree,Multiple Endocrine Neoplasia,endocrine-other,,,
+topic_subtree,Endocrine Gland Neoplasms,endocrine-other,yes,,
+topic_subtree,Eye Neoplasms,eye,,,"New topic: retinoblastoma, uveal melanoma."
+topic_subtree,Retinal Neoplasms,eye,,,
+topic_subtree,Uveal Neoplasms,eye,,,
+topic_subtree,"Neoplasms, Germ Cell and Embryonal",germ-cell-embryonal,,,"New topic; largest single gap (pediatric onc)."
+topic_subtree,Wilms Tumor,germ-cell-embryonal,,,
+topic_subtree,Neuroblastoma,germ-cell-embryonal,,,
+topic_subtree,Abdominal Neoplasms,peritoneal-abdominal,yes,,"New topic; peritoneal/retroperitoneal."
+topic_subtree,Splenic Neoplasms,peritoneal-abdominal,,,
+topic_subtree,"Neoplasms, Unknown Primary",unknown-primary,,,
+topic_subtree,"Neoplastic Syndromes, Hereditary",cc-hereditary,,,"Cross-cutting axis."
+topic_subtree,Precancerous Conditions,cc-precancerous,,,
+topic_subtree,Neoplastic Processes,cc-biology,,,
+topic_term,Neoplasm Metastasis,cc-biology,,,
+topic_term,Neoplastic Stem Cells,cc-biology,,,
+topic_term,Tumor Microenvironment,cc-biology,,,
+topic_term,Cancer-Associated Fibroblasts,cc-biology,,,
+topic_term,"Biomarkers, Tumor",cc-biology,,,
+topic_term,"Genes, Neoplasm",cc-biology,,,
+topic_term,"Genes, Tumor Suppressor",cc-biology,,,
+topic_term,Oncogenes,cc-biology,,,
+topic_term,Carcinogenesis,cc-biology,,,
+topic_term,BRCA1 Protein,cc-biology,,,
+topic_term,BRCA2 Protein,cc-biology,,,
+topic_term,Antineoplastic Agents,cc-therapeutics,,,
+topic_term,Antineoplastic Combined Chemotherapy Protocols,cc-therapeutics,,,
+topic_term,Antineoplastic Protocols,cc-therapeutics,,,
+topic_term,Cancer Vaccines,cc-therapeutics,,,
+topic_term,"Drug Screening Assays, Antitumor",cc-therapeutics,,,
+topic_term,"Chemotherapy, Cancer, Regional Perfusion",cc-therapeutics,,,
+topic_term,"Receptors, Chimeric Antigen",cc-therapeutics,,,
+topic_term,Radiation Oncology,cc-therapeutics,,,
+topic_term,Surgical Oncology,cc-therapeutics,,,
+topic_term,Medical Oncology,cc-control-survivorship,,,
+topic_term,Oncology Nursing,cc-control-survivorship,,,
+topic_term,"Oncology Service, Hospital",cc-control-survivorship,,,
+topic_term,Cancer Care Facilities,cc-control-survivorship,,,
+topic_term,Cancer Survivors,cc-control-survivorship,,,
+topic_term,Early Detection of Cancer,cc-control-survivorship,,,
+topic_term,Cancer Pain,cc-control-survivorship,,,
+topic_term,Breast Cancer Lymphedema,cc-control-survivorship,,,
+topic_term,"National Cancer Institute (U.S.)",cc-control-survivorship,,,
+topic_term,National Program of Cancer Registries,cc-control-survivorship,,,
+topic_subtree,"Neoplasms, Experimental",cc-experimental-models,,,"Model systems. Script strips site topics from these."
+topic_subtree,"Mammary Neoplasms, Animal",cc-experimental-models,,,
