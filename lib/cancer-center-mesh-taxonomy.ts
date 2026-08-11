@@ -109,6 +109,14 @@ export function matchedCodes(meshUis: string[], codeByUi: Map<string, Set<string
   return [...out].sort();
 }
 
+/** Which of the paper's own MeSH UIs actually fell in the taxonomy — the
+ *  term-level detail `matchedCodes` rolls up into disease codes. A caller
+ *  wanting the human-readable term name(s) still needs a `ui -> name` map
+ *  (e.g. `descriptors` from `loadTaxonomy`) to resolve these. */
+export function matchedUis(meshUis: string[], codeByUi: Map<string, Set<string>>): string[] {
+  return meshUis.filter((ui) => codeByUi.has(ui));
+}
+
 export type MeshDescriptorReader = {
   findMany: (args: {
     select: { descriptorUi: true; name: true; treeNumbers: true };
