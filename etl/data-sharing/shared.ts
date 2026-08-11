@@ -15,6 +15,19 @@
  * query (below) and by hardening `nonEmpty()` itself, since the unchecked
  * cast means a future column-type drift could hit any other field here too.
  * Every other column was checked against the DDL and does match.
+ *
+ * A second live run (same day, after the pmid fix) crashed differently: a
+ * unique-constraint violation on insert. Root cause — confirmed on the real
+ * data, not assumed — is `scan2.py`'s two extraction paths (databank vs.
+ * full-text scan) capturing the same real DOI with different letter casing
+ * (`10.5281/ZENODO.3576630` vs `10.5281/zenodo.3576630`). DOIs are
+ * case-insensitive by spec, and `DatasetDeposit`'s unique index is
+ * `utf8mb4_unicode_ci` (matches reciterdb's own collation), so the DB
+ * correctly treats those as one row — but this file's in-memory dedup Map
+ * used plain (case-sensitive) string equality, so it built two "distinct"
+ * deposits that collided on insert. Fixed by lowercasing `accessionOrDoi`
+ * at the point it's read (below), so the dedup key matches what the DB
+ * already enforces.
  */
 import { createHash } from "node:crypto";
 import { db } from "../../lib/db";
@@ -142,7 +155,12 @@ export function buildDepositsAndLinks(
 
   for (const r of rows) {
     const repository = nonEmpty(r.repository);
-    const accessionOrDoi = nonEmpty(r.accessionOrDoi);
+    // Lowercased: DOIs are case-insensitive by spec, and the DB's unique index
+    // on (repository, accessionOrDoi) is case-insensitive too (utf8mb4_unicode_ci)
+    // — this must match, or two case variants of the same real deposit build as
+    // "distinct" here and collide on insert. See the file header for how that
+    // was found.
+    const accessionOrDoi = nonEmpty(r.accessionOrDoi)?.toLowerCase() ?? null;
     if (!repository || !accessionOrDoi) {
       skippedNoKey++;
       continue;

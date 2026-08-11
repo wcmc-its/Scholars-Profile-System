@@ -92,6 +92,25 @@ describe("buildDepositsAndLinks", () => {
     expect(links[0].pmids).toEqual(["111"]);
   });
 
+  it("dedupes an accessionOrDoi that differs only by case — regression test for the DOI-case unique-constraint collision", () => {
+    // Real data: scan2.py's databank vs. full-text-scan paths captured the
+    // same Zenodo DOI as "10.5281/ZENODO.3576630" and "10.5281/zenodo.3576630".
+    // DatasetDeposit's unique index is case-insensitive (utf8mb4_unicode_ci,
+    // matching reciterdb), so these must collapse to ONE deposit here too —
+    // pre-fix, they built as two and crashed the insert with P2002.
+    const rows: SourceRow[] = [
+      row({ cwid: "abc1234", repository: "Zenodo", accessionOrDoi: "10.5281/ZENODO.3576630" }),
+      row({ cwid: "abc1234", repository: "Zenodo", accessionOrDoi: "10.5281/zenodo.3576630" }),
+    ];
+
+    const { deposits, links, stats } = buildDepositsAndLinks(rows, scholars, NOW);
+
+    expect(deposits).toHaveLength(1);
+    expect(deposits[0].accessionOrDoi).toBe("10.5281/zenodo.3576630");
+    expect(links).toHaveLength(1);
+    expect(stats.deposits).toBe(1);
+  });
+
   it("gives different (repository, accessionOrDoi) pairs different deposit ids", () => {
     const rows: SourceRow[] = [
       row({ cwid: "abc1234", repository: "Dryad", accessionOrDoi: "10.5061/dryad.abc123" }),
