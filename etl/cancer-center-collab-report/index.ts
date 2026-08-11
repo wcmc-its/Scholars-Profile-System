@@ -26,10 +26,7 @@
  *
  * Usage: npm run etl:cancer-center-collab-report
  */
-import { readFileSync } from "node:fs";
-import path from "node:path";
-
-import { buildCodeByUi, isCancerRelated, parseCsv, type Descriptor } from "@/lib/cancer-center-mesh-taxonomy";
+import { isCancerRelated, loadTaxonomy } from "@/lib/cancer-center-mesh-taxonomy";
 import { isCenterMembershipActive } from "@/lib/api/centers";
 import {
   computeCollabCandidateMetrics,
@@ -93,7 +90,7 @@ async function computeForCenter(centerCode: string, cutoffYear: number): Promise
     },
     select: { pmid: true, cwid: true, publication: { select: { meshTerms: true } } },
   });
-  const codeByUi = await loadCodeByUi();
+  const { codeByUi } = await loadTaxonomy(db.write.meshDescriptor);
   const rows: CollabAuthorRow[] = authorRows
     .filter((r): r is typeof r & { cwid: string } => r.cwid !== null)
     .map((r) => {
@@ -121,24 +118,6 @@ async function computeForCenter(centerCode: string, cutoffYear: number): Promise
     }),
   ]);
   return metrics.length;
-}
-
-let cachedCodeByUi: Map<string, Set<string>> | null = null;
-async function loadCodeByUi(): Promise<Map<string, Set<string>>> {
-  if (cachedCodeByUi) return cachedCodeByUi;
-  const taxonomyCsv = readFileSync(path.join(process.cwd(), "docs/cancer-center-disease-taxonomy.csv"), "utf8");
-  const taxonomy = parseCsv(taxonomyCsv);
-  const descriptors: Descriptor[] = (
-    await db.write.meshDescriptor.findMany({ select: { descriptorUi: true, name: true, treeNumbers: true } })
-  ).map((d) => ({
-    ui: d.descriptorUi,
-    name: d.name,
-    treeNumbers: Array.isArray(d.treeNumbers) ? d.treeNumbers.filter((x): x is string => typeof x === "string") : [],
-  }));
-  const { codeByUi, missing } = buildCodeByUi(descriptors, taxonomy);
-  if (missing.length) throw new Error(`unresolved NLM descriptors: ${missing.join(", ")}`);
-  cachedCodeByUi = codeByUi;
-  return codeByUi;
 }
 
 async function main(): Promise<number> {

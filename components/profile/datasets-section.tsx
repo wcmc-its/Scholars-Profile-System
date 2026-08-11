@@ -21,6 +21,18 @@ const ACCESSION_RESOLVERS: Record<string, (accession: string) => string> = {
   "ArrayExpress/BioStudies": (a) => `https://www.ebi.ac.uk/biostudies/arrayexpress/studies/${encodeURIComponent(a)}`,
   PRIDE: (a) => `https://www.ebi.ac.uk/pride/archive/projects/${encodeURIComponent(a)}`,
   MetaboLights: (a) => `https://www.ebi.ac.uk/metabolights/${encodeURIComponent(a)}`,
+  ProteomeXchange: (a) =>
+    `http://proteomecentral.proteomexchange.org/cgi/GetDataset?ID=${encodeURIComponent(a)}`,
+  MassIVE: (a) => `https://massive.ucsd.edu/ProteoSAFe/dataset.jsp?accession=${encodeURIComponent(a)}`,
+  "Metabolomics Workbench": (a) =>
+    `https://www.metabolomicsworkbench.org/data/DRCCMetadata.php?Mode=Study&StudyID=${encodeURIComponent(a)}`,
+  OpenNeuro: (a) => `https://openneuro.org/datasets/${encodeURIComponent(a)}`,
+  Synapse: (a) => `https://www.synapse.org/Synapse:${encodeURIComponent(a)}`,
+  // EGAD-prefixed accessions are dataset records; everything else (most
+  // commonly EGAS studies) resolves under /studies/.
+  EGA: (a) =>
+    `https://ega-archive.org/${a.startsWith("EGAD") ? "datasets" : "studies"}/${encodeURIComponent(a)}`,
+  "ClinicalTrials.gov": (a) => `https://clinicaltrials.gov/study/${encodeURIComponent(a)}`,
 };
 
 const DOI_PATTERN = /^10\.\d{4,9}\//;
@@ -60,15 +72,19 @@ export function DatasetsSection({ datasets }: { datasets: Dataset[] }) {
 
 function DatasetRow({ dataset }: { dataset: Dataset }) {
   const url = resolveDatasetUrl(dataset);
+  const metaParts = [
+    dataset.dataType,
+    dataset.depositYear ? String(dataset.depositYear) : null,
+    dataset.accessModel,
+    dataset.confidence,
+  ].filter((p): p is string => Boolean(p));
   return (
     <div className="grid grid-cols-[1fr_auto] items-baseline gap-3">
       <div>
         <div className="text-base leading-snug font-medium">{dataset.repository}</div>
-        <div className="text-muted-foreground mt-0.5 text-sm">
-          {dataset.dataType ? <span>{dataset.dataType}</span> : null}
-          {dataset.dataType && dataset.depositYear ? " · " : null}
-          {dataset.depositYear ? <span>{dataset.depositYear}</span> : null}
-        </div>
+        {metaParts.length > 0 ? (
+          <div className="text-muted-foreground mt-0.5 text-sm">{metaParts.join(" · ")}</div>
+        ) : null}
       </div>
       {url ? (
         <a

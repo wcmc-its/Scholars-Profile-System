@@ -23,10 +23,27 @@ const ROWS = [
   { cwid: "c3", surname: "Neitherperson", givenName: "N", primaryDepartment: "Med", totalPapersPostCutoff: 10, collaborationsWithCenter: 1, cancerRelatedPapers: 1, isCurrentMember: false, currentProgramCode: null },
 ];
 
+const TAXONOMY_CODES = [
+  {
+    code: "BREAST",
+    disease: "Breast Cancer",
+    anchors: [{ name: "Breast Neoplasms", treeNumber: "C04.588.180" }],
+    descendantCount: 12,
+    exampleDescendants: ["Breast Neoplasms, Male"],
+  },
+];
+
+/** Branches by URL — the card fetches BOTH the report data and (lazily, once
+ *  the modal opens) the taxonomy detail. */
 function mockFetch() {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => ({ ok: true, json: async () => ({ generatedAt: "2026-08-10T00:00:00Z", rows: ROWS }) })),
+    vi.fn(async (url: string) => {
+      if (String(url).includes("cancer-center-mesh-taxonomy")) {
+        return { ok: true, json: async () => ({ ok: true, codes: TAXONOMY_CODES }) };
+      }
+      return { ok: true, json: async () => ({ generatedAt: "2026-08-10T00:00:00Z", rows: ROWS }) };
+    }),
   );
 }
 
@@ -109,5 +126,34 @@ describe("CancerCenterCollabReportCard", () => {
       target: { value: "papers" },
     });
     expect(within(collabSection).getByText(/Collabrelevant/)).toBeTruthy();
+  });
+
+  it("offers a per-row and a whole-report CSV download, each pointed at the right export URL", async () => {
+    mockFetch();
+    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" />);
+    fireEvent.click(screen.getByText("Collaboration & Cancer-Relevance"));
+    await waitFor(() => expect(screen.getByText(/REMOVE/)).toBeTruthy());
+
+    const whole = screen.getByLabelText("Download full report (CSV)") as HTMLAnchorElement;
+    expect(whole.getAttribute("href")).toBe("/api/edit/center/meyer_cancer_center/collab-report/export");
+
+    const removeSection = screen.getByText(/REMOVE/).closest("section")!;
+    const perRow = within(removeSection).getByLabelText(/Download R Removeperson's papers/) as HTMLAnchorElement;
+    expect(perRow.getAttribute("href")).toBe(
+      "/api/edit/center/meyer_cancer_center/collab-report/export?cwid=m1",
+    );
+  });
+
+  it("the mesh-logic modal fetches and shows the taxonomy on open, stating the goal", async () => {
+    mockFetch();
+    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" />);
+    fireEvent.click(screen.getByText("Collaboration & Cancer-Relevance"));
+    await waitFor(() => expect(screen.getByText(/REMOVE/)).toBeTruthy());
+
+    fireEvent.click(screen.getByText("How cancer-relevance is determined"));
+    expect(screen.getByText(/only count a paper toward this report's cancer-relevance axis/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/Breast Cancer/)).toBeTruthy());
+    expect(screen.getByText(/Breast Neoplasms — C04.588.180/)).toBeTruthy();
+    expect(screen.getByText(/Breast Neoplasms, Male/)).toBeTruthy();
   });
 });
