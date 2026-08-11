@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
+import { Prisma } from "@/lib/generated/prisma/client";
 import {
   buildDepositsAndLinks,
   depositId,
   nonEmpty,
+  parseJsonArray,
   type SourceRow,
 } from "@/etl/data-sharing/shared";
 
@@ -21,6 +23,13 @@ function row(p: Partial<SourceRow>): SourceRow {
     confidence: null,
     authorPosition: null,
     pmid: null,
+    title: null,
+    description: null,
+    creators: null,
+    publisher: null,
+    trialPhase: null,
+    trialStatus: null,
+    trialConditions: null,
     ...p,
   };
 }
@@ -55,6 +64,50 @@ describe("nonEmpty", () => {
     expect(nonEmpty(null)).toBeNull();
     expect(nonEmpty(undefined)).toBeNull();
     expect(nonEmpty("  ")).toBeNull();
+  });
+});
+
+describe("parseJsonArray", () => {
+  // reciterdb.dataset_deposit.creators/trial_conditions are declared JSON, but
+  // MariaDB implements JSON as a LONGTEXT alias — the mariadb driver hands
+  // readSourceRows() back a JSON-encoded string, not a parsed array.
+  it("parses a JSON-encoded array string", () => {
+    expect(parseJsonArray('["Jane Doe","John Smith"]')).toEqual(["Jane Doe", "John Smith"]);
+  });
+
+  it("treats null/empty/malformed input as null instead of throwing", () => {
+    expect(parseJsonArray(null)).toBeNull();
+    expect(parseJsonArray("")).toBeNull();
+    expect(parseJsonArray("not json")).toBeNull();
+    expect(parseJsonArray('{"not":"an array"}')).toBeNull();
+  });
+});
+
+describe("buildDepositsAndLinks", () => {
+  it("carries the #2350 Phase 2 title/metadata fields through to the built deposit, JSON-decoding creators/trialConditions", () => {
+    const rows: SourceRow[] = [
+      row({
+        cwid: "abc1234",
+        repository: "ClinicalTrials.gov",
+        accessionOrDoi: "NCT03815682",
+        title: "RPTR-147 in Patients With Selected Solid Tumors and Lymphomas",
+        trialPhase: "PHASE1",
+        trialStatus: "TERMINATED",
+        trialConditions: '["Solid Tumor","Lymphoma"]',
+      }),
+    ];
+
+    const { deposits } = buildDepositsAndLinks(rows, new Map([["abc1234", "abc1234"]]), NOW);
+
+    expect(deposits).toHaveLength(1);
+    expect(deposits[0].title).toBe("RPTR-147 in Patients With Selected Solid Tumors and Lymphomas");
+    expect(deposits[0].trialPhase).toBe("PHASE1");
+    expect(deposits[0].trialStatus).toBe("TERMINATED");
+    expect(deposits[0].trialConditions).toEqual(["Solid Tumor", "Lymphoma"]);
+    // No DataCite fields on a CT.gov row — absent, not a bare `null` (Prisma
+    // rejects bare `null` for a nullable Json column in createMany).
+    expect(deposits[0].description).toBeNull();
+    expect(deposits[0].creators).toBe(Prisma.DbNull);
   });
 });
 

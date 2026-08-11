@@ -695,6 +695,22 @@ export type ProfilePayload = {
     authorPosition: string;
     /** 'high' | 'low' | 'unclear' — null for databank rows. */
     confidence: string | null;
+    /** DataCite titles[0].title, or CT.gov briefTitle for ClinicalTrials.gov
+     *  rows (dataset title/metadata enrichment plan, #2350 Phase 2). Null
+     *  until `scripts/bulk-data-rule/enrich_titles.py` backfills it. */
+    title: string | null;
+    /** DataCite descriptions[0].description; DOI-based repos only. */
+    description: string | null;
+    /** DataCite creators[].name — names only; DOI-based repos only. */
+    creators: string[] | null;
+    /** DataCite publisher; DOI-based repos only. */
+    publisher: string | null;
+    /** CT.gov phases[0]; ClinicalTrials.gov only. */
+    trialPhase: string | null;
+    /** CT.gov overallStatus; ClinicalTrials.gov only. */
+    trialStatus: string | null;
+    /** CT.gov conditions; ClinicalTrials.gov only. */
+    trialConditions: string[] | null;
   }>;
   /** Licensable inventions from the WCM Center for Technology Licensing's public
    *  portfolio, attributed to this scholar by the CWID in the VIVO link CTL
@@ -1728,6 +1744,15 @@ export const getScholarFullProfileBySlug = cache(
                 depositYear: pd.dataset.depositYear,
                 authorPosition: pd.authorPosition,
                 confidence: pd.dataset.confidence,
+                title: pd.dataset.title,
+                description: pd.dataset.description,
+                creators: Array.isArray(pd.dataset.creators) ? (pd.dataset.creators as string[]) : null,
+                publisher: pd.dataset.publisher,
+                trialPhase: pd.dataset.trialPhase,
+                trialStatus: pd.dataset.trialStatus,
+                trialConditions: Array.isArray(pd.dataset.trialConditions)
+                  ? (pd.dataset.trialConditions as string[])
+                  : null,
               }))
               .sort((a, b) => (b.depositYear ?? 0) - (a.depositYear ?? 0))
           : [],

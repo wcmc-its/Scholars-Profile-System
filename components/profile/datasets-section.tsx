@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import type { ProfilePayload } from "@/lib/api/profile";
+import { TechnologyOverview } from "@/components/profile/technology-overview";
 
 type Dataset = ProfilePayload["datasets"][number];
 
@@ -70,19 +71,72 @@ export function DatasetsSection({ datasets }: { datasets: Dataset[] }) {
   );
 }
 
+/** "A, B, and C" (Oxford comma for 3+; "A and B" for 2; "A" for 1) — used for
+ *  the Creators line in the DataCite overview composition below. */
+function formatNameList(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+}
+
 function DatasetRow({ dataset }: { dataset: Dataset }) {
   const url = resolveDatasetUrl(dataset);
-  const metaParts = [
-    dataset.dataType,
-    dataset.depositYear ? String(dataset.depositYear) : null,
-    dataset.accessModel,
-    dataset.confidence,
+  const hasTitle = Boolean(dataset.title);
+  // When a title exists, `repository` no longer heads the row (see below) —
+  // fold it, plus the two CT.gov scalars and comma-joined conditions, into
+  // the same meta line as the pre-existing fields. When there's no title yet
+  // (repos Phase B doesn't cover, or before it's run at all), leave this
+  // exactly as it was — a purely additive rendering path.
+  const metaParts = (
+    hasTitle
+      ? [
+          dataset.repository,
+          dataset.trialPhase,
+          dataset.trialStatus,
+          dataset.trialConditions && dataset.trialConditions.length > 0
+            ? dataset.trialConditions.join(", ")
+            : null,
+          dataset.dataType,
+          dataset.depositYear ? String(dataset.depositYear) : null,
+          dataset.accessModel,
+          dataset.confidence,
+        ]
+      : [
+          dataset.dataType,
+          dataset.depositYear ? String(dataset.depositYear) : null,
+          dataset.accessModel,
+          dataset.confidence,
+        ]
+  ).filter((p): p is string => Boolean(p));
+
+  // DataCite-only fields (never populated for ClinicalTrials.gov rows) —
+  // composed into one `\n`-joined string and handed to TechnologyOverview
+  // as-is: a "Publisher: X" line, a "Creators: A, B, and C" line (either
+  // omitted when null/empty), then the description as its own line.
+  const overviewLines = [
+    dataset.publisher ? `Publisher: ${dataset.publisher}` : null,
+    dataset.creators && dataset.creators.length > 0
+      ? `Creators: ${formatNameList(dataset.creators)}`
+      : null,
+    dataset.description,
   ].filter((p): p is string => Boolean(p));
+  const overviewText = overviewLines.length > 0 ? overviewLines.join("\n") : null;
+
   return (
     <div className="grid grid-cols-[1fr_auto] items-baseline gap-3">
       <div>
-        <div className="text-base leading-snug font-medium">{dataset.repository}</div>
-        {metaParts.length > 0 ? (
+        <div className="text-base leading-snug font-medium">{dataset.title ?? dataset.repository}</div>
+        {overviewText ? (
+          <div className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+            {metaParts.length > 0 ? <span>{metaParts.join(" · ")}</span> : null}
+            {metaParts.length > 0 ? (
+              <span aria-hidden="true" className="text-muted-foreground/60">
+                ·
+              </span>
+            ) : null}
+            <TechnologyOverview overview={overviewText} />
+          </div>
+        ) : metaParts.length > 0 ? (
           <div className="text-muted-foreground mt-0.5 text-sm">{metaParts.join(" · ")}</div>
         ) : null}
       </div>

@@ -70,6 +70,13 @@ function parseNdjson(text: string): { rows: SourceRow[]; skipped: number } {
         confidence: (o.confidence as string) ?? null,
         authorPosition: (o.authorPosition as string) ?? null,
         pmid: (o.pmid as string) ?? null,
+        title: (o.title as string) ?? null,
+        description: (o.description as string) ?? null,
+        creators: (o.creators as string) ?? null,
+        publisher: (o.publisher as string) ?? null,
+        trialPhase: (o.trialPhase as string) ?? null,
+        trialStatus: (o.trialStatus as string) ?? null,
+        trialConditions: (o.trialConditions as string) ?? null,
       });
     } catch {
       skipped++;

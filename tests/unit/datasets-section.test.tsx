@@ -22,6 +22,13 @@ const dataset = (over: Partial<Dataset> = {}): Dataset => ({
   depositYear: null,
   authorPosition: "first",
   confidence: null,
+  title: null,
+  description: null,
+  creators: null,
+  publisher: null,
+  trialPhase: null,
+  trialStatus: null,
+  trialConditions: null,
   ...over,
 });
 
@@ -53,6 +60,78 @@ describe("DatasetsSection — accessModel/confidence", () => {
     render(<DatasetsSection datasets={[dataset({ accessModel: "open", confidence: null })]} />);
     expect(screen.getByText(/open/)).toBeTruthy();
     expect(screen.queryByText(/high|low|unclear/)).toBeNull();
+  });
+});
+
+describe("DatasetsSection — title/metadata enrichment (#2350 phase 2)", () => {
+  it("renders repository as the headline and leaves metaParts unchanged when title is absent (purely additive path)", () => {
+    render(
+      <DatasetsSection
+        datasets={[dataset({ repository: "ClinicalTrials.gov", trialPhase: "PHASE1", trialStatus: "RECRUITING" })]}
+      />,
+    );
+    expect(screen.getByText("ClinicalTrials.gov")).toBeTruthy();
+    // trialPhase/trialStatus only fold into metaParts once a title exists.
+    expect(screen.queryByText(/PHASE1/)).toBeNull();
+    expect(screen.queryByText(/RECRUITING/)).toBeNull();
+  });
+
+  it("renders title as the headline and folds repository/trialPhase/trialStatus into the meta line when title is present", () => {
+    render(
+      <DatasetsSection
+        datasets={[
+          dataset({
+            repository: "ClinicalTrials.gov",
+            accessionOrDoi: "NCT03815682",
+            title: "RPTR-147 in Patients With Selected Solid Tumors and Lymphomas",
+            trialPhase: "PHASE1",
+            trialStatus: "TERMINATED",
+            trialConditions: ["Solid Tumor", "Lymphoma"],
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("RPTR-147 in Patients With Selected Solid Tumors and Lymphomas")).toBeTruthy();
+    const meta = screen.getByText(/PHASE1/);
+    expect(meta.textContent).toContain("ClinicalTrials.gov");
+    expect(meta.textContent).toContain("PHASE1");
+    expect(meta.textContent).toContain("TERMINATED");
+    expect(meta.textContent).toContain("Solid Tumor, Lymphoma");
+  });
+
+  it("composes publisher/creators/description into the TechnologyOverview trigger, DataCite-only fields never on a CT.gov row", () => {
+    render(
+      <DatasetsSection
+        datasets={[
+          dataset({
+            repository: "Zenodo",
+            accessionOrDoi: "10.5281/zenodo.1211768",
+            title: "A global distribution of dissolved organic carbon",
+            publisher: "Zenodo",
+            creators: ["Jane Doe", "John Smith"],
+            description: "Current global carbon models...",
+          }),
+        ]}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Overview" });
+    expect(trigger).toBeTruthy();
+  });
+
+  it("shows no Overview trigger when there's no title/description/creators/publisher (CT.gov-only row)", () => {
+    render(
+      <DatasetsSection
+        datasets={[
+          dataset({
+            repository: "ClinicalTrials.gov",
+            title: "A trial",
+            trialConditions: ["Solid Tumor"],
+          }),
+        ]}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Overview" })).toBeNull();
+    expect(screen.getByText(/Solid Tumor/)).toBeTruthy();
   });
 });
 

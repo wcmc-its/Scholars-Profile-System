@@ -28,9 +28,33 @@
  * deposits that collided on insert. Fixed by lowercasing `accessionOrDoi`
  * at the point it's read (below), so the dedup key matches what the DB
  * already enforces.
+ *
+ * `title`/`description`/`creators`/`publisher`/`trial_phase`/`trial_status`/
+ * `trial_conditions` (#2350 Phase 2, dataset title/metadata enrichment plan)
+ * added 2026-08-11, ahead of the ReCiterDB migration that creates them —
+ * unverified against a real row for the same reason `pmid` wasn't: no live
+ * run has hit this SELECT with these columns present yet. One thing IS
+ * knowable ahead of time, not just assumed: `creators`/`trial_conditions`
+ * are declared `JSON`, but MariaDB implements `JSON` as a `LONGTEXT` alias
+ * (not a native binary JSON type the way MySQL 5.7+/Aurora MySQL do), and
+ * the `mariadb` driver has no server-side type signal to tell it to parse
+ * text as JSON — so `readSourceRows()` gets these back as JSON-encoded TEXT,
+ * same as every VARCHAR/TEXT column here, not as parsed arrays. `SourceRow`
+ * types them `string | null` and `buildDepositsAndLinks()` runs them through
+ * `parseJsonArray()` before they reach `DepositBuild`. A plain JS array
+ * passes straight through to Prisma's `Json?` columns (same as `pmids` on
+ * `LinkBuild` below, a required `Json`), but a plain `null` does not — Prisma
+ * rejects bare `null` for a nullable `Json` field in `createMany` (it needs
+ * `Prisma.DbNull` to mean "SQL NULL", to keep that distinct from a literal
+ * JSON `null`, `Prisma.JsonNull`); this file's own `?? Prisma.DbNull` below
+ * follows the same convention as `etl/reporter/index.ts`'s `keywords`/
+ * `meshDescriptorUis`. Re-verify the MariaDB-JSON claim the same way the two
+ * bugs above were found: watch the first live run, don't just trust this
+ * comment.
  */
 import { createHash } from "node:crypto";
 import { db } from "../../lib/db";
+import { Prisma } from "@/lib/generated/prisma/client";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
 
 export const INSERT_BATCH = 1000;
@@ -66,11 +90,33 @@ export type SourceRow = {
   confidence: string | null; // 'high' | 'low' | 'unclear'
   authorPosition: string | null; // 'first' | 'last' | 'middle'
   pmid: string | null; // the citing publication for this (cwid, dataset) pair
+  title: string | null;
+  description: string | null;
+  creators: string | null; // JSON-encoded string[] — see file header (MariaDB JSON-as-LONGTEXT)
+  publisher: string | null;
+  trialPhase: string | null;
+  trialStatus: string | null;
+  trialConditions: string | null; // JSON-encoded string[] — see file header
 };
 
 export function nonEmpty(s: unknown): string | null {
   const t = (s === null || s === undefined ? "" : String(s)).trim();
   return t.length > 0 ? t : null;
+}
+
+/** Parse a raw JSON-array column (see file header — MariaDB's `JSON` is a
+ *  `LONGTEXT` alias, so the driver hands this back as text, not a parsed
+ *  value). Defensive, not just a bare `JSON.parse`: `enrich_titles.py`
+ *  always writes a valid array, but this is unverified against a real row
+ *  until the first live run. */
+export function parseJsonArray(raw: string | null): string[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 export function cleanYear(raw: number | string | null): number | null {
@@ -89,6 +135,13 @@ export type DepositBuild = {
   depositYear: number | null;
   provenance: string;
   confidence: string | null;
+  title: string | null;
+  description: string | null;
+  creators: Prisma.InputJsonValue | typeof Prisma.DbNull;
+  publisher: string | null;
+  trialPhase: string | null;
+  trialStatus: string | null;
+  trialConditions: Prisma.InputJsonValue | typeof Prisma.DbNull;
   source: string;
   lastRefreshedAt: Date;
 };
@@ -122,7 +175,11 @@ export async function readSourceRows(): Promise<SourceRow[]> {
              deposit_year AS depositYear,
              provenance, confidence,
              author_position AS authorPosition,
-             CAST(pmid AS CHAR) AS pmid
+             CAST(pmid AS CHAR) AS pmid,
+             title, description, creators, publisher,
+             trial_phase AS trialPhase,
+             trial_status AS trialStatus,
+             trial_conditions AS trialConditions
       FROM dataset_deposit
     `)) as SourceRow[];
   });
@@ -184,6 +241,16 @@ export function buildDepositsAndLinks(
         depositYear: cleanYear(r.depositYear),
         provenance: nonEmpty(r.provenance) ?? "databank",
         confidence: nonEmpty(r.confidence),
+        title: nonEmpty(r.title),
+        description: nonEmpty(r.description),
+        // JSON columns, not strings — parseJsonArray(), not nonEmpty(). See
+        // file header (MariaDB JSON-as-LONGTEXT). `?? Prisma.DbNull`, not a
+        // bare `null` — see file header on nullable `Json` columns.
+        creators: parseJsonArray(r.creators) ?? Prisma.DbNull,
+        publisher: nonEmpty(r.publisher),
+        trialPhase: nonEmpty(r.trialPhase),
+        trialStatus: nonEmpty(r.trialStatus),
+        trialConditions: parseJsonArray(r.trialConditions) ?? Prisma.DbNull,
         source: "reciterdb.dataset_deposit",
         lastRefreshedAt: now,
       });

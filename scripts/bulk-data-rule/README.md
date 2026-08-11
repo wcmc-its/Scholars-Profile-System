@@ -47,6 +47,7 @@ Run from this directory. `catalog.py`, `taxonomy.py`, and `datacite.py` are impo
 | 6b | `coauthor_affil.py` | `attributed_deposits.csv` + PubMed efetch | `coauthor_affil.csv` (country-of-concern coauthor flags) |
 | 7 | `build_people.py` | `attributed_deposits.csv` + deposit CSVs + `coauthor_affil.csv` | People & Metadata `.xlsx` |
 | — | `datacite.py` | DataCite API, per DOI | (library; not yet wired into `scan2.py` — see S-Index spec, Open questions) |
+| — | `enrich_titles.py` | `dataset_deposit` (reciterdb) + `clinical_trials_enriched` + DataCite/CT.gov APIs | `dataset_deposit` (`title`, `description`, `creators`, `publisher`, `trial_phase`, `trial_status`, `trial_conditions`) |
 
 ```bash
 cd scripts/bulk-data-rule
@@ -64,6 +65,15 @@ python3 build_people.py                       # people workbook
 CSV intermediates are written next to the scripts (gitignored — see `.gitignore` in this dir and
 the root `.gitignore`'s `*.csv`/`data/` rules); the two `.xlsx` workbooks go to the project root
 (dated), outside this repo.
+
+`enrich_titles.py` is not part of the numbered run order above — it's a standalone follow-on that
+runs after step 7, once a separate ReCiterDB migration adds the 7 title/metadata columns to
+`dataset_deposit` (dataset title/metadata enrichment plan, #2350 Phase 2). It reads
+`dataset_deposit` directly (`WHERE title IS NULL`), not any CSV, and needs no `WRITE_DATASET_DEPOSIT`-style
+gate — writing is its only purpose. `python3 enrich_titles.py` runs its pure-logic self-check
+(mirrors `datacite.py`/`catalog.py`, no reciterdb/API calls) and then the live backfill in the same
+invocation — call `python3 -c "import enrich_titles; enrich_titles._self_check()"` instead if you
+only want the self-check.
 
 ## S-Index scope (department pilot)
 

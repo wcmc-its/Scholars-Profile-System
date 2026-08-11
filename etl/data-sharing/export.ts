@@ -15,7 +15,9 @@
  *
  * NDJSON contract: one JSON object per line —
  *   { cwid, repository, accessionOrDoi, resourceType, dataType, accessModel,
- *     depositYear, provenance, confidence, authorPosition, pmid }
+ *     depositYear, provenance, confidence, authorPosition, pmid, title,
+ *     description, creators, publisher, trialPhase, trialStatus,
+ *     trialConditions }
  * Raw source rows — the importer applies the SAME build (etl/data-sharing/
  * shared.ts), so the bridge and direct paths can't drift.
  *
