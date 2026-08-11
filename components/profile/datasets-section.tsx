@@ -38,8 +38,13 @@ const ACCESSION_RESOLVERS: Record<string, (accession: string) => string> = {
 const DOI_PATTERN = /^10\.\d{4,9}\//;
 
 /** Resolve a dataset's accession-or-DOI to a public link, or null when
- *  neither a known repository resolver nor the DOI pattern matches. */
-function resolveUrl(d: Dataset): string | null {
+ *  neither a known repository resolver nor the DOI pattern matches. Exported
+ *  so the /edit Datasets card (#2348) links each row the same way the public
+ *  profile does, rather than duplicating the resolver table. Narrowed to just
+ *  the two fields it needs (not the full `Dataset` shape) so any row carrying
+ *  `repository` + `accessionOrDoi` — including `EditContextDataset` — can
+ *  reuse it structurally. */
+export function resolveDatasetUrl(d: { repository: string; accessionOrDoi: string }): string | null {
   if (DOI_PATTERN.test(d.accessionOrDoi)) {
     return `https://doi.org/${d.accessionOrDoi}`;
   }
@@ -66,7 +71,7 @@ export function DatasetsSection({ datasets }: { datasets: Dataset[] }) {
 }
 
 function DatasetRow({ dataset }: { dataset: Dataset }) {
-  const url = resolveUrl(dataset);
+  const url = resolveDatasetUrl(dataset);
   const metaParts = [
     dataset.dataType,
     dataset.depositYear ? String(dataset.depositYear) : null,

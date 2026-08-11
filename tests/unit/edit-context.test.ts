@@ -33,6 +33,7 @@ type FakeClient = {
   publication: { findMany: AnyMock };
   publicationConflictStatement: { findMany: AnyMock };
   scholarTechnology: { findMany: AnyMock };
+  personDatasetDeposit: { findMany: AnyMock };
 };
 type EditContextClient = Parameters<typeof loadEditContext>[1];
 
@@ -78,6 +79,10 @@ function fakeClient(): FakeClient {
     // AVAILABLE_TECHNOLOGIES_SECTION is on (else the loader returns [] and never
     // touches this delegate).
     scholarTechnology: { findMany: vi.fn().mockResolvedValue([]) },
+    // Dataset deposits (#2348) — default to "no rows". Only queried when
+    // DATA_SHARING_SECTION is on (else the loader returns [] and never touches
+    // this delegate).
+    personDatasetDeposit: { findMany: vi.fn().mockResolvedValue([]) },
   };
 }
 
@@ -963,6 +968,136 @@ describe("loadEditContext — CTL technologies (read-only, flag-gated)", () => {
     const ctx = await loadEditContext(SELF, asClient(c));
     expect(ctx!.technologies).toEqual([]);
     expect(c.scholarTechnology.findMany).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("loadEditContext — dataset deposits (suppressible, flag-gated, #2348)", () => {
+  const DATASET_ROWS = [
+    {
+      datasetId: "ds-1",
+      authorPosition: "first",
+      dataset: {
+        repository: "GEO",
+        accessionOrDoi: "GSE12345",
+        resourceType: "Dataset",
+        dataType: "RNA-seq",
+        depositYear: 2023,
+        accessModel: "open",
+        confidence: "high",
+      },
+    },
+  ];
+
+  // Set/restore the flag per test — the loader reads it at call time.
+  let prevFlag: string | undefined;
+  beforeEach(() => {
+    prevFlag = process.env.DATA_SHARING_SECTION;
+  });
+  afterEach(() => {
+    if (prevFlag === undefined) delete process.env.DATA_SHARING_SECTION;
+    else process.env.DATA_SHARING_SECTION = prevFlag;
+  });
+
+  it("returns [] and never queries person_dataset_deposit when the flag is off", async () => {
+    delete process.env.DATA_SHARING_SECTION;
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.personDatasetDeposit.findMany.mockResolvedValue(DATASET_ROWS);
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.datasets).toEqual([]);
+    expect(c.personDatasetDeposit.findMany).not.toHaveBeenCalled();
+  });
+
+  it("populates datasets as 'shown' (flag on, no suppressions) using the cwid scope", async () => {
+    process.env.DATA_SHARING_SECTION = "on";
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.personDatasetDeposit.findMany.mockResolvedValue(DATASET_ROWS);
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.datasets).toEqual([
+      {
+        datasetId: "ds-1",
+        repository: "GEO",
+        accessionOrDoi: "GSE12345",
+        resourceType: "Dataset",
+        dataType: "RNA-seq",
+        depositYear: 2023,
+        accessModel: "open",
+        confidence: "high",
+        authorPosition: "first",
+        state: "shown",
+        suppressionId: null,
+      },
+    ]);
+    expect(c.personDatasetDeposit.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { cwid: SELF } }),
+    );
+  });
+
+  it("derives hidden_by_self from a per-contributor suppression, carrying its suppressionId", async () => {
+    process.env.DATA_SHARING_SECTION = "on";
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.personDatasetDeposit.findMany.mockResolvedValue(DATASET_ROWS);
+    // Two suppression.findMany calls: scholar-level then dataset-level.
+    c.suppression.findMany
+      .mockResolvedValueOnce([]) // scholar-level
+      .mockResolvedValueOnce([{ id: "sup-1", entityId: "ds-1", contributorCwid: SELF }]);
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.datasets[0]).toMatchObject({ state: "hidden_by_self", suppressionId: "sup-1" });
+  });
+
+  it("derives removed_by_admin from a whole-entity suppression (contributorCwid null), no suppressionId", async () => {
+    process.env.DATA_SHARING_SECTION = "on";
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.personDatasetDeposit.findMany.mockResolvedValue(DATASET_ROWS);
+    c.suppression.findMany
+      .mockResolvedValueOnce([]) // scholar-level
+      .mockResolvedValueOnce([{ id: "sup-admin", entityId: "ds-1", contributorCwid: null }]);
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.datasets[0]).toMatchObject({ state: "removed_by_admin", suppressionId: null });
+  });
+
+  it("a whole-entity takedown outranks a coexisting self-hide on the same dataset", async () => {
+    process.env.DATA_SHARING_SECTION = "on";
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.personDatasetDeposit.findMany.mockResolvedValue(DATASET_ROWS);
+    c.suppression.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      { id: "sup-self", entityId: "ds-1", contributorCwid: SELF },
+      { id: "sup-admin", entityId: "ds-1", contributorCwid: null },
+    ]);
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.datasets[0]).toMatchObject({ state: "removed_by_admin", suppressionId: null });
+  });
+
+  it("returns [] (flag on) when the scholar has no deposits, and skips the suppression query", async () => {
+    process.env.DATA_SHARING_SECTION = "on";
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    // fakeClient defaults personDatasetDeposit.findMany to [].
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.datasets).toEqual([]);
+    const dsCall = c.suppression.findMany.mock.calls.find(
+      (args) => args[0].where.entityType === "dataset_deposit",
+    );
+    expect(dsCall).toBeUndefined();
+  });
+
+  it("populates datasets even when the scholar has zero confirmed publications (the early-return branch)", async () => {
+    process.env.DATA_SHARING_SECTION = "on";
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.personDatasetDeposit.findMany.mockResolvedValue(DATASET_ROWS);
+    // publicationAuthor.findMany defaults to [] ⇒ pmids.length === 0 ⇒ the
+    // loader takes the early-return branch. Datasets must still be populated
+    // there — a scholar with no publications but real deposits must not
+    // silently lose the card.
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.publications).toEqual([]);
+    expect(ctx!.datasets).toHaveLength(1);
+    expect(ctx!.datasets[0]).toMatchObject({ datasetId: "ds-1", state: "shown" });
   });
 });
 

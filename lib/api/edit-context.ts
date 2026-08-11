@@ -66,6 +66,7 @@ type EditContextReadClient = Pick<
   | "reporterProfileCandidate"
   | "scholarTechnology"
   | "newsMention"
+  | "personDatasetDeposit"
 >;
 
 export type EditContextScholar = {
@@ -253,6 +254,37 @@ export type EditContextNews = {
   showOnProfile: boolean;
   /** How it was attached: VIVO (article link) | NAME (queue-confirmed) | CURATOR. */
   source: string;
+};
+
+/**
+ * One dataset deposit row for the interactive /edit "Datasets" card
+ * (data-sharing spec, #2348). Sourced from `reciterdb.dataset_deposit` by
+ * etl/data-sharing, same precedent as publications: the scholar may hide
+ * their OWN row (per-contributor, drops it from their profile only) or a
+ * superuser may take the whole deposit down (whole-entity, drops it
+ * everywhere). Unlike publications there is no ReCiter-reject equivalent —
+ * datasets carry no `rejected` state, `isSoleDisplayedAuthor`, or "Not mine"
+ * interstitial. Empty unless `DATA_SHARING_SECTION` is on (dark-launch,
+ * mirroring `technologies`/`news`).
+ */
+export type EditContextDataset = {
+  /** `DatasetDeposit.id` — deterministic (sha256 of repository|accessionOrDoi,
+   *  #2340), the suppress `entityId`. */
+  datasetId: string;
+  repository: string;
+  accessionOrDoi: string;
+  resourceType: string | null;
+  dataType: string | null;
+  depositYear: number | null;
+  /** 'open' | 'controlled', or null when unknown. */
+  accessModel: string | null;
+  /** 'high' | 'low' | 'unclear', or null (databank rows carry no confidence). */
+  confidence: string | null;
+  /** 'first' | 'last' | 'middle' — this scholar's role on the deposit. */
+  authorPosition: string;
+  state: "shown" | "hidden_by_self" | "removed_by_admin";
+  /** The active self-applied suppression's id when `state === 'hidden_by_self'`, else null. */
+  suppressionId: string | null;
 };
 
 /**
@@ -552,6 +584,12 @@ export type EditContext = {
    * unless `NEWS_MENTIONS_SECTION` is on.
    */
   news: ReadonlyArray<EditContextNews>;
+  /**
+   * The scholar's dataset deposits for the interactive /edit "Datasets" card
+   * (data-sharing spec, #2348). All author positions (display scope). Empty
+   * unless `DATA_SHARING_SECTION` is on.
+   */
+  datasets: ReadonlyArray<EditContextDataset>;
   /** Suppressible mentees (derived from training records; mentor may hide). */
   mentees: ReadonlyArray<EditContextMentee>;
   /**
@@ -1049,6 +1087,90 @@ export async function loadEditContext(
           source: n.source,
         }))
       : [];
+
+  // Dataset deposits — the interactive /edit "Datasets" card (data-sharing
+  // spec, #2348). Loaded for every caller; only queried when
+  // DATA_SHARING_SECTION is on (else the loader returns [] and never touches
+  // this delegate) — same dark-launch precedent as technologies/news. Computed
+  // here (ABOVE the pmids/early-return branch below) and threaded into BOTH
+  // `return` statements, so a scholar with zero confirmed publications but
+  // real dataset deposits still gets the card.
+  const datasetRows =
+    process.env.DATA_SHARING_SECTION === "on"
+      ? await client.personDatasetDeposit.findMany({
+          where: { cwid },
+          select: {
+            datasetId: true,
+            authorPosition: true,
+            dataset: {
+              select: {
+                repository: true,
+                accessionOrDoi: true,
+                resourceType: true,
+                dataType: true,
+                depositYear: true,
+                accessModel: true,
+                confidence: true,
+              },
+            },
+          },
+        })
+      : [];
+
+  const datasets: EditContextDataset[] = [];
+  if (datasetRows.length > 0) {
+    // Per-contributor suppression, same shape as publications (`pubSuppressions`
+    // below): a `contributorCwid === null` row is a whole-entity admin takedown
+    // (`removed_by_admin`), a `contributorCwid === cwid` row is this scholar's
+    // own hide (`hidden_by_self`). Unlike publications there is no reject
+    // (`isRejectReason`) and no sole-displayed-author guard — neither concept
+    // applies to a dataset deposit.
+    const datasetIds = datasetRows.map((r) => r.datasetId);
+    const datasetSuppressions = await client.suppression.findMany({
+      where: {
+        entityType: "dataset_deposit",
+        entityId: { in: datasetIds },
+        revokedAt: null,
+      },
+      select: { id: true, entityId: true, contributorCwid: true },
+    });
+    const darkDatasetIds = new Set<string>();
+    // datasetId → this scholar's own active suppression id.
+    const selfSuppressionByDataset = new Map<string, string>();
+    for (const row of datasetSuppressions) {
+      if (row.contributorCwid === null) {
+        darkDatasetIds.add(row.entityId);
+      } else if (row.contributorCwid === cwid) {
+        selfSuppressionByDataset.set(row.entityId, row.id);
+      }
+    }
+    for (const r of datasetRows) {
+      let state: EditContextDataset["state"];
+      let suppressionId: string | null = null;
+      if (darkDatasetIds.has(r.datasetId)) {
+        // Whole-entity takedown outranks a self-hide, mirroring publications.
+        state = "removed_by_admin";
+      } else if (selfSuppressionByDataset.has(r.datasetId)) {
+        state = "hidden_by_self";
+        suppressionId = selfSuppressionByDataset.get(r.datasetId)!;
+      } else {
+        state = "shown";
+      }
+      datasets.push({
+        datasetId: r.datasetId,
+        repository: r.dataset.repository,
+        accessionOrDoi: r.dataset.accessionOrDoi,
+        resourceType: r.dataset.resourceType,
+        dataType: r.dataset.dataType,
+        depositYear: r.dataset.depositYear,
+        accessModel: r.dataset.accessModel,
+        confidence: r.dataset.confidence,
+        authorPosition: r.authorPosition,
+        state,
+        suppressionId,
+      });
+    }
+  }
 
   // Publication-derived COI-gap candidates (`SELF_EDIT_COI_GAP_HINT`) — SELF-
   // ONLY, and the opt-in IS the self guard: only the self page passes
@@ -1618,6 +1740,7 @@ export async function loadEditContext(
       coiDisclosures,
       technologies,
       news,
+      datasets,
       mentees,
       manualMentees: manualMenteeRows,
       manualMenteeUnresolvedCwids,
@@ -1787,6 +1910,7 @@ export async function loadEditContext(
     coiDisclosures,
     technologies,
     news,
+    datasets,
     mentees,
     manualMentees: manualMenteeRows,
     manualMenteeUnresolvedCwids,

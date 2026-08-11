@@ -96,6 +96,10 @@ const ctx: EditContext = {
   // below exercises the populated case.
   technologies: [],
   news: [],
+  // DATA_SHARING_SECTION — empty by default (loader returns [] unless the flag
+  // is on AND the scholar has deposits); a dedicated describe block below
+  // exercises the populated case.
+  datasets: [],
   mentees: [
     {
       externalId: "self01:mentee9",
@@ -625,6 +629,58 @@ describe("EditPage router — Available technologies rail (AVAILABLE_TECHNOLOGIE
     // The other section toggles still render; the technologies one is gated off.
     expect(screen.getByTestId("section-toggle-hideMethods")).toBeTruthy();
     expect(screen.queryByTestId("section-toggle-hideTechnologies")).toBeNull();
+  });
+});
+
+describe("EditPage router — Datasets rail (DATA_SHARING_SECTION, #2348)", () => {
+  const withDatasets: EditContext = {
+    ...ctx,
+    datasets: [
+      {
+        datasetId: "ds-1",
+        repository: "GEO",
+        accessionOrDoi: "GSE12345",
+        resourceType: "Dataset",
+        dataType: "RNA-seq",
+        depositYear: 2023,
+        accessModel: "open",
+        confidence: "high",
+        authorPosition: "first",
+        state: "shown",
+        suppressionId: null,
+      },
+    ],
+  };
+
+  it("does NOT show the datasets rail item when the scholar has none (default)", () => {
+    render(<EditPage ctx={ctx} mode="self" />);
+    expect(screen.queryByTestId("rail-datasets")).toBeNull();
+  });
+
+  it("an ?attr=datasets with no deposits canonicalizes away (Home renders instead)", () => {
+    render(<EditPage ctx={ctx} mode="self" attr="datasets" />);
+    expect(document.querySelector('[data-slot="datasets-card"]')).toBeNull();
+    expect(document.querySelector('[data-slot="home-panel"]')).not.toBeNull();
+  });
+
+  it("shows the datasets rail item ONLY when the scholar has ≥1 deposit", () => {
+    render(<EditPage ctx={withDatasets} mode="self" />);
+    expect(screen.getByTestId("rail-datasets")).toBeTruthy();
+  });
+
+  it("?attr=datasets renders the datasets card with a row", () => {
+    render(<EditPage ctx={withDatasets} mode="self" attr="datasets" />);
+    expect(document.querySelector('[data-slot="datasets-card"]')).not.toBeNull();
+    const row = screen.getByTestId("dataset-row-ds-1");
+    expect(row.textContent).toContain("GEO");
+    expect(row.textContent).toContain("GSE12345");
+  });
+
+  it("surfaces the datasets rail item in superuser mode too when populated", () => {
+    const suCtx: EditContext = { ...superuserCtx, datasets: withDatasets.datasets };
+    render(<EditPage ctx={suCtx} mode="superuser" />);
+    const item = screen.getByTestId("rail-datasets") as HTMLAnchorElement;
+    expect(item.getAttribute("href")).toBe("/edit/scholar/other7?attr=datasets");
   });
 });
 
