@@ -4,10 +4,10 @@
  * post-cutoff Academic Article authorship per candidate with full citation
  * detail (title, journal, year, publication type, impact score/
  * justification, synopsis) and the taxonomy "why": matched or not, which
- * term(s)/code(s)/disease(s). `matchedCodes`/`matchedUis`/`loadTaxonomy` are
- * mocked here — their own correctness is covered by
- * `cancer-center-mesh-taxonomy.test.ts`; this test is about the route's CSV
- * shape, filename, and scoping (`?cwid=` vs. whole report).
+ * term(s)/topic(s). `matchedTopics`/`matchedUis`/`loadCancerTaxonomy` are
+ * mocked here — their own correctness is covered by `cancer-taxonomy.test.ts`;
+ * this test is about the route's CSV shape, filename, and scoping (`?cwid=`
+ * vs. whole report).
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
@@ -19,8 +19,8 @@ const {
   mockCandidateFindMany,
   mockScholarFindMany,
   mockAuthorFindMany,
-  mockLoadTaxonomy,
-  mockMatchedCodes,
+  mockLoadCancerTaxonomy,
+  mockMatchedTopics,
   mockMatchedUis,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
@@ -29,8 +29,8 @@ const {
   mockCandidateFindMany: vi.fn(),
   mockScholarFindMany: vi.fn(),
   mockAuthorFindMany: vi.fn(),
-  mockLoadTaxonomy: vi.fn(),
-  mockMatchedCodes: vi.fn(),
+  mockLoadCancerTaxonomy: vi.fn(),
+  mockMatchedTopics: vi.fn(),
   mockMatchedUis: vi.fn(),
 }));
 
@@ -53,16 +53,15 @@ vi.mock("@/lib/db", () => ({
       centerCollabCandidate: { findMany: mockCandidateFindMany },
       scholar: { findMany: mockScholarFindMany },
       publicationAuthor: { findMany: mockAuthorFindMany },
+      cancerTaxonomyDescriptor: { findMany: vi.fn() },
       meshDescriptor: { findMany: vi.fn() },
     },
   },
 }));
-vi.mock("@/lib/cancer-center-mesh-taxonomy", () => ({
-  loadTaxonomy: mockLoadTaxonomy,
-  matchedCodes: mockMatchedCodes,
+vi.mock("@/lib/cancer-taxonomy", () => ({
+  loadCancerTaxonomy: mockLoadCancerTaxonomy,
+  matchedTopics: mockMatchedTopics,
   matchedUis: mockMatchedUis,
-  diseaseByCode: (taxonomy: Array<{ code: string; disease: string }>) =>
-    new Map(taxonomy.map((t) => [t.code, t.disease])),
 }));
 
 import { GET } from "@/app/api/edit/center/[code]/collab-report/export/route";
@@ -116,12 +115,11 @@ beforeEach(() => {
       },
     },
   ]);
-  mockLoadTaxonomy.mockResolvedValue({
-    codeByUi: new Map(),
-    descriptors: [{ ui: "D001943", name: "Breast Neoplasms", treeNumbers: ["C04.588.180"] }],
-    taxonomy: [{ code: "BREAST", disease: "Breast Cancer", nlm_descriptor: "Breast Neoplasms", note: "" }],
+  mockLoadCancerTaxonomy.mockResolvedValue({
+    topicsByUi: new Map([["D001943", ["breast"]]]),
+    nameByUi: new Map([["D001943", "Breast Neoplasms"]]),
   });
-  mockMatchedCodes.mockImplementation((uis: string[]) => (uis.includes("D001943") ? ["BREAST"] : []));
+  mockMatchedTopics.mockImplementation((uis: string[]) => (uis.includes("D001943") ? ["breast"] : []));
   mockMatchedUis.mockImplementation((uis: string[]) => uis.filter((u) => u === "D001943"));
 });
 
@@ -153,12 +151,12 @@ describe("GET /api/edit/center/[code]/collab-report/export", () => {
     const csv = await res.text();
     const lines = csv.trim().split("\r\n");
     expect(lines[0]).toBe(
-      "cwid,surname,given_name,pmid,article_title,journal_title,publication_type,year,is_cancer_related,matched_terms,matched_codes,matched_diseases,impact_score,impact_justification,synopsis",
+      "cwid,surname,given_name,pmid,article_title,journal_title,publication_type,year,is_cancer_related,matched_terms,matched_topics,impact_score,impact_justification,synopsis",
     );
     expect(lines).toContain(
-      "c1,Lovelace,Ada,111,A Study of Breast Neoplasms,J Oncol,Academic Article,2020,yes,Breast Neoplasms,BREAST,Breast Cancer,4.2,Cited widely,Found a thing.",
+      "c1,Lovelace,Ada,111,A Study of Breast Neoplasms,J Oncol,Academic Article,2020,yes,Breast Neoplasms,breast,4.2,Cited widely,Found a thing.",
     );
-    expect(lines).toContain("c1,Lovelace,Ada,222,Unrelated Work,J Misc,Academic Article,2021,no,,,,,,");
+    expect(lines).toContain("c1,Lovelace,Ada,222,Unrelated Work,J Misc,Academic Article,2021,no,,,,,");
   });
 
   it("scopes to one candidate and uses the per-person filename when ?cwid= is given", async () => {

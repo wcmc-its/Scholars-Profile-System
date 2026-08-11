@@ -25,7 +25,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, createReadStream } from "node:fs";
 import path from "node:path";
 import { parseMeshXmlStream } from "@/etl/mesh-descriptors/parser";
-import { parseCsv } from "@/lib/cancer-center-mesh-taxonomy";
+import { parseCsv } from "@/lib/csv";
 import {
   generateCancerTaxonomy,
   parseRuleset,

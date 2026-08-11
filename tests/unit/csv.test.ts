@@ -5,7 +5,7 @@
  * the pre-guard output.
  */
 import { describe, it, expect } from "vitest";
-import { toCsv } from "@/lib/csv";
+import { parseCsv, toCsv } from "@/lib/csv";
 
 // toCsv appends a trailing CRLF and separates rows with CRLF.
 const rows = (csv: string) => csv.replace(/\r\n$/, "").split("\r\n");
@@ -50,5 +50,12 @@ describe("toCsv — #1514 formula-injection guard", () => {
   it("does NOT touch plain text starting with a safe character", () => {
     expect(cell("Alpha")).toBe("Alpha");
     expect(cell("(212) 555-1212")).toBe("(212) 555-1212"); // paren-led, safe
+  });
+});
+
+describe("parseCsv", () => {
+  it("parses a header + quoted-field row, moved here from the retired cancer-center-mesh-taxonomy.ts test suite", () => {
+    const rows = parseCsv("code,disease,nlm_descriptor,note\nBREAST,Breast Cancer,Breast Neoplasms,\n");
+    expect(rows).toEqual([{ code: "BREAST", disease: "Breast Cancer", nlm_descriptor: "Breast Neoplasms", note: "" }]);
   });
 });

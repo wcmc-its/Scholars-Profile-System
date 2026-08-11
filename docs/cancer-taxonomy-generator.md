@@ -1,12 +1,12 @@
 # Cancer taxonomy generator — logic and rationale
 
 **Status (2026-08-11):** the generator, its persisted table, and its ETL step are merged
-and live (#2356) — `npm run etl:cancer-taxonomy` has run for real against staging and
-produced real classification data. Ruleset content refinements from a post-merge content
-review are in review (#2358). **Neither is wired to a reader yet** — the Reports tab, the
-CSV export, and the "How cancer-relevance is determined" modal all still walk the old,
-hand-picked taxonomy described below. This doc explains the new system on its own terms;
-see `docs/cancer-taxonomy-ruleset.csv`'s own row-level `note` comments for the current,
+and live (#2356), including the content-review ruleset fixes (#2358) — staging's
+`CancerTaxonomyDescriptor` reflects the final 878-descriptor ruleset. The Reports tab, the
+CSV export, and the "How cancer-relevance is determined" modal all read this table directly
+now — the old, hand-picked taxonomy described below (for context on what it replaced) is
+retired. This doc explains the new system on its own terms; see
+`docs/cancer-taxonomy-ruleset.csv`'s own row-level `note` comments for the current,
 authoritative content of the ruleset — this doc does not attempt to freeze that in prose.
 
 ## Why this exists
@@ -178,22 +178,19 @@ here as worked examples:
 
 ## Current status
 
-- **Merged and live** (#2356): the generator, `CancerTaxonomyDescriptor`, the ETL step, and
-  MeSH-chaining. Run for real against staging: 154 baseline ruleset rows → 687 cancer-relevant
-  descriptors (vs. 308 under the old 18-code taxonomy).
-- **In review** (#2358): the four content-gap fixes above. Final ruleset (staging, delta
-  applied): 878 descriptors.
-- **Not yet done, deliberately**: cutting `etl/cancer-center-collab-report/index.ts`, the
-  Reports tab, the CSV export, or the modal over to the new table. That cutover is gated on a
-  person-level diff — who actually clears ADD/recruit thresholds under the old taxonomy vs.
-  the new one, at both the existing thresholds and any recalibration — decided against an
-  acceptance criterion agreed *before* the numbers come back, not after. One measurement
-  already done: at Meyer Cancer Center's default thresholds, 146 candidates clear ADD/recruit
-  under the old taxonomy today; 196 would under the new one (+51/−1), combining the original
-  C04 widening with the gap #1/#3/#4 additions. Searching the relevance threshold for a
+- **Merged and live** (#2356 + #2358): the generator, `CancerTaxonomyDescriptor`, the ETL
+  step, MeSH-chaining, and the four content-gap fixes. Staging reflects the final ruleset:
+  164 rules → 878 cancer-relevant descriptors (vs. 308 under the old 18-code taxonomy).
+- **Cutover shipped**: `etl/cancer-center-collab-report/index.ts`, the Reports tab's "How
+  cancer-relevance is determined" modal, and the per-paper CSV export all read
+  `CancerTaxonomyDescriptor` via `lib/cancer-taxonomy.ts` now — the old CSV taxonomy
+  (`docs/cancer-center-disease-taxonomy.csv`, `lib/cancer-center-mesh-taxonomy.ts`) is
+  retired. The go decision was made on the population-widening evidence gathered before
+  cutover: at Meyer Cancer Center's default thresholds, 146 candidates cleared ADD/recruit
+  under the old taxonomy; 196 clear under the new one (+51/−1), combining the original C04
+  widening with the gap #1/#3/#4 additions. Searching the relevance threshold for a
   "preserve who clears" recalibration (against the pre-gap-additions baseline) found the
-  *current* default threshold already near-optimal — raising it trades a small reduction in
-  newly-qualifying candidates for a much larger loss of people who qualify today, at every
-  value tested. Widening the definition is not free to undo by nudging a threshold; it's a
-  real effect of a more complete definition, and the cutover decision needs to be made on
-  those terms.
+  *default* threshold already near-optimal — raising it trades a small reduction in
+  newly-qualifying candidates for a much larger loss of people who qualified before, at every
+  value tested. Widening the definition was not undone by nudging a threshold; it was a real
+  effect of a more complete definition, and the cutover was decided on those terms.
