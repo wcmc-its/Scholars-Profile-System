@@ -12,16 +12,25 @@ import { isAuthorizedBearer } from "@/lib/revalidate-auth";
 /**
  * GET /api/faculty-review/[cwid]/grants
  *
- * Server-to-server read of ONE scholar's complete grant history, for the
- * WCM-internal Faculty Review Tool. Distinct from `/api/scholar/[cwid]/grants`,
- * which is a session/on-network topic-matching SEARCH widget (needs a `q`,
- * returns the top-3 matches, off by default). This route is a plain data read:
- * a caller with the service token gets every `Grant` row we hold for the cwid.
+ * Server-to-server read of ONE scholar's complete grant history. Originally
+ * built for the WCM-internal Faculty Review Tool; Research Informatics
+ * (#2363) reads the same route for on-demand single-cwid lookups alongside
+ * their nightly all-scholars S3 export (#2359) -- same data, same shape,
+ * independent credential. Distinct from `/api/scholar/[cwid]/grants`, which
+ * is a session/on-network topic-matching SEARCH widget (needs a `q`, returns
+ * the top-3 matches, off by default). This route is a plain data read: a
+ * caller with a valid service token gets every `Grant` row we hold for the
+ * cwid.
  *
  * Auth: `Authorization: Bearer <token>`, constant-time compared (reuses the
- * `/api/revalidate` gate). Tokens come from `FACULTY_REVIEW_TOKEN` (+ optional
- * `FACULTY_REVIEW_TOKEN_PREVIOUS` for rotation). No token configured ⇒ every
- * request 401s (fail closed) — the endpoint is dark until the secret is wired.
+ * `/api/revalidate` gate) against the UNION of two independent consumer
+ * token pairs -- `FACULTY_REVIEW_TOKEN` (+ optional `_PREVIOUS`) for the
+ * Faculty Review Tool (#1855), `RESEARCH_INFORMATICS_TOKEN` (+ optional
+ * `_PREVIOUS`) for Research Informatics (#2363). Deliberately two separate
+ * secrets, not one shared token: each consumer's access is independently
+ * auditable and revocable without touching the other's. No token configured
+ * for a consumer just drops that pair from the accepted set -- if NEITHER
+ * consumer has a token configured, every request 401s (fail closed).
  *
  * Scope decisions (agreed with the tool owner):
  *   - Returns the FULL history — recency `Suppression`s that default-hide old
@@ -45,6 +54,8 @@ export async function GET(
   const tokens = [
     process.env.FACULTY_REVIEW_TOKEN,
     process.env.FACULTY_REVIEW_TOKEN_PREVIOUS,
+    process.env.RESEARCH_INFORMATICS_TOKEN,
+    process.env.RESEARCH_INFORMATICS_TOKEN_PREVIOUS,
   ]
     .map((t) => t?.trim() ?? "")
     .filter((t) => t.length > 0);

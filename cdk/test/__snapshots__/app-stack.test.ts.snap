@@ -1069,6 +1069,21 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "RESEARCH_INFORMATICS_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/research-informatics-token",
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "SESSION_COOKIE_SECRET",
                 "ValueFrom": {
                   "Fn::Join": [
@@ -3598,6 +3613,25 @@ service:
                     {
                       "Ref": "AWS::Partition",
                     },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/research-informatics-token-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/session-cookie-key-??????",
                   ],
                 ],
@@ -5287,6 +5321,21 @@ exports[`AppStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/faculty-review-token",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RESEARCH_INFORMATICS_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/research-informatics-token",
                     ],
                   ],
                 },
@@ -7803,6 +7852,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/faculty-review-token-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/research-informatics-token-??????",
                   ],
                 ],
               },
