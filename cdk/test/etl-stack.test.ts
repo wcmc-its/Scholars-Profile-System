@@ -1395,9 +1395,12 @@ describe("EtlStack", () => {
         }
       });
 
-      it("the ETL task role's only write grant is PutObject scoped to the curation backup bucket (no bare *, no other bucket, no delete)", () => {
-        // The backup step (scripts/backups/export-curated-tables.ts) is the sole
-        // writer; grantPut emits Put*/Abort* on exactly the CurationBackupBucket.
+      it("the ETL task role's only write grants are PutObject scoped to the curation backup bucket and the grants export bucket (no bare *, no other bucket, no delete)", () => {
+        // The backup step (scripts/backups/export-curated-tables.ts) writes
+        // CurationBackupBucket; the grants bulk export step
+        // (scripts/exports/grants-bulk-export.ts) writes GrantsExportBucket.
+        // grantPut emits Put*/Abort* on exactly those two buckets -- no other
+        // S3 write grant should exist on the task role.
         const policies = Object.values(
           template.findResources("AWS::IAM::Policy"),
         ).filter((p) => {
@@ -1411,8 +1414,8 @@ describe("EtlStack", () => {
               !r.Ref.includes("EtlTaskExecutionRole"),
           );
         });
-        // Find the single statement (across the task role's policies) that
-        // grants any S3 write action.
+        // Find every statement (across the task role's policies) that grants
+        // any S3 write action.
         const writeStmts = policies.flatMap((p) => {
           const statements = (p.Properties?.PolicyDocument?.Statement ??
             []) as Array<Record<string, unknown>>;
@@ -1424,23 +1427,29 @@ describe("EtlStack", () => {
             );
           });
         });
-        expect(writeStmts).toHaveLength(1);
-        const stmt = writeStmts[0];
-        const actions = (
-          Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action]
-        ) as string[];
-        // Put/Abort only — never GetObject, DeleteObject, or s3:*.
-        for (const a of actions) {
-          expect(a).toMatch(/^s3:(PutObject|Abort)/);
+        // One write statement per bucket: CurationBackupBucket, GrantsExportBucket.
+        expect(writeStmts).toHaveLength(2);
+        const serializedResources = writeStmts.map((s) =>
+          JSON.stringify(s.Resource),
+        );
+        expect(serializedResources.some((r) => /CurationBackupBucket/.test(r))).toBe(true);
+        expect(serializedResources.some((r) => /GrantsExportBucket/.test(r))).toBe(true);
+        for (const stmt of writeStmts) {
+          const actions = (
+            Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action]
+          ) as string[];
+          // Put/Abort only — never GetObject, DeleteObject, or s3:*.
+          for (const a of actions) {
+            expect(a).toMatch(/^s3:(PutObject|Abort)/);
+          }
+          expect(actions).not.toContain("s3:DeleteObject");
+          expect(actions).not.toContain("s3:*");
+          // Resource is never a bare * or a ReciterAI artifact bucket (those
+          // stay read-only).
+          const serialized = JSON.stringify(stmt.Resource);
+          expect(serialized).not.toMatch(/wcmc-reciterai/);
+          expect(serialized).not.toMatch(/^"\*"$/);
         }
-        expect(actions).not.toContain("s3:DeleteObject");
-        expect(actions).not.toContain("s3:*");
-        // Resource is the backup bucket's objects, never a bare * or any other
-        // bucket (the ReciterAI artifact buckets stay read-only).
-        const serialized = JSON.stringify(stmt.Resource);
-        expect(serialized).toMatch(/CurationBackupBucket/);
-        expect(serialized).not.toMatch(/wcmc-reciterai/);
-        expect(serialized).not.toMatch(/^"\*"$/);
       });
 
       it("every EventBridge-rule role has states:StartExecution scoped to a single state-machine ARN (no *)", () => {
@@ -1751,14 +1760,15 @@ describe("EtlStack", () => {
       expect(stagingEnv).toMatch(/"MESH_ANCHOR_SCORE_MIN"[^}]*"0\.9"/);
     });
 
-    it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled + cdnReconcileScheduleEnabled + curationBackupScheduleEnabled + edEmailVisibilityBridgeEnabled all true)", () => {
+    it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled + cdnReconcileScheduleEnabled + curationBackupScheduleEnabled + grantsExportScheduleEnabled + edEmailVisibilityBridgeEnabled all true)", () => {
       const rules = template.findResources("AWS::Events::Rule");
       // 3 cadence rules + the #595 heartbeat rule + the #393 reconciler rule +
       // the #353 cdn reconciler rule + the #1032 curated-tables backup rule +
-      // the #443 ED email-visibility bridge rule; all enabled in staging.
+      // the grants bulk export rule + the #443 ED email-visibility bridge
+      // rule; all enabled in staging.
       // The #1218 opportunity-projection rule was RETIRED in staging on
-      // 2026-07-20 (the nightly now covers the work), so 8 rather than 9.
-      expect(Object.keys(rules)).toHaveLength(8);
+      // 2026-07-20 (the nightly now covers the work), so 9 rather than 10.
+      expect(Object.keys(rules)).toHaveLength(9);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
         expect({ id, state }).toEqual({ id, state: "ENABLED" });
