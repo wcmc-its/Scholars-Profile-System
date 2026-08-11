@@ -36,6 +36,8 @@ import { HelpCircle } from "lucide-react";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { ADD_THRESHOLD, pct } from "@/lib/center-collaboration/recommendations-core";
 
 /** (?) icon that reveals `text` on hover/focus — the "explain the logic here"
@@ -135,40 +137,109 @@ function SectionHeading({ text, info }: { text: string; info: string }) {
   );
 }
 
+type SortKey = "name" | "department" | "papers" | "collab" | "relevant";
+
+const SORTERS: Record<SortKey, (a: Row, b: Row) => number> = {
+  name: (a, b) => `${a.givenName} ${a.surname}`.localeCompare(`${b.givenName} ${b.surname}`),
+  department: (a, b) => a.primaryDepartment.localeCompare(b.primaryDepartment),
+  papers: (a, b) => b.totalPapersPostCutoff - a.totalPapersPostCutoff,
+  collab: (a, b) => b.collaborationsWithCenter - a.collaborationsWithCenter,
+  relevant: (a, b) => b.cancerRelatedPapers - a.cancerRelatedPapers,
+};
+
+const TH_CLASS = "sticky top-0 z-10 bg-background py-1.5 pr-2";
+
+/** A section's row list, filterable/sortable client-side — sections can run to 100+
+ *  rows (a full-time-faculty-wide candidate pool), so a plain static table read as
+ *  unnavigable. `ScrollArea` bounds each section's own height (same `md:h-[60vh]`
+ *  convention as `publications-card.tsx`/`highlights-card.tsx`) with a sticky header,
+ *  instead of every section stacking into one very long page. */
 function RowTable({ rows, extraCol }: { rows: Row[]; extraCol?: (r: Row) => React.ReactNode }) {
+  const [query, setQuery] = React.useState("");
+  const [sort, setSort] = React.useState<SortKey>("name");
+
+  const filtered = React.useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const pool = q
+      ? rows.filter(
+          (r) =>
+            `${r.givenName} ${r.surname}`.toLowerCase().includes(q) ||
+            r.primaryDepartment.toLowerCase().includes(q),
+        )
+      : rows;
+    return [...pool].sort(SORTERS[sort]);
+  }, [rows, query, sort]);
+
   if (rows.length === 0) return <p className="text-sm text-muted-foreground">None at this threshold.</p>;
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[600px] border-collapse text-sm">
-        <thead>
-          <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
-            <th className="py-1.5 pr-2">Name</th>
-            <th className="py-1.5 pr-2">Department</th>
-            <th className="py-1.5 pr-2 text-right">Papers</th>
-            <th className="py-1.5 pr-2 text-right">Collab.</th>
-            <th className="py-1.5 pr-2 text-right">Cancer-Related</th>
-            {extraCol && <th className="py-1.5 pr-2">Program</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.cwid} className="border-b border-border/50">
-              <td className="py-1.5 pr-2">
-                {r.givenName} {r.surname}
-              </td>
-              <td className="py-1.5 pr-2">{r.primaryDepartment}</td>
-              <td className="py-1.5 pr-2 text-right">{r.totalPapersPostCutoff}</td>
-              <td className="py-1.5 pr-2 text-right">
-                {r.collaborationsWithCenter} ({pct(r.collaborationsWithCenter, r.totalPapersPostCutoff)}%)
-              </td>
-              <td className="py-1.5 pr-2 text-right">
-                {r.cancerRelatedPapers} ({pct(r.cancerRelatedPapers, r.totalPapersPostCutoff)}%)
-              </td>
-              {extraCol && <td className="py-1.5 pr-2">{extraCol(r)}</td>}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div>
+      <div className="mb-2 flex flex-wrap items-center gap-3">
+        <Input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Filter by name or department…"
+          aria-label="Filter rows by name or department"
+          className="h-8 max-w-56 text-xs"
+        />
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          Sort
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortKey)}
+            className="rounded border border-input bg-background px-1.5 py-0.5 text-xs text-foreground"
+            aria-label="Sort rows by"
+          >
+            <option value="name">Name</option>
+            <option value="department">Department</option>
+            <option value="papers">Papers</option>
+            <option value="collab">Collab.</option>
+            <option value="relevant">Cancer-Related</option>
+          </select>
+        </label>
+        <span className="text-xs text-muted-foreground">
+          {filtered.length} of {rows.length}
+        </span>
+      </div>
+      {filtered.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No rows match &ldquo;{query}&rdquo;.</p>
+      ) : (
+        <ScrollArea className="md:h-[60vh]">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[600px] border-collapse text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+                  <th className={TH_CLASS}>Name</th>
+                  <th className={TH_CLASS}>Department</th>
+                  <th className={`${TH_CLASS} text-right`}>Papers</th>
+                  <th className={`${TH_CLASS} text-right`}>Collab.</th>
+                  <th className={`${TH_CLASS} text-right`}>Cancer-Related</th>
+                  {extraCol && <th className={TH_CLASS}>Program</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((r) => (
+                  <tr key={r.cwid} className="border-b border-border/50">
+                    <td className="py-1.5 pr-2">
+                      {r.givenName} {r.surname}
+                    </td>
+                    <td className="py-1.5 pr-2">{r.primaryDepartment}</td>
+                    <td className="py-1.5 pr-2 text-right">{r.totalPapersPostCutoff}</td>
+                    <td className="py-1.5 pr-2 text-right">
+                      {r.collaborationsWithCenter} ({pct(r.collaborationsWithCenter, r.totalPapersPostCutoff)}%)
+                    </td>
+                    <td className="py-1.5 pr-2 text-right">
+                      {r.cancerRelatedPapers} ({pct(r.cancerRelatedPapers, r.totalPapersPostCutoff)}%)
+                    </td>
+                    {extraCol && <td className="py-1.5 pr-2">{extraCol(r)}</td>}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </ScrollArea>
+      )}
     </div>
   );
 }
