@@ -1,7 +1,11 @@
 /**
  * Render-path tests for the dataset deposits profile section (#2350 phase 1):
- *   - accessModel/confidence render on the muted secondary line when present,
- *     and are absent from the DOM (never the literal string "null") when not.
+ *   - accessModel renders as a readable label ("Open access"/"Controlled
+ *     access") on the muted secondary line when present, and is absent from
+ *     the DOM (never the literal string "null") when not.
+ *   - confidence never renders on the public page at all — it's the
+ *     extraction pipeline's confidence, not a fact about the dataset (see
+ *     datasets-section.tsx's ACCESS_LABELS comment).
  *   - the newly added ACCESSION_RESOLVERS entries produce the expected href
  *     for a sample accession from each repository.
  */
@@ -33,33 +37,34 @@ const dataset = (over: Partial<Dataset> = {}): Dataset => ({
 });
 
 describe("DatasetsSection — accessModel/confidence", () => {
-  it("renders accessModel and confidence on the muted line when present", () => {
-    render(<DatasetsSection datasets={[dataset({ accessModel: "controlled", confidence: "high" })]} />);
-    expect(screen.getByText(/controlled/)).toBeTruthy();
-    expect(screen.getByText(/high/)).toBeTruthy();
+  it("renders accessModel as a readable label on the muted line, never the raw enum", () => {
+    render(<DatasetsSection datasets={[dataset({ accessModel: "controlled" })]} />);
+    expect(screen.getByText(/Controlled access/)).toBeTruthy();
   });
 
-  it('never renders the literal string "null" when both are absent', () => {
+  it("renders open the same way", () => {
+    render(<DatasetsSection datasets={[dataset({ accessModel: "open" })]} />);
+    expect(screen.getByText(/Open access/)).toBeTruthy();
+  });
+
+  it('never renders the literal string "null" when accessModel is absent', () => {
     const { container } = render(
-      <DatasetsSection
-        datasets={[
-          dataset({ accessModel: null, confidence: null, dataType: null, depositYear: null }),
-        ]}
-      />,
+      <DatasetsSection datasets={[dataset({ accessModel: null, dataType: null, depositYear: null })]} />,
     );
     expect(container.textContent).not.toContain("null");
   });
 
-  it("omits accessModel from the DOM when null but still shows confidence", () => {
-    render(<DatasetsSection datasets={[dataset({ accessModel: null, confidence: "unclear" })]} />);
-    expect(screen.queryByText(/controlled|open/)).toBeNull();
-    expect(screen.getByText(/unclear/)).toBeTruthy();
+  it("omits accessModel from the DOM when null", () => {
+    render(<DatasetsSection datasets={[dataset({ accessModel: null })]} />);
+    expect(screen.queryByText(/access/)).toBeNull();
   });
 
-  it("omits confidence from the DOM when null but still shows accessModel", () => {
-    render(<DatasetsSection datasets={[dataset({ accessModel: "open", confidence: null })]} />);
-    expect(screen.getByText(/open/)).toBeTruthy();
-    expect(screen.queryByText(/high|low|unclear/)).toBeNull();
+  it("never renders confidence — extraction-pipeline metadata, not a dataset fact — regardless of value", () => {
+    for (const confidence of ["high", "low", "unclear"] as const) {
+      const { unmount } = render(<DatasetsSection datasets={[dataset({ accessModel: "open", confidence })]} />);
+      expect(screen.queryByText(new RegExp(confidence, "i"))).toBeNull();
+      unmount();
+    }
   });
 });
 
