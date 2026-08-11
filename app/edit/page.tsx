@@ -198,6 +198,9 @@ export default async function EditSelfPage({
     // News mentions is valid only when the scholar has ≥1 published mention (the
     // loader gates the array on NEWS_MENTIONS_SECTION).
     ctx.news.length > 0,
+    // Datasets is valid only when the scholar has ≥1 deposit (the loader gates
+    // the array on DATA_SHARING_SECTION).
+    ctx.datasets.length > 0,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect("/edit");
