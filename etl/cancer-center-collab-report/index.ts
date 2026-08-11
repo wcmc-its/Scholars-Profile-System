@@ -2,10 +2,13 @@
  * Cancer Center collaboration-recommendations v2 weekly precompute
  * (`2026-08-10-cancer-center-collaboration-recommendations-v2-cancer-relevance-plan.md`).
  *
- * Computes BOTH axes together, for every full-time faculty member (plus every
- * active research member — see below) against each center that has a program
- * taxonomy, and writes one row per (centerCode, cwid) to
- * `CenterCollabCandidate`. No REMOVE/ADD/recruit classification happens here
+ * Computes BOTH axes together, for every full-time faculty member against
+ * each center that has a program taxonomy, and writes one row per
+ * (centerCode, cwid) to `CenterCollabCandidate`. Only full-time faculty can
+ * be a Cancer Center member, so the candidate universe and the member set
+ * are drawn from the SAME full-time-faculty query — a `CenterMembership` row
+ * for someone who no longer qualifies (role change, suppression, departure)
+ * is not trusted on its own. No REMOVE/ADD/recruit classification happens here
  * — the `/edit` Reports tab applies threshold filtering (percentage or
  * raw-count slider) against these stored numbers at request time, so it never
  * needs to re-run MeSH matching.
@@ -40,7 +43,19 @@ import { withEtlRun } from "@/lib/etl-run";
 async function computeForCenter(centerCode: string, cutoffYear: number): Promise<number> {
   const today = new Date().toISOString().slice(0, 10);
 
-  // Active research members — v1's exact REMOVE-eligible population — plus
+  // Only full-time faculty can be Cancer Center members — the full-time-
+  // faculty population below IS the whole candidate universe, so build the
+  // member set FROM it rather than trusting `CenterMembership` alone. A role
+  // change, suppression, or departure after joining must not leave a stale
+  // row still counted as a research member.
+  const facultyScholars = await db.write.scholar.findMany({
+    where: { deletedAt: null, status: "active", roleCategory: "full_time_faculty" },
+    select: { cwid: true },
+  });
+  const fullTimeFacultyCwids = new Set(facultyScholars.map((s) => s.cwid));
+
+  // Active research members — v1's exact REMOVE-eligible population, now
+  // additionally validated against the full-time-faculty set above — plus
   // the ANY-type active membership set, used only to exclude already-rostered
   // people from the candidate side (see the schema doc comment on
   // `CenterCollabCandidate`).
@@ -50,20 +65,18 @@ async function computeForCenter(centerCode: string, cutoffYear: number): Promise
   });
   const active = memberships.filter((m) => isCenterMembershipActive(m.startDate, m.endDate, today));
   const anyActiveMemberCwids = new Set(active.map((m) => m.cwid));
-  const researchMembers = active.filter((m) => m.membershipType === "research");
+  const researchMembers = active.filter(
+    (m) => m.membershipType === "research" && fullTimeFacultyCwids.has(m.cwid),
+  );
 
   // Candidate universe: every full-time faculty member, minus anyone already
   // on this center's roster under some OTHER membership type (not a fresh
   // candidate, out of REMOVE's scope too — see the schema comment).
-  const candidateScholars = await db.write.scholar.findMany({
-    where: { deletedAt: null, status: "active", roleCategory: "full_time_faculty" },
-    select: { cwid: true },
-  });
   const universe: CollabUniverseMember[] = [
     ...researchMembers.map((m) => ({ cwid: m.cwid, isResearchMember: true, programCode: m.programCode })),
     // anyActiveMemberCwids is a superset of researchMemberCwids, so this also
     // correctly excludes research members from being added twice.
-    ...candidateScholars
+    ...facultyScholars
       .filter((s) => !anyActiveMemberCwids.has(s.cwid))
       .map((s) => ({ cwid: s.cwid, isResearchMember: false, programCode: null })),
   ];

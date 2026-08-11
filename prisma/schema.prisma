@@ -1581,21 +1581,26 @@ model CenterMembership {
 }
 
 /// Cancer Center collaboration-recommendations v2 Reports tab — one row per
-/// (center, full-time faculty member OR active research member), computed
-/// weekly by `etl/cancer-center-collab-report/index.ts` from the same pure
-/// core the standalone `scripts/cancer-center-collaboration-recommendations.ts`
-/// CLI uses (`lib/center-collaboration/recommendations-core.ts`).
+/// (center, full-time faculty member), computed weekly by
+/// `etl/cancer-center-collab-report/index.ts` from the same pure core the
+/// standalone `scripts/cancer-center-collaboration-recommendations.ts` CLI
+/// uses (`lib/center-collaboration/recommendations-core.ts`). Only full-time
+/// faculty can be a Cancer Center member, so the whole universe (members and
+/// candidates alike) is drawn from that population — a `CenterMembership`
+/// row for someone who no longer qualifies (role change, suppression,
+/// departure) is not trusted on its own.
 ///
 /// No REMOVE/ADD/recruit classification is stored — the Reports tab applies
 /// threshold filtering (percentage or raw-count slider, one pair per axis)
 /// against these already-computed numbers at request time.
 ///
 /// `isCurrentMember` mirrors v1's REMOVE-eligible population exactly: an
-/// active `CenterMembership` with `membershipType === "research"`, not "any
-/// membership type" — see `recommendations-core.ts` `CollabUniverseMember`.
-/// A full-time faculty member who IS a center member under some OTHER type
-/// gets no row for this center at all (already on the roster, out of both
-/// REMOVE's and the ADD/recruit candidate pool's scope).
+/// active `CenterMembership` with `membershipType === "research"` AND a
+/// current full-time-faculty `Scholar` row, not "any membership type" — see
+/// `recommendations-core.ts` `CollabUniverseMember`. A full-time faculty
+/// member who IS a center member under some OTHER type gets no row for this
+/// center at all (already on the roster, out of both REMOVE's and the
+/// ADD/recruit candidate pool's scope).
 model CenterCollabCandidate {
   centerCode               String   @map("center_code") @db.VarChar(64)
   cwid                     String   @db.VarChar(32)
