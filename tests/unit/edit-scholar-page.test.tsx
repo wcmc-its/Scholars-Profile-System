@@ -119,6 +119,7 @@ const fakeCtx = (cwid: string) => ({
   highlights: null,
   technologies: [],
   news: [],
+  datasets: [],
 });
 
 function params(cwid: string): Promise<{ cwid: string }> {
