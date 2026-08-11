@@ -765,6 +765,20 @@ model DatasetDeposit {
   provenance     String    @db.VarChar(16)
   /// 'high' | 'low' | 'unclear' — null for databank rows.
   confidence     String?   @db.VarChar(16)
+  /// DataCite titles[0].title, or CT.gov briefTitle for ClinicalTrials.gov rows.
+  title           String?  @db.VarChar(512)
+  /// DataCite descriptions[0].description; DOI-based repos only.
+  description     String?  @db.Text
+  /// DataCite creators[].name — names only, not the full creator objects; DOI-based repos only.
+  creators        Json?
+  /// DataCite publisher; DOI-based repos only.
+  publisher       String?  @db.VarChar(255)
+  /// CT.gov phases[0]; ClinicalTrials.gov only.
+  trialPhase      String?  @map("trial_phase") @db.VarChar(32)
+  /// CT.gov overallStatus; ClinicalTrials.gov only.
+  trialStatus     String?  @map("trial_status") @db.VarChar(32)
+  /// CT.gov conditions (array); ClinicalTrials.gov only.
+  trialConditions Json?    @map("trial_conditions")
   source         String    @default("reciterdb.dataset_deposit") @db.VarChar(48)
   lastRefreshedAt DateTime @default(now()) @map("last_refreshed_at")
 
