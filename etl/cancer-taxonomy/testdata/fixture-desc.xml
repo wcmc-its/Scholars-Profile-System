@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Small, hand-built stand-in for NLM's desc<year>.xml — see
+  ../generate.golden.test.ts. Exercises every branch of the admit-exclude-
+  readmit closure against the REAL, checked-in ../../../docs/cancer-taxonomy-
+  ruleset.csv: root subtree inclusion, exclude-then-individual-readmit
+  (Cysts/Hamartoma), a term-only inclusion outside the tree (BRCA1 Protein),
+  a term-only exclusion that must NOT survive (Multiple Pulmonary Nodules),
+  the experimental-model site-topic-stripping cross-list (Liver Neoplasms,
+  Experimental carries two tree numbers, same as real MeSH), and
+  fallback-topic-only-when-nothing-more-specific-matched (Hematologic
+  Neoplasms vs. Leukemia). Every other one of the ruleset's ~154 rows will
+  land in `.unresolved` against this tiny fixture — expected and asserted.
+-->
+<DescriptorRecordSet>
+  <DescriptorRecord>
+    <DescriptorUI>D001</DescriptorUI>
+    <DescriptorName><String>Neoplasms</String></DescriptorName>
+    <TreeNumberList><TreeNumber>C04</TreeNumber></TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D002</DescriptorUI>
+    <DescriptorName><String>Cysts</String></DescriptorName>
+    <TreeNumberList><TreeNumber>C04.100</TreeNumber></TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D003</DescriptorUI>
+    <DescriptorName><String>Ganglion Cyst</String></DescriptorName>
+    <TreeNumberList><TreeNumber>C04.100.100</TreeNumber></TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D004</DescriptorUI>
+    <DescriptorName><String>Dermoid Cyst</String></DescriptorName>
+    <TreeNumberList><TreeNumber>C04.100.200</TreeNumber></TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D005</DescriptorUI>
+    <DescriptorName><String>Hamartoma</String></DescriptorName>
+    <TreeNumberList><TreeNumber>C04.200</TreeNumber></TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D006</DescriptorUI>
+    <DescriptorName><String>Tuberous Sclerosis</String></DescriptorName>
+    <TreeNumberList><TreeNumber>C04.200.100</TreeNumber></TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D007</DescriptorUI>
+    <DescriptorName><String>Hamartoma Syndrome, Multiple</String></DescriptorName>
+    <TreeNumberList><TreeNumber>C04.200.200</TreeNumber></TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D008</DescriptorUI>
+    <DescriptorName><String>Breast Neoplasms</String></DescriptorName>
+    <TreeNumberList><TreeNumber>C04.300</TreeNumber></TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D009</DescriptorUI>
+    <DescriptorName><String>Breast Neoplasms, Male</String></DescriptorName>
+    <TreeNumberList><TreeNumber>C04.300.100</TreeNumber></TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D010</DescriptorUI>
+    <DescriptorName><String>Liver Neoplasms</String></DescriptorName>
+    <TreeNumberList><TreeNumber>C04.400</TreeNumber></TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D011</DescriptorUI>
+    <DescriptorName><String>Liver Neoplasms, Experimental</String></DescriptorName>
+    <!-- Cross-listed under BOTH Liver Neoplasms and Neoplasms, Experimental,
+         same as real MeSH — the exact shape the experimental-model
+         site-stripping rule depends on. -->
+    <TreeNumberList>
+      <TreeNumber>C04.400.100</TreeNumber>
+      <TreeNumber>C04.900.100</TreeNumber>
+    </TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D012</DescriptorUI>
+    <DescriptorName><String>Neoplasms, Experimental</String></DescriptorName>
+    <TreeNumberList><TreeNumber>C04.900</TreeNumber></TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D013</DescriptorUI>
+    <DescriptorName><String>Mammary Neoplasms, Animal</String></DescriptorName>
+    <TreeNumberList><TreeNumber>C04.900.200</TreeNumber></TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D014</DescriptorUI>
+    <DescriptorName><String>Hematologic Neoplasms</String></DescriptorName>
+    <TreeNumberList><TreeNumber>C04.500</TreeNumber></TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D015</DescriptorUI>
+    <DescriptorName><String>Leukemia</String></DescriptorName>
+    <TreeNumberList><TreeNumber>C04.500.100</TreeNumber></TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D016</DescriptorUI>
+    <DescriptorName><String>Mast Cell Sarcoma</String></DescriptorName>
+    <TreeNumberList><TreeNumber>C04.500.200</TreeNumber></TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D017</DescriptorUI>
+    <DescriptorName><String>Multiple Pulmonary Nodules</String></DescriptorName>
+    <TreeNumberList><TreeNumber>C04.600</TreeNumber></TreeNumberList>
+  </DescriptorRecord>
+  <DescriptorRecord>
+    <DescriptorUI>D018</DescriptorUI>
+    <DescriptorName><String>BRCA1 Protein</String></DescriptorName>
+    <!-- Deliberately no TreeNumberList: real BRCA1 Protein sits outside C04
+         entirely, admitted only via rel_include_term. -->
+  </DescriptorRecord>
+</DescriptorRecordSet>

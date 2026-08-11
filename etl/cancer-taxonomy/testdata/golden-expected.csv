@@ -1,0 +1,15 @@
+descriptor_ui,descriptor_name,tree_numbers,cancer_relevant,topics,topic_count,admitted_by,review
+D018,BRCA1 Protein,,true,cc-biology,1,BRCA1 Protein,rel_include_term:BRCA1 Protein
+D008,Breast Neoplasms,C04.300,true,breast,1,Neoplasms,
+D009,"Breast Neoplasms, Male",C04.300.100,true,breast,1,Neoplasms,
+D004,Dermoid Cyst,C04.100.200,true,unassigned,0,Dermoid Cyst|Neoplasms,
+D007,"Hamartoma Syndrome, Multiple",C04.200.200,true,unassigned,0,"Hamartoma Syndrome, Multiple|Neoplasms",
+D014,Hematologic Neoplasms,C04.500,true,hematologic-other,1,Neoplasms,
+D015,Leukemia,C04.500.100,true,leukemia,1,Neoplasms,
+D010,Liver Neoplasms,C04.400,true,liver-biliary,1,Neoplasms,
+D011,"Liver Neoplasms, Experimental",C04.400.100|C04.900.100,true,cc-experimental-models,1,Neoplasms,
+D013,"Mammary Neoplasms, Animal",C04.900.200,true,cc-experimental-models,1,Neoplasms,
+D016,Mast Cell Sarcoma,C04.500.200,true,hematologic-other,1,Neoplasms,
+D001,Neoplasms,C04,true,unassigned,0,Neoplasms,
+D012,"Neoplasms, Experimental",C04.900,true,cc-experimental-models,1,Neoplasms,
+D006,Tuberous Sclerosis,C04.200.100,true,unassigned,0,Neoplasms|Tuberous Sclerosis,
