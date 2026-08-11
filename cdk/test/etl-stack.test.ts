@@ -1395,9 +1395,12 @@ describe("EtlStack", () => {
         }
       });
 
-      it("the ETL task role's only write grant is PutObject scoped to the curation backup bucket (no bare *, no other bucket, no delete)", () => {
-        // The backup step (scripts/backups/export-curated-tables.ts) is the sole
-        // writer; grantPut emits Put*/Abort* on exactly the CurationBackupBucket.
+      it("the ETL task role's only write grants are PutObject scoped to the curation backup bucket and the grants export bucket (no bare *, no other bucket, no delete)", () => {
+        // The backup step (scripts/backups/export-curated-tables.ts) writes
+        // CurationBackupBucket; the grants bulk export step
+        // (scripts/exports/grants-bulk-export.ts) writes GrantsExportBucket.
+        // grantPut emits Put*/Abort* on exactly those two buckets -- no other
+        // S3 write grant should exist on the task role.
         const policies = Object.values(
           template.findResources("AWS::IAM::Policy"),
         ).filter((p) => {
@@ -1411,8 +1414,8 @@ describe("EtlStack", () => {
               !r.Ref.includes("EtlTaskExecutionRole"),
           );
         });
-        // Find the single statement (across the task role's policies) that
-        // grants any S3 write action.
+        // Find every statement (across the task role's policies) that grants
+        // any S3 write action.
         const writeStmts = policies.flatMap((p) => {
           const statements = (p.Properties?.PolicyDocument?.Statement ??
             []) as Array<Record<string, unknown>>;
@@ -1424,23 +1427,29 @@ describe("EtlStack", () => {
             );
           });
         });
-        expect(writeStmts).toHaveLength(1);
-        const stmt = writeStmts[0];
-        const actions = (
-          Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action]
-        ) as string[];
-        // Put/Abort only — never GetObject, DeleteObject, or s3:*.
-        for (const a of actions) {
-          expect(a).toMatch(/^s3:(PutObject|Abort)/);
+        // One write statement per bucket: CurationBackupBucket, GrantsExportBucket.
+        expect(writeStmts).toHaveLength(2);
+        const serializedResources = writeStmts.map((s) =>
+          JSON.stringify(s.Resource),
+        );
+        expect(serializedResources.some((r) => /CurationBackupBucket/.test(r))).toBe(true);
+        expect(serializedResources.some((r) => /GrantsExportBucket/.test(r))).toBe(true);
+        for (const stmt of writeStmts) {
+          const actions = (
+            Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action]
+          ) as string[];
+          // Put/Abort only — never GetObject, DeleteObject, or s3:*.
+          for (const a of actions) {
+            expect(a).toMatch(/^s3:(PutObject|Abort)/);
+          }
+          expect(actions).not.toContain("s3:DeleteObject");
+          expect(actions).not.toContain("s3:*");
+          // Resource is never a bare * or a ReciterAI artifact bucket (those
+          // stay read-only).
+          const serialized = JSON.stringify(stmt.Resource);
+          expect(serialized).not.toMatch(/wcmc-reciterai/);
+          expect(serialized).not.toMatch(/^"\*"$/);
         }
-        expect(actions).not.toContain("s3:DeleteObject");
-        expect(actions).not.toContain("s3:*");
-        // Resource is the backup bucket's objects, never a bare * or any other
-        // bucket (the ReciterAI artifact buckets stay read-only).
-        const serialized = JSON.stringify(stmt.Resource);
-        expect(serialized).toMatch(/CurationBackupBucket/);
-        expect(serialized).not.toMatch(/wcmc-reciterai/);
-        expect(serialized).not.toMatch(/^"\*"$/);
       });
 
       it("every EventBridge-rule role has states:StartExecution scoped to a single state-machine ARN (no *)", () => {
@@ -1751,14 +1760,15 @@ describe("EtlStack", () => {
       expect(stagingEnv).toMatch(/"MESH_ANCHOR_SCORE_MIN"[^}]*"0\.9"/);
     });
 
-    it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled + cdnReconcileScheduleEnabled + curationBackupScheduleEnabled + edEmailVisibilityBridgeEnabled all true)", () => {
+    it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled + cdnReconcileScheduleEnabled + curationBackupScheduleEnabled + grantsExportScheduleEnabled + edEmailVisibilityBridgeEnabled all true)", () => {
       const rules = template.findResources("AWS::Events::Rule");
       // 3 cadence rules + the #595 heartbeat rule + the #393 reconciler rule +
       // the #353 cdn reconciler rule + the #1032 curated-tables backup rule +
-      // the #443 ED email-visibility bridge rule; all enabled in staging.
+      // the grants bulk export rule + the #443 ED email-visibility bridge
+      // rule; all enabled in staging.
       // The #1218 opportunity-projection rule was RETIRED in staging on
-      // 2026-07-20 (the nightly now covers the work), so 8 rather than 9.
-      expect(Object.keys(rules)).toHaveLength(8);
+      // 2026-07-20 (the nightly now covers the work), so 9 rather than 10.
+      expect(Object.keys(rules)).toHaveLength(9);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
         expect({ id, state }).toEqual({ id, state: "ENABLED" });
@@ -1830,6 +1840,68 @@ describe("EtlStack", () => {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: "sps-curation-backup-status-staging",
       });
+    });
+
+    it("the grants-export cross-account read grant is scoped to the one object key, GetObject only, principal from SSM (never a bare bucket/wildcard)", () => {
+      // This is the stack's first EXTERNAL-account resource policy (every
+      // other cross-account-shaped grant here is same-account). Asserted
+      // separately from the opaque full-stack snapshot so a scope-widening
+      // refactor (e.g. object-key ARN -> bucket ARN, or GetObject -> s3:*)
+      // fails a targeted test, not just a snapshot diff nobody reads closely.
+      const json = template.toJSON();
+
+      // `valueForStringParameter` lowers to an `AWS::SSM::Parameter::Value<String>`
+      // template Parameter (NOT a `{{resolve:ssm:...}}` dynamic reference) --
+      // CloudFormation looks this up for the WHOLE template up front, before
+      // touching any resource, which is exactly why a missing SSM param aborts
+      // the entire stack update rather than just the new resources (finding #1).
+      const params = json.Parameters as Record<string, Record<string, unknown>>;
+      const ssmParamLogicalId = Object.entries(params).find(
+        ([, p]) =>
+          p.Type === "AWS::SSM::Parameter::Value<String>" &&
+          p.Default === "/scholars/staging/grants-export/consumer-role-arn",
+      )?.[0];
+      expect(ssmParamLogicalId).toBeDefined();
+
+      const bucketPolicies = Object.values(
+        template.findResources("AWS::S3::BucketPolicy"),
+      ).map((r) => (r.Properties as Record<string, unknown>).PolicyDocument as Record<string, unknown>);
+      const grantsPolicy = bucketPolicies.find((doc) =>
+        JSON.stringify(doc).includes(ssmParamLogicalId as string),
+      );
+      expect(grantsPolicy).toBeDefined();
+      const statements = grantsPolicy?.Statement as Array<Record<string, unknown>>;
+      // The bucket's default enforceSSL deny statement, plus this one grant.
+      const stmt = statements.find((s) => s.Effect === "Allow");
+      expect(stmt).toBeDefined();
+
+      // Action: GetObject only -- never ListBucket, never a wildcard.
+      const actions = Array.isArray(stmt!.Action) ? stmt!.Action : [stmt!.Action];
+      expect(actions).toEqual(["s3:GetObject"]);
+
+      // Resource: the single persistent key, never the bucket itself or "*".
+      const resource = JSON.stringify(stmt!.Resource);
+      expect(resource).toContain("grants.ndjson");
+      expect(resource).not.toMatch(/^"\*"$/);
+
+      // Principal: Ref to the SSM-sourced parameter (resolved at deploy time,
+      // never a hardcoded account ID/role ARN -- this repo is public), not a
+      // bare "*".
+      expect(stmt!.Principal).toEqual({ AWS: { Ref: ssmParamLogicalId } });
+    });
+
+    it("prod ships the grants-export bucket (unconditional) but NO cross-account read grant while the flag is off", () => {
+      // Mirrors the opportunity-projection resurrection guard above: the
+      // bucket + write grant are unconditional in both envs (an operator can
+      // run the export by hand via run-task before go-live), but the
+      // cross-account READ policy must stay absent from prod until
+      // grantsExportScheduleEnabled flips -- an SSM param that does not exist
+      // in prod yet would otherwise fail the next `cdk deploy Sps-Etl-prod`.
+      const prodTemplate = buildEtlStack("prod").template;
+      const prodPolicies = JSON.stringify(
+        prodTemplate.findResources("AWS::S3::BucketPolicy"),
+      );
+      expect(prodPolicies).not.toMatch(/grants-export\/consumer-role-arn/);
     });
 
     // The prod template asserts the same invariant, but staging is where the

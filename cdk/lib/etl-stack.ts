@@ -594,6 +594,43 @@ export class EtlStack extends Stack {
     curationBackupBucket.grantRead(taskRole, "scratch-input/*");
 
     // ------------------------------------------------------------------
+    // Grants bulk-export bucket — nightly NDJSON dump of every `Grant` row
+    // (scripts/exports/grants-bulk-export.ts, `export:grants-bulk`) for the
+    // Research Informatics cross-account consumer. Replaces a rejected live
+    // "bulk API" idea (measured ~58-67 MB per full-cohort JSON response, too
+    // heavy for a synchronous web-tier route).
+    //
+    // DIFFERENT trust boundary than curationBackupBucket above: that bucket
+    // is internal-only (task role write, operator-only read); this one is
+    // deliberately readable by an external AWS account (the cross-account
+    // bucket policy is added below, gated with the schedule -- see the
+    // `grantsExportScheduleEnabled` block further down).
+    //
+    // Single persistent key (`grants.ndjson`), overwritten every run -- every
+    // export is a full snapshot, not a delta, so there is no restore need for
+    // prior versions. Versioning deliberately OFF (unlike curationBackupBucket):
+    // the persistent-key design means "the last good export" is always at the
+    // one key, and turning versioning on here would only accumulate noncurrent
+    // copies of a value nothing ever needs to roll back to.
+    //
+    // Bucket + grantPut + the GRANTS_EXPORT_BUCKET env injection (below) are
+    // UNCONDITIONAL in both envs -- like curationBackupBucket -- so an
+    // operator can hand-run `export:grants-bulk` via run-task before the
+    // schedule/cross-account grant go live. Only the schedule + the
+    // cross-account read policy are gated by `grantsExportScheduleEnabled`.
+    // ------------------------------------------------------------------
+    const grantsExportBucket = new s3.Bucket(this, "GrantsExportBucket", {
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    // The task role's write grant -- PutObject (+ Abort*) on this bucket. The
+    // export step uploads here; the cross-account consumer only ever gets a
+    // narrow GetObject via the resource policy below, never this grant.
+    grantsExportBucket.grantPut(taskRole);
+
+    // ------------------------------------------------------------------
     // ETL task family. One image, one container -- per-step
     // differentiation lives in ContainerOverrides at state-machine task
     // construction time (`command: ["npm","run","etl:<source>"]`). Base
@@ -714,6 +751,10 @@ export class EtlStack extends Stack {
       // task role is granted PutObject on exactly this bucket above; the
       // script defaults the key prefix to "sps-curation-backups".
       CURATION_BACKUP_BUCKET: curationBackupBucket.bucketName,
+      // Destination bucket for the `export:grants-bulk` nightly NDJSON dump.
+      // The task role is granted PutObject on exactly this bucket above; the
+      // script defaults the object key to "grants.ndjson".
+      GRANTS_EXPORT_BUCKET: grantsExportBucket.bucketName,
       // #728 — write gate for the ED delegated-admin importer (etl:ed:admins,
       // the EdAdmins nightly step). "on" enables per-unit UnitAdmin `curator`
       // upserts + reconcile; anything else keeps the job in dry-run (no writes,
@@ -2511,6 +2552,172 @@ export class EtlStack extends Stack {
     }
 
     // ------------------------------------------------------------------
+    // Grants bulk-export schedule -- nightly all-scholars `export:grants-bulk`
+    // NDJSON dump (see GrantsExportBucket above) for the Research Informatics
+    // cross-account consumer. Structurally mirrors the curated-tables backup
+    // block above: a one-shot EcsRunTask wrapped in a minimal state machine so
+    // a failed run Catches to the ETL failure topic, plus cadence + status
+    // alarms. Reuses the shared ETL task def (base unit -- no source creds
+    // needed, just DATABASE_URL + GRANTS_EXPORT_BUCKET, both already on it).
+    //
+    // Daily at 05:30 UTC -- ahead of the curated-tables backup (06:00) and the
+    // 07:00 nightly ETL, so none of the three collide on the shared task def.
+    //
+    // The WHOLE block -- schedule AND the cross-account bucket policy below --
+    // is gated on `grantsExportScheduleEnabled`. Unlike the curated-tables
+    // backup flag, this one guards a REAL prod deploy hazard, not just an
+    // unwanted schedule: the bucket policy resolves the consumer role ARN from
+    // an SSM param (`/scholars/<env>/grants-export/consumer-role-arn`) that
+    // does not exist in prod SSM yet -- an unconditional reference would fail
+    // the next `cdk deploy Sps-Etl-prod` outright. See the flag's JSDoc
+    // (cdk/lib/config.ts) for the full rollout story.
+    // ------------------------------------------------------------------
+    if (envConfig.grantsExportScheduleEnabled) {
+      // Cross-account read grant -- GetObject on exactly the one persistent
+      // object key, never the whole bucket. Principal is the external
+      // consumer's role ARN, resolved from SSM at deploy time (a CFN dynamic
+      // reference -- never hardcoded; this repo is public).
+      grantsExportBucket.addToResourcePolicy(
+        new iam.PolicyStatement({
+          principals: [
+            new iam.ArnPrincipal(
+              ssm.StringParameter.valueForStringParameter(
+                this,
+                `/scholars/${env}/grants-export/consumer-role-arn`,
+              ),
+            ),
+          ],
+          actions: ["s3:GetObject"],
+          resources: [grantsExportBucket.arnForObjects("grants.ndjson")],
+        }),
+      );
+
+      const grantsExportUnit = taskUnitFor("export:grants-bulk"); // base (no source creds)
+      const grantsExportTask = new tasks.EcsRunTask(this, "TaskGrantsExport", {
+        integrationPattern: sfn.IntegrationPattern.RUN_JOB,
+        cluster: ecsCluster,
+        taskDefinition: grantsExportUnit.taskDefinition,
+        launchTarget: new tasks.EcsFargateLaunchTarget({
+          platformVersion: ecs.FargatePlatformVersion.LATEST,
+        }),
+        assignPublicIp: false,
+        subnets: etlTaskSubnets,
+        securityGroups: [etlSecurityGroup],
+        containerOverrides: [
+          {
+            containerDefinition: grantsExportUnit.container,
+            command: ["npm", "run", "export:grants-bulk"],
+          },
+        ],
+        // A select + NDJSON-serialize + single PutObject over the whole
+        // cohort; 30 min is generous over cold start + connect, same budget
+        // as the curated-tables backup.
+        taskTimeout: sfn.Timeout.duration(Duration.minutes(30)),
+      });
+      grantsExportTask.addRetry({
+        errors: ["States.TaskFailed", "States.Timeout"],
+        maxAttempts: 1,
+        backoffRate: 2,
+        interval: Duration.minutes(1),
+      });
+      grantsExportTask.addCatch(
+        new tasks.SnsPublish(this, "NotifyGrantsExport", {
+          topic: this.failureTopic,
+          subject: `SPS grants bulk export ${env} -- run failed`,
+          message: sfn.TaskInput.fromObject({
+            env,
+            step: "GrantsExport",
+            stateMachine: sfn.JsonPath.stateMachineName,
+            execution: sfn.JsonPath.executionName,
+            error: sfn.JsonPath.stringAt("$.error"),
+          }),
+        }).next(
+          new sfn.Fail(this, "FailGrantsExport", {
+            cause: "grants bulk export run failed",
+          }),
+        ),
+        { errors: ["States.ALL"], resultPath: "$.error" },
+      );
+
+      const grantsExportSmLogGroup = new logs.LogGroup(this, "GrantsExportSmLogGroup", {
+        logGroupName: `/aws/states/grants-export-${env}`,
+        retention: logRetention,
+        removalPolicy: RemovalPolicy.RETAIN,
+      });
+      const grantsExportStateMachine = new sfn.StateMachine(this, "GrantsExportStateMachine", {
+        stateMachineName: `scholars-grants-export-${env}`,
+        stateMachineType: sfn.StateMachineType.STANDARD,
+        definitionBody: sfn.DefinitionBody.fromChainable(grantsExportTask),
+        // Same 70 min reasoning as the curated-tables backup machine: the
+        // task's own retry (30 min timeout x 2 attempts + 1 min interval = 61
+        // min worst case) must fit under the machine timeout, or a hung run
+        // hits TIMED_OUT before its retry exhausts -- and TIMED_OUT runs no
+        // Catch, so the failure that should page never would.
+        timeout: Duration.minutes(70),
+        logs: {
+          destination: grantsExportSmLogGroup,
+          level: sfn.LogLevel.ERROR,
+          includeExecutionData: false,
+        },
+        tracingEnabled: true,
+      });
+
+      const grantsExportRule = new events.Rule(this, "GrantsExportScheduleRule", {
+        ruleName: `sps-grants-export-${env}`,
+        description: `SPS grants bulk export -- daily 05:30 UTC (${env}).`,
+        schedule: events.Schedule.cron({ minute: "30", hour: "5" }),
+        enabled: true,
+      });
+      grantsExportRule.addTarget(
+        new eventsTargets.SfnStateMachine(grantsExportStateMachine, {
+          input: events.RuleTargetInput.fromObject({}),
+          retryAttempts: 0,
+        }),
+      );
+
+      // Cadence alarm -- absence of any execution across two consecutive
+      // 1-day windows (~2 missed daily fires). Same shape as the curated-
+      // tables backup's cadence alarm.
+      const grantsExportCadenceAlarm = new cloudwatch.Alarm(this, "GrantsExportCadenceAlarm", {
+        alarmName: `sps-grants-export-cadence-${env}`,
+        alarmDescription: `SPS grants bulk export (${env}) -- cadence missed (no execution started in ~2 days). Next: confirm the daily rule is enabled and the state-machine IAM is intact; run 'npm run export:grants-bulk' via run-task to bridge the gap.`,
+        metric: new cloudwatch.Metric({
+          namespace: "AWS/States",
+          metricName: "ExecutionsStarted",
+          statistic: cloudwatch.Stats.SUM,
+          period: Duration.days(1),
+          dimensionsMap: {
+            StateMachineArn: grantsExportStateMachine.stateMachineArn,
+          },
+        }),
+        evaluationPeriods: 2,
+        datapointsToAlarm: 2,
+        threshold: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+      });
+      grantsExportCadenceAlarm.addAlarmAction(alarmAction);
+
+      // Status alarm -- same reasoning as the curated-tables backup's status
+      // alarm: a TIMED_OUT execution started (cadence alarm stays green) and
+      // runs no Catch (the SnsPublish above never fires), so this is the only
+      // signal for that failure mode.
+      const grantsExportStatusAlarm = new cloudwatch.Alarm(this, "GrantsExportStatusAlarm", {
+        alarmName: `sps-grants-export-status-${env}`,
+        alarmDescription: `SPS grants bulk export (${env}) -- a run did not finish successfully: it failed, ran out of time, or was stopped. The consumer's last-good object in S3 is unchanged; this run's data did not land, so it is a day older than it looks. Next: open the Step Functions execution for scholars-grants-export-${env} and read the task's logs. Nothing retries before tomorrow's 05:30 UTC fire -- run 'npm run export:grants-bulk' via run-task to close the gap.`,
+        metric: unsuccessfulMetric(
+          { StateMachineArn: grantsExportStateMachine.stateMachineArn },
+          Duration.days(1),
+        ),
+        evaluationPeriods: 1,
+        threshold: 0,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      grantsExportStatusAlarm.addAlarmAction(alarmAction);
+    }
+
+    // ------------------------------------------------------------------
     // Standalone DynamoDB projection schedule — daily `etl:dynamodb` (#1218).
     //
     // `etl:dynamodb` mirrors ReciterAI's `reciterai` DynamoDB table into the
@@ -2941,6 +3148,11 @@ export class EtlStack extends Stack {
     new CfnOutput(this, "CurationBackupBucketName", {
       value: curationBackupBucket.bucketName,
       description: "SPS curated-tables logical-backup bucket (backup:curated uploads here).",
+    });
+    new CfnOutput(this, "GrantsExportBucketName", {
+      value: grantsExportBucket.bucketName,
+      description:
+        "SPS grants bulk-export bucket (export:grants-bulk uploads grants.ndjson here).",
     });
     new CfnOutput(this, "NightlyStateMachineArn", {
       value: this.nightlyStateMachine.stateMachineArn,

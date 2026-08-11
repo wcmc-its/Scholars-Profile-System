@@ -237,6 +237,36 @@ export interface SpsEnvConfig {
    */
   readonly curationBackupScheduleEnabled: boolean;
   /**
+   * Whether the nightly all-scholars grants bulk export (`export:grants-bulk`,
+   * scripts/exports/grants-bulk-export.ts — a read-only NDJSON dump of every
+   * `Grant` row to the grants-export S3 bucket) is scheduled AND readable
+   * cross-account, at deploy time. Replaces a rejected live "bulk API" idea
+   * (measured ~58-67 MB per full-cohort JSON response, too heavy for a
+   * synchronous web-tier route) for the Research Informatics cross-account
+   * consumer (role ARN supplied out-of-band via the SSM param below, never
+   * committed).
+   *
+   * Gates TWO things together, deliberately, not just the EventBridge rule's
+   * Enabled flag: the EventBridge schedule + state machine, AND the
+   * cross-account bucket policy (which resolves the consumer role ARN from an
+   * SSM param at deploy time — `/scholars/<env>/grants-export/consumer-role-arn`
+   * — that does not exist in prod SSM yet). An automated export nobody can
+   * read is pointless, and a read grant with no data landing is pointless, so
+   * this flag treats them as one go-live step. The bucket itself + its
+   * GRANTS_EXPORT_BUCKET env-var injection are UNCONDITIONAL in both envs
+   * (like {@link curationBackupScheduleEnabled}'s bucket) so an operator can
+   * still run the export by hand via run-task before the schedule/grant go live.
+   *
+   * `true` in staging so the export + the cross-account read grant can be
+   * hand-verified there first; `false` in prod until staging verification is
+   * done AND Research Informatics' role is actually ready to be granted prod
+   * read access (which also means seeding the prod SSM param BEFORE flipping
+   * this, or the next `cdk deploy Sps-Etl-prod` fails resolving it). See
+   * ~/Dropbox/Projects/Scholars-Profile-System/2026-08-11-grants-bulk-export-plan.md
+   * (not in this repo) for the staging-first rollout plan.
+   */
+  readonly grantsExportScheduleEnabled: boolean;
+  /**
    * Whether the standalone daily DynamoDB→MySQL projection (`etl:dynamodb`, the
    * step that mirrors ReciterAI's `reciterai` table into the `opportunity` +
    * scholar tables) runs on its OWN schedule, separate from the nightly cadence.
@@ -650,6 +680,10 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // #1032 — daily curated-tables logical backup; enabled in staging (the
     // backup is live + verified here). Read-only + tiny, so safe from launch.
     curationBackupScheduleEnabled: true,
+    // Nightly all-scholars grants bulk export (Research Informatics
+    // cross-account consumer) — staging-first, per flag JSDoc. Build + verify
+    // here before flipping prod or granting the consumer role prod access.
+    grantsExportScheduleEnabled: true,
     // #1218 — daily standalone DynamoDB projection so the funding-matcher corpus
     // stays fresh while the nightly is blocked at etl:ed (#443).
     //
@@ -828,6 +862,10 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // prod (deploy + first verify run) then flip this to true. See
     // docs/curation-backup-runbook.md § Prod.
     curationBackupScheduleEnabled: false,
+    // Nightly grants bulk export NOT YET ACTIVATED on prod — staging-first
+    // rollout, per flag JSDoc. Flip once staging is hand-verified and Research
+    // Informatics' role is ready for prod read access.
+    grantsExportScheduleEnabled: false,
     // #1218 — standalone DynamoDB projection ships disabled on prod: the prod
     // opportunity corpus isn't published yet and the matcher is dark there. Flip
     // when the prod corpus lands (or leave off once #443 unblocks the nightly).

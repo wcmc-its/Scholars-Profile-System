@@ -114,6 +114,7 @@
     "etl:integrity": "tsx etl/integrity/index.ts",
     "etl:vivo-redirect": "tsx etl/vivo-redirect/generate-map.ts",
     "backup:curated": "tsx scripts/backups/export-curated-tables.ts",
+    "export:grants-bulk": "tsx scripts/exports/grants-bulk-export.ts",
     "seo:basket": "tsx scripts/seo/build-basket.ts",
     "seo:track": "tsx scripts/seo/track-rank.ts",
     "seo:diff": "tsx scripts/seo/diff-rank.ts",
