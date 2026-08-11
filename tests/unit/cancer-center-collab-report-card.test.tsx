@@ -85,4 +85,29 @@ describe("CancerCenterCollabReportCard", () => {
     expect(screen.getByLabelText(/About the Collaboration threshold/)).toBeTruthy();
     expect(screen.getByLabelText(/About the Cancer-relevance threshold/)).toBeTruthy();
   });
+
+  it("each section's table filters and sorts client-side", async () => {
+    mockFetch();
+    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" />);
+    fireEvent.click(screen.getByText("Collaboration & Cancer-Relevance"));
+    await waitFor(() => expect(screen.getByText(/REMOVE/)).toBeTruthy());
+
+    const removeSection = screen.getByText(/REMOVE/).closest("section")!;
+    // REMOVE has one row (Removeperson) — filtering it out of existence proves
+    // the filter box is wired to this section's own rows, not a global list.
+    fireEvent.change(within(removeSection).getByLabelText(/Filter rows/), {
+      target: { value: "nobody-matches-this" },
+    });
+    expect(within(removeSection).queryByText(/Removeperson/)).toBeNull();
+    expect(within(removeSection).getByText(/No rows match/)).toBeTruthy();
+
+    // Sorting by Papers (desc) in the collaborator+relevant section: only one
+    // row there in this fixture, so just confirm the control doesn't blow up
+    // and the row survives the re-sort.
+    const collabSection = screen.getByText(/collaborator \+ relevant/).closest("section")!;
+    fireEvent.change(within(collabSection).getByLabelText(/Sort rows by/), {
+      target: { value: "papers" },
+    });
+    expect(within(collabSection).getByText(/Collabrelevant/)).toBeTruthy();
+  });
 });
