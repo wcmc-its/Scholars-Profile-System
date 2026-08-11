@@ -29,9 +29,12 @@ rel_include_term,Early Detection of Cancer,,,,
 rel_include_term,Cancer Pain,,,,
 rel_include_term,Breast Cancer Lymphedema,,,,
 rel_include_term,"Biomarkers, Tumor",,,,
-rel_include_term,"Genes, Neoplasm",,,,
-rel_include_term,"Genes, Tumor Suppressor",,,,
-rel_include_term,Oncogenes,,,,
+rel_include_subtree,"Genes, Neoplasm",,,,"#gap-3 structural fix: admit MeSH's own cancer-gene branches instead of a curated gene roster. Genes, Neoplasm's subtree already contains Oncogenes and part of Genes, Tumor Suppressor; upgrading all three to subtree sweeps in Genes, erbB-2 (HER2), Genes, ras, Genes, myc, Genes, p53 without anyone maintaining a list. Verified against live MeSH tree numbers 2026-08-11."
+rel_include_subtree,"Genes, Tumor Suppressor",,,,"#gap-3: kept as its own anchor (not redundant with Genes, Neoplasm above) — it carries a SECOND tree number outside that subtree, so dropping this row would silently lose that branch."
+rel_include_subtree,Oncogenes,,,,"#gap-3: kept as its own anchor for clarity even though its subtree is already reachable via Genes, Neoplasm above — redundant admission is harmless (admittedBy just carries both names) and this row's own name is more legible in the audit trail than an inherited one."
+rel_include_subtree,Neoplasm Proteins,,,,"#gap-3: the PROTEIN-side counterpart to the gene rows above — a separate MeSH branch (D12.776.624, protein chemistry, not the gene/disease tree) that admitted NOTHING before this row. Contains Tumor Suppressor Protein p53 and Proto-Oncogene Proteins c-myc directly. BRCA1/BRCA2 Protein below (both under this same branch) are redundant with this row, kept for their own review-flag history rather than removed."
+rel_exclude_term,Proto-Oncogene Proteins c-akt,,,,"#gap-3 precision: 158 tagged, 46% no neoplasm co-tag vs. a 20-35% baseline for p53/myc/ras — heavy non-cancer use (metabolism/neuroscience) at WCM. Present via Neoplasm Proteins subtree above."
+rel_exclude_term,Janus Kinase 2,,,,"#gap-3 precision: 89 tagged, 58% no neoplasm co-tag — broad cytokine-receptor-signaling/hematopoiesis use well beyond myeloproliferative neoplasms. Present via Neoplasm Proteins subtree above."
 rel_include_term,Neoplastic Stem Cells,,,,
 rel_include_term,Tumor Microenvironment,,,,
 rel_include_term,Cancer-Associated Fibroblasts,,,,
@@ -40,8 +43,18 @@ rel_include_term,Carcinogens,,,review,"Broad; admits some environmental-health w
 rel_include_term,"Receptors, Chimeric Antigen",,,review,"CAR constructs; near-universally oncology but not formally a neoplasm term."
 rel_include_term,"National Cancer Institute (U.S.)",,,,
 rel_include_term,National Program of Cancer Registries,,,,
-rel_include_term,BRCA1 Protein,,,review,"Admits pure structural-biology work with no neoplasm term. Deliberate call needed."
-rel_include_term,BRCA2 Protein,,,review,"As above."
+rel_include_term,BRCA1 Protein,,,review,"Admits pure structural-biology work with no neoplasm term. Deliberate call needed. #gap-3: now redundant with the Neoplasm Proteins subtree row above (same MeSH branch) — kept for its own review-flag history, not removed."
+rel_include_term,BRCA2 Protein,,,review,"As above. #gap-3: redundant with Neoplasm Proteins above, same reasoning."
+rel_include_term,Papillomavirus Infections,,,,"#gap-1 etiology. Sized 2026-08-11 against 191,110 WCM-confirmed pubs: 189 tagged, 59 (31%) carry no neoplasm co-tag — well-established cervical/oropharyngeal etiology, majority of local usage already cancer-adjacent."
+rel_include_term,Epstein-Barr Virus Infections,,,,"#gap-1: 84 tagged, 32 (38%) no neoplasm co-tag — established Burkitt/nasopharyngeal/Hodgkin etiology."
+rel_include_term,Helicobacter pylori,,,review,"#gap-1: 43 tagged, 27 (63%) no neoplasm co-tag. Real gastric-cancer/MALT-lymphoma link, but most local H. pylori work is general GI/microbiology — flagged for an SME precision call, not a clean add."
+rel_include_term,Helicobacter Infections,,,review,"#gap-1: 45 tagged, 27 (60%) no neoplasm co-tag. Same call as Helicobacter pylori above — the two overlap substantially, consider whether both are needed."
+# gap-1: "Hepatitis B" considered and REJECTED 2026-08-11. 120 tagged, 108 (90%) no
+# neoplasm co-tag; "Hepatitis B, Chronic" alternative also sized: 49 tagged, 42 (86%)
+# no co-tag — barely better. Cancer-motivated HBV work (HCC etiology) is the slice most
+# likely to already carry a Liver Neoplasms co-tag on its own, so the marginal recall
+# gain from either row is small against a 86-90% dilution cost. Do not re-add without
+# new evidence.
 topic_subtree,Breast Neoplasms,breast,,,
 topic_subtree,"Breast Neoplasms, Male",breast,,,
 topic_subtree,Lung Neoplasms,lung-thoracic,,,
@@ -122,13 +135,17 @@ topic_subtree,"Neoplastic Syndromes, Hereditary",cc-hereditary,,,"Cross-cutting 
 topic_subtree,Precancerous Conditions,cc-precancerous,,,
 topic_subtree,Neoplastic Processes,cc-biology,,,
 topic_term,Neoplasm Metastasis,cc-biology,,,
+topic_term,"Neoplasm Recurrence, Local",cc-biology,,,"#gap-4: sibling of Neoplasm Metastasis above, same topic — cheap completeness fix."
+topic_term,"Neoplasm, Residual",cc-biology,,,"#gap-4: sibling of Neoplasm Metastasis above."
+topic_term,"Neoplasm Regression, Spontaneous",cc-biology,,,"#gap-4: sibling of Neoplasm Metastasis above."
 topic_term,Neoplastic Stem Cells,cc-biology,,,
 topic_term,Tumor Microenvironment,cc-biology,,,
 topic_term,Cancer-Associated Fibroblasts,cc-biology,,,
 topic_term,"Biomarkers, Tumor",cc-biology,,,
-topic_term,"Genes, Neoplasm",cc-biology,,,
-topic_term,"Genes, Tumor Suppressor",cc-biology,,,
-topic_term,Oncogenes,cc-biology,,,
+topic_subtree,"Genes, Neoplasm",cc-biology,,,"#gap-3: upgraded alongside the rel_include_subtree row above, same reasoning — descendant genes should land in cc-biology, not unassigned."
+topic_subtree,"Genes, Tumor Suppressor",cc-biology,,,
+topic_subtree,Oncogenes,cc-biology,,,
+topic_subtree,Neoplasm Proteins,cc-biology,,,"#gap-3: pairs with the rel_include_subtree row above."
 topic_term,Carcinogenesis,cc-biology,,,
 topic_term,BRCA1 Protein,cc-biology,,,
 topic_term,BRCA2 Protein,cc-biology,,,
