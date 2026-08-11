@@ -278,8 +278,18 @@ export type EditContextDataset = {
   depositYear: number | null;
   /** 'open' | 'controlled', or null when unknown. */
   accessModel: string | null;
-  /** 'high' | 'low' | 'unclear', or null (databank rows carry no confidence). */
+  /** 'high' | 'low' | 'unclear', or null (databank rows carry no confidence).
+   *  Extraction-pipeline QA metadata, not a fact about the dataset — shown
+   *  here (unlike the public profile, `datasets-section.tsx`) because this
+   *  is the scholar's own review surface: it's exactly the signal that helps
+   *  them judge whether a row is really theirs. */
   confidence: string | null;
+  /** DataCite title or CT.gov briefTitle (#2350 phase 2), or null. */
+  title: string | null;
+  /** 'databank' | 'fulltext-scan', or null. */
+  provenance: string | null;
+  /** Citing PMIDs for this (cwid, dataset) pair — usually one, sometimes more. */
+  pmids: string[];
   /** 'first' | 'last' | 'middle' — this scholar's role on the deposit. */
   authorPosition: string;
   state: "shown" | "hidden_by_self" | "removed_by_admin";
@@ -1102,6 +1112,7 @@ export async function loadEditContext(
           select: {
             datasetId: true,
             authorPosition: true,
+            pmids: true,
             dataset: {
               select: {
                 repository: true,
@@ -1111,6 +1122,8 @@ export async function loadEditContext(
                 depositYear: true,
                 accessModel: true,
                 confidence: true,
+                title: true,
+                provenance: true,
               },
             },
           },
@@ -1165,6 +1178,12 @@ export async function loadEditContext(
         depositYear: r.dataset.depositYear,
         accessModel: r.dataset.accessModel,
         confidence: r.dataset.confidence,
+        title: r.dataset.title,
+        provenance: r.dataset.provenance,
+        // Real MySQL JSON column via Prisma (unlike reciterdb's MariaDB
+        // LONGTEXT-alias JSON, this comes back already parsed) — still
+        // narrowed defensively since `Json` is `JsonValue`, not `string[]`.
+        pmids: Array.isArray(r.pmids) ? r.pmids.filter((p): p is string => typeof p === "string") : [],
         authorPosition: r.authorPosition,
         state,
         suppressionId,

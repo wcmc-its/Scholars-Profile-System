@@ -41,6 +41,33 @@ export type DatasetsCardProps = {
 };
 
 type Row = EditContextDataset;
+
+/** `provenance`'s raw enum ('databank' | 'fulltext-scan') → the label the
+ *  mockup (s-index-ui-proposal.html §5) uses in the citation line below. */
+const PROVENANCE_LABELS: Record<string, string> = {
+  databank: "DataBankList",
+  "fulltext-scan": "full-text scan",
+};
+
+/** "From PMID 36711842 (you are last author) · full-text scan, high
+ *  confidence" (s-index-ui-proposal.html §5's edit-row `.m` line) — the
+ *  context a scholar needs to judge a row in five seconds: which of their
+ *  papers cited this, their role on it, how it was found, and how sure the
+ *  extractor was. Deliberately not shown on the public profile
+ *  (`datasets-section.tsx`) — that's a fact about the extraction, not the
+ *  dataset, and only useful to the person deciding whether to hide it. */
+function citationLine(d: Row): string {
+  const from =
+    d.pmids.length > 0
+      ? `From PMID ${d.pmids[0]}${d.pmids.length > 1 ? ` (+${d.pmids.length - 1} more)` : ""} (you are ${d.authorPosition} author)`
+      : `You are ${d.authorPosition} author`;
+  const method = d.provenance ? PROVENANCE_LABELS[d.provenance] ?? d.provenance : null;
+  const methodConfidence = [method, d.confidence ? `${d.confidence} confidence` : null]
+    .filter(Boolean)
+    .join(", ");
+  return [from, methodConfidence].filter(Boolean).join(" · ");
+}
+
 type OptimisticUpdate =
   | { kind: "hide"; datasetId: string }
   | { kind: "show"; datasetId: string };
@@ -201,6 +228,7 @@ function DatasetRow({
             ) : (
               <span className="font-mono text-sm">{dataset.accessionOrDoi}</span>
             )}
+            {dataset.title ? ` — ${dataset.title}` : null}
           </p>
           <p className="text-sm text-muted-foreground">
             {dataset.dataType ?? "Data type unknown"} · {dataset.depositYear ?? "Year unknown"} ·{" "}
@@ -217,6 +245,7 @@ function DatasetRow({
               </>
             )}
           </p>
+          <p className="text-muted-foreground text-sm">{citationLine(dataset)}</p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {dataset.state === "shown" && (

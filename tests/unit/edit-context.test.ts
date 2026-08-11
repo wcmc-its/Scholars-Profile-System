@@ -976,6 +976,7 @@ describe("loadEditContext — dataset deposits (suppressible, flag-gated, #2348)
     {
       datasetId: "ds-1",
       authorPosition: "first",
+      pmids: ["12345678"],
       dataset: {
         repository: "GEO",
         accessionOrDoi: "GSE12345",
@@ -984,6 +985,8 @@ describe("loadEditContext — dataset deposits (suppressible, flag-gated, #2348)
         depositYear: 2023,
         accessModel: "open",
         confidence: "high",
+        title: null,
+        provenance: "fulltext-scan",
       },
     },
   ];
@@ -1024,6 +1027,9 @@ describe("loadEditContext — dataset deposits (suppressible, flag-gated, #2348)
         depositYear: 2023,
         accessModel: "open",
         confidence: "high",
+        title: null,
+        provenance: "fulltext-scan",
+        pmids: ["12345678"],
         authorPosition: "first",
         state: "shown",
         suppressionId: null,
