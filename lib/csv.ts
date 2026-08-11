@@ -1,5 +1,5 @@
 /**
- * Minimal RFC 4180 CSV writer.
+ * Minimal RFC 4180 CSV writer + reader.
  *
  * Why not ExcelJS: PM uses ExcelJS because it also emits .xlsx workbooks.
  * Scholars exports plain CSV only, and ExcelJS pulls in ~1MB of zip /
@@ -11,6 +11,12 @@
  * when the file has any non-ASCII content; we omit the BOM intentionally
  * so the file opens cleanly in `cat`, `less`, `head`, and downstream
  * pipelines that don't strip it.
+ *
+ * `parseCsv` (the reader half) moved here from the retired
+ * `lib/cancer-center-mesh-taxonomy.ts` once its last consumer became the
+ * cancer-taxonomy generator — this repo's one CSV dialect now has its
+ * write and read halves in the same file instead of one hanging off an
+ * unrelated module.
  */
 
 export type CsvCell = string | number | null | undefined;
@@ -61,4 +67,30 @@ export function toCsv(
   }
   // CRLF terminator per spec; also keeps Excel-on-Windows happy.
   return out.join("\r\n") + "\r\n";
+}
+
+export type Row = Record<string, string>;
+
+/** Minimal RFC4180 reader: quoted fields, doubled quotes, `#` comment lines. */
+export function parseCsv(text: string): Row[] {
+  const lines: string[][] = [];
+  let field = "";
+  let row: string[] = [];
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; } else quoted = false;
+      } else field += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n") { row.push(field); lines.push(row); row = []; field = ""; }
+    else if (c !== "\r") field += c;
+  }
+  if (field !== "" || row.length) { row.push(field); lines.push(row); }
+  const body = lines.filter((r) => r.length > 1 && !r[0].startsWith("#"));
+  const header = body.shift();
+  if (!header) return [];
+  return body.map((r) => Object.fromEntries(header.map((h, i) => [h.trim(), (r[i] ?? "").trim()])));
 }

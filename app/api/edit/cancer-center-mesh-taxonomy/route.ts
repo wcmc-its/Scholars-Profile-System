@@ -2,12 +2,15 @@
  * GET /api/edit/cancer-center-mesh-taxonomy
  *
  * Read-only detail behind the Reports tab's "How cancer-relevance is
- * determined" modal — the 18-code taxonomy (`docs/cancer-center-disease-
- * taxonomy.csv`), each code's real MeSH anchor term(s) + tree number(s), and
- * a live-computed sample of the descendant MeSH terms that actually fall
- * under it. Built from `buildTaxonomyDetail`, which reuses the same
- * `codeByUi` the weekly ETL step matches papers against — the modal can
- * never show a broader or narrower subtree than what's actually counted.
+ * determined" modal — the topic-grouped `CancerTaxonomyDescriptor` ruleset
+ * (`docs/cancer-taxonomy-ruleset.csv`), grouped by topic bucket with a live
+ * count and a capped sample of the descriptors that carry it. Built from
+ * `buildTopicDetail`, which reuses the SAME `topicsByUi` lookup the weekly
+ * ETL step matches papers against — the modal can never show a broader or
+ * narrower set than what's actually counted. No more codes, anchors, or tree
+ * numbers: those belonged to the retired 18-code CSV taxonomy this replaces.
+ * A relevant-but-untagged descriptor groups under the "unassigned" bucket
+ * rather than disappearing.
  *
  * Cancer-relevance only matters today for full-time faculty who could be
  * Cancer Center members — this taxonomy is WCM-wide (not per-center) and not
@@ -17,7 +20,7 @@
  */
 import { type NextResponse } from "next/server";
 
-import { buildTaxonomyDetail, loadTaxonomy } from "@/lib/cancer-center-mesh-taxonomy";
+import { buildTopicDetail, loadCancerTaxonomy } from "@/lib/cancer-taxonomy";
 import { db } from "@/lib/db";
 import { editError, editOk, resolveEditIdentity } from "@/lib/edit/request";
 
@@ -25,7 +28,7 @@ export async function GET(): Promise<NextResponse> {
   const identity = await resolveEditIdentity();
   if (!identity) return editError(401, "unauthenticated");
 
-  const { codeByUi, descriptors, taxonomy } = await loadTaxonomy(db.read.meshDescriptor);
-  const codes = buildTaxonomyDetail(taxonomy, descriptors, codeByUi);
-  return editOk({ codes });
+  const lookup = await loadCancerTaxonomy(db.read.cancerTaxonomyDescriptor, db.read.meshDescriptor);
+  const topics = buildTopicDetail(lookup);
+  return editOk({ topics });
 }

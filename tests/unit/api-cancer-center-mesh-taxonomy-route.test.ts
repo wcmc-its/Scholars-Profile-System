@@ -1,16 +1,16 @@
 /**
  * GET /api/edit/cancer-center-mesh-taxonomy — 401 unauthenticated; 200 shapes
- * whatever `buildTaxonomyDetail` returns, built from `loadTaxonomy`. Not
+ * whatever `buildTopicDetail` returns, built from `loadCancerTaxonomy`. Not
  * center-scoped (no curator-role check) — any authenticated `/edit` session
  * may read it, same as its sibling collab-report route's own posture but
  * without the per-center authz layer since this isn't center data.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const { mockGetEditSession, mockLoadTaxonomy, mockBuildTaxonomyDetail } = vi.hoisted(() => ({
+const { mockGetEditSession, mockLoadCancerTaxonomy, mockBuildTopicDetail } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
-  mockLoadTaxonomy: vi.fn(),
-  mockBuildTaxonomyDetail: vi.fn(),
+  mockLoadCancerTaxonomy: vi.fn(),
+  mockBuildTopicDetail: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
@@ -24,29 +24,26 @@ vi.mock("@/lib/auth/session-server", () => ({
     return s ? { cwid: s.cwid, iat: 0, exp: 0 } : null;
   }),
 }));
-vi.mock("@/lib/db", () => ({ db: { read: { meshDescriptor: { findMany: vi.fn() } } } }));
-vi.mock("@/lib/cancer-center-mesh-taxonomy", () => ({
-  loadTaxonomy: mockLoadTaxonomy,
-  buildTaxonomyDetail: mockBuildTaxonomyDetail,
+vi.mock("@/lib/db", () => ({
+  db: { read: { cancerTaxonomyDescriptor: { findMany: vi.fn() }, meshDescriptor: { findMany: vi.fn() } } },
+}));
+vi.mock("@/lib/cancer-taxonomy", () => ({
+  loadCancerTaxonomy: mockLoadCancerTaxonomy,
+  buildTopicDetail: mockBuildTopicDetail,
 }));
 
 import { GET } from "@/app/api/edit/cancer-center-mesh-taxonomy/route";
 
 const FIXTURE_DETAIL = [
-  {
-    code: "BREAST",
-    disease: "Breast Cancer",
-    anchors: [{ name: "Breast Neoplasms", treeNumber: "C04.588.180" }],
-    descendantCount: 12,
-    exampleDescendants: ["Breast Neoplasms, Male"],
-  },
+  { topic: "breast", descriptorCount: 12, exampleDescriptors: ["Breast Neoplasms", "Breast Neoplasms, Male"] },
+  { topic: "unassigned", descriptorCount: 3, exampleDescriptors: ["Some Other Descriptor"] },
 ];
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetEditSession.mockResolvedValue({ cwid: "cur001", isSuperuser: false });
-  mockLoadTaxonomy.mockResolvedValue({ codeByUi: new Map(), descriptors: [], taxonomy: [] });
-  mockBuildTaxonomyDetail.mockReturnValue(FIXTURE_DETAIL);
+  mockLoadCancerTaxonomy.mockResolvedValue({ topicsByUi: new Map(), nameByUi: new Map() });
+  mockBuildTopicDetail.mockReturnValue(FIXTURE_DETAIL);
 });
 
 describe("GET /api/edit/cancer-center-mesh-taxonomy", () => {
@@ -56,10 +53,10 @@ describe("GET /api/edit/cancer-center-mesh-taxonomy", () => {
     expect(res.status).toBe(401);
   });
 
-  it("200s with the codes buildTaxonomyDetail returns, for any authenticated /edit session", async () => {
+  it("200s with the topics buildTopicDetail returns, for any authenticated /edit session", async () => {
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ ok: true, codes: FIXTURE_DETAIL });
+    expect(body).toEqual({ ok: true, topics: FIXTURE_DETAIL });
   });
 });

@@ -7,16 +7,16 @@
  * detail (title, journal, year, publication type), the ReCiterAI synopsis
  * and impact score/justification, and whether/why it matched the cancer
  * taxonomy — including the specific MeSH term(s) matched, not just the
- * rolled-up disease code. Exists so a curator can audit the classification
+ * rolled-up topic bucket(s). Exists so a curator can audit the classification
  * directly instead of re-deriving it by hand against reciterdb, the way
  * this report's numbers were validated once already.
  *
  * Re-derives per-paper detail at request time — the weekly
  * `CenterCollabCandidate` row only stores aggregate counts, not which papers
- * or which MeSH terms produced them — using the SAME `loadTaxonomy` the ETL
- * step calls (the ETL only needs its boolean `isCancerRelated`; this route
- * additionally uses `matchedCodes`/`matchedUis` for the term-level "why"),
- * so the export can't drift from what was actually counted.
+ * or which MeSH terms produced them — using the SAME `loadCancerTaxonomy`
+ * the ETL step calls (the ETL only needs its boolean `isCancerRelated`; this
+ * route additionally uses `matchedTopics`/`matchedUis` for the term-level
+ * "why"), so the export can't drift from what was actually counted.
  *
  * Authz mirrors the parent report: Curator/Owner of the center, or
  * Superuser/comms_steward (`canEditUnit`).
@@ -36,7 +36,7 @@
  */
 import { NextResponse, type NextRequest } from "next/server";
 
-import { diseaseByCode, loadTaxonomy, matchedCodes, matchedUis } from "@/lib/cancer-center-mesh-taxonomy";
+import { loadCancerTaxonomy, matchedTopics, matchedUis } from "@/lib/cancer-taxonomy";
 import { DEFAULT_CUTOFF_YEAR, splitName } from "@/lib/center-collaboration/recommendations-core";
 import { toCsv, type CsvCell } from "@/lib/csv";
 import { db } from "@/lib/db";
@@ -56,8 +56,7 @@ const HEADERS = [
   "year",
   "is_cancer_related",
   "matched_terms",
-  "matched_codes",
-  "matched_diseases",
+  "matched_topics",
   "impact_score",
   "impact_justification",
   "synopsis",
@@ -156,9 +155,7 @@ export async function GET(
     },
   });
 
-  const { codeByUi, descriptors, taxonomy } = await loadTaxonomy(db.read.meshDescriptor);
-  const diseaseNameByCode = diseaseByCode(taxonomy);
-  const termNameByUi = new Map(descriptors.map((d) => [d.ui, d.name]));
+  const lookup = await loadCancerTaxonomy(db.read.cancerTaxonomyDescriptor, db.read.meshDescriptor);
 
   const rows: CsvCell[][] = authorRows
     .filter((r): r is typeof r & { cwid: string } => r.cwid !== null)
@@ -167,8 +164,8 @@ export async function GET(
       const meshUis = Array.isArray(mt)
         ? mt.flatMap((x) => (x && typeof x === "object" && "ui" in x && typeof x.ui === "string" ? [x.ui] : []))
         : [];
-      const codes = matchedCodes(meshUis, codeByUi);
-      const terms = matchedUis(meshUis, codeByUi).map((ui) => termNameByUi.get(ui) ?? ui);
+      const topics = matchedTopics(meshUis, lookup);
+      const terms = matchedUis(meshUis, lookup).map((ui) => lookup.nameByUi.get(ui) ?? ui);
       const { given, surname } = nameByCwid.get(r.cwid) ?? { given: "", surname: r.cwid };
       return [
         r.cwid,
@@ -179,10 +176,9 @@ export async function GET(
         r.publication.journal,
         r.publication.publicationType,
         r.publication.year,
-        codes.length > 0 ? "yes" : "no",
+        topics.length > 0 ? "yes" : "no",
         terms.join(";"),
-        codes.join(";"),
-        codes.map((c) => diseaseNameByCode.get(c) ?? c).join(";"),
+        topics.join(";"),
         r.publication.impactScore !== null ? Number(r.publication.impactScore) : null,
         r.publication.impactJustification,
         r.publication.synopsis,

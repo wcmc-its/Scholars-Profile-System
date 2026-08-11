@@ -26,7 +26,7 @@
  * (docs/cancer-taxonomy-golden — see the .test.ts alongside this file)
  * depends on using the same ordering as the source script.
  */
-import { parseCsv } from "@/lib/cancer-center-mesh-taxonomy";
+import { parseCsv } from "@/lib/csv";
 
 const REL_RULES = new Set([
   "rel_include_subtree",

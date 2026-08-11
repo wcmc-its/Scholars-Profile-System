@@ -5,11 +5,11 @@
  * `docs/cancer-taxonomy-ruleset.csv` against the already-persisted
  * `MeshDescriptor` table and full-replaces `CancerTaxonomyDescriptor`.
  *
- * NOT wired to any reader yet. `etl/cancer-center-collab-report/index.ts`
- * and the "How cancer-relevance is determined" modal still walk the old
- * `docs/cancer-center-disease-taxonomy.csv` (`lib/cancer-center-mesh-
- * taxonomy.ts`) — cutting them over is a later, separate step gated on a
- * person-level diff against real reciterdb numbers (see the plan doc).
+ * `etl/cancer-center-collab-report/index.ts`, the "How cancer-relevance is
+ * determined" modal, and the per-paper CSV export all read this table
+ * directly now (`lib/cancer-taxonomy.ts`) — the old CSV taxonomy and its
+ * hand-walked MeSH matching (`lib/cancer-center-mesh-taxonomy.ts`,
+ * `docs/cancer-center-disease-taxonomy.csv`) are retired.
  *
  * Versioning: a taxonomy resolution is only reproducible as the COMBINATION
  * of (ruleset content, MeSH release) — either alone is not enough. This

@@ -164,6 +164,7 @@ in **§10**.
 | [`ctl-technologies.md`](./ctl-technologies.md) | Where a profile's **Available technologies** come from, and what to do when the weekly CTL scrape shrinks — the CWID-only join (never name, never PMID), the `TechnologyWeekly` step, the `TECHNOLOGIES_MIN_RETAIN` volume guard, and the no-op short-circuit. |
 | [`2026-07-18-news-mentions-plan.md`](./2026-07-18-news-mentions-plan.md) | Where a profile's **News mentions** come from and how an article gets attached to a scholar — the `news_mention` model, the weekly `etl:news` ingest (repointed under #2200 to the WCM Newsroom `feed.json`; the research site is a *syndication target*, not a source), the trusted VIVO `cwid-` link → published vs prose name-match → pending rule, the upsert that never reverts a human decision, and the `/edit/news-queue` approval surface (superusers + `comms_steward`). Prod-on 2026-07-27. |
 | [`spotlight-pipeline.md`](./spotlight-pipeline.md) | **Why *this* Spotlight card and not that one** — the pipeline end to end across two repos: ReciterAI's monthly 6-stage generation (rank → select → lede → critic → sensitive gate → publish to S3), the impact / relevance / article-score blend that picks a card's lead paper, this app's SHA256-gated weekly `etl:spotlight` full-replacement ingest into `Spotlight`, and the per-surface inclusion criteria (impact ≥ 40, year ≥ 2020, first/last author; faculty-only on topic/unit pages vs faculty + postdocs + fellows on the home carousel). The companion to the operator-facing [`spotlight-runbook.md`](./spotlight-runbook.md). |
+| [`cancer-taxonomy-generator.md`](./cancer-taxonomy-generator.md) | Where a paper's cancer-relevance topic bucket(s) come from — the two-axis (`cancer_relevant`/`topics`) MeSH-descriptor closure generated from `docs/cancer-taxonomy-ruleset.csv`, the admit-exclude-readmit algorithm, the paired-hash versioning, the rot-detection design, and the "size before deciding" content-review discipline. The generator/table/ETL step are merged and have run for real against staging (#2356); content refinements are in review (#2358). The Reports tab, CSV export, and "How cancer-relevance is determined" modal now read `CancerTaxonomyDescriptor` directly (this PR). |
 
 ## 7. Architecture Decision Records — why it's built this way
 
@@ -237,14 +238,6 @@ Listed here for completeness so §1–§8 stay focused.
   staging-soaked but **dark in prod** — `REPORTER_MATCH_V2` is `env === "staging" ? "on" : "off"`
   in both the app and ETL task-defs, so `reporter_profile_candidate` stays empty in prod until ops
   flip it. (v1 shipped and is indexed in §6.)
-- Cancer taxonomy generator — the two-axis (`cancer_relevant`/`topics`) MeSH-descriptor
-  closure replacing the hand-picked `docs/cancer-center-disease-taxonomy.csv`; the
-  admit-exclude-readmit algorithm, the paired-hash versioning, the rot-detection design, and
-  the "size before deciding" content-review discipline: `cancer-taxonomy-generator.md`. The
-  generator/table/ETL step are merged and have run for real against staging (#2356); content
-  refinements are in review (#2358). **Not wired to any reader** — the Reports tab, CSV
-  export, and modal still read the old taxonomy pending a person-level cutover diff. Promote
-  to §6 once that cutover ships.
 - Outreach (launch-window, #506 D5): `outreach/_skeleton.md` (shared 5-part template) + per-audience
   drafts `outreach/wave1-center-admins.md`, `outreach/wave1-superusers-library.md`,
   `outreach/wave2-scholars.md`,

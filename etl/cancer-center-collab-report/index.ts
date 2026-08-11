@@ -26,7 +26,7 @@
  *
  * Usage: npm run etl:cancer-center-collab-report
  */
-import { isCancerRelated, loadTaxonomy } from "@/lib/cancer-center-mesh-taxonomy";
+import { isCancerRelated, loadCancerTaxonomy } from "@/lib/cancer-taxonomy";
 import { isCenterMembershipActive } from "@/lib/api/centers";
 import {
   computeCollabCandidateMetrics,
@@ -90,7 +90,7 @@ async function computeForCenter(centerCode: string, cutoffYear: number): Promise
     },
     select: { pmid: true, cwid: true, publication: { select: { meshTerms: true } } },
   });
-  const { codeByUi } = await loadTaxonomy(db.write.meshDescriptor);
+  const lookup = await loadCancerTaxonomy(db.write.cancerTaxonomyDescriptor, db.write.meshDescriptor);
   const rows: CollabAuthorRow[] = authorRows
     .filter((r): r is typeof r & { cwid: string } => r.cwid !== null)
     .map((r) => {
@@ -101,7 +101,7 @@ async function computeForCenter(centerCode: string, cutoffYear: number): Promise
       return { pmid: r.pmid, cwid: r.cwid, meshUis };
     });
 
-  const metrics = computeCollabCandidateMetrics(universe, rows, (uis) => isCancerRelated(uis, codeByUi));
+  const metrics = computeCollabCandidateMetrics(universe, rows, (uis) => isCancerRelated(uis, lookup));
 
   await db.write.$transaction([
     db.write.centerCollabCandidate.deleteMany({ where: { centerCode } }),

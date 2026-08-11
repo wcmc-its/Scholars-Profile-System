@@ -47,7 +47,7 @@ import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ADD_THRESHOLD, pct } from "@/lib/center-collaboration/recommendations-core";
-import type { CodeDetail } from "@/lib/cancer-center-mesh-taxonomy";
+import type { TopicDetail } from "@/lib/cancer-taxonomy";
 
 /** (?) icon that reveals `text` on hover/focus — the "explain the logic here"
  *  affordance next to each section heading / threshold control. */
@@ -148,20 +148,20 @@ function SectionHeading({ text, info }: { text: string; info: string }) {
 
 /**
  * "How cancer-relevance is determined" — states the goal in plain language,
- * explains the MeSH-tree subtree-match mechanism, and lists all 18 codes
- * with their real anchor term(s), tree number(s), and a live sample of the
- * descendant terms that actually count. Fetched lazily (only once the dialog
- * opens) from `/api/edit/cancer-center-mesh-taxonomy`, which builds this from
- * the SAME `codeByUi` the weekly ETL step matches papers against — so this
- * can't show a broader or narrower subtree than what's actually counted.
+ * explains the MeSH-tree subtree-match mechanism, and lists every topic
+ * bucket with its live descriptor count and a sample of the descriptors that
+ * carry it. Fetched lazily (only once the dialog opens) from
+ * `/api/edit/cancer-center-mesh-taxonomy`, which builds this from the SAME
+ * `topicsByUi` lookup the weekly ETL step matches papers against — so this
+ * can't show a broader or narrower set than what's actually counted.
  */
 function MeshLogicModal() {
   const [open, setOpen] = React.useState(false);
-  const [codes, setCodes] = React.useState<CodeDetail[] | null>(null);
+  const [topics, setTopics] = React.useState<TopicDetail[] | null>(null);
   const [error, setError] = React.useState(false);
 
   React.useEffect(() => {
-    if (!open || codes || error) return;
+    if (!open || topics || error) return;
     (async () => {
       try {
         const res = await fetch("/api/edit/cancer-center-mesh-taxonomy");
@@ -170,12 +170,12 @@ function MeshLogicModal() {
           return;
         }
         const body = await res.json();
-        setCodes(body.codes);
+        setTopics(body.topics);
       } catch {
         setError(true);
       }
     })();
-  }, [open, codes, error]);
+  }, [open, topics, error]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -206,28 +206,25 @@ function MeshLogicModal() {
           named term.
         </p>
         <p className="text-sm text-muted-foreground">
-          This list is a single, backend-curated definition applied WCM-wide today, not a per-center
-          self-service setting — narrowing it for a specific center&apos;s actual scope is a change to{" "}
-          <code className="text-xs">docs/cancer-center-disease-taxonomy.csv</code>, not something adjustable
-          here.
+          This isn&apos;t a fixed list of 18 disease codes anymore — it&apos;s a backend-curated ruleset of
+          MeSH-subtree rules that decides which descriptors count as cancer-relevant at all, then separately
+          tags some of those descriptors with a topic such as a disease site (others are left
+          &ldquo;unassigned&rdquo;). Applied WCM-wide today, not a per-center self-service setting — narrowing
+          it for a specific center&apos;s actual scope is a change to{" "}
+          <code className="text-xs">docs/cancer-taxonomy-ruleset.csv</code>, not something adjustable here.
         </p>
         {error && <p className="text-sm text-destructive">Failed to load.</p>}
-        {!error && !codes && <p className="text-sm text-muted-foreground">Loading…</p>}
-        {codes && (
+        {!error && !topics && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {topics && (
           <ul className="divide-y divide-border text-sm">
-            {codes.map((c) => (
-              <li key={c.code} className="py-2">
-                <p className="font-medium">
-                  {c.disease}{" "}
-                  <span className="font-normal text-muted-foreground">
-                    ({c.anchors.map((a) => `${a.name} — ${a.treeNumber}`).join("; ")})
-                  </span>
-                </p>
+            {topics.map((t) => (
+              <li key={t.topic} className="py-2">
+                <p className="font-medium">{t.topic}</p>
                 <p className="text-xs text-muted-foreground">
-                  {c.descendantCount} descendant MeSH term{c.descendantCount === 1 ? "" : "s"} match
-                  {c.exampleDescendants.length > 0 && <>: {c.exampleDescendants.join(", ")}</>}
-                  {c.descendantCount > c.exampleDescendants.length &&
-                    ` (+${c.descendantCount - c.exampleDescendants.length} more)`}
+                  {t.descriptorCount} descriptor{t.descriptorCount === 1 ? "" : "s"} match
+                  {t.exampleDescriptors.length > 0 && <>: {t.exampleDescriptors.join(", ")}</>}
+                  {t.descriptorCount > t.exampleDescriptors.length &&
+                    ` (+${t.descriptorCount - t.exampleDescriptors.length} more)`}
                 </p>
               </li>
             ))}
