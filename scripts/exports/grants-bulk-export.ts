@@ -39,7 +39,7 @@
  *   AWS_REGION / AWS_DEFAULT_REGION   (default "us-east-1").
  */
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { db } from "../../lib/db";
+import { db, disconnect } from "../../lib/db";
 import {
   FACULTY_REVIEW_GRANT_SELECT,
   toGrantRecord,
@@ -66,6 +66,16 @@ async function main(): Promise<void> {
   const start = Date.now();
   const now = new Date();
 
+  // Cheap env checks before the expensive full-cohort read + serialize below.
+  const bucket = process.env.GRANTS_EXPORT_BUCKET;
+  if (!bucket) {
+    throw new Error(
+      "GRANTS_EXPORT_BUCKET is not set. (EtlStack injects it on the deployed sps-etl-<env> task.)",
+    );
+  }
+  const key = process.env.GRANTS_EXPORT_KEY ?? DEFAULT_KEY;
+  const region = process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-east-1";
+
   console.log("Loading all Grant rows...");
   const rows = await db.read.grant.findMany({
     // Same lean select as the Faculty Review Tool's per-cwid API — no
@@ -75,17 +85,23 @@ async function main(): Promise<void> {
   });
   console.log(`Fetched ${rows.length} grant rows.`);
 
-  const ndjson = rows.map((r) => JSON.stringify(toGrantExportRecord(r, now))).join("\n") + "\n";
-  const bytes = Buffer.byteLength(ndjson, "utf8");
-
-  const bucket = process.env.GRANTS_EXPORT_BUCKET;
-  if (!bucket) {
+  // A 0-row result is never a legitimate export -- every scholar with a grant
+  // disappearing institution-wide is far more likely a transient bad read
+  // (replica lag, wrong schema, misconfigured env) than reality. Throw rather
+  // than overwrite the one persistent key: this run has no versioning/dated
+  // keys by design, so a bad overwrite destroys the last-known-good snapshot
+  // and the consumer's next pull silently gets ~0 rows. Throwing here instead
+  // fails the ECS task, which the state machine's Catch reports to SNS.
+  if (rows.length === 0) {
     throw new Error(
-      "GRANTS_EXPORT_BUCKET is not set. (EtlStack injects it on the deployed sps-etl-<env> task.)",
+      "Grant.findMany returned 0 rows -- refusing to overwrite the last-known-good " +
+        "grants.ndjson with an empty file. Check DATABASE_URL / replica lag / schema " +
+        "before re-running.",
     );
   }
-  const key = process.env.GRANTS_EXPORT_KEY ?? DEFAULT_KEY;
-  const region = process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-east-1";
+
+  const ndjson = rows.map((r) => JSON.stringify(toGrantExportRecord(r, now))).join("\n") + "\n";
+  const bytes = Buffer.byteLength(ndjson, "utf8");
 
   const s3 = new S3Client({ region });
   await s3.send(
@@ -111,14 +127,10 @@ const isDirectInvocation =
   import.meta.url === `file://${process.argv[1]}`;
 if (isDirectInvocation) {
   main()
-    .then(async () => {
-      await db.read.$disconnect();
-      await db.write.$disconnect();
-    })
+    .then(disconnect)
     .catch(async (err) => {
       console.error(`\ngrants-bulk-export FAILED: ${err instanceof Error ? err.message : err}`);
-      await db.read.$disconnect().catch(() => {});
-      await db.write.$disconnect().catch(() => {});
+      await disconnect().catch(() => {});
       process.exitCode = 1;
     });
 }

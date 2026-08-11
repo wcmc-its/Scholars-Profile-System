@@ -1842,6 +1842,68 @@ describe("EtlStack", () => {
       });
     });
 
+    it("the grants-export cross-account read grant is scoped to the one object key, GetObject only, principal from SSM (never a bare bucket/wildcard)", () => {
+      // This is the stack's first EXTERNAL-account resource policy (every
+      // other cross-account-shaped grant here is same-account). Asserted
+      // separately from the opaque full-stack snapshot so a scope-widening
+      // refactor (e.g. object-key ARN -> bucket ARN, or GetObject -> s3:*)
+      // fails a targeted test, not just a snapshot diff nobody reads closely.
+      const json = template.toJSON();
+
+      // `valueForStringParameter` lowers to an `AWS::SSM::Parameter::Value<String>`
+      // template Parameter (NOT a `{{resolve:ssm:...}}` dynamic reference) --
+      // CloudFormation looks this up for the WHOLE template up front, before
+      // touching any resource, which is exactly why a missing SSM param aborts
+      // the entire stack update rather than just the new resources (finding #1).
+      const params = json.Parameters as Record<string, Record<string, unknown>>;
+      const ssmParamLogicalId = Object.entries(params).find(
+        ([, p]) =>
+          p.Type === "AWS::SSM::Parameter::Value<String>" &&
+          p.Default === "/scholars/staging/grants-export/consumer-role-arn",
+      )?.[0];
+      expect(ssmParamLogicalId).toBeDefined();
+
+      const bucketPolicies = Object.values(
+        template.findResources("AWS::S3::BucketPolicy"),
+      ).map((r) => (r.Properties as Record<string, unknown>).PolicyDocument as Record<string, unknown>);
+      const grantsPolicy = bucketPolicies.find((doc) =>
+        JSON.stringify(doc).includes(ssmParamLogicalId as string),
+      );
+      expect(grantsPolicy).toBeDefined();
+      const statements = grantsPolicy?.Statement as Array<Record<string, unknown>>;
+      // The bucket's default enforceSSL deny statement, plus this one grant.
+      const stmt = statements.find((s) => s.Effect === "Allow");
+      expect(stmt).toBeDefined();
+
+      // Action: GetObject only -- never ListBucket, never a wildcard.
+      const actions = Array.isArray(stmt!.Action) ? stmt!.Action : [stmt!.Action];
+      expect(actions).toEqual(["s3:GetObject"]);
+
+      // Resource: the single persistent key, never the bucket itself or "*".
+      const resource = JSON.stringify(stmt!.Resource);
+      expect(resource).toContain("grants.ndjson");
+      expect(resource).not.toMatch(/^"\*"$/);
+
+      // Principal: Ref to the SSM-sourced parameter (resolved at deploy time,
+      // never a hardcoded account ID/role ARN -- this repo is public), not a
+      // bare "*".
+      expect(stmt!.Principal).toEqual({ AWS: { Ref: ssmParamLogicalId } });
+    });
+
+    it("prod ships the grants-export bucket (unconditional) but NO cross-account read grant while the flag is off", () => {
+      // Mirrors the opportunity-projection resurrection guard above: the
+      // bucket + write grant are unconditional in both envs (an operator can
+      // run the export by hand via run-task before go-live), but the
+      // cross-account READ policy must stay absent from prod until
+      // grantsExportScheduleEnabled flips -- an SSM param that does not exist
+      // in prod yet would otherwise fail the next `cdk deploy Sps-Etl-prod`.
+      const prodTemplate = buildEtlStack("prod").template;
+      const prodPolicies = JSON.stringify(
+        prodTemplate.findResources("AWS::S3::BucketPolicy"),
+      );
+      expect(prodPolicies).not.toMatch(/grants-export\/consumer-role-arn/);
+    });
+
     // The prod template asserts the same invariant, but staging is where the
     // three short-lived machines actually synthesize -- so this is the case
     // that would have caught the gap.
