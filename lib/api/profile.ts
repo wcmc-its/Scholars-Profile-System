@@ -689,8 +689,12 @@ export type ProfilePayload = {
     accessionOrDoi: string;
     resourceType: string | null;
     dataType: string | null;
+    /** 'open' | 'controlled'. */
+    accessModel: string | null;
     depositYear: number | null;
     authorPosition: string;
+    /** 'high' | 'low' | 'unclear' — null for databank rows. */
+    confidence: string | null;
   }>;
   /** Licensable inventions from the WCM Center for Technology Licensing's public
    *  portfolio, attributed to this scholar by the CWID in the VIVO link CTL
@@ -1720,8 +1724,10 @@ export const getScholarFullProfileBySlug = cache(
                 accessionOrDoi: pd.dataset.accessionOrDoi,
                 resourceType: pd.dataset.resourceType,
                 dataType: pd.dataset.dataType,
+                accessModel: pd.dataset.accessModel,
                 depositYear: pd.dataset.depositYear,
                 authorPosition: pd.authorPosition,
+                confidence: pd.dataset.confidence,
               }))
               .sort((a, b) => (b.depositYear ?? 0) - (a.depositYear ?? 0))
           : [],
