@@ -15,6 +15,12 @@
  * Collaboration tab uses) for the intra/inter-program split, rather than
  * reimplementing that subtree-adjacent grouping logic.
  *
+ * `buildPmidIndex`/`buildGroups`/`centerMetrics`/`splitName`/`pct` live in
+ * `lib/center-collaboration/recommendations-core.ts` — shared with
+ * `etl/cancer-center-collab-report/index.ts` (v2's weekly precompute, adds
+ * the cancer-relevance axis + the full-time-faculty candidate universe) so
+ * the two can't drift on what "collaboration with the center" counts.
+ *
  * Run (needs DATABASE_URL; in-VPC — see docs/DEPLOY-RUNBOOK.md TS-backfill
  * convention):
  *   npx tsx scripts/cancer-center-collaboration-recommendations.ts \
@@ -25,76 +31,22 @@
  */
 import { prisma, disconnect } from "@/lib/db";
 import { isCenterMembershipActive } from "@/lib/api/centers";
+import { computeCoPubCounts, UNCLASSIFIED_KEY, UNCLASSIFIED_LABEL } from "@/lib/center-collaboration/graph";
 import {
-  buildProgramEdges,
-  computeCoPubCounts,
-  UNCLASSIFIED_KEY,
-  UNCLASSIFIED_LABEL,
-  type ProgramEdge,
-} from "@/lib/center-collaboration/graph";
-import type { CollabGroup } from "@/lib/center-collaboration/types";
+  ADD_THRESHOLD,
+  buildGroups,
+  buildPmidIndex,
+  centerMetrics,
+  DEFAULT_CUTOFF_YEAR,
+  pct,
+  REMOVE_THRESHOLD,
+  splitName,
+  type AuthorRow,
+  type CenterMetrics,
+} from "@/lib/center-collaboration/recommendations-core";
 
-// ponytail: starting points, not a scoring rubric — tune once real output is
-// seen. PubMed-only collaboration count is the only signal here, so there's
-// no multi-axis confidence tier to replicate from the disease-taxonomy script.
-export const REMOVE_THRESHOLD = 0; // active research member exactly at this count → REMOVE
-export const ADD_THRESHOLD = 2; // non-member faculty at/above this count → ADD
-
-// --- pure core (DB-free, unit-testable) --------------------------------
-
-export type AuthorRow = { pmid: string; cwid: string };
-
-/** Index authorship rows by pmid → the set of member indices on that pmid,
- *  restricted to (and index-mapped through) the given cwid→index table. Rows
- *  for a cwid outside the table are dropped. The single join both the member
- *  graph and the simulated-roster graph are built from, AND the lookup
- *  `assignSimProgram` needs — computed once, reused, not re-derived. */
-export function buildPmidIndex(
-  rows: AuthorRow[],
-  indexByCwid: Map<string, number>,
-): Map<string, Set<number>> {
-  const byPmid = new Map<string, Set<number>>();
-  for (const r of rows) {
-    const idx = indexByCwid.get(r.cwid);
-    if (idx === undefined) continue;
-    let s = byPmid.get(r.pmid);
-    if (!s) byPmid.set(r.pmid, (s = new Set()));
-    s.add(idx);
-  }
-  return byPmid;
-}
-
-/** `CollabGroup[]` from a pmid index — the shape `graph.ts`'s pure edge/rollup
- *  helpers consume. */
-export function buildGroups(byPmid: Map<string, Set<number>>): CollabGroup[] {
-  return [...byPmid.values()].map((s) => ({
-    m: [...s].sort((a, b) => a - b),
-    year: null,
-  }));
-}
-
-export type CenterMetrics = {
-  totalPapers: number;
-  intraPapers: number;
-  interPapers: number;
-  perProgramIntra: Map<string, number>;
-  /** Cross-program edges — kept alongside `perProgramIntra` so a per-program
-   *  percentage (not just a raw count) can be derived without a second pass
-   *  over the paper groups; both come off the same `buildProgramEdges` call. */
-  programEdges: ProgramEdge[];
-};
-
-/** Center-level intra/inter-program split, via the shared-tab's edge builder. */
-export function centerMetrics(
-  groups: CollabGroup[],
-  programOf: (idx: number) => string | null,
-): CenterMetrics {
-  const totalPapers = groups.filter((g) => g.m.length >= 2).length;
-  const { internal, edges } = buildProgramEdges(groups, programOf);
-  let intraPapers = 0;
-  for (const n of internal.values()) intraPapers += n;
-  return { totalPapers, intraPapers, interPapers: totalPapers - intraPapers, perProgramIntra: internal, programEdges: edges };
-}
+export type { AuthorRow };
+export { ADD_THRESHOLD, buildGroups, buildPmidIndex, centerMetrics, pct, REMOVE_THRESHOLD, splitName };
 
 /** Papers touching program `key` at all (intra + any cross-program edge that
  *  names it) — the denominator for that program's own intra %. */
@@ -102,15 +54,6 @@ function papersTouching(m: CenterMetrics, key: string): number {
   const intra = m.perProgramIntra.get(key) ?? 0;
   const cross = m.programEdges.filter((e) => e.a === key || e.b === key).reduce((n, e) => n + e.weight, 0);
   return intra + cross;
-}
-
-/** "Given ... Last" → { given, surname } by last-token split. `Scholar` has no
- *  authoritative first/last split (only `preferredName`/`fullName`), so this
- *  is a display heuristic for the report, not a canonical field. */
-export function splitName(preferredName: string): { given: string; surname: string } {
-  const tokens = preferredName.trim().split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return { given: "", surname: "" };
-  return { given: tokens.slice(0, -1).join(" "), surname: tokens[tokens.length - 1] };
 }
 
 /** Which current member an ADD candidate shares the most co-authored papers
@@ -153,10 +96,6 @@ export type PersonRow = {
   percentageCollaborations: number;
   recommendation: string;
 };
-
-export function pct(n: number, d: number): number {
-  return d === 0 ? 0 : Math.round((1000 * n) / d) / 10;
-}
 
 export function toCsv(rows: PersonRow[]): string {
   const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
@@ -283,8 +222,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  const cutoffYear = Number(argValue("cutoff-year", "2016"));
-  if (!Number.isInteger(cutoffYear)) throw new Error(`--cutoff-year must be an integer, got: ${argValue("cutoff-year", "2016")}`);
+  const cutoffYear = Number(argValue("cutoff-year", String(DEFAULT_CUTOFF_YEAR)));
+  if (!Number.isInteger(cutoffYear)) {
+    throw new Error(`--cutoff-year must be an integer, got: ${argValue("cutoff-year", String(DEFAULT_CUTOFF_YEAR))}`);
+  }
   const centerCode = argValue("center", "meyer_cancer_center");
   const today = new Date().toISOString().slice(0, 10);
 
