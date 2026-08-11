@@ -82,14 +82,16 @@ describe("generateCancerTaxonomy — golden-file equivalence with build_cancer_t
     }
   });
 
-  it("resolves exactly the ruleset rows that name a descriptor in the fixture (138 unresolved)", async () => {
+  it("resolves exactly the ruleset rows that name a descriptor in the fixture (148 unresolved)", async () => {
     const descriptors = await loadFixtureDescriptors();
     const rules = parseRuleset(readFileSync(RULESET_PATH, "utf8"));
     const result = generateCancerTaxonomy(rules, descriptors);
-    // Matches the real script's own summary line for this fixture+ruleset pair
-    // ("unresolved rule rows  : 138") — the ruleset has 154 rows; 16 of them
-    // name one of the fixture's 18 descriptors (BRCA1 Protein twice).
-    expect(result.unresolved).toHaveLength(138);
+    // Content-review gaps #1/#3/#4 (2026-08-11) added 10 rows naming
+    // descriptors outside this tiny fixture (HPV/EBV/Helicobacter/Hepatitis
+    // B, the gene/protein subtree rows, the metastasis siblings) — none of
+    // them touch the 16 rows that DO resolve against the fixture's 18
+    // descriptors, so this count is additive: 138 + 10 = 148.
+    expect(result.unresolved).toHaveLength(148);
   });
 
   it("flags the fixture's own leaf subtree anchors as empty (real rot-detector signal, fixture-scale noise)", async () => {
