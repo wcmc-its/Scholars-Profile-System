@@ -146,22 +146,49 @@ function SectionHeading({ text, info }: { text: string; info: string }) {
   );
 }
 
+type TaxonomySummary = {
+  topics: TopicDetail[];
+  totalRelevant: number;
+  ruleCount: number;
+  meshRelease: string | null;
+};
+
+const RULESET_URL = "https://github.com/wcmc-its/Scholars-Profile-System/blob/master/docs/cancer-taxonomy-ruleset.csv";
+const GENERATOR_DOC_URL =
+  "https://github.com/wcmc-its/Scholars-Profile-System/blob/master/docs/cancer-taxonomy-generator.md";
+
+/** Section header inside the modal's prose — plain weight, no (?) hover
+ *  (unlike `SectionHeading` above, which is for the report's own collapsible
+ *  sections). */
+function ModalSectionHeading({ children }: { children: React.ReactNode }) {
+  return <h3 className="text-sm font-semibold text-foreground">{children}</h3>;
+}
+
 /**
- * "How cancer-relevance is determined" — states the goal in plain language,
- * explains the MeSH-tree subtree-match mechanism, and lists every topic
- * bucket with its live descriptor count and a sample of the descriptors that
- * carry it. Fetched lazily (only once the dialog opens) from
+ * "How cancer-relevance is determined" — states the two independent axes
+ * (cancer-relevant at all vs. which topic) as separate callouts, the
+ * subtree-matching mechanism, why an experimental-model paper loses its site
+ * topic, why a defined/versioned method matters for NCI CCSG reporting, and
+ * a collapsible list of every topic bucket with a live descriptor
+ * count + sample. Fetched lazily (only once the dialog opens) from
  * `/api/edit/cancer-center-mesh-taxonomy`, which builds this from the SAME
- * `topicsByUi` lookup the weekly ETL step matches papers against — so this
- * can't show a broader or narrower set than what's actually counted.
+ * `topicsByUi` lookup the weekly ETL step and CSV export match against — so
+ * this can't show a broader or narrower set than what's actually counted.
+ *
+ * The left-border accent colors (WCM red for "is it relevant at all", amber
+ * for "which topic") are the first hardcoded brand colors in this app — no
+ * existing `--primary`/token maps to WCM red today, so they're arbitrary-
+ * value Tailwind classes local to this component rather than a new global
+ * token, matching this component's existing utility-class-only pattern.
  */
 function MeshLogicModal() {
   const [open, setOpen] = React.useState(false);
-  const [topics, setTopics] = React.useState<TopicDetail[] | null>(null);
+  const [data, setData] = React.useState<TaxonomySummary | null>(null);
   const [error, setError] = React.useState(false);
+  const [listOpen, setListOpen] = React.useState(false);
 
   React.useEffect(() => {
-    if (!open || topics || error) return;
+    if (!open || data || error) return;
     (async () => {
       try {
         const res = await fetch("/api/edit/cancer-center-mesh-taxonomy");
@@ -169,13 +196,19 @@ function MeshLogicModal() {
           setError(true);
           return;
         }
-        const body = await res.json();
-        setTopics(body.topics);
+        setData(await res.json());
       } catch {
         setError(true);
       }
     })();
-  }, [open, topics, error]);
+  }, [open, data, error]);
+
+  // "unassigned" is a real bucket (a relevant descriptor with no site/cc-
+  // topic) but isn't a disease-site OR a cross-cutting cc- bucket itself —
+  // excluded from both counts below so the intro prose's "N site buckets
+  // plus M cc- buckets" stays literally additive.
+  const siteCount = data?.topics.filter((t) => !t.topic.startsWith("cc-") && t.topic !== "unassigned").length;
+  const ccCount = data?.topics.filter((t) => t.topic.startsWith("cc-")).length;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -192,43 +225,157 @@ function MeshLogicModal() {
         <DialogHeader>
           <DialogTitle>How cancer-relevance is determined</DialogTitle>
           <DialogDescription>
-            The goal: only count a paper toward this report&apos;s cancer-relevance axis when it&apos;s indexed
-            under one of the cancer-disease topics below — full-time faculty publishing outside that scope
-            shouldn&apos;t read as &ldquo;cancer-relevant&rdquo; just because they publish a lot.
+            {data
+              ? `${data.totalRelevant} cancer-relevant descriptors from ${data.ruleCount} ruleset rows${
+                  data.meshRelease ? ` · Resolved against ${data.meshRelease}` : ""
+                }`
+              : " "}
           </DialogDescription>
         </DialogHeader>
+
         <p className="text-sm text-muted-foreground">
-          Each topic is anchored to a real National Library of Medicine MeSH term. MeSH organizes every
-          biomedical concept into a hierarchy, encoded as a dotted &ldquo;tree number&rdquo; (e.g.{" "}
-          <code className="text-xs">C04.588.180</code> for Breast Neoplasms) — reading left to right goes from
-          broad to specific. A paper counts under a topic if any of its own MeSH terms fall anywhere in that
-          anchor&apos;s branch — the anchor itself or any narrower descendant — not just an exact match on the
-          named term.
+          A paper counts toward this report&apos;s cancer-relevance axis when at least one of its MeSH terms is in
+          the cancer taxonomy. The taxonomy is generated, not hand-picked: a checked-in ruleset of MeSH subtree
+          rules is expanded against the full National Library of Medicine descriptor release into a complete,
+          provenanced list.
         </p>
         <p className="text-sm text-muted-foreground">
-          This isn&apos;t a fixed list of 18 disease codes anymore — it&apos;s a backend-curated ruleset of
-          MeSH-subtree rules that decides which descriptors count as cancer-relevant at all, then separately
-          tags some of those descriptors with a topic such as a disease site (others are left
-          &ldquo;unassigned&rdquo;). Applied WCM-wide today, not a per-center self-service setting — narrowing
-          it for a specific center&apos;s actual scope is a change to{" "}
-          <code className="text-xs">docs/cancer-taxonomy-ruleset.csv</code>, not something adjustable here.
+          It answers two independent questions, and they should not be collapsed into one.
         </p>
+
+        <div className="grid gap-3.5">
+          <div className="rounded-md border border-border border-l-[3px] border-l-[#9d2235] p-4">
+            <p className="mb-1 font-medium text-foreground">Is it cancer-relevant at all?</p>
+            <p className="text-sm text-muted-foreground">
+              All of MeSH&apos;s C04 (Neoplasms) subtree, minus <code className="text-xs">Cysts</code> and{" "}
+              <code className="text-xs">Hamartoma</code>, which are non-neoplastic despite living there, plus
+              curated non-C04 headings covering therapeutics, cancer control, tumor biology, and cancer-gene
+              concepts. A few individual terms are readmitted against an exclusion — Dermoid Cyst, Tuberous
+              Sclerosis, Cowden syndrome. This is the count the report keys on.
+            </p>
+          </div>
+          <div className="rounded-md border border-border border-l-[3px] border-l-[#d97706] p-4">
+            <p className="mb-1 font-medium text-foreground">Which topic does it belong to?</p>
+            <p className="text-sm text-muted-foreground">
+              A separate facet: {siteCount ?? "~25"} disease-site buckets plus {ccCount ?? "six"} cross-cutting{" "}
+              <code className="text-xs">cc-</code> buckets. A descriptor can carry several topics, and can
+              legitimately carry none — a cancer-relevant paper with no site-specific angle,{" "}
+              <code className="text-xs">Carcinoma</code> itself for instance, is{" "}
+              <code className="text-xs">unassigned</code> rather than a data gap. Topic counts do not sum to a
+              total.
+            </p>
+          </div>
+        </div>
+
+        <ModalSectionHeading>Matching runs down the tree</ModalSectionHeading>
+        <p className="text-sm text-muted-foreground">
+          MeSH encodes every biomedical concept as a dotted tree number — <code className="text-xs">C04.588.180</code>{" "}
+          for Breast Neoplasms — reading left to right from broad to specific. A subtree rule admits its anchor and
+          everything beneath it, so a paper matches on any descendant term, not only on an exact hit against the
+          named heading.
+        </p>
+
+        <ModalSectionHeading>Experimental models are relevant, but not to a site</ModalSectionHeading>
+        <p className="text-sm text-muted-foreground">
+          <code className="text-xs">Liver Neoplasms, Experimental</code> sits under both{" "}
+          <code className="text-xs">Liver Neoplasms</code> and{" "}
+          <code className="text-xs">Neoplasms, Experimental</code>. The generator strips the site topic from
+          anything caught by the model-system sweep and routes it to{" "}
+          <code className="text-xs">cc-experimental-models</code> only. A mouse-model paper is cancer research; it
+          is not a liver cancer paper in the sense this report means.
+        </p>
+
+        <ModalSectionHeading>Why a defined method at all</ModalSectionHeading>
+        <p className="text-sm text-muted-foreground">
+          NCI treats cancer-relatedness as a matter of flexible interpretation and lets each center choose its own
+          method, so long as that method is rigorous, described, and defensible in peer review. A generated
+          taxonomy with a checked-in ruleset and a version pinned to both the ruleset and the MeSH release is what
+          makes this one answerable: any count here traces back to the rule that produced it.
+        </p>
+        <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-sm">
+          <a
+            href="https://grants.nih.gov/grants/guide/pa-files/PAR-25-444.html"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            CCSG announcement, Cancer Focus ↗
+          </a>
+          <a
+            href="https://cancercenters.cancer.gov/sites/default/files/FAQsCCSG.pdf"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            CCSG FAQ ↗
+          </a>
+          <a
+            href="https://cancercenters.cancer.gov/sites/default/files/CCSGDataGuide.pdf"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            CCSG Data Guide ↗
+          </a>
+        </div>
+
+        <ModalSectionHeading>Changing it is a pull request</ModalSectionHeading>
+        <p className="text-sm text-muted-foreground">
+          The ruleset is checked-in data applied WCM-wide, not a per-center setting. Narrowing it to one
+          center&apos;s scope means editing <code className="text-xs">docs/cancer-taxonomy-ruleset.csv</code>, and
+          the working discipline there is to size a candidate rule against real WCM publication counts before
+          adopting or rejecting it.
+        </p>
+
         {error && <p className="text-sm text-destructive">Failed to load.</p>}
-        {!error && !topics && <p className="text-sm text-muted-foreground">Loading…</p>}
-        {topics && (
-          <ul className="divide-y divide-border text-sm">
-            {topics.map((t) => (
-              <li key={t.topic} className="py-2">
-                <p className="font-medium">{t.topic}</p>
-                <p className="text-xs text-muted-foreground">
-                  {t.descriptorCount} descriptor{t.descriptorCount === 1 ? "" : "s"} match
-                  {t.exampleDescriptors.length > 0 && <>: {t.exampleDescriptors.join(", ")}</>}
-                  {t.descriptorCount > t.exampleDescriptors.length &&
-                    ` (+${t.descriptorCount - t.exampleDescriptors.length} more)`}
-                </p>
-              </li>
-            ))}
-          </ul>
+        {!error && !data && <p className="text-sm text-muted-foreground">Loading…</p>}
+
+        {data && (
+          <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-4">
+            <div className="flex flex-col gap-1.5 text-sm">
+              <a href={GENERATOR_DOC_URL} target="_blank" rel="noreferrer" className="font-medium underline">
+                How the taxonomy is generated ↗
+              </a>
+              <a href={RULESET_URL} target="_blank" rel="noreferrer" className="font-medium underline">
+                The full ruleset, all {data.ruleCount} rows ↗
+              </a>
+            </div>
+            <button
+              type="button"
+              onClick={() => setListOpen((v) => !v)}
+              className="min-w-[172px] whitespace-nowrap rounded-md border border-input px-3.5 py-1.5 text-sm text-foreground hover:bg-muted"
+            >
+              {listOpen ? "Hide topic buckets" : "View topic buckets"}
+            </button>
+          </div>
+        )}
+
+        {data && listOpen && (
+          <div className="max-h-[420px] overflow-y-auto border-t border-border">
+            <p className="px-1 py-3 text-xs text-muted-foreground">
+              Every topic bucket, with a live count and a sample of the descriptors that carry it. The complete
+              list of admitted descriptors and the note behind each rule live in the ruleset.
+            </p>
+            <ul className="divide-y divide-border text-sm">
+              {data.topics.map((t) => (
+                <li key={t.topic} className="flex gap-5 py-3">
+                  <div className="w-[190px] shrink-0">
+                    <p className="font-medium text-foreground">{t.topic}</p>
+                  </div>
+                  <p className="flex-1 text-muted-foreground">
+                    {t.descriptorCount} descriptor{t.descriptorCount === 1 ? "" : "s"}
+                    {t.exampleDescriptors.length > 0 && <>, including {t.exampleDescriptors.join(", ")}</>}
+                    {t.descriptorCount > t.exampleDescriptors.length &&
+                      ` (+${t.descriptorCount - t.exampleDescriptors.length} more)`}
+                    .{" "}
+                    <a href={RULESET_URL} target="_blank" rel="noreferrer" className="whitespace-nowrap underline">
+                      Rules for this bucket ↗
+                    </a>
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </DialogContent>
     </Dialog>
