@@ -113,11 +113,12 @@ describe("DatasetsCard — title + citation line (s-index-ui-proposal.html §5 f
 });
 
 describe("DatasetsCard — row states", () => {
-  it("a 'shown' row has the 'Not mine · Remove' button", () => {
+  it("a 'shown' row has separate Hide and Not mine buttons", () => {
     render(<DatasetsCard cwid={CWID} datasets={[dataset({ state: "shown" })]} />);
-    const btn = screen.getByTestId("dataset-hide-ds-1");
-    expect(btn).toBeTruthy();
-    expect(btn.textContent).toContain("Not mine");
+    const hideBtn = screen.getByTestId("dataset-hide-ds-1");
+    const notMineBtn = screen.getByTestId("dataset-notmine-ds-1");
+    expect(hideBtn.textContent).toContain("Hide");
+    expect(notMineBtn.textContent).toContain("Not mine");
     expect(screen.queryByTestId("dataset-show-ds-1")).toBeNull();
   });
 
@@ -155,12 +156,13 @@ describe("DatasetsCard — row states", () => {
     render(<DatasetsCard cwid={CWID} datasets={[dataset({ state: "removed_by_admin" })]} />);
     expect(screen.getByText("Removed by an administrator")).toBeTruthy();
     expect(screen.queryByTestId("dataset-hide-ds-1")).toBeNull();
+    expect(screen.queryByTestId("dataset-notmine-ds-1")).toBeNull();
     expect(screen.queryByTestId("dataset-show-ds-1")).toBeNull();
   });
 });
 
 describe("DatasetsCard — optimistic hide", () => {
-  it("hide POSTs to /api/edit/suppress with the per-contributor body", async () => {
+  it("Hide POSTs to /api/edit/suppress with an explicit reason (server 400s dataset_deposit without one)", async () => {
     const f = stubFetch({ ok: true, suppressionId: "sup-fresh" });
     render(<DatasetsCard cwid={CWID} datasets={[dataset({ state: "shown" })]} />);
     fireEvent.click(screen.getByTestId("dataset-hide-ds-1"));
@@ -171,9 +173,42 @@ describe("DatasetsCard — optimistic hide", () => {
       entityType: "dataset_deposit",
       entityId: "ds-1",
       contributorCwid: CWID,
+      reason: "Hidden by the author via /edit",
     });
     // Optimistic flip — the Show button appears.
     await waitFor(() => expect(screen.getByTestId("dataset-show-ds-1")).toBeTruthy());
+  });
+
+  it("Not mine POSTs to /api/edit/suppress with a distinct reason from Hide", async () => {
+    const f = stubFetch({ ok: true, suppressionId: "sup-fresh" });
+    render(<DatasetsCard cwid={CWID} datasets={[dataset({ state: "shown" })]} />);
+    fireEvent.click(screen.getByTestId("dataset-notmine-ds-1"));
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    const [, opts] = f.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(opts.body as string)).toEqual({
+      entityType: "dataset_deposit",
+      entityId: "ds-1",
+      contributorCwid: CWID,
+      reason: "Not mine — removed by the author via /edit",
+    });
+    // Same visible outcome as Hide — the Show button appears.
+    await waitFor(() => expect(screen.getByTestId("dataset-show-ds-1")).toBeTruthy());
+  });
+
+  it("superuser mode sends superuser-flavored reasons for both buttons", async () => {
+    const f = stubFetch({ ok: true, suppressionId: "sup-fresh" });
+    render(
+      <DatasetsCard
+        cwid="target1"
+        mode="superuser"
+        scholarName="Ronald Crystal"
+        datasets={[dataset({ state: "shown" })]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("dataset-notmine-ds-1"));
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    const [, opts] = f.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(opts.body as string).reason).toBe("Marked not theirs by a superuser via /edit");
   });
 
   it("hide failure reverts the row and renders an inline error", async () => {
