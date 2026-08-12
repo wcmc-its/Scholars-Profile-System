@@ -1869,15 +1869,19 @@ model CancerCenterDiseaseAssignment {
 /// require re-deciding a row someone already reviewed. `scoreAtDecision` /
 /// `confidenceAtDecision` snapshot the assignment's evidence AT the moment of
 /// decision, so a later re-run that shifts `score`/`confidence` can't
-/// silently make a stale decision look freshly reviewed.
+/// silently make a stale decision look freshly reviewed. Both are NULLABLE —
+/// a curator can also manually attach a disease code the generator never
+/// suggested (no `CancerCenterDiseaseAssignment` row for the pair); that
+/// decision has no evidence to snapshot, and null represents that honestly
+/// instead of a fake sentinel score/confidence.
 model CancerCenterDiseaseDecision {
   cwid                 String   @db.VarChar(32)
   diseaseCode          String   @map("disease_code") @db.VarChar(32)
   decision             String   @db.VarChar(16) // confirmed | rejected
   decidedBy            String   @map("decided_by") @db.VarChar(32)
   decidedAt            DateTime @map("decided_at")
-  scoreAtDecision      Int      @map("score_at_decision")
-  confidenceAtDecision String   @map("confidence_at_decision") @db.VarChar(16)
+  scoreAtDecision      Int?     @map("score_at_decision")
+  confidenceAtDecision String?  @map("confidence_at_decision") @db.VarChar(16)
 
   @@id([cwid, diseaseCode])
   @@index([cwid])

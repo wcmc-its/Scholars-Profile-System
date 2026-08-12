@@ -136,6 +136,14 @@ describe("POST /api/edit/center/[code]/disease-assignments — validation", () =
     expect((await res.json()).error).toBe("invalid_decision");
   });
 
+  it("400s a disease code that isn't in the canonical taxonomy — before any authz/DB work", async () => {
+    const res = await call({ cwid: "fac001", diseaseCode: "NOT_A_REAL_CODE", decision: "confirmed" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("unknown_disease_code");
+    expect(mockCenterFindUnique).not.toHaveBeenCalled();
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
   it("400s an unknown center code", async () => {
     mockCenterFindUnique.mockResolvedValue(null);
     const res = await call({ cwid: "fac001", diseaseCode: "BREAST", decision: "confirmed" });
@@ -203,13 +211,59 @@ describe("POST .../disease-assignments — clear is a REAL DELETE, never a third
 });
 
 describe("POST .../disease-assignments — confirm / reject", () => {
-  it("404s confirm when the pair has no current assignment row — nothing to snapshot", async () => {
+  it("404s reject when the pair has no current assignment row — nothing to reject", async () => {
     mockTxAssignmentFindUnique.mockResolvedValue(null);
-    const res = await call({ cwid: "fac001", diseaseCode: "BREAST", decision: "confirmed" });
+    const res = await call({ cwid: "fac001", diseaseCode: "BREAST", decision: "rejected" });
     expect(res.status).toBe(404);
     expect((await res.json()).error).toBe("assignment_not_found");
     expect(mockTxDecisionUpsert).not.toHaveBeenCalled();
     expect(mockAppendAuditRow).not.toHaveBeenCalled();
+  });
+
+  it("manual add: confirming with no current assignment row succeeds with null score/confidence + a real audit row", async () => {
+    mockTxAssignmentFindUnique.mockResolvedValue(null);
+    mockTxDecisionUpsert.mockResolvedValue({
+      decision: "confirmed",
+      scoreAtDecision: null,
+      confidenceAtDecision: null,
+    });
+    const res = await call({ cwid: "fac001", diseaseCode: "BREAST", decision: "confirmed" });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toMatchObject({
+      ok: true,
+      cwid: "fac001",
+      diseaseCode: "BREAST",
+      decision: "confirmed",
+      scoreAtDecision: null,
+      confidenceAtDecision: null,
+    });
+
+    expect(mockTxDecisionUpsert).toHaveBeenCalledTimes(1);
+    const call1 = mockTxDecisionUpsert.mock.calls[0][0];
+    expect(call1.create).toMatchObject({
+      cwid: "fac001",
+      diseaseCode: "BREAST",
+      decision: "confirmed",
+      decidedBy: "cur1001",
+      scoreAtDecision: null,
+      confidenceAtDecision: null,
+    });
+    expect(call1.update).toMatchObject({ scoreAtDecision: null, confidenceAtDecision: null });
+
+    // A real, complete audit row — not skipped just because there's nothing
+    // to snapshot.
+    expect(mockAppendAuditRow).toHaveBeenCalledTimes(1);
+    const row = mockAppendAuditRow.mock.calls[0][1];
+    expect(row.action).toBe("disease_assignment_decision");
+    expect(row.targetEntityType).toBe("scholar");
+    expect(row.targetEntityId).toBe("fac001");
+    expect(row.afterValues).toMatchObject({
+      diseaseCode: "BREAST",
+      decision: "confirmed",
+      scoreAtDecision: null,
+      confidenceAtDecision: null,
+    });
   });
 
   it("confirms, upserting decidedBy + snapshotting the CURRENT assignment score/confidence", async () => {

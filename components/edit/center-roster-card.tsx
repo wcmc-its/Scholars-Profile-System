@@ -1,7 +1,7 @@
 /**
  * CenterRosterCard — the rich center roster table (#552 §6.1; the deferred
- * #540 PR-7b-roster). Columns: Member | [Type | Program] | Start | End | Status
- * | Remove.
+ * #540 PR-7b-roster). Columns: Member | [Type | Program] | [Diseases] | Start
+ * | End | Status | Remove.
  *
  * Type + Program are surfaced **only when the center has a program taxonomy**
  * (`programs.length > 0`) — the data-driven "Cancer-Center-only" gate. Every
@@ -28,22 +28,32 @@
  * and surfaces an error. A date edit that would make End < Start is blocked
  * client-side before the POST.
  *
- * The disease-assignment plan (`2026-08-12-cancer-center-disease-assignment-
- * edit-ui-plan.md` §5) explicitly rejects fitting a per-person RANKED LIST of
- * diseases into another inline `<select>` cell. Instead: a small "Diseases
- * (N)" link next to a member's name (absent when N is 0) opens a Dialog
- * (`MemberDiseasesDialog` below — the same per-item Dialog primitive
- * `MeshLogicModal` uses in `cancer-center-collab-report-card.tsx`, not a new
- * one) listing that member's ranked `CancerCenterDiseaseAssignment` rows
- * merged with any `CancerCenterDiseaseDecision`, each with Confirm / Reject /
- * (Clear, once decided) buttons POSTing to `/api/edit/center/[code]/
- * disease-assignments` — same optimistic-update-with-revert convention as
- * `patch()` below, serialized per (cwid, diseaseCode) pair.
+ * Diseases (the `2026-08-12-cancer-center-disease-assignment-edit-ui-plan.md`
+ * §5 redesign — this replaces the original per-member Dialog with an inline,
+ * accordion-row expand): a "Diseases" column renders only for a center that
+ * actually has assignment data at all (`hasDiseases` below). Each member's
+ * LIVE (non-rejected) assignments render as confidence-tinted chips, capped at
+ * `MAX_DISEASE_CHIPS` with a "+N more" overflow chip, plus an amber "N to
+ * review" pill for any undecided rows. Clicking ANY chip/pill in a row toggles
+ * an inline expanded region directly under that row (`DiseaseExpandedPanel`)
+ * listing EVERY assignment — including rejected ones, de-emphasized rather
+ * than hidden, so a curator can Undo. Confirm/Reject/Undo POST the exact same
+ * `/api/edit/center/[code]/disease-assignments` route as before, via
+ * `decideDisease` — same optimistic-update-with-revert convention as `patch()`
+ * below, serialized per (cwid, diseaseCode) pair.
+ *
+ * A second filter-bar row narrows the visible member list — client-side, over
+ * the already-loaded roster, AND-composed with each other and with the
+ * existing All/Inactive/Departed radio: a free-text search (name or CWID), a
+ * disease multi-select, a confidence tier, and a "needs review" toggle whose
+ * count is the total pending assignments across the WHOLE roster (unaffected
+ * by the other filters). "Clear all filters" resets all four at once.
  */
 "use client";
 
 import Link from "next/link";
 import * as React from "react";
+import { ChevronDown } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import {
@@ -54,15 +64,9 @@ import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import type { RosterDiseaseRow } from "@/lib/api/unit-edit-context";
 
@@ -83,7 +87,9 @@ export type RosterMember = {
   /** Disease-assignment plan §5/§6 — this member's ranked disease-expertise
    *  picture, `[]`/absent for a non-center roster or a member with none.
    *  Optional for the same reason `scholarState` is: existing fixtures/callers
-   *  that predate this feature still type-check. */
+   *  that predate this feature still type-check. Already server-sorted by
+   *  rank (drift-only decision rows trailing by code) — see
+   *  `loadUnitEditContext`. */
   diseases?: ReadonlyArray<RosterDiseaseRow>;
 };
 
@@ -104,6 +110,11 @@ type Status = "active" | "pending" | "inactive";
 
 /** The three mutually-exclusive roster views. `all` is the default. */
 type RosterFilter = "all" | "inactive" | "departed";
+
+type ConfidenceFilter = "any" | "high" | "medium" | "low";
+
+/** Chips shown before the "+N more" overflow chip kicks in. */
+const MAX_DISEASE_CHIPS = 3;
 
 /** #552 §3.3 active filter, inclusive boundaries, nulls open. */
 function statusOf(member: RosterMember, today: string): Status {
@@ -170,6 +181,13 @@ const CONFIDENCE_BADGE_CLASS: Record<string, string> = {
   low: "bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border",
 };
 
+/** Solid dot matching each confidence tier — the chip legend's color key. */
+const CONFIDENCE_DOT_CLASS: Record<string, string> = {
+  high: "bg-apollo-green-foreground",
+  medium: "bg-apollo-amber",
+  low: "bg-apollo-slate",
+};
+
 /** "the evidence counts already on the row" (plan §5), formatted as one
  *  compact line rather than a second mini-table. */
 function evidenceLine(a: NonNullable<RosterDiseaseRow["assignment"]>): string {
@@ -182,6 +200,23 @@ function evidenceLine(a: NonNullable<RosterDiseaseRow["assignment"]>): string {
   ].join("  —  ");
 }
 
+/** A row's confidence for tinting/filtering purposes — the current assignment's
+ *  if one still exists, else the snapshot the decision was made against. */
+function confidenceOf(row: RosterDiseaseRow): string | null {
+  return row.assignment?.confidence ?? row.decision?.confidenceAtDecision ?? null;
+}
+
+/** Non-rejected rows for a member — what the collapsed chips show, in the
+ *  server-sent (rank) order. */
+function liveDiseaseRows(member: RosterMember): RosterDiseaseRow[] {
+  return (member.diseases ?? []).filter((d) => d.decision?.decision !== "rejected");
+}
+
+/** Assignment rows with no curator decision yet — the "N to review" count. */
+function pendingDiseaseRows(member: RosterMember): RosterDiseaseRow[] {
+  return (member.diseases ?? []).filter((d) => d.assignment !== null && d.decision === null);
+}
+
 function DiseaseDecisionBadge({ decision }: { decision: string }) {
   if (decision === "confirmed") {
     return (
@@ -189,7 +224,7 @@ function DiseaseDecisionBadge({ decision }: { decision: string }) {
         variant="outline"
         className="bg-apollo-green-tint text-apollo-green border-apollo-green-tint-border rounded-full"
       >
-        Confirmed
+        ✓ Confirmed
       </Badge>
     );
   }
@@ -209,18 +244,97 @@ function DiseaseDecisionBadge({ decision }: { decision: string }) {
 type DiseaseDecisionKind = "confirmed" | "rejected" | "clear";
 
 /**
- * The per-member disease panel (plan §5) — Dialog + `DialogTrigger asChild`
- * wrapping a plain link, the same per-item modal shape `MeshLogicModal` in
- * `cancer-center-collab-report-card.tsx` uses. Uncontrolled (Radix owns its
- * own open state); `member.diseases` is read straight from the live `members`
- * state in the parent, so a decision made here re-renders in place.
+ * The collapsed-row summary (plan §5) — up to `MAX_DISEASE_CHIPS`
+ * confidence-tinted chips (confirmed ones prefixed "✓ "), a "+N more"
+ * overflow chip, and an amber "N to review" pill for undecided rows. Every
+ * chip/pill shares one click handler: toggle the row's inline expand.
  */
-function MemberDiseasesDialog({
+function DiseaseChips({
+  member,
+  onToggleExpand,
+}: {
+  member: RosterMember;
+  onToggleExpand: (cwid: string) => void;
+}) {
+  const diseases = member.diseases ?? [];
+  if (diseases.length === 0) return null;
+
+  const live = liveDiseaseRows(member);
+  const pending = pendingDiseaseRows(member);
+
+  if (live.length === 0 && pending.length === 0) {
+    return (
+      <span
+        className="text-muted-foreground text-xs italic"
+        data-testid={`roster-disease-empty-${member.cwid}`}
+      >
+        No disease assignments
+      </span>
+    );
+  }
+
+  const shown = live.slice(0, MAX_DISEASE_CHIPS);
+  const overflow = live.length - shown.length;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1" data-testid={`roster-disease-chips-${member.cwid}`}>
+      {shown.map((d) => {
+        const confidence = confidenceOf(d) ?? "low";
+        const confirmed = d.decision?.decision === "confirmed";
+        return (
+          <button
+            key={d.diseaseCode}
+            type="button"
+            onClick={() => onToggleExpand(member.cwid)}
+            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${
+              CONFIDENCE_BADGE_CLASS[confidence] ?? ""
+            }`}
+            data-testid={`roster-disease-chip-${member.cwid}-${d.diseaseCode}`}
+          >
+            <span className={`size-1.5 rounded-full ${CONFIDENCE_DOT_CLASS[confidence] ?? ""}`} aria-hidden />
+            {confirmed ? "✓ " : ""}
+            {diseaseLabel(d.diseaseCode)}
+          </button>
+        );
+      })}
+      {overflow > 0 && (
+        <button
+          type="button"
+          onClick={() => onToggleExpand(member.cwid)}
+          className="border-apollo-border text-apollo-slate rounded-full border px-2 py-0.5 text-xs font-medium"
+          data-testid={`roster-disease-chip-more-${member.cwid}`}
+        >
+          +{overflow} more
+        </button>
+      )}
+      {pending.length > 0 && (
+        <button
+          type="button"
+          onClick={() => onToggleExpand(member.cwid)}
+          className="bg-apollo-amber-tint text-apollo-amber border-apollo-amber-tint-border rounded-full border px-2 py-0.5 text-xs font-medium"
+          data-testid={`roster-disease-pending-${member.cwid}`}
+        >
+          {pending.length} to review
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The inline expanded region (plan §5) — replaces the old per-member Dialog.
+ * Renders ALL of a member's disease rows (not just the live ones), ranked by
+ * evidence, so a curator can Undo a rejection that the collapsed chips hide.
+ * Rejected cards are de-emphasized (dimmed), not hidden.
+ */
+function DiseaseExpandedPanel({
   member,
   onDecide,
+  onCollapse,
 }: {
   member: RosterMember;
   onDecide: (cwid: string, diseaseCode: string, decision: DiseaseDecisionKind) => Promise<void>;
+  onCollapse: () => void;
 }) {
   const diseases = member.diseases ?? [];
   const [busyCode, setBusyCode] = React.useState<string | null>(null);
@@ -235,114 +349,119 @@ function MemberDiseasesDialog({
   }
 
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <button
+    <div className="flex flex-col gap-3" data-testid={`disease-expand-${member.cwid}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">Disease assignments — ranked by evidence</p>
+          <p className="text-muted-foreground text-xs">
+            Confirming or rejecting records your call — a later reseed of the underlying evidence
+            never silently erases it.
+          </p>
+        </div>
+        <Button
           type="button"
-          className="text-apollo-slate ml-2 text-xs hover:underline"
-          data-testid={`roster-diseases-${member.cwid}`}
+          size="sm"
+          variant="ghost"
+          onClick={onCollapse}
+          data-testid={`disease-expand-collapse-${member.cwid}`}
         >
-          Diseases ({diseases.length})
-        </button>
-      </DialogTrigger>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl" data-testid="member-diseases-dialog">
-        <DialogHeader>
-          <DialogTitle>{member.name} — Disease assignments</DialogTitle>
-          <DialogDescription>
-            Ranked by evidence. Confirming or rejecting records your call — a later reseed of the
-            underlying evidence never silently erases it.
-          </DialogDescription>
-        </DialogHeader>
-        <ul className="flex flex-col gap-3">
-          {diseases.map((d) => {
-            const busy = busyCode === d.diseaseCode;
-            return (
-              <li
-                key={d.diseaseCode}
-                className="border-apollo-border rounded-md border p-3"
-                data-testid={`disease-row-${member.cwid}-${d.diseaseCode}`}
-              >
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="font-medium">{diseaseLabel(d.diseaseCode)}</span>
-                  <span className="text-muted-foreground text-xs">{d.diseaseCode}</span>
-                  {d.assignment ? (
-                    <>
-                      <Badge variant="outline" className="rounded-full">
-                        Rank {d.assignment.rank}
-                      </Badge>
-                      <Badge variant="outline" className="rounded-full">
-                        {FOCUS_LABEL[d.assignment.focus] ?? d.assignment.focus}
-                      </Badge>
-                      <Badge
-                        variant="outline"
-                        className={`rounded-full ${CONFIDENCE_BADGE_CLASS[d.assignment.confidence] ?? ""}`}
-                      >
-                        {d.assignment.confidence} confidence
-                      </Badge>
-                    </>
-                  ) : (
+          Collapse
+        </Button>
+      </div>
+      <ul className="flex flex-col gap-2">
+        {diseases.map((d) => {
+          const busy = busyCode === d.diseaseCode;
+          const rejected = d.decision?.decision === "rejected";
+          return (
+            <li
+              key={d.diseaseCode}
+              className={`border-apollo-border rounded-md border p-3 ${rejected ? "opacity-50" : ""}`}
+              data-testid={`disease-card-${member.cwid}-${d.diseaseCode}`}
+            >
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-medium">{diseaseLabel(d.diseaseCode)}</span>
+                <span className="text-muted-foreground text-xs">{d.diseaseCode}</span>
+                {d.assignment ? (
+                  <>
+                    <Badge variant="outline" className="rounded-full">
+                      Rank {d.assignment.rank}
+                    </Badge>
+                    <Badge variant="outline" className="rounded-full">
+                      {FOCUS_LABEL[d.assignment.focus] ?? d.assignment.focus}
+                    </Badge>
                     <Badge
                       variant="outline"
-                      className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+                      className={`rounded-full ${CONFIDENCE_BADGE_CLASS[d.assignment.confidence] ?? ""}`}
                     >
-                      No longer suggested
+                      {d.assignment.confidence} confidence
                     </Badge>
-                  )}
-                  {d.decision && <DiseaseDecisionBadge decision={d.decision.decision} />}
-                  {d.drifted && (
-                    <Badge
-                      variant="outline"
-                      className="bg-apollo-amber-tint text-apollo-amber border-apollo-amber-tint-border rounded-full"
-                      title="The evidence behind this decision has changed since it was made."
-                      data-testid={`disease-drift-${member.cwid}-${d.diseaseCode}`}
-                    >
-                      Review — evidence changed
-                    </Badge>
-                  )}
-                </div>
-                {d.assignment && (
-                  <p className="text-muted-foreground mt-1 text-xs">{evidenceLine(d.assignment)}</p>
+                  </>
+                ) : (
+                  <Badge
+                    variant="outline"
+                    className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+                  >
+                    No longer suggested
+                  </Badge>
                 )}
-                <div className="mt-2 flex gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
+                {d.drifted && (
+                  <Badge
                     variant="outline"
-                    disabled={busy || !d.assignment || d.decision?.decision === "confirmed"}
-                    onClick={() => act(d.diseaseCode, "confirmed")}
-                    data-testid={`disease-confirm-${member.cwid}-${d.diseaseCode}`}
+                    className="bg-apollo-amber-tint text-apollo-amber border-apollo-amber-tint-border rounded-full"
+                    title="The evidence behind this decision has changed since it was made."
+                    data-testid={`disease-drift-${member.cwid}-${d.diseaseCode}`}
                   >
-                    Confirm
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={busy || !d.assignment || d.decision?.decision === "rejected"}
-                    onClick={() => act(d.diseaseCode, "rejected")}
-                    data-testid={`disease-reject-${member.cwid}-${d.diseaseCode}`}
-                  >
-                    Reject
-                  </Button>
-                  {d.decision && (
+                    Review — evidence changed
+                  </Badge>
+                )}
+              </div>
+              {d.assignment && (
+                <p className="text-muted-foreground mt-1 text-xs">{evidenceLine(d.assignment)}</p>
+              )}
+              <div className="mt-2 flex items-center gap-2">
+                {!d.decision ? (
+                  <>
                     <Button
                       type="button"
                       size="sm"
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() => act(d.diseaseCode, "clear")}
-                      data-testid={`disease-clear-${member.cwid}-${d.diseaseCode}`}
+                      variant="outline"
+                      disabled={busy || !d.assignment}
+                      onClick={() => act(d.diseaseCode, "confirmed")}
+                      data-testid={`disease-confirm-${member.cwid}-${d.diseaseCode}`}
                     >
-                      Clear
+                      Confirm
                     </Button>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      </DialogContent>
-    </Dialog>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={busy || !d.assignment}
+                      onClick={() => act(d.diseaseCode, "rejected")}
+                      data-testid={`disease-reject-${member.cwid}-${d.diseaseCode}`}
+                    >
+                      Reject
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <DiseaseDecisionBadge decision={d.decision.decision} />
+                    <button
+                      type="button"
+                      disabled={busy}
+                      className="text-apollo-slate text-xs hover:underline disabled:opacity-50"
+                      onClick={() => act(d.diseaseCode, "clear")}
+                      data-testid={`disease-undo-${member.cwid}-${d.diseaseCode}`}
+                    >
+                      Undo
+                    </button>
+                  </>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
@@ -367,6 +486,41 @@ export function CenterRosterCard({
   const [adding, setAdding] = React.useState(false);
   const [removeTarget, setRemoveTarget] = React.useState<RosterMember | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+
+  // Disease-column state: which rows are expanded, plus the new filter bar.
+  const [expandedCwids, setExpandedCwids] = React.useState<Set<string>>(() => new Set());
+  const [selectedDiseaseCodes, setSelectedDiseaseCodes] = React.useState<Set<string>>(() => new Set());
+  const [diseaseSearch, setDiseaseSearch] = React.useState("");
+  const [confidenceFilter, setConfidenceFilter] = React.useState<ConfidenceFilter>("any");
+  const [needsReviewOnly, setNeedsReviewOnly] = React.useState(false);
+  // Free-text search — case-insensitive substring match against name OR cwid.
+  const [freeText, setFreeText] = React.useState("");
+
+  function toggleExpand(cwid: string) {
+    setExpandedCwids((prev) => {
+      const next = new Set(prev);
+      if (next.has(cwid)) next.delete(cwid);
+      else next.add(cwid);
+      return next;
+    });
+  }
+
+  function toggleDiseaseCode(code: string) {
+    setSelectedDiseaseCodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  }
+
+  function clearAllFilters() {
+    setSelectedDiseaseCodes(new Set());
+    setDiseaseSearch("");
+    setConfidenceFilter("any");
+    setNeedsReviewOnly(false);
+    setFreeText("");
+  }
 
   async function post(body: Record<string, unknown>): Promise<boolean> {
     let res: Response;
@@ -559,17 +713,71 @@ export function CenterRosterCard({
   const needsCloseOutOf = (m: RosterMember) =>
     m.scholarState === "departed" && statusOf(m, now) !== "inactive";
 
-  const visible =
+  const hasDiseases = members.some((m) => (m.diseases ?? []).length > 0);
+
+  const rosterFiltered =
     filter === "inactive"
       ? members.filter((m) => statusOf(m, now) === "inactive")
       : filter === "departed"
         ? members.filter((m) => m.scholarState === "departed")
         : members;
+
+  // The new filter-bar controls, AND-composed on top of the radio filter
+  // above. `preDiseaseFiltered` excludes the disease multi-select itself so
+  // the multi-select's OWN option counts stay meaningful as more codes are
+  // checked (an OR-widening selection, not a further narrowing one).
+  const preDiseaseFiltered = rosterFiltered.filter((m) => {
+    if (confidenceFilter !== "any") {
+      const hasTier = liveDiseaseRows(m).some((d) => confidenceOf(d) === confidenceFilter);
+      if (!hasTier) return false;
+    }
+    if (needsReviewOnly && pendingDiseaseRows(m).length === 0) return false;
+    const q = freeText.trim().toLowerCase();
+    if (q && !m.name.toLowerCase().includes(q) && !m.cwid.toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  // Disease multi-select options: every code that appears anywhere on the
+  // roster, with a count of currently-visible (pre-disease-filter) members
+  // holding a live assignment to it.
+  const diseaseCodeCounts = new Map<string, number>();
+  const diseaseCodes = new Set<string>();
+  for (const m of members) for (const d of m.diseases ?? []) diseaseCodes.add(d.diseaseCode);
+  for (const m of preDiseaseFiltered) {
+    const seen = new Set<string>();
+    for (const d of liveDiseaseRows(m)) {
+      if (seen.has(d.diseaseCode)) continue;
+      seen.add(d.diseaseCode);
+      diseaseCodeCounts.set(d.diseaseCode, (diseaseCodeCounts.get(d.diseaseCode) ?? 0) + 1);
+    }
+  }
+  const diseaseOptions = [...diseaseCodes]
+    .map((code) => ({ code, count: diseaseCodeCounts.get(code) ?? 0 }))
+    .sort((a, b) => diseaseLabel(a.code).localeCompare(diseaseLabel(b.code)));
+  const diseaseOptionsShown = diseaseOptions.filter((o) => {
+    const q = diseaseSearch.trim().toLowerCase();
+    return !q || diseaseLabel(o.code).toLowerCase().includes(q) || o.code.toLowerCase().includes(q);
+  });
+
+  const visible =
+    selectedDiseaseCodes.size === 0
+      ? preDiseaseFiltered
+      : preDiseaseFiltered.filter((m) =>
+          liveDiseaseRows(m).some((d) => selectedDiseaseCodes.has(d.diseaseCode)),
+        );
+
+  // The total pending count across the WHOLE roster — unaffected by any
+  // active filter, so the "Needs review" pill's badge is a stable total.
+  const pendingTotal = members.reduce((sum, m) => sum + pendingDiseaseRows(m).length, 0);
+
+  const filtersActive =
+    selectedDiseaseCodes.size > 0 || confidenceFilter !== "any" || needsReviewOnly || freeText.trim() !== "";
+
   // The nudge is about WORK OUTSTANDING, not about what the filter is hiding —
   // "all" hides nothing now. These are the people who left WCM while their
   // membership stayed open, which is the only state here needing a curator.
   const needsCloseOut = members.filter(needsCloseOutOf).length;
-  const colCount = hasPrograms ? 6 : 4;
+  const colCount = (hasPrograms ? 6 : 4) + (hasDiseases ? 1 : 0);
 
   return (
     <EditPanel
@@ -625,6 +833,130 @@ export function CenterRosterCard({
           </RadioGroup>
         </div>
 
+        {/* The new filter bar — free-text search always available; the
+            disease/confidence/needs-review controls only when this center
+            actually has assignment data. AND-composed with each other and
+            with the radio filter above. */}
+        <div className="flex flex-wrap items-end gap-3" data-testid="center-roster-filter-bar">
+          <div className="flex flex-col gap-1">
+            <label htmlFor="roster-search-input" className="text-muted-foreground text-xs font-medium">
+              Search
+            </label>
+            <Input
+              id="roster-search-input"
+              type="text"
+              placeholder="Name or CWID"
+              className="h-8 w-48"
+              value={freeText}
+              onChange={(e) => setFreeText(e.target.value)}
+              data-testid="roster-search-input"
+            />
+          </div>
+
+          {hasDiseases && (
+            <>
+              <div className="flex flex-col gap-1">
+                <span className="text-muted-foreground text-xs font-medium">Disease</span>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-8 gap-1.5" data-testid="roster-disease-filter-trigger">
+                      {selectedDiseaseCodes.size === 0
+                        ? "Any disease"
+                        : `${selectedDiseaseCodes.size} selected`}
+                      <ChevronDown className="size-3.5 opacity-60" aria-hidden />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-72 p-2" data-testid="roster-disease-filter-menu">
+                    <Input
+                      type="text"
+                      placeholder="Filter diseases…"
+                      className="mb-2 h-8"
+                      value={diseaseSearch}
+                      onChange={(e) => setDiseaseSearch(e.target.value)}
+                      data-testid="roster-disease-filter-search"
+                    />
+                    <div className="flex max-h-64 flex-col gap-0.5 overflow-y-auto">
+                      {diseaseOptionsShown.length === 0 ? (
+                        <p className="text-muted-foreground px-1.5 py-1 text-xs">No diseases match.</p>
+                      ) : (
+                        diseaseOptionsShown.map((opt) => (
+                          <label
+                            key={opt.code}
+                            className="hover:bg-accent flex cursor-pointer items-center gap-2 rounded px-1.5 py-1.5 text-sm"
+                            data-testid={`roster-disease-filter-option-${opt.code}`}
+                          >
+                            <Checkbox
+                              checked={selectedDiseaseCodes.has(opt.code)}
+                              onCheckedChange={() => toggleDiseaseCode(opt.code)}
+                            />
+                            <span className="truncate">{diseaseLabel(opt.code)}</span>
+                            <span className="text-muted-foreground ml-auto text-xs tabular-nums">{opt.count}</span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label htmlFor="roster-confidence-filter" className="text-muted-foreground text-xs font-medium">
+                  Confidence
+                </label>
+                <select
+                  id="roster-confidence-filter"
+                  className="border-apollo-border-strong h-8 rounded-md border bg-apollo-surface px-2 text-sm"
+                  value={confidenceFilter}
+                  onChange={(e) => setConfidenceFilter(e.target.value as ConfidenceFilter)}
+                  data-testid="roster-confidence-filter"
+                >
+                  <option value="any">Any</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setNeedsReviewOnly((v) => !v)}
+                aria-pressed={needsReviewOnly}
+                className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors ${
+                  needsReviewOnly
+                    ? "border-apollo-amber bg-apollo-amber text-white"
+                    : "border-apollo-amber-tint-border bg-apollo-amber-tint text-apollo-amber"
+                }`}
+                data-testid="roster-needs-review-toggle"
+              >
+                Needs review
+                <span
+                  className={`inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[0.65rem] tabular-nums ${
+                    needsReviewOnly ? "bg-white/25 text-white" : "bg-white/60 text-apollo-amber"
+                  }`}
+                >
+                  {pendingTotal}
+                </span>
+              </button>
+            </>
+          )}
+        </div>
+
+        {filtersActive && (
+          <div className="flex items-center justify-between gap-4 text-sm">
+            <span className="text-muted-foreground" data-testid="roster-filter-result-line">
+              Showing {visible.length} of {rosterFiltered.length} members
+            </span>
+            <button
+              type="button"
+              className="text-apollo-slate text-xs hover:underline"
+              onClick={clearAllFilters}
+              data-testid="roster-filter-clear-all"
+            >
+              Clear all filters
+            </button>
+          </div>
+        )}
+
         {needsCloseOut > 0 && filter !== "departed" && (
           <p className="text-muted-foreground text-sm" data-testid="roster-needs-close-out">
             {needsCloseOut === 1
@@ -648,12 +980,13 @@ export function CenterRosterCard({
           </p>
         ) : (
           <div className="overflow-x-auto">
-          <table className="[&_td]:align-middle w-full min-w-[760px] text-sm" data-testid="center-roster-table">
+          <table className="[&_td]:align-middle w-full min-w-[880px] text-sm" data-testid="center-roster-table">
             <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
               <tr className="border-apollo-border border-b">
                 <th className="px-3 py-2 font-medium">Member</th>
                 {hasPrograms && <th className="px-3 py-2 font-medium">Type</th>}
                 {hasPrograms && <th className="px-3 py-2 font-medium">Program</th>}
+                {hasDiseases && <th className="px-3 py-2 font-medium">Diseases</th>}
                 <th className="px-3 py-2 font-medium">Start</th>
                 <th className="px-3 py-2 font-medium">End</th>
                 <th className="px-3 py-2 font-medium">Status</th>
@@ -664,8 +997,25 @@ export function CenterRosterCard({
               {visible.length === 0 ? (
                 <tr>
                   <td colSpan={colCount + 1} className="text-muted-foreground px-3 py-3">
-                    No members match this filter. Choose &ldquo;All members&rdquo; to see
-                    the whole roster.
+                    {rosterFiltered.length === 0 ? (
+                      <>
+                        No members match this filter. Choose &ldquo;All members&rdquo; to see the whole
+                        roster.
+                      </>
+                    ) : (
+                      <>
+                        No members match the current filters.{" "}
+                        <button
+                          type="button"
+                          className="text-apollo-slate underline"
+                          onClick={clearAllFilters}
+                          data-testid="roster-filter-clear-all-inline"
+                        >
+                          Clear all filters
+                        </button>{" "}
+                        to see more.
+                      </>
+                    )}
                   </td>
                 </tr>
               ) : (
@@ -679,9 +1029,10 @@ export function CenterRosterCard({
                   // exclusive with the `opacity-50` inactive dimming by
                   // construction, so the two never compose.
                   const rowNeedsCloseOut = needsCloseOutOf(m);
+                  const expanded = expandedCwids.has(m.cwid);
                   return (
+                    <React.Fragment key={m.cwid}>
                     <tr
-                      key={m.cwid}
                       className={`border-apollo-border border-b ${
                         status === "inactive" ? "opacity-50" : ""
                       } ${rowNeedsCloseOut ? "bg-apollo-amber-tint" : ""}`}
@@ -689,30 +1040,32 @@ export function CenterRosterCard({
                       data-needs-close-out={rowNeedsCloseOut ? "true" : undefined}
                     >
                       <td className="px-3 py-2">
-                        <span className="font-medium">{m.name}</span>
-                        {m.title && <span className="text-muted-foreground"> · {m.title}</span>}
-                        {m.scholarState === "departed" && (
-                          <Badge
-                            variant="outline"
-                            className="bg-apollo-amber-tint text-apollo-amber border-apollo-amber-tint-border ml-2 rounded-full"
-                            data-testid={`roster-scholar-state-${m.cwid}`}
-                          >
-                            Left WCM
-                          </Badge>
-                        )}
-                        {m.scholarState === "unknown" && (
-                          <Badge
-                            variant="outline"
-                            className="border-apollo-border ml-2 rounded-full"
-                            data-testid={`roster-scholar-state-${m.cwid}`}
-                            title="No directory record matches this CWID, so we can't show a name."
-                          >
-                            Not in directory
-                          </Badge>
-                        )}
-                        {(m.diseases ?? []).length > 0 && (
-                          <MemberDiseasesDialog member={m} onDecide={decideDisease} />
-                        )}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-medium">{m.name}</span>
+                          {m.title && <span className="text-muted-foreground">· {m.title}</span>}
+                          {m.scholarState === "departed" && (
+                            <Badge
+                              variant="outline"
+                              className="bg-apollo-amber-tint text-apollo-amber border-apollo-amber-tint-border rounded-full"
+                              data-testid={`roster-scholar-state-${m.cwid}`}
+                            >
+                              Left WCM
+                            </Badge>
+                          )}
+                          {m.scholarState === "unknown" && (
+                            <Badge
+                              variant="outline"
+                              className="border-apollo-border rounded-full"
+                              data-testid={`roster-scholar-state-${m.cwid}`}
+                              title="No directory record matches this CWID, so we can't show a name."
+                            >
+                              Not in directory
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-muted-foreground text-xs" data-testid={`roster-cwid-${m.cwid}`}>
+                          CWID: {m.cwid}
+                        </div>
                       </td>
                       {hasPrograms && (
                         <td className="px-3 py-2">
@@ -747,6 +1100,11 @@ export function CenterRosterCard({
                               </option>
                             ))}
                           </select>
+                        </td>
+                      )}
+                      {hasDiseases && (
+                        <td className="px-3 py-2">
+                          <DiseaseChips member={m} onToggleExpand={toggleExpand} />
                         </td>
                       )}
                       <td className="px-3 py-2">
@@ -801,11 +1159,45 @@ export function CenterRosterCard({
                         </Button>
                       </td>
                     </tr>
+                    {hasDiseases && expanded && (m.diseases ?? []).length > 0 && (
+                      <tr className="border-apollo-border bg-apollo-surface-2 border-b" data-testid={`disease-expand-row-${m.cwid}`}>
+                        <td colSpan={colCount + 1} className="px-3 py-3">
+                          <DiseaseExpandedPanel
+                            member={m}
+                            onDecide={decideDisease}
+                            onCollapse={() => toggleExpand(m.cwid)}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   );
                 })
               )}
             </tbody>
           </table>
+          </div>
+        )}
+
+        {hasDiseases && (
+          <div
+            className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 text-xs"
+            data-testid="roster-disease-legend"
+          >
+            <span className="text-foreground font-medium">Confidence</span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="bg-apollo-green-foreground size-2.5 rounded-full" aria-hidden />
+              High
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="bg-apollo-amber size-2.5 rounded-full" aria-hidden />
+              Medium
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="bg-apollo-slate size-2.5 rounded-full" aria-hidden />
+              Low
+            </span>
+            <span>✓ = confirmed by an editor · rejected assignments are hidden from chips</span>
           </div>
         )}
 

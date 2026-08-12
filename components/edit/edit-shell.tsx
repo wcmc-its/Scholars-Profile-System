@@ -12,12 +12,19 @@
  * editable vs sourced, a skip link + named `<main>` land a11y basics, and the
  * full vertical rail collapses to a `<select>` below `md` so the editor is not
  * buried under nine links on phones (finding 4.5).
+ *
+ * On `md`+ the rail column is additionally wrapped in `RailCollapse`, a chevron
+ * toggle that shrinks it to a thin strip so the detail panel can reclaim its
+ * width — independent of, and layered on top of, the phone-only `<select>`
+ * swap above. Defaults expanded and remembers the choice in localStorage; see
+ * `rail-collapse.tsx`.
  */
 import Link from "next/link";
 import { ArrowUpRight, ChevronLeftIcon } from "lucide-react";
 
 import { AttributeRail, type RailItem } from "@/components/edit/attribute-rail";
 import { RailSelect } from "@/components/edit/rail-select";
+import { RailCollapse } from "@/components/edit/rail-collapse";
 import { ProxyBanner } from "@/components/edit/proxy-banner";
 import { SuperuserBanner } from "@/components/edit/superuser-banner";
 import { UnitAdminBanner } from "@/components/edit/unit-admin-banner";
@@ -166,9 +173,12 @@ export function EditShell({
       )}
 
       {/* Body — rail + detail. The rail column is desktop-only; on phones a
-          compact <select> at the top of the detail column replaces it. */}
-      <div className="mx-auto grid max-w-[var(--max-content)] grid-cols-1 gap-6 px-6 py-8 md:grid-cols-[16rem_1fr]">
-        <div className="hidden flex-col gap-3 md:flex">
+          compact <select> at the top of the detail column replaces it. The
+          first track is `auto`, not a fixed `16rem`, so `RailCollapse`'s own
+          width (`w-64` expanded / `w-9` collapsed) drives the column — no
+          state needs lifting up to this grid. */}
+      <div className="mx-auto grid max-w-[var(--max-content)] grid-cols-1 gap-6 px-6 py-8 md:grid-cols-[auto_1fr]">
+        <RailCollapse>
           <AttributeRail
             items={railItems}
             active={activeAttr}
@@ -176,7 +186,7 @@ export function EditShell({
             groupMeta={railGroupMeta}
           />
           {subRail}
-        </div>
+        </RailCollapse>
 
         <main id="edit-detail" tabIndex={-1} aria-labelledby="panel-heading" className="min-w-0 scroll-mt-4">
           <RailSelect items={railItems} active={activeAttr} basePath={basePath} />

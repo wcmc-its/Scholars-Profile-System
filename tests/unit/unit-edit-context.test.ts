@@ -78,8 +78,9 @@ type Opts = {
     decision: string;
     decidedBy: string;
     decidedAt: Date;
-    scoreAtDecision: number;
-    confidenceAtDecision: string;
+    /** null for a manual add (no backing assignment row to snapshot). */
+    scoreAtDecision: number | null;
+    confidenceAtDecision: string | null;
   }>;
 };
 
@@ -664,5 +665,89 @@ describe("loadUnitEditContext — center disease assignments (plan §5/§6)", ()
       ),
     );
     expect(ctx!.roster![0].diseases!.map((d) => d.diseaseCode)).toEqual(["LUNG", "GYN", "BREAST"]);
+  });
+
+  it("manual add (plan's manual-add extension): a decision with NO matching assignment row still produces a diseases entry — assignment null, decision populated with a null score/confidence snapshot", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          // No assignment rows at all for this member — the generator never
+          // suggested BREAST for them — only a curator's manual-add decision.
+          diseaseAssignments: [],
+          diseaseDecisions: [
+            decision({ scoreAtDecision: null, confidenceAtDecision: null }),
+          ],
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases).toEqual([
+      {
+        diseaseCode: "BREAST",
+        assignment: null,
+        decision: expect.objectContaining({
+          decision: "confirmed",
+          scoreAtDecision: null,
+          confidenceAtDecision: null,
+        }),
+        // NOT drifted: a manual add never had an assignment row to lose —
+        // `confidenceAtDecision: null` is the "never had evidence" signal
+        // `isDiseaseDecisionDrifted` uses to tell this apart from a real
+        // confirmed decision whose evidence later disappeared (§6).
+        drifted: false,
+      },
+    ]);
+  });
+});
+
+describe("loadUnitEditContext — diseaseOptions (manual-add extension)", () => {
+  const center = {
+    code: "meyer",
+    name: "Meyer Cancer Center",
+    description: null,
+    url: null,
+    slug: "meyer",
+    directorCwid: null,
+    centerType: "center",
+    leaderInterim: false,
+  };
+
+  it("a center context carries the canonical disease-code -> label list, sorted by label", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(fakeClient({ center })),
+    );
+    expect(ctx!.diseaseOptions).not.toBeNull();
+    expect(ctx!.diseaseOptions!.length).toBeGreaterThan(0);
+    // One real, known code from `docs/cancer-center-person-rollup.csv`.
+    expect(ctx!.diseaseOptions).toContainEqual({ code: "BREAST", label: "Breast Cancer" });
+    // Sorted by label — every entry's label is <= the next one's.
+    const labels = ctx!.diseaseOptions!.map((o) => o.label);
+    expect(labels).toEqual([...labels].sort((a, b) => a.localeCompare(b)));
+  });
+
+  it("is null for a department/division — not a center", async () => {
+    const dept = {
+      code: "N1280",
+      name: "Medicine",
+      description: null,
+      url: null,
+      slug: "medicine",
+      chairCwid: null,
+      source: "ED",
+    };
+    const ctx = await loadUnitEditContext(
+      "department",
+      "N1280",
+      SUPERUSER,
+      asClient(fakeClient({ department: dept })),
+    );
+    expect(ctx!.diseaseOptions).toBeNull();
   });
 });
