@@ -17,3 +17,18 @@ const NCE_GRACE_MS = 365 * 24 * 60 * 60 * 1000;
 export function isFundingActive(endDate: Date, now: Date): boolean {
   return endDate.getTime() + NCE_GRACE_MS > now.getTime();
 }
+
+/**
+ * "Active as of `asOfDate`" — same NCE-grace `isFundingActive` window, plus a
+ * lower bound: a grant that hasn't started yet is not active on the chosen
+ * date even though its end date (still years off) would clear the grace
+ * window on its own. Used by the `/edit/reports/4` "Grants active as of a
+ * date" report, which (unlike the profile/search/edit-panel callers of
+ * `isFundingActive`) lets the viewer pick a date other than today.
+ */
+export function isFundingActiveAsOf(
+  grant: { startDate: Date; endDate: Date },
+  asOfDate: Date,
+): boolean {
+  return grant.startDate <= asOfDate && isFundingActive(grant.endDate, asOfDate);
+}
