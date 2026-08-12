@@ -1285,10 +1285,7 @@ export class AppStack extends Stack {
         // by named faculty (no lock, no redaction — decided 2026-08-12). Read via
         // isDataSharingDashboardEnabled() (=== "on"); when off the route 404s and
         // the sub-nav tab is hidden — ships dark. App-only, no reindex, no writes.
-        // STAGING-FIRST: on in staging to soak, off in prod until sign-off — brand
-        // new this session, unreviewed, same precedent as EDIT_DATA_QUALITY_DASHBOARD's
-        // original launch.
-        EDIT_DATA_SHARING_DASHBOARD: env === "staging" ? "on" : "off",
+        EDIT_DATA_SHARING_DASHBOARD: "on", // Prod flipped 2026-08-12 (#2383, staging-soaked same day, render-only).
         // #746 — self-edit "Not mine" → ReCiter gold-standard reject.
         // STAGING-FIRST rollout: ON in staging, OFF in prod until the staging
         // soak completes (prod flips in a follow-up). While off, "Not mine?"
