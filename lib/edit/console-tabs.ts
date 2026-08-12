@@ -2,6 +2,7 @@ import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import type { EditSession } from "@/lib/auth/superuser";
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
+import { isDataSharingDashboardTabVisible } from "@/lib/edit/data-sharing-dashboard";
 
 /**
  * The role-gated `AdminSubnav` props that are derivable from the session + env
@@ -30,6 +31,7 @@ export type ConsoleTabProps = {
   administratorsTab: number | null;
   methodsTab: number | null;
   dataQualityTab: number | null;
+  dataSharingTab: number | null;
   viewerIsDeveloper: boolean;
 };
 
@@ -48,6 +50,7 @@ export function deriveConsoleTabs(session: EditSession): ConsoleTabProps {
     administratorsTab: session.isSuperuser && isAdministratorsTabEnabled() ? 0 : null,
     methodsTab: isMethodsTabVisible(session) ? 0 : null,
     dataQualityTab: isDataQualityTabVisible(session) ? 0 : null,
+    dataSharingTab: isDataSharingDashboardTabVisible(session) ? 0 : null,
     viewerIsDeveloper: session.isDeveloper === true,
   };
 }

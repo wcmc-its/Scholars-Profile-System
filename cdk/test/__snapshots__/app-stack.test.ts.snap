@@ -371,6 +371,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "EDIT_DATA_SHARING_DASHBOARD",
+                "Value": "off",
+              },
+              {
                 "Name": "RECITER_REJECT_SEND",
                 "Value": "on",
               },
@@ -4621,6 +4625,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "EDIT_DATA_QUALITY_DASHBOARD",
+                "Value": "on",
+              },
+              {
+                "Name": "EDIT_DATA_SHARING_DASHBOARD",
                 "Value": "on",
               },
               {

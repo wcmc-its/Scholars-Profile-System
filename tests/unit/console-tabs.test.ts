@@ -22,6 +22,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
     vi.stubEnv("SELF_EDIT_ADMINISTRATORS_TAB", "on");
     vi.stubEnv("COMMS_STEWARD_ENABLED", "on");
     vi.stubEnv("EDIT_DATA_QUALITY_DASHBOARD", "on");
+    vi.stubEnv("EDIT_DATA_SHARING_DASHBOARD", "on");
   });
   afterEach(() => vi.unstubAllEnvs());
 
@@ -33,6 +34,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       administratorsTab: 0,
       methodsTab: 0,
       dataQualityTab: 0,
+      dataSharingTab: 0,
       viewerIsDeveloper: false,
     });
   });
@@ -45,6 +47,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       administratorsTab: null, // superuser-only, even with the flag on
       methodsTab: 0,
       dataQualityTab: 0,
+      dataSharingTab: 0,
       viewerIsDeveloper: false,
     });
   });
@@ -59,6 +62,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       administratorsTab: null,
       methodsTab: null,
       dataQualityTab: null,
+      dataSharingTab: null,
       viewerIsDeveloper: false,
     });
   });
@@ -71,6 +75,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       administratorsTab: null,
       methodsTab: null,
       dataQualityTab: null,
+      dataSharingTab: null,
       viewerIsDeveloper: true,
     });
   });
@@ -83,18 +88,21 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       administratorsTab: null,
       methodsTab: null,
       dataQualityTab: null,
+      dataSharingTab: null,
       viewerIsDeveloper: false,
     });
   });
 
-  it("flags OFF — Administrators / Methods / Data quality hidden even for a superuser", () => {
+  it("flags OFF — Administrators / Methods / Data quality / Data sharing hidden even for a superuser", () => {
     vi.stubEnv("SELF_EDIT_ADMINISTRATORS_TAB", "off");
     vi.stubEnv("COMMS_STEWARD_ENABLED", "off");
     vi.stubEnv("EDIT_DATA_QUALITY_DASHBOARD", "off");
+    vi.stubEnv("EDIT_DATA_SHARING_DASHBOARD", "off");
     const tabs = deriveConsoleTabs(session({ isSuperuser: true }));
     expect(tabs.administratorsTab).toBeNull();
     expect(tabs.methodsTab).toBeNull();
     expect(tabs.dataQualityTab).toBeNull();
+    expect(tabs.dataSharingTab).toBeNull();
     // The unflagged role surfaces are unaffected.
     expect(tabs.superuserSurfaces).toBe(true);
     expect(tabs.unitsTab).toBe(true);
