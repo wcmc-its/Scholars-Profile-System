@@ -25,6 +25,9 @@ const ROWS = [
 
 const TAXONOMY_TOPICS = [
   { topic: "breast", descriptorCount: 12, exampleDescriptors: ["Breast Neoplasms, Male"] },
+  // Not in the curated TOPIC_LABELS map — exercises the hyphen-to-space
+  // fallback rather than the mangling "X and Y" transform that was rejected.
+  { topic: "future-bucket", descriptorCount: 1, exampleDescriptors: ["Something New"] },
 ];
 const TAXONOMY_SUMMARY = { totalRelevant: 878, ruleCount: 165, meshRelease: "MeSH 2026" };
 
@@ -154,8 +157,10 @@ describe("CancerCenterCollabReportCard", () => {
     // Topic bucket list starts collapsed; the "who clears" prose and links are visible without it.
     expect(screen.queryByText("breast")).toBeNull();
     fireEvent.click(screen.getByText("View topic buckets"));
-    expect(screen.getByText("breast")).toBeTruthy();
+    expect(screen.getByText("Breast")).toBeTruthy(); // curated display label
+    expect(screen.getByText("breast")).toBeTruthy(); // raw slug, still shown beneath the label
     expect(screen.getByText(/12 descriptors, including Breast Neoplasms, Male/)).toBeTruthy();
+    expect(screen.getByText("Future bucket")).toBeTruthy(); // uncurated slug: space-joined fallback, not "Future and bucket"
     expect(screen.getByText("Hide topic buckets")).toBeTruthy();
   });
 });
