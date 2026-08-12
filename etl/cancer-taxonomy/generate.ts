@@ -145,6 +145,19 @@ export function generateCancerTaxonomy(
     s.add(val);
   }
 
+  // #2370 — which anchor produced each topic, so the most specific one can win.
+  // Keyed ui -> topic -> anchor tree numbers. Without this the topic set is a
+  // plain union over every ANCESTOR anchor, and a descriptor that descends from
+  // two anchors inherits both buckets.
+  const topicAnchors = new Map<string, Map<string, Set<string>>>();
+  function addAnchor(ui: string, topic: string, trees: string[]): void {
+    let byTopic = topicAnchors.get(ui);
+    if (!byTopic) topicAnchors.set(ui, (byTopic = new Map()));
+    let s = byTopic.get(topic);
+    if (!s) byTopic.set(topic, (s = new Set()));
+    for (const t of trees) s.add(t);
+  }
+
   function subtreeUis(rec: DescriptorInput): Set<string> {
     const out = new Set<string>([rec.ui]);
     if (rec.treeNumbers.length === 0) return out;
@@ -182,6 +195,10 @@ export function generateCancerTaxonomy(
       if (topic) {
         const bucket = r.fallback.trim() ? fallbackTopics : topics;
         for (const u of uis) addTo(bucket, u, topic);
+        // #2370 — the anchor for a subtree rule is the rule's own descriptor;
+        // for a term rule the descriptor IS the target, which is maximally
+        // specific and therefore always survives.
+        if (!r.fallback.trim()) for (const u of uis) addAnchor(u, topic, rec.treeNumbers);
         if (topic === EXPERIMENTAL_TOPIC) for (const u of uis) experimental.add(u);
       }
     }
@@ -191,6 +208,43 @@ export function generateCancerTaxonomy(
     }
   }
 
+  /**
+   * #2370 — keep only the topics whose anchor is the most specific match.
+   *
+   * A descriptor can descend from two anchors when one anchor is itself a
+   * descendant of the other: `Melanoma` sits under BOTH `Neuroendocrine Tumors`
+   * and `Neoplasms, Germ Cell and Embryonal`, so a plain union tagged every
+   * melanoma descriptor `thyroid-neuroendocrine` and `germ-cell-embryonal` as
+   * well as `melanoma-skin`.
+   *
+   * An anchor loses if another matching anchor sits strictly deeper on the same
+   * branch (its tree number is a proper prefix of the other's). A topic survives
+   * if at least one of its anchors survives. Anchors on unrelated branches never
+   * suppress each other, so genuine multi-site descriptors keep every bucket.
+   */
+  function mostSpecificTopics(ui: string, assigned: Set<string>): Set<string> {
+    const byTopic = topicAnchors.get(ui);
+    if (!byTopic || assigned.size < 2) return new Set(assigned);
+    const own = byUi.get(ui)?.treeNumbers ?? [];
+    // Anchors that actually cover THIS descriptor (self or ancestor).
+    const matching: Array<[string, string]> = [];
+    for (const topic of assigned) {
+      for (const atn of byTopic.get(topic) ?? []) {
+        if (own.some((t) => t === atn || t.startsWith(atn + "."))) matching.push([atn, topic]);
+      }
+    }
+    if (matching.length === 0) return new Set(assigned);
+    const kept = new Set<string>();
+    for (const [atn, topic] of matching) {
+      const dominated = matching.some(([btn]) => btn !== atn && btn.startsWith(atn + "."));
+      if (!dominated) kept.add(topic);
+    }
+    // A topic with no covering anchor (term rule on a different tree, say) is
+    // never silently dropped.
+    for (const topic of assigned) if (!matching.some(([, t]) => t === topic)) kept.add(topic);
+    return kept.size > 0 ? kept : new Set(assigned);
+  }
+
   const relevant = new Set<string>();
   for (const u of included) if (!excluded.has(u)) relevant.add(u);
   for (const u of readmitted) relevant.add(u);
@@ -198,7 +252,7 @@ export function generateCancerTaxonomy(
   const rows: GeneratedRow[] = [...relevant]
     .sort((a, b) => sortStr(byUi.get(a)!.name, byUi.get(b)!.name))
     .map((ui) => {
-      let assigned = new Set(topics.get(ui) ?? []);
+      let assigned = mostSpecificTopics(ui, topics.get(ui) ?? new Set());
       if (experimental.has(ui)) {
         // Model-system records count as cancer research but must not
         // attribute to a human disease site.

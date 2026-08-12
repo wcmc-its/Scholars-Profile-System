@@ -141,3 +141,46 @@ describe("generateCancerTaxonomy — synthetic edge cases", () => {
     expect(result.rows).toEqual([]);
   });
 });
+
+/**
+ * #2370 — anchor nesting. Not covered by the golden file: the fixture MeSH
+ * slice contains no descriptor that descends from two topic anchors, which is
+ * exactly why the over-assignment shipped unnoticed. These cases use synthetic
+ * descriptors so they pin the rule rather than the fixture.
+ */
+describe("topic anchor specificity (#2370)", () => {
+  const descriptors: DescriptorInput[] = [
+    { ui: "D_NET", name: "Neuroendocrine Tumors", treeNumbers: ["C04.557.465"] },
+    { ui: "D_MEL", name: "Melanoma", treeNumbers: ["C04.557.465.625.650.510"] },
+    { ui: "D_SKIN", name: "Skin Neoplasms", treeNumbers: ["C04.588.805"] },
+    // Genuinely two-site: a descriptor sitting on two UNRELATED branches.
+    { ui: "D_BOTH", name: "Ovarian Germ Cell Tumor", treeNumbers: ["C04.557.465.910", "C04.588.322.455"] },
+    { ui: "D_GYN", name: "Ovarian Neoplasms", treeNumbers: ["C04.588.322"] },
+  ];
+  const rules = [
+    { rule: "rel_include_subtree", descriptor: "Neuroendocrine Tumors", topic: "", fallback: "", flag: "", note: "" },
+    { rule: "rel_include_subtree", descriptor: "Skin Neoplasms", topic: "", fallback: "", flag: "", note: "" },
+    { rule: "rel_include_subtree", descriptor: "Ovarian Neoplasms", topic: "", fallback: "", flag: "", note: "" },
+    { rule: "topic_subtree", descriptor: "Neuroendocrine Tumors", topic: "thyroid-neuroendocrine", fallback: "", flag: "", note: "" },
+    { rule: "topic_subtree", descriptor: "Melanoma", topic: "melanoma-skin", fallback: "", flag: "", note: "" },
+    { rule: "topic_subtree", descriptor: "Ovarian Neoplasms", topic: "gynecologic", fallback: "", flag: "", note: "" },
+  ];
+  const topicsOf = (ui: string): string[] => {
+    const { rows } = generateCancerTaxonomy(rules, descriptors);
+    return rows.find((r: GeneratedRow) => r.descriptorUi === ui)?.topics ?? [];
+  };
+
+  it("the deeper anchor wins: melanoma is not also neuroendocrine", () => {
+    expect(topicsOf("D_MEL")).toEqual(["melanoma-skin"]);
+  });
+
+  it("the broad anchor still applies to descriptors the deep one does not cover", () => {
+    expect(topicsOf("D_NET")).toEqual(["thyroid-neuroendocrine"]);
+  });
+
+  it("anchors on unrelated branches do NOT suppress each other", () => {
+    // Neither C04.557.465 nor C04.588.322 is a prefix of the other, so a
+    // descriptor genuinely under both keeps both buckets.
+    expect(topicsOf("D_BOTH").sort()).toEqual(["gynecologic", "thyroid-neuroendocrine"]);
+  });
+});
