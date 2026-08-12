@@ -47,8 +47,13 @@ Authorization: Bearer <your-token>
 Each consumer gets its own independent token — the Faculty Review Tool's
 token and Research Informatics' token are separate secrets on the SPS side,
 so either can be rotated or revoked without touching the other. Use whichever
-one was issued to you; both are accepted on this same endpoint.
+one was issued to you; both are accepted on this same endpoint, **per env**.
 
+- **Environment status:** the Faculty Review Tool's token is live in both
+  staging and prod. Research Informatics' token is live in **staging only**
+  as of this writing — a request with it against prod 401s the same as an
+  unrecognized token, not a distinct error. Contact the SPS operator for
+  current status before assuming prod coverage.
 - The token is issued out-of-band by the SPS operator (WCM secret). Store it as
   a secret in your service; never commit it or put it in a URL.
 - Comparison is constant-time. A missing, malformed, or wrong token → `401`.
