@@ -57,7 +57,6 @@ export default async function EditReportsOptimizeMembershipPage({
       session={session}
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
-      reportsTab={0}
     >
       <Link
         href={`/edit/reports?center=${encodeURIComponent(code)}`}
