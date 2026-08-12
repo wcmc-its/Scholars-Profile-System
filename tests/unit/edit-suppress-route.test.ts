@@ -6,6 +6,7 @@ const {
   mockTransaction,
   mockSuppressionFindFirst,
   mockPublicationAuthorFindFirst,
+  mockPersonDatasetDepositFindUnique,
   mockSuppressionCreate,
   mockScholarUpdateMany,
   mockExecuteRaw,
@@ -26,6 +27,7 @@ const {
   mockTransaction: vi.fn(),
   mockSuppressionFindFirst: vi.fn(),
   mockPublicationAuthorFindFirst: vi.fn(),
+  mockPersonDatasetDepositFindUnique: vi.fn(),
   mockSuppressionCreate: vi.fn(),
   mockScholarUpdateMany: vi.fn(),
   mockExecuteRaw: vi.fn(),
@@ -60,6 +62,7 @@ vi.mock("@/lib/db", () => ({
     read: {
       suppression: { findFirst: mockSuppressionFindFirst },
       publicationAuthor: { findFirst: mockPublicationAuthorFindFirst },
+      personDatasetDeposit: { findUnique: mockPersonDatasetDepositFindUnique },
       grant: { findUnique: mockGrantFindUnique },
       education: { findUnique: mockEducationFindUnique },
       appointment: { findUnique: mockAppointmentFindUnique },
@@ -112,6 +115,7 @@ beforeEach(() => {
   mockTransaction.mockImplementation(async (cb: (tx: typeof fakeTx) => unknown) => cb(fakeTx));
   mockSuppressionFindFirst.mockResolvedValue(null);
   mockPublicationAuthorFindFirst.mockResolvedValue({ id: "pa1" });
+  mockPersonDatasetDepositFindUnique.mockResolvedValue({ cwid: "self01" });
   mockSuppressionCreate.mockResolvedValue({ id: "sup-1" });
   mockScholarUpdateMany.mockResolvedValue({ count: 1 });
   mockExecuteRaw.mockResolvedValue(1);
@@ -192,6 +196,48 @@ describe("POST /api/edit/suppress", () => {
   it("rejects a scholar suppression carrying a contributorCwid with 400", async () => {
     const res = await POST(post({ entityType: "scholar", entityId: "self01", contributorCwid: "self01" }));
     expect(res.status).toBe(400);
+  });
+
+  // --- dataset_deposit (Phase 2 data-sharing): unlike publication, there is
+  //     no `isSelfAuthorHide`-style default — the client must always send an
+  //     explicit reason, self or superuser (found while wiring the Datasets
+  //     card's Hide/Not-mine split; datasets-card.tsx now always sends one). ---
+
+  it("rejects a self per-contributor dataset hide with no reason (no default for dataset_deposit)", async () => {
+    const res = await POST(
+      post({ entityType: "dataset_deposit", entityId: "ds-1", contributorCwid: "self01" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "reason_required" });
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("writes a per-contributor dataset hide when a reason is supplied", async () => {
+    const res = await POST(
+      post({
+        entityType: "dataset_deposit",
+        entityId: "ds-1",
+        contributorCwid: "self01",
+        reason: "Not mine — removed by the author via /edit",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockSuppressionCreate).toHaveBeenCalledTimes(1);
+    expect(mockScholarUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a per-contributor dataset hide with no attribution row with 400", async () => {
+    mockPersonDatasetDepositFindUnique.mockResolvedValue(null);
+    const res = await POST(
+      post({
+        entityType: "dataset_deposit",
+        entityId: "ds-1",
+        contributorCwid: "self01",
+        reason: "Not mine — removed by the author via /edit",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "no_authorship" });
   });
 
   // --- whole-entity types: education / appointment (#160 PR-A) ---

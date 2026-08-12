@@ -4,13 +4,19 @@
  * Publications card's mechanism (`components/edit/publications-card.tsx`).
  *
  * Unlike Publications, there is no ReCiter-reject equivalent for a dataset
- * deposit — no "Not mine" INTERSTITIAL (the button is labeled "Not mine ·
- * Remove", s-index-ui-proposal.html §5, but it's a direct one-click action,
- * same as the old plain "Hide"), no first-hide-of-session notice, no
- * sole-displayed-author confirm guard, and no ReCiter pending hint. A hide
- * removes this scholar's row from THIS profile only (per-contributor, same
- * suppress/revoke routes as publications); a `removed_by_admin` row renders
- * read-only with an inline explanation and no controls.
+ * deposit, so "Hide" and "Not mine" are both direct one-click actions (no
+ * interstitial) — mirrors `news-edit-card.tsx`'s Hide/Not-me pair, not
+ * publications' richer reject flow. No first-hide-of-session notice, no
+ * sole-displayed-author confirm guard, and no ReCiter pending hint. Both
+ * buttons POST the same `/api/edit/suppress` with a different `reason`
+ * string (no new AuditAction, no schema change — `reason` is a free-text
+ * field the route already accepts) so the audit trail can tell "wrong
+ * attribution" apart from "just don't want this shown" for whenever the
+ * deferred regression-case work reads suppressions back into the extraction
+ * classifier. Either removes this scholar's row from THIS profile only
+ * (per-contributor, same suppress/revoke routes as publications); a
+ * `removed_by_admin` row renders read-only with an inline explanation and no
+ * controls.
  *
  * Rendered only when the loader populated `ctx.datasets` (DATA_SHARING_SECTION
  * on AND the scholar has ≥1 deposit), so an empty panel is never reached.
@@ -95,6 +101,10 @@ function applyOptimistic(state: Row[], update: OptimisticUpdate): Row[] {
 export function DatasetsCard({ cwid, mode = "self", scholarName = "", datasets }: DatasetsCardProps) {
   const su = mode === "superuser";
   const possessive = su ? `${scholarName}’s` : "your";
+  const hideReason = su ? "Hidden by a superuser via /edit" : "Hidden by the author via /edit";
+  const notMineReason = su
+    ? "Marked not theirs by a superuser via /edit"
+    : "Not mine — removed by the author via /edit";
   const [list, setList] = React.useState<Row[]>([...datasets]);
   const [, startTransition] = React.useTransition();
   const [optimistic, addOptimistic] = React.useOptimistic(list, applyOptimistic);
@@ -113,7 +123,12 @@ export function DatasetsCard({ cwid, mode = "self", scholarName = "", datasets }
     setList((prev) => updater(prev));
   }
 
-  function hide(datasetId: string) {
+  // `/api/edit/suppress`'s self-hide reason default only covers
+  // entityType === "publication" (route.ts's `isSelfAuthorHide`) — dataset_deposit
+  // was never added to it, so an omitted reason 400s ("reason_required") in
+  // every mode. Sending an explicit reason here fixes that AND gives Hide vs
+  // Not mine distinct audit text.
+  function suppress(datasetId: string, reason: string) {
     setError(datasetId, null);
     startTransition(async () => {
       addOptimistic({ kind: "hide", datasetId });
@@ -125,6 +140,7 @@ export function DatasetsCard({ cwid, mode = "self", scholarName = "", datasets }
             entityType: "dataset_deposit",
             entityId: datasetId,
             contributorCwid: cwid,
+            reason,
           }),
         });
         const data = (await res.json()) as
@@ -183,7 +199,7 @@ export function DatasetsCard({ cwid, mode = "self", scholarName = "", datasets }
     <EditPanel
       slot="datasets-card"
       heading={su ? "Datasets" : "My datasets"}
-      description={`Dataset deposits ${su ? `attributed to ${scholarName}` : "you're listed on"}, sourced from public repositories. If one isn't ${su ? scholarName : "yours"}, remove it from this site — that affects ${possessive} profile only.`}
+      description={`Dataset deposits ${su ? `attributed to ${scholarName}` : "you're listed on"}, sourced from public repositories. Hide one you'd rather not show on ${possessive} profile, or use "Not mine" if the attribution is wrong.`}
     >
       {optimistic.length === 0 ? (
         <p className="text-sm text-muted-foreground">
@@ -196,7 +212,8 @@ export function DatasetsCard({ cwid, mode = "self", scholarName = "", datasets }
               key={d.datasetId}
               dataset={d}
               error={errors.get(d.datasetId) ?? null}
-              onHide={() => hide(d.datasetId)}
+              onHide={() => suppress(d.datasetId, hideReason)}
+              onNotMine={() => suppress(d.datasetId, notMineReason)}
               onShow={() => show(d)}
             />
           ))}
@@ -210,11 +227,13 @@ function DatasetRow({
   dataset,
   error,
   onHide,
+  onNotMine,
   onShow,
 }: {
   dataset: Row;
   error: string | null;
   onHide: () => void;
+  onNotMine: () => void;
   onShow: () => void;
 }) {
   const url = resolveDatasetUrl(dataset);
@@ -254,17 +273,30 @@ function DatasetRow({
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {dataset.state === "shown" && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="min-h-11 md:min-h-8"
-              onClick={onHide}
-              data-testid={`dataset-hide-${dataset.datasetId}`}
-            >
-              <EyeOff />
-              Not mine · Remove
-            </Button>
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="min-h-11 md:min-h-8"
+                onClick={onHide}
+                data-testid={`dataset-hide-${dataset.datasetId}`}
+              >
+                <EyeOff />
+                Hide
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="min-h-11 md:min-h-8"
+                onClick={onNotMine}
+                data-testid={`dataset-notmine-${dataset.datasetId}`}
+                title="This deposit isn't attributed to me correctly — remove it"
+              >
+                Not mine
+              </Button>
+            </>
           )}
           {hidden && (
             <Button
