@@ -703,9 +703,6 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               "Ref": "DefaultRscCacheCFC4DDE6",
             },
             "Compress": true,
-            "OriginRequestPolicyId": {
-              "Ref": "ViewerHostOrp926A5472",
-            },
             "ResponseHeadersPolicyId": {
               "Ref": "HtmlHeadersD748949D",
             },
@@ -1360,27 +1357,6 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::S3::BucketPolicy",
-    },
-    "ViewerHostOrp926A5472": {
-      "Properties": {
-        "OriginRequestPolicyConfig": {
-          "Comment": "SPS (prod) -- forward the viewer Host so middleware redirects are absolute onto the public host (#1930).",
-          "CookiesConfig": {
-            "CookieBehavior": "none",
-          },
-          "HeadersConfig": {
-            "HeaderBehavior": "whitelist",
-            "Headers": [
-              "Host",
-            ],
-          },
-          "Name": "sps-viewer-host-prod",
-          "QueryStringsConfig": {
-            "QueryStringBehavior": "none",
-          },
-        },
-      },
-      "Type": "AWS::CloudFront::OriginRequestPolicy",
     },
     "WcmIpAllowSet": {
       "Properties": {
@@ -2128,9 +2104,6 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
               "Ref": "DefaultRscCacheCFC4DDE6",
             },
             "Compress": true,
-            "OriginRequestPolicyId": {
-              "Ref": "ViewerHostOrp926A5472",
-            },
             "ResponseHeadersPolicyId": {
               "Ref": "HtmlHeadersD748949D",
             },
@@ -2785,27 +2758,6 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::S3::BucketPolicy",
-    },
-    "ViewerHostOrp926A5472": {
-      "Properties": {
-        "OriginRequestPolicyConfig": {
-          "Comment": "SPS (staging) -- forward the viewer Host so middleware redirects are absolute onto the public host (#1930).",
-          "CookiesConfig": {
-            "CookieBehavior": "none",
-          },
-          "HeadersConfig": {
-            "HeaderBehavior": "whitelist",
-            "Headers": [
-              "Host",
-            ],
-          },
-          "Name": "sps-viewer-host-staging",
-          "QueryStringsConfig": {
-            "QueryStringBehavior": "none",
-          },
-        },
-      },
-      "Type": "AWS::CloudFront::OriginRequestPolicy",
     },
     "WcmIpAllowSet": {
       "Properties": {
