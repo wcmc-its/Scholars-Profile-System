@@ -4,7 +4,7 @@
  * NCI CCSG Data Table 2A rows for one center (today, always Meyer Cancer
  * Center — this is data-driven on `CenterProgram` existing, not a hardcoded
  * center check, same posture as the collaboration-network gate) and one
- * import cycle, for the `/edit/center/[code]?attr=nci-2a` review panel
+ * import cycle, for the `/edit/reports/2` review panel
  * (`2026-08-08-cancer-center-nci-table-2a-feature-plan.md`). `[code]` is the
  * raw `Center.code` (e.g. `meyer_cancer_center`), matching
  * `/edit/center/[code]/page.tsx` — NOT the public-facing slug.

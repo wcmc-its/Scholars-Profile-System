@@ -21,9 +21,8 @@
  * restore it). The `retire` panel renders normally so they can Restore; every
  * other panel shows a "Retired — restore to edit" notice instead of its editor.
  */
-import { CancerCenterCollabReportCard } from "@/components/edit/cancer-center-collab-report-card";
-import { Nci2aCard } from "@/components/edit/cancer-center-nci-2a-card";
 import { CenterProgramCard } from "@/components/edit/center-program-card";
+import { CenterReportsRailLink } from "@/components/edit/center-reports-rail-link";
 import { CenterRosterCard } from "@/components/edit/center-roster-card";
 import { CenterTypeCard } from "@/components/edit/center-type-card";
 import { EditShell } from "@/components/edit/edit-shell";
@@ -47,8 +46,6 @@ type AttrKey =
   | "leader"
   | "roster"
   | "programs"
-  | "nci-2a"
-  | "reports"
   | "access"
   | "name"
   | "slug"
@@ -84,6 +81,16 @@ const hasFacultyExportTab = (ctx: UnitEditContext) =>
   isUnitRosterExportEnabled() &&
   (ctx.unit.unitType === "department" || ctx.unit.unitType === "division");
 
+// The same data-driven "has a program taxonomy" gate Programs/NCI-Table-2A/
+// Reports have always shared — a center with a program taxonomy is exactly
+// the population the Cancer Center reports cover. Reports moved off the
+// in-page attribute set to the top-level `/edit/reports` console
+// (cancer-center-reports-consolidation); this predicate now only decides
+// whether the rail's external "Reports" link (`CenterReportsRailLink`)
+// renders, not a case in `renderPanel`.
+const hasCenterReports = (ctx: UnitEditContext) =>
+  ctx.unit.unitType === "center" && (ctx.programs?.length ?? 0) > 0;
+
 /** The full attribute set; `visible` encodes the SPEC § attribute table. */
 const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // Only for units SPS owns — a department's name is the directory's, and an
@@ -105,24 +112,8 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
     label: "Programs",
     visible: (ctx) => ctx.unit.unitType === "center" && (ctx.programs?.length ?? 0) > 0,
   },
-  // Same data-driven gate as Programs — a center with a program taxonomy is
-  // exactly the population this report's Program Code column can resolve
-  // against (`CenterMembership.programCode`).
-  {
-    key: "nci-2a",
-    label: "NCI Table 2A",
-    visible: (ctx) => ctx.unit.unitType === "center" && (ctx.programs?.length ?? 0) > 0,
-  },
   { key: "access", label: "Access", visible: (ctx) => isOwnerPlus(ctx.actorRole) },
   { key: "slug", label: "Profile URL", visible: (ctx) => isSuperuser(ctx.actorRole) },
-  // Cancer Center collaboration-recommendations v2. Same data-driven gate as
-  // Programs/NCI Table 2A — a center with a program taxonomy is exactly the
-  // population this report's collaboration + cancer-relevance axes cover.
-  {
-    key: "reports",
-    label: "Reports",
-    visible: (ctx) => ctx.unit.unitType === "center" && (ctx.programs?.length ?? 0) > 0,
-  },
   {
     key: "center-type",
     label: "Center type",
@@ -157,9 +148,14 @@ export function UnitEditPage({ ctx, attr }: UnitEditPageProps) {
           ? `/departments/${ctx.unit.deptSlug}/divisions/${ctx.unit.slug}`
           : undefined; // a division with no resolvable parent slug has no preview
 
+  // Mutually exclusive by unit type: a department gets its sibling-divisions
+  // cross-nav; a center with a program taxonomy gets the external "Reports"
+  // link instead (a division gets neither).
   const subRail =
     ctx.unit.unitType === "department" && ctx.siblingDivisions ? (
       <SiblingDivisionsRail divisions={ctx.siblingDivisions} />
+    ) : hasCenterReports(ctx) ? (
+      <CenterReportsRailLink centerCode={ctx.unit.code} />
     ) : undefined;
 
   return (
@@ -281,15 +277,6 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
       return (
         <CenterProgramCard centerCode={ctx.unit.code} programs={ctx.programs ?? []} />
       );
-    case "nci-2a":
-      // Same gate as Programs — a data-driven Meyer-only surface, no hardcoded
-      // center check. Fetches its own data client-side (real award dollars,
-      // no need to thread it through the shared unit-edit-context loader).
-      return <Nci2aCard centerCode={ctx.unit.code} />;
-    case "reports":
-      // Same gate as Programs/NCI Table 2A. Reads the precomputed weekly
-      // table client-side — no need to thread it through the shared loader.
-      return <CancerCenterCollabReportCard centerCode={ctx.unit.code} />;
     case "name":
       // The rail only surfaces this row for a manually-owned unit, so the
       // unitType is center | division here (never department).

@@ -149,6 +149,44 @@ describe("UnitEditPage — rail filtering", () => {
     expect(railKeys()).not.toContain("programs");
   });
 
+  // Cancer Center reports consolidation — "reports" / "nci-2a" are no longer
+  // in-page `?attr=` attributes; the rail carries ONE external link instead
+  // (`CenterReportsRailLink`, rendered via `subRail`, not `AttributeRail`).
+  it("a center with a program taxonomy shows the external Reports rail link, not an in-page attr", () => {
+    const withPrograms = ctx({
+      unitType: "center",
+      actorRole: "curator",
+      programs: [{ code: "CB", label: "Cancer Biology", sortOrder: 10, description: null, leaders: [] }],
+    });
+    render(<UnitEditPage ctx={withPrograms} />);
+    // Not selectable in-page — the old two-case rail behavior is gone.
+    expect(railKeys()).not.toContain("reports");
+    expect(railKeys()).not.toContain("nci-2a");
+    // The external link renders instead, pointing at the top-level console.
+    const link = screen.getByTestId("rail-reports-link");
+    expect(link.getAttribute("href")).toBe("/edit/reports?center=N1280");
+  });
+
+  it("a center with NO program taxonomy shows neither the in-page attrs nor the Reports rail link", () => {
+    render(<UnitEditPage ctx={ctx({ unitType: "center", actorRole: "curator" })} />);
+    expect(railKeys()).not.toContain("reports");
+    expect(railKeys()).not.toContain("nci-2a");
+    expect(screen.queryByTestId("rail-reports-link")).toBeNull();
+  });
+
+  it("a deep link to the retired ?attr=reports/?attr=nci-2a values falls back to the default panel", () => {
+    // Neither key exists in ATTRIBUTES anymore, so `visible.find` misses and
+    // `UnitEditPage` falls back to `DEFAULT_ATTR` ("description") rather than
+    // rendering nothing — a stale bookmark degrades gracefully.
+    const withPrograms = ctx({
+      unitType: "center",
+      actorRole: "curator",
+      programs: [{ code: "CB", label: "Cancer Biology", sortOrder: 10, description: null, leaders: [] }],
+    });
+    render(<UnitEditPage ctx={withPrograms} attr="reports" />);
+    expect(screen.getByTestId("panel-description")).toBeTruthy();
+  });
+
   it("an ED division has no roster row", () => {
     render(<UnitEditPage ctx={ctx({ unitType: "division", actorRole: "curator", source: "ED" })} />);
     expect(railKeys()).not.toContain("roster");

@@ -3,8 +3,8 @@
  *
  * A reviewer overrides an LLM-proposed judgment column on one NCI Table 2A
  * award row (`2026-08-08-cancer-center-nci-table-2a-feature-plan.md`) — the
- * `/edit/center/[code]?attr=nci-2a` panel's write path. `[code]` is the raw
- * `Center.code`, matching `/edit/center/[code]/page.tsx`.
+ * `/edit/reports/2` panel's write path. `[code]` is the raw `Center.code`,
+ * matching `/edit/center/[code]/page.tsx`.
  *
  * Body (at least one of the two):
  *   cancerRelevantPercent: number in [0, 100]

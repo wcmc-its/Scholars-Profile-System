@@ -238,6 +238,42 @@ describe("AdminSubnav", () => {
     expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
   });
 
+  // Reports console (Cancer Center collaboration/NCI-Table-2A, consolidated off
+  // the `/edit/center/[code]` unit editor) — same shape as the Data quality tab.
+  it("hides the Reports tab when reportsTab is null/omitted", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} reportsTab={null} />);
+    expect(screen.queryByTestId("admin-tab-reports")).toBeNull();
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+    expect(screen.queryByTestId("admin-tab-reports")).toBeNull();
+  });
+
+  it("shows the Reports tab (linking /edit/reports) when reportsTab is 0", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} reportsTab={0} />);
+    const tab = screen.getByTestId("admin-tab-reports");
+    expect(tab.getAttribute("href")).toBe("/edit/reports");
+    expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
+  });
+
+  it("marks the Reports tab active with aria-current", () => {
+    render(<AdminSubnav active="reports" pendingSlugRequests={null} pendingHonors={null} reportsTab={0} />);
+    expect(screen.getByTestId("admin-tab-reports").getAttribute("aria-current")).toBe("page");
+  });
+
+  // A unit Owner/Curator (superuserSurfaces=false) of a center also gets Reports —
+  // the `/edit/reports/*` pages pass reportsTab once their own authz check passes.
+  it("shows Reports for a non-superuser when reportsTab is set", () => {
+    render(
+      <AdminSubnav
+        active="reports"
+        pendingSlugRequests={null} pendingHonors={null}
+        superuserSurfaces={false}
+        reportsTab={0}
+      />,
+    );
+    expect(screen.getByTestId("admin-tab-reports")).toBeTruthy();
+    expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
+  });
+
   // comms-steward-profile-editing-spec.md §3b — a steward edits org units, so
   // the Units tab is shown via the `unitsTab` capability.
   it("shows the Units tab (linking /edit/units) when unitsTab is true", () => {
@@ -389,13 +425,14 @@ describe("AdminSubnav — the Honors tab (#1762)", () => {
 describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  /** Everything a full superuser sees: all 15 tabs visible, all four groups populated. */
+  /** Everything a full superuser sees: all 16 tabs visible, all four groups populated. */
   const allOn = {
     pendingSlugRequests: 2,
     pendingHonors: 0,
     administratorsTab: 0,
     methodsTab: 0,
     dataQualityTab: 0,
+    reportsTab: 0,
     unitsTab: true,
   } as const;
 
@@ -406,17 +443,17 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     vi.stubEnv("MATCHA", "on");
   }
 
-  it("collapses 15 tabs into a 6-item tier 1", () => {
+  it("collapses 16 tabs into a 6-item tier 1", () => {
     grouped();
     render(<AdminSubnav active="profiles" {...allOn} />);
-    // Profiles + Org units stay top-level; the other thirteen become four groups.
+    // Profiles + Org units stay top-level; the other fourteen become four groups.
     for (const id of ["profiles", "units"]) expect(screen.getByTestId(`admin-tab-${id}`)).toBeTruthy();
     for (const g of ["queues", "registries", "insights", "tools"])
       expect(screen.getByTestId(`admin-group-${g}`)).toBeTruthy();
     // …and the grouped members are NOT in tier 1 — no group is active here, so
     // they are not in the DOM at all. This is the assertion that would fail if
     // grouping silently rendered both tiers flat.
-    for (const id of ["slug-requests", "slugs", "usage", "matcha", "cores", "activity", "etl-status"])
+    for (const id of ["slug-requests", "slugs", "usage", "matcha", "cores", "activity", "etl-status", "reports"])
       expect(screen.queryByTestId(`admin-tab-${id}`)).toBeNull();
   });
 
@@ -438,6 +475,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
       "slug-requests": "queues", "honors-queue": "queues", "news-queue": "queues", cores: "queues",
       slugs: "registries", administrators: "registries", methods: "registries",
       "data-quality": "insights", activity: "insights", usage: "insights", "etl-status": "insights",
+      reports: "insights",
       "find-researchers": "tools", matcha: "tools",
     };
     for (const [id, group] of Object.entries(expected)) {
@@ -638,25 +676,26 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
       "admin-tab-administrators",
       "admin-tab-methods",
     ]);
-    // Insights gained ETL status at the END of the group, so the three surfaces
-    // that were already there keep their positions.
+    // Insights gained ETL status, then Reports, at the END of the group, so the
+    // surfaces that were already there keep their positions.
     fireEvent.focus(screen.getByTestId("admin-group-insights"));
     expect(order(await screen.findByTestId("admin-group-menu-insights"))).toEqual([
       "admin-tab-data-quality",
       "admin-tab-activity",
       "admin-tab-usage",
       "admin-tab-etl-status",
+      "admin-tab-reports",
     ]);
   });
 
-  it("is dark by default — the flag off reproduces the flat 15-tab strip", () => {
+  it("is dark by default — the flag off reproduces the flat 16-tab strip", () => {
     vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
     vi.stubEnv("CORE_PAGES", "on");
     render(<AdminSubnav active="profiles" {...allOn} />);
     expect(order(screen.getByTestId("admin-subnav-tier1"))).toEqual(
       [
         "profiles", "units", "slug-requests", "honors-queue", "news-queue", "slugs",
-        "administrators", "methods", "data-quality", "activity", "usage", "etl-status", "cores",
+        "administrators", "methods", "data-quality", "activity", "usage", "etl-status", "reports", "cores",
         "find-researchers",
       ].map((id) => `admin-tab-${id}`),
     );

@@ -24,6 +24,7 @@ export function ConsoleShell({
   profilesTab,
   unitsTab,
   dataQualityTab,
+  reportsTab,
   administratorsTab,
   usageTab,
   children,
@@ -47,6 +48,13 @@ export function ConsoleShell({
   profilesTab?: boolean;
   unitsTab?: boolean;
   dataQualityTab?: number | null;
+  /** Same override shape as `dataQualityTab` — see that prop's doc for the
+   *  general pattern. Only `/edit/reports/*` passes this today (the gate
+   *  already passed to reach that page); a future page that admits a unit
+   *  Owner/Curator of a center without ALSO being one of those routes would
+   *  OR its own signal onto the derived base the same way `/edit/units` does
+   *  for `dataQualityTab`. */
+  reportsTab?: number | null;
   administratorsTab?: number | null;
   usageTab?: boolean;
   children: React.ReactNode;
@@ -55,6 +63,7 @@ export function ConsoleShell({
   if (profilesTab !== undefined) tabs.profilesTab = tabs.profilesTab || profilesTab;
   if (unitsTab !== undefined) tabs.unitsTab = unitsTab;
   if (dataQualityTab !== undefined) tabs.dataQualityTab = dataQualityTab;
+  if (reportsTab !== undefined) tabs.reportsTab = reportsTab;
   if (administratorsTab !== undefined) tabs.administratorsTab = administratorsTab;
   return (
     <div className="bg-apollo-page min-h-screen">
