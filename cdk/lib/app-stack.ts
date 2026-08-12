@@ -2322,19 +2322,6 @@ export class AppStack extends Stack {
         // on the live superuser-role LDAP check (R1); enabling the flag does
         // not by itself grant anyone impersonation.
         IMPERSONATION_ENABLED: "true",
-        // #671 -- people profile canonical URL. "root" serves /{slug} as the
-        // canonical profile URL (and /scholars/{slug} 301s to it); "scholars"
-        // (or unset) keeps the legacy /scholars/{slug}. Both envs cut over to
-        // "root" (staging flipped first for verification; prod followed). Kept
-        // as an explicit flag -- not yet removed -- so it stays the rollback
-        // lever during the soak (set back to "scholars" + redeploy to revert).
-        // Unlike IMPERSONATION above, this needs NO EdgeStack behavior: a root
-        // single-segment profile falls to the cacheable default behavior
-        // (force-dynamic, path-cached, no cookie/query dependence) -- the same
-        // edge treatment the legacy route got. The app reads PROFILE_CANONICAL
-        // in lib/profile-url.ts. Deployed manually (cdk deploy --exclusively
-        // Sps-App-<env>); the CD pipeline only re-rolls the image.
-        PROFILE_CANONICAL: "root",
         // #799/#800/#801 -- family-primary "Methods & tools" lens. Two flags,
         // STAGING-FIRST (both ON in staging, OFF in prod until the staging soak
         // completes and the prod data steps are done):

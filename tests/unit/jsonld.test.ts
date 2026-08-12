@@ -4,7 +4,7 @@
  * Contract (issue #171):
  *  - @context = "https://schema.org", @type = "Person"
  *  - name from preferredName (postnominal applied upstream)
- *  - url canonicalized to scholars.weill.cornell.edu/scholars/<slug>
+ *  - url canonicalized to scholars.weill.cornell.edu/<slug>
  *  - image always populated from identityImageEndpoint
  *  - affiliation + worksFor both carry WCM ROR identifier
  *  - worksFor.department nested when primaryDepartment is non-null
@@ -62,7 +62,8 @@ describe("buildPersonJsonLd", () => {
 
   it("emits canonical url with slug", () => {
     const ld = buildPersonJsonLd(baseInput);
-    expect((ld.url as string).endsWith("/scholars/jane-smith")).toBe(true);
+    expect((ld.url as string).endsWith("/jane-smith")).toBe(true);
+    expect(ld.url as string).not.toContain("/scholars/");
   });
 
   it("emits image from identityImageEndpoint", () => {
