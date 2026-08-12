@@ -759,10 +759,6 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "true",
               },
               {
-                "Name": "PROFILE_CANONICAL",
-                "Value": "root",
-              },
-              {
                 "Name": "METHODS_LENS_ENABLED",
                 "Value": "on",
               },
@@ -5014,10 +5010,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "IMPERSONATION_ENABLED",
                 "Value": "true",
-              },
-              {
-                "Name": "PROFILE_CANONICAL",
-                "Value": "root",
               },
               {
                 "Name": "METHODS_LENS_ENABLED",
