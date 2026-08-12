@@ -295,6 +295,10 @@ export type EditContextDataset = {
   state: "shown" | "hidden_by_self" | "removed_by_admin";
   /** The active self-applied suppression's id when `state === 'hidden_by_self'`, else null. */
   suppressionId: string | null;
+  /** ISO timestamp of that suppression's `createdAt`, or null. Server-confirmed
+   *  date for "Removed by you on {date}" — the optimistic client-side hide
+   *  uses `new Date()` instead, since the row genuinely is being hidden right now. */
+  hiddenAt: string | null;
 };
 
 /**
@@ -1145,27 +1149,30 @@ export async function loadEditContext(
         entityId: { in: datasetIds },
         revokedAt: null,
       },
-      select: { id: true, entityId: true, contributorCwid: true },
+      select: { id: true, entityId: true, contributorCwid: true, createdAt: true },
     });
     const darkDatasetIds = new Set<string>();
-    // datasetId → this scholar's own active suppression id.
-    const selfSuppressionByDataset = new Map<string, string>();
+    // datasetId → this scholar's own active suppression (id + when they hid it).
+    const selfSuppressionByDataset = new Map<string, { id: string; createdAt: Date }>();
     for (const row of datasetSuppressions) {
       if (row.contributorCwid === null) {
         darkDatasetIds.add(row.entityId);
       } else if (row.contributorCwid === cwid) {
-        selfSuppressionByDataset.set(row.entityId, row.id);
+        selfSuppressionByDataset.set(row.entityId, { id: row.id, createdAt: row.createdAt });
       }
     }
     for (const r of datasetRows) {
       let state: EditContextDataset["state"];
       let suppressionId: string | null = null;
+      let hiddenAt: string | null = null;
       if (darkDatasetIds.has(r.datasetId)) {
         // Whole-entity takedown outranks a self-hide, mirroring publications.
         state = "removed_by_admin";
       } else if (selfSuppressionByDataset.has(r.datasetId)) {
         state = "hidden_by_self";
-        suppressionId = selfSuppressionByDataset.get(r.datasetId)!;
+        const self = selfSuppressionByDataset.get(r.datasetId)!;
+        suppressionId = self.id;
+        hiddenAt = self.createdAt.toISOString();
       } else {
         state = "shown";
       }
@@ -1187,6 +1194,7 @@ export async function loadEditContext(
         authorPosition: r.authorPosition,
         state,
         suppressionId,
+        hiddenAt,
       });
     }
   }

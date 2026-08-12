@@ -651,6 +651,7 @@ describe("EditPage router — Datasets rail (DATA_SHARING_SECTION, #2348)", () =
         authorPosition: "first",
         state: "shown",
         suppressionId: null,
+        hiddenAt: null,
       },
     ],
   };

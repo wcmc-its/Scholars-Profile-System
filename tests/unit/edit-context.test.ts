@@ -1033,6 +1033,7 @@ describe("loadEditContext — dataset deposits (suppressible, flag-gated, #2348)
         authorPosition: "first",
         state: "shown",
         suppressionId: null,
+        hiddenAt: null,
       },
     ]);
     expect(c.personDatasetDeposit.findMany).toHaveBeenCalledWith(
@@ -1046,11 +1047,16 @@ describe("loadEditContext — dataset deposits (suppressible, flag-gated, #2348)
     c.scholar.findUnique.mockResolvedValue(scholarRow());
     c.personDatasetDeposit.findMany.mockResolvedValue(DATASET_ROWS);
     // Two suppression.findMany calls: scholar-level then dataset-level.
-    c.suppression.findMany
-      .mockResolvedValueOnce([]) // scholar-level
-      .mockResolvedValueOnce([{ id: "sup-1", entityId: "ds-1", contributorCwid: SELF }]);
+    c.suppression.findMany.mockResolvedValueOnce([]) // scholar-level
+      .mockResolvedValueOnce([
+        { id: "sup-1", entityId: "ds-1", contributorCwid: SELF, createdAt: new Date("2026-08-03T00:00:00Z") },
+      ]);
     const ctx = await loadEditContext(SELF, asClient(c));
-    expect(ctx!.datasets[0]).toMatchObject({ state: "hidden_by_self", suppressionId: "sup-1" });
+    expect(ctx!.datasets[0]).toMatchObject({
+      state: "hidden_by_self",
+      suppressionId: "sup-1",
+      hiddenAt: "2026-08-03T00:00:00.000Z",
+    });
   });
 
   it("derives removed_by_admin from a whole-entity suppression (contributorCwid null), no suppressionId", async () => {
