@@ -28,6 +28,7 @@ function dataset(overrides: Partial<EditContextDataset>): EditContextDataset {
     authorPosition: "first",
     state: "shown",
     suppressionId: null,
+    hiddenAt: null,
     ...overrides,
   };
 }
@@ -112,22 +113,42 @@ describe("DatasetsCard — title + citation line (s-index-ui-proposal.html §5 f
 });
 
 describe("DatasetsCard — row states", () => {
-  it("a 'shown' row has the Hide button", () => {
+  it("a 'shown' row has the 'Not mine · Remove' button", () => {
     render(<DatasetsCard cwid={CWID} datasets={[dataset({ state: "shown" })]} />);
-    expect(screen.getByTestId("dataset-hide-ds-1")).toBeTruthy();
+    const btn = screen.getByTestId("dataset-hide-ds-1");
+    expect(btn).toBeTruthy();
+    expect(btn.textContent).toContain("Not mine");
     expect(screen.queryByTestId("dataset-show-ds-1")).toBeNull();
   });
 
-  it("a 'hidden_by_self' row has the Show button + Hidden badge", () => {
+  it("a 'hidden_by_self' row has the Restore button + an accurate removal note, dated when hiddenAt is known", () => {
     render(
       <DatasetsCard
         cwid={CWID}
-        datasets={[dataset({ state: "hidden_by_self", suppressionId: "sup-a" })]}
+        datasets={[
+          dataset({ state: "hidden_by_self", suppressionId: "sup-a", hiddenAt: "2026-08-03T12:00:00.000Z" }),
+        ]}
       />,
     );
-    expect(screen.getByTestId("dataset-show-ds-1")).toBeTruthy();
+    const restore = screen.getByTestId("dataset-show-ds-1");
+    expect(restore.textContent).toContain("Restore");
     expect(screen.queryByTestId("dataset-hide-ds-1")).toBeNull();
-    expect(screen.getByText("Hidden")).toBeTruthy();
+    const text = screen.getByTestId("dataset-row-ds-1").textContent ?? "";
+    expect(text).toContain("Removed by you on Aug 3 · kept out of your public profile");
+    // Never the mockup's aspirational claims — nothing today reads
+    // suppressions back into reports or the extraction ruleset.
+    expect(text).not.toContain("reports");
+    expect(text).not.toContain("ruleset");
+  });
+
+  it("omits the date but still shows the removal note when hiddenAt is unknown", () => {
+    render(
+      <DatasetsCard
+        cwid={CWID}
+        datasets={[dataset({ state: "hidden_by_self", suppressionId: "sup-a", hiddenAt: null })]}
+      />,
+    );
+    expect(screen.getByText("Removed by you · kept out of your public profile")).toBeTruthy();
   });
 
   it("a 'removed_by_admin' row has the inline destructive text and NO control", () => {

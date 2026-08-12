@@ -4,7 +4,9 @@
  * Publications card's mechanism (`components/edit/publications-card.tsx`).
  *
  * Unlike Publications, there is no ReCiter-reject equivalent for a dataset
- * deposit — no "Not mine" interstitial, no first-hide-of-session notice, no
+ * deposit — no "Not mine" INTERSTITIAL (the button is labeled "Not mine ·
+ * Remove", s-index-ui-proposal.html §5, but it's a direct one-click action,
+ * same as the old plain "Hide"), no first-hide-of-session notice, no
  * sole-displayed-author confirm guard, and no ReCiter pending hint. A hide
  * removes this scholar's row from THIS profile only (per-contributor, same
  * suppress/revoke routes as publications); a `removed_by_admin` row renders
@@ -68,6 +70,11 @@ function citationLine(d: Row): string {
   return [from, methodConfidence].filter(Boolean).join(" · ");
 }
 
+/** "Aug 11" — matches s-index-ui-proposal.html §5's "Removed by you on Aug 3". */
+function formatShortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 type OptimisticUpdate =
   | { kind: "hide"; datasetId: string }
   | { kind: "show"; datasetId: string };
@@ -76,9 +83,12 @@ function applyOptimistic(state: Row[], update: OptimisticUpdate): Row[] {
   return state.map((d) => {
     if (d.datasetId !== update.datasetId) return d;
     if (update.kind === "hide") {
-      return { ...d, state: "hidden_by_self", suppressionId: null };
+      // No suppressionId yet (the POST hasn't resolved), but `hiddenAt` needs
+      // no server round-trip to be accurate — the row genuinely is being
+      // removed right now.
+      return { ...d, state: "hidden_by_self", suppressionId: null, hiddenAt: new Date().toISOString() };
     }
-    return { ...d, state: "shown", suppressionId: null };
+    return { ...d, state: "shown", suppressionId: null, hiddenAt: null };
   });
 }
 
@@ -173,7 +183,7 @@ export function DatasetsCard({ cwid, mode = "self", scholarName = "", datasets }
     <EditPanel
       slot="datasets-card"
       heading={su ? "Datasets" : "My datasets"}
-      description={`Dataset deposits ${su ? `attributed to ${scholarName}` : "you're listed on"}, sourced from public repositories. Hide one to remove ${su ? scholarName : "yourself"} from it on this site — hiding affects ${possessive} profile only.`}
+      description={`Dataset deposits ${su ? `attributed to ${scholarName}` : "you're listed on"}, sourced from public repositories. If one isn't ${su ? scholarName : "yours"}, remove it from this site — that affects ${possessive} profile only.`}
     >
       {optimistic.length === 0 ? (
         <p className="text-sm text-muted-foreground">
@@ -233,19 +243,14 @@ function DatasetRow({
           <p className="text-sm text-muted-foreground">
             {dataset.dataType ?? "Data type unknown"} · {dataset.depositYear ?? "Year unknown"} ·{" "}
             {dataset.authorPosition} author
-            {hidden && (
-              <>
-                {" · "}
-                <Badge
-                  variant="outline"
-                  className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
-                >
-                  Hidden
-                </Badge>
-              </>
-            )}
           </p>
           <p className="text-muted-foreground text-sm">{citationLine(dataset)}</p>
+          {hidden && (
+            <p className="text-muted-foreground text-sm">
+              Removed by you{dataset.hiddenAt ? ` on ${formatShortDate(dataset.hiddenAt)}` : ""} ·
+              kept out of your public profile
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {dataset.state === "shown" && (
@@ -258,7 +263,7 @@ function DatasetRow({
               data-testid={`dataset-hide-${dataset.datasetId}`}
             >
               <EyeOff />
-              Hide
+              Not mine · Remove
             </Button>
           )}
           {hidden && (
@@ -271,7 +276,7 @@ function DatasetRow({
               data-testid={`dataset-show-${dataset.datasetId}`}
             >
               <Eye />
-              Show
+              Restore
             </Button>
           )}
           {dataset.state === "removed_by_admin" && (
