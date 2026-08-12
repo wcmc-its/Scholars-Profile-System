@@ -90,8 +90,9 @@ describe("ConsoleShell", () => {
     expect(screen.getByTestId("admin-tab-slugs")).toBeTruthy();
     expect(screen.getByTestId("admin-tab-activity")).toBeTruthy();
     expect(screen.getByTestId("admin-tab-usage")).toBeTruthy();
-    // Reports (Cancer Center console) — same base gate as Data quality.
-    expect(screen.getByTestId("admin-tab-reports")).toBeTruthy();
+    // No Reports tab, even for a superuser — reached exclusively via
+    // /edit/units → the center's own editor.
+    expect(screen.queryByTestId("admin-tab-reports")).toBeNull();
   });
 
   it("comms_steward sees Profiles + Units + Methods, NOT the superuser-only surfaces", () => {
@@ -108,30 +109,24 @@ describe("ConsoleShell", () => {
     expect(screen.getByTestId("admin-tab-profiles")).toBeTruthy();
     expect(screen.getByTestId("admin-tab-units")).toBeTruthy();
     expect(screen.getByTestId("admin-tab-methods")).toBeTruthy();
-    // A comms_steward is a global editor, so Reports shows here too — same
-    // base gate as Data quality (deriveConsoleTabs, not a superuser-only tab).
-    expect(screen.getByTestId("admin-tab-reports")).toBeTruthy();
+    // No Reports tab, for anyone — 2026-08-12 direction: that console is
+    // reached exclusively via /edit/units → the center's own editor.
+    expect(screen.queryByTestId("admin-tab-reports")).toBeNull();
     // Superuser-only surfaces stay hidden.
     expect(screen.queryByTestId("admin-tab-slugs")).toBeNull();
     expect(screen.queryByTestId("admin-tab-administrators")).toBeNull();
     expect(screen.queryByTestId("admin-tab-activity")).toBeNull();
   });
 
-  it("a unit Owner/Curator (non-global) gets Reports only via the page's own reportsTab override", () => {
+  it("/edit/reports/* pages render with no Reports tab, even passing active=\"reports\"", () => {
     render(
-      <ConsoleShell
-        active="reports"
-        session={session({})}
-        pendingSlugRequests={null}
-        pendingHonors={null}
-        reportsTab={0}
-      >
+      <ConsoleShell active="reports" session={session({})} pendingSlugRequests={null} pendingHonors={null}>
         <h1>Reports</h1>
       </ConsoleShell>,
     );
-    // The override REPLACES the derived (null) base — mirrors dataQualityTab.
-    expect(screen.getByTestId("admin-tab-reports").getAttribute("aria-current")).toBe("page");
-    // Still no other superuser/global surfaces leak in.
+    // `active="reports"` never matches any rendered tab — there is no
+    // `reportsTab` override anymore, on this shell or `AdminSubnav` itself.
+    expect(screen.queryByTestId("admin-tab-reports")).toBeNull();
     expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
   });
 });

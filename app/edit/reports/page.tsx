@@ -89,7 +89,6 @@ export default async function EditReportsIndexPage({
       session={session}
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
-      reportsTab={0}
     >
       <h1 className="mb-1 text-xl font-semibold">{ctx.unit.name} reports</h1>
       <p className="text-muted-foreground mb-6 text-sm">
