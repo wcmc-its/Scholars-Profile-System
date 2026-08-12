@@ -39,6 +39,7 @@ export type AdminSubnavActive =
   | "administrators"
   | "methods"
   | "data-quality"
+  | "data-sharing"
   | "activity"
   | "usage"
   | "etl-status"
@@ -90,6 +91,7 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   methods: "registries",
   /** Read-only dashboards; no writes. */
   "data-quality": "insights",
+  "data-sharing": "insights",
   activity: "insights",
   usage: "insights",
   "etl-status": "insights",
@@ -124,6 +126,7 @@ export function AdminSubnav({
   administratorsTab,
   methodsTab,
   dataQualityTab,
+  dataSharingTab,
   superuserSurfaces = true,
   profilesTab = false,
   unitsTab = false,
@@ -159,6 +162,11 @@ export function AdminSubnav({
    *  shows it to a unit Owner/Curator with grants). A number shows it (passed
    *  `0` — no badge), mirroring `methodsTab`. */
   dataQualityTab?: number | null;
+  /** `null`/omitted hides the "Data sharing" tab — the S-Index Phase 1 dashboard
+   *  is flag- + role-gated (`isDataSharingDashboardTabVisible`; superuser or
+   *  comms_steward, no unit-scoped variant — unlike Data Quality, there is no
+   *  natural per-unit cut here). A number shows it (passed `0` — no badge). */
+  dataSharingTab?: number | null;
   /** Whether to show the superuser list surfaces (URL requests / Slug registry /
    *  Administrators — and Profiles, unless `profilesTab` separately enables it).
    *  Default `true`. A comms_steward who is NOT a superuser passes `false` so
@@ -239,6 +247,12 @@ export function AdminSubnav({
         id: "data-quality",
         href: "/edit/data-quality",
         label: "Data quality",
+      },
+      {
+        show: dataSharingTab !== null && dataSharingTab !== undefined,
+        id: "data-sharing",
+        href: "/edit/data-sharing",
+        label: "Data sharing",
       },
       // Fleet-wide edit-activity oversight. Superuser-only; no separate flag — the
       // superuser gate on the page IS the control.
