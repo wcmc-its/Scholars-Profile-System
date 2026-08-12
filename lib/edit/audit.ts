@@ -176,7 +176,7 @@ export type AuditAction =
   /** a superuser/comms-steward overrode a `CancerCenterFundingAward` row's
    *  LLM-proposed `cancerRelevantPercent` and/or replaced its
    *  `CancerCenterProgramAllocation` set, on the Meyer Cancer Center NCI
-   *  Table 2A tab (`/edit/center/[slug]?attr=nci-2a`). `targetEntityType=
+   *  Table 2A report (`/edit/reports/2`). `targetEntityType=
    *  'cancer_funding_award'`, `targetEntityId` is the award `id`; before/after
    *  carry whichever of {cancerRelevantPercent, allocations} changed. Marks the
    *  touched field(s) `source: "human"` — a later cycle re-import must never
@@ -230,7 +230,7 @@ export type AuditEntityType =
    *  `targetEntityId` is the (already deleted) `biosketch_generation.id`, so it
    *  names WHAT was erased rather than something to look up. */
   | "biosketch_generation"
-  /** an NCI Table 2A funding row overridden on `/edit/center/[slug]?attr=nci-2a`
+  /** an NCI Table 2A funding row overridden on `/edit/reports/2`
    *  (`cancer_funding_override`); `targetEntityId` is the
    *  `cancer_center_funding_award.id`. The cycle IMPORT that produces the row is
    *  machine-run (`scripts/backfills/*-cancer-center-nci-2a-import.ts`) and is

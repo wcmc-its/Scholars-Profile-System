@@ -42,6 +42,7 @@ export type AdminSubnavActive =
   | "activity"
   | "usage"
   | "etl-status"
+  | "reports"
   | "cores"
   | "find-researchers"
   | "matcha"
@@ -92,6 +93,9 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   activity: "insights",
   usage: "insights",
   "etl-status": "insights",
+  // Cancer Center reporting console (`/edit/reports`) — advisory-only, no
+  // writes, the same posture as its insights siblings.
+  reports: "insights",
   /** Paste an input, get a ranked result. */
   "find-researchers": "tools",
   matcha: "tools",
@@ -115,6 +119,7 @@ export function AdminSubnav({
   administratorsTab,
   methodsTab,
   dataQualityTab,
+  reportsTab,
   superuserSurfaces = true,
   profilesTab = false,
   unitsTab = false,
@@ -150,6 +155,15 @@ export function AdminSubnav({
    *  shows it to a unit Owner/Curator with grants). A number shows it (passed
    *  `0` — no badge), mirroring `methodsTab`. */
   dataQualityTab?: number | null;
+  /** `null`/omitted hides the "Reports" tab (`/edit/reports` — the Cancer
+   *  Center collaboration/NCI-Table-2A console, consolidated off the
+   *  `/edit/center/[code]` unit editor). A number shows it (passed `0` — no
+   *  badge), mirroring `dataQualityTab`: a superuser or comms_steward gets it
+   *  from `deriveConsoleTabs`; a unit Owner/Curator of a center earns it too,
+   *  once they've passed the `/edit/reports/*` page's own authz check (which
+   *  passes a literal `reportsTab={0}` override, the same way
+   *  `/edit/data-quality/page.tsx` does for `dataQualityTab`). */
+  reportsTab?: number | null;
   /** Whether to show the superuser list surfaces (URL requests / Slug registry /
    *  Administrators — and Profiles, unless `profilesTab` separately enables it).
    *  Default `true`. A comms_steward who is NOT a superuser passes `false` so
@@ -240,6 +254,15 @@ export function AdminSubnav({
       // Read-only ETL health board. Superuser-only; no separate flag — same
       // rationale as Activity above, the superuser gate on the page IS the control.
       { show: superuserSurfaces, id: "etl-status", href: "/edit/etl-status", label: "ETL status" },
+      // Cancer Center reporting console — consolidated off the per-unit editor's
+      // `?attr=reports` / `?attr=nci-2a` tabs. `null`/omitted hides it; a number
+      // shows it (passed `0` — no badge), mirroring `dataQualityTab`.
+      {
+        show: reportsTab !== null && reportsTab !== undefined,
+        id: "reports",
+        href: "/edit/reports",
+        label: "Reports",
+      },
       // Gated on the same `CORE_PAGES` flag as the public core surfaces, so it stays
       // dark in any env where cores aren't live yet (staging-on / prod-off).
       { show: superuserSurfaces && isCorePagesEnabled(), id: "cores", href: "/edit/core", label: "Cores" },

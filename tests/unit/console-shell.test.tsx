@@ -90,6 +90,8 @@ describe("ConsoleShell", () => {
     expect(screen.getByTestId("admin-tab-slugs")).toBeTruthy();
     expect(screen.getByTestId("admin-tab-activity")).toBeTruthy();
     expect(screen.getByTestId("admin-tab-usage")).toBeTruthy();
+    // Reports (Cancer Center console) — same base gate as Data quality.
+    expect(screen.getByTestId("admin-tab-reports")).toBeTruthy();
   });
 
   it("comms_steward sees Profiles + Units + Methods, NOT the superuser-only surfaces", () => {
@@ -106,9 +108,30 @@ describe("ConsoleShell", () => {
     expect(screen.getByTestId("admin-tab-profiles")).toBeTruthy();
     expect(screen.getByTestId("admin-tab-units")).toBeTruthy();
     expect(screen.getByTestId("admin-tab-methods")).toBeTruthy();
+    // A comms_steward is a global editor, so Reports shows here too — same
+    // base gate as Data quality (deriveConsoleTabs, not a superuser-only tab).
+    expect(screen.getByTestId("admin-tab-reports")).toBeTruthy();
     // Superuser-only surfaces stay hidden.
     expect(screen.queryByTestId("admin-tab-slugs")).toBeNull();
     expect(screen.queryByTestId("admin-tab-administrators")).toBeNull();
     expect(screen.queryByTestId("admin-tab-activity")).toBeNull();
+  });
+
+  it("a unit Owner/Curator (non-global) gets Reports only via the page's own reportsTab override", () => {
+    render(
+      <ConsoleShell
+        active="reports"
+        session={session({})}
+        pendingSlugRequests={null}
+        pendingHonors={null}
+        reportsTab={0}
+      >
+        <h1>Reports</h1>
+      </ConsoleShell>,
+    );
+    // The override REPLACES the derived (null) base — mirrors dataQualityTab.
+    expect(screen.getByTestId("admin-tab-reports").getAttribute("aria-current")).toBe("page");
+    // Still no other superuser/global surfaces leak in.
+    expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
   });
 });

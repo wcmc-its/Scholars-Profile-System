@@ -30,6 +30,7 @@ export type ConsoleTabProps = {
   administratorsTab: number | null;
   methodsTab: number | null;
   dataQualityTab: number | null;
+  reportsTab: number | null;
   viewerIsDeveloper: boolean;
 };
 
@@ -48,6 +49,13 @@ export function deriveConsoleTabs(session: EditSession): ConsoleTabProps {
     administratorsTab: session.isSuperuser && isAdministratorsTabEnabled() ? 0 : null,
     methodsTab: isMethodsTabVisible(session) ? 0 : null,
     dataQualityTab: isDataQualityTabVisible(session) ? 0 : null,
+    // Reports (`/edit/reports` — the former center-editor `?attr=reports` /
+    // `?attr=nci-2a` tabs): the same "global editor" half as dataQualityTab. A
+    // unit Owner/Curator of a center earns the tab too, but only once they've
+    // already passed that page's own authz check — the `/edit/reports/*`
+    // pages pass a literal `reportsTab={0}` override (like `dataQualityTab={0}`
+    // on `/edit/data-quality/page.tsx`), not an OR onto this base.
+    reportsTab: session.isSuperuser || session.isCommsSteward ? 0 : null,
     viewerIsDeveloper: session.isDeveloper === true,
   };
 }

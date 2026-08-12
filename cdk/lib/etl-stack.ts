@@ -1375,8 +1375,8 @@ export class EtlStack extends Stack {
       // a scholar who gained a photo stayed listed as missing for five weeks.
       // Measured cost of a full wave in prod (2026-07-06): 9,389 probes in 3m21s.
       { id: "HeadshotPresence", npmScript: "etl:headshot", external: false, tier: "continue" },
-      // Cancer Center collaboration-recommendations v2 Reports tab (`/edit`
-      // `?attr=reports`) — precomputes both axes (PubMed collaboration +
+      // Cancer Center collaboration-recommendations v2 Reports tab
+      // (`/edit/reports/1`) — precomputes both axes (PubMed collaboration +
       // cancer-relevance) for every full-time faculty member against each
       // center with a program taxonomy. Aurora-only (no LDAP/WCM network
       // dependency), so external:false. `continue` — this is advisory data

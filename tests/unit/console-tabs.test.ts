@@ -33,6 +33,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       administratorsTab: 0,
       methodsTab: 0,
       dataQualityTab: 0,
+      reportsTab: 0,
       viewerIsDeveloper: false,
     });
   });
@@ -45,6 +46,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       administratorsTab: null, // superuser-only, even with the flag on
       methodsTab: 0,
       dataQualityTab: 0,
+      reportsTab: 0,
       viewerIsDeveloper: false,
     });
   });
@@ -59,6 +61,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       administratorsTab: null,
       methodsTab: null,
       dataQualityTab: null,
+      reportsTab: null,
       viewerIsDeveloper: false,
     });
   });
@@ -71,6 +74,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       administratorsTab: null,
       methodsTab: null,
       dataQualityTab: null,
+      reportsTab: null,
       viewerIsDeveloper: true,
     });
   });
@@ -83,6 +87,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       administratorsTab: null,
       methodsTab: null,
       dataQualityTab: null,
+      reportsTab: null,
       viewerIsDeveloper: false,
     });
   });
