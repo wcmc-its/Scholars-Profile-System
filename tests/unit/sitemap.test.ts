@@ -160,7 +160,7 @@ describe("lib/sitemap — buildSitemapEntries", () => {
 
   it("emits one scholar entry (0.8/weekly) per active scholar, lastmod from updatedAt", async () => {
     const entries = await buildSitemapEntries();
-    const jane = entries.find((e) => e.url.endsWith("/scholars/jane-doe"));
+    const jane = entries.find((e) => e.url.endsWith("/jane-doe"));
     expect(jane).toMatchObject({ priority: 0.8, changeFrequency: "weekly" });
     expect(jane?.lastModified).toEqual(new Date("2026-01-15"));
   });
@@ -197,7 +197,8 @@ describe("lib/sitemap — buildSitemapEntries", () => {
     mockScholarFindMany.mockRejectedValue(new Error("no DB"));
     const entries = await buildSitemapEntries();
     expect(entries).toHaveLength(3); // /, /browse, /about
-    expect(entries.every((e) => !e.url.includes("/scholars/"))).toBe(true);
+    // Scholar entries are the only 0.8/weekly rows; none survive a DB failure.
+    expect(entries.every((e) => e.priority !== 0.8)).toBe(true);
   });
 });
 
@@ -218,8 +219,12 @@ describe("lib/sitemap — buildSitemapEntries", () => {
  * `isPubliclyDisplayed` filter, and the where-clause is asserted separately.
  */
 describe("lib/sitemap — #536 role carve on scholar entries (#2205)", () => {
+  // Scholar entries are the only 0.8/weekly rows (D-08); topics/depts/centers
+  // are 0.6/monthly and static pages 1.0/0.5, so priority is the reliable
+  // discriminator now that scholar URLs are bare `/{slug}` (#671) rather than
+  // living under a `/scholars/` path segment.
   const slugsOf = (entries: SitemapEntry[]) =>
-    entries.filter((e) => e.url.includes("/scholars/")).map((e) => e.url);
+    entries.filter((e) => e.priority === 0.8).map((e) => e.url);
 
   it("admits role_category IS NULL in the where-clause, not just notIn", async () => {
     await buildSitemapEntries();
@@ -253,7 +258,7 @@ describe("lib/sitemap — #536 role carve on scholar entries (#2205)", () => {
       },
     ]);
     const urls = slugsOf(await buildSitemapEntries());
-    expect(urls).toEqual(["https://scholars.weill.cornell.edu/scholars/jane-doe"]);
+    expect(urls).toEqual(["https://scholars.weill.cornell.edu/jane-doe"]);
   });
 
   it("drops every enumerated hidden role", async () => {
@@ -294,7 +299,7 @@ describe("lib/sitemap — #536 role carve on scholar entries (#2205)", () => {
       { slug: "no-role-yet", updatedAt: new Date("2026-01-15"), roleCategory: null },
     ]);
     expect(slugsOf(await buildSitemapEntries())).toEqual([
-      "https://scholars.weill.cornell.edu/scholars/no-role-yet",
+      "https://scholars.weill.cornell.edu/no-role-yet",
     ]);
   });
 
@@ -327,8 +332,8 @@ describe("lib/sitemap — #536 role carve on scholar entries (#2205)", () => {
       { slug: "c-faculty", updatedAt: new Date("2026-01-15"), roleCategory: "postdoc" },
     ]);
     expect(slugsOf(await buildSitemapEntries())).toEqual([
-      "https://scholars.weill.cornell.edu/scholars/a-faculty",
-      "https://scholars.weill.cornell.edu/scholars/c-faculty",
+      "https://scholars.weill.cornell.edu/a-faculty",
+      "https://scholars.weill.cornell.edu/c-faculty",
     ]);
   });
 
@@ -355,7 +360,7 @@ describe("lib/sitemap — #536 role carve on scholar entries (#2205)", () => {
 
 describe("lib/sitemap — renderUrlset", () => {
   const entry: SitemapEntry = {
-    url: "https://scholars.weill.cornell.edu/scholars/jane-doe",
+    url: "https://scholars.weill.cornell.edu/jane-doe",
     lastModified: new Date("2026-01-15T00:00:00.000Z"),
     changeFrequency: "weekly",
     priority: 0.8,
@@ -364,7 +369,7 @@ describe("lib/sitemap — renderUrlset", () => {
   it("wraps entries in a urlset with loc/lastmod/changefreq/priority", () => {
     const xml = renderUrlset([entry]);
     expect(xml).toContain('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">');
-    expect(xml).toContain("<loc>https://scholars.weill.cornell.edu/scholars/jane-doe</loc>");
+    expect(xml).toContain("<loc>https://scholars.weill.cornell.edu/jane-doe</loc>");
     expect(xml).toContain("<lastmod>2026-01-15T00:00:00.000Z</lastmod>");
     expect(xml).toContain("<changefreq>weekly</changefreq>");
     expect(xml).toContain("<priority>0.8</priority>");
@@ -422,7 +427,7 @@ describe("app/sitemap/[shard] — child route", () => {
     expect(body).toContain("<urlset");
     // 2 scholars + 2 topics + 2 depts + 0 centers + 3 static = 9 urls.
     expect((body.match(/<url>/g) ?? []).length).toBe(9);
-    expect(body).toContain("<loc>https://scholars.weill.cornell.edu/scholars/jane-doe</loc>");
+    expect(body).toContain("<loc>https://scholars.weill.cornell.edu/jane-doe</loc>");
   });
 
   it("returns an empty urlset for an out-of-range shard", async () => {

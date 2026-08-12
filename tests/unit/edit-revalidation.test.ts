@@ -107,7 +107,7 @@ describe("resolveAffectedProfiles", () => {
 describe("reflectOverviewEdit", () => {
   it("revalidates only the profile page", async () => {
     await reflectOverviewEdit("jane-smith");
-    expect(mockRevalidatePath).toHaveBeenCalledWith("/scholars/jane-smith");
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/jane-smith");
     expect(mockRevalidatePath).toHaveBeenCalledTimes(1);
   });
 
@@ -117,7 +117,7 @@ describe("reflectOverviewEdit", () => {
     // Durable row enqueued synchronously (#353 backstop stays in the request).
     expect(mockCdnCreate).toHaveBeenCalledTimes(1);
     expect(JSON.parse(mockCdnCreate.mock.calls[0][0].data.paths)).toEqual([
-      "/scholars/jane-smith",
+      "/jane-smith",
     ]);
     // The slow AWS send is deferred — not issued when the response returns.
     expect(mockCfSend).not.toHaveBeenCalled();
@@ -196,14 +196,14 @@ describe("reflectVisibilityChange", () => {
   it("revalidates /browse and each affected profile page", async () => {
     await reflectVisibilityChange(["jane-smith", "bob-jones"]);
     expect(mockRevalidatePath).toHaveBeenCalledWith("/browse");
-    expect(mockRevalidatePath).toHaveBeenCalledWith("/scholars/jane-smith");
-    expect(mockRevalidatePath).toHaveBeenCalledWith("/scholars/bob-jones");
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/jane-smith");
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/bob-jones");
   });
 
   it("skips a path that is not on the shared allow-list", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     await reflectVisibilityChange(["bad slug"]);
-    expect(mockRevalidatePath).not.toHaveBeenCalledWith("/scholars/bad slug");
+    expect(mockRevalidatePath).not.toHaveBeenCalledWith("/bad slug");
     expect(mockRevalidatePath).toHaveBeenCalledWith("/browse");
     warn.mockRestore();
   });
@@ -235,7 +235,7 @@ describe("invalidateCloudFront enqueue/mark (#353 outbox)", () => {
     // synchronously, before the response returns.
     expect(mockCdnCreate).toHaveBeenCalledTimes(1);
     const createArg = mockCdnCreate.mock.calls[0][0];
-    expect(JSON.parse(createArg.data.paths)).toEqual(["/browse", "/scholars/jane-smith"]);
+    expect(JSON.parse(createArg.data.paths)).toEqual(["/browse", "/jane-smith"]);
     expect(createArg.data.attempts).toBe(0);
 
     // Neither the send nor the stamp has happened yet — both are deferred.

@@ -36,13 +36,15 @@ export const ALLOWED_EXACT: ReadonlySet<string> = new Set([
 
 /** Dynamic-path patterns eligible for revalidation. */
 export const ALLOWED_PATTERNS: readonly RegExp[] = [
-  // NOTE: since #671 (`PROFILE_CANONICAL=root`, live in both envs) this is the
-  // LEGACY path — `/scholars/{slug}` permanently redirects to the canonical
-  // `/{slug}`. Revalidating it busts a redirect, not a profile. Kept because
-  // the flag can be flipped back, and it is harmless either way: the canonical
-  // profile route is force-dynamic, so it holds no ISR entry to bust. Anything
-  // that needs to refresh a profile should re-render it, not revalidate it.
-  // Add `^/${SLUG_RE_SOURCE}$` here only alongside making profiles static/ISR.
+  // NOTE: since #671 (root `/{slug}` cutover, live in both envs since
+  // 2026-07-14; the `PROFILE_CANONICAL` rollback flag has since been removed)
+  // this is the LEGACY path — `/scholars/{slug}` permanently redirects to the
+  // canonical `/{slug}`. Revalidating it busts a redirect, not a profile.
+  // Harmless either way: the canonical profile route is force-dynamic, so it
+  // holds no ISR entry to bust. Anything that needs to refresh a profile
+  // should re-render it, not revalidate it. Left on the allow-list so a stale
+  // caller still asking for the legacy path doesn't hit the reject-and-warn
+  // branch below.
   new RegExp(`^/scholars/${SLUG_RE_SOURCE}$`),
   new RegExp(`^/topics/${TOPIC_SLUG_RE_SOURCE}$`),
   new RegExp(`^/departments/${SLUG_RE_SOURCE}$`),
@@ -58,7 +60,7 @@ export const ALLOWED_PATTERNS: readonly RegExp[] = [
   new RegExp(`^/methods/${SLUG_RE_SOURCE}/${SLUG_RE_SOURCE}$`),
 ];
 
-// #671 — root people-profile form `/{slug}` (PROFILE_CANONICAL = "root").
+// #671 — root people-profile form `/{slug}`, the only canonical form now.
 // A single slug-shaped segment (no `.`/`/`) that is NOT a reserved route word,
 // so `/edit`, `/api`, `/search`, `/about`, … stay off-list — mirrors the gate
 // the root `(public)/[slug]` route applies.

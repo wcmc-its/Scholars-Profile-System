@@ -1890,12 +1890,6 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("METHODS_LENS_PAGES")).toBe("on"); // #824 armed both envs (now live in prod with ENABLED on)
       });
 
-      it("serves the root /{slug} canonical profile URL in prod (PROFILE_CANONICAL=root, #671 cutover)", () => {
-        // Both envs are cut over to root; the flag stays set explicitly as the
-        // soak rollback lever (set back to "scholars" + redeploy to revert).
-        expect(appContainerEnv().get("PROFILE_CANONICAL")).toBe("root");
-      });
-
       it("enables the slug-request lifecycle in prod (#497, on in both envs)", () => {
         // Per the 2026-06-03 product decision the lifecycle is enabled in both
         // envs (no staging-only soak); activation is the manual cdk deploy.
@@ -2248,25 +2242,6 @@ describe("AppStack", () => {
       template.hasResourceProperties("AWS::ECS::Service", {
         DesiredCount: 1,
       });
-    });
-
-    it("flips staging to the root /{slug} canonical profile URL (PROFILE_CANONICAL=root, #671 soak-first)", () => {
-      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
-      const appTaskDef = Object.values(taskDefs).find(
-        (r) => r.Properties?.Family === "sps-app-staging",
-      );
-      const appContainer = (
-        appTaskDef?.Properties?.ContainerDefinitions as
-          | Array<{
-              Name?: string;
-              Environment?: Array<{ Name?: string; Value?: string }>;
-            }>
-          | undefined
-      )?.find((c) => c.Name === "app");
-      const envByName = new Map(
-        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
-      );
-      expect(envByName.get("PROFILE_CANONICAL")).toBe("root");
     });
 
     it("activates the ReCiter 'Not mine' reject in staging first (RECITER_REJECT_SEND=on, #746)", () => {
