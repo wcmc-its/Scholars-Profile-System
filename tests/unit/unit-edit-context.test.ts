@@ -52,6 +52,35 @@ type Opts = {
     leaders: Array<{ cwid: string; interim: boolean; role?: string; sortOrder: number }>;
   }>;
   divisionMembers?: Array<{ cwid: string; source: string }>;
+  diseaseAssignments?: Array<{
+    cwid: string;
+    diseaseCode: string;
+    rank: number;
+    focus: string;
+    confidence: string;
+    leadPubs: number;
+    secondPubs: number;
+    middlePubs: number;
+    grantsLed: number;
+    grantsSupport: number;
+    trialsLed: number;
+    trialsSupport: number;
+    pubScore: number;
+    score: number;
+    firstYear: number | null;
+    lastYear: number | null;
+    recentPubs: number;
+    specialtyStatus: string;
+  }>;
+  diseaseDecisions?: Array<{
+    cwid: string;
+    diseaseCode: string;
+    decision: string;
+    decidedBy: string;
+    decidedAt: Date;
+    scoreAtDecision: number;
+    confidenceAtDecision: string;
+  }>;
 };
 
 function fakeClient(o: Opts) {
@@ -73,6 +102,8 @@ function fakeClient(o: Opts) {
     centerMembership: { findMany: vi.fn().mockResolvedValue(o.centerMembers ?? []) },
     centerProgram: { findMany: vi.fn().mockResolvedValue(o.centerPrograms ?? []) },
     divisionMembership: { findMany: vi.fn().mockResolvedValue(o.divisionMembers ?? []) },
+    cancerCenterDiseaseAssignment: { findMany: vi.fn().mockResolvedValue(o.diseaseAssignments ?? []) },
+    cancerCenterDiseaseDecision: { findMany: vi.fn().mockResolvedValue(o.diseaseDecisions ?? []) },
   };
 }
 
@@ -359,6 +390,7 @@ describe("loadUnitEditContext — manual division roster", () => {
         startDate: null,
         endDate: null,
         scholarState: "active",
+        diseases: [],
       },
     ]);
     expect(ctx!.unit.deptName).toBe("Medicine");
@@ -450,6 +482,7 @@ describe("loadUnitEditContext — center", () => {
         startDate: "2024-07-01",
         endDate: null,
         scholarState: "unknown",
+        diseases: [],
       },
     ]);
     // #552/#1117 — the program taxonomy rides along (sorted by sortOrder) with
@@ -482,5 +515,154 @@ describe("loadUnitEditContext — center", () => {
       },
       { code: "CT", label: "Cancer Therapeutics", sortOrder: 40, description: null, leaders: [] },
     ]);
+  });
+});
+
+describe("loadUnitEditContext — center disease assignments (plan §5/§6)", () => {
+  const center = {
+    code: "meyer",
+    name: "Meyer Cancer Center",
+    description: null,
+    url: null,
+    slug: "meyer",
+    directorCwid: null,
+    centerType: "center",
+    leaderInterim: false,
+  };
+  const assignment = (over: Partial<NonNullable<Opts["diseaseAssignments"]>[number]> = {}) => ({
+    cwid: "mem1",
+    diseaseCode: "BREAST",
+    rank: 1,
+    focus: "primary",
+    confidence: "medium",
+    leadPubs: 5,
+    secondPubs: 2,
+    middlePubs: 1,
+    grantsLed: 1,
+    grantsSupport: 0,
+    trialsLed: 0,
+    trialsSupport: 1,
+    pubScore: 40,
+    score: 50,
+    firstYear: 2019,
+    lastYear: 2025,
+    recentPubs: 3,
+    specialtyStatus: "matched",
+    ...over,
+  });
+  const decision = (over: Partial<NonNullable<Opts["diseaseDecisions"]>[number]> = {}) => ({
+    cwid: "mem1",
+    diseaseCode: "BREAST",
+    decision: "confirmed",
+    decidedBy: "cur001",
+    decidedAt: new Date("2026-08-01"),
+    scoreAtDecision: 50,
+    confidenceAtDecision: "medium",
+    ...over,
+  });
+
+  it("an unreviewed assignment carries a null decision and no drift", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          diseaseAssignments: [assignment()],
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases).toEqual([
+      { diseaseCode: "BREAST", assignment: expect.objectContaining({ rank: 1 }), decision: null, drifted: false },
+    ]);
+  });
+
+  it("a rejected decision flags drift once the current row is high-confidence", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          diseaseAssignments: [assignment({ confidence: "high" })],
+          diseaseDecisions: [decision({ decision: "rejected", confidenceAtDecision: "medium" })],
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases![0].drifted).toBe(true);
+  });
+
+  it("a rejected decision does NOT flag when confidence stayed below high", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          diseaseAssignments: [assignment({ confidence: "medium" })],
+          diseaseDecisions: [decision({ decision: "rejected", confidenceAtDecision: "low" })],
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases![0].drifted).toBe(false);
+  });
+
+  it("a confirmed decision flags drift once its assignment row disappears entirely", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          diseaseAssignments: [], // the ETL's latest full-replace dropped this pair
+          diseaseDecisions: [decision({ decision: "confirmed" })],
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases).toEqual([
+      { diseaseCode: "BREAST", assignment: null, decision: expect.objectContaining({ decision: "confirmed" }), drifted: true },
+    ]);
+  });
+
+  it("a confirmed decision does NOT flag while its assignment row still exists", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          diseaseAssignments: [assignment()],
+          diseaseDecisions: [decision()],
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases![0].drifted).toBe(false);
+  });
+
+  it("ranks live assignments first, trailing decision-only rows by code", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          diseaseAssignments: [assignment({ diseaseCode: "LUNG", rank: 1 }), assignment({ diseaseCode: "GYN", rank: 2 })],
+          diseaseDecisions: [decision({ diseaseCode: "BREAST" })], // orphaned — no assignment row
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases!.map((d) => d.diseaseCode)).toEqual(["LUNG", "GYN", "BREAST"]);
   });
 });

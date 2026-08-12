@@ -79,6 +79,7 @@
     "etl:completeness": "tsx etl/completeness/index.ts",
     "etl:headshot": "tsx etl/headshot/index.ts",
     "etl:cancer-center-collab-report": "tsx etl/cancer-center-collab-report/index.ts",
+    "etl:cancer-center-disease-assignments": "tsx etl/cancer-center-disease-assignments/index.ts",
     "etl:coi": "tsx etl/coi/index.ts",
     "etl:coi-gap": "tsx etl/coi-gap/index.ts",
     "etl:coi-gap:diagnose": "tsx etl/coi-gap/diagnose.ts",

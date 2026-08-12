@@ -1383,6 +1383,14 @@ export class EtlStack extends Stack {
       // dependency), so external:false. `continue` — this is advisory data
       // for a review tab, not on the critical path any other step depends on.
       { id: "CancerCenterCollabReport", npmScript: "etl:cancer-center-collab-report", external: false, tier: "continue" },
+      // Cancer Center disease-assignment curator UI (`CancerCenterDiseaseAssignment`,
+      // #edit surfaces `CancerCenterDiseaseDecision` on top of it). Same shape as
+      // CancerCenterCollabReport above: Aurora-only (reads cancer_taxonomy_descriptor
+      // + the person rollup, no LDAP/WCM network dependency), so external:false.
+      // Weekly matches this feature's current maturity -- no public consumer yet to
+      // demand tighter freshness -- and `continue` so a failure here (or an unseeded
+      // cancer_taxonomy_descriptor) never aborts the rest of the weekly chain.
+      { id: "CancerCenterDiseaseAssignmentsWeekly", npmScript: "etl:cancer-center-disease-assignments", external: false, tier: "continue" },
       { id: "Spotlight", npmScript: "etl:spotlight", external: true, tier: "continue" },
       // Grant-enrichment sources (#608). They key off the `grant` table that
       // etl:infoed refreshes nightly; neither needs 24h freshness, so they batch

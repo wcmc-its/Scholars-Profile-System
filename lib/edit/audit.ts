@@ -43,6 +43,12 @@ export type AuditAction =
   | "unit_create"
   /** a CenterMembership / DivisionMembership row was added or removed (#540 Phase 1) */
   | "roster_change"
+  /** a reviewer confirmed or rejected a `CancerCenterDiseaseAssignment` row on
+   *  /edit; `targetEntityType='scholar'`, `targetEntityId` is the cwid;
+   *  before/after carry the `CancerCenterDiseaseDecision` snapshot
+   *  (score/confidence at decision time). Requires the `scholars_audit`
+   *  action ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "disease_assignment_decision"
   /** a UnitAdmin row was inserted or hard-deleted (#540 Phase 1) */
   | "grant_change"
   /** a superuser began a "View as" impersonation session (#637 R5 — enter) */

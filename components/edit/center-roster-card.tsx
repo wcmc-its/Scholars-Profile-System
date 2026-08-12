@@ -27,6 +27,18 @@
  * `action:"remove"`. The list updates optimistically; a failed write reverts
  * and surfaces an error. A date edit that would make End < Start is blocked
  * client-side before the POST.
+ *
+ * The disease-assignment plan (`2026-08-12-cancer-center-disease-assignment-
+ * edit-ui-plan.md` §5) explicitly rejects fitting a per-person RANKED LIST of
+ * diseases into another inline `<select>` cell. Instead: a small "Diseases
+ * (N)" link next to a member's name (absent when N is 0) opens a Dialog
+ * (`MemberDiseasesDialog` below — the same per-item Dialog primitive
+ * `MeshLogicModal` uses in `cancer-center-collab-report-card.tsx`, not a new
+ * one) listing that member's ranked `CancerCenterDiseaseAssignment` rows
+ * merged with any `CancerCenterDiseaseDecision`, each with Confirm / Reject /
+ * (Clear, once decided) buttons POSTing to `/api/edit/center/[code]/
+ * disease-assignments` — same optimistic-update-with-revert convention as
+ * `patch()` below, serialized per (cwid, diseaseCode) pair.
  */
 "use client";
 
@@ -42,8 +54,17 @@ import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import type { RosterDiseaseRow } from "@/lib/api/unit-edit-context";
 
 export type RosterMember = {
   cwid: string;
@@ -59,6 +80,11 @@ export type RosterMember = {
    *  combination is the whole point of surfacing this. Optional so existing
    *  fixtures/callers that predate #2324 still type-check; absent → "active". */
   scholarState?: "active" | "departed" | "unknown";
+  /** Disease-assignment plan §5/§6 — this member's ranked disease-expertise
+   *  picture, `[]`/absent for a non-center roster or a member with none.
+   *  Optional for the same reason `scholarState` is: existing fixtures/callers
+   *  that predate this feature still type-check. */
+  diseases?: ReadonlyArray<RosterDiseaseRow>;
 };
 
 export type CenterProgramOption = { code: string; label: string; sortOrder: number };
@@ -88,6 +114,236 @@ function statusOf(member: RosterMember, today: string): Status {
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * `person_code` -> `display_label`, from `docs/cancer-center-person-rollup.csv`
+ * (the same map `labelsOf()` in `scripts/cancer-center-disease-assignments.ts`
+ * builds at ETL time). Hardcoded rather than read here at request time:
+ * unlike `CancerTaxonomyDescriptor`, the rollup has no DB-backed lookup, and
+ * the app's runtime image never ships `docs/` at all (`Dockerfile`'s runtime
+ * stage copies only `.next/standalone` + `.next/static` + `prisma/`) — a
+ * `readFileSync` here would ENOENT in every deployed environment. Same
+ * reasoning `TOPIC_LABELS` in `cancer-center-collab-report-card.tsx` documents
+ * for its own (unrelated) axis, including the fallback below for a rollup
+ * code added after this map was last synced.
+ */
+const DISEASE_LABELS: Record<string, string> = {
+  BREAST: "Breast Cancer",
+  LUNG: "Lung & Thoracic Cancer",
+  GI_COLORECTAL: "Colorectal & Anal Cancer",
+  GI_PANCREAS: "Pancreatic Cancer",
+  GI_LIVER: "Liver & Bile Duct Cancer",
+  GI_UPPER: "Esophageal & Stomach Cancer",
+  GU_PROSTATE: "Prostate Cancer",
+  GU_OTHER: "Kidney, Bladder & Testicular Cancer",
+  GYN: "Gynecologic Cancer",
+  HEME_LEUK: "Leukemia",
+  HEME_LYMPH: "Lymphoma",
+  HEME_MYELOMA: "Multiple Myeloma",
+  HEME_MDS_MPN: "Blood Cancers (MDS, MPN & Other)",
+  NEURO: "Brain & Nervous System Cancer",
+  HEAD_NECK: "Head & Neck Cancer",
+  SKIN: "Melanoma & Skin Cancer",
+  SARCOMA: "Sarcoma & Bone Cancer",
+  ENDO: "Thyroid & Endocrine Cancer",
+  HEREDITARY: "Hereditary Cancer & Genetics",
+};
+
+function diseaseLabel(code: string): string {
+  const known = DISEASE_LABELS[code];
+  if (known) return known;
+  const spaced = code.replace(/_/g, " ").toLowerCase();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+const FOCUS_LABEL: Record<string, string> = {
+  primary: "Primary",
+  secondary: "Secondary",
+  peripheral: "Peripheral",
+};
+
+/** Same tint convention as the roster Active/Inactive badge below. */
+const CONFIDENCE_BADGE_CLASS: Record<string, string> = {
+  high: "bg-apollo-green-tint text-apollo-green border-apollo-green-tint-border",
+  medium: "bg-apollo-amber-tint text-apollo-amber border-apollo-amber-tint-border",
+  low: "bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border",
+};
+
+/** "the evidence counts already on the row" (plan §5), formatted as one
+ *  compact line rather than a second mini-table. */
+function evidenceLine(a: NonNullable<RosterDiseaseRow["assignment"]>): string {
+  const years = a.firstYear && a.lastYear ? ` (${a.firstYear}–${a.lastYear})` : "";
+  return [
+    `${a.leadPubs} lead · ${a.secondPubs} second · ${a.middlePubs} middle`,
+    `${a.recentPubs} recent pub${a.recentPubs === 1 ? "" : "s"}${years}`,
+    `${a.grantsLed} grant${a.grantsLed === 1 ? "" : "s"} led · ${a.grantsSupport} supported`,
+    `${a.trialsLed} trial${a.trialsLed === 1 ? "" : "s"} led · ${a.trialsSupport} supported`,
+  ].join("  —  ");
+}
+
+function DiseaseDecisionBadge({ decision }: { decision: string }) {
+  if (decision === "confirmed") {
+    return (
+      <Badge
+        variant="outline"
+        className="bg-apollo-green-tint text-apollo-green border-apollo-green-tint-border rounded-full"
+      >
+        Confirmed
+      </Badge>
+    );
+  }
+  if (decision === "rejected") {
+    return (
+      <Badge
+        variant="outline"
+        className="bg-apollo-red-tint text-apollo-maroon border-apollo-red-tint-border rounded-full"
+      >
+        Rejected
+      </Badge>
+    );
+  }
+  return null;
+}
+
+type DiseaseDecisionKind = "confirmed" | "rejected" | "clear";
+
+/**
+ * The per-member disease panel (plan §5) — Dialog + `DialogTrigger asChild`
+ * wrapping a plain link, the same per-item modal shape `MeshLogicModal` in
+ * `cancer-center-collab-report-card.tsx` uses. Uncontrolled (Radix owns its
+ * own open state); `member.diseases` is read straight from the live `members`
+ * state in the parent, so a decision made here re-renders in place.
+ */
+function MemberDiseasesDialog({
+  member,
+  onDecide,
+}: {
+  member: RosterMember;
+  onDecide: (cwid: string, diseaseCode: string, decision: DiseaseDecisionKind) => Promise<void>;
+}) {
+  const diseases = member.diseases ?? [];
+  const [busyCode, setBusyCode] = React.useState<string | null>(null);
+
+  async function act(diseaseCode: string, decision: DiseaseDecisionKind) {
+    setBusyCode(diseaseCode);
+    try {
+      await onDecide(member.cwid, diseaseCode, decision);
+    } finally {
+      setBusyCode(null);
+    }
+  }
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          className="text-apollo-slate ml-2 text-xs hover:underline"
+          data-testid={`roster-diseases-${member.cwid}`}
+        >
+          Diseases ({diseases.length})
+        </button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl" data-testid="member-diseases-dialog">
+        <DialogHeader>
+          <DialogTitle>{member.name} — Disease assignments</DialogTitle>
+          <DialogDescription>
+            Ranked by evidence. Confirming or rejecting records your call — a later reseed of the
+            underlying evidence never silently erases it.
+          </DialogDescription>
+        </DialogHeader>
+        <ul className="flex flex-col gap-3">
+          {diseases.map((d) => {
+            const busy = busyCode === d.diseaseCode;
+            return (
+              <li
+                key={d.diseaseCode}
+                className="border-apollo-border rounded-md border p-3"
+                data-testid={`disease-row-${member.cwid}-${d.diseaseCode}`}
+              >
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-medium">{diseaseLabel(d.diseaseCode)}</span>
+                  <span className="text-muted-foreground text-xs">{d.diseaseCode}</span>
+                  {d.assignment ? (
+                    <>
+                      <Badge variant="outline" className="rounded-full">
+                        Rank {d.assignment.rank}
+                      </Badge>
+                      <Badge variant="outline" className="rounded-full">
+                        {FOCUS_LABEL[d.assignment.focus] ?? d.assignment.focus}
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className={`rounded-full ${CONFIDENCE_BADGE_CLASS[d.assignment.confidence] ?? ""}`}
+                      >
+                        {d.assignment.confidence} confidence
+                      </Badge>
+                    </>
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+                    >
+                      No longer suggested
+                    </Badge>
+                  )}
+                  {d.decision && <DiseaseDecisionBadge decision={d.decision.decision} />}
+                  {d.drifted && (
+                    <Badge
+                      variant="outline"
+                      className="bg-apollo-amber-tint text-apollo-amber border-apollo-amber-tint-border rounded-full"
+                      title="The evidence behind this decision has changed since it was made."
+                      data-testid={`disease-drift-${member.cwid}-${d.diseaseCode}`}
+                    >
+                      Review — evidence changed
+                    </Badge>
+                  )}
+                </div>
+                {d.assignment && (
+                  <p className="text-muted-foreground mt-1 text-xs">{evidenceLine(d.assignment)}</p>
+                )}
+                <div className="mt-2 flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={busy || !d.assignment || d.decision?.decision === "confirmed"}
+                    onClick={() => act(d.diseaseCode, "confirmed")}
+                    data-testid={`disease-confirm-${member.cwid}-${d.diseaseCode}`}
+                  >
+                    Confirm
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={busy || !d.assignment || d.decision?.decision === "rejected"}
+                    onClick={() => act(d.diseaseCode, "rejected")}
+                    data-testid={`disease-reject-${member.cwid}-${d.diseaseCode}`}
+                  >
+                    Reject
+                  </Button>
+                  {d.decision && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => act(d.diseaseCode, "clear")}
+                      data-testid={`disease-clear-${member.cwid}-${d.diseaseCode}`}
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export function CenterRosterCard({
@@ -157,6 +413,94 @@ export function CenterRosterCard({
         if (!ok) setMembers((ms) => ms.map((m) => (m.cwid === cwid ? prev : m)));
       });
     writeQueue.current.set(cwid, run);
+    await run;
+  }
+
+  /** Per-(cwid, diseaseCode) write chain — same reason `writeQueue` above
+   *  exists: two quick decisions on the SAME pair (e.g. Reject then Clear)
+   *  shouldn't race. */
+  const diseaseWriteQueue = React.useRef<Map<string, Promise<unknown>>>(new Map());
+
+  function replaceDiseaseRow(
+    cwid: string,
+    diseaseCode: string,
+    updater: (row: RosterDiseaseRow) => RosterDiseaseRow,
+  ) {
+    setMembers((ms) =>
+      ms.map((m) => {
+        if (m.cwid !== cwid || !m.diseases) return m;
+        return {
+          ...m,
+          diseases: m.diseases.map((d) => (d.diseaseCode === diseaseCode ? updater(d) : d)),
+        };
+      }),
+    );
+  }
+
+  /** Confirm / Reject / Clear one (cwid, diseaseCode) decision — optimistic
+   *  with revert on failure, serialized per pair, mirroring `patch()` above.
+   *  Unlike `patch()`, the route's success response carries the server's
+   *  authoritative `scoreAtDecision`/`confidenceAtDecision` snapshot, so a
+   *  successful confirm/reject reconciles onto that instead of trusting the
+   *  client's guess (which assumed the row's CURRENT assignment hadn't
+   *  changed since page load). */
+  async function decideDisease(cwid: string, diseaseCode: string, decision: DiseaseDecisionKind) {
+    setError(null);
+    const member = members.find((m) => m.cwid === cwid);
+    const prevRow = member?.diseases?.find((d) => d.diseaseCode === diseaseCode);
+    if (!prevRow) return;
+
+    const optimistic: RosterDiseaseRow =
+      decision === "clear"
+        ? { ...prevRow, decision: null, drifted: false }
+        : {
+            ...prevRow,
+            decision: {
+              decision,
+              decidedBy: prevRow.decision?.decidedBy ?? "",
+              decidedAt: new Date(),
+              scoreAtDecision: prevRow.assignment?.score ?? prevRow.decision?.scoreAtDecision ?? 0,
+              confidenceAtDecision:
+                prevRow.assignment?.confidence ?? prevRow.decision?.confidenceAtDecision ?? "low",
+            },
+            drifted: false,
+          };
+    replaceDiseaseRow(cwid, diseaseCode, () => optimistic);
+
+    const key = `${cwid}::${diseaseCode}`;
+    const prior = diseaseWriteQueue.current.get(key) ?? Promise.resolve();
+    const run = prior
+      .catch(() => {})
+      .then(async () => {
+        let res: Response;
+        try {
+          res = await fetch(`/api/edit/center/${encodeURIComponent(unitCode)}/disease-assignments`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cwid, diseaseCode, decision }),
+          });
+        } catch {
+          setError(mapErrorToMessage(""));
+          replaceDiseaseRow(cwid, diseaseCode, () => prevRow);
+          return;
+        }
+        const data = (await res.json().catch(() => null)) as
+          | { ok: boolean; error?: string; scoreAtDecision?: number; confidenceAtDecision?: string }
+          | null;
+        if (!res.ok || data?.ok !== true) {
+          setError(mapErrorToMessage(data?.error ?? ""));
+          replaceDiseaseRow(cwid, diseaseCode, () => prevRow);
+          return;
+        }
+        if (decision !== "clear" && data.scoreAtDecision !== undefined && data.confidenceAtDecision !== undefined) {
+          const scoreAtDecision = data.scoreAtDecision;
+          const confidenceAtDecision = data.confidenceAtDecision;
+          replaceDiseaseRow(cwid, diseaseCode, (row) =>
+            row.decision ? { ...row, decision: { ...row.decision, scoreAtDecision, confidenceAtDecision } } : row,
+          );
+        }
+      });
+    diseaseWriteQueue.current.set(key, run);
     await run;
   }
 
@@ -366,6 +710,9 @@ export function CenterRosterCard({
                             Not in directory
                           </Badge>
                         )}
+                        {(m.diseases ?? []).length > 0 && (
+                          <MemberDiseasesDialog member={m} onDecide={decideDisease} />
+                        )}
                       </td>
                       {hasPrograms && (
                         <td className="px-3 py-2">
@@ -514,6 +861,8 @@ function mapErrorToMessage(code: string): string {
     case "no_taxonomy":
     case "invalid_program_code":
       return "That program isn't available for this center.";
+    case "assignment_not_found":
+      return "This disease is no longer in the current assignment list. Refresh the page to see what changed.";
     default:
       return "Something went wrong — the change wasn't saved. Please try again.";
   }

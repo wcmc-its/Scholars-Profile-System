@@ -1820,6 +1820,70 @@ model CancerCenterProgramAllocation {
   @@map("cancer_center_program_allocation")
 }
 
+/// A member's disease-expertise assignment for the Meyer Cancer Center — one
+/// row per (cwid, diseaseCode) the deterministic generator
+/// (`scripts/cancer-center-disease-assignments.ts`,
+/// `docs/cancer-center-disease-taxonomy-decisions.md`) produced, ranked by
+/// importance (`rank` 1 = headline). Full-replace on every generator run,
+/// mirroring `CancerTaxonomyDescriptor`'s full-replace + runId provenance
+/// shape: `runId` is the producing `EtlRun.id`, joined back to recover when
+/// and from what state this row was generated. `focus` (the display band)
+/// and `confidence` (evidence strength) are deliberately separate axes — see
+/// the generator's own `focusOf` doc comment — never collapse one into the
+/// other. `firstYear`/`lastYear`/`recentPubs` surface recency to a human
+/// reviewer and are NEVER folded into `score`: a scholar's uncurated-
+/// publication gap concentrates on affiliated faculty, so silently demoting
+/// on staleness would encode that curation gap as a judgment about focus.
+model CancerCenterDiseaseAssignment {
+  cwid            String @db.VarChar(32)
+  diseaseCode     String @map("disease_code") @db.VarChar(32)
+  rank            Int
+  focus           String @db.VarChar(16) // primary | secondary | peripheral
+  confidence      String @db.VarChar(16) // high | medium | low
+  leadPubs        Int    @map("lead_pubs")
+  secondPubs      Int    @map("second_pubs")
+  middlePubs      Int    @map("middle_pubs")
+  grantsLed       Int    @map("grants_led")
+  grantsSupport   Int    @map("grants_support")
+  trialsLed       Int    @map("trials_led")
+  trialsSupport   Int    @map("trials_support")
+  pubScore        Int    @map("pub_score")
+  score           Int
+  firstYear       Int?   @map("first_year")
+  lastYear        Int?   @map("last_year")
+  recentPubs      Int    @map("recent_pubs")
+  specialtyStatus String @map("specialty_status") @db.VarChar(24)
+  runId           String @map("run_id") @db.VarChar(64)
+
+  @@id([cwid, diseaseCode])
+  @@index([cwid])
+  @@map("cancer_center_disease_assignment")
+}
+
+/// A reviewer's confirm-or-reject call on one `CancerCenterDiseaseAssignment`
+/// row, made on /edit (`disease_assignment_decision` audit action,
+/// `targetEntityType='scholar'`, `targetEntityId` the cwid). Always-present
+/// decision row, mirroring `FamilyTierDecision`'s shape: one row per (cwid,
+/// diseaseCode) a human has actually decided on, not one per generator run —
+/// a later full-replace of `CancerCenterDiseaseAssignment` does not erase or
+/// require re-deciding a row someone already reviewed. `scoreAtDecision` /
+/// `confidenceAtDecision` snapshot the assignment's evidence AT the moment of
+/// decision, so a later re-run that shifts `score`/`confidence` can't
+/// silently make a stale decision look freshly reviewed.
+model CancerCenterDiseaseDecision {
+  cwid                 String   @db.VarChar(32)
+  diseaseCode          String   @map("disease_code") @db.VarChar(32)
+  decision             String   @db.VarChar(16) // confirmed | rejected
+  decidedBy            String   @map("decided_by") @db.VarChar(32)
+  decidedAt            DateTime @map("decided_at")
+  scoreAtDecision      Int      @map("score_at_decision")
+  confidenceAtDecision String   @map("confidence_at_decision") @db.VarChar(16)
+
+  @@id([cwid, diseaseCode])
+  @@index([cwid])
+  @@map("cancer_center_disease_decision")
+}
+
 /// Per-scholar membership in a manually-created Division (`Division.source =
 /// 'manual'`). Mirrors `CenterMembership` exactly — added rows carry
 /// `source='manual-ui'`. No FK to `Scholar` (a roster row may exist before the

@@ -39,6 +39,10 @@ const FIELD_LABEL: Record<RosterFieldChange["field"], string> = {
   program: "Program",
   start: "Start",
   end: "End",
+  // Disease-assignment plan §5 — a `disease_assignment_decision` row's one
+  // `fieldChanges` entry (`lib/api/center-audit.ts`'s `deriveDiseaseChange`):
+  // "Disease: BREAST → confirmed".
+  disease: "Disease",
 };
 
 /** Format a stored ISO-8601 instant as a compact UTC wall-clock string. */
@@ -49,9 +53,17 @@ function formatTs(iso: string): string {
   return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
-/** Render one row's diff: a dash for add/remove, "Field: a → b" lines for modify. */
+/**
+ * Render one row's diff: "Field: a → b" lines when `fieldChanges` is
+ * non-empty, else a dash. A roster row only populates `fieldChanges` on
+ * `modify` (add/remove is the whole row — the Member column already says
+ * who); a `disease_assignment_decision` row populates it on every kind, since
+ * the code + decision IS the row's content even for a first decision or a
+ * clear (`deriveDiseaseChange`) — so this checks `fieldChanges.length`
+ * directly rather than gating on `changeKind`.
+ */
 function DiffSummary({ entry }: { entry: CenterAuditEntry }) {
-  if (entry.changeKind !== "modify" || entry.fieldChanges.length === 0) {
+  if (entry.fieldChanges.length === 0) {
     return <span className="text-muted-foreground">—</span>;
   }
   return (
