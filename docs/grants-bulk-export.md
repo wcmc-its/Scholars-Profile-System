@@ -28,11 +28,12 @@ share one field-mapping implementation
 
 ## Access
 
-The task role writes the object (`s3:PutObject`, scoped to the one bucket).
-Research Informatics' role is granted **read-only** access to the one object
-key — `s3:GetObject` on `grants.ndjson` only, never `ListBucket` and never the
-rest of the bucket — via a cross-account S3 bucket policy. Read the object
-directly with your AWS credentials:
+**Staging only for now — see Rollout status below.** The task role writes the
+object (`s3:PutObject`, scoped to the one bucket). Research Informatics' role
+is granted **read-only** access to the one object key — `s3:GetObject` on
+`grants.ndjson` only, never `ListBucket` and never the rest of the bucket —
+via a cross-account S3 bucket policy. Read the object directly with your AWS
+credentials:
 
 ```bash
 aws s3 cp s3://<bucket>/grants.ndjson - --profile <your-role-profile> | head
@@ -79,7 +80,9 @@ doc's field table for the full description of every field, including why
 
 Staging-first. The nightly schedule and the cross-account read grant are both
 gated by one deploy-time flag (`grantsExportScheduleEnabled`,
-`cdk/lib/config.ts`): `true` in staging, `false` in prod. Prod does not yet
-run the schedule and Research Informatics' role does not yet have prod read
-access — both flip together once staging is hand-verified. Contact the SPS
-operator for status.
+`cdk/lib/config.ts`): `true` in staging, `false` in prod. Staging has been
+deployed and hand-verified (a real nightly run landed the full cohort
+correctly). **Prod has no grants-export infrastructure at all yet** — not
+merely a disabled schedule; the bucket, cross-account policy, state machine,
+and alarms only exist once the env's stack is deployed with this flag on.
+Contact the SPS operator for status.

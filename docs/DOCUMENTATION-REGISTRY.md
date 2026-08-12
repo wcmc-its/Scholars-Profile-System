@@ -144,7 +144,7 @@ in **§10**.
 | [`ADR-007`](./ADR-007-csp-script-src-strategy.md) | Content-Security-Policy posture. || [`ses-sender-verification.md`](./ses-sender-verification.md) | Out-of-band SES sender-verification steps for the "Request a change" mailer. |
 | [`student-profile-visibility.md`](./student-profile-visibility.md) | **Why doctoral students have no public profile, and why no flag turns them on** — the #536 FERPA carve: no profile page, no people-index or autocomplete presence, enforced by hardcoded query filters (`publicRoleWhere()` plus a fail-closed `isPubliclyDisplayed` on the raw `role_category`), not a toggle. Carries the #2202 correction that staging and prod hide students by *different* mechanisms, so a staging pass proves nothing. |
 | [`email-visibility-spec.md`](./email-visibility-spec.md) | **Can a scholar's email be shown to the public, and what decides it** — the Web Directory `weillCornellEduReleaseCode;mail` release code imported to `Scholar.emailVisibility`, the fail-closed display gate, and the export row-filter + ≤50 cohort cap. Still **prod-dark** (`PROFILE_EMAIL_RELEASE_GATE` staging-on / prod-off) pending the prod backfill — until then prod fails open and shows every email. |
-| [`faculty-review-grants-api.md`](./faculty-review-grants-api.md) | How the WCM Faculty Review Tool reads one scholar's complete grant history out of SPS — the internal-ALB-only bearer endpoint `GET /api/faculty-review/{cwid}/grants`, its response contract (including why `Co-PI` means MPI), and how its token rotates. |
+| [`faculty-review-grants-api.md`](./faculty-review-grants-api.md) | How the WCM Faculty Review Tool and Research Informatics (on-demand single-cwid lookups, alongside their separate nightly S3 export) each read one scholar's complete grant history out of SPS on independent bearer tokens — the internal-ALB-only endpoint `GET /api/faculty-review/{cwid}/grants`, its response contract (including why `Co-PI` means MPI), and how each consumer's token rotates independently. |
 | [`grants-bulk-export.md`](./grants-bulk-export.md) | How the Research Informatics cross-account consumer reads **every** scholar's grant history out of SPS — the nightly `grants.ndjson` S3 export (replacing a rejected live bulk API), the NDJSON schema, the cross-account read grant, and staging-first rollout status. |
 
 ## 6. Data sources & ETL — where does the data come from?
@@ -318,7 +318,13 @@ while writing the §1–§8 docs. Tracked in **[issue #560](https://github.com/w
 
 ---
 
-*Last updated: 2026-08-07 — docs-tree reconciliation: 57 unindexed docs triaged, 34 of them verified
+*Last updated: 2026-08-11 — §5 added [`grants-bulk-export.md`](./grants-bulk-export.md)
+(PR #2359, merged `4b9d91b6`): nightly all-scholars grants NDJSON S3 export for the
+Research Informatics cross-account consumer, staging-deployed and hand-verified,
+prod not yet deployed. `faculty-review-grants-api.md` gained a second, independently-
+tokened consumer on its existing endpoint (Research Informatics, PR #2364/#2363,
+merged `03c4b18e`, staging only) alongside the original Faculty Review Tool consumer
+(#1855) — row description updated to match. 2026-08-07 — docs-tree reconciliation: 57 unindexed docs triaged, 34 of them verified
 as documenting live, shipped behavior and given rows — §2 `search-people-concurrency-performance.md`
 + `1503-shared-cachehandler-spec.md`; §3 `edit-auth-200-vs-403.md`; §4 `qa/launch-data-qa.md` +
 `scholar-proxy-runbook.md`; §5 the impersonation / scholar-proxy / ED-admin / comms-steward /
