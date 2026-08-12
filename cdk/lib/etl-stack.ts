@@ -899,6 +899,7 @@ export class EtlStack extends Stack {
       "etl:reporter",
       "etl:clinical-trials",
       "etl:data-sharing",
+      "etl:journal-impact-factor",
     ]);
     const taskUnitFor = (
       npmScript: string,
@@ -1429,6 +1430,23 @@ export class EtlStack extends Stack {
       {
         id: "DataSharingWeekly",
         npmScript: "etl:data-sharing",
+        external: true,
+        tier: "continue",
+      },
+      // Journal Impact Factor lookup, mirrored from reciterdb's
+      // `journal_impact_alternative` (Web-of-Science journal-level metrics;
+      // 21,800 rows as of 2026-08-12) for `/edit/reports/3` ("Publications").
+      // Direct read (external:true, needs the same EtlSecretReciter as
+      // DataSharingWeekly above -- no bridge, #2337 already proved in-VPC
+      // reciterdb reachability for a direct step). `continue` -- this is
+      // enrichment data for a review report, not on the critical path any
+      // other step depends on; a reciterdb hiccup here must not abort the
+      // weekly chain. Full-replace every run (a JCR-release snapshot, not an
+      // accreted history); its own volume guard (floor 15,000) aborts the
+      // step itself rather than truncating the table on a bad read.
+      {
+        id: "JournalImpactFactorWeekly",
+        npmScript: "etl:journal-impact-factor",
         external: true,
         tier: "continue",
       },
