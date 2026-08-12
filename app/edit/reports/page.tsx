@@ -33,7 +33,7 @@ import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Reports — Scholars Profile Console",
+  title: "Cancer Center Reports — Scholars Profile Console",
   robots: { index: false, follow: false },
 };
 
