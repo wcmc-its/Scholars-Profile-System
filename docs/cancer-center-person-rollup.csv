@@ -1,0 +1,51 @@
+# PERSON ROLLUP — the one artifact the Cancer Center is asked to red-pen.
+#
+# The article axis (#2356 ruleset) is exhaustive and multi-valued: every cancer
+# paper lands somewhere, rare sites and cross-cutting themes included,
+# `unassigned` legal, no ranking. This file is the PERSON view over it:
+# identity-shaped, ranked, deliberately NOT exhaustive. It contains only labels a
+# faculty member would recognise as "what I work on".
+#
+# The person taxonomy is therefore NOT a second ontology. It is a rollup, so every
+# person label stays explainable by article evidence. Editing this file is the
+# supported way to change the person vocabulary; do not add MeSH descriptors to a
+# person code directly.
+#
+# person_code EMPTY = that article bucket contributes no person label. Evidence
+# still counts toward cancer relevance; it just never becomes an identity claim.
+#
+# display_label is what a public surface shows. It is deliberately plainer than
+# the clinical label -- "Myelodysplastic and Myeloproliferative Cancer" is not
+# something to put on a hover card.
+article_bucket,person_code,display_label,note
+breast,BREAST,Breast Cancer,
+lung-thoracic,LUNG,Lung & Thoracic Cancer,
+colorectal,GI_COLORECTAL,Colorectal & Anal Cancer,
+gi-other,GI_COLORECTAL,Colorectal & Anal Cancer,"Anal and small-bowel. Anal cancer sits with colorectal clinically."
+peritoneal-abdominal,GI_COLORECTAL,Colorectal & Anal Cancer,"Peritoneal surface malignancy is surgical-onc / appendiceal territory. CONFIRM: could equally be its own code if WCM has a HIPEC practice."
+pancreatic,GI_PANCREAS,Pancreatic Cancer,
+liver-biliary,GI_LIVER,Liver & Bile Duct Cancer,
+esophageal-gastric,GI_UPPER,Esophageal & Stomach Cancer,
+prostate,GU_PROSTATE,Prostate Cancer,
+kidney-bladder-testicular,GU_OTHER,"Kidney, Bladder & Testicular Cancer",
+germ-cell-embryonal,GU_OTHER,"Kidney, Bladder & Testicular Cancer","FLAG: dominant adult germ-cell site is testicular, but OVARIAN germ-cell descriptors arguably belong to Gynecologic. The bucket's descriptors are enumerated, so this can be split at descriptor level if the Center wants."
+gynecologic,GYN,Gynecologic Cancer,
+leukemia,HEME_LEUK,Leukemia,
+lymphoma,HEME_LYMPH,Lymphoma,
+multiple-myeloma,HEME_MYELOMA,Multiple Myeloma,
+mds-mpn,HEME_MDS_MPN,"Blood Cancers (MDS, MPN & Other)",
+hematologic-other,HEME_MDS_MPN,"Blood Cancers (MDS, MPN & Other)","Rescues histiocytic and rare heme without creating a junk-drawer code."
+brain-cns,NEURO,Brain & Nervous System Cancer,
+head-neck,HEAD_NECK,Head & Neck Cancer,
+melanoma-skin,SKIN,Melanoma & Skin Cancer,
+eye,SKIN,Melanoma & Skin Cancer,"Adult eye cancer is overwhelmingly ocular melanoma, treated by melanoma teams."
+sarcoma-bone,SARCOMA,Sarcoma & Bone Cancer,"Only 2 members hold this as primary against 72 carrying it. That shape is a finding about consult practice, not a vocabulary defect -- keep the code."
+thyroid-neuroendocrine,ENDO,Thyroid & Endocrine Cancer,
+endocrine-other,ENDO,Thyroid & Endocrine Cancer,"Adrenal, pituitary. Same endocrine practice."
+unknown-primary,,,"NO person code. Cancer of unknown primary is a diagnostic category, not an identity; a CUP-focused oncologist surfaces through their site work anyway."
+cc-biology,,,"NO person code. Mechanism-of-work already has a curated person-level answer at Meyer: Program (CB/CGE/CPC/CT). A derived mechanism label would publish a second, noisier answer beside a hand-curated one."
+cc-therapeutics,,,"NO person code -- see cc-biology. Program CT is the curated answer."
+cc-control-survivorship,,,"NO person code -- see cc-biology. Program CPC is the curated answer."
+cc-experimental-models,,,"NO person code. A model system is not a disease."
+cc-precancerous,,,"NO person code. Sits under the site code its lesion belongs to."
+cc-hereditary,HEREDITARY,Hereditary Cancer & Genetics,"PROPOSED, 19th code -- the Center should accept or strike it. Unlike the other cc-* buckets this names an actual clinical practice (cancer genetics clinic, genetic counselling) that is invisible on the site axis. Risk: every BRCA-adjacent breast researcher carries it as secondary noise. Rank and confidence already exist to handle that."

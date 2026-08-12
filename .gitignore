@@ -70,6 +70,13 @@ seed-output/
 # docs/cancer-center-disease-taxonomy.csv). etl/cancer-taxonomy/index.ts
 # reads it at run time.
 !docs/cancer-taxonomy-ruleset.csv
+# Exception: cancer taxonomy versioned redesign — the person rollup
+# (article-bucket -> person disease code + display label) and the clinical
+# specialty map, both curated seeds `scripts/cancer-center-disease-
+# assignments.ts` depends on to run. Checked in so curation edits flow
+# through PR review, same posture as `docs/cancer-taxonomy-ruleset.csv` above.
+!docs/cancer-center-person-rollup.csv
+!docs/cancer-center-specialty-map.csv
 # Exception: golden-file fixture (tests/unit/cancer-taxonomy-generate.test.ts)
 # — the real Python generator's output on a pinned MeSH XML slice, proving
 # the TS port's equivalence. A test input, not ETL output.

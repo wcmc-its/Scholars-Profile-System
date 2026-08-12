@@ -1,0 +1,47 @@
+# Clinical specialty -> disease code. Corroboration only: a match raises
+# confidence, a non-match never lowers it. Matched with the same normalisation as
+# lib/clinical-mesh-anchors.ts (lowercase, strip non-alphanumerics), so POPS
+# casing/punctuation drift can't cause a silent miss.
+#
+# DELIBERATELY UNMAPPED -- high-volume strings that name no cancer:
+#   Internal Medicine (76), Medical Oncology (48), Hematology/Oncology (37),
+#   Surgery (33), Radiology (13), Pathology (13), Radiation Oncology (9).
+#   These reach all 18 codes, so mapping them would corroborate everything and
+#   discriminate nothing.
+#
+# CODES WITH NO BOARD SPECIALTY (#2033) -- these can never reach `match`, and
+# that is a fact about American board certification, not a gap to fill:
+#   BREAST        -- breast surgery is a fellowship, no ABMS board
+#   GI_PANCREAS   -- pancreatic/HPB surgery is a fellowship, no ABMS board
+#   GI_UPPER      -- foregut surgery is a fellowship, no ABMS board
+#   SARCOMA       -- orthopaedic oncology is a fellowship, no ABMS board
+#   Rows for these codes report specialty_status=code-unmapped, which is
+#   silence, NOT disagreement. Do not read it as a contradiction.
+specialty,disease_code
+Urology,GU_PROSTATE
+Urology,GU_OTHER
+Colon and Rectal Surgery,GI_COLORECTAL
+"Surgery, Colon and Rectal",GI_COLORECTAL
+Gynecologic Oncology,GYN
+Obstetrics and Gynecology,GYN
+Thoracic Surgery,LUNG
+"Surgery, Thoracic",LUNG
+Otolaryngology-Head & Neck Surgery,HEAD_NECK
+Dermatology,SKIN
+Neurological Surgery,NEURO
+"Surgery, Neurological",NEURO
+Pediatric Neurological Surgery,NEURO
+Neuro-Oncology,NEURO
+Endocrine Surgery,ENDO
+Transplant Hepatology,GI_LIVER
+# Hematology constrains to the four blood-cancer codes -- 4 of 18, so unlike
+# "Medical Oncology" it genuinely discriminates. It cannot separate leukemia from
+# lymphoma; that is what the publication axis is for.
+Hematology,HEME_LEUK
+Hematology,HEME_LYMPH
+Hematology,HEME_MYELOMA
+Hematology,HEME_MDS_MPN
+Pediatric Hematology-Oncology,HEME_LEUK
+Pediatric Hematology-Oncology,HEME_LYMPH
+Pediatric Hematology-Oncology,HEME_MYELOMA
+Pediatric Hematology-Oncology,HEME_MDS_MPN
