@@ -26,6 +26,7 @@ const ROWS = [
 const TAXONOMY_TOPICS = [
   { topic: "breast", descriptorCount: 12, exampleDescriptors: ["Breast Neoplasms, Male"] },
 ];
+const TAXONOMY_SUMMARY = { totalRelevant: 878, ruleCount: 165, meshRelease: "MeSH 2026" };
 
 /** Branches by URL — the card fetches BOTH the report data and (lazily, once
  *  the modal opens) the taxonomy detail. */
@@ -34,7 +35,7 @@ function mockFetch() {
     "fetch",
     vi.fn(async (url: string) => {
       if (String(url).includes("cancer-center-mesh-taxonomy")) {
-        return { ok: true, json: async () => ({ ok: true, topics: TAXONOMY_TOPICS }) };
+        return { ok: true, json: async () => ({ ok: true, topics: TAXONOMY_TOPICS, ...TAXONOMY_SUMMARY }) };
       }
       return { ok: true, json: async () => ({ generatedAt: "2026-08-10T00:00:00Z", rows: ROWS }) };
     }),
@@ -138,16 +139,23 @@ describe("CancerCenterCollabReportCard", () => {
     );
   });
 
-  it("the mesh-logic modal fetches and shows the taxonomy on open, stating the goal", async () => {
+  it("the mesh-logic modal fetches the taxonomy summary on open, and reveals topic buckets on demand", async () => {
     mockFetch();
     render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" />);
     fireEvent.click(screen.getByText("Collaboration & Cancer-Relevance"));
     await waitFor(() => expect(screen.getByText(/REMOVE/)).toBeTruthy());
 
     fireEvent.click(screen.getByText("How cancer-relevance is determined"));
-    expect(screen.getByText(/only count a paper toward this report's cancer-relevance axis/)).toBeTruthy();
-    await waitFor(() => expect(screen.getByText("breast")).toBeTruthy());
-    expect(screen.getByText(/12 descriptors match/)).toBeTruthy();
-    expect(screen.getByText(/Breast Neoplasms, Male/)).toBeTruthy();
+    expect(screen.getByText(/A paper counts toward this report's cancer-relevance axis/)).toBeTruthy();
+    // Summary line reads the live totalRelevant/ruleCount/meshRelease, not a static string.
+    await waitFor(() => expect(screen.getByText(/878 cancer-relevant descriptors from 165 ruleset rows/)).toBeTruthy());
+    expect(screen.getByText(/Resolved against MeSH 2026/)).toBeTruthy();
+
+    // Topic bucket list starts collapsed; the "who clears" prose and links are visible without it.
+    expect(screen.queryByText("breast")).toBeNull();
+    fireEvent.click(screen.getByText("View topic buckets"));
+    expect(screen.getByText("breast")).toBeTruthy();
+    expect(screen.getByText(/12 descriptors, including Breast Neoplasms, Male/)).toBeTruthy();
+    expect(screen.getByText("Hide topic buckets")).toBeTruthy();
   });
 });
