@@ -8,9 +8,11 @@
  *     datasets-section.tsx's ACCESS_LABELS comment).
  *   - the newly added ACCESSION_RESOLVERS entries produce the expected href
  *     for a sample accession from each repository.
+ *   - the >5-row <details> expander (hidden at exactly 5), same cap/pattern
+ *     as technologies-section.tsx's ROW_CAP.
  */
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { DatasetsSection } from "@/components/profile/datasets-section";
 import type { ProfilePayload } from "@/lib/api/profile";
 
@@ -35,6 +37,14 @@ const dataset = (over: Partial<Dataset> = {}): Dataset => ({
   trialConditions: null,
   ...over,
 });
+
+/** n rows with distinct ids/titles and descending depositYear, so sorted
+ *  order matches creation order (Dataset 1 first, Dataset n last) — same
+ *  shape as technologies-section.test.tsx's techs(). */
+const datasets = (n: number): Dataset[] =>
+  Array.from({ length: n }, (_, i) =>
+    dataset({ datasetId: `ds-${i + 1}`, title: `Dataset ${i + 1}`, depositYear: n - i }),
+  );
 
 describe("DatasetsSection — accessModel/confidence", () => {
   it("renders accessModel as a readable label on the muted line, never the raw enum", () => {
@@ -192,5 +202,30 @@ describe("DatasetsSection — new accession resolvers (#2350 phase 1)", () => {
     render(<DatasetsSection datasets={[dataset({ repository, accessionOrDoi: accession })]} />);
     const link = screen.getByRole("link", { name: accession });
     expect(link.getAttribute("href")).toBe(href);
+  });
+});
+
+describe("DatasetsSection — row cap", () => {
+  it("shows no expander at exactly 5 datasets", () => {
+    const { container } = render(<DatasetsSection datasets={datasets(5)} />);
+    expect(container.querySelector("details")).toBeNull();
+    expect(screen.queryByText(/Show \d+ more/)).toBeNull();
+    expect(screen.getByText("Dataset 5")).toBeTruthy();
+  });
+
+  it("collapses the remainder into a <details> when there are more than 5", () => {
+    const { container } = render(<DatasetsSection datasets={datasets(7)} />);
+    const details = container.querySelector("details");
+    expect(details).not.toBeNull();
+    const summary = within(details as HTMLElement).getByText("Show 2 more datasets");
+    expect(summary.tagName).toBe("SUMMARY");
+    // The 6th and 7th rows live inside the <details>, not the head list.
+    expect(within(details as HTMLElement).getByText("Dataset 6")).toBeTruthy();
+    expect(within(details as HTMLElement).getByText("Dataset 7")).toBeTruthy();
+  });
+
+  it("uses the singular when exactly one row overflows", () => {
+    render(<DatasetsSection datasets={datasets(6)} />);
+    expect(screen.getByText("Show 1 more dataset")).toBeTruthy();
   });
 });

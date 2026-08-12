@@ -1,10 +1,11 @@
-"use client";
-
-import { useMemo } from "react";
 import type { ProfilePayload } from "@/lib/api/profile";
 import { TechnologyOverview } from "@/components/profile/technology-overview";
 
 type Dataset = ProfilePayload["datasets"][number];
+
+/** Most rows fit above the fold; the rest collapse into a native <details> —
+ *  same cap and zero-JS pattern as `technologies-section.tsx`'s ROW_CAP. */
+const ROW_CAP = 5;
 
 /** Accession → repository resolver URL templates, for the repos most likely
  *  in a WCM biomedical corpus (scripts/bulk-data-rule/catalog.py's canonical
@@ -67,21 +68,39 @@ export function resolveDatasetUrl(d: { repository: string; accessionOrDoi: strin
 }
 
 export function DatasetsSection({ datasets }: { datasets: Dataset[] }) {
-  const sorted = useMemo(
-    () => [...datasets].sort((a, b) => (b.depositYear ?? 0) - (a.depositYear ?? 0)),
-    [datasets],
-  );
+  const sorted = [...datasets].sort((a, b) => (b.depositYear ?? 0) - (a.depositYear ?? 0));
 
   if (sorted.length === 0) return null;
 
+  const head = sorted.slice(0, ROW_CAP);
+  const rest = sorted.slice(ROW_CAP);
+
   return (
-    <ul>
-      {sorted.map((d) => (
-        <li key={d.datasetId} className="border-border border-t py-3 first:border-t-0">
-          <DatasetRow dataset={d} />
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul>
+        {head.map((d) => (
+          <li key={d.datasetId} className="border-border border-t py-3 first:border-t-0">
+            <DatasetRow dataset={d} />
+          </li>
+        ))}
+      </ul>
+      {rest.length > 0 ? (
+        // Native <details> so "show more" needs no client state — the section
+        // stays server-rendered, same as technologies-section.tsx.
+        <details className="border-border border-t">
+          <summary className="text-muted-foreground hover:text-foreground cursor-pointer py-3 text-sm">
+            Show {rest.length} more {rest.length === 1 ? "dataset" : "datasets"}
+          </summary>
+          <ul>
+            {rest.map((d) => (
+              <li key={d.datasetId} className="border-border border-t py-3 first:border-t-0">
+                <DatasetRow dataset={d} />
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </>
   );
 }
 
