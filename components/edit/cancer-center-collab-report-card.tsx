@@ -157,6 +157,64 @@ const RULESET_URL = "https://github.com/wcmc-its/Scholars-Profile-System/blob/ma
 const GENERATOR_DOC_URL =
   "https://github.com/wcmc-its/Scholars-Profile-System/blob/master/docs/cancer-taxonomy-generator.md";
 
+/**
+ * Topic slug -> a curated display label, for the modal only. Checked
+ * intentionally: `docs/cancer-taxonomy-ruleset.csv`'s own `topic` column IS
+ * the raw slug (`kidney-bladder-testicular`, `cc-biology`, ...) — there is
+ * no display-name source anywhere in the ruleset or `CancerTaxonomyDescriptor`
+ * to read this from, so unlike everything else in this modal, these labels
+ * are NOT derived from a live query. A mechanical slug->label transform
+ * (hyphens -> ", "/" and ", capitalize) was tried and rejected: it silently
+ * mangles real oncology terms a naive split can't tell from a coordinate
+ * list — "unknown-primary" -> "Unknown and primary", "multiple-myeloma" ->
+ * "Multiple and myeloma", "mds-mpn" (a real overlap-syndrome abbreviation,
+ * not two words) -> "Mds and mpn". Hand-curated instead, using standard
+ * oncology-program naming. A future ruleset topic not yet listed here falls
+ * back to a plain hyphen-to-space prettification — imperfect, but it never
+ * asserts a false "X and Y" structure the way the rejected transform did.
+ */
+const TOPIC_LABELS: Record<string, string> = {
+  unassigned: "Unassigned",
+  "brain-cns": "Brain and CNS",
+  breast: "Breast",
+  colorectal: "Colorectal",
+  "endocrine-other": "Endocrine (other)",
+  "esophageal-gastric": "Esophageal and gastric",
+  eye: "Eye (ocular)",
+  "germ-cell-embryonal": "Germ cell and embryonal",
+  "gi-other": "GI (other)",
+  gynecologic: "Gynecologic",
+  "head-neck": "Head and neck",
+  "hematologic-other": "Hematologic (other)",
+  "kidney-bladder-testicular": "Kidney, bladder and testicular",
+  leukemia: "Leukemia",
+  "liver-biliary": "Liver and biliary",
+  "lung-thoracic": "Lung and thoracic",
+  lymphoma: "Lymphoma",
+  "mds-mpn": "MDS/MPN",
+  "melanoma-skin": "Melanoma and skin",
+  "multiple-myeloma": "Multiple myeloma",
+  pancreatic: "Pancreatic",
+  "peritoneal-abdominal": "Peritoneal and abdominal",
+  prostate: "Prostate",
+  "sarcoma-bone": "Sarcoma and bone",
+  "thyroid-neuroendocrine": "Thyroid and neuroendocrine",
+  "unknown-primary": "Unknown primary",
+  "cc-biology": "Tumor biology",
+  "cc-control-survivorship": "Cancer control and survivorship",
+  "cc-experimental-models": "Experimental models",
+  "cc-hereditary": "Hereditary cancer syndromes",
+  "cc-precancerous": "Precancerous conditions",
+  "cc-therapeutics": "Cancer therapeutics",
+};
+
+function topicLabel(topic: string): string {
+  const known = TOPIC_LABELS[topic];
+  if (known) return known;
+  const spaced = topic.replace(/-/g, " ");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 /** Section header inside the modal's prose — plain weight, no (?) hover
  *  (unlike `SectionHeading` above, which is for the report's own collapsible
  *  sections). */
@@ -360,7 +418,8 @@ function MeshLogicModal() {
               {data.topics.map((t) => (
                 <li key={t.topic} className="flex gap-5 py-3">
                   <div className="w-[190px] shrink-0">
-                    <p className="font-medium text-foreground">{t.topic}</p>
+                    <p className="font-medium text-foreground">{topicLabel(t.topic)}</p>
+                    <p className="font-mono text-xs text-muted-foreground">{t.topic}</p>
                   </div>
                   <p className="flex-1 text-muted-foreground">
                     {t.descriptorCount} descriptor{t.descriptorCount === 1 ? "" : "s"}
