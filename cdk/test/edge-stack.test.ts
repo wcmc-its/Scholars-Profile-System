@@ -477,12 +477,14 @@ describe("EdgeStack", () => {
       });
 
       it("default behavior forwards NO cookies and NO query strings to the origin (acceptance #5 -- prevents cookie leak)", () => {
-        // Previously asserted `OriginRequestPolicyId === undefined`, i.e. no
-        // policy at all. #1930 has to attach one to forward the viewer Host
-        // (without it, middleware redirects on the legacy VIVO paths point at
-        // the origin hostname), so this now pins acceptance #5's actual
-        // intent -- nothing cookie- or query-bearing reaches the origin on the
-        // cached HTML path -- rather than the proxy of "no policy".
+        // #1930/#1931 briefly attached an origin request policy here (to
+        // forward the viewer Host for middleware redirects); #1944 retired it
+        // once #1935 moved that redirect logic onto the configured SITE_URL,
+        // so `OriginRequestPolicyId === undefined` (no policy at all) is the
+        // expected shape again. This assertion tolerates either shape so it
+        // keeps pinning acceptance #5's actual intent -- nothing cookie- or
+        // query-bearing reaches the origin on the cached HTML path -- rather
+        // than the proxy of "no policy".
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
@@ -935,42 +937,24 @@ describe("EdgeStack", () => {
       });
     });
 
-    describe("#1930 legacy VIVO redirects need the viewer Host on the default behavior", () => {
-      // middleware.ts absoluteLocation() builds redirect Locations from the
-      // Host header. CloudFront sends the ORIGIN's hostname as Host unless the
-      // behavior forwards the viewer's, so a redirect emitted from a behavior
-      // without Host forwarding points at an unreachable host. The legacy VIVO
-      // paths (/display, /individual, /profile) match no additional behavior,
-      // so they are served by the DEFAULT behavior -- these two assertions pin
-      // both halves of that invariant.
-      it("the default behavior forwards the viewer Host and nothing else", () => {
-        const orpLogicalId = Object.entries(
+    describe("#1944 viewerHostOrp retired -- legacy VIVO redirects now come from SITE_URL, not the viewer Host", () => {
+      // middleware.ts absoluteLocation() used to build redirect Locations from
+      // the Host header, which needed #1930/#1931's viewerHostOrp forwarding
+      // the viewer's Host onto the default (cached) behavior. #1935 moved that
+      // logic onto the configured SITE_URL instead, so nothing on the default
+      // behavior reads a forwarded Host any more; #1944 removed the now-unused
+      // policy once #1935 was confirmed running in both envs.
+      it("the default behavior carries no origin request policy (Host forwarding is gone, not just unused)", () => {
+        const stillExists = Object.values(
           template.findResources("AWS::CloudFront::OriginRequestPolicy"),
-        ).find(
-          ([, r]) =>
+        ).some(
+          (r) =>
             (
               (r.Properties as Record<string, unknown>)
                 .OriginRequestPolicyConfig as Record<string, unknown>
             ).Name === "sps-viewer-host-prod",
-        )?.[0];
-        expect(orpLogicalId).toBeDefined();
-
-        template.hasResourceProperties(
-          "AWS::CloudFront::OriginRequestPolicy",
-          {
-            OriginRequestPolicyConfig: Match.objectLike({
-              Name: "sps-viewer-host-prod",
-              HeadersConfig: {
-                HeaderBehavior: "whitelist",
-                Headers: ["Host"],
-              },
-              // The default behavior's cache policy sets both to `none` on
-              // purpose; this policy must not widen what reaches the origin.
-              CookiesConfig: { CookieBehavior: "none" },
-              QueryStringsConfig: { QueryStringBehavior: "none" },
-            }),
-          },
         );
+        expect(stillExists).toBe(false);
 
         const dist = Object.values(
           template.findResources("AWS::CloudFront::Distribution"),
@@ -980,11 +964,13 @@ describe("EdgeStack", () => {
           string,
           unknown
         >;
-        expect(defaultBehavior.OriginRequestPolicyId).toEqual({
-          Ref: orpLogicalId,
-        });
+        expect(defaultBehavior.OriginRequestPolicyId).toBeUndefined();
       });
 
+      // The legacy VIVO paths (/display, /individual, /profile) still match no
+      // additional behavior, so they still fall through to the (now
+      // policy-less) default behavior and still redirect correctly via
+      // SITE_URL -- this pins that nothing has claimed them since.
       it("no additional behavior intercepts the legacy VIVO paths (they must fall through to the default)", () => {
         const dist = Object.values(
           template.findResources("AWS::CloudFront::Distribution"),

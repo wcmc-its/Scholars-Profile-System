@@ -417,35 +417,6 @@ export class EdgeStack extends Stack {
         queryStringBehavior: cloudfront.OriginRequestQueryStringBehavior.all(),
       },
     );
-    // #1930 -- forward the VIEWER's Host on the default (cached) behavior.
-    //
-    // For a custom origin CloudFront sets `Host` to the ORIGIN's domain name
-    // unless the behavior forwards the viewer's Host. `middleware.ts`
-    // (absoluteLocation) builds absolute redirect Locations from `Host`, so on
-    // the default behavior every middleware redirect pointed at the origin
-    // hostname -- unreachable in a browser. That broke the entire B14 legacy
-    // VIVO redirect set (#113): `/display/*`, `/individual/*` and `/profile/*`
-    // match no behavior below, so they are served HERE, and all ~9.8k legacy
-    // URLs 301'd to a dead host. The `/edit*` family was fine only because
-    // allViewer already forwards Host -- which is why this went unnoticed.
-    //
-    // Deliberately a minimal allowList, NOT allViewer: the default behavior is
-    // the cached HTML path and its cache policy sets cookies/query strings to
-    // `none` on purpose. cookie/queryString `none` here preserves that exactly
-    // -- this policy adds Host and nothing else. Name/comment ASCII-only (#401).
-    const viewerHostOrp = new cloudfront.OriginRequestPolicy(
-      this,
-      "ViewerHostOrp",
-      {
-        originRequestPolicyName: `sps-viewer-host-${env}`,
-        comment: `SPS (${env}) -- forward the viewer Host so middleware redirects are absolute onto the public host (#1930).`,
-        headerBehavior:
-          cloudfront.OriginRequestHeaderBehavior.allowList("Host"),
-        cookieBehavior: cloudfront.OriginRequestCookieBehavior.none(),
-        queryStringBehavior:
-          cloudfront.OriginRequestQueryStringBehavior.none(),
-      },
-    );
     // Per-path override: these uncacheable behaviors get internalViewerOrp instead
     // of plain allViewer so the on-network signal can read the viewer IP (#866).
     // Every other uncacheable behavior defaults to allViewer.
@@ -1024,21 +995,20 @@ export class EdgeStack extends Stack {
     //   latency impact.
     // - enableLogging + logFilePrefix wire standard access logs to the
     //   stack-owned bucket.
-    // - The default behavior carries `viewerHostOrp` (#1930) and NOTHING
-    //   wider. STALE COMMENT WARNING: this used to read "no origin request
-    //   policy, by design" -- true until #1931. What still holds is the
-    //   reason behind it: ALL_VIEWER must never be attached here, because it
-    //   would forward cookies onto the CACHEABLE path and leak one viewer's
-    //   HTML to another. `viewerHostOrp` pins cookies/query to `none`
-    //   precisely to preserve that.
-    // - `viewerHostOrp` is now REDUNDANT and slated for removal: as of #1934
-    //   `middleware.ts` builds absolute Locations from the configured
-    //   `SITE_URL`, not from the request `Host`, so nothing on this behavior
-    //   reads the forwarded header any more. Removing it also removes the
-    //   forwarded-but-not-cache-keyed footgun that made the default behavior
-    //   Host-poisonable. Order matters: the app change must be RUNNING in an
-    //   env before the policy is dropped there, or that env regresses to
-    //   #1930 until the image rolls.
+    // - The default behavior carries NO origin request policy, by design:
+    //   ALL_VIEWER must never be attached here, because it would forward
+    //   cookies onto the CACHEABLE path and leak one viewer's HTML to
+    //   another.
+    // - #1930/#1931 briefly attached `viewerHostOrp` here so `middleware.ts`
+    //   could build absolute redirect Locations from the forwarded viewer
+    //   `Host` (needed for the legacy VIVO paths -- `/display`, `/individual`,
+    //   `/profile` -- which match no behavior below and so are served HERE).
+    //   That header was forwarded but not cache-keyed, which made the
+    //   default behavior Host-poisonable (reproduced in prod 2026-07-25).
+    //   #1935 closed this at the source: `middleware.ts` now builds those
+    //   Locations from the configured `SITE_URL`, not from `Host`, so
+    //   nothing on this behavior needs the header any more. `viewerHostOrp`
+    //   was removed (#1944) once #1935 was confirmed running in both envs.
     // ------------------------------------------------------------------
     this.distribution = new cloudfront.Distribution(this, "Distribution", {
       comment: `SPS edge -- ${env}`,
@@ -1049,10 +1019,6 @@ export class EdgeStack extends Stack {
       defaultBehavior: {
         origin,
         cachePolicy: defaultRscCache,
-        // #1930 -- see viewerHostOrp. Required for middleware redirects on the
-        // legacy VIVO paths (/display, /individual, /profile), which are served
-        // by this behavior and build their Location from the Host header.
-        originRequestPolicy: viewerHostOrp,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
         // HTML-specific headers: HSTS + a `max-age=0, must-revalidate`
         // Cache-Control override so browsers revalidate HTML and never serve a
