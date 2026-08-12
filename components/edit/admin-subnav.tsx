@@ -256,12 +256,16 @@ export function AdminSubnav({
       { show: superuserSurfaces, id: "etl-status", href: "/edit/etl-status", label: "ETL status" },
       // Cancer Center reporting console — consolidated off the per-unit editor's
       // `?attr=reports` / `?attr=nci-2a` tabs. `null`/omitted hides it; a number
-      // shows it (passed `0` — no badge), mirroring `dataQualityTab`.
+      // shows it (passed `0` — no badge), mirroring `dataQualityTab`. Labeled
+      // "Cancer Center Reports", not the bare "Reports" — a peer of Data
+      // quality/Activity/Usage in this same group otherwise reads as a
+      // general-purpose reporting feature, when every report underneath is
+      // specifically Cancer-Center-scoped (2026-08-12 user feedback).
       {
         show: reportsTab !== null && reportsTab !== undefined,
         id: "reports",
         href: "/edit/reports",
-        label: "Reports",
+        label: "Cancer Center Reports",
       },
       // Gated on the same `CORE_PAGES` flag as the public core surfaces, so it stays
       // dark in any env where cores aren't live yet (staging-on / prod-off).
