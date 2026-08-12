@@ -1,9 +1,16 @@
 # docs/ADR-012 — InfoEd grant import: what we admit, what we publish as a date, and where dates may come from
 
-**Status:** **Partially accepted, nothing yet in production.** D1, D3, D4a and D9 are merged to master (#2176, #2140) but **dark** — `etl:infoed` is excluded from the staging cadence and prod requires a manual `workflow_dispatch` deploy, so no behaviour has changed for any user yet. D5 and D4b are decisions *not* to act, and are live by default. D10 is unresolved and blocked on OSRA. D11 is accepted and describes behaviour already shipped — it requires no code change, only that the mapping not be widened.
-**Date:** 2026-08-05
-**Revision:** 3
+**Status:** **Partially accepted; D1, D3, D4a and D9 are LIVE IN PRODUCTION as of the 2026-08-07 nightly.** They were merged to master under #2176 / #2140 (with the query rewrite in #2173) and reached production on ETL image `727f0d23`, pushed 2026-08-06 23:58 ET. Verified: `TaskInfoed` entered and exited cleanly on the 2026-08-07 prod run, `NotifyInfoed` did not fire, and the log carries the per-account period line #2173 introduced (`InfoEd returned 17874 grant rows in 273s; 29275 account periods in 0s`).
+
+Revisions 1–3 of this ADR said "nothing yet in production", on the reasoning that prod requires a manual `workflow_dispatch` deploy. **That gate governs the task definition's environment, not its code.** `cdk/lib/etl-stack.ts:551` binds the ETL task to the mutable `:latest` tag, so an ECR push ships ETL code on the next nightly with no `cdk deploy`. Decisions implemented purely in code therefore went live on the first image push after merge; only behaviour gated on a task-def env var stays dark until that env changes. Still true: `etl:infoed` is excluded from the staging cadence, so staging is not a rehearsal for any of this. D5 and D4b are decisions *not* to act, and are live by default. D10 is unresolved and blocked on OSRA. D11 is accepted and describes behaviour already shipped — it requires no code change, only that the mapping not be widened.
+**Date:** 2026-08-07
+**Revision:** 4
 **Authors:** Scholars Profile System development team
+
+**Revision 4 corrects the Status header**: D1, D3, D4a and D9 are live in production, not dark. The
+"nothing yet in production" claim rested on a manual-deploy gate that does not apply to ETL code,
+because the task definition binds the mutable `:latest` image tag. No decision changed; only the
+statement of what is deployed.
 
 **Revision 3 adds D11**, the investigator-role contract, settled by a written OSRA ruling on 2026-08-05.
 
