@@ -86,6 +86,7 @@ const ACTION_LABEL: Partial<Record<AuditAction, string>> = {
   proxy_revoke: "Revoked proxy editor",
   impersonation_start: "Started View-as session",
   impersonation_end: "Ended View-as session",
+  disease_assignment_decision: "Reviewed disease assignment",
 };
 
 /** A few field keys that don't humanize cleanly from camelCase alone. */

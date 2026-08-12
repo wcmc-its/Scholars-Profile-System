@@ -31,6 +31,14 @@
  * membershipType / programCode / startDate / endDate and added a per-center
  * `programs` taxonomy map (both null/empty for non-center units), consumed by
  * the center roster table (`center-roster-card.tsx`).
+ *
+ * The disease-assignment plan (`2026-08-12-cancer-center-disease-assignment-
+ * edit-ui-plan.md` §5/§6) widens each center roster row further with a
+ * `diseases` list — `CancerCenterDiseaseAssignment` merged with any curator
+ * `CancerCenterDiseaseDecision` for the same (cwid, diseaseCode) pair, plus a
+ * v1 drift flag comparing the decision's snapshot against the CURRENT
+ * assignment row. Always `[]` for a department/division and for a center with
+ * no assignment/decision rows.
  */
 import {
   loadUnitFieldOverrides,
@@ -123,6 +131,13 @@ export type UnitEditContext = {
      *  `unknown` = no Scholar row ever matched this cwid, which is why the `name`
      *  above falls back to the raw cwid. */
     scholarState: RosterScholarState;
+    /** Disease-assignment plan §5/§6 — this member's ranked disease-expertise
+     *  picture. `[]` outside a center (dept/division) and for a center member
+     *  with no `CancerCenterDiseaseAssignment`/`CancerCenterDiseaseDecision`
+     *  rows. Optional so existing fixtures/callers that predate this feature
+     *  still type-check; absent → `[]` (same convention as `RosterMember.
+     *  scholarState` in `center-roster-card.tsx`). */
+    diseases?: ReadonlyArray<RosterDiseaseRow>;
   }> | null;
   /** The center's program taxonomy (#552), present for a center (empty when the
    *  center has none — the roster editor hides Type + Program then). null for a
@@ -174,6 +189,8 @@ export type UnitEditContextClient = Pick<
   | "centerMembership"
   | "divisionMembership"
   | "centerProgram"
+  | "cancerCenterDiseaseAssignment"
+  | "cancerCenterDiseaseDecision"
 >;
 
 /**
@@ -228,6 +245,70 @@ export function scholarStateOf(
 ): RosterScholarState {
   if (resolved === undefined) return "unknown";
   return resolved.departed ? "departed" : "active";
+}
+
+/**
+ * One (cwid, diseaseCode) pair — the CURRENT `CancerCenterDiseaseAssignment`
+ * row for it, if the assignment ETL's most recent full-replace still carries
+ * one, UNION'd with the curator's `CancerCenterDiseaseDecision`, if any exists.
+ * Either can be present alone: an assignment with no decision is simply
+ * unreviewed; a decision with no current assignment is the "evidence
+ * disappeared" drift case below (plan §6).
+ */
+export type RosterDiseaseRow = {
+  diseaseCode: string;
+  assignment: {
+    rank: number;
+    focus: string;
+    confidence: string;
+    leadPubs: number;
+    secondPubs: number;
+    middlePubs: number;
+    grantsLed: number;
+    grantsSupport: number;
+    trialsLed: number;
+    trialsSupport: number;
+    pubScore: number;
+    score: number;
+    firstYear: number | null;
+    lastYear: number | null;
+    recentPubs: number;
+    specialtyStatus: string;
+  } | null;
+  decision: {
+    decision: string; // "confirmed" | "rejected"
+    decidedBy: string;
+    decidedAt: Date;
+    scoreAtDecision: number;
+    confidenceAtDecision: string;
+  } | null;
+  /** Plan §6 v1 drift flag — see `isDiseaseDecisionDrifted`. */
+  drifted: boolean;
+};
+
+/**
+ * Plan §6 — deliberately simple v1 drift flag, recomputed on every load by
+ * comparing a decision's AT-DECISION-TIME snapshot against the CURRENT
+ * assignment row for the same pair. A visible badge only; no auto-revert, no
+ * notification.
+ *
+ * ponytail: v2 could add thresholds / a staleness window / a digest instead
+ * of a per-row badge the curator happens to notice next time they're on the
+ * row — flagged here so this doesn't quietly become the permanent ceiling.
+ */
+export function isDiseaseDecisionDrifted(
+  decision: { decision: string; confidenceAtDecision: string },
+  current: { confidence: string } | undefined,
+): boolean {
+  if (decision.decision === "rejected") {
+    // Evidence "tripled" — now high confidence, and wasn't at decision time.
+    return current !== undefined && current.confidence === "high" && decision.confidenceAtDecision !== "high";
+  }
+  if (decision.decision === "confirmed") {
+    // The row this confirmation was about no longer exists at all.
+    return current === undefined;
+  }
+  return false;
 }
 
 export async function loadUnitEditContext(
@@ -438,6 +519,120 @@ export async function loadUnitEditContext(
     }
   }
 
+  // 4b. Disease-expertise rows (plan §5/§6) — center only, keyed off the
+  // roster cwids just loaded above. `CancerCenterDiseaseAssignment` /
+  // `CancerCenterDiseaseDecision` carry no center column of their own (a
+  // scholar's disease profile isn't center-scoped data — same posture as the
+  // `/disease-assignments` route's own docblock), so this is "assignments +
+  // decisions for THIS center's current roster members," not a query scoped
+  // by a center FK.
+  const diseasesByCwid = new Map<string, RosterDiseaseRow[]>();
+  if (unitType === "center" && rosterRows.length > 0) {
+    const rosterCwids = rosterRows.map((r) => r.cwid);
+    const [assignmentRows, decisionRows] = await Promise.all([
+      client.cancerCenterDiseaseAssignment.findMany({
+        where: { cwid: { in: rosterCwids } },
+        select: {
+          cwid: true,
+          diseaseCode: true,
+          rank: true,
+          focus: true,
+          confidence: true,
+          leadPubs: true,
+          secondPubs: true,
+          middlePubs: true,
+          grantsLed: true,
+          grantsSupport: true,
+          trialsLed: true,
+          trialsSupport: true,
+          pubScore: true,
+          score: true,
+          firstYear: true,
+          lastYear: true,
+          recentPubs: true,
+          specialtyStatus: true,
+        },
+      }),
+      client.cancerCenterDiseaseDecision.findMany({
+        where: { cwid: { in: rosterCwids } },
+        select: {
+          cwid: true,
+          diseaseCode: true,
+          decision: true,
+          decidedBy: true,
+          decidedAt: true,
+          scoreAtDecision: true,
+          confidenceAtDecision: true,
+        },
+      }),
+    ]);
+
+    // Both tables share the same (cwid, diseaseCode) composite id — key on it
+    // to look up "does this decision's pair still have a live assignment row"
+    // for the drift check below.
+    const assignmentByKey = new Map<string, (typeof assignmentRows)[number]>();
+    for (const a of assignmentRows) assignmentByKey.set(`${a.cwid}::${a.diseaseCode}`, a);
+
+    const rowsByCwid = new Map<string, Map<string, RosterDiseaseRow>>();
+    const rowFor = (cwid: string, diseaseCode: string): RosterDiseaseRow => {
+      let byCode = rowsByCwid.get(cwid);
+      if (!byCode) rowsByCwid.set(cwid, (byCode = new Map()));
+      let row = byCode.get(diseaseCode);
+      if (!row) {
+        row = { diseaseCode, assignment: null, decision: null, drifted: false };
+        byCode.set(diseaseCode, row);
+      }
+      return row;
+    };
+
+    for (const a of assignmentRows) {
+      rowFor(a.cwid, a.diseaseCode).assignment = {
+        rank: a.rank,
+        focus: a.focus,
+        confidence: a.confidence,
+        leadPubs: a.leadPubs,
+        secondPubs: a.secondPubs,
+        middlePubs: a.middlePubs,
+        grantsLed: a.grantsLed,
+        grantsSupport: a.grantsSupport,
+        trialsLed: a.trialsLed,
+        trialsSupport: a.trialsSupport,
+        pubScore: a.pubScore,
+        score: a.score,
+        firstYear: a.firstYear,
+        lastYear: a.lastYear,
+        recentPubs: a.recentPubs,
+        specialtyStatus: a.specialtyStatus,
+      };
+    }
+    for (const d of decisionRows) {
+      const row = rowFor(d.cwid, d.diseaseCode);
+      row.decision = {
+        decision: d.decision,
+        decidedBy: d.decidedBy,
+        decidedAt: d.decidedAt,
+        scoreAtDecision: d.scoreAtDecision,
+        confidenceAtDecision: d.confidenceAtDecision,
+      };
+      const current = assignmentByKey.get(`${d.cwid}::${d.diseaseCode}`);
+      row.drifted = isDiseaseDecisionDrifted(
+        row.decision,
+        current ? { confidence: current.confidence } : undefined,
+      );
+    }
+
+    // Ranked — live assignments by their rank, any decision-only ("evidence
+    // disappeared") rows trail at the end ordered by code.
+    for (const [cwid, byCode] of rowsByCwid) {
+      const rows = [...byCode.values()].sort((a, b) => {
+        const rankA = a.assignment?.rank ?? Number.MAX_SAFE_INTEGER;
+        const rankB = b.assignment?.rank ?? Number.MAX_SAFE_INTEGER;
+        return rankA - rankB || a.diseaseCode.localeCompare(b.diseaseCode);
+      });
+      diseasesByCwid.set(cwid, rows);
+    }
+  }
+
   // 5. Batch-resolve names for the leader + access + roster cwids. A unit admin
   // is often a non-Scholar staff member, so a Scholar miss is expected — the
   // access card re-resolves those names client-side via /api/directory/people.
@@ -479,6 +674,7 @@ export async function loadUnitEditContext(
           startDate: r.startDate ? r.startDate.toISOString().slice(0, 10) : null,
           endDate: r.endDate ? r.endDate.toISOString().slice(0, 10) : null,
           scholarState: scholarStateOf(resolved),
+          diseases: diseasesByCwid.get(r.cwid) ?? [],
         };
       })
     : null;

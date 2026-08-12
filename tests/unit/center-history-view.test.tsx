@@ -86,6 +86,50 @@ describe("CenterHistoryView", () => {
     expect(row.textContent).toContain("CT");
   });
 
+  it("renders a disease-assignment-decision row (add kind) as 'Disease: BREAST → confirmed'", () => {
+    render(
+      <CenterHistoryView
+        centerCode="meyer_cancer_center"
+        centerName="Meyer"
+        entries={[
+          entry({
+            id: "4",
+            changeKind: "add",
+            targetCwid: "abc1001",
+            fieldChanges: [{ field: "disease", from: "BREAST", to: "confirmed" }],
+          }),
+        ]}
+        windowDays={90}
+      />,
+    );
+    const row = screen.getByTestId("center-history-row-4");
+    expect(row.textContent).toContain("Disease:");
+    expect(row.textContent).toContain("BREAST");
+    expect(row.textContent).toContain("confirmed");
+  });
+
+  it("renders a cleared disease decision (remove kind) with a dash 'to' value", () => {
+    render(
+      <CenterHistoryView
+        centerCode="meyer_cancer_center"
+        centerName="Meyer"
+        entries={[
+          entry({
+            id: "5",
+            changeKind: "remove",
+            targetCwid: "abc1001",
+            fieldChanges: [{ field: "disease", from: "BREAST", to: null }],
+          }),
+        ]}
+        windowDays={90}
+      />,
+    );
+    const row = screen.getByTestId("center-history-row-5");
+    expect(row.textContent).toContain("Disease:");
+    expect(row.textContent).toContain("BREAST");
+    expect(row.textContent).toContain("—");
+  });
+
   it("shows the impersonation note when impersonatedCwid is set", () => {
     render(
       <CenterHistoryView
