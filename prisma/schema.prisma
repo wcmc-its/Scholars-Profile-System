@@ -1671,6 +1671,59 @@ model CancerTaxonomyDescriptor {
   @@map("cancer_taxonomy_descriptor")
 }
 
+/// Journal Impact Factor lookup, mirrored weekly from reciterdb's
+/// `journal_impact_alternative` (21,800 rows as of 2026-08-12; Web-of-Science
+/// journal-level metrics, not a Scholars-native concept) by
+/// `etl/journal-impact-factor`. Feeds `/edit/reports/3` ("Publications"): a
+/// per-center report joining member publications to their journal's Impact
+/// Factor by abbreviation. Full-replace on every run — this is a mirror, not
+/// an accreted history; `refreshedAt` is the run timestamp, not a per-row edit
+/// time.
+model JournalImpactFactor {
+  id           Int    @id @default(autoincrement())
+  journalTitle String @map("journal_title") @db.VarChar(200)
+  /// Normalized (trim + uppercase) copy of reciterdb's `journalAbbrName`
+  /// (Web-of-Science style, e.g. "NEW ENGL J MED") — normalized at ETL-write
+  /// time so the report's query-time join against `Publication.journalAbbrev`
+  /// (NLM/Index-Medicus style, e.g. "N Engl J Med") is one exact string
+  /// comparison after the SAME normalization on that side
+  /// (`normalizeJournalAbbrev` in `lib/edit/cancer-center-publications-
+  /// report.ts`), not a case-insensitive collation trick. Confirmed
+  /// empirically against the live source: 0 duplicate `journalAbbrName`
+  /// values, case-sensitive or normalized, across all 21,800 rows — so
+  /// normalizing here cannot introduce a collision that wasn't already
+  /// there, and `@@unique` below is safe. NOT the same abbreviation
+  /// convention as `Publication.journalAbbrev` — WoS and NLM disagree on
+  /// some journals' abbreviated form (e.g. NEJM: "NEW ENGL J MED" here vs.
+  /// "N Engl J Med" there), which is *why* the report's join is a partial
+  /// match, not a schema bug. See the report module's `ponytail:` comment.
+  journalAbbrev String  @map("journal_abbrev") @db.VarChar(128)
+  issn          String? @db.VarChar(12)
+  eissn         String? @db.VarChar(12)
+  /// Current-year Journal Impact Factor. Spot-checked against known journals
+  /// on the live source: CA-A Cancer J Clin 503.1, NEJM 96.2, Lancet 98.4,
+  /// Nature 50.5 — all match the real current JCR figures (CA-A Cancer J
+  /// Clin's ~500 is a famous, genuine outlier, not a data error). `Decimal`
+  /// here (not `Float`) though the source column is `float(7,1)` — an exact
+  /// base-10 decimal is worth the conversion for a stat readers compare
+  /// against a fixed threshold (`>= 10`, see the report module).
+  impactScore1 Decimal? @map("impact_score_1") @db.Decimal(7, 1)
+  /// 5-year Journal Impact Factor. Spot-checked: NEJM 94.3, Lancet 106.9,
+  /// Nature 54.4 — consistent with real published 5-year JIFs (close to but
+  /// distinct from the 1-year figures above, as expected). Null more often
+  /// than impactScore1 (795 vs. 13 of 21,800 on the live source) — a newly
+  /// tracked journal hasn't accrued 5 years of citation history yet.
+  impactScore2 Decimal? @map("impact_score_2") @db.Decimal(7, 1)
+  /// Raw passthrough, e.g. "ONCOLOGY|Q1|1/322" (subject category | quartile |
+  /// rank/category size). Never parsed apart in the schema — the report
+  /// module splits it at render time when it wants quartile/rank separately.
+  category    String?  @db.VarChar(200)
+  refreshedAt DateTime @default(now()) @map("refreshed_at")
+
+  @@unique([journalAbbrev])
+  @@map("journal_impact_factor")
+}
+
 /// NCI CCSG Data Table 2A — one row per (center, reporting cycle, OSRA award).
 /// The OSRA "Active Awards" workbook is the source of truth for money and dates
 /// (existing data, no LLM); `cancerRelevantPercent` has no source anywhere else
