@@ -71,6 +71,20 @@ const nextConfig: NextConfig = {
     "/api/edit/suppress": ["./etl/clinical-mesh/specialty-anchors.csv"],
     "/api/edit/reject": ["./etl/clinical-mesh/specialty-anchors.csv"],
     "/api/edit/revoke": ["./etl/clinical-mesh/specialty-anchors.csv"],
+    // Disease-assignment manual-add extension — `loadUnitEditContext`'s
+    // `diseaseOptions` (center only) and the `/disease-assignments` route's
+    // known-code validation both read `docs/cancer-center-person-rollup.csv`
+    // via a cwd-relative path (`lib/api/unit-edit-context.ts`). The standalone
+    // runtime image doesn't ship `docs/`, so trace the CSV into the routes that
+    // actually need it working (not merely degrading to `[]`/500) — the center
+    // editor page and the decision route. `loadUnitEditContext`'s OTHER
+    // center-context callers (history, export, `/edit/reports/*`) are left
+    // untraced on purpose: they don't render `diseaseOptions`, so the
+    // catch-and-degrade-to-`[]` fallback in `loadUnitEditContext` is fine for
+    // them. ANY new app-runtime caller that actually NEEDS `diseaseOptions` (or
+    // a direct call to `loadDiseaseCodeOptions`) populated must be added here.
+    "/edit/center/[code]": ["./docs/cancer-center-person-rollup.csv"],
+    "/api/edit/center/[code]/disease-assignments": ["./docs/cancer-center-person-rollup.csv"],
   },
   // Issue #391 — keep jsdom (pulled in by isomorphic-dompurify in
   // lib/edit/validators.ts) external to the server bundle. jsdom reads

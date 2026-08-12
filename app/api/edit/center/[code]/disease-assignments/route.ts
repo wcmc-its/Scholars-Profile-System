@@ -20,11 +20,20 @@
  * `CancerCenterDiseaseAssignment` row for the pair, read inside the SAME
  * transaction as the write (a later reseed can then detect drift by diffing
  * against the live assignment row — plan §6). `404 assignment_not_found` when
- * that pair has no assignment row — there is nothing to snapshot a decision
- * against. `"clear"` is a REAL DELETE of the decision row, never a third
- * stored `decision` value — collapsing "no decision yet" into "explicitly
- * cleared" is the exact bug `FamilyTierDecision` (#1993/#2160) was built to
- * close, and this table copies that shape on purpose.
+ * a `"rejected"` pair has no assignment row — there is nothing to snapshot a
+ * decision against, and rejecting something the generator never suggested
+ * makes no sense. `"confirmed"` with no assignment row is instead a REAL,
+ * deliberate feature — the manual add: a curator attaching a disease code the
+ * generator never suggested for this member. That upserts a decision with
+ * `scoreAtDecision: null, confidenceAtDecision: null` (both columns are
+ * nullable for exactly this case) rather than 404ing or faking a sentinel
+ * score/confidence. `diseaseCode` must be a KNOWN code from the canonical
+ * taxonomy (`loadDiseaseCodeOptions`, `lib/api/unit-edit-context.ts`) —
+ * validated up front, `400 unknown_disease_code`, so the audit log can never
+ * carry a garbage code. `"clear"` is a REAL DELETE of the decision row, never
+ * a third stored `decision` value — collapsing "no decision yet" into
+ * "explicitly cleared" is the exact bug `FamilyTierDecision` (#1993/#2160)
+ * was built to close, and this table copies that shape on purpose.
  *
  * `decidedBy` is always `realCwid` — the accountable human from
  * `resolveEditIdentity()` — never the effective/impersonated cwid. One
@@ -35,6 +44,7 @@
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
+import { loadDiseaseCodeOptions } from "@/lib/api/unit-edit-context";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import {
@@ -77,6 +87,22 @@ export async function POST(
   }
   if (typeof decision !== "string" || !isDecision(decision)) {
     return editError(400, "invalid_decision", "decision");
+  }
+
+  // `diseaseCode` must be a KNOWN code from the canonical taxonomy, so the
+  // audit log can never carry a garbage code — a manual add (no backing
+  // assignment row, below) has no assignment row to have already validated it
+  // against, so this is the one gate standing between a typo and a permanent
+  // audit-log entry.
+  let knownDiseaseCodes: Set<string>;
+  try {
+    knownDiseaseCodes = new Set(loadDiseaseCodeOptions().map((o) => o.code));
+  } catch (err) {
+    logEditFailure(PATH, err);
+    return editError(500, "read_failed");
+  }
+  if (!knownDiseaseCodes.has(diseaseCode)) {
+    return editError(400, "unknown_disease_code", "diseaseCode");
   }
 
   const { code } = await params;
@@ -160,7 +186,13 @@ export async function POST(
         where: { cwid_diseaseCode: { cwid, diseaseCode } },
         select: { score: true, confidence: true },
       });
-      if (!assignment) throw new AssignmentNotFound();
+      // No assignment row for this pair: "rejected" has nothing to reject —
+      // 404, unchanged. "confirmed" is instead the manual add — a curator
+      // attaching a disease the generator never suggested — so it proceeds
+      // with null score/confidence rather than 404ing.
+      if (!assignment && decision === "rejected") throw new AssignmentNotFound();
+      const scoreAtDecision = assignment?.score ?? null;
+      const confidenceAtDecision = assignment?.confidence ?? null;
 
       const decided = await tx.cancerCenterDiseaseDecision.upsert({
         where: { cwid_diseaseCode: { cwid, diseaseCode } },
@@ -170,15 +202,15 @@ export async function POST(
           decision,
           decidedBy: realCwid,
           decidedAt,
-          scoreAtDecision: assignment.score,
-          confidenceAtDecision: assignment.confidence,
+          scoreAtDecision,
+          confidenceAtDecision,
         },
         update: {
           decision,
           decidedBy: realCwid,
           decidedAt,
-          scoreAtDecision: assignment.score,
-          confidenceAtDecision: assignment.confidence,
+          scoreAtDecision,
+          confidenceAtDecision,
         },
         select: { decision: true, scoreAtDecision: true, confidenceAtDecision: true },
       });

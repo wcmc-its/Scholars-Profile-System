@@ -38,14 +38,31 @@
  * `CancerCenterDiseaseDecision` for the same (cwid, diseaseCode) pair, plus a
  * v1 drift flag comparing the decision's snapshot against the CURRENT
  * assignment row. Always `[]` for a department/division and for a center with
- * no assignment/decision rows.
+ * no assignment/decision rows. A decision with NO matching assignment row
+ * (the manual-add case — a curator attaching a disease code the generator
+ * never suggested for this member) still produces a `diseases` entry:
+ * `assignment: null`, `decision` populated. The merge below keys off BOTH
+ * tables independently rather than iterating assignments and attaching
+ * decisions, precisely so a decision-only pair is never dropped.
+ *
+ * The manual-add extension also widens the context with `diseaseOptions` — the
+ * canonical disease-code → label list (`docs/cancer-center-person-rollup.csv`,
+ * the same rollup `labelsOf()` in `scripts/cancer-center-disease-assignments.ts`
+ * reads) — so the roster card's "Add a disease" picker has something to list
+ * without a second round-trip. One shared list for the whole center, computed
+ * once per load — NOT per member. `null` outside a center, same convention as
+ * `programs`.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import {
   loadUnitFieldOverrides,
   mergeUnitFields,
   type UnitEntityType,
   type UnitFieldOverrideName,
 } from "@/lib/api/manual-layer";
+import { parseCsv } from "@/lib/csv";
 import {
   getEffectiveUnitRole,
   type UnitAdminLookup,
@@ -165,6 +182,11 @@ export type UnitEditContext = {
     name: string;
     slug: string;
   }> | null;
+  /** Disease-assignment plan §5/§6 manual-add extension — the canonical
+   *  disease-code → label list, for the roster card's "Add a disease" picker.
+   *  One shared list for the whole center (not per member); `null` for a
+   *  department or division, same convention as {@link programs}. */
+  diseaseOptions: ReadonlyArray<DiseaseCodeOption> | null;
   /** The actor's effective role on THIS unit (drives client-side rail filtering). */
   actorRole: UnitActorRole;
   /** The acting session's CWID — the access card disables Remove on this row
@@ -279,12 +301,62 @@ export type RosterDiseaseRow = {
     decision: string; // "confirmed" | "rejected"
     decidedBy: string;
     decidedAt: Date;
-    scoreAtDecision: number;
-    confidenceAtDecision: string;
+    /** null for a manual add (plan's manual-add extension) — a curator-attached
+     *  disease with no `CancerCenterDiseaseAssignment` row to snapshot. Always
+     *  populated for a decision made against a live assignment (the ordinary
+     *  confirm/reject flow). */
+    scoreAtDecision: number | null;
+    confidenceAtDecision: string | null;
   } | null;
   /** Plan §6 v1 drift flag — see `isDiseaseDecisionDrifted`. */
   drifted: boolean;
 };
+
+/** One canonical disease code — for the "Add a disease" picker (manual-add
+ *  extension) and for validating a curator-supplied code server-side. */
+export type DiseaseCodeOption = { code: string; label: string };
+
+/** `docs/cancer-center-person-rollup.csv`, read via a cwd-relative path — the
+ *  same file `scripts/cancer-center-disease-assignments.ts`'s CLI entrypoint
+ *  reads. Traced into the app runtime image via `next.config.ts`'s
+ *  `outputFileTracingIncludes` for the routes that call
+ *  {@link loadDiseaseCodeOptions}; any NEW app-runtime caller must be added
+ *  there too (mirrors `loadMeshAncestorContext`'s own CSV-tracing guardrail,
+ *  `lib/clinical-mesh-anchors.ts`). */
+const DISEASE_ROLLUP_CSV_PATH = path.join(process.cwd(), "docs/cancer-center-person-rollup.csv");
+
+/**
+ * The canonical disease-code → label list, deduped by code (a code can repeat
+ * across several `article_bucket` rows in the rollup — first label wins, same
+ * as `labelsOf()` in `scripts/cancer-center-disease-assignments.ts`), sorted
+ * by label for the picker. Deliberately NOT an import of `labelsOf()` itself:
+ * that file's `runAssignments` pulls in the raw `mariadb` driver + `lib/
+ * cancer-taxonomy.ts` at module scope (behind an `import.meta.url` CLI guard,
+ * not a lazy import), which this context loader — reached by every unit-editor
+ * route, not only centers — has no reason to carry. `parseCsv` (the one CSV
+ * dialect this repo has) IS reused; only the ~3-line code→label dedup is
+ * re-derived locally.
+ *
+ * Throws (fail-loud) if the CSV is absent — same stance
+ * `loadSpecialtyAnchorMap` documents for its own CSV: the file is committed,
+ * so absence is a packaging bug, not a runtime-degrade case. The one caller in
+ * this module ({@link loadUnitEditContext}) catches around its call site and
+ * degrades `diseaseOptions` to `[]` rather than failing the whole unit page.
+ */
+export function loadDiseaseCodeOptions(
+  csvPath: string = DISEASE_ROLLUP_CSV_PATH,
+): ReadonlyArray<DiseaseCodeOption> {
+  const rows = parseCsv(readFileSync(csvPath, "utf8"));
+  const seen = new Set<string>();
+  const options: DiseaseCodeOption[] = [];
+  for (const r of rows) {
+    const code = r.person_code;
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    options.push({ code, label: r.display_label });
+  }
+  return options.sort((a, b) => a.label.localeCompare(b.label));
+}
 
 /**
  * Plan §6 — deliberately simple v1 drift flag, recomputed on every load by
@@ -297,7 +369,7 @@ export type RosterDiseaseRow = {
  * row — flagged here so this doesn't quietly become the permanent ceiling.
  */
 export function isDiseaseDecisionDrifted(
-  decision: { decision: string; confidenceAtDecision: string },
+  decision: { decision: string; confidenceAtDecision: string | null },
   current: { confidence: string } | undefined,
 ): boolean {
   if (decision.decision === "rejected") {
@@ -305,8 +377,12 @@ export function isDiseaseDecisionDrifted(
     return current !== undefined && current.confidence === "high" && decision.confidenceAtDecision !== "high";
   }
   if (decision.decision === "confirmed") {
-    // The row this confirmation was about no longer exists at all.
-    return current === undefined;
+    // A manual add (`confidenceAtDecision === null` — no assignment row to
+    // snapshot at decision time, the route's manual-add branch) never had
+    // evidence to begin with, so "the row disappeared" doesn't apply to it.
+    // Only flag drift when a decision that WAS backed by evidence loses its
+    // assignment row.
+    return decision.confidenceAtDecision !== null && current === undefined;
   }
   return false;
 }
@@ -713,6 +789,22 @@ export async function loadUnitEditContext(
         ).map((d) => ({ code: d.code, name: d.name, slug: d.slug }))
       : null;
 
+  // 7. Disease-code options (manual-add extension) — center only, one shared
+  // list for the whole roster (not per member). A read failure (the CSV
+  // missing from this route's `outputFileTracingIncludes` trace, or absent
+  // entirely) degrades the picker to empty rather than failing the whole unit
+  // page — `loadDiseaseCodeOptions` itself stays fail-loud so a genuinely
+  // missing/malformed CSV is easy to spot from this one call site.
+  let diseaseOptions: ReadonlyArray<DiseaseCodeOption> | null = null;
+  if (unitType === "center") {
+    try {
+      diseaseOptions = loadDiseaseCodeOptions();
+    } catch (err) {
+      console.error("[unit-edit-context] loadDiseaseCodeOptions failed", err);
+      diseaseOptions = [];
+    }
+  }
+
   return {
     unit: {
       unitType,
@@ -749,6 +841,7 @@ export async function loadUnitEditContext(
     roster,
     programs,
     siblingDivisions,
+    diseaseOptions,
     actorRole,
     actorCwid: session.cwid,
   };
