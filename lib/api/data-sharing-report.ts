@@ -24,6 +24,7 @@
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { loadContributorSuppressions } from "@/lib/api/manual-layer";
+import { toCsv } from "@/lib/csv";
 
 /** The Prisma surface this loader needs — kept narrow for unit tests. */
 export type DataSharingReportClient = Pick<
@@ -42,6 +43,19 @@ export type DatasetLinkRow = {
   datasetId: string;
   repository: string;
   accessModel: string | null;
+  /** Export-only fields (exact `DatasetDeposit` column names, prisma/schema.prisma)
+   *  — none of the `aggregateBy*` functions below read these, they exist so the
+   *  item-level CSV export (below) can reuse this same suppression-filtered row
+   *  set instead of a second query. Optional (not just nullable) so the existing
+   *  rollup-fixture rows in `tests/unit/data-sharing-report.test.ts` don't need
+   *  touching — a strict additive extension, not a reshape. */
+  title?: string | null;
+  accessionOrDoi?: string;
+  resourceType?: string | null;
+  dataType?: string | null;
+  depositYear?: number | null;
+  provenance?: string;
+  confidence?: string | null;
 };
 
 export type DepartmentRollup = {
@@ -87,7 +101,22 @@ export async function loadDatasetLinkRows(client: DataSharingReportClient): Prom
       cwid: true,
       datasetId: true,
       scholar: { select: { preferredName: true, fullName: true, slug: true, primaryDepartment: true } },
-      dataset: { select: { repository: true, accessModel: true } },
+      // Widened for the item-level CSV export (below) — the three rollup
+      // aggregates only ever read repository/accessModel; the rest are
+      // export-only and otherwise ignored.
+      dataset: {
+        select: {
+          repository: true,
+          accessModel: true,
+          title: true,
+          accessionOrDoi: true,
+          resourceType: true,
+          dataType: true,
+          depositYear: true,
+          provenance: true,
+          confidence: true,
+        },
+      },
     },
   });
   if (links.length === 0) return [];
@@ -110,6 +139,13 @@ export async function loadDatasetLinkRows(client: DataSharingReportClient): Prom
       datasetId: l.datasetId,
       repository: l.dataset.repository,
       accessModel: l.dataset.accessModel,
+      title: l.dataset.title,
+      accessionOrDoi: l.dataset.accessionOrDoi,
+      resourceType: l.dataset.resourceType,
+      dataType: l.dataset.dataType,
+      depositYear: l.dataset.depositYear,
+      provenance: l.dataset.provenance,
+      confidence: l.dataset.confidence,
     });
   }
   return rows;
@@ -207,4 +243,80 @@ export function buildDataSharingReport(rows: readonly DatasetLinkRow[]): DataSha
 export async function loadDataSharingReport(client: DataSharingReportClient): Promise<DataSharingReport> {
   const rows = await loadDatasetLinkRows(client);
   return buildDataSharingReport(rows);
+}
+
+// ---------------------------------------------------------------------------
+// CSV export (`/edit/data-sharing/export`) — item-level, one row per
+// suppression-filtered (person, dataset) link. Deliberately reuses
+// `loadDatasetLinkRows` rather than a second "export loader": that function
+// already returns the FULL suppression-filtered set with no pagination, which
+// is exactly what an unpaginated export needs — a second query would just
+// duplicate this one. Unlike `/edit/data-quality`, this dashboard has no
+// query-param filters or unit scoping to thread through (global-only, see
+// `lib/edit/data-sharing-dashboard.ts`), so the export has none either.
+// ---------------------------------------------------------------------------
+
+/** Upper bound on rows in one CSV export — mirrors `DATA_QUALITY_EXPORT_CAP`'s
+ *  value and rationale: real volume today is ~1,445 links, so this is a safety
+ *  net against runaway growth, not a real limit yet. */
+export const DATA_SHARING_EXPORT_CAP = 5000;
+
+export type DataSharingExport = {
+  /** The rows kept after capping (input order preserved). */
+  rows: DatasetLinkRow[];
+  /** Total rows before the cap. */
+  total: number;
+  /** True when `total` exceeded the cap and `rows` was truncated. */
+  truncated: boolean;
+};
+
+/** Slice a (person, dataset) link row set to `DATA_SHARING_EXPORT_CAP` — a
+ *  pure helper (same shape as data-quality's `DataQualityExport`) so tests can
+ *  exercise the truncation branch directly, without 5,001 fake DB rows
+ *  end-to-end. */
+export function capDatasetLinkRows(rows: readonly DatasetLinkRow[]): DataSharingExport {
+  const total = rows.length;
+  return {
+    rows: rows.slice(0, DATA_SHARING_EXPORT_CAP),
+    total,
+    truncated: total > DATA_SHARING_EXPORT_CAP,
+  };
+}
+
+const DATA_SHARING_CSV_HEADERS = [
+  "repository",
+  "accession_or_doi",
+  "title",
+  "resource_type",
+  "data_type",
+  "access_model",
+  "deposit_year",
+  "provenance",
+  "confidence",
+  "department",
+  "faculty_name",
+  "cwid",
+] as const;
+
+/** Serialize item-level (person, dataset) link rows to a CSV string — one row
+ *  per link (this loader's own grain), not one row per distinct dataset. No
+ *  email/PII field: neither `DatasetDeposit` nor `PersonDatasetDeposit` carries
+ *  one — `faculty_name` + `cwid` are the only person-identifying columns, same
+ *  as the on-page "Named faculty" table. */
+export function buildDataSharingCsv(rows: readonly DatasetLinkRow[]): string {
+  const body = rows.map((r) => [
+    r.repository,
+    r.accessionOrDoi ?? "",
+    r.title ?? "",
+    r.resourceType ?? "",
+    r.dataType ?? "",
+    r.accessModel ?? "",
+    r.depositYear ?? "",
+    r.provenance ?? "",
+    r.confidence ?? "",
+    r.department ?? "",
+    r.scholarName,
+    r.cwid,
+  ]);
+  return toCsv(DATA_SHARING_CSV_HEADERS, body);
 }

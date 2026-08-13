@@ -42,7 +42,15 @@ function RollupSection({ report }: { report: DataSharingReport }) {
 
   return (
     <section id="rollup" className="scroll-mt-4">
-      <h2 className="text-base font-semibold">1 · Institutional rollup</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-base font-semibold">1 · Institutional rollup</h2>
+        {/* A plain <a>: /export is a CSV download route (route.ts), not a page,
+            so <Link>'s client nav + prefetch would fetch the file itself. */}
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+        <a href="/edit/data-sharing/export" className="text-sm hover:underline" data-testid="ds-export-link">
+          Download CSV
+        </a>
+      </div>
       <p className="text-muted-foreground mt-1 text-sm">
         Aggregate headline numbers for CTSA renewal writers and research deans.
       </p>
