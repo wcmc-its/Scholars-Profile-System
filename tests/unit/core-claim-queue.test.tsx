@@ -4,7 +4,7 @@
  * optimistic local state. fetch is mocked — no DB/network.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const mockRefresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mockRefresh }) }));
@@ -156,6 +156,52 @@ describe("CoreClaimQueue", () => {
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: /confirm/i })).toBeNull(),
     );
+  });
+
+  it("tints the decided strip green on confirm and red on reject (mockup parity)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "1", title: "Confirm me" }), row({ pmid: "2", title: "Reject me" })]}
+        confirmed={[]}
+      />,
+    );
+    const confirmCard = screen.getByRole("group", { name: /^Candidate: Confirm me/ });
+    fireEvent.click(within(confirmCard).getByRole("button", { name: /^confirm$/i }));
+    const rejectCard = screen.getByRole("group", { name: /^Candidate: Reject me/ });
+    fireEvent.click(within(rejectCard).getByRole("button", { name: /^reject$/i }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    const confirmedStrip = await screen.findByRole("group", { name: /^Confirmed: Confirm me/ });
+    expect(confirmedStrip.className).toContain("bg-emerald-50");
+    const rejectedStrip = screen.getByRole("group", { name: /^Rejected: Reject me/ });
+    expect(rejectedStrip.className).toContain("bg-red-50");
+  });
+
+  it("explains a 0-signal candidate instead of silently omitting the evidence list", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({
+            pmid: "1",
+            signalAck: false,
+            ackAlias: null,
+            coauthors: [],
+            coauthorScholars: [],
+            llmScore: null,
+            authorAffinity: null,
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    expect(screen.getByText(/0 of 4 signals fired/)).toBeTruthy();
+    expect(
+      screen.getByText(/No displayed signal fired — the combined score moved/),
+    ).toBeTruthy();
   });
 
   it("surfaces an error and keeps the row when the POST is refused", async () => {
@@ -509,7 +555,9 @@ describe("CoreClaimQueue", () => {
       coreId: "2",
       status: "revoked",
     });
-    expect(await screen.findByText(/Revoked — Claimed pub/)).toBeTruthy();
+    // Title, year, PMID all stay visible — only the trailing note changes.
+    expect(await screen.findByText("Claimed pub")).toBeTruthy();
+    expect(screen.getByText(/— Revoked, re-files on next load/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /undo/i })).toBeTruthy();
   });
 
@@ -591,7 +639,9 @@ describe("CoreClaimQueue", () => {
       coreId: "2",
       status: "revoked",
     });
-    expect(await screen.findByText(/Restored — Rejected pub/)).toBeTruthy();
+    // Title stays visible (not swallowed by the restored note) — same fix as revoke.
+    expect(await screen.findByText("Rejected pub")).toBeTruthy();
+    expect(screen.getByText(/— Restored, re-files on next load/)).toBeTruthy();
   });
 
   it("keeps a rejected row and surfaces an error when the restore POST is refused", async () => {
@@ -615,7 +665,7 @@ describe("CoreClaimQueue", () => {
     );
     // not restored — the Restore affordance is still present
     expect(screen.getByRole("button", { name: /restore/i })).toBeTruthy();
-    expect(screen.queryByText(/Restored — Rejected pub/)).toBeNull();
+    expect(screen.queryByText(/re-files on next load/)).toBeNull();
   });
 
   it("renders MeSH terms as chips in the Details expander", () => {

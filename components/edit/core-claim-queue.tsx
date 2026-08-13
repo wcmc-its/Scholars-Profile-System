@@ -726,7 +726,10 @@ function ConfirmedRow({
       <li className="text-muted-foreground flex items-center justify-between gap-2 text-sm">
         <span className="flex min-w-0 items-baseline gap-2">
           <Undo2 className="size-3.5 shrink-0 translate-y-0.5" aria-hidden />
-          <span className="truncate">Revoked — {row.title}</span>
+          <span className="truncate">{row.title}</span>
+          {row.year ? <span className="shrink-0 text-xs">· {row.year}</span> : null}
+          <span className="shrink-0 text-xs tabular-nums">· PMID {row.pmid}</span>
+          <span className="shrink-0 text-xs italic">— Revoked, re-files on next load</span>
         </span>
         <button
           type="button"
@@ -793,7 +796,10 @@ function RejectedRow({
       <li className="text-muted-foreground flex items-center justify-between gap-2 text-sm">
         <span className="flex min-w-0 items-baseline gap-2">
           <Undo2 className="size-3.5 shrink-0 translate-y-0.5" aria-hidden />
-          <span className="truncate">Restored — {row.title}</span>
+          <span className="truncate">{row.title}</span>
+          {row.year ? <span className="shrink-0 text-xs">· {row.year}</span> : null}
+          <span className="shrink-0 text-xs tabular-nums">· PMID {row.pmid}</span>
+          <span className="shrink-0 text-xs italic">— Restored, re-files on next load</span>
         </span>
         <button
           type="button"
@@ -934,9 +940,15 @@ function CandidateCard({
   }
 
   if (decided) {
+    // Tint the strip so a confirm vs. reject reads at a glance, not just from the
+    // icon — same pattern as opportunity-intake-panel's STATUS_STYLES.
+    const tint =
+      decided === "claimed"
+        ? "border-emerald-200 bg-emerald-50"
+        : "border-red-200 bg-red-50";
     return (
       <div
-        className={`${CARD_SHELL} flex items-center justify-between gap-3 p-4`}
+        className={`flex items-center justify-between gap-3 rounded-lg border p-4 ${tint} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-slate)]`}
         data-card
         data-pmid={row.pmid}
         tabIndex={0}
@@ -949,9 +961,9 @@ function CandidateCard({
           {decided === "claimed" ? (
             <Check className="size-4 shrink-0 text-emerald-600" aria-hidden />
           ) : (
-            <X className="text-muted-foreground size-4 shrink-0" aria-hidden />
+            <X className="size-4 shrink-0 text-red-600" aria-hidden />
           )}
-          <span className="text-muted-foreground shrink-0">
+          <span className={decided === "claimed" ? "text-emerald-800" : "text-red-800"}>
             {decided === "claimed" ? "Confirmed" : "Rejected"}
           </span>
           <span className="text-foreground truncate">{row.title}</span>
@@ -1058,7 +1070,9 @@ function CandidateCard({
       </div>
 
       {row.synopsis ? (
-        <p className="text-muted-foreground mt-3 text-[13px] leading-snug">{row.synopsis}</p>
+        <p className="bg-muted/60 text-muted-foreground mt-3 rounded-md px-3 py-2 text-[13px] leading-snug">
+          {row.synopsis}
+        </p>
       ) : null}
 
       {/* Combined likelihood + the per-signal "why this surfaced" breakdown. */}
@@ -1083,7 +1097,16 @@ function CandidateCard({
             <SignalRow key={s.kind} signal={s} row={row} />
           ))}
         </ul>
-      ) : null}
+      ) : (
+        // Reachable for real: a topic-driven candidate can move the combined
+        // likelihood without firing any of the four displayed signals (the MeSH
+        // prior isn't one of them — see the spec's "Topic is a candidate-
+        // generation input, but it isn't shown").
+        <p className="text-muted-foreground mt-1 text-xs italic">
+          No displayed signal fired — the combined score moved on inputs the queue
+          doesn&apos;t label.
+        </p>
+      )}
 
       {row.abstract || row.fullAuthorsString || row.wcmAuthors.length > 0 || row.meshTerms.length > 0 ? (
         <details className="group mt-2.5">
