@@ -1,7 +1,7 @@
 /**
  * CenterRosterCard — the rich center roster table (#552 §6.1; the deferred
  * #540 PR-7b-roster). Columns: Member | [Type | Program] | [Diseases] |
- * Status | Remove. Start/End are NOT their own columns — see "Dates" below.
+ * Status. Start/End and Remove are NOT their own columns — see "Dates" below.
  *
  * Type + Program are surfaced **only when the center has a program taxonomy**
  * (`programs.length > 0`) — the data-driven "Cancer-Center-only" gate. Every
@@ -16,6 +16,9 @@
  * the Diseases column + filter bar. Clicking the range opens a small popover
  * with the same two `<input type=date>` fields as before, same
  * `onStartChange`/`onEndChange` validation (End < Start blocked client-side).
+ * Remove rides along as a discreet text link right beside the date range —
+ * dropped from its own always-on column since it's a rare action, not
+ * something that needs permanent width on every row.
  *
  * ONE mutually-exclusive filter — All members (default) / Inactive / Departed
  * — rendered as a 3-button segmented control, so the roster opens on the
@@ -1062,24 +1065,30 @@ export function CenterRosterCard({
           )}
           {/* A 3-button segmented control, not a radio group — matches the
               mockup, and stays the same "one mutually-exclusive choice"
-              semantics the docblock above argues for. */}
-          <div className="flex items-center gap-2" role="group" aria-label="Filter members">
+              semantics the docblock above argues for. One bordered container
+              with the buttons conjoined (no gap, no per-button radius) so it
+              reads as a single control, not three floating pills. */}
+          <div
+            className="border-apollo-border flex overflow-hidden rounded-md border"
+            role="group"
+            aria-label="Filter members"
+          >
             {(
               [
                 ["all", "All members"],
                 ["inactive", "Inactive"],
                 ["departed", "Departed"],
               ] as ReadonlyArray<readonly [RosterFilter, string]>
-            ).map(([value, label]) => (
+            ).map(([value, label], i) => (
               <button
                 key={value}
                 type="button"
                 onClick={() => setFilter(value)}
                 aria-pressed={filter === value}
-                className={`rounded-full border px-3 py-1 text-sm font-medium transition-colors ${
+                className={`px-3 py-1 text-sm font-medium transition-colors ${i > 0 ? "border-apollo-border border-l" : ""} ${
                   filter === value
-                    ? "border-apollo-maroon bg-apollo-maroon text-white"
-                    : "border-apollo-border text-muted-foreground hover:bg-accent"
+                    ? "bg-apollo-maroon text-white"
+                    : "text-muted-foreground hover:bg-accent"
                 }`}
                 data-testid={`roster-filter-${value}`}
               >
@@ -1111,67 +1120,61 @@ export function CenterRosterCard({
 
           {hasDiseases && (
             <>
-              <div className="flex flex-col gap-1">
-                <span className="text-muted-foreground text-xs font-medium">Disease</span>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-8 gap-1.5" data-testid="roster-disease-filter-trigger">
-                      {selectedDiseaseCodes.size === 0
-                        ? "Any disease"
-                        : `${selectedDiseaseCodes.size} selected`}
-                      <ChevronDown className="size-3.5 opacity-60" aria-hidden />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent align="start" className="w-72 p-2" data-testid="roster-disease-filter-menu">
-                    <Input
-                      type="text"
-                      placeholder="Filter diseases…"
-                      className="mb-2 h-8"
-                      value={diseaseSearch}
-                      onChange={(e) => setDiseaseSearch(e.target.value)}
-                      data-testid="roster-disease-filter-search"
-                    />
-                    <div className="flex max-h-64 flex-col gap-0.5 overflow-y-auto">
-                      {rosterDiseaseOptionsShown.length === 0 ? (
-                        <p className="text-muted-foreground px-1.5 py-1 text-xs">No diseases match.</p>
-                      ) : (
-                        rosterDiseaseOptionsShown.map((opt) => (
-                          <label
-                            key={opt.code}
-                            className="hover:bg-accent flex cursor-pointer items-center gap-2 rounded px-1.5 py-1.5 text-sm"
-                            data-testid={`roster-disease-filter-option-${opt.code}`}
-                          >
-                            <Checkbox
-                              checked={selectedDiseaseCodes.has(opt.code)}
-                              onCheckedChange={() => toggleDiseaseCode(opt.code)}
-                            />
-                            <span className="truncate">{diseaseLabel(opt.code)}</span>
-                            <span className="text-muted-foreground ml-auto text-xs tabular-nums">{opt.count}</span>
-                          </label>
-                        ))
-                      )}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              </div>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 gap-1.5" data-testid="roster-disease-filter-trigger">
+                    <span className="text-muted-foreground">Disease</span>
+                    <span className="font-semibold">
+                      {selectedDiseaseCodes.size === 0 ? "Any" : `${selectedDiseaseCodes.size} selected`}
+                    </span>
+                    <ChevronDown className="size-3.5 opacity-60" aria-hidden />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-72 p-2" data-testid="roster-disease-filter-menu">
+                  <Input
+                    type="text"
+                    placeholder="Filter diseases…"
+                    className="mb-2 h-8"
+                    value={diseaseSearch}
+                    onChange={(e) => setDiseaseSearch(e.target.value)}
+                    data-testid="roster-disease-filter-search"
+                  />
+                  <div className="flex max-h-64 flex-col gap-0.5 overflow-y-auto">
+                    {rosterDiseaseOptionsShown.length === 0 ? (
+                      <p className="text-muted-foreground px-1.5 py-1 text-xs">No diseases match.</p>
+                    ) : (
+                      rosterDiseaseOptionsShown.map((opt) => (
+                        <label
+                          key={opt.code}
+                          className="hover:bg-accent flex cursor-pointer items-center gap-2 rounded px-1.5 py-1.5 text-sm"
+                          data-testid={`roster-disease-filter-option-${opt.code}`}
+                        >
+                          <Checkbox
+                            checked={selectedDiseaseCodes.has(opt.code)}
+                            onCheckedChange={() => toggleDiseaseCode(opt.code)}
+                          />
+                          <span className="truncate">{diseaseLabel(opt.code)}</span>
+                          <span className="text-muted-foreground ml-auto text-xs tabular-nums">{opt.count}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
 
-              <div className="flex flex-col gap-1">
-                <label htmlFor="roster-confidence-filter" className="text-muted-foreground text-xs font-medium">
-                  Confidence
-                </label>
-                <select
-                  id="roster-confidence-filter"
-                  className="border-apollo-border-strong h-8 rounded-md border bg-apollo-surface px-2 text-sm"
-                  value={confidenceFilter}
-                  onChange={(e) => setConfidenceFilter(e.target.value as ConfidenceFilter)}
-                  data-testid="roster-confidence-filter"
-                >
-                  <option value="any">Any</option>
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
-                </select>
-              </div>
+              <select
+                id="roster-confidence-filter"
+                aria-label="Confidence"
+                className="border-apollo-border-strong h-8 rounded-md border bg-apollo-surface px-2 text-sm"
+                value={confidenceFilter}
+                onChange={(e) => setConfidenceFilter(e.target.value as ConfidenceFilter)}
+                data-testid="roster-confidence-filter"
+              >
+                <option value="any">Any confidence</option>
+                <option value="high">High confidence</option>
+                <option value="medium">Medium confidence</option>
+                <option value="low">Low confidence</option>
+              </select>
 
               <button
                 type="button"
@@ -1244,13 +1247,12 @@ export function CenterRosterCard({
                 {hasPrograms && <th className="px-3 py-2 font-medium">Program</th>}
                 {hasDiseases && <th className="px-3 py-2 font-medium">Diseases</th>}
                 <th className="px-3 py-2 font-medium">Status</th>
-                <th className="px-3 py-2" />
               </tr>
             </thead>
             <tbody>
               {visible.length === 0 ? (
                 <tr>
-                  <td colSpan={colCount + 1} className="text-muted-foreground px-3 py-3">
+                  <td colSpan={colCount} className="text-muted-foreground px-3 py-3">
                     {rosterFiltered.length === 0 ? (
                       <>
                         No members match this filter. Choose &ldquo;All members&rdquo; to see the whole
@@ -1284,13 +1286,29 @@ export function CenterRosterCard({
                   // construction, so the two never compose.
                   const rowNeedsCloseOut = needsCloseOutOf(m);
                   const expanded = expandedCwids.has(m.cwid);
-                  const dateRange = (
-                    <MemberDateRange
-                      member={m}
-                      onStartChange={(v) => onStartChange(m, v)}
-                      onEndChange={(v) => onEndChange(m, v)}
-                      needsCloseOut={rowNeedsCloseOut}
-                    />
+                  // Remove is a discreet text link beside the date range, not
+                  // its own always-visible column — it's a rare action and
+                  // doesn't need permanent screen real estate.
+                  const dateAndRemove = (
+                    <div className="mt-0.5 flex items-center gap-1.5">
+                      <MemberDateRange
+                        member={m}
+                        onStartChange={(v) => onStartChange(m, v)}
+                        onEndChange={(v) => onEndChange(m, v)}
+                        needsCloseOut={rowNeedsCloseOut}
+                      />
+                      <span className="text-muted-foreground text-xs" aria-hidden>
+                        ·
+                      </span>
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-apollo-maroon text-xs hover:underline"
+                        onClick={() => setRemoveTarget(m)}
+                        data-testid={`roster-remove-${m.cwid}`}
+                      >
+                        Remove
+                      </button>
+                    </div>
                   );
                   return (
                     <React.Fragment key={m.cwid}>
@@ -1303,8 +1321,7 @@ export function CenterRosterCard({
                     >
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="font-medium">{m.name}</span>
-                          {m.title && <span className="text-muted-foreground">· {m.title}</span>}
+                          <span className="font-semibold">{m.name}</span>
                           {m.scholarState === "departed" && (
                             <Badge
                               variant="outline"
@@ -1325,12 +1342,13 @@ export function CenterRosterCard({
                             </Badge>
                           )}
                         </div>
+                        {m.title && <div className="text-muted-foreground text-xs">{m.title}</div>}
                         <div className="text-muted-foreground text-xs" data-testid={`roster-cwid-${m.cwid}`}>
                           CWID: {m.cwid}
                         </div>
                         {/* No Program column on this center — the date range
                             folds under Member instead, so it's never dropped. */}
-                        {!hasPrograms && <div className="mt-0.5">{dateRange}</div>}
+                        {!hasPrograms && dateAndRemove}
                       </td>
                       {hasPrograms && (
                         <td className="px-3 py-2">
@@ -1365,7 +1383,7 @@ export function CenterRosterCard({
                               </option>
                             ))}
                           </select>
-                          <div className="mt-0.5">{dateRange}</div>
+                          {dateAndRemove}
                         </td>
                       )}
                       {hasDiseases && (
@@ -1386,21 +1404,10 @@ export function CenterRosterCard({
                           {status === "active" ? "Active" : status === "pending" ? "Pending" : "Inactive"}
                         </Badge>
                       </td>
-                      <td className="px-3 py-2 text-right">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setRemoveTarget(m)}
-                          data-testid={`roster-remove-${m.cwid}`}
-                        >
-                          Remove
-                        </Button>
-                      </td>
                     </tr>
                     {hasDiseases && expanded && (m.diseases ?? []).length > 0 && (
                       <tr className="border-apollo-border bg-apollo-surface-2 border-b" data-testid={`disease-expand-row-${m.cwid}`}>
-                        <td colSpan={colCount + 1} className="px-3 py-3">
+                        <td colSpan={colCount} className="px-3 py-3">
                           <DiseaseExpandedPanel
                             member={m}
                             diseaseOptions={diseaseOptions}
