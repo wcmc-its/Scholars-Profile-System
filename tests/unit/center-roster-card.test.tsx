@@ -1,10 +1,13 @@
 /**
  * `components/edit/center-roster-card.tsx` — the rich #552 §6.1 roster table.
- * Covers the program-gated columns, derived status, the show-active-only
- * toggle, inline set PATCHes, the date-range block, and add/remove.
+ * Covers the program-gated columns, derived status, the segmented filter,
+ * inline set PATCHes, the folded date-range popover, add/remove, and (the
+ * 2026-08-12 mockup-fidelity pass) the disease chips/expand/confirm/reject/
+ * undo/manual-add flow.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import type { RosterDiseaseRow } from "@/lib/api/unit-edit-context";
 
 vi.mock("@/components/edit/directory-people-typeahead", () => ({
   DirectoryPeopleTypeahead: ({
@@ -49,6 +52,38 @@ function member(over: Partial<RosterMember>): RosterMember {
   };
 }
 
+function diseaseRow(over: Partial<RosterDiseaseRow>): RosterDiseaseRow {
+  return {
+    diseaseCode: "BREAST",
+    assignment: {
+      rank: 1,
+      focus: "primary",
+      confidence: "medium",
+      leadPubs: 2,
+      secondPubs: 1,
+      middlePubs: 2,
+      grantsLed: 0,
+      grantsSupport: 0,
+      trialsLed: 1,
+      trialsSupport: 0,
+      pubScore: 10,
+      score: 10,
+      firstYear: 2018,
+      lastYear: 2025,
+      recentPubs: 3,
+      specialtyStatus: "match",
+    },
+    decision: null,
+    drifted: false,
+    ...over,
+  };
+}
+
+const DISEASE_OPTIONS = [
+  { code: "BREAST", label: "Breast Cancer" },
+  { code: "GI_COLORECTAL", label: "Colorectal & Anal Cancer" },
+];
+
 beforeEach(() => {
   vi.restoreAllMocks();
 });
@@ -81,8 +116,8 @@ describe("CenterRosterCard — columns", () => {
     render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
     expect(screen.queryByTestId("roster-type-m1")).toBeNull();
     expect(screen.queryByTestId("roster-program-m1")).toBeNull();
-    // dates + status still present
-    expect(screen.getByTestId("roster-start-m1")).toBeTruthy();
+    // dates (folded under Member with no Program column) + status still present
+    expect(screen.getByTestId("roster-dates-trigger-m1")).toBeTruthy();
     expect(screen.getByTestId("roster-status-m1")).toBeTruthy();
   });
 
@@ -171,6 +206,7 @@ describe("CenterRosterCard — inline edits", () => {
   it("setting a start date POSTs set with startDate", async () => {
     const fetchMock = stubOk();
     render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
+    fireEvent.click(screen.getByTestId("roster-dates-trigger-m1"));
     fireEvent.change(screen.getByTestId("roster-start-m1"), { target: { value: "2024-07-01" } });
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({ action: "set", startDate: "2024-07-01" });
@@ -181,6 +217,7 @@ describe("CenterRosterCard — inline edits", () => {
     render(
       <CenterRosterCard {...base} members={[member({ startDate: "2025-01-01" })]} programs={[]} />,
     );
+    fireEvent.click(screen.getByTestId("roster-dates-trigger-m1"));
     fireEvent.change(screen.getByTestId("roster-end-m1"), { target: { value: "2024-01-01" } });
     expect(screen.getByText(/can't be before the start date/i)).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
@@ -332,11 +369,13 @@ describe("CenterRosterCard — a departed person with an open membership needs c
     endDate: "2024-01-01",
   });
 
-  it("tints the row and outlines the End field when the membership is still open", () => {
+  it("tints the row and colors the date-range trigger when the membership is still open", () => {
     render(<CenterRosterCard {...base} members={[openMembership]} programs={[]} />);
     const row = screen.getByTestId("center-roster-row-open1");
     expect(row.getAttribute("data-needs-close-out")).toBe("true");
     expect(row.className).toMatch(/apollo-amber/);
+    expect(screen.getByTestId("roster-dates-trigger-open1").className).toMatch(/apollo-amber/);
+    fireEvent.click(screen.getByTestId("roster-dates-trigger-open1"));
     expect(screen.getByTestId("roster-end-open1").className).toMatch(/apollo-amber/);
   });
 
@@ -345,7 +384,7 @@ describe("CenterRosterCard — a departed person with an open membership needs c
     const row = screen.getByTestId("center-roster-row-shut1");
     expect(row.getAttribute("data-needs-close-out")).toBeNull();
     expect(row.className).not.toMatch(/apollo-amber/);
-    expect(screen.getByTestId("roster-end-shut1").className).not.toMatch(/apollo-amber/);
+    expect(screen.getByTestId("roster-dates-trigger-shut1").className).not.toMatch(/apollo-amber/);
   });
 
   it("does NOT flag a still-employed member with an open membership", () => {
@@ -353,5 +392,127 @@ describe("CenterRosterCard — a departed person with an open membership needs c
     const row = screen.getByTestId("center-roster-row-here1");
     expect(row.getAttribute("data-needs-close-out")).toBeNull();
     expect(row.className).not.toMatch(/apollo-amber/);
+  });
+});
+
+describe("CenterRosterCard — disease chips + expanded panel", () => {
+  it("renders a confidence-tinted chip and expands the panel on click", () => {
+    const withDisease = member({ diseases: [diseaseRow({})] });
+    render(<CenterRosterCard {...base} members={[withDisease]} programs={[]} />);
+    expect(screen.getByTestId("roster-disease-chip-m1-BREAST").textContent).toMatch(/breast cancer/i);
+    expect(screen.queryByTestId("disease-expand-m1")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("roster-disease-chip-m1-BREAST"));
+    expect(screen.getByTestId("disease-expand-m1")).toBeTruthy();
+    expect(screen.getByTestId("disease-card-m1-BREAST").textContent).toMatch(/rank 1/i);
+
+    fireEvent.click(screen.getByTestId("disease-expand-collapse-m1"));
+    expect(screen.queryByTestId("disease-expand-m1")).toBeNull();
+  });
+
+  it("shows an amber pending pill for an undecided assignment", () => {
+    const withDisease = member({ diseases: [diseaseRow({})] });
+    render(<CenterRosterCard {...base} members={[withDisease]} programs={[]} />);
+    expect(screen.getByTestId("roster-disease-pending-m1").textContent).toMatch(/1 to review/i);
+  });
+
+  it("Confirm POSTs decision:confirmed and flips the card to the Confirmed state", async () => {
+    const fetchMock = stubOk();
+    const withDisease = member({ diseases: [diseaseRow({})] });
+    render(<CenterRosterCard {...base} members={[withDisease]} programs={[]} />);
+    fireEvent.click(screen.getByTestId("roster-disease-chip-m1-BREAST"));
+    fireEvent.click(screen.getByTestId("disease-confirm-m1-BREAST"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/edit/center/meyer_cancer_center/disease-assignments");
+    expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({
+      cwid: "m1",
+      diseaseCode: "BREAST",
+      decision: "confirmed",
+    });
+    expect(screen.getByText(/^✓ Confirmed$/)).toBeTruthy();
+  });
+
+  it("Undo on a confirmed row clears it back to Confirm/Reject", async () => {
+    stubOk();
+    const withDisease = member({
+      diseases: [
+        diseaseRow({
+          decision: {
+            decision: "confirmed",
+            decidedBy: "abc123",
+            decidedAt: new Date("2026-01-01"),
+            scoreAtDecision: 10,
+            confidenceAtDecision: "medium",
+          },
+        }),
+      ],
+    });
+    render(<CenterRosterCard {...base} members={[withDisease]} programs={[]} />);
+    fireEvent.click(screen.getByTestId("roster-disease-chip-m1-BREAST"));
+    expect(screen.getByText(/^✓ Confirmed$/)).toBeTruthy();
+    fireEvent.click(screen.getByText("Undo"));
+    await waitFor(() => expect(screen.getByTestId("disease-confirm-m1-BREAST")).toBeTruthy());
+  });
+
+  it("Reject POSTs decision:rejected and de-emphasizes the card", async () => {
+    const fetchMock = stubOk();
+    const withDisease = member({ diseases: [diseaseRow({})] });
+    render(<CenterRosterCard {...base} members={[withDisease]} programs={[]} />);
+    fireEvent.click(screen.getByTestId("roster-disease-chip-m1-BREAST"));
+    fireEvent.click(screen.getByTestId("disease-reject-m1-BREAST"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({ decision: "rejected" });
+    await waitFor(() =>
+      expect(screen.getByTestId("disease-card-m1-BREAST").className).toMatch(/opacity-50/),
+    );
+  });
+});
+
+describe("CenterRosterCard — manual add (\"+ Add a disease\")", () => {
+  it("offers only codes not already on the member, and POSTs confirmed with no prior assignment", async () => {
+    const fetchMock = stubOk();
+    const withDisease = member({ diseases: [diseaseRow({})] }); // already has BREAST
+    render(
+      <CenterRosterCard
+        {...base}
+        members={[withDisease]}
+        programs={[]}
+        diseaseOptions={DISEASE_OPTIONS}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("roster-disease-chip-m1-BREAST"));
+    fireEvent.click(screen.getByTestId("disease-add-trigger-m1"));
+    // BREAST is already on the member — only the other option should be offered.
+    expect(screen.queryByTestId("disease-add-option-m1-BREAST")).toBeNull();
+    fireEvent.click(screen.getByTestId("disease-add-option-m1-GI_COLORECTAL"));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({
+      cwid: "m1",
+      diseaseCode: "GI_COLORECTAL",
+      decision: "confirmed",
+    });
+    expect(screen.getByTestId("disease-card-m1-GI_COLORECTAL").textContent).toMatch(/manually added/i);
+  });
+
+  it("Undo on a manually-added disease removes the card entirely (nothing left to show)", async () => {
+    stubOk();
+    const manuallyAdded = diseaseRow({
+      diseaseCode: "GI_COLORECTAL",
+      assignment: null,
+      decision: {
+        decision: "confirmed",
+        decidedBy: "abc123",
+        decidedAt: new Date("2026-01-01"),
+        scoreAtDecision: null,
+        confidenceAtDecision: null,
+      },
+    });
+    const withManualAdd = member({ diseases: [manuallyAdded] });
+    render(<CenterRosterCard {...base} members={[withManualAdd]} programs={[]} />);
+    fireEvent.click(screen.getByTestId("roster-disease-chip-m1-GI_COLORECTAL"));
+    expect(screen.getByTestId("disease-card-m1-GI_COLORECTAL")).toBeTruthy();
+    fireEvent.click(screen.getByText("Undo"));
+    await waitFor(() => expect(screen.queryByTestId("disease-card-m1-GI_COLORECTAL")).toBeNull());
   });
 });
