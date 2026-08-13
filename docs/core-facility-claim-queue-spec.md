@@ -214,6 +214,8 @@ An owner who knows a paper used their core — one the engine never scored, or s
 
 Notes on the mockup: `[Chen R]` in the byline is a tinted, linked chip in the real UI — the co-author signal's staff CWID resolved to a named scholar and overlaid onto the flat `authorsString` by best-effort surname match (`ponytail`-marked in the source: the data carries no per-author byline token, so this mirrors how the profile page overlays author links). The default sort is **"Uncertain first"** — likelihoods near 50/50 surface before the engine's own high-confidence tail, on the theory that a 96% doesn't need a human and a 58% does.
 
+Checked against the original design artifact (`Core Claim Queue.dc.html`) and brought into parity: the just-decided strip is now color-tinted (green/confirmed, red/rejected — it rendered in flat neutral gray before, including a gray, non-red Rejected icon); a 0-signal candidate now explains itself ("No displayed signal fired — the combined score moved on inputs the queue doesn't label.") instead of silently omitting the evidence list — a real, reachable state per the topical-MeSH-prior note above; Revoked/Restored rows on the Confirmed/Rejected tabs keep title, year, and PMID visible with an added "— re-files on next load" note, instead of the whole line collapsing to just "Revoked — {title}"; and `Publication.synopsis` gets the mockup's light boxed treatment. Not brought into parity: the mockup's "· just now" Confirmed-tab entries are a demo artifact of having no server — the real, documented behavior is that a session-decided row stays in the review list as a strip until the next page load, not an instant move into the Confirmed tab.
+
 ### Tabs, once there's history
 
 Once at least one candidate has been confirmed or rejected, the single "To review" heading becomes a 3-way segmented control:
@@ -274,11 +276,10 @@ Revoking/restoring keeps the row visible for the session with a one-line "Revoke
 │   Genomics Resources Core Facility                                           │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │   ...9 more (Epigenomics, Proteomics and Metabolomics, ...)                  │
-├──────────────────────────────────────────────────────────────────────────────┤
-│   Research Informatics                                     not yet cataloged │
-│   Not one of the 13 dictionary cores today -- see "Adding a core" below      │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
+
+The index (`app/edit/core/page.tsx` → `getCoreList()`) only ever enumerates real catalog rows — there's no "not yet cataloged" placeholder for a facility outside the 13. Research Informatics (see "Adding a core" below) wouldn't appear here at all until it's actually added to both dictionaries; it isn't a row the real UI shows today, only a worked example of what adding one requires.
 
 ## Public surface — `/cores/[coreId]`
 
