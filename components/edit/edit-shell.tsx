@@ -18,6 +18,14 @@
  * width — independent of, and layered on top of, the phone-only `<select>`
  * swap above. Defaults expanded and remembers the choice in localStorage; see
  * `rail-collapse.tsx`.
+ *
+ * `hideRail` drops BOTH the rail column and the phone `<select>` for one
+ * dedicated attribute — content that wants the whole width (the Cancer
+ * Center Members table, with its own filter bar + disease grid) rather than
+ * sharing it with a 9-item nav the page can't use anyway. In its place, a
+ * "← Back" link (`backHref`) is the only way back to the rest of the
+ * attribute set — this is a one-attribute escape hatch, not a rail
+ * replacement, so it's deliberately just a link, not a breadcrumb.
  */
 import Link from "next/link";
 import { ArrowUpRight, ChevronLeftIcon } from "lucide-react";
@@ -72,6 +80,14 @@ export type EditShellProps = {
    *  (e.g. a department's sibling-divisions list). Omitted ⇒ no visible change
    *  for the existing /edit/scholar callers. */
   subRail?: React.ReactNode;
+  /** Drops the rail column (desktop) and the `<select>` swap (phone) entirely,
+   *  giving the detail panel the full width — a "← Back" link (`backHref`)
+   *  takes its place. For one attribute that needs the room, not a general
+   *  layout switch; default false leaves every existing caller unchanged. */
+  hideRail?: boolean;
+  /** Where `hideRail`'s "← Back" link goes — normally `basePath` (the same
+   *  unit, default attribute, rail restored). No-op when `hideRail` is false. */
+  backHref?: string;
   /** Unit-admin mode only (Amendment 4): the unit through which the viewer
    *  administers this scholar, naming the "via {unit} administrator" banner. */
   unitAdmin?: { unitKind: "department" | "division" | "center"; unitName: string };
@@ -91,6 +107,8 @@ export function EditShell({
   canBrowseProfiles = false,
   consoleNav,
   subRail,
+  hideRail = false,
+  backHref,
   unitAdmin,
   children,
 }: EditShellProps) {
@@ -176,20 +194,41 @@ export function EditShell({
           compact <select> at the top of the detail column replaces it. The
           first track is `auto`, not a fixed `16rem`, so `RailCollapse`'s own
           width (`w-64` expanded / `w-9` collapsed) drives the column — no
-          state needs lifting up to this grid. */}
-      <div className="mx-auto grid max-w-[var(--max-content)] grid-cols-1 gap-6 px-6 py-8 md:grid-cols-[auto_1fr]">
-        <RailCollapse>
-          <AttributeRail
-            items={railItems}
-            active={activeAttr}
-            basePath={basePath}
-            groupMeta={railGroupMeta}
-          />
-          {subRail}
-        </RailCollapse>
+          state needs lifting up to this grid. `hideRail` drops that first
+          track altogether (both the desktop rail and the phone <select>) so
+          the detail panel is the only column. */}
+      <div
+        className={`mx-auto grid max-w-[var(--max-content)] grid-cols-1 gap-6 px-6 py-8 ${
+          hideRail ? "" : "md:grid-cols-[auto_1fr]"
+        }`}
+      >
+        {!hideRail && (
+          <RailCollapse>
+            <AttributeRail
+              items={railItems}
+              active={activeAttr}
+              basePath={basePath}
+              groupMeta={railGroupMeta}
+            />
+            {subRail}
+          </RailCollapse>
+        )}
 
         <main id="edit-detail" tabIndex={-1} aria-labelledby="panel-heading" className="min-w-0 scroll-mt-4">
-          <RailSelect items={railItems} active={activeAttr} basePath={basePath} />
+          {hideRail ? (
+            backHref && (
+              <Link
+                href={backHref}
+                className="text-muted-foreground hover:text-foreground mb-4 inline-flex items-center gap-1 text-sm"
+                data-testid="edit-rail-back"
+              >
+                <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
+                Back
+              </Link>
+            )
+          ) : (
+            <RailSelect items={railItems} active={activeAttr} basePath={basePath} />
+          )}
 
           {/* Secondary links row (mockup parity, slate text). "View change
               history" (internal audit page, #955) sits beside "Preview Profile"

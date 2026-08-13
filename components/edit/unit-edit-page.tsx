@@ -167,6 +167,11 @@ export function UnitEditPage({ ctx, attr }: UnitEditPageProps) {
       basePath={basePath}
       previewHref={previewHref}
       subRail={subRail}
+      // Members gets the whole width for its own filter bar + (on a center)
+      // disease grid, not a shared column with a rail it has no room to use —
+      // "← Back" (to basePath, the default attr, rail restored) replaces it.
+      hideRail={active.key === "roster"}
+      backHref={basePath}
     >
       {renderPanel(active.key, ctx)}
     </EditShell>

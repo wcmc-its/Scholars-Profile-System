@@ -193,10 +193,19 @@ describe("UnitEditPage — rail filtering", () => {
     expect(railKeys()).not.toContain("roster");
   });
 
-  it("a department gets a Members tab (faculty export) when the export flag is on", () => {
+  it("a department gets a Members tab (faculty export) when the export flag is on, reachable from the rail", () => {
     mockRosterExportEnabled.mockReturnValue(true);
-    render(<UnitEditPage ctx={ctx({ unitType: "department", actorRole: "curator" })} attr="roster" />);
+    render(<UnitEditPage ctx={ctx({ unitType: "department", actorRole: "curator" })} />);
     expect(railKeys()).toContain("roster");
+  });
+
+  it("the Members page itself has no rail (hideRail) — just the panel and a way back", () => {
+    mockRosterExportEnabled.mockReturnValue(true);
+    render(
+      <UnitEditPage ctx={ctx({ unitType: "department", actorRole: "curator" })} attr="roster" />,
+    );
+    expect(railKeys()).toEqual([]);
+    expect(screen.getByTestId("edit-rail-back")).toBeTruthy();
     expect(screen.getByTestId("panel-faculty-export")).toBeTruthy();
   });
 
@@ -214,7 +223,10 @@ describe("UnitEditPage — rail filtering", () => {
         attr="roster"
       />,
     );
-    expect(railKeys()).toContain("roster");
+    // On the Members page itself the rail is hidden (hideRail) — a back link
+    // stands in for it, not the rail.
+    expect(railKeys()).toEqual([]);
+    expect(screen.getByTestId("edit-rail-back")).toBeTruthy();
     expect(screen.getByTestId("panel-faculty-export")).toBeTruthy();
     expect(screen.queryByTestId("panel-roster")).toBeNull();
   });
