@@ -4,6 +4,7 @@ import {
   aggregateByDepartment,
   aggregateByFaculty,
   aggregateByRepository,
+  aggregateBySubtype,
   aggregateRepositoriesByTier,
   bucketDatasetLink,
   buildDataSharingCsv,
@@ -350,6 +351,117 @@ describe("buildDataSharingReport — risk tier (this PR)", () => {
 
     const alice = report.byFaculty.find((f) => f.cwid === "aaa1")!;
     expect(alice).toMatchObject({ concerningDeposits: 2, foreignHostedDeposits: 0 });
+  });
+});
+
+/** One row per sub-type, plus a second row on the same (genomic, WGS/WES)
+ *  sub-type as the first row, to exercise the deposit-INSTANCE (row) count —
+ *  not distinct-dataset — counting rule; a row that lists two sub-types (the
+ *  Neurology row: genomic + geolocation), to exercise "counts once toward
+ *  EACH sub-type it lists"; a row with no `sensitiveSubtypes` at all (the
+ *  Surgery row), to exercise the skip path; and a row with a malformed
+ *  (no-colon) token mixed into an otherwise-valid one, to exercise the
+ *  per-token skip. */
+const SUBTYPE_ROWS: DatasetLinkRow[] = [
+  {
+    cwid: "aaa1",
+    scholarName: "Alice A",
+    scholarSlug: "alice-a",
+    department: "Medicine",
+    datasetId: "d1",
+    repository: "dbGaP",
+    accessModel: "controlled",
+    sensitiveSubtypes: "genomic:WGS/WES",
+  },
+  {
+    cwid: "bbb2",
+    scholarName: "Bob B",
+    scholarSlug: "bob-b",
+    department: "Medicine",
+    datasetId: "d2",
+    repository: "dbGaP",
+    accessModel: "controlled",
+    sensitiveSubtypes: "genomic:WGS/WES",
+  },
+  {
+    cwid: "ccc3",
+    scholarName: "Cara C",
+    scholarSlug: "cara-c",
+    department: "Neurology",
+    datasetId: "d3",
+    repository: "GEO",
+    accessModel: "open",
+    sensitiveSubtypes: "genomic:single-cell|geolocation:GPS trace",
+  },
+  {
+    cwid: "ddd4",
+    scholarName: "Dan D",
+    scholarSlug: "dan-d",
+    department: "Surgery",
+    datasetId: "d4",
+    repository: "Zenodo",
+    accessModel: "open",
+    sensitiveSubtypes: null,
+  },
+  {
+    cwid: "eee5",
+    scholarName: "Eve E",
+    scholarSlug: "eve-e",
+    department: "Medicine",
+    datasetId: "d5",
+    repository: "dbGaP",
+    accessModel: "controlled",
+    sensitiveSubtypes: "malformed-no-colon|health:clinical",
+  },
+];
+
+describe("aggregateBySubtype", () => {
+  it("counts deposit INSTANCES (rows) per sub-type, not distinct datasets", () => {
+    const bySubtype = aggregateBySubtype(SUBTYPE_ROWS);
+    const wgs = bySubtype.find((s) => s.subtype === "WGS/WES")!;
+    expect(wgs).toEqual({ category: "genomic", subtype: "WGS/WES", count: 2 });
+  });
+
+  it("counts a row with multiple sub-types once toward EACH sub-type", () => {
+    const bySubtype = aggregateBySubtype(SUBTYPE_ROWS);
+    expect(bySubtype).toContainEqual({ category: "genomic", subtype: "single-cell", count: 1 });
+    expect(bySubtype).toContainEqual({ category: "geolocation", subtype: "GPS trace", count: 1 });
+  });
+
+  it("skips a null sensitiveSubtypes row without crashing", () => {
+    const bySubtype = aggregateBySubtype(SUBTYPE_ROWS);
+    const total = bySubtype.reduce((sum, s) => sum + s.count, 0);
+    // 2 (WGS/WES) + 1 (single-cell) + 1 (GPS trace) + 1 (clinical) = 5 —
+    // the Surgery row (null) contributes nothing, and the malformed
+    // "malformed-no-colon" token on the Eve row is skipped, not counted.
+    expect(total).toBe(5);
+  });
+
+  it("skips a malformed (no-colon) token but keeps the well-formed one on the same row", () => {
+    const bySubtype = aggregateBySubtype(SUBTYPE_ROWS);
+    expect(bySubtype).toContainEqual({ category: "health", subtype: "clinical", count: 1 });
+    expect(bySubtype.some((s) => s.subtype === "malformed-no-colon")).toBe(false);
+  });
+
+  it("sorts by category ascending, then count descending within category", () => {
+    const bySubtype = aggregateBySubtype(SUBTYPE_ROWS);
+    const categories = bySubtype.map((s) => s.category);
+    const sortedCategories = [...categories].sort();
+    expect(categories).toEqual(sortedCategories);
+    const genomicRows = bySubtype.filter((s) => s.category === "genomic");
+    expect(genomicRows[0]).toEqual({ category: "genomic", subtype: "WGS/WES", count: 2 });
+  });
+
+  it("returns an empty array for rows with no sensitiveSubtypes data", () => {
+    expect(aggregateBySubtype(ROWS)).toEqual([]);
+  });
+});
+
+describe("buildDataSharingReport — granular sub-types (this PR)", () => {
+  it("wires bySubtype from aggregateBySubtype", () => {
+    const report = buildDataSharingReport(SUBTYPE_ROWS);
+    expect(report.bySubtype).toEqual(aggregateBySubtype(SUBTYPE_ROWS));
+    expect(report.bySubtype).toContainEqual({ category: "genomic", subtype: "WGS/WES", count: 2 });
   });
 });
 
@@ -869,6 +981,8 @@ describe("buildDataSharingCsv", () => {
         accessionOrDoi: "GSE12345",
         resourceType: "Dataset",
         dataType: "genomic",
+        sensitiveCats: "genomic",
+        sensitiveSubtypes: "genomic:WGS/WES",
         depositYear: 2025,
         provenance: "databank",
         confidence: "high",
@@ -876,10 +990,10 @@ describe("buildDataSharingCsv", () => {
     ]);
     const lines = csv.trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "repository,accession_or_doi,title,resource_type,data_type,access_model,deposit_year,provenance,confidence,department,faculty_name,cwid",
+      "repository,accession_or_doi,title,resource_type,data_type,sensitive_cats,sensitive_subtypes,access_model,deposit_year,provenance,confidence,department,faculty_name,cwid",
     );
     expect(lines[1]).toBe(
-      'GEO,GSE12345,"A dataset, with a comma in the title",Dataset,genomic,open,2025,databank,high,Medicine,"Alice, A",aaa1',
+      'GEO,GSE12345,"A dataset, with a comma in the title",Dataset,genomic,genomic,genomic:WGS/WES,open,2025,databank,high,Medicine,"Alice, A",aaa1',
     );
   });
 
@@ -897,13 +1011,15 @@ describe("buildDataSharingCsv", () => {
         accessionOrDoi: undefined,
         resourceType: null,
         dataType: null,
+        sensitiveCats: null,
+        sensitiveSubtypes: null,
         depositYear: null,
         provenance: undefined,
         confidence: null,
       },
     ]);
     const line = csv.trimEnd().split("\r\n")[1];
-    expect(line).toBe("dbGaP,,,,,,,,,,Bob B,bbb2");
+    expect(line).toBe("dbGaP,,,,,,,,,,,,Bob B,bbb2");
   });
 });
 
