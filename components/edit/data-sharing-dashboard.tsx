@@ -7,22 +7,37 @@
  * the "Copy paragraph" clipboard button, an existing client island.
  *
  * v1 scope: COUNTS ONLY (distinct datasets, depositing faculty, link volume).
- * No share rate, no full-text coverage — see `lib/api/data-sharing-report.ts`'s
- * header for why those are a fast-follow, not this pass. Strict-only: every
- * count here is the confirmed-deposit floor (`DatasetDeposit.confidence`
- * is only ever `'high'` in what's persisted today — see the 2026-08-12 plan's
- * "Strict/generous band" section). Named faculty (§3) ships identically to
- * §1–2 — one flag, no lock, no redaction (decided 2026-08-12).
+ * Strict-only: every count here is the confirmed-deposit floor
+ * (`DatasetDeposit.confidence` is only ever `'high'` in what's persisted
+ * today — see the 2026-08-12 plan's "Strict/generous band" section). Named
+ * faculty (§3) ships identically to §1–2 — one flag, no lock, no redaction
+ * (decided 2026-08-12).
+ *
+ * Share rate (added after v1): "n/N (x%)" of confirmed first/last-authored
+ * WCM pubs since `SHARE_RATE_YEAR_FLOOR` with a detected deposit — the
+ * MeSH-free fallback denominator, see `lib/api/data-sharing-report.ts`'s
+ * header. Deliberately never rendered as a bare percentage — see the Rollup
+ * section's stat card. Still no full-text coverage stat.
  */
 import Link from "next/link";
 
 import { CopyButton } from "@/components/publication/copy-button";
 import { Badge } from "@/components/ui/badge";
-import type { DataSharingReport } from "@/lib/api/data-sharing-report";
+import { SHARE_RATE_YEAR_FLOOR, type DataSharingReport } from "@/lib/api/data-sharing-report";
 
 const thClass = "px-3 py-2 font-medium";
 const tdClass = "px-3 py-2";
 const sectionClass = "border-apollo-border bg-apollo-surface mt-3 overflow-x-auto rounded-md border";
+
+/** "n/N (x%)" — deliberately never a bare percentage (a past review flagged
+ *  that a naked percent on a small denominator implies false precision).
+ *  `undefined` (row has no share-rate data merged) or a zero denominator both
+ *  render "—" rather than "0/0 (NaN%)" or a misleading "0%". */
+function formatShareRate(numerator: number | undefined, denominator: number | undefined): string {
+  if (numerator === undefined || denominator === undefined || denominator === 0) return "—";
+  const pct = Math.round((numerator / denominator) * 100);
+  return `${numerator.toLocaleString()}/${denominator.toLocaleString()} (${pct}%)`;
+}
 
 function AccessChip({ accessModel }: { accessModel: string | null }) {
   if (accessModel === null) return <span className="text-muted-foreground">—</span>;
@@ -55,7 +70,7 @@ function RollupSection({ report }: { report: DataSharingReport }) {
         Aggregate headline numbers for CTSA renewal writers and research deans.
       </p>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className={`${sectionClass} p-4`}>
           <div className="text-2xl font-semibold">{overall.datasets.toLocaleString()}</div>
           <div className="text-muted-foreground text-xs">Distinct datasets (strict floor)</div>
@@ -67,6 +82,17 @@ function RollupSection({ report }: { report: DataSharingReport }) {
         <div className={`${sectionClass} p-4`}>
           <div className="text-2xl font-semibold">{report.byDepartment.length}</div>
           <div className="text-muted-foreground text-xs">Departments represented</div>
+        </div>
+        <div className={`${sectionClass} p-4`}>
+          <div className="text-2xl font-semibold">
+            {formatShareRate(overall.shareRateNumerator, overall.shareRateDenominator)}
+          </div>
+          <div className="text-muted-foreground text-xs">
+            Confirmed first/last-author pubs with a detected deposit
+          </div>
+          <div className="text-muted-foreground mt-0.5 text-xs">
+            since {SHARE_RATE_YEAR_FLOOR}, no lock to a sensitive-data subset
+          </div>
         </div>
       </div>
 
@@ -91,6 +117,16 @@ function RollupSection({ report }: { report: DataSharingReport }) {
         <strong>Coverage skew:</strong> the full-text scan only sees full text that is actually
         retrievable. A department publishing more in low-PMC-coverage venues will look like it
         shares less than it does — state this on any cross-department comparison.
+      </p>
+
+      <p className="text-muted-foreground mt-2 text-xs">
+        <strong>Share rate caveats:</strong> the denominator only counts publications from{" "}
+        {SHARE_RATE_YEAR_FLOOR} onward — the extraction pipeline never scanned earlier pubs, so including them would
+        manufacture &quot;no detected deposit&quot; for papers that were simply never checked.
+        Deposit detection today also only covers full-time faculty, an extraction-pipeline scope
+        rather than an SPS filter — a non-full-time scholar&apos;s rate will read 0/0, or a low
+        denominator with a zero numerator, by construction, not as a finding about their sharing
+        behavior.
       </p>
     </section>
   );
@@ -135,6 +171,7 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
               <th className={thClass}>Department</th>
               <th className={`${thClass} text-right`}>Datasets</th>
               <th className={`${thClass} text-right`}>Depositing faculty</th>
+              <th className={`${thClass} text-right`}>Share rate</th>
             </tr>
           </thead>
           <tbody>
@@ -143,6 +180,9 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
                 <td className={tdClass}>{d.department}</td>
                 <td className={`${tdClass} text-right`}>{d.datasets.toLocaleString()}</td>
                 <td className={`${tdClass} text-right`}>{d.faculty.toLocaleString()}</td>
+                <td className={`${tdClass} text-right`}>
+                  {formatShareRate(d.shareRateNumerator, d.shareRateDenominator)}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -172,6 +212,7 @@ function FacultySection({ report }: { report: DataSharingReport }) {
               <th className={thClass}>Faculty</th>
               <th className={thClass}>Department</th>
               <th className={`${thClass} text-right`}>Datasets</th>
+              <th className={`${thClass} text-right`}>Share rate</th>
             </tr>
           </thead>
           <tbody>
@@ -184,6 +225,9 @@ function FacultySection({ report }: { report: DataSharingReport }) {
                 </td>
                 <td className={tdClass}>{f.department ?? "—"}</td>
                 <td className={`${tdClass} text-right`}>{f.datasets.toLocaleString()}</td>
+                <td className={`${tdClass} text-right`}>
+                  {formatShareRate(f.shareRateNumerator, f.shareRateDenominator)}
+                </td>
               </tr>
             ))}
           </tbody>
