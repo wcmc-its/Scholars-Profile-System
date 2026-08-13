@@ -5,7 +5,16 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { buildSignals, compareBySort, CoreClaimQueue } from "@/components/edit/core-claim-queue";
+
+const mockRefresh = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mockRefresh }) }));
+
+import {
+  buildSignals,
+  compareBySort,
+  CoreClaimQueue,
+  parsePmidBlock,
+} from "@/components/edit/core-claim-queue";
 import type { CoreQueueRow } from "@/lib/api/core-queue";
 
 function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
@@ -33,6 +42,7 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     pubmedUrl: "https://pubmed.ncbi.nlm.nih.gov/30418319/",
     doi: "10.1016/j.neuroimage.2021.001",
     claimed: false,
+    isManual: false,
     relativeCitationRatio: null,
     nihPercentile: null,
     meshTerms: [],
@@ -406,6 +416,82 @@ describe("CoreClaimQueue", () => {
     );
   });
 
+  it("shows a 'Manually added' badge on a confirmed row with no engine signals", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[]}
+        confirmed={[row({ pmid: "5", title: "Old paper", claimed: true, isManual: true })]}
+      />,
+    );
+    expect(screen.getByText("Manually added")).toBeTruthy();
+  });
+
+  it("does not show the badge on an ordinary confirmed row", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[]}
+        confirmed={[row({ pmid: "5", title: "Old paper", claimed: true, isManual: false })]}
+      />,
+    );
+    expect(screen.queryByText("Manually added")).toBeNull();
+  });
+
+  it("claims a pasted block of PMIDs via the bulk endpoint and refreshes on success", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ written: 2, skipped: 0, notFound: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: /Add PMIDs/ }));
+    fireEvent.change(screen.getByLabelText("Claim known PMIDs directly"), {
+      target: { value: "111, 222\n222" }, // dupe collapses client-side
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Claim" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0] as [string, { body: string }];
+    expect(url).toBe("/api/edit/core-claim/bulk");
+    expect(JSON.parse(init.body)).toEqual({ coreId: "2", pmids: ["111", "222"], status: "claimed" });
+    // "Claimed 2." lands in both the result line and the aria-live announcer —
+    // scope to the status paragraph specifically.
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Claimed 2."));
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports skipped/not-found pmids and does NOT refresh when nothing new was written", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ written: 0, skipped: 1, notFound: ["999"] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: /Add PMIDs/ }));
+    fireEvent.change(screen.getByLabelText("Claim known PMIDs directly"), {
+      target: { value: "1 999" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Claim" }));
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toMatch(
+        /Already claimed: 1\..*Not found in SPS: 999\./,
+      ),
+    );
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
+  it("does not call the API on a block with no valid PMIDs", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    render(<CoreClaimQueue core={CORE} candidates={[]} confirmed={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: /Add PMIDs/ }));
+    fireEvent.change(screen.getByLabelText("Claim known PMIDs directly"), {
+      target: { value: "abc, def" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Claim" }));
+    expect(screen.getByText(/No valid PMIDs found/)).toBeTruthy();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("revokes a human-claimed Confirmed row with 'revoked' and offers undo", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
@@ -618,6 +704,22 @@ describe("CoreClaimQueue", () => {
     expect(csvText).toContain("Confirmed");
     expect(csvText).toContain("PMID: 111."); // citation string
     clickSpy.mockRestore();
+  });
+});
+
+describe("parsePmidBlock", () => {
+  it("splits on newlines, commas, and spaces, and dedupes", () => {
+    expect(parsePmidBlock("111, 222\n333 111").pmids).toEqual(["111", "222", "333"]);
+  });
+
+  it("separates malformed tokens into invalid, not pmids", () => {
+    const { pmids, invalid } = parsePmidBlock("111, abc, 007, 222");
+    expect(pmids).toEqual(["111", "222"]);
+    expect(invalid).toEqual(["abc", "007"]); // leading zero is not a real PMID
+  });
+
+  it("returns empty arrays for blank input", () => {
+    expect(parsePmidBlock("   \n  ")).toEqual({ pmids: [], invalid: [] });
   });
 });
 

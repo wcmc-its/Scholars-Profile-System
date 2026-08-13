@@ -31,6 +31,7 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     pubmedUrl: null,
     doi: null,
     claimed: false,
+    isManual: false,
     relativeCitationRatio: null,
     nihPercentile: null,
     meshTerms: [],
@@ -160,13 +161,16 @@ describe("loadCoreReviewQueue mapping", () => {
     rows: ReturnType<typeof rawRow>[],
     scholars: typeof SCHOLARS = SCHOLARS,
     authors: typeof AUTHORS = AUTHORS,
+    claims: Array<{ pmid: string; status: ClaimStatus }> = [],
+    publications: Array<Record<string, unknown>> = [],
   ) =>
     ({
       core: { findUnique: async () => ({ id: "2", name: "Imaging" }) },
       publicationCore: { findMany: async () => rows },
-      coreClaim: { findMany: async () => [] },
+      coreClaim: { findMany: async () => claims },
       scholar: { findMany: async () => scholars },
       publicationAuthor: { findMany: async () => authors },
+      publication: { findMany: async () => publications },
     }) as unknown as Parameters<typeof loadCoreReviewQueue>[1];
 
   it("maps the new Tier-1 fields through, coercing Decimals and filtering CWIDs", async () => {
@@ -242,6 +246,59 @@ describe("loadCoreReviewQueue mapping", () => {
       reader([{ ...rawRow(), authorAffinity: null } as unknown as ReturnType<typeof rawRow>]),
     );
     expect(queue?.candidates[0]?.authorAffinity).toBeNull();
+  });
+
+  it("surfaces a CLAIMED core_claim with no publication_core row as a manual confirmed row (Manual PMID add)", async () => {
+    const queue = await loadCoreReviewQueue(
+      "2",
+      reader(
+        [rawRow()], // one engine candidate, pmid 30418319
+        SCHOLARS,
+        AUTHORS,
+        [{ pmid: "99999999", status: "claimed" }], // manually claimed, no engine row
+        [
+          {
+            pmid: "99999999",
+            title: "An older paper the engine never scored",
+            journal: "Cell Reports",
+            year: 2019,
+            authorsString: "Someone S",
+            fullAuthorsString: "Someone S",
+            abstract: null,
+            synopsis: null,
+            citationCount: 3,
+            pubmedUrl: "https://pubmed.ncbi.nlm.nih.gov/99999999/",
+            doi: null,
+            relativeCitationRatio: null,
+            nihPercentile: null,
+            meshTerms: [],
+          },
+        ],
+      ),
+    );
+    expect(queue?.candidates.map((r) => r.pmid)).toEqual(["30418319"]);
+    const manual = queue?.confirmed.find((r) => r.pmid === "99999999");
+    expect(manual).toBeDefined();
+    expect(manual?.isManual).toBe(true);
+    expect(manual?.claimed).toBe(true);
+    expect(manual?.title).toBe("An older paper the engine never scored");
+    expect(manual?.likelihood).toBe(0);
+    expect(manual?.coauthors).toEqual([]);
+    // the engine-sourced row is NOT manual
+    expect(queue?.candidates[0]?.isManual).toBe(false);
+  });
+
+  it("does not surface a REJECTED core_claim with no publication_core row (nothing to reject)", async () => {
+    const queue = await loadCoreReviewQueue(
+      "2",
+      reader([rawRow()], SCHOLARS, AUTHORS, [{ pmid: "99999999", status: "rejected" }], []),
+    );
+    const pmids = [
+      ...(queue?.candidates ?? []),
+      ...(queue?.confirmed ?? []),
+      ...(queue?.rejected ?? []),
+    ].map((r) => r.pmid);
+    expect(pmids).not.toContain("99999999");
   });
 
   it("returns null when the core does not exist", async () => {

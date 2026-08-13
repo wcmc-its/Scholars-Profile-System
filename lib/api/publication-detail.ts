@@ -382,24 +382,50 @@ async function resolvePublicationCores(
 ): Promise<PublicationDetailCore[]> {
   if (!isCorePubModalEnabled()) return [];
 
-  const rows = await prisma.publicationCore.findMany({
-    where: { pmid },
-    select: {
-      coreId: true,
-      status: true,
-      core: { select: { name: true, facility: true } },
-    },
-  });
-  if (rows.length === 0) return [];
+  const [rows, claimedCoreIds] = await Promise.all([
+    prisma.publicationCore.findMany({
+      where: { pmid },
+      select: {
+        coreId: true,
+        status: true,
+        core: { select: { name: true, facility: true } },
+      },
+    }),
+    // Manual PMID add: CLAIMED core_claim rows for this pmid — includes cores the
+    // engine never scored it against at all (no publicationCore row above).
+    prisma.coreClaim.findMany({
+      where: { pmid, revokedAt: null, status: "claimed" },
+      select: { coreId: true },
+    }),
+  ]);
+
+  const projectedCoreIds = new Set(rows.map((r) => r.coreId));
+  const manualCoreIds = claimedCoreIds
+    .map((c) => c.coreId)
+    .filter((coreId) => !projectedCoreIds.has(coreId));
+  if (rows.length === 0 && manualCoreIds.length === 0) return [];
+
+  const manualCores =
+    manualCoreIds.length === 0
+      ? []
+      : await prisma.core.findMany({
+          where: { id: { in: manualCoreIds } },
+          select: { id: true, name: true, facility: true },
+        });
 
   const claims = await loadActiveCoreClaimsForPmids([pmid]);
   return buildPublicationCores(
-    rows.map((r) => ({
-      coreId: r.coreId,
-      status: r.status,
-      name: r.core.name,
-      facility: r.core.facility,
-    })),
+    [
+      ...rows.map((r) => ({
+        coreId: r.coreId,
+        status: r.status,
+        name: r.core.name,
+        facility: r.core.facility,
+      })),
+      // status is a placeholder — buildPublicationCores resolves purely off the
+      // active claim (isEffectiveConfirmed short-circuits before reading it).
+      ...manualCores.map((c) => ({ coreId: c.id, status: "confirmed", name: c.name, facility: c.facility })),
+    ],
     (coreId) => claims.get(claimKey(pmid, coreId)) ?? null,
     isCorePagesEnabled(),
   );

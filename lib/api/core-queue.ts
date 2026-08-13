@@ -11,6 +11,13 @@
  * An engine `below_threshold` row with no claim drops out of all three lists.
  * All three are ranked by likelihood desc.
  *
+ * A CLAIMED `core_claim` with no matching `publication_core` row at all — a
+ * human attesting usage of a PMID the engine never scored ("Manual PMID add",
+ * `POST /api/edit/core-claim/bulk`) — is folded into `confirmed` too, via a
+ * second query joined straight to `publication` (`isManual: true` on the row).
+ * A REJECTED claim with no engine row isn't surfaced — there's nothing to
+ * reject, so it's not meaningful review state.
+ *
  * The DB load is a thin wrapper; `partitionCoreQueue` is pure and unit-tested.
  */
 import { db } from "@/lib/db";
@@ -73,6 +80,11 @@ export interface CoreQueueRow {
   /** True when an active human claim (not just the engine) backs a confirmed row;
    *  set by partitionCoreQueue. Drives the Confirmed-list revoke vs reject path. */
   claimed: boolean;
+  /** True when this row has NO engine (`publication_core`) projection at all — a
+   *  human claimed a PMID the engine never scored ("Manual PMID add"). Every
+   *  signal/likelihood field is a placeholder; the UI should show that plainly
+   *  rather than a misleading 0%/no-evidence candidate card. */
+  isManual: boolean;
   /** iCite relative citation ratio (reciterdb.analysis_nih), when computed. */
   relativeCitationRatio: number | null;
   /** NIH citation percentile (0-100), when computed. */
@@ -119,8 +131,26 @@ export function partitionCoreQueue(
 
 type QueueReader = Pick<
   typeof db.read,
-  "core" | "publicationCore" | "coreClaim" | "scholar" | "publicationAuthor"
+  "core" | "publicationCore" | "coreClaim" | "scholar" | "publicationAuthor" | "publication"
 >;
+
+/** The `publication` fields a queue card needs — shared by the engine-sourced
+ *  and manual-claim-only row builders below. */
+const CARD_PUBLICATION_SELECT = {
+  title: true,
+  journal: true,
+  year: true,
+  authorsString: true,
+  fullAuthorsString: true,
+  abstract: true,
+  synopsis: true,
+  citationCount: true,
+  pubmedUrl: true,
+  doi: true,
+  relativeCitationRatio: true,
+  nihPercentile: true,
+  meshTerms: true,
+} as const;
 
 /** Cap WCM byline authors per card — mega-author papers would otherwise be a wall. */
 const WCM_AUTHORS_CAP = 12;
@@ -154,34 +184,35 @@ export async function loadCoreReviewQueue(
       llmScore: true,
       llmRationale: true,
       authorAffinity: true,
-      publication: {
-        select: {
-          title: true,
-          journal: true,
-          year: true,
-          authorsString: true,
-          fullAuthorsString: true,
-          abstract: true,
-          synopsis: true,
-          citationCount: true,
-          pubmedUrl: true,
-          doi: true,
-          relativeCitationRatio: true,
-          nihPercentile: true,
-          meshTerms: true,
-        },
-      },
+      publication: { select: CARD_PUBLICATION_SELECT },
     },
   });
 
-  // --- batched name resolution (one query each, not per row) ---
+  const claims = await loadActiveCoreClaimsByCore(coreId, client);
+
+  // Manual PMID add: a CLAIMED core_claim with no matching publication_core row
+  // above — a human attesting usage the engine never scored. (A REJECTED claim
+  // with no engine row has nothing to reject, so it's not surfaced.)
+  const projectedPmids = new Set(rows.map((r) => r.pmid));
+  const manualPmids = [...claims.entries()]
+    .filter(([pmid, status]) => status === "claimed" && !projectedPmids.has(pmid))
+    .map(([pmid]) => pmid);
+  const manualPubs =
+    manualPmids.length === 0
+      ? []
+      : await client.publication.findMany({
+          where: { pmid: { in: manualPmids } },
+          select: { pmid: true, ...CARD_PUBLICATION_SELECT },
+        });
+
+  // --- batched name resolution (one query each, not per row; covers manual rows too) ---
   const coStaffCwids = new Set<string>();
   for (const r of rows) {
     if (Array.isArray(r.signalCoauthors)) {
       for (const c of r.signalCoauthors) if (typeof c === "string") coStaffCwids.add(c);
     }
   }
-  const pmids = rows.map((r) => r.pmid);
+  const pmids = [...rows.map((r) => r.pmid), ...manualPubs.map((p) => p.pmid)];
 
   // Core-staff co-authors (signal-2 CWIDs) → named scholars. CWIDs with no
   // Scholar row simply don't appear here (the component falls back to the CWID).
@@ -268,6 +299,7 @@ export async function loadCoreReviewQueue(
       doi: r.publication.doi,
       // claimed is resolved per-row in partitionCoreQueue once claims are known.
       claimed: false,
+      isManual: false,
       relativeCitationRatio:
         r.publication.relativeCitationRatio == null
           ? null
@@ -278,9 +310,42 @@ export async function loadCoreReviewQueue(
     };
   });
 
-  const claims = await loadActiveCoreClaimsByCore(coreId, client);
+  const manualRows: CoreQueueRow[] = manualPubs.map((p) => ({
+    pmid: p.pmid,
+    title: p.title,
+    journal: p.journal,
+    year: p.year,
+    authorsString: p.authorsString,
+    fullAuthorsString: p.fullAuthorsString,
+    abstract: p.abstract,
+    synopsis: p.synopsis,
+    // No engine projection exists — likelihood/status/every signal is a
+    // placeholder never read functionally (core-merge resolves purely off the
+    // active claim), but isManual tells the UI to render that plainly.
+    likelihood: 0,
+    status: "confirmed",
+    coauthors: [],
+    coauthorScholars: [],
+    wcmAuthors: wcmByPmid.get(p.pmid) ?? [],
+    signalAck: false,
+    ackAlias: null,
+    ackSnippet: null,
+    llmScore: null,
+    llmRationale: null,
+    authorAffinity: null,
+    citationCount: p.citationCount,
+    pubmedUrl: p.pubmedUrl,
+    doi: p.doi,
+    claimed: false,
+    isManual: true,
+    relativeCitationRatio:
+      p.relativeCitationRatio == null ? null : Number(p.relativeCitationRatio),
+    nihPercentile: p.nihPercentile == null ? null : Number(p.nihPercentile),
+    meshTerms: normalizeMeshTerms(p.meshTerms),
+  }));
+
   const { candidates, confirmed, rejected } = partitionCoreQueue(
-    queueRows,
+    [...queueRows, ...manualRows],
     (pmid) => claims.get(pmid) ?? null,
   );
   return { core, candidates, confirmed, rejected };
