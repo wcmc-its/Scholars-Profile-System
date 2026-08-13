@@ -26,6 +26,18 @@
  * Strict-only (decided 2026-08-12): `DatasetDeposit.confidence` is only ever
  * `'high'` or `null` in what's actually persisted — there is no generous/ceiling
  * band to read. See the dashboard plan's "Strict/generous band" section.
+ *
+ * S-Index v2 (this PR): three free/cheap additions, zero migration. (1) Access
+ * model split — `openDatasets`/`controlledDatasets` on `byDepartment`/
+ * `byFaculty`, `openPubs`/`controlledPubs` on `overall` — via `bucketDatasetLink`.
+ * (2) Registry separation — `registryDatasets` on `byDepartment` only (the
+ * faculty table stays Open/Controlled-only); `REGISTRY_DATA_TYPE` rows
+ * (ClinicalTrials.gov / CTRI) are excluded from the open/controlled split
+ * everywhere, not just counted separately — counting a trial registration as
+ * data sharing would inflate every number on this page. (3) Funding lens —
+ * `nihFundedPubs`/`notNihFundedPubs` on `overall`, via `loadFundingSplit`
+ * joining `GrantPublication`/`Grant.nihIc` over the same non-registry
+ * deposited-pmid population the access split uses.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { loadContributorSuppressions } from "@/lib/api/manual-layer";
@@ -34,7 +46,7 @@ import { toCsv } from "@/lib/csv";
 /** The Prisma surface this loader needs — kept narrow for unit tests. */
 export type DataSharingReportClient = Pick<
   PrismaClient,
-  "personDatasetDeposit" | "suppression" | "publicationAuthor"
+  "personDatasetDeposit" | "suppression" | "publicationAuthor" | "grantPublication"
 >;
 
 /** Matches the Python extraction pipeline's own year>=2020 floor
@@ -84,6 +96,17 @@ export type DepartmentRollup = {
   datasets: number;
   faculty: number;
   links: number;
+  /** Distinct-dataset counts split by access model / registry status — see
+   *  `bucketDatasetLink`'s doc comment for the exact bucketing rule (registry
+   *  checked before access model; a dataset can appear in exactly one of these
+   *  three, or none, if `accessModel` is null on a non-registry deposit).
+   *  Required, not optional, unlike the share-rate fields above:
+   *  `aggregateByDepartment` is the only producer of `DepartmentRollup` and
+   *  every caller goes through it, so there is no partial-construction path
+   *  that would need these to be optional. */
+  openDatasets: number;
+  controlledDatasets: number;
+  registryDatasets: number;
   /** Share-rate totals for this department, merged in by `buildDataSharingReport`.
    *  Optional (not required) so it stays additive over `aggregateByDepartment`'s
    *  own output and over pre-existing test fixtures that predate the share rate. */
@@ -107,11 +130,41 @@ export type NamedFacultyRow = {
   department: string | null;
   datasets: number;
   links: number;
+  /** Same bucketing rule as `DepartmentRollup.openDatasets`/`controlledDatasets`
+   *  (registry checked first, then access model) — no `registryDatasets` here
+   *  on purpose, the faculty table only ever shows Open/Controlled. Required,
+   *  same rationale as `DepartmentRollup`: `aggregateByFaculty` is the only
+   *  producer. */
+  openDatasets: number;
+  controlledDatasets: number;
   /** Share-rate totals for this scholar — same optional/merge shape as
    *  `DepartmentRollup`'s fields, see that comment. */
   shareRateDenominator?: number;
   shareRateNumerator?: number;
 };
+
+/** catalog.py's `bucket` field for ClinicalTrials.gov / CTRI rows — trial
+ *  registration, not identifiable microdata. `DatasetLinkRow.dataType` /
+ *  `DatasetDeposit.dataType` carry this exact string for those rows. Checked
+ *  BEFORE `accessModel` everywhere on this page: a registry deposit must never
+ *  land in the open/controlled split even though its `accessModel` may itself
+ *  resolve to `'open'` (ClinicalTrials.gov's catalog row is "open registry").
+ *  Counting ClinicalTrials.gov as data sharing would inflate every number —
+ *  registries are separated everywhere on this page. */
+export const REGISTRY_DATA_TYPE = "registration (not microdata)";
+
+/** One dataset link's access bucket — the single rule every open/controlled/
+ *  registry split on this page shares. Registry status wins first; only a
+ *  non-registry row is then split by `accessModel`. `null` (ambiguous/unknown
+ *  access, e.g. the Synapse "open/controlled" case `access_model()` in
+ *  `scripts/bulk-data-rule/attribute.py` now returns `None` for) is a real
+ *  third outcome — uncounted in either bucket, not silently forced into one. */
+export function bucketDatasetLink(row: Pick<DatasetLinkRow, "dataType" | "accessModel">): "open" | "controlled" | "registry" | null {
+  if (row.dataType === REGISTRY_DATA_TYPE) return "registry";
+  if (row.accessModel === "open") return "open";
+  if (row.accessModel === "controlled") return "controlled";
+  return null;
+}
 
 /** One confirmed first/last-authored WCM publication in the share-rate
  *  denominator corpus (`loadShareRateCorpus`). Deliberately MeSH-free — no
@@ -126,6 +179,23 @@ export type DataSharingReport = {
     links: number;
     shareRateDenominator: number;
     shareRateNumerator: number;
+    /** Distinct publications with at least one detected OPEN-access deposit,
+     *  and separately at least one detected CONTROLLED-access deposit — built
+     *  by `pubAccessPmidSets`, registry rows excluded entirely (same rationale
+     *  as `REGISTRY_DATA_TYPE`'s doc comment). A pmid can land in both sets
+     *  (different deposits, different access models on the same publication)
+     *  — that's real, same spirit as the multi-department caveat elsewhere in
+     *  this file; don't reconcile it away. */
+    openPubs: number;
+    controlledPubs: number;
+    /** NIH-funded vs. not-NIH-funded split over the same non-registry deposited
+     *  pmid population `openPubs`/`controlledPubs` are built from — see
+     *  `loadFundingSplit`. "Not NIH-funded" is the honest claim, not
+     *  "non-federal": `Grant.nihIc` is only ever populated for NIH awards, so
+     *  other-federal funding (CDC/NSF/etc.) isn't distinguishable from truly
+     *  non-federal with this field. */
+    nihFundedPubs: number;
+    notNihFundedPubs: number;
   };
   byDepartment: DepartmentRollup[];
   byRepository: RepositoryBreakdown[];
@@ -235,13 +305,34 @@ export async function loadShareRateCorpus(client: DataSharingReportClient): Prom
  *  column will run ahead of `overall.datasets`. That's real multi-department
  *  co-authorship, not a bug — don't silently reconcile it away. */
 export function aggregateByDepartment(rows: readonly DatasetLinkRow[]): DepartmentRollup[] {
-  const byDept = new Map<string, { datasets: Set<string>; faculty: Set<string>; links: number }>();
+  const byDept = new Map<
+    string,
+    {
+      datasets: Set<string>;
+      faculty: Set<string>;
+      links: number;
+      openDatasets: Set<string>;
+      controlledDatasets: Set<string>;
+      registryDatasets: Set<string>;
+    }
+  >();
   for (const r of rows) {
     const dept = r.department ?? "Unknown / no department on file";
-    const bucket = byDept.get(dept) ?? { datasets: new Set(), faculty: new Set(), links: 0 };
+    const bucket = byDept.get(dept) ?? {
+      datasets: new Set(),
+      faculty: new Set(),
+      links: 0,
+      openDatasets: new Set<string>(),
+      controlledDatasets: new Set<string>(),
+      registryDatasets: new Set<string>(),
+    };
     bucket.datasets.add(r.datasetId);
     bucket.faculty.add(r.cwid);
     bucket.links++;
+    const kind = bucketDatasetLink(r);
+    if (kind === "registry") bucket.registryDatasets.add(r.datasetId);
+    else if (kind === "open") bucket.openDatasets.add(r.datasetId);
+    else if (kind === "controlled") bucket.controlledDatasets.add(r.datasetId);
     byDept.set(dept, bucket);
   }
   return [...byDept.entries()]
@@ -250,6 +341,9 @@ export function aggregateByDepartment(rows: readonly DatasetLinkRow[]): Departme
       datasets: b.datasets.size,
       faculty: b.faculty.size,
       links: b.links,
+      openDatasets: b.openDatasets.size,
+      controlledDatasets: b.controlledDatasets.size,
+      registryDatasets: b.registryDatasets.size,
     }))
     .sort((a, b) => b.datasets - a.datasets);
 }
@@ -278,7 +372,15 @@ export function aggregateByRepository(rows: readonly DatasetLinkRow[]): Reposito
 export function aggregateByFaculty(rows: readonly DatasetLinkRow[]): NamedFacultyRow[] {
   const byCwid = new Map<
     string,
-    { name: string; slug: string; department: string | null; datasets: Set<string>; links: number }
+    {
+      name: string;
+      slug: string;
+      department: string | null;
+      datasets: Set<string>;
+      links: number;
+      openDatasets: Set<string>;
+      controlledDatasets: Set<string>;
+    }
   >();
   for (const r of rows) {
     const bucket = byCwid.get(r.cwid) ?? {
@@ -287,9 +389,17 @@ export function aggregateByFaculty(rows: readonly DatasetLinkRow[]): NamedFacult
       department: r.department,
       datasets: new Set<string>(),
       links: 0,
+      openDatasets: new Set<string>(),
+      controlledDatasets: new Set<string>(),
     };
     bucket.datasets.add(r.datasetId);
     bucket.links++;
+    const kind = bucketDatasetLink(r);
+    // No registry bucket on this row shape (see `NamedFacultyRow`'s comment)
+    // — a registry-kind link still counts toward `datasets`/`links` above,
+    // it just doesn't land in either access column.
+    if (kind === "open") bucket.openDatasets.add(r.datasetId);
+    else if (kind === "controlled") bucket.controlledDatasets.add(r.datasetId);
     byCwid.set(r.cwid, bucket);
   }
   return [...byCwid.entries()]
@@ -300,6 +410,8 @@ export function aggregateByFaculty(rows: readonly DatasetLinkRow[]): NamedFacult
       department: b.department,
       datasets: b.datasets.size,
       links: b.links,
+      openDatasets: b.openDatasets.size,
+      controlledDatasets: b.controlledDatasets.size,
     }))
     .sort((a, b) => b.datasets - a.datasets);
 }
@@ -317,6 +429,49 @@ export function depositedPmidSet(rows: readonly DatasetLinkRow[]): Set<string> {
   for (const r of rows) {
     if (!r.pmids || r.pmids.length === 0) continue;
     for (const pmid of r.pmids) set.add(pmid);
+  }
+  return set;
+}
+
+/** Flatten `pmids` into an open set and a controlled set — mirrors
+ *  `depositedPmidSet`'s shape, but split by `bucketDatasetLink` instead of
+ *  merged into one set, and with registry-type rows excluded entirely (not
+ *  just uncounted like a null `accessModel` — a registry row never
+ *  contributes to either set, full stop). A pmid can land in BOTH sets: two
+ *  different deposits of the same publication with different access models
+ *  is real, not a bug — same spirit as this file's multi-department caveat,
+ *  don't reconcile it away. A pmid whose only non-registry deposits have a
+ *  null `accessModel` lands in neither set (the real ambiguous/unknown case,
+ *  same semantics as the Synapse fix `bucketDatasetLink` documents). */
+export function pubAccessPmidSets(rows: readonly DatasetLinkRow[]): {
+  openPmids: Set<string>;
+  controlledPmids: Set<string>;
+} {
+  const openPmids = new Set<string>();
+  const controlledPmids = new Set<string>();
+  for (const r of rows) {
+    if (!r.pmids || r.pmids.length === 0) continue;
+    const kind = bucketDatasetLink(r);
+    if (kind === "open") for (const pmid of r.pmids) openPmids.add(pmid);
+    else if (kind === "controlled") for (const pmid of r.pmids) controlledPmids.add(pmid);
+  }
+  return { openPmids, controlledPmids };
+}
+
+/** Every pmid that appears on at least one registry-type row (`bucketDatasetLink`
+ *  === `'registry'`) — used only to carve the funding-lens population down to
+ *  real data-sharing pmids (`loadFundingSplit`'s `where.pmid`). A pmid with
+ *  BOTH a registry row and a non-registry row is still excluded here: the
+ *  funding lens asks "of publications with a real (non-registry) data
+ *  deposit, how many are NIH-funded", and mixing in a pmid whose only
+ *  detected deposit signal might be a CT.gov registration would blur that
+ *  question — simpler and more conservative than trying to partially credit
+ *  a pmid that has both. */
+function registryPmidSet(rows: readonly DatasetLinkRow[]): Set<string> {
+  const set = new Set<string>();
+  for (const r of rows) {
+    if (!r.pmids || r.pmids.length === 0) continue;
+    if (bucketDatasetLink(r) === "registry") for (const pmid of r.pmids) set.add(pmid);
   }
   return set;
 }
@@ -372,6 +527,44 @@ export function buildShareRates(
   };
 }
 
+export type FundingSplitTotals = { nihFundedPubs: number; notNihFundedPubs: number };
+
+/** NIH-funded vs. not-NIH-funded split over the real (non-registry) data-
+ *  sharing pmid population — `depositedPmidSet(rows)` minus every pmid that
+ *  only shows up via a registry-type row (`registryPmidSet`), mirroring the
+ *  registry exclusion `pubAccessPmidSets` applies. A pmid counts as
+ *  NIH-funded if ANY of its `GrantPublication` rows resolves to a grant with
+ *  a non-null `nihIc` — `nihIc` is populated only for NIH awards (see
+ *  `Grant.nihIc`'s doc comment in `prisma/schema.prisma`), so "not
+ *  NIH-funded" is the honest claim here, not "non-federal": other federal
+ *  funders (CDC/NSF/etc.) aren't distinguishable from truly non-federal with
+ *  this field. */
+export async function loadFundingSplit(
+  client: DataSharingReportClient,
+  rows: readonly DatasetLinkRow[],
+): Promise<FundingSplitTotals> {
+  const registryPmids = registryPmidSet(rows);
+  const fundingPmids = [...depositedPmidSet(rows)].filter((pmid) => !registryPmids.has(pmid));
+  if (fundingPmids.length === 0) return { nihFundedPubs: 0, notNihFundedPubs: 0 };
+
+  const links = await client.grantPublication.findMany({
+    where: { pmid: { in: fundingPmids } },
+    select: { pmid: true, grant: { select: { nihIc: true } } },
+  });
+
+  const nihByPmid = new Map<string, boolean>();
+  for (const l of links) {
+    const alreadyNih = nihByPmid.get(l.pmid) ?? false;
+    nihByPmid.set(l.pmid, alreadyNih || l.grant.nihIc !== null);
+  }
+
+  let nihFundedPubs = 0;
+  for (const pmid of fundingPmids) {
+    if (nihByPmid.get(pmid)) nihFundedPubs++;
+  }
+  return { nihFundedPubs, notNihFundedPubs: fundingPmids.length - nihFundedPubs };
+}
+
 /** `corpusRows` defaults to `[]` for backward compatibility — existing
  *  single-argument callers (and every pre-share-rate test fixture) keep
  *  working unchanged, just with rate fields at 0/0. When a `byDepartment` or
@@ -381,13 +574,20 @@ export function buildShareRates(
  *  to `{ 0, 0 }`, not `undefined`: keeps every row's shape uniform for the
  *  UI's `n/N (x%)` formatter without an extra undefined-check. The exported
  *  types keep these fields optional only so pre-existing test fixtures that
- *  predate share rate don't need touching. */
+ *  predate share rate don't need touching.
+ *
+ *  `fundingSplit` defaults to `{ nihFundedPubs: 0, notNihFundedPubs: 0 }` for
+ *  the same backward-compat reason `corpusRows` defaults to `[]` — it can
+ *  only be computed with a DB round-trip (`loadFundingSplit`), so this pure
+ *  function accepts it pre-computed rather than becoming async itself. */
 export function buildDataSharingReport(
   rows: readonly DatasetLinkRow[],
   corpusRows: readonly ShareRateCorpusRow[] = [],
+  fundingSplit: FundingSplitTotals = { nihFundedPubs: 0, notNihFundedPubs: 0 },
 ): DataSharingReport {
   const deposited = depositedPmidSet(rows);
   const rates = buildShareRates(corpusRows, deposited);
+  const { openPmids, controlledPmids } = pubAccessPmidSets(rows);
 
   // Departments: UNION deposit-side departments with corpus-side ones, not just
   // deposit-side. A department with real denominator data (confirmed first/last
@@ -407,6 +607,9 @@ export function buildDataSharingReport(
         datasets: d?.datasets ?? 0,
         faculty: d?.faculty ?? 0,
         links: d?.links ?? 0,
+        openDatasets: d?.openDatasets ?? 0,
+        controlledDatasets: d?.controlledDatasets ?? 0,
+        registryDatasets: d?.registryDatasets ?? 0,
         shareRateDenominator: rate?.denominatorPubs ?? 0,
         shareRateNumerator: rate?.numeratorPubs ?? 0,
       };
@@ -437,6 +640,10 @@ export function buildDataSharingReport(
       links: rows.length,
       shareRateDenominator: rates.overall.denominatorPubs,
       shareRateNumerator: rates.overall.numeratorPubs,
+      openPubs: openPmids.size,
+      controlledPubs: controlledPmids.size,
+      nihFundedPubs: fundingSplit.nihFundedPubs,
+      notNihFundedPubs: fundingSplit.notNihFundedPubs,
     },
     byDepartment,
     byRepository: aggregateByRepository(rows),
@@ -449,7 +656,8 @@ export async function loadDataSharingReport(client: DataSharingReportClient): Pr
     loadDatasetLinkRows(client),
     loadShareRateCorpus(client),
   ]);
-  return buildDataSharingReport(rows, corpusRows);
+  const fundingSplit = await loadFundingSplit(client, rows);
+  return buildDataSharingReport(rows, corpusRows, fundingSplit);
 }
 
 // ---------------------------------------------------------------------------

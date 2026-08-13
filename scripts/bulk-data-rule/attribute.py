@@ -135,7 +135,9 @@ if os.environ.get("WRITE_DATASET_DEPOSIT"):
     import pymysql
     def nz(v): return None if pd.isna(v) else v
     def access_model(v):  # catalog.py's `access` is a free-text note, not the table's open|controlled enum
-        return "controlled" if "controlled" in str(v).lower() else "open"
+        s = str(v).lower()
+        if "open" in s and "controlled" in s: return None  # governance varies per project (e.g. Synapse "open/controlled") — don't force a bucket
+        return "controlled" if "controlled" in s else "open"
     recs=[(nz(r.cwid), r.repo, r.accession, nz(r.resource_type), nz(r.bucket), access_model(r.access),
            int(r.year) if pd.notna(r.year) else None, r.provenance, nz(r.confidence),
            nz(r.position), int(r.pmid))
