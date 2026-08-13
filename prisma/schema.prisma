@@ -1046,6 +1046,20 @@ model Publication {
   /// in reciterdb. Source: `reciterdb.person_article_keyword` joined to
   /// `reciterdb.mesh`. Keyword sets are per-PMID, not per-(person, pmid) —
   /// verified during ETL design.
+  ///
+  /// NOT raw MEDLINE MeSH — `person_article_keyword` is ReCiter's own curated
+  /// keyword list for this Topics use case, not the full `<MeshHeading>` set
+  /// PubMed efetch returns. Confirmed empirically 2026-08-13 (Bulk Data Rule /
+  /// S-Index v2 investigation): 0 of 153,791 publications with non-null
+  /// `meshTerms` carry any MEDLINE check-tag (`Humans`, `Animals`, `Male`,
+  /// `Female`, `Adult`) — check-tags are structurally absent, not merely rare.
+  /// A raw-MeSH efetch cross-check on a sample also found `person_article_keyword`
+  /// missing ~4% of category-triggering descriptors that were present in raw
+  /// MeSH. Don't assume this field has MEDLINE-complete recall or check-tag
+  /// coverage for anything that needs real MeSH semantics (human-subject
+  /// gating, full descriptor recall) — it's a curated topic list, not a MeSH
+  /// mirror. Full writeup: `~/Dropbox/Projects/Bulk Data Rule/
+  /// 2026-08-13-mesh-denominator-plan.md`.
   meshTerms             Json?     @map("mesh_terms")
   /// Plain-text article abstract from ReciterDB.reporting_abstracts.abstractVarchar
   /// (capped at 15000 chars at the source). Used by the search-index ETL to
