@@ -14,6 +14,7 @@ const {
   mockCoreFindUnique,
   mockClaimFindMany,
   mockUnitAdminFindUnique,
+  mockPublicationFindMany,
   mockTransaction,
   mockClaimUpsert,
   mockAppendAuditRow,
@@ -23,6 +24,7 @@ const {
   mockCoreFindUnique: vi.fn(),
   mockClaimFindMany: vi.fn(),
   mockUnitAdminFindUnique: vi.fn(),
+  mockPublicationFindMany: vi.fn(),
   mockTransaction: vi.fn(),
   mockClaimUpsert: vi.fn(),
   mockAppendAuditRow: vi.fn(),
@@ -41,6 +43,7 @@ vi.mock("@/lib/db", () => ({
       core: { findUnique: mockCoreFindUnique },
       coreClaim: { findMany: mockClaimFindMany },
       unitAdmin: { findUnique: mockUnitAdminFindUnique },
+      publication: { findMany: mockPublicationFindMany },
     },
     write: { $transaction: mockTransaction },
   },
@@ -84,6 +87,13 @@ beforeEach(() => {
   mockCoreFindUnique.mockResolvedValue({ id: "2" });
   mockUnitAdminFindUnique.mockResolvedValue(null); // role none; superuser session allows
   mockClaimFindMany.mockResolvedValue([]); // no prior active claims by default
+  // Every requested pmid "exists" by default — echoes back whatever was queried,
+  // so existing tests don't need to know about this check. Override per-test to
+  // exercise notFound.
+  mockPublicationFindMany.mockImplementation(
+    async ({ where }: { where: { pmid: { in: string[] } } }) =>
+      where.pmid.in.map((pmid) => ({ pmid })),
+  );
   mockClaimUpsert.mockResolvedValue({});
   mockAppendAuditRow.mockResolvedValue(undefined);
   mockWriteBack.mockResolvedValue({ ok: true, skipped: false });
@@ -228,6 +238,30 @@ describe("POST /api/edit/core-claim/bulk", () => {
     const res = await call();
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ error: "core_not_found" });
+  });
+
+  it("reports a pmid SPS hasn't ingested as notFound, and doesn't write it (manual PMID add)", async () => {
+    mockPublicationFindMany.mockResolvedValue([{ pmid: "1" }]); // "2" isn't in SPS
+    const res = await call({ pmids: ["1", "2"] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ written: 1, skipped: 0, notFound: ["2"] });
+    expect(mockClaimUpsert).toHaveBeenCalledTimes(1);
+    expect(mockClaimUpsert.mock.calls[0][0].where).toEqual({
+      pmid_coreId: { pmid: "1", coreId: "2" },
+    });
+    expect(mockPublicationFindMany).toHaveBeenCalledWith({
+      where: { pmid: { in: ["1", "2"] } },
+      select: { pmid: true },
+    });
+  });
+
+  it("writes nothing (no transaction) when every pmid is unknown to SPS", async () => {
+    mockPublicationFindMany.mockResolvedValue([]);
+    const res = await call({ pmids: ["1", "2"] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ written: 0, skipped: 0, notFound: ["1", "2"] });
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockWriteBack).not.toHaveBeenCalled();
   });
 
   it("returns 500 write_failed when the transaction throws", async () => {

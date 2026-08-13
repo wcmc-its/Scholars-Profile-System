@@ -4,7 +4,7 @@
  * effective-confirmed CoreClaim merge and the year-desc, pmid-desc ordering.
  */
 import { describe, expect, it } from "vitest";
-import { getCoreList, selectCorePublications } from "@/lib/api/cores";
+import { getCoreList, getCorePage, selectCorePublications } from "@/lib/api/cores";
 
 type Row = Parameters<typeof selectCorePublications>[0][number];
 
@@ -68,5 +68,45 @@ describe("getCoreList", () => {
     );
     expect(out.map((c) => c.id)).toEqual(["1", "2", "10"]); // numeric, not "1","10","2"
     expect(out.map((c) => c.hasConfirmedPublications)).toEqual([false, true, false]);
+  });
+});
+
+describe("getCorePage — manual PMID add", () => {
+  const reader = (
+    claims: Array<{ pmid: string; status: "claimed" | "rejected" }>,
+    publications: Array<Record<string, unknown>>,
+  ) =>
+    ({
+      core: { findUnique: async () => ({ id: "2", name: "Imaging", facility: "CBIC" }) },
+      publicationCore: { findMany: async () => [] }, // engine never scored anything for this core
+      coreClaim: { findMany: async () => claims },
+      publication: { findMany: async () => publications },
+    }) as unknown as Parameters<typeof getCorePage>[1];
+
+  it("shows a manually-claimed pmid with no engine publication_core row", async () => {
+    const page = await getCorePage(
+      "2",
+      reader(
+        [{ pmid: "99999999", status: "claimed" }],
+        [
+          {
+            pmid: "99999999",
+            title: "A paper the engine never scored",
+            journal: "Cell Reports",
+            year: 2019,
+            citationCount: 3,
+            doi: null,
+            pubmedUrl: "https://pubmed.ncbi.nlm.nih.gov/99999999/",
+          },
+        ],
+      ),
+    );
+    expect(page?.publications.map((p) => p.pmid)).toEqual(["99999999"]);
+    expect(page?.publications[0]?.title).toBe("A paper the engine never scored");
+  });
+
+  it("does not surface a manually-rejected pmid with no engine row (nothing to reject)", async () => {
+    const page = await getCorePage("2", reader([{ pmid: "99999999", status: "rejected" }], []));
+    expect(page?.publications).toEqual([]);
   });
 });

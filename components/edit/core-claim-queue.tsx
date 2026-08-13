@@ -9,12 +9,15 @@
  * have no dual org/paper view and a binary (confirm/reject) decision.
  */
 import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import {
   Check,
   CheckCheck,
   ChevronRight,
   Download,
   ExternalLink,
+  PenLine,
+  Plus,
   Quote,
   Repeat,
   Sparkles,
@@ -27,6 +30,30 @@ import type { CoreQueueRow, CoreReviewQueue, QueueScholar } from "@/lib/api/core
 import { sanitizePubmedHtml } from "@/lib/utils";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { toCsv } from "@/lib/csv";
+
+/** A pasted block of PMIDs, split on any run of whitespace/commas. Digit-only
+ *  tokens are candidates; anything else is reported back so a typo isn't
+ *  silently dropped. Pure — unit-tested without the network. */
+export function parsePmidBlock(text: string): { pmids: string[]; invalid: string[] } {
+  const tokens = text
+    .split(/[\s,]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+  const pmids: string[] = [];
+  const invalid: string[] = [];
+  const seen = new Set<string>();
+  for (const t of tokens) {
+    if (/^[1-9][0-9]*$/.test(t)) {
+      if (!seen.has(t)) {
+        seen.add(t);
+        pmids.push(t);
+      }
+    } else {
+      invalid.push(t);
+    }
+  }
+  return { pmids, invalid };
+}
 
 type Decision = "claimed" | "rejected";
 /** Which list the segmented control is showing (only when there's history). */
@@ -164,6 +191,14 @@ export function CoreClaimQueue({
   // Polite SR announcement of the last outcome — the success path is otherwise
   // silent (the card swaps in place with no focus move), mirroring coi-gap-card.
   const [announce, setAnnounce] = useState("");
+  // Manual PMID add: paste a block of known PMIDs and claim them directly,
+  // independent of the engine queue (POST /api/edit/core-claim/bulk — the same
+  // endpoint "Confirm N high-confidence" uses).
+  const [addOpen, setAddOpen] = useState(false);
+  const [addText, setAddText] = useState("");
+  const [addPending, setAddPending] = useState(false);
+  const [addResult, setAddResult] = useState<string | null>(null);
+  const router = useRouter();
 
   const markPending = (pmid: string) => setPending((s) => new Set(s).add(pmid));
   const clearPending = (pmid: string) =>
@@ -269,6 +304,46 @@ export function CoreClaimQueue({
         ? `Confirmed ${pmids.length} high-confidence publication${pmids.length === 1 ? "" : "s"}.`
         : "Bulk confirm could not be saved.",
     );
+  }
+
+  // Claim a pasted block of known PMIDs directly — the queue's own candidates
+  // list plays no part; a pmid the engine never scored (or never will) is
+  // claimed anyway, and the server-side existence check catches anything SPS
+  // hasn't ingested. Refresh (not local state) so the page re-fetches the newly
+  // manual-confirmed rows with their real title/journal/etc.
+  async function submitAddPmids() {
+    const { pmids, invalid } = parsePmidBlock(addText);
+    if (pmids.length === 0) {
+      setAddResult(
+        invalid.length > 0 ? `No valid PMIDs found (ignored: ${invalid.join(", ")}).` : "Paste at least one PMID.",
+      );
+      return;
+    }
+    setAddPending(true);
+    setAddResult(null);
+    const res = await fetch("/api/edit/core-claim/bulk", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ coreId: core.id, pmids, status: "claimed" }),
+    }).catch(() => null);
+    setAddPending(false);
+    if (!res?.ok) {
+      setAddResult("Could not save — try again.");
+      return;
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      written?: number;
+      skipped?: number;
+      notFound?: string[];
+    };
+    const parts = [`Claimed ${data.written ?? 0}.`];
+    if (data.skipped) parts.push(`Already claimed: ${data.skipped}.`);
+    if (data.notFound?.length) parts.push(`Not found in SPS: ${data.notFound.join(", ")}.`);
+    if (invalid.length > 0) parts.push(`Ignored: ${invalid.join(", ")}.`);
+    setAddResult(parts.join(" "));
+    setAnnounce(parts.join(" "));
+    setAddText("");
+    if ((data.written ?? 0) > 0) router.refresh();
   }
 
   // Walk back a confirmed row: a human claim soft-revokes ("revoked"); an engine
@@ -447,8 +522,65 @@ export function CoreClaimQueue({
               <Download className="size-4" aria-hidden /> Download CSV
             </button>
           ) : null}
+          <button
+            type="button"
+            onClick={() => {
+              setAddOpen((v) => !v);
+              setAddResult(null);
+            }}
+            aria-pressed={addOpen}
+            className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm"
+          >
+            <Plus className="size-4" aria-hidden /> Add PMIDs
+          </button>
         </div>
       </div>
+
+      {addOpen ? (
+        <div className="border-apollo-border mb-3 rounded-lg border bg-background p-3">
+          <label htmlFor="core-claim-add-pmids" className="text-foreground mb-1.5 block text-sm font-medium">
+            Claim known PMIDs directly
+          </label>
+          <p className="text-muted-foreground mb-2 text-xs">
+            One per line, or comma/space-separated. Independent of the review queue — use this for
+            a paper you know used this core that our signals never surfaced.
+          </p>
+          <textarea
+            id="core-claim-add-pmids"
+            value={addText}
+            onChange={(e) => setAddText(e.target.value)}
+            placeholder="39812345, 38209981&#10;37102244"
+            rows={3}
+            className="border-border-strong text-foreground w-full rounded-md border bg-background px-2.5 py-2 text-sm"
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              disabled={addPending || addText.trim().length === 0}
+              onClick={submitAddPmids}
+              className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[var(--color-accent-slate)] px-3 text-sm text-white disabled:opacity-50"
+            >
+              {addPending ? "Claiming…" : "Claim"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAddOpen(false);
+                setAddText("");
+                setAddResult(null);
+              }}
+              className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center rounded-full border bg-background px-3 text-sm"
+            >
+              Cancel
+            </button>
+          </div>
+          {addResult ? (
+            <p className="text-muted-foreground mt-2 text-xs" role="status">
+              {addResult}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {view === "review" ? (
         <>
@@ -614,6 +746,11 @@ function ConfirmedRow({
         <span className="text-foreground truncate">{row.title}</span>
         {row.year ? <span className="shrink-0 text-xs">· {row.year}</span> : null}
         <span className="shrink-0 text-xs tabular-nums">· PMID {row.pmid}</span>
+        {row.isManual ? (
+          <span className="text-muted-foreground inline-flex shrink-0 items-center gap-1 text-xs italic">
+            <PenLine className="size-3" aria-hidden /> Manually added
+          </span>
+        ) : null}
       </span>
       <span className="flex shrink-0 items-center gap-2">
         {error ? (

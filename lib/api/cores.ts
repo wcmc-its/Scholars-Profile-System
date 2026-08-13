@@ -60,7 +60,7 @@ export function selectCorePublications(
 }
 
 /** Minimal read surface so the loader stays injectable for integration tests. */
-type CoreReader = Pick<typeof db.read, "core" | "publicationCore" | "coreClaim">;
+type CoreReader = Pick<typeof db.read, "core" | "publicationCore" | "coreClaim" | "publication">;
 
 /**
  * Public per-core page data, or `null` when the core id is unknown. A core that
@@ -98,17 +98,38 @@ export async function getCorePage(
     loadActiveCoreClaimsByCore(coreId, client),
   ]);
 
+  // Manual PMID add: a CLAIMED core_claim with no matching publication_core row —
+  // a human attesting usage the engine never scored. selectCorePublications
+  // already resolves it to effective-confirmed via `claims`; it just needs a row
+  // to filter, joined straight to `publication` (the engine never projected one).
+  const projectedPmids = new Set(rows.map((r) => r.pmid));
+  const manualPmids = [...claims.entries()]
+    .filter(([pmid, status]) => status === "claimed" && !projectedPmids.has(pmid))
+    .map(([pmid]) => pmid);
+  const manualPubs =
+    manualPmids.length === 0
+      ? []
+      : await client.publication.findMany({
+          where: { pmid: { in: manualPmids } },
+          select: { pmid: true, title: true, journal: true, year: true, citationCount: true, doi: true, pubmedUrl: true },
+        });
+
   const publications = selectCorePublications(
-    rows.map((r) => ({
-      pmid: r.pmid,
-      status: r.status,
-      title: r.publication.title,
-      journal: r.publication.journal,
-      year: r.publication.year,
-      citationCount: r.publication.citationCount,
-      doi: r.publication.doi,
-      pubmedUrl: r.publication.pubmedUrl,
-    })),
+    [
+      ...rows.map((r) => ({
+        pmid: r.pmid,
+        status: r.status,
+        title: r.publication.title,
+        journal: r.publication.journal,
+        year: r.publication.year,
+        citationCount: r.publication.citationCount,
+        doi: r.publication.doi,
+        pubmedUrl: r.publication.pubmedUrl,
+      })),
+      // status is a placeholder — selectCorePublications resolves purely off the
+      // active claim (effectiveCoreStatus short-circuits before reading it).
+      ...manualPubs.map((p) => ({ ...p, status: "confirmed" })),
+    ],
     (pmid) => claims.get(pmid) ?? null,
   );
 

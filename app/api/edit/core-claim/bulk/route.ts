@@ -14,6 +14,12 @@
  * `revoked` is intentionally NOT a bulk action — undo is always a deliberate
  * single-row gesture, so it stays on the single-claim route.
  *
+ * A pmid SPS hasn't ingested is reported back as `notFound`, not written —
+ * this also doubles as the manual "claim a block of known PMIDs" entry point
+ * (the same endpoint the engine-sourced "Confirm N high-confidence" button
+ * uses; every pmid there already has a `publication` row, so this check is a
+ * no-op for that caller).
+ *
  * Authorization (403): owner OR curator of THIS core
  * (`UnitAdmin(entityType="core", entityId=coreId)`), or a Superuser — resolved
  * ONCE (the core dimension is identical for every pmid in the batch).
@@ -86,11 +92,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(403, authz.reason);
   }
 
-  // Prior ACTIVE claims for this core, keyed by pmid — drives idempotent skips
-  // (a pmid already at the target status needs no re-write) + audit before-values.
-  const active = await loadActiveCoreClaimsByCore(coreId, db.read);
-  const toWrite = targetPmids.filter((p) => active.get(p) !== status);
-  const skipped = targetPmids.length - toWrite.length;
+  // Prior ACTIVE claims for this core (idempotent-skip source), and which of the
+  // requested pmids SPS actually knows about. `core_claim` is FK-less (see route
+  // header) — nothing at the DB layer stops a claim for a pmid SPS never ingested,
+  // but every read path is publication_core-first, so such a claim would write
+  // successfully and then surface nowhere. Reject it here instead, explicitly, so
+  // a manual "paste a block of PMIDs" caller finds out immediately.
+  const [active, knownPublications] = await Promise.all([
+    loadActiveCoreClaimsByCore(coreId, db.read),
+    db.read.publication.findMany({
+      where: { pmid: { in: targetPmids } },
+      select: { pmid: true },
+    }),
+  ]);
+  const knownPmids = new Set(knownPublications.map((p) => p.pmid));
+  const notFound = targetPmids.filter((p) => !knownPmids.has(p));
+  const known = targetPmids.filter((p) => knownPmids.has(p));
+  const toWrite = known.filter((p) => active.get(p) !== status);
+  const skipped = known.length - toWrite.length;
 
   if (toWrite.length > 0) {
     const now = new Date();
@@ -151,6 +170,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     status,
     written: toWrite.length,
     skipped,
+    notFound,
     writebackOk,
   });
 }
