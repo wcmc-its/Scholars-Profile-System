@@ -225,7 +225,7 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
         />
       );
     case "roster":
-      // A center gets the rich #552 §6.1 table (Member/Type/Program/Start/End/
+      // A center gets the rich #552 §6.1 table (Member/Type/Program/Diseases/
       // Status); a manual division gets the simple add/remove list (PR-7c).
       if (ctx.unit.unitType === "center") {
         return (
@@ -234,6 +234,10 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
             members={ctx.roster ?? []}
             programs={ctx.programs ?? []}
             exportEnabled={isUnitRosterExportEnabled()}
+            // The canonical disease-code list for "+ Add a disease" — was
+            // already computed by `loadUnitEditContext` for the API route's
+            // own server-side validation but never reached this component.
+            diseaseOptions={ctx.diseaseOptions ?? []}
           />
         );
       }
