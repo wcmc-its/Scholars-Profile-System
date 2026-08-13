@@ -4,11 +4,13 @@ import {
   aggregateByDepartment,
   aggregateByFaculty,
   aggregateByRepository,
+  aggregateRepositoriesByTier,
   bucketDatasetLink,
   buildDataSharingCsv,
   buildDataSharingReport,
   buildShareRates,
   capDatasetLinkRows,
+  countConcerningDeposits,
   DATA_SHARING_EXPORT_CAP,
   depositedPmidSet,
   loadDatasetLinkRows,
@@ -17,6 +19,7 @@ import {
   pubAccessPmidSets,
   REGISTRY_DATA_TYPE,
   SHARE_RATE_YEAR_FLOOR,
+  tierPubSpectrum,
   type DataSharingReportClient,
   type DatasetLinkRow,
   type ShareRateCorpusRow,
@@ -111,8 +114,8 @@ describe("aggregateByRepository", () => {
     const geo = byRepo.find((r) => r.repository === "GEO")!;
     const dbgap = byRepo.find((r) => r.repository === "dbGaP")!;
     // GEO's d1 has two link rows (Alice + Bob) but is ONE dataset.
-    expect(geo).toEqual({ repository: "GEO", accessModel: "open", datasets: 1 });
-    expect(dbgap).toEqual({ repository: "dbGaP", accessModel: "controlled", datasets: 1 });
+    expect(geo).toEqual({ repository: "GEO", accessModel: "open", datasets: 1, tier: "US_OPEN" });
+    expect(dbgap).toEqual({ repository: "dbGaP", accessModel: "controlled", datasets: 1, tier: "US_CTRL" });
   });
 });
 
@@ -137,6 +140,217 @@ describe("aggregateByFaculty", () => {
       controlledDatasets: 0,
     });
   });
+
+  it("neither ROWS repository (GEO/dbGaP, both US-tier) counts as concerning or foreign-hosted", () => {
+    const byFaculty = aggregateByFaculty(ROWS);
+    expect(byFaculty.every((f) => f.concerningDeposits === 0 && f.foreignHostedDeposits === 0)).toBe(true);
+  });
+});
+
+/** One row per tier for the tier-aggregation tests below: a CONCERN row
+ *  (GSA-Human), a FOREIGN_OPEN row (Zenodo), a FOREIGN_CTRL row (EGA), a
+ *  US_OPEN row (GEO), a US_CTRL row (dbGaP), and a REGISTRY row
+ *  (ClinicalTrials.gov) — plus a second CONCERN row on the same cwid as the
+ *  first, to exercise the deposit-INSTANCE (not distinct-dataset) counting
+ *  rule. */
+const TIER_ROWS: DatasetLinkRow[] = [
+  {
+    cwid: "aaa1",
+    scholarName: "Alice A",
+    scholarSlug: "alice-a",
+    department: "Medicine",
+    datasetId: "d1",
+    repository: "GSA-Human",
+    accessModel: "open",
+    pmids: ["p1"],
+  },
+  {
+    cwid: "aaa1",
+    scholarName: "Alice A",
+    scholarSlug: "alice-a",
+    department: "Medicine",
+    // A second, distinct CONCERN-tier dataset for the same scholar — Alice's
+    // `concerningDeposits` must be 2 (two link rows), not 1 (one scholar).
+    datasetId: "d2",
+    repository: "GSA",
+    accessModel: "open",
+    pmids: ["p2"],
+  },
+  {
+    cwid: "bbb2",
+    scholarName: "Bob B",
+    scholarSlug: "bob-b",
+    department: "Surgery",
+    datasetId: "d3",
+    repository: "Zenodo",
+    accessModel: "open",
+    pmids: ["p3"],
+  },
+  {
+    cwid: "bbb2",
+    scholarName: "Bob B",
+    scholarSlug: "bob-b",
+    department: "Surgery",
+    datasetId: "d4",
+    repository: "EGA",
+    accessModel: "controlled",
+    pmids: ["p4"],
+  },
+  {
+    cwid: "ccc3",
+    scholarName: "Cara C",
+    scholarSlug: "cara-c",
+    department: "Pediatrics",
+    datasetId: "d5",
+    repository: "GEO",
+    accessModel: "open",
+    pmids: ["p5"],
+  },
+  {
+    cwid: "ccc3",
+    scholarName: "Cara C",
+    scholarSlug: "cara-c",
+    department: "Pediatrics",
+    datasetId: "d6",
+    repository: "dbGaP",
+    accessModel: "controlled",
+    pmids: ["p6"],
+  },
+  {
+    cwid: "ddd4",
+    scholarName: "Dan D",
+    scholarSlug: "dan-d",
+    department: "Neurology",
+    datasetId: "d7",
+    repository: "ClinicalTrials.gov",
+    accessModel: "open",
+    dataType: REGISTRY_DATA_TYPE,
+    pmids: ["p7"],
+  },
+];
+
+describe("aggregateRepositoriesByTier", () => {
+  it("groups aggregateByRepository's output by tier, summing datasets and listing repository names", () => {
+    const byRepo = aggregateByRepository(TIER_ROWS);
+    const byTier = aggregateRepositoriesByTier(byRepo);
+
+    const concern = byTier.find((t) => t.tier === "CONCERN")!;
+    expect(concern.datasets).toBe(2); // GSA-Human (1) + GSA (1)
+    expect(concern.repositories.sort()).toEqual(["GSA", "GSA-Human"]);
+
+    const foreignOpen = byTier.find((t) => t.tier === "FOREIGN_OPEN")!;
+    expect(foreignOpen).toEqual({ tier: "FOREIGN_OPEN", datasets: 1, repositories: ["Zenodo"] });
+
+    const foreignCtrl = byTier.find((t) => t.tier === "FOREIGN_CTRL")!;
+    expect(foreignCtrl).toEqual({ tier: "FOREIGN_CTRL", datasets: 1, repositories: ["EGA"] });
+  });
+
+  it("sorts by catalog.py's tier priority order (CONCERN first, REGISTRY last)", () => {
+    const byTier = aggregateRepositoriesByTier(aggregateByRepository(TIER_ROWS));
+    expect(byTier.map((t) => t.tier)).toEqual([
+      "CONCERN",
+      "FOREIGN_OPEN",
+      "FOREIGN_CTRL",
+      "US_OPEN",
+      "US_CTRL",
+      "REGISTRY",
+    ]);
+  });
+
+  it("empty input produces an empty array", () => {
+    expect(aggregateRepositoriesByTier([])).toEqual([]);
+  });
+});
+
+describe("tierPubSpectrum", () => {
+  it("counts distinct pubs per tier, including registry (unlike pubAccessPmidSets)", () => {
+    const spectrum = tierPubSpectrum(TIER_ROWS);
+    const byTier = new Map(spectrum.map((s) => [s.tier, s.pubs]));
+    expect(byTier.get("CONCERN")).toBe(2); // p1, p2
+    expect(byTier.get("FOREIGN_OPEN")).toBe(1); // p3
+    expect(byTier.get("FOREIGN_CTRL")).toBe(1); // p4
+    expect(byTier.get("US_OPEN")).toBe(1); // p5
+    expect(byTier.get("US_CTRL")).toBe(1); // p6
+    expect(byTier.get("REGISTRY")).toBe(1); // p7 — registry rows count here
+  });
+
+  it("a pmid deposited in repositories of two different tiers lands in both tier buckets", () => {
+    const rows: DatasetLinkRow[] = [
+      { cwid: "s1", scholarName: "S", scholarSlug: "s", department: null, datasetId: "d1", repository: "GSA-Human", accessModel: "open", pmids: ["p1"] },
+      { cwid: "s1", scholarName: "S", scholarSlug: "s", department: null, datasetId: "d2", repository: "GEO", accessModel: "open", pmids: ["p1"] },
+    ];
+    const byTier = new Map(tierPubSpectrum(rows).map((s) => [s.tier, s.pubs]));
+    expect(byTier.get("CONCERN")).toBe(1);
+    expect(byTier.get("US_OPEN")).toBe(1);
+  });
+
+  it("skips rows with no pmids", () => {
+    const rows: DatasetLinkRow[] = [
+      { cwid: "s1", scholarName: "S", scholarSlug: "s", department: null, datasetId: "d1", repository: "GSA-Human", accessModel: "open" },
+    ];
+    expect(tierPubSpectrum(rows)).toEqual([]);
+  });
+
+  it("empty input produces an empty array", () => {
+    expect(tierPubSpectrum([])).toEqual([]);
+  });
+});
+
+describe("countConcerningDeposits", () => {
+  it("counts deposit INSTANCES (rows), not distinct datasets — CONCERN and FOREIGN_* both count toward concerningDeposits", () => {
+    const totals = countConcerningDeposits(TIER_ROWS);
+    // CONCERN: 2 rows (d1, d2). FOREIGN_OPEN: 1 (d3). FOREIGN_CTRL: 1 (d4).
+    // US_OPEN/US_CTRL/REGISTRY don't count.
+    expect(totals.concerningDeposits).toBe(4);
+  });
+
+  it("foreignHostedDeposits excludes CONCERN — it's its own bucket, not 'foreign-hosted' in this taxonomy", () => {
+    const totals = countConcerningDeposits(TIER_ROWS);
+    // Only the two FOREIGN_* rows (d3 Zenodo, d4 EGA) — the two CONCERN rows
+    // (d1, d2) do NOT also count here.
+    expect(totals.foreignHostedDeposits).toBe(2);
+  });
+
+  it("a single scholar with two CONCERN-tier link rows counts 2, not 1 (deposit-instance grain)", () => {
+    const rows = TIER_ROWS.filter((r) => r.cwid === "aaa1");
+    expect(countConcerningDeposits(rows)).toEqual({ concerningDeposits: 2, foreignHostedDeposits: 0 });
+  });
+
+  it("US_OPEN/US_CTRL/REGISTRY rows never count toward either total", () => {
+    const rows = TIER_ROWS.filter((r) => ["GEO", "dbGaP", "ClinicalTrials.gov"].includes(r.repository));
+    expect(countConcerningDeposits(rows)).toEqual({ concerningDeposits: 0, foreignHostedDeposits: 0 });
+  });
+
+  it("empty input produces zeros", () => {
+    expect(countConcerningDeposits([])).toEqual({ concerningDeposits: 0, foreignHostedDeposits: 0 });
+  });
+});
+
+describe("aggregateByFaculty — concerning / foreign-hosted (risk tier)", () => {
+  it("wires countConcerningDeposits' per-row rule into the per-faculty row, at deposit-instance grain", () => {
+    const byFaculty = aggregateByFaculty(TIER_ROWS);
+    const alice = byFaculty.find((f) => f.cwid === "aaa1")!; // 2 CONCERN rows
+    const bob = byFaculty.find((f) => f.cwid === "bbb2")!; // 1 FOREIGN_OPEN + 1 FOREIGN_CTRL
+    const cara = byFaculty.find((f) => f.cwid === "ccc3")!; // US_OPEN + US_CTRL only
+    const dan = byFaculty.find((f) => f.cwid === "ddd4")!; // REGISTRY only
+
+    expect(alice).toMatchObject({ concerningDeposits: 2, foreignHostedDeposits: 0 });
+    expect(bob).toMatchObject({ concerningDeposits: 2, foreignHostedDeposits: 2 });
+    expect(cara).toMatchObject({ concerningDeposits: 0, foreignHostedDeposits: 0 });
+    expect(dan).toMatchObject({ concerningDeposits: 0, foreignHostedDeposits: 0 });
+  });
+});
+
+describe("buildDataSharingReport — risk tier (this PR)", () => {
+  it("wires byRepositoryTier, pubsByTier, and overall.concerningDepositInstances", () => {
+    const report = buildDataSharingReport(TIER_ROWS);
+    expect(report.overall.concerningDepositInstances).toBe(4); // same total as countConcerningDeposits
+    expect(report.byRepositoryTier.find((t) => t.tier === "CONCERN")?.datasets).toBe(2);
+    expect(report.pubsByTier.find((t) => t.tier === "CONCERN")?.pubs).toBe(2);
+
+    const alice = report.byFaculty.find((f) => f.cwid === "aaa1")!;
+    expect(alice).toMatchObject({ concerningDeposits: 2, foreignHostedDeposits: 0 });
+  });
 });
 
 describe("buildDataSharingReport", () => {
@@ -148,6 +362,8 @@ describe("buildDataSharingReport", () => {
     // `openPubs`/`controlledPubs` are 0 here too — none of ROWS carries a
     // `pmids` field. `nihFundedPubs`/`notNihFundedPubs` are zeroed since no
     // `fundingSplit` argument was supplied either (same backward-compat path).
+    // `concerningDepositInstances` is 0 too — ROWS is GEO (US_OPEN) + dbGaP
+    // (US_CTRL) only, neither a concerning tier.
     expect(report.overall).toEqual({
       datasets: 2,
       faculty: 2,
@@ -158,6 +374,7 @@ describe("buildDataSharingReport", () => {
       controlledPubs: 0,
       nihFundedPubs: 0,
       notNihFundedPubs: 0,
+      concerningDepositInstances: 0,
     });
   });
 
@@ -173,9 +390,12 @@ describe("buildDataSharingReport", () => {
       controlledPubs: 0,
       nihFundedPubs: 0,
       notNihFundedPubs: 0,
+      concerningDepositInstances: 0,
     });
     expect(report.byDepartment).toEqual([]);
     expect(report.byRepository).toEqual([]);
+    expect(report.byRepositoryTier).toEqual([]);
+    expect(report.pubsByTier).toEqual([]);
     expect(report.byFaculty).toEqual([]);
   });
 });
@@ -459,11 +679,13 @@ describe("buildDataSharingReport — share rate (second argument)", () => {
       repository: "GEO",
       accessModel: "open",
       datasets: 1,
+      tier: "US_OPEN",
     });
     expect(report.byRepository.find((r) => r.repository === "dbGaP")).toEqual({
       repository: "dbGaP",
       accessModel: "controlled",
       datasets: 1,
+      tier: "US_CTRL",
     });
     // Rate fields present (required on `overall`, optional-but-populated on
     // the rollup rows) but zeroed — no corpus was supplied.

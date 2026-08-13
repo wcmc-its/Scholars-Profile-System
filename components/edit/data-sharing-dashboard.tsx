@@ -23,6 +23,17 @@
  * department table (§2), Open / Controlled on the faculty table (§3), and a
  * new §4 funding lens (NIH-funded vs. not-NIH-funded pub counts). See
  * `lib/api/data-sharing-report.ts`'s header for the exact bucketing rule.
+ *
+ * S-Index v2, risk tier (this PR, stacked on the above): a "Repositories by
+ * risk tier" table and a Tier column on the existing repository table in
+ * §3, a tier spectrum row on §1 Rollup, and Concerning/Foreign-hosted
+ * columns on the §4 faculty table. Tier is host jurisdiction × access model,
+ * a pure function of `repository` (`@/lib/repository-tier`, a partial port
+ * of `catalog.py`). SPEC "Amended 08-13": "concerning" here is TIER-DERIVED
+ * ONLY — country-of-concern host or foreign-hosted repository. It does NOT
+ * include sensitive-data-type detection (needs raw MeSH per citing pub, cut
+ * this session) — every place this flag is visible says so, don't soften or
+ * drop that caveat.
  */
 import Link from "next/link";
 
@@ -51,6 +62,27 @@ function AccessChip({ accessModel }: { accessModel: string | null }) {
       {accessModel === "open" ? "Open" : "Controlled"}
     </Badge>
   );
+}
+
+/** Short display label per `tierOf` value (`@/lib/repository-tier`). Falls
+ *  through to the bare tier string for `'UNKNOWN'` or any future tier this
+ *  table hasn't been updated for. */
+const TIER_LABELS: Record<string, string> = {
+  CONCERN: "Country of concern",
+  FOREIGN_OPEN: "Foreign-hosted, open",
+  FOREIGN_CTRL: "Foreign-hosted, controlled",
+  US_OPEN: "US-hosted, open",
+  US_CTRL: "US-hosted, controlled",
+  REGISTRY: "Registry (not microdata)",
+  UNKNOWN: "Unclassified",
+};
+
+/** `variant` mirrors severity: `destructive` for CONCERN, `secondary` for
+ *  the foreign-hosted tiers, `outline` otherwise — same visual language as
+ *  `AccessChip`, no new color system introduced. */
+function TierChip({ tier }: { tier: string }) {
+  const variant = tier === "CONCERN" ? "destructive" : tier === "FOREIGN_OPEN" || tier === "FOREIGN_CTRL" ? "secondary" : "outline";
+  return <Badge variant={variant}>{TIER_LABELS[tier] ?? tier}</Badge>;
 }
 
 function RollupSection({ report }: { report: DataSharingReport }) {
@@ -133,6 +165,23 @@ function RollupSection({ report }: { report: DataSharingReport }) {
         denominator with a zero numerator, by construction, not as a finding about their sharing
         behavior.
       </p>
+
+      <div className={`${sectionClass} mt-4 p-4`}>
+        <div className="text-sm font-medium">Publications by repository risk tier</div>
+        <p className="text-muted-foreground mt-1 text-xs">
+          Distinct publications with a detected deposit in a repository of each tier —
+          tier-based only (host jurisdiction × access model); a publication with deposits in
+          repositories of different tiers is counted in each.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-x-6 gap-y-3">
+          {report.pubsByTier.map((t) => (
+            <div key={t.tier} className="flex items-baseline gap-1.5">
+              <span className="text-lg font-semibold">{t.pubs.toLocaleString()}</span>
+              <span className="text-muted-foreground text-xs">{TIER_LABELS[t.tier] ?? t.tier}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }
@@ -176,11 +225,41 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
         Audience: library / RDM team — targeting DMS training and repository support.
       </p>
 
+      <h3 className="text-sm font-semibold">Repositories by risk tier</h3>
+      <p className="text-muted-foreground mt-1 text-xs">
+        Tier-based only — country-of-concern host or foreign-hosted repository; does not
+        include sensitive data-type detection.
+      </p>
+      <div className={sectionClass}>
+        <table className="w-full text-sm">
+          <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
+            <tr className="border-apollo-border border-b">
+              <th className={thClass}>Tier</th>
+              <th className={thClass}>Repositories</th>
+              <th className={`${thClass} text-right`}>Datasets</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.byRepositoryTier.map((t) => (
+              <tr key={t.tier} className="border-apollo-border border-b">
+                <td className={tdClass}>
+                  <TierChip tier={t.tier} />
+                </td>
+                <td className={tdClass}>{t.repositories.join(", ")}</td>
+                <td className={`${tdClass} text-right`}>{t.datasets.toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h3 className="mt-6 text-sm font-semibold">By repository</h3>
       <div className={sectionClass}>
         <table className="w-full text-sm">
           <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
             <tr className="border-apollo-border border-b">
               <th className={thClass}>Repository</th>
+              <th className={thClass}>Tier</th>
               <th className={thClass}>Access</th>
               <th className={`${thClass} text-right`}>Datasets</th>
             </tr>
@@ -189,6 +268,9 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
             {report.byRepository.map((r) => (
               <tr key={r.repository} className="border-apollo-border border-b">
                 <td className={`${tdClass} font-medium`}>{r.repository}</td>
+                <td className={tdClass}>
+                  <TierChip tier={r.tier} />
+                </td>
                 <td className={tdClass}>
                   <AccessChip accessModel={r.accessModel} />
                 </td>
@@ -240,12 +322,24 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
   );
 }
 
+/** Fixed caption text for the Concerning/Foreign-hosted columns — matches
+ *  the SPEC's "Amended 08-13" caveat framing exactly. Don't soften or drop
+ *  this; it's the boundary between the tier-only flag actually shipped here
+ *  and the fuller 3-way "concerning" definition the SPEC describes but
+ *  defers (open-deposit-of-sensitive-category needs raw MeSH per citing pub,
+ *  cut this session). */
+const CONCERNING_CAVEAT =
+  "Tier-based only — country-of-concern host or foreign-hosted repository; does not include sensitive data-type detection.";
+
 function FacultySection({ report }: { report: DataSharingReport }) {
   return (
     <section id="faculty" className="scroll-mt-4 mt-10">
       <h2 className="text-base font-semibold">4 · Named faculty</h2>
       <p className="text-muted-foreground mt-1 text-sm">
         Per-individual counts — same access as sections 1–3 above, no separate review.
+      </p>
+      <p className="text-muted-foreground mt-2 text-xs">
+        <strong>Concerning / Foreign-hosted:</strong> {CONCERNING_CAVEAT}
       </p>
 
       <div className={sectionClass}>
@@ -257,6 +351,12 @@ function FacultySection({ report }: { report: DataSharingReport }) {
               <th className={`${thClass} text-right`}>Datasets</th>
               <th className={`${thClass} text-right`}>Open</th>
               <th className={`${thClass} text-right`}>Controlled</th>
+              <th className={`${thClass} text-right`} title={CONCERNING_CAVEAT}>
+                Concerning
+              </th>
+              <th className={`${thClass} text-right`} title={CONCERNING_CAVEAT}>
+                Foreign-hosted
+              </th>
               <th className={`${thClass} text-right`}>Share rate</th>
             </tr>
           </thead>
@@ -272,6 +372,8 @@ function FacultySection({ report }: { report: DataSharingReport }) {
                 <td className={`${tdClass} text-right`}>{f.datasets.toLocaleString()}</td>
                 <td className={`${tdClass} text-right`}>{f.openDatasets.toLocaleString()}</td>
                 <td className={`${tdClass} text-right`}>{f.controlledDatasets.toLocaleString()}</td>
+                <td className={`${tdClass} text-right`}>{f.concerningDeposits.toLocaleString()}</td>
+                <td className={`${tdClass} text-right`}>{f.foreignHostedDeposits.toLocaleString()}</td>
                 <td className={`${tdClass} text-right`}>
                   {formatShareRate(f.shareRateNumerator, f.shareRateDenominator)}
                 </td>
@@ -280,6 +382,13 @@ function FacultySection({ report }: { report: DataSharingReport }) {
           </tbody>
         </table>
       </div>
+
+      <p className="text-muted-foreground mt-2 text-xs">
+        <strong>{report.overall.concerningDepositInstances.toLocaleString()}</strong> deposit
+        instance{report.overall.concerningDepositInstances === 1 ? "" : "s"} institution-wide flagged
+        concerning by tier (same tier-only definition as the columns above) — not a distinct-dataset
+        or distinct-publication count.
+      </p>
     </section>
   );
 }

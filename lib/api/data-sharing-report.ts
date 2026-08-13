@@ -38,10 +38,28 @@
  * `nihFundedPubs`/`notNihFundedPubs` on `overall`, via `loadFundingSplit`
  * joining `GrantPublication`/`Grant.nihIc` over the same non-registry
  * deposited-pmid population the access split uses.
+ *
+ * S-Index v2, risk tier (this PR, stacked on the above): `tierOf` (`@/lib/
+ * repository-tier`, a partial port of `catalog.py`'s `R` list — tier only)
+ * classifies every `repository` by host jurisdiction × access model.
+ * `byRepositoryTier` groups `byRepository` by tier; `pubsByTier` flattens
+ * `pmids` per row keyed by tier (same Set-per-bucket, no-reconciliation
+ * pattern as `pubAccessPmidSets`). `NamedFacultyRow.concerningDeposits` /
+ * `.foreignHostedDeposits` and `overall.concerningDepositInstances` are
+ * DEPOSIT-INSTANCE (row) counts, not distinct-dataset counts — see
+ * `countConcerningDeposits`'s doc comment.
+ *
+ * SCOPE (SPEC "Amended 08-13", read before touching any of the above):
+ * "concerning" here is TIER-DERIVED ONLY — CONCERN (country-of-concern host)
+ * or FOREIGN_OPEN/FOREIGN_CTRL (foreign-hosted). It does NOT include
+ * `catalog.py`'s open-deposit-of-sensitive-category branch, which needs raw
+ * MeSH per citing publication and was cut this session. Never present this
+ * flag as the full 3-way "concerning" definition in code or on the page.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { loadContributorSuppressions } from "@/lib/api/manual-layer";
 import { toCsv } from "@/lib/csv";
+import { tierOf } from "@/lib/repository-tier";
 
 /** The Prisma surface this loader needs — kept narrow for unit tests. */
 export type DataSharingReportClient = Pick<
@@ -121,6 +139,11 @@ export type RepositoryBreakdown = {
    *  data model carries it per-deposit, not per-repository. */
   accessModel: string | null;
   datasets: number;
+  /** `tierOf(repository)` — `'CONCERN' | 'FOREIGN_OPEN' | 'FOREIGN_CTRL' |
+   *  'US_OPEN' | 'US_CTRL' | 'REGISTRY' | 'UNKNOWN'`. Pure function of
+   *  `repository`, computed here rather than stored — see `@/lib/
+   *  repository-tier`'s header for the tier-only SPEC-boundary note. */
+  tier: string;
 };
 
 export type NamedFacultyRow = {
@@ -137,6 +160,18 @@ export type NamedFacultyRow = {
    *  producer. */
   openDatasets: number;
   controlledDatasets: number;
+  /** Deposit-INSTANCE (row) counts, not distinct-dataset or distinct-pub
+   *  counts — same grain as `links` above, not `datasets`. `concerningDeposits`
+   *  counts rows whose `tierOf(repository)` is `'CONCERN'` OR
+   *  `'FOREIGN_OPEN'`/`'FOREIGN_CTRL'`; `foreignHostedDeposits` counts only
+   *  the `FOREIGN_*` subset (`CONCERN` is its own, more severe bucket — not
+   *  "foreign-hosted" in this taxonomy, so it does NOT also count toward
+   *  `foreignHostedDeposits`). Tier-derived only — see
+   *  `countConcerningDeposits`'s doc comment and the module header's SPEC
+   *  "Amended 08-13" scope note. Required, same rationale as `openDatasets`/
+   *  `controlledDatasets`: `aggregateByFaculty` is the only producer. */
+  concerningDeposits: number;
+  foreignHostedDeposits: number;
   /** Share-rate totals for this scholar — same optional/merge shape as
    *  `DepartmentRollup`'s fields, see that comment. */
   shareRateDenominator?: number;
@@ -172,6 +207,43 @@ export function bucketDatasetLink(row: Pick<DatasetLinkRow, "dataType" | "access
  *  pipeline could have scanned". */
 export type ShareRateCorpusRow = { pmid: string; cwid: string; department: string | null };
 
+/** `catalog.py`'s tier priority order, most to least severe — the sort order
+ *  `aggregateRepositoriesByTier` and `pubsByTier` both use. `'UNKNOWN'`
+ *  (a repository not in `@/lib/repository-tier`'s port) sorts last, after
+ *  `REGISTRY`. */
+export const TIER_ORDER = ["CONCERN", "FOREIGN_OPEN", "FOREIGN_CTRL", "US_OPEN", "US_CTRL", "REGISTRY", "UNKNOWN"] as const;
+
+/** The tier-only "concerning" set per the SPEC's "Amended 08-13" note —
+ *  CONCERN (country-of-concern host) plus both foreign-hosted tiers. Shared
+ *  by `countConcerningDeposits` (per-faculty and whole-corpus) so the
+ *  definition can't drift between the two call sites. */
+const CONCERNING_TIERS = new Set(["CONCERN", "FOREIGN_OPEN", "FOREIGN_CTRL"]);
+/** The foreign-hosted subset of `CONCERNING_TIERS` — deliberately excludes
+ *  `CONCERN`, which is its own more severe bucket, not "foreign-hosted" in
+ *  this taxonomy (see `NamedFacultyRow.foreignHostedDeposits`'s comment). */
+const FOREIGN_HOSTED_TIERS = new Set(["FOREIGN_OPEN", "FOREIGN_CTRL"]);
+
+/** Repositories grouped by risk tier — "Repositories by risk tier" on the
+ *  dashboard. Groups `aggregateByRepository`'s existing per-repository
+ *  output by `tier`, summing `datasets` and collecting repository names;
+ *  does not re-scan `DatasetLinkRow`s. Sorted by `TIER_ORDER`. */
+export type RepositoryTierRollup = {
+  tier: string;
+  datasets: number;
+  repositories: string[];
+};
+
+/** One tier's distinct-publication count — the Rollup's tier "spectrum".
+ *  Built the same way `pubAccessPmidSets` builds its open/controlled sets:
+ *  one `Set<pmid>` per bucket (here, per tier), flattened from every row's
+ *  `pmids`. A pmid can land in more than one tier (deposits of the same
+ *  publication in repositories of different tiers) — real, not reconciled
+ *  away, same spirit as every other multi-bucket caveat in this file. */
+export type TierPubSpectrumRow = {
+  tier: string;
+  pubs: number;
+};
+
 export type DataSharingReport = {
   overall: {
     datasets: number;
@@ -196,9 +268,20 @@ export type DataSharingReport = {
      *  non-federal with this field. */
     nihFundedPubs: number;
     notNihFundedPubs: number;
+    /** Whole-corpus deposit-INSTANCE (row) count, tier-only definition — the
+     *  one Compliance-view number buildable without the COC-coauthor pull
+     *  (SPEC "Amended 08-13"). Same `countConcerningDeposits` rule as
+     *  `NamedFacultyRow.concerningDeposits`, summed over every row instead
+     *  of grouped by faculty. NOT a distinct-dataset or distinct-pub count —
+     *  see that field's comment. */
+    concerningDepositInstances: number;
   };
   byDepartment: DepartmentRollup[];
   byRepository: RepositoryBreakdown[];
+  /** `byRepository` grouped by tier — see `RepositoryTierRollup`. */
+  byRepositoryTier: RepositoryTierRollup[];
+  /** Distinct-publication count per tier — see `TierPubSpectrumRow`. */
+  pubsByTier: TierPubSpectrumRow[];
   byFaculty: NamedFacultyRow[];
 };
 
@@ -350,7 +433,9 @@ export function aggregateByDepartment(rows: readonly DatasetLinkRow[]): Departme
 
 /** Distinct-dataset count per repository. `accessModel` is read off whichever
  *  row is seen first for that repository — see `RepositoryBreakdown`'s note on
- *  why this is per-deposit data being read as if it were per-repository. */
+ *  why this is per-deposit data being read as if it were per-repository.
+ *  `tier` is `tierOf(repository)` — a pure function of the repository name,
+ *  so unlike `accessModel` there's no first-seen ambiguity to resolve. */
 export function aggregateByRepository(rows: readonly DatasetLinkRow[]): RepositoryBreakdown[] {
   const byRepo = new Map<string, { datasets: Set<string>; accessModel: string | null }>();
   for (const r of rows) {
@@ -360,8 +445,73 @@ export function aggregateByRepository(rows: readonly DatasetLinkRow[]): Reposito
     byRepo.set(r.repository, bucket);
   }
   return [...byRepo.entries()]
-    .map(([repository, b]) => ({ repository, accessModel: b.accessModel, datasets: b.datasets.size }))
+    .map(([repository, b]) => ({ repository, accessModel: b.accessModel, datasets: b.datasets.size, tier: tierOf(repository) }))
     .sort((a, b) => b.datasets - a.datasets);
+}
+
+/** Groups `aggregateByRepository`'s output by tier — "Repositories by risk
+ *  tier". Sums each tier's `datasets` (same double-count caveat as
+ *  `aggregateByDepartment`: a dataset deposited to two repositories in the
+ *  same tier is not expected here since `RepositoryBreakdown` is already
+ *  one row per repository, but a dataset multi-deposited across repositories
+ *  in the SAME tier would still sum, not dedup, across those repositories —
+ *  no worse than `byRepository` itself). Sorted by `TIER_ORDER`. */
+export function aggregateRepositoriesByTier(byRepository: readonly RepositoryBreakdown[]): RepositoryTierRollup[] {
+  const byTier = new Map<string, { datasets: number; repositories: string[] }>();
+  for (const r of byRepository) {
+    const bucket = byTier.get(r.tier) ?? { datasets: 0, repositories: [] };
+    bucket.datasets += r.datasets;
+    bucket.repositories.push(r.repository);
+    byTier.set(r.tier, bucket);
+  }
+  return [...byTier.entries()]
+    .map(([tier, b]) => ({ tier, datasets: b.datasets, repositories: b.repositories }))
+    .sort((a, b) => TIER_ORDER.indexOf(a.tier as (typeof TIER_ORDER)[number]) - TIER_ORDER.indexOf(b.tier as (typeof TIER_ORDER)[number]));
+}
+
+/** Distinct-publication count per tier — the Rollup's tier "spectrum". Same
+ *  Set-per-bucket, flatten-`pmids` pattern as `pubAccessPmidSets`, keyed on
+ *  `tierOf(r.repository)` instead of `bucketDatasetLink`. Registry rows are
+ *  NOT excluded here (unlike `pubAccessPmidSets`) — a registry repository has
+ *  its own tier (`REGISTRY`) and belongs in its own spectrum bucket, same as
+ *  every other tier. A pmid can land in multiple tiers; not reconciled away,
+ *  see `TierPubSpectrumRow`'s comment. */
+export function tierPubSpectrum(rows: readonly DatasetLinkRow[]): TierPubSpectrumRow[] {
+  const byTier = new Map<string, Set<string>>();
+  for (const r of rows) {
+    if (!r.pmids || r.pmids.length === 0) continue;
+    const tier = tierOf(r.repository);
+    const set = byTier.get(tier) ?? new Set<string>();
+    for (const pmid of r.pmids) set.add(pmid);
+    byTier.set(tier, set);
+  }
+  return [...byTier.entries()]
+    .map(([tier, pmids]) => ({ tier, pubs: pmids.size }))
+    .sort((a, b) => TIER_ORDER.indexOf(a.tier as (typeof TIER_ORDER)[number]) - TIER_ORDER.indexOf(b.tier as (typeof TIER_ORDER)[number]));
+}
+
+/** Deposit-INSTANCE (row) counts for the tier-only "concerning" flag — same
+ *  grain as `links`/`NamedFacultyRow.concerningDeposits`, NOT distinct
+ *  datasets or distinct pubs: a scholar with three link rows to the same
+ *  CONCERN-tier dataset (e.g. three separate `pmids` cite it) counts 3, same
+ *  reasoning as why `links` itself is a row count. Shared by
+ *  `aggregateByFaculty` (per-faculty) and `buildDataSharingReport`
+ *  (whole-corpus, via a single-bucket call) so the two can't drift.
+ *
+ *  Tier-only per the SPEC's "Amended 08-13" note — see this module's header
+ *  and `@/lib/repository-tier`'s. Does NOT include the open-deposit-of-
+ *  sensitive-category branch (needs raw MeSH per citing pub, cut this
+ *  session). */
+export function countConcerningDeposits(rows: readonly DatasetLinkRow[]): { concerningDeposits: number; foreignHostedDeposits: number } {
+  let concerningDeposits = 0;
+  let foreignHostedDeposits = 0;
+  for (const r of rows) {
+    const tier = tierOf(r.repository);
+    if (!CONCERNING_TIERS.has(tier)) continue;
+    concerningDeposits++;
+    if (FOREIGN_HOSTED_TIERS.has(tier)) foreignHostedDeposits++;
+  }
+  return { concerningDeposits, foreignHostedDeposits };
 }
 
 /** Distinct-dataset / link counts per named individual — same shape as the
@@ -380,6 +530,8 @@ export function aggregateByFaculty(rows: readonly DatasetLinkRow[]): NamedFacult
       links: number;
       openDatasets: Set<string>;
       controlledDatasets: Set<string>;
+      concerningDeposits: number;
+      foreignHostedDeposits: number;
     }
   >();
   for (const r of rows) {
@@ -391,6 +543,8 @@ export function aggregateByFaculty(rows: readonly DatasetLinkRow[]): NamedFacult
       links: 0,
       openDatasets: new Set<string>(),
       controlledDatasets: new Set<string>(),
+      concerningDeposits: 0,
+      foreignHostedDeposits: 0,
     };
     bucket.datasets.add(r.datasetId);
     bucket.links++;
@@ -400,6 +554,11 @@ export function aggregateByFaculty(rows: readonly DatasetLinkRow[]): NamedFacult
     // it just doesn't land in either access column.
     if (kind === "open") bucket.openDatasets.add(r.datasetId);
     else if (kind === "controlled") bucket.controlledDatasets.add(r.datasetId);
+    const tier = tierOf(r.repository);
+    if (CONCERNING_TIERS.has(tier)) {
+      bucket.concerningDeposits++;
+      if (FOREIGN_HOSTED_TIERS.has(tier)) bucket.foreignHostedDeposits++;
+    }
     byCwid.set(r.cwid, bucket);
   }
   return [...byCwid.entries()]
@@ -412,6 +571,8 @@ export function aggregateByFaculty(rows: readonly DatasetLinkRow[]): NamedFacult
       links: b.links,
       openDatasets: b.openDatasets.size,
       controlledDatasets: b.controlledDatasets.size,
+      concerningDeposits: b.concerningDeposits,
+      foreignHostedDeposits: b.foreignHostedDeposits,
     }))
     .sort((a, b) => b.datasets - a.datasets);
 }
@@ -633,6 +794,8 @@ export function buildDataSharingReport(
     };
   });
 
+  const byRepository = aggregateByRepository(rows);
+
   return {
     overall: {
       datasets: new Set(rows.map((r) => r.datasetId)).size,
@@ -644,9 +807,12 @@ export function buildDataSharingReport(
       controlledPubs: controlledPmids.size,
       nihFundedPubs: fundingSplit.nihFundedPubs,
       notNihFundedPubs: fundingSplit.notNihFundedPubs,
+      concerningDepositInstances: countConcerningDeposits(rows).concerningDeposits,
     },
     byDepartment,
-    byRepository: aggregateByRepository(rows),
+    byRepository,
+    byRepositoryTier: aggregateRepositoriesByTier(byRepository),
+    pubsByTier: tierPubSpectrum(rows),
     byFaculty,
   };
 }
