@@ -6,13 +6,14 @@
  *
  * RED while lib/api/browse.ts does not exist; turns GREEN in Plan 02.
  */
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const {
   mockDepartmentFindMany,
   mockScholarFindMany,
   mockDivisionFindMany,
   mockCenterFindMany,
+  mockCoreFindMany,
   mockTopicFindMany,
   mockQueryRawUnsafe,
 } = vi.hoisted(() => ({
@@ -20,6 +21,7 @@ const {
   mockScholarFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
   mockCenterFindMany: vi.fn(),
+  mockCoreFindMany: vi.fn(),
   mockTopicFindMany: vi.fn(),
   mockQueryRawUnsafe: vi.fn(),
 }));
@@ -30,6 +32,7 @@ vi.mock("@/lib/db", () => ({
     scholar: { findMany: mockScholarFindMany },
     division: { findMany: mockDivisionFindMany },
     center: { findMany: mockCenterFindMany },
+    core: { findMany: mockCoreFindMany },
     topic: { findMany: mockTopicFindMany },
     $queryRawUnsafe: mockQueryRawUnsafe,
   },
@@ -39,6 +42,7 @@ import {
   getDepartmentsList,
   getAZBuckets,
   getBrowseData,
+  getCoresList,
 } from "@/lib/api/browse";
 
 describe("getDepartmentsList", () => {
@@ -47,6 +51,7 @@ describe("getDepartmentsList", () => {
     mockScholarFindMany.mockReset();
     mockDivisionFindMany.mockReset().mockResolvedValue([]);
     mockCenterFindMany.mockReset().mockResolvedValue([]);
+    mockCoreFindMany.mockReset().mockResolvedValue([]);
     mockTopicFindMany.mockReset().mockResolvedValue([]);
     mockQueryRawUnsafe.mockReset().mockResolvedValue([]);
   });
@@ -122,6 +127,7 @@ describe("getAZBuckets", () => {
     mockScholarFindMany.mockReset();
     mockDivisionFindMany.mockReset().mockResolvedValue([]);
     mockCenterFindMany.mockReset().mockResolvedValue([]);
+    mockCoreFindMany.mockReset().mockResolvedValue([]);
     mockTopicFindMany.mockReset().mockResolvedValue([]);
     mockQueryRawUnsafe.mockReset().mockResolvedValue([]);
   });
@@ -165,25 +171,85 @@ describe("getAZBuckets", () => {
   });
 });
 
+describe("getCoresList", () => {
+  beforeEach(() => {
+    mockCoreFindMany.mockReset().mockResolvedValue([]);
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("returns [] without querying the DB when CORE_PAGES is off", async () => {
+    // CORE_PAGES unstubbed here => isCorePagesEnabled() reads the real
+    // (unset) process.env, i.e. the default-off posture.
+    const result = await getCoresList();
+    expect(result).toEqual([]);
+    expect(mockCoreFindMany).not.toHaveBeenCalled();
+  });
+
+  it("selects only visible:true cores when CORE_PAGES is on", async () => {
+    vi.stubEnv("CORE_PAGES", "on");
+    mockCoreFindMany.mockResolvedValue([
+      { id: "2", name: "Biomedical Imaging", facility: "Citigroup Biomedical Imaging Center", description: null },
+    ]);
+    const result = await getCoresList();
+    expect(result).toEqual([
+      { id: "2", name: "Biomedical Imaging", facility: "Citigroup Biomedical Imaging Center", description: null },
+    ]);
+    expect(mockCoreFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { visible: true } }),
+    );
+  });
+
+  it("does NOT filter on confirmed-publication-count (directory, not evidence surface)", async () => {
+    vi.stubEnv("CORE_PAGES", "on");
+    mockCoreFindMany.mockResolvedValue([
+      { id: "3", name: "Flow Cytometry", facility: null, description: null },
+    ]);
+    const result = await getCoresList();
+    expect(result).toHaveLength(1);
+    const [call] = mockCoreFindMany.mock.calls[0];
+    expect(call.where).toEqual({ visible: true });
+    expect(call.select).not.toHaveProperty("publications");
+  });
+});
+
 describe("getBrowseData", () => {
   beforeEach(() => {
     mockDepartmentFindMany.mockReset();
     mockScholarFindMany.mockReset();
     mockDivisionFindMany.mockReset().mockResolvedValue([]);
     mockCenterFindMany.mockReset().mockResolvedValue([]);
+    mockCoreFindMany.mockReset().mockResolvedValue([]);
     mockTopicFindMany.mockReset().mockResolvedValue([]);
     mockQueryRawUnsafe.mockReset().mockResolvedValue([]);
   });
+  afterEach(() => vi.unstubAllEnvs());
 
-  it("returns composite { departments, centers }", async () => {
+  it("returns composite { departments, centers, cores }", async () => {
     mockDepartmentFindMany.mockResolvedValue([]);
     mockScholarFindMany.mockResolvedValue([]);
     const data = await getBrowseData();
     expect(data).toHaveProperty("departments");
     expect(data).toHaveProperty("centers");
+    expect(data).toHaveProperty("cores");
     expect(data).not.toHaveProperty("departmentsByCategory");
     expect(data).not.toHaveProperty("azBuckets");
     expect(data.centers).toEqual([]);
+    // CORE_PAGES unstubbed (default off) => cores is [] without a DB call.
+    expect(data.cores).toEqual([]);
+    expect(mockCoreFindMany).not.toHaveBeenCalled();
     expect(Array.isArray(data.departments)).toBe(true);
+  });
+
+  it("includes cores from getCoresList when CORE_PAGES is on", async () => {
+    vi.stubEnv("CORE_PAGES", "on");
+    mockDepartmentFindMany.mockResolvedValue([]);
+    mockScholarFindMany.mockResolvedValue([]);
+    mockCoreFindMany.mockResolvedValue([
+      { id: "2", name: "Biomedical Imaging", facility: null, description: null },
+    ]);
+    const data = await getBrowseData();
+    expect(data.cores).toEqual([
+      { id: "2", name: "Biomedical Imaging", facility: null, description: null },
+    ]);
   });
 });

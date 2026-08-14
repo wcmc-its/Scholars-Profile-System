@@ -5,17 +5,25 @@
  *   - getDepartmentsList():   one BrowseDepartment per dept, with category,
  *                             division chip-row, and top topic chips.
  *   - getCentersList():       one BrowseCenter per row in `center`.
+ *   - getCoresList():         one BrowseCore per publicly-visible row in
+ *                             `core` (cores-as-org-units P4). Gated on
+ *                             isCorePagesEnabled() AND Core.visible — NOT on
+ *                             confirmed-publication-count (that's /cores'
+ *                             stricter, evidence-surface gate; a browse
+ *                             listing is a directory, per
+ *                             core-as-org-unit-plan.md P4).
  *   - getAZBuckets():         A-Z directory buckets, capped at 10 names per
  *                             letter. Consumed by /search empty-People state
  *                             (relocated from /browse per docs/browse-vs-search.md).
- *   - getBrowseData():        composite for /browse — runs departments and
- *                             centers in parallel.
+ *   - getBrowseData():        composite for /browse — runs departments,
+ *                             centers, and cores in parallel.
  *
  * All callers are Server Components / ISR pages. Public-data only — no auth.
  */
 import { prisma } from "@/lib/db";
 import { countActiveCenterMembersByCode } from "@/lib/api/center-member-count";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import type {
   DepartmentCategory,
@@ -58,6 +66,13 @@ export type BrowseCenter = {
   sortOrder: number;
 };
 
+export type BrowseCore = {
+  id: string;
+  name: string;
+  facility: string | null;
+  description: string | null;
+};
+
 export type AZScholar = {
   /** "{Last}, {First}" — last token of preferredName treated as surname. */
   name: string;
@@ -74,6 +89,7 @@ export type AZBucket = {
 export type BrowseData = {
   departments: BrowseDepartment[];
   centers: BrowseCenter[];
+  cores: BrowseCore[];
 };
 
 type DeptRow = {
@@ -285,6 +301,23 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
   }));
 }
 
+/**
+ * Cores-as-org-units P4 (core-as-org-unit-plan.md). Publicly-visible cores for
+ * the /browse peer section, gated on isCorePagesEnabled() AND Core.visible —
+ * deliberately NOT also filtered to hasConfirmedPublications like /cores'
+ * index: a browse listing is a directory, not an evidence surface, and
+ * getCorePage already renders a working (if empty) page for a zero-pub core.
+ * Off (flag disabled) returns [] so BrowsePage never needs its own flag check.
+ */
+export async function getCoresList(): Promise<BrowseCore[]> {
+  if (!isCorePagesEnabled()) return [];
+  return prisma.core.findMany({
+    where: { visible: true },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, facility: true, description: true },
+  });
+}
+
 export async function getAZBuckets(): Promise<AZBucket[]> {
   const scholars = (await prisma.scholar.findMany({
     where: { deletedAt: null, status: "active" },
@@ -329,9 +362,10 @@ export async function getAZBuckets(): Promise<AZBucket[]> {
 }
 
 export async function getBrowseData(): Promise<BrowseData> {
-  const [departments, centers] = await Promise.all([
+  const [departments, centers, cores] = await Promise.all([
     getDepartmentsList(),
     getCentersList(),
+    getCoresList(),
   ]);
-  return { departments, centers };
+  return { departments, centers, cores };
 }

@@ -1,5 +1,5 @@
 /**
- * /browse anchor strip — two in-page anchors + one cross-link.
+ * /browse anchor strip — three in-page anchors + one cross-link.
  * Server Component, no JS scroll-spy. The A–Z anchor used to live here;
  * surname-finding now lives on /search's empty People tab per
  * docs/browse-vs-search.md. "Research areas →" targets /#browse-all-research-areas
@@ -21,6 +21,9 @@ export function BrowseAnchorStrip() {
         </a>
         <a href="#centers" className={anchorClass}>
           Centers &amp; Institutes
+        </a>
+        <a href="#cores" className={anchorClass}>
+          Core Facilities
         </a>
       </nav>
       <div className="mt-2 text-right">
