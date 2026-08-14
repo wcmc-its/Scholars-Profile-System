@@ -99,7 +99,7 @@ only want the self-check.
 
 **PubMed Central coverage**
 - Only the **PMC Open Access subset** has machine-readable full text. Of the since-2020 corpus, ~63% are in PMC and ~98% of those returned full text — so **~37% of the corpus (not in PMC) is scanned only via the sparse structured `<DataBankList>`**, undercounting deposition by non-PMC pubs.
-- No raw XML is cached → a rerun depends on live Europe PMC / NCBI availability and current content. PMC adds and edits articles over time, so counts drift between runs. **Fix:** cache fetched XML keyed by PMCID.
+- **Implemented:** full-text XML is cached on disk at `~/Dropbox/Projects/Bulk Data Rule/data/xml_cache/`, keyed by PMCID, never-expiring. Delete the directory (or individual files) to force a re-fetch of specific articles.
 
 **Extraction**
 - Data Availability statements are found by section-heading heuristics; non-standard headings are missed.
@@ -119,7 +119,7 @@ only want the self-check.
 
 ## Making it audit-grade (next steps)
 
-1. **Snapshot inputs:** persist the reciterdb result set and cache fetched full-text XML per run date → exact reproducibility independent of live APIs.
+1. **Snapshot inputs:** persist the reciterdb result set and cache fetched full-text XML per run date → exact reproducibility independent of live APIs. **Implemented** via `snapshot.py`: `extract_databanks.py`'s corpus pull and `attribute.py`'s WCM-authorship (`ppl`) join are cached to `snapshot_corpus.csv`/`snapshot_ppl.csv` in the output dir on first run and reused on every subsequent run; set `SNAPSHOT_REFRESH=1` to force a fresh live pull (e.g. deliberately picking up corpus growth). Switching `PILOT_DEPARTMENT` scope requires deleting these two CSVs or setting `SNAPSHOT_REFRESH=1` — same operator responsibility as this pipeline's other scope-blind intermediate CSVs.
 2. **Version the taxonomy:** changelog on `catalog.py` / `taxonomy.py` so classification changes are traceable.
 3. **Validation harness:** hand-label a random sample → report measured precision/recall instead of assumed accuracy.
 4. **If an LLM pass is added** (the prose-only tail): `temperature=0`, pinned model version, cache every response, and route LLM output through the deterministic classifier (extract-then-verify) so LLM non-determinism stays out of the final numbers.

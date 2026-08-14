@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 from sqlalchemy import create_engine, text
-import catalog, scan2
+import catalog, scan2, snapshot
 
 API = os.environ.get("PUBMED_API_KEY", "")
 # ponytail: a durable, non-git location, not the script's own directory - a full run's CSVs are
@@ -37,8 +37,7 @@ JOIN identity i ON i.cwid = a.personIdentifier
 WHERE {where}
   AND r.publicationTypeCanonical = 'Academic Article'
 """
-with engine.connect() as conn:
-    pubs = pd.read_sql(text(q), conn, params=params)
+pubs = snapshot.snapshot_query(engine, q, f"{OUT}/snapshot_corpus.csv", params)
 pubs = pubs[pubs['pmid'].notna()].copy()
 pubs['pmid'] = pubs['pmid'].astype(int).astype(str)
 yr = dict(zip(pubs['pmid'], pubs['yr']))

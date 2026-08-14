@@ -11,6 +11,7 @@ import catalog, datacite
 # Durable, non-git output location - see extract_databanks.py's OUT comment.
 OUT = os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule/data")
 os.makedirs(OUT, exist_ok=True)
+os.makedirs(os.path.join(OUT, "xml_cache"), exist_ok=True)
 API=os.environ.get("PUBMED_API_KEY","")
 CANON = {rec[0]: dict(zip(["canonical","org","country","access","bucket","tier","note"],
                          (rec[0],rec[3],rec[4],rec[5],rec[6],rec[7],rec[8]))) for rec in catalog.R}
@@ -73,14 +74,22 @@ DEP = re.compile(r"deposit|submitted to|were made available|are available (in|at
 USE = re.compile(r"download|obtained from|retrieved from|acquired from|we (used|obtained|retrieved|downloaded)|collected from|sourced from|accessed (from|via|on|at)|were obtained", re.I)
 
 EFETCH="https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
-def ft(pmcid):
-    pid=pmcid if pmcid.upper().startswith("PMC") else "PMC"+pmcid
+def _fetch_live(pid):
     try:
         return urllib.request.urlopen(urllib.request.Request(f"https://www.ebi.ac.uk/europepmc/webservices/rest/{pid}/fullTextXML",headers={"User-Agent":"x"}),timeout=60).read()
     except Exception: pass
     d={"db":"pmc","id":re.sub(r"\D","",pid),"rettype":"xml"};  d.update({"api_key":API} if API else {})
     try: return urllib.request.urlopen(urllib.request.Request(EFETCH,data=urllib.parse.urlencode(d).encode()),timeout=60).read()
     except Exception: return None
+def ft(pmcid):
+    pid=pmcid if pmcid.upper().startswith("PMC") else "PMC"+pmcid
+    cache_path=os.path.join(OUT,"xml_cache",f"{pid}.xml")
+    if os.path.exists(cache_path):
+        with open(cache_path,"rb") as f: return f.read()
+    xml=_fetch_live(pid)
+    if xml:
+        with open(cache_path,"wb") as f: f.write(xml)
+    return xml
 def das_text(root):
     out=[]
     for sec in root.iter():

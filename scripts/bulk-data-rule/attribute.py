@@ -9,7 +9,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from datetime import date
-import catalog, taxonomy
+import catalog, taxonomy, snapshot
 
 # Durable, non-git output location - see extract_databanks.py's OUT comment. (Was PROJ, declared
 # here but never used - the other 3 pipeline scripts wrote to their own script directory instead,
@@ -53,10 +53,11 @@ print(f"{len(dep)} deposits across {len(pmids)} pubs", flush=True)
 
 # ---------- 2. people (WCM full-time first/last authors) ----------
 inlist=",".join(str(p) for p in pmids)
-ppl=pd.read_sql(text(f"""SELECT a.pmid, i.cwid, i.givenName firstName, i.surname lastName,
+ppl_query=f"""SELECT a.pmid, i.cwid, i.givenName firstName, i.surname lastName,
     i.primaryAcademicDepartment dept, i.primaryAcademicDivision division, i.primaryTitle title, a.authorPosition position
     FROM analysis_summary_author a JOIN identity i ON i.cwid=a.personIdentifier
-    WHERE a.pmid IN ({inlist}) AND i.fullTimeFaculty='yes' AND a.authorPosition IN ('first','last')"""), engine)
+    WHERE a.pmid IN ({inlist}) AND i.fullTimeFaculty='yes' AND a.authorPosition IN ('first','last')"""
+ppl=snapshot.snapshot_query(engine, ppl_query, f"{OUT}/snapshot_ppl.csv")
 ppl['pmid']=ppl['pmid'].astype(int)
 
 # ---------- 3. article metadata from DB ----------
