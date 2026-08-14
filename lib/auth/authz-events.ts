@@ -24,11 +24,12 @@ export interface AuthzDenial {
   /** Short stable reason, e.g. `not_superuser`, `not_self`, `not_owner`. */
   reason: string;
   /**
-   * Org-unit target type when the denial concerns a department/division/center
-   * (#540 / ADR-005 Amendment 1 § A1.5 #1). Optional — scholar/publication
-   * denials keep emitting only `target_cwid`.
+   * Org-unit target type when the denial concerns a department/division/
+   * center/core (#540 / ADR-005 Amendment 1 § A1.5 #1; core widened by
+   * cores-as-org-units P2). Optional — scholar/publication denials keep
+   * emitting only `target_cwid`.
    */
-  target_entity_type?: "department" | "division" | "center";
+  target_entity_type?: "department" | "division" | "center" | "core";
   /** Unit `code` when `target_entity_type` is set. */
   target_entity_id?: string;
   /**

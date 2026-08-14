@@ -70,6 +70,7 @@ const KIND_LABEL: Record<AdminRosterGrant["entityType"], string> = {
   department: "Department",
   division: "Division",
   center: "Center",
+  core: "Core",
 };
 
 const PROVENANCE_BADGE_BASE =
@@ -95,6 +96,16 @@ export type AdministratorsRosterProps = {
   /** Whether the viewer can launch "View as" (impersonation flag on + superuser, #729).
    *  Optional + default-off: the button is a launcher only; the route enforces all policy. */
   canImpersonate?: boolean;
+  /**
+   * Every catalog core, regardless of whether it already has a grant on this
+   * roster (cores-as-org-units P2). Unlike department/division/center, a core
+   * with zero existing grants would otherwise be unselectable in
+   * `AddAdministratorDialog` — `unitOptions` merges this in so a core's
+   * *subsequent* owner/curator can be granted through the UI (the *first*
+   * grant is still provisioned by direct DB insert). Optional + default-empty
+   * so existing callers/tests are unaffected.
+   */
+  allCores?: ReadonlyArray<{ id: string; name: string }>;
 };
 
 /** A person's enriched display fields, in the resolved precedence order. */
@@ -113,6 +124,7 @@ export function AdministratorsRoster({
   actorCwid,
   nameResolutionDegraded,
   canImpersonate = false,
+  allCores = [],
 }: AdministratorsRosterProps) {
   // Directory rows keyed by CWID; empty until (and unless) the fetch succeeds.
   const [directory, setDirectory] = React.useState<Map<string, DirectoryPerson>>(new Map());
@@ -331,7 +343,7 @@ export function AdministratorsRoster({
         <p className="text-muted-foreground text-sm" data-testid="administrators-scope-caption">
           {scopeCaption}
         </p>
-        <AddAdministratorDialog units={unitOptions(roster)} onGranted={handleGranted} />
+        <AddAdministratorDialog units={unitOptions(roster, allCores)} onGranted={handleGranted} />
       </div>
 
       {showDegradedNote && (
@@ -517,21 +529,47 @@ export function AdministratorsRoster({
   );
 }
 
-/** Distinct units across the roster's grants, as Add-dialog options. */
-function unitOptions(roster: ReadonlyArray<AdminRosterEntry>): AddAdminUnit[] {
+/**
+ * Distinct units across the roster's grants, as Add-dialog options. For
+ * department/division/center this stays grants-only — today a unit of that
+ * kind with zero existing grants can't be selected here, and fixing that
+ * needs a real shared "all units" abstraction `/browse` doesn't have yet
+ * (out of scope for cores-as-org-units P2). Cores are the one kind scoped
+ * with a canonical list already (`getCoreList`), so `allCores` is seeded
+ * first — every catalog core is always selectable, even with zero grants —
+ * then the roster's own grants are layered on top so a core that DOES have a
+ * grant keeps its real grant-derived data (the two de-dupe on the same map
+ * key, `core:{id}`).
+ */
+function unitOptions(
+  roster: ReadonlyArray<AdminRosterEntry>,
+  allCores: ReadonlyArray<{ id: string; name: string }>,
+): AddAdminUnit[] {
   const seen = new Map<string, AddAdminUnit>();
+  for (const c of allCores) {
+    const value = `core:${c.id}`;
+    seen.set(value, {
+      value,
+      entityType: "core",
+      entityId: c.id,
+      unitName: c.name,
+      label: `${c.name} · Core`,
+    });
+  }
+  // Unconditional set (not "set if absent"): a roster grant's real data
+  // should win over an `allCores` synthesized placeholder for the same core,
+  // and re-setting the same unit from a second person's grant is a harmless
+  // no-op (identical unitName/entityType/entityId either way).
   for (const e of roster) {
     for (const g of e.grants) {
       const value = `${g.entityType}:${g.entityId}`;
-      if (!seen.has(value)) {
-        seen.set(value, {
-          value,
-          entityType: g.entityType,
-          entityId: g.entityId,
-          unitName: g.unitName,
-          label: `${g.unitName} · ${KIND_LABEL[g.entityType]}`,
-        });
-      }
+      seen.set(value, {
+        value,
+        entityType: g.entityType,
+        entityId: g.entityId,
+        unitName: g.unitName,
+        label: `${g.unitName} · ${KIND_LABEL[g.entityType]}`,
+      });
     }
   }
   return [...seen.values()];

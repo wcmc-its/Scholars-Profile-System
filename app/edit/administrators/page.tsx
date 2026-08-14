@@ -19,6 +19,7 @@ import { ConsoleShell } from "@/components/edit/console-shell";
 import { AdministratorsRoster } from "@/components/edit/administrators-roster";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { loadUnitAdministratorRoster } from "@/lib/api/administrators-roster";
+import { getCoreList } from "@/lib/api/cores";
 import { getEffectiveEditSession, impersonationEnabled } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import {
@@ -69,10 +70,11 @@ export default async function AdministratorsPage() {
     }
   }
 
-  const { entries, nameResolutionDegraded } = await loadUnitAdministratorRoster(
-    { scope },
-    db.read,
-  );
+  // Parallelized: the roster load and the core catalog are independent reads.
+  const [{ entries, nameResolutionDegraded }, allCores] = await Promise.all([
+    loadUnitAdministratorRoster({ scope }, db.read),
+    getCoreList(db.read),
+  ]);
 
   // The "URL requests" admin tab + pending-count pill; `null` when the
   // slug-request feature is off (hides the tab).
@@ -114,6 +116,7 @@ export default async function AdministratorsPage() {
           actorCwid={session.cwid}
           nameResolutionDegraded={nameResolutionDegraded}
           canImpersonate={impersonationEnabled() && session.isSuperuser}
+          allCores={allCores}
         />
     </ConsoleShell>
   );

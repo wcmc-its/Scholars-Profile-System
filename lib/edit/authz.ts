@@ -533,7 +533,11 @@ export function logEditDenial(params: {
   targetCwid: string;
   path: string;
   reason: string;
-  targetEntityType?: UnitKind;
+  /** `UnitKind` plus `"core"` — cores are a flat, non-cascading unit kind
+   *  (cores-as-org-units P2) that never appears in `UnitRef`/`UnitKind`
+   *  itself (no dept→division-style cascade), but the grant route logs
+   *  denials for core grants too. */
+  targetEntityType?: UnitKind | "core";
   targetEntityId?: string;
   role?: "owner" | "curator";
 }): void {

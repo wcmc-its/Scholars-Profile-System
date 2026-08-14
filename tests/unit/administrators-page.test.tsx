@@ -11,6 +11,7 @@ const {
   mockIsTabEnabled,
   mockLoadOwnerScope,
   mockLoadRoster,
+  mockGetCoreList,
   mockRedirect,
   mockRoster,
   mockForbidden,
@@ -19,6 +20,7 @@ const {
   mockIsTabEnabled: vi.fn(),
   mockLoadOwnerScope: vi.fn(),
   mockLoadRoster: vi.fn(),
+  mockGetCoreList: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
     throw new Error(`__REDIRECT__:${url}`);
   }),
@@ -38,6 +40,8 @@ vi.mock("@/lib/edit/administrators", () => ({
 vi.mock("@/lib/api/administrators-roster", () => ({
   loadUnitAdministratorRoster: mockLoadRoster,
 }));
+// cores-as-org-units P2 — the page's new `allCores` prop source.
+vi.mock("@/lib/api/cores", () => ({ getCoreList: mockGetCoreList }));
 vi.mock("@/components/edit/administrators-roster", () => ({ AdministratorsRoster: mockRoster }));
 vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: mockForbidden }));
 vi.mock("@/components/edit/admin-subnav", () => ({ AdminSubnav: () => null }));
@@ -63,6 +67,7 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
   mockIsTabEnabled.mockReturnValue(true);
   mockLoadRoster.mockResolvedValue({ entries: [], nameResolutionDegraded: false });
+  mockGetCoreList.mockResolvedValue([]);
 });
 
 describe("/edit/administrators — authorization", () => {
@@ -132,5 +137,20 @@ describe("/edit/administrators — authorization", () => {
     expect(mockLoadOwnerScope).not.toHaveBeenCalled();
     const [arg] = mockLoadRoster.mock.calls[0];
     expect(arg).toEqual({ scope: undefined });
+  });
+
+  it("passes the core catalog through as allCores (cores-as-org-units P2)", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockGetCoreList.mockResolvedValue([
+      { id: "2", name: "Biomedical Imaging", facility: null, hasConfirmedPublications: false },
+    ]);
+    const result = asEl(await AdministratorsPage());
+    const children = result.props.children as unknown[];
+    const rosterEl = children.map(asEl).find((c) => c.type === mockRoster);
+    expect(rosterEl).toBeTruthy();
+    expect((rosterEl!.props as { allCores: unknown }).allCores).toEqual([
+      { id: "2", name: "Biomedical Imaging", facility: null, hasConfirmedPublications: false },
+    ]);
+    expect(mockGetCoreList).toHaveBeenCalledOnce();
   });
 });
