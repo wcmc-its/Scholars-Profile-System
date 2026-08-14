@@ -32,6 +32,7 @@ export type ConsoleTabProps = {
   methodsTab: number | null;
   dataQualityTab: number | null;
   dataSharingTab: number | null;
+  reportsTab: boolean;
   viewerIsDeveloper: boolean;
 };
 
@@ -51,6 +52,12 @@ export function deriveConsoleTabs(session: EditSession): ConsoleTabProps {
     methodsTab: isMethodsTabVisible(session) ? 0 : null,
     dataQualityTab: isDataQualityTabVisible(session) ? 0 : null,
     dataSharingTab: isDataSharingDashboardTabVisible(session) ? 0 : null,
+    // Reports IA redesign (2026-08-14) — comms_steward has the same reports
+    // authz as a superuser (`loadReportsContext`'s gate), so they get the tab
+    // everywhere, mirroring `unitsTab`. A plain unit Owner/Curator does not —
+    // that needs an actual "do they have a reportable unit" read, which stays
+    // a per-page OR (`ConsoleShell`'s `reportsTab` prop), same as `profilesTab`.
+    reportsTab: session.isSuperuser || session.isCommsSteward,
     viewerIsDeveloper: session.isDeveloper === true,
   };
 }

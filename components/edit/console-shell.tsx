@@ -26,6 +26,7 @@ export function ConsoleShell({
   dataQualityTab,
   administratorsTab,
   usageTab,
+  reportsTab,
   children,
 }: {
   active: AdminSubnavActive;
@@ -49,6 +50,10 @@ export function ConsoleShell({
   dataQualityTab?: number | null;
   administratorsTab?: number | null;
   usageTab?: boolean;
+  /** Show the "Reports" tab to a non-superuser unit admin with ≥1 reportable
+   *  unit — same per-page-input treatment as `usageTab` (Reports IA redesign,
+   *  2026-08-14). */
+  reportsTab?: boolean;
   children: React.ReactNode;
 }) {
   const tabs = deriveConsoleTabs(session);
@@ -56,6 +61,7 @@ export function ConsoleShell({
   if (unitsTab !== undefined) tabs.unitsTab = unitsTab;
   if (dataQualityTab !== undefined) tabs.dataQualityTab = dataQualityTab;
   if (administratorsTab !== undefined) tabs.administratorsTab = administratorsTab;
+  if (reportsTab !== undefined) tabs.reportsTab = tabs.reportsTab || reportsTab;
   return (
     <div className="bg-apollo-page min-h-screen">
       {/* Skip link — first focusable element, jumps past the tab strip to the page. */}
