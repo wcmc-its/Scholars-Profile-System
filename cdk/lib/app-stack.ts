@@ -145,6 +145,13 @@ export class AppStack extends Stack {
    * collision; EtlStack pulls from here (#454).
    */
   public readonly etlEcrRepository: ecr.Repository;
+  /**
+   * ECR repository for the `scripts/bulk-data-rule/` pipeline image. Python
+   * (pandas/sqlalchemy/pymysql), not the app's or ETL's Node/`tsx` runtime,
+   * so it gets its own repo rather than riding either (containerization
+   * design, 2026-08-14).
+   */
+  public readonly bulkDataRuleEcrRepository: ecr.Repository;
   /** ECS Fargate cluster the app + migration tasks run in. */
   public readonly ecsCluster: ecs.Cluster;
   /** ECS service for the SPS application. */
@@ -436,6 +443,30 @@ export class AppStack extends Stack {
     // pulls from here; the deploy workflow builds `--target etl` and pushes.
     this.etlEcrRepository = new ecr.Repository(this, "EtlEcrRepository", {
       repositoryName: `scholars-etl-${env}`,
+      imageScanOnPush: true,
+      lifecycleRules: [
+        {
+          description: "Keep the last 30 tagged images",
+          tagStatus: ecr.TagStatus.TAGGED,
+          tagPatternList: ["*"],
+          maxImageCount: 30,
+        },
+        {
+          description: "Expire untagged images after 7 days",
+          tagStatus: ecr.TagStatus.UNTAGGED,
+          maxImageAge: Duration.days(7),
+        },
+      ],
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
+    // Dedicated bulk-data-rule pipeline image repo (containerization design,
+    // 2026-08-14). scripts/bulk-data-rule/ is a standalone Python pipeline --
+    // no runtime overlap with the app or the tsx-based ETL image, so it gets
+    // its own repo rather than a seat on either. Same scan + lifecycle
+    // posture as the other two.
+    this.bulkDataRuleEcrRepository = new ecr.Repository(this, "BulkDataRuleEcrRepository", {
+      repositoryName: `scholars-bulk-data-rule-${env}`,
       imageScanOnPush: true,
       lifecycleRules: [
         {
@@ -3646,6 +3677,10 @@ export class AppStack extends Stack {
     new CfnOutput(this, "EtlEcrRepoUri", {
       value: this.etlEcrRepository.repositoryUri,
       description: "SPS ETL batch-image ECR repository URI (#454)",
+    });
+    new CfnOutput(this, "BulkDataRuleEcrRepoUri", {
+      value: this.bulkDataRuleEcrRepository.repositoryUri,
+      description: "SPS bulk-data-rule pipeline image ECR repository URI (containerization design, 2026-08-14)",
     });
     new CfnOutput(this, "EcsClusterName", {
       value: this.ecsCluster.clusterName,

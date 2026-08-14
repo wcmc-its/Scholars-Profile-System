@@ -242,9 +242,10 @@ describe("AppStack", () => {
     });
 
     describe("Resource counts (the plan's § Acceptance criteria)", () => {
-      it("creates exactly two ECR repositories (app + ETL), one ECS cluster, five task definitions, one ECS service", () => {
-        // App image repo + the dedicated ETL batch-image repo (#454).
-        template.resourceCountIs("AWS::ECR::Repository", 2);
+      it("creates exactly three ECR repositories (app + ETL + bulk-data-rule), one ECS cluster, five task definitions, one ECS service", () => {
+        // App image repo + the dedicated ETL batch-image repo (#454) + the
+        // bulk-data-rule pipeline image repo (containerization design, 2026-08-14).
+        template.resourceCountIs("AWS::ECR::Repository", 3);
         template.resourceCountIs("AWS::ECS::Cluster", 1);
         // app + migrate + db-bootstrap (#493) + verify-grants (ADR-009) +
         // search-eval canary (#1444).

@@ -50,6 +50,7 @@ function buildObservabilityStack(
     vpc: network.vpc,
     ecsCluster: app.ecsCluster,
     etlEcrRepository: app.etlEcrRepository,
+    bulkDataRuleEcrRepository: app.bulkDataRuleEcrRepository,
   });
   const stack = new SpsObservabilityStack(
     fixture.app,

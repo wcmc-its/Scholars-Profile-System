@@ -95,6 +95,7 @@ const etlStack = new EtlStack(app, `Sps-Etl-${envConfig.envName}`, {
   vpc: networkStack.vpc,
   ecsCluster: appStack.ecsCluster,
   etlEcrRepository: appStack.etlEcrRepository,
+  bulkDataRuleEcrRepository: appStack.bulkDataRuleEcrRepository,
   description: `SPS ETL orchestration — Step Functions state machines + alarms, ${envConfig.envName} (ADR-008 B08+B20).`,
 });
 
