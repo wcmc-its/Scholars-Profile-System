@@ -8,7 +8,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 import catalog, datacite
 
-OUT = os.path.dirname(os.path.abspath(__file__)); API=os.environ.get("PUBMED_API_KEY","")
+# Durable, non-git output location - see extract_databanks.py's OUT comment.
+OUT = os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule/data")
+os.makedirs(OUT, exist_ok=True)
+API=os.environ.get("PUBMED_API_KEY","")
 CANON = {rec[0]: dict(zip(["canonical","org","country","access","bucket","tier","note"],
                          (rec[0],rec[3],rec[4],rec[5],rec[6],rec[7],rec[8]))) for rec in catalog.R}
 DOI_REPOS = {"Zenodo","figshare","Dryad","OSF","Mendeley Data","Harvard Dataverse"}

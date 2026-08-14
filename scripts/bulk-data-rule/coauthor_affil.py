@@ -5,7 +5,10 @@ import os, time, re, urllib.request, urllib.parse
 import xml.etree.ElementTree as ET
 import pandas as pd
 
-OUT=os.path.dirname(os.path.abspath(__file__)); API=os.environ.get("PUBMED_API_KEY","")
+# Durable, non-git output location - see extract_databanks.py's OUT comment.
+OUT=os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule/data")
+os.makedirs(OUT, exist_ok=True)
+API=os.environ.get("PUBMED_API_KEY","")
 pmids=sorted(pd.read_csv(f"{OUT}/attributed_deposits.csv")['pmid'].dropna().astype(int).unique().tolist())
 print(f"{len(pmids)} depositing pubs -> all-author affiliations", flush=True)
 

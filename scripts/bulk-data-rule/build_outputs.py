@@ -9,7 +9,10 @@ from openpyxl.utils import get_column_letter
 from datetime import date
 import catalog
 
-OUT=os.path.dirname(os.path.abspath(__file__)); PROJ=os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule"); Y=2020
+# Durable, non-git output location - see extract_databanks.py's OUT comment.
+OUT=os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule/data")
+os.makedirs(OUT, exist_ok=True)
+PROJ=os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule"); Y=2020
 
 def cls(n):
     r=catalog.classify(name=str(n)); return pd.Series([r['canonical'],r['tier'],r['country'],r['access'],r['bucket']])

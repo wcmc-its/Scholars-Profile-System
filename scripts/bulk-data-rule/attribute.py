@@ -11,7 +11,12 @@ from openpyxl.utils import get_column_letter
 from datetime import date
 import catalog, taxonomy
 
-OUT=os.path.dirname(os.path.abspath(__file__)); PROJ=os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule"); API=os.environ.get("PUBMED_API_KEY","")
+# Durable, non-git output location - see extract_databanks.py's OUT comment. (Was PROJ, declared
+# here but never used - the other 3 pipeline scripts wrote to their own script directory instead,
+# which is what made the 08-13 backfill's source CSVs vanish along with an ephemeral worktree.)
+OUT=os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule/data")
+os.makedirs(OUT, exist_ok=True)
+API=os.environ.get("PUBMED_API_KEY","")
 engine=create_engine(f"mysql+pymysql://{os.environ['DB_USERNAME']}:{os.environ['DB_PASSWORD']}@{os.environ['DB_HOST']}/{os.environ['DB_NAME']}")
 
 # ---------- 1. unified deposit set (academic + preprint; full-text high-conf + structured) ----------
