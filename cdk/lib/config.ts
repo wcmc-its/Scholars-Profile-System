@@ -862,10 +862,13 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // prod (deploy + first verify run) then flip this to true. See
     // docs/curation-backup-runbook.md § Prod.
     curationBackupScheduleEnabled: false,
-    // Nightly grants bulk export NOT YET ACTIVATED on prod — staging-first
-    // rollout, per flag JSDoc. Flip once staging is hand-verified and Research
-    // Informatics' role is ready for prod read access.
-    grantsExportScheduleEnabled: false,
+    // Nightly grants bulk export — staging hand-verified 2026-08-11 (13,266
+    // rows, correct NDJSON schema, both an ECS RunTask and a real Step
+    // Functions execution). Research Informatics confirmed prod read access
+    // is ready on their end (arch-staging-ai-role's identity policy). Flipped
+    // to true (#2359 follow-up) — SSM param + `cdk deploy Sps-Etl-prod` still
+    // needed to actually create the prod bucket/policy/schedule.
+    grantsExportScheduleEnabled: true,
     // #1218 — standalone DynamoDB projection ships disabled on prod: the prod
     // opportunity corpus isn't published yet and the matcher is dark there. Flip
     // when the prod corpus lands (or leave off once #443 unblocks the nightly).

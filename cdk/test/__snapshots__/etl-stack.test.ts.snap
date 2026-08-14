@@ -74,6 +74,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
+    "SsmParameterValuescholarsprodgrantsexportconsumerrolearnC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/scholars/prod/grants-export/consumer-role-arn",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
     "SsmParameterValuespsprodappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter": {
       "Default": "/sps/prod/app/internal-alb-dns",
       "Type": "AWS::SSM::Parameter::Value<String>",
@@ -4194,11 +4198,510 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               ],
             },
+            {
+              "Action": "s3:GetObject",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Ref": "SsmParameterValuescholarsprodgrantsexportconsumerrolearnC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "GrantsExportBucketD74F895B",
+                        "Arn",
+                      ],
+                    },
+                    "/grants.ndjson",
+                  ],
+                ],
+              },
+            },
           ],
           "Version": "2012-10-17",
         },
       },
       "Type": "AWS::S3::BucketPolicy",
+    },
+    "GrantsExportCadenceAlarm40D581ED": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS grants bulk export (prod) -- cadence missed (no execution started in ~2 days). Next: confirm the daily rule is enabled and the state-machine IAM is intact; run 'npm run export:grants-bulk' via run-task to bridge the gap.",
+        "AlarmName": "sps-grants-export-cadence-prod",
+        "ComparisonOperator": "LessThanThreshold",
+        "DatapointsToAlarm": 2,
+        "Dimensions": [
+          {
+            "Name": "StateMachineArn",
+            "Value": {
+              "Ref": "GrantsExportStateMachine65749BBE",
+            },
+          },
+        ],
+        "EvaluationPeriods": 2,
+        "MetricName": "ExecutionsStarted",
+        "Namespace": "AWS/States",
+        "Period": 86400,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "breaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "GrantsExportScheduleRule2A37CE33": {
+      "Properties": {
+        "Description": "SPS grants bulk export -- daily 05:30 UTC (prod).",
+        "Name": "sps-grants-export-prod",
+        "ScheduleExpression": "cron(30 5 * * ? *)",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Ref": "GrantsExportStateMachine65749BBE",
+            },
+            "Id": "Target0",
+            "Input": "{}",
+            "RetryPolicy": {
+              "MaximumRetryAttempts": 0,
+            },
+            "RoleArn": {
+              "Fn::GetAtt": [
+                "GrantsExportStateMachineEventsRoleF0AF5C37",
+                "Arn",
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
+    "GrantsExportSmLogGroup3186C7F7": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/states/grants-export-prod",
+        "RetentionInDays": 90,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "GrantsExportStateMachine65749BBE": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "GrantsExportStateMachineRoleDefaultPolicyCA61E41B",
+        "GrantsExportStateMachineRole8DF633D2",
+      ],
+      "Properties": {
+        "DefinitionString": {
+          "Fn::Join": [
+            "",
+            [
+              "{"StartAt":"TaskGrantsExport","States":{"TaskGrantsExport":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":60,"MaxAttempts":1,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyGrantsExport"}],"Type":"Task","TimeoutSeconds":1800,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","export:grants-bulk"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyGrantsExport":{"Next":"FailGrantsExport","Type":"Task","Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"prod","step":"GrantsExport","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS grants bulk export prod -- run failed"}},"FailGrantsExport":{"Type":"Fail","Cause":"grants bulk export run failed"}},"TimeoutSeconds":4200}",
+            ],
+          ],
+        },
+        "LoggingConfiguration": {
+          "Destinations": [
+            {
+              "CloudWatchLogsLogGroup": {
+                "LogGroupArn": {
+                  "Fn::GetAtt": [
+                    "GrantsExportSmLogGroup3186C7F7",
+                    "Arn",
+                  ],
+                },
+              },
+            },
+          ],
+          "IncludeExecutionData": false,
+          "Level": "ERROR",
+        },
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "GrantsExportStateMachineRole8DF633D2",
+            "Arn",
+          ],
+        },
+        "StateMachineName": "scholars-grants-export-prod",
+        "StateMachineType": "STANDARD",
+        "TracingConfiguration": {
+          "Enabled": true,
+        },
+      },
+      "Type": "AWS::StepFunctions::StateMachine",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "GrantsExportStateMachineEventsRoleDefaultPolicy59756EAB": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "states:StartExecution",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "GrantsExportStateMachine65749BBE",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "GrantsExportStateMachineEventsRoleDefaultPolicy59756EAB",
+        "Roles": [
+          {
+            "Ref": "GrantsExportStateMachineEventsRoleF0AF5C37",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "GrantsExportStateMachineEventsRoleF0AF5C37": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "events.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "GrantsExportStateMachineRole8DF633D2": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "states.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "GrantsExportStateMachineRoleDefaultPolicyCA61E41B": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecs:RunTask",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        2,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        3,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        4,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        0,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlTaskDefinition32654FF8",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    "/",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlTaskDefinition32654FF8",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ecs:StopTask",
+                "ecs:DescribeTasks",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskRoleD514E3A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskExecutionRoleC745E2CD",
+                    "Arn",
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "events:PutTargets",
+                "events:PutRule",
+                "events:DescribeRule",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":events:us-east-1:123456789012:rule/StepFunctionsGetEventsForECSTaskRule",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogDelivery",
+                "logs:GetLogDelivery",
+                "logs:UpdateLogDelivery",
+                "logs:DeleteLogDelivery",
+                "logs:ListLogDeliveries",
+                "logs:PutResourcePolicy",
+                "logs:DescribeResourcePolicies",
+                "logs:DescribeLogGroups",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "xray:PutTraceSegments",
+                "xray:PutTelemetryRecords",
+                "xray:GetSamplingRules",
+                "xray:GetSamplingTargets",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "GrantsExportStateMachineRoleDefaultPolicyCA61E41B",
+        "Roles": [
+          {
+            "Ref": "GrantsExportStateMachineRole8DF633D2",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "GrantsExportStatusAlarm2D2B60F7": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS grants bulk export (prod) -- a run did not finish successfully: it failed, ran out of time, or was stopped. The consumer's last-good object in S3 is unchanged; this run's data did not land, so it is a day older than it looks. Next: open the Step Functions execution for scholars-grants-export-prod and read the task's logs. Nothing retries before tomorrow's 05:30 UTC fire -- run 'npm run export:grants-bulk' via run-task to close the gap.",
+        "AlarmName": "sps-grants-export-status-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "EvaluationPeriods": 1,
+        "Metrics": [
+          {
+            "Expression": "failed + timedOut + aborted",
+            "Id": "expr_1",
+            "ReturnData": true,
+          },
+          {
+            "Id": "failed",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "GrantsExportStateMachine65749BBE",
+                    },
+                  },
+                ],
+                "MetricName": "ExecutionsFailed",
+                "Namespace": "AWS/States",
+              },
+              "Period": 86400,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+          {
+            "Id": "timedOut",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "GrantsExportStateMachine65749BBE",
+                    },
+                  },
+                ],
+                "MetricName": "ExecutionsTimedOut",
+                "Namespace": "AWS/States",
+              },
+              "Period": 86400,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+          {
+            "Id": "aborted",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "GrantsExportStateMachine65749BBE",
+                    },
+                  },
+                ],
+                "MetricName": "ExecutionsAborted",
+                "Namespace": "AWS/States",
+              },
+              "Period": 86400,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+        ],
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
     },
     "HeartbeatCadenceAlarm4771CCDE": {
       "Properties": {
