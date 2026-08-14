@@ -46,7 +46,10 @@ import {
  * resolve to one that does.
  */
 export async function resolveReportsCenterCode(
-  db: UnitEditContextClient,
+  // `loadAllUnitsForFinder` below reads `db.core` too now that cores are a
+  // fourth `ManageableUnitKind` (cores-as-org-units P5) — intersected locally
+  // rather than widening `UnitEditContextClient` itself (out of scope here).
+  db: UnitEditContextClient & Pick<PrismaClient, "core">,
   requested: string | undefined,
 ): Promise<string> {
   const [centers, programRows] = await Promise.all([
@@ -120,6 +123,7 @@ export type ReportsDirectoryClient = Pick<
   | "department"
   | "division"
   | "center"
+  | "core"
   | "suppression"
   | "scholar"
   | "centerMembership"

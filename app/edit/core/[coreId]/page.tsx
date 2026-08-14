@@ -1,9 +1,18 @@
 /**
- * `/edit/core/[coreId]` — the core owner's review queue (cores inference), plus
- * (cores-as-org-units P3) the core's own attribute editors: description, URL,
- * visibility, leadership, and access. Lists the engine's candidate
- * (publication, core) usages for one core, ranked by likelihood, with inline
- * evidence; the owner confirms/rejects each via `POST /api/edit/core-claim`.
+ * `/edit/core/[coreId]` — the core's own attribute editor (cores-as-org-units
+ * P3/P4 restructure): Details, Leadership, and (Owner/Superuser only) Access,
+ * one panel at a time via `?attr=`. Mirrors `/edit/center/[code]`'s
+ * `EditShell`/`AttributeRail` UX exactly, but built as a bespoke page — NOT
+ * routed through `unit-edit-page.tsx` (`UnitEditContext`/`findUnit`/
+ * `getEffectiveUnitRole` are hardcoded department|division|center throughout
+ * and are production infrastructure the three already-shipped unit types
+ * depend on; lower blast radius to build cores' own rail here than to widen
+ * that shared plumbing, `core-as-org-unit-plan.md` P3).
+ *
+ * The pub review queue (`CoreClaimQueue`) moved to its own route,
+ * `/edit/core/[coreId]/review` — a sibling sub-page, not a rail attribute
+ * (mirrors `/edit/center/[code]/history`, a bespoke child route reusing the
+ * parent's own authz gate rather than sharing this page).
  *
  * Server Component. Authorization mirrors the unit-curation editor routes
  * (`/edit/center/[code]`):
@@ -13,29 +22,17 @@
  *   3. **No role + core exists** → one `edit_authz_denied` line + a visible 403;
  *      **core absent** → 404.
  *
- * P3's new panels (`CoreDetailsCard`, `CoreLeaderCard`, `UnitAccessCard`) are
- * a bespoke, flat stack alongside `CoreClaimQueue` — NOT the shared
- * `EditShell`/`AttributeRail` pattern `/edit/{department,division,center}`
- * use (`unit-edit-page.tsx`), which is hardcoded to those three unit kinds
- * throughout (`UnitEditContext`, `findUnit`, `getEffectiveUnitRole`) and is
- * production infrastructure three already-shipped unit types depend on —
- * lower blast radius to add core-specific panels here than to widen it
- * (`core-as-org-unit-plan.md` P3). Every viewer who reaches this page already
- * cleared the owner/curator/superuser gate above, so the panels below need no
- * further per-panel visibility check except Access, which — like the rail's
- * own `isOwnerPlus` gate — is Owner/Superuser only.
- *
  * No caching: `force-dynamic` + `noindex`, matching the rest of `/edit/*`.
  */
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
-import { ConsoleTopBar } from "@/components/edit/console-top-bar";
-import { CoreClaimQueue } from "@/components/edit/core-claim-queue";
+import type { RailItem } from "@/components/edit/attribute-rail";
 import { CoreDetailsCard } from "@/components/edit/core-details-card";
 import { CoreLeaderCard, type CoreLeaderState } from "@/components/edit/core-leader-card";
+import { EditShell } from "@/components/edit/edit-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { UnitAccessCard } from "@/components/edit/unit-access-card";
-import { loadCoreReviewQueue } from "@/lib/api/core-queue";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import {
@@ -48,14 +45,19 @@ import {
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Review core publications",
+  title: "Edit core",
   robots: { index: false, follow: false },
 };
 
+type AttrKey = "details" | "leadership" | "access";
+const DEFAULT_ATTR: AttrKey = "details";
+
 export default async function EditCorePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ coreId: string }>;
+  searchParams?: Promise<{ attr?: string }>;
 }) {
   const { coreId } = await params;
 
@@ -67,7 +69,7 @@ export default async function EditCorePage({
   const coreRole = await getCoreOwnerRole(session, coreId, db.read as unknown as CoreOwnerLookup);
   const authz = authorizeCoreClaim(session, coreRole);
   if (!authz.ok) {
-    // Distinguish "no such core" (404) from "exists but you can't review it" (403).
+    // Distinguish "no such core" (404) from "exists but you can't edit it" (403).
     const exists = await db.read.core.findUnique({ where: { id: coreId }, select: { id: true } });
     if (!exists) notFound();
     logEditDenial({
@@ -77,22 +79,18 @@ export default async function EditCorePage({
       reason: authz.reason,
       targetEntityId: coreId,
     });
-    return <ForbiddenEditPage />;
+    return <ForbiddenEditPage variant="unit" targetEntity={coreId} />;
   }
 
-  const queue = await loadCoreReviewQueue(coreId, db.read);
-  if (!queue) notFound();
-
-  // P3 panels' data. `loadCoreReviewQueue` above already proved the core
-  // exists, so `coreDetail` is never null here. Access (Owner/Superuser only —
-  // "Curators grant nothing") mirrors `unit-edit-context.ts`'s own
-  // `canManageAccess` local, not the `lib/edit/authz` predicate of the same
-  // name (that one gates `/api/edit/unit`'s create-unit path, unrelated here).
+  // Access (Owner/Superuser only — "Curators grant nothing") mirrors
+  // `unit-edit-context.ts`'s own `canManageAccess` local, not the
+  // `lib/edit/authz` predicate of the same name (that one gates
+  // `/api/edit/unit`'s create-unit path, unrelated here).
   const canManageAccess = session.isSuperuser || coreRole === "owner";
-  const [coreDetail, leaderRows, accessRows] = await Promise.all([
+  const [core, leaderRows, accessRows] = await Promise.all([
     db.read.core.findUnique({
       where: { id: coreId },
-      select: { description: true, url: true, visible: true },
+      select: { name: true, description: true, url: true, visible: true },
     }),
     db.read.coreLeader.findMany({
       where: { coreId },
@@ -107,6 +105,7 @@ export default async function EditCorePage({
         })
       : Promise.resolve([]),
   ]);
+  if (!core) notFound();
 
   // Batch-resolve leader + access cwids to display names (a unit admin is
   // often non-Scholar staff, so a miss is expected — UnitAccessCard
@@ -141,41 +140,50 @@ export default async function EditCorePage({
       }))
     : null;
 
+  const railItems: RailItem[] = [
+    { key: "details", label: "Details" },
+    { key: "leadership", label: "Leadership" },
+    ...(canManageAccess ? [{ key: "access", label: "Access" }] : []),
+  ];
+  const { attr } = (await searchParams) ?? {};
+  const active = (railItems.some((r) => r.key === attr) ? attr : DEFAULT_ATTR) as AttrKey;
+  const basePath = `/edit/core/${coreId}`;
+
   return (
-    <div className="min-h-screen bg-apollo-page" data-slot="edit-core-page">
-      <ConsoleTopBar variant="console" />
-
-      <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
-        <h1 className="mb-1 text-xl font-semibold">{queue.core.name} — core publications</h1>
-        <p className="text-muted-foreground mb-6 text-sm">
-          Publications our signals flag as having used this core. Confirm the ones that did and
-          reject false positives — your decisions surface on the public profiles and prime the next
-          inference run.
-        </p>
-        <CoreClaimQueue
-          core={queue.core}
-          candidates={queue.candidates}
-          confirmed={queue.confirmed}
-          rejected={queue.rejected}
+    <EditShell
+      mode="superuser"
+      scholarName={core.name}
+      railItems={railItems}
+      activeAttr={active}
+      basePath={basePath}
+    >
+      <p className="mb-6">
+        <Link
+          href={`${basePath}/review`}
+          className="text-apollo-slate text-sm font-medium hover:underline"
+          data-testid="core-review-link"
+        >
+          Review pending publications
+        </Link>
+      </p>
+      {active === "details" && (
+        <CoreDetailsCard
+          coreId={coreId}
+          description={core.description}
+          url={core.url}
+          visible={core.visible}
         />
-
-        <div className="mt-10 flex flex-col gap-8">
-          <CoreDetailsCard
-            coreId={coreId}
-            description={coreDetail?.description ?? null}
-            url={coreDetail?.url ?? null}
-            visible={coreDetail?.visible ?? false}
-          />
-          <CoreLeaderCard coreId={coreId} leaders={leaders} />
-          <UnitAccessCard
-            entityType="core"
-            entityId={coreId}
-            access={access}
-            actorCwid={session.cwid}
-            headingId="core-access-heading"
-          />
-        </div>
-      </main>
-    </div>
+      )}
+      {active === "leadership" && <CoreLeaderCard coreId={coreId} leaders={leaders} />}
+      {active === "access" && canManageAccess && (
+        <UnitAccessCard
+          entityType="core"
+          entityId={coreId}
+          access={access}
+          actorCwid={session.cwid}
+          headingId="core-access-heading"
+        />
+      )}
+    </EditShell>
   );
 }

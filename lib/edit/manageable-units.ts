@@ -28,8 +28,8 @@ import { countActiveCenterMembersByCode } from "@/lib/api/center-member-count";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { compactUnitName, officialUnitName } from "@/lib/org-unit-names";
 
-/** The three org-unit `EntityType`s a `unit_admin` grant can target. */
-export type ManageableUnitKind = "department" | "division" | "center";
+/** The four org-unit `EntityType`s a `unit_admin` grant can target. */
+export type ManageableUnitKind = "department" | "division" | "center" | "core";
 
 /** The two `UnitRole`s a grant carries. */
 export type ManageableUnitRole = "owner" | "curator";
@@ -49,7 +49,8 @@ export type ManageableUnits = {
   departments: ManageableUnit[];
   divisions: ManageableUnit[];
   centers: ManageableUnit[];
-  /** Total across all three groups — drives the "self-hide when zero" gate. */
+  cores: ManageableUnit[];
+  /** Total across all four groups — drives the "self-hide when zero" gate. */
   total: number;
 };
 
@@ -64,11 +65,11 @@ export type UnitFinderEntry = {
 /** The narrow Prisma surface these helpers read — a `db.read` client satisfies it. */
 export type ManageableUnitsClient = Pick<
   PrismaClient,
-  "unitAdmin" | "department" | "division" | "center"
+  "unitAdmin" | "department" | "division" | "center" | "core"
 >;
 
 function isManageableKind(value: string): value is ManageableUnitKind {
-  return value === "department" || value === "division" || value === "center";
+  return value === "department" || value === "division" || value === "center" || value === "core";
 }
 
 /** The unit's editor route. `code` is URL-encoded — LDAP N-codes are safe, but
@@ -81,6 +82,7 @@ const KIND_LABEL: Record<ManageableUnitKind, string> = {
   department: "Department",
   division: "Division",
   center: "Center",
+  core: "Core",
 };
 
 /** Display label for a unit kind ("Department" | "Division" | "Center"). */
@@ -124,14 +126,19 @@ export async function loadManageableUnits(
     }
   }
   if (best.size === 0) {
-    return { departments: [], divisions: [], centers: [], total: 0 };
+    return { departments: [], divisions: [], centers: [], cores: [], total: 0 };
   }
 
   // Collect codes per kind for one batched name lookup each.
-  const codes: Record<ManageableUnitKind, string[]> = { department: [], division: [], center: [] };
+  const codes: Record<ManageableUnitKind, string[]> = {
+    department: [],
+    division: [],
+    center: [],
+    core: [],
+  };
   for (const u of best.values()) codes[u.kind].push(u.code);
 
-  const [deptRows, divRows, ctrRows] = await Promise.all([
+  const [deptRows, divRows, ctrRows, coreRows] = await Promise.all([
     codes.department.length
       ? db.department.findMany({
           where: { code: { in: codes.department } },
@@ -150,18 +157,26 @@ export async function loadManageableUnits(
           select: { code: true, name: true },
         })
       : Promise.resolve([]),
+    codes.core.length
+      ? db.core.findMany({
+          where: { id: { in: codes.core } },
+          select: { id: true, name: true },
+        })
+      : Promise.resolve([]),
   ]);
 
   const names: Record<ManageableUnitKind, Map<string, string>> = {
     department: new Map(deptRows.map((r) => [r.code, r.name])),
     division: new Map(divRows.map((r) => [r.code, r.name])),
     center: new Map(ctrRows.map((r) => [r.code, r.name])),
+    core: new Map(coreRows.map((r) => [r.id, r.name])),
   };
 
   const groups: Record<ManageableUnitKind, ManageableUnit[]> = {
     department: [],
     division: [],
     center: [],
+    core: [],
   };
   for (const u of best.values()) {
     const name = names[u.kind].get(u.code);
@@ -177,12 +192,15 @@ export async function loadManageableUnits(
   groups.department.sort(byName);
   groups.division.sort(byName);
   groups.center.sort(byName);
+  groups.core.sort(byName);
 
   return {
     departments: groups.department,
     divisions: groups.division,
     centers: groups.center,
-    total: groups.department.length + groups.division.length + groups.center.length,
+    cores: groups.core,
+    total:
+      groups.department.length + groups.division.length + groups.center.length + groups.core.length,
   };
 }
 
@@ -488,6 +506,10 @@ export async function loadAllUnitsDirectory(
     department: 0,
     division: 1,
     center: 2,
+    // This directory never emits a "core" entry (deptRows/divRows/ctrRows only) —
+    // the key exists solely to satisfy Record<ManageableUnitKind, number>'s
+    // exhaustiveness now that the type is shared with cores.
+    core: 3,
   };
   return visible.sort(
     (a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.name.localeCompare(b.name),
