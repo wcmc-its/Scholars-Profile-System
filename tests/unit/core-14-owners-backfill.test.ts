@@ -1,12 +1,14 @@
 /**
  * core-14 (Research Informatics) owners backfill: verify-all-before-write
- * safety, matching `POST /api/edit/grant`'s own write shape.
+ * safety.
  *
  *  - dry-run verifies but writes nothing;
- *  - a real run upserts every owner + appends one audit row per owner, in
- *    one $transaction (idempotent by composite PK);
- *  - a typo'd core id ABORTS with no writes;
+ *  - a real run upserts every owner (idempotent by composite PK);
  *  - a real (non-dry-run) run without --granted-by ABORTS with no writes.
+ *
+ * No audit-row coverage here — this script deliberately does not write one
+ * (the `etl` DB role has no grant on `scholars_audit.manual_edit_audit`; see
+ * the header comment in the script itself).
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -14,22 +16,14 @@ import {
   runBackfill,
   parseArgs,
   type CoreOwnerBackfillDb,
-  type CoreOwnerBackfillTx,
 } from "@/scripts/backfills/2026-08-14-core-14-research-informatics-owners";
 
 const OWNER_CWIDS = ["evs2008", "nik2004", "saa3011", "thc2015"];
 
 function fakeDb() {
   const upsert = vi.fn().mockResolvedValue({});
-  const findUnique = vi.fn().mockResolvedValue(null);
-  const tx: CoreOwnerBackfillTx = {
-    unitAdmin: { findUnique, upsert },
-    $executeRaw: vi.fn().mockResolvedValue(undefined),
-  };
-  const db: CoreOwnerBackfillDb = {
-    $transaction: async (fn) => fn(tx),
-  };
-  return { db, tx, upsert, findUnique };
+  const db: CoreOwnerBackfillDb = { unitAdmin: { upsert } };
+  return { db, upsert };
 }
 
 describe("core-14 owners backfill", () => {
@@ -42,20 +36,16 @@ describe("core-14 owners backfill", () => {
 
   it("dry-run verifies but writes nothing", async () => {
     const { db, upsert } = fakeDb();
-    const auditFn = vi.fn();
-    const result = await runBackfill(db, auditFn, { dryRun: true, grantedBy: null });
+    const result = await runBackfill(db, { dryRun: true, grantedBy: null });
     expect(result).toEqual({ verified: OWNER_CWIDS.length, upserted: 0, dryRun: true });
     expect(upsert).not.toHaveBeenCalled();
-    expect(auditFn).not.toHaveBeenCalled();
   });
 
-  it("a real run upserts every owner with role=owner and audits each one", async () => {
+  it("a real run upserts every owner with role=owner", async () => {
     const { db, upsert } = fakeDb();
-    const auditFn = vi.fn().mockResolvedValue(undefined);
-    const result = await runBackfill(db, auditFn, { dryRun: false, grantedBy: "paa2013" });
+    const result = await runBackfill(db, { dryRun: false, grantedBy: "paa2013" });
     expect(result.upserted).toBe(OWNER_CWIDS.length);
     expect(upsert).toHaveBeenCalledTimes(OWNER_CWIDS.length);
-    expect(auditFn).toHaveBeenCalledTimes(OWNER_CWIDS.length);
     for (const cwid of OWNER_CWIDS) {
       expect(upsert).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -65,24 +55,14 @@ describe("core-14 owners backfill", () => {
         }),
       );
     }
-    expect(auditFn).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        actorCwid: "paa2013",
-        targetEntityType: "core",
-        targetEntityId: "14",
-        action: "grant_change",
-      }),
-    );
   });
 
   it("aborts with NO writes on a real run when --granted-by is omitted", async () => {
     const { db, upsert } = fakeDb();
-    const auditFn = vi.fn();
-    const result = runBackfill(db, auditFn, { dryRun: false, grantedBy: null });
-    await expect(result).rejects.toThrow(/--granted-by/);
+    await expect(runBackfill(db, { dryRun: false, grantedBy: null })).rejects.toThrow(
+      /--granted-by/,
+    );
     expect(upsert).not.toHaveBeenCalled();
-    expect(auditFn).not.toHaveBeenCalled();
   });
 
   it("core 14 is 'Research Informatics' in CORE_CATALOG (guards a silent id/name drift)", async () => {
