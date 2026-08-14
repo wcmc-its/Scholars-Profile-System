@@ -216,16 +216,23 @@ export function EditShell({
 
         <main id="edit-detail" tabIndex={-1} aria-labelledby="panel-heading" className="min-w-0 scroll-mt-4">
           {hideRail ? (
-            backHref && (
-              <Link
-                href={backHref}
-                className="text-muted-foreground hover:text-foreground mb-4 inline-flex items-center gap-1 text-sm"
-                data-testid="edit-rail-back"
-              >
-                <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
-                Back
-              </Link>
-            )
+            <>
+              {backHref && (
+                <Link
+                  href={backHref}
+                  className="text-muted-foreground hover:text-foreground mb-4 inline-flex items-center gap-1 text-sm"
+                  data-testid="edit-rail-back"
+                >
+                  <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
+                  Back
+                </Link>
+              )}
+              {/* hideRail drops the rail COLUMN (the attribute switcher), not
+                  subRail's own cross-nav (sibling divisions / a center's Reports
+                  link) — it still needs somewhere to live, so it renders here
+                  instead of silently disappearing with the rest of the rail. */}
+              {subRail && <div className="mb-4">{subRail}</div>}
+            </>
           ) : (
             <RailSelect items={railItems} active={activeAttr} basePath={basePath} />
           )}

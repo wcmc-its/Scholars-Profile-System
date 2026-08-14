@@ -90,24 +90,29 @@ export default async function EditReportsIndexPage({
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <h1 className="mb-1 text-xl font-semibold">{ctx.unit.name} reports</h1>
-      <p className="text-muted-foreground mb-6 text-sm">
-        Advisory only — every report reads precomputed data; nothing here writes to the roster.
-      </p>
-      <ul className="divide-y divide-border">
-        {REPORTS.map((r) => (
-          <li key={r.n}>
-            <Link
-              href={`/edit/reports/${r.n}?center=${encodeURIComponent(code)}`}
-              data-testid={`reports-index-${r.n}`}
-              className="flex w-full flex-col items-start gap-0.5 py-3 text-left hover:bg-muted/50"
-            >
-              <span className="text-sm font-medium">{r.label}</span>
-              <span className="text-xs text-muted-foreground">{r.description}</span>
-            </Link>
-          </li>
-        ))}
-      </ul>
+      {/* ConsoleShell owns only the chrome — content supplies its own surface
+          (R1/the Apollo Surface Language "the page is never white"). Without
+          this, the list floats directly on --apollo-page with no card. */}
+      <div className="apollo-card">
+        <h1 className="mb-1 text-xl font-semibold">{ctx.unit.name} reports</h1>
+        <p className="text-muted-foreground mb-6 text-sm">
+          Advisory only — every report reads precomputed data; nothing here writes to the roster.
+        </p>
+        <ul className="divide-y divide-border">
+          {REPORTS.map((r) => (
+            <li key={r.n}>
+              <Link
+                href={`/edit/reports/${r.n}?center=${encodeURIComponent(code)}`}
+                data-testid={`reports-index-${r.n}`}
+                className="flex w-full flex-col items-start gap-0.5 py-3 text-left hover:bg-muted/50"
+              >
+                <span className="text-sm font-medium">{r.label}</span>
+                <span className="text-xs text-muted-foreground">{r.description}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </div>
     </ConsoleShell>
   );
 }

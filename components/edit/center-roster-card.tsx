@@ -380,7 +380,7 @@ function DecisionLine({
     <div className="mt-2 flex items-center gap-2">
       <span
         className={`inline-flex items-center gap-1 text-sm font-medium ${
-          decision === "confirmed" ? "text-apollo-green" : "text-apollo-maroon"
+          decision === "confirmed" ? "text-apollo-green" : "text-destructive"
         }`}
       >
         {decision === "confirmed" ? "✓ Confirmed" : "✕ Rejected"}
@@ -425,7 +425,7 @@ function AddDiseaseCard({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="border-apollo-border text-apollo-maroon hover:bg-accent flex min-h-24 items-center justify-center rounded-md border border-dashed p-3 text-sm font-medium"
+          className="border-apollo-border text-[var(--color-facet-topic-count)] hover:bg-accent flex min-h-24 items-center justify-center rounded-md border border-dashed p-3 text-sm font-medium"
           data-testid={`disease-add-trigger-${member.cwid}`}
         >
           + Add a disease
@@ -511,7 +511,7 @@ function DiseaseExpandedPanel({
         <button
           type="button"
           onClick={onCollapse}
-          className="text-apollo-maroon inline-flex shrink-0 items-center gap-1 text-sm font-semibold hover:underline"
+          className="text-muted-foreground hover:text-foreground inline-flex shrink-0 items-center gap-1 text-sm font-semibold"
           data-testid={`disease-expand-collapse-${member.cwid}`}
         >
           Collapse
@@ -1302,7 +1302,7 @@ export function CenterRosterCard({
                       </span>
                       <button
                         type="button"
-                        className="text-muted-foreground hover:text-apollo-maroon text-xs hover:underline"
+                        className="text-muted-foreground hover:text-apollo-slate text-xs hover:underline"
                         onClick={() => setRemoveTarget(m)}
                         data-testid={`roster-remove-${m.cwid}`}
                       >

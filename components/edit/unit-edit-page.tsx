@@ -334,7 +334,7 @@ function RetiredNotice() {
   return (
     <section data-slot="retired-notice" data-testid="retired-notice" className="flex flex-col gap-4">
       <div className="bg-apollo-surface-2 border-apollo-border rounded-md border p-4">
-        <p className="text-muted-foreground text-sm">
+        <p className="text-foreground text-sm">
           This unit is retired. Restore it (under <span className="font-medium">Retire unit</span>)
           to edit its other attributes.
         </p>
