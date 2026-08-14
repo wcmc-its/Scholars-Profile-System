@@ -151,9 +151,11 @@ describe("UnitEditPage — rail filtering", () => {
   });
 
   // Cancer Center reports consolidation — "reports" / "nci-2a" are no longer
-  // in-page `?attr=` attributes; the rail carries ONE external link instead
-  // (`CenterReportsRailLink`, rendered via `subRail`, not `AttributeRail`).
-  it("a center with a program taxonomy shows the external Reports rail link, not an in-page attr", () => {
+  // in-page `?attr=` attributes; a header link carries the ONE external link
+  // instead (`EditShell`'s `reportsHref`, Reports IA redesign 2026-08-14 —
+  // replaced the earlier rail-mounted `CenterReportsRailLink` so the link
+  // survives the roster/Members page, which hides the rail).
+  it("a center with a program taxonomy shows the header Reports link, not an in-page attr", () => {
     const withPrograms = ctx({
       unitType: "center",
       actorRole: "curator",
@@ -163,16 +165,16 @@ describe("UnitEditPage — rail filtering", () => {
     // Not selectable in-page — the old two-case rail behavior is gone.
     expect(railKeys()).not.toContain("reports");
     expect(railKeys()).not.toContain("nci-2a");
-    // The external link renders instead, pointing at the top-level console.
-    const link = screen.getByTestId("rail-reports-link");
+    // The header link renders instead, pointing at the top-level console.
+    const link = screen.getByTestId("edit-reports-link");
     expect(link.getAttribute("href")).toBe("/edit/reports?center=N1280");
   });
 
-  it("a center with NO program taxonomy shows neither the in-page attrs nor the Reports rail link", () => {
+  it("a center with NO program taxonomy shows neither the in-page attrs nor the header Reports link", () => {
     render(<UnitEditPage ctx={ctx({ unitType: "center", actorRole: "curator" })} />);
     expect(railKeys()).not.toContain("reports");
     expect(railKeys()).not.toContain("nci-2a");
-    expect(screen.queryByTestId("rail-reports-link")).toBeNull();
+    expect(screen.queryByTestId("edit-reports-link")).toBeNull();
   });
 
   it("a deep link to the retired ?attr=reports/?attr=nci-2a values falls back to the default panel", () => {
