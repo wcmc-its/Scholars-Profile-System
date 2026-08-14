@@ -463,13 +463,34 @@ function SubtypesSection({ report }: { report: DataSharingReport }) {
             </tr>
           </thead>
           <tbody>
-            {report.bySubtype.map((s) => (
-              <tr key={`${s.category}|${s.subtype}`} className="border-apollo-border border-b">
-                <td className={tdClass}>{SUBTYPE_CATEGORY_LABELS[s.category] ?? s.category}</td>
-                <td className={tdClass}>{s.subtype}</td>
-                <td className={`${tdClass} text-right`}>{s.count.toLocaleString()}</td>
-              </tr>
-            ))}
+            {report.bySubtype.map((s, i) => {
+              // Rows arrive pre-sorted by category (aggregateBySubtype's own
+              // contract), so a contiguous run shares one category — print
+              // the Category cell once per run (rowSpan), on an
+              // --apollo-surface-2 band, instead of repeating it down every
+              // row in the group (R11).
+              const rows = report.bySubtype;
+              const isGroupStart = i === 0 || rows[i - 1].category !== s.category;
+              if (!isGroupStart) {
+                return (
+                  <tr key={`${s.category}|${s.subtype}`} className="border-apollo-border border-b">
+                    <td className={tdClass}>{s.subtype}</td>
+                    <td className={`${tdClass} text-right`}>{s.count.toLocaleString()}</td>
+                  </tr>
+                );
+              }
+              let span = 1;
+              while (rows[i + span] && rows[i + span].category === s.category) span++;
+              return (
+                <tr key={`${s.category}|${s.subtype}`} className="border-apollo-border border-b">
+                  <td className={`${tdClass} bg-apollo-surface-2 align-top font-medium`} rowSpan={span}>
+                    {SUBTYPE_CATEGORY_LABELS[s.category] ?? s.category}
+                  </td>
+                  <td className={tdClass}>{s.subtype}</td>
+                  <td className={`${tdClass} text-right`}>{s.count.toLocaleString()}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

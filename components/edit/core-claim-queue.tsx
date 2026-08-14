@@ -547,7 +547,7 @@ export function CoreClaimQueue({
       </div>
 
       {addOpen ? (
-        <div className="border-apollo-border mb-3 rounded-lg border bg-background p-3">
+        <div className="border-apollo-border bg-apollo-surface mb-3 rounded-lg border p-3">
           <label htmlFor="core-claim-add-pmids" className="text-foreground mb-1.5 block text-sm font-medium">
             Claim known PMIDs directly
           </label>
@@ -561,7 +561,7 @@ export function CoreClaimQueue({
             onChange={(e) => setAddText(e.target.value)}
             placeholder="39812345, 38209981&#10;37102244"
             rows={3}
-            className="border-border-strong text-foreground w-full rounded-md border bg-background px-2.5 py-2 text-sm"
+            className="border-border-strong text-foreground bg-apollo-surface focus-visible:ring-apollo-maroon w-full rounded-md border px-2.5 py-2 text-sm focus-visible:outline-none focus-visible:ring-2"
           />
           <div className="mt-2 flex items-center gap-2">
             <button
@@ -700,9 +700,9 @@ function ViewTabs({
             type="button"
             aria-pressed={view === t.key}
             onClick={() => onView(t.key)}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] ${
+            className={`focus-visible:ring-apollo-maroon inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] focus-visible:outline-none focus-visible:ring-2 ${
               view === t.key
-                ? "border-transparent bg-[var(--color-accent-slate)] text-white"
+                ? "bg-apollo-maroon border-transparent text-white"
                 : "border-apollo-border text-muted-foreground hover:text-foreground"
             }`}
           >
@@ -869,9 +869,9 @@ function QueueControls({
             type="button"
             aria-pressed={filter === f.key}
             onClick={() => onFilter(f.key)}
-            className={`rounded-full border px-3 py-1 text-[13px] ${
+            className={`focus-visible:ring-apollo-maroon rounded-full border px-3 py-1 text-[13px] focus-visible:outline-none focus-visible:ring-2 ${
               filter === f.key
-                ? "border-transparent bg-[var(--color-accent-slate)] text-white"
+                ? "bg-apollo-maroon border-transparent text-white"
                 : "border-apollo-border text-muted-foreground hover:text-foreground"
             }`}
           >
@@ -884,7 +884,7 @@ function QueueControls({
         <select
           value={sort}
           onChange={(e) => onSort(e.target.value as SortKey)}
-          className="border-apollo-border rounded-md border bg-background px-2 py-1 text-[13px]"
+          className="border-border-strong bg-apollo-surface focus-visible:ring-apollo-maroon rounded-md border px-2 py-1 text-[13px] focus-visible:outline-none focus-visible:ring-2"
         >
           {SORTS.map((s) => (
             <option key={s.key} value={s.key}>
@@ -909,7 +909,7 @@ function Kbd({ children }: { children: ReactNode }) {
 // keyboard contract (a/r/u + ↑/↓), firing only when the card itself is focused
 // (not a child button/link), so its inner controls keep their native behavior.
 const CARD_SHELL =
-  "bg-apollo-surface rounded-lg border border-apollo-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-slate)]";
+  "bg-apollo-surface rounded-lg border border-apollo-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apollo-maroon";
 
 function CandidateCard({
   row,
@@ -958,7 +958,7 @@ function CandidateCard({
         : "border-red-200 bg-red-50";
     return (
       <div
-        className={`flex items-center justify-between gap-3 rounded-lg border p-4 ${tint} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-slate)]`}
+        className={`flex items-center justify-between gap-3 rounded-lg border p-4 ${tint} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apollo-maroon`}
         data-card
         data-pmid={row.pmid}
         tabIndex={0}
@@ -1080,7 +1080,7 @@ function CandidateCard({
       </div>
 
       {row.synopsis ? (
-        <p className="bg-muted/60 text-muted-foreground mt-3 rounded-md px-3 py-2 text-[13px] leading-snug">
+        <p className="bg-muted/60 border-apollo-border text-muted-foreground mt-3 rounded-md border px-3 py-2 text-[13px] leading-snug">
           {row.synopsis}
         </p>
       ) : null}

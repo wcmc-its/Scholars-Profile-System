@@ -80,4 +80,22 @@ describe("EditShell — hideRail", () => {
     );
     expect(screen.getByTestId("the-panel").textContent).toBe("panel content");
   });
+
+  // Regression: hideRail used to drop subRail (a center's Reports link, or a
+  // department's sibling-divisions nav) along with the attribute rail, even
+  // though it's cross-nav unrelated to the attribute switcher hideRail exists
+  // to hide. It now renders in the main column instead of disappearing.
+  it("still renders subRail when hideRail is true", () => {
+    render(
+      <EditShell
+        {...base}
+        hideRail
+        backHref="/edit/center/meyer_cancer_center"
+        subRail={<div data-testid="the-sub-rail">Reports</div>}
+      >
+        <div>panel</div>
+      </EditShell>,
+    );
+    expect(screen.getByTestId("the-sub-rail").textContent).toBe("Reports");
+  });
 });

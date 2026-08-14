@@ -116,7 +116,7 @@ function ThresholdControl({
           onModeChange(next);
           if (next === "percent") onValueChange(Math.min(value, 100));
         }}
-        className="rounded border border-input bg-background px-1.5 py-0.5 text-xs"
+        className="border-apollo-border-strong bg-apollo-surface rounded border px-1.5 py-0.5 text-xs"
       >
         <option value="count">raw count</option>
         <option value="percent">percentage</option>
@@ -127,7 +127,9 @@ function ThresholdControl({
         max={mode === "percent" ? 100 : max}
         value={value}
         onChange={(e) => onValueChange(Number(e.target.value))}
-        className="w-32"
+        // R12 — "current selection" (a slider's thumb/track is a selection
+        // control) is maroon, never browser-default blue.
+        className="accent-apollo-maroon w-32"
       />
       <span className="w-12 tabular-nums text-muted-foreground">
         {value}
@@ -233,11 +235,13 @@ function ModalSectionHeading({ children }: { children: React.ReactNode }) {
  * `topicsByUi` lookup the weekly ETL step and CSV export match against — so
  * this can't show a broader or narrower set than what's actually counted.
  *
- * The left-border accent colors (WCM red for "is it relevant at all", amber
- * for "which topic") are the first hardcoded brand colors in this app — no
- * existing `--primary`/token maps to WCM red today, so they're arbitrary-
- * value Tailwind classes local to this component rather than a new global
- * token, matching this component's existing utility-class-only pattern.
+ * The left-border accent colors are the editor's own two-role palette, not
+ * WCM red or an invented third hue: `--apollo-maroon` for "is it relevant at
+ * all" (brand, the primary axis) and `--apollo-amber` for "which topic"
+ * (matches the app's existing pending/needs-review amber elsewhere, e.g. the
+ * disease-review chips in `center-roster-card.tsx`) — this component
+ * previously hardcoded two arbitrary raw hexes here instead of using either
+ * token.
  */
 function MeshLogicModal() {
   const [open, setOpen] = React.useState(false);
@@ -302,7 +306,7 @@ function MeshLogicModal() {
         </p>
 
         <div className="grid gap-3.5">
-          <div className="rounded-md border border-border border-l-[3px] border-l-[#9d2235] p-4">
+          <div className="border-l-apollo-maroon rounded-md border border-border border-l-[3px] p-4">
             <p className="mb-1 font-medium text-foreground">Is it cancer-relevant at all?</p>
             <p className="text-sm text-muted-foreground">
               All of MeSH&apos;s C04 (Neoplasms) subtree, minus <code className="text-xs">Cysts</code> and{" "}
@@ -312,7 +316,7 @@ function MeshLogicModal() {
               Sclerosis, Cowden syndrome. This is the count the report keys on.
             </p>
           </div>
-          <div className="rounded-md border border-border border-l-[3px] border-l-[#d97706] p-4">
+          <div className="border-l-apollo-amber rounded-md border border-border border-l-[3px] p-4">
             <p className="mb-1 font-medium text-foreground">Which topic does it belong to?</p>
             <p className="text-sm text-muted-foreground">
               A separate facet: {siteCount ?? "~25"} disease-site buckets plus {ccCount ?? "six"} cross-cutting{" "}
@@ -451,7 +455,7 @@ const SORTERS: Record<SortKey, (a: Row, b: Row) => number> = {
   relevant: (a, b) => b.cancerRelatedPapers - a.cancerRelatedPapers,
 };
 
-const TH_CLASS = "sticky top-0 z-10 bg-background py-1.5 pr-2";
+const TH_CLASS = "sticky top-0 z-10 bg-apollo-surface-2 py-1.5 pr-2";
 
 /** A section's row list, filterable/sortable client-side — sections can run to 100+
  *  rows (a full-time-faculty-wide candidate pool), so a plain static table read as
@@ -500,7 +504,7 @@ function RowTable({
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as SortKey)}
-            className="rounded border border-input bg-background px-1.5 py-0.5 text-xs text-foreground"
+            className="border-apollo-border-strong bg-apollo-surface text-foreground rounded border px-1.5 py-0.5 text-xs"
             aria-label="Sort rows by"
           >
             <option value="name">Name</option>
@@ -517,6 +521,7 @@ function RowTable({
       {filtered.length === 0 ? (
         <p className="text-sm text-muted-foreground">No rows match &ldquo;{query}&rdquo;.</p>
       ) : (
+        <div className="border-apollo-border overflow-hidden rounded-md border">
         <ScrollArea className="md:h-[60vh]">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[600px] border-collapse text-sm">
@@ -564,6 +569,7 @@ function RowTable({
             </table>
           </div>
         </ScrollArea>
+        </div>
       )}
     </div>
   );
