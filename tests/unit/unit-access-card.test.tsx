@@ -87,6 +87,28 @@ describe("UnitAccessCard", () => {
     expect(screen.queryByText(/covers/i)).toBeNull();
   });
 
+  // cores-as-org-units P3 — the "core" entityType reuses this card as-is.
+  it("a core shows no cascade hint and grants against entityType 'core'", async () => {
+    const fetchMock = stubOk();
+    render(<UnitAccessCard {...base} entityType="core" entityId="2" access={[]} />);
+    expect(screen.queryByText(/covers/i)).toBeNull();
+    fireEvent.click(screen.getByTestId("grant-pick"));
+    fireEvent.click(screen.getByTestId("unit-access-grant"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({
+      entityType: "core",
+      entityId: "2",
+      cwid: "new9",
+      role: "curator",
+      action: "grant",
+    });
+  });
+
+  it("accepts a headingId override (for use as a sibling panel outside the attribute rail)", () => {
+    render(<UnitAccessCard {...base} access={[]} headingId="core-access-heading" />);
+    expect(screen.getByRole("heading", { name: "Access" }).id).toBe("core-access-heading");
+  });
+
   it("grant POSTs action:grant with the picked cwid + default curator role", async () => {
     const fetchMock = stubOk();
     render(<UnitAccessCard {...base} access={[]} />);

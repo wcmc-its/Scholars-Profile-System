@@ -56,19 +56,34 @@ const ED_LOCKED_HINT =
   "This access is managed in the Enterprise Directory and can't be removed here.";
 
 export type UnitAccessCardProps = {
-  entityType: "department" | "division" | "center";
+  /** Cores-as-org-units P3: `"core"` reuses this card as-is — the component
+   *  never branches on unit kind beyond this type + the two lookups below, and
+   *  cores are already a valid `/api/edit/grant` `entityType` (P2, #2409). */
+  entityType: "department" | "division" | "center" | "core";
   entityId: string;
   access: ReadonlyArray<AccessRow> | null;
   actorCwid: string;
+  /** Heading id for `aria-labelledby`, passed through to `EditPanel`. Defaults
+   *  to the shared `panel-heading` constant — override when this card renders
+   *  as a sibling of other panels on the same page (e.g. `/edit/core/[coreId]`,
+   *  a flat page with no attribute rail to guarantee only one panel mounts). */
+  headingId?: string;
 };
 
 const CASCADE_HINT: Record<UnitAccessCardProps["entityType"], string | null> = {
   department: "An Owner or Curator here covers this department and its divisions.",
   division: "An Owner or Curator here covers only this division.",
   center: null,
+  core: null,
 };
 
-export function UnitAccessCard({ entityType, entityId, access, actorCwid }: UnitAccessCardProps) {
+export function UnitAccessCard({
+  entityType,
+  entityId,
+  access,
+  actorCwid,
+  headingId,
+}: UnitAccessCardProps) {
   // Defensive: the rail only mounts this panel for Owner/Superuser, where
   // `access` is non-null. A null slips through ⇒ render nothing.
   const [rows, setRows] = React.useState<AccessRow[]>(access ? [...access] : []);
@@ -185,6 +200,7 @@ export function UnitAccessCard({ entityType, entityId, access, actorCwid }: Unit
   return (
     <EditPanel
       slot="unit-access-card"
+      headingId={headingId}
       heading="Access"
       description={`Owners and Curators can edit this ${entityType}. Only Owners can manage access.`}
     >
