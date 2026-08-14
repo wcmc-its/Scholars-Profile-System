@@ -242,14 +242,15 @@ export function EditShell({
             <RailSelect items={railItems} active={activeAttr} basePath={basePath} />
           )}
 
-          {/* Secondary links row (mockup parity, slate text). "View change
-              history" (internal audit page, #955) sits beside "Preview Profile"
-              (the public profile, external ↗) and, for a center, "View reports"
+          {/* Secondary links row (mockup parity, slate text — order matches the
+              `1b` mockup: reports, then preview). "View change history"
+              (internal audit page, #955), then, for a center, "View reports"
               (internal, Reports IA redesign 2026-08-14 — replaces the old
               rail-mounted link so it survives the roster/Members page, which
-              hides the rail). Shown alongside the account menu's "View my
+              hides the rail), then "Preview Profile" (the public profile,
+              external ↗). Shown alongside the account menu's "View my
               profile". */}
-          {(historyHref || previewHref || reportsHref) && (
+          {(historyHref || reportsHref || previewHref) && (
             <div className="mb-4 flex items-center justify-end gap-4">
               {historyHref && (
                 <Link
@@ -258,6 +259,16 @@ export function EditShell({
                   data-testid="edit-history-link"
                 >
                   View change history
+                </Link>
+              )}
+              {reportsHref && (
+                <Link
+                  href={reportsHref}
+                  className="text-apollo-slate inline-flex items-center gap-1.5 text-sm font-medium hover:underline"
+                  data-testid="edit-reports-link"
+                >
+                  View reports
+                  <ArrowRight className="size-4" aria-hidden />
                 </Link>
               )}
               {previewHref && (
@@ -269,16 +280,6 @@ export function EditShell({
                 >
                   Preview Profile
                   <ArrowUpRight className="size-4" aria-hidden />
-                </Link>
-              )}
-              {reportsHref && (
-                <Link
-                  href={reportsHref}
-                  className="text-apollo-slate inline-flex items-center gap-1.5 text-sm font-medium hover:underline"
-                  data-testid="edit-reports-link"
-                >
-                  View reports
-                  <ArrowRight className="size-4" aria-hidden />
                 </Link>
               )}
             </div>

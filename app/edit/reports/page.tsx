@@ -11,24 +11,41 @@
  * comms_steward (global content-editor parity), or a unit Owner/Curator of
  * this center — reused wholesale via `loadReportsContext` rather than
  * re-derived, so this console can't drift from the per-unit editor it
- * replaced. The center itself is resolved server-side (never hardcoded):
- * `?center=` addresses a second center once one exists; absent that, the sole
- * center today is the default (`resolveReportsCenterCode`).
+ * replaced. The center itself is resolved server-side (never hardcoded).
  *
- * Reports 1 and 2 are live (`CancerCenterCollabReportCard`, `Nci2aCard`,
- * unchanged — only how they're hosted moved). 3–5 are placeholder stubs;
- * their real implementations are separate follow-up PRs.
+ * All 5 reports are live (`CancerCenterCollabReportCard`, `Nci2aCard`, and
+ * three plain data-table pages) — "live" per unit varies with real data
+ * (`loadReportLiveness`), the catalog does not.
+ *
+ * Reports IA redesign (2026-08-14): `?center=` now addresses one of
+ * POTENTIALLY SEVERAL reportable units, not just "the second center once one
+ * exists." With `?center=` given, behavior is unchanged (today's single-unit
+ * list). Without it: 0 reportable units → 404 (unchanged); exactly 1 → the
+ * same single-unit list, resolved automatically (unchanged end-user
+ * behavior); 2+ → the new cross-unit index (`ReportsIndex`), scoped to the
+ * actor (org-wide for a superuser/comms_steward, else their own `UnitAdmin`
+ * grants) — a table with a filter rail once there are enough units to
+ * warrant one (`2a`), otherwise every unit banded inline on one page (`1a`).
  */
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { ReportsIndex, type ReportsIndexUnit } from "@/components/edit/reports-index";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import type { EditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
-import { loadReportsContext, resolveReportsCenterCode } from "@/lib/edit/cancer-center-reports";
+import {
+  loadReportLiveness,
+  loadReportableUnitsForActor,
+  loadReportsContext,
+  resolveReportsCenterCode,
+} from "@/lib/edit/cancer-center-reports";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
+import { unitEditHref } from "@/lib/edit/manageable-units";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
+import type { UnitEditContext } from "@/lib/api/unit-edit-context";
 
 export const dynamic = "force-dynamic";
 
@@ -55,9 +72,21 @@ const REPORTS: readonly ReportDef[] = [
     description:
       "NCI CCSG Data Table 2A funding review — program-code allocation and the Cancer-Relevant Percent judgment column.",
   },
-  { n: 3, label: "3. Publications", description: "Coming soon." },
-  { n: 4, label: "4. Grants", description: "Coming soon." },
-  { n: 5, label: "5. Clinical Trials", description: "Coming soon." },
+  {
+    n: 3,
+    label: "3. Publications",
+    description: "Center-attributed publications by program, with cancer-relevance tagging.",
+  },
+  {
+    n: 4,
+    label: "4. Grants",
+    description: "Active grants for the center's members, as of a chosen date.",
+  },
+  {
+    n: 5,
+    label: "5. Clinical Trials",
+    description: "Active clinical trials involving the center's members, with ClinicalTrials.gov links.",
+  },
 ];
 
 export default async function EditReportsIndexPage({
@@ -70,25 +99,102 @@ export default async function EditReportsIndexPage({
     redirect("/api/auth/saml/login?return=/edit/reports");
   }
 
-  const { center } = (await searchParams) ?? {};
-  const code = await resolveReportsCenterCode(db.read, center);
-  const ctx = await loadReportsContext(code, session, db.read);
-  if (ctx === null) {
-    return <ForbiddenEditPage variant="unit" targetEntity={code} />;
-  }
-
   const pendingSlugRequests =
     session.isSuperuser && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
   const pendingHonors = isHonorsQueueTabVisible(session)
     ? await countPendingHonors(db.read)
     : null;
+  const shell = { session, pendingSlugRequests, pendingHonors } as const;
 
+  const { center } = (await searchParams) ?? {};
+  if (center) {
+    // Unchanged: an explicit `?center=` always addresses exactly one unit.
+    const code = await resolveReportsCenterCode(db.read, center);
+    const ctx = await loadReportsContext(code, session, db.read);
+    if (ctx === null) return <ForbiddenEditPage variant="unit" targetEntity={code} />;
+    return <SingleUnitReports ctx={ctx} code={code} {...shell} />;
+  }
+
+  const reportableUnits = await loadReportableUnitsForActor(session, db.read);
+  if (reportableUnits.length === 0) notFound();
+
+  if (reportableUnits.length === 1) {
+    const code = reportableUnits[0].code;
+    const ctx = await loadReportsContext(code, session, db.read);
+    if (ctx === null) return <ForbiddenEditPage variant="unit" targetEntity={code} />;
+    return <SingleUnitReports ctx={ctx} code={code} {...shell} />;
+  }
+
+  const liveness = await loadReportLiveness(
+    reportableUnits.map((u) => u.code),
+    db.read,
+  );
+  const units: ReportsIndexUnit[] = reportableUnits.map((u) => {
+    const l = liveness.get(u.code);
+    return {
+      code: u.code,
+      name: u.name,
+      centerType: u.centerType,
+      editHref: unitEditHref("center", u.code),
+      liveCount: l?.liveCount ?? 0,
+      totalCount: l?.totalCount ?? REPORTS.length,
+      lastRefreshedAt: l?.lastRefreshedAt?.toISOString() ?? null,
+      perReport:
+        l?.perReport.map((r) => ({ n: r.n, live: r.live, lastRefreshedAt: r.lastRefreshedAt?.toISOString() ?? null })) ??
+        REPORTS.map((r) => ({ n: r.n, live: false, lastRefreshedAt: null })),
+    };
+  });
+  // 2a (table + filter rail) once there are enough units for a picker to earn
+  // its keep; otherwise 1a (every unit banded inline) — including a
+  // superuser/comms_steward with a small org today.
+  const mode = (session.isSuperuser || session.isCommsSteward) && units.length > 3 ? "table" : "bands";
+
+  return (
+    <ConsoleShell active="reports" reportsTab {...shell}>
+      <div className="apollo-card">
+        <h1 className="mb-1 text-xl font-semibold">Reports</h1>
+        <p className="text-muted-foreground text-sm">
+          {mode === "table"
+            ? "Advisory only — every report reads precomputed data; nothing here writes to the roster."
+            : "Reports for the centers you administer."}
+        </p>
+        {mode === "bands" && (
+          <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <span className="font-semibold">Advisory only</span> — every report reads precomputed
+            data; nothing here writes to the roster.
+          </div>
+        )}
+        <div className="mt-5">
+          <ReportsIndex units={units} reports={REPORTS} mode={mode} />
+        </div>
+      </div>
+    </ConsoleShell>
+  );
+}
+
+/** Today's existing per-unit report list — unchanged, just extracted so both
+ *  the explicit `?center=` path and the single-reportable-unit default reuse
+ *  it instead of duplicating the JSX. */
+function SingleUnitReports({
+  ctx,
+  code,
+  session,
+  pendingSlugRequests,
+  pendingHonors,
+}: {
+  ctx: UnitEditContext;
+  code: string;
+  session: EditSession;
+  pendingSlugRequests: number | null;
+  pendingHonors: number | null;
+}) {
   return (
     <ConsoleShell
       active="reports"
       session={session}
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
+      reportsTab
     >
       {/* ConsoleShell owns only the chrome — content supplies its own surface
           (R1/the Apollo Surface Language "the page is never white"). Without

@@ -35,11 +35,12 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       methodsTab: 0,
       dataQualityTab: 0,
       dataSharingTab: 0,
+      reportsTab: true,
       viewerIsDeveloper: false,
     });
   });
 
-  it("comms_steward (not superuser) — Profiles + Units + Methods + Data quality, NO superuser strip", () => {
+  it("comms_steward (not superuser) — Profiles + Units + Methods + Data quality + Reports, NO superuser strip", () => {
     expect(deriveConsoleTabs(session({ isCommsSteward: true }))).toEqual({
       superuserSurfaces: false,
       profilesTab: true,
@@ -48,6 +49,9 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       methodsTab: 0,
       dataQualityTab: 0,
       dataSharingTab: 0,
+      // Same reports authz as a superuser (`loadReportsContext`'s gate) —
+      // Reports IA redesign, 2026-08-14.
+      reportsTab: true,
       viewerIsDeveloper: false,
     });
   });
@@ -63,6 +67,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       methodsTab: null,
       dataQualityTab: null,
       dataSharingTab: null,
+      reportsTab: false,
       viewerIsDeveloper: false,
     });
   });
@@ -76,6 +81,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       methodsTab: null,
       dataQualityTab: null,
       dataSharingTab: null,
+      reportsTab: false,
       viewerIsDeveloper: true,
     });
   });
@@ -89,6 +95,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       methodsTab: null,
       dataQualityTab: null,
       dataSharingTab: null,
+      reportsTab: false,
       viewerIsDeveloper: false,
     });
   });

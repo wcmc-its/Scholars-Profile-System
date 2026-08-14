@@ -63,17 +63,23 @@ export type AdminSubnavActive =
  * console pages. `Record<AdminSubnavActive, …>` is the point: a new id fails to
  * compile until it is placed, rather than silently landing ungrouped.
  */
-type GroupId = "queues" | "registries" | "insights" | "tools";
+type GroupId = "queues" | "registries" | "reports" | "insights" | "tools";
 
 const GROUP_LABEL: Record<GroupId, string> = {
   queues: "Queues",
   registries: "Registries",
+  reports: "Reports",
   insights: "Insights",
   tools: "Tools",
 };
 
-/** Tier-1 order after the top-level tabs. */
-const GROUP_ORDER: GroupId[] = ["queues", "registries", "insights", "tools"];
+/** Tier-1 order after the top-level tabs. `reports` is always a single-member
+ *  "group" (see `TAB_GROUP.reports` below) — the single-member promotion
+ *  further down renders it as a plain tab, not a dropdown, so this array
+ *  entry is really just "where in the strip does Reports sit": left of
+ *  Insights, per direct feedback overturning the 2026-08-12 exclusivity
+ *  decision (Reports IA redesign, 2026-08-14). */
+const GROUP_ORDER: GroupId[] = ["queues", "registries", "reports", "insights", "tools"];
 
 const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   profiles: null,
@@ -95,14 +101,12 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   activity: "insights",
   usage: "insights",
   "etl-status": "insights",
-  // "reports" has no TabSpec below — it deliberately never appears in this
-  // bar (2026-08-12: the Cancer Center Reports console must be reached
-  // EXCLUSIVELY via /edit/units → the center's own editor, not a global
-  // Insights peer). It stays in `AdminSubnavActive`/this map only because
-  // `Record<AdminSubnavActive, …>` requires every member covered, and the
-  // `/edit/reports/*` pages still pass `active="reports"` to `ConsoleShell`
-  // — harmless, since no tab ever matches that id.
-  reports: null,
+  // Its own single-member group (Reports IA redesign, 2026-08-14) — a
+  // dedicated top-level tab, not an Insights peer. Reverses the 2026-08-12
+  // "reached exclusively via /edit/units" decision; per direct feedback,
+  // Reports keeps a SECOND entry point too (the center editor's header link,
+  // `EditShell`'s `reportsHref` — Phase 1 of this redesign).
+  reports: "reports",
   /** Paste an input, get a ranked result. */
   "find-researchers": "tools",
   matcha: "tools",
@@ -131,6 +135,7 @@ export function AdminSubnav({
   profilesTab = false,
   unitsTab = false,
   usageTab = false,
+  reportsTab = false,
   viewerIsDeveloper = false,
 }: {
   active: AdminSubnavActive;
@@ -185,6 +190,12 @@ export function AdminSubnav({
    *  `superuserSurfaces`; this is the escape hatch so a unit admin who can view
    *  usage (`canViewUsage`) sees the tab too. Default `false`. */
   usageTab?: boolean;
+  /** Show the "Reports" tab (`/edit/reports`, the Cancer Center reports console)
+   *  to a non-superuser unit admin (owner/curator) with at least one reportable
+   *  unit. Superusers already get it via `superuserSurfaces`; this is the
+   *  escape hatch, mirroring `usageTab`. Default `false` (Reports IA redesign,
+   *  2026-08-14). */
+  reportsTab?: boolean;
   /** Show the "Funding matcher" tab to a pure development-role viewer who is NOT
    *  a superuser. Superusers already get it via `superuserSurfaces`; this is the
    *  dev-role escape hatch on `/edit/find-researchers` (their only console page).
@@ -242,6 +253,11 @@ export function AdminSubnav({
         href: "/edit/methods",
         label: "Method families",
       },
+      // A dedicated tab, not an Insights peer (Reports IA redesign, 2026-08-14 —
+      // reverses the 2026-08-12 "/edit/units only" decision). Declared here, right
+      // before the Insights group's own members, so it also lands immediately to
+      // their left when `CONSOLE_SUBNAV_GROUPED` is off and `tabs` renders verbatim.
+      { show: superuserSurfaces || reportsTab, id: "reports", href: "/edit/reports", label: "Reports" },
       {
         show: dataQualityTab !== null && dataQualityTab !== undefined,
         id: "data-quality",
@@ -263,10 +279,6 @@ export function AdminSubnav({
       // Read-only ETL health board. Superuser-only; no separate flag — same
       // rationale as Activity above, the superuser gate on the page IS the control.
       { show: superuserSurfaces, id: "etl-status", href: "/edit/etl-status", label: "ETL status" },
-      // NO "reports" entry here on purpose (2026-08-12 direction): the Cancer
-      // Center Reports console is reached exclusively via /edit/units → the
-      // center's own editor (`CenterReportsRailLink`), never this global bar.
-      // See the `reports: null` comment on `TAB_GROUP` above.
       // Gated on the same `CORE_PAGES` flag as the public core surfaces, so it stays
       // dark in any env where cores aren't live yet (staging-on / prod-off).
       { show: superuserSurfaces && isCorePagesEnabled(), id: "cores", href: "/edit/core", label: "Cores" },

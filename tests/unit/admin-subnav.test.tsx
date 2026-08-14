@@ -238,24 +238,41 @@ describe("AdminSubnav", () => {
     expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
   });
 
-  // 2026-08-12 direction: the Cancer Center Reports console must be reached
-  // EXCLUSIVELY via /edit/units → the center's own editor
-  // (`CenterReportsRailLink`), never a global Insights peer here. There is no
-  // `reportsTab` prop anymore — this is a regression guard that no future
-  // prop/flag can resurrect an "admin-tab-reports" entry in this bar, under
-  // any role or `active` value.
-  it("never renders a Reports tab, superuser or not, active or not", () => {
+  // Reports IA redesign (2026-08-14) — reverses the 2026-08-12 "exclusively via
+  // /edit/units" direction. Reports is a dedicated top-level tab, not an
+  // Insights peer (see the two-tier grouping suite below for its position),
+  // mirroring `usageTab`'s reach pattern: superusers get it via
+  // `superuserSurfaces`, everyone else needs the per-page `reportsTab` escape
+  // hatch. The center editor's header link (`EditShell`'s `reportsHref`,
+  // Phase 1 of this redesign) is a SECOND entry point, not a replacement.
+  it("shows the Reports tab (linking /edit/reports) to a superuser by default", () => {
     render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
-    expect(screen.queryByTestId("admin-tab-reports")).toBeNull();
+    expect(screen.getByTestId("admin-tab-reports").getAttribute("href")).toBe("/edit/reports");
+  });
+
+  it("hides the Reports tab from a non-superuser without reportsTab", () => {
     render(
       <AdminSubnav
-        active="reports"
+        active="profiles"
         pendingSlugRequests={null}
         pendingHonors={null}
         superuserSurfaces={false}
       />,
     );
     expect(screen.queryByTestId("admin-tab-reports")).toBeNull();
+  });
+
+  it("shows the Reports tab to a non-superuser unit admin via reportsTab", () => {
+    render(
+      <AdminSubnav
+        active="reports"
+        pendingSlugRequests={null}
+        pendingHonors={null}
+        superuserSurfaces={false}
+        reportsTab
+      />,
+    );
+    expect(screen.getByTestId("admin-tab-reports")).toBeTruthy();
   });
 
   // comms-steward-profile-editing-spec.md §3b — a steward edits org units, so
@@ -636,6 +653,10 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
       "admin-tab-units",
       "admin-group-queues",
       "admin-group-registries",
+      // Reports IA redesign (2026-08-14) — its own single-member group, so it
+      // renders as a plain tab (not a dropdown) right where GROUP_ORDER puts
+      // it: left of Insights.
+      "admin-tab-reports",
       "admin-group-insights",
       "admin-group-tools",
     ]);
@@ -658,8 +679,9 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
       "admin-tab-administrators",
       "admin-tab-methods",
     ]);
-    // Insights gained ETL status at the END of the group; there is no Reports
-    // member anymore — that console is reached exclusively via /edit/units.
+    // Insights gained ETL status at the END of the group; Reports is its own
+    // single-member group now (left of Insights, not inside it — see the
+    // tier-1 order test above), so it never appears in this menu.
     fireEvent.focus(screen.getByTestId("admin-group-insights"));
     expect(order(await screen.findByTestId("admin-group-menu-insights"))).toEqual([
       "admin-tab-data-quality",
@@ -676,7 +698,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     expect(order(screen.getByTestId("admin-subnav-tier1"))).toEqual(
       [
         "profiles", "units", "slug-requests", "honors-queue", "news-queue", "slugs",
-        "administrators", "methods", "data-quality", "activity", "usage", "etl-status", "cores",
+        "administrators", "methods", "reports", "data-quality", "activity", "usage", "etl-status", "cores",
         "find-researchers",
       ].map((id) => `admin-tab-${id}`),
     );

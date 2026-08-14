@@ -17,7 +17,7 @@ import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { loadClinicalTrialsReport } from "@/lib/center-collaboration/clinical-trials-report";
 import { db } from "@/lib/db";
-import { loadReportsContext, resolveReportsCenterCode } from "@/lib/edit/cancer-center-reports";
+import { loadReportsContext, resolveNumberedReportCenterCode } from "@/lib/edit/cancer-center-reports";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
@@ -46,7 +46,7 @@ export default async function EditReportsClinicalTrialsPage({
   }
 
   const { center } = (await searchParams) ?? {};
-  const code = await resolveReportsCenterCode(db.read, center);
+  const code = await resolveNumberedReportCenterCode(session, db.read, center);
   const ctx = await loadReportsContext(code, session, db.read);
   if (ctx === null) {
     return <ForbiddenEditPage variant="unit" targetEntity={code} />;
@@ -66,6 +66,7 @@ export default async function EditReportsClinicalTrialsPage({
       session={session}
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
+      reportsTab
     >
       <Link
         href={`/edit/reports?center=${encodeURIComponent(code)}`}
