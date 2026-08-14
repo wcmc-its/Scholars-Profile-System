@@ -11,7 +11,12 @@ from sqlalchemy import create_engine, text
 import catalog, scan2
 
 API = os.environ.get("PUBMED_API_KEY", "")
-OUT = os.path.dirname(os.path.abspath(__file__))
+# ponytail: a durable, non-git location, not the script's own directory - a full run's CSVs are
+# expensive to regenerate (a corpus-wide PubMed pass) and this repo is public, so they must never
+# risk landing in a git worktree that gets cleaned up or, worse, committed. Same directory every
+# script in this pipeline writes to; see catalog.py's own header for the "not a config file" ethos.
+OUT = os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule/data")
+os.makedirs(OUT, exist_ok=True)
 
 engine = create_engine(
     f"mysql+pymysql://{os.environ['DB_USERNAME']}:{os.environ['DB_PASSWORD']}@{os.environ['DB_HOST']}/{os.environ['DB_NAME']}"

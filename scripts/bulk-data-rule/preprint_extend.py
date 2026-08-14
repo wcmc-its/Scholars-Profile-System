@@ -6,7 +6,10 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 import scan2
 
-OUT=os.path.dirname(os.path.abspath(__file__)); API=os.environ.get("PUBMED_API_KEY","")
+# Durable, non-git output location - see extract_databanks.py's OUT comment.
+OUT=os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule/data")
+os.makedirs(OUT, exist_ok=True)
+API=os.environ.get("PUBMED_API_KEY","")
 engine=create_engine(f"mysql+pymysql://{os.environ['DB_USERNAME']}:{os.environ['DB_PASSWORD']}@{os.environ['DB_HOST']}/{os.environ['DB_NAME']}")
 q="""SELECT DISTINCT r.pmid pmid, r.articleYear yr FROM analysis_summary_author a
      JOIN analysis_summary_article r ON r.pmid=a.pmid JOIN identity i ON i.cwid=a.personIdentifier

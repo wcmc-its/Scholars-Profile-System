@@ -7,7 +7,10 @@ import os, time, urllib.request, urllib.parse
 import xml.etree.ElementTree as ET
 import pandas as pd
 
-OUT=os.path.dirname(os.path.abspath(__file__)); API=os.environ.get("PUBMED_API_KEY","")
+# Durable, non-git output location - see extract_databanks.py's OUT comment.
+OUT=os.path.expanduser("~/Dropbox/Projects/Bulk Data Rule/data")
+os.makedirs(OUT, exist_ok=True)
+API=os.environ.get("PUBMED_API_KEY","")
 cov=pd.read_csv(f"{OUT}/coverage.csv"); cov=cov[cov['year']>=2020].copy()
 pmids=cov['pmid'].astype(int).astype(str).tolist()
 print(f"MeSH pass over {len(pmids)} since-2020 pubs", flush=True)
