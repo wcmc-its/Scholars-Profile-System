@@ -292,25 +292,36 @@ export type UnitDirectoryEntry = {
 /** The narrow Prisma surface `loadAllUnitsDirectory` reads — `db.read` satisfies it. */
 export type AllUnitsDirectoryClient = Pick<
   PrismaClient,
-  "department" | "division" | "center" | "suppression" | "scholar" | "centerMembership"
+  "department" | "division" | "center" | "core" | "suppression" | "scholar" | "centerMembership"
 >;
 
 /**
- * The complete org-unit directory (#971) — every department, division, and
- * center resolved to a display-rich `UnitDirectoryEntry`, kind-then-name sorted.
+ * The complete org-unit directory (#971) — every department, division,
+ * center, and (cores-as-org-units) core resolved to a display-rich
+ * `UnitDirectoryEntry`, kind-then-name sorted, cores last.
  *
  * Bounded work: the org chart is ~50 units (≈30-40 depts + a few divisions +
- * ~8-11 centers), so this issues exactly five batched queries regardless of
- * size — three `findMany` (one per kind) in parallel, ONE `suppression.findMany`
- * for the retired set (not findFirst-per-unit), and ONE `scholar.findMany` for
- * every leader name at once (mirroring `resolveScholarNames` in
- * `lib/api/unit-edit-context.ts`).
+ * ~8-11 centers + 14 cores), so this issues exactly six batched queries
+ * regardless of size — four `findMany` (one per kind) in parallel, ONE
+ * `suppression.findMany` for the retired set (not findFirst-per-unit), and
+ * ONE `scholar.findMany` for every leader name at once (mirroring
+ * `resolveScholarNames` in `lib/api/unit-edit-context.ts`).
  *
  * Field degradation (only columns present on this checkout are read):
  *   - Division has NO officialName/compactName/category/centerType/sortOrder/
  *     leaderInterim columns → official = compact = name, category/centerType/
  *     sortOrder = null, leaderInterim = false.
  *   - Center has NO parent-dept FK → parentDeptCode/parentDeptName always null.
+ *   - Core has NO slug/category/centerType/sortOrder columns, and no single
+ *     leader column — `CoreLeader` is a list (P1). `slug` degrades to the
+ *     core id (its only stable identifier; unused by the rendering component
+ *     today). `leaderCwid`/`leaderName` show the FIRST leader by `sortOrder`
+ *     only — a co-led core's other leaders aren't represented in this
+ *     single-leader-column shape (same acceptable-for-a-read-only-audit-view
+ *     trade-off as dept/div leader overrides below). `scholarCount` is
+ *     always 0 — cores have no roster concept. `retired` is always false —
+ *     `Suppression` explicitly excludes `entityType="core"` by design
+ *     (`core-as-org-unit-plan.md`).
  *   - No active/retired/deletedAt column on any unit → `retired` is derived from
  *     a Suppression row with revokedAt IS NULL.
  *
@@ -321,7 +332,8 @@ export type AllUnitsDirectoryClient = Pick<
  * So a PENDING dept/div leader override or interim flag won't show here — only
  * the row column (chairCwid/chiefCwid/directorCwid) is read. Acceptable for a
  * low-stakes, read-only audit view; centers (leader + interim in-row) are
- * faithful.
+ * faithful. Cores skip the external-leader overlay entirely — that config is
+ * keyed by dept/center unit code and a core never participates in it.
  *
  * Retired rows are hidden unless `opts.includeRetired` — the page passes
  * `session.isSuperuser`, so only superusers see retired units (comms stewards do
@@ -331,7 +343,7 @@ export async function loadAllUnitsDirectory(
   db: AllUnitsDirectoryClient,
   opts?: { includeRetired?: boolean },
 ): Promise<UnitDirectoryEntry[]> {
-  const [deptRows, divRows, ctrRows, suppressions] = await Promise.all([
+  const [deptRows, divRows, ctrRows, coreRows, suppressions] = await Promise.all([
     db.department.findMany({
       select: {
         code: true,
@@ -376,6 +388,19 @@ export async function loadAllUnitsDirectory(
         source: true,
       },
     }),
+    db.core.findMany({
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        source: true,
+        leaders: {
+          orderBy: { sortOrder: "asc" },
+          take: 1,
+          select: { cwid: true, interim: true },
+        },
+      },
+    }),
     db.suppression.findMany({
       where: {
         entityType: { in: ["department", "division", "center"] },
@@ -400,6 +425,7 @@ export async function loadAllUnitsDirectory(
     ...deptRows.map((r) => r.chairCwid),
     ...divRows.map((r) => r.chiefCwid),
     ...ctrRows.map((r) => r.directorCwid),
+    ...coreRows.map((r) => r.leaders[0]?.cwid ?? null),
   ].filter((c): c is string => !!c && c.length > 0);
   const uniqueLeaders = [...new Set(leaderCwids)];
   const nameMap = new Map<string, string>();
@@ -496,6 +522,39 @@ export async function loadAllUnitsDirectory(
         href: unitEditHref("center", r.code),
       }),
     ),
+    ...coreRows.map((r): UnitDirectoryEntry => {
+      const leaderCwid = r.leaders[0]?.cwid ?? null;
+      return {
+        kind: "core",
+        code: r.id,
+        name: r.name,
+        officialName: officialUnitName({ name: r.name }),
+        compactName: compactUnitName({ name: r.name }),
+        description: r.description,
+        // No slug column — the id is the only stable identifier (unused by
+        // the rendering component today).
+        slug: r.id,
+        kindLabel: unitKindLabel("core"),
+        category: null,
+        centerType: null,
+        leaderCwid,
+        // Skips the external-leader overlay `resolveLeader` checks for the
+        // other kinds — that config is keyed by dept/center unit code and a
+        // core never participates in it.
+        leaderName: leaderCwid ? (nameMap.get(leaderCwid) ?? null) : null,
+        leaderInterim: r.leaders[0]?.interim ?? false,
+        // Cores have no roster concept.
+        scholarCount: 0,
+        source: r.source,
+        parentDeptCode: null,
+        parentDeptName: null,
+        sortOrder: null,
+        // Suppression explicitly excludes entityType="core" by design
+        // (core-as-org-unit-plan.md) — never retired.
+        retired: false,
+        href: unitEditHref("core", r.id),
+      };
+    }),
   ];
 
   const visible = opts?.includeRetired ? entries : entries.filter((e) => !e.retired);
@@ -506,9 +565,7 @@ export async function loadAllUnitsDirectory(
     department: 0,
     division: 1,
     center: 2,
-    // This directory never emits a "core" entry (deptRows/divRows/ctrRows only) —
-    // the key exists solely to satisfy Record<ManageableUnitKind, number>'s
-    // exhaustiveness now that the type is shared with cores.
+    // Cores sort last — a newer, still-thinner unit kind than the other three.
     core: 3,
   };
   return visible.sort(
