@@ -45,14 +45,16 @@ describe("selectCorePublications", () => {
 });
 
 describe("getCoreList", () => {
-  // Minimal injected reader: the two reads getCoreList performs.
+  // Minimal injected reader: the three reads getCoreList performs.
   const reader = (
     cores: Array<{ id: string; name: string; facility: string | null }>,
-    confirmedCoreIds: string[],
+    confirmedPairs: Array<{ coreId: string; pmid: string }>,
+    activeClaims: Array<{ coreId: string; pmid: string; status: "claimed" | "rejected" }> = [],
   ) =>
     ({
       core: { findMany: async () => cores },
-      publicationCore: { findMany: async () => confirmedCoreIds.map((coreId) => ({ coreId })) },
+      publicationCore: { findMany: async () => confirmedPairs },
+      coreClaim: { findMany: async () => activeClaims },
     }) as unknown as Parameters<typeof getCoreList>[0];
 
   it("sorts by numeric id (not string) and flags cores with confirmed publications", async () => {
@@ -63,11 +65,36 @@ describe("getCoreList", () => {
           { id: "2", name: "Imaging", facility: "CBIC" },
           { id: "1", name: "Bioinformatics", facility: null },
         ],
-        ["2"], // only core 2 has confirmed pubs
+        [{ coreId: "2", pmid: "111" }], // only core 2 has an engine-confirmed pair
       ),
     );
     expect(out.map((c) => c.id)).toEqual(["1", "2", "10"]); // numeric, not "1","10","2"
     expect(out.map((c) => c.hasConfirmedPublications)).toEqual([false, true, false]);
+  });
+
+  it("flags a core whose only confirmed usage is a manual claim (no engine-confirmed row)", async () => {
+    // Bug being fixed: under the old distinct-coreId-on-engine-status-only
+    // query, core "3" would never appear in the confirmed set — the human
+    // claim is the sole source of "confirmed" for this (pub, core) pair.
+    const out = await getCoreList(
+      reader(
+        [{ id: "3", name: "Genomics", facility: "Genomics Core" }],
+        [], // no engine-confirmed pairs at all
+        [{ coreId: "3", pmid: "222", status: "claimed" }],
+      ),
+    );
+    expect(out.map((c) => c.hasConfirmedPublications)).toEqual([true]);
+  });
+
+  it("drops a core whose only engine-confirmed pair was human-rejected", async () => {
+    const out = await getCoreList(
+      reader(
+        [{ id: "4", name: "Proteomics", facility: "Proteomics Core" }],
+        [{ coreId: "4", pmid: "333" }],
+        [{ coreId: "4", pmid: "333", status: "rejected" }],
+      ),
+    );
+    expect(out.map((c) => c.hasConfirmedPublications)).toEqual([false]);
   });
 });
 
