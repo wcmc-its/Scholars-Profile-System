@@ -42,12 +42,20 @@ const centerOwner: ManageableUnit = {
   role: "owner",
   href: "/edit/center/man-onc",
 };
+const coreOwner: ManageableUnit = {
+  kind: "core",
+  code: "2",
+  name: "Biomedical Imaging",
+  role: "owner",
+  href: "/edit/core/2",
+};
 
 function mkUnits(list: ManageableUnit[]): ManageableUnits {
   return {
     departments: list.filter((u) => u.kind === "department"),
     divisions: list.filter((u) => u.kind === "division"),
     centers: list.filter((u) => u.kind === "center"),
+    cores: list.filter((u) => u.kind === "core"),
     total: list.length,
   };
 }
@@ -58,13 +66,14 @@ describe("ManageableUnitsIndex", () => {
   it("non-superuser with grants: groups, edit links, owner 'Add a center', no superuser tools", () => {
     render(
       <ManageableUnitsIndex
-        units={mkUnits([deptOwner, divCurator, centerOwner])}
+        units={mkUnits([deptOwner, divCurator, centerOwner, coreOwner])}
         isSuperuser={false}
       />,
     );
     expect(href(screen.getByTestId("units-edit-department-N1280"))).toBe("/edit/department/N1280");
     expect(href(screen.getByTestId("units-edit-division-D-CARD"))).toBe("/edit/division/D-CARD");
     expect(href(screen.getByTestId("units-edit-center-man-onc"))).toBe("/edit/center/man-onc");
+    expect(href(screen.getByTestId("units-edit-core-2"))).toBe("/edit/core/2");
     // Owner of a department → can add a center under it.
     expect(href(screen.getByTestId("units-add-center-N1280"))).toBe(
       "/edit/unit/new?type=center&dept=N1280",

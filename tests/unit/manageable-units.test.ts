@@ -28,15 +28,26 @@ function selectByCode(
   return pool.map((r) => ({ code: r.code, name: r.name }));
 }
 
+function selectById(
+  rows: Row[],
+  args: { where?: { id?: { in?: string[] } } } | undefined,
+): Array<{ id: string; name: string }> {
+  const inList = args?.where?.id?.in;
+  const pool = inList ? rows.filter((r) => inList.includes(r.code)) : rows;
+  return pool.map((r) => ({ id: r.code, name: r.name }));
+}
+
 function makeClient(opts: {
   grants?: Grant[];
   departments?: Row[];
   divisions?: Row[];
   centers?: Row[];
+  cores?: Row[];
 }) {
   const dept = vi.fn(async (args?: never) => selectByCode(opts.departments ?? [], args));
   const div = vi.fn(async (args?: never) => selectByCode(opts.divisions ?? [], args));
   const ctr = vi.fn(async (args?: never) => selectByCode(opts.centers ?? [], args));
+  const core = vi.fn(async (args?: never) => selectById(opts.cores ?? [], args));
   const grants = vi.fn(async () => (opts.grants ?? []).map((g) => ({ ...g })));
   return {
     client: {
@@ -44,8 +55,9 @@ function makeClient(opts: {
       department: { findMany: dept },
       division: { findMany: div },
       center: { findMany: ctr },
+      core: { findMany: core },
     } as never,
-    spies: { grants, dept, div, ctr },
+    spies: { grants, dept, div, ctr, core },
   };
 }
 
@@ -59,6 +71,7 @@ describe("unitEditHref / unitKindLabel", () => {
     expect(unitKindLabel("department")).toBe("Department");
     expect(unitKindLabel("division")).toBe("Division");
     expect(unitKindLabel("center")).toBe("Center");
+    expect(unitKindLabel("core")).toBe("Core");
   });
 });
 
@@ -66,10 +79,11 @@ describe("loadManageableUnits", () => {
   it("returns all-empty and skips name lookups when there are no grants", async () => {
     const { client, spies } = makeClient({ grants: [] });
     const result = await loadManageableUnits("cwid1", client);
-    expect(result).toEqual({ departments: [], divisions: [], centers: [], total: 0 });
+    expect(result).toEqual({ departments: [], divisions: [], centers: [], cores: [], total: 0 });
     expect(spies.dept).not.toHaveBeenCalled();
     expect(spies.div).not.toHaveBeenCalled();
     expect(spies.ctr).not.toHaveBeenCalled();
+    expect(spies.core).not.toHaveBeenCalled();
   });
 
   it("groups grants by kind, resolves names, and builds hrefs", async () => {
@@ -78,13 +92,24 @@ describe("loadManageableUnits", () => {
         { entityType: "department", entityId: "N1280", role: "owner" },
         { entityType: "division", entityId: "D-CARD", role: "curator" },
         { entityType: "center", entityId: "man-onc", role: "owner" },
+        { entityType: "core", entityId: "2", role: "owner" },
       ],
       departments: [{ code: "N1280", name: "Medicine" }],
       divisions: [{ code: "D-CARD", name: "Cardiology" }],
       centers: [{ code: "man-onc", name: "Cancer Center" }],
+      cores: [{ code: "2", name: "Biomedical Imaging" }],
     });
     const r = await loadManageableUnits("cwid1", client);
-    expect(r.total).toBe(3);
+    expect(r.total).toBe(4);
+    expect(r.cores).toEqual([
+      {
+        kind: "core",
+        code: "2",
+        name: "Biomedical Imaging",
+        role: "owner",
+        href: "/edit/core/2",
+      },
+    ]);
     expect(r.departments).toEqual([
       {
         kind: "department",
