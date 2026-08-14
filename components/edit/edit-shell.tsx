@@ -28,7 +28,7 @@
  * replacement, so it's deliberately just a link, not a breadcrumb.
  */
 import Link from "next/link";
-import { ArrowUpRight, ChevronLeftIcon } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ChevronLeftIcon } from "lucide-react";
 
 import { AttributeRail, type RailItem } from "@/components/edit/attribute-rail";
 import { RailSelect } from "@/components/edit/rail-select";
@@ -57,6 +57,10 @@ export type EditShellProps = {
    *  audit page (#955). Internal, so it opens in the same tab. Shown for every
    *  edit mode (history visibility == edit access). Omit ⇒ no link. */
   historyHref?: string;
+  /** "View reports" target — a center's Reports console (`/edit/reports`).
+   *  Internal, same tab. Center editor only; omit ⇒ no link. Replaces the old
+   *  rail-mounted `CenterReportsRailLink` (Reports IA redesign, 2026-08-14). */
+  reportsHref?: string;
   /**
    * The signed-in (actor) scholar's identity for the header account menu. In
    * self mode this is the scholar themselves; omit it for surfaces that don't
@@ -103,6 +107,7 @@ export function EditShell({
   railGroupMeta,
   previewHref,
   historyHref,
+  reportsHref,
   account,
   canBrowseProfiles = false,
   consoleNav,
@@ -239,9 +244,12 @@ export function EditShell({
 
           {/* Secondary links row (mockup parity, slate text). "View change
               history" (internal audit page, #955) sits beside "Preview Profile"
-              (the public profile, external ↗). Shown alongside the account
-              menu's "View my profile". */}
-          {(historyHref || previewHref) && (
+              (the public profile, external ↗) and, for a center, "View reports"
+              (internal, Reports IA redesign 2026-08-14 — replaces the old
+              rail-mounted link so it survives the roster/Members page, which
+              hides the rail). Shown alongside the account menu's "View my
+              profile". */}
+          {(historyHref || previewHref || reportsHref) && (
             <div className="mb-4 flex items-center justify-end gap-4">
               {historyHref && (
                 <Link
@@ -261,6 +269,16 @@ export function EditShell({
                 >
                   Preview Profile
                   <ArrowUpRight className="size-4" aria-hidden />
+                </Link>
+              )}
+              {reportsHref && (
+                <Link
+                  href={reportsHref}
+                  className="text-apollo-slate inline-flex items-center gap-1.5 text-sm font-medium hover:underline"
+                  data-testid="edit-reports-link"
+                >
+                  View reports
+                  <ArrowRight className="size-4" aria-hidden />
                 </Link>
               )}
             </div>

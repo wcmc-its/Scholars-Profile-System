@@ -22,7 +22,6 @@
  * other panel shows a "Retired — restore to edit" notice instead of its editor.
  */
 import { CenterProgramCard } from "@/components/edit/center-program-card";
-import { CenterReportsRailLink } from "@/components/edit/center-reports-rail-link";
 import { CenterRosterCard } from "@/components/edit/center-roster-card";
 import { CenterTypeCard } from "@/components/edit/center-type-card";
 import { EditShell } from "@/components/edit/edit-shell";
@@ -85,9 +84,11 @@ const hasFacultyExportTab = (ctx: UnitEditContext) =>
 // Reports have always shared — a center with a program taxonomy is exactly
 // the population the Cancer Center reports cover. Reports moved off the
 // in-page attribute set to the top-level `/edit/reports` console
-// (cancer-center-reports-consolidation); this predicate now only decides
-// whether the rail's external "Reports" link (`CenterReportsRailLink`)
-// renders, not a case in `renderPanel`.
+// (cancer-center-reports-consolidation); this predicate now decides whether
+// `EditShell`'s header "View reports" link (`reportsHref`) renders — it used
+// to gate a rail-mounted link instead (`CenterReportsRailLink`, retired
+// Reports IA redesign 2026-08-14, so the link survives the roster/Members
+// page, which hides the rail).
 const hasCenterReports = (ctx: UnitEditContext) =>
   ctx.unit.unitType === "center" && (ctx.programs?.length ?? 0) > 0;
 
@@ -148,15 +149,16 @@ export function UnitEditPage({ ctx, attr }: UnitEditPageProps) {
           ? `/departments/${ctx.unit.deptSlug}/divisions/${ctx.unit.slug}`
           : undefined; // a division with no resolvable parent slug has no preview
 
-  // Mutually exclusive by unit type: a department gets its sibling-divisions
-  // cross-nav; a center with a program taxonomy gets the external "Reports"
-  // link instead (a division gets neither).
+  // A department gets its sibling-divisions cross-nav; other unit types have
+  // nothing to put here (a center's Reports link moved to `reportsHref` below).
   const subRail =
     ctx.unit.unitType === "department" && ctx.siblingDivisions ? (
       <SiblingDivisionsRail divisions={ctx.siblingDivisions} />
-    ) : hasCenterReports(ctx) ? (
-      <CenterReportsRailLink centerCode={ctx.unit.code} />
     ) : undefined;
+
+  const reportsHref = hasCenterReports(ctx)
+    ? `/edit/reports?center=${encodeURIComponent(ctx.unit.code)}`
+    : undefined;
 
   return (
     <EditShell
@@ -166,6 +168,7 @@ export function UnitEditPage({ ctx, attr }: UnitEditPageProps) {
       activeAttr={active.key}
       basePath={basePath}
       previewHref={previewHref}
+      reportsHref={reportsHref}
       subRail={subRail}
       // Members gets the whole width for its own filter bar + (on a center)
       // disease grid, not a shared column with a rail it has no room to use —

@@ -155,7 +155,7 @@ export default async function EditReportsPublicationsPage({
       <h1 className="mb-1 text-xl font-semibold">3. Publications</h1>
       <p className="text-muted-foreground text-sm">
         Every publication with a confirmed {ctx.unit.name} author, joined to Journal Impact Factor
-        data where the journal matches. Advisory only — nothing here writes to the roster.
+        data where the journal matches.
       </p>
       <ReportBody report={report} />
     </ConsoleShell>
