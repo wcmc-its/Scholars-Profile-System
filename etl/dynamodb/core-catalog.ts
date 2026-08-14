@@ -9,7 +9,7 @@
  * FK-guards `publication_core.coreId` against it — the same "populate the
  * catalog, then guard the usage rows" flow Block 1 uses for `topic`.
  *
- * Keep in sync with the dictionary as cores are resolved. All 13 WCM cores in the
+ * Keep in sync with the dictionary as cores are resolved. All 14 WCM cores in the
  * dictionary are now mirrored here. Cores with no firing staff/alias signal yet
  * (6 Institutional Biorepository, 7 Metabolic Phenotyping, 8 Microbiome, 10 Human
  * Immune Monitoring) seed a catalog row but currently project zero usage rows — an
@@ -42,4 +42,5 @@ export const CORE_CATALOG: ReadonlyArray<CoreCatalogEntry> = [
   { id: "11", name: "Microscopy and Image Analysis", facility: "Microscopy and Image Analysis Core" },
   { id: "12", name: "Nuclear Magnetic Resonance", facility: "Nuclear Magnetic Resonance (NMR) Core Facility" },
   { id: "13", name: "Proteomics and Metabolomics", facility: "Proteomics & Metabolomics Core Facility" },
+  { id: "14", name: "Research Informatics", facility: "Research Informatics" },
 ];
