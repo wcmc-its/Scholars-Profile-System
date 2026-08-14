@@ -43,6 +43,7 @@ const KIND_ORDER: ReadonlyArray<{ kind: ManageableUnitKind; title: string }> = [
   { kind: "department", title: "Departments" },
   { kind: "division", title: "Divisions" },
   { kind: "center", title: "Centers" },
+  { kind: "core", title: "Cores" },
 ];
 
 /** Unit · Kind · Code · Scholars · Leader · Description — the group header row spans them all. */
@@ -131,8 +132,9 @@ export function AllUnitsDirectory({
         <div>
           <h2 className="text-[15px] font-semibold">All units</h2>
           <p className="text-muted-foreground text-sm">
-            Every department, division, and center{isSuperuser ? ", including retired ones," : ""}{" "}
-            with its names, leadership, and counts — a read-only audit of the full org chart.
+            Every department, division, center, and core
+            {isSuperuser ? ", including retired ones," : ""} with its names, leadership, and
+            counts — a read-only audit of the full org chart.
           </p>
         </div>
         {/* Create a unit is superuser-only — a comms_steward edits existing units

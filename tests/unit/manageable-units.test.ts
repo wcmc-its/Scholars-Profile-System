@@ -258,11 +258,19 @@ type MembershipRow = {
   startDate?: Date | null;
   endDate?: Date | null;
 };
+type CoreRow = {
+  id: string;
+  name: string;
+  description?: string | null;
+  source?: string;
+  leaders?: Array<{ cwid: string; interim?: boolean }>;
+};
 
 function makeDirectoryClient(opts: {
   departments?: DeptRow[];
   divisions?: DivRow[];
   centers?: CtrRow[];
+  cores?: CoreRow[];
   suppressions?: Suppr[];
   scholars?: ScholarRow[];
   /** Center roster rows — centers count live off these, never off the row. */
@@ -271,6 +279,9 @@ function makeDirectoryClient(opts: {
   const dept = vi.fn(async () => opts.departments ?? []);
   const div = vi.fn(async () => opts.divisions ?? []);
   const ctr = vi.fn(async () => opts.centers ?? []);
+  const core = vi.fn(async () =>
+    (opts.cores ?? []).map((r) => ({ source: "reciterai-core-dictionary", leaders: [], ...r })),
+  );
   const suppression = vi.fn(async () => opts.suppressions ?? []);
   const scholar = vi.fn(async (args?: { where?: { cwid?: { in?: string[] } } }) => {
     const inList = args?.where?.cwid?.in ?? [];
@@ -289,11 +300,12 @@ function makeDirectoryClient(opts: {
       department: { findMany: dept },
       division: { findMany: div },
       center: { findMany: ctr },
+      core: { findMany: core },
       suppression: { findMany: suppression },
       scholar: { findMany: scholar },
       centerMembership: { findMany: centerMembership },
     } as never,
-    spies: { dept, div, ctr, suppression, scholar, centerMembership },
+    spies: { dept, div, ctr, core, suppression, scholar, centerMembership },
   };
 }
 
@@ -439,7 +451,7 @@ describe("loadAllUnitsDirectory", () => {
     expect(r.find((u) => u.code === "live")!.retired).toBe(false);
   });
 
-  it("sorts by kind (dept, division, center) then name", async () => {
+  it("sorts by kind (dept, division, center, core) then name — cores last", async () => {
     const { client } = makeDirectoryClient({
       departments: [
         { code: "N2", name: "Surgery", scholarCount: 0 },
@@ -447,6 +459,7 @@ describe("loadAllUnitsDirectory", () => {
       ],
       divisions: [{ code: "D1", name: "Cardiology", scholarCount: 0 }],
       centers: [{ code: "C1", name: "Brain Center", scholarCount: 0 }],
+      cores: [{ id: "1", name: "Aardvark Core" }], // name-sorts first alphabetically — kind wins anyway
     });
     const r = await loadAllUnitsDirectory(client);
     expect(r.map((u) => `${u.kind}:${u.name}`)).toEqual([
@@ -454,7 +467,72 @@ describe("loadAllUnitsDirectory", () => {
       "department:Surgery",
       "division:Cardiology",
       "center:Brain Center",
+      "core:Aardvark Core",
     ]);
+  });
+
+  it("maps a core: name-only official/compact, id as both code and slug, no parent/category/centerType, never retired", async () => {
+    const { client } = makeDirectoryClient({
+      cores: [{ id: "14", name: "Research Informatics", description: "The core.", source: "reciterai-core-dictionary" }],
+    });
+    const r = await loadAllUnitsDirectory(client);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({
+      kind: "core",
+      code: "14",
+      officialName: "Research Informatics",
+      compactName: "Research Informatics",
+      description: "The core.",
+      slug: "14",
+      kindLabel: "Core",
+      category: null,
+      centerType: null,
+      parentDeptCode: null,
+      parentDeptName: null,
+      sortOrder: null,
+      scholarCount: 0,
+      retired: false,
+      href: "/edit/core/14",
+    });
+  });
+
+  it("core leadership: first leader by sortOrder resolved, interim carried, skips the external-leader overlay", async () => {
+    const { client } = makeDirectoryClient({
+      // N1540 is Joel Stein in EXTERNAL_LEADERS — a core id colliding with that
+      // code string would be a coincidence, not a real overlay match, so this
+      // core must NOT pick up the overlay name.
+      cores: [
+        {
+          id: "N1540",
+          name: "Multi-Led Core",
+          leaders: [
+            { cwid: "second1", interim: false },
+            { cwid: "first0001", interim: true },
+          ],
+        },
+      ],
+      scholars: [
+        { cwid: "first0001", preferredName: "First Leader" },
+        { cwid: "second1", preferredName: "Second Leader" },
+      ],
+    });
+    const r = await loadAllUnitsDirectory(client);
+    // The mock ignores the real orderBy/take Prisma args, so this only proves
+    // the mapping reads leaders[0] — sortOrder ordering itself is DB-enforced,
+    // not something a mocked findMany can verify.
+    expect(r[0].leaderCwid).toBe("second1");
+    expect(r[0].leaderName).toBe("Second Leader");
+    expect(r[0].leaderInterim).toBe(false);
+  });
+
+  it("a leaderless core has null leaderCwid/leaderName and false leaderInterim", async () => {
+    const { client } = makeDirectoryClient({
+      cores: [{ id: "2", name: "No Leader Core" }],
+    });
+    const r = await loadAllUnitsDirectory(client);
+    expect(r[0].leaderCwid).toBeNull();
+    expect(r[0].leaderName).toBeNull();
+    expect(r[0].leaderInterim).toBe(false);
   });
 
   // The directory must count a center's roster live. `Center.scholarCount`
