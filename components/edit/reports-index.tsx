@@ -1,22 +1,24 @@
 /**
- * The Reports IA redesign (2026-08-14) — `2a`/`1a`: a cross-unit Reports
- * index for an actor with more than one reportable unit (a center or
- * institute with a `CenterProgram` taxonomy). Single-unit actors never reach
- * this component — `app/edit/reports/page.tsx` falls straight through to
- * today's existing per-unit report list instead, unchanged.
+ * The Reports IA redesign (2026-08-14) — `2a`/`1a`/`3a`.
  *
- * Two renderings of the SAME data, chosen by the page:
+ * Three renderings of the same underlying per-report data
+ * (`lib/edit/cancer-center-reports.ts`'s `loadReportLiveness`), chosen by the
+ * page:
  * - `mode="table"` (2a, superuser/comms_steward with >3 units) — one row per
  *   unit, filter rail, row click opens that unit's report list
- *   (`/edit/reports?center=…`, today's existing page). Mirrors
- *   `AllUnitsDirectory`'s contract: server-bounded list, filter in-memory, no
- *   fetch, stretched-anchor rows (R7).
+ *   (`/edit/reports?center=…`). Mirrors `AllUnitsDirectory`'s contract:
+ *   server-bounded list, filter in-memory, no fetch, stretched-anchor rows
+ *   (R7).
  * - `mode="bands"` (1a, everyone else with >1 unit) — every unit inline on one
  *   page, each in its own band with its 5 report rows beneath, so a multi-unit
  *   admin never has to leave the page to see any of it.
+ * - `SingleUnitReportsTable` (3a — an actor with exactly one reportable unit,
+ *   the common case today) — the SAME `Report | Focus | Last refreshed`
+ *   table as one band's body, just without the band header (the page's own
+ *   `<h1>` already names the unit). Exported separately since it's rendered
+ *   from `app/edit/reports/page.tsx` directly, not through `ReportsIndex`.
  *
- * "Live reports" / "N of 5" is real per-report data presence
- * (`lib/edit/cancer-center-reports.ts`'s `loadReportLiveness`), not a static
+ * "Live reports" / "N of 5" is real per-report data presence, not a static
  * catalog flag — a not-live report renders as muted text, not a link.
  */
 "use client";
@@ -283,6 +285,74 @@ function FilterCheckbox({
   );
 }
 
+type PerReport = ReportsIndexUnit["perReport"][number];
+
+/** One unit's 5 report rows — shared by a band body (`ReportsBands`) and the
+ *  band-less single-unit table (`SingleUnitReportsTable`). A live report is a
+ *  stretched-anchor link to `/edit/reports/N?center=…`; not-live renders as
+ *  plain muted text, matching the "advisory, not a promise" tone of the rest
+ *  of this console. */
+function ReportRows({
+  perReport,
+  reports,
+  centerCode,
+}: {
+  perReport: ReadonlyArray<PerReport>;
+  reports: ReadonlyArray<ReportsIndexReport>;
+  centerCode: string;
+}) {
+  const liveByN = new Map(perReport.map((r) => [r.n, r]));
+  return (
+    <>
+      {reports.map((r) => {
+        const live = liveByN.get(r.n);
+        return live?.live ? (
+          <tr
+            key={r.n}
+            className="border-apollo-border hover:bg-apollo-surface-2 focus-within:outline focus-within:-outline-offset-2 focus-within:outline-apollo-maroon relative border-t focus-within:outline-2"
+          >
+            <td className="px-3 py-2.5 align-middle">
+              <Link
+                href={`/edit/reports/${r.n}?center=${encodeURIComponent(centerCode)}`}
+                className="text-apollo-maroon font-medium after:absolute after:inset-0 hover:underline"
+                data-testid={`reports-index-band-link-${centerCode}-${r.n}`}
+              >
+                {r.label}
+              </Link>
+            </td>
+            <td className="px-3 py-2.5 align-middle">{r.description}</td>
+            <td className="text-muted-foreground px-3 py-2.5 text-right align-middle tabular-nums whitespace-nowrap">
+              {formatDate(live.lastRefreshedAt)}
+            </td>
+          </tr>
+        ) : (
+          <tr key={r.n} className="border-apollo-border text-muted-foreground border-t">
+            <td className="px-3 py-2.5 align-middle">{r.label}</td>
+            <td className="px-3 py-2.5 align-middle">Nothing live yet for this unit.</td>
+            <td className="px-3 py-2.5 text-right align-middle">—</td>
+          </tr>
+        );
+      })}
+    </>
+  );
+}
+
+const REPORT_TABLE_HEAD = (
+  <thead className="bg-apollo-surface-2">
+    <tr className="border-apollo-border border-b">
+      <th scope="col" className={`${TH_CLASS} w-60`}>
+        Report
+      </th>
+      <th scope="col" className={TH_CLASS}>
+        Focus
+      </th>
+      <th scope="col" className={`${TH_CLASS} w-36 text-right`}>
+        Last refreshed
+      </th>
+    </tr>
+  </thead>
+);
+
 function ReportsBands({
   units,
   reports,
@@ -293,72 +363,56 @@ function ReportsBands({
   return (
     <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-xl border" data-testid="reports-index-bands">
       <table className="w-full border-collapse text-left text-sm">
-        <thead className="bg-apollo-surface-2">
-          <tr className="border-apollo-border border-b">
-            <th scope="col" className={`${TH_CLASS} w-60`}>
-              Report
-            </th>
-            <th scope="col" className={TH_CLASS}>
-              Focus
-            </th>
-            <th scope="col" className={`${TH_CLASS} w-36 text-right`}>
-              Last refreshed
-            </th>
-          </tr>
-        </thead>
-        {units.map((u) => {
-          const liveByN = new Map(u.perReport.map((r) => [r.n, r]));
-          return (
-            <tbody key={u.code} data-testid={`reports-index-band-${u.code}`}>
-              <tr className="bg-apollo-surface-2">
-                <td colSpan={2} className="border-apollo-border border-t px-3 py-2 font-semibold">
-                  {u.name}
-                  <span className="text-muted-foreground ml-2 text-xs font-normal">
-                    {typeLabel(u.centerType)} · {u.liveCount} of {u.totalCount} reports live
-                  </span>
-                </td>
-                <td className="border-apollo-border border-t px-3 py-2 text-right">
-                  <Link
-                    href={u.editHref}
-                    className="text-foreground relative z-10 text-xs hover:underline"
-                    data-testid={`reports-index-edit-${u.code}`}
-                  >
-                    Edit center profile
-                  </Link>
-                </td>
-              </tr>
-              {reports.map((r) => {
-                const live = liveByN.get(r.n);
-                return live?.live ? (
-                  <tr
-                    key={r.n}
-                    className="border-apollo-border hover:bg-apollo-surface-2 focus-within:outline focus-within:-outline-offset-2 focus-within:outline-apollo-maroon relative border-t focus-within:outline-2"
-                  >
-                    <td className="px-3 py-2.5 align-middle">
-                      <Link
-                        href={`/edit/reports/${r.n}?center=${encodeURIComponent(u.code)}`}
-                        className="text-apollo-maroon font-medium after:absolute after:inset-0 hover:underline"
-                        data-testid={`reports-index-band-link-${u.code}-${r.n}`}
-                      >
-                        {r.label}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2.5 align-middle">{r.description}</td>
-                    <td className="text-muted-foreground px-3 py-2.5 text-right align-middle tabular-nums whitespace-nowrap">
-                      {formatDate(live.lastRefreshedAt)}
-                    </td>
-                  </tr>
-                ) : (
-                  <tr key={r.n} className="border-apollo-border text-muted-foreground border-t">
-                    <td className="px-3 py-2.5 align-middle">{r.label}</td>
-                    <td className="px-3 py-2.5 align-middle">Nothing live yet for this unit.</td>
-                    <td className="px-3 py-2.5 text-right align-middle">—</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          );
-        })}
+        {REPORT_TABLE_HEAD}
+        {units.map((u) => (
+          <tbody key={u.code} data-testid={`reports-index-band-${u.code}`}>
+            <tr className="bg-apollo-surface-2">
+              <td colSpan={2} className="border-apollo-border border-t px-3 py-2 font-semibold">
+                {u.name}
+                <span className="text-muted-foreground ml-2 text-xs font-normal">
+                  {typeLabel(u.centerType)} · {u.liveCount} of {u.totalCount} reports live
+                </span>
+              </td>
+              <td className="border-apollo-border border-t px-3 py-2 text-right">
+                <Link
+                  href={u.editHref}
+                  className="text-foreground relative z-10 text-xs hover:underline"
+                  data-testid={`reports-index-edit-${u.code}`}
+                >
+                  Edit center profile
+                </Link>
+              </td>
+            </tr>
+            <ReportRows perReport={u.perReport} reports={reports} centerCode={u.code} />
+          </tbody>
+        ))}
+      </table>
+    </div>
+  );
+}
+
+/** `3a` — an actor with exactly one reportable unit. Same table shape as one
+ *  band's body, no band header (the page's own `<h1>` already names the
+ *  unit) — replaces the old plain divided list. */
+export function SingleUnitReportsTable({
+  centerCode,
+  perReport,
+  reports,
+}: {
+  centerCode: string;
+  perReport: ReadonlyArray<PerReport>;
+  reports: ReadonlyArray<ReportsIndexReport>;
+}) {
+  return (
+    <div
+      className="border-apollo-border bg-apollo-surface overflow-hidden rounded-xl border"
+      data-testid="single-unit-reports-table"
+    >
+      <table className="w-full border-collapse text-left text-sm">
+        {REPORT_TABLE_HEAD}
+        <tbody>
+          <ReportRows perReport={perReport} reports={reports} centerCode={centerCode} />
+        </tbody>
       </table>
     </div>
   );
