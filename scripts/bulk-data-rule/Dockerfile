@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Only the DB-write-path scripts + the modules they import — build_outputs.py, build_people.py,
 # mesh_sensitive.py, coauthor_affil.py are analyst-local-only (design decision #1) and deliberately
 # not copied in.
-COPY catalog.py taxonomy.py datacite.py extract_databanks.py scan2.py preprint_extend.py attribute.py ./
+COPY catalog.py taxonomy.py datacite.py snapshot.py extract_databanks.py scan2.py preprint_extend.py attribute.py ./
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
 
