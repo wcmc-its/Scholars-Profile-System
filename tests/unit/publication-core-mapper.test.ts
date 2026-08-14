@@ -126,6 +126,7 @@ describe("buildPublicationCoreWrites (Block 6 mapper)", () => {
           llm_score: 7.9,
           llm_rationale: "advanced MRI methods described",
           author_affinity: 0.45,
+          prefilter_prior: 0.37,
         }),
       ],
       SETS,
@@ -139,6 +140,7 @@ describe("buildPublicationCoreWrites (Block 6 mapper)", () => {
     expect(w.llmScore).toBe(7); // truncated to SMALLINT
     expect(w.llmRationale).toBe("advanced MRI methods described");
     expect(Number(w.authorAffinity)).toBeCloseTo(0.45);
+    expect(Number(w.topicalPrior)).toBeCloseTo(0.37);
   });
 
   it("uses JsonNull for empty coauthors and null for absent optional fields", () => {
@@ -151,6 +153,27 @@ describe("buildPublicationCoreWrites (Block 6 mapper)", () => {
     expect(w.llmScore).toBeNull();
     expect(w.llmRationale).toBeNull();
     expect(w.authorAffinity).toBeNull();
+    expect(w.topicalPrior).toBeNull();
+  });
+
+  it("maps prefilter_prior (batch_screen topical prior) independently of the four run.py signals", () => {
+    const present = buildPublicationCoreWrites([rec({ prefilter_prior: 0.58 })], SETS);
+    expect(Number(present.writes[0].topicalPrior)).toBeCloseTo(0.58);
+
+    const absent = buildPublicationCoreWrites([rec({ prefilter_prior: undefined })], SETS);
+    expect(absent.writes[0].topicalPrior).toBeNull();
+
+    const malformed = buildPublicationCoreWrites(
+      // @ts-expect-error - exercising a malformed upstream payload
+      [rec({ prefilter_prior: "not-a-number" })],
+      SETS,
+    );
+    expect(malformed.writes[0].topicalPrior).toBeNull();
+
+    // A malformed/absent prefilter_prior must NOT trip any skip guard - it's
+    // optional metadata, not a required field.
+    expect(malformed.skippedMissingFields).toBe(0);
+    expect(absent.skippedMissingFields).toBe(0);
   });
 
   it("returns an all-zero result for empty input", () => {

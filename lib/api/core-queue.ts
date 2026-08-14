@@ -73,6 +73,8 @@ export interface CoreQueueRow {
   llmRationale: string | null;
   /** 0-1 repeat-user prior (signal 1); null when never computed. */
   authorAffinity: number | null;
+  /** 0-1 batch_screen prefilter_prior (signal 5); null when never computed. */
+  topicalPrior: number | null;
   /** Scopus citation count for the publication. */
   citationCount: number;
   pubmedUrl: string | null;
@@ -184,6 +186,7 @@ export async function loadCoreReviewQueue(
       llmScore: true,
       llmRationale: true,
       authorAffinity: true,
+      topicalPrior: true,
       publication: { select: CARD_PUBLICATION_SELECT },
     },
   });
@@ -294,6 +297,8 @@ export async function loadCoreReviewQueue(
       llmRationale: r.llmRationale,
       // authorAffinity is a nullable Decimal — Number(null) is 0, so guard the null.
       authorAffinity: r.authorAffinity == null ? null : Number(r.authorAffinity),
+      // same nullable-Decimal guard as authorAffinity above.
+      topicalPrior: r.topicalPrior == null ? null : Number(r.topicalPrior),
       citationCount: r.publication.citationCount,
       pubmedUrl: r.publication.pubmedUrl,
       doi: r.publication.doi,
@@ -333,6 +338,7 @@ export async function loadCoreReviewQueue(
     llmScore: null,
     llmRationale: null,
     authorAffinity: null,
+    topicalPrior: null,
     citationCount: p.citationCount,
     pubmedUrl: p.pubmedUrl,
     doi: p.doi,

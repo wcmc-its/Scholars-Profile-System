@@ -2075,6 +2075,7 @@ model PublicationCore {
   llmScore        Int?     @map("llm_score") @db.SmallInt // signal 4: 1-10 dense triage score
   llmRationale    String?  @map("llm_rationale") @db.Text // short LLM rationale
   authorAffinity  Decimal? @map("author_affinity") @db.Decimal(5, 4) // 0-1 repeat-user prior (signal 1)
+  topicalPrior    Decimal? @map("topical_prior") @db.Decimal(5, 4) // 0-1 batch_screen prefilter_prior (signal 5): noisy-OR of author-affinity (0.6) + bare-descriptor MeSH E-tree membership (0.4)
   scoredAt        DateTime @map("scored_at") // engine `scored_at` ISO timestamp
 
   publication Publication @relation(fields: [pmid], references: [pmid], onDelete: Cascade)
