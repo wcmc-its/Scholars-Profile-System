@@ -36,6 +36,7 @@ export type CoreRecordInput = {
   llm_score?: number; // 1-10 dense triage
   llm_rationale?: string;
   author_affinity?: number; // 0-1 repeat-user prior
+  prefilter_prior?: number; // 0-1 batch_screen noisy-OR prior (author-affinity 0.6 + bare-descriptor MeSH E-tree membership 0.4)
 };
 
 export type PubCoreWrite = {
@@ -50,6 +51,7 @@ export type PubCoreWrite = {
   llmScore: number | null;
   llmRationale: string | null;
   authorAffinity: Prisma.Decimal | null;
+  topicalPrior: Prisma.Decimal | null;
   scoredAt: Date;
 };
 
@@ -157,6 +159,10 @@ export function buildPublicationCoreWrites(
       authorAffinity:
         typeof it.author_affinity === "number" && Number.isFinite(it.author_affinity)
           ? new Prisma.Decimal(it.author_affinity)
+          : null,
+      topicalPrior:
+        typeof it.prefilter_prior === "number" && Number.isFinite(it.prefilter_prior)
+          ? new Prisma.Decimal(it.prefilter_prior)
           : null,
       scoredAt: new Date(scoredAtMs),
     });

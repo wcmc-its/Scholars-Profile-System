@@ -38,6 +38,7 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     llmScore: 7,
     llmRationale: "Acknowledges the imaging core for confocal microscopy.",
     authorAffinity: 0.42,
+    topicalPrior: null,
     citationCount: 12,
     pubmedUrl: "https://pubmed.ncbi.nlm.nih.gov/30418319/",
     doi: "10.1016/j.neuroimage.2021.001",
@@ -64,7 +65,7 @@ describe("CoreClaimQueue", () => {
     // combined-likelihood bar
     expect(screen.getByText("Combined likelihood")).toBeTruthy();
     expect(screen.getByText("82%")).toBeTruthy();
-    expect(screen.getByText(/4 of 4 signals fired/)).toBeTruthy();
+    expect(screen.getByText(/4 of 5 signals fired/)).toBeTruthy();
     // one row per fired signal, with fixed-per-type tiers + raw readout in the meter
     expect(screen.getByText("Named in the acknowledgments")).toBeTruthy();
     expect(screen.getByText("Direct")).toBeTruthy(); // ack tier
@@ -198,7 +199,7 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    expect(screen.getByText(/0 of 4 signals fired/)).toBeTruthy();
+    expect(screen.getByText(/0 of 5 signals fired/)).toBeTruthy();
     expect(
       screen.getByText(/No displayed signal fired — the combined score moved/),
     ).toBeTruthy();
@@ -775,10 +776,22 @@ describe("parsePmidBlock", () => {
 
 describe("buildSignals", () => {
   it("returns only fired signals, scored and ordered strongest-first", () => {
-    const signals = buildSignals(row()); // all four fire
+    const signals = buildSignals(row()); // four fire; topicalPrior defaults to null
     expect(signals.map((s) => s.kind)).toEqual(["ack", "coauthor", "llm", "affinity"]);
     expect(signals[0]).toMatchObject({ kind: "ack", dots: 4, strength: "Direct" });
     expect(signals.at(-1)).toMatchObject({ kind: "affinity", dots: 1, strength: "Weak" });
+  });
+
+  it("adds the topical MeSH prior as a fifth signal, ordered after affinity", () => {
+    const signals = buildSignals(row({ topicalPrior: 0.37 }));
+    expect(signals.map((s) => s.kind)).toEqual(["ack", "coauthor", "llm", "affinity", "topic"]);
+    expect(signals.at(-1)).toMatchObject({ kind: "topic", dots: 1, strength: "Weak" });
+  });
+
+  it("leaves the four-signal behavior unchanged when topicalPrior is null", () => {
+    const signals = buildSignals(row({ topicalPrior: null }));
+    expect(signals.map((s) => s.kind)).toEqual(["ack", "coauthor", "llm", "affinity"]);
+    expect(signals).toHaveLength(4);
   });
 
   it("omits a signal that did not fire", () => {

@@ -1,0 +1,11 @@
+-- Surfaces ReciterAI's `batch_screen` prefilter_prior as a fifth, labeled
+-- core-claim signal ("Topical MeSH match") alongside the existing four
+-- (ack/co-author/LLM/authorAffinity). Noisy-OR of author-affinity (weight
+-- 0.6) + bare-descriptor MeSH E-tree membership (weight 0.4), computed
+-- upstream — this column just lands it. See
+-- docs/core-facility-claim-queue-spec.md, "The signals".
+--
+-- Additive only, nullable: absent for any row scored by the deterministic
+-- run.py path (which never writes prefilter_prior), and for rows written
+-- before this column existed.
+ALTER TABLE `publication_core` ADD COLUMN `topical_prior` DECIMAL(5, 4) NULL;

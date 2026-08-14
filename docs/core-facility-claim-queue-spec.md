@@ -50,7 +50,7 @@ Ownership is **not** a column on `core`. A core owner/curator is a `UnitAdmin(en
 
 ### Shown in the SPS queue
 
-`publication_core.likelihood` is one combined 0–1 score, but the queue UI decomposes it into up to four independently-fired signals (`buildSignals()`, `components/edit/core-claim-queue.tsx`). Each signal's **display strength is fixed per kind**, not the model's raw self-score — how much that *category* of evidence should move a reviewer:
+`publication_core.likelihood` is one combined 0–1 score, but the queue UI decomposes it into up to five independently-fired signals (`buildSignals()`, `components/edit/core-claim-queue.tsx`). Each signal's **display strength is fixed per kind**, not the model's raw self-score — how much that *category* of evidence should move a reviewer:
 
 | Signal | Source | Strength (fixed) | Raw value shown |
 |---|---|---|---|
@@ -58,17 +58,18 @@ Ownership is **not** a column on `core`. A core owner/curator is a `UnitAdmin(en
 | **Co-author** (`signalCoauthors`) | Core-staff CWIDs found on the byline | Strong (3 dots) | resolved scholar names + dept, or bare CWID if unresolved |
 | **LLM triage** (`llmScore`/`llmRationale`) | 1–10 dense LLM read | Moderate (2 dots) | `{score}/10` + one-line rationale |
 | **Repeat-user prior** (`authorAffinity`) | 0–1, from the author's own history of confirmed usage of this core | Weak (1 dot) | percentage |
+| **Topical MeSH prior** (`topicalPrior`) | `batch_screen`'s `prefilter_prior` — noisy-OR of author-affinity (0.6) + bare-descriptor MeSH E-tree membership (0.4) | Weak (1 dot) | percentage |
 
-Signals are shown strongest-first. A row can fire 0–4 of them; "Why this surfaced · N of 4 signals fired" is the queue's evidence-count line.
+Signals are shown strongest-first. A row can fire 0–5 of them; "Why this surfaced · N of 5 signals fired" is the queue's evidence-count line.
 
-### Topic is a candidate-generation input, but it isn't shown
+### Topic is a candidate-generation input, and now it's shown
 
-Yes — with a caveat. `pipeline_cores` runs two modes. The **deterministic run** (`run.py`) is the source of the four signals above. A separate **`batch_screen` run-mode** generates the *candidate* queue for everything the deterministic run didn't confirm, and its pre-filter combines two free signals by noisy-OR into a `prefilter_prior` **before** the LLM screen:
+`pipeline_cores` runs two modes. The **deterministic run** (`run.py`) is the source of the first four signals above. A separate **`batch_screen` run-mode** generates the *candidate* queue for everything the deterministic run didn't confirm, and its pre-filter combines two free signals by noisy-OR into a `prefilter_prior` **before** the LLM screen:
 
 1. author-affinity (repeat-user prior) — weight 0.6, outranks the other
 2. **bare-descriptor MeSH E-tree membership** — weight 0.4 — a topical hint that the paper carries a MeSH descriptor under that core's technique branch of the tree (e.g. `E01.370.350` Diagnostic Imaging for core 2). This is the closest thing to a "topic match" signal in the pipeline.
 
-Two things temper that: **MeSH qualifiers/subheadings were separately tested and rejected** as a signal (only discriminative for imaging, redundant there, and indexing lag would drop ~half the corpus as a gate) — only bare descriptors survived, and only for the cores with a clean technique branch (imaging, microscopy, flow, sequencing-based cores, MS-based cores; bioinformatics/biorepository/metabolic-phenotyping/microbiome/immune-monitoring have no mapped MeSH branch and rely on author-affinity + the LLM screen alone). And **the topical prior never reaches SPS as a labeled signal**: `batch_screen`'s DynamoDB write adds `prefilter_prior`/`screen_band`/`screen_confidence` attributes, but SPS's ingest mapper (`buildPublicationCoreWrites`, `etl/dynamodb/publication-core-mapper.ts`) only reads `pmid`/`coreId`/`likelihood`/`status`/`scoredAt` plus the four signal fields above — `prefilter_prior` isn't one of them. So a topic-driven candidate can surface in the queue (it moved the combined `likelihood`), but the reviewer sees it as an unexplained likelihood with 0–2 of the four displayed signals fired, never a "matched on topic" evidence row. Surfacing it as a fifth signal is a straightforward add if it's worth the mapper + UI change — the source field already exists upstream.
+Two things temper that: **MeSH qualifiers/subheadings were separately tested and rejected** as a signal (only discriminative for imaging, redundant there, and indexing lag would drop ~half the corpus as a gate) — only bare descriptors survived, and only for the cores with a clean technique branch (imaging, microscopy, flow, sequencing-based cores, MS-based cores; bioinformatics/biorepository/metabolic-phenotyping/microbiome/immune-monitoring have no mapped MeSH branch and rely on author-affinity + the LLM screen alone). **This PR closes the other gap**: `batch_screen`'s DynamoDB write adds `prefilter_prior`/`screen_band`/`screen_confidence` attributes; the ingest mapper (`buildPublicationCoreWrites`, `etl/dynamodb/publication-core-mapper.ts`) now also reads `prefilter_prior` (defensively — absent/unparseable maps to `null`, same as `author_affinity`, and it never participates in a skip guard) and lands it on `publication_core.topical_prior`. The queue UI surfaces it as the fifth "Topical MeSH match" signal above. `screen_band`/`screen_confidence` remain unmapped — a topic-driven candidate can still move the combined `likelihood` via those two fields without any displayed signal firing, so the "No displayed signal fired" empty state is still reachable.
 
 ## Lifecycle: engine status × human claim → effective status
 
@@ -196,7 +197,7 @@ An owner who knows a paper used their core — one the engine never scored, or s
 │                                                                              │
 │   Combined likelihood  ################----                              82% │
 │                                                                              │
-│   Why this surfaced . 3 of 4 signals fired                                   │
+│   Why this surfaced . 3 of 5 signals fired                                   │
 │     Named in the acknowledgments                                ****  Direct │
 │       "imaging performed at the Citigroup Biomedical Imaging                 │
 │        Center core facility"                                                 │
@@ -357,7 +358,7 @@ Mirrors the topic-projection block. Two-phase, "populate catalog then guard usag
    - `skippedBelowThreshold` — engine scored it but marked `below_threshold` (deliberately not surfaced)
    - `skippedMissingPublication` — pmid not yet in SPS's `publication` table (FK guard)
 
-`publication_core` is a **full wholesale rebuild** every run — it carries no human decision, so clobbering it nightly is safe by construction. `core_claim` is a completely separate table the ETL never touches. The mapper's field list is a strict subset of what the engine can write (see "Topic is a candidate-generation input" above) — extending it is a mapper + Prisma-column change, not a re-architecture.
+`publication_core` is a **full wholesale rebuild** every run — it carries no human decision, so clobbering it nightly is safe by construction. `core_claim` is a completely separate table the ETL never touches. The mapper's field list is a strict subset of what the engine can write (see "Topic is a candidate-generation input, and now it's shown" above) — extending it is a mapper + Prisma-column change, not a re-architecture.
 
 ## Adding a core
 
@@ -378,12 +379,12 @@ Both sides need an entry before a core is reviewable, in this order:
 - **`CORE_CLAIM_WRITEBACK` needs a DynamoDB write IAM grant** SPS doesn't have yet (SPS has only ever *read* the `reciterai` table before this feature) — dormant until that's provisioned, same posture `lib/reciter/client.ts` documents for its own dormant-safe writes.
 - **A `below_threshold` row can never be claimed today** — there's no UI path that lets an owner promote an engine-suppressed candidate directly (the merge logic supports it; nothing writes it).
 - ~~No way to manually claim a PMID the engine hasn't scored at all~~ — **built** ("Manual PMID add" above): an owner can paste a block of known PMIDs and claim them directly, independent of the engine queue. Built on a separate branch (`feat/core-claim-manual-pmid-add`), not yet merged as of this spec's date.
-- **The topical MeSH prior isn't a labeled signal in SPS** (see "Topic is a candidate-generation input" above) — it can move a row into the queue but the reviewer never sees why in those terms.
+- ~~The topical MeSH prior isn't a labeled signal in SPS~~ — **built** ("Topic is a candidate-generation input, and now it's shown" above): `prefilter_prior` is mapped through as `publication_core.topical_prior` and surfaced as the fifth "Topical MeSH match" signal. `screen_band`/`screen_confidence` remain unmapped, so a 0-displayed-signal candidate is still reachable.
 - **A 14th+ core needs a coordinated two-repo change** (see "Adding a core" above) — there's no SPS-side self-service path; Research Informatics (or any other facility) needs ReciterAI's dictionary updated first.
 
 ## Interfaces and dependencies
 
-- **Upstream:** ReciterAI's `pipeline_cores` module (PR #245), writing `PUB#{pmid}/CORE#{core_id}` items to the shared `reciterai` DynamoDB table, keyed the same way the topic pipeline is. Two run-modes: the deterministic `run.py` (the four SPS-visible signals) and the `batch_screen` candidate generator (adds the topical MeSH prior, not SPS-visible).
+- **Upstream:** ReciterAI's `pipeline_cores` module (PR #245), writing `PUB#{pmid}/CORE#{core_id}` items to the shared `reciterai` DynamoDB table, keyed the same way the topic pipeline is. Two run-modes: the deterministic `run.py` (the first four SPS-visible signals) and the `batch_screen` candidate generator (adds the topical MeSH prior — now the fifth SPS-visible signal — plus `screen_band`/`screen_confidence`, still not mapped).
 - **Downstream (this feature writes back to):** the same DynamoDB table, gated behind `CORE_CLAIM_WRITEBACK`, feeding the engine's `authorAffinity` prior on its next run.
 - **RBAC:** `UnitAdmin(entityType="core")`, the same table department/division/center ownership uses; `canGrant`/`canManageAccess` (`lib/edit/authz.ts`) are already unit-kind-agnostic and need no change to cover cores (see "Owner vs curator" above).
 - **Audit:** `core_claim` action + `core` target-entity-type, registered in all four required sites (`lib/edit/audit.ts` + the three `scripts/sql/audit-log.sql` ENUM sites) — verified present.

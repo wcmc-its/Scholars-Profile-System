@@ -21,6 +21,7 @@ import {
   Quote,
   Repeat,
   Sparkles,
+  Tag,
   Undo2,
   Users,
   X,
@@ -61,7 +62,7 @@ type QueueView = "review" | "confirmed" | "rejected";
 type FilterKey = "all" | "ack" | "coauthored" | "llm";
 type SortKey = "likelihood" | "uncertain" | "strongest" | "llm";
 
-type SignalKind = "ack" | "coauthor" | "llm" | "affinity";
+type SignalKind = "ack" | "coauthor" | "llm" | "affinity" | "topic";
 interface Signal {
   kind: SignalKind;
   /** 1–4 display strength. */
@@ -69,23 +70,31 @@ interface Signal {
   strength: string;
 }
 
-/** The four core-usage signals (ack, co-author, LLM, repeat-user). */
-const SIGNAL_COUNT = 4;
+/** The five core-usage signals (ack, co-author, LLM, repeat-user, topical MeSH). */
+const SIGNAL_COUNT = 5;
 const SIGNAL_ICON: Record<SignalKind, LucideIcon> = {
   ack: Quote,
   coauthor: Users,
   llm: Sparkles,
   affinity: Repeat,
+  topic: Tag,
 };
 /** Stable tie-break so equal-strength signals keep a deterministic order. */
-const KIND_ORDER: Record<SignalKind, number> = { ack: 0, coauthor: 1, llm: 2, affinity: 3 };
+const KIND_ORDER: Record<SignalKind, number> = {
+  ack: 0,
+  coauthor: 1,
+  llm: 2,
+  affinity: 3,
+  topic: 4,
+};
 /**
- * Which of the four signals fired for a row. Strength is FIXED PER SIGNAL TYPE —
+ * Which of the five signals fired for a row. Strength is FIXED PER SIGNAL TYPE —
  * how much that *kind* of evidence should move a reviewer — NOT the model's
  * self-score: ack = Direct (4), core-staff co-author = Strong (3),
- * LLM read = Moderate (2) regardless of score, repeat-user prior = Weak (1).
- * The raw value (8/10, 45%) rides along as a secondary readout in the meter.
- * Pure; ordered strongest-first.
+ * LLM read = Moderate (2) regardless of score, repeat-user prior and topical
+ * MeSH prior = Weak (1) — both are indirect priors, not direct evidence about
+ * this specific paper. The raw value (8/10, 45%) rides along as a secondary
+ * readout in the meter. Pure; ordered strongest-first.
  */
 export function buildSignals(row: CoreQueueRow): Signal[] {
   const out: Signal[] = [];
@@ -93,6 +102,7 @@ export function buildSignals(row: CoreQueueRow): Signal[] {
   if (row.coauthors.length > 0) out.push({ kind: "coauthor", dots: 3, strength: "Strong" });
   if (row.llmScore !== null) out.push({ kind: "llm", dots: 2, strength: "Moderate" });
   if (row.authorAffinity !== null) out.push({ kind: "affinity", dots: 1, strength: "Weak" });
+  if (row.topicalPrior !== null) out.push({ kind: "topic", dots: 1, strength: "Weak" });
   return out.sort((a, b) => b.dots - a.dots || KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
 }
 
@@ -1098,10 +1108,10 @@ function CandidateCard({
           ))}
         </ul>
       ) : (
-        // Reachable for real: a topic-driven candidate can move the combined
-        // likelihood without firing any of the four displayed signals (the MeSH
-        // prior isn't one of them — see the spec's "Topic is a candidate-
-        // generation input, but it isn't shown").
+        // Reachable for real: batch_screen's own screen_confidence/screen_band
+        // outputs can move the combined likelihood without any of the five
+        // displayed signals firing — those two fields still aren't mapped into
+        // SPS (see docs/core-facility-claim-queue-spec.md, "The signals").
         <p className="text-muted-foreground mt-1 text-xs italic">
           No displayed signal fired — the combined score moved on inputs the queue
           doesn&apos;t label.
@@ -1196,6 +1206,11 @@ function SignalRow({ signal, row }: { signal: Signal; row: CoreQueueRow }) {
       lead = "Repeat user of this core";
       sub = "From the author's prior confirmed pubs with this core";
       value = `${Math.round((row.authorAffinity ?? 0) * 100)}%`;
+      break;
+    case "topic":
+      lead = "Topical MeSH match";
+      sub = "The paper carries a MeSH descriptor under this core's technique branch";
+      value = `${Math.round((row.topicalPrior ?? 0) * 100)}%`;
       break;
   }
   return (

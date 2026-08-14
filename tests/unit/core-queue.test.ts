@@ -27,6 +27,7 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     llmScore: null,
     llmRationale: null,
     authorAffinity: null,
+    topicalPrior: null,
     citationCount: 0,
     pubmedUrl: null,
     doi: null,
@@ -130,6 +131,7 @@ describe("loadCoreReviewQueue mapping", () => {
     llmScore: 7,
     llmRationale: "Methods cite the core's confocal microscope.",
     authorAffinity: "0.4200",
+    topicalPrior: "0.3700",
     publication: {
       title: "Advanced MRI",
       journal: "NeuroImage",
@@ -178,6 +180,7 @@ describe("loadCoreReviewQueue mapping", () => {
     const r = queue?.candidates[0];
     expect(r?.likelihood).toBe(0.82);
     expect(r?.authorAffinity).toBe(0.42);
+    expect(r?.topicalPrior).toBe(0.37);
     expect(r?.signalAck).toBe(true);
     expect(r?.llmRationale).toBe("Methods cite the core's confocal microscope.");
     expect(r?.coauthors).toEqual(["djb2001", "jpd2001"]);
@@ -248,6 +251,14 @@ describe("loadCoreReviewQueue mapping", () => {
     expect(queue?.candidates[0]?.authorAffinity).toBeNull();
   });
 
+  it("keeps a null topicalPrior null (Number(null) would be 0)", async () => {
+    const queue = await loadCoreReviewQueue(
+      "2",
+      reader([{ ...rawRow(), topicalPrior: null } as unknown as ReturnType<typeof rawRow>]),
+    );
+    expect(queue?.candidates[0]?.topicalPrior).toBeNull();
+  });
+
   it("surfaces a CLAIMED core_claim with no publication_core row as a manual confirmed row (Manual PMID add)", async () => {
     const queue = await loadCoreReviewQueue(
       "2",
@@ -284,6 +295,7 @@ describe("loadCoreReviewQueue mapping", () => {
     expect(manual?.title).toBe("An older paper the engine never scored");
     expect(manual?.likelihood).toBe(0);
     expect(manual?.coauthors).toEqual([]);
+    expect(manual?.topicalPrior).toBeNull();
     // the engine-sourced row is NOT manual
     expect(queue?.candidates[0]?.isManual).toBe(false);
   });

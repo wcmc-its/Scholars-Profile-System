@@ -859,6 +859,7 @@ async function main() {
               llmScore: w.llmScore,
               llmRationale: w.llmRationale,
               authorAffinity: w.authorAffinity,
+              topicalPrior: w.topicalPrior,
               scoredAt: w.scoredAt,
             },
             update: {
@@ -871,6 +872,7 @@ async function main() {
               llmScore: w.llmScore,
               llmRationale: w.llmRationale,
               authorAffinity: w.authorAffinity,
+              topicalPrior: w.topicalPrior,
               scoredAt: w.scoredAt,
             },
           }),
