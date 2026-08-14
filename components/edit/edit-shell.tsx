@@ -67,11 +67,23 @@ export type EditShellProps = {
    * have the actor's scholar row (the account menu then degrades to Sign out).
    */
   account?: { slug: string; preferredName: string } | null;
-  /** Self mode only: the viewer is a superuser, so the sub-nav adds a link
-   *  across to the Profiles roster (`/edit/scholars`). Ignored in superuser
-   *  mode, where the "Profiles" tab is always a link back to that roster.
-   *  Superseded by `consoleNav` when that is supplied. */
+  /** The viewer has the right to edit ≥1 profile that isn't their own
+   *  (`session.isSuperuser`, the same check `app/edit/page.tsx` computes this
+   *  from) — gates the "Profiles" cross-link. Self mode: adds an "All
+   *  profiles" link. Superuser mode: keeps the "Profiles / {name}" breadcrumb
+   *  navigable; when false AND `isProfileEntity` is also false (a unit editor,
+   *  not a scholar), the crumb degrades to a flat, non-navigable label — a
+   *  unit owner/curator with no profile-browsing rights has nowhere useful for
+   *  "Profiles" to go. Superseded by `consoleNav` when that is supplied. */
   canBrowseProfiles?: boolean;
+  /** Superuser mode only: true when `scholarName` names an actual scholar
+   *  profile (the default — every caller before cores-as-org-units P3 was
+   *  scholar-shaped) rather than a unit. Viewing an individual profile is
+   *  its own reason to keep the "Profiles" breadcrumb navigable, regardless
+   *  of `canBrowseProfiles` — set false for a unit editor (department/
+   *  division/center/core), where "Profiles" only makes sense when the
+   *  viewer separately has `canBrowseProfiles` rights. */
+  isProfileEntity?: boolean;
   /** Self mode only: a pre-built console tab strip (the shared `AdminSubnav`)
    *  rendered IN PLACE OF the minimal "My Profile / All profiles" strip. The
    *  `/edit` page supplies it for a superuser or comms_steward so the full
@@ -110,6 +122,7 @@ export function EditShell({
   reportsHref,
   account,
   canBrowseProfiles = false,
+  isProfileEntity = true,
   consoleNav,
   subRail,
   hideRail = false,
@@ -144,22 +157,33 @@ export function EditShell({
       <div className="border-border border-b">
         <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-2 px-6">
           {isSuperuser ? (
-            <nav aria-label="Breadcrumb" className="flex items-center gap-2 py-3 text-sm">
-              <Link
-                href="/edit/scholars"
-                className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-                data-testid="edit-subnav-profiles"
-              >
-                <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
-                Profiles
-              </Link>
-              <span className="text-muted-foreground" aria-hidden>
-                /
-              </span>
-              <span className="font-medium" aria-current="page">
-                {scholarName}
-              </span>
-            </nav>
+            isProfileEntity || canBrowseProfiles ? (
+              <nav aria-label="Breadcrumb" className="flex items-center gap-2 py-3 text-sm">
+                <Link
+                  href="/edit/scholars"
+                  className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+                  data-testid="edit-subnav-profiles"
+                >
+                  <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
+                  Profiles
+                </Link>
+                <span className="text-muted-foreground" aria-hidden>
+                  /
+                </span>
+                <span className="font-medium" aria-current="page">
+                  {scholarName}
+                </span>
+              </nav>
+            ) : (
+              // A unit editor (department/division/center/core) with no
+              // profile-browsing rights has nowhere for "Profiles" to go —
+              // just the unit name, same flat-label shape as proxy/unit-admin.
+              <nav aria-label="Breadcrumb" className="flex items-center gap-2 py-3 text-sm">
+                <span className="font-medium" aria-current="page">
+                  {scholarName}
+                </span>
+              </nav>
+            )
           ) : isProxy || isUnitAdmin ? (
             // A proxy / unit admin has no roster to return to — a flat label
             // naming the scholar they are editing, not a navigable breadcrumb.
