@@ -18,6 +18,11 @@
  * MeSH-free fallback denominator, see `lib/api/data-sharing-report.ts`'s
  * header. Deliberately never rendered as a bare percentage — see the Rollup
  * section's stat card. Still no full-text coverage stat.
+ *
+ * S-Index v2 (this PR): Open / Controlled / Registry columns on the
+ * department table (§2), Open / Controlled on the faculty table (§3), and a
+ * new §4 funding lens (NIH-funded vs. not-NIH-funded pub counts). See
+ * `lib/api/data-sharing-report.ts`'s header for the exact bucketing rule.
  */
 import Link from "next/link";
 
@@ -132,10 +137,41 @@ function RollupSection({ report }: { report: DataSharingReport }) {
   );
 }
 
+function FundingSection({ report }: { report: DataSharingReport }) {
+  const { overall } = report;
+  return (
+    <section id="funding" className="scroll-mt-4 mt-10">
+      <h2 className="text-base font-semibold">2 · Funding</h2>
+      <p className="text-muted-foreground mt-1 text-sm">
+        NIH-funded share of the same non-registry deposited publications the access-model split
+        above is built from.
+      </p>
+
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <div className={`${sectionClass} p-4`}>
+          <div className="text-2xl font-semibold">{overall.nihFundedPubs.toLocaleString()}</div>
+          <div className="text-muted-foreground text-xs">NIH-funded publications</div>
+        </div>
+        <div className={`${sectionClass} p-4`}>
+          <div className="text-2xl font-semibold">{overall.notNihFundedPubs.toLocaleString()}</div>
+          <div className="text-muted-foreground text-xs">Not NIH-funded publications</div>
+        </div>
+      </div>
+
+      <p className="text-muted-foreground mt-2 text-xs">
+        &quot;Not NIH-funded&quot; is not the same as non-federal: <code>nih_ic</code> is only ever
+        populated for NIH awards, so other federal funders (CDC, NSF, and the like) aren&apos;t
+        separately tracked here and are counted as not NIH-funded alongside genuinely
+        non-federal work.
+      </p>
+    </section>
+  );
+}
+
 function RepositoriesSection({ report }: { report: DataSharingReport }) {
   return (
     <section id="repos" className="scroll-mt-4 mt-10">
-      <h2 className="text-base font-semibold">2 · Repositories &amp; departments</h2>
+      <h2 className="text-base font-semibold">3 · Repositories &amp; departments</h2>
       <p className="text-muted-foreground mt-1 text-sm">
         Audience: library / RDM team — targeting DMS training and repository support.
       </p>
@@ -171,6 +207,9 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
               <th className={thClass}>Department</th>
               <th className={`${thClass} text-right`}>Datasets</th>
               <th className={`${thClass} text-right`}>Depositing faculty</th>
+              <th className={`${thClass} text-right`}>Open</th>
+              <th className={`${thClass} text-right`}>Controlled</th>
+              <th className={`${thClass} text-right`}>Registry</th>
               <th className={`${thClass} text-right`}>Share rate</th>
             </tr>
           </thead>
@@ -180,6 +219,9 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
                 <td className={tdClass}>{d.department}</td>
                 <td className={`${tdClass} text-right`}>{d.datasets.toLocaleString()}</td>
                 <td className={`${tdClass} text-right`}>{d.faculty.toLocaleString()}</td>
+                <td className={`${tdClass} text-right`}>{d.openDatasets.toLocaleString()}</td>
+                <td className={`${tdClass} text-right`}>{d.controlledDatasets.toLocaleString()}</td>
+                <td className={`${tdClass} text-right`}>{d.registryDatasets.toLocaleString()}</td>
                 <td className={`${tdClass} text-right`}>
                   {formatShareRate(d.shareRateNumerator, d.shareRateDenominator)}
                 </td>
@@ -191,7 +233,8 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
       <p className="text-muted-foreground mt-2 text-xs">
         Department dataset counts don&apos;t sum to the institutional total — a dataset with
         co-authors in two departments counts once in each. Don&apos;t treat this column as a
-        partition of the rollup above.
+        partition of the rollup above. Open, Controlled, and Registry don&apos;t sum to Datasets
+        either — a deposit with no recorded access model is uncounted in either of the first two.
       </p>
     </section>
   );
@@ -200,9 +243,9 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
 function FacultySection({ report }: { report: DataSharingReport }) {
   return (
     <section id="faculty" className="scroll-mt-4 mt-10">
-      <h2 className="text-base font-semibold">3 · Named faculty</h2>
+      <h2 className="text-base font-semibold">4 · Named faculty</h2>
       <p className="text-muted-foreground mt-1 text-sm">
-        Per-individual counts — same access as sections 1–2 above, no separate review.
+        Per-individual counts — same access as sections 1–3 above, no separate review.
       </p>
 
       <div className={sectionClass}>
@@ -212,6 +255,8 @@ function FacultySection({ report }: { report: DataSharingReport }) {
               <th className={thClass}>Faculty</th>
               <th className={thClass}>Department</th>
               <th className={`${thClass} text-right`}>Datasets</th>
+              <th className={`${thClass} text-right`}>Open</th>
+              <th className={`${thClass} text-right`}>Controlled</th>
               <th className={`${thClass} text-right`}>Share rate</th>
             </tr>
           </thead>
@@ -225,6 +270,8 @@ function FacultySection({ report }: { report: DataSharingReport }) {
                 </td>
                 <td className={tdClass}>{f.department ?? "—"}</td>
                 <td className={`${tdClass} text-right`}>{f.datasets.toLocaleString()}</td>
+                <td className={`${tdClass} text-right`}>{f.openDatasets.toLocaleString()}</td>
+                <td className={`${tdClass} text-right`}>{f.controlledDatasets.toLocaleString()}</td>
                 <td className={`${tdClass} text-right`}>
                   {formatShareRate(f.shareRateNumerator, f.shareRateDenominator)}
                 </td>
@@ -241,6 +288,7 @@ export function DataSharingDashboard({ report }: { report: DataSharingReport }) 
   return (
     <>
       <RollupSection report={report} />
+      <FundingSection report={report} />
       <RepositoriesSection report={report} />
       <FacultySection report={report} />
     </>

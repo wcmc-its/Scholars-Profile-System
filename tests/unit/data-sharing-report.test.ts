@@ -4,6 +4,7 @@ import {
   aggregateByDepartment,
   aggregateByFaculty,
   aggregateByRepository,
+  bucketDatasetLink,
   buildDataSharingCsv,
   buildDataSharingReport,
   buildShareRates,
@@ -11,7 +12,10 @@ import {
   DATA_SHARING_EXPORT_CAP,
   depositedPmidSet,
   loadDatasetLinkRows,
+  loadFundingSplit,
   loadShareRateCorpus,
+  pubAccessPmidSets,
+  REGISTRY_DATA_TYPE,
   SHARE_RATE_YEAR_FLOOR,
   type DataSharingReportClient,
   type DatasetLinkRow,
@@ -57,8 +61,25 @@ describe("aggregateByDepartment", () => {
     const rollup = aggregateByDepartment(ROWS);
     const medicine = rollup.find((r) => r.department === "Medicine")!;
     const surgery = rollup.find((r) => r.department === "Surgery")!;
-    expect(medicine).toEqual({ department: "Medicine", datasets: 2, faculty: 1, links: 2 });
-    expect(surgery).toEqual({ department: "Surgery", datasets: 1, faculty: 1, links: 1 });
+    // Medicine: d1 (open) + d2 (controlled). Surgery: d1 (open) only.
+    expect(medicine).toEqual({
+      department: "Medicine",
+      datasets: 2,
+      faculty: 1,
+      links: 2,
+      openDatasets: 1,
+      controlledDatasets: 1,
+      registryDatasets: 0,
+    });
+    expect(surgery).toEqual({
+      department: "Surgery",
+      datasets: 1,
+      faculty: 1,
+      links: 1,
+      openDatasets: 1,
+      controlledDatasets: 0,
+      registryDatasets: 0,
+    });
   });
 
   it("department dataset counts can legitimately exceed the overall total (THE denominator trap)", () => {
@@ -100,8 +121,21 @@ describe("aggregateByFaculty", () => {
     const byFaculty = aggregateByFaculty(ROWS);
     const alice = byFaculty.find((f) => f.cwid === "aaa1")!;
     const bob = byFaculty.find((f) => f.cwid === "bbb2")!;
-    expect(alice).toMatchObject({ datasets: 2, links: 2, department: "Medicine" });
-    expect(bob).toMatchObject({ datasets: 1, links: 1, department: "Surgery" });
+    // Alice: d1 (open) + d2 (controlled). Bob: d1 (open) only.
+    expect(alice).toMatchObject({
+      datasets: 2,
+      links: 2,
+      department: "Medicine",
+      openDatasets: 1,
+      controlledDatasets: 1,
+    });
+    expect(bob).toMatchObject({
+      datasets: 1,
+      links: 1,
+      department: "Surgery",
+      openDatasets: 1,
+      controlledDatasets: 0,
+    });
   });
 });
 
@@ -111,12 +145,19 @@ describe("buildDataSharingReport", () => {
     // `shareRateDenominator`/`shareRateNumerator` are always present on
     // `overall` (required, not optional) — zeroed here since ROWS is passed
     // with no `corpusRows` argument (the default-`[]` backward-compat path).
+    // `openPubs`/`controlledPubs` are 0 here too — none of ROWS carries a
+    // `pmids` field. `nihFundedPubs`/`notNihFundedPubs` are zeroed since no
+    // `fundingSplit` argument was supplied either (same backward-compat path).
     expect(report.overall).toEqual({
       datasets: 2,
       faculty: 2,
       links: 3,
       shareRateDenominator: 0,
       shareRateNumerator: 0,
+      openPubs: 0,
+      controlledPubs: 0,
+      nihFundedPubs: 0,
+      notNihFundedPubs: 0,
     });
   });
 
@@ -128,6 +169,10 @@ describe("buildDataSharingReport", () => {
       links: 0,
       shareRateDenominator: 0,
       shareRateNumerator: 0,
+      openPubs: 0,
+      controlledPubs: 0,
+      nihFundedPubs: 0,
+      notNihFundedPubs: 0,
     });
     expect(report.byDepartment).toEqual([]);
     expect(report.byRepository).toEqual([]);
@@ -171,6 +216,67 @@ describe("depositedPmidSet", () => {
     // paper as having no deposit.
     const set = depositedPmidSet([row({ cwid: "faculty-b", datasetId: "d9", pmids: ["p1"] })]);
     expect(set.has("p1")).toBe(true);
+  });
+});
+
+describe("bucketDatasetLink", () => {
+  it("returns 'registry' for a REGISTRY_DATA_TYPE row regardless of accessModel", () => {
+    expect(bucketDatasetLink({ dataType: REGISTRY_DATA_TYPE, accessModel: "open" })).toBe("registry");
+    expect(bucketDatasetLink({ dataType: REGISTRY_DATA_TYPE, accessModel: null })).toBe("registry");
+  });
+
+  it("returns 'open' or 'controlled' for a non-registry row, keyed on accessModel", () => {
+    expect(bucketDatasetLink({ dataType: "genomic", accessModel: "open" })).toBe("open");
+    expect(bucketDatasetLink({ dataType: null, accessModel: "controlled" })).toBe("controlled");
+  });
+
+  it("returns null for a non-registry row with no recorded access model (the real ambiguous case — the Synapse fix)", () => {
+    expect(bucketDatasetLink({ dataType: "genomic", accessModel: null })).toBeNull();
+  });
+});
+
+describe("pubAccessPmidSets", () => {
+  const row = (overrides: Partial<DatasetLinkRow>): DatasetLinkRow => ({
+    cwid: "s1",
+    scholarName: "S",
+    scholarSlug: "s",
+    department: null,
+    datasetId: "d1",
+    repository: "GEO",
+    accessModel: null,
+    ...overrides,
+  });
+
+  it("splits pmids into an open set and a controlled set", () => {
+    const { openPmids, controlledPmids } = pubAccessPmidSets([
+      row({ datasetId: "d1", accessModel: "open", pmids: ["p1"] }),
+      row({ datasetId: "d2", accessModel: "controlled", pmids: ["p2"] }),
+    ]);
+    expect(openPmids).toEqual(new Set(["p1"]));
+    expect(controlledPmids).toEqual(new Set(["p2"]));
+  });
+
+  it("excludes registry-type rows entirely, even when accessModel would otherwise resolve to open", () => {
+    const { openPmids, controlledPmids } = pubAccessPmidSets([
+      row({ dataType: REGISTRY_DATA_TYPE, accessModel: "open", pmids: ["p9"] }),
+    ]);
+    expect(openPmids.size).toBe(0);
+    expect(controlledPmids.size).toBe(0);
+  });
+
+  it("a pmid with both an open deposit and a controlled deposit lands in both sets — real, not reconciled away", () => {
+    const { openPmids, controlledPmids } = pubAccessPmidSets([
+      row({ datasetId: "d1", accessModel: "open", pmids: ["p1"] }),
+      row({ datasetId: "d2", accessModel: "controlled", pmids: ["p1"] }),
+    ]);
+    expect(openPmids.has("p1")).toBe(true);
+    expect(controlledPmids.has("p1")).toBe(true);
+  });
+
+  it("a null accessModel on a non-registry row lands in neither set", () => {
+    const { openPmids, controlledPmids } = pubAccessPmidSets([row({ accessModel: null, pmids: ["p1"] })]);
+    expect(openPmids.size).toBe(0);
+    expect(controlledPmids.size).toBe(0);
   });
 });
 
@@ -365,6 +471,164 @@ describe("buildDataSharingReport — share rate (second argument)", () => {
     expect(report.overall.shareRateNumerator).toBe(0);
     expect(report.byDepartment.every((d) => d.shareRateDenominator === 0 && d.shareRateNumerator === 0)).toBe(true);
     expect(report.byFaculty.every((f) => f.shareRateDenominator === 0 && f.shareRateNumerator === 0)).toBe(true);
+  });
+});
+
+describe("buildDataSharingReport — access split & funding lens (v2)", () => {
+  // d1 (open, Medicine), d2 (controlled, Surgery), d3 (registry, Neurology —
+  // a ClinicalTrials.gov row whose accessModel is 'open' but must NOT count
+  // as an open dataset/pub, the exact case `bucketDatasetLink` guards).
+  const LINK_ROWS: DatasetLinkRow[] = [
+    {
+      cwid: "aaa1",
+      scholarName: "Alice A",
+      scholarSlug: "alice-a",
+      department: "Medicine",
+      datasetId: "d1",
+      repository: "GEO",
+      accessModel: "open",
+      pmids: ["p1"],
+    },
+    {
+      cwid: "bbb2",
+      scholarName: "Bob B",
+      scholarSlug: "bob-b",
+      department: "Surgery",
+      datasetId: "d2",
+      repository: "dbGaP",
+      accessModel: "controlled",
+      pmids: ["p2"],
+    },
+    {
+      cwid: "ccc3",
+      scholarName: "Cara C",
+      scholarSlug: "cara-c",
+      department: "Neurology",
+      datasetId: "d3",
+      repository: "ClinicalTrials.gov",
+      accessModel: "open",
+      dataType: REGISTRY_DATA_TYPE,
+      pmids: ["p3"],
+    },
+  ];
+
+  it("computes overall openPubs/controlledPubs from pmids, excluding registry-type rows", () => {
+    const report = buildDataSharingReport(LINK_ROWS);
+    expect(report.overall.openPubs).toBe(1); // p1 only — p3 excluded (registry)
+    expect(report.overall.controlledPubs).toBe(1); // p2
+  });
+
+  it("computes byDepartment open/controlled/registry dataset counts", () => {
+    const report = buildDataSharingReport(LINK_ROWS);
+    const medicine = report.byDepartment.find((d) => d.department === "Medicine")!;
+    const surgery = report.byDepartment.find((d) => d.department === "Surgery")!;
+    const neurology = report.byDepartment.find((d) => d.department === "Neurology")!;
+    expect(medicine).toMatchObject({ openDatasets: 1, controlledDatasets: 0, registryDatasets: 0 });
+    expect(surgery).toMatchObject({ openDatasets: 0, controlledDatasets: 1, registryDatasets: 0 });
+    expect(neurology).toMatchObject({ openDatasets: 0, controlledDatasets: 0, registryDatasets: 1 });
+  });
+
+  it("computes byFaculty open/controlled dataset counts, with no registry column", () => {
+    const report = buildDataSharingReport(LINK_ROWS);
+    const cara = report.byFaculty.find((f) => f.cwid === "ccc3")!;
+    // Cara's only dataset is the registry row — she has a dataset but it
+    // lands in neither the open nor controlled bucket.
+    expect(cara).toMatchObject({ datasets: 1, openDatasets: 0, controlledDatasets: 0 });
+    expect(cara).not.toHaveProperty("registryDatasets");
+  });
+
+  it("defaults nihFundedPubs/notNihFundedPubs to 0 when no fundingSplit argument is supplied (backward compat)", () => {
+    const report = buildDataSharingReport(LINK_ROWS);
+    expect(report.overall.nihFundedPubs).toBe(0);
+    expect(report.overall.notNihFundedPubs).toBe(0);
+  });
+
+  it("merges a supplied fundingSplit onto overall, untouched", () => {
+    const report = buildDataSharingReport(LINK_ROWS, [], { nihFundedPubs: 3, notNihFundedPubs: 5 });
+    expect(report.overall.nihFundedPubs).toBe(3);
+    expect(report.overall.notNihFundedPubs).toBe(5);
+  });
+});
+
+describe("loadFundingSplit", () => {
+  // Same three-row shape as the block above: d1/p1 open, d2/p2 controlled,
+  // d3/p3 registry (must never reach the funding query).
+  const LINK_ROWS: DatasetLinkRow[] = [
+    {
+      cwid: "aaa1",
+      scholarName: "Alice A",
+      scholarSlug: "alice-a",
+      department: "Medicine",
+      datasetId: "d1",
+      repository: "GEO",
+      accessModel: "open",
+      pmids: ["p1"],
+    },
+    {
+      cwid: "bbb2",
+      scholarName: "Bob B",
+      scholarSlug: "bob-b",
+      department: "Surgery",
+      datasetId: "d2",
+      repository: "dbGaP",
+      accessModel: "controlled",
+      pmids: ["p2"],
+    },
+    {
+      cwid: "ccc3",
+      scholarName: "Cara C",
+      scholarSlug: "cara-c",
+      department: "Neurology",
+      datasetId: "d3",
+      repository: "ClinicalTrials.gov",
+      accessModel: "open",
+      dataType: REGISTRY_DATA_TYPE,
+      pmids: ["p3"],
+    },
+  ];
+
+  it("queries grantPublication scoped to the non-registry deposited pmids only", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { pmid: "p1", grant: { nihIc: "NCI" } },
+      { pmid: "p2", grant: { nihIc: null } },
+    ]);
+    const client = { grantPublication: { findMany } } as unknown as DataSharingReportClient;
+
+    const split = await loadFundingSplit(client, LINK_ROWS);
+
+    expect(findMany).toHaveBeenCalledTimes(1);
+    const call = findMany.mock.calls[0][0];
+    expect([...call.where.pmid.in].sort()).toEqual(["p1", "p2"]); // p3 excluded — registry-only pmid
+    expect(split).toEqual({ nihFundedPubs: 1, notNihFundedPubs: 1 });
+  });
+
+  it("counts a pmid as NIH-funded if ANY of its grantPublication rows has a non-null nihIc", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { pmid: "p1", grant: { nihIc: null } },
+      { pmid: "p1", grant: { nihIc: "NHLBI" } },
+    ]);
+    const client = { grantPublication: { findMany } } as unknown as DataSharingReportClient;
+
+    const split = await loadFundingSplit(client, [LINK_ROWS[0]]);
+    expect(split).toEqual({ nihFundedPubs: 1, notNihFundedPubs: 0 });
+  });
+
+  it("a deposited pmid with no matching grantPublication rows counts as not-NIH-funded", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const client = { grantPublication: { findMany } } as unknown as DataSharingReportClient;
+
+    const split = await loadFundingSplit(client, [LINK_ROWS[0]]);
+    expect(split).toEqual({ nihFundedPubs: 0, notNihFundedPubs: 1 });
+  });
+
+  it("skips the DB round-trip entirely when the non-registry deposited pmid population is empty", async () => {
+    const findMany = vi.fn();
+    const client = { grantPublication: { findMany } } as unknown as DataSharingReportClient;
+
+    // LINK_ROWS[2] is the registry-only row — its pmid never reaches the query.
+    const split = await loadFundingSplit(client, [LINK_ROWS[2]]);
+    expect(findMany).not.toHaveBeenCalled();
+    expect(split).toEqual({ nihFundedPubs: 0, notNihFundedPubs: 0 });
   });
 });
 
