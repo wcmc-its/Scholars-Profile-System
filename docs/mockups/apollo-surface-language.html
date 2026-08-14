@@ -1,0 +1,931 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apollo Surface Language v2 — /edit design touchstone</title>
+<style>
+  /* ------------------------------------------------------------------
+     Values copied verbatim from app/globals.css on origin/master.
+     If these drift from the app, the app is right and this file is stale.
+     ------------------------------------------------------------------ */
+  :root {
+    --apollo-bar:           #2a2421;  /* warm near-black header — OUT OF SCOPE */
+    --apollo-page:          #faf8f6;  /* page */
+    --apollo-surface:       #ffffff;  /* card / panel / table body */
+    --apollo-surface-2:     #f4f1ed;  /* chips, thead, ghost-hover */
+    --apollo-rail:          #ede7df;  /* rails & filter sidebars — MOVED off surface-2 */
+    --apollo-border:        #e9e3df;  /* warm hairline */
+    --apollo-border-strong: #dbd3cd;  /* input / control borders */
+    --apollo-rail-border:   #dbd3cd;  /* MOVED: hairline dies on the darker rail */
+    --apollo-rail-hover:    #e4ddd2;  /* MOVED: old value collided with the new rail */
+    --apollo-maroon:        #8a1f2b;
+    --apollo-green:         #2e7d5b;
+    --muted-foreground:     #6b6560;
+
+    /* facet hues — existing registry, shown for context only */
+    --facet-topic-fill:   #E6F1FB;  --facet-topic-border:  #378ADD;  --facet-topic-text:  #0C447C;
+    --facet-method-fill:  #EEEDFE;  --facet-method-border: #7A72D6;  --facet-method-text: #3C3489;
+    --facet-position-fill:#FBF1DC;  --facet-position-border:#A67012; --facet-position-text:#6B4310;
+
+    --apollo-ink:       #1c1917;  /* v2: primary ink — names, numbers, values */
+    --apollo-focus:     #8a1f2b;  /* v2: focus ring = maroon 2px, offset -2 */
+
+    --wrong: #b3261e;
+    --right: #2e7d5b;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--apollo-page);
+    color: #1c1917;
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  .bar {
+    background: var(--apollo-bar); color: #fff;
+    padding: 14px 28px; font-weight: 600; letter-spacing: .01em;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .bar .chip {
+    background: var(--apollo-maroon); width: 28px; height: 28px; border-radius: 5px;
+    display: grid; place-items: center; font-size: 11px; font-weight: 700;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 28px 96px; }
+  h1 { font-size: 26px; margin: 28px 0 6px; letter-spacing: -.01em; }
+  h2 {
+    font-size: 19px; margin: 52px 0 4px; letter-spacing: -.01em;
+    padding-bottom: 8px; border-bottom: 2px solid var(--apollo-maroon); display: inline-block;
+  }
+  h3 { font-size: 14px; margin: 26px 0 10px; text-transform: uppercase;
+       letter-spacing: .07em; color: var(--muted-foreground); font-weight: 600; }
+  p.lede { color: var(--muted-foreground); margin: 6px 0 0; max-width: 74ch; }
+  code {
+    font: 12.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--apollo-surface-2); border: 1px solid var(--apollo-border);
+    border-radius: 4px; padding: 1px 5px;
+  }
+
+  /* the two-up comparison frame */
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 14px; }
+  @media (max-width: 900px) { .duo { grid-template-columns: 1fr; } }
+  .pane { border-radius: 10px; overflow: hidden; border: 1px solid var(--apollo-border); }
+  .pane > .label {
+    font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 7px 12px; color: #fff;
+  }
+  .pane.no > .label  { background: var(--wrong); }
+  .pane.yes > .label { background: var(--right); }
+  .pane .stage { padding: 20px; }
+  /* the two page grounds under test */
+  .stage.white { background: #ffffff; }
+  .stage.warm  { background: var(--apollo-page); }
+  .note { font-size: 12.5px; color: var(--muted-foreground); margin: 9px 0 0; }
+
+  /* ---- the components under test ---- */
+  .card {
+    background: var(--apollo-surface); border: 1px solid var(--apollo-border);
+    border-radius: 10px; padding: 16px 18px;
+  }
+  .card.borderless { border: 1px solid transparent; }
+  .card h4 { margin: 0 0 4px; font-size: 15px; }
+  .card p { margin: 0; font-size: 13.5px; color: var(--muted-foreground); }
+
+  .input {
+    height: 38px; width: 100%; border-radius: 7px; padding: 0 11px; font-size: 14px;
+    background: var(--apollo-surface); border: 1px solid var(--apollo-border-strong);
+    color: #1c1917;
+  }
+  .input.ghost { background: transparent; }
+  .input::placeholder { color: #a8a29e; }
+  select.input { appearance: none;
+    background-image: linear-gradient(45deg,transparent 50%,var(--muted-foreground) 50%),
+                      linear-gradient(135deg,var(--muted-foreground) 50%,transparent 50%);
+    background-position: calc(100% - 18px) 17px, calc(100% - 13px) 17px;
+    background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12.5px; color: var(--muted-foreground); margin-bottom: 5px; }
+
+  /* rail / facets */
+  .rail {
+    background: var(--apollo-rail); border: 1px solid var(--apollo-rail-border);
+    border-radius: 10px; padding: 6px;
+  }
+  .rail.flat { background: transparent; border-color: transparent; }
+  .rail .group { padding: 12px 12px 14px; }
+  .rail .group + .group { border-top: 1px solid var(--apollo-border); }
+  .rail h5 {
+    margin: 0 0 9px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted-foreground); font-weight: 600;
+  }
+  .opt { display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; font-size: 13px;
+         color: var(--muted-foreground); cursor: pointer; }
+  .opt input { margin: 3px 0 0; accent-color: var(--apollo-maroon); }
+  .opt .n { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 12px; color: #8a837d; }
+  .opt.on { color: #1c1917; }
+  .opt.pinned { position: relative; }
+  .opt.pinned::after {
+    content: "kept — selected past the cap"; position: absolute; left: 0; top: 100%;
+    font-size: 10.5px; color: var(--apollo-maroon); letter-spacing: .02em;
+  }
+  .showall { margin-top: 8px; font-size: 12px; color: var(--apollo-maroon);
+             background: none; border: 0; padding: 0; cursor: pointer; font-weight: 500; }
+
+  /* table */
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px;
+          background: var(--apollo-surface); }
+  .tablewrap { border: 1px solid var(--apollo-border); border-radius: 10px; overflow: hidden; }
+  thead { background: var(--apollo-surface-2); }
+  thead.white { background: var(--apollo-surface); }
+  th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+       color: var(--muted-foreground); padding: 9px 12px; font-weight: 600; }
+  td { padding: 10px 12px; border-top: 1px solid var(--apollo-border); }
+  tbody tr:first-child td { border-top: 1px solid var(--apollo-border); }
+  .name { color: var(--apollo-maroon); font-weight: 500; }
+
+  /* ---- R7: whole-row target via a REAL anchor (stretched-link) ---- */
+  tbody tr.rowlink { position: relative; }
+  tbody tr.rowlink:hover { background: var(--apollo-surface-2); cursor: pointer; }
+  tbody tr.rowlink a.primary { color: var(--apollo-maroon); font-weight: 500; text-decoration: none; }
+  tbody tr.rowlink a.primary::after {
+    content: ""; position: absolute; inset: 0;   /* covers the row, still one real anchor */
+  }
+  tbody tr.rowlink:hover a.primary { text-decoration: underline; }
+  tbody tr.rowlink:focus-within { outline: 2px solid var(--apollo-maroon); outline-offset: -2px; }
+  /* anything else interactive in the row must sit ABOVE the stretched anchor */
+  tbody tr.rowlink .secondary { position: relative; z-index: 1; }
+  .btn-secondary {
+    background: var(--apollo-surface); border: 1px solid var(--apollo-border-strong);
+    border-radius: 6px; padding: 4px 10px; font-size: 12.5px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .btn-secondary:hover { background: var(--apollo-surface-2); }
+  .ok  { color: var(--apollo-green); font-weight: 600; }
+  .gap { color: var(--apollo-maroon); font-weight: 600; }
+  .dash { color: var(--muted-foreground); }
+
+  .pill { display: inline-block; font-size: 11.5px; padding: 2px 9px; border-radius: 999px;
+          border: 1px solid; }
+  .pill.topic    { background: var(--facet-topic-fill);    border-color: var(--facet-topic-border);    color: var(--facet-topic-text); }
+  .pill.method   { background: var(--facet-method-fill);   border-color: var(--facet-method-border);   color: var(--facet-method-text); }
+  .pill.position { background: var(--facet-position-fill); border-color: var(--facet-position-border); color: var(--facet-position-text); }
+
+  /* swatches + ratio table */
+  .levels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
+  @media (max-width: 760px) { .levels { grid-template-columns: 1fr; } }
+  .level { border: 1px solid var(--apollo-border); border-radius: 10px; overflow: hidden;
+           background: var(--apollo-surface); }
+  .level .sw { height: 84px; border-bottom: 1px solid var(--apollo-border); }
+  .level .meta { padding: 11px 13px; }
+  .level b { display: block; font-size: 13.5px; }
+  .level span { font-size: 12px; color: var(--muted-foreground);
+                font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  table.ratios { background: var(--apollo-surface); }
+  table.ratios td, table.ratios th { padding: 8px 12px; }
+  table.ratios td:last-child { font-variant-numeric: tabular-nums; text-align: right; }
+  .flag { font-weight: 700; color: var(--wrong); }
+
+  .rulebox {
+    background: var(--apollo-surface); border: 1px solid var(--apollo-border);
+    border-left: 3px solid var(--apollo-maroon);
+    border-radius: 8px; padding: 14px 18px; margin-top: 16px;
+  }
+  .rulebox b { display: block; margin-bottom: 3px; }
+  .rulebox p { margin: 0; font-size: 14px; color: #44403c; }
+
+  .open {
+    background: #FBF1DC; border: 1px solid #A67012; color: #6B4310;
+    border-radius: 8px; padding: 14px 18px; margin-top: 16px; font-size: 14px;
+  }
+  .open b { display: block; margin-bottom: 3px; }
+</style>
+</head>
+<body>
+
+<div class="bar"><span class="chip">WCM</span> Scholars Profile Console</div>
+
+<div class="wrap">
+
+  <h1>Apollo Surface Language</h1>
+  <p class="lede">
+    A design touchstone for the <code>/edit</code> console. Governs <b>which surface sits on
+    what</b> — deliberately separate from the existing <i>Apollo Editor Colour Language</i>
+    docblock, which governs which hue means what. Values below are copied verbatim from
+    <code>app/globals.css</code> on <code>origin/master</code>; if they drift, the app is right
+    and this file is stale.
+  </p>
+
+  <h2>The three levels</h2>
+  <div class="levels">
+    <div class="level">
+      <div class="sw" style="background:var(--apollo-page)"></div>
+      <div class="meta"><b>Page</b><span>--apollo-page · #faf8f6</span></div>
+    </div>
+    <div class="level">
+      <div class="sw" style="background:var(--apollo-surface)"></div>
+      <div class="meta"><b>Card / panel / table body</b><span>--apollo-surface · #ffffff</span></div>
+    </div>
+    <div class="level">
+      <div class="sw" style="background:var(--apollo-rail)"></div>
+      <div class="meta"><b>Rail / filter sidebar</b><span>--apollo-rail · #ede7df</span></div>
+    </div>
+  </div>
+  <div class="levels" style="margin-top:16px">
+    <div class="level">
+      <div class="sw" style="background:var(--apollo-surface-2)"></div>
+      <div class="meta"><b>thead / chip / ghost-hover</b><span>--apollo-surface-2 · #f4f1ed</span></div>
+    </div>
+    <div class="level">
+      <div class="sw" style="background:var(--apollo-rail-hover)"></div>
+      <div class="meta"><b>Rail item hover</b><span>--apollo-rail-hover · #e4ddd2</span></div>
+    </div>
+    <div class="level">
+      <div class="sw" style="background:var(--apollo-rail-border)"></div>
+      <div class="meta"><b>Rail edge</b><span>--apollo-rail-border · #dbd3cd</span></div>
+    </div>
+  </div>
+
+  <div class="rulebox">
+    <b>R2 — A fill step is never a boundary. The hairline is.</b>
+    <p>Every fill step in this palette is under 1.13:1. None of them separate anything on their
+      own, so any change of level carries a border. This is the rule the console is actually
+      breaking; the fill choices were mostly fine.</p>
+  </div>
+
+  <h3>Measured</h3>
+  <div class="tablewrap" style="margin-top:10px">
+    <table class="ratios">
+      <thead><tr><th>Step</th><th style="text-align:right">Contrast</th></tr></thead>
+      <tbody>
+        <tr><td>page <code>#faf8f6</code> → card <code>#ffffff</code> <i>(fine — the border carries it, per R2)</i></td><td>1.059:1</td></tr>
+        <tr><td><b>new</b> rail <code>#ede7df</code> → card <code>#ffffff</code></td><td>1.228:1</td></tr>
+        <tr><td><b>new</b> rail <code>#ede7df</code> → page <code>#faf8f6</code></td><td>1.159:1</td></tr>
+        <tr><td><b>new</b> rail <code>#ede7df</code> → thead <code>#f4f1ed</code></td><td>1.091:1</td></tr>
+        <tr><td><code>--apollo-border</code> → card</td><td>1.271:1</td></tr>
+        <tr><td><code>--apollo-border-strong</code> → card</td><td>1.478:1</td></tr>
+        <tr><td><code>--apollo-border</code> → <b>new</b> rail <i>(dies)</i></td><td class="flag">1.035:1</td></tr>
+        <tr><td><code>--apollo-border-strong</code> → <b>new</b> rail</td><td>1.203:1</td></tr>
+        <tr><td><i>old</i> rail <code>#f4f1ed</code> → thead <i>(the problem)</i></td><td class="flag">1.000:1</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>R1 — The page is never white</h2>
+  <p class="lede">14 pages hardcode <code>bg-[var(--background)]</code>, which is
+    <code>oklch(1 0 0)</code> — pure white. A white card on a white page has no step left to make.</p>
+  <div class="duo">
+    <div class="pane no">
+      <div class="label">✗ page on --background (pure white)</div>
+      <div class="stage white">
+        <div class="card borderless">
+          <h4>Anesthesiology</h4>
+          <p>Department · N1140 · 438 scholars</p>
+        </div>
+        <p class="note">The card is here. You cannot see where it starts or ends.</p>
+      </div>
+    </div>
+    <div class="pane yes">
+      <div class="label">✓ page on --apollo-page</div>
+      <div class="stage warm">
+        <div class="card">
+          <h4>Anesthesiology</h4>
+          <p>Department · N1140 · 438 scholars</p>
+        </div>
+        <p class="note">Warm page + white card + hairline. The step is small; the border carries it.</p>
+      </div>
+    </div>
+  </div>
+
+  <h2>R3 — Inputs are white plus a strong border</h2>
+  <p class="lede">Never <code>bg-transparent</code>. Transparent survives on white and dissolves on
+    greige, so it cannot be the house answer once the page is warm.</p>
+  <div class="duo">
+    <div class="pane no">
+      <div class="label">✗ bg-transparent on a warm page</div>
+      <div class="stage warm">
+        <div class="field"><label>Search name or CWID</label>
+          <input class="input ghost" placeholder="e.g. Smith or abc1001"></div>
+        <div class="field"><label>Org unit</label>
+          <select class="input ghost"><option>All units</option></select></div>
+        <p class="note">The field <i>is</i> the page. Only the border says otherwise.</p>
+      </div>
+    </div>
+    <div class="pane yes">
+      <div class="label">✓ --apollo-surface + --apollo-border-strong</div>
+      <div class="stage warm">
+        <div class="field"><label>Search name or CWID</label>
+          <input class="input" placeholder="e.g. Smith or abc1001"></div>
+        <div class="field"><label>Org unit</label>
+          <select class="input"><option>All units</option></select></div>
+        <p class="note">Reads as a place to type, on either ground.</p>
+      </div>
+    </div>
+  </div>
+
+  <h2>R4 — Filter sidebars are rails</h2>
+  <p class="lede">A filter column gets <code>--apollo-rail</code> + <code>--apollo-rail-border</code>,
+    the same treatment as the attribute rail and the Matcha rail. Groups are divided by a hairline,
+    not by each having its own box.</p>
+  <div class="duo">
+    <div class="pane no">
+      <div class="label">✗ filters loose on the page</div>
+      <div class="stage warm">
+        <div class="rail flat">
+          <div class="group">
+            <h5>Person type</h5>
+            <label class="opt"><input type="checkbox"> Affiliated faculty <span class="n">5,316</span></label>
+            <label class="opt"><input type="checkbox"> Doctoral student <span class="n">689</span></label>
+            <label class="opt"><input type="checkbox"> Full-time faculty <span class="n">2,408</span></label>
+          </div>
+          <div class="group">
+            <h5>Gap</h5>
+            <label class="opt"><input type="checkbox"> No headshot <span class="n">6,740</span></label>
+            <label class="opt"><input type="checkbox"> No overview <span class="n">8,873</span></label>
+          </div>
+        </div>
+        <p class="note">Nothing says where the filters end and the results begin.</p>
+      </div>
+    </div>
+    <div class="pane yes">
+      <div class="label">✓ one greige rail, hairline between groups</div>
+      <div class="stage warm">
+        <div class="rail">
+          <div class="group">
+            <h5>Person type</h5>
+            <label class="opt on"><input type="checkbox" checked> Affiliated faculty <span class="n">5,316</span></label>
+            <label class="opt"><input type="checkbox"> Doctoral student <span class="n">689</span></label>
+            <label class="opt"><input type="checkbox"> Full-time faculty <span class="n">2,408</span></label>
+          </div>
+          <div class="group">
+            <h5>Gap</h5>
+            <label class="opt"><input type="checkbox"> No headshot <span class="n">6,740</span></label>
+            <label class="opt"><input type="checkbox"> No overview <span class="n">8,873</span></label>
+          </div>
+        </div>
+        <p class="note">One unit. Divider is adjacent-sibling, so a hidden group leaves no orphan rule.</p>
+      </div>
+    </div>
+  </div>
+
+  <h3>Facet behaviour that ships today (PR #1823)</h3>
+  <div class="duo">
+    <div class="pane no">
+      <div class="label">✗ selection dropped past the cap</div>
+      <div class="stage warm">
+        <div class="rail"><div class="group">
+          <h5>Org unit — collapsed at 3</h5>
+          <label class="opt"><input type="checkbox"> Anesthesiology <span class="n">438</span></label>
+          <label class="opt"><input type="checkbox"> Biochemistry <span class="n">96</span></label>
+          <label class="opt"><input type="checkbox"> Cardiothoracic <span class="n">54</span></label>
+          <button class="showall">Show all 12</button>
+        </div></div>
+        <p class="note">Radiology <i>is</i> selected and filtering the table. It is not on screen,
+          and the only recovery is Clear — which drops every other facet too.</p>
+      </div>
+    </div>
+    <div class="pane yes">
+      <div class="label">✓ selection pinned, unselected still hidden</div>
+      <div class="stage warm">
+        <div class="rail"><div class="group">
+          <h5>Org unit — collapsed at 3</h5>
+          <label class="opt"><input type="checkbox"> Anesthesiology <span class="n">438</span></label>
+          <label class="opt"><input type="checkbox"> Biochemistry <span class="n">96</span></label>
+          <label class="opt"><input type="checkbox"> Cardiothoracic <span class="n">54</span></label>
+          <label class="opt on pinned" style="margin-bottom:14px"><input type="checkbox" checked> Radiology <span class="n">211</span></label>
+          <button class="showall">Show all 12</button>
+        </div></div>
+        <p class="note">A filter you can see acting stays a filter you can un-tick.</p>
+      </div>
+    </div>
+  </div>
+
+  <h2>Tables</h2>
+  <p class="lede">Header on <code>--apollo-surface-2</code>, body on <code>--apollo-surface</code>,
+    the whole thing inside one hairline. The header labels the data; it is not data.</p>
+  <div class="duo">
+    <div class="pane no">
+      <div class="label">✗ thead same as body, no frame</div>
+      <div class="stage white">
+        <table>
+          <thead class="white"><tr><th>#</th><th>Scholar</th><th>Headshot</th><th>Overview</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td><span class="name">Andrew Halloran</span></td><td class="ok">✓</td><td class="ok">✓</td></tr>
+            <tr><td>2</td><td><span class="name">Renata B. Sloane</span></td><td class="ok">✓</td><td class="ok">✓</td></tr>
+            <tr><td>3</td><td><span class="name">Warren G Castellan</span></td><td class="ok">✓</td><td class="gap">✗</td></tr>
+          </tbody>
+        </table>
+        <p class="note">Header floats. Table has no edge against the page.</p>
+      </div>
+    </div>
+    <div class="pane yes">
+      <div class="label">✓ greige thead, framed</div>
+      <div class="stage warm">
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>#</th><th>Scholar</th><th>Headshot</th><th>Overview</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td><span class="name">Andrew Halloran</span></td><td class="ok">✓</td><td class="ok">✓</td></tr>
+              <tr><td>2</td><td><span class="name">Renata B. Sloane</span></td><td class="ok">✓</td><td class="ok">✓</td></tr>
+              <tr><td>3</td><td><span class="name">Warren G Castellan</span></td><td class="ok">✓</td><td class="gap">✗</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">✓ is <code>--apollo-green</code> (5.00:1), shipped in #1821 — not emerald-600 (3.77:1).</p>
+      </div>
+    </div>
+  </div>
+
+  <h2>The adjacency test</h2>
+  <p class="lede">The one case I could not settle by reading: once the filter rail is greige and the
+    table header is greige, the two meet at the top-left corner with white between them. R2 predicts
+    the table frame separates them. Judge it here.</p>
+
+  <div class="pane yes" style="margin-top:14px">
+    <div class="label">rail + table, both greige — does the header read as part of the sidebar?</div>
+    <div class="stage warm">
+      <div style="display:grid; grid-template-columns:220px 1fr; gap:20px; align-items:start">
+        <div class="rail">
+          <div class="group">
+            <h5>Person type</h5>
+            <label class="opt on"><input type="checkbox" checked> Full-time faculty <span class="n">2,408</span></label>
+            <label class="opt"><input type="checkbox"> Postdoc <span class="n">443</span></label>
+            <label class="opt"><input type="checkbox"> Fellow <span class="n">139</span></label>
+          </div>
+          <div class="group">
+            <h5>Gap</h5>
+            <label class="opt"><input type="checkbox"> No headshot <span class="n">6,740</span></label>
+          </div>
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>#</th><th>Scholar</th><th>Person type</th><th>Overview</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td><span class="name">Andrew Halloran</span> <span class="pill topic">Dean</span></td><td>Full-time faculty</td><td class="ok">✓</td></tr>
+              <tr><td>2</td><td><span class="name">Jordan Safarian</span> <span class="pill position">Senior Assoc Dean</span></td><td>Full-time faculty</td><td class="ok">✓</td></tr>
+              <tr><td>3</td><td><span class="name">Selene Parmeter</span> <span class="pill method">Chair</span></td><td>Full-time faculty</td><td class="gap">✗</td></tr>
+              <tr><td>4</td><td><span class="name">Reyna Kessler</span></td><td>Full-time faculty</td><td class="dash">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="open">
+    <b>Resolved — rail moved off thead. But it is three values, not one.</b>
+    I called this a "one value edit". That was wrong, and here is why:
+    <ul style="margin:8px 0 0; padding-left:20px">
+      <li><code>--apollo-rail</code> <code>#f4f1ed</code> → <code>#ede7df</code> — the actual decision.</li>
+      <li><code>--apollo-rail-hover</code> must move too. The old hover <code>#ece7e1</code> lands at
+        <b>1.001:1</b> against the new rail — the hover state would disappear entirely.
+        → <code>#e4ddd2</code>, which preserves the 1.09 hover feel.</li>
+      <li><code>--apollo-rail-border</code> must move too. <code>--apollo-border</code> <code>#e9e3df</code>
+        reads at <b>1.035:1</b> on the darker rail — the edge dies. → <code>--apollo-border-strong</code>
+        <code>#dbd3cd</code> at 1.203:1.</li>
+    </ul>
+    <p style="margin:9px 0 0"><b>Corollary to R2:</b> the darker the fill, the stronger the border it
+    needs. A hairline tuned for white is not a hairline on greige.</p>
+    <p style="margin:9px 0 0"><b>Consequence to weigh:</b> this also darkens the Matcha rail
+    (<code>matcha-panel.tsx:1361</code>), which you signed off in #1806. I think it is an improvement
+    and keeps one rail treatment across the console — but it is a change to shipped work, so it is
+    your call, not mine.</p>
+  </div>
+
+  <h2>Org units — cards become a table</h2>
+  <p class="lede">Every unit carries the same five attributes in the same order. That is a table.
+    Cards cost ~130px per unit to say what a row says in 44px, and the eye cannot compare down a
+    column because there is no column.</p>
+  <div class="duo">
+    <div class="pane no">
+      <div class="label">✗ card per unit — today</div>
+      <div class="stage white">
+        <div class="card borderless" style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div>
+              <h4>Anesthesiology <span class="pill topic">Clinical</span></h4>
+              <p>Department · N1140 · 438 scholars · Enterprise Directory</p>
+              <p style="margin-top:6px">Hugh C Hollingsworth
+                <span class="pill position">No description</span></p>
+            </div>
+            <span style="color:var(--apollo-maroon);font-size:13.5px">Edit →</span>
+          </div>
+        </div>
+        <div class="card borderless">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div>
+              <h4>Biochemistry and Biophysics <span class="pill topic">Basic</span></h4>
+              <p>Department · N1700 · 96 scholars · Enterprise Directory</p>
+              <p style="margin-top:6px">Sana Reyes-Peterson
+                <span class="pill position">No description</span></p>
+            </div>
+            <span style="color:var(--apollo-maroon);font-size:13.5px">Edit →</span>
+          </div>
+        </div>
+        <p class="note">Two units fill the viewport. "Missing description" is a filter you cannot
+          scan for, because the badge sits at a different x-position in every card.</p>
+      </div>
+    </div>
+    <div class="pane yes">
+      <div class="label">✓ one row per unit</div>
+      <div class="stage warm">
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Unit</th><th>Kind</th><th>Code</th><th style="text-align:right">Scholars</th><th>Leader</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr class="rowlink"><td><a class="primary" href="#">Anesthesiology</a></td><td><span class="pill topic">Clinical</span></td><td>N1140</td><td style="text-align:right">438</td><td>Hugh C Hollingsworth</td><td class="gap">Missing</td></tr>
+              <tr class="rowlink"><td><a class="primary" href="#">Biochemistry and Biophysics</a></td><td><span class="pill topic">Basic</span></td><td>N1700</td><td style="text-align:right">96</td><td>Sana Reyes-Peterson</td><td class="gap">Missing</td></tr>
+              <tr class="rowlink"><td><a class="primary" href="#">Cardiothoracic Surgery</a></td><td><span class="pill topic">Clinical</span></td><td>N1210</td><td style="text-align:right">54</td><td>Leo Girand</td><td class="ok">✓</td></tr>
+              <tr class="rowlink"><td><a class="primary" href="#">Dermatology</a></td><td><span class="pill topic">Clinical</span></td><td>N1300</td><td style="text-align:right">61</td><td class="dash">—</td><td class="gap">Missing</td></tr>
+              <tr class="rowlink"><td><a class="primary" href="#">Genetic Medicine</a></td><td><span class="pill topic">Basic</span></td><td>N1420</td><td style="text-align:right">88</td><td>Warren G Castellan</td><td class="ok">✓</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">Five units in the space two cards took. "Missing" now scans as a column —
+          which is what the Missing-description filter is for. Sort by Scholars actually means something.</p>
+      </div>
+    </div>
+  </div>
+  <div class="rulebox">
+    <b>R5 — Uniform records are rows, not cards.</b>
+    <p>If every item carries the same attributes in the same order, use a table. Reserve cards for
+      heterogeneous items, or where one item is the subject of the page. "Your editable units" at the
+      top of Org units is legitimately a card list — it is 1–3 items and they are the subject. The
+      "All units" audit below it is not.</p>
+  </div>
+
+  <h2>R7 — The row is the target, not a link on the right</h2>
+  <p class="lede">Hover any row above. The whole row is clickable, but it is still a real
+    <code>&lt;a href&gt;</code> — not an <code>onClick</code> on the <code>&lt;tr&gt;</code>. That
+    distinction is the whole rule; the naive version silently breaks four things.</p>
+
+  <div class="rulebox">
+    <b>The implementation is a stretched anchor, never a row handler.</b>
+    <p>Put a real <code>&lt;a href&gt;</code> on the primary cell and let it cover the row:</p>
+    <pre style="margin:10px 0 0;font:12.5px/1.5 ui-monospace,Menlo,monospace;background:var(--apollo-surface-2);border:1px solid var(--apollo-border);border-radius:6px;padding:11px 13px;overflow-x:auto">tr        { position: relative; }
+a.primary::after { content: ""; position: absolute; inset: 0; }
+tr:hover  { background: var(--apollo-surface-2); }
+tr:focus-within { outline: 2px solid var(--apollo-maroon); outline-offset: -2px; }</pre>
+  </div>
+
+  <h3>What <code>onClick</code> on a &lt;tr&gt; breaks</h3>
+  <div class="tablewrap" style="margin-top:10px">
+    <table class="ratios">
+      <thead><tr><th>Behaviour</th><th style="text-align:left">onClick row</th><th style="text-align:left">stretched &lt;a&gt;</th></tr></thead>
+      <tbody>
+        <tr><td>⌘-click / middle-click → new tab</td><td style="text-align:left" class="gap">✗ dead</td><td style="text-align:left" class="ok">✓ works</td></tr>
+        <tr><td>Right-click → Copy link address</td><td style="text-align:left" class="gap">✗ no URL exists</td><td style="text-align:left" class="ok">✓ works</td></tr>
+        <tr><td>Tab to it / activate with Enter</td><td style="text-align:left" class="gap">✗ not focusable</td><td style="text-align:left" class="ok">✓ native</td></tr>
+        <tr><td>Screen reader announces a link</td><td style="text-align:left" class="gap">✗ announces a row</td><td style="text-align:left" class="ok">✓ announces a link</td></tr>
+        <tr><td>Hover shows destination in status bar</td><td style="text-align:left" class="gap">✗ nothing</td><td style="text-align:left" class="ok">✓ shows URL</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Two costs, and the carve-outs</h3>
+  <p class="lede">The stretched anchor is not free. Both costs are real and both have a fixed answer.</p>
+
+  <div class="duo">
+    <div class="pane no">
+      <div class="label">✗ secondary action swallowed by the row link</div>
+      <div class="stage warm">
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Scholar</th><th>Unit</th><th></th></tr></thead>
+            <tbody>
+              <tr class="rowlink"><td><a class="primary" href="#">A. Osei Garber</a></td><td>Surgery</td>
+                <td style="text-align:right"><button class="btn-secondary">👁 View as</button></td></tr>
+              <tr class="rowlink"><td><a class="primary" href="#">Aarti Kandel</a></td><td>Pediatrics</td>
+                <td style="text-align:right"><button class="btn-secondary">👁 View as</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">Click "View as" — you get the row's link instead. The stretched anchor sits
+          on top of it. Try it; it is genuinely broken here.</p>
+      </div>
+    </div>
+    <div class="pane yes">
+      <div class="label">✓ secondary lifted above with z-index</div>
+      <div class="stage warm">
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Scholar</th><th>Unit</th><th></th></tr></thead>
+            <tbody>
+              <tr class="rowlink"><td><a class="primary" href="#">A. Osei Garber</a></td><td>Surgery</td>
+                <td style="text-align:right"><span class="secondary"><button class="btn-secondary">👁 View as</button></span></td></tr>
+              <tr class="rowlink"><td><a class="primary" href="#">Aarti Kandel</a></td><td>Pediatrics</td>
+                <td style="text-align:right"><span class="secondary"><button class="btn-secondary">👁 View as</button></span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">Any other interactive element in the row gets
+          <code>position:relative; z-index:1</code>. Without it, the row link eats every button in
+          the row — the single most common way this pattern ships broken.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="rulebox">
+    <b>Cost 2 — text selection dies inside the row.</b>
+    <p>The overlay means you cannot drag-select a CWID or a unit code out of the table. Accept it on
+      navigational tables (Org units, Funding matcher, Profiles). Do <b>not</b> use R7 where the
+      table exists to be read and copied from — an audit or export view — or where a row has two
+      equally-primary destinations, in which case there is no single target and explicit links are
+      correct.</p>
+  </div>
+
+  <h2>Funding matcher</h2>
+  <p class="lede">Same R1/R4/R5 problems, plus two of its own. 200 opportunities rendered as
+    ~90px cards, each carrying a title, a code, and two badges.</p>
+  <div class="duo">
+    <div class="pane no">
+      <div class="label">✗ today</div>
+      <div class="stage white">
+        <div class="card borderless" style="margin-bottom:10px;position:relative">
+          <span class="pill topic" style="position:absolute;top:10px;right:12px">WCM curated</span>
+          <h4 style="color:var(--apollo-maroon);padding-right:110px">NIGMS Collaborative Program Grant for Multidisciplinary Teams (RM1) <span class="pill method">Flagship</span></h4>
+          <p>RM1</p>
+        </div>
+        <div class="card borderless" style="position:relative">
+          <span class="pill topic" style="position:absolute;top:10px;right:12px">WCM curated</span>
+          <p style="margin-bottom:2px">National Institutes of Health (NIH)</p>
+          <h4 style="color:var(--apollo-maroon);padding-right:110px">National Institutes of Health (NIH) - NIH Outstanding New Environmental Scientist (ONES) Award (R01) <span class="pill method">Flagship</span></h4>
+          <p>R01</p>
+        </div>
+        <p class="note"><b>Sponsor printed twice</b> in the second card — once as an eyebrow, once
+          inside the title. <b>Badge floats</b> top-right, detached from the title it modifies.
+          <b>No deadline</b> on the card, though Deadline is a filter.</p>
+      </div>
+    </div>
+    <div class="pane yes">
+      <div class="label">✓ table, sponsor once, deadline visible</div>
+      <div class="stage warm">
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Opportunity</th><th>Sponsor</th><th>Activity</th><th>Deadline</th></tr></thead>
+            <tbody>
+              <tr class="rowlink"><td><a class="primary" href="#">NIGMS Collaborative Program Grant for Multidisciplinary Teams</a> <span class="pill topic">WCM curated</span> <span class="pill method">Flagship</span></td><td>NIGMS</td><td>RM1</td><td>Sep 25, 2026</td></tr>
+              <tr class="rowlink"><td><a class="primary" href="#">NIH Director's Early Independence Award</a> <span class="pill topic">WCM curated</span> <span class="pill method">Flagship</span></td><td>NIH</td><td>DP5</td><td>Sep 04, 2026</td></tr>
+              <tr class="rowlink"><td><a class="primary" href="#">NIH Outstanding New Environmental Scientist (ONES) Award</a> <span class="pill topic">WCM curated</span></td><td>NIH</td><td>R01</td><td class="dash">Rolling</td></tr>
+              <tr class="rowlink"><td><a class="primary" href="#">Pathway to Independence Award</a></td><td>NIH</td><td>K99/R00</td><td>Oct 12, 2026</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">Sponsor is a column, so it stops repeating inside the title. Deadline is
+          visible, so the Deadline filter has something to act on that you can see. Badges sit with
+          the title they modify.</p>
+      </div>
+    </div>
+  </div>
+  <div class="rulebox">
+    <b>R6 — A filterable attribute must be visible on the row.</b>
+    <p>Funding matcher filters by Deadline and Sponsor, but shows neither on the card. A filter whose
+      effect you cannot see reduces to guesswork — the same failure as an invisible selected facet,
+      one layer up.</p>
+  </div>
+
+  <h2>Token reference</h2>
+  <div class="tablewrap" style="margin-top:10px">
+    <table class="ratios">
+      <thead><tr><th>Token</th><th>Value</th><th style="text-align:left">Job</th></tr></thead>
+      <tbody>
+        <tr><td><code>--apollo-page</code></td><td>#faf8f6</td><td style="text-align:left">Every /edit route shell</td></tr>
+        <tr><td><code>--apollo-surface</code></td><td>#ffffff</td><td style="text-align:left">Card, panel, table body, input fill</td></tr>
+        <tr><td><code>--apollo-surface-2</code></td><td>#f4f1ed</td><td style="text-align:left">Chip, thead, ghost-hover</td></tr>
+        <tr><td><code>--apollo-rail</code></td><td><b>#ede7df</b> <i>(was #f4f1ed)</i></td><td style="text-align:left">Rail, filter sidebar</td></tr>
+        <tr><td><code>--apollo-rail-hover</code></td><td><b>#e4ddd2</b> <i>(was #ece7e1)</i></td><td style="text-align:left">Rail item hover</td></tr>
+        <tr><td><code>--apollo-rail-border</code></td><td><b>#dbd3cd</b> <i>(was #e9e3df)</i></td><td style="text-align:left">Rail edge — needs the strong value</td></tr>
+        <tr><td><code>--apollo-border</code></td><td>#e9e3df</td><td style="text-align:left">Hairline on white surfaces only</td></tr>
+        <tr><td><code>--apollo-ink</code></td><td><b>#1c1917</b> <i>(v2)</i></td><td style="text-align:left">Primary ink — names, values, headline sentences</td></tr>
+        <tr><td><code>--muted-foreground</code></td><td>#6b6560</td><td style="text-align:left">Annotation only — never the subject (R8)</td></tr>
+        <tr><td><code>--apollo-focus</code></td><td><b>#8a1f2b</b> <i>(v2)</i></td><td style="text-align:left">Focus ring: 2px, offset −2 (was only in R7's example)</td></tr>
+        <tr><td><code>--apollo-border-strong</code></td><td>#dbd3cd</td><td style="text-align:left">Inputs, controls, and any greige edge</td></tr>
+        <tr><td><code>--apollo-bar</code></td><td>#2a2421</td><td style="text-align:left">Top bar — chrome, out of scope</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="rulebox">
+    <b>Known debt — <code>--apollo-surface-2</code> has the disease the rail had.</b>
+    <p>It does three jobs: thead, chip fill, ghost-hover. A chip on a thead, or a ghost-hover on a
+      surface-2 ground, lands at 1.000:1 — the same collision that forced the rail split. Until it
+      is split, the rule is: surface-2 elements never sit on surface-2; hover on greige uses
+      <code>--apollo-rail-hover</code>. Also note <code>--apollo-rail-border</code> and
+      <code>--apollo-border-strong</code> are the same hex — alias the former to the latter before
+      they drift.</p>
+  </div>
+
+  <p class="note" style="margin-top:22px">
+    Not governed here: hue-to-job (BRAND / YOURS / LOCKED / DANGER / INFO / ELIGIBILITY) — see the
+    Apollo Editor Colour Language docblock at <code>app/globals.css:89-126</code>. Keeping the two
+    separate is deliberate; merging them is how the first one got vague.
+  </p>
+
+  <h2>v2 — What staging taught us</h2>
+  <p class="lede">Rules R8–R11 were added after reviewing <code>/edit/units</code>,
+    <code>/edit/administrators</code>, and <code>/edit/data-sharing</code> on staging. All three
+    pages follow the surface rules and still wash together — because the failures moved from
+    surfaces to <b>ink</b>. The surface language was silent on ink; it no longer is.</p>
+
+  <h2>R8 — Two inks per block</h2>
+  <p class="lede">Every block gets at most two text colors: <code>--apollo-ink</code> for the
+    thing itself (names, numbers, the sentence you came for) and <code>--muted-foreground</code>
+    for annotation. On /edit/data-sharing the headline sentence, the methodology, the coverage
+    note, and the section ledes are all the same muted gray — five levels of importance, one ink.</p>
+  <div class="duo">
+    <div class="pane no">
+      <div class="label">✗ everything muted — nothing is the point</div>
+      <div class="stage warm">
+        <div class="card">
+          <h4 style="color:var(--muted-foreground)">1,228</h4>
+          <p>Distinct datasets (strict floor)</p>
+          <p style="margin-top:8px">WCM researchers deposited at least 1,228 distinct datasets in public repositories.</p>
+        </div>
+      </div>
+    </div>
+    <div class="pane yes">
+      <div class="label">✓ value in ink, annotation muted</div>
+      <div class="stage warm">
+        <div class="card">
+          <h4 style="font-size:24px;color:var(--apollo-ink)">1,228</h4>
+          <p>Distinct datasets (strict floor)</p>
+          <p style="margin-top:8px;color:var(--apollo-ink);font-size:14px">WCM researchers deposited at least 1,228 distinct datasets in public repositories.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="rulebox">
+    <b>R8 — Ink for the subject, muted for the caption. Never a third gray.</b>
+    <p>If a block needs three inks, it is two blocks. Section descriptions, methodology notes, and
+      captions are muted; the data, the headline sentence, and every value a user came to read are
+      <code>--apollo-ink</code>.</p>
+  </div>
+
+  <h2>R9 — Maroon has one job per view: the link</h2>
+  <p class="lede">/edit/units sets unit names in maroon (links, per R7) <i>and</i> the word
+    "Missing" in maroon (a status) <i>and</i> underlines the org codes (a second link style).
+    Three jobs, one hue — the Description column reads as a column of links.</p>
+  <div class="duo">
+    <div class="pane no">
+      <div class="label">✗ maroon link + maroon status + underlined second link</div>
+      <div class="stage warm">
+        <div class="tablewrap"><table>
+          <thead><tr><th>Unit</th><th>Code</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="name">Anesthesiology</span></td><td><a href="#" style="color:var(--apollo-ink)">N1140</a></td><td class="gap">Missing</td></tr>
+            <tr><td><span class="name">Cardiothoracic Surgery</span></td><td><a href="#" style="color:var(--apollo-ink)">N1160</a></td><td class="gap">Missing</td></tr>
+          </tbody>
+        </table></div>
+        <p class="note">Which maroon do I click? Both. Neither. The status invites a click it cannot honor.</p>
+      </div>
+    </div>
+    <div class="pane yes">
+      <div class="label">✓ one link per row; gaps get the gap treatment</div>
+      <div class="stage warm">
+        <div class="tablewrap"><table>
+          <thead><tr><th>Unit</th><th>Code</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr class="rowlink"><td><a class="primary" href="#">Anesthesiology</a></td><td>N1140</td><td style="color:var(--wrong)">✗ Missing</td></tr>
+            <tr class="rowlink"><td><a class="primary" href="#">Cardiothoracic Surgery</a></td><td>N1160</td><td style="color:var(--wrong)">✗ Missing</td></tr>
+          </tbody>
+        </table></div>
+        <p class="note">One primary link (R7). Codes are data. Gaps use <code>--wrong</code> with a glyph, matching the ✓/✗ audit columns already shipped.</p>
+      </div>
+    </div>
+  </div>
+  <div class="rulebox">
+    <b>R9 — In any one view, maroon marks the primary link and nothing else.</b>
+    <p>Status colors come from the colour language (<code>--wrong</code>, <code>--right</code>).
+      A second destination in a row is a plain-ink anchor that underlines on hover — never a second
+      maroon and never a resting underline. Corollary: <b>maroon is never a border on repeated
+      containers</b> — /edit/administrators frames every person card in maroon, which spends the
+      accent on chrome. (The scholar editor's single maroon left-rule on <i>the</i> active panel is
+      different and correct — see R12.)</p>
+  </div>
+
+  <h2>R10 — A value every row shares is a caption, not a column</h2>
+  <p class="lede">/edit/units prints a "Department" pill on every row <i>under a band that already
+    says DEPARTMENTS</i>, plus "Enterprise Directory" under every name. /edit/data-sharing prints
+    an identical black "Open" pill on every repository row. /edit/administrators prints "Managed
+    through Web Directory" under every grant. None of these vary; none of them inform.</p>
+  <div class="duo">
+    <div class="pane no">
+      <div class="label">✗ the pill repeats — it is decoration</div>
+      <div class="stage warm">
+        <div class="tablewrap"><table>
+          <thead><tr><th>Repository</th><th>Access</th><th style="text-align:right">Datasets</th></tr></thead>
+          <tbody>
+            <tr><td>ClinicalTrials.gov</td><td><span class="pill" style="background:#2a2421;border-color:#2a2421;color:#fff">Open</span></td><td style="text-align:right">400</td></tr>
+            <tr><td>GEO</td><td><span class="pill" style="background:#2a2421;border-color:#2a2421;color:#fff">Open</span></td><td style="text-align:right">362</td></tr>
+            <tr><td>Zenodo</td><td><span class="pill" style="background:#2a2421;border-color:#2a2421;color:#fff">Open</span></td><td style="text-align:right">131</td></tr>
+          </tbody>
+        </table></div>
+        <p class="note">The heaviest ink on the page, three times, saying one thing. (Also an
+          off-registry hue — near-black filled pills exist nowhere in the colour language.)</p>
+      </div>
+    </div>
+    <div class="pane yes">
+      <div class="label">✓ hoisted to the caption; the column returns when it varies</div>
+      <div class="stage warm">
+        <p style="margin:0 0 8px;font-size:12.5px;color:var(--muted-foreground)">All repositories below are open access.</p>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Repository</th><th style="text-align:right">Datasets</th></tr></thead>
+          <tbody>
+            <tr><td>ClinicalTrials.gov</td><td style="text-align:right">400</td></tr>
+            <tr><td>GEO</td><td style="text-align:right">362</td></tr>
+            <tr><td>Zenodo</td><td style="text-align:right">131</td></tr>
+          </tbody>
+        </table></div>
+        <p class="note">One sentence where the column was. The moment a restricted repository
+          appears, Access earns its column back — with facet-registry pills, not black ones.</p>
+      </div>
+    </div>
+  </div>
+  <div class="rulebox">
+    <b>R10 — Before shipping a column or per-row badge, ask: does it ever vary on this page?</b>
+    <p>If not, it moves to the group band, the lede, or a footnote. This is R6's inverse: R6 says a
+      filterable attribute must be visible; R10 says an invariant attribute must not be repeated.</p>
+  </div>
+
+  <h2>R11 — Declare headers once per collection</h2>
+  <p class="lede">/edit/administrators renders each person as a maroon-bordered card containing its
+    own table — Org unit / Role / Source / Actions re-declared for every human on the page, with a
+    radio group per row. The DEPARTMENTS band on /edit/units is the right pattern: one table, one
+    header, group bands inside it.</p>
+  <div class="rulebox">
+    <b>R11 — Grouped uniform records are one table with group bands, not a card-of-tables per group.</b>
+    <p>The person becomes a band row (name · title · CWID, with per-person actions right-aligned in
+      the band) on <code>--apollo-surface-2</code>, matching the DEPARTMENTS band. Column headers
+      render once. Per-row controls stay per-row; per-person controls live in the band. Reserve the
+      card-per-group form for when groups carry different columns — then they are not uniform and
+      R5 no longer applies.</p>
+  </div>
+
+  <h2>R12 — Selection is a maroon fill; there is one active panel</h2>
+  <p class="lede">The scholar editor is the house's best page and it already has a selection
+    language: the current nav item is a <b>maroon fill with white text</b>, the segmented choices
+    (Third person / Formal / Standard) fill maroon when chosen, and one maroon left-rule marks the
+    panel the nav item opened. That is the canon — write it down so other pages stop inventing.</p>
+  <div class="duo">
+    <div class="pane no">
+      <div class="label">✗ selection borrowed from the UA — blue pill, blue slider</div>
+      <div class="stage warm">
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="pill" style="background:#1e5b8a;border-color:#1e5b8a;color:#fff">Fit</span>
+          <span class="pill" style="background:#fff;border-color:var(--apollo-border-strong);color:#44403c">Deadline</span>
+          <span class="pill" style="background:#fff;border-color:var(--apollo-border-strong);color:#44403c">Stage</span>
+          <input type="range" style="width:120px">
+        </div>
+        <p class="note">/edit/scholar's "Grants for me" sorter and the reports sliders ship default
+          blue — a hue with no job in the colour language, meaning "selected" only by accident.</p>
+      </div>
+    </div>
+    <div class="pane yes">
+      <div class="label">✓ maroon fill = chosen, everywhere</div>
+      <div class="stage warm">
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="pill" style="background:var(--apollo-maroon);border-color:var(--apollo-maroon);color:#fff">Fit</span>
+          <span class="pill" style="background:#fff;border-color:var(--apollo-border-strong);color:#44403c">Deadline</span>
+          <span class="pill" style="background:#fff;border-color:var(--apollo-border-strong);color:#44403c">Stage</span>
+          <input type="range" style="width:120px;accent-color:var(--apollo-maroon)">
+        </div>
+        <p class="note">One selection treatment across nav, segments, sort pills, checkboxes,
+          radios, sliders, toggles: <code>accent-color: var(--apollo-maroon)</code> or a maroon
+          fill. Matches the attribute rail and the Draft-with-AI segments.</p>
+      </div>
+    </div>
+  </div>
+  <div class="rulebox">
+    <b>R12 — Maroon has exactly two jobs: the primary link (R9) and the current selection.</b>
+    <p>Both mean "the one that matters here." Status, decoration, and repeated-container borders
+      are still forbidden. The maroon left-rule is singular: it marks <i>the</i> active panel that
+      the selected nav item opened — one per view, never on cards in a list. Form controls never
+      ship UA-default blue; set <code>accent-color</code> globally.</p>
+  </div>
+
+  <h2>R13 — Amber means "awaiting human judgment" — and it obeys R10</h2>
+  <p class="lede">NCI Table 2a tags <b>every</b> row "AI-SUGGESTED" in amber; the reports pages
+    are advisory top to bottom; the members view collapses suggestions into an amber pill. Amber is
+    already converging on one meaning — a machine proposed this and a person has not yet ruled —
+    which matches the facet-position hue and the "Needs review" queue.</p>
+  <div class="rulebox">
+    <b>R13 — Reserve the amber treatment for pending-judgment states, and hoist it when invariant.</b>
+    <p>When every row on a page is AI-suggested (Table 2a today), the per-row tag is an R10
+      violation — say it once above the table ("all percentages below are AI-suggested until
+      confirmed") and tag only the exceptions once confirmations start landing. Confirmed values
+      drop the amber; they do not gain a green — quiet is the confirmed state.</p>
+  </div>
+
+  <h2>R14 — Every /edit route wears the shell</h2>
+  <p class="lede">One reports page renders a bare table on white — no top bar, no nav, no page
+    ground, no table frame. Advisory tools feel optional; chrome-less pages feel abandoned.</p>
+  <div class="rulebox">
+    <b>R14 — Shell (bar + nav + <code>--apollo-page</code>) is non-negotiable, reports included.</b>
+    <p>Reports are still R1/R2/R5 territory: warm page, framed tables, greige thead. The
+      report-scoped controls (filters, sliders, downloads) sit in the content column under the
+      report title, styled per R3/R12 — not floating in an unstyled void.</p>
+  </div>
+
+</div>
+</body>
+</html>
