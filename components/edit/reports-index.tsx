@@ -34,7 +34,11 @@ export type ReportsIndexReport = { n: 1 | 2 | 3 | 4 | 5; label: string; descript
 export type ReportsIndexUnit = {
   code: string;
   name: string;
-  centerType: "center" | "institute";
+  // "department" is unreachable today — `loadReportableUnitsForActor` only ever
+  // emits center/institute (kind === "center" is the hard gate) — but the 2a
+  // mockup's filter rail shows a (currently-empty) Department checkbox for
+  // parity with `AllUnitsDirectory`'s own rail, so the type carries it too.
+  centerType: "center" | "institute" | "department";
   editHref: string;
   liveCount: number;
   totalCount: number;
@@ -48,8 +52,10 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function typeLabel(centerType: "center" | "institute"): string {
-  return centerType === "institute" ? "Institute" : "Center";
+function typeLabel(centerType: "center" | "institute" | "department"): string {
+  if (centerType === "institute") return "Institute";
+  if (centerType === "department") return "Department";
+  return "Center";
 }
 
 export function ReportsIndex({
@@ -75,6 +81,9 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
   const [sort, setSort] = React.useState<SortKey>("unit");
   const [showCenters, setShowCenters] = React.useState(true);
   const [showInstitutes, setShowInstitutes] = React.useState(true);
+  // Default unchecked, matching the mockup's own default state for this bucket
+  // (today always empty — see the `ReportsIndexUnit.centerType` comment).
+  const [showDepartments, setShowDepartments] = React.useState(false);
   const [liveOnly, setLiveOnly] = React.useState(false);
   const [noneYetOnly, setNoneYetOnly] = React.useState(false);
 
@@ -82,6 +91,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
     () => ({
       centers: units.filter((u) => u.centerType === "center").length,
       institutes: units.filter((u) => u.centerType === "institute").length,
+      departments: units.filter((u) => u.centerType === "department").length,
       liveOnly: units.filter((u) => u.liveCount > 0).length,
       noneYet: units.filter((u) => u.liveCount === 0).length,
     }),
@@ -93,6 +103,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
     const pool = units.filter((u) => {
       if (u.centerType === "center" && !showCenters) return false;
       if (u.centerType === "institute" && !showInstitutes) return false;
+      if (u.centerType === "department" && !showDepartments) return false;
       if (liveOnly && u.liveCount === 0) return false;
       if (noneYetOnly && u.liveCount > 0) return false;
       if (trimmed.length === 0) return true;
@@ -109,7 +120,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
       });
     }
     return [...pool].sort((a, b) => a.name.localeCompare(b.name));
-  }, [units, query, sort, showCenters, showInstitutes, liveOnly, noneYetOnly]);
+  }, [units, query, sort, showCenters, showInstitutes, showDepartments, liveOnly, noneYetOnly]);
 
   return (
     <div className="flex flex-col gap-4" data-slot="reports-index-table" data-testid="reports-index-table">
@@ -133,6 +144,13 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
                 label="Institute"
                 count={counts.institutes}
                 testid="reports-index-filter-institute"
+              />
+              <FilterCheckbox
+                checked={showDepartments}
+                onChange={setShowDepartments}
+                label="Department"
+                count={counts.departments}
+                testid="reports-index-filter-department"
               />
             </div>
           </fieldset>
