@@ -2040,10 +2040,39 @@ model Core {
   // (Superuser-granted), the same machinery as department/division/center.
   source      String   @db.VarChar(64) // "reciterai-core-dictionary"
   refreshedAt DateTime @default(now()) @map("refreshed_at")
+  /// Cores-as-org-units P1 (core-as-org-unit-plan.md). Manually owned (no ETL
+  /// writes these), null/default so the 13 existing cores land clean with no
+  /// backfill. `visible` is the per-core curator-facing toggle — it coexists
+  /// with the existing global `CORE_PAGES`/`CORE_PUB_MODAL` env flags; both
+  /// must be true for a core to show publicly.
+  description String?  @db.Text
+  url         String?  @db.VarChar(512)
+  visible     Boolean  @default(false)
 
   publications PublicationCore[]
+  leaders      CoreLeader[]
 
   @@map("core")
+}
+
+/// Cores-as-org-units P1 (core-as-org-unit-plan.md) — a core's leader(s).
+/// Mirrors `CenterProgramLeader`'s shape: a core may be co-led, so leaders
+/// are rows here (0..N) rather than a single scalar column, matching the
+/// only other multi-person leadership table in the schema. `role` is an open
+/// string (not a Prisma enum), same pattern as `CenterProgramLeader.role`'s
+/// "leader"/"coe_liaison" — extensible without a future migration.
+model CoreLeader {
+  coreId    String  @map("core_id") @db.VarChar(32)
+  cwid      String  @db.VarChar(32)
+  role      String  @default("director") @map("role") @db.VarChar(32)
+  interim   Boolean @default(false)
+  sortOrder Int     @default(0) @map("sort_order")
+
+  core Core @relation(fields: [coreId], references: [id], onDelete: Cascade)
+
+  @@id([coreId, cwid])
+  @@index([coreId])
+  @@map("core_leader")
 }
 
 /// Projected (publication × core) usage candidates from ReciterAI's cores
