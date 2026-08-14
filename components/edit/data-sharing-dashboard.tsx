@@ -40,10 +40,12 @@ import Link from "next/link";
 import { CopyButton } from "@/components/publication/copy-button";
 import { Badge } from "@/components/ui/badge";
 import { SHARE_RATE_YEAR_FLOOR, type DataSharingReport } from "@/lib/api/data-sharing-report";
+import { urlOf } from "@/lib/repository-tier";
 
 const thClass = "px-3 py-2 font-medium";
 const tdClass = "px-3 py-2";
-const sectionClass = "border-apollo-border bg-apollo-surface mt-3 overflow-x-auto rounded-md border";
+const sectionClass =
+  "border-apollo-border bg-apollo-surface mt-3 overflow-x-auto rounded-md border";
 
 /** "n/N (x%)" — deliberately never a bare percentage (a past review flagged
  *  that a naked percent on a small denominator implies false precision).
@@ -81,7 +83,12 @@ const TIER_LABELS: Record<string, string> = {
  *  the foreign-hosted tiers, `outline` otherwise — same visual language as
  *  `AccessChip`, no new color system introduced. */
 function TierChip({ tier }: { tier: string }) {
-  const variant = tier === "CONCERN" ? "destructive" : tier === "FOREIGN_OPEN" || tier === "FOREIGN_CTRL" ? "secondary" : "outline";
+  const variant =
+    tier === "CONCERN"
+      ? "destructive"
+      : tier === "FOREIGN_OPEN" || tier === "FOREIGN_CTRL"
+        ? "secondary"
+        : "outline";
   return <Badge variant={variant}>{TIER_LABELS[tier] ?? tier}</Badge>;
 }
 
@@ -99,7 +106,11 @@ function RollupSection({ report }: { report: DataSharingReport }) {
         {/* A plain <a>: /export is a CSV download route (route.ts), not a page,
             so <Link>'s client nav + prefetch would fetch the file itself. */}
         {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-        <a href="/edit/data-sharing/export" className="text-sm hover:underline" data-testid="ds-export-link">
+        <a
+          href="/edit/data-sharing/export"
+          className="text-sm hover:underline"
+          data-testid="ds-export-link"
+        >
           Download CSV
         </a>
       </div>
@@ -143,10 +154,10 @@ function RollupSection({ report }: { report: DataSharingReport }) {
         </div>
         <p className="mt-2 text-sm">{paragraph}</p>
         <p className="text-muted-foreground mt-2 text-xs">
-          Methodology travels with the number: extracted from PubMed DataBankList and full-text
-          Data Availability statements, attributed via ReCiter disambiguation, deposit-vs-use
-          classified. Counts are a floor, not a census — confirmed deposits only, not an estimate
-          of the ceiling.
+          Methodology travels with the number: extracted from PubMed DataBankList and full-text Data
+          Availability statements, attributed via ReCiter disambiguation, deposit-vs-use classified.
+          Counts are a floor, not a census — confirmed deposits only, not an estimate of the
+          ceiling.
         </p>
       </div>
 
@@ -158,20 +169,20 @@ function RollupSection({ report }: { report: DataSharingReport }) {
 
       <p className="text-muted-foreground mt-2 text-xs">
         <strong>Share rate caveats:</strong> the denominator only counts publications from{" "}
-        {SHARE_RATE_YEAR_FLOOR} onward — the extraction pipeline never scanned earlier pubs, so including them would
-        manufacture &quot;no detected deposit&quot; for papers that were simply never checked.
-        Deposit detection today also only covers full-time faculty, an extraction-pipeline scope
-        rather than an SPS filter — a non-full-time scholar&apos;s rate will read 0/0, or a low
-        denominator with a zero numerator, by construction, not as a finding about their sharing
-        behavior.
+        {SHARE_RATE_YEAR_FLOOR} onward — the extraction pipeline never scanned earlier pubs, so
+        including them would manufacture &quot;no detected deposit&quot; for papers that were simply
+        never checked. Deposit detection today also only covers full-time faculty, an
+        extraction-pipeline scope rather than an SPS filter — a non-full-time scholar&apos;s rate
+        will read 0/0, or a low denominator with a zero numerator, by construction, not as a finding
+        about their sharing behavior.
       </p>
 
       <div className={`${sectionClass} mt-4 p-4`}>
         <div className="text-sm font-medium">Publications by repository risk tier</div>
         <p className="text-muted-foreground mt-1 text-xs">
-          Distinct publications with a detected deposit in a repository of each tier —
-          tier-based only (host jurisdiction × access model); a publication with deposits in
-          repositories of different tiers is counted in each.
+          Distinct publications with a detected deposit in a repository of each tier — tier-based
+          only (host jurisdiction × access model); a publication with deposits in repositories of
+          different tiers is counted in each.
         </p>
         <div className="mt-3 flex flex-wrap gap-x-6 gap-y-3">
           {report.pubsByTier.map((t) => (
@@ -189,7 +200,7 @@ function RollupSection({ report }: { report: DataSharingReport }) {
 function FundingSection({ report }: { report: DataSharingReport }) {
   const { overall } = report;
   return (
-    <section id="funding" className="scroll-mt-4 mt-10">
+    <section id="funding" className="mt-10 scroll-mt-4">
       <h2 className="text-base font-semibold">2 · Funding</h2>
       <p className="text-muted-foreground mt-1 text-sm">
         NIH-funded share of the same non-registry deposited publications the access-model split
@@ -210,8 +221,8 @@ function FundingSection({ report }: { report: DataSharingReport }) {
       <p className="text-muted-foreground mt-2 text-xs">
         &quot;Not NIH-funded&quot; is not the same as non-federal: <code>nih_ic</code> is only ever
         populated for NIH awards, so other federal funders (CDC, NSF, and the like) aren&apos;t
-        separately tracked here and are counted as not NIH-funded alongside genuinely
-        non-federal work.
+        separately tracked here and are counted as not NIH-funded alongside genuinely non-federal
+        work.
       </p>
     </section>
   );
@@ -219,7 +230,7 @@ function FundingSection({ report }: { report: DataSharingReport }) {
 
 function RepositoriesSection({ report }: { report: DataSharingReport }) {
   return (
-    <section id="repos" className="scroll-mt-4 mt-10">
+    <section id="repos" className="mt-10 scroll-mt-4">
       <h2 className="text-base font-semibold">3 · Repositories &amp; departments</h2>
       <p className="text-muted-foreground mt-1 text-sm">
         Audience: library / RDM team — targeting DMS training and repository support.
@@ -227,8 +238,8 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
 
       <h3 className="text-sm font-semibold">Repositories by risk tier</h3>
       <p className="text-muted-foreground mt-1 text-xs">
-        Tier-based only — country-of-concern host or foreign-hosted repository; does not
-        include sensitive data-type detection.
+        Tier-based only — country-of-concern host or foreign-hosted repository; does not include
+        sensitive data-type detection.
       </p>
       <div className={sectionClass}>
         <table className="w-full text-sm">
@@ -265,18 +276,34 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
             </tr>
           </thead>
           <tbody>
-            {report.byRepository.map((r) => (
-              <tr key={r.repository} className="border-apollo-border border-b">
-                <td className={`${tdClass} font-medium`}>{r.repository}</td>
-                <td className={tdClass}>
-                  <TierChip tier={r.tier} />
-                </td>
-                <td className={tdClass}>
-                  <AccessChip accessModel={r.accessModel} />
-                </td>
-                <td className={`${tdClass} text-right`}>{r.datasets.toLocaleString()}</td>
-              </tr>
-            ))}
+            {report.byRepository.map((r) => {
+              const url = urlOf(r.repository);
+              return (
+                <tr key={r.repository} className="border-apollo-border border-b">
+                  <td className={`${tdClass} font-medium`}>
+                    {url ? (
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:underline"
+                      >
+                        {r.repository}
+                      </a>
+                    ) : (
+                      r.repository
+                    )}
+                  </td>
+                  <td className={tdClass}>
+                    <TierChip tier={r.tier} />
+                  </td>
+                  <td className={tdClass}>
+                    <AccessChip accessModel={r.accessModel} />
+                  </td>
+                  <td className={`${tdClass} text-right`}>{r.datasets.toLocaleString()}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -333,7 +360,7 @@ const CONCERNING_CAVEAT =
 
 function FacultySection({ report }: { report: DataSharingReport }) {
   return (
-    <section id="faculty" className="scroll-mt-4 mt-10">
+    <section id="faculty" className="mt-10 scroll-mt-4">
       <h2 className="text-base font-semibold">4 · Named faculty</h2>
       <p className="text-muted-foreground mt-1 text-sm">
         Per-individual counts — same access as sections 1–3 above, no separate review.
@@ -373,7 +400,9 @@ function FacultySection({ report }: { report: DataSharingReport }) {
                 <td className={`${tdClass} text-right`}>{f.openDatasets.toLocaleString()}</td>
                 <td className={`${tdClass} text-right`}>{f.controlledDatasets.toLocaleString()}</td>
                 <td className={`${tdClass} text-right`}>{f.concerningDeposits.toLocaleString()}</td>
-                <td className={`${tdClass} text-right`}>{f.foreignHostedDeposits.toLocaleString()}</td>
+                <td className={`${tdClass} text-right`}>
+                  {f.foreignHostedDeposits.toLocaleString()}
+                </td>
                 <td className={`${tdClass} text-right`}>
                   {formatShareRate(f.shareRateNumerator, f.shareRateDenominator)}
                 </td>
@@ -385,9 +414,9 @@ function FacultySection({ report }: { report: DataSharingReport }) {
 
       <p className="text-muted-foreground mt-2 text-xs">
         <strong>{report.overall.concerningDepositInstances.toLocaleString()}</strong> deposit
-        instance{report.overall.concerningDepositInstances === 1 ? "" : "s"} institution-wide flagged
-        concerning by tier (same tier-only definition as the columns above) — not a distinct-dataset
-        or distinct-publication count.
+        instance{report.overall.concerningDepositInstances === 1 ? "" : "s"} institution-wide
+        flagged concerning by tier (same tier-only definition as the columns above) — not a
+        distinct-dataset or distinct-publication count.
       </p>
     </section>
   );

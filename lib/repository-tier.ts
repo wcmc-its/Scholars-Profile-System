@@ -1,10 +1,10 @@
 /**
- * Repository risk-tier lookup — partial port of
+ * Repository risk-tier + homepage-URL lookup — partial port of
  * `~/Dropbox/Projects/Bulk Data Rule/pipeline/catalog.py`'s `R` list
- * (tier only; canonical name ↔ tier pairs). The org/country/access/bucket/
- * note fields on each `catalog.py` record are NOT ported here — nothing on
- * this dashboard reads them. Keep in sync if `catalog.py`'s `R` list changes
- * (repository added/removed, or a tier reclassified).
+ * (tier and url only; canonical name ↔ tier/url pairs). The org/country/
+ * access/bucket/note fields on each `catalog.py` record are NOT ported here —
+ * nothing on this dashboard reads them. Keep in sync if `catalog.py`'s `R`
+ * list changes (repository added/removed, tier reclassified, or url moves).
  *
  * Tier is a pure function of `repository` (`DatasetDeposit.repository`,
  * always the canonical name — see `attribute.py`'s `d['repo']`). Priority
@@ -72,4 +72,62 @@ export const REPO_TIER: Record<string, string> = {
  *  upstream, port not yet updated). */
 export function tierOf(repository: string): string {
   return REPO_TIER[repository] ?? "UNKNOWN";
+}
+
+/** Repository homepage, keyed identically to `REPO_TIER` (same 36 canonical
+ *  names, same source row in `catalog.py`). This is the repository's own
+ *  homepage — NOT a per-accession deep link; `components/profile/
+ *  datasets-section.tsx`'s `ACCESSION_RESOLVERS` already covers per-accession
+ *  URLs for the subset of repositories that need one, and stays separate
+ *  from this table on purpose. */
+export const REPO_URL: Record<string, string> = {
+  "GSA-Human": "https://ngdc.cncb.ac.cn/gsa-human/",
+  GSA: "https://ngdc.cncb.ac.cn/gsa/",
+  "NGDC/CNCB (other)": "https://ngdc.cncb.ac.cn/",
+  iProX: "https://www.iprox.cn/",
+  "CNGB/CNSA": "https://db.cngb.org/cnsa/",
+
+  dbGaP: "https://www.ncbi.nlm.nih.gov/gap/",
+  ImmPort: "https://www.immport.org/",
+
+  GEO: "https://www.ncbi.nlm.nih.gov/geo/",
+  SRA: "https://www.ncbi.nlm.nih.gov/sra",
+  "BioProject/BioSample": "https://www.ncbi.nlm.nih.gov/bioproject/",
+  GenBank: "https://www.ncbi.nlm.nih.gov/genbank/",
+  "Metabolomics Workbench": "https://www.metabolomicsworkbench.org/",
+  MassIVE: "https://massive.ucsd.edu/",
+  Dryad: "https://datadryad.org/",
+  OSF: "https://osf.io/",
+  "Harvard Dataverse": "https://dataverse.harvard.edu/",
+  TCIA: "https://www.cancerimagingarchive.net/",
+
+  EGA: "https://ega-archive.org/",
+
+  "ArrayExpress/BioStudies": "https://www.ebi.ac.uk/biostudies/arrayexpress",
+  ENA: "https://www.ebi.ac.uk/ena/browser/home",
+  PRIDE: "https://www.ebi.ac.uk/pride/",
+  MetaboLights: "https://www.ebi.ac.uk/metabolights/",
+  figshare: "https://figshare.com/",
+  Zenodo: "https://zenodo.org/",
+  "Mendeley Data": "https://data.mendeley.com/",
+  ProteomeXchange: "http://www.proteomexchange.org/",
+
+  OpenNeuro: "https://openneuro.org/",
+  "NDA (NIMH Data Archive)": "https://nda.nih.gov/",
+  PhysioNet: "https://physionet.org/",
+  "IDR (Image Data Resource)": "https://idr.openmicroscopy.org/",
+  Vivli: "https://vivli.org/",
+  BioLINCC: "https://biolincc.nhlbi.nih.gov/",
+  Synapse: "https://www.synapse.org/",
+
+  "ClinicalTrials.gov": "https://clinicaltrials.gov/",
+  CTRI: "https://ctri.nic.in/",
+  PDB: "https://www.rcsb.org/",
+};
+
+/** Homepage URL for a repository's canonical name, or `null` when unmapped
+ *  (mirrors `tierOf`'s `"UNKNOWN"` fallback, `null` instead since there's no
+ *  sensible placeholder URL). */
+export function urlOf(repository: string): string | null {
+  return REPO_URL[repository] ?? null;
 }

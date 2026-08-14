@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { REPO_TIER, tierOf } from "@/lib/repository-tier";
+import { REPO_TIER, REPO_URL, tierOf, urlOf } from "@/lib/repository-tier";
 
 describe("tierOf", () => {
   it("resolves a CONCERN-tier repository", () => {
@@ -46,5 +46,28 @@ describe("tierOf", () => {
   it("has exactly 5 CONCERN-tier entries, matching catalog.py's R list", () => {
     const concernCount = Object.values(REPO_TIER).filter((t) => t === "CONCERN").length;
     expect(concernCount).toBe(5);
+  });
+});
+
+describe("urlOf", () => {
+  it("resolves a known repository's homepage", () => {
+    expect(urlOf("Dryad")).toBe("https://datadryad.org/");
+    expect(urlOf("GEO")).toBe("https://www.ncbi.nlm.nih.gov/geo/");
+  });
+
+  it("returns null for a repository not in the catalog.py port", () => {
+    expect(urlOf("Some Repository Nobody Has Heard Of")).toBeNull();
+    expect(urlOf("")).toBeNull();
+  });
+
+  it("carries a url for all 36 catalog.py repositories, same key set as REPO_TIER", () => {
+    expect(Object.keys(REPO_URL)).toHaveLength(36);
+    expect(Object.keys(REPO_URL).sort()).toEqual(Object.keys(REPO_TIER).sort());
+  });
+
+  it("every url is a well-formed http(s) link", () => {
+    for (const url of Object.values(REPO_URL)) {
+      expect(url).toMatch(/^https?:\/\//);
+    }
   });
 });
