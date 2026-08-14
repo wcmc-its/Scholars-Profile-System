@@ -327,24 +327,27 @@ describe("EtlStack", () => {
     });
 
     describe("Resource counts (B08 / B20 acceptance)", () => {
-      it("creates six state machines (3 cadence + #595 heartbeat + #393 reconciler + #353 cdn reconciler), six EventBridge rules, two SNS topics", () => {
+      it("creates seven state machines (3 cadence + #595 heartbeat + #393 reconciler + #353 cdn reconciler + grants export), seven EventBridge rules, two SNS topics", () => {
         // 3 cadence machines + the #595 heartbeat + the #393 reconciler +
-        // the #353 cdn reconciler (PR-2).
-        template.resourceCountIs("AWS::StepFunctions::StateMachine", 6);
-        template.resourceCountIs("AWS::Events::Rule", 6);
-        // The heartbeat + both reconcilers reuse the cadence failure topic; PR-7
-        // adds the etl-page P1 topic, so two total: etl-failures + etl-page.
+        // the #353 cdn reconciler (PR-2) + the grants-export machine, now
+        // that grantsExportScheduleEnabled is true in prod too.
+        template.resourceCountIs("AWS::StepFunctions::StateMachine", 7);
+        template.resourceCountIs("AWS::Events::Rule", 7);
+        // The heartbeat + both reconcilers + grants export reuse the cadence
+        // failure topic; PR-7 adds the etl-page P1 topic, so two total:
+        // etl-failures + etl-page.
         template.resourceCountIs("AWS::SNS::Topic", 2);
         template.hasResourceProperties("AWS::SNS::Topic", { TopicName: "etl-failures-prod" });
         template.hasResourceProperties("AWS::SNS::Topic", { TopicName: "etl-page-prod" });
       });
 
-      it("creates fourteen CloudWatch alarms (4 status + 3 cadence + 3 duration + reconciler status/cadence + cdn reconciler status/cadence)", () => {
+      it("creates sixteen CloudWatch alarms (4 status + 3 cadence + 3 duration + reconciler status/cadence + cdn reconciler status/cadence + grants export status/cadence)", () => {
         // 10 cadence-machine alarms (4 status + 3 cadence: nightly/weekly/heartbeat
         // + 3 duration: nightly/weekly/heartbeat, #2190 -- annual is excluded, its
         // ExecutionTime is approval-gate wait) + 2 reconciler alarms (#393)
-        // + 2 cdn reconciler alarms (#353).
-        template.resourceCountIs("AWS::CloudWatch::Alarm", 14);
+        // + 2 cdn reconciler alarms (#353) + 2 grants-export alarms (status +
+        // cadence), now that grantsExportScheduleEnabled is true in prod too.
+        template.resourceCountIs("AWS::CloudWatch::Alarm", 16);
       });
 
       it("creates six ECS task definitions (4 ETL credential-split defs + lean reconciler + lean cdn reconciler) and one SG-to-SG ingress rule on the internal ALB SG", () => {
@@ -693,10 +696,12 @@ describe("EtlStack", () => {
       it("every alarm publishes to the etl-failures-${env} SNS topic", () => {
         const alarms = template.findResources("AWS::CloudWatch::Alarm");
         // 10 cadence-machine alarms (4 status + 3 cadence + 3 duration, #2190)
-        // + 2 reconciler alarms (#393) + 2 cdn reconciler alarms (#353); all
-        // share the topic -- a duration alarm that routed elsewhere would be
-        // invisible, so it is covered by the same loop below.
-        expect(Object.keys(alarms)).toHaveLength(14);
+        // + 2 reconciler alarms (#393) + 2 cdn reconciler alarms (#353) + 2
+        // grants-export alarms (status + cadence), now that
+        // grantsExportScheduleEnabled is true in prod too; all share the
+        // topic -- a duration alarm that routed elsewhere would be invisible,
+        // so it is covered by the same loop below.
+        expect(Object.keys(alarms)).toHaveLength(16);
         for (const [id, alarm] of Object.entries(alarms)) {
           const actions = (alarm.Properties?.AlarmActions ?? []) as unknown[];
           expect({ id, hasAction: actions.length > 0 }).toEqual({
@@ -1890,18 +1895,36 @@ describe("EtlStack", () => {
       expect(stmt!.Principal).toEqual({ AWS: { Ref: ssmParamLogicalId } });
     });
 
-    it("prod ships the grants-export bucket (unconditional) but NO cross-account read grant while the flag is off", () => {
-      // Mirrors the opportunity-projection resurrection guard above: the
-      // bucket + write grant are unconditional in both envs (an operator can
-      // run the export by hand via run-task before go-live), but the
-      // cross-account READ policy must stay absent from prod until
-      // grantsExportScheduleEnabled flips -- an SSM param that does not exist
-      // in prod yet would otherwise fail the next `cdk deploy Sps-Etl-prod`.
+    it("prod ships the grants-export cross-account read grant now that the flag is on (staging hand-verified, Research Informatics confirmed prod-ready)", () => {
+      // grantsExportScheduleEnabled flipped true for prod -- mirrors the
+      // staging assertion above: GetObject only, scoped to the one object
+      // key, principal resolved from the PROD SSM param.
       const prodTemplate = buildEtlStack("prod").template;
-      const prodPolicies = JSON.stringify(
+      const json = prodTemplate.toJSON();
+      const params = json.Parameters as Record<string, Record<string, unknown>>;
+      const ssmParamLogicalId = Object.entries(params).find(
+        ([, p]) =>
+          p.Type === "AWS::SSM::Parameter::Value<String>" &&
+          p.Default === "/scholars/prod/grants-export/consumer-role-arn",
+      )?.[0];
+      expect(ssmParamLogicalId).toBeDefined();
+
+      const bucketPolicies = Object.values(
         prodTemplate.findResources("AWS::S3::BucketPolicy"),
+      ).map((r) => (r.Properties as Record<string, unknown>).PolicyDocument as Record<string, unknown>);
+      const grantsPolicy = bucketPolicies.find((doc) =>
+        JSON.stringify(doc).includes(ssmParamLogicalId as string),
       );
-      expect(prodPolicies).not.toMatch(/grants-export\/consumer-role-arn/);
+      expect(grantsPolicy).toBeDefined();
+      const statements = grantsPolicy?.Statement as Array<Record<string, unknown>>;
+      const stmt = statements.find((s) => s.Effect === "Allow");
+      expect(stmt).toBeDefined();
+
+      const actions = Array.isArray(stmt!.Action) ? stmt!.Action : [stmt!.Action];
+      expect(actions).toEqual(["s3:GetObject"]);
+      const resource = JSON.stringify(stmt!.Resource);
+      expect(resource).toContain("grants.ndjson");
+      expect(resource).not.toMatch(/^"\*"$/);
     });
 
     // The prod template asserts the same invariant, but staging is where the
