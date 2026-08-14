@@ -12,6 +12,7 @@ import { BrowseHero } from "@/components/browse/browse-hero";
 import { BrowseAnchorStrip } from "@/components/browse/browse-anchor-strip";
 import { DepartmentsGrid } from "@/components/browse/departments-grid";
 import { CentersGrid } from "@/components/browse/centers-grid";
+import { CoresGrid } from "@/components/browse/cores-grid";
 
 /**
  * Departments & Centers hub.
@@ -40,7 +41,7 @@ export default async function BrowsePage() {
   // repopulate the hub on the first production render. Mirrors the guards in
   // app/sitemap.ts and app/llms.txt/route.ts.
   const data = await getBrowseData().catch(
-    (): BrowseData => ({ departments: [], centers: [] }),
+    (): BrowseData => ({ departments: [], centers: [], cores: [] }),
   );
 
   return (
@@ -61,6 +62,7 @@ export default async function BrowsePage() {
       <BrowseAnchorStrip />
       <DepartmentsGrid departments={data.departments} />
       <CentersGrid centers={data.centers} />
+      <CoresGrid cores={data.cores} />
     </main>
   );
 }
