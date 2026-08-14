@@ -32,6 +32,14 @@ export interface EtlStackProps extends StackProps {
    * the `scholars-etl-*` image, not the standalone app image (#454).
    */
   readonly etlEcrRepository: ecr.IRepository;
+  /**
+   * ECR repo holding the `scripts/bulk-data-rule/` Python pipeline image
+   * (from AppStack). Separate from `etlEcrRepository` -- this pipeline is
+   * Python (pandas/sqlalchemy/pymysql), not `tsx`, and runs as a manually
+   * triggered one-off `run-task`, never a Step Functions step
+   * (containerization design, 2026-08-14).
+   */
+  readonly bulkDataRuleEcrRepository: ecr.IRepository;
 }
 
 /**
@@ -115,6 +123,12 @@ export class EtlStack extends Stack {
   public readonly pageTopic: sns.Topic;
   /** Fargate task family every state-machine step launches. */
   public readonly etlTaskDefinition: ecs.FargateTaskDefinition;
+  /**
+   * One-off `scripts/bulk-data-rule/` pipeline task family. No cadence step
+   * launches this -- an operator does, via `aws ecs run-task` (containerization
+   * design, 2026-08-14). Not part of any state machine below.
+   */
+  public readonly bulkDataRuleTaskDefinition: ecs.FargateTaskDefinition;
   /** Three cadence state machines: nightly, weekly, annual. */
   public readonly nightlyStateMachine: sfn.StateMachine;
   public readonly weeklyStateMachine: sfn.StateMachine;
@@ -129,7 +143,7 @@ export class EtlStack extends Stack {
   constructor(scope: Construct, id: string, props: EtlStackProps) {
     super(scope, id, props);
 
-    const { envConfig, ecsCluster, etlEcrRepository } = props;
+    const { envConfig, ecsCluster, etlEcrRepository, bulkDataRuleEcrRepository } = props;
     // Item-3 pass 2a: import the ETL SG by id from the SSM param NetworkStack
     // publishes (pass 1) instead of the cross-stack handle — severs the SG `Ref`
     // export that would lock the useSharedVpc flip. Used only as `.securityGroupId`
@@ -201,6 +215,20 @@ export class EtlStack extends Stack {
       this,
       "EtlDbSecret",
       `scholars/${env}/db/etl`,
+    );
+    // Dedicated reciterdb credential for scripts/bulk-data-rule/ (containerization
+    // design, 2026-08-14). Deliberately its own secret, not a share of the
+    // per-source EtlReciter secret below (SOURCES_SECRET_IDS) -- that secret's
+    // keys are SCHOLARS_RECITERDB_* (the TS loader's env names); the Python
+    // scripts read plain DB_HOST/DB_USERNAME/DB_PASSWORD/DB_NAME
+    // (scripts/bulk-data-rule/attribute.py), so reusing it would need either an
+    // entrypoint remap or edits across all 8 scripts. Also narrower than
+    // SOURCES_SECRET_IDS's group: this pipeline never touches Asms/Infoed/
+    // Coi/Jenzabar, so it gets its own role below, not a seat on that task.
+    const bulkDataRuleSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "BulkDataRuleSecret",
+      `scholars/${env}/etl/bulk-data-rule`,
     );
     // Read-only app DSN — injected ONLY into the main `sps-etl-${env}` task def
     // (below) as DATABASE_URL_RO, so `scripts/run-staging-probe.sh` runs its
@@ -878,6 +906,120 @@ export class EtlStack extends Stack {
     // (see OPERATIONS-RUNBOOK). Isolating it here keeps the admin key off every
     // cadence step. Created for its side effect (the task def + role).
     makeEtlTaskUnit("ReciterApi", "reciter-api", RECITER_API_SECRET_IDS);
+
+    // ------------------------------------------------------------------
+    // scripts/bulk-data-rule/ pipeline — dedicated one-off task def
+    // (containerization design, 2026-08-14). NOT built on makeEtlTaskUnit
+    // above: that helper is wired to the `tsx`-based etlEcrRepository image,
+    // the shared `taskRole`, and the SCHOLARS_* secret fan-out -- none of
+    // which fit a standalone Python image with its own narrow secret. Not
+    // part of any cadence state machine below either: this pipeline stays
+    // manually triggered (`aws ecs run-task --task-definition
+    // sps-bulk-data-rule-<env>`), never a Step Functions step -- the
+    // human-curated taxonomy and live uncached full-text scan both want a
+    // person reviewing a run's output before it's trusted. No alarm, no
+    // schedule, by design (see doc's Non-goals).
+    //
+    // Narrow-scoped on purpose: reusing sourcesUnit's role would mean this
+    // pipeline's third-party Python packages and live external-service
+    // fetches -- a materially larger supply-chain/injection surface than the
+    // TS loaders that role was scoped for -- sit alongside Asms/Infoed/Coi
+    // credentials this pipeline never touches. Same VPC/subnet/SG as every
+    // other step above (etlTaskSubnets/etlSecurityGroup); only the role and
+    // secret are new.
+    // ------------------------------------------------------------------
+    const bulkDataRuleLogGroup = new logs.LogGroup(this, "BulkDataRuleLogGroup", {
+      logGroupName: `/aws/ecs/sps-bulk-data-rule-${env}`,
+      retention: logRetention,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
+    const bulkDataRuleTaskExecutionRole = new iam.Role(this, "BulkDataRuleTaskExecutionRole", {
+      roleName: `sps-bulk-data-rule-task-exec-${env}`,
+      assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+      description: `SPS bulk-data-rule ECS task-execution role (${env}). Pulls the dedicated Python image, injects only the bulk-data-rule secret, writes logs.`,
+    });
+    bulkDataRuleTaskExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["ecr:GetAuthorizationToken"],
+        resources: ["*"],
+      }),
+    );
+    bulkDataRuleTaskExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+        ],
+        resources: [bulkDataRuleEcrRepository.repositoryArn],
+      }),
+    );
+    bulkDataRuleTaskExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["secretsmanager:GetSecretValue"],
+        resources: [bulkDataRuleSecret.secretArn],
+      }),
+    );
+    bulkDataRuleTaskExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["logs:CreateLogStream", "logs:PutLogEvents"],
+        resources: [bulkDataRuleLogGroup.logGroupArn, `${bulkDataRuleLogGroup.logGroupArn}:*`],
+      }),
+    );
+
+    const bulkDataRuleTaskRole = new iam.Role(this, "BulkDataRuleTaskRole", {
+      roleName: `sps-bulk-data-rule-task-${env}`,
+      assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+      description: `SPS bulk-data-rule ECS task role (${env}). Runtime identity; write-only on its own prefix of the curation-backup bucket (provenance sync), nothing else.`,
+    });
+    // Provenance sync target (design decision #1): the entrypoint `aws s3
+    // sync`s its working dir (intermediate CSVs + a run-manifest: image
+    // digest, git SHA, row counts, timestamp) here at the end of every run.
+    // Reuses curationBackupBucket under its own prefix rather than standing
+    // up a second bucket -- same reasoning as that bucket's scratch-input
+    // grant above. This is the audit trail for what a run wrote, not a
+    // deliverable channel -- .xlsx reports stay analyst-local against
+    // downloaded row data (design decision #1).
+    curationBackupBucket.grantPut(bulkDataRuleTaskRole, "bulk-data-rule/*");
+
+    this.bulkDataRuleTaskDefinition = new ecs.FargateTaskDefinition(
+      this,
+      "BulkDataRuleTaskDefinition",
+      {
+        family: `sps-bulk-data-rule-${env}`,
+        // Lean, not the 8 GB ETL sizing: pandas over a five-figure PMID
+        // corpus, not the full-cohort ETL. Bump if a real run OOMs.
+        cpu: 1024,
+        memoryLimitMiB: 2048,
+        executionRole: bulkDataRuleTaskExecutionRole,
+        taskRole: bulkDataRuleTaskRole,
+      },
+    );
+    this.bulkDataRuleTaskDefinition.addContainer("bulk-data-rule", {
+      image: ecs.ContainerImage.fromEcrRepository(bulkDataRuleEcrRepository, "latest"),
+      containerName: "bulk-data-rule",
+      essential: true,
+      logging: ecs.LogDriver.awsLogs({
+        logGroup: bulkDataRuleLogGroup,
+        streamPrefix: "bulk-data-rule",
+      }),
+      environment: {
+        CURATION_BACKUP_BUCKET: curationBackupBucket.bucketName,
+        CURATION_BACKUP_PREFIX: "bulk-data-rule",
+      },
+      secrets: {
+        DB_HOST: ecs.Secret.fromSecretsManager(bulkDataRuleSecret, "DB_HOST"),
+        DB_USERNAME: ecs.Secret.fromSecretsManager(bulkDataRuleSecret, "DB_USERNAME"),
+        DB_PASSWORD: ecs.Secret.fromSecretsManager(bulkDataRuleSecret, "DB_PASSWORD"),
+        DB_NAME: ecs.Secret.fromSecretsManager(bulkDataRuleSecret, "DB_NAME"),
+      },
+    });
+
     // Route each step's npm script to the task def whose secrets it needs;
     // everything not listed runs on the base def (base secrets only).
     const LDAP_SCRIPTS = new Set([
@@ -3170,6 +3312,11 @@ export class EtlStack extends Stack {
     new CfnOutput(this, "EtlTaskFamily", {
       value: this.etlTaskDefinition.family,
       description: "SPS ETL Fargate task family.",
+    });
+    new CfnOutput(this, "BulkDataRuleTaskFamily", {
+      value: this.bulkDataRuleTaskDefinition.family,
+      description:
+        "SPS bulk-data-rule pipeline Fargate task family — manually triggered via run-task, no cadence step launches it.",
     });
     new CfnOutput(this, "CurationBackupBucketName", {
       value: curationBackupBucket.bucketName,

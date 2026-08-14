@@ -272,6 +272,18 @@ export class SecretsStack extends Stack {
         description:
           "SPS ETL credentials — ReciterDB MySQL connection (SCHOLARS_RECITERDB_* host/port/database/username/password).",
       },
+      // Containerization design (2026-08-14) -- scripts/bulk-data-rule/ gets
+      // its own reciterdb credential rather than a share of EtlReciter above.
+      // Deliberately plain key names, not SCHOLARS_RECITERDB_*: the Python
+      // scripts read os.environ['DB_HOST']/['DB_USERNAME']/['DB_PASSWORD']/
+      // ['DB_NAME'] directly (attribute.py and friends), so seeding this
+      // secret with those exact keys means zero script changes.
+      {
+        constructId: "EtlBulkDataRule",
+        name: `scholars/${env}/etl/bulk-data-rule`,
+        description:
+          "SPS bulk-data-rule pipeline (scripts/bulk-data-rule/) — dedicated reciterdb credential, plain DB_HOST/DB_USERNAME/DB_PASSWORD/DB_NAME keys (the Python scripts' own env var names). Narrow-scoped: this task's role/secret reads nothing else.",
+      },
       {
         constructId: "EtlJenzabar",
         name: `scholars/${env}/etl/jenzabar`,

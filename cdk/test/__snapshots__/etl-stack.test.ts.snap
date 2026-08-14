@@ -9,6 +9,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "Ref": "AnnualStateMachine848975DB",
       },
     },
+    "BulkDataRuleTaskFamily": {
+      "Description": "SPS bulk-data-rule pipeline Fargate task family — manually triggered via run-task, no cadence step launches it.",
+      "Value": "sps-bulk-data-rule-prod",
+    },
     "CdnReconcileStateMachineArn": {
       "Description": "SPS CloudFront-invalidation reconciler state machine ARN (#353).",
       "Value": {
@@ -547,6 +551,360 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
+    },
+    "BulkDataRuleLogGroup31F582FF": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/ecs/sps-bulk-data-rule-prod",
+        "RetentionInDays": 90,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "BulkDataRuleTaskDefinition93928776": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "Environment": [
+              {
+                "Name": "CURATION_BACKUP_BUCKET",
+                "Value": {
+                  "Ref": "CurationBackupBucketE5A802A9",
+                },
+              },
+              {
+                "Name": "CURATION_BACKUP_PREFIX",
+                "Value": "bulk-data-rule",
+              },
+            ],
+            "Essential": true,
+            "Image": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      4,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttBulkDataRuleEcrRepository3BE802EDArnED1AA6BA",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".dkr.ecr.",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttBulkDataRuleEcrRepository3BE802EDArnED1AA6BA",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".",
+                  {
+                    "Ref": "AWS::URLSuffix",
+                  },
+                  "/",
+                  {
+                    "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefBulkDataRuleEcrRepository3BE802EDFF1913C3",
+                  },
+                  ":latest",
+                ],
+              ],
+            },
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "BulkDataRuleLogGroup31F582FF",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "bulk-data-rule",
+              },
+            },
+            "Name": "bulk-data-rule",
+            "Secrets": [
+              {
+                "Name": "DB_HOST",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/bulk-data-rule:DB_HOST::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "DB_USERNAME",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/bulk-data-rule:DB_USERNAME::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "DB_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/bulk-data-rule:DB_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "DB_NAME",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/bulk-data-rule:DB_NAME::",
+                    ],
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+        "Cpu": "1024",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "BulkDataRuleTaskExecutionRoleBD7B3620",
+            "Arn",
+          ],
+        },
+        "Family": "sps-bulk-data-rule-prod",
+        "Memory": "2048",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "BulkDataRuleTaskRole8E9A94F8",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
+    },
+    "BulkDataRuleTaskExecutionRoleBD7B3620": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "SPS bulk-data-rule ECS task-execution role (prod). Pulls the dedicated Python image, injects only the bulk-data-rule secret, writes logs.",
+        "RoleName": "sps-bulk-data-rule-task-exec-prod",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "BulkDataRuleTaskExecutionRoleDefaultPolicyC9225CE7": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecr:GetAuthorizationToken",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttBulkDataRuleEcrRepository3BE802EDArnED1AA6BA",
+              },
+            },
+            {
+              "Action": "secretsmanager:GetSecretValue",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/bulk-data-rule",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "BulkDataRuleLogGroup31F582FF",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "BulkDataRuleLogGroup31F582FF",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "BulkDataRuleLogGroup31F582FF",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/bulk-data-rule-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "BulkDataRuleTaskExecutionRoleDefaultPolicyC9225CE7",
+        "Roles": [
+          {
+            "Ref": "BulkDataRuleTaskExecutionRoleBD7B3620",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "BulkDataRuleTaskRole8E9A94F8": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "SPS bulk-data-rule ECS task role (prod). Runtime identity; write-only on its own prefix of the curation-backup bucket (provenance sync), nothing else.",
+        "RoleName": "sps-bulk-data-rule-task-prod",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "BulkDataRuleTaskRoleDefaultPolicy1420FA3D": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "CurationBackupBucketE5A802A9",
+                        "Arn",
+                      ],
+                    },
+                    "/bulk-data-rule/*",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "BulkDataRuleTaskRoleDefaultPolicy1420FA3D",
+        "Roles": [
+          {
+            "Ref": "BulkDataRuleTaskRole8E9A94F8",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "CdnReconcileCadenceAlarm48FE34E6": {
       "Properties": {
@@ -8096,6 +8454,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         "Ref": "AnnualStateMachine848975DB",
       },
     },
+    "BulkDataRuleTaskFamily": {
+      "Description": "SPS bulk-data-rule pipeline Fargate task family — manually triggered via run-task, no cadence step launches it.",
+      "Value": "sps-bulk-data-rule-staging",
+    },
     "CdnReconcileStateMachineArn": {
       "Description": "SPS CloudFront-invalidation reconciler state machine ARN (#353).",
       "Value": {
@@ -8640,6 +9002,360 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
+    },
+    "BulkDataRuleLogGroup31F582FF": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/ecs/sps-bulk-data-rule-staging",
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "BulkDataRuleTaskDefinition93928776": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "Environment": [
+              {
+                "Name": "CURATION_BACKUP_BUCKET",
+                "Value": {
+                  "Ref": "CurationBackupBucketE5A802A9",
+                },
+              },
+              {
+                "Name": "CURATION_BACKUP_PREFIX",
+                "Value": "bulk-data-rule",
+              },
+            ],
+            "Essential": true,
+            "Image": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      4,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttBulkDataRuleEcrRepository3BE802EDArnED1AA6BA",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".dkr.ecr.",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttBulkDataRuleEcrRepository3BE802EDArnED1AA6BA",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".",
+                  {
+                    "Ref": "AWS::URLSuffix",
+                  },
+                  "/",
+                  {
+                    "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefBulkDataRuleEcrRepository3BE802EDFF1913C3",
+                  },
+                  ":latest",
+                ],
+              ],
+            },
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "BulkDataRuleLogGroup31F582FF",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "bulk-data-rule",
+              },
+            },
+            "Name": "bulk-data-rule",
+            "Secrets": [
+              {
+                "Name": "DB_HOST",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/bulk-data-rule:DB_HOST::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "DB_USERNAME",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/bulk-data-rule:DB_USERNAME::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "DB_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/bulk-data-rule:DB_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "DB_NAME",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/bulk-data-rule:DB_NAME::",
+                    ],
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+        "Cpu": "1024",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "BulkDataRuleTaskExecutionRoleBD7B3620",
+            "Arn",
+          ],
+        },
+        "Family": "sps-bulk-data-rule-staging",
+        "Memory": "2048",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "BulkDataRuleTaskRole8E9A94F8",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
+    },
+    "BulkDataRuleTaskExecutionRoleBD7B3620": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "SPS bulk-data-rule ECS task-execution role (staging). Pulls the dedicated Python image, injects only the bulk-data-rule secret, writes logs.",
+        "RoleName": "sps-bulk-data-rule-task-exec-staging",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "BulkDataRuleTaskExecutionRoleDefaultPolicyC9225CE7": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecr:GetAuthorizationToken",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttBulkDataRuleEcrRepository3BE802EDArnED1AA6BA",
+              },
+            },
+            {
+              "Action": "secretsmanager:GetSecretValue",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/bulk-data-rule",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "BulkDataRuleLogGroup31F582FF",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "BulkDataRuleLogGroup31F582FF",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "BulkDataRuleLogGroup31F582FF",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/bulk-data-rule-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "BulkDataRuleTaskExecutionRoleDefaultPolicyC9225CE7",
+        "Roles": [
+          {
+            "Ref": "BulkDataRuleTaskExecutionRoleBD7B3620",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "BulkDataRuleTaskRole8E9A94F8": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "SPS bulk-data-rule ECS task role (staging). Runtime identity; write-only on its own prefix of the curation-backup bucket (provenance sync), nothing else.",
+        "RoleName": "sps-bulk-data-rule-task-staging",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "BulkDataRuleTaskRoleDefaultPolicy1420FA3D": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "CurationBackupBucketE5A802A9",
+                        "Arn",
+                      ],
+                    },
+                    "/bulk-data-rule/*",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "BulkDataRuleTaskRoleDefaultPolicy1420FA3D",
+        "Roles": [
+          {
+            "Ref": "BulkDataRuleTaskRole8E9A94F8",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "CdnReconcileCadenceAlarm48FE34E6": {
       "Properties": {

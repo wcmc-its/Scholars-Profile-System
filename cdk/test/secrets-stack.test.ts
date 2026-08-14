@@ -20,6 +20,9 @@ const PER_SOURCE_ETL_NAMES = [
   "infoed",
   "coi",
   "reciter",
+  // Containerization design (2026-08-14) -- scripts/bulk-data-rule/ gets its
+  // own reciterdb credential, not a share of "reciter" above.
+  "bulk-data-rule",
   "jenzabar",
   "dynamodb",
   "spotlight",
@@ -65,7 +68,7 @@ describe("SecretsStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates the expected set of secrets by name (fifteen core incl. opensearch/master + session-cookie-key + faculty-review-token (#1855) + research-informatics-token (#2363) + saml/idp-cert + saml-sp/cert + db/bootstrap + db/migrate (ADR-009) + newrelic-license-key + nine per-source ETL stubs + reciter-api (#746) + EdgeStack origin shared secret + on-call Teams webhook)", () => {
+    it("creates the expected set of secrets by name (fifteen core incl. opensearch/master + session-cookie-key + faculty-review-token (#1855) + research-informatics-token (#2363) + saml/idp-cert + saml-sp/cert + db/bootstrap + db/migrate (ADR-009) + newrelic-license-key + ten per-source ETL stubs (incl. bulk-data-rule, 2026-08-14) + reciter-api (#746) + EdgeStack origin shared secret + on-call Teams webhook)", () => {
       template.resourceCountIs(
         "AWS::SecretsManager::Secret",
         EXPECTED_SECRET_COUNT,
