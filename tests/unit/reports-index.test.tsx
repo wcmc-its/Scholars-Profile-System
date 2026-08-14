@@ -90,6 +90,14 @@ describe("ReportsIndex — table mode (2a)", () => {
     expect(screen.getByTestId("reports-index-row-meyer")).toBeTruthy();
     expect(screen.queryByTestId("reports-index-row-epic")).toBeNull();
   });
+
+  it("the Department checkbox exists (mockup parity) and defaults unchecked — a department unit stays hidden until toggled on", () => {
+    const dept: ReportsIndexUnit = { ...EPIC, code: "dept", name: "Some Department", centerType: "department" };
+    render(<ReportsIndex units={[MEYER, dept]} reports={REPORTS} mode="table" />);
+    expect(screen.queryByTestId("reports-index-row-dept")).toBeNull();
+    fireEvent.click(screen.getByTestId("reports-index-filter-department"));
+    expect(screen.getByTestId("reports-index-row-dept")).toBeTruthy();
+  });
 });
 
 describe("ReportsIndex — bands mode (1a)", () => {
