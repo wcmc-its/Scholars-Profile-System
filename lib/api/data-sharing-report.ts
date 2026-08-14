@@ -55,6 +55,15 @@
  * `catalog.py`'s open-deposit-of-sensitive-category branch, which needs raw
  * MeSH per citing publication and was cut this session. Never present this
  * flag as the full 3-way "concerning" definition in code or on the page.
+ *
+ * S-Index v2, granular sub-types (this PR, stacked on the above): reads the
+ * new `DatasetDeposit.sensitiveCats`/`.sensitiveSubtypes` columns (from
+ * `scripts/bulk-data-rule/taxonomy.py`'s `tag()`, via the companion
+ * ReCiterDB PR + `attribute.py`'s `WRITE_DATASET_DEPOSIT` path) and adds
+ * `bySubtype` — deposit-instance counts per granular sub-type (e.g.
+ * "genomic:WGS/WES"), grouped by coarse category, via `aggregateBySubtype`.
+ * Dark until the companion columns exist on the live `reciterdb.dataset_deposit`
+ * AND `etl/data-sharing` has re-run — see that PR's description.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { loadContributorSuppressions } from "@/lib/api/manual-layer";
@@ -107,6 +116,16 @@ export type DatasetLinkRow = {
    *  rollup-fixture rows in `tests/unit/data-sharing-report.test.ts` stay
    *  valid untouched. */
   pmids?: string[];
+  /** `DatasetDeposit.sensitiveCats`/`.sensitiveSubtypes` (S-Index v2 granular
+   *  sub-types) — like `pmids` above, NOT export-only: `aggregateBySubtype`
+   *  (below) parses `sensitiveSubtypes` to build `DataSharingReport.bySubtype`,
+   *  so these live outside the export-only block even though `sensitiveCats`
+   *  itself is currently read only by the CSV export. Optional, same
+   *  not-nullable-but-optional shape as `pmids`, for the same reason: existing
+   *  rollup-fixture rows in `tests/unit/data-sharing-report.test.ts` predate
+   *  these columns and shouldn't need touching. */
+  sensitiveCats?: string | null;
+  sensitiveSubtypes?: string | null;
 };
 
 export type DepartmentRollup = {
@@ -283,6 +302,9 @@ export type DataSharingReport = {
   /** Distinct-publication count per tier — see `TierPubSpectrumRow`. */
   pubsByTier: TierPubSpectrumRow[];
   byFaculty: NamedFacultyRow[];
+  /** Deposit-instance counts per granular sensitive sub-type, grouped by
+   *  coarse category — see `aggregateBySubtype`. */
+  bySubtype: SubtypeRow[];
 };
 
 /** Read every active (person, dataset) link, suppression-filtered — a whole-
@@ -311,6 +333,8 @@ export async function loadDatasetLinkRows(client: DataSharingReportClient): Prom
           accessionOrDoi: true,
           resourceType: true,
           dataType: true,
+          sensitiveCats: true,
+          sensitiveSubtypes: true,
           depositYear: true,
           provenance: true,
           confidence: true,
@@ -342,6 +366,8 @@ export async function loadDatasetLinkRows(client: DataSharingReportClient): Prom
       accessionOrDoi: l.dataset.accessionOrDoi,
       resourceType: l.dataset.resourceType,
       dataType: l.dataset.dataType,
+      sensitiveCats: l.dataset.sensitiveCats,
+      sensitiveSubtypes: l.dataset.sensitiveSubtypes,
       depositYear: l.dataset.depositYear,
       provenance: l.dataset.provenance,
       confidence: l.dataset.confidence,
@@ -488,6 +514,43 @@ export function tierPubSpectrum(rows: readonly DatasetLinkRow[]): TierPubSpectru
   return [...byTier.entries()]
     .map(([tier, pmids]) => ({ tier, pubs: pmids.size }))
     .sort((a, b) => TIER_ORDER.indexOf(a.tier as (typeof TIER_ORDER)[number]) - TIER_ORDER.indexOf(b.tier as (typeof TIER_ORDER)[number]));
+}
+
+export type SubtypeRow = { category: string; subtype: string; count: number };
+
+/** Parses `DatasetLinkRow.sensitiveSubtypes` — `'|'`-delimited
+ *  `"coarseCategory:label"` pairs (e.g. `"genomic:WGS/WES"`), same source as
+ *  `sensitiveCats` (`scripts/bulk-data-rule/taxonomy.py`'s `tag()`) — and
+ *  counts DEPOSIT INSTANCES (row count, same grain as `links`, NOT distinct
+ *  datasets or distinct pubs — same reasoning as `countConcerningDeposits`'s
+ *  comment) per sub-type label, grouped by coarse category. A row listing
+ *  more than one sub-type (a dataset spanning genomic + geolocation, say)
+ *  counts once toward EACH sub-type it lists — not reconciled away, same
+ *  spirit as this file's other multi-bucket caveats. A malformed entry (no
+ *  `':'` separator, or an empty label) is skipped rather than crashing or
+ *  landing in a silent "unknown" bucket. Sorted by category, then count
+ *  descending within category. */
+export function aggregateBySubtype(rows: readonly DatasetLinkRow[]): SubtypeRow[] {
+  const counts = new Map<string, SubtypeRow>(); // keyed "category subtype"
+  for (const r of rows) {
+    if (!r.sensitiveSubtypes) continue;
+    for (const token of r.sensitiveSubtypes.split("|")) {
+      const t = token.trim();
+      if (!t) continue;
+      const idx = t.indexOf(":");
+      if (idx <= 0) continue; // no category prefix — malformed, skip
+      const category = t.slice(0, idx).trim();
+      const subtype = t.slice(idx + 1).trim();
+      if (!category || !subtype) continue;
+      const key = `${category} ${subtype}`;
+      const existing = counts.get(key);
+      if (existing) existing.count++;
+      else counts.set(key, { category, subtype, count: 1 });
+    }
+  }
+  return [...counts.values()].sort(
+    (a, b) => a.category.localeCompare(b.category) || b.count - a.count,
+  );
 }
 
 /** Deposit-INSTANCE (row) counts for the tier-only "concerning" flag — same
@@ -814,6 +877,7 @@ export function buildDataSharingReport(
     byRepositoryTier: aggregateRepositoriesByTier(byRepository),
     pubsByTier: tierPubSpectrum(rows),
     byFaculty,
+    bySubtype: aggregateBySubtype(rows),
   };
 }
 
@@ -870,6 +934,8 @@ const DATA_SHARING_CSV_HEADERS = [
   "title",
   "resource_type",
   "data_type",
+  "sensitive_cats",
+  "sensitive_subtypes",
   "access_model",
   "deposit_year",
   "provenance",
@@ -891,6 +957,8 @@ export function buildDataSharingCsv(rows: readonly DatasetLinkRow[]): string {
     r.title ?? "",
     r.resourceType ?? "",
     r.dataType ?? "",
+    r.sensitiveCats ?? "",
+    r.sensitiveSubtypes ?? "",
     r.accessModel ?? "",
     r.depositYear ?? "",
     r.provenance ?? "",

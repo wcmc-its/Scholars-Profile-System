@@ -34,6 +34,14 @@
  * include sensitive-data-type detection (needs raw MeSH per citing pub, cut
  * this session) — every place this flag is visible says so, don't soften or
  * drop that caveat.
+ *
+ * S-Index v2, granular sub-types (this PR, stacked on the above): a new §5
+ * "Deposits by data sub-type" — deposit-instance counts per granular
+ * sub-type (e.g. "genomic:WGS/WES"), grouped by coarse category, from
+ * `report.bySubtype` (`lib/api/data-sharing-report.ts`'s `aggregateBySubtype`).
+ * Same deposit-INSTANCE grain as the link counts elsewhere on this page —
+ * not distinct datasets. Dark (empty table, section hidden) until the
+ * companion ReCiterDB columns are live and `etl/data-sharing` has re-run.
  */
 import Link from "next/link";
 
@@ -422,6 +430,53 @@ function FacultySection({ report }: { report: DataSharingReport }) {
   );
 }
 
+/** Display label per coarse sensitive category — the `sensitiveCats`/
+ *  `sensitiveSubtypes` category prefix (`SENS` in `scripts/bulk-data-rule/
+ *  attribute.py`, from `taxonomy.py`'s `tag()`). Falls through to the raw
+ *  category string for any value not in this map, same pattern as
+ *  `TIER_LABELS`. */
+const SUBTYPE_CATEGORY_LABELS: Record<string, string> = {
+  genomic: "Genomic",
+  omic_other: "Other 'omic",
+  health: "Health data",
+  biometric: "Biometric",
+  geolocation: "Geolocation",
+};
+
+function SubtypesSection({ report }: { report: DataSharingReport }) {
+  if (report.bySubtype.length === 0) return null;
+  return (
+    <section id="subtypes" className="scroll-mt-4 mt-10">
+      <h2 className="text-base font-semibold">5 · Deposits by data sub-type</h2>
+      <p className="text-muted-foreground mt-1 text-sm">
+        Granular sensitive sub-types detected per deposit, grouped by coarse category —
+        deposit-INSTANCE counts, same grain as the link counts elsewhere on this page, not
+        distinct datasets. A deposit spanning more than one sub-type counts once toward each.
+      </p>
+      <div className={sectionClass}>
+        <table className="w-full text-sm">
+          <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
+            <tr className="border-apollo-border border-b">
+              <th className={thClass}>Category</th>
+              <th className={thClass}>Sub-type</th>
+              <th className={`${thClass} text-right`}>Deposit instances</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.bySubtype.map((s) => (
+              <tr key={`${s.category}|${s.subtype}`} className="border-apollo-border border-b">
+                <td className={tdClass}>{SUBTYPE_CATEGORY_LABELS[s.category] ?? s.category}</td>
+                <td className={tdClass}>{s.subtype}</td>
+                <td className={`${tdClass} text-right`}>{s.count.toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 export function DataSharingDashboard({ report }: { report: DataSharingReport }) {
   return (
     <>
@@ -429,6 +484,7 @@ export function DataSharingDashboard({ report }: { report: DataSharingReport }) 
       <FundingSection report={report} />
       <RepositoriesSection report={report} />
       <FacultySection report={report} />
+      <SubtypesSection report={report} />
     </>
   );
 }

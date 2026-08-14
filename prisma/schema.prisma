@@ -757,6 +757,10 @@ model DatasetDeposit {
   resourceType   String?   @map("resource_type") @db.VarChar(32)
   /// Repo-native bucket, or MeSH-derived; enrichment field, may be null.
   dataType       String?   @map("data_type") @db.VarChar(64)
+  /// '|'-delimited coarse sensitive categories (genomic|omic_other|health|biometric|geolocation), from scripts/bulk-data-rule/taxonomy.py's tag(). Null if none detected or not yet backfilled.
+  sensitiveCats      String?  @map("sensitive_cats") @db.VarChar(255)
+  /// '|'-delimited granular sub-types (e.g. "genomic:WGS/WES|omic_other:single-cell"), same taxonomy.py source. Null if none detected or not yet backfilled.
+  sensitiveSubtypes  String?  @map("sensitive_subtypes") @db.VarChar(255)
   /// 'open' | 'controlled'.
   accessModel    String?   @map("access_model") @db.VarChar(16)
   /// Repo metadata where available, else pub year.

@@ -17,6 +17,8 @@ function row(p: Partial<SourceRow>): SourceRow {
     accessionOrDoi: null,
     resourceType: null,
     dataType: null,
+    sensitiveCats: null,
+    sensitiveSubtypes: null,
     accessModel: null,
     depositYear: null,
     provenance: null,
@@ -108,6 +110,37 @@ describe("buildDepositsAndLinks", () => {
     // rejects bare `null` for a nullable Json column in createMany).
     expect(deposits[0].description).toBeNull();
     expect(deposits[0].creators).toBe(Prisma.DbNull);
+  });
+});
+
+describe("buildDepositsAndLinks", () => {
+  it("carries the S-Index v2 sensitiveCats/sensitiveSubtypes fields through to the built deposit", () => {
+    const rows: SourceRow[] = [
+      row({
+        cwid: "abc1234",
+        repository: "dbGaP",
+        accessionOrDoi: "phs000001.v1.p1",
+        sensitiveCats: "genomic|health",
+        sensitiveSubtypes: "genomic:WGS/WES|health:clinical",
+      }),
+    ];
+
+    const { deposits } = buildDepositsAndLinks(rows, new Map([["abc1234", "abc1234"]]), NOW);
+
+    expect(deposits).toHaveLength(1);
+    expect(deposits[0].sensitiveCats).toBe("genomic|health");
+    expect(deposits[0].sensitiveSubtypes).toBe("genomic:WGS/WES|health:clinical");
+  });
+
+  it("leaves sensitiveCats/sensitiveSubtypes null when the source row has none", () => {
+    const rows: SourceRow[] = [
+      row({ cwid: "abc1234", repository: "Dryad", accessionOrDoi: "10.5061/dryad.abc999" }),
+    ];
+
+    const { deposits } = buildDepositsAndLinks(rows, new Map([["abc1234", "abc1234"]]), NOW);
+
+    expect(deposits[0].sensitiveCats).toBeNull();
+    expect(deposits[0].sensitiveSubtypes).toBeNull();
   });
 });
 

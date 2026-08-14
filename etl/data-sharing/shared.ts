@@ -84,6 +84,8 @@ export type SourceRow = {
   accessionOrDoi: string | null;
   resourceType: string | null;
   dataType: string | null;
+  sensitiveCats: string | null; // '|'-delimited coarse categories, taxonomy.py's tag()
+  sensitiveSubtypes: string | null; // '|'-delimited "coarseCategory:label" pairs, same source
   accessModel: string | null;
   depositYear: number | string | null;
   provenance: string | null; // 'databank' | 'fulltext-scan'
@@ -131,6 +133,8 @@ export type DepositBuild = {
   accessionOrDoi: string;
   resourceType: string | null;
   dataType: string | null;
+  sensitiveCats: string | null;
+  sensitiveSubtypes: string | null;
   accessModel: string | null;
   depositYear: number | null;
   provenance: string;
@@ -171,6 +175,8 @@ export async function readSourceRows(): Promise<SourceRow[]> {
              accession_or_doi AS accessionOrDoi,
              resource_type AS resourceType,
              data_type AS dataType,
+             sensitive_cats AS sensitiveCats,
+             sensitive_subtypes AS sensitiveSubtypes,
              access_model AS accessModel,
              deposit_year AS depositYear,
              provenance, confidence,
@@ -237,6 +243,8 @@ export function buildDepositsAndLinks(
         accessionOrDoi,
         resourceType: nonEmpty(r.resourceType),
         dataType: nonEmpty(r.dataType),
+        sensitiveCats: nonEmpty(r.sensitiveCats),
+        sensitiveSubtypes: nonEmpty(r.sensitiveSubtypes),
         accessModel: nonEmpty(r.accessModel),
         depositYear: cleanYear(r.depositYear),
         provenance: nonEmpty(r.provenance) ?? "databank",

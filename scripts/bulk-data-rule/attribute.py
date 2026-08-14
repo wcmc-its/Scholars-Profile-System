@@ -140,15 +140,26 @@ if os.environ.get("WRITE_DATASET_DEPOSIT"):
         return "controlled" if "controlled" in s else "open"
     recs=[(nz(r.cwid), r.repo, r.accession, nz(r.resource_type), nz(r.bucket), access_model(r.access),
            int(r.year) if pd.notna(r.year) else None, r.provenance, nz(r.confidence),
-           nz(r.position), int(r.pmid))
+           nz(r.position), int(r.pmid), nz(r.sensitive_cats), nz(r.sensitive_subtypes))
           for r in full.itertuples()]
     conn=pymysql.connect(host=os.environ['DB_HOST'], user=os.environ['DB_USERNAME'],
                           password=os.environ['DB_PASSWORD'], database=os.environ['DB_NAME'])
     with conn.cursor() as cur:
-        cur.executemany("""INSERT IGNORE INTO dataset_deposit
+        # ON DUPLICATE KEY UPDATE, not INSERT IGNORE: the ~1621 rows already in the table
+        # were inserted before sensitive_cats/sensitive_subtypes existed, so plain INSERT
+        # IGNORE would silently no-op on their (repository, accession_or_doi) unique key and
+        # a rerun would never backfill them. Every other column is left as originally
+        # inserted — only the two sub-typing columns are refreshed on conflict.
+        cur.executemany("""INSERT INTO dataset_deposit
             (cwid, repository, accession_or_doi, resource_type, data_type, access_model,
-             deposit_year, provenance, confidence, author_position, pmid)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", recs)
-        written=cur.rowcount
+             deposit_year, provenance, confidence, author_position, pmid, sensitive_cats, sensitive_subtypes)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON DUPLICATE KEY UPDATE
+                sensitive_cats = VALUES(sensitive_cats),
+                sensitive_subtypes = VALUES(sensitive_subtypes)""", recs)
+        affected=cur.rowcount
     conn.commit(); conn.close()
-    print(f"\nwrote {written} new rows to reciterdb.dataset_deposit ({len(recs)} candidates, dupes ignored)")
+    # MySQL rowcount under ON DUPLICATE KEY UPDATE counts each inserted row as 1 and each
+    # updated (backfilled) row as 2, so this is not a plain "rows written" count.
+    print(f"\nupserted {len(recs)} candidate rows to reciterdb.dataset_deposit "
+          f"(rowcount {affected}: new inserts count 1 each, backfilled existing rows count 2 each)")
