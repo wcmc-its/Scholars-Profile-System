@@ -894,6 +894,23 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 ],
               },
             },
+            {
+              "Action": "s3:ListBucket",
+              "Condition": {
+                "StringLike": {
+                  "s3:prefix": [
+                    "bulk-data-rule/*",
+                  ],
+                },
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "CurationBackupBucketE5A802A9",
+                  "Arn",
+                ],
+              },
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -9342,6 +9359,23 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                     },
                     "/bulk-data-rule/*",
                   ],
+                ],
+              },
+            },
+            {
+              "Action": "s3:ListBucket",
+              "Condition": {
+                "StringLike": {
+                  "s3:prefix": [
+                    "bulk-data-rule/*",
+                  ],
+                },
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "CurationBackupBucketE5A802A9",
+                  "Arn",
                 ],
               },
             },
