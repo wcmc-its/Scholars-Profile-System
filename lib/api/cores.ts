@@ -11,7 +11,12 @@
  */
 import { db } from "@/lib/db";
 import type { ClaimStatus } from "@/lib/generated/prisma/client";
-import { isEffectiveConfirmed, loadActiveCoreClaimsByCore } from "@/lib/api/core-merge";
+import {
+  claimKey,
+  effectiveCoreStatus,
+  isEffectiveConfirmed,
+  loadActiveCoreClaimsByCore,
+} from "@/lib/api/core-merge";
 
 /** One confirmed publication on a core's public page (public scalar fields only,
  *  shaped to feed `<PublicationCard>` with no author chips). */
@@ -144,34 +149,56 @@ export interface CoreListItem {
   id: string;
   name: string;
   facility: string | null;
-  /** True when the core has >=1 engine-confirmed `publication_core` row. Cheap
-   *  (one indexed `distinct` scan) and used to hide empty cores from the public
-   *  index. NOTE: this is the engine status only — the per-core page applies the
-   *  full CoreClaim merge, so its heading count can differ once curators claim or
-   *  reject rows. Here it is a presence flag, not a displayed count. */
+  /** True when the core has >=1 effective-confirmed publication — the same
+   *  CoreClaim merge the per-core page applies (engine `confirmed` minus any
+   *  human rejection, plus any human `claimed` override, including
+   *  manual-PMID-add pairs the engine never scored). Used to hide empty cores
+   *  from the public index. A presence flag, not a displayed count. */
   hasConfirmedPublications: boolean;
 }
 
 /** Every catalog core in numeric-id order, each flagged for whether it has any
- *  engine-confirmed publications. Used by both index surfaces. */
+ *  effective-confirmed publications (full CoreClaim merge). Used by both index
+ *  surfaces. */
 export async function getCoreList(
-  client: Pick<typeof db.read, "core" | "publicationCore"> = db.read,
+  client: Pick<typeof db.read, "core" | "publicationCore" | "coreClaim"> = db.read,
 ): Promise<CoreListItem[]> {
-  const [cores, confirmed] = await Promise.all([
+  const [cores, confirmedPairs, activeClaims] = await Promise.all([
     client.core.findMany({ select: { id: true, name: true, facility: true } }),
     client.publicationCore.findMany({
       where: { status: "confirmed" },
-      select: { coreId: true },
-      distinct: ["coreId"],
+      select: { coreId: true, pmid: true },
+    }),
+    client.coreClaim.findMany({
+      where: { revokedAt: null },
+      select: { coreId: true, pmid: true, status: true },
     }),
   ]);
-  const hasConfirmed = new Set(confirmed.map((r) => r.coreId));
+
+  const claimByKey = new Map(activeClaims.map((c) => [claimKey(c.pmid, c.coreId), c.status]));
+
+  const present = new Set<string>();
+  for (const pair of confirmedPairs) {
+    const claim = claimByKey.get(claimKey(pair.pmid, pair.coreId)) ?? null;
+    if (effectiveCoreStatus("confirmed", claim) === "confirmed") {
+      present.add(pair.coreId);
+    }
+  }
+  // Manual-claim-only pairs (and below_threshold rows a human promoted): the
+  // engine row may not exist or say "confirmed" at all, but an active
+  // `claimed` override is effective-confirmed regardless of engine status.
+  for (const claim of activeClaims) {
+    if (claim.status === "claimed") {
+      present.add(claim.coreId);
+    }
+  }
+
   return cores
     .map((c) => ({
       id: c.id,
       name: c.name,
       facility: c.facility,
-      hasConfirmedPublications: hasConfirmed.has(c.id),
+      hasConfirmedPublications: present.has(c.id),
     }))
     .sort((a, b) => Number(a.id) - Number(b.id));
 }
