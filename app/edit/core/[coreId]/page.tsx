@@ -153,6 +153,10 @@ export default async function EditCorePage({
     <EditShell
       mode="superuser"
       scholarName={core.name}
+      // A unit, not a scholar profile — "Profiles" only makes sense when the
+      // viewer separately has profile-browsing rights.
+      isProfileEntity={false}
+      canBrowseProfiles={session.isSuperuser}
       railItems={railItems}
       activeAttr={active}
       basePath={basePath}
