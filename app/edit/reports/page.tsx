@@ -27,12 +27,15 @@
  * grants) — a table with a filter rail once there are enough units to
  * warrant one (`2a`), otherwise every unit banded inline on one page (`1a`).
  */
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import { ReportsIndex, type ReportsIndexUnit } from "@/components/edit/reports-index";
+import {
+  ReportsIndex,
+  SingleUnitReportsTable,
+  type ReportsIndexUnit,
+} from "@/components/edit/reports-index";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import type { EditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
@@ -41,6 +44,7 @@ import {
   loadReportableUnitsForActor,
   loadReportsContext,
   resolveReportsCenterCode,
+  type ReportLiveness,
 } from "@/lib/edit/cancer-center-reports";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { unitEditHref } from "@/lib/edit/manageable-units";
@@ -112,7 +116,7 @@ export default async function EditReportsIndexPage({
     const code = await resolveReportsCenterCode(db.read, center);
     const ctx = await loadReportsContext(code, session, db.read);
     if (ctx === null) return <ForbiddenEditPage variant="unit" targetEntity={code} />;
-    return <SingleUnitReports ctx={ctx} code={code} {...shell} />;
+    return <SingleUnitReports ctx={ctx} code={code} perReport={await loadSingleUnitPerReport(code)} {...shell} />;
   }
 
   const reportableUnits = await loadReportableUnitsForActor(session, db.read);
@@ -122,7 +126,7 @@ export default async function EditReportsIndexPage({
     const code = reportableUnits[0].code;
     const ctx = await loadReportsContext(code, session, db.read);
     if (ctx === null) return <ForbiddenEditPage variant="unit" targetEntity={code} />;
-    return <SingleUnitReports ctx={ctx} code={code} {...shell} />;
+    return <SingleUnitReports ctx={ctx} code={code} perReport={await loadSingleUnitPerReport(code)} {...shell} />;
   }
 
   const liveness = await loadReportLiveness(
@@ -139,9 +143,7 @@ export default async function EditReportsIndexPage({
       liveCount: l?.liveCount ?? 0,
       totalCount: l?.totalCount ?? REPORTS.length,
       lastRefreshedAt: l?.lastRefreshedAt?.toISOString() ?? null,
-      perReport:
-        l?.perReport.map((r) => ({ n: r.n, live: r.live, lastRefreshedAt: r.lastRefreshedAt?.toISOString() ?? null })) ??
-        REPORTS.map((r) => ({ n: r.n, live: false, lastRefreshedAt: null })),
+      perReport: serializePerReport(l),
     };
   });
   // 2a (table + filter rail) once there are enough units for a picker to earn
@@ -172,18 +174,48 @@ export default async function EditReportsIndexPage({
   );
 }
 
-/** Today's existing per-unit report list — unchanged, just extracted so both
- *  the explicit `?center=` path and the single-reportable-unit default reuse
- *  it instead of duplicating the JSX. */
+type SerializedPerReport = ReadonlyArray<{
+  n: 1 | 2 | 3 | 4 | 5;
+  live: boolean;
+  lastRefreshedAt: string | null;
+}>;
+
+/** ISO-string serialization shared by the multi-unit index and the
+ *  single-unit table below — a unit/code with no liveness row at all (the
+ *  Map lookup missed) degrades to "nothing live," not a missing entry. */
+function serializePerReport(liveness: ReportLiveness | undefined): SerializedPerReport {
+  return (
+    liveness?.perReport.map((r) => ({
+      n: r.n,
+      live: r.live,
+      lastRefreshedAt: r.lastRefreshedAt?.toISOString() ?? null,
+    })) ?? REPORTS.map((r) => ({ n: r.n, live: false, lastRefreshedAt: null }))
+  );
+}
+
+/** `3a` — an actor with exactly one reportable unit (the common case today).
+ *  Per-report liveness for one center, plain-serialized for the client table. */
+async function loadSingleUnitPerReport(code: string): Promise<SerializedPerReport> {
+  const liveness = (await loadReportLiveness([code], db.read)).get(code);
+  return serializePerReport(liveness);
+}
+
+/** `3a` — same `Report | Focus | Last refreshed` table `1a`'s bands use per
+ *  unit, just without the band header (this page's own `<h1>` already names
+ *  the unit) — matches the actual mockup (`Reports IA.dc.html`), which was
+ *  never a plain list. Shared between the explicit `?center=` path and the
+ *  single-reportable-unit default so neither duplicates the JSX. */
 function SingleUnitReports({
   ctx,
   code,
+  perReport,
   session,
   pendingSlugRequests,
   pendingHonors,
 }: {
   ctx: UnitEditContext;
   code: string;
+  perReport: SerializedPerReport;
   session: EditSession;
   pendingSlugRequests: number | null;
   pendingHonors: number | null;
@@ -204,20 +236,7 @@ function SingleUnitReports({
         <p className="text-muted-foreground mb-6 text-sm">
           Advisory only — every report reads precomputed data; nothing here writes to the roster.
         </p>
-        <ul className="divide-y divide-border">
-          {REPORTS.map((r) => (
-            <li key={r.n}>
-              <Link
-                href={`/edit/reports/${r.n}?center=${encodeURIComponent(code)}`}
-                data-testid={`reports-index-${r.n}`}
-                className="flex w-full flex-col items-start gap-0.5 py-3 text-left hover:bg-muted/50"
-              >
-                <span className="text-sm font-medium">{r.label}</span>
-                <span className="text-xs text-muted-foreground">{r.description}</span>
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <SingleUnitReportsTable centerCode={code} perReport={perReport} reports={REPORTS} />
       </div>
     </ConsoleShell>
   );

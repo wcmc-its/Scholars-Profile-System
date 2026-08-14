@@ -1,13 +1,20 @@
 /**
  * `components/edit/reports-index.tsx` — the Reports IA redesign's cross-unit
- * index (`2a`/`1a`, 2026-08-14). Table mode: filter rail + sortable rows,
+ * index (`2a`/`1a`/`3a`, 2026-08-14). Table mode: filter rail + sortable rows,
  * one per unit, row links to that unit's report list. Bands mode: every unit
  * inline with its own 5 report rows, live ones clickable, others muted.
+ * `SingleUnitReportsTable` (`3a`) is the same report-row shape as one band's
+ * body, without the band header — used when an actor has exactly one
+ * reportable unit, which is the common case today.
  */
 import { describe, expect, it } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 
-import { ReportsIndex, type ReportsIndexUnit } from "@/components/edit/reports-index";
+import {
+  ReportsIndex,
+  SingleUnitReportsTable,
+  type ReportsIndexUnit,
+} from "@/components/edit/reports-index";
 
 const REPORTS = [
   { n: 1 as const, label: "1. Optimize membership", description: "Membership recs." },
@@ -108,5 +115,26 @@ describe("ReportsIndex — bands mode (1a)", () => {
     expect(band.textContent).toContain("Institute");
     expect(band.textContent).toContain("0 of 5 reports live");
     expect(screen.getByTestId("reports-index-edit-epic").getAttribute("href")).toBe("/edit/center/epic");
+  });
+});
+
+describe("SingleUnitReportsTable — 3a (exactly one reportable unit)", () => {
+  it("renders the same Report | Focus | Last refreshed table shape as a band, no band header", () => {
+    render(<SingleUnitReportsTable centerCode="meyer" perReport={perReport([1, 2])} reports={REPORTS} />);
+    const table = screen.getByTestId("single-unit-reports-table");
+    expect(within(table).getByText("Report")).toBeTruthy();
+    expect(within(table).getByText("Focus")).toBeTruthy();
+    expect(within(table).getByText("Last refreshed")).toBeTruthy();
+    // No band header row — nothing states a unit name/live-count inside the table itself.
+    expect(within(table).queryByText(/reports live/)).toBeNull();
+  });
+
+  it("a live report is a link to /edit/reports/N?center=…; a not-live one is plain muted text", () => {
+    render(<SingleUnitReportsTable centerCode="meyer" perReport={perReport([1, 2])} reports={REPORTS} />);
+    const link = screen.getByTestId("reports-index-band-link-meyer-1");
+    expect(link.getAttribute("href")).toBe("/edit/reports/1?center=meyer");
+    expect(screen.queryByTestId("reports-index-band-link-meyer-3")).toBeNull();
+    const table = screen.getByTestId("single-unit-reports-table");
+    expect(within(table).getByText("3. Publications")).toBeTruthy();
   });
 });
