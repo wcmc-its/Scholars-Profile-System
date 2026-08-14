@@ -986,6 +986,19 @@ export class EtlStack extends Stack {
     // deliverable channel -- .xlsx reports stay analyst-local against
     // downloaded row data (design decision #1).
     curationBackupBucket.grantPut(bulkDataRuleTaskRole, "bulk-data-rule/*");
+    // `grantPut` alone 403s the entrypoint's `aws s3 sync` at the ListBucket call sync makes
+    // first to compare local vs. remote before uploading -- PutObject on the prefix isn't
+    // enough (caught this session: first real containerized run wrote its 377 dataset_deposit
+    // rows fine, then failed at the sync step). Same prefix-scoped ListBucket pattern as
+    // analytics-stack.ts's rollup Lambda.
+    bulkDataRuleTaskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["s3:ListBucket"],
+        resources: [curationBackupBucket.bucketArn],
+        conditions: { StringLike: { "s3:prefix": ["bulk-data-rule/*"] } },
+      }),
+    );
 
     this.bulkDataRuleTaskDefinition = new ecs.FargateTaskDefinition(
       this,
