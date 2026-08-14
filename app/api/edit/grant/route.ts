@@ -33,8 +33,11 @@ import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import {
   canGrant,
+  getCoreOwnerRole,
   getEffectiveUnitRole,
   logEditDenial,
+  type CoreOwnerLookup,
+  type EffectiveUnitRole,
   type UnitAdminLookup,
   type UnitKind,
   type UnitRef,
@@ -60,7 +63,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (
     entityType !== "department" &&
     entityType !== "division" &&
-    entityType !== "center"
+    entityType !== "center" &&
+    entityType !== "core"
   ) {
     return editError(400, "invalid_entity_type", "entityType");
   }
@@ -93,25 +97,48 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(403, "cannot_revoke_self");
   }
 
-  // Unit existence — a 400 precedes the 403. Lookup also gives the slug
-  // + parent dept slug for post-commit revalidation.
-  const unit = await findUnit(entityType, entityId, db.read);
-  if (!unit.ok) return editError(400, "unit_not_found", "entityId");
+  // Unit existence — a 400 precedes the 403. For department/division/center,
+  // `findUnit` also gives the slug + parent dept slug for post-commit
+  // revalidation (`reflect`, built below). Cores are flat and have no public
+  // owner/curator listing, so they get their own existence check + role
+  // lookup and `reflect` stays null for them (see the post-commit section).
+  let effective: EffectiveUnitRole;
+  let reflect: { unitKind: UnitKind; unitSlug: string; parentDeptSlug?: string } | null = null;
+  if (entityType === "core") {
+    const core = await db.read.core.findUnique({
+      where: { id: entityId },
+      select: { id: true },
+    });
+    if (!core) return editError(400, "unit_not_found", "entityId");
+    // Authz: Owner of the core (Superuser also allowed via `canGrant`
+    // below). Cores are flat — no dept→division cascade to build a
+    // `UnitRef` for.
+    effective = await getCoreOwnerRole(session, entityId, db.read as unknown as CoreOwnerLookup);
+  } else {
+    const unit = await findUnit(entityType, entityId, db.read);
+    if (!unit.ok) return editError(400, "unit_not_found", "entityId");
 
-  // Authz: Owner of the target unit (with the dept→division cascade), or
-  // Superuser. `canGrant` distinguishes scope_violation vs
-  // authority_violation; both render as a 403 with a stable `reason`.
-  const unitRef: UnitRef =
-    unit.kind === "department"
-      ? { kind: "department", code: entityId }
-      : unit.kind === "division"
-        ? { kind: "division", code: entityId, parentDeptCode: unit.parentDeptCode }
-        : { kind: "center", code: entityId };
-  const effective = await getEffectiveUnitRole(
-    session,
-    unitRef,
-    db.read as unknown as UnitAdminLookup,
-  );
+    // Authz: Owner of the target unit (with the dept→division cascade), or
+    // Superuser. `canGrant` distinguishes scope_violation vs
+    // authority_violation; both render as a 403 with a stable `reason`.
+    const unitRef: UnitRef =
+      unit.kind === "department"
+        ? { kind: "department", code: entityId }
+        : unit.kind === "division"
+          ? { kind: "division", code: entityId, parentDeptCode: unit.parentDeptCode }
+          : { kind: "center", code: entityId };
+    effective = await getEffectiveUnitRole(
+      session,
+      unitRef,
+      db.read as unknown as UnitAdminLookup,
+    );
+    reflect = {
+      unitKind: unit.kind,
+      unitSlug: unit.slug,
+      parentDeptSlug:
+        unit.kind === "division" ? (unit.parentDeptSlug ?? undefined) : undefined,
+    };
+  }
   const authz = canGrant(session, effective, role);
   if (!authz.ok) {
     logEditDenial({
@@ -144,8 +171,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // a silent-revert footgun; the role is changed at the source, not here
   // (amended 2026-06-03, was superuser-overridable). The check is on the
   // in-memory loaded row — a brand-new grant (`existing` is null, ED rows are
-  // ETL-created only) is never ED-locked.
-  if (existing && existing.source.startsWith("ED:")) {
+  // ETL-created only) is never ED-locked. A core row's `source` is always
+  // "manual" (no ED source ever writes a core grant), so this can never fire
+  // for a core in practice — the `entityType !== "core"` guard makes that
+  // explicit rather than relying on it silently never matching.
+  if (entityType !== "core" && existing && existing.source.startsWith("ED:")) {
     logEditDenial({
       actorCwid: session.cwid,
       targetCwid: cwid,
@@ -206,14 +236,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // Post-commit reflection — the access list is rendered on the unit page
-  // (Phase 7); a grant changes who sees the edit affordances.
-  const unitKind: UnitKind = unit.kind;
-  await reflectUnitChange({
-    unitKind,
-    unitSlug: unit.slug,
-    parentDeptSlug:
-      unit.kind === "division" ? (unit.parentDeptSlug ?? undefined) : undefined,
-  });
+  // (Phase 7); a grant changes who sees the edit affordances. No public page
+  // shows a core's owner/curator list, so there's nothing to revalidate —
+  // `reflect` stays null for entityType === "core" (set above).
+  if (reflect) {
+    await reflectUnitChange(reflect);
+  }
 
   return editOk({ entityType, entityId, cwid, role, action, changed: true });
 }

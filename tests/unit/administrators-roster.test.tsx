@@ -404,6 +404,77 @@ describe("AdministratorsRoster — Phase C write controls", () => {
   });
 });
 
+// ── cores-as-org-units P2 — `allCores` merges into the Add-dialog options ────
+
+describe("AdministratorsRoster — allCores option merge (P2)", () => {
+  it("offers a core with zero grants as an Add-dialog option", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[manualRow()]}
+        isSuperuser={false}
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+        allCores={[{ id: "2", name: "Biomedical Imaging" }]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("administrators-add-trigger"));
+    const options = screen
+      .getAllByRole("option")
+      .map((o) => (o as HTMLOptionElement).value);
+    expect(options).toContain("core:2");
+  });
+
+  it("keeps the roster's real unitName for a core that already has a grant, over the allCores placeholder", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[
+          entry({
+            cwid: "own001",
+            name: "Own One",
+            nameResolved: true,
+            grants: [
+              {
+                entityType: "core",
+                entityId: "2",
+                unitName: "Biomedical Imaging (roster)",
+                role: "owner",
+                source: "manual",
+              },
+            ],
+          }),
+        ]}
+        isSuperuser={false}
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+        allCores={[{ id: "2", name: "Biomedical Imaging (catalog)" }]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("administrators-add-trigger"));
+    const options = screen.getAllByRole("option") as HTMLOptionElement[];
+    const coreOption = options.find((o) => o.value === "core:2");
+    expect(coreOption?.textContent).toBe("Biomedical Imaging (roster) · Core");
+  });
+
+  it("does not offer a core option when allCores is omitted (default empty)", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[manualRow()]}
+        isSuperuser={false}
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("administrators-add-trigger"));
+    const options = screen
+      .getAllByRole("option")
+      .map((o) => (o as HTMLOptionElement).value);
+    expect(options.some((v) => v.startsWith("core:"))).toBe(false);
+  });
+});
+
 // ── #729 — per-card "View as" launch shortcut gating ─────────────────────────
 
 describe("AdministratorsRoster — View as (#729)", () => {
