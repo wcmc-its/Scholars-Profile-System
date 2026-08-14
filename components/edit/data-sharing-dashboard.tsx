@@ -65,6 +65,12 @@ function formatShareRate(numerator: number | undefined, denominator: number | un
   return `${numerator.toLocaleString()}/${denominator.toLocaleString()} (${pct}%)`;
 }
 
+/** `report.dataAsOf` — when the weekly data-sharing bridge last fully synced. */
+function formatDate(d: Date | null): string {
+  if (d === null) return "—";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
 function AccessChip({ accessModel }: { accessModel: string | null }) {
   if (accessModel === null) return <span className="text-muted-foreground">—</span>;
   return (
@@ -501,6 +507,7 @@ function SubtypesSection({ report }: { report: DataSharingReport }) {
 export function DataSharingDashboard({ report }: { report: DataSharingReport }) {
   return (
     <>
+      <p className="text-muted-foreground mb-3 text-sm">Data as of {formatDate(report.dataAsOf)}.</p>
       <RollupSection report={report} />
       <FundingSection report={report} />
       <RepositoriesSection report={report} />

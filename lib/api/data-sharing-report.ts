@@ -73,7 +73,7 @@ import { tierOf } from "@/lib/repository-tier";
 /** The Prisma surface this loader needs — kept narrow for unit tests. */
 export type DataSharingReportClient = Pick<
   PrismaClient,
-  "personDatasetDeposit" | "suppression" | "publicationAuthor" | "grantPublication"
+  "personDatasetDeposit" | "suppression" | "publicationAuthor" | "grantPublication" | "datasetDeposit"
 >;
 
 /** Matches the Python extraction pipeline's own year>=2020 floor
@@ -305,6 +305,11 @@ export type DataSharingReport = {
   /** Deposit-instance counts per granular sensitive sub-type, grouped by
    *  coarse category — see `aggregateBySubtype`. */
   bySubtype: SubtypeRow[];
+  /** MAX(lastRefreshedAt) across `DatasetDeposit` — when the weekly
+   *  data-sharing bridge last fully synced (every row gets the same run
+   *  timestamp, see `etl/data-sharing/shared.ts`'s `buildDepositsAndLinks`).
+   *  Null if the table has never been populated. */
+  dataAsOf: Date | null;
 };
 
 /** Read every active (person, dataset) link, suppression-filtered — a whole-
@@ -808,7 +813,7 @@ export function buildDataSharingReport(
   rows: readonly DatasetLinkRow[],
   corpusRows: readonly ShareRateCorpusRow[] = [],
   fundingSplit: FundingSplitTotals = { nihFundedPubs: 0, notNihFundedPubs: 0 },
-): DataSharingReport {
+): Omit<DataSharingReport, "dataAsOf"> {
   const deposited = depositedPmidSet(rows);
   const rates = buildShareRates(corpusRows, deposited);
   const { openPmids, controlledPmids } = pubAccessPmidSets(rows);
@@ -881,13 +886,21 @@ export function buildDataSharingReport(
   };
 }
 
+/** MAX(lastRefreshedAt) across `DatasetDeposit` — see `DataSharingReport
+ *  .dataAsOf`'s doc comment for what this timestamp means. */
+async function loadDataAsOf(client: DataSharingReportClient): Promise<Date | null> {
+  const agg = await client.datasetDeposit.aggregate({ _max: { lastRefreshedAt: true } });
+  return agg._max.lastRefreshedAt ?? null;
+}
+
 export async function loadDataSharingReport(client: DataSharingReportClient): Promise<DataSharingReport> {
-  const [rows, corpusRows] = await Promise.all([
+  const [rows, corpusRows, dataAsOf] = await Promise.all([
     loadDatasetLinkRows(client),
     loadShareRateCorpus(client),
+    loadDataAsOf(client),
   ]);
   const fundingSplit = await loadFundingSplit(client, rows);
-  return buildDataSharingReport(rows, corpusRows, fundingSplit);
+  return { ...buildDataSharingReport(rows, corpusRows, fundingSplit), dataAsOf };
 }
 
 // ---------------------------------------------------------------------------
