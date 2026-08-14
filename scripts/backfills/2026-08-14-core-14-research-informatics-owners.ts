@@ -16,14 +16,20 @@
  *   saa3011  Sajjad Abedian
  *   thc2015  Thomas Campion
  *
- * Mirrors `POST /api/edit/grant`'s write shape exactly (one transaction: a
- * `unit_admin` upsert + one B03 audit row, `action: "grant_change"`) so this
- * grant is indistinguishable in the audit trail from one a human made through
- * the API — `lib/edit/audit.ts`'s `AuditEntityType` already carries `"core"`
- * (added alongside `core_claim`), so no schema/enum change is needed.
- * `grantedBy`/`actorCwid` is the operator running this script, not a fixed
- * sentinel — pass `--granted-by=<cwid>` (defaults to the sentinel
- * `"backfill"` if omitted, so a real actor should always be supplied).
+ * NO B03 audit row (unlike `POST /api/edit/grant`, which writes one alongside
+ * every `unit_admin` upsert). An earlier version of this script tried to
+ * match that write shape exactly and hit a real permission wall running on
+ * staging: `INSERT command denied to user 'etl'@'...' for table
+ * 'manual_edit_audit'` — the `etl` MySQL user has no grant on the
+ * `scholars_audit` schema. That's very likely deliberate, not an oversight:
+ * `manual_edit_audit` rows are meant to be human-attributable
+ * (`AuditRow.actorCwid` — "the signed-in actor"), and letting an automated
+ * ETL-role script write into that trail would blur that guarantee. Matches
+ * every other script in `scripts/backfills/` — none of them write an audit
+ * row either, for what is presumably the same underlying reason. This grant
+ * is therefore NOT in the B03 log — if that turns out to matter, it needs a
+ * deliberate follow-up (e.g. running as the `app` DB user instead of `etl`,
+ * which no existing tooling supports today), not a silent workaround here.
  *
  * Safety (data-integrity rule — never write a guessed/typo'd id):
  *   - `entityId` must be a real `CORE_CATALOG` id (catches a typo'd core
@@ -41,8 +47,7 @@
  *     existence, only the `UnitAdmin` row.
  *   - Idempotent: each row is an upsert by composite PK `(entityType,
  *     entityId, cwid)` — a re-run updates `role`/`grantedBy` to the values
- *     below and appends a fresh audit row (matching the real API's
- *     re-grant-updates-audit-too behavior) rather than erroring.
+ *     below rather than erroring.
  *
  * Flags:
  *   --dry-run              verify + report; write nothing.
@@ -66,17 +71,9 @@ const OWNERS: ReadonlyArray<{ cwid: string; name: string }> = [
 ];
 
 /** The narrow Prisma slice this backfill touches — structural so the unit
- *  test can supply a mock without a live DB. Matches `POST /api/edit/grant`'s
- *  own write shape (upsert + one B03 audit row, same transaction). */
+ *  test can supply a mock without a live DB. */
 export type CoreOwnerBackfillDb = {
-  $transaction<T>(fn: (tx: CoreOwnerBackfillTx) => Promise<T>): Promise<T>;
-};
-export type CoreOwnerBackfillTx = {
   unitAdmin: {
-    findUnique(args: {
-      where: { entityType_entityId_cwid: { entityType: "core"; entityId: string; cwid: string } };
-      select: { role: true; grantedBy: true };
-    }): Promise<{ role: string; grantedBy: string } | null>;
     upsert(args: {
       where: { entityType_entityId_cwid: { entityType: "core"; entityId: string; cwid: string } };
       create: {
@@ -90,8 +87,6 @@ export type CoreOwnerBackfillTx = {
       update: { role: "owner"; grantedBy: string; granteeName: string };
     }): Promise<unknown>;
   };
-  $executeRawUnsafe?: unknown; // appendAuditRow needs only $executeRaw at the real call site
-  $executeRaw: (...args: unknown[]) => Promise<unknown>;
 };
 
 export type BackfillOpts = { dryRun: boolean; grantedBy: string | null };
@@ -111,7 +106,6 @@ export function parseArgs(argv: ReadonlyArray<string>): BackfillOpts {
 
 export async function runBackfill(
   db: CoreOwnerBackfillDb,
-  appendAuditRow: (tx: CoreOwnerBackfillTx, row: Record<string, unknown>) => Promise<void>,
   opts: BackfillOpts,
 ): Promise<BackfillResult> {
   // 1. Verify the core id is real (catches a typo'd core number).
@@ -123,7 +117,7 @@ export async function runBackfill(
   for (const o of OWNERS) log(`  ${o.cwid.padEnd(10)} (${o.name})`);
 
   if (opts.dryRun) {
-    log(`\n[DRY RUN] would upsert ${OWNERS.length} unit_admin row(s) + ${OWNERS.length} audit row(s). Nothing written.`);
+    log(`\n[DRY RUN] would upsert ${OWNERS.length} unit_admin row(s). Nothing written.`);
     return { verified: OWNERS.length, upserted: 0, dryRun: true };
   }
 
@@ -133,40 +127,22 @@ export async function runBackfill(
   const grantedBy = opts.grantedBy;
 
   let upserted = 0;
-  await db.$transaction(async (tx) => {
-    for (const o of OWNERS) {
-      const existing = await tx.unitAdmin.findUnique({
-        where: { entityType_entityId_cwid: { entityType: "core", entityId: CORE_ID, cwid: o.cwid } },
-        select: { role: true, grantedBy: true },
-      });
-      await tx.unitAdmin.upsert({
-        where: { entityType_entityId_cwid: { entityType: "core", entityId: CORE_ID, cwid: o.cwid } },
-        create: {
-          entityType: "core",
-          entityId: CORE_ID,
-          cwid: o.cwid,
-          role: "owner",
-          grantedBy,
-          granteeName: o.name,
-        },
-        update: { role: "owner", grantedBy, granteeName: o.name },
-      });
-      await appendAuditRow(tx, {
-        actorCwid: grantedBy,
-        impersonatedCwid: null,
-        targetEntityType: "core",
-        targetEntityId: CORE_ID,
-        action: "grant_change",
-        fieldsChanged: null,
-        beforeValues: existing ? { cwid: o.cwid, role: existing.role, granted_by: existing.grantedBy } : null,
-        afterValues: { cwid: o.cwid, role: "owner", granted_by: grantedBy },
-        ts: new Date(),
-        requestId: null,
-      });
-      upserted += 1;
-    }
-  });
-  log(`\nUpserted ${upserted} unit_admin row(s) + ${upserted} audit row(s).`);
+  for (const o of OWNERS) {
+    await db.unitAdmin.upsert({
+      where: { entityType_entityId_cwid: { entityType: "core", entityId: CORE_ID, cwid: o.cwid } },
+      create: {
+        entityType: "core",
+        entityId: CORE_ID,
+        cwid: o.cwid,
+        role: "owner",
+        grantedBy,
+        granteeName: o.name,
+      },
+      update: { role: "owner", grantedBy, granteeName: o.name },
+    });
+    upserted += 1;
+  }
+  log(`\nUpserted ${upserted} unit_admin row(s).`);
   return { verified: OWNERS.length, upserted, dryRun: false };
 }
 
@@ -175,13 +151,8 @@ const main = async (): Promise<void> => {
   log(`core-14 owners backfill${opts.dryRun ? " [DRY RUN — no writes]" : ""}`);
 
   const { db } = await import("../../lib/db");
-  const { appendAuditRow } = await import("../../lib/edit/audit");
   try {
-    await runBackfill(
-      db.write as unknown as CoreOwnerBackfillDb,
-      appendAuditRow as unknown as (tx: CoreOwnerBackfillTx, row: Record<string, unknown>) => Promise<void>,
-      opts,
-    );
+    await runBackfill(db.write as unknown as CoreOwnerBackfillDb, opts);
   } finally {
     await db.write.$disconnect();
   }
