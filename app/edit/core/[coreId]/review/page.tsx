@@ -68,7 +68,12 @@ export default async function EditCoreReviewPage({
       reason: authz.reason,
       targetEntityId: coreId,
     });
-    return <ForbiddenEditPage variant="unit" targetEntity={coreId} />;
+    return (
+      <div className="bg-apollo-page min-h-screen">
+        <ConsoleTopBar variant="console" />
+        <ForbiddenEditPage variant="unit" targetEntity={coreId} />
+      </div>
+    );
   }
 
   const queue = await loadCoreReviewQueue(coreId, db.read);

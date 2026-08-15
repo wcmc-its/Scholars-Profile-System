@@ -173,8 +173,13 @@ describe("/edit/scholar/[cwid] — authorization matrix", () => {
   it("signed-in non-superuser on another cwid → ForbiddenEditPage + audit log line", async () => {
     mockGetEditSession.mockResolvedValue(SELF);
     const result = asElement(await EditScholarPage({ params: params("other7") }));
-    expect(result.type).toBe(mockForbiddenEditPage);
-    expect(result.props.targetCwid).toBe("other7");
+    // The denial branch is wrapped in the reduced-chrome shell (a bare div +
+    // ConsoleTopBar), so the top-level element is the div and ForbiddenEditPage
+    // is its second child, not the return value itself.
+    expect(result.type).toBe("div");
+    const forbidden = asElement((result.props.children as unknown[])[1]);
+    expect(forbidden.type).toBe(mockForbiddenEditPage);
+    expect(forbidden.props.targetCwid).toBe("other7");
     expect(mockLoadEditContext).not.toHaveBeenCalled();
     // The log line is emitted by requireSuperuserGet (lib/edit/authz).
     expect(console.warn).toHaveBeenCalled();
@@ -265,7 +270,8 @@ describe("/edit/scholar/[cwid] — authorization matrix", () => {
     // and the 403 page renders.
     mockGetEditSession.mockResolvedValue(SELF); // no longer a superuser
     const result = asElement(await EditScholarPage({ params: params("other7") }));
-    expect(result.type).toBe(mockForbiddenEditPage);
+    const forbidden = asElement((result.props.children as unknown[])[1]);
+    expect(forbidden.type).toBe(mockForbiddenEditPage);
   });
 
   // Amendment 4 — org-unit administrator as profile editor.
@@ -296,7 +302,8 @@ describe("/edit/scholar/[cwid] — authorization matrix", () => {
     mockGetEditSession.mockResolvedValue({ cwid: "uadm01", isSuperuser: false });
     // default mocks: scholar.findUnique → null ⇒ resolver null ⇒ no unit-admin.
     const result = asElement(await EditScholarPage({ params: params("sch001") }));
-    expect(result.type).toBe(mockForbiddenEditPage);
+    const forbidden = asElement((result.props.children as unknown[])[1]);
+    expect(forbidden.type).toBe(mockForbiddenEditPage);
     expect(mockEditPage).not.toHaveBeenCalled();
   });
 });

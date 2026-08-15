@@ -18,6 +18,7 @@
  */
 import { notFound, redirect } from "next/navigation";
 
+import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { ScholarHistoryView } from "@/components/edit/scholar-history-view";
 import { loadScholarAuditHistory, SCHOLAR_AUDIT_WINDOW_DAYS } from "@/lib/api/scholar-audit";
@@ -49,7 +50,12 @@ export default async function EditScholarHistoryPage({
     redirect(access.to);
   }
   if (access.kind === "forbidden") {
-    return <ForbiddenEditPage targetCwid={targetCwid} />;
+    return (
+      <div className="bg-apollo-page min-h-screen">
+        <ConsoleTopBar variant="console" />
+        <ForbiddenEditPage targetCwid={targetCwid} />
+      </div>
+    );
   }
   const { session } = access;
 

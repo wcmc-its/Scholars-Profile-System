@@ -17,6 +17,7 @@
  */
 import { notFound, redirect } from "next/navigation";
 
+import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { EditPage, visibleAttrKeys } from "@/components/edit/edit-page";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { loadEditContext } from "@/lib/api/edit-context";
@@ -66,7 +67,12 @@ export default async function EditScholarPage({
     redirect(access.to);
   }
   if (access.kind === "forbidden") {
-    return <ForbiddenEditPage targetCwid={targetCwid} />;
+    return (
+      <div className="bg-apollo-page min-h-screen">
+        <ConsoleTopBar variant="console" />
+        <ForbiddenEditPage targetCwid={targetCwid} />
+      </div>
+    );
   }
   const { session, isSelf, isProxy, isUnitAdmin, unit } = access;
 
