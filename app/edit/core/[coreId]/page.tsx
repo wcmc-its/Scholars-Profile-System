@@ -26,6 +26,7 @@
  */
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { ArrowRight } from "lucide-react";
 
 import type { RailItem } from "@/components/edit/attribute-rail";
 import { CoreDetailsCard } from "@/components/edit/core-details-card";
@@ -33,6 +34,7 @@ import { CoreLeaderCard, type CoreLeaderState } from "@/components/edit/core-lea
 import { EditShell } from "@/components/edit/edit-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { UnitAccessCard } from "@/components/edit/unit-access-card";
+import { loadCoreReviewQueue } from "@/lib/api/core-queue";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import {
@@ -87,7 +89,7 @@ export default async function EditCorePage({
   // `lib/edit/authz` predicate of the same name (that one gates
   // `/api/edit/unit`'s create-unit path, unrelated here).
   const canManageAccess = session.isSuperuser || coreRole === "owner";
-  const [core, leaderRows, accessRows] = await Promise.all([
+  const [core, leaderRows, accessRows, queue] = await Promise.all([
     db.read.core.findUnique({
       where: { id: coreId },
       select: { name: true, description: true, url: true, visible: true },
@@ -104,8 +106,13 @@ export default async function EditCorePage({
           orderBy: { createdAt: "asc" },
         })
       : Promise.resolve([]),
+    // Reuses the review page's own loader for the pending count — the same
+    // query the review page runs, not a hand-rolled parallel count that could
+    // drift from its candidate/confirmed/rejected partition logic.
+    loadCoreReviewQueue(coreId, db.read),
   ]);
   if (!core) notFound();
+  const pendingCount = queue?.candidates.length ?? 0;
 
   // Batch-resolve leader + access cwids to display names (a unit admin is
   // often non-Scholar staff, so a miss is expected — UnitAccessCard
@@ -160,15 +167,32 @@ export default async function EditCorePage({
       activeAttr={active}
       basePath={basePath}
     >
-      <p className="mb-6">
-        <Link
-          href={`${basePath}/review`}
-          className="text-apollo-slate text-sm font-medium hover:underline"
-          data-testid="core-review-link"
-        >
-          Review pending publications
-        </Link>
-      </p>
+      {/* The core owner's PRIMARY task — reviewing candidate publications —
+          lives on a separate route (see file header), so it needs a real
+          call-to-action here, not a small text link a scanning admin can
+          miss. The amber dot follows R13 (Apollo Surface Language): amber
+          means "awaiting human judgment," hoisted to this one indicator
+          rather than repeated per-row. */}
+      <Link
+        href={`${basePath}/review`}
+        className="border-apollo-border bg-apollo-surface hover:border-apollo-slate-tint-border mb-6 flex items-center justify-between gap-4 rounded-lg border px-5 py-4 transition-colors hover:no-underline"
+        data-testid="core-review-link"
+      >
+        <div className="flex items-center gap-3">
+          {pendingCount > 0 && (
+            <span className="bg-apollo-amber size-2.5 flex-none rounded-full" aria-hidden />
+          )}
+          <div>
+            <div className="font-medium">Review pending publications</div>
+            <div className="text-muted-foreground text-sm">
+              {pendingCount > 0
+                ? `${pendingCount} publication${pendingCount === 1 ? "" : "s"} awaiting your review`
+                : "No publications pending review"}
+            </div>
+          </div>
+        </div>
+        <ArrowRight className="text-muted-foreground size-4 flex-none" aria-hidden />
+      </Link>
       {active === "details" && (
         <CoreDetailsCard
           coreId={coreId}
