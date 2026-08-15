@@ -90,7 +90,7 @@ export function CoiRoster({
       <h1 className="mb-1 text-xl font-semibold">COI</h1>
       <p className="text-muted-foreground mb-6 text-sm">
         Every scholar, most prominent first, with unreviewed conflict-of-interest suggestions.
-        Select a row to open that profile's editor.
+        Select a row to open that profile&rsquo;s editor.
       </p>
 
       <div className="flex flex-col gap-6 lg:flex-row">
