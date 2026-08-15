@@ -52,9 +52,9 @@
  * The check is **fail-closed**: a disabled flag, a missing group cn, an
  * unreachable directory, a bind failure, or a search error all resolve to
  * "not a data-sharing viewer". A directory problem can never *grant* the
- * role. In particular, the group can be (and initially is) created with
- * ZERO members — the role stays fully dormant until named individuals are
- * added, which is a directory-side change, not a code deploy.
+ * role. Membership is a directory-side change, not a code deploy — adding or
+ * removing a `memberURL` on the ED group takes effect immediately, with no
+ * redeploy of this app.
  */
 import { cache } from "react";
 

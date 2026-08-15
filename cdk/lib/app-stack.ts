@@ -1632,9 +1632,9 @@ export class AppStack extends Stack {
         //   SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN -- the ED group whose
         //     membership confers the role. Created 2026-08-15, structurally
         //     identical to its siblings (groupOfURLs under `ou=application
-        //     security`) but created EMPTY -- no members yet, so the role
-        //     stays fully dormant (fail-closed) until named individuals are
-        //     added directory-side. "on" here is safe before that happens.
+        //     security`); dhd2002 and aeo2003 are its initial members
+        //     (employee-exempt memberURL filter, matching the superuser /
+        //     comms-steward groups' pattern for staff members).
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         DATA_SHARING_VIEWER_ENABLED: "on",
         SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN: "ITS:Library:Scholars/data-sharing-viewer-role",
