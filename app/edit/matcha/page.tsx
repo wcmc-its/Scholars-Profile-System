@@ -46,7 +46,11 @@ export default async function MatchaPage() {
       path: "/edit/matcha",
       reason: "not_developer_get",
     });
-    return <ForbiddenEditPage />;
+    return (
+      <ConsoleShell active="matcha" session={session} pendingSlugRequests={null} pendingHonors={null}>
+        <ForbiddenEditPage />
+      </ConsoleShell>
+    );
   }
 
   // Fold into the shared console — mirrors `/edit/find-researchers`.

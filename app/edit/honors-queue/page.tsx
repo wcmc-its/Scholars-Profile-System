@@ -52,7 +52,16 @@ export default async function HonorsQueuePage() {
   // (`app/api/auth/session/route.ts`), and a bare read of any role flag inherits
   // that shape and locks superusers out.
   if (!session.isSuperuser && session.isHonorsCurator !== true) {
-    return <ForbiddenEditPage />;
+    return (
+      <ConsoleShell
+        active="honors-queue"
+        session={session}
+        pendingSlugRequests={null}
+        pendingHonors={null}
+      >
+        <ForbiddenEditPage />
+      </ConsoleShell>
+    );
   }
 
   // All three status buckets — Pending is the working queue; Approved/Rejected are
