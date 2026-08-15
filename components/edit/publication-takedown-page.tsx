@@ -5,6 +5,7 @@
  * Server Component. Wraps the superuser banner + summary card + takedown
  * card in the standard `/edit/*` shell layout.
  */
+import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { PublicationSummaryCard } from "@/components/edit/publication-summary-card";
 import { PublicationTakedownCard } from "@/components/edit/publication-takedown-card";
 import { SuperuserBanner } from "@/components/edit/superuser-banner";
@@ -17,6 +18,7 @@ export type PublicationTakedownPageProps = {
 export function PublicationTakedownPage({ ctx }: PublicationTakedownPageProps) {
   return (
     <div className="bg-apollo-page min-h-screen">
+      <ConsoleTopBar variant="console" />
       <main className="mx-auto w-full max-w-[var(--max-narrow)] px-6 py-10 md:py-12">
         <header className="mb-6">
           <h1 className="page-title">Manage publication</h1>

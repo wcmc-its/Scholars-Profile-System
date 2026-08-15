@@ -12,6 +12,7 @@
  */
 import Link from "next/link";
 
+import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import type { ScholarAuditEntry } from "@/lib/api/scholar-audit";
 
 export type ScholarHistoryViewProps = {
@@ -71,71 +72,74 @@ export function ScholarHistoryView({
   unavailable = false,
 }: ScholarHistoryViewProps) {
   return (
-    <main
-      className="mx-auto w-full max-w-[var(--max-content)] px-6 py-10"
-      data-slot="scholar-history-view"
-      data-cwid={cwid}
-    >
-      <p className="mb-4">
-        <Link
-          href={`/edit/scholar/${encodeURIComponent(cwid)}`}
-          className="text-apollo-slate hover:underline"
-        >
-          &larr; Back to {scholarName}
-        </Link>
-      </p>
-
-      <h1 className="page-title">Profile change history</h1>
-      <p className="text-muted-foreground mt-2">
-        {scholarName} — edits to this profile in the last {windowDays} days. Read-only. Publication
-        and grant suppressions are recorded on their own surfaces.
-      </p>
-
-      {unavailable ? (
-        <p className="text-muted-foreground mt-8" data-testid="scholar-history-unavailable">
-          Change history is temporarily unavailable. Please try again later or contact ITS Support
-          if this persists.
+    <div className="bg-apollo-page min-h-screen">
+      <ConsoleTopBar variant="console" />
+      <main
+        className="mx-auto w-full max-w-[var(--max-content)] px-6 py-10"
+        data-slot="scholar-history-view"
+        data-cwid={cwid}
+      >
+        <p className="mb-4">
+          <Link
+            href={`/edit/scholar/${encodeURIComponent(cwid)}`}
+            className="text-apollo-slate hover:underline"
+          >
+            &larr; Back to {scholarName}
+          </Link>
         </p>
-      ) : entries.length === 0 ? (
-        <p className="text-muted-foreground mt-8" data-testid="scholar-history-empty">
-          No profile edits recorded in the last {windowDays} days.
+
+        <h1 className="page-title">Profile change history</h1>
+        <p className="text-muted-foreground mt-2">
+          {scholarName} — edits to this profile in the last {windowDays} days. Read-only.
+          Publication and grant suppressions are recorded on their own surfaces.
         </p>
-      ) : (
-        <div className="mt-8 overflow-x-auto">
-          <table className="w-full text-sm" data-testid="scholar-history-table">
-            <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
-              <tr className="border-apollo-border border-b">
-                <th className="px-3 py-2 font-medium">When</th>
-                <th className="px-3 py-2 font-medium">Actor</th>
-                <th className="px-3 py-2 font-medium">Action</th>
-                <th className="px-3 py-2 font-medium">Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((e) => (
-                <tr
-                  key={e.id}
-                  className="border-apollo-border border-b align-top"
-                  data-testid={`scholar-history-row-${e.id}`}
-                  data-action={e.action}
-                >
-                  <td className="px-3 py-2 whitespace-nowrap">{formatTs(e.ts)}</td>
-                  <td className="px-3 py-2">
-                    {e.actorCwid}
-                    {e.impersonatedCwid && (
-                      <span className="text-muted-foreground"> (as {e.impersonatedCwid})</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">{e.actionLabel}</td>
-                  <td className="px-3 py-2">
-                    <DetailSummary entry={e} />
-                  </td>
+
+        {unavailable ? (
+          <p className="text-muted-foreground mt-8" data-testid="scholar-history-unavailable">
+            Change history is temporarily unavailable. Please try again later or contact ITS
+            Support if this persists.
+          </p>
+        ) : entries.length === 0 ? (
+          <p className="text-muted-foreground mt-8" data-testid="scholar-history-empty">
+            No profile edits recorded in the last {windowDays} days.
+          </p>
+        ) : (
+          <div className="mt-8 overflow-x-auto">
+            <table className="w-full text-sm" data-testid="scholar-history-table">
+              <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
+                <tr className="border-apollo-border border-b">
+                  <th className="px-3 py-2 font-medium">When</th>
+                  <th className="px-3 py-2 font-medium">Actor</th>
+                  <th className="px-3 py-2 font-medium">Action</th>
+                  <th className="px-3 py-2 font-medium">Details</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </main>
+              </thead>
+              <tbody>
+                {entries.map((e) => (
+                  <tr
+                    key={e.id}
+                    className="border-apollo-border border-b align-top"
+                    data-testid={`scholar-history-row-${e.id}`}
+                    data-action={e.action}
+                  >
+                    <td className="px-3 py-2 whitespace-nowrap">{formatTs(e.ts)}</td>
+                    <td className="px-3 py-2">
+                      {e.actorCwid}
+                      {e.impersonatedCwid && (
+                        <span className="text-muted-foreground"> (as {e.impersonatedCwid})</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">{e.actionLabel}</td>
+                    <td className="px-3 py-2">
+                      <DetailSummary entry={e} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </main>
+    </div>
   );
 }
