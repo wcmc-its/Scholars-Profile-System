@@ -31,7 +31,7 @@ import Link from "next/link";
 import { ArrowRight, ArrowUpRight, ChevronLeftIcon } from "lucide-react";
 
 import { AttributeRail, type RailItem } from "@/components/edit/attribute-rail";
-import { RailSelect } from "@/components/edit/rail-select";
+import { RailSheet } from "@/components/edit/rail-sheet";
 import { RailCollapse } from "@/components/edit/rail-collapse";
 import { ProxyBanner } from "@/components/edit/proxy-banner";
 import { SuperuserBanner } from "@/components/edit/superuser-banner";
@@ -263,7 +263,12 @@ export function EditShell({
               {subRail && <div className="mb-4">{subRail}</div>}
             </>
           ) : (
-            <RailSelect items={railItems} active={activeAttr} basePath={basePath} />
+            <RailSheet
+              items={railItems}
+              active={activeAttr}
+              basePath={basePath}
+              subRail={subRail}
+            />
           )}
 
           {/* Secondary links row (mockup parity, slate text — order matches the

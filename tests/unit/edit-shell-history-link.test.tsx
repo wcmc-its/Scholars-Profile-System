@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 vi.mock("@/components/site/account-menu", () => ({ AccountMenu: () => null }));
-// EditShell's rail children (RailSelect / AttributeRail) read the router.
+// EditShell's rail children (RailSheet / AttributeRail) read the router.
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
   usePathname: () => "/edit",

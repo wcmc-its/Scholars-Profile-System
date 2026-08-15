@@ -2,7 +2,7 @@
  * The `md`+ ATTRIBUTES-rail collapse toggle (`RailCollapse`, wrapped around the
  * rail column by `EditShell`). Covers: default-expanded (today's behavior,
  * unchanged), toggling collapses the rail, the collapsed choice persists across
- * a re-mount via localStorage, and the existing mobile `RailSelect` `<select>`
+ * a re-mount via localStorage, and the existing mobile `RailSheet`
  * fallback is untouched by any of this.
  *
  * `AccountMenu` fires an impersonation-probe fetch on mount, so it's mocked out
@@ -12,7 +12,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
 vi.mock("@/components/site/account-menu", () => ({ AccountMenu: () => null }));
-// EditShell's rail children (RailSelect / AttributeRail) read the router.
+// EditShell's rail children (RailSheet / AttributeRail) read the router.
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
   usePathname: () => "/edit",
@@ -102,17 +102,16 @@ describe("EditShell — desktop rail collapse toggle", () => {
     expect(screen.getByTestId("rail-expanded")).toBeTruthy();
   });
 
-  it("leaves the existing mobile RailSelect <select> path untouched", () => {
+  it("leaves the existing mobile RailSheet trigger untouched", () => {
     render(
       <EditShell {...base}>
         <div>panel</div>
       </EditShell>,
     );
-    // The mobile <select> fallback renders regardless of the desktop toggle
-    // and is unaffected by collapsing the rail.
-    const select = screen.getByTestId("rail-select") as HTMLSelectElement;
-    expect(select.value).toBe("overview");
+    // The mobile trigger renders regardless of the desktop toggle and is
+    // unaffected by collapsing the rail.
+    expect(screen.getByTestId("rail-sheet-trigger")).toBeTruthy();
     fireEvent.click(screen.getByTestId("rail-collapse-toggle"));
-    expect((screen.getByTestId("rail-select") as HTMLSelectElement).value).toBe("overview");
+    expect(screen.getByTestId("rail-sheet-trigger")).toBeTruthy();
   });
 });
