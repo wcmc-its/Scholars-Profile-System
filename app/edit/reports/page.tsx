@@ -20,7 +20,10 @@
  * Reports IA redesign (2026-08-14): `?center=` now addresses one of
  * POTENTIALLY SEVERAL reportable units, not just "the second center once one
  * exists." With `?center=` given, behavior is unchanged (today's single-unit
- * list). Without it: 0 reportable units → 404 (unchanged); exactly 1 → the
+ * list). Without it: 0 reportable units → 404 for a scoped Owner/Curator/
+ * comms_steward, but an empty index for a superuser (Gap 5, 2026-08-14
+ * handoff — a superuser isn't scoped to any grants, so an empty roster isn't
+ * "this route doesn't exist"); exactly 1 → the
  * same single-unit list, resolved automatically (unchanged end-user
  * behavior); 2+ → the new cross-unit index (`ReportsIndex`), scoped to the
  * actor (org-wide for a superuser/comms_steward, else their own `UnitAdmin`
@@ -125,7 +128,12 @@ export default async function EditReportsIndexPage({
   }
 
   const reportableUnits = await loadReportableUnitsForActor(session, db.read);
-  if (reportableUnits.length === 0) notFound();
+  // Gap 5 (2026-08-14 handoff): a superuser isn't scoped to any particular
+  // unit's grants, so zero reportable units for them isn't "this route doesn't
+  // exist" the way it is for a scoped Owner/Curator/comms_steward with no
+  // grants at all — it's an empty roster. Fall through to the bands view below,
+  // which renders gracefully on an empty `units` array; everyone else still 404s.
+  if (reportableUnits.length === 0 && !session.isSuperuser) notFound();
 
   if (reportableUnits.length === 1) {
     const code = reportableUnits[0].code;
