@@ -19,6 +19,7 @@ export const sess = (over: Partial<EditSession> = {}): EditSession => ({
   isCommsSteward: false,
   isHonorsCurator: false,
   isDeveloper: false,
+  isDataSharingViewer: false,
   ...over,
 });
 
@@ -125,6 +126,13 @@ export const INTENDED_MATRIX: MatrixRow[] = [
     grants: grants(),
     expect: ["fundingMatcher", "matcha"],
     pins: "Gap 1b — reachable from the /edit landing page, not only once already there",
+  },
+  {
+    name: "pure data_sharing_viewer",
+    session: sess({ isDataSharingViewer: true }),
+    grants: grants(),
+    expect: ["dataSharing"],
+    pins: "2026-08-15 — the role unlocks ONLY the dashboard, no other /edit tab",
   },
   {
     name: "comms_steward + unit Owner (the Gap 4b monotonicity case)",
