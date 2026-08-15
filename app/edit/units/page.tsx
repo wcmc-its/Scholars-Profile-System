@@ -18,12 +18,9 @@ import { AllUnitsDirectory } from "@/components/edit/all-units-directory";
 import { ManageableUnitsIndex } from "@/components/edit/manageable-units-index";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { loadAllUnitsDirectory, loadManageableUnits } from "@/lib/edit/manageable-units";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
-import { canViewUsage } from "@/lib/edit/usage-access";
-import { loadReportableUnitsForActor } from "@/lib/edit/cancer-center-reports";
 
 export const dynamic = "force-dynamic";
 
@@ -62,14 +59,6 @@ export default async function EditUnitsPage() {
   const pendingHonors = isHonorsQueueTabVisible(session)
     ? await countPendingHonors(db.read)
     : null;
-  // Usage and Reports are the other two unit-admin escape hatches (mirroring
-  // dataQualityTab above) — this page already loads everything both checks
-  // need (`units`), it just never passed the result through
-  // (docs/edit-console-ia-spec.md Gap 4). Independent reads, fanned out.
-  const [viewerCanViewUsage, reportableUnits] = await Promise.all([
-    canViewUsage(session, db.read),
-    loadReportableUnitsForActor(session, db.read),
-  ]);
 
   return (
     <ConsoleShell
@@ -77,17 +66,14 @@ export default async function EditUnitsPage() {
       session={session}
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
+      // `unitsTab`/`dataQualityTab`/`usageTab`/`reportsTab` no longer need a
+      // per-page override here — `ConsoleShell` derives all four from `session`
+      // via `loadConsoleTabs` (docs/edit-console-ia-spec.md Part B §2), which
+      // already runs the same `units`/`canViewUsage`/`loadReportableUnitsForActor`
+      // reads this page used to duplicate. `unitsTab` stays as a bare OR-in: this
+      // page has no unit-admin gate of its own (any signed-in viewer can land
+      // here), unlike the others.
       unitsTab
-      // A global editor (superuser/comms_steward) OR a unit Owner/Curator with
-      // grants gets the Data quality tab — the latter sees it scoped to their units.
-      dataQualityTab={
-        isDataQualityDashboardEnabled() &&
-        (session.isSuperuser || session.isCommsSteward || units.total > 0)
-          ? 0
-          : null
-      }
-      usageTab={viewerCanViewUsage}
-      reportsTab={reportableUnits.length > 0}
     >
         <h1 className="mb-1 text-xl font-semibold">Org units</h1>
         <p className="text-muted-foreground mb-6 text-sm">

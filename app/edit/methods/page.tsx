@@ -24,14 +24,12 @@
  */
 import { notFound, redirect } from "next/navigation";
 
-import { AdminSubnav } from "@/components/edit/admin-subnav";
+import { ConsoleShell } from "@/components/edit/console-shell";
 import { MethodFamiliesRoster } from "@/components/edit/method-families-roster";
 import { buildFamilyRoster } from "@/lib/api/methods-families";
-import { isCommsStewardEnabled, isMethodsTabVisible } from "@/lib/auth/comms-steward";
+import { isCommsStewardEnabled } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
-import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { isMethodsLensSensitiveGateOn } from "@/lib/profile/methods-lens-flags";
@@ -71,62 +69,38 @@ export default async function MethodFamiliesPage() {
   // renders publicly. Surfaced prominently so a steward is never misled.
   const sensitivityGateOn = isMethodsLensSensitiveGateOn();
 
-  // §4 — the surface folds into the shared `/edit` console via `AdminSubnav`.
-  // The superuser list surfaces (Profiles / URL requests / Slug registry /
-  // Administrators) render only for a superuser; a comms_steward who is not a
-  // superuser sees just the Method Families tab (the rest would 404 for them).
-  const superuserSurfaces = session.isSuperuser;
+  // §4 — the surface folds into the shared `/edit` console via `ConsoleShell`
+  // (migrated off a hand-rolled bar + directly-invoked `AdminSubnav` alongside
+  // the `loadConsoleTabs` migration, docs/edit-console-ia-spec.md Part B §2 —
+  // this file's own per-page administratorsTab/methodsTab/dataQualityTab/
+  // profilesTab/unitsTab computation was doing by hand exactly what
+  // `ConsoleShell` now derives from `session`; also closes the Apollo v2 audit's
+  // B3/B7 finding, docs/audits/apollo-v2-surface-audit-2026-08-14.md — the
+  // hand-rolled chrome had already drifted from the shared bar's badge size and
+  // was missing `sticky` + the skip-to-content link).
   const pendingSlugRequests =
-    superuserSurfaces && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
+    session.isSuperuser && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
   // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:
   // flag off, or this viewer is neither superuser nor honors_curator.
   const pendingHonors = isHonorsQueueTabVisible(session)
     ? await countPendingHonors(db.read)
     : null;
-  const administratorsTab = superuserSurfaces && isAdministratorsTabEnabled() ? 0 : null;
 
   return (
-    <div className="min-h-screen bg-apollo-page" data-slot="method-families-page">
-      <header className="bg-apollo-bar text-white">
-        <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
-          <span
-            className="bg-apollo-maroon flex size-7 items-center justify-center rounded-sm text-xs font-bold"
-            aria-hidden
-          >
-            WCM
-          </span>
-          <span className="font-semibold">Scholars Profile Console</span>
-        </div>
-      </header>
-
-      <AdminSubnav
-        active="methods"
-        pendingSlugRequests={pendingSlugRequests}
-        pendingHonors={pendingHonors}
-        administratorsTab={administratorsTab}
-        methodsTab={isMethodsTabVisible(session) ? 0 : null}
-        dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
-        superuserSurfaces={superuserSurfaces}
-        // A comms_steward is a global profile + unit-content editor (comms-
-        // steward-profile-editing-spec.md §3b/§4d), so surface the Profiles +
-        // Units tabs here even though the other superuser surfaces stay hidden.
-        profilesTab={session.isCommsSteward || session.isSuperuser}
-        unitsTab={session.isCommsSteward || session.isSuperuser}
-      />
-
-      <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
-        <h1 className="mb-1 text-xl font-semibold">Method families</h1>
-        <p className="text-muted-foreground mb-6 max-w-3xl text-sm">
-          Control the visibility tier of each method family and review the ones flagged as
-          potentially sensitive. The review queue surfaces flagged families first; setting a tier
-          takes effect immediately — no rebuild. Nothing here hides a publication; it only changes
-          how a method family is shown on public profiles.
-        </p>
-        <MethodFamiliesRoster
-          families={families}
-          sensitivityGateOn={sensitivityGateOn}
-        />
-      </main>
-    </div>
+    <ConsoleShell
+      active="methods"
+      session={session}
+      pendingSlugRequests={pendingSlugRequests}
+      pendingHonors={pendingHonors}
+    >
+      <h1 className="mb-1 text-xl font-semibold">Method families</h1>
+      <p className="text-muted-foreground mb-6 max-w-3xl text-sm">
+        Control the visibility tier of each method family and review the ones flagged as
+        potentially sensitive. The review queue surfaces flagged families first; setting a tier
+        takes effect immediately — no rebuild. Nothing here hides a publication; it only changes
+        how a method family is shown on public profiles.
+      </p>
+      <MethodFamiliesRoster families={families} sensitivityGateOn={sensitivityGateOn} />
+    </ConsoleShell>
   );
 }

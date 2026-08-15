@@ -24,11 +24,7 @@ import {
 import { getEffectiveEditSession, impersonationEnabled } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { requireSuperuserGet } from "@/lib/edit/authz";
-import {
-  isDataQualityDashboardEnabled,
-  isEmptyScope,
-  loadDataQualityScope,
-} from "@/lib/edit/data-quality";
+import { isEmptyScope, loadDataQualityScope } from "@/lib/edit/data-quality";
 import { isUnitAdminCenterProxyEnabled } from "@/lib/edit/unit-admin-center-proxy";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
@@ -163,15 +159,12 @@ export default async function EditScholarsPage({
       session={session}
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
-      // The unit-admin escape hatches (`console-tabs.ts`: a page that admits unit
-      // admins ORs its own grant signal onto the session-derived base). Without
-      // these a curator who lands here has no tab back to their units or their
-      // gap report — the strip would render only the tab they are standing on.
-      profilesTab={unitScope !== null}
-      unitsTab={unitScope !== null ? true : undefined}
-      dataQualityTab={
-        unitScope !== null && isDataQualityDashboardEnabled() ? 0 : undefined
-      }
+      // No per-page override needed for `profilesTab`/`unitsTab`/`dataQualityTab`
+      // anymore — `ConsoleShell` derives all three from `session` via
+      // `loadConsoleTabs` (docs/edit-console-ia-spec.md Part B §2). This is
+      // the exact Gap-2 root cause fix: the old `profilesTab={unitScope !== null}`
+      // override here leaked into `AdminSubnav`'s News-tab gate (piggybacked on
+      // `profilesTab`), showing a unit Owner/Curator a News link that 404s.
     >
       <ProfilesRoster
         entries={entries}

@@ -18,7 +18,7 @@
  * out of scope — we only assert the route's branch via the JSX it returns
  * (component spy) or the thrown `notFound()` sentinel.
  */
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const {
   mockGetSession,
@@ -32,6 +32,8 @@ const {
   mockLoadManageableUnits,
   mockListUnitAdminEditors,
   mockCountPendingSlugRequests,
+  mockIsHonorsCurator,
+  mockIsDeveloper,
 } = vi.hoisted(() => ({
   mockGetSession: vi.fn(),
   mockGetEffectiveCwid: vi.fn(),
@@ -50,6 +52,8 @@ const {
   mockLoadManageableUnits: vi.fn(),
   mockListUnitAdminEditors: vi.fn(),
   mockCountPendingSlugRequests: vi.fn(),
+  mockIsHonorsCurator: vi.fn(),
+  mockIsDeveloper: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -72,6 +76,7 @@ vi.mock("@/lib/db", () => ({
     read: {
       scholar: { findMany: async () => [] },
       scholarProxy: { findMany: async () => [] },
+      honor: { count: async () => 0 },
     },
     write: {},
   },
@@ -80,7 +85,15 @@ vi.mock("@/lib/edit/proxy-authz", () => ({ scholarsServedByProxy: mockScholarsSe
 vi.mock("@/lib/edit/unit-scholar-authz", () => ({
   listUnitAdminEditorsForScholar: mockListUnitAdminEditors,
 }));
-vi.mock("@/lib/edit/administrators", () => ({ isAdministratorsTabEnabled: () => false }));
+vi.mock("@/lib/edit/administrators", () => ({
+  isAdministratorsTabEnabled: () => false,
+  isAdministratorsTabVisible: () => false,
+  loadOwnerManagedUnitScope: async () => [],
+}));
+vi.mock("@/lib/edit/usage-access", () => ({ canViewUsage: async () => false }));
+vi.mock("@/lib/edit/cancer-center-reports", () => ({
+  loadReportableUnitsForActor: async () => [],
+}));
 vi.mock("@/lib/edit/coi-gap-hint", () => ({ isCoiGapHintEnabled: () => false }));
 vi.mock("@/lib/edit/manual-highlights", () => ({ isManualHighlightsEnabled: () => false }));
 vi.mock("@/lib/edit/slug-request", () => ({
@@ -88,7 +101,12 @@ vi.mock("@/lib/edit/slug-request", () => ({
   loadLatestSlugRequest: async () => null,
   countPendingSlugRequests: mockCountPendingSlugRequests,
 }));
-vi.mock("@/lib/edit/manageable-units", () => ({ loadManageableUnits: mockLoadManageableUnits }));
+vi.mock("@/lib/edit/manageable-units", () => ({
+  loadManageableUnits: mockLoadManageableUnits,
+  loadAllUnitsDirectory: async () => [],
+}));
+vi.mock("@/lib/auth/honors-curator", () => ({ isHonorsCurator: mockIsHonorsCurator }));
+vi.mock("@/lib/auth/development", () => ({ isDeveloper: mockIsDeveloper }));
 vi.mock("@/components/edit/edit-page", () => ({
   EditPage: mockEditPage,
   visibleAttrKeys: () => ["home"],
@@ -148,9 +166,11 @@ beforeEach(() => {
   // Not a proxy → the null-ctx branch ends in notFound(); irrelevant when ctx is set.
   mockScholarsServedByProxy.mockResolvedValue([]);
   // Fan-out reads after the guard — keep them inert so the render branch resolves.
-  mockLoadManageableUnits.mockResolvedValue({ departments: [], divisions: [], centers: [] });
+  mockLoadManageableUnits.mockResolvedValue({ departments: [], divisions: [], centers: [], total: 0 });
   mockListUnitAdminEditors.mockResolvedValue([]);
   mockCountPendingSlugRequests.mockResolvedValue(0);
+  mockIsHonorsCurator.mockResolvedValue(false);
+  mockIsDeveloper.mockResolvedValue(false);
 });
 
 describe("/edit (self) — #536 hidden-identity-class guard", () => {
@@ -199,5 +219,39 @@ describe("/edit (self) — #536 hidden-identity-class guard", () => {
     expect(mockNotFound).not.toHaveBeenCalled();
     // The superuser re-check ran against the real human, not the hidden target.
     expect(mockIsSuperuser).toHaveBeenCalledWith("adm001");
+  });
+});
+
+describe("/edit (self) — loadConsoleTabs migration (Gaps 1 / 1b)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("Gap 1 — a pure honors_curator (no other console signal) still gets the console nav", async () => {
+    // `isHonorsQueueTabVisible` (which `loadConsoleTabs`'s `honors` predicate
+    // delegates to) is ALSO flag-gated — the surface must actually be live for
+    // there to be anything to show.
+    vi.stubEnv("HONORS_APPROVAL_QUEUE", "on");
+    mockLoadEditContext.mockResolvedValue(fakeCtx("self01", "full_time_faculty"));
+    mockIsHonorsCurator.mockResolvedValue(true);
+    const result = asElement(await EditSelfPage({ searchParams: searchParams() }));
+    // canBrowseProfiles=false, commsSteward=false, hasUnitGrants=false (empty
+    // manageableUnits), developer=false — only honorsCurator is true, and
+    // `loadConsoleTabs`'s own `honors` predicate is the ONLY thing deciding
+    // whether the strip renders at all now (no separate showConsoleNav gate
+    // left to forget a role in).
+    expect(result.props.consoleNav).toBeTruthy();
+  });
+
+  it("Gap 1b — a pure development-role viewer gets viewerIsDeveloper threaded into AdminSubnav", async () => {
+    mockLoadEditContext.mockResolvedValue(fakeCtx("self01", "full_time_faculty"));
+    mockIsDeveloper.mockResolvedValue(true);
+    const result = asElement(await EditSelfPage({ searchParams: searchParams() }));
+    const consoleNav = asElement(result.props.consoleNav);
+    expect(consoleNav.props.viewerIsDeveloper).toBe(true);
+  });
+
+  it("a plain scholar (no roles) still gets no console nav — the migration doesn't over-widen", async () => {
+    mockLoadEditContext.mockResolvedValue(fakeCtx("self01", "full_time_faculty"));
+    const result = asElement(await EditSelfPage({ searchParams: searchParams() }));
+    expect(result.props.consoleNav).toBeUndefined();
   });
 });
