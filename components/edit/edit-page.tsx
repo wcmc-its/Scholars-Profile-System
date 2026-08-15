@@ -1325,7 +1325,7 @@ function ProfileUrlReadonlyPanel({ slug, cwid }: { slug: string; cwid: string })
       <p className="flex flex-wrap items-center gap-2.5 text-sm">
         <span className="text-muted-foreground">Your current URL: </span>
         <code
-          className="bg-apollo-surface-2 border-apollo-border rounded border px-2.5 py-1 font-mono text-xs"
+          className="bg-apollo-surface-2 border-apollo-border-strong rounded border px-2.5 py-1 font-mono text-xs"
           data-testid="profile-url-readonly-value"
         >
           {currentUrl}
