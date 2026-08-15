@@ -94,7 +94,15 @@ export default async function AdministratorsPage() {
       session={session}
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
-      unitsTab={session.isSuperuser}
+      // No unitsTab override: the deriveConsoleTabs baseline (superuser OR
+      // comms_steward) is already correct for this page. The prior
+      // `unitsTab={session.isSuperuser}` REPLACED that baseline (ConsoleShell's
+      // unitsTab merge is replace-not-OR) rather than narrowing it deliberately
+      // — it predates ConsoleShell (#977) and was never revisited when the
+      // shared baseline grew a comms_steward case, so a comms_steward who also
+      // owns a unit (the only way a non-superuser steward reaches this page —
+      // see the Forbidden gate above) silently lost a tab their role alone
+      // already earned (docs/edit-console-ia-spec.md Gap 4b).
     >
         <h1 className="mb-1 text-xl font-semibold">Administrators</h1>
         <p className="text-muted-foreground mb-6 text-sm">
