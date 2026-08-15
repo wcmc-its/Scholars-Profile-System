@@ -32,6 +32,8 @@ const {
   mockLoadManageableUnits,
   mockListUnitAdminEditors,
   mockCountPendingSlugRequests,
+  mockIsHonorsCurator,
+  mockIsDeveloper,
 } = vi.hoisted(() => ({
   mockGetSession: vi.fn(),
   mockGetEffectiveCwid: vi.fn(),
@@ -50,6 +52,8 @@ const {
   mockLoadManageableUnits: vi.fn(),
   mockListUnitAdminEditors: vi.fn(),
   mockCountPendingSlugRequests: vi.fn(),
+  mockIsHonorsCurator: vi.fn(),
+  mockIsDeveloper: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -89,6 +93,8 @@ vi.mock("@/lib/edit/slug-request", () => ({
   countPendingSlugRequests: mockCountPendingSlugRequests,
 }));
 vi.mock("@/lib/edit/manageable-units", () => ({ loadManageableUnits: mockLoadManageableUnits }));
+vi.mock("@/lib/auth/honors-curator", () => ({ isHonorsCurator: mockIsHonorsCurator }));
+vi.mock("@/lib/auth/development", () => ({ isDeveloper: mockIsDeveloper }));
 vi.mock("@/components/edit/edit-page", () => ({
   EditPage: mockEditPage,
   visibleAttrKeys: () => ["home"],
@@ -151,6 +157,8 @@ beforeEach(() => {
   mockLoadManageableUnits.mockResolvedValue({ departments: [], divisions: [], centers: [] });
   mockListUnitAdminEditors.mockResolvedValue([]);
   mockCountPendingSlugRequests.mockResolvedValue(0);
+  mockIsHonorsCurator.mockResolvedValue(false);
+  mockIsDeveloper.mockResolvedValue(false);
 });
 
 describe("/edit (self) — #536 hidden-identity-class guard", () => {
@@ -199,5 +207,30 @@ describe("/edit (self) — #536 hidden-identity-class guard", () => {
     expect(mockNotFound).not.toHaveBeenCalled();
     // The superuser re-check ran against the real human, not the hidden target.
     expect(mockIsSuperuser).toHaveBeenCalledWith("adm001");
+  });
+});
+
+describe("/edit (self) — console nav gaps 1 / 1b", () => {
+  it("Gap 1 — a pure honors_curator (no other console signal) still gets the console nav", async () => {
+    mockLoadEditContext.mockResolvedValue(fakeCtx("self01", "full_time_faculty"));
+    mockIsHonorsCurator.mockResolvedValue(true);
+    const result = asElement(await EditSelfPage({ searchParams: searchParams() }));
+    // canBrowseProfiles=false, commsSteward=false (mocked false above),
+    // hasUnitGrants=false (empty manageableUnits) — only honorsCurator is true.
+    expect(result.props.consoleNav).toBeTruthy();
+  });
+
+  it("Gap 1b — a pure development-role viewer gets viewerIsDeveloper threaded into AdminSubnav", async () => {
+    mockLoadEditContext.mockResolvedValue(fakeCtx("self01", "full_time_faculty"));
+    mockIsDeveloper.mockResolvedValue(true);
+    const result = asElement(await EditSelfPage({ searchParams: searchParams() }));
+    const consoleNav = asElement(result.props.consoleNav);
+    expect(consoleNav.props.viewerIsDeveloper).toBe(true);
+  });
+
+  it("a plain scholar (no roles) still gets no console nav — Gap 1's fix doesn't over-widen", async () => {
+    mockLoadEditContext.mockResolvedValue(fakeCtx("self01", "full_time_faculty"));
+    const result = asElement(await EditSelfPage({ searchParams: searchParams() }));
+    expect(result.props.consoleNav).toBeUndefined();
   });
 });

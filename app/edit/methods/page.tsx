@@ -112,6 +112,9 @@ export default async function MethodFamiliesPage() {
         // Units tabs here even though the other superuser surfaces stay hidden.
         profilesTab={session.isCommsSteward || session.isSuperuser}
         unitsTab={session.isCommsSteward || session.isSuperuser}
+        // Gap 2 — News piggybacked on `profilesTab` before; kept byte-identical
+        // here now that AdminSubnav gates News on its own prop instead.
+        newsTab={session.isCommsSteward || session.isSuperuser}
       />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">

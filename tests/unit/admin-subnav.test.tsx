@@ -292,6 +292,49 @@ describe("AdminSubnav", () => {
     expect(screen.getByTestId("admin-tab-units").getAttribute("aria-current")).toBe("page");
   });
 
+  // Gap 2 fix (2026-08-14) — News used to piggyback on `profilesTab`, which a
+  // unit Owner/Curator also earns (`/edit/scholars`'s `unitScope !== null`
+  // override), showing a link that 404s on `isNewsQueueTabVisible`'s real
+  // isSuperuser-or-isCommsSteward gate. `newsTab` is the dedicated escape
+  // hatch now, mirroring `reportsTab`.
+  describe("the News tab (Gap 2)", () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("shows the News tab to a superuser by default", () => {
+      vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
+      render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+      expect(screen.getByTestId("admin-tab-news-queue").getAttribute("href")).toBe("/edit/news-queue");
+    });
+
+    it("shows the News tab to a non-superuser comms_steward via newsTab", () => {
+      vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
+      render(
+        <AdminSubnav
+          active="news-queue"
+          pendingSlugRequests={null}
+          pendingHonors={null}
+          superuserSurfaces={false}
+          newsTab
+        />,
+      );
+      expect(screen.getByTestId("admin-tab-news-queue")).toBeTruthy();
+    });
+
+    it("🔴 does NOT show News to a non-superuser with only profilesTab (e.g. a unit Owner/Curator) — the Gap 2 leak", () => {
+      vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
+      render(
+        <AdminSubnav
+          active="profiles"
+          pendingSlugRequests={null}
+          pendingHonors={null}
+          superuserSurfaces={false}
+          profilesTab
+        />,
+      );
+      expect(screen.queryByTestId("admin-tab-news-queue")).toBeNull();
+    });
+  });
+
   // ── The Matcha tab and its explanatory hover (round-2 §2) ───────────────────
   //
   // The whole suite above never sees this tab: `isMatchaEnabled()` reads env, so it is dark by
@@ -569,6 +612,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
           superuserSurfaces={false}
           profilesTab
           unitsTab
+          newsTab
         />,
       );
       expect(screen.getByTestId("admin-tab-news-queue").textContent).toContain("News");

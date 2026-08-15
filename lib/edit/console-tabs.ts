@@ -33,6 +33,7 @@ export type ConsoleTabProps = {
   dataQualityTab: number | null;
   dataSharingTab: number | null;
   reportsTab: boolean;
+  newsTab: boolean;
   viewerIsDeveloper: boolean;
 };
 
@@ -58,6 +59,9 @@ export function deriveConsoleTabs(session: EditSession): ConsoleTabProps {
     // that needs an actual "do they have a reportable unit" read, which stays
     // a per-page OR (`ConsoleShell`'s `reportsTab` prop), same as `profilesTab`.
     reportsTab: session.isSuperuser || session.isCommsSteward,
+    // Gap 2 fix (2026-08-14) — the dedicated News escape hatch, mirroring
+    // `reportsTab`. `AdminSubnav` still ANDs this with `isNewsQueueEnabled()`.
+    newsTab: session.isSuperuser || session.isCommsSteward,
     viewerIsDeveloper: session.isDeveloper === true,
   };
 }

@@ -18,6 +18,7 @@ import { getEffectiveCwid } from "@/lib/auth/effective-identity";
 import { isSuperuser } from "@/lib/auth/superuser";
 import { isCommsSteward, isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
+import { isDeveloper } from "@/lib/auth/development";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { db } from "@/lib/db";
@@ -243,6 +244,11 @@ export default async function EditSelfPage({
     // must hide while down-scoped under "View as". Flag-gated short-circuit (no
     // LDAP when `HONORS_CURATOR_ENABLED` is off), fail-closed.
     honorsCurator,
+    // Gap 1b — whether the EFFECTIVE viewer is a pure `development`-role member,
+    // gating the "Funding matcher" / "Matcha" tabs below (their only console
+    // entry points from this self-edit landing page). Fail-closed like the
+    // other role reads above.
+    developer,
   ] = await Promise.all([
     isSuperuser(editCwid).catch(() => false),
     slugRequestEnabled ? loadLatestSlugRequest(editCwid, db.read) : Promise.resolve(null),
@@ -255,6 +261,7 @@ export default async function EditSelfPage({
     listUnitAdminEditorsForScholar(editCwid, db.read as unknown as UnitAdminEditorsLookup),
     isCommsSteward(editCwid).catch(() => false),
     isHonorsCurator(editCwid).catch(() => false),
+    isDeveloper(editCwid).catch(() => false),
   ]);
 
   const manageableUnits = [...units.departments, ...units.divisions, ...units.centers];
@@ -280,8 +287,16 @@ export default async function EditSelfPage({
   // a comms_steward, OR a unit Owner/Curator (≥1 grant) — so the "Units" tab (and
   // any other role-available tab) is reachable from every self-edit tab, not only
   // via the Home-panel link. A plain scholar still falls back to the minimal strip.
+  // Gap 1 — a pure honors_curator (none of the three signals above) still needs
+  // the strip to render at all, or their own (already-correct) Honors tab below
+  // never gets a nav to hang off of — the #1767 "nobody could find it" shape one
+  // layer up.
+  // Gap 1b — same for a pure development-role viewer: without `developer` here
+  // too, `viewerIsDeveloper` below is threaded into an AdminSubnav that never
+  // mounts, and Funding matcher/Matcha stay unreachable from this landing page.
   const hasUnitGrants = manageableUnits.length > 0;
-  const showConsoleNav = canBrowseProfiles || commsSteward || hasUnitGrants;
+  const showConsoleNav =
+    canBrowseProfiles || commsSteward || hasUnitGrants || honorsCurator || developer;
   const pendingSlugRequests =
     canBrowseProfiles && slugRequestEnabled ? await countPendingSlugRequests(db.read) : null;
   // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:
@@ -312,10 +327,17 @@ export default async function EditSelfPage({
             // Profiles tab on EVERY console surface (matching /edit/scholars +
             // /edit/methods). A superuser already has it via `superuserSurfaces`.
             profilesTab={commsSteward}
+            // Gap 2 — News piggybacked on `profilesTab` before; kept byte-identical
+            // here (both already resolve to `commsSteward` on this page) now that
+            // AdminSubnav gates News on its own prop instead.
+            newsTab={commsSteward}
             unitsTab={canBrowseProfiles || commsSteward || hasUnitGrants}
             pendingSlugRequests={pendingSlugRequests}
             pendingHonors={pendingHonors}
             administratorsTab={canBrowseProfiles && isAdministratorsTabEnabled() ? 0 : null}
+            // Gap 1b — a pure development-role viewer's only path to Funding
+            // matcher / Matcha from their own self-edit landing page.
+            viewerIsDeveloper={developer}
             methodsTab={
               isMethodsTabVisible({
                 isSuperuser: canBrowseProfiles,

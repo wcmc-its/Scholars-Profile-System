@@ -136,6 +136,7 @@ export function AdminSubnav({
   unitsTab = false,
   usageTab = false,
   reportsTab = false,
+  newsTab = false,
   viewerIsDeveloper = false,
 }: {
   active: AdminSubnavActive;
@@ -196,6 +197,13 @@ export function AdminSubnav({
    *  escape hatch, mirroring `usageTab`. Default `false` (Reports IA redesign,
    *  2026-08-14). */
   reportsTab?: boolean;
+  /** Show the "News" tab (`/edit/news-queue`) to a non-superuser comms_steward.
+   *  Superusers already get it via `superuserSurfaces`; this is the escape
+   *  hatch, mirroring `reportsTab`. Gap 2 fix (2026-08-14) — previously
+   *  piggybacked on `profilesTab`, which a unit Owner/Curator can also earn
+   *  (`/edit/scholars`'s `unitScope !== null` override), showing a News link
+   *  that 404s on `isNewsQueueTabVisible`'s actual gate. Default `false`. */
+  newsTab?: boolean;
   /** Show the "Funding matcher" tab to a pure development-role viewer who is NOT
    *  a superuser. Superusers already get it via `superuserSurfaces`; this is the
    *  dev-role escape hatch on `/edit/find-researchers` (their only console page).
@@ -233,7 +241,11 @@ export function AdminSubnav({
       // #1762 round 4: no count badge — the curator asked for it to be dropped.
       { show: pendingHonors !== null, id: "honors-queue", href: "/edit/honors-queue", label: "Honors" },
       {
-        show: (superuserSurfaces || profilesTab) && isNewsQueueEnabled(),
+        // Gap 2 fix — was `superuserSurfaces || profilesTab`, piggybacking on a
+        // prop a unit Owner/Curator can also earn; `newsTab` is the dedicated
+        // signal (mirrors `reportsTab`), matching `isNewsQueueTabVisible`'s
+        // actual isSuperuser-or-isCommsSteward gate.
+        show: (superuserSurfaces || newsTab) && isNewsQueueEnabled(),
         id: "news-queue",
         href: "/edit/news-queue",
         label: "News",

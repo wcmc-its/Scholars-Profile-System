@@ -36,6 +36,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       dataQualityTab: 0,
       dataSharingTab: 0,
       reportsTab: true,
+      newsTab: true,
       viewerIsDeveloper: false,
     });
   });
@@ -52,6 +53,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       // Same reports authz as a superuser (`loadReportsContext`'s gate) —
       // Reports IA redesign, 2026-08-14.
       reportsTab: true,
+      newsTab: true,
       viewerIsDeveloper: false,
     });
   });
@@ -68,6 +70,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       dataQualityTab: null,
       dataSharingTab: null,
       reportsTab: false,
+      newsTab: false,
       viewerIsDeveloper: false,
     });
   });
@@ -82,6 +85,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       dataQualityTab: null,
       dataSharingTab: null,
       reportsTab: false,
+      newsTab: false,
       viewerIsDeveloper: true,
     });
   });
@@ -96,6 +100,7 @@ describe("deriveConsoleTabs — role-gate decision table", () => {
       dataQualityTab: null,
       dataSharingTab: null,
       reportsTab: false,
+      newsTab: false,
       viewerIsDeveloper: false,
     });
   });
