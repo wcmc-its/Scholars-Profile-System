@@ -22,6 +22,8 @@ import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { loadAllUnitsDirectory, loadManageableUnits } from "@/lib/edit/manageable-units";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
+import { canViewUsage } from "@/lib/edit/usage-access";
+import { loadReportableUnitsForActor } from "@/lib/edit/cancer-center-reports";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +62,14 @@ export default async function EditUnitsPage() {
   const pendingHonors = isHonorsQueueTabVisible(session)
     ? await countPendingHonors(db.read)
     : null;
+  // Usage and Reports are the other two unit-admin escape hatches (mirroring
+  // dataQualityTab above) — this page already loads everything both checks
+  // need (`units`), it just never passed the result through
+  // (docs/edit-console-ia-spec.md Gap 4). Independent reads, fanned out.
+  const [viewerCanViewUsage, reportableUnits] = await Promise.all([
+    canViewUsage(session, db.read),
+    loadReportableUnitsForActor(session, db.read),
+  ]);
 
   return (
     <ConsoleShell
@@ -76,6 +86,8 @@ export default async function EditUnitsPage() {
           ? 0
           : null
       }
+      usageTab={viewerCanViewUsage}
+      reportsTab={reportableUnits.length > 0}
     >
         <h1 className="mb-1 text-xl font-semibold">Org units</h1>
         <p className="text-muted-foreground mb-6 text-sm">

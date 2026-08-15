@@ -139,6 +139,18 @@ describe("/edit/administrators — authorization", () => {
     expect(arg).toEqual({ scope: undefined });
   });
 
+  it("does not override unitsTab — the ConsoleShell baseline governs (Gap 4b)", async () => {
+    // Regression for docs/edit-console-ia-spec.md Gap 4b: this page used to pass
+    // `unitsTab={session.isSuperuser}`, which REPLACED (not OR'd onto) the
+    // deriveConsoleTabs baseline, silently dropping Units for a comms_steward
+    // who also owns a unit — the only way a non-superuser steward reaches this
+    // page at all (a pure steward with no owned unit hits Forbidden above).
+    mockGetEditSession.mockResolvedValue(OWNER);
+    mockLoadOwnerScope.mockResolvedValue(["N1280"]);
+    const result = asEl(await AdministratorsPage());
+    expect(result.props.unitsTab).toBeUndefined();
+  });
+
   it("passes the core catalog through as allCores (cores-as-org-units P2)", async () => {
     mockGetEditSession.mockResolvedValue(SUPERUSER);
     mockGetCoreList.mockResolvedValue([
