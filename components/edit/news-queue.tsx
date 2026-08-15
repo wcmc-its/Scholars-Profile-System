@@ -42,7 +42,7 @@ function Candidate({ row }: { row: NewsQueueRow }) {
             href={`/${row.slug}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+            className="text-apollo-slate underline-offset-4 hover:underline"
           >
             {row.scholarName}
           </a>
