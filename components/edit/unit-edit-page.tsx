@@ -164,10 +164,9 @@ export function UnitEditPage({ ctx, attr }: UnitEditPageProps) {
     <EditShell
       mode="superuser"
       scholarName={ctx.unit.name}
-      // A unit, not a scholar profile — "Profiles" only makes sense when the
-      // viewer separately has profile-browsing rights.
+      // A unit, not a scholar profile — "Profiles" never has anywhere useful
+      // to go from a unit editor.
       isProfileEntity={false}
-      canBrowseProfiles={isSuperuser(ctx.actorRole)}
       railItems={railItems}
       activeAttr={active.key}
       basePath={basePath}
