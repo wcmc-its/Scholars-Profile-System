@@ -335,7 +335,7 @@ function UnitRow({ unit }: { unit: UnitDirectoryEntry }) {
           </Link>
           {unit.retired && (
             <span
-              className="flex-none rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700"
+              className="flex-none rounded-full border border-apollo-slate-tint-border bg-apollo-slate-tint px-2 py-0.5 text-xs font-medium text-apollo-slate"
               data-testid={`all-units-retired-${unit.kind}-${unit.code}`}
             >
               Retired
