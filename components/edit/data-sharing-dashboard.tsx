@@ -129,7 +129,7 @@ function RollupSection({ report }: { report: DataSharingReport }) {
         </a>
       </div>
       <p className="text-muted-foreground mt-1 text-sm">
-        Aggregate headline numbers for CTSA renewal writers and research deans.
+        Aggregate headline numbers for research leadership and compliance/grant reporting.
       </p>
 
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -160,7 +160,7 @@ function RollupSection({ report }: { report: DataSharingReport }) {
 
       <div className={`${sectionClass} mt-4 p-4`}>
         <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-medium">One paragraph for the renewal</span>
+          <span className="text-sm font-medium">One paragraph for reporting</span>
           <span className="inline-flex items-center gap-1 text-xs">
             <CopyButton value={paragraph} label="Copy paragraph text" />
             Copy paragraph
