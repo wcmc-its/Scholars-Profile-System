@@ -113,11 +113,11 @@ export function SlugRequestRow({ request, onDecided }: SlugRequestRowProps) {
               className="flex flex-wrap items-center gap-2 text-sm"
               data-testid="slug-request-change-line"
             >
-              <code className="bg-apollo-surface-2 border-apollo-border text-muted-foreground rounded border px-2 py-0.5 font-mono text-xs line-through">
+              <code className="bg-apollo-surface-2 border-apollo-border-strong text-muted-foreground rounded border px-2 py-0.5 font-mono text-xs line-through">
                 {request.currentSlug ?? "—"}
               </code>
               <span className="text-muted-foreground">→</span>
-              <code className="bg-apollo-surface-2 border-apollo-border text-foreground rounded border px-2 py-0.5 font-mono text-xs font-semibold">
+              <code className="bg-apollo-surface-2 border-apollo-border-strong text-foreground rounded border px-2 py-0.5 font-mono text-xs font-semibold">
                 {request.requestedSlug}
               </code>
             </p>
@@ -145,7 +145,7 @@ export function SlugRequestRow({ request, onDecided }: SlugRequestRowProps) {
         </div>
 
         <p
-          className="bg-apollo-surface-2 border-apollo-border text-muted-foreground rounded-md border px-3 py-2 text-sm"
+          className="bg-apollo-surface-2 border-apollo-border-strong text-muted-foreground rounded-md border px-3 py-2 text-sm"
           data-testid="slug-request-reason"
         >
           {request.reason && request.reason.trim().length > 0 ? (
