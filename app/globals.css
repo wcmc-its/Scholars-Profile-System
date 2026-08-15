@@ -190,7 +190,15 @@
   /* Semantic amber — "incomplete / needs you". The completeness checklist's
      to-do marker, progress fill, and missing-headshot badge: an invitation,
      never a danger-red alarm. The tint pair backs the "worth reviewing"
-     advisory badge + the COI → publications bridge callout. */
+     advisory badge + the COI → publications bridge callout.
+
+     2026-08-15: three further settled meanings live alongside this one and
+     R13's pending-judgment canon (apollo-v2-surface-audit-2026-08-14.md §4a,
+     decision 1) — confidence/tier classification (Matcha fit + eligibility
+     badges) and time-urgent deadlines (#1608, <30 days out). Four meanings
+     total; never two on the same surface. Operational-status boards
+     (etl-status) are exempt from all of this — pipeline health, not a
+     pending human decision, and never on this token system. */
   --apollo-amber: #8a5a06;
   --apollo-amber-tint: #fbf1dc;
   --apollo-amber-tint-border: #efdbaf;
