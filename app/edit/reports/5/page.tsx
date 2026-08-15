@@ -74,7 +74,7 @@ export default async function EditReportsClinicalTrialsPage({
       >
         &larr; All reports
       </Link>
-      <h1 className="mb-1 text-xl font-semibold">5. Clinical Trials</h1>
+      <h1 className="mb-1 text-xl font-bold">5. Clinical Trials</h1>
       <p className="text-muted-foreground mb-4 text-sm">
         {rows.length === 0
           ? "Current members' clinical-trial links (Principal Investigator or Investigator)."

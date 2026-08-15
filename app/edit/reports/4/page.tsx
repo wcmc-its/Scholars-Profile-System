@@ -94,7 +94,7 @@ export default async function EditReportsGrantsPage({
       >
         &larr; All reports
       </Link>
-      <h1 className="mb-1 text-xl font-semibold">4. Grants</h1>
+      <h1 className="mb-1 text-xl font-bold">4. Grants</h1>
       <p className="text-muted-foreground mb-4 text-sm">
         This center’s members’ grants active as of the chosen date.
       </p>

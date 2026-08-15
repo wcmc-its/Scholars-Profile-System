@@ -153,22 +153,23 @@ export default async function EditReportsIndexPage({
 
   return (
     <ConsoleShell active="reports" reportsTab {...shell}>
-      <div className="apollo-card">
-        <h1 className="mb-1 text-xl font-semibold">Reports</h1>
-        <p className="text-muted-foreground text-sm">
-          {mode === "table"
-            ? "Advisory only — every report reads precomputed data; nothing here writes to the roster."
-            : "Reports for the centers you administer."}
-        </p>
-        {mode === "bands" && (
-          <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            <span className="font-semibold">Advisory only</span> — every report reads precomputed
-            data; nothing here writes to the roster.
-          </div>
-        )}
-        <div className="mt-5">
-          <ReportsIndex units={units} reports={REPORTS} mode={mode} />
+      <h1 className="mb-1 text-xl font-bold">Reports</h1>
+      <p className="text-muted-foreground text-sm">
+        {mode === "table"
+          ? "Advisory only — every report reads precomputed data; nothing here writes to the roster."
+          : "Reports for the centers you administer."}
+      </p>
+      {mode === "bands" && (
+        <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <span className="font-semibold">Advisory only</span> — every report reads precomputed
+          data; nothing here writes to the roster.
         </div>
+      )}
+      {/* ConsoleShell owns only the chrome — content supplies its own surface
+          (R1/the Apollo Surface Language "the page is never white"). Without
+          this, the list floats directly on --apollo-page with no card. */}
+      <div className="apollo-card mt-5">
+        <ReportsIndex units={units} reports={REPORTS} mode={mode} />
       </div>
     </ConsoleShell>
   );
@@ -228,14 +229,14 @@ function SingleUnitReports({
       pendingHonors={pendingHonors}
       reportsTab
     >
+      <h1 className="mb-1 text-xl font-bold">{ctx.unit.name} reports</h1>
+      <p className="text-muted-foreground mb-6 text-sm">
+        Advisory only — every report reads precomputed data; nothing here writes to the roster.
+      </p>
       {/* ConsoleShell owns only the chrome — content supplies its own surface
           (R1/the Apollo Surface Language "the page is never white"). Without
-          this, the list floats directly on --apollo-page with no card. */}
+          this, the table floats directly on --apollo-page with no card. */}
       <div className="apollo-card">
-        <h1 className="mb-1 text-xl font-semibold">{ctx.unit.name} reports</h1>
-        <p className="text-muted-foreground mb-6 text-sm">
-          Advisory only — every report reads precomputed data; nothing here writes to the roster.
-        </p>
         <SingleUnitReportsTable centerCode={code} perReport={perReport} reports={REPORTS} />
       </div>
     </ConsoleShell>
