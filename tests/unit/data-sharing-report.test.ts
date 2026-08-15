@@ -17,7 +17,9 @@ import {
   loadDatasetLinkRows,
   loadFundingSplit,
   loadShareRateCorpus,
+  mostRecentDeposits,
   pubAccessPmidSets,
+  RECENT_ITEMS_LIMIT,
   REGISTRY_DATA_TYPE,
   SHARE_RATE_YEAR_FLOOR,
   tierPubSpectrum,
@@ -457,11 +459,76 @@ describe("aggregateBySubtype", () => {
   });
 });
 
+const RECENT_ROWS: DatasetLinkRow[] = [
+  { cwid: "a", scholarName: "A", scholarSlug: "a", department: null, datasetId: "d-2022", repository: "Zenodo", accessModel: "open", depositYear: 2022 },
+  { cwid: "b", scholarName: "B", scholarSlug: "b", department: null, datasetId: "d-2024-late", repository: "GEO", accessModel: "open", depositYear: 2024 },
+  { cwid: "c", scholarName: "C", scholarSlug: "c", department: null, datasetId: "d-2024-early", repository: "dbGaP", accessModel: "controlled", depositYear: 2024 },
+  { cwid: "d", scholarName: "D", scholarSlug: "d", department: null, datasetId: "d-unknown", repository: "figshare", accessModel: "open", depositYear: undefined },
+  { cwid: "e", scholarName: "E", scholarSlug: "e", department: null, datasetId: "d-2023", repository: "Zenodo", accessModel: "open", depositYear: 2023 },
+];
+
+describe("mostRecentDeposits", () => {
+  it("sorts by depositYear descending", () => {
+    const recent = mostRecentDeposits(RECENT_ROWS);
+    expect(recent.map((r) => r.datasetId)).toEqual([
+      "d-2024-early", // tiebreak below — both 2024
+      "d-2024-late",
+      "d-2023",
+      "d-2022",
+      "d-unknown", // no depositYear sorts LAST, not first
+    ]);
+  });
+
+  it("breaks a same-year tie deterministically by datasetId, not DB return order", () => {
+    const recent = mostRecentDeposits(RECENT_ROWS);
+    const year2024 = recent.filter((r) => r.depositYear === 2024).map((r) => r.datasetId);
+    // "d-2024-early" < "d-2024-late" lexically — same order regardless of
+    // which one appeared first in the input array.
+    expect(year2024).toEqual(["d-2024-early", "d-2024-late"]);
+  });
+
+  it("caps to the given limit, keeping the most recent", () => {
+    const recent = mostRecentDeposits(RECENT_ROWS, 2);
+    expect(recent.map((r) => r.datasetId)).toEqual(["d-2024-early", "d-2024-late"]);
+  });
+
+  it("defaults the limit to RECENT_ITEMS_LIMIT", () => {
+    const rows = Array.from({ length: RECENT_ITEMS_LIMIT + 10 }, (_, i) => ({
+      cwid: `c${i}`,
+      scholarName: `C${i}`,
+      scholarSlug: `c${i}`,
+      department: null,
+      datasetId: `d${i}`,
+      repository: "Zenodo",
+      accessModel: "open",
+      depositYear: 2000 + i,
+    }));
+    expect(mostRecentDeposits(rows)).toHaveLength(RECENT_ITEMS_LIMIT);
+  });
+
+  it("does not mutate the input array", () => {
+    const copy = [...RECENT_ROWS];
+    mostRecentDeposits(RECENT_ROWS);
+    expect(RECENT_ROWS).toEqual(copy);
+  });
+
+  it("returns [] for an empty input", () => {
+    expect(mostRecentDeposits([])).toEqual([]);
+  });
+});
+
 describe("buildDataSharingReport — granular sub-types (this PR)", () => {
   it("wires bySubtype from aggregateBySubtype", () => {
     const report = buildDataSharingReport(SUBTYPE_ROWS);
     expect(report.bySubtype).toEqual(aggregateBySubtype(SUBTYPE_ROWS));
     expect(report.bySubtype).toContainEqual({ category: "genomic", subtype: "WGS/WES", count: 2 });
+  });
+});
+
+describe("buildDataSharingReport — recent activity", () => {
+  it("wires recentItems from mostRecentDeposits", () => {
+    const report = buildDataSharingReport(RECENT_ROWS);
+    expect(report.recentItems).toEqual(mostRecentDeposits(RECENT_ROWS));
   });
 });
 

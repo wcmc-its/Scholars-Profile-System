@@ -42,13 +42,23 @@
  * Same deposit-INSTANCE grain as the link counts elsewhere on this page —
  * not distinct datasets. Dark (empty table, section hidden) until the
  * companion ReCiterDB columns are live and `etl/data-sharing` has re-run.
+ *
+ * Recent activity (2026-08-15): a new §6, item-level (one row per
+ * (person, dataset) link, same grain as the CSV export — a multi-author
+ * dataset can appear more than once). "Recent" means `depositYear`, NOT
+ * "when SPS detected this" — this data model has no per-item discovery
+ * timestamp (`report.dataAsOf`'s doc comment explains why
+ * `lastRefreshedAt` can't stand in for one). Says so on the page, not just
+ * in code. Reuses `TierChip`/`AccessChip` for the same severity coloring as
+ * §3, per the existing convention: no new color system for this table
+ * either.
  */
 import Link from "next/link";
 
 import { CopyButton } from "@/components/publication/copy-button";
 import { Badge } from "@/components/ui/badge";
 import { SHARE_RATE_YEAR_FLOOR, type DataSharingReport } from "@/lib/api/data-sharing-report";
-import { urlOf } from "@/lib/repository-tier";
+import { tierOf, urlOf } from "@/lib/repository-tier";
 
 const thClass = "px-3 py-2 font-medium";
 const tdClass = "px-3 py-2";
@@ -504,6 +514,73 @@ function SubtypesSection({ report }: { report: DataSharingReport }) {
   );
 }
 
+function RecentActivitySection({ report }: { report: DataSharingReport }) {
+  return (
+    <section id="recent" className="mt-10 scroll-mt-4">
+      <h2 className="text-base font-semibold">6 · Recent activity</h2>
+      <p className="text-muted-foreground mt-1 text-sm">
+        Item-level — one row per (person, dataset) link, same grain as the CSV export (a dataset
+        with more than one depositing/citing faculty member can appear more than once). Sorted by
+        deposit year (repository metadata, or publication year as a fallback) — the only per-item
+        recency signal this data has. NOT &ldquo;when SPS detected this&rdquo;: every row in the
+        table is stamped with the same sync time on each weekly refresh (see &ldquo;Data as
+        of&rdquo; above), so a deposit found this week and one found months ago are
+        indistinguishable by that timestamp.
+        Ties within a year have no further real ordering.
+      </p>
+      <div className={sectionClass}>
+        <table className="w-full text-sm">
+          <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
+            <tr className="border-apollo-border border-b">
+              <th className={thClass}>Repository</th>
+              <th className={thClass}>Title</th>
+              <th className={thClass}>Tier</th>
+              <th className={thClass}>Access</th>
+              <th className={`${thClass} text-right`}>Deposit year</th>
+              <th className={thClass}>Faculty</th>
+              <th className={thClass}>Department</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.recentItems.map((r) => {
+              const url = urlOf(r.repository);
+              return (
+                // (cwid, datasetId) is PersonDatasetDeposit's own primary key —
+                // already unique per row, no index needed.
+                <tr key={`${r.datasetId}|${r.cwid}`} className="border-apollo-border border-b">
+                  <td className={`${tdClass} font-medium`}>
+                    {url ? (
+                      <a href={url} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                        {r.repository}
+                      </a>
+                    ) : (
+                      r.repository
+                    )}
+                  </td>
+                  <td className={tdClass}>{r.title || r.accessionOrDoi || "—"}</td>
+                  <td className={tdClass}>
+                    <TierChip tier={tierOf(r.repository)} />
+                  </td>
+                  <td className={tdClass}>
+                    <AccessChip accessModel={r.accessModel} />
+                  </td>
+                  <td className={`${tdClass} text-right`}>{r.depositYear ?? "—"}</td>
+                  <td className={tdClass}>
+                    <Link href={`/scholar/${r.scholarSlug}`} className="hover:underline">
+                      {r.scholarName}
+                    </Link>
+                  </td>
+                  <td className={tdClass}>{r.department ?? "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 export function DataSharingDashboard({ report }: { report: DataSharingReport }) {
   return (
     <>
@@ -513,6 +590,7 @@ export function DataSharingDashboard({ report }: { report: DataSharingReport }) 
       <RepositoriesSection report={report} />
       <FacultySection report={report} />
       <SubtypesSection report={report} />
+      <RecentActivitySection report={report} />
     </>
   );
 }
