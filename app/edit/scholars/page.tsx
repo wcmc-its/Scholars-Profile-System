@@ -3,29 +3,35 @@
  * `self-edit-launch-spec.md` § The Profiles roster). The admin entry point to
  * *find* a profile before editing it.
  *
- * Superuser-gated at B2 (org-unit-admin scope is the separate B3 workstream —
- * when it lands, this handler resolves `managedUnits` and passes
- * `unitCodeScope` to `loadEditRoster`, and the gate allows an in-scope admin).
+ * Formerly two pages: this roster and the standalone Data Quality dashboard
+ * (`/edit/data-quality`, prominence sort + leadership + gap tracking). They
+ * merged here — see `components/edit/profiles-roster.tsx` and
+ * `lib/api/data-quality.ts` for what carried over and what was dropped.
+ *
+ * Superuser-gated at B2, with an org-unit-admin scope tier (B3): a unit
+ * Owner/Curator sees only the scholars in the unit(s) they administer.
  * Authorization is re-checked here on every GET, never cached; the query — not
  * the UI — is the scope boundary. `force-dynamic` + `noindex`, mirroring the
  * other `/edit/*` pages.
+ *
+ * COI review is a SEPARATE, narrower gate layered on top: superuser only
+ * (`session.isSuperuser`), and only when `EDIT_DATA_QUALITY_DASHBOARD` is on.
+ * A comms_steward or unit Owner/Curator gets the rest of the roster (including
+ * Status) but never COI — so `gap` is forced to `"all"` here regardless of the
+ * query string, not just hidden in the UI: a crafted `?gap=has-coi` would
+ * otherwise leak COI presence through which rows come back even with the
+ * column itself withheld.
  */
 import { redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { ProfilesRoster } from "@/components/edit/profiles-roster";
-import {
-  loadEditRoster,
-  loadRosterFacets,
-  type EditRosterStatusFilter,
-  type EditRosterUnitFilter,
-} from "@/lib/api/edit-roster";
+import { loadDataQualityFacets, loadDataQualityRoster, parseDataQualityParams } from "@/lib/api/data-quality";
 import { getEffectiveEditSession, impersonationEnabled } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { requireSuperuserGet } from "@/lib/edit/authz";
-import { isEmptyScope, loadDataQualityScope } from "@/lib/edit/data-quality";
-import { isUnitAdminCenterProxyEnabled } from "@/lib/edit/unit-admin-center-proxy";
+import { isDataQualityDashboardEnabled, isEmptyScope, loadDataQualityScope } from "@/lib/edit/data-quality";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 
@@ -36,37 +42,12 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-const PAGE_SIZE = 50;
-
-function parseStatus(v: string | undefined): EditRosterStatusFilter {
-  return v === "visible" || v === "hidden" ? v : "all";
-}
-
-/** Decode the org-unit select value (`dept:CODE` | `div:CODE` | `center:CODE`)
- *  into a roster unit filter. Unknown/empty ⇒ no filter. */
-function parseUnit(v: string | undefined): EditRosterUnitFilter | undefined {
-  if (!v) return undefined;
-  const sep = v.indexOf(":");
-  if (sep < 0) return undefined;
-  const kind = v.slice(0, sep);
-  const code = v.slice(sep + 1);
-  if (!code) return undefined;
-  if (kind === "dept") return { kind: "department", code };
-  if (kind === "div") return { kind: "division", code };
-  if (kind === "center") return { kind: "center", code };
-  return undefined;
-}
+const PAGE_SIZE = 100;
 
 export default async function EditScholarsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{
-    q?: string;
-    status?: string;
-    page?: string;
-    unit?: string;
-    type?: string;
-  }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await getEffectiveEditSession();
   if (!session) {
@@ -82,12 +63,6 @@ export default async function EditScholarsPage({
   //     so the roster can no longer list a profile they'd be refused on open.
   //   - anyone else (a plain scholar) → empty scope, falls through to the
   //     superuser re-check, which emits the `edit_authz_denied` line and 403s.
-  //
-  // ponytail: `loadDataQualityScope` is reused verbatim as THE unit-scope source
-  // — it already resolves grants + the dept→division cascade + center codes, and
-  // sharing it is what makes Profiles and Data quality show the same people. Its
-  // name is dashboard-flavoured for historical reasons only (it reads no flag);
-  // move it to a neutral module if a third consumer appears.
   const scope = await loadDataQualityScope(session, db.read);
   if (isEmptyScope(scope)) {
     const denial = requireSuperuserGet({ session, path: "/edit/scholars", targetId: "roster" });
@@ -95,52 +70,53 @@ export default async function EditScholarsPage({
       return <ForbiddenEditPage />;
     }
   }
-  // A non-global editor is scope-filtered; a global editor passes `undefined`
-  // (no scope clause) and sees everyone, exactly as before.
-  const unitScope = scope.all === false ? scope : null;
-  const { q, status, page, unit: unitParam, type } = (await searchParams) ?? {};
-  const query = (q ?? "").trim();
-  const statusFilter = parseStatus(status);
-  const unit = parseUnit(unitParam);
-  const roleCategory = (type ?? "").trim() || undefined;
-  const pageNum = Math.max(Number.parseInt(page ?? "0", 10) || 0, 0);
 
-  const [{ entries, total }, allFacets] = await Promise.all([
-    loadEditRoster(
+  // COI review is superuser-only, layered on top of the roster scope above —
+  // see the module doc comment.
+  const canSeeCoi = session.isSuperuser && isDataQualityDashboardEnabled();
+
+  const params = parseDataQualityParams((await searchParams) ?? {});
+  const gap = canSeeCoi ? params.gap : "all";
+
+  const [roster, allFacets] = await Promise.all([
+    loadDataQualityRoster(
       {
-        query,
-        status: statusFilter,
-        roleCategory,
-        unit,
-        unitCodeScope: unitScope ? unitScope.unitCodes : undefined,
-        // Centers only when Amendment 4 actually grants center-based edit access
-        // (#1104). The roster must never be BROADER than the per-scholar
-        // predicate — a listed row whose editor 403s on click is worse than an
-        // absent row. `loadDataQualityScope` returns centers unconditionally
-        // because a read-only gap report has no such coupling.
-        scopeCenterCodes:
-          unitScope && isUnitAdminCenterProxyEnabled() ? unitScope.centerCodes : undefined,
+        scope,
+        query: params.q,
+        roleCategories: params.roleCategories,
+        units: params.units,
+        gap,
+        includeHidden: params.includeHidden,
         limit: PAGE_SIZE,
-        offset: pageNum * PAGE_SIZE,
+        offset: params.page * PAGE_SIZE,
       },
       db.read,
     ),
-    loadRosterFacets(db.read),
+    loadDataQualityFacets(db.read),
   ]);
 
   // Narrow the org-unit filter dropdowns to the viewer's own scope. Without this
   // a curator is offered every department in the institution and any pick but
   // their own returns zero rows (scope AND filter) — an empty list that reads as
   // "no such people" rather than "not yours". Person-type stays global: those
-  // categories are not unit-specific.
-  const facets = unitScope
-    ? {
-        ...allFacets,
-        departments: allFacets.departments.filter((d) => unitScope.unitCodes.includes(d.code)),
-        divisions: allFacets.divisions.filter((d) => unitScope.unitCodes.includes(d.code)),
-        centers: allFacets.centers.filter((c) => unitScope.centerCodes.includes(c.code)),
-      }
-    : allFacets;
+  // categories are not unit-specific. Divisions nest inside their department
+  // here (unlike the old flat roster facets), so a division-only curator's
+  // department survives the filter too — dropping it would drop their division
+  // along with it.
+  const codeOf = (value: string) => value.slice(value.indexOf(":") + 1);
+  const facets =
+    scope.all === false
+      ? {
+          ...allFacets,
+          departments: allFacets.departments
+            .map((d) => ({
+              ...d,
+              divisions: d.divisions.filter((div) => scope.unitCodes.includes(codeOf(div.value))),
+            }))
+            .filter((d) => scope.unitCodes.includes(codeOf(d.value)) || d.divisions.length > 0),
+          centers: allFacets.centers.filter((c) => scope.centerCodes.includes(codeOf(c.value))),
+        }
+      : allFacets;
 
   // The "URL requests" admin tab + pending-count pill (#497 PR-3c); `null` when
   // the slug-request feature is off, which hides the tab.
@@ -152,7 +128,6 @@ export default async function EditScholarsPage({
     ? await countPendingHonors(db.read)
     : null;
 
-
   return (
     <ConsoleShell
       active="profiles"
@@ -161,23 +136,23 @@ export default async function EditScholarsPage({
       pendingHonors={pendingHonors}
       // No per-page override needed for `profilesTab`/`unitsTab`/`dataQualityTab`
       // anymore — `ConsoleShell` derives all three from `session` via
-      // `loadConsoleTabs` (docs/edit-console-ia-spec.md Part B §2). This is
-      // the exact Gap-2 root cause fix: the old `profilesTab={unitScope !== null}`
-      // override here leaked into `AdminSubnav`'s News-tab gate (piggybacked on
-      // `profilesTab`), showing a unit Owner/Curator a News link that 404s.
+      // `loadConsoleTabs` (docs/edit-console-ia-spec.md Part B §2).
     >
       <ProfilesRoster
-        entries={entries}
-        total={total}
-        query={query}
-        status={statusFilter}
-        unit={unitParam ?? ""}
-        roleCategory={roleCategory ?? ""}
+        entries={roster.entries}
+        total={roster.total}
+        counts={roster.counts}
         facets={facets}
-        page={pageNum}
+        roleCategories={params.roleCategories}
+        units={params.unitValues}
+        q={params.q}
+        gap={gap}
+        includeHidden={params.includeHidden}
+        page={params.page}
         pageSize={PAGE_SIZE}
         canImpersonate={impersonationEnabled() && session.isSuperuser}
         viewerCwid={session.cwid}
+        canSeeCoi={canSeeCoi}
       />
     </ConsoleShell>
   );

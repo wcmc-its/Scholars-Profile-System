@@ -1,9 +1,12 @@
 /**
- * `components/edit/data-quality-filters.tsx` — the client filter island. Verifies
- * auto-apply: every change navigates via router.replace to a query string the
- * server parser decodes (repeated ?type=/?unit=, the gap/overview-age selects, the
+ * `components/edit/profiles-filters.tsx` — the Profiles roster's client filter
+ * island (formerly `data-quality-filters.tsx` / `DataQualityFilters`, folded in
+ * when the standalone Data Quality dashboard merged into `/edit/scholars`).
+ * Verifies auto-apply: every change navigates via router.replace to a query
+ * string the server parser decodes (repeated ?type=/?unit=, the gap select, the
  * hidden-roles toggle, and the debounced search), with no "Apply" button. Also
- * checks the structural division indent (#3 fix).
+ * checks the structural division indent (#3 fix) and the `canSeeCoi` gate on the
+ * "Gap" (COI) select.
  */
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +16,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace, push: vi.fn(), prefetch: vi.fn() }),
 }));
 
-import { DataQualityFilters } from "@/components/edit/data-quality-filters";
+import { ProfilesFilters } from "@/components/edit/profiles-filters";
 
 const facets = {
   roleCategories: [
@@ -33,14 +36,14 @@ const facets = {
 
 function renderFilters(over: Record<string, unknown> = {}) {
   return render(
-    <DataQualityFilters
+    <ProfilesFilters
       facets={facets as never}
       roleCategories={["postdoc"]}
       units={["dept:MED"]}
       q=""
       gap="all"
-      overviewAge="all"
       includeHidden={true}
+      canSeeCoi={true}
       {...over}
     />,
   );
@@ -50,7 +53,7 @@ const lastUrl = () => String(replace.mock.calls.at(-1)?.[0] ?? "");
 
 beforeEach(() => vi.clearAllMocks());
 
-describe("DataQualityFilters — auto-apply", () => {
+describe("ProfilesFilters — auto-apply", () => {
   it("has no Apply button", () => {
     renderFilters();
     expect(screen.queryByRole("button", { name: /apply/i })).toBeNull();
@@ -75,14 +78,13 @@ describe("DataQualityFilters — auto-apply", () => {
     expect(lastUrl()).toContain("unit=center%3AMCC");
   });
 
-  it("navigates when the gap and overview-age selects change", () => {
+  it("navigates when the gap select changes, with just the two COI options", () => {
     renderFilters();
-    fireEvent.change(screen.getByLabelText("Gap"), { target: { value: "no-headshot" } });
-    expect(lastUrl()).toContain("gap=no-headshot");
-    fireEvent.change(screen.getByLabelText("Overview last updated"), {
-      target: { value: "imported" },
-    });
-    expect(lastUrl()).toContain("overviewAge=imported");
+    const select = screen.getByLabelText("Gap") as HTMLSelectElement;
+    const values = Array.from(select.options).map((o) => o.value);
+    expect(values).toEqual(["all", "has-coi"]);
+    fireEvent.change(select, { target: { value: "has-coi" } });
+    expect(lastUrl()).toContain("gap=has-coi");
   });
 
   it("navigates when the hide-students checkbox changes", () => {
@@ -118,7 +120,7 @@ describe("DataQualityFilters — auto-apply", () => {
   it("Clear navigates back to the unfiltered route", () => {
     renderFilters();
     fireEvent.click(screen.getByRole("button", { name: /clear/i }));
-    expect(replace).toHaveBeenLastCalledWith("/edit/data-quality", { scroll: false });
+    expect(replace).toHaveBeenLastCalledWith("/edit/scholars", { scroll: false });
   });
 
   it("renders departments and divisions as a flat (non-indented) list", () => {
@@ -128,5 +130,17 @@ describe("DataQualityFilters — auto-apply", () => {
     for (const btn of document.querySelectorAll<HTMLButtonElement>("button[aria-pressed]")) {
       expect(btn.style.paddingInlineStart).toBe("");
     }
+  });
+});
+
+describe("ProfilesFilters — canSeeCoi gates the Gap select", () => {
+  it("shows the Gap select when canSeeCoi is true", () => {
+    renderFilters({ canSeeCoi: true });
+    expect(screen.getByLabelText("Gap")).toBeTruthy();
+  });
+
+  it("hides the Gap select entirely when canSeeCoi is false", () => {
+    renderFilters({ canSeeCoi: false });
+    expect(screen.queryByLabelText("Gap")).toBeNull();
   });
 });

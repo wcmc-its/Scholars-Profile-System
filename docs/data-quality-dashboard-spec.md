@@ -1,6 +1,10 @@
 # Data Quality Dashboard — `/edit/data-quality`
 
-**Status:** PROPOSED (awaiting approval)
+**Status:** SUPERSEDED — merged into the Profiles roster (`/edit/scholars`,
+`components/edit/profiles-roster.tsx`) 2026-08-15. The standalone page/tab
+described below no longer exists. Headshot/overview gap tracking was dropped
+in the merge; COI review carried over as a superuser-only column
+(`lib/edit/data-quality.ts`). This doc is kept for historical context only.
 **Date:** 2026-06-17
 **Scope:** A new tab in the `/edit` admin surface that lists scholars with their data-quality
 gaps (missing headshot, missing overview, pending COI suggestions), sorted by a rolled-our-own

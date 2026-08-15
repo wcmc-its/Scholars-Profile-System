@@ -40,7 +40,6 @@ export const ALL_TABS: ConsoleTabId[] = [
   "administrators",
   "methods",
   "reports",
-  "dataQuality",
   "dataSharing",
   "activity",
   "usage",
@@ -62,8 +61,8 @@ export interface MatrixRow {
   pins?: string;
 }
 
-// Flag-gated tabs (honors, news, administrators, methods, dataQuality,
-// dataSharing, cores, matcha) assume their flag is ON — these rows exercise
+// Flag-gated tabs (honors, news, administrators, methods, dataSharing, cores,
+// matcha) assume their flag is ON — these rows exercise
 // role/grant logic, not env config. `console-tab-matrix.test.ts`'s "feature
 // flags" block covers the flag-off direction separately, against the real
 // `isXTabVisible` functions (this fixture has no flags-off rows to avoid
@@ -83,7 +82,7 @@ export const INTENDED_MATRIX: MatrixRow[] = [
     name: "comms_steward",
     session: sess({ isCommsSteward: true }),
     grants: grants(),
-    expect: ["profiles", "units", "news", "methods", "reports", "dataQuality", "dataSharing"],
+    expect: ["profiles", "units", "news", "methods", "reports", "dataSharing"],
     pins: "Gap 2 — news via isNewsQueueTabVisible, never via a profilesTab piggyback",
   },
   {
@@ -102,21 +101,21 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       reportableUnitCount: 2,
       viewerCanViewUsage: true,
     }),
-    expect: ["profiles", "units", "administrators", "reports", "dataQuality", "usage"],
+    expect: ["profiles", "units", "administrators", "reports", "usage"],
     pins: "Gap 3 (D5: administrators for Owners) + Gap 4 (reports/usage everywhere)",
   },
   {
     name: "unit Owner of a department only (0 reportable — reports counts centers, not depts)",
     session: sess(),
     grants: grants({ ownerUnitCount: 1, manageableUnitCount: 1 }),
-    expect: ["profiles", "units", "administrators", "dataQuality"],
+    expect: ["profiles", "units", "administrators"],
     pins: "reportableUnitCount vs manageableUnitCount divergence, Part B §4",
   },
   {
     name: "unit Curator (1 manageable center, nothing else)",
     session: sess(),
     grants: grants({ manageableUnitCount: 1, reportableUnitCount: 1 }),
-    expect: ["profiles", "units", "reports", "dataQuality"],
+    expect: ["profiles", "units", "reports"],
     pins: "D5 by-design exclusion — curators never see Administrators (ownerUnitCount stays 0)",
   },
   {
@@ -141,7 +140,6 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "news",
       "methods",
       "reports",
-      "dataQuality",
       "dataSharing",
       "administrators",
       "usage",

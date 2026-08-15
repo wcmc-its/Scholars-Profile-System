@@ -224,42 +224,6 @@ describe("AdminSubnav", () => {
     expect(screen.getByTestId("account-menu-stub")).toBeTruthy();
   });
 
-  // Data Quality dashboard tab (docs/data-quality-dashboard-spec.md).
-  it("hides the Data quality tab when dataQualityTab is null/omitted", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} dataQualityTab={null} />);
-    expect(screen.queryByTestId("admin-tab-data-quality")).toBeNull();
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
-    expect(screen.queryByTestId("admin-tab-data-quality")).toBeNull();
-  });
-
-  it("shows the Data quality tab (linking /edit/data-quality) when dataQualityTab is 0", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} dataQualityTab={0} />);
-    const tab = screen.getByTestId("admin-tab-data-quality");
-    expect(tab.getAttribute("href")).toBe("/edit/data-quality");
-    expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
-  });
-
-  it("marks the Data quality tab active with aria-current", () => {
-    render(<AdminSubnav active="data-quality" pendingSlugRequests={null} pendingHonors={null} dataQualityTab={0} />);
-    expect(screen.getByTestId("admin-tab-data-quality").getAttribute("aria-current")).toBe("page");
-  });
-
-  // A unit Owner/Curator (superuserSurfaces=false) still gets Data quality scoped
-  // to their units — the `/edit/units` page passes dataQualityTab on grants.
-  it("shows Data quality for a non-superuser when dataQualityTab is set", () => {
-    render(
-      <AdminSubnav
-        active="units"
-        pendingSlugRequests={null} pendingHonors={null}
-        superuserSurfaces={false}
-        unitsTab
-        dataQualityTab={0}
-      />,
-    );
-    expect(screen.getByTestId("admin-tab-data-quality")).toBeTruthy();
-    expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
-  });
-
   // Reports IA redesign (2026-08-14) — reverses the 2026-08-12 "exclusively via
   // /edit/units" direction. Reports is a dedicated top-level tab, not an
   // Insights peer (see the two-tier grouping suite below for its position),
@@ -491,13 +455,12 @@ describe("AdminSubnav — the Honors tab (#1762)", () => {
 describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  /** Everything a full superuser sees: all 15 tabs visible, all four groups populated. */
+  /** Everything a full superuser sees: all 14 tabs visible, all four groups populated. */
   const allOn = {
     pendingSlugRequests: 2,
     pendingHonors: 0,
     administratorsTab: 0,
     methodsTab: 0,
-    dataQualityTab: 0,
     unitsTab: true,
   } as const;
 
@@ -529,7 +492,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     // <Link>, never a hover menu or a button (#1783).
     expect(screen.getByTestId("admin-group-queues").getAttribute("href")).toBe("/edit/slug-requests");
     expect(screen.getByTestId("admin-group-registries").getAttribute("href")).toBe("/edit/slugs");
-    expect(screen.getByTestId("admin-group-insights").getAttribute("href")).toBe("/edit/data-quality");
+    expect(screen.getByTestId("admin-group-insights").getAttribute("href")).toBe("/edit/activity");
     expect(screen.getByTestId("admin-group-tools").getAttribute("href")).toBe("/edit/find-researchers");
   });
 
@@ -539,7 +502,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     const expected: Record<string, string> = {
       "slug-requests": "queues", "honors-queue": "queues", "news-queue": "queues", cores: "queues",
       slugs: "registries", administrators: "registries", methods: "registries",
-      "data-quality": "insights", activity: "insights", usage: "insights", "etl-status": "insights",
+      activity: "insights", usage: "insights", "etl-status": "insights",
       "find-researchers": "tools", matcha: "tools",
     };
     for (const [id, group] of Object.entries(expected)) {
@@ -604,7 +567,6 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
       />,
     );
     expect(screen.queryByTestId("admin-group-insights")).toBeNull();
-    expect(screen.queryByTestId("admin-tab-data-quality")).toBeNull();
     expect(screen.queryByTestId("admin-tab-usage")).toBeNull();
   });
 
@@ -750,7 +712,6 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     // tier-1 order test above), so it never appears in this menu.
     fireEvent.focus(screen.getByTestId("admin-group-insights"));
     expect(order(await screen.findByTestId("admin-group-menu-insights"))).toEqual([
-      "admin-tab-data-quality",
       "admin-tab-activity",
       "admin-tab-usage",
       "admin-tab-etl-status",
@@ -764,7 +725,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     expect(order(screen.getByTestId("admin-subnav-tier1"))).toEqual(
       [
         "profiles", "units", "slug-requests", "honors-queue", "news-queue", "slugs",
-        "administrators", "methods", "reports", "data-quality", "activity", "usage", "etl-status", "cores",
+        "administrators", "methods", "reports", "activity", "usage", "etl-status", "cores",
         "find-researchers",
       ].map((id) => `admin-tab-${id}`),
     );

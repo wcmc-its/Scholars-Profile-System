@@ -24,12 +24,9 @@ function entry(over: Partial<DataQualityEntry> = {}): DataQualityEntry {
     isChief: true,
     leadership: "Chief",
     leadershipTier: 2,
-    headshot: "present",
-    hasOverview: true,
-    overviewUpdatedAt: null,
-    overviewState: "imported",
+    isVisible: true,
     pendingCoiHigh: 0,
-    pendingCoiMedium: 1,
+    pendingCoiMedium: 0,
     prominence: 10.567,
     editHref: "/edit/scholar/fac1",
     ...over,
@@ -37,44 +34,61 @@ function entry(over: Partial<DataQualityEntry> = {}): DataQualityEntry {
 }
 
 describe("buildDataQualityCsv", () => {
-  it("emits the header and rank/leadership/overview_updated/prominence, quoting commas", () => {
-    const csv = buildDataQualityCsv([
-      entry({ leadership: "Dean", overviewState: "lt1yr", overviewUpdatedAt: "2026-06-01T12:00:00.000Z" }),
-      entry({
-        cwid: "fac2",
-        name: "Ben Chair",
-        isChair: true,
-        isChief: false,
-        leadership: "Chair",
-        headshot: "missing",
-        hasOverview: false,
-        overviewState: "never",
-        overviewUpdatedAt: null,
-        pendingCoiHigh: 2,
-      }),
-    ]);
+  it("emits the header and rank/leadership/visible/pending-coi/prominence, quoting commas, when includeCoi is true", () => {
+    const csv = buildDataQualityCsv(
+      [
+        entry({ leadership: "Dean", pendingCoiHigh: 0, pendingCoiMedium: 1 }),
+        entry({
+          cwid: "fac2",
+          name: "Ben Chair",
+          isChair: true,
+          isChief: false,
+          leadership: "Chair",
+          isVisible: false,
+          pendingCoiHigh: 2,
+          pendingCoiMedium: 0,
+        }),
+      ],
+      { includeCoi: true },
+    );
     const lines = csv.trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "rank,cwid,name,title,unit,person_type,leadership,headshot,has_overview,overview_updated,pending_coi_high,pending_coi_medium,prominence",
+      "rank,cwid,name,title,unit,person_type,leadership,visible,pending_coi_high,pending_coi_medium,prominence",
     );
-    // Row 1: rank 1, name with a comma is quoted, Dean label, edit date (YYYY-MM-DD), prominence to 2dp.
+    // Row 1: rank 1, name with a comma is quoted, Dean label, visible, COI counts, prominence to 2dp.
     expect(lines[1].startsWith("1,fac1,")).toBe(true);
     expect(lines[1]).toContain('"Ada, Faculty"');
-    expect(lines[1]).toContain(",Dean,present,yes,2026-06-01,0,1,");
+    expect(lines[1]).toContain(",Dean,yes,0,1,");
     expect(lines[1].endsWith(",10.57")).toBe(true);
-    // Row 2: rank 2, Chair, missing headshot, no overview (empty overview_updated), 2 COI.
+    // Row 2: rank 2, Chair, hidden (visible=no), 2 high-tier COI.
     expect(lines[2].startsWith("2,fac2,")).toBe(true);
-    expect(lines[2]).toContain(",Chair,missing,no,,2,");
+    expect(lines[2]).toContain(",Chair,no,2,0,");
   });
 
-  it("an imported (un-edited) overview shows 'imported' in overview_updated", () => {
-    const csv = buildDataQualityCsv([entry({ overviewState: "imported", overviewUpdatedAt: null })]);
-    expect(csv.split("\r\n")[1]).toContain(",present,yes,imported,");
+  it("omits the COI columns entirely when includeCoi is false", () => {
+    const csv = buildDataQualityCsv(
+      [entry({ leadership: "Dean", pendingCoiHigh: 3, pendingCoiMedium: 2 })],
+      { includeCoi: false },
+    );
+    const lines = csv.trimEnd().split("\r\n");
+    expect(lines[0]).toBe("rank,cwid,name,title,unit,person_type,leadership,visible,prominence");
+    // The COI counts never appear anywhere in the row — not just hidden from
+    // the header, actually absent from the serialized cells.
+    expect(lines[1]).not.toContain("3");
+    expect(lines[1]).not.toContain(",2,");
+    expect(lines[1]).toContain(",Dean,yes,10.57");
   });
 
   it("renders a non-leader with an empty leadership cell", () => {
-    const csv = buildDataQualityCsv([entry({ isChief: false, isChair: false, leadership: null })]);
-    expect(csv.split("\r\n")[1]).toContain(",,present,"); // empty leadership between person_type and headshot
+    const csv = buildDataQualityCsv([entry({ isChief: false, isChair: false, leadership: null })], {
+      includeCoi: true,
+    });
+    expect(csv.split("\r\n")[1]).toContain(",,yes,"); // empty leadership between person_type and visible
+  });
+
+  it("renders a hidden (suppressed) scholar with visible=no", () => {
+    const csv = buildDataQualityCsv([entry({ isVisible: false })], { includeCoi: false });
+    expect(csv.split("\r\n")[1]).toContain(",no,");
   });
 });
 
@@ -84,10 +98,9 @@ function fakeClient(scholars: unknown[]) {
     scholar: { findMany: vi.fn().mockResolvedValue(scholars) },
     department: { findMany: vi.fn().mockResolvedValue([]) },
     division: { findMany: vi.fn().mockResolvedValue([]) },
+    center: { findMany: vi.fn().mockResolvedValue([]) },
     grant: { groupBy: vi.fn().mockResolvedValue([]) },
     coiGapCandidate: { groupBy: vi.fn().mockResolvedValue([]) },
-    fieldOverride: { findMany: vi.fn().mockResolvedValue([]) },
-    overviewProvenance: { findMany: vi.fn().mockResolvedValue([]) },
     centerMembership: { findMany: vi.fn().mockResolvedValue([]) },
   };
 }
@@ -97,10 +110,9 @@ const scholarRow = (i: number) => ({
   preferredName: `S${String(i).padStart(3, "0")}`,
   primaryTitle: null,
   roleCategory: "full_time_faculty",
-  overview: "bio",
+  status: "active",
   hIndex: null,
   scoredPubCount: 100 - i,
-  hasHeadshot: true,
   department: null,
   division: null,
 });
@@ -118,5 +130,17 @@ describe("loadDataQualityExport", () => {
     // higher scoredPubCount (lower index) ranks first
     expect(out.rows[0].cwid).toBe("s0");
     expect(out.rows[119].cwid).toBe("s119");
+  });
+
+  it("carries isVisible through from Scholar.status", async () => {
+    const rows = [
+      { ...scholarRow(0), status: "active" },
+      { ...scholarRow(1), status: "suppressed" },
+    ];
+    const c = fakeClient(rows);
+    const out = await loadDataQualityExport({ scope: { all: true } }, c as unknown as LoaderClient);
+    const byCwid = new Map(out.rows.map((r) => [r.cwid, r]));
+    expect(byCwid.get("s0")?.isVisible).toBe(true);
+    expect(byCwid.get("s1")?.isVisible).toBe(false);
   });
 });

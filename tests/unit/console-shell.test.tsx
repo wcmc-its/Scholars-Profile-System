@@ -57,7 +57,6 @@ const NO_TABS: ConsoleTabState = {
   administrators: false,
   methods: false,
   reports: false,
-  dataQuality: false,
   dataSharing: false,
   activity: false,
   usage: false,

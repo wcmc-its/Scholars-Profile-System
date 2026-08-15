@@ -13,7 +13,6 @@ describe("buildConsoleLinks", () => {
       isSuperuser: true,
       canManageMethods: false,
       managesUnits: false,
-      canBrowseDataQuality: false,
     });
     expect(links).toEqual([
       { id: "manage-profiles", label: "Admin console", href: "/edit/scholars" },
@@ -25,7 +24,6 @@ describe("buildConsoleLinks", () => {
       isSuperuser: true,
       canManageMethods: true,
       managesUnits: true,
-      canBrowseDataQuality: false,
     });
     expect(links.map((l) => l.id)).toEqual(["manage-profiles"]);
   });
@@ -35,7 +33,6 @@ describe("buildConsoleLinks", () => {
       isSuperuser: false,
       canManageMethods: true,
       managesUnits: false,
-      canBrowseDataQuality: false,
     });
     expect(links).toEqual([
       { id: "methods", label: "Method families", href: "/edit/methods" },
@@ -52,48 +49,11 @@ describe("buildConsoleLinks", () => {
       isSuperuser: false,
       canManageMethods: false,
       managesUnits: true,
-      canBrowseDataQuality: false,
     });
     expect(links).toEqual([
       { id: "profiles", label: "Profiles", href: "/edit/scholars" },
       { id: "units", label: "Org units", href: "/edit/units" },
     ]);
-  });
-
-  it("unit Owner/Curator with the dashboard on → Profiles, Data quality, Org units", () => {
-    const links = buildConsoleLinks({
-      isSuperuser: false,
-      canManageMethods: false,
-      managesUnits: true,
-      canBrowseDataQuality: true,
-    });
-    expect(links).toEqual([
-      { id: "profiles", label: "Profiles", href: "/edit/scholars" },
-      { id: "data-quality", label: "Data quality", href: "/edit/data-quality" },
-      { id: "units", label: "Org units", href: "/edit/units" },
-    ]);
-  });
-
-  it("dashboard flag off → Profiles survives, only Data quality drops (it would 404)", () => {
-    const links = buildConsoleLinks({
-      isSuperuser: false,
-      canManageMethods: false,
-      managesUnits: true,
-      canBrowseDataQuality: false,
-    });
-    expect(links.map((l) => l.id)).toEqual(["profiles", "units"]);
-  });
-
-  it("a grantless viewer never gets Profiles, even with the dashboard flag on", () => {
-    // `canBrowseDataQuality` folds in `managesUnits`, so this combination should
-    // not arise — pinned anyway: the roster row keys on the GRANT, not the flag.
-    const links = buildConsoleLinks({
-      isSuperuser: false,
-      canManageMethods: false,
-      managesUnits: false,
-      canBrowseDataQuality: true,
-    });
-    expect(links.map((l) => l.id)).toEqual(["data-quality"]);
   });
 
   it("superuser → still only 'Admin console', never the scoped rows", () => {
@@ -103,7 +63,6 @@ describe("buildConsoleLinks", () => {
       isSuperuser: true,
       canManageMethods: true,
       managesUnits: true,
-      canBrowseDataQuality: true,
     });
     expect(links.map((l) => l.id)).toEqual(["manage-profiles"]);
   });
@@ -113,7 +72,6 @@ describe("buildConsoleLinks", () => {
       isSuperuser: false,
       canManageMethods: true,
       managesUnits: true,
-      canBrowseDataQuality: false,
     });
     expect(links.map((l) => l.id)).toEqual(["methods", "profiles", "units"]);
   });
@@ -123,7 +81,6 @@ describe("buildConsoleLinks", () => {
       isSuperuser: false,
       canManageMethods: false,
       managesUnits: false,
-      canBrowseDataQuality: false,
     });
     expect(links).toEqual([]);
   });
@@ -135,7 +92,6 @@ describe("buildConsoleLinks", () => {
       isSuperuser: false,
       canManageMethods: false,
       managesUnits: false,
-      canBrowseDataQuality: false,
     });
     expect(links).toEqual([]);
   });
@@ -144,9 +100,9 @@ describe("buildConsoleLinks", () => {
   // in-console AdminSubnav (`/edit/find-researchers`). The dropdown never carries it.
   it("never surfaces a find-researchers / Funding-matcher row, for any viewer", () => {
     const matrices = [
-      { isSuperuser: true, canManageMethods: false, managesUnits: false, canBrowseDataQuality: false },
-      { isSuperuser: true, canManageMethods: true, managesUnits: true, canBrowseDataQuality: true },
-      { isSuperuser: false, canManageMethods: true, managesUnits: true, canBrowseDataQuality: true },
+      { isSuperuser: true, canManageMethods: false, managesUnits: false },
+      { isSuperuser: true, canManageMethods: true, managesUnits: true },
+      { isSuperuser: false, canManageMethods: true, managesUnits: true },
     ];
     for (const v of matrices) {
       expect(buildConsoleLinks(v).some((l) => l.href === "/edit/find-researchers")).toBe(false);
