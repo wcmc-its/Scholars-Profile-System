@@ -136,6 +136,7 @@ export function AdminSubnav({
   unitsTab = false,
   usageTab = false,
   reportsTab = false,
+  newsTab = false,
   viewerIsDeveloper = false,
 }: {
   active: AdminSubnavActive;
@@ -196,6 +197,13 @@ export function AdminSubnav({
    *  escape hatch, mirroring `usageTab`. Default `false` (Reports IA redesign,
    *  2026-08-14). */
   reportsTab?: boolean;
+  /** Show the "News" tab (`/edit/news-queue`) to a non-superuser comms_steward.
+   *  Superusers already get it via `superuserSurfaces`; this is the escape
+   *  hatch, mirroring `reportsTab`. Gap 2 fix (2026-08-14) — previously
+   *  piggybacked on `profilesTab`, which a unit Owner/Curator can also earn
+   *  (`/edit/scholars`'s `unitScope !== null` override), showing a News link
+   *  that 404s on `isNewsQueueTabVisible`'s actual gate. Default `false`. */
+  newsTab?: boolean;
   /** Show the "Funding matcher" tab to a pure development-role viewer who is NOT
    *  a superuser. Superusers already get it via `superuserSurfaces`; this is the
    *  dev-role escape hatch on `/edit/find-researchers` (their only console page).
@@ -233,7 +241,11 @@ export function AdminSubnav({
       // #1762 round 4: no count badge — the curator asked for it to be dropped.
       { show: pendingHonors !== null, id: "honors-queue", href: "/edit/honors-queue", label: "Honors" },
       {
-        show: (superuserSurfaces || profilesTab) && isNewsQueueEnabled(),
+        // Gap 2 fix — was `superuserSurfaces || profilesTab`, piggybacking on a
+        // prop a unit Owner/Curator can also earn; `newsTab` is the dedicated
+        // signal (mirrors `reportsTab`), matching `isNewsQueueTabVisible`'s
+        // actual isSuperuser-or-isCommsSteward gate.
+        show: (superuserSurfaces || newsTab) && isNewsQueueEnabled(),
         id: "news-queue",
         href: "/edit/news-queue",
         label: "News",
@@ -241,8 +253,15 @@ export function AdminSubnav({
       // Always visible to superusers — the slug namespace exists regardless of the
       // slug-request flag.
       { show: superuserSurfaces, id: "slugs", href: "/edit/slugs", label: "URL registry" },
+      // Gap 3 fix — was `superuserSurfaces && administratorsTab !== null && ...`,
+      // ANDing a role check its siblings (methods/dataQuality/dataSharing below)
+      // don't. `administratorsTab` is now `0`-or-`null` FOR THE VIEWER already
+      // (superuser OR unit Owner, D5 — see `loadConsoleTabs`'s `administrators`
+      // predicate), so the count-vs-null check alone is the correct gate; the
+      // extra AND was hiding the tab from exactly the Owner it exists to serve,
+      // mirroring the #1767 shape already fixed for Honors above.
       {
-        show: superuserSurfaces && administratorsTab !== null && administratorsTab !== undefined,
+        show: administratorsTab !== null && administratorsTab !== undefined,
         id: "administrators",
         href: "/edit/administrators",
         label: "Administrators",

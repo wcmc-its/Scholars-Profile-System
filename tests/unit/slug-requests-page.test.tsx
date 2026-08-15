@@ -33,9 +33,17 @@ vi.mock("@/lib/db", () => ({
   db: { read: { scholar: { findUnique: vi.fn().mockResolvedValue(null) } }, write: {} },
 }));
 vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: mockForbidden }));
-vi.mock("@/components/edit/admin-subnav", () => ({
-  AdminSubnav: (p: { pendingSlugRequests: number | null }) => (
-    <div data-testid="mock-subnav" data-pending={String(p.pendingSlugRequests)} />
+// `ConsoleShell` is an async Server Component (it awaits `loadConsoleTabs`) —
+// mocked here like every other chrome component in this boundary test, both to
+// avoid needing a full grant-loader mock stack AND because react-dom's
+// synchronous renderer can't mount an unresolved async component reached via
+// JSX (only the page's own top-level `await SlugRequestsPage()` is awaited).
+vi.mock("@/components/edit/console-shell", () => ({
+  ConsoleShell: (p: { pendingSlugRequests: number | null; children: React.ReactNode }) => (
+    <div>
+      <div data-testid="mock-subnav" data-pending={String(p.pendingSlugRequests)} />
+      {p.children}
+    </div>
   ),
 }));
 vi.mock("@/components/edit/slug-request-queue", () => ({

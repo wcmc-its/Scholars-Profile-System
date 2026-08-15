@@ -15,9 +15,10 @@ import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { ProxyLanding } from "@/components/edit/proxy-landing";
 import { getSession } from "@/lib/auth/session-server";
 import { getEffectiveCwid } from "@/lib/auth/effective-identity";
-import { isSuperuser } from "@/lib/auth/superuser";
-import { isCommsSteward, isMethodsTabVisible } from "@/lib/auth/comms-steward";
+import { isSuperuser, type EditSession } from "@/lib/auth/superuser";
+import { isCommsSteward } from "@/lib/auth/comms-steward";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
+import { isDeveloper } from "@/lib/auth/development";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { db } from "@/lib/db";
@@ -26,10 +27,9 @@ import {
   listUnitAdminEditorsForScholar,
   type UnitAdminEditorsLookup,
 } from "@/lib/edit/unit-scholar-authz";
-import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
+import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 import { isReporterMatchV2Enabled } from "@/lib/edit/reporter-match";
-import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
 import {
@@ -42,7 +42,7 @@ import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
 import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
 import { isCvEnabled } from "@/lib/edit/cv-export";
 import { isRailRestructureEnabled } from "@/lib/edit/rail-layout";
-import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
+import { countPendingHonors } from "@/lib/edit/honor-queue";
 
 // /edit reads suppression-OFF + writes via /api/edit/*; the page must never
 // be cached (CloudFront also marks it CachingDisabled per cloudfront-cache-spec.md).
@@ -243,6 +243,10 @@ export default async function EditSelfPage({
     // must hide while down-scoped under "View as". Flag-gated short-circuit (no
     // LDAP when `HONORS_CURATOR_ENABLED` is off), fail-closed.
     honorsCurator,
+    // Gap 1b — whether the EFFECTIVE viewer is a pure `development`-role member,
+    // gating the "Funding matcher"/"Matcha" tabs below (their only console entry
+    // points from this self-edit landing page). Fail-closed like the others.
+    developer,
   ] = await Promise.all([
     isSuperuser(editCwid).catch(() => false),
     slugRequestEnabled ? loadLatestSlugRequest(editCwid, db.read) : Promise.resolve(null),
@@ -255,6 +259,7 @@ export default async function EditSelfPage({
     listUnitAdminEditorsForScholar(editCwid, db.read as unknown as UnitAdminEditorsLookup),
     isCommsSteward(editCwid).catch(() => false),
     isHonorsCurator(editCwid).catch(() => false),
+    isDeveloper(editCwid).catch(() => false),
   ]);
 
   const manageableUnits = [...units.departments, ...units.divisions, ...units.centers];
@@ -273,27 +278,37 @@ export default async function EditSelfPage({
   // or comms_steward sees the full role-gated `AdminSubnav` on this self-edit
   // surface (active="self"), so every admin option is reachable from here rather
   // than only after drilling into the roster. A plain scholar gets `undefined` and
-  // EditShell falls back to the minimal "My Profile" strip. The pending-request
-  // count drives the superuser "URL requests" badge only — skip the query for a
-  // steward-only viewer.
-  // Anyone who can edit an org unit also gets the console tab strip — a superuser,
-  // a comms_steward, OR a unit Owner/Curator (≥1 grant) — so the "Units" tab (and
-  // any other role-available tab) is reachable from every self-edit tab, not only
-  // via the Home-panel link. A plain scholar still falls back to the minimal strip.
+  // EditShell falls back to the minimal "My Profile" strip.
+  //
+  // `loadConsoleTabs` migration (docs/edit-console-ia-spec.md Part B §2,
+  // 2026-08-14-edit-console-ia-handoff.md decision 3) — this page used to
+  // hand-compute `showConsoleNav` and every individual AdminSubnav tab prop
+  // from `canBrowseProfiles`/`commsSteward`/`hasUnitGrants` in three different
+  // OR combinations, one of which (`showConsoleNav`) forgot `honorsCurator`
+  // entirely (Gap 1) and none of which read `isDeveloper` at all (Gap 1b). One
+  // `loadConsoleTabs` call now derives the full, correct tab set from an
+  // `EditSession` shaped from the EFFECTIVE roles already resolved above — no
+  // separate gate left to forget a role in, and `fundingMatcher`/`matcha` are
+  // ordinary predicates like every other tab, reachable from this landing page
+  // like anywhere else.
   const hasUnitGrants = manageableUnits.length > 0;
-  const showConsoleNav = canBrowseProfiles || commsSteward || hasUnitGrants;
+  const effectiveSession: EditSession = {
+    cwid: editCwid,
+    isSuperuser: canBrowseProfiles,
+    isCommsSteward: commsSteward,
+    isHonorsCurator: honorsCurator,
+    isDeveloper: developer,
+  };
+  const tabs = await loadConsoleTabs(effectiveSession, db.read);
+  // Nothing to render if every predicate is false — the same "no strip at all"
+  // fallback the old `showConsoleNav` gate gave a plain scholar, now derived
+  // rather than hand-maintained.
+  const showConsoleNav = Object.values(tabs).some(Boolean);
   const pendingSlugRequests =
     canBrowseProfiles && slugRequestEnabled ? await countPendingSlugRequests(db.read) : null;
   // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:
   // flag off, or this viewer is neither superuser nor honors_curator.
-  // This page has no `EditSession` — it resolves each role against `editCwid`
-  // (the EFFECTIVE viewer) above, so hand the gate the same shape it expects.
-  const pendingHonors = isHonorsQueueTabVisible({
-    isSuperuser: canBrowseProfiles,
-    isHonorsCurator: honorsCurator,
-  })
-    ? await countPendingHonors(db.read)
-    : null;
+  const pendingHonors = tabs.honors ? await countPendingHonors(db.read) : null;
 
   return (
     <EditPage
@@ -308,30 +323,18 @@ export default async function EditSelfPage({
           <AdminSubnav
             active="self"
             superuserSurfaces={canBrowseProfiles}
-            // #986 — a comms_steward is a global profile editor, so it gets the
-            // Profiles tab on EVERY console surface (matching /edit/scholars +
-            // /edit/methods). A superuser already has it via `superuserSurfaces`.
-            profilesTab={commsSteward}
-            unitsTab={canBrowseProfiles || commsSteward || hasUnitGrants}
+            profilesTab={tabs.profiles}
+            unitsTab={tabs.units || hasUnitGrants}
             pendingSlugRequests={pendingSlugRequests}
             pendingHonors={pendingHonors}
-            administratorsTab={canBrowseProfiles && isAdministratorsTabEnabled() ? 0 : null}
-            methodsTab={
-              isMethodsTabVisible({
-                isSuperuser: canBrowseProfiles,
-                isCommsSteward: commsSteward,
-              })
-                ? 0
-                : null
-            }
-            // A global editor OR a unit Owner/Curator with grants gets the Data
-            // quality tab (mirrors `unitsTab`); the latter sees it scoped to their units.
-            dataQualityTab={
-              isDataQualityDashboardEnabled() &&
-              (canBrowseProfiles || commsSteward || hasUnitGrants)
-                ? 0
-                : null
-            }
+            administratorsTab={tabs.administrators ? 0 : null}
+            methodsTab={tabs.methods ? 0 : null}
+            dataQualityTab={tabs.dataQuality ? 0 : null}
+            dataSharingTab={tabs.dataSharing ? 0 : null}
+            reportsTab={tabs.reports}
+            newsTab={tabs.news}
+            usageTab={tabs.usage}
+            viewerIsDeveloper={tabs.fundingMatcher}
           />
         ) : undefined
       }

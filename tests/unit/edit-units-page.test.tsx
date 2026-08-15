@@ -1,29 +1,28 @@
 /**
- * `app/edit/units/page.tsx` — regression coverage for
- * docs/edit-console-ia-spec.md Gap 4: `usageTab`/`reportsTab` were never
- * passed to `ConsoleShell` despite the page already loading everything both
- * checks need. Shallow element inspection only (no render) — same pattern as
+ * `app/edit/units/page.tsx` — regression coverage for the `loadConsoleTabs`
+ * migration (docs/edit-console-ia-spec.md Part B §2). Gap 4 (`usageTab`/
+ * `reportsTab` never passed to `ConsoleShell`) used to be fixed by this page
+ * hand-computing both from grant reads it already ran; the migration deletes
+ * that per-page computation entirely — `ConsoleShell` now derives every
+ * grant-based tab itself from `session` via `loadConsoleTabs`. This file now
+ * guards the OTHER direction of that same bug class: that the page doesn't
+ * reintroduce a per-page override for anything `loadConsoleTabs` already
+ * covers, and that it still passes the correct `session` through (a wrong
+ * session here would silently break every tab `loadConsoleTabs` derives).
+ * Shallow element inspection only (no render) — same pattern as
  * `administrators-page.test.tsx`.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const {
-  mockGetEditSession,
-  mockLoadManageableUnits,
-  mockLoadAllUnitsDirectory,
-  mockCanViewUsage,
-  mockLoadReportableUnits,
-  mockRedirect,
-} = vi.hoisted(() => ({
-  mockGetEditSession: vi.fn(),
-  mockLoadManageableUnits: vi.fn(),
-  mockLoadAllUnitsDirectory: vi.fn().mockResolvedValue([]),
-  mockCanViewUsage: vi.fn(),
-  mockLoadReportableUnits: vi.fn(),
-  mockRedirect: vi.fn((url: string) => {
-    throw new Error(`__REDIRECT__:${url}`);
-  }),
-}));
+const { mockGetEditSession, mockLoadManageableUnits, mockLoadAllUnitsDirectory, mockRedirect } =
+  vi.hoisted(() => ({
+    mockGetEditSession: vi.fn(),
+    mockLoadManageableUnits: vi.fn(),
+    mockLoadAllUnitsDirectory: vi.fn().mockResolvedValue([]),
+    mockRedirect: vi.fn((url: string) => {
+      throw new Error(`__REDIRECT__:${url}`);
+    }),
+  }));
 
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("@/lib/auth/effective-identity", () => ({
@@ -33,11 +32,6 @@ vi.mock("@/lib/edit/manageable-units", () => ({
   loadManageableUnits: mockLoadManageableUnits,
   loadAllUnitsDirectory: mockLoadAllUnitsDirectory,
 }));
-vi.mock("@/lib/edit/usage-access", () => ({ canViewUsage: mockCanViewUsage }));
-vi.mock("@/lib/edit/cancer-center-reports", () => ({
-  loadReportableUnitsForActor: mockLoadReportableUnits,
-}));
-vi.mock("@/lib/edit/data-quality", () => ({ isDataQualityDashboardEnabled: () => false }));
 vi.mock("@/lib/edit/slug-request", () => ({
   isSlugRequestEnabled: () => false,
   countPendingSlugRequests: vi.fn().mockResolvedValue(0),
@@ -62,7 +56,7 @@ beforeEach(() => {
   mockLoadAllUnitsDirectory.mockResolvedValue([]);
 });
 
-describe("/edit/units — usageTab / reportsTab (Gap 4)", () => {
+describe("/edit/units — ConsoleShell wiring", () => {
   it("signed-out → SAML redirect", async () => {
     mockGetEditSession.mockResolvedValue(null);
     await expect(EditUnitsPage()).rejects.toThrow(
@@ -70,22 +64,21 @@ describe("/edit/units — usageTab / reportsTab (Gap 4)", () => {
     );
   });
 
-  it("passes usageTab/reportsTab through from the already-loaded grant reads", async () => {
+  it("passes the EFFECTIVE session through to ConsoleShell — loadConsoleTabs derives every grant-based tab from it", async () => {
     mockGetEditSession.mockResolvedValue(OWNER);
-    mockCanViewUsage.mockResolvedValue(true);
-    mockLoadReportableUnits.mockResolvedValue([{ code: "N1280", name: "A Center" }]);
     const result = asEl(await EditUnitsPage());
-    expect(result.props.usageTab).toBe(true);
-    expect(result.props.reportsTab).toBe(true);
-    expect(mockCanViewUsage).toHaveBeenCalledWith(OWNER, {});
+    expect(result.props.session).toBe(OWNER);
+    // The bare escape hatch stays — this page has no unit-admin gate of its
+    // own, unlike every other console page (docs/edit-console-ia-spec.md
+    // Part B §2 / console-shell.tsx's own doc comment).
+    expect(result.props.unitsTab).toBe(true);
   });
 
-  it("hides both when the viewer has no usage grant and no reportable unit", async () => {
+  it("no longer hand-computes dataQualityTab/usageTab/reportsTab — ConsoleShell derives them from session now", async () => {
     mockGetEditSession.mockResolvedValue(OWNER);
-    mockCanViewUsage.mockResolvedValue(false);
-    mockLoadReportableUnits.mockResolvedValue([]);
     const result = asEl(await EditUnitsPage());
-    expect(result.props.usageTab).toBe(false);
-    expect(result.props.reportsTab).toBe(false);
+    expect(result.props.dataQualityTab).toBeUndefined();
+    expect(result.props.usageTab).toBeUndefined();
+    expect(result.props.reportsTab).toBeUndefined();
   });
 });

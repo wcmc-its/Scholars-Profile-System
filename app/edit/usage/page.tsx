@@ -302,8 +302,10 @@ export default async function EditUsagePage() {
       session={session}
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
-      unitsTab
-      usageTab
+      // No `unitsTab`/`usageTab` override needed — reaching this page at all
+      // already requires `canViewUsage` (superuser or any UnitAdmin grant
+      // holder), which implies `ConsoleShell`'s own `loadConsoleTabs`
+      // derivation is already true for both.
     >
       <h1 className="mb-1 text-xl font-semibold">Usage</h1>
       {unavailable ? (

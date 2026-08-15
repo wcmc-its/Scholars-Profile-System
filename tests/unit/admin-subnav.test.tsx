@@ -146,12 +146,11 @@ describe("AdminSubnav", () => {
     expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
   });
 
-  it("superuserSurfaces=false shows ONLY Method families (a comms_steward who is not a superuser)", () => {
+  it("superuserSurfaces=false, no administratorsTab, shows ONLY Method families (a comms_steward who is not a superuser, not a unit Owner)", () => {
     render(
       <AdminSubnav
         active="methods"
         pendingSlugRequests={3} pendingHonors={null}
-        administratorsTab={0}
         methodsTab={0}
         superuserSurfaces={false}
       />,
@@ -161,6 +160,29 @@ describe("AdminSubnav", () => {
     expect(screen.queryByTestId("admin-tab-slugs")).toBeNull();
     expect(screen.queryByTestId("admin-tab-slug-requests")).toBeNull();
     expect(screen.queryByTestId("admin-tab-administrators")).toBeNull();
+  });
+
+  // Gap 3 fix (2026-08-14, docs/edit-console-ia-spec.md) — `administratorsTab`'s
+  // show condition used to AND `superuserSurfaces`, unlike every sibling
+  // count-vs-null-gated tab (methods/dataQuality/dataSharing below), which hid
+  // the tab from exactly the non-superuser unit Owner it exists to serve (D5).
+  // This test used to pin that bug as intentional ("superuserSurfaces=false...
+  // administratorsTab={0}... expect ... toBeNull()"); it now asserts the fix.
+  it("🔴 shows the Administrators tab to a NON-superuser unit Owner (administratorsTab=0, superuserSurfaces=false) — Gap 3 fix", () => {
+    render(
+      <AdminSubnav
+        active="administrators"
+        pendingSlugRequests={null} pendingHonors={null}
+        administratorsTab={0}
+        superuserSurfaces={false}
+      />,
+    );
+    const tab = screen.getByTestId("admin-tab-administrators");
+    expect(tab.getAttribute("aria-current")).toBe("page");
+    // The rest of the superuser-only strip stays hidden — this is an OWNER,
+    // not a superuser.
+    expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
+    expect(screen.queryByTestId("admin-tab-slugs")).toBeNull();
   });
 
   // account-dropdown-nav handoff, Workstream A (its ACCOUNT_CONSOLE_NAV_RESTRUCTURE
@@ -290,6 +312,49 @@ describe("AdminSubnav", () => {
   it('marks the Units tab active with aria-current when active="units"', () => {
     render(<AdminSubnav active="units" pendingSlugRequests={null} pendingHonors={null} unitsTab />);
     expect(screen.getByTestId("admin-tab-units").getAttribute("aria-current")).toBe("page");
+  });
+
+  // Gap 2 fix (2026-08-14) — News used to piggyback on `profilesTab`, which a
+  // unit Owner/Curator also earns (`/edit/scholars`'s `unitScope !== null`
+  // override), showing a link that 404s on `isNewsQueueTabVisible`'s real
+  // isSuperuser-or-isCommsSteward gate. `newsTab` is the dedicated escape
+  // hatch now, mirroring `reportsTab`.
+  describe("the News tab (Gap 2)", () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("shows the News tab to a superuser by default", () => {
+      vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
+      render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+      expect(screen.getByTestId("admin-tab-news-queue").getAttribute("href")).toBe("/edit/news-queue");
+    });
+
+    it("shows the News tab to a non-superuser comms_steward via newsTab", () => {
+      vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
+      render(
+        <AdminSubnav
+          active="news-queue"
+          pendingSlugRequests={null}
+          pendingHonors={null}
+          superuserSurfaces={false}
+          newsTab
+        />,
+      );
+      expect(screen.getByTestId("admin-tab-news-queue")).toBeTruthy();
+    });
+
+    it("🔴 does NOT show News to a non-superuser with only profilesTab (e.g. a unit Owner/Curator) — the Gap 2 leak", () => {
+      vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
+      render(
+        <AdminSubnav
+          active="profiles"
+          pendingSlugRequests={null}
+          pendingHonors={null}
+          superuserSurfaces={false}
+          profilesTab
+        />,
+      );
+      expect(screen.queryByTestId("admin-tab-news-queue")).toBeNull();
+    });
   });
 
   // ── The Matcha tab and its explanatory hover (round-2 §2) ───────────────────
@@ -569,6 +634,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
           superuserSurfaces={false}
           profilesTab
           unitsTab
+          newsTab
         />,
       );
       expect(screen.getByTestId("admin-tab-news-queue").textContent).toContain("News");

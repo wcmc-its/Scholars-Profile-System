@@ -103,8 +103,10 @@ export default async function EditDataQualityPage({
       session={session}
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
-      unitsTab
-      dataQualityTab={0}
+      // No `unitsTab`/`dataQualityTab` override needed — reaching this page at
+      // all already requires a non-empty `loadDataQualityScope`, which implies
+      // `ConsoleShell`'s own `loadConsoleTabs` derivation is already true for
+      // both (docs/edit-console-ia-spec.md Part B §2).
     >
         <h1 className="mb-1 text-xl font-semibold">Data quality</h1>
         <p className="text-muted-foreground mb-6 text-sm">
