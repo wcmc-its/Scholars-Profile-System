@@ -435,7 +435,7 @@ function AdminTab({
       {label}
       {count !== undefined && count > 0 && (
         <span
-          className="bg-apollo-maroon inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold text-white"
+          className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border inline-flex min-w-5 items-center justify-center rounded-full border px-1.5 py-0.5 text-xs font-semibold"
           data-testid="admin-subnav-pending-count"
         >
           {count}
