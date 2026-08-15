@@ -39,7 +39,7 @@ export function ForbiddenEditPage({
   if (variant === "unit") {
     return (
       <main
-        className="mx-auto w-full max-w-[var(--max-narrow)] px-6 py-16 text-center"
+        className="bg-apollo-page min-h-screen mx-auto w-full max-w-[var(--max-narrow)] px-6 py-16 text-center"
         data-slot="forbidden-edit-page"
         data-variant="unit"
         data-target-entity={targetEntity ?? ""}
@@ -59,7 +59,7 @@ export function ForbiddenEditPage({
 
   return (
     <main
-      className="mx-auto w-full max-w-[var(--max-narrow)] px-6 py-16 text-center"
+      className="bg-apollo-page min-h-screen mx-auto w-full max-w-[var(--max-narrow)] px-6 py-16 text-center"
       data-slot="forbidden-edit-page"
       data-target-cwid={targetCwid ?? ""}
     >

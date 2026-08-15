@@ -112,7 +112,7 @@ export default async function AdministratorsPage() {
             href="https://directory.weill.cornell.edu/"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[var(--apollo-maroon)] underline"
+            className="text-[var(--apollo-maroon)] hover:underline"
           >
             Web Directory
           </a>{" "}
