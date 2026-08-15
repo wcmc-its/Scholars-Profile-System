@@ -239,7 +239,7 @@ function OpportunityRow({ o, tier }: { o: Opportunity; tier: FitTierLabel }) {
         {`${lead.join(" · ")} · `}
         <span
           className={
-            urgency === "soon" ? "font-medium text-amber-700 dark:text-amber-400" : undefined
+            urgency === "soon" ? "font-medium text-apollo-amber" : undefined
           }
         >
           {deadlineLabel(o.dueDate, o.status)}

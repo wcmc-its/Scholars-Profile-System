@@ -157,13 +157,13 @@ describe("GrantRecsCard", () => {
     vi.stubGlobal("fetch", routedFetch([{ ...OPP, dueDate: soon }]));
     const { unmount } = render(<GrantRecsCard cwid="thc2015" />);
     const soonEl = await screen.findByText(/^Due /);
-    expect(soonEl.className).toContain("text-amber-700");
+    expect(soonEl.className).toContain("text-apollo-amber");
     unmount();
 
     vi.stubGlobal("fetch", routedFetch([{ ...OPP, dueDate: far }]));
     render(<GrantRecsCard cwid="thc2015" />);
     const farEl = await screen.findByText(/^Due /);
-    expect(farEl.className).not.toContain("text-amber-700");
+    expect(farEl.className).not.toContain("text-apollo-amber");
   });
 
   it("lazily loads the detail route on expand: synopsis, award count, link out + demoted meters", async () => {
