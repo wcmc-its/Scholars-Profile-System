@@ -2170,7 +2170,7 @@ function GrantResultCard({
         {facts.length > 0 ? `${facts.join(" · ")} · ` : ""}
         <span
           className={
-            urgency === "soon" ? "font-medium text-amber-700 dark:text-amber-400" : undefined
+            urgency === "soon" ? "font-medium text-apollo-amber" : undefined
           }
         >
           {deadlineLabel(candidate.dueDate, candidate.status)}
