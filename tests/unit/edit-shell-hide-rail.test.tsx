@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 vi.mock("@/components/site/account-menu", () => ({ AccountMenu: () => null }));
-// EditShell's rail children (RailSelect / AttributeRail) read the router.
+// EditShell's rail children (RailSheet / AttributeRail) read the router.
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
   usePathname: () => "/edit",
@@ -31,14 +31,14 @@ const base = {
 };
 
 describe("EditShell — hideRail", () => {
-  it("renders the rail (desktop) and RailSelect (phone) when unset — the default", () => {
+  it("renders the rail (desktop) and RailSheet (phone) when unset — the default", () => {
     render(
       <EditShell {...base}>
         <div>panel</div>
       </EditShell>,
     );
     expect(screen.getByTestId("rail-description")).toBeTruthy();
-    expect(screen.getByTestId("rail-select")).toBeTruthy();
+    expect(screen.getByTestId("rail-sheet-trigger")).toBeTruthy();
     expect(screen.queryByTestId("edit-rail-back")).toBeNull();
   });
 
@@ -49,7 +49,7 @@ describe("EditShell — hideRail", () => {
       </EditShell>,
     );
     expect(screen.queryByTestId("rail-description")).toBeNull();
-    expect(screen.queryByTestId("rail-select")).toBeNull();
+    expect(screen.queryByTestId("rail-sheet-trigger")).toBeNull();
   });
 
   it("renders a Back link to backHref in the rail's place", () => {
