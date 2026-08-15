@@ -155,16 +155,8 @@ export default async function EditReportsIndexPage({
     <ConsoleShell active="reports" reportsTab {...shell}>
       <h1 className="mb-1 text-xl font-bold">Reports</h1>
       <p className="text-muted-foreground text-sm">
-        {mode === "table"
-          ? "Advisory only — every report reads precomputed data; nothing here writes to the roster."
-          : "Reports for the centers you administer."}
+        Advisory only — every report reads precomputed data; nothing here writes to the roster.
       </p>
-      {mode === "bands" && (
-        <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <span className="font-semibold">Advisory only</span> — every report reads precomputed
-          data; nothing here writes to the roster.
-        </div>
-      )}
       {/* ConsoleShell owns only the chrome — content supplies its own surface
           (R1/the Apollo Surface Language "the page is never white"). Without
           this, the list floats directly on --apollo-page with no card. */}
