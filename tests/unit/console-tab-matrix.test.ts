@@ -108,6 +108,7 @@ describe("feature flags", () => {
     ["NEWS_APPROVAL_QUEUE", "news"],
     ["SELF_EDIT_ADMINISTRATORS_TAB", "administrators"],
     ["COMMS_STEWARD_ENABLED", "methods"],
+    ["EDIT_DATA_QUALITY_DASHBOARD", "coi"],
     ["EDIT_DATA_SHARING_DASHBOARD", "dataSharing"],
     ["CORE_PAGES", "cores"],
     ["MATCHA", "matcha"],

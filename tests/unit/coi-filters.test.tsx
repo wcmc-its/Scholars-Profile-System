@@ -1,15 +1,12 @@
 /**
- * `components/edit/profiles-filters.tsx` — the Profiles roster's client filter
- * island (formerly `data-quality-filters.tsx` / `DataQualityFilters`, folded in
- * when the standalone Data Quality dashboard merged into `/edit/scholars`, then
- * split again so COI moved to its own page/component — `coi-filters.tsx`).
- * Verifies auto-apply: every change navigates via router.replace to a query
- * string the server parser decodes (repeated ?type=/?unit=, the gap and
- * overview-age selects, the hidden-roles toggle, and the debounced search),
- * with no "Apply" button. Also checks the structural division indent (#3 fix).
- *
- * This component has NO COI awareness at all (no `canSeeCoi` prop, no COI gap
- * option, not even hidden) — that lives entirely in `CoiFilters` now.
+ * `components/edit/coi-filters.tsx` — the COI dashboard's client filter
+ * island (`/edit/coi`, superuser-only). A trimmed sibling of
+ * `components/edit/profiles-filters.tsx`: same auto-apply idiom (facet
+ * toggle / select / hidden-roles checkbox / debounced search all navigate via
+ * `router.replace`, no "Apply" button), but the only "Gap" option is COI
+ * itself — no headshot/overview options (those never existed here), and no
+ * overview-freshness filter at all. There is no `canSeeCoi`-equivalent prop:
+ * page-level auth (`app/edit/coi/page.tsx`) already gates the whole surface.
  */
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,7 +16,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace, push: vi.fn(), prefetch: vi.fn() }),
 }));
 
-import { ProfilesFilters } from "@/components/edit/profiles-filters";
+import { CoiFilters } from "@/components/edit/coi-filters";
 
 const facets = {
   roleCategories: [
@@ -39,13 +36,12 @@ const facets = {
 
 function renderFilters(over: Record<string, unknown> = {}) {
   return render(
-    <ProfilesFilters
+    <CoiFilters
       facets={facets as never}
       roleCategories={["postdoc"]}
       units={["dept:MED"]}
       q=""
       gap="all"
-      overviewAge="all"
       includeHidden={true}
       {...over}
     />,
@@ -56,7 +52,7 @@ const lastUrl = () => String(replace.mock.calls.at(-1)?.[0] ?? "");
 
 beforeEach(() => vi.clearAllMocks());
 
-describe("ProfilesFilters — auto-apply", () => {
+describe("CoiFilters — auto-apply", () => {
   it("has no Apply button", () => {
     renderFilters();
     expect(screen.queryByRole("button", { name: /apply/i })).toBeNull();
@@ -67,7 +63,6 @@ describe("ProfilesFilters — auto-apply", () => {
     fireEvent.click(screen.getByText("Full-time faculty"));
     expect(replace).toHaveBeenCalledTimes(1);
     expect(lastUrl()).toContain("type=full_time_faculty");
-    // Toggling a second facet keeps the existing selection (still has the dept).
     fireEvent.click(screen.getByText("Postdoc"));
     const url = lastUrl();
     expect(url).toContain("type=full_time_faculty");
@@ -81,23 +76,18 @@ describe("ProfilesFilters — auto-apply", () => {
     expect(lastUrl()).toContain("unit=center%3AMCC");
   });
 
-  it("the Gap select offers exactly Any/Missing headshot/Missing overview — no COI option, ever", () => {
+  it("the Gap select offers ONLY Any/Has COI to review — no headshot/overview options", () => {
     renderFilters();
     const select = screen.getByLabelText("Gap") as HTMLSelectElement;
     const values = Array.from(select.options).map((o) => o.value);
-    expect(values).toEqual(["all", "no-headshot", "no-overview"]);
-    expect(values).not.toContain("has-coi");
-    fireEvent.change(select, { target: { value: "no-headshot" } });
-    expect(lastUrl()).toContain("gap=no-headshot");
+    expect(values).toEqual(["all", "has-coi"]);
+    fireEvent.change(select, { target: { value: "has-coi" } });
+    expect(lastUrl()).toContain("gap=has-coi");
   });
 
-  it("the Overview last updated select offers Any/Imported/No overview/<1yr/1-2yr/>2yr, and navigates with ?overviewAge=", () => {
+  it("has no overview-freshness filter at all", () => {
     renderFilters();
-    const select = screen.getByLabelText("Overview last updated") as HTMLSelectElement;
-    const values = Array.from(select.options).map((o) => o.value);
-    expect(values).toEqual(["all", "imported", "never", "lt1yr", "1to2yr", "gt2yr"]);
-    fireEvent.change(select, { target: { value: "imported" } });
-    expect(lastUrl()).toContain("overviewAge=imported");
+    expect(screen.queryByLabelText("Overview last updated")).toBeNull();
   });
 
   it("navigates when the hide-students checkbox changes", () => {
@@ -130,18 +120,9 @@ describe("ProfilesFilters — auto-apply", () => {
     expect(lastUrl()).toContain("q=silver");
   });
 
-  it("Clear navigates back to the unfiltered route", () => {
+  it("Clear navigates back to the unfiltered /edit/coi route", () => {
     renderFilters();
     fireEvent.click(screen.getByRole("button", { name: /clear/i }));
-    expect(replace).toHaveBeenLastCalledWith("/edit/scholars", { scroll: false });
-  });
-
-  it("renders departments and divisions as a flat (non-indented) list", () => {
-    renderFilters();
-    // No facet option carries an indent — divisions are disambiguated by their
-    // parent in the label instead, so nothing implies false nesting under search.
-    for (const btn of document.querySelectorAll<HTMLButtonElement>("button[aria-pressed]")) {
-      expect(btn.style.paddingInlineStart).toBe("");
-    }
+    expect(replace).toHaveBeenLastCalledWith("/edit/coi", { scroll: false });
   });
 });

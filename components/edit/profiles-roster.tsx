@@ -8,14 +8,15 @@
  *
  * Formerly two separate surfaces: this roster (Name/Title/Unit/Type/Status) and
  * the standalone Data Quality dashboard (prominence sort, leadership badges,
- * COI review). They merged here — the roster kept its Status column and its
- * superuser-only "View as" action; the dashboard's headshot/overview gap
- * tracking was dropped, and its COI column carried over as a superuser-only
- * addition (`canSeeCoi`). See `lib/api/data-quality.ts`.
+ * headshot/overview/COI gap tracking). They merged here — the roster kept its
+ * Status column and its superuser-only "View as" action, and gained the
+ * dashboard's prominence sort, leadership badges, and headshot/overview gap
+ * tracking. COI review did NOT carry over here — it's superuser-only and lives
+ * on its own page (`/edit/coi`, `components/edit/coi-roster.tsx`) precisely so
+ * this broader-audience page never touches it. See `lib/api/data-quality.ts`.
  *
  * Authorization is the page's job (superuser-gated; org-unit-admin scope is
- * B3; COI visibility is a separate, narrower superuser-only gate); this
- * component only renders what it's handed.
+ * B3); this component only renders what it's handed.
  */
 import Link from "next/link";
 
@@ -28,6 +29,7 @@ import type {
   DataQualityEntry,
   DataQualityFacets,
   DataQualityGapFilter,
+  OverviewAgeFilter,
 } from "@/lib/api/data-quality";
 
 export type ProfilesRosterProps = {
@@ -43,6 +45,7 @@ export type ProfilesRosterProps = {
   /** Name / CWID search term. */
   q: string;
   gap: DataQualityGapFilter;
+  overviewAge: OverviewAgeFilter;
   includeHidden: boolean;
   page: number;
   pageSize: number;
@@ -50,9 +53,6 @@ export type ProfilesRosterProps = {
   canImpersonate: boolean;
   /** The viewer's own cwid — the "View as" button is hidden on their own row. */
   viewerCwid: string;
-  /** Whether the viewer sees the COI column/summary/filter — superuser only,
-   *  and only when `EDIT_DATA_QUALITY_DASHBOARD` is on (`isDataQualityDashboardEnabled`). */
-  canSeeCoi: boolean;
 };
 
 const BASE = "/edit/scholars";
@@ -62,6 +62,7 @@ type FilterState = {
   units: string[];
   q: string;
   gap: DataQualityGapFilter;
+  overviewAge: OverviewAgeFilter;
   includeHidden: boolean;
 };
 
@@ -72,6 +73,7 @@ function filterParams(f: FilterState): URLSearchParams {
   for (const r of f.roleCategories) p.append("type", r);
   for (const u of f.units) p.append("unit", u);
   if (f.gap !== "all") p.set("gap", f.gap);
+  if (f.overviewAge !== "all") p.set("overviewAge", f.overviewAge);
   if (!f.includeHidden) p.set("hidden", "0");
   return p;
 }
@@ -89,6 +91,33 @@ function exportHref(f: FilterState): string {
   return qs ? `${BASE}/export?${qs}` : `${BASE}/export`;
 }
 
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+}
+
+/** The "overview last updated" cell — a date, the imported-seed label, or "—". */
+function overviewUpdated(e: DataQualityEntry): string {
+  if (e.overviewUpdatedAt) return formatDate(e.overviewUpdatedAt);
+  return e.overviewState === "imported" ? "Imported" : "—";
+}
+
+/** A green ✓ (good) or muted "—" (not checked / n/a). */
+function Yes() {
+  return <span className="font-semibold text-apollo-green" aria-label="yes">✓</span>;
+}
+function Gap() {
+  return <span className="text-apollo-maroon font-semibold" aria-label="missing">✗</span>;
+}
+function Unknown() {
+  return (
+    <span className="text-muted-foreground" aria-label="not checked" title="Not checked yet">
+      —
+    </span>
+  );
+}
+
 export function ProfilesRoster({
   entries,
   total,
@@ -98,14 +127,14 @@ export function ProfilesRoster({
   units,
   q,
   gap,
+  overviewAge,
   includeHidden,
   page,
   pageSize,
   canImpersonate,
   viewerCwid,
-  canSeeCoi,
 }: ProfilesRosterProps) {
-  const filters: FilterState = { roleCategories, units, q, gap, includeHidden };
+  const filters: FilterState = { roleCategories, units, q, gap, overviewAge, includeHidden };
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min((page + 1) * pageSize, total);
   const hasPrev = page > 0;
@@ -123,23 +152,25 @@ export function ProfilesRoster({
             units={units}
             q={q}
             gap={gap}
+            overviewAge={overviewAge}
             includeHidden={includeHidden}
-            canSeeCoi={canSeeCoi}
           />
         </aside>
 
         <div className="min-w-0 flex-1">
-          {/* Summary chips across the in-scope set (before the gap filter). */}
+          {/* Summary chips across the in-scope set (before the gap/age filters). */}
           <div className="text-muted-foreground mb-4 flex flex-wrap gap-x-6 gap-y-1 text-sm">
             <span>
               <strong className="text-foreground">{counts.inScope.toLocaleString()}</strong> in scope
             </span>
-            {canSeeCoi && (
-              <span>
-                <strong className="text-foreground">{counts.withCoi.toLocaleString()}</strong> with COI
-                to review
-              </span>
-            )}
+            <span>
+              <strong className="text-foreground">{counts.missingHeadshot.toLocaleString()}</strong> no
+              headshot
+            </span>
+            <span>
+              <strong className="text-foreground">{counts.missingOverview.toLocaleString()}</strong> no
+              overview
+            </span>
           </div>
 
           <div className="mb-2 flex items-center justify-between">
@@ -167,7 +198,9 @@ export function ProfilesRoster({
                   <th className="px-3 py-2">Scholar</th>
                   <th className="px-3 py-2">Person type</th>
                   <th className="px-3 py-2">Status</th>
-                  {canSeeCoi && <th className="px-3 py-2 text-center">COI</th>}
+                  <th className="px-3 py-2 text-center">Headshot</th>
+                  <th className="px-3 py-2 text-center">Overview</th>
+                  <th className="px-3 py-2">Overview updated</th>
                   <th className="px-3 py-2">
                     <span className="sr-only">Actions</span>
                   </th>
@@ -176,10 +209,7 @@ export function ProfilesRoster({
               <tbody>
                 {entries.length === 0 ? (
                   <tr>
-                    <td
-                      colSpan={canSeeCoi ? 6 : 5}
-                      className="text-muted-foreground px-3 py-6 text-center"
-                    >
+                    <td colSpan={8} className="text-muted-foreground px-3 py-6 text-center">
                       No profiles match your search.
                     </td>
                   </tr>
@@ -221,24 +251,13 @@ export function ProfilesRoster({
                           {e.isVisible ? "Visible" : "Hidden"}
                         </Badge>
                       </td>
-                      {canSeeCoi && (
-                        <td className="px-3 py-2 text-center">
-                          {e.pendingCoiHigh > 0 ? (
-                            <span
-                              className="bg-muted text-muted-foreground inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold"
-                              title={
-                                e.pendingCoiMedium > 0
-                                  ? `${e.pendingCoiHigh} to review · ${e.pendingCoiMedium} likely covered`
-                                  : `${e.pendingCoiHigh} to review`
-                              }
-                            >
-                              {e.pendingCoiHigh}
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </td>
-                      )}
+                      <td className="px-3 py-2 text-center">
+                        {e.headshot === "present" ? <Yes /> : e.headshot === "missing" ? <Gap /> : <Unknown />}
+                      </td>
+                      <td className="px-3 py-2 text-center">{e.hasOverview ? <Yes /> : <Gap />}</td>
+                      <td className="text-muted-foreground px-3 py-2 text-xs whitespace-nowrap">
+                        {overviewUpdated(e)}
+                      </td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-3">
                           {canImpersonate && e.cwid !== viewerCwid && (

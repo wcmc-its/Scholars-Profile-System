@@ -40,6 +40,7 @@ import { loadReportableUnitsForActor } from "@/lib/edit/cancer-center-reports";
 import { isNewsQueueTabVisible } from "@/lib/edit/news-queue";
 import { isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { isDataSharingDashboardTabVisible } from "@/lib/edit/data-sharing-dashboard";
+import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 import { isMatchaEnabled } from "@/lib/api/matcha";
 
@@ -58,6 +59,7 @@ export const CONSOLE_TAB_IDS = [
   "administrators",
   "methods",
   "reports",
+  "coi",
   "dataSharing",
   "activity",
   "usage",
@@ -130,6 +132,13 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
   // Gap 4 (reports half): a reportable unit surfaces the tab everywhere,
   // including `/edit/units` and `/edit/administrators`.
   reports: (s, g) => s.isSuperuser || s.isCommsSteward || g.reportableUnitCount > 0,
+
+  // COI review — superuser-only, no comms_steward/unit-admin escape hatch at
+  // all (unlike `profiles`/`units`/`reports`). Split out of the merged
+  // Profiles page specifically so this stays the one tab a unit admin can
+  // never earn, on-screen or via a crafted query param — see
+  // `app/edit/coi/page.tsx`.
+  coi: (s) => s.isSuperuser && isDataQualityDashboardEnabled(),
 
   // No per-unit data-sharing concept exists (by design — no unit-scoped
   // variant of this dashboard has been decided; unlike Data Quality this

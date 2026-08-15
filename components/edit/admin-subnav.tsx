@@ -27,6 +27,7 @@ import { AdminGroupMenu } from "@/components/edit/admin-group-menu";
 import { MatchaTab } from "@/components/edit/matcha-tab";
 import { isMatchaEnabled } from "@/lib/api/matcha";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
+import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { isNewsQueueEnabled } from "@/lib/edit/news-queue";
 
 export type AdminSubnavActive =
@@ -38,6 +39,7 @@ export type AdminSubnavActive =
   | "slugs"
   | "administrators"
   | "methods"
+  | "coi"
   | "data-sharing"
   | "activity"
   | "usage"
@@ -95,6 +97,7 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   administrators: "registries",
   methods: "registries",
   /** Read-only dashboards; no writes. */
+  coi: "insights",
   "data-sharing": "insights",
   activity: "insights",
   usage: "insights",
@@ -270,6 +273,10 @@ export function AdminSubnav({
       // before the Insights group's own members, so it also lands immediately to
       // their left when `CONSOLE_SUBNAV_GROUPED` is off and `tabs` renders verbatim.
       { show: superuserSurfaces || reportsTab, id: "reports", href: "/edit/reports", label: "Reports" },
+      // Superuser + flag only, no grant escape hatch — the one tab a unit
+      // admin can never earn (`lib/edit/console-tabs.server.ts`'s `coi`
+      // predicate mirrors this exactly).
+      { show: superuserSurfaces && isDataQualityDashboardEnabled(), id: "coi", href: "/edit/coi", label: "COI" },
       {
         show: dataSharingTab !== null && dataSharingTab !== undefined,
         id: "data-sharing",

@@ -6,16 +6,13 @@
  * Same gates, scope, and filters as the page (the query, not the UI, is the
  * boundary), but unpaginated — the full prominence-sorted set capped at
  * DATA_QUALITY_EXPORT_CAP. Filters arrive as query params (type / dept / gap /
- * hidden), matching the roster's GET form. `force-dynamic`, no-store.
+ * overviewAge / hidden), matching the roster's GET form. `force-dynamic`,
+ * no-store.
  *
- * COI is gated exactly like the page (`app/edit/scholars/page.tsx`): superuser
- * only, AND only when `EDIT_DATA_QUALITY_DASHBOARD` is on — dropping the flag
- * check here (leaving only the `isSuperuser` check) would let a superuser
- * export COI through this route while the page keeps it dark, with the flag
- * off. The CSV must not carry it for anyone else either, so `gap` is forced to
- * `"all"` and `includeCoi: false` when `canSeeCoi` is false, regardless of what
- * the query string asks for — a crafted `?gap=has-coi` would otherwise leak
- * COI presence through which rows are returned even with the columns stripped.
+ * COI never appears here — it's superuser-only and lives on its own export
+ * (`/edit/coi/export`). `gap` is forced to strip `"has-coi"` (falling back to
+ * `"all"`), same as the page: a crafted `?gap=has-coi` would otherwise narrow
+ * the row set by COI presence in a CSV that never carries the column.
  *
  * Gate order: no session → 401 · empty scope (a plain scholar) → 404 · else
  * text/csv attachment.
@@ -25,7 +22,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { buildDataQualityCsv, loadDataQualityExport, parseDataQualityParams } from "@/lib/api/data-quality";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { isDataQualityDashboardEnabled, isEmptyScope, loadDataQualityScope } from "@/lib/edit/data-quality";
+import { isEmptyScope, loadDataQualityScope } from "@/lib/edit/data-quality";
 
 export const dynamic = "force-dynamic";
 // `maxDuration` is inert under `output: "standalone"`; the real budget this route is
@@ -43,7 +40,7 @@ export async function GET(request: NextRequest) {
 
   // Identical parse to the page (the query, not the UI, is the boundary).
   const params = parseDataQualityParams(request.nextUrl.searchParams);
-  const canSeeCoi = session.isSuperuser && isDataQualityDashboardEnabled();
+  const gap = params.gap === "has-coi" ? "all" : params.gap;
 
   const { rows, total, truncated } = await loadDataQualityExport(
     {
@@ -51,7 +48,8 @@ export async function GET(request: NextRequest) {
       query: params.q,
       roleCategories: params.roleCategories,
       units: params.units,
-      gap: canSeeCoi ? params.gap : "all",
+      gap,
+      overviewAge: params.overviewAge,
       includeHidden: params.includeHidden,
     },
     db.read,
@@ -69,7 +67,7 @@ export async function GET(request: NextRequest) {
     }),
   );
 
-  const csv = buildDataQualityCsv(rows, { includeCoi: canSeeCoi });
+  const csv = buildDataQualityCsv(rows, { includeProfileCols: true, includeCoi: false });
   const date = new Date().toISOString().slice(0, 10);
   return new NextResponse(csv, {
     status: 200,

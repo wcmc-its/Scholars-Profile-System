@@ -41,6 +41,7 @@ export const ALL_TABS: ConsoleTabId[] = [
   "administrators",
   "methods",
   "reports",
+  "coi",
   "dataSharing",
   "activity",
   "usage",

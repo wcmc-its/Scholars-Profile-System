@@ -6,7 +6,9 @@
  * Formerly two pages: this roster and the standalone Data Quality dashboard
  * (`/edit/data-quality`, prominence sort + leadership + gap tracking). They
  * merged here — see `components/edit/profiles-roster.tsx` and
- * `lib/api/data-quality.ts` for what carried over and what was dropped.
+ * `lib/api/data-quality.ts` for what carried over. COI review did NOT carry
+ * over: it's superuser-only and lives on its own page (`/edit/coi`,
+ * `app/edit/coi/page.tsx`) so this broader-audience page never touches it.
  *
  * Superuser-gated at B2, with an org-unit-admin scope tier (B3): a unit
  * Owner/Curator sees only the scholars in the unit(s) they administer.
@@ -14,13 +16,12 @@
  * the UI — is the scope boundary. `force-dynamic` + `noindex`, mirroring the
  * other `/edit/*` pages.
  *
- * COI review is a SEPARATE, narrower gate layered on top: superuser only
- * (`session.isSuperuser`), and only when `EDIT_DATA_QUALITY_DASHBOARD` is on.
- * A comms_steward or unit Owner/Curator gets the rest of the roster (including
- * Status) but never COI — so `gap` is forced to `"all"` here regardless of the
- * query string, not just hidden in the UI: a crafted `?gap=has-coi` would
- * otherwise leak COI presence through which rows come back even with the
- * column itself withheld.
+ * `gap` is sanitized to strip `"has-coi"` (falling back to `"all"`) before it
+ * ever reaches `loadDataQualityRoster`, regardless of what the query string
+ * asks for: `DataQualityGapFilter` is a value shared with `/edit/coi`, and a
+ * crafted `?gap=has-coi` here would otherwise narrow the row set by COI
+ * presence on a page that never shows a COI column at all — the same class of
+ * leak the superuser-only gate on `/edit/coi` exists to prevent.
  */
 import { redirect } from "next/navigation";
 
@@ -31,7 +32,7 @@ import { loadDataQualityFacets, loadDataQualityRoster, parseDataQualityParams } 
 import { getEffectiveEditSession, impersonationEnabled } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { requireSuperuserGet } from "@/lib/edit/authz";
-import { isDataQualityDashboardEnabled, isEmptyScope, loadDataQualityScope } from "@/lib/edit/data-quality";
+import { isEmptyScope, loadDataQualityScope } from "@/lib/edit/data-quality";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 
@@ -75,12 +76,9 @@ export default async function EditScholarsPage({
     }
   }
 
-  // COI review is superuser-only, layered on top of the roster scope above —
-  // see the module doc comment.
-  const canSeeCoi = session.isSuperuser && isDataQualityDashboardEnabled();
-
   const params = parseDataQualityParams((await searchParams) ?? {});
-  const gap = canSeeCoi ? params.gap : "all";
+  // Strip "has-coi" — see the module doc comment.
+  const gap = params.gap === "has-coi" ? "all" : params.gap;
 
   const [roster, allFacets] = await Promise.all([
     loadDataQualityRoster(
@@ -90,6 +88,7 @@ export default async function EditScholarsPage({
         roleCategories: params.roleCategories,
         units: params.units,
         gap,
+        overviewAge: params.overviewAge,
         includeHidden: params.includeHidden,
         limit: PAGE_SIZE,
         offset: params.page * PAGE_SIZE,
@@ -151,12 +150,12 @@ export default async function EditScholarsPage({
         units={params.unitValues}
         q={params.q}
         gap={gap}
+        overviewAge={params.overviewAge}
         includeHidden={params.includeHidden}
         page={params.page}
         pageSize={PAGE_SIZE}
         canImpersonate={impersonationEnabled() && session.isSuperuser}
         viewerCwid={session.cwid}
-        canSeeCoi={canSeeCoi}
       />
     </ConsoleShell>
   );

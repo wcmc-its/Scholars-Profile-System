@@ -18,8 +18,10 @@ function scholarRow(over: Record<string, unknown> = {}) {
     primaryTitle: null,
     roleCategory: "full_time_faculty",
     status: "active",
+    overview: null,
     hIndex: null,
     scoredPubCount: null,
+    hasHeadshot: null,
     department: null,
     division: null,
     ...over,
@@ -107,6 +109,8 @@ function fakeClient(opts: {
         );
       }),
     },
+    fieldOverride: { findMany: vi.fn().mockResolvedValue([]) },
+    overviewProvenance: { findMany: vi.fn().mockResolvedValue([]) },
   };
   return { client, scholarFindMany, grantGroupBy };
 }
@@ -195,7 +199,10 @@ describe("loadDataQualityRoster — leadership + COI + prominence", () => {
   it("reports summary counts across the in-scope set (pre gap filter)", async () => {
     const { client } = setup();
     const { counts } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
-    expect(counts).toEqual({ inScope: 3, withCoi: 1 });
+    // None of this fixture's scholars set hasHeadshot/overview, so headshot is
+    // "unknown" (not "missing") for all three and hasOverview is false for all
+    // three.
+    expect(counts).toEqual({ inScope: 3, missingHeadshot: 0, missingOverview: 3, withCoi: 1 });
   });
 });
 
