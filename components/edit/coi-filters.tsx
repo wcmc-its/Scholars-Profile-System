@@ -1,39 +1,29 @@
 "use client";
 
 /**
- * The Profiles roster filter sidebar (#3/#4/#5/#6 — v2; formerly the Data
- * Quality dashboard's filter sidebar, folded in when that surface merged into
- * `/edit/scholars`). COI review moved to its own page (`/edit/coi`,
- * `components/edit/coi-filters.tsx`) — this sidebar only ever filters by the
- * Profiles-visible gaps (missing headshot / missing overview) and overview
- * freshness; it has no COI option at all, not even hidden.
+ * The COI dashboard's filter sidebar (`/edit/coi`, superuser-only). A trimmed
+ * sibling of `components/edit/profiles-filters.tsx` — same auto-apply client
+ * island, same facet/search/hidden-roles controls, but the only "Gap" option
+ * is COI itself (no headshot/overview — those are Profiles-only), and there's
+ * no overview-freshness filter at all.
  *
  * A client island that AUTO-APPLIES: every change (facet toggle, select, the
- * hidden-roles checkbox, or the debounced search box) navigates the page to a new
- * query string via `router.replace` — no "Apply" button. The URL stays the source
- * of truth (shareable / reload-safe) and the server re-runs the query, so the
- * query, never the UI, remains the scope boundary. A soft nav keeps scroll
- * position and only re-renders the table.
- *
- * Reuses the #972 `RosterFacet` typeahead; the org-unit hierarchy is a
- * "Department / division" facet with divisions indented under their parent, plus a
- * separate "Centers" facet (centers have no parent-dept FK, so they can't nest).
+ * hidden-roles checkbox, or the debounced search box) navigates the page to a
+ * new query string via `router.replace` — no "Apply" button. The URL stays
+ * the source of truth (shareable / reload-safe) and the server re-runs the
+ * query, so the query, never the UI, remains the scope boundary.
  */
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { RosterFacet, type FacetOption } from "@/components/center/center-roster-facets";
-import type {
-  DataQualityFacets,
-  DataQualityGapFilter,
-  OverviewAgeFilter,
-} from "@/lib/api/data-quality";
+import type { DataQualityFacets, DataQualityGapFilter } from "@/lib/api/data-quality";
 
-const BASE = "/edit/scholars";
+const BASE = "/edit/coi";
 /** Debounce the free-text search so typing doesn't fire a request per keystroke. */
 const SEARCH_DEBOUNCE_MS = 350;
 
-export type ProfilesFiltersProps = {
+export type CoiFiltersProps = {
   facets: DataQualityFacets;
   /** Currently-applied person types (raw roleCategory values). */
   roleCategories: string[];
@@ -41,7 +31,6 @@ export type ProfilesFiltersProps = {
   units: string[];
   q: string;
   gap: DataQualityGapFilter;
-  overviewAge: OverviewAgeFilter;
   includeHidden: boolean;
 };
 
@@ -50,7 +39,6 @@ type FilterState = {
   unitSet: ReadonlySet<string>;
   query: string;
   gap: DataQualityGapFilter;
-  overviewAge: OverviewAgeFilter;
   hide: boolean;
 };
 
@@ -60,22 +48,13 @@ function hrefFor(s: FilterState): string {
   for (const r of s.roles) p.append("type", r);
   for (const u of s.unitSet) p.append("unit", u);
   if (s.gap !== "all") p.set("gap", s.gap);
-  if (s.overviewAge !== "all") p.set("overviewAge", s.overviewAge);
   if (s.hide) p.set("hidden", "0");
   // No `page` → any filter change resets to the first page.
   const qs = p.toString();
   return qs ? `${BASE}?${qs}` : BASE;
 }
 
-export function ProfilesFilters({
-  facets,
-  roleCategories,
-  units,
-  q,
-  gap,
-  overviewAge,
-  includeHidden,
-}: ProfilesFiltersProps) {
+export function CoiFilters({ facets, roleCategories, units, q, gap, includeHidden }: CoiFiltersProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -84,7 +63,6 @@ export function ProfilesFilters({
   const [selUnits, setSelUnits] = useState<ReadonlySet<string>>(new Set(units));
   const [qDraft, setQDraft] = useState(q);
   const [gapVal, setGapVal] = useState<DataQualityGapFilter>(gap);
-  const [ageVal, setAgeVal] = useState<OverviewAgeFilter>(overviewAge);
   const [hide, setHide] = useState(!includeHidden); // checkbox checked = hide
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -93,7 +71,6 @@ export function ProfilesFilters({
     unitSet: selUnits,
     query: qDraft,
     gap: gapVal,
-    overviewAge: ageVal,
     hide,
   });
 
@@ -133,7 +110,6 @@ export function ProfilesFilters({
     setSelUnits(new Set());
     setQDraft("");
     setGapVal("all");
-    setAgeVal("all");
     setHide(false);
     startTransition(() => router.replace(BASE, { scroll: false }));
   };
@@ -142,9 +118,7 @@ export function ProfilesFilters({
   const roleOptions: FacetOption[] = facets.roleCategories;
 
   // Department + division options as a FLAT list (each department followed by its
-  // divisions, order preserved). Divisions are NOT indented: their label already
-  // carries the parent department ("Cardiology (Medicine)"), and indentation would
-  // wrongly imply nesting under whatever row sits above them under search.
+  // divisions, order preserved) — same layout rationale as `ProfilesFilters`.
   const unitOptions = useMemo<FacetOption[]>(() => {
     const out: FacetOption[] = [];
     for (const dep of facets.departments) {
@@ -164,11 +138,8 @@ export function ProfilesFilters({
         e.preventDefault(); // Enter in the search box applies immediately.
         flushSearch();
       }}
-      /* R4 (surface language): a filter sidebar is a rail — one greige unit with
-         its own edge, not controls loose on the page. --apollo-rail-border is the
-         strong value because the hairline reads 1.035:1 on the rail and dies. */
       className="bg-apollo-rail border-apollo-rail-border w-full rounded-xl border p-4"
-      data-testid="profiles-filter-form"
+      data-testid="coi-filter-form"
     >
       <div className="mb-4 flex items-center gap-2">
         <span className="text-muted-foreground text-xs" aria-live="polite">
@@ -184,11 +155,11 @@ export function ProfilesFilters({
       </div>
 
       <div className="mb-4 flex flex-col gap-1">
-        <label htmlFor="pf-q" className="text-muted-foreground text-xs">
+        <label htmlFor="coi-q" className="text-muted-foreground text-xs">
           Search name or CWID
         </label>
         <input
-          id="pf-q"
+          id="coi-q"
           type="search"
           value={qDraft}
           onChange={(e) => onSearchChange(e.target.value)}
@@ -198,11 +169,11 @@ export function ProfilesFilters({
       </div>
 
       <div className="mb-4 flex flex-col gap-1">
-        <label htmlFor="pf-gap" className="text-muted-foreground text-xs">
+        <label htmlFor="coi-gap" className="text-muted-foreground text-xs">
           Gap
         </label>
         <select
-          id="pf-gap"
+          id="coi-gap"
           value={gapVal}
           onChange={(e) => {
             const v = e.target.value as DataQualityGapFilter;
@@ -212,37 +183,13 @@ export function ProfilesFilters({
           className="border-input bg-background h-9 rounded-md border px-3 text-sm"
         >
           <option value="all">Any</option>
-          <option value="no-headshot">Missing headshot</option>
-          <option value="no-overview">Missing overview</option>
+          <option value="has-coi">Has COI to review</option>
         </select>
       </div>
 
-      <div className="mb-4 flex flex-col gap-1">
-        <label htmlFor="pf-overview-age" className="text-muted-foreground text-xs">
-          Overview last updated
-        </label>
-        <select
-          id="pf-overview-age"
-          value={ageVal}
-          onChange={(e) => {
-            const v = e.target.value as OverviewAgeFilter;
-            setAgeVal(v);
-            apply({ overviewAge: v });
-          }}
-          className="border-input bg-background h-9 rounded-md border px-3 text-sm"
-        >
-          <option value="all">Any</option>
-          <option value="imported">Imported / seed only</option>
-          <option value="never">No overview</option>
-          <option value="lt1yr">Edited &lt; 1 year ago</option>
-          <option value="1to2yr">Edited 1–2 years ago</option>
-          <option value="gt2yr">Edited &gt; 2 years ago</option>
-        </select>
-      </div>
-
-      <label className="mb-5 flex items-center gap-2 text-sm" htmlFor="pf-hidden">
+      <label className="mb-5 flex items-center gap-2 text-sm" htmlFor="coi-hidden">
         <input
-          id="pf-hidden"
+          id="coi-hidden"
           type="checkbox"
           checked={hide}
           onChange={(e) => {

@@ -1,22 +1,24 @@
 /**
- * The Profiles roster query — prominence-sorted scholars with leadership,
- * PI-grant, and (superuser-only) COI-review signal. Formerly the standalone
- * "Data Quality dashboard" query (`docs/data-quality-dashboard-spec.md`); that
- * surface was folded into `/edit/scholars` ("Profiles") and its headshot/
- * overview gap tracking was dropped in the merge — COI review, leadership, and
- * prominence sort are the parts that carried over.
+ * The shared scholar-roster query behind TWO pages that both sort by
+ * prominence + leadership: `/edit/scholars` ("Profiles" — headshot/overview
+ * gaps, Status, everyone who can see Profiles) and `/edit/coi` ("COI" —
+ * pending conflict-of-interest review, superuser-only). One query engine,
+ * one candidate set per request; each PAGE decides which columns to render
+ * and sanitizes `gap`/`overviewAge` down to the values that make sense for
+ * it (see the module doc comments on both pages) — a stray `?gap=has-coi` on
+ * Profiles, or `?gap=no-headshot` on COI, must not narrow the row set by a
+ * dimension that page doesn't show, or it leaks that dimension's data through
+ * which rows come back even with the column withheld.
  *
- * Loads the scholars in the viewer's scope and computes each one's rolled-
- * our-own "prominence" score plus pending-COI counts, then sorts by prominence
- * and paginates. Read-only; the page deep-links each row into the existing
- * per-scholar edit surface.
+ * Loads the scholars in the viewer's scope and computes each one's gaps
+ * (headshot / overview presence + freshness), pending-COI counts, and a
+ * rolled-our-own "prominence" score, then sorts by prominence and paginates.
+ * Read-only; the page deep-links each row into the existing per-scholar edit
+ * surface.
  *
  * Authorization/scope is the page's responsibility to *resolve* (via
  * `loadDataQualityScope`), but the scope MUST live in the query (so the UI is
- * never the boundary) — `opts.scope` does exactly that. COI visibility is a
- * SEPARATE, narrower gate (superuser-only) that the caller enforces by forcing
- * `gap` to `"all"` and `includeCoi: false` for anyone who isn't one — see
- * `app/edit/scholars/page.tsx` and the export route.
+ * never the boundary) — `opts.scope` does exactly that.
  *
  * Aggregates (chairs, chiefs, PI-grant counts, COI counts) are read GROUPED BY
  * cwid across the whole table and joined to the candidate set in-app, rather
@@ -44,8 +46,10 @@ export type DataQualityClient = Pick<
   | "center"
   | "grant"
   | "coiGapCandidate"
+  | "fieldOverride"
   | "centerMembership"
   | "divisionMembership"
+  | "overviewProvenance"
 >;
 
 /** A single org-unit filter (department / division / center); reused from the
@@ -137,7 +141,51 @@ export function classifyLeadership(
   return { tier: LEADERSHIP_TIER.none, label: null };
 }
 
-export type DataQualityGapFilter = "all" | "has-coi";
+const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
+
+/**
+ * Classify an overview's freshness (#6), agreeing with the #1077 edit surface:
+ *  - "never"    — no overview at all
+ *  - "imported" — a bio exists but has NO OverviewProvenance row (still the VIVO
+ *                 seed, never edited in /edit) → no genuine last-edited date
+ *  - "lt1yr"/"1to2yr"/"gt2yr" — edited in /edit; bucketed by the provenance date
+ * `Scholar.overviewUpdatedAt` is dormant (never written) so it is NOT used.
+ *
+ * #2212 — `updatedAt` here is `OverviewProvenance.updatedAt`, the date the bio
+ * was last saved IN /edit. It is NOT content age: the /edit clock started in
+ * 2026, so `gt2yr` cannot match until 2028, and a never-edited seed classifies
+ * as "imported" rather than into any age bucket. That is correct, and "imported"
+ * — not "gt2yr" — is the stale-overview stratum (`docs/qa/launch-data-qa.md`
+ * §1). Do NOT paper over it by falling back to `Scholar.overviewUpdatedAt`:
+ * every seeded row holds the same corpus-LOAD date, so that fallback would
+ * classify all 552 as freshly edited. There is no true authored date upstream.
+ */
+function classifyOverview(
+  hasOverview: boolean,
+  updatedAt: Date | string | null | undefined,
+  now: number,
+): { overviewState: OverviewState; overviewUpdatedAt: string | null } {
+  if (!hasOverview) return { overviewState: "never", overviewUpdatedAt: null };
+  if (!updatedAt) return { overviewState: "imported", overviewUpdatedAt: null };
+  const d = updatedAt instanceof Date ? updatedAt : new Date(updatedAt);
+  if (Number.isNaN(d.getTime())) return { overviewState: "imported", overviewUpdatedAt: null };
+  const ageYears = (now - d.getTime()) / MS_PER_YEAR;
+  const state: OverviewState = ageYears < 1 ? "lt1yr" : ageYears < 2 ? "1to2yr" : "gt2yr";
+  return { overviewState: state, overviewUpdatedAt: d.toISOString() };
+}
+
+export type HeadshotState = "present" | "missing" | "unknown";
+
+/** Overview-freshness bucket (#6); see `classifyOverview`. */
+export type OverviewState = "never" | "imported" | "lt1yr" | "1to2yr" | "gt2yr";
+/** The "overview last updated" filter — "all" plus the freshness buckets.
+ *  Profiles-only; the COI page never parses this (module doc comment). */
+export type OverviewAgeFilter = "all" | OverviewState;
+
+/** "no-headshot"/"no-overview" are Profiles-only; "has-coi" is COI-page-only.
+ *  Each page sanitizes the value down to the subset that applies to it before
+ *  it ever reaches this module — see the module doc comment. */
+export type DataQualityGapFilter = "all" | "no-headshot" | "no-overview" | "has-coi";
 
 /** One row in the roster table. Plain-serializable (crosses to a client UI). */
 export type DataQualityEntry = {
@@ -158,8 +206,19 @@ export type DataQualityEntry = {
   /** True when the profile is publicly visible (`status === 'active'`); false
    *  when it is suppressed (self or admin). Drives the Visible / Hidden chip. */
   isVisible: boolean;
-  /** Pending COI-review counts — populate the COI column for a superuser only;
-   *  the caller must not render these for anyone else (see module doc comment). */
+  /** "present" | "missing" | "unknown" (not yet probed by etl:headshot).
+   *  Profiles-only. */
+  headshot: HeadshotState;
+  /** Profiles-only. */
+  hasOverview: boolean;
+  /** ISO date the overview was last edited in /edit; null when imported/never.
+   *  Profiles-only. */
+  overviewUpdatedAt: string | null;
+  /** Overview freshness bucket (#1077 parity). Profiles-only. */
+  overviewState: OverviewState;
+  /** Pending COI-review counts. COI-page-only — Profiles must never render
+   *  these (see the Profiles page's own doc comment on why `gap` is sanitized
+   *  server-side, not just hidden in the UI). */
   pendingCoiHigh: number;
   pendingCoiMedium: number;
   prominence: number;
@@ -176,10 +235,14 @@ export type DataQualityOptions = {
   roleCategories?: readonly string[];
   /** Org-unit multi-select (#5): departments / divisions / centers, OR'd together. */
   units?: readonly EditRosterUnitFilter[];
-  /** Gap-type filter; defaults to "all". The caller MUST force this to "all" for
-   *  a non-superuser — a COI filter would otherwise leak COI presence through
-   *  which rows appear, even with the COI column itself hidden. */
+  /** Gap-type filter; defaults to "all". Each caller sanitizes this to the
+   *  subset of `DataQualityGapFilter` that applies to it (module doc comment)
+   *  — an unsanitized value would filter the row set by a dimension that
+   *  page's columns never show, leaking that dimension's data anyway. */
   gap?: DataQualityGapFilter;
+  /** Overview-freshness filter (#6); defaults to "all". Profiles-only — the
+   *  COI page never sets this. */
+  overviewAge?: OverviewAgeFilter;
   /** Include #536 hidden identity classes (doctoral students / alumni). Default
    *  true; ignored when a specific person-type is chosen. */
   includeHidden?: boolean;
@@ -189,10 +252,13 @@ export type DataQualityOptions = {
   offset?: number;
 };
 
-/** Gap counts across the in-scope, filtered (pre-gap-filter) set — for summary chips. */
+/** Gap counts across the in-scope, filtered (pre-gap-filter) set — for summary
+ *  chips. Both pages get the full set back; each renders only its own slice. */
 export type DataQualityCounts = {
   /** Scholars in scope after person-type/department/hidden filters (pre gap filter). */
   inScope: number;
+  missingHeadshot: number;
+  missingOverview: number;
   withCoi: number;
 };
 
@@ -205,6 +271,10 @@ export type DataQualityResult = {
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+
+function nonEmpty(s: string | null | undefined): boolean {
+  return typeof s === "string" && s.trim().length > 0;
+}
 
 /** A center membership active by date today (pending / expired excluded). Mirrors
  *  `isCenterMembershipActive` (`lib/api/centers.ts`) — duplicated here so this
@@ -358,53 +428,68 @@ async function computeDataQualityEntries(
 
   // Candidate identities + prominence inputs. The whole in-scope set loads (the
   // prominence sort is computed in-app over all of it, then paginated).
-  const [candidates, chairRows, chiefRows, piRows, nihPiRows, coiRows] = await Promise.all([
-    client.scholar.findMany({
-      where,
-      select: {
-        cwid: true,
-        slug: true,
-        preferredName: true,
-        primaryTitle: true,
-        roleCategory: true,
-        status: true,
-        hIndex: true,
-        scoredPubCount: true,
-        department: { select: { name: true } },
-        division: { select: { name: true } },
-      },
-    }),
-    client.department.findMany({ select: { chairCwid: true } }),
-    client.division.findMany({ select: { chiefCwid: true } }),
-    client.grant.groupBy({
-      by: ["cwid"],
-      // PI prominence weights WCM-administered grants only; exclude RePORTER
-      // backfill so a recruit's prior-institution history doesn't inflate it.
-      where: { role: { in: [...PI_ROLES] }, source: { not: "RePORTER" } },
-      _count: { _all: true },
-    }),
-    client.grant.groupBy({
-      by: ["cwid"],
-      where: { role: { in: [...PI_ROLES] }, nihIc: { not: null }, source: { not: "RePORTER" } },
-      _count: { _all: true },
-    }),
-    client.coiGapCandidate.groupBy({
-      by: ["cwid", "tier"],
-      where: { status: "new" },
-      _count: { _all: true },
-    }),
-  ]);
+  const [candidates, chairRows, chiefRows, piRows, nihPiRows, coiRows, overrideRows, provRows] =
+    await Promise.all([
+      client.scholar.findMany({
+        where,
+        select: {
+          cwid: true,
+          slug: true,
+          preferredName: true,
+          primaryTitle: true,
+          roleCategory: true,
+          status: true,
+          overview: true,
+          hIndex: true,
+          scoredPubCount: true,
+          hasHeadshot: true,
+          department: { select: { name: true } },
+          division: { select: { name: true } },
+        },
+      }),
+      client.department.findMany({ select: { chairCwid: true } }),
+      client.division.findMany({ select: { chiefCwid: true } }),
+      client.grant.groupBy({
+        by: ["cwid"],
+        // PI prominence weights WCM-administered grants only; exclude RePORTER
+        // backfill so a recruit's prior-institution history doesn't inflate it.
+        where: { role: { in: [...PI_ROLES] }, source: { not: "RePORTER" } },
+        _count: { _all: true },
+      }),
+      client.grant.groupBy({
+        by: ["cwid"],
+        where: { role: { in: [...PI_ROLES] }, nihIc: { not: null }, source: { not: "RePORTER" } },
+        _count: { _all: true },
+      }),
+      client.coiGapCandidate.groupBy({
+        by: ["cwid", "tier"],
+        where: { status: "new" },
+        _count: { _all: true },
+      }),
+      client.fieldOverride.findMany({
+        where: { entityType: "scholar", fieldName: "overview" },
+        select: { entityId: true, value: true },
+      }),
+      // #1077 parity — the last-edited-in-/edit date; absence ⇒ imported VIVO seed.
+      client.overviewProvenance.findMany({ select: { cwid: true, updatedAt: true } }),
+    ]);
 
   const chairs = new Set(chairRows.map((r) => r.chairCwid).filter((c): c is string => !!c));
   const chiefs = new Set(chiefRows.map((r) => r.chiefCwid).filter((c): c is string => !!c));
   const piCount = new Map(piRows.map((r) => [r.cwid, r._count._all]));
   const nihPiCount = new Map(nihPiRows.map((r) => [r.cwid, r._count._all]));
+  const overviewOverride = new Set(
+    overrideRows.filter((r) => nonEmpty(r.value)).map((r) => r.entityId),
+  );
+  const provByCwid = new Map(provRows.map((r) => [r.cwid, r.updatedAt]));
   const coiHigh = new Map<string, number>();
   const coiMedium = new Map<string, number>();
   for (const r of coiRows) {
     if (r.tier === "High") coiHigh.set(r.cwid, r._count._all);
     else if (r.tier === "Medium") coiMedium.set(r.cwid, r._count._all);
   }
+
+  const now = Date.now();
 
   let entries: DataQualityEntry[] = candidates.map((s) => {
     const isChair = chairs.has(s.cwid);
@@ -421,6 +506,16 @@ async function computeDataQualityEntries(
 
     const { tier, label } = classifyLeadership(s.primaryTitle ?? null, isChair, isChief);
 
+    const headshot: HeadshotState =
+      s.hasHeadshot === true ? "present" : s.hasHeadshot === false ? "missing" : "unknown";
+
+    const hasOverview = nonEmpty(s.overview) || overviewOverride.has(s.cwid);
+    const { overviewState, overviewUpdatedAt } = classifyOverview(
+      hasOverview,
+      provByCwid.get(s.cwid),
+      now,
+    );
+
     return {
       cwid: s.cwid,
       slug: s.slug,
@@ -433,6 +528,10 @@ async function computeDataQualityEntries(
       leadership: label,
       leadershipTier: tier,
       isVisible: s.status === "active",
+      headshot,
+      hasOverview,
+      overviewUpdatedAt,
+      overviewState,
       pendingCoiHigh: coiHigh.get(s.cwid) ?? 0,
       pendingCoiMedium: coiMedium.get(s.cwid) ?? 0,
       prominence,
@@ -443,12 +542,22 @@ async function computeDataQualityEntries(
   // Summary counts across the in-scope, filtered set (before the gap filter).
   const counts: DataQualityCounts = {
     inScope: entries.length,
+    missingHeadshot: entries.filter((e) => e.headshot === "missing").length,
+    missingOverview: entries.filter((e) => !e.hasOverview).length,
     withCoi: entries.filter((e) => e.pendingCoiHigh > 0).length,
   };
 
-  // Gap filter — "has-coi" only; the caller has already forced this to "all"
-  // for a non-superuser (module doc comment).
-  if (opts.gap === "has-coi") entries = entries.filter((e) => e.pendingCoiHigh > 0);
+  // Gap filter — each caller has already sanitized `gap` to the subset that
+  // applies to it (module doc comment), so only one of these three branches
+  // ever actually narrows the set for a given page.
+  if (opts.gap === "no-headshot") entries = entries.filter((e) => e.headshot === "missing");
+  else if (opts.gap === "no-overview") entries = entries.filter((e) => !e.hasOverview);
+  else if (opts.gap === "has-coi") entries = entries.filter((e) => e.pendingCoiHigh > 0);
+
+  // Overview-age filter (#6) — Profiles-only; the COI page never sets this.
+  if (opts.overviewAge && opts.overviewAge !== "all") {
+    entries = entries.filter((e) => e.overviewState === opts.overviewAge);
+  }
 
   // Leadership tier first (Dean #1), then prominence desc, then name asc for a
   // stable page boundary.
@@ -504,30 +613,33 @@ export async function loadDataQualityExport(
   };
 }
 
-const BASE_CSV_HEADERS = [
-  "rank",
-  "cwid",
-  "name",
-  "title",
-  "unit",
-  "person_type",
-  "leadership",
-  "visible",
-] as const;
+const BASE_CSV_HEADERS = ["rank", "cwid", "name", "title", "unit", "person_type", "leadership"] as const;
+/** Profiles-only columns (Status + gaps). */
+const PROFILE_CSV_HEADERS = ["visible", "headshot", "has_overview", "overview_updated"] as const;
+/** COI-page-only columns. */
 const COI_CSV_HEADERS = ["pending_coi_high", "pending_coi_medium"] as const;
 const TAIL_CSV_HEADERS = ["prominence"] as const;
 
+/** The CSV "overview_updated" cell: the edit date (YYYY-MM-DD) when known,
+ *  "imported" for the un-edited VIVO seed, "" when there's no overview. */
+function overviewUpdatedCell(e: DataQualityEntry): string {
+  if (e.overviewUpdatedAt) return e.overviewUpdatedAt.slice(0, 10);
+  return e.overviewState === "imported" ? "imported" : "";
+}
+
 /** Serialize export rows to a CSV string. `rank` is the 1-based position in the
- *  prominence-sorted set the rows arrive in. `includeCoi` MUST be false for a
- *  non-superuser — COI review is superuser-only (module doc comment); omitting
- *  the columns here, not just hiding them, is what keeps a crafted request from
- *  getting COI data the UI never showed. */
+ *  prominence-sorted set the rows arrive in. `includeProfileCols`/`includeCoi`
+ *  must match what the CALLING page's table actually renders — Profiles sets
+ *  `{includeProfileCols:true, includeCoi:false}`, the COI page the reverse.
+ *  Never `true` for both: each dimension is scoped to its own page (module
+ *  doc comment), and the CSV must not carry a column its page never shows. */
 export function buildDataQualityCsv(
   rows: readonly DataQualityEntry[],
-  opts: { includeCoi: boolean },
+  opts: { includeProfileCols: boolean; includeCoi: boolean },
 ): string {
   const headers = [
     ...BASE_CSV_HEADERS,
+    ...(opts.includeProfileCols ? PROFILE_CSV_HEADERS : []),
     ...(opts.includeCoi ? COI_CSV_HEADERS : []),
     ...TAIL_CSV_HEADERS,
   ];
@@ -540,21 +652,29 @@ export function buildDataQualityCsv(
       e.unit ?? "",
       formatRoleCategory(e.roleCategory) ?? e.roleCategory ?? "",
       e.leadership ?? "",
-      e.isVisible ? "yes" : "no",
     ];
+    const profile = opts.includeProfileCols
+      ? [e.isVisible ? "yes" : "no", e.headshot, e.hasOverview ? "yes" : "no", overviewUpdatedCell(e)]
+      : [];
     const coi = opts.includeCoi ? [e.pendingCoiHigh, e.pendingCoiMedium] : [];
-    return [...base, ...coi, e.prominence.toFixed(2)];
+    return [...base, ...profile, ...coi, e.prominence.toFixed(2)];
   });
   return toCsv(headers, body);
 }
 
 // ---------------------------------------------------------------------------
-// Shared param parsing (#3/#4/#5) — the page and the export route parse the
+// Shared param parsing (#3/#4/#5/#6) — the page and the export route parse the
 // SAME query string identically through this helper, so they can never drift.
 // ---------------------------------------------------------------------------
 
 function parseGap(v: string | undefined): DataQualityGapFilter {
-  return v === "has-coi" ? v : "all";
+  return v === "no-headshot" || v === "no-overview" || v === "has-coi" ? v : "all";
+}
+
+function parseOverviewAge(v: string | undefined): OverviewAgeFilter {
+  return v === "imported" || v === "never" || v === "lt1yr" || v === "1to2yr" || v === "gt2yr"
+    ? v
+    : "all";
 }
 
 /** Decode a unit-filter value (`dept:CODE` / `div:CODE` / `center:CODE`). */
@@ -577,6 +697,9 @@ export type ParsedDataQualityParams = {
   /** The raw encoded unit values (`dept:CODE` …) — for href building + UI seeding. */
   unitValues: string[];
   gap: DataQualityGapFilter;
+  /** Profiles-only; the COI page parses this too (dual-source parser, module
+   *  doc comment) but never passes it through to `loadDataQualityRoster`. */
+  overviewAge: OverviewAgeFilter;
   includeHidden: boolean;
   page: number;
 };
@@ -615,6 +738,7 @@ export function parseDataQualityParams(
     units,
     unitValues,
     gap: parseGap(first("gap")),
+    overviewAge: parseOverviewAge(first("overviewAge")),
     includeHidden: !(hidden === "0" || hidden === "false"),
     page: Math.max(Number.parseInt(first("page") ?? "0", 10) || 0, 0),
   };

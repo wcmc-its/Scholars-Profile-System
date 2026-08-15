@@ -32,6 +32,7 @@ describe("parseDataQualityParams — dual source + multi-value", () => {
       ],
       unitValues: ["dept:MED", "div:CARD"],
       gap: "has-coi",
+      overviewAge: "all",
       includeHidden: false,
       page: 2,
     });
@@ -54,11 +55,23 @@ describe("parseDataQualityParams — dual source + multi-value", () => {
     expect(parseDataQualityParams(new URLSearchParams("page=abc")).page).toBe(0);
     expect(parseDataQualityParams(new URLSearchParams("page=4")).page).toBe(4);
     expect(parseDataQualityParams(new URLSearchParams("gap=bogus")).gap).toBe("all");
-    // The dropped headshot/overview gap options fall back to "all" — an old
-    // bookmarked `gap=no-headshot` link degrades gracefully instead of erroring.
-    expect(parseDataQualityParams(new URLSearchParams("gap=no-headshot")).gap).toBe("all");
+    // The parser itself accepts every `DataQualityGapFilter` value — it's the
+    // shared page↔export boundary for BOTH `/edit/scholars` and `/edit/coi`,
+    // so it can't drop a value one of the two pages actually uses. Each PAGE
+    // sanitizes down to its own subset afterward (see the page/export-route
+    // tests), not this parser.
+    expect(parseDataQualityParams(new URLSearchParams("gap=no-headshot")).gap).toBe("no-headshot");
+    expect(parseDataQualityParams(new URLSearchParams("gap=no-overview")).gap).toBe("no-overview");
     expect(parseDataQualityParams(new URLSearchParams("gap=has-coi")).gap).toBe("has-coi");
     expect(parseDataQualityParams(new URLSearchParams("q=%20%20Harrington%20")).q).toBe("Harrington");
+  });
+
+  it("whitelists overviewAge, defaulting anything unrecognized to 'all'", () => {
+    expect(parseDataQualityParams(new URLSearchParams("")).overviewAge).toBe("all");
+    expect(parseDataQualityParams(new URLSearchParams("overviewAge=bogus")).overviewAge).toBe("all");
+    for (const v of ["imported", "never", "lt1yr", "1to2yr", "gt2yr"]) {
+      expect(parseDataQualityParams(new URLSearchParams(`overviewAge=${v}`)).overviewAge).toBe(v);
+    }
   });
 
   it("defaults includeHidden true; only 0/false hide", () => {

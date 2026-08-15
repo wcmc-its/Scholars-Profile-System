@@ -261,6 +261,40 @@ describe("AdminSubnav", () => {
     expect(screen.getByTestId("admin-tab-reports")).toBeTruthy();
   });
 
+  // COI dashboard tab — superuser + `EDIT_DATA_QUALITY_DASHBOARD` only, no
+  // grant escape hatch at all (mirrors the `coi` predicate in
+  // `lib/edit/console-tabs.server.ts`).
+  describe("the COI tab", () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("shows the COI tab (linking /edit/coi) to a superuser when the flag is on", () => {
+      vi.stubEnv("EDIT_DATA_QUALITY_DASHBOARD", "on");
+      render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+      const tab = screen.getByTestId("admin-tab-coi");
+      expect(tab.textContent).toContain("COI");
+      expect(tab.getAttribute("href")).toBe("/edit/coi");
+    });
+
+    it("hides the COI tab from a superuser when the flag is off", () => {
+      render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+      expect(screen.queryByTestId("admin-tab-coi")).toBeNull();
+    });
+
+    it("hides the COI tab from a non-superuser regardless of the flag", () => {
+      vi.stubEnv("EDIT_DATA_QUALITY_DASHBOARD", "on");
+      render(
+        <AdminSubnav
+          active="profiles"
+          pendingSlugRequests={null}
+          pendingHonors={null}
+          superuserSurfaces={false}
+          profilesTab
+        />,
+      );
+      expect(screen.queryByTestId("admin-tab-coi")).toBeNull();
+    });
+  });
+
   // comms-steward-profile-editing-spec.md §3b — a steward edits org units, so
   // the Units tab is shown via the `unitsTab` capability.
   it("shows the Units tab (linking /edit/units) when unitsTab is true", () => {

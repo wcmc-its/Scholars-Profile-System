@@ -1,7 +1,8 @@
 /**
  * `app/edit/scholars/page.tsx` — the Profiles roster page (#160 UI follow-up;
- * merged with the former standalone Data Quality dashboard, see
- * `lib/api/data-quality.ts`). Route-level authorization + query-wiring tests.
+ * merged with the former standalone Data Quality dashboard, then split again
+ * so COI moved to its own page, see `lib/api/data-quality.ts` and
+ * `app/edit/coi/page.tsx`). Route-level authorization + query-wiring tests.
  * Mocks the boundary deps and uses the real `requireSuperuserGet` (so the
  * denial log line is exercised) and the real `loadDataQualityScope` /
  * `isEmptyScope` (so the B3 unit-scope resolution is exercised against a
@@ -105,16 +106,22 @@ const ENTRY = {
   leadership: null,
   leadershipTier: 3,
   isVisible: true,
+  headshot: "unknown" as const,
+  hasOverview: false,
+  overviewUpdatedAt: null,
+  overviewState: "never" as const,
   pendingCoiHigh: 0,
   pendingCoiMedium: 0,
   prominence: 1.0,
   editHref: "/edit/scholar/abc1",
 };
 
+const COUNTS = { inScope: 0, missingHeadshot: 0, missingOverview: 0, withCoi: 0 };
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "warn").mockImplementation(() => {});
-  mockLoadDataQualityRoster.mockResolvedValue({ entries: [], total: 0, counts: { inScope: 0, withCoi: 0 } });
+  mockLoadDataQualityRoster.mockResolvedValue({ entries: [], total: 0, counts: COUNTS });
   mockLoadDataQualityFacets.mockResolvedValue({ roleCategories: [], departments: [], centers: [] });
   // Default: the viewer holds no unit grants → empty scope → Forbidden unless
   // they are a superuser / comms_steward.
@@ -268,7 +275,7 @@ describe("/edit/scholars — authorization", () => {
     mockLoadDataQualityRoster.mockResolvedValue({
       entries: [ENTRY],
       total: 1,
-      counts: { inScope: 1, withCoi: 0 },
+      counts: { ...COUNTS, inScope: 1 },
     });
     const result = asEl(await EditScholarsPage({ searchParams: sp() }));
     expect(result.type).not.toBe(mockForbidden);
@@ -278,7 +285,7 @@ describe("/edit/scholars — authorization", () => {
     expect(mockLoadDataQualityRoster).toHaveBeenCalledOnce();
   });
 
-  // Every viewer who reaches the page sees Status — it's not COI-gated.
+  // Every viewer who reaches the page sees Status — it's not gated at all.
   it("passes isVisible through to a row regardless of role", async () => {
     mockGetEditSession.mockResolvedValue(CURATOR);
     mockUnitAdminFindMany.mockResolvedValue([{ entityType: "department", entityId: "DEPT1" }]);
@@ -288,7 +295,7 @@ describe("/edit/scholars — authorization", () => {
         { ...ENTRY, cwid: "hid1", isVisible: false },
       ],
       total: 2,
-      counts: { inScope: 2, withCoi: 0 },
+      counts: { ...COUNTS, inScope: 2 },
     });
     const result = asEl(await EditScholarsPage({ searchParams: sp() }));
     const roster = asEl(result.props.children);
@@ -296,38 +303,27 @@ describe("/edit/scholars — authorization", () => {
     expect(entries.find((e) => e.cwid === "vis1")?.isVisible).toBe(true);
     expect(entries.find((e) => e.cwid === "hid1")?.isVisible).toBe(false);
   });
+
+  it("no longer passes a canSeeCoi prop to ProfilesRoster at all — COI is gone from this page", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    const result = asEl(await EditScholarsPage({ searchParams: sp() }));
+    const roster = asEl(result.props.children);
+    expect(roster.props.canSeeCoi).toBeUndefined();
+  });
 });
 
-describe("/edit/scholars — COI gating (canSeeCoi)", () => {
-  it("superuser + EDIT_DATA_QUALITY_DASHBOARD on → canSeeCoi true", async () => {
-    vi.stubEnv("EDIT_DATA_QUALITY_DASHBOARD", "on");
+describe("/edit/scholars — gap sanitization (COI never leaks into Profiles)", () => {
+  // The key security-relevant assertion: not just no COI column rendered — the
+  // query itself is narrowed server-side, so a crafted `?gap=has-coi` can't leak
+  // COI presence through which rows come back, for ANY viewer of this page.
+  it("forces gap to 'all' server-side despite ?gap=has-coi, for a superuser", async () => {
     mockGetEditSession.mockResolvedValue(ADMIN);
-    const result = asEl(await EditScholarsPage({ searchParams: sp() }));
-    const roster = asEl(result.props.children);
-    expect(roster.props.canSeeCoi).toBe(true);
+    await EditScholarsPage({ searchParams: sp({ gap: "has-coi" }) });
+    const [opts] = mockLoadDataQualityRoster.mock.calls[0];
+    expect(opts.gap).toBe("all");
   });
 
-  it("superuser + flag off → canSeeCoi false", async () => {
-    mockGetEditSession.mockResolvedValue(ADMIN);
-    const result = asEl(await EditScholarsPage({ searchParams: sp() }));
-    const roster = asEl(result.props.children);
-    expect(roster.props.canSeeCoi).toBe(false);
-  });
-
-  it("non-superuser unit Owner/Curator → canSeeCoi false, even with the flag on", async () => {
-    vi.stubEnv("EDIT_DATA_QUALITY_DASHBOARD", "on");
-    mockGetEditSession.mockResolvedValue(CURATOR);
-    mockUnitAdminFindMany.mockResolvedValue([{ entityType: "department", entityId: "DEPT1" }]);
-    const result = asEl(await EditScholarsPage({ searchParams: sp() }));
-    const roster = asEl(result.props.children);
-    expect(roster.props.canSeeCoi).toBe(false);
-  });
-
-  // The important security-relevant assertion: not just the UI column hidden —
-  // the query itself is narrowed server-side, so a crafted `?gap=has-coi` can't
-  // leak COI presence through which rows come back.
-  it("forces gap to 'all' server-side for a non-superuser, even with ?gap=has-coi", async () => {
-    vi.stubEnv("EDIT_DATA_QUALITY_DASHBOARD", "on");
+  it("forces gap to 'all' server-side despite ?gap=has-coi, for a non-superuser unit Owner/Curator", async () => {
     mockGetEditSession.mockResolvedValue(CURATOR);
     mockUnitAdminFindMany.mockResolvedValue([{ entityType: "department", entityId: "DEPT1" }]);
     await EditScholarsPage({ searchParams: sp({ gap: "has-coi" }) });
@@ -335,35 +331,41 @@ describe("/edit/scholars — COI gating (canSeeCoi)", () => {
     expect(opts.gap).toBe("all");
   });
 
-  it("forces gap to 'all' server-side for a superuser with the flag off, even with ?gap=has-coi", async () => {
+  it("passes a Profiles-native gap value (no-headshot) straight through", async () => {
     mockGetEditSession.mockResolvedValue(ADMIN);
-    await EditScholarsPage({ searchParams: sp({ gap: "has-coi" }) });
+    await EditScholarsPage({ searchParams: sp({ gap: "no-headshot" }) });
     const [opts] = mockLoadDataQualityRoster.mock.calls[0];
-    expect(opts.gap).toBe("all");
+    expect(opts.gap).toBe("no-headshot");
   });
 
-  it("passes gap=has-coi straight through for a superuser with the flag on", async () => {
-    vi.stubEnv("EDIT_DATA_QUALITY_DASHBOARD", "on");
+  it("passes the other Profiles-native gap value (no-overview) straight through too", async () => {
     mockGetEditSession.mockResolvedValue(ADMIN);
-    await EditScholarsPage({ searchParams: sp({ gap: "has-coi" }) });
+    await EditScholarsPage({ searchParams: sp({ gap: "no-overview" }) });
     const [opts] = mockLoadDataQualityRoster.mock.calls[0];
-    expect(opts.gap).toBe("has-coi");
+    expect(opts.gap).toBe("no-overview");
   });
 });
 
 describe("/edit/scholars — query parsing", () => {
-  it("parses q, type, unit, gap, and page into the roster query", async () => {
-    vi.stubEnv("EDIT_DATA_QUALITY_DASHBOARD", "on");
+  it("parses q, type, unit, gap, overviewAge, and page into the roster query", async () => {
     mockGetEditSession.mockResolvedValue(ADMIN);
     await EditScholarsPage({
-      searchParams: sp({ q: "  smith ", type: "postdoc", unit: "dept:MED", gap: "has-coi", page: "2" }),
+      searchParams: sp({
+        q: "  smith ",
+        type: "postdoc",
+        unit: "dept:MED",
+        gap: "no-headshot",
+        overviewAge: "lt1yr",
+        page: "2",
+      }),
     });
     const [opts] = mockLoadDataQualityRoster.mock.calls[0];
     expect(opts).toMatchObject({
       query: "smith",
       roleCategories: ["postdoc"],
       units: [{ kind: "department", code: "MED" }],
-      gap: "has-coi",
+      gap: "no-headshot",
+      overviewAge: "lt1yr",
       limit: 100, // PAGE_SIZE
       offset: 200, // page 2 * PAGE_SIZE
     });
@@ -403,6 +405,10 @@ describe("ProfilesRoster — row name links to the editor", () => {
             leadership: null,
             leadershipTier: 3,
             isVisible: true,
+            headshot: "present",
+            hasOverview: true,
+            overviewUpdatedAt: "2026-01-01T00:00:00.000Z",
+            overviewState: "lt1yr",
             pendingCoiHigh: 0,
             pendingCoiMedium: 0,
             prominence: 1.2,
@@ -410,18 +416,18 @@ describe("ProfilesRoster — row name links to the editor", () => {
           },
         ]}
         total={1}
-        counts={{ inScope: 1, withCoi: 0 }}
+        counts={{ ...COUNTS, inScope: 1 }}
         facets={{ roleCategories: [], departments: [], centers: [] }}
         roleCategories={[]}
         units={[]}
         q=""
         gap="all"
+        overviewAge="all"
         includeHidden={true}
         page={0}
         pageSize={100}
         canImpersonate={false}
         viewerCwid="adm001"
-        canSeeCoi={false}
         {...overrides}
       />,
     );
@@ -456,7 +462,7 @@ describe("ProfilesRoster — row name links to the editor", () => {
     expect(screen.queryByTestId("view-as-abc1001")).toBeNull();
   });
 
-  it("renders the Status chip reflecting isVisible, for every viewer (not COI-gated)", async () => {
+  it("renders the Status chip reflecting isVisible, for every viewer (not gated at all)", async () => {
     await renderRoster({
       entries: [
         {
@@ -471,15 +477,24 @@ describe("ProfilesRoster — row name links to the editor", () => {
           leadership: null,
           leadershipTier: 3,
           isVisible: false,
+          headshot: "present",
+          hasOverview: true,
+          overviewUpdatedAt: "2026-01-01T00:00:00.000Z",
+          overviewState: "lt1yr",
           pendingCoiHigh: 0,
           pendingCoiMedium: 0,
           prominence: 1.2,
           editHref: "/edit/scholar/abc1001",
         },
       ],
-      canSeeCoi: false,
     });
     const row = screen.getByTestId("roster-row-abc1001");
     expect(row.textContent).toContain("Hidden");
+  });
+
+  it("never renders a COI column or cell — COI lives on /edit/coi now", async () => {
+    await renderRoster();
+    const table = screen.getByRole("table");
+    expect(table.textContent).not.toContain("COI");
   });
 });
