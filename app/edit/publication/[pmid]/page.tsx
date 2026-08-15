@@ -17,6 +17,7 @@
  */
 import { notFound, redirect } from "next/navigation";
 
+import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { PublicationTakedownPage } from "@/components/edit/publication-takedown-page";
 import { loadPublicationTakedownContext } from "@/lib/api/publication-takedown-context";
@@ -52,7 +53,12 @@ export default async function EditPublicationPage({
     targetId: pmid,
   });
   if (denial !== null) {
-    return <ForbiddenEditPage />;
+    return (
+      <div className="bg-apollo-page min-h-screen">
+        <ConsoleTopBar variant="console" />
+        <ForbiddenEditPage />
+      </div>
+    );
   }
 
   const ctx = await loadPublicationTakedownContext(pmid, db.read);

@@ -49,7 +49,11 @@ export default async function EditReportsClinicalTrialsPage({
   const code = await resolveNumberedReportCenterCode(session, db.read, center);
   const ctx = await loadReportsContext(code, session, db.read);
   if (ctx === null) {
-    return <ForbiddenEditPage variant="unit" targetEntity={code} />;
+    return (
+      <ConsoleShell active="reports" session={session} pendingSlugRequests={null} pendingHonors={null}>
+        <ForbiddenEditPage variant="unit" targetEntity={code} />
+      </ConsoleShell>
+    );
   }
 
   const pendingSlugRequests =

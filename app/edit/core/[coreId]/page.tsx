@@ -29,6 +29,7 @@ import { notFound, redirect } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 
 import type { RailItem } from "@/components/edit/attribute-rail";
+import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { CoreDetailsCard } from "@/components/edit/core-details-card";
 import { CoreLeaderCard, type CoreLeaderState } from "@/components/edit/core-leader-card";
 import { EditShell } from "@/components/edit/edit-shell";
@@ -81,7 +82,12 @@ export default async function EditCorePage({
       reason: authz.reason,
       targetEntityId: coreId,
     });
-    return <ForbiddenEditPage variant="unit" targetEntity={coreId} />;
+    return (
+      <div className="bg-apollo-page min-h-screen">
+        <ConsoleTopBar variant="console" />
+        <ForbiddenEditPage variant="unit" targetEntity={coreId} />
+      </div>
+    );
   }
 
   // Access (Owner/Superuser only — "Curators grant nothing") mirrors

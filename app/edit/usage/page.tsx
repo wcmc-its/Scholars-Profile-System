@@ -267,7 +267,11 @@ export default async function EditUsagePage() {
       path: "/edit/usage",
       reason: "not_superuser_or_unit_admin",
     });
-    return <ForbiddenEditPage />;
+    return (
+      <ConsoleShell active="usage" session={session} pendingSlugRequests={null} pendingHonors={null}>
+        <ForbiddenEditPage />
+      </ConsoleShell>
+    );
   }
 
   // Superuser subnav props mirror the administrators page; a non-superuser unit

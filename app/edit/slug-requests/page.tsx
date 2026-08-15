@@ -39,7 +39,11 @@ export default async function SlugRequestsPage() {
     targetId: "slug-requests",
   });
   if (denial !== null) {
-    return <ForbiddenEditPage />;
+    return (
+      <ConsoleShell active="slug-requests" session={session} pendingSlugRequests={null} pendingHonors={null}>
+        <ForbiddenEditPage />
+      </ConsoleShell>
+    );
   }
   // The queue surface doesn't exist until ops enable the feature.
   if (!isSlugRequestEnabled()) {

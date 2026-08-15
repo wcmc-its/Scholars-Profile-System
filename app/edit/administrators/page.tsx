@@ -50,7 +50,11 @@ export default async function AdministratorsPage() {
       path: "/edit/administrators",
       reason: "not_superuser_get",
     });
-    return <ForbiddenEditPage />;
+    return (
+      <ConsoleShell active="administrators" session={session} pendingSlugRequests={null} pendingHonors={null}>
+        <ForbiddenEditPage />
+      </ConsoleShell>
+    );
   }
 
   // Scope (D5): superuser ⇒ all grants; Owner ⇒ their owned subtree; nobody ⇒ 403.
@@ -66,7 +70,11 @@ export default async function AdministratorsPage() {
         path: "/edit/administrators",
         reason: "not_unit_owner",
       });
-      return <ForbiddenEditPage />;
+      return (
+        <ConsoleShell active="administrators" session={session} pendingSlugRequests={null} pendingHonors={null}>
+          <ForbiddenEditPage />
+        </ConsoleShell>
+      );
     }
   }
 

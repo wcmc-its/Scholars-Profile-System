@@ -23,6 +23,7 @@
  */
 import { notFound, redirect } from "next/navigation";
 
+import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { UnitEditPage } from "@/components/edit/unit-edit-page";
 import { loadUnitEditContext } from "@/lib/api/unit-edit-context";
@@ -68,7 +69,12 @@ export default async function EditDivisionPage({
       targetEntityType: "division",
       targetEntityId: code,
     });
-    return <ForbiddenEditPage variant="unit" targetEntity={code} />;
+    return (
+      <div className="bg-apollo-page min-h-screen">
+        <ConsoleTopBar variant="console" />
+        <ForbiddenEditPage variant="unit" targetEntity={code} />
+      </div>
+    );
   }
 
   const { attr } = (await searchParams) ?? {};

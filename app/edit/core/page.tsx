@@ -40,7 +40,11 @@ export default async function EditCoresIndexPage() {
       path: "/edit/core",
       reason: "not_superuser_get",
     });
-    return <ForbiddenEditPage />;
+    return (
+      <ConsoleShell active="cores" session={session} pendingSlugRequests={null} pendingHonors={null}>
+        <ForbiddenEditPage />
+      </ConsoleShell>
+    );
   }
 
   const cores = await getCoreList(db.read);
