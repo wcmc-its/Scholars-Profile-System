@@ -35,7 +35,6 @@ import { ViewAsButton } from "@/components/edit/view-as-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import type { AdminRosterEntry, AdminRosterGrant } from "@/lib/api/administrators-roster";
 import type { DirectoryPerson } from "@/lib/sources/ldap";
@@ -75,6 +74,9 @@ const KIND_LABEL: Record<AdminRosterGrant["entityType"], string> = {
 
 const PROVENANCE_BADGE_BASE =
   "bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium";
+
+/** Org unit · Role · Source · Actions — the per-person band row spans them all. */
+const COLUMN_COUNT = 4;
 
 /** The caveat shown beside ED-locked controls (§ 4.4). */
 const ED_LOCKED_NOTE =
@@ -364,55 +366,60 @@ export function AdministratorsRoster({
           {isSuperuser ? "No administrators yet." : "No administrators within your units."}
         </p>
       ) : (
-        resolved.map(({ entry, person }) => {
-          const isSelf = entry.cwid === actorCwid;
-          return (
-            <Card
-              key={entry.cwid}
-              className="border-l-2 border-apollo-maroon/60"
-              data-testid={`administrators-card-${entry.cwid}`}
-            >
-              <CardHeader>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <CardTitle className="text-base">
-                      <span className="font-medium">{person.name}</span>
-                      {person.title && (
-                        <span className="text-muted-foreground font-normal"> · {person.title}</span>
-                      )}
-                      <span className="text-muted-foreground ml-2 text-xs font-normal tabular-nums">
-                        {entry.cwid}
-                      </span>
-                    </CardTitle>
-                    {person.email && (
-                      <a
-                        href={`mailto:${person.email}`}
-                        className="text-muted-foreground text-xs hover:underline"
-                        data-testid={`administrators-email-${entry.cwid}`}
+        // One table for the whole roster (R11): the header renders once, and
+        // each person becomes a group-header band row (name/title/CWID +
+        // `ViewAsButton`) with their grant rows nested underneath — the same
+        // one-table/tbody-per-group shape `all-units-directory.tsx` uses for
+        // its kind groups.
+        <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-xl border">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm" data-testid="administrators-table">
+              <thead className="bg-apollo-surface-2">
+                <tr className="text-muted-foreground border-apollo-border border-b text-left">
+                  <th className="py-2 pl-3 font-medium">Org unit</th>
+                  <th className="py-2 pl-6 font-medium whitespace-nowrap">Role</th>
+                  <th className="py-2 pl-6 font-medium whitespace-nowrap">Source</th>
+                  <th className="py-2 pr-3 pl-6 text-right font-medium">Actions</th>
+                </tr>
+              </thead>
+              {resolved.map(({ entry, person }) => {
+                const isSelf = entry.cwid === actorCwid;
+                return (
+                  <tbody key={entry.cwid} data-testid={`administrators-person-${entry.cwid}`}>
+                    <tr>
+                      <th
+                        scope="colgroup"
+                        colSpan={COLUMN_COUNT}
+                        className="bg-apollo-surface-2 border-apollo-border border-y px-3 py-2 text-left align-middle text-sm font-normal"
                       >
-                        {person.email}
-                      </a>
-                    )}
-                  </div>
-                  {canImpersonate && !isSelf && (
-                    <ViewAsButton targetCwid={entry.cwid} targetName={person.name} />
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-4">
-                <table
-                  className="w-full text-sm"
-                  data-testid={`administrators-grants-${entry.cwid}`}
-                >
-                  <thead>
-                    <tr className="text-muted-foreground border-apollo-border border-b text-left">
-                      <th className="py-2 font-medium">Org unit</th>
-                      <th className="py-2 pl-6 font-medium whitespace-nowrap">Role</th>
-                      <th className="py-2 pl-6 font-medium whitespace-nowrap">Source</th>
-                      <th className="py-2 pl-6 text-right font-medium">Actions</th>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <span className="font-semibold">{person.name}</span>
+                            {person.title && (
+                              <span className="text-muted-foreground font-normal">
+                                {" "}
+                                · {person.title}
+                              </span>
+                            )}
+                            <span className="text-muted-foreground ml-2 text-xs font-normal tabular-nums">
+                              {entry.cwid}
+                            </span>
+                            {person.email && (
+                              <a
+                                href={`mailto:${person.email}`}
+                                className="text-muted-foreground block text-xs font-normal hover:underline"
+                                data-testid={`administrators-email-${entry.cwid}`}
+                              >
+                                {person.email}
+                              </a>
+                            )}
+                          </div>
+                          {canImpersonate && !isSelf && (
+                            <ViewAsButton targetCwid={entry.cwid} targetName={person.name} />
+                          )}
+                        </div>
+                      </th>
                     </tr>
-                  </thead>
-                  <tbody>
                     {entry.grants.map((grant) => {
                       const prov = provenanceBadge(grant.source);
                       const edLocked = isEdSourced(grant.source);
@@ -429,7 +436,7 @@ export function AdministratorsRoster({
                           className="border-apollo-border border-b align-middle"
                           data-testid={`administrators-grant-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
                         >
-                          <td className="py-2">
+                          <td className="py-2 pl-3">
                             <span className="font-medium">{grant.unitName}</span>
                             <Badge
                               variant="outline"
@@ -467,7 +474,7 @@ export function AdministratorsRoster({
                           <td className="py-2 pl-6 whitespace-nowrap">
                             <span className={PROVENANCE_BADGE_BASE}>{prov.label}</span>
                           </td>
-                          <td className="py-2 pl-6 text-right">
+                          <td className="py-2 pr-3 pl-6 text-right">
                             <div className="flex flex-col items-end gap-1">
                               <Button
                                 type="button"
@@ -506,11 +513,11 @@ export function AdministratorsRoster({
                       );
                     })}
                   </tbody>
-                </table>
-              </CardContent>
-            </Card>
-          );
-        })
+                );
+              })}
+            </table>
+          </div>
+        </div>
       )}
 
       <ConfirmDialog

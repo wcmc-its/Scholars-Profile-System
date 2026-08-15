@@ -122,8 +122,8 @@ describe("AdministratorsRoster — directory enrichment", () => {
         nameResolutionDegraded={true}
       />,
     );
-    // The card title falls back to the bare CWID.
-    expect(screen.getByTestId("administrators-card-staff1")).toBeTruthy();
+    // The band-row name falls back to the bare CWID.
+    expect(screen.getByTestId("administrators-person-staff1")).toBeTruthy();
     await waitFor(() =>
       expect(screen.getByTestId("administrators-name-degraded-note")).toBeTruthy(),
     );
