@@ -28,7 +28,7 @@ export type RailKind = "owned" | "service" | "sourced" | "readonly";
 /**
  * Leading-icon keys a rail item may carry. A STRING (not the component) so the
  * item stays serializable across the server→client boundary — `railItems` is
- * passed to the mobile `RailSelect`, a client component, and React Server
+ * passed to the mobile `RailSheet`, a client component, and React Server
  * Components cannot serialize a function/component prop. `RailLink` maps the key
  * to the glyph.
  */

@@ -13,7 +13,7 @@ const STORAGE_KEY = "edit-shell:rail-collapsed";
  * Desktop-only collapse toggle around the ATTRIBUTES rail column. Reclaims
  * horizontal width for the detail panel on narrower desktop viewports without
  * touching the existing `md:` breakpoint that swaps the whole column for
- * `RailSelect` on phones — this wraps the SAME "hidden … md:flex" column, it
+ * `RailSheet` on phones — this wraps the SAME "hidden … md:flex" column, it
  * doesn't replace it.
  *
  * `children` is the server-rendered rail (`AttributeRail` + the optional

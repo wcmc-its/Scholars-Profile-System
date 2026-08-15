@@ -8,7 +8,8 @@ import { render, screen } from "@testing-library/react";
 
 const { mockRosterExportEnabled } = vi.hoisted(() => ({ mockRosterExportEnabled: vi.fn() }));
 
-// The shell's mobile RailSelect calls useRouter; stub the app-router context.
+// EditShell's account menu / rail children read the app-router context;
+// stub it.
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
 }));
