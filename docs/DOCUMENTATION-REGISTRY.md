@@ -271,6 +271,7 @@ live state without re-checking the source.
 | [`audits/methods-lens-prod-golive-2026-06-14.md`](./audits/methods-lens-prod-golive-2026-06-14.md) | The methods-lens prod go-live cutover — the operator package (two code changes + a data load, not a flag flip). **Executed 2026-07-05** (#962/#1481); read it as the plan of record, never as current state. |
 | [`audits/matcha-extract-model-ab-2026-07-14.md`](./audits/matcha-extract-model-ab-2026-07-14.md) | Matcha concept-extraction model bake-off, Opus 4.8 vs Sonnet 4.5 — no win (+0.010, inside Opus's own 0.0215 spread), so **Sonnet stayed** and is the live config today. The durable number is the eval's **~0.0074 nDCG noise floor even at `temperature: 0`**: any single-run gain under ~0.01 is unproven. |
 | [`audits/matcha-gloss-query-ab-2026-07-19.md`](./audits/matcha-gloss-query-ab-2026-07-19.md) | Matcha gloss-query A/B — MeSH concept canonicalization vs the sponsor's literal phrasing. The gloss arm lost on every metric (it *substitutes* the gloss rather than adding it); the retrieval half was deleted. |
+| [`audits/apollo-v2-surface-audit-2026-08-14.md`](./audits/apollo-v2-surface-audit-2026-08-14.md) | Apollo Surface Language v2 (R1–R14) audit of the `/edit` console — 15 verified Tier A token swaps, 8 Tier B restructuring items, 11 Tier C judgment calls (mostly maroon/amber carrying a second, undecided meaning). Replaces a prior audit's findings that were lost before being filed. |
 
 ---
 
