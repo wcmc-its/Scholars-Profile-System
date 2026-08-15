@@ -11,7 +11,6 @@ import {
   type ImpersonationUnitKind,
 } from "@/lib/edit/impersonation-display";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
-import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { db } from "@/lib/db";
 
 /**
@@ -125,7 +124,6 @@ export async function GET(): Promise<NextResponse> {
       isSuperuser: true,
       canManageMethods: false,
       managesUnits: false,
-      canBrowseDataQuality: false,
     });
   } else {
     const commsSteward = await isCommsSteward(session.cwid).catch(() => false);
@@ -135,10 +133,6 @@ export async function GET(): Promise<NextResponse> {
       isSuperuser: false,
       canManageMethods: isMethodsTabVisible({ isSuperuser: false, isCommsSteward: commsSteward }),
       managesUnits,
-      // Same grants that earn the "Profiles" and "Org units" rows also earn the
-      // gap report, so this costs no extra lookup — only the flag, folded in
-      // here to keep `buildConsoleLinks` env-free. Flag off ⇒ route 404s ⇒ no row.
-      canBrowseDataQuality: isDataQualityDashboardEnabled() && managesUnits,
     });
   }
 

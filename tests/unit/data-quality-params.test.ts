@@ -11,15 +11,14 @@ describe("parseDataQualityParams — dual source + multi-value", () => {
   it("parses a URLSearchParams (route) and a Next searchParams object identically", () => {
     const fromUrl = parseDataQualityParams(
       new URLSearchParams(
-        "q=harr&type=postdoc&type=staff&unit=dept:MED&unit=div:CARD&gap=no-headshot&overviewAge=imported&hidden=0&page=2",
+        "q=harr&type=postdoc&type=staff&unit=dept:MED&unit=div:CARD&gap=has-coi&hidden=0&page=2",
       ),
     );
     const fromObject = parseDataQualityParams({
       q: "harr",
       type: ["postdoc", "staff"],
       unit: ["dept:MED", "div:CARD"],
-      gap: "no-headshot",
-      overviewAge: "imported",
+      gap: "has-coi",
       hidden: "0",
       page: "2",
     });
@@ -32,8 +31,7 @@ describe("parseDataQualityParams — dual source + multi-value", () => {
         { kind: "division", code: "CARD" },
       ],
       unitValues: ["dept:MED", "div:CARD"],
-      gap: "no-headshot",
-      overviewAge: "imported",
+      gap: "has-coi",
       includeHidden: false,
       page: 2,
     });
@@ -51,12 +49,15 @@ describe("parseDataQualityParams — dual source + multi-value", () => {
     expect(p.unitValues).toEqual(["garbage", "div:", "dept:MED"]);
   });
 
-  it("clamps page and whitelists gap / overviewAge; trims q", () => {
+  it("clamps page and whitelists gap; trims q", () => {
     expect(parseDataQualityParams(new URLSearchParams("page=-3")).page).toBe(0);
     expect(parseDataQualityParams(new URLSearchParams("page=abc")).page).toBe(0);
     expect(parseDataQualityParams(new URLSearchParams("page=4")).page).toBe(4);
     expect(parseDataQualityParams(new URLSearchParams("gap=bogus")).gap).toBe("all");
-    expect(parseDataQualityParams(new URLSearchParams("overviewAge=bogus")).overviewAge).toBe("all");
+    // The dropped headshot/overview gap options fall back to "all" — an old
+    // bookmarked `gap=no-headshot` link degrades gracefully instead of erroring.
+    expect(parseDataQualityParams(new URLSearchParams("gap=no-headshot")).gap).toBe("all");
+    expect(parseDataQualityParams(new URLSearchParams("gap=has-coi")).gap).toBe("has-coi");
     expect(parseDataQualityParams(new URLSearchParams("q=%20%20Harrington%20")).q).toBe("Harrington");
   });
 

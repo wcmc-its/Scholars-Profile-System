@@ -38,7 +38,6 @@ export type AdminSubnavActive =
   | "slugs"
   | "administrators"
   | "methods"
-  | "data-quality"
   | "data-sharing"
   | "activity"
   | "usage"
@@ -96,7 +95,6 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   administrators: "registries",
   methods: "registries",
   /** Read-only dashboards; no writes. */
-  "data-quality": "insights",
   "data-sharing": "insights",
   activity: "insights",
   usage: "insights",
@@ -129,7 +127,6 @@ export function AdminSubnav({
   pendingHonors,
   administratorsTab,
   methodsTab,
-  dataQualityTab,
   dataSharingTab,
   superuserSurfaces = true,
   profilesTab = false,
@@ -163,11 +160,6 @@ export function AdminSubnav({
    *  is flag-gated + role-gated (`isMethodsTabVisible`). A number shows it
    *  (passed `0` — no badge), mirroring `administratorsTab`. */
   methodsTab?: number | null;
-  /** `null`/omitted hides the "Data quality" tab — the dashboard is flag- +
-   *  role-gated (`isDataQualityTabVisible`; the `/edit/units` page additionally
-   *  shows it to a unit Owner/Curator with grants). A number shows it (passed
-   *  `0` — no badge), mirroring `methodsTab`. */
-  dataQualityTab?: number | null;
   /** `null`/omitted hides the "Data sharing" tab — the S-Index Phase 1 dashboard
    *  is flag- + role-gated (`isDataSharingDashboardTabVisible`; superuser,
    *  comms_steward, or data_sharing_viewer, no unit-scoped variant — unlike
@@ -278,12 +270,6 @@ export function AdminSubnav({
       // before the Insights group's own members, so it also lands immediately to
       // their left when `CONSOLE_SUBNAV_GROUPED` is off and `tabs` renders verbatim.
       { show: superuserSurfaces || reportsTab, id: "reports", href: "/edit/reports", label: "Reports" },
-      {
-        show: dataQualityTab !== null && dataQualityTab !== undefined,
-        id: "data-quality",
-        href: "/edit/data-quality",
-        label: "Data quality",
-      },
       {
         show: dataSharingTab !== null && dataSharingTab !== undefined,
         id: "data-sharing",

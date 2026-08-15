@@ -1,259 +1,286 @@
 /**
  * The Profiles roster table for `/edit/scholars` (#160 UI follow-up,
  * `self-edit-launch-spec.md` § The Profiles roster). The admin entry point: a
- * searchable scholar index whose per-row name links to that scholar's editor.
- * Server-rendered with a
- * plain GET form (search + status filter + pagination all via query params),
- * so it needs no client JS — consistent with the rest of the server-rendered
- * `/edit/*` surface. The Apollo "Profiles" tab chrome wraps it.
+ * searchable, prominence-sorted scholar index whose per-row name links to that
+ * scholar's editor. Server-rendered — the filter sidebar is a small client
+ * island (`ProfilesFilters`); this component and its data (`loadDataQualityRoster`)
+ * carry no client JS otherwise. The Apollo "Profiles" tab chrome wraps it.
+ *
+ * Formerly two separate surfaces: this roster (Name/Title/Unit/Type/Status) and
+ * the standalone Data Quality dashboard (prominence sort, leadership badges,
+ * COI review). They merged here — the roster kept its Status column and its
+ * superuser-only "View as" action; the dashboard's headshot/overview gap
+ * tracking was dropped, and its COI column carried over as a superuser-only
+ * addition (`canSeeCoi`). See `lib/api/data-quality.ts`.
  *
  * Authorization is the page's job (superuser-gated; org-unit-admin scope is
- * B3); this component only renders what it's handed.
+ * B3; COI visibility is a separate, narrower superuser-only gate); this
+ * component only renders what it's handed.
  */
 import Link from "next/link";
 
+import { ProfilesFilters } from "@/components/edit/profiles-filters";
 import { ViewAsButton } from "@/components/edit/view-as-button";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { formatRoleCategory } from "@/lib/role-display";
 import type {
-  EditRosterEntry,
-  EditRosterStatusFilter,
-  RosterFacets,
-} from "@/lib/api/edit-roster";
+  DataQualityCounts,
+  DataQualityEntry,
+  DataQualityFacets,
+  DataQualityGapFilter,
+} from "@/lib/api/data-quality";
 
 export type ProfilesRosterProps = {
-  entries: ReadonlyArray<EditRosterEntry>;
+  entries: ReadonlyArray<DataQualityEntry>;
   total: number;
-  query: string;
-  status: EditRosterStatusFilter;
-  /** Selected org-unit filter, raw select value ("dept:CODE" | "div:CODE" |
-   *  "center:CODE" | ""). */
-  unit: string;
-  /** Selected person-type (roleCategory) filter, raw DB value or "". */
-  roleCategory: string;
-  /** Dropdown option lists for the org-unit + person-type filters. */
-  facets: RosterFacets;
+  counts: DataQualityCounts;
+  /** Filter-bar facet options (person types + the org-unit hierarchy). */
+  facets: DataQualityFacets;
+  /** Selected person-type (roleCategory) values. */
+  roleCategories: string[];
+  /** Selected unit values (`dept:CODE` / `div:CODE` / `center:CODE`). */
+  units: string[];
+  /** Name / CWID search term. */
+  q: string;
+  gap: DataQualityGapFilter;
+  includeHidden: boolean;
   page: number;
   pageSize: number;
   /** Whether the viewer can launch "View as" (impersonation flag on + superuser, #729). */
   canImpersonate: boolean;
   /** The viewer's own cwid — the "View as" button is hidden on their own row. */
   viewerCwid: string;
+  /** Whether the viewer sees the COI column/summary/filter — superuser only,
+   *  and only when `EDIT_DATA_QUALITY_DASHBOARD` is on (`isDataQualityDashboardEnabled`). */
+  canSeeCoi: boolean;
 };
 
 const BASE = "/edit/scholars";
 
-function pageHref(opts: {
-  page: number;
-  query: string;
-  status: EditRosterStatusFilter;
-  unit: string;
-  roleCategory: string;
-}): string {
+type FilterState = {
+  roleCategories: string[];
+  units: string[];
+  q: string;
+  gap: DataQualityGapFilter;
+  includeHidden: boolean;
+};
+
+/** Serialize the current filters into a URLSearchParams (repeated `type`/`unit`). */
+function filterParams(f: FilterState): URLSearchParams {
   const p = new URLSearchParams();
-  if (opts.query) p.set("q", opts.query);
-  if (opts.status !== "all") p.set("status", opts.status);
-  if (opts.unit) p.set("unit", opts.unit);
-  if (opts.roleCategory) p.set("type", opts.roleCategory);
-  if (opts.page > 0) p.set("page", String(opts.page));
+  if (f.q) p.set("q", f.q);
+  for (const r of f.roleCategories) p.append("type", r);
+  for (const u of f.units) p.append("unit", u);
+  if (f.gap !== "all") p.set("gap", f.gap);
+  if (!f.includeHidden) p.set("hidden", "0");
+  return p;
+}
+
+function pageHref(f: FilterState, page: number): string {
+  const p = filterParams(f);
+  if (page > 0) p.set("page", String(page));
   const qs = p.toString();
   return qs ? `${BASE}?${qs}` : BASE;
+}
+
+/** The CSV-export URL carrying the current filters (no page — export is unpaginated). */
+function exportHref(f: FilterState): string {
+  const qs = filterParams(f).toString();
+  return qs ? `${BASE}/export?${qs}` : `${BASE}/export`;
 }
 
 export function ProfilesRoster({
   entries,
   total,
-  query,
-  status,
-  unit,
-  roleCategory,
+  counts,
   facets,
+  roleCategories,
+  units,
+  q,
+  gap,
+  includeHidden,
   page,
   pageSize,
   canImpersonate,
   viewerCwid,
+  canSeeCoi,
 }: ProfilesRosterProps) {
+  const filters: FilterState = { roleCategories, units, q, gap, includeHidden };
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min((page + 1) * pageSize, total);
   const hasPrev = page > 0;
-  const hasNext = (page + 1) * pageSize < total;
+  const hasNext = end < total;
 
   return (
-    <>
+    <div data-slot="profiles-roster">
       <h1 className="mb-4 text-xl font-semibold">Profiles</h1>
 
-        {/* GET form — search + status filter, no client JS. */}
-        <form method="get" className="mb-4 flex flex-wrap items-end gap-3" data-testid="roster-search-form">
-          <div className="flex flex-col gap-1">
-            <label htmlFor="roster-q" className="text-muted-foreground text-xs">
-              Search name or CWID
-            </label>
-            <Input
-              id="roster-q"
-              type="search"
-              name="q"
-              defaultValue={query}
-              placeholder="e.g. Smith or abc1001"
-              className="w-64"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="roster-unit" className="text-muted-foreground text-xs">
-              Org unit
-            </label>
-            <select
-              id="roster-unit"
-              name="unit"
-              defaultValue={unit}
-              className="border-apollo-border-strong h-9 max-w-[16rem] rounded-md border bg-apollo-surface px-3 text-sm"
-            >
-              <option value="">All units</option>
-              <optgroup label="Departments">
-                {facets.departments.map((d) => (
-                  <option key={`dept:${d.code}`} value={`dept:${d.code}`}>
-                    {d.name}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Divisions">
-                {facets.divisions.map((d) => (
-                  <option key={`div:${d.code}`} value={`div:${d.code}`}>
-                    {d.name}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Centers">
-                {facets.centers.map((c) => (
-                  <option key={`center:${c.code}`} value={`center:${c.code}`}>
-                    {c.name}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="roster-type" className="text-muted-foreground text-xs">
-              Person type
-            </label>
-            <select
-              id="roster-type"
-              name="type"
-              defaultValue={roleCategory}
-              className="border-apollo-border-strong h-9 rounded-md border bg-apollo-surface px-3 text-sm"
-            >
-              <option value="">All</option>
-              {facets.roleCategories.map((r) => (
-                <option key={r.value} value={r.value}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="roster-status" className="text-muted-foreground text-xs">
-              Visibility
-            </label>
-            <select
-              id="roster-status"
-              name="status"
-              defaultValue={status}
-              className="border-apollo-border-strong h-9 rounded-md border bg-apollo-surface px-3 text-sm"
-            >
-              <option value="all">All</option>
-              <option value="visible">Visible</option>
-              <option value="hidden">Hidden</option>
-            </select>
-          </div>
-          <Button type="submit" variant="outline">
-            Search
-          </Button>
-        </form>
+      <div className="flex flex-col gap-6 lg:flex-row">
+        <aside className="lg:w-64 lg:shrink-0">
+          <ProfilesFilters
+            facets={facets}
+            roleCategories={roleCategories}
+            units={units}
+            q={q}
+            gap={gap}
+            includeHidden={includeHidden}
+            canSeeCoi={canSeeCoi}
+          />
+        </aside>
 
-        <p className="text-muted-foreground mb-2 text-sm" aria-live="polite">
-          {total === 0 ? "No matching profiles." : `Showing ${start}–${end} of ${total.toLocaleString()}`}
-        </p>
+        <div className="min-w-0 flex-1">
+          {/* Summary chips across the in-scope set (before the gap filter). */}
+          <div className="text-muted-foreground mb-4 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+            <span>
+              <strong className="text-foreground">{counts.inScope.toLocaleString()}</strong> in scope
+            </span>
+            {canSeeCoi && (
+              <span>
+                <strong className="text-foreground">{counts.withCoi.toLocaleString()}</strong> with COI
+                to review
+              </span>
+            )}
+          </div>
 
-        <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-md border">
-          <table className="[&_td]:align-middle w-full text-sm">
-            <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
-              <tr>
-                <th className="px-3 py-2 font-medium">Name</th>
-                <th className="px-3 py-2 font-medium">Title</th>
-                <th className="px-3 py-2 font-medium">Unit</th>
-                <th className="px-3 py-2 font-medium">Type</th>
-                <th className="px-3 py-2 font-medium">Status</th>
-                <th className="px-3 py-2 font-medium">
-                  <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-apollo-border divide-y">
-              {entries.length === 0 ? (
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-muted-foreground text-sm" data-testid="profiles-result-count">
+              {total === 0
+                ? "No scholars match these filters."
+                : `Showing ${start}–${end} of ${total}`}
+            </div>
+            {total > 0 && (
+              <a
+                href={exportHref(filters)}
+                className="text-sm hover:underline"
+                data-testid="profiles-export-link"
+              >
+                Download CSV
+              </a>
+            )}
+          </div>
+
+          <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-md border">
+            <table className="[&_td]:align-middle w-full text-sm" data-testid="profiles-table">
+              <thead className="bg-apollo-surface-2 text-muted-foreground text-left text-xs uppercase">
                 <tr>
-                  <td colSpan={6} className="text-muted-foreground px-3 py-6 text-center">
-                    No profiles match your search.
-                  </td>
+                  <th className="w-12 px-3 py-2">#</th>
+                  <th className="px-3 py-2">Scholar</th>
+                  <th className="px-3 py-2">Person type</th>
+                  <th className="px-3 py-2">Status</th>
+                  {canSeeCoi && <th className="px-3 py-2 text-center">COI</th>}
+                  <th className="px-3 py-2">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
-              ) : (
-                entries.map((e) => (
-                  <tr key={e.cwid} data-testid={`roster-row-${e.cwid}`}>
-                    <td className="px-3 py-2">
-                      <Link
-                        href={`/edit/scholar/${encodeURIComponent(e.cwid)}`}
-                        className="text-apollo-slate font-medium hover:underline"
-                        data-testid={`roster-name-${e.cwid}`}
-                      >
-                        {e.name}
-                      </Link>{" "}
-                      <span className="text-muted-foreground">({e.cwid})</span>
-                    </td>
-                    <td className="text-muted-foreground px-3 py-2">{e.title ?? "—"}</td>
-                    <td className="text-muted-foreground px-3 py-2">{e.unit ?? "—"}</td>
-                    <td className="text-muted-foreground px-3 py-2">
-                      {formatRoleCategory(e.roleCategory) ?? "—"}
-                    </td>
-                    <td className="px-3 py-2">
-                      <Badge
-                        variant="outline"
-                        className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
-                      >
-                        {e.isVisible ? "Visible" : "Hidden"}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <div className="flex items-center justify-end gap-3">
-                        {canImpersonate && e.cwid !== viewerCwid && (
-                          <ViewAsButton targetCwid={e.cwid} targetName={e.name} />
-                        )}
-                      </div>
+              </thead>
+              <tbody>
+                {entries.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={canSeeCoi ? 6 : 5}
+                      className="text-muted-foreground px-3 py-6 text-center"
+                    >
+                      No profiles match your search.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {(hasPrev || hasNext) && (
-          <div className="mt-4 flex items-center justify-between">
-            {hasPrev ? (
-              <Link href={pageHref({ page: page - 1, query, status, unit, roleCategory })} className="text-apollo-slate text-sm hover:underline" data-testid="roster-prev">
-                ← Previous
-              </Link>
-            ) : (
-              <span />
-            )}
-            {hasNext ? (
-              <Link href={pageHref({ page: page + 1, query, status, unit, roleCategory })} className="text-apollo-slate text-sm hover:underline" data-testid="roster-next">
-                Next →
-              </Link>
-            ) : (
-              <span />
-            )}
+                ) : (
+                  entries.map((e, i) => (
+                    <tr key={e.cwid} className="border-t" data-testid={`roster-row-${e.cwid}`}>
+                      <td
+                        className="text-muted-foreground px-3 py-2 tabular-nums"
+                        title={`Prominence ${e.prominence.toFixed(1)}`}
+                      >
+                        {page * pageSize + i + 1}
+                      </td>
+                      <td className="px-3 py-2">
+                        <Link
+                          href={e.editHref}
+                          className="text-apollo-maroon font-medium hover:underline"
+                          data-testid={`roster-name-${e.cwid}`}
+                        >
+                          {e.name}
+                        </Link>{" "}
+                        <span className="text-muted-foreground">({e.cwid})</span>
+                        {e.leadership && (
+                          <span className="bg-muted text-muted-foreground ml-2 rounded px-1.5 py-0.5 text-xs">
+                            {e.leadership}
+                          </span>
+                        )}
+                        <div className="text-muted-foreground text-xs">
+                          {[e.title, e.unit].filter(Boolean).join(" · ") || e.cwid}
+                        </div>
+                      </td>
+                      <td className="text-muted-foreground px-3 py-2">
+                        {formatRoleCategory(e.roleCategory) ?? "—"}
+                      </td>
+                      <td className="px-3 py-2">
+                        <Badge
+                          variant="outline"
+                          className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+                        >
+                          {e.isVisible ? "Visible" : "Hidden"}
+                        </Badge>
+                      </td>
+                      {canSeeCoi && (
+                        <td className="px-3 py-2 text-center">
+                          {e.pendingCoiHigh > 0 ? (
+                            <span
+                              className="bg-muted text-muted-foreground inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold"
+                              title={
+                                e.pendingCoiMedium > 0
+                                  ? `${e.pendingCoiHigh} to review · ${e.pendingCoiMedium} likely covered`
+                                  : `${e.pendingCoiHigh} to review`
+                              }
+                            >
+                              {e.pendingCoiHigh}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                      )}
+                      <td className="px-3 py-2 text-right">
+                        <div className="flex items-center justify-end gap-3">
+                          {canImpersonate && e.cwid !== viewerCwid && (
+                            <ViewAsButton targetCwid={e.cwid} targetName={e.name} />
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
-        )}
-    </>
+
+          {(hasPrev || hasNext) && (
+            <div className="mt-4 flex items-center justify-between">
+              {hasPrev ? (
+                <Link
+                  href={pageHref(filters, page - 1)}
+                  className="text-sm hover:underline"
+                  data-testid="roster-prev"
+                >
+                  ← Previous
+                </Link>
+              ) : (
+                <span />
+              )}
+              {hasNext ? (
+                <Link
+                  href={pageHref(filters, page + 1)}
+                  className="text-sm hover:underline"
+                  data-testid="roster-next"
+                >
+                  Next →
+                </Link>
+              ) : (
+                <span />
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

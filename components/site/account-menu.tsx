@@ -6,7 +6,6 @@ import {
   Building2Icon,
   ChevronDownIcon,
   ChevronLeftIcon,
-  ClipboardCheckIcon,
   EyeIcon,
   FlaskConicalIcon,
   type LucideIcon,
@@ -64,7 +63,6 @@ const CONSOLE_LINK_ICON: Record<ConsoleLink["id"], LucideIcon> = {
   methods: FlaskConicalIcon,
   units: Building2Icon,
   profiles: UsersIcon,
-  "data-quality": ClipboardCheckIcon,
 };
 
 export type AccountMenuProps = {

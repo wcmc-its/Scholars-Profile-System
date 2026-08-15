@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   isDataQualityDashboardEnabled,
-  isDataQualityTabVisible,
   isEmptyScope,
   loadDataQualityScope,
 } from "@/lib/edit/data-quality";
@@ -47,19 +46,6 @@ describe("isDataQualityDashboardEnabled", () => {
     expect(isDataQualityDashboardEnabled()).toBe(false);
     delete process.env.EDIT_DATA_QUALITY_DASHBOARD;
     expect(isDataQualityDashboardEnabled()).toBe(false);
-  });
-});
-
-describe("isDataQualityTabVisible", () => {
-  it("hidden when the flag is off, even for a superuser", () => {
-    process.env.EDIT_DATA_QUALITY_DASHBOARD = "off";
-    expect(isDataQualityTabVisible({ isSuperuser: true, isCommsSteward: false })).toBe(false);
-  });
-  it("shown to a superuser or comms_steward when on; hidden for neither", () => {
-    process.env.EDIT_DATA_QUALITY_DASHBOARD = "on";
-    expect(isDataQualityTabVisible({ isSuperuser: true, isCommsSteward: false })).toBe(true);
-    expect(isDataQualityTabVisible({ isSuperuser: false, isCommsSteward: true })).toBe(true);
-    expect(isDataQualityTabVisible({ isSuperuser: false, isCommsSteward: false })).toBe(false);
   });
 });
 

@@ -1,7 +1,11 @@
 "use client";
 
 /**
- * The Data Quality dashboard filter sidebar (#3/#4/#5/#6 — v2).
+ * The Profiles roster filter sidebar (#3/#4/#5 — v2; formerly the Data Quality
+ * dashboard's filter sidebar, folded in when that surface merged into
+ * `/edit/scholars`). The "Has COI to review" gap option and its summary chip
+ * are superuser-only (`canSeeCoi`) — the headshot/overview gap filters that
+ * used to live here were dropped along with those columns.
  *
  * A client island that AUTO-APPLIES: every change (facet toggle, select, the
  * hidden-roles checkbox, or the debounced search box) navigates the page to a new
@@ -18,17 +22,13 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { RosterFacet, type FacetOption } from "@/components/center/center-roster-facets";
-import type {
-  DataQualityFacets,
-  DataQualityGapFilter,
-  OverviewAgeFilter,
-} from "@/lib/api/data-quality";
+import type { DataQualityFacets, DataQualityGapFilter } from "@/lib/api/data-quality";
 
-const BASE = "/edit/data-quality";
+const BASE = "/edit/scholars";
 /** Debounce the free-text search so typing doesn't fire a request per keystroke. */
 const SEARCH_DEBOUNCE_MS = 350;
 
-export type DataQualityFiltersProps = {
+export type ProfilesFiltersProps = {
   facets: DataQualityFacets;
   /** Currently-applied person types (raw roleCategory values). */
   roleCategories: string[];
@@ -36,8 +36,9 @@ export type DataQualityFiltersProps = {
   units: string[];
   q: string;
   gap: DataQualityGapFilter;
-  overviewAge: OverviewAgeFilter;
   includeHidden: boolean;
+  /** Whether to show the "Gap" (COI) filter at all — superuser-only. */
+  canSeeCoi: boolean;
 };
 
 type FilterState = {
@@ -45,7 +46,6 @@ type FilterState = {
   unitSet: ReadonlySet<string>;
   query: string;
   gap: DataQualityGapFilter;
-  overviewAge: OverviewAgeFilter;
   hide: boolean;
 };
 
@@ -55,22 +55,21 @@ function hrefFor(s: FilterState): string {
   for (const r of s.roles) p.append("type", r);
   for (const u of s.unitSet) p.append("unit", u);
   if (s.gap !== "all") p.set("gap", s.gap);
-  if (s.overviewAge !== "all") p.set("overviewAge", s.overviewAge);
   if (s.hide) p.set("hidden", "0");
   // No `page` → any filter change resets to the first page.
   const qs = p.toString();
   return qs ? `${BASE}?${qs}` : BASE;
 }
 
-export function DataQualityFilters({
+export function ProfilesFilters({
   facets,
   roleCategories,
   units,
   q,
   gap,
-  overviewAge,
   includeHidden,
-}: DataQualityFiltersProps) {
+  canSeeCoi,
+}: ProfilesFiltersProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -79,7 +78,6 @@ export function DataQualityFilters({
   const [selUnits, setSelUnits] = useState<ReadonlySet<string>>(new Set(units));
   const [qDraft, setQDraft] = useState(q);
   const [gapVal, setGapVal] = useState<DataQualityGapFilter>(gap);
-  const [ageVal, setAgeVal] = useState<OverviewAgeFilter>(overviewAge);
   const [hide, setHide] = useState(!includeHidden); // checkbox checked = hide
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -88,7 +86,6 @@ export function DataQualityFilters({
     unitSet: selUnits,
     query: qDraft,
     gap: gapVal,
-    overviewAge: ageVal,
     hide,
   });
 
@@ -128,7 +125,6 @@ export function DataQualityFilters({
     setSelUnits(new Set());
     setQDraft("");
     setGapVal("all");
-    setAgeVal("all");
     setHide(false);
     startTransition(() => router.replace(BASE, { scroll: false }));
   };
@@ -163,7 +159,7 @@ export function DataQualityFilters({
          its own edge, not controls loose on the page. --apollo-rail-border is the
          strong value because the hairline reads 1.035:1 on the rail and dies. */
       className="bg-apollo-rail border-apollo-rail-border w-full rounded-xl border p-4"
-      data-testid="dq-filter-form"
+      data-testid="profiles-filter-form"
     >
       <div className="mb-4 flex items-center gap-2">
         <span className="text-muted-foreground text-xs" aria-live="polite">
@@ -179,11 +175,11 @@ export function DataQualityFilters({
       </div>
 
       <div className="mb-4 flex flex-col gap-1">
-        <label htmlFor="dq-q" className="text-muted-foreground text-xs">
+        <label htmlFor="pf-q" className="text-muted-foreground text-xs">
           Search name or CWID
         </label>
         <input
-          id="dq-q"
+          id="pf-q"
           type="search"
           value={qDraft}
           onChange={(e) => onSearchChange(e.target.value)}
@@ -192,53 +188,30 @@ export function DataQualityFilters({
         />
       </div>
 
-      <div className="mb-4 flex flex-col gap-1">
-        <label htmlFor="dq-gap" className="text-muted-foreground text-xs">
-          Gap
-        </label>
-        <select
-          id="dq-gap"
-          value={gapVal}
-          onChange={(e) => {
-            const v = e.target.value as DataQualityGapFilter;
-            setGapVal(v);
-            apply({ gap: v });
-          }}
-          className="border-input bg-background h-9 rounded-md border px-3 text-sm"
-        >
-          <option value="all">Any</option>
-          <option value="no-headshot">Missing headshot</option>
-          <option value="no-overview">Missing overview</option>
-          <option value="has-coi">Has COI to review</option>
-        </select>
-      </div>
+      {canSeeCoi && (
+        <div className="mb-4 flex flex-col gap-1">
+          <label htmlFor="pf-gap" className="text-muted-foreground text-xs">
+            Gap
+          </label>
+          <select
+            id="pf-gap"
+            value={gapVal}
+            onChange={(e) => {
+              const v = e.target.value as DataQualityGapFilter;
+              setGapVal(v);
+              apply({ gap: v });
+            }}
+            className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+          >
+            <option value="all">Any</option>
+            <option value="has-coi">Has COI to review</option>
+          </select>
+        </div>
+      )}
 
-      <div className="mb-4 flex flex-col gap-1">
-        <label htmlFor="dq-overview-age" className="text-muted-foreground text-xs">
-          Overview last updated
-        </label>
-        <select
-          id="dq-overview-age"
-          value={ageVal}
-          onChange={(e) => {
-            const v = e.target.value as OverviewAgeFilter;
-            setAgeVal(v);
-            apply({ overviewAge: v });
-          }}
-          className="border-input bg-background h-9 rounded-md border px-3 text-sm"
-        >
-          <option value="all">Any</option>
-          <option value="imported">Imported / seed only</option>
-          <option value="never">No overview</option>
-          <option value="lt1yr">Edited &lt; 1 year ago</option>
-          <option value="1to2yr">Edited 1–2 years ago</option>
-          <option value="gt2yr">Edited &gt; 2 years ago</option>
-        </select>
-      </div>
-
-      <label className="mb-5 flex items-center gap-2 text-sm" htmlFor="dq-hidden">
+      <label className="mb-5 flex items-center gap-2 text-sm" htmlFor="pf-hidden">
         <input
-          id="dq-hidden"
+          id="pf-hidden"
           type="checkbox"
           checked={hide}
           onChange={(e) => {

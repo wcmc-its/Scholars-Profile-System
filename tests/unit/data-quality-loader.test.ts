@@ -1,7 +1,7 @@
 /**
- * `lib/api/data-quality.ts` — the Data Quality roster query
- * (docs/data-quality-dashboard-spec.md): prominence sort, gap computation,
- * scope, filters, and pagination.
+ * `lib/api/data-quality.ts` — the Profiles roster query (formerly the Data
+ * Quality dashboard query, `docs/data-quality-dashboard-spec.md`): prominence
+ * sort, leadership, COI signal, visibility, scope, filters, and pagination.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -17,10 +17,9 @@ function scholarRow(over: Record<string, unknown> = {}) {
     preferredName: "X",
     primaryTitle: null,
     roleCategory: "full_time_faculty",
-    overview: null,
+    status: "active",
     hIndex: null,
     scoredPubCount: null,
-    hasHeadshot: null,
     department: null,
     division: null,
     ...over,
@@ -36,8 +35,6 @@ function fakeClient(opts: {
   pi?: Array<{ cwid: string; n: number }>;
   nihPi?: Array<{ cwid: string; n: number }>;
   coi?: Array<{ cwid: string; tier: string; n: number }>;
-  overrides?: Array<{ entityId: string; value: string }>;
-  prov?: Array<{ cwid: string; updatedAt: Date | string }>;
   /** Members returned for each requested center code (echoed back so the loader
    *  can partition scope-vs-filter centers). Active (null dates). */
   centerMembers?: string[];
@@ -49,6 +46,9 @@ function fakeClient(opts: {
     startDate?: Date | null;
     endDate?: Date | null;
   }>;
+  /** Manual DIVISION-roster rows (`DivisionMembership`) — echoed back filtered
+   *  to the requested division codes, mirroring `centerMemberRows`. */
+  divisionRosterRows?: Array<{ cwid: string; divisionCode: string }>;
 }) {
   const scholarFindMany = vi.fn().mockResolvedValue(opts.scholars ?? []);
   const grantGroupBy: AnyMock = vi.fn().mockImplementation((args: { where?: { nihIc?: unknown } }) => {
@@ -72,8 +72,6 @@ function fakeClient(opts: {
           (opts.coi ?? []).map((r) => ({ cwid: r.cwid, tier: r.tier, _count: { _all: r.n } })),
         ),
     },
-    fieldOverride: { findMany: vi.fn().mockResolvedValue(opts.overrides ?? []) },
-    overviewProvenance: { findMany: vi.fn().mockResolvedValue(opts.prov ?? []) },
     centerMembership: {
       findMany: vi.fn().mockImplementation((args: { where?: { centerCode?: { in?: string[] } } }) => {
         const codes = args?.where?.centerCode?.in ?? [];
@@ -99,6 +97,16 @@ function fakeClient(opts: {
         );
       }),
     },
+    divisionMembership: {
+      findMany: vi.fn().mockImplementation((args: { where?: { divisionCode?: { in?: string[] } } }) => {
+        const codes = args?.where?.divisionCode?.in ?? [];
+        return Promise.resolve(
+          (opts.divisionRosterRows ?? [])
+            .filter((r) => codes.includes(r.divisionCode))
+            .map((r) => ({ cwid: r.cwid, divisionCode: r.divisionCode })),
+        );
+      }),
+    },
   };
   return { client, scholarFindMany, grantGroupBy };
 }
@@ -106,7 +114,7 @@ const asClient = (c: ReturnType<typeof fakeClient>["client"]) => c as unknown as
 
 beforeEach(() => vi.clearAllMocks());
 
-describe("loadDataQualityRoster — gaps + prominence", () => {
+describe("loadDataQualityRoster — leadership + COI + prominence", () => {
   const scholars = [
     scholarRow({
       cwid: "fac1",
@@ -115,8 +123,6 @@ describe("loadDataQualityRoster — gaps + prominence", () => {
       primaryTitle: "Professor",
       scoredPubCount: 100,
       hIndex: 40,
-      overview: "A real bio.",
-      hasHeadshot: true,
       department: { name: "Medicine" },
     }),
     scholarRow({
@@ -125,8 +131,6 @@ describe("loadDataQualityRoster — gaps + prominence", () => {
       preferredName: "Ben Chair",
       scoredPubCount: 10,
       hIndex: 5,
-      overview: null,
-      hasHeadshot: false,
       department: { name: "Medicine" },
     }),
     scholarRow({
@@ -134,8 +138,6 @@ describe("loadDataQualityRoster — gaps + prominence", () => {
       slug: "stu-one",
       preferredName: "Cy Student",
       roleCategory: "doctoral_student",
-      overview: null,
-      hasHeadshot: null,
       department: { name: "Medicine" },
     }),
   ];
@@ -150,31 +152,23 @@ describe("loadDataQualityRoster — gaps + prominence", () => {
         { cwid: "fac2", tier: "High", n: 2 },
         { cwid: "fac1", tier: "Medium", n: 1 },
       ],
-      overrides: [{ entityId: "stu1", value: "An overridden bio." }],
     });
 
-  it("computes each scholar's gaps correctly", async () => {
+  it("computes each scholar's chair/chief + COI signal correctly", async () => {
     const { client } = setup();
     const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
     const byCwid = Object.fromEntries(entries.map((e) => [e.cwid, e]));
 
     expect(byCwid.fac1).toMatchObject({
-      headshot: "present",
-      hasOverview: true,
       isChief: true,
       isChair: false,
       pendingCoiHigh: 0,
       pendingCoiMedium: 1,
     });
     expect(byCwid.fac2).toMatchObject({
-      headshot: "missing",
-      hasOverview: false,
       isChair: true,
       pendingCoiHigh: 2,
     });
-    // Student has no Scholar.overview but a field_override → counts as covered;
-    // never-probed headshot → "unknown" (not "missing").
-    expect(byCwid.stu1).toMatchObject({ headshot: "unknown", hasOverview: true });
     expect(byCwid.fac1.editHref).toBe("/edit/scholar/fac1");
   });
 
@@ -201,7 +195,25 @@ describe("loadDataQualityRoster — gaps + prominence", () => {
   it("reports summary counts across the in-scope set (pre gap filter)", async () => {
     const { client } = setup();
     const { counts } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
-    expect(counts).toEqual({ inScope: 3, missingHeadshot: 1, missingOverview: 1, withCoi: 1 });
+    expect(counts).toEqual({ inScope: 3, withCoi: 1 });
+  });
+});
+
+describe("loadDataQualityRoster — visibility", () => {
+  it("computes isVisible from Scholar.status — both visible and hidden are candidates", async () => {
+    const { client } = fakeClient({
+      scholars: [
+        scholarRow({ cwid: "vis1", status: "active" }),
+        scholarRow({ cwid: "hid1", status: "suppressed" }),
+      ],
+    });
+    const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
+    const byCwid = Object.fromEntries(entries.map((e) => [e.cwid, e]));
+    // Neither the visible nor the hidden scholar is filtered out — unlike the
+    // old dashboard, which hard-filtered to `status: "active"` only.
+    expect(entries).toHaveLength(2);
+    expect(byCwid.vis1.isVisible).toBe(true);
+    expect(byCwid.hid1.isVisible).toBe(false);
   });
 });
 
@@ -211,18 +223,24 @@ describe("loadDataQualityRoster — filters + pagination", () => {
       cwid: `s${i}`,
       preferredName: `S${i}`,
       scoredPubCount: 100 - i * 10, // descending prominence by index
-      hasHeadshot: i % 2 === 0 ? false : true,
     }),
   );
 
-  it("gap=no-headshot keeps only missing-headshot rows; total reflects the filter", async () => {
-    const { client } = fakeClient({ scholars: many });
+  it("gap=has-coi keeps only scholars with pending High-tier COI; total reflects the filter", async () => {
+    const { client } = fakeClient({
+      scholars: many,
+      coi: [
+        { cwid: "s0", tier: "High", n: 1 },
+        { cwid: "s2", tier: "High", n: 2 },
+        { cwid: "s4", tier: "High", n: 1 },
+      ],
+    });
     const { entries, total } = await loadDataQualityRoster(
-      { scope: { all: true }, gap: "no-headshot" },
+      { scope: { all: true }, gap: "has-coi" },
       asClient(client),
     );
     expect(total).toBe(3); // s0, s2, s4
-    expect(entries.every((e) => e.headshot === "missing")).toBe(true);
+    expect(entries.every((e) => e.pendingCoiHigh > 0)).toBe(true);
   });
 
   it("paginates the prominence-sorted set", async () => {
@@ -386,69 +404,6 @@ describe("classifyLeadership — title heuristic (#1)", () => {
   });
 });
 
-describe("loadDataQualityRoster — overview freshness (#6)", () => {
-  it("buckets never / imported / aged from OverviewProvenance and filters by it", async () => {
-    const recent = new Date(Date.now() - 30 * 24 * 3600 * 1000); // ~1 month ago
-    const old = new Date(Date.now() - 3 * 365.25 * 24 * 3600 * 1000); // ~3 years ago
-    const scholars = [
-      scholarRow({ cwid: "none", overview: null }),
-      scholarRow({ cwid: "imp", overview: "Imported VIVO bio." }),
-      scholarRow({ cwid: "fresh", overview: "Edited bio." }),
-      scholarRow({ cwid: "stale", overview: "Edited long ago." }),
-    ];
-    const prov = [
-      { cwid: "fresh", updatedAt: recent },
-      { cwid: "stale", updatedAt: old },
-    ];
-    const { client } = fakeClient({ scholars, prov });
-    const all = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
-    const byCwid = Object.fromEntries(all.entries.map((e) => [e.cwid, e]));
-    expect(byCwid.none.overviewState).toBe("never");
-    expect(byCwid.imp.overviewState).toBe("imported");
-    expect(byCwid.imp.overviewUpdatedAt).toBeNull();
-    expect(byCwid.fresh.overviewState).toBe("lt1yr");
-    expect(byCwid.fresh.overviewUpdatedAt).toBe(recent.toISOString());
-    expect(byCwid.stale.overviewState).toBe("gt2yr");
-
-    const importedOnly = await loadDataQualityRoster(
-      { scope: { all: true }, overviewAge: "imported" },
-      asClient(client),
-    );
-    expect(importedOnly.entries.map((e) => e.cwid)).toEqual(["imp"]);
-    expect(importedOnly.total).toBe(1);
-    // Counts stay pre-filter (the full in-scope set).
-    expect(importedOnly.counts.inScope).toBe(4);
-  });
-
-  it("buckets the 1-2yr band and composes with the gap filter", async () => {
-    const mid = new Date(Date.now() - 18 * 30 * 24 * 3600 * 1000); // ~18 months ago
-    const recent = new Date(Date.now() - 30 * 24 * 3600 * 1000);
-    const scholars = [
-      scholarRow({ cwid: "mid", overview: "Edited ~18mo ago.", hasHeadshot: false }),
-      scholarRow({ cwid: "midHas", overview: "Edited ~18mo ago.", hasHeadshot: true }),
-      scholarRow({ cwid: "fresh", overview: "Edited recently.", hasHeadshot: false }),
-    ];
-    const prov = [
-      { cwid: "mid", updatedAt: mid },
-      { cwid: "midHas", updatedAt: mid },
-      { cwid: "fresh", updatedAt: recent },
-    ];
-    const { client } = fakeClient({ scholars, prov });
-    const byBucket = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
-    expect(Object.fromEntries(byBucket.entries.map((e) => [e.cwid, e.overviewState])).mid).toBe(
-      "1to2yr",
-    );
-
-    // gap=no-headshot AND overviewAge=1to2yr intersect (midHas has a headshot → out).
-    const both = await loadDataQualityRoster(
-      { scope: { all: true }, gap: "no-headshot", overviewAge: "1to2yr" },
-      asClient(client),
-    );
-    expect(both.entries.map((e) => e.cwid)).toEqual(["mid"]);
-    expect(both.counts.inScope).toBe(3); // counts stay pre-filter
-  });
-});
-
 describe("loadDataQualityRoster — scope", () => {
   it("a unit scope restricts the query to the managed dept/div codes", async () => {
     const { client, scholarFindMany } = fakeClient({ scholars: [] });
@@ -462,6 +417,36 @@ describe("loadDataQualityRoster — scope", () => {
       OR: [{ deptCode: { in: ["MED", "CARD"] } }, { divCode: { in: ["MED", "CARD"] } }],
     });
     expect(client.centerMembership.findMany).not.toHaveBeenCalled();
+  });
+
+  it("a division scope unions in manual DivisionMembership roster cwids (Amendment 4 parity)", async () => {
+    // A scholar can be on a division's manual roster (`DivisionMembership`)
+    // without their own `divCode` column pointing at it — Amendment 4 still
+    // makes them editable by that division's admin
+    // (`lib/edit/unit-scholar-authz.ts`), so the roster that FINDS them must
+    // use the same union or it silently under-lists people the per-scholar
+    // editor still lets the admin open.
+    const { client, scholarFindMany } = fakeClient({
+      scholars: [],
+      divisionRosterRows: [{ cwid: "roster-only-1", divisionCode: "CARD" }],
+    });
+    await loadDataQualityRoster(
+      { scope: { all: false, unitCodes: ["CARD"], centerCodes: [] } },
+      asClient(client),
+    );
+    expect(client.divisionMembership.findMany).toHaveBeenCalledWith({
+      where: { divisionCode: { in: ["CARD"] } },
+      select: { cwid: true },
+    });
+    const where = scholarFindMany.mock.calls[0][0].where;
+    const scopeClause = where.AND?.[0];
+    expect(scopeClause).toEqual({
+      OR: [
+        { deptCode: { in: ["CARD"] } },
+        { divCode: { in: ["CARD"] } },
+        { cwid: { in: ["roster-only-1"] } },
+      ],
+    });
   });
 
   it("a center scope expands to member cwids and ORs them into the where", async () => {
@@ -479,5 +464,19 @@ describe("loadDataQualityRoster — scope", () => {
     });
     const where = scholarFindMany.mock.calls[0][0].where;
     expect(where.AND?.[0]).toEqual({ OR: [{ cwid: { in: ["m1", "m2"] } }] });
+  });
+
+  // Defensive-only: the route already 403s an empty scope via `isEmptyScope`
+  // before the query ever runs, but the loader itself must fail CLOSED (match
+  // nothing) rather than vacuously matching everyone, should that guard ever
+  // be bypassed. Mirrors the retired `loadEditRoster`'s equivalent case.
+  it("an empty non-global scope (no unit or center codes) matches nothing, not everything", async () => {
+    const { client, scholarFindMany } = fakeClient({ scholars: [] });
+    await loadDataQualityRoster(
+      { scope: { all: false, unitCodes: [], centerCodes: [] } },
+      asClient(client),
+    );
+    const where = scholarFindMany.mock.calls[0][0].where;
+    expect(where.AND?.[0]).toEqual({ cwid: { in: [] } });
   });
 });

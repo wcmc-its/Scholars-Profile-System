@@ -39,7 +39,6 @@ import { canViewUsage } from "@/lib/edit/usage-access";
 import { loadReportableUnitsForActor } from "@/lib/edit/cancer-center-reports";
 import { isNewsQueueTabVisible } from "@/lib/edit/news-queue";
 import { isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
-import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { isDataSharingDashboardTabVisible } from "@/lib/edit/data-sharing-dashboard";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 import { isMatchaEnabled } from "@/lib/api/matcha";
@@ -59,7 +58,6 @@ export const CONSOLE_TAB_IDS = [
   "administrators",
   "methods",
   "reports",
-  "dataQuality",
   "dataSharing",
   "activity",
   "usage",
@@ -81,7 +79,7 @@ export interface ConsoleGrants {
    *  D5. Feeds `administrators`. */
   ownerUnitCount: number;
   /** `loadManageableUnits(...).total` — owner OR curator, any of the four unit
-   *  kinds. Feeds `profiles` / `units` / `dataQuality`. */
+   *  kinds. Feeds `profiles` / `units`. */
   manageableUnitCount: number;
   /** `loadReportableUnitsForActor(...).length` — for a non-global viewer this
    *  counts CENTERS only (departments/divisions/cores don't carry reports), so
@@ -132,12 +130,6 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
   // Gap 4 (reports half): a reportable unit surfaces the tab everywhere,
   // including `/edit/units` and `/edit/administrators`.
   reports: (s, g) => s.isSuperuser || s.isCommsSteward || g.reportableUnitCount > 0,
-
-  // No single `isDataQualityTabVisible`-shaped function bundles the grant
-  // escape hatch — `isDataQualityDashboardEnabled` is the flag primitive
-  // `/edit/units` already reuses inline; this mirrors that, not a new read.
-  dataQuality: (s, g) =>
-    isDataQualityDashboardEnabled() && (s.isSuperuser || s.isCommsSteward || g.manageableUnitCount > 0),
 
   // No per-unit data-sharing concept exists (by design — no unit-scoped
   // variant of this dashboard has been decided; unlike Data Quality this
