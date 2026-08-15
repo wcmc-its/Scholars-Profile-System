@@ -191,3 +191,10 @@ scripts/search-eval/captures/
 # spine-eval artifacts: spine-eval-out/ holds ranked cwids (real people) and this repo is PUBLIC.
 scripts/search-eval/spine-eval-out/
 scripts/search-eval/extractions.json
+
+# design-sync (claude.ai/design)
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
