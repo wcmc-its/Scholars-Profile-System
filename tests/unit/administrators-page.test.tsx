@@ -83,7 +83,10 @@ describe("/edit/administrators — authorization", () => {
     mockGetEditSession.mockResolvedValue(SUPERUSER);
     mockIsTabEnabled.mockReturnValue(false);
     const result = asEl(await AdministratorsPage());
-    expect(result.type).toBe(mockForbidden);
+    // C8/C9 — the denial branch is wrapped in the same ConsoleShell the
+    // success path uses, so the top-level element is the shell and
+    // ForbiddenEditPage is its child, not the return value itself.
+    expect(asEl(result.props.children).type).toBe(mockForbidden);
     expect(mockLoadRoster).not.toHaveBeenCalled();
     // logEditDenial emits the denial line.
     expect(console.warn).toHaveBeenCalled();
@@ -93,7 +96,7 @@ describe("/edit/administrators — authorization", () => {
     mockGetEditSession.mockResolvedValue(NOBODY);
     mockLoadOwnerScope.mockResolvedValue([]);
     const result = asEl(await AdministratorsPage());
-    expect(result.type).toBe(mockForbidden);
+    expect(asEl(result.props.children).type).toBe(mockForbidden);
     expect(mockLoadOwnerScope).toHaveBeenCalledOnce();
     expect(mockLoadRoster).not.toHaveBeenCalled();
     expect(console.warn).toHaveBeenCalled();

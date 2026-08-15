@@ -57,7 +57,7 @@ export default async function EditDataSharingPage() {
       <h1 className="mb-1 text-xl font-semibold">Data sharing</h1>
       <p className="text-muted-foreground mb-6 text-sm">
         Dataset deposits synced from reciterdb via the weekly data-sharing bridge — aggregate
-        views for CTSA renewal writers, research deans, and the library/RDM team.
+        views for research leadership, compliance/grant reporting, and the library/RDM team.
       </p>
       <DataSharingDashboard report={report} />
     </ConsoleShell>

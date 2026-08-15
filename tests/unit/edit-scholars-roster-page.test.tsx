@@ -133,10 +133,13 @@ describe("/edit/scholars — authorization", () => {
     expect(mockLoadDataQualityRoster).not.toHaveBeenCalled();
   });
 
-  it("signed-in non-superuser with an empty scope → ForbiddenEditPage, no roster query", async () => {
+  it("signed-in non-superuser with an empty scope → ForbiddenEditPage inside ConsoleShell, no roster query", async () => {
     mockGetEditSession.mockResolvedValue(SELF);
     const result = asEl(await EditScholarsPage({ searchParams: sp() }));
-    expect(result.type).toBe(mockForbidden);
+    // B8 — the denial branch is wrapped in the same ConsoleShell the success
+    // path uses, so the top-level element is the shell and ForbiddenEditPage
+    // is its child, not the return value itself.
+    expect(asEl(result.props.children).type).toBe(mockForbidden);
     expect(mockLoadDataQualityRoster).not.toHaveBeenCalled();
     // requireSuperuserGet emits the denial line.
     expect(console.warn).toHaveBeenCalled();

@@ -21,15 +21,28 @@
  * department fixed read-only from `?dept=`.
  *
  * No caching: `force-dynamic` + `noindex`, matching the rest of `/edit/*`.
+ *
+ * 2026-08-15: `CreateChrome` used to be a bare `ConsoleTopBar` + page background
+ * (bar, no nav) — Tier C decision 3 (`docs/audits/apollo-v2-surface-audit-2026-08-14.md`
+ * §4b, C11) judged that a deliberate omission, not this page's case: unlike
+ * `core/[coreId]/review`'s documented reduced-chrome, every viewer who reaches
+ * this form has already cleared this page's own unit-admin gate (Owner or
+ * Superuser), so they're squarely inside the Units console area, not a
+ * pre-selection chooser — they should get the real nav, same as every other
+ * `/edit/units*` surface. `CreateChrome` now renders the full `ConsoleShell`
+ * (`active="units"`), and the denial branch (`forbidden()`) is wrapped in the
+ * SAME shell rather than left bare (the Tier C decision 2 fix, applied here
+ * alongside decision 3 since both touch this file).
  */
 import { redirect } from "next/navigation";
 
-import { ConsoleTopBar } from "@/components/edit/console-top-bar";
+import { ConsoleShell } from "@/components/edit/console-shell";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { RequestNewOrgUnitDialog } from "@/components/edit/request-new-org-unit-dialog";
 import { UnitCreateForm } from "@/components/edit/unit-create-form";
 import type { DepartmentOption } from "@/components/edit/department-picker";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import type { EditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
 import {
   canManageAccess,
@@ -37,6 +50,8 @@ import {
   logEditDenial,
   type UnitAdminLookup,
 } from "@/lib/edit/authz";
+import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
+import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { isOrgUnitCreateSuperuserOnly } from "@/lib/edit/unit-create-flags";
 
 export const dynamic = "force-dynamic";
@@ -65,6 +80,18 @@ export default async function NewUnitPage({
   const mode: "center" | "division" = type === "division" ? "division" : "center";
   const isSuperuser = session.isSuperuser;
 
+  // Mirrors the sibling console pages (e.g. app/edit/core/page.tsx): `null`
+  // hides the tab/badge (flag off, or this viewer isn't superuser/honors_curator).
+  // Computed unconditionally, including on paths that end up denied below — the
+  // two reads are cheap and every denial still renders through the same shell,
+  // which needs a real value either way.
+  const pendingSlugRequests = isSlugRequestEnabled()
+    ? await countPendingSlugRequests(db.read)
+    : null;
+  const pendingHonors = isHonorsQueueTabVisible(session)
+    ? await countPendingHonors(db.read)
+    : null;
+
   function forbidden(reason: "not_superuser" | "not_curator") {
     logEditDenial({
       actorCwid: session!.cwid,
@@ -74,7 +101,16 @@ export default async function NewUnitPage({
       targetEntityType: mode === "division" ? "division" : "center",
       targetEntityId: dept ?? "new",
     });
-    return <ForbiddenEditPage variant="unit" targetEntity={dept ?? "a new unit"} />;
+    return (
+      <ConsoleShell
+        active="units"
+        session={session!}
+        pendingSlugRequests={null}
+        pendingHonors={null}
+      >
+        <ForbiddenEditPage variant="unit" targetEntity={dept ?? "a new unit"} />
+      </ConsoleShell>
+    );
   }
 
   // --- division: Superuser only ---
@@ -82,7 +118,13 @@ export default async function NewUnitPage({
     if (!isSuperuser) return forbidden("not_superuser");
     const departments = await loadDepartments();
     return (
-      <CreateChrome heading="Create a division" subtitle="Pre-register a coded division before the directory catches up.">
+      <CreateChrome
+        heading="Create a division"
+        subtitle="Pre-register a coded division before the directory catches up."
+        session={session}
+        pendingSlugRequests={pendingSlugRequests}
+        pendingHonors={pendingHonors}
+      >
         <UnitCreateForm
           initialMode="division"
           canSwitchMode
@@ -98,7 +140,13 @@ export default async function NewUnitPage({
   if (isSuperuser) {
     const departments = await loadDepartments();
     return (
-      <CreateChrome heading="Create a unit" subtitle="Create a center or institute, or pre-register a coded division.">
+      <CreateChrome
+        heading="Create a unit"
+        subtitle="Create a center or institute, or pre-register a coded division."
+        session={session}
+        pendingSlugRequests={pendingSlugRequests}
+        pendingHonors={pendingHonors}
+      >
         <UnitCreateForm
           initialMode="center"
           canSwitchMode
@@ -119,6 +167,9 @@ export default async function NewUnitPage({
       <CreateChrome
         heading="Request a new org unit"
         subtitle="New org units are created by Scholars superusers. Send a request and we'll route it."
+        session={session}
+        pendingSlugRequests={pendingSlugRequests}
+        pendingHonors={pendingHonors}
       >
         <RequestNewOrgUnitDialog />
       </CreateChrome>
@@ -144,7 +195,13 @@ export default async function NewUnitPage({
   if (!authz.ok) return forbidden("not_curator");
 
   return (
-    <CreateChrome heading="Create a center" subtitle={`A new center or institute under ${parent.name}.`}>
+    <CreateChrome
+      heading="Create a center"
+      subtitle={`A new center or institute under ${parent.name}.`}
+      session={session}
+      pendingSlugRequests={pendingSlugRequests}
+      pendingHonors={pendingHonors}
+    >
       <UnitCreateForm
         initialMode="center"
         canSwitchMode={false}
@@ -167,20 +224,28 @@ async function loadDepartments(): Promise<DepartmentOption[]> {
 function CreateChrome({
   heading,
   subtitle,
+  session,
+  pendingSlugRequests,
+  pendingHonors,
   children,
 }: {
   heading: string;
   subtitle: string;
+  session: EditSession;
+  pendingSlugRequests: number | null;
+  pendingHonors: number | null;
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-apollo-page" data-slot="unit-create-page">
-      <ConsoleTopBar variant="console" />
-      <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
-        <h1 className="mb-1 text-xl font-semibold">{heading}</h1>
-        <p className="text-muted-foreground mb-6 text-sm">{subtitle}</p>
-        {children}
-      </main>
-    </div>
+    <ConsoleShell
+      active="units"
+      session={session}
+      pendingSlugRequests={pendingSlugRequests}
+      pendingHonors={pendingHonors}
+    >
+      <h1 className="mb-1 text-xl font-semibold">{heading}</h1>
+      <p className="text-muted-foreground mb-6 text-sm">{subtitle}</p>
+      {children}
+    </ConsoleShell>
   );
 }

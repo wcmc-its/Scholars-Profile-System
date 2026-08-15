@@ -55,7 +55,16 @@ export default async function FindResearchersPage() {
       path: "/edit/find-researchers",
       reason: "not_developer_get",
     });
-    return <ForbiddenEditPage />;
+    return (
+      <ConsoleShell
+        active="find-researchers"
+        session={session}
+        pendingSlugRequests={null}
+        pendingHonors={null}
+      >
+        <ForbiddenEditPage />
+      </ConsoleShell>
+    );
   }
 
   // Fold into the shared console (mirrors `/edit/methods` et al.). A superuser

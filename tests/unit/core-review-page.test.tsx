@@ -103,8 +103,13 @@ describe("/edit/core/[coreId]/review — authorization", () => {
     mockUnitAdminFindUnique.mockResolvedValue(null);
     mockCoreFindUnique.mockResolvedValue({ id: "2" });
     const result = asEl(await EditCoreReviewPage({ params: params("2") }));
-    expect(result.type).toBe(mockForbidden);
-    expect(result.props.targetEntity).toBe("2");
+    // The denial branch is now wrapped in the same reduced-chrome shell (bare
+    // div + ConsoleTopBar) the success path already uses, so ForbiddenEditPage
+    // is nested rather than the return value itself — walk the tree like the
+    // success-path assertion below does.
+    const forbidden = findByType(result, mockForbidden);
+    expect(forbidden).toBeTruthy();
+    expect(forbidden!.props.targetEntity).toBe("2");
     expect(mockLogAuthzDenied).toHaveBeenCalledWith(
       expect.objectContaining({ reason: "not_core_owner", target_entity_id: "2" }),
     );

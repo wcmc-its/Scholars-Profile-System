@@ -269,7 +269,7 @@ function DeadlineCell({ iso, status }: { iso: string | null; status: string | nu
     <span
       className={
         urgency === "soon"
-          ? "font-medium text-amber-700 dark:text-amber-400"
+          ? "font-medium text-apollo-amber"
           : urgency === "past"
             ? "text-muted-foreground"
             : undefined
@@ -1059,7 +1059,7 @@ function OpportunityCard({
       label: "Due",
       value: urgency === "past" ? `${due} (passed)` : due,
       className:
-        urgency === "soon" ? "font-medium text-amber-700 dark:text-amber-400" : undefined,
+        urgency === "soon" ? "font-medium text-apollo-amber" : undefined,
     });
   }
   if (cfda) facts.push({ label: "CFDA", value: cfda });
@@ -1457,7 +1457,7 @@ function ResearcherRow({
                   className={
                     r.fundingStatus === "funded"
                       ? "rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-                      : "rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-400"
+                      : "rounded-full bg-apollo-amber-tint px-2 py-0.5 text-xs text-apollo-amber"
                   }
                 >
                   {fundingStatusLabel(r.fundingStatus)}
@@ -1538,7 +1538,7 @@ function ResearcherRow({
 function StageBadge({ fit }: { fit: ReturnType<typeof stageFit> }) {
   const tone: Record<string, string> = {
     strong: "bg-green-600/15 text-green-700 dark:text-green-400",
-    moderate: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+    moderate: "bg-apollo-amber-tint text-apollo-amber",
     weak: "bg-muted text-muted-foreground",
     none: "bg-muted text-muted-foreground",
   };

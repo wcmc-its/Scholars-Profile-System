@@ -23,6 +23,20 @@
  * `byDepartment`, and `byFaculty`. Still no full-text coverage stat — that
  * SPEC headline remains out of scope.
  *
+ * Share rate, publication-type scope (2026-08-15): the denominator originally
+ * had no publication-type filter, but the numerator's underlying deposit-scan
+ * pipeline only ever covers `SHARE_RATE_ELIGIBLE_TYPES` — every other type
+ * inflated the denominator with zero chance of a numerator hit. Fixed by
+ * scoping `loadShareRateCorpus` to the same types. Doesn't close the whole
+ * gap: the numerator is also full-time-faculty-only and SPS has no bridged
+ * FTE field to match that on the denominator side — open, see
+ * `SHARE_RATE_ELIGIBLE_TYPES`'s doc comment. Checked the corresponding-author
+ * question too (a mockup footer claimed dashboard metrics go beyond
+ * first/last): traced `PersonDatasetDeposit`'s only write path
+ * (`etl/data-sharing/shared.ts`) back to `attribute.py`'s
+ * `authorPosition IN ('first','last')` source query — no widening exists
+ * anywhere in the pipeline, so no reconciliation was needed here.
+ *
  * Strict-only (decided 2026-08-12): `DatasetDeposit.confidence` is only ever
  * `'high'` or `null` in what's actually persisted — there is no generous/ceiling
  * band to read. See the dashboard plan's "Strict/generous band" section.
@@ -83,6 +97,18 @@ export type DataSharingReportClient = Pick<
  *  for pubs that were simply never checked — not a scope choice, a
  *  coverage-window fix. */
 export const SHARE_RATE_YEAR_FLOOR = 2020;
+
+/** Matches the Python extraction pipeline's own corpus-query scope
+ *  (`extract_databanks.py` hardcodes `publicationTypeCanonical = 'Academic
+ *  Article'`; `preprint_extend.py` adds `'Preprint'`). Nothing outside these
+ *  two types is ever scanned for deposits, so counting them in the
+ *  denominator inflates it with pubs that have zero chance of ever
+ *  contributing to the numerator (2026-08-15 fix — see the data-sharing
+ *  dashboard handoff). Doesn't close the gap: the numerator is also
+ *  full-time-faculty-only (`attribute.py`'s `fullTimeFaculty='yes'`), and SPS
+ *  has no bridged FTE field to filter the denominator by — that piece stays
+ *  open, needs its own reciterdb/`identity`-table bridge. */
+const SHARE_RATE_ELIGIBLE_TYPES = ["Academic Article", "Preprint"] as const;
 
 /** One suppression-filtered (person, dataset) link, flattened for aggregation —
  *  the shape every `aggregateBy*` function below operates on. Exported so
@@ -305,6 +331,10 @@ export type DataSharingReport = {
   /** Deposit-instance counts per granular sensitive sub-type, grouped by
    *  coarse category — see `aggregateBySubtype`. */
   bySubtype: SubtypeRow[];
+  /** The `RECENT_ITEMS_LIMIT` most recently deposited items — see
+   *  `mostRecentDeposits`'s doc comment for what "recent" can and can't mean
+   *  with this data model. */
+  recentItems: DatasetLinkRow[];
   /** MAX(lastRefreshedAt) across `DatasetDeposit` — when the weekly
    *  data-sharing bridge last fully synced (every row gets the same run
    *  timestamp, see `etl/data-sharing/shared.ts`'s `buildDepositsAndLinks`).
@@ -386,18 +416,21 @@ export async function loadDatasetLinkRows(client: DataSharingReportClient): Prom
 }
 
 /** Read every confirmed first/last-authored WCM publication since
- *  `SHARE_RATE_YEAR_FLOOR` — the share-rate denominator corpus. `cwid` is
- *  guaranteed non-null by the `where` clause (`cwid: { not: null }`) even
- *  though Prisma's generated type keeps the column's nullable declaration;
- *  asserted once here rather than threading `string | null` through every
- *  downstream aggregate. */
+ *  `SHARE_RATE_YEAR_FLOOR`, scoped to `SHARE_RATE_ELIGIBLE_TYPES` — the
+ *  share-rate denominator corpus. `cwid` is guaranteed non-null by the
+ *  `where` clause (`cwid: { not: null }`) even though Prisma's generated type
+ *  keeps the column's nullable declaration; asserted once here rather than
+ *  threading `string | null` through every downstream aggregate. */
 export async function loadShareRateCorpus(client: DataSharingReportClient): Promise<ShareRateCorpusRow[]> {
   const rows = await client.publicationAuthor.findMany({
     where: {
       OR: [{ isFirst: true }, { isLast: true }],
       isConfirmed: true,
       cwid: { not: null },
-      publication: { year: { gte: SHARE_RATE_YEAR_FLOOR } },
+      publication: {
+        year: { gte: SHARE_RATE_YEAR_FLOOR },
+        publicationType: { in: [...SHARE_RATE_ELIGIBLE_TYPES] },
+      },
     },
     select: {
       pmid: true,
@@ -556,6 +589,40 @@ export function aggregateBySubtype(rows: readonly DatasetLinkRow[]): SubtypeRow[
   return [...counts.values()].sort(
     (a, b) => a.category.localeCompare(b.category) || b.count - a.count,
   );
+}
+
+/** Upper bound on rows in the "Recent activity" table — a UI list, not an
+ *  export; if this ever needs to show more, that's pagination, not a
+ *  constant bump. */
+export const RECENT_ITEMS_LIMIT = 25;
+
+/** The `limit` most recently deposited items, item-level — one row per
+ *  (person, dataset) link, same grain as the CSV export (not distinct
+ *  datasets: a dataset with 3 depositing/citing faculty can appear 3 times).
+ *
+ *  "Recent" means `depositYear` (repo metadata, or pub year as a fallback)
+ *  — the ONLY per-item recency signal this data model carries.
+ *  `lastRefreshedAt` on `DatasetDeposit`/`PersonDatasetDeposit` is NOT a
+ *  substitute: every row gets the SAME whole-table sync timestamp on each
+ *  full-replace ETL run (see `DataSharingReport.dataAsOf`'s doc comment), so
+ *  it can't tell a deposit newly discovered this run from one that's been in
+ *  the table for months — there is no "date SPS first saw this" field today.
+ *  A row with no `depositYear` sorts last (unknown recency, not assumed
+ *  recent). Deterministic tiebreak within a year (`depositYear` is
+ *  year-granularity, so ties are real, not incidental): `datasetId`, stable
+ *  but not itself meaningful — just enough to keep re-renders from
+ *  reshuffling equally-recent rows. */
+export function mostRecentDeposits(
+  rows: readonly DatasetLinkRow[],
+  limit: number = RECENT_ITEMS_LIMIT,
+): DatasetLinkRow[] {
+  return [...rows]
+    .sort(
+      (a, b) =>
+        (b.depositYear ?? -Infinity) - (a.depositYear ?? -Infinity) ||
+        a.datasetId.localeCompare(b.datasetId),
+    )
+    .slice(0, limit);
 }
 
 /** Deposit-INSTANCE (row) counts for the tier-only "concerning" flag — same
@@ -883,6 +950,7 @@ export function buildDataSharingReport(
     pubsByTier: tierPubSpectrum(rows),
     byFaculty,
     bySubtype: aggregateBySubtype(rows),
+    recentItems: mostRecentDeposits(rows),
   };
 }
 

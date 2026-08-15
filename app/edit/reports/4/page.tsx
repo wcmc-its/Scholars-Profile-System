@@ -68,7 +68,11 @@ export default async function EditReportsGrantsPage({
   const code = await resolveNumberedReportCenterCode(session, db.read, center);
   const ctx = await loadReportsContext(code, session, db.read);
   if (ctx === null) {
-    return <ForbiddenEditPage variant="unit" targetEntity={code} />;
+    return (
+      <ConsoleShell active="reports" session={session} pendingSlugRequests={null} pendingHonors={null}>
+        <ForbiddenEditPage variant="unit" targetEntity={code} />
+      </ConsoleShell>
+    );
   }
 
   const { date: asOfDate, iso: asOfIso } = resolveAsOf(asOf);
@@ -117,10 +121,10 @@ export default async function EditReportsGrantsPage({
           No active grants for this center’s members as of {formatDate(asOfDate)}.
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="border-apollo-border bg-apollo-surface mt-4 overflow-x-auto rounded-md border">
           <table className="w-full min-w-[900px] border-collapse text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+            <thead className="bg-apollo-surface-2">
+              <tr className="border-apollo-border border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <th className="py-1.5 pr-2">PI</th>
                 <th className="py-1.5 pr-2">Project title</th>
                 <th className="py-1.5 pr-2">Sponsor</th>
@@ -131,7 +135,7 @@ export default async function EditReportsGrantsPage({
             </thead>
             <tbody>
               {grants.map((g, i) => (
-                <tr key={`${g.cwid}-${i}`} className="border-b border-border/50 align-top">
+                <tr key={`${g.cwid}-${i}`} className="border-apollo-border border-b align-top">
                   <td className="py-1.5 pr-2">{g.piName}</td>
                   <td className="py-1.5 pr-2">{g.title}</td>
                   <td className="py-1.5 pr-2">{g.sponsor}</td>

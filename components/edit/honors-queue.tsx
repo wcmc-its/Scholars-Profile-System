@@ -252,7 +252,7 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props
       </div>
 
       {error ? (
-        <p className="rounded-sm border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+        <p className="rounded-sm border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
           {error}
         </p>
       ) : null}
@@ -271,7 +271,7 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props
             <select
               value={groupBy}
               onChange={(e) => setGroupBy(e.target.value as GroupBy)}
-              className="bg-background rounded-sm border px-2 py-1 text-xs"
+              className="bg-background border-apollo-border-strong rounded-sm border px-2 py-1 text-xs"
             >
               <option value="none">No grouping</option>
               <option value="person">By person</option>
@@ -284,7 +284,7 @@ export function HonorsQueue({ pending, approved, rejected, userAsserted }: Props
               <select
                 value={sortKey}
                 onChange={(e) => setSortKey(e.target.value as SortKey)}
-                className="bg-background rounded-sm border px-2 py-1 text-xs"
+                className="bg-background border-apollo-border-strong rounded-sm border px-2 py-1 text-xs"
               >
                 <option value="prestige">Most prestigious</option>
                 <option value="recent">Most recent</option>
@@ -445,7 +445,7 @@ function PendingGroup({
   return (
     <div
       data-slot={group.contested ? "honor-group-contested" : "honor-group"}
-      className={group.contested ? "rounded-md border-2 border-amber-400 bg-amber-50/40 p-4" : "rounded-md border p-4"}
+      className={group.contested ? "rounded-md border-2 border-apollo-amber-tint-border bg-apollo-amber-tint p-4" : "rounded-md border p-4"}
     >
       <div className="mb-3">
         {group.contested ? (
@@ -496,7 +496,7 @@ function PendingGroup({
                   )}
                 </p>
                 {note ? (
-                  <p className="mt-1 text-xs text-amber-800" data-slot="honor-year-warning">
+                  <p className="mt-1 text-xs text-apollo-amber" data-slot="honor-year-warning">
                     ⚠ {note}
                   </p>
                 ) : null}

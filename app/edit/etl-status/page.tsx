@@ -531,7 +531,11 @@ export default async function EtlStatusPage() {
       path: "/edit/etl-status",
       reason: "not_superuser_get",
     });
-    return <ForbiddenEditPage />;
+    return (
+      <ConsoleShell active="etl-status" session={session} pendingSlugRequests={null} pendingHonors={null}>
+        <ForbiddenEditPage />
+      </ConsoleShell>
+    );
   }
 
   let pendingSlugRequests: number | null = null;

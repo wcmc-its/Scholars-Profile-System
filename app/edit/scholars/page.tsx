@@ -67,7 +67,11 @@ export default async function EditScholarsPage({
   if (isEmptyScope(scope)) {
     const denial = requireSuperuserGet({ session, path: "/edit/scholars", targetId: "roster" });
     if (denial !== null) {
-      return <ForbiddenEditPage />;
+      return (
+        <ConsoleShell active="profiles" session={session} pendingSlugRequests={null} pendingHonors={null}>
+          <ForbiddenEditPage />
+        </ConsoleShell>
+      );
     }
   }
 

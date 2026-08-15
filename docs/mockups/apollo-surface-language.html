@@ -914,6 +914,12 @@ tr:focus-within { outline: 2px solid var(--apollo-maroon); outline-offset: -2px;
       violation — say it once above the table ("all percentages below are AI-suggested until
       confirmed") and tag only the exceptions once confirmations start landing. Confirmed values
       drop the amber; they do not gain a green — quiet is the confirmed state.</p>
+    <p><b>2026-08-15 addendum</b> — amber also covers two other settled, non-decorative
+      conventions that are NOT pending-judgment: confidence/tier classification (Matcha fit
+      and eligibility badges) and time-urgent deadlines (#1608, inside 30 days). Three meanings,
+      never two on the same surface. Operational-status boards (etl-status) are exempt from R13
+      entirely — they describe pipeline health, not a pending human decision, and were never on
+      the apollo token system.</p>
   </div>
 
   <h2>R14 — Every /edit route wears the shell</h2>
@@ -924,6 +930,15 @@ tr:focus-within { outline: 2px solid var(--apollo-maroon); outline-offset: -2px;
     <p>Reports are still R1/R2/R5 territory: warm page, framed tables, greige thead. The
       report-scoped controls (filters, sliders, downloads) sit in the content column under the
       report title, styled per R3/R12 — not floating in an unstyled void.</p>
+    <p><b>2026-08-15 addendum</b> — two routes are a documented exception to "nav is
+      non-negotiable": <code>app/edit/core/[coreId]/review/page.tsx</code> (a bespoke owner
+      sub-page reached only after its own authz gate) and the proxy fan-out landing
+      (<code>ProxyLanding</code>, <code>app/edit/page.tsx</code>) — a pre-selection chooser for
+      an identity that may hold no console-tab access at all. Both keep the bar +
+      <code>--apollo-page</code>, just no nav strip. Every other denied or reduced surface from
+      this round (Tier C decisions 2/3, <code>apollo-v2-surface-audit-2026-08-14.md</code> §4b)
+      got the real shell instead, including <code>app/edit/unit/new/page.tsx</code>, moved OFF
+      reduced-chrome once its viewers turned out to always already be inside the Units area.</p>
   </div>
 
 </div>

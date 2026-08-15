@@ -125,7 +125,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
   return (
     <div className="flex flex-col gap-4" data-slot="reports-index-table" data-testid="reports-index-table">
       <div className="grid grid-cols-[220px_1fr] items-start gap-5">
-        <div className="border-apollo-border bg-apollo-surface-2 flex flex-col gap-4 rounded-xl border p-3">
+        <div className="border-apollo-rail-border bg-apollo-rail flex flex-col gap-4 rounded-xl border p-3">
           <fieldset>
             <legend className="text-muted-foreground mb-2 text-xs font-semibold tracking-wide uppercase">
               Unit type

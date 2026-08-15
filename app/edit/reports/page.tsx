@@ -20,7 +20,10 @@
  * Reports IA redesign (2026-08-14): `?center=` now addresses one of
  * POTENTIALLY SEVERAL reportable units, not just "the second center once one
  * exists." With `?center=` given, behavior is unchanged (today's single-unit
- * list). Without it: 0 reportable units → 404 (unchanged); exactly 1 → the
+ * list). Without it: 0 reportable units → 404 for a scoped Owner/Curator/
+ * comms_steward, but an empty index for a superuser (Gap 5, 2026-08-14
+ * handoff — a superuser isn't scoped to any grants, so an empty roster isn't
+ * "this route doesn't exist"); exactly 1 → the
  * same single-unit list, resolved automatically (unchanged end-user
  * behavior); 2+ → the new cross-unit index (`ReportsIndex`), scoped to the
  * actor (org-wide for a superuser/comms_steward, else their own `UnitAdmin`
@@ -115,17 +118,32 @@ export default async function EditReportsIndexPage({
     // Unchanged: an explicit `?center=` always addresses exactly one unit.
     const code = await resolveReportsCenterCode(db.read, center);
     const ctx = await loadReportsContext(code, session, db.read);
-    if (ctx === null) return <ForbiddenEditPage variant="unit" targetEntity={code} />;
+    if (ctx === null)
+      return (
+        <ConsoleShell active="reports" session={session} pendingSlugRequests={null} pendingHonors={null}>
+          <ForbiddenEditPage variant="unit" targetEntity={code} />
+        </ConsoleShell>
+      );
     return <SingleUnitReports ctx={ctx} code={code} perReport={await loadSingleUnitPerReport(code)} {...shell} />;
   }
 
   const reportableUnits = await loadReportableUnitsForActor(session, db.read);
-  if (reportableUnits.length === 0) notFound();
+  // Gap 5 (2026-08-14 handoff): a superuser isn't scoped to any particular
+  // unit's grants, so zero reportable units for them isn't "this route doesn't
+  // exist" the way it is for a scoped Owner/Curator/comms_steward with no
+  // grants at all — it's an empty roster. Fall through to the bands view below,
+  // which renders gracefully on an empty `units` array; everyone else still 404s.
+  if (reportableUnits.length === 0 && !session.isSuperuser) notFound();
 
   if (reportableUnits.length === 1) {
     const code = reportableUnits[0].code;
     const ctx = await loadReportsContext(code, session, db.read);
-    if (ctx === null) return <ForbiddenEditPage variant="unit" targetEntity={code} />;
+    if (ctx === null)
+      return (
+        <ConsoleShell active="reports" session={session} pendingSlugRequests={null} pendingHonors={null}>
+          <ForbiddenEditPage variant="unit" targetEntity={code} />
+        </ConsoleShell>
+      );
     return <SingleUnitReports ctx={ctx} code={code} perReport={await loadSingleUnitPerReport(code)} {...shell} />;
   }
 
@@ -155,16 +173,8 @@ export default async function EditReportsIndexPage({
     <ConsoleShell active="reports" reportsTab {...shell}>
       <h1 className="mb-1 text-xl font-bold">Reports</h1>
       <p className="text-muted-foreground text-sm">
-        {mode === "table"
-          ? "Advisory only — every report reads precomputed data; nothing here writes to the roster."
-          : "Reports for the centers you administer."}
+        Advisory only — every report reads precomputed data; nothing here writes to the roster.
       </p>
-      {mode === "bands" && (
-        <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <span className="font-semibold">Advisory only</span> — every report reads precomputed
-          data; nothing here writes to the roster.
-        </div>
-      )}
       {/* ConsoleShell owns only the chrome — content supplies its own surface
           (R1/the Apollo Surface Language "the page is never white"). Without
           this, the list floats directly on --apollo-page with no card. */}

@@ -1,0 +1,28 @@
+{
+  "projectId": "fad0406e-4998-4c8c-9d42-8cf8ebc35047",
+  "shape": "package",
+  "pkg": "scholars-profile-system",
+  "entry": "dist/index.js",
+  "srcDir": "components/ui",
+  "cssEntry": ".ds-sync/compiled-globals.css",
+  "tsconfig": "tsconfig.json",
+  "buildCmd": "NODE_PATH=./node_modules node .ds-sync/compile-css.mjs (compiles app/globals.css → .ds-sync/compiled-globals.css; no dist build otherwise, see NOTES.md)",
+  "extraFonts": [".ds-sync/node_modules/@fontsource/inter/400.css", ".ds-sync/node_modules/@fontsource/inter/600.css"],
+  "docsDir": ".design-sync/no-component-docs",
+  "guidelinesGlob": [],
+  "readmeHeader": ".design-sync/conventions.md",
+  "overrides": {
+    "Select": { "cardMode": "single", "viewport": "360x320" },
+    "Dialog": { "cardMode": "single", "viewport": "480x360" },
+    "Popover": { "cardMode": "single", "viewport": "320x220" },
+    "HoverCard": { "cardMode": "single", "viewport": "320x220" },
+    "Tooltip": { "cardMode": "single", "viewport": "280x120" },
+    "Sheet": { "cardMode": "single", "viewport": "420x500" },
+    "Alert": { "cardMode": "column" },
+    "Card": { "cardMode": "column" },
+    "Collapsible": { "cardMode": "column" },
+    "Pagination": { "cardMode": "column" },
+    "ScrollArea": { "cardMode": "column" },
+    "Skeleton": { "cardMode": "column" }
+  }
+}

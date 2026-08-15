@@ -80,7 +80,12 @@ describe("/edit/center/[code]/history — authorization", () => {
     mockLoadCtx.mockResolvedValue(null);
     mockFindUnique.mockResolvedValue({ code: "meyer_cancer_center" });
     const result = asEl(await EditCenterHistoryPage({ params: params("meyer_cancer_center") }));
-    expect(result.type).toBe(mockForbidden);
+    // The denial branch is wrapped in the reduced-chrome shell (a bare div +
+    // ConsoleTopBar), so the top-level element is the div and ForbiddenEditPage
+    // is its second child, not the return value itself.
+    expect(result.type).toBe("div");
+    const forbidden = asEl((result.props.children as unknown[])[1]);
+    expect(forbidden.type).toBe(mockForbidden);
     expect(mockLogDenial).toHaveBeenCalledWith(
       expect.objectContaining({ targetEntityType: "center", reason: "not_curator" }),
     );

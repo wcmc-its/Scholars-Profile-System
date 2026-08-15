@@ -25,6 +25,7 @@
 import { notFound, redirect } from "next/navigation";
 
 import { CenterHistoryView } from "@/components/edit/center-history-view";
+import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { CENTER_AUDIT_WINDOW_DAYS, loadCenterAuditHistory } from "@/lib/api/center-audit";
 import { loadUnitEditContext } from "@/lib/api/unit-edit-context";
@@ -68,7 +69,12 @@ export default async function EditCenterHistoryPage({
       targetEntityType: "center",
       targetEntityId: code,
     });
-    return <ForbiddenEditPage variant="unit" targetEntity={code} />;
+    return (
+      <div className="bg-apollo-page min-h-screen">
+        <ConsoleTopBar variant="console" />
+        <ForbiddenEditPage variant="unit" targetEntity={code} />
+      </div>
+    );
   }
 
   // The audit log lives in the separate `scholars_audit` database; the read role

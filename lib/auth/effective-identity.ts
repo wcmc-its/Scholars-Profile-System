@@ -24,6 +24,7 @@
  * `SessionData`, which needs neither `next/headers` nor LDAP.
  */
 import { isCommsSteward } from "@/lib/auth/comms-steward";
+import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { getSession } from "@/lib/auth/session-server";
@@ -84,14 +85,22 @@ export async function getEffectiveEditSession(): Promise<EditSession | null> {
   if (!session) return null;
   const cwid = getEffectiveCwid(session);
   // #1514 — same concurrent resolve as getEditSession: independent fail-closed
-  // checks, one directory round-trip of wall-clock instead of four.
-  const [su, cs, dev, hc] = await Promise.all([
+  // checks, one directory round-trip of wall-clock instead of five.
+  const [su, cs, dev, hc, dsv] = await Promise.all([
     isSuperuser(cwid),
     isCommsSteward(cwid),
     isDeveloper(cwid),
     isHonorsCurator(cwid),
+    isDataSharingViewer(cwid),
   ]);
-  return { cwid, isSuperuser: su, isCommsSteward: cs, isDeveloper: dev, isHonorsCurator: hc };
+  return {
+    cwid,
+    isSuperuser: su,
+    isCommsSteward: cs,
+    isDeveloper: dev,
+    isHonorsCurator: hc,
+    isDataSharingViewer: dsv,
+  };
 }
 
 /**

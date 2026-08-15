@@ -24,6 +24,7 @@
  */
 import { cache } from "react";
 import { isCommsSteward } from "@/lib/auth/comms-steward";
+import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { getSuperuserAllowlist, getSuperuserConfig } from "@/lib/auth/config";
@@ -61,6 +62,17 @@ export interface EditSession {
    * queue's gates only ever read a session from those.
    */
   isHonorsCurator?: boolean;
+  /**
+   * Live `data_sharing_viewer` verdict (2026-08-15); a superuser is a
+   * superset of this. Gates ONLY the `/edit/data-sharing` dashboard — no
+   * other edit-authz predicate reads it, so like `isDeveloper` /
+   * `isHonorsCurator` it is OPTIONAL: the synthetic `EditSession` shapes the
+   * field / unit authz helpers build need not carry a flag they never
+   * consume. The live resolvers (`getEditSession` / `getEffectiveEditSession`)
+   * always populate it, and the dashboard's own gate
+   * (`canViewDataSharingDashboard`) only ever reads a session from those.
+   */
+  isDataSharingViewer?: boolean;
 }
 
 
@@ -111,14 +123,15 @@ export const isSuperuser = cache(async (cwid: string): Promise<boolean> => {
 export async function getEditSession(): Promise<EditSession | null> {
   const session = await getSession();
   if (!session) return null;
-  // #1514 — four independent LDAPS group checks; resolve concurrently so the
-  // wall-clock cost is one directory round-trip, not four. All four are
+  // #1514 — five independent LDAPS group checks; resolve concurrently so the
+  // wall-clock cost is one directory round-trip, not five. All five are
   // fail-closed and never throw, so Promise.all cannot reject.
-  const [su, cs, dev, hc] = await Promise.all([
+  const [su, cs, dev, hc, dsv] = await Promise.all([
     isSuperuser(session.cwid),
     isCommsSteward(session.cwid),
     isDeveloper(session.cwid),
     isHonorsCurator(session.cwid),
+    isDataSharingViewer(session.cwid),
   ]);
   return {
     cwid: session.cwid,
@@ -126,5 +139,6 @@ export async function getEditSession(): Promise<EditSession | null> {
     isCommsSteward: cs,
     isDeveloper: dev,
     isHonorsCurator: hc,
+    isDataSharingViewer: dsv,
   };
 }
