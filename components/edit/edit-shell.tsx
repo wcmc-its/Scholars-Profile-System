@@ -67,22 +67,21 @@ export type EditShellProps = {
    * have the actor's scholar row (the account menu then degrades to Sign out).
    */
   account?: { slug: string; preferredName: string } | null;
-  /** The viewer has the right to edit ≥1 profile that isn't their own
-   *  (`session.isSuperuser`, the same check `app/edit/page.tsx` computes this
-   *  from) — gates the "Profiles" cross-link. Self mode: adds an "All
-   *  profiles" link. Superuser mode: keeps the "Profiles / {name}" breadcrumb
-   *  navigable; when false AND `isProfileEntity` is also false (a unit editor,
-   *  not a scholar), the crumb degrades to a flat, non-navigable label — a
-   *  unit owner/curator with no profile-browsing rights has nowhere useful for
-   *  "Profiles" to go. Superseded by `consoleNav` when that is supplied. */
+  /** Self mode only: the viewer has the right to edit ≥1 profile that isn't
+   *  their own (`session.isSuperuser`) — adds the "All profiles" cross-link.
+   *  Superseded by `consoleNav` when that is supplied. No longer read in
+   *  superuser mode (see `isProfileEntity`) — a unit owner/curator with real
+   *  profile-editing rights elsewhere still has nowhere useful for "Profiles"
+   *  to go FROM a unit page, so the crumb is gated purely on page identity,
+   *  not on the viewer's other permissions. */
   canBrowseProfiles?: boolean;
   /** Superuser mode only: true when `scholarName` names an actual scholar
    *  profile (the default — every caller before cores-as-org-units P3 was
-   *  scholar-shaped) rather than a unit. Viewing an individual profile is
-   *  its own reason to keep the "Profiles" breadcrumb navigable, regardless
-   *  of `canBrowseProfiles` — set false for a unit editor (department/
-   *  division/center/core), where "Profiles" only makes sense when the
-   *  viewer separately has `canBrowseProfiles` rights. */
+   *  scholar-shaped) rather than a unit. The "Profiles / {name}" breadcrumb
+   *  is navigable only when this is true; set false for a unit editor
+   *  (department/division/center/core), where it degrades to a flat,
+   *  non-navigable label — "Profiles" only ever makes sense as a way back
+   *  from an individual profile, never from a unit's own editor. */
   isProfileEntity?: boolean;
   /** Self mode only: a pre-built console tab strip (the shared `AdminSubnav`)
    *  rendered IN PLACE OF the minimal "My Profile / All profiles" strip. The
@@ -157,7 +156,7 @@ export function EditShell({
       <div className="border-border border-b">
         <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-2 px-6">
           {isSuperuser ? (
-            isProfileEntity || canBrowseProfiles ? (
+            isProfileEntity ? (
               <nav aria-label="Breadcrumb" className="flex items-center gap-2 py-3 text-sm">
                 <Link
                   href="/edit/scholars"
@@ -175,9 +174,10 @@ export function EditShell({
                 </span>
               </nav>
             ) : (
-              // A unit editor (department/division/center/core) with no
-              // profile-browsing rights has nowhere for "Profiles" to go —
-              // just the unit name, same flat-label shape as proxy/unit-admin.
+              // A unit editor (department/division/center/core) — "Profiles"
+              // has nowhere useful to go from here regardless of the viewer's
+              // own rights, so just the unit name, same flat-label shape as
+              // proxy/unit-admin.
               <nav aria-label="Breadcrumb" className="flex items-center gap-2 py-3 text-sm">
                 <span className="font-medium" aria-current="page">
                   {scholarName}
