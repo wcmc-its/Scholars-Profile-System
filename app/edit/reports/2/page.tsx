@@ -63,7 +63,7 @@ export default async function EditReportsNci2aPage({
       >
         &larr; All reports
       </Link>
-      <h1 className="mb-4 text-xl font-semibold">2. NCI Table 2a</h1>
+      <h1 className="mb-4 text-xl font-bold">2. NCI Table 2a</h1>
       <Nci2aCard centerCode={code} />
     </ConsoleShell>
   );

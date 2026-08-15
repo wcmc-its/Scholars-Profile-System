@@ -65,9 +65,9 @@ export default async function EditReportsOptimizeMembershipPage({
       >
         &larr; All reports
       </Link>
+      <h1 className="mb-4 text-xl font-bold">1. Optimize membership</h1>
       {/* ConsoleShell owns only the chrome — see app/edit/reports/page.tsx. */}
       <div className="apollo-card">
-        <h1 className="mb-4 text-xl font-semibold">1. Optimize membership</h1>
         <CancerCenterCollabReportCard centerCode={code} />
       </div>
     </ConsoleShell>

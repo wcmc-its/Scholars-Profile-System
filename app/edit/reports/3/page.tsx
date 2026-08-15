@@ -153,7 +153,7 @@ export default async function EditReportsPublicationsPage({
       >
         &larr; All reports
       </Link>
-      <h1 className="mb-1 text-xl font-semibold">3. Publications</h1>
+      <h1 className="mb-1 text-xl font-bold">3. Publications</h1>
       <p className="text-muted-foreground text-sm">
         Every publication with a confirmed {ctx.unit.name} author, joined to Journal Impact Factor
         data where the journal matches.
