@@ -1143,7 +1143,7 @@ describe("loadShareRateCorpus", () => {
    *  here (OR flipped to AND, `isConfirmed` dropped, the year floor dropped)
    *  would pass all of them unnoticed. This asserts the actual Prisma call
    *  args, not just a canned resolved value. */
-  it("queries publicationAuthor with first-OR-last, confirmed, non-null cwid, and the year floor", async () => {
+  it("queries publicationAuthor with first-OR-last, confirmed, non-null cwid, the year floor, and the publication-type scope", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
     const client = { publicationAuthor: { findMany } } as unknown as DataSharingReportClient;
 
@@ -1155,6 +1155,11 @@ describe("loadShareRateCorpus", () => {
     expect(call.where.isConfirmed).toBe(true);
     expect(call.where.cwid).toEqual({ not: null });
     expect(call.where.publication.year.gte).toBe(SHARE_RATE_YEAR_FLOOR);
+    // 2026-08-15: denominator scoped to the same types the deposit-scan pipeline
+    // covers (extract_databanks.py / preprint_extend.py) — see the handoff.
+    expect(call.where.publication.publicationType).toEqual({
+      in: ["Academic Article", "Preprint"],
+    });
   });
 
   it("maps rows to pmid/cwid/department, defaulting a missing department to null", async () => {

@@ -23,6 +23,20 @@
  * `byDepartment`, and `byFaculty`. Still no full-text coverage stat — that
  * SPEC headline remains out of scope.
  *
+ * Share rate, publication-type scope (2026-08-15): the denominator originally
+ * had no publication-type filter, but the numerator's underlying deposit-scan
+ * pipeline only ever covers `SHARE_RATE_ELIGIBLE_TYPES` — every other type
+ * inflated the denominator with zero chance of a numerator hit. Fixed by
+ * scoping `loadShareRateCorpus` to the same types. Doesn't close the whole
+ * gap: the numerator is also full-time-faculty-only and SPS has no bridged
+ * FTE field to match that on the denominator side — open, see
+ * `SHARE_RATE_ELIGIBLE_TYPES`'s doc comment. Checked the corresponding-author
+ * question too (a mockup footer claimed dashboard metrics go beyond
+ * first/last): traced `PersonDatasetDeposit`'s only write path
+ * (`etl/data-sharing/shared.ts`) back to `attribute.py`'s
+ * `authorPosition IN ('first','last')` source query — no widening exists
+ * anywhere in the pipeline, so no reconciliation was needed here.
+ *
  * Strict-only (decided 2026-08-12): `DatasetDeposit.confidence` is only ever
  * `'high'` or `null` in what's actually persisted — there is no generous/ceiling
  * band to read. See the dashboard plan's "Strict/generous band" section.
@@ -83,6 +97,18 @@ export type DataSharingReportClient = Pick<
  *  for pubs that were simply never checked — not a scope choice, a
  *  coverage-window fix. */
 export const SHARE_RATE_YEAR_FLOOR = 2020;
+
+/** Matches the Python extraction pipeline's own corpus-query scope
+ *  (`extract_databanks.py` hardcodes `publicationTypeCanonical = 'Academic
+ *  Article'`; `preprint_extend.py` adds `'Preprint'`). Nothing outside these
+ *  two types is ever scanned for deposits, so counting them in the
+ *  denominator inflates it with pubs that have zero chance of ever
+ *  contributing to the numerator (2026-08-15 fix — see the data-sharing
+ *  dashboard handoff). Doesn't close the gap: the numerator is also
+ *  full-time-faculty-only (`attribute.py`'s `fullTimeFaculty='yes'`), and SPS
+ *  has no bridged FTE field to filter the denominator by — that piece stays
+ *  open, needs its own reciterdb/`identity`-table bridge. */
+const SHARE_RATE_ELIGIBLE_TYPES = ["Academic Article", "Preprint"] as const;
 
 /** One suppression-filtered (person, dataset) link, flattened for aggregation —
  *  the shape every `aggregateBy*` function below operates on. Exported so
@@ -386,18 +412,21 @@ export async function loadDatasetLinkRows(client: DataSharingReportClient): Prom
 }
 
 /** Read every confirmed first/last-authored WCM publication since
- *  `SHARE_RATE_YEAR_FLOOR` — the share-rate denominator corpus. `cwid` is
- *  guaranteed non-null by the `where` clause (`cwid: { not: null }`) even
- *  though Prisma's generated type keeps the column's nullable declaration;
- *  asserted once here rather than threading `string | null` through every
- *  downstream aggregate. */
+ *  `SHARE_RATE_YEAR_FLOOR`, scoped to `SHARE_RATE_ELIGIBLE_TYPES` — the
+ *  share-rate denominator corpus. `cwid` is guaranteed non-null by the
+ *  `where` clause (`cwid: { not: null }`) even though Prisma's generated type
+ *  keeps the column's nullable declaration; asserted once here rather than
+ *  threading `string | null` through every downstream aggregate. */
 export async function loadShareRateCorpus(client: DataSharingReportClient): Promise<ShareRateCorpusRow[]> {
   const rows = await client.publicationAuthor.findMany({
     where: {
       OR: [{ isFirst: true }, { isLast: true }],
       isConfirmed: true,
       cwid: { not: null },
-      publication: { year: { gte: SHARE_RATE_YEAR_FLOOR } },
+      publication: {
+        year: { gte: SHARE_RATE_YEAR_FLOOR },
+        publicationType: { in: [...SHARE_RATE_ELIGIBLE_TYPES] },
+      },
     },
     select: {
       pmid: true,
