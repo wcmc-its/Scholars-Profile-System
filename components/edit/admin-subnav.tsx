@@ -169,9 +169,10 @@ export function AdminSubnav({
    *  `0` — no badge), mirroring `methodsTab`. */
   dataQualityTab?: number | null;
   /** `null`/omitted hides the "Data sharing" tab — the S-Index Phase 1 dashboard
-   *  is flag- + role-gated (`isDataSharingDashboardTabVisible`; superuser or
-   *  comms_steward, no unit-scoped variant — unlike Data Quality, there is no
-   *  natural per-unit cut here). A number shows it (passed `0` — no badge). */
+   *  is flag- + role-gated (`isDataSharingDashboardTabVisible`; superuser,
+   *  comms_steward, or data_sharing_viewer, no unit-scoped variant — unlike
+   *  Data Quality, there is no natural per-unit cut here). A number shows it
+   *  (passed `0` — no badge). */
   dataSharingTab?: number | null;
   /** Whether to show the superuser list surfaces (URL requests / Slug registry /
    *  Administrators — and Profiles, unless `profilesTab` separately enables it).

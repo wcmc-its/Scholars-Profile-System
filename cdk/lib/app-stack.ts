@@ -1621,6 +1621,23 @@ export class AppStack extends Stack {
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         HONORS_CURATOR_ENABLED: "on",
         SCHOLARS_HONORS_CURATOR_GROUP_CN: "ITS:Library:Scholars/honors-curator-role",
+        // `data_sharing_viewer` role (2026-08-15 -- data-sharing dashboard
+        // handoff). Unlocks ONLY /edit/data-sharing for the dashboard's
+        // reframed standing audience (research leadership, compliance/grant
+        // reporting, library/RDM) who are neither superuser nor comms_steward
+        // -- both of which already pass this guard.
+        //   DATA_SHARING_VIEWER_ENABLED -- master kill switch, same shape as
+        //     HONORS_CURATOR_ENABLED above. While not "on", isDataSharingViewer()
+        //     short-circuits to false before any directory work.
+        //   SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN -- the ED group whose
+        //     membership confers the role. Created 2026-08-15, structurally
+        //     identical to its siblings (groupOfURLs under `ou=application
+        //     security`) but created EMPTY -- no members yet, so the role
+        //     stays fully dormant (fail-closed) until named individuals are
+        //     added directory-side. "on" here is safe before that happens.
+        // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        DATA_SHARING_VIEWER_ENABLED: "on",
+        SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN: "ITS:Library:Scholars/data-sharing-viewer-role",
         // #742 -- the /edit Overview "Generate a draft" surface: the Existing /
         // Generator tabs, the Sources drawer, and the AI overview-statement
         // generator. overviewGenerateEnabled() reads === "on"

@@ -313,6 +313,7 @@ describe("getEffectiveEditSession", () => {
       isCommsSteward: false,
       isDeveloper: false,
       isHonorsCurator: false,
+      isDataSharingViewer: false,
     });
   });
 
@@ -330,6 +331,7 @@ describe("getEffectiveEditSession", () => {
       isCommsSteward: false,
       isDeveloper: false,
       isHonorsCurator: false,
+      isDataSharingViewer: false,
     });
   });
 });

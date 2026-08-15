@@ -550,6 +550,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "ITS:Library:Scholars/honors-curator-role",
               },
               {
+                "Name": "DATA_SHARING_VIEWER_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN",
+                "Value": "ITS:Library:Scholars/data-sharing-viewer-role",
+              },
+              {
                 "Name": "SELF_EDIT_OVERVIEW_GENERATE",
                 "Value": "on",
               },
@@ -4870,6 +4878,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLARS_HONORS_CURATOR_GROUP_CN",
                 "Value": "ITS:Library:Scholars/honors-curator-role",
+              },
+              {
+                "Name": "DATA_SHARING_VIEWER_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN",
+                "Value": "ITS:Library:Scholars/data-sharing-viewer-role",
               },
               {
                 "Name": "SELF_EDIT_OVERVIEW_GENERATE",

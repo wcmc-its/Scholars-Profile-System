@@ -70,6 +70,7 @@ function mergeSessions(a: EditSession, b: EditSession): EditSession {
     isCommsSteward: a.isCommsSteward || b.isCommsSteward,
     isHonorsCurator: a.isHonorsCurator === true || b.isHonorsCurator === true,
     isDeveloper: a.isDeveloper === true || b.isDeveloper === true,
+    isDataSharingViewer: a.isDataSharingViewer === true || b.isDataSharingViewer === true,
   };
 }
 
