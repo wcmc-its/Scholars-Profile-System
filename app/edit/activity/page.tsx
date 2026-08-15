@@ -264,7 +264,11 @@ export default async function EditActivityPage() {
       path: "/edit/activity",
       reason: "not_superuser_get",
     });
-    return <ForbiddenEditPage />;
+    return (
+      <ConsoleShell active="activity" session={session} pendingSlugRequests={null} pendingHonors={null}>
+        <ForbiddenEditPage />
+      </ConsoleShell>
+    );
   }
 
   const pendingSlugRequests = isSlugRequestEnabled()

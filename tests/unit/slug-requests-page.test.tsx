@@ -58,7 +58,7 @@ vi.mock("@/lib/edit/slug-request", () => ({
 
 import SlugRequestsPage from "@/app/edit/slug-requests/page";
 
-type El = { type: unknown };
+type El = { type: unknown; props: Record<string, unknown> };
 const asEl = (v: unknown) => v as El;
 
 const ADMIN = { cwid: "adm001", isSuperuser: true };
@@ -83,7 +83,10 @@ describe("/edit/slug-requests — authorization & flag", () => {
   it("signed-in non-superuser → ForbiddenEditPage, no queue load", async () => {
     mockGetEditSession.mockResolvedValue(SELF);
     const result = asEl(await SlugRequestsPage());
-    expect(result.type).toBe(mockForbidden);
+    // C8/C9 — the denial branch is wrapped in the same ConsoleShell the
+    // success path uses, so the top-level element is the shell and
+    // ForbiddenEditPage is its child, not the return value itself.
+    expect(asEl(result.props.children).type).toBe(mockForbidden);
     expect(mockLoadQueue).not.toHaveBeenCalled();
     expect(console.warn).toHaveBeenCalled(); // requireSuperuserGet denial line
   });

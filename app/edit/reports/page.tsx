@@ -115,7 +115,12 @@ export default async function EditReportsIndexPage({
     // Unchanged: an explicit `?center=` always addresses exactly one unit.
     const code = await resolveReportsCenterCode(db.read, center);
     const ctx = await loadReportsContext(code, session, db.read);
-    if (ctx === null) return <ForbiddenEditPage variant="unit" targetEntity={code} />;
+    if (ctx === null)
+      return (
+        <ConsoleShell active="reports" session={session} pendingSlugRequests={null} pendingHonors={null}>
+          <ForbiddenEditPage variant="unit" targetEntity={code} />
+        </ConsoleShell>
+      );
     return <SingleUnitReports ctx={ctx} code={code} perReport={await loadSingleUnitPerReport(code)} {...shell} />;
   }
 
@@ -125,7 +130,12 @@ export default async function EditReportsIndexPage({
   if (reportableUnits.length === 1) {
     const code = reportableUnits[0].code;
     const ctx = await loadReportsContext(code, session, db.read);
-    if (ctx === null) return <ForbiddenEditPage variant="unit" targetEntity={code} />;
+    if (ctx === null)
+      return (
+        <ConsoleShell active="reports" session={session} pendingSlugRequests={null} pendingHonors={null}>
+          <ForbiddenEditPage variant="unit" targetEntity={code} />
+        </ConsoleShell>
+      );
     return <SingleUnitReports ctx={ctx} code={code} perReport={await loadSingleUnitPerReport(code)} {...shell} />;
   }
 

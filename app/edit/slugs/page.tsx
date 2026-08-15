@@ -61,7 +61,11 @@ export default async function EditSlugsPage({
   // Superuser re-check on every GET (B2). Emits the `edit_authz_denied` line.
   const denial = requireSuperuserGet({ session, path: "/edit/slugs", targetId: "slug-registry" });
   if (denial !== null) {
-    return <ForbiddenEditPage />;
+    return (
+      <ConsoleShell active="slugs" session={session} pendingSlugRequests={null} pendingHonors={null}>
+        <ForbiddenEditPage />
+      </ConsoleShell>
+    );
   }
 
   const requestedEnabled = isSlugRequestEnabled();
