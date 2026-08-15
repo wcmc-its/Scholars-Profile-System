@@ -331,6 +331,10 @@ export type DataSharingReport = {
   /** Deposit-instance counts per granular sensitive sub-type, grouped by
    *  coarse category — see `aggregateBySubtype`. */
   bySubtype: SubtypeRow[];
+  /** The `RECENT_ITEMS_LIMIT` most recently deposited items — see
+   *  `mostRecentDeposits`'s doc comment for what "recent" can and can't mean
+   *  with this data model. */
+  recentItems: DatasetLinkRow[];
   /** MAX(lastRefreshedAt) across `DatasetDeposit` — when the weekly
    *  data-sharing bridge last fully synced (every row gets the same run
    *  timestamp, see `etl/data-sharing/shared.ts`'s `buildDepositsAndLinks`).
@@ -585,6 +589,40 @@ export function aggregateBySubtype(rows: readonly DatasetLinkRow[]): SubtypeRow[
   return [...counts.values()].sort(
     (a, b) => a.category.localeCompare(b.category) || b.count - a.count,
   );
+}
+
+/** Upper bound on rows in the "Recent activity" table — a UI list, not an
+ *  export; if this ever needs to show more, that's pagination, not a
+ *  constant bump. */
+export const RECENT_ITEMS_LIMIT = 25;
+
+/** The `limit` most recently deposited items, item-level — one row per
+ *  (person, dataset) link, same grain as the CSV export (not distinct
+ *  datasets: a dataset with 3 depositing/citing faculty can appear 3 times).
+ *
+ *  "Recent" means `depositYear` (repo metadata, or pub year as a fallback)
+ *  — the ONLY per-item recency signal this data model carries.
+ *  `lastRefreshedAt` on `DatasetDeposit`/`PersonDatasetDeposit` is NOT a
+ *  substitute: every row gets the SAME whole-table sync timestamp on each
+ *  full-replace ETL run (see `DataSharingReport.dataAsOf`'s doc comment), so
+ *  it can't tell a deposit newly discovered this run from one that's been in
+ *  the table for months — there is no "date SPS first saw this" field today.
+ *  A row with no `depositYear` sorts last (unknown recency, not assumed
+ *  recent). Deterministic tiebreak within a year (`depositYear` is
+ *  year-granularity, so ties are real, not incidental): `datasetId`, stable
+ *  but not itself meaningful — just enough to keep re-renders from
+ *  reshuffling equally-recent rows. */
+export function mostRecentDeposits(
+  rows: readonly DatasetLinkRow[],
+  limit: number = RECENT_ITEMS_LIMIT,
+): DatasetLinkRow[] {
+  return [...rows]
+    .sort(
+      (a, b) =>
+        (b.depositYear ?? -Infinity) - (a.depositYear ?? -Infinity) ||
+        a.datasetId.localeCompare(b.datasetId),
+    )
+    .slice(0, limit);
 }
 
 /** Deposit-INSTANCE (row) counts for the tier-only "concerning" flag — same
@@ -912,6 +950,7 @@ export function buildDataSharingReport(
     pubsByTier: tierPubSpectrum(rows),
     byFaculty,
     bySubtype: aggregateBySubtype(rows),
+    recentItems: mostRecentDeposits(rows),
   };
 }
 
