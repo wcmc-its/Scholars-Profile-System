@@ -477,6 +477,110 @@ describe("AdministratorsRoster — allCores option merge (P2)", () => {
 
 // ── #729 — per-card "View as" launch shortcut gating ─────────────────────────
 
+// ── Sort + filter (§ SORT / § FILTER) ────────────────────────────────────────
+
+describe("AdministratorsRoster — sort + filter", () => {
+  const zoe = entry({
+    cwid: "zoe1",
+    name: "Zoe Zebra",
+    nameResolved: true,
+    grants: [
+      {
+        entityType: "department",
+        entityId: "A1",
+        unitName: "Anesthesiology",
+        role: "curator",
+        source: "manual",
+      },
+    ],
+  });
+  const amy = entry({
+    cwid: "amy1",
+    name: "Amy Apple",
+    nameResolved: true,
+    grants: [
+      {
+        entityType: "department",
+        entityId: "Z1",
+        unitName: "Zoology",
+        role: "curator",
+        source: "manual",
+      },
+    ],
+  });
+
+  it("defaults to sorting by person name", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[zoe, amy]}
+        isSuperuser
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+      />,
+    );
+    const names = screen.getAllByTestId(/^administrators-person-/).map((el) => el.getAttribute("data-testid"));
+    expect(names).toEqual(["administrators-person-amy1", "administrators-person-zoe1"]);
+  });
+
+  it("switching to 'Org unit' re-sorts groups by each person's alphabetically-first unitName", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[zoe, amy]}
+        isSuperuser
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+      />,
+    );
+    // Default (by person): amy1 before zoe1.
+    let names = screen.getAllByTestId(/^administrators-person-/).map((el) => el.getAttribute("data-testid"));
+    expect(names).toEqual(["administrators-person-amy1", "administrators-person-zoe1"]);
+
+    fireEvent.change(screen.getByTestId("administrators-sort-select"), {
+      target: { value: "orgUnit" },
+    });
+    // By org unit: zoe manages "Anesthesiology" (< "Zoology"), so zoe1 now leads.
+    names = screen.getAllByTestId(/^administrators-person-/).map((el) => el.getAttribute("data-testid"));
+    expect(names).toEqual(["administrators-person-zoe1", "administrators-person-amy1"]);
+  });
+
+  it("filters to person-groups matching name, cwid, or org unit (case-insensitive substring)", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[zoe, amy]}
+        isSuperuser
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("administrators-filter-input"), {
+      target: { value: "zoology" },
+    });
+    expect(screen.getByTestId("administrators-person-amy1")).toBeTruthy();
+    expect(screen.queryByTestId("administrators-person-zoe1")).toBeNull();
+  });
+
+  it("shows the no-matches message (distinct from the empty-roster message) when nothing matches", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[zoe, amy]}
+        isSuperuser
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("administrators-filter-input"), {
+      target: { value: "no such person or unit" },
+    });
+    expect(screen.getByTestId("administrators-no-matches")).toBeTruthy();
+    expect(screen.queryByTestId("administrators-empty")).toBeNull();
+    expect(screen.queryByTestId("administrators-table")).toBeNull();
+  });
+});
+
 describe("AdministratorsRoster — View as (#729)", () => {
   it("renders a View-as button on other people's cards when canImpersonate", () => {
     stubRouter();
