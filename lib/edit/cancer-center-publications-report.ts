@@ -1,10 +1,18 @@
 /**
- * `/edit/reports/3` ("Publications") data layer — per-center publications ×
+ * `/edit/reports/3` ("Publications") data layer — per-unit publications ×
  * Journal Impact Factor report (`etl/journal-impact-factor` mirrors the
- * source table weekly into `JournalImpactFactor`).
+ * source table weekly into `JournalImpactFactor`). Genericized off its
+ * original center-only shape (org-unit publications reports plan,
+ * 2026-08-16) to also serve department and division units — the catalog
+ * blurb's old "cancer-relevance tagging" claim was never true of this code
+ * either way; see that plan's item 4.
  *
- * Membership: the SAME `loadActiveCenterMemberCwids` (`lib/api/centers.ts`)
- * every other center-wide surface uses — never re-derived. Publications:
+ * Membership: the SAME per-kind resolver every other unit-wide surface
+ * uses — never re-derived. `center`: `loadActiveCenterMemberCwids`
+ * (`lib/api/centers.ts`). `division`: `loadDivisionMemberCwids`
+ * (`lib/api/divisions.ts`). `department`: the same
+ * `scholar: { deptCode, deletedAt: null, status: "active" }` predicate
+ * `getDeptPublicationsListUncached` (`lib/api/dept-lists.ts`) uses. Publications:
  * confirmed-authorship fan-out across the member set, the same
  * `authors: { some: { isConfirmed, cwid: { in } } }` relation filter
  * `getCenterPublicationsListUncached` (`lib/api/centers.ts`) and
@@ -12,7 +20,7 @@
  * surface, not a public one, so — like the collab-report precompute — it
  * does NOT layer the public-surface suppression/darkness overlay
  * (`lib/api/manual-layer.ts`); a curator reviewing coverage needs to see the
- * center's full confirmed-authorship set, hidden-from-public or not.
+ * unit's full confirmed-authorship set, hidden-from-public or not.
  *
  * ponytail: exact-match join on normalized journalAbbrev — publications in a
  * journal not in journal_impact_alternative, or with inconsistent
@@ -20,7 +28,9 @@
  * low: a curated ISSN/name crosswalk, not a fuzzy-match library.
  */
 import { db } from "@/lib/db";
+import type { UnitEntityType } from "@/lib/api/manual-layer";
 import { loadActiveCenterMemberCwids } from "@/lib/api/centers";
+import { loadDivisionMemberCwids } from "@/lib/api/divisions";
 import { normalizeJournalAbbrev } from "@/lib/journal-abbrev";
 
 /** `impactScore1` (current-year JIF) threshold for the report's "high impact"
@@ -42,7 +52,8 @@ export type PublicationsReportRow = {
    *  which can read slightly differently than PubMed's `journal`. */
   matchedJournalTitle: string;
   /** Current-year Journal Impact Factor, or null (13 of 21,800 source rows
-   *  lack one — a journal just added to WoS tracking). */
+   *  lack one — a journal just added to WoS tracking). Secondary sort key —
+   *  see `PublicationsReport.rows`. */
   impactScore1: number | null;
   /** 5-year Journal Impact Factor, or null (more commonly absent than
    *  impactScore1 — needs 5 years of citation history to compute). */
@@ -51,10 +62,31 @@ export type PublicationsReportRow = {
   categoryName: string | null;
   quartile: string | null;
   categoryRank: string | null;
+  /** `Publication.impactScore` — the paper-level GPT-rubric impact score
+   *  (0-100). The report's PRIMARY sort key (org-unit publications reports
+   *  plan, "Ranking"): a paper-level signal, paired with `impactJustification`
+   *  below, over the journal-level `impactScore1` that used to rank this
+   *  report alone. Null for a pub the ReciterAI impact-scoring ETL hasn't
+   *  reached yet. */
+  impactScore: number | null;
+  /** `Publication.impactJustification` — GPT-generated rationale for
+   *  `impactScore` (novelty / methodology / influence / translational
+   *  relevance). Surfaced as a tooltip on the Impact score cell. Null
+   *  whenever `impactScore` is null. */
+  impactJustification: string | null;
+  /** `Publication.synopsis` — one-line plain-language summary. Surfaced as a
+   *  secondary line under the title when present; null for many older or
+   *  non-research pubs the ReciterAI synopsis ETL hasn't reached. */
+  synopsis: string | null;
+  /** Distinct, non-null `Scholar.roleCategory` values among this pub's
+   *  CONFIRMED unit-member authors — the Person-type filter rail's key.
+   *  `[]` when every confirmed member-author's Scholar row has a null
+   *  roleCategory (rare). */
+  authorRoleCategories: ReadonlyArray<string>;
 };
 
 export type PublicationsReport = {
-  /** Every publication with ≥1 confirmed center-member author — the
+  /** Every publication with ≥1 confirmed unit-member author — the
    *  denominator for `matchRatePct`. */
   totalPublications: number;
   /** Publications whose journal matched a `JournalImpactFactor` row. */
@@ -72,11 +104,12 @@ export type PublicationsReport = {
    *  reason this field and matchRatePct are separate, explicit numbers rather
    *  than one blended percentage. */
   highImpactRatePct: number;
-  /** MATCHED publications only, impactScore1 desc (nulls last) then pmid asc
-   *  for a stable order. Unmatched publications are omitted from the table —
-   *  the match-rate line above already accounts for them; a row that can only
-   *  ever show "no data" for every IF column added no information a curator
-   *  could act on. */
+  /** MATCHED publications only, `impactScore` desc (nulls last) then
+   *  `impactScore1` desc (nulls last, secondary — see the field doc) then
+   *  pmid asc for a stable order. Unmatched publications are omitted from the
+   *  table — the match-rate line above already accounts for them; a row that
+   *  can only ever show "no data" for every IF column added no information a
+   *  curator could act on. */
   rows: PublicationsReportRow[];
 };
 
@@ -107,28 +140,80 @@ export function parseCategory(raw: string | null): {
   };
 }
 
+/** Descending numeric compare with nulls sorted last — shared by the primary
+ *  (`impactScore`) and secondary (`impactScore1`) sort keys below. */
+function compareDescNullsLast(a: number | null, b: number | null): number {
+  if (a === b) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return b - a;
+}
+
+/** Active member CWIDs for `kind`, via the SAME resolver every other
+ *  unit-wide surface uses — see the module doc comment. */
+async function loadUnitMemberCwids(kind: UnitEntityType, code: string): Promise<string[]> {
+  if (kind === "center") return loadActiveCenterMemberCwids(code);
+  if (kind === "division") return loadDivisionMemberCwids(code);
+  const rows = await db.read.scholar.findMany({
+    where: { deptCode: code, deletedAt: null, status: "active" },
+    select: { cwid: true },
+  });
+  return rows.map((r) => r.cwid);
+}
+
 /**
- * Build the report for one center: resolve active members, pull their
+ * Build the report for one unit: resolve active members, pull their
  * confirmed-authorship publications, join each to `JournalImpactFactor` by
  * normalized `journalAbbrev`, and compute the match/high-impact stats.
  *
  * The `JournalImpactFactor` lookup is scoped to only the abbreviations this
- * center's publications actually carry (a `findMany({ where: { in: [...] } })`
+ * unit's publications actually carry (a `findMany({ where: { in: [...] } })`
  * over at most `totalPublications` distinct values), never the full ~21,800-
  * row table.
  */
-export async function loadCancerCenterPublicationsReport(
-  centerCode: string,
+export async function loadUnitPublicationsReport(
+  kind: UnitEntityType,
+  code: string,
 ): Promise<PublicationsReport> {
-  const memberCwids = await loadActiveCenterMemberCwids(centerCode);
+  const memberCwids = await loadUnitMemberCwids(kind, code);
   if (memberCwids.length === 0) return EMPTY_REPORT;
 
   const pubs = await db.read.publication.findMany({
     where: { authors: { some: { isConfirmed: true, cwid: { in: memberCwids } } } },
-    select: { pmid: true, title: true, journal: true, journalAbbrev: true, year: true },
+    select: {
+      pmid: true,
+      title: true,
+      journal: true,
+      journalAbbrev: true,
+      year: true,
+      impactScore: true,
+      impactJustification: true,
+      synopsis: true,
+      // Only the CONFIRMED member authors — the Person-type facet's key.
+      // Never the full author list (which includes non-member co-authors).
+      authors: {
+        where: { isConfirmed: true, cwid: { in: memberCwids } },
+        select: { cwid: true },
+      },
+    },
   });
   const totalPublications = pubs.length;
   if (totalPublications === 0) return EMPTY_REPORT;
+
+  const memberAuthorCwids = Array.from(
+    new Set(pubs.flatMap((p) => p.authors.map((a) => a.cwid).filter((c): c is string => c !== null))),
+  );
+  const roleCategoryByCwid =
+    memberAuthorCwids.length > 0
+      ? new Map(
+          (
+            await db.read.scholar.findMany({
+              where: { cwid: { in: memberAuthorCwids } },
+              select: { cwid: true, roleCategory: true },
+            })
+          ).map((s) => [s.cwid, s.roleCategory]),
+        )
+      : new Map<string, string | null>();
 
   const neededAbbrevs = Array.from(
     new Set(
@@ -157,6 +242,14 @@ export async function loadCancerCenterPublicationsReport(
     if (impactScore1 !== null && impactScore1 >= HIGH_IMPACT_THRESHOLD) highImpactCount++;
 
     const { categoryName, quartile, categoryRank } = parseCategory(jif.category);
+    const impactScore = p.impactScore === null || p.impactScore === undefined ? null : Number(p.impactScore);
+    const authorRoleCategories = Array.from(
+      new Set(
+        p.authors
+          .map((a) => (a.cwid ? roleCategoryByCwid.get(a.cwid) : null))
+          .filter((r): r is string => !!r),
+      ),
+    );
     rows.push({
       pmid: p.pmid,
       title: p.title,
@@ -169,13 +262,18 @@ export async function loadCancerCenterPublicationsReport(
       categoryName,
       quartile,
       categoryRank,
+      impactScore,
+      impactJustification: p.impactJustification ?? null,
+      synopsis: p.synopsis ?? null,
+      authorRoleCategories,
     });
   }
   rows.sort((a, b) => {
-    if (a.impactScore1 === b.impactScore1) return a.pmid.localeCompare(b.pmid);
-    if (a.impactScore1 === null) return 1;
-    if (b.impactScore1 === null) return -1;
-    return b.impactScore1 - a.impactScore1;
+    const byImpactScore = compareDescNullsLast(a.impactScore, b.impactScore);
+    if (byImpactScore !== 0) return byImpactScore;
+    const byJif = compareDescNullsLast(a.impactScore1, b.impactScore1);
+    if (byJif !== 0) return byJif;
+    return a.pmid.localeCompare(b.pmid);
   });
 
   const matchedPublications = rows.length;

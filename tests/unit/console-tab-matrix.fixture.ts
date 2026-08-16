@@ -107,7 +107,11 @@ export const INTENDED_MATRIX: MatrixRow[] = [
     pins: "Gap 3 (D5: administrators for Owners) + Gap 4 (reports/usage everywhere)",
   },
   {
-    name: "unit Owner of a department only (0 reportable — reports counts centers, not depts)",
+    // Org-unit publications reports plan (2026-08-16) widened reports 3/6 to
+    // department/division too, so `reportableUnitCount` now counts all three
+    // kinds — `core` (a `manageableUnitCount` kind with no report loader) is
+    // the one remaining divergence case, not department/division anymore.
+    name: "unit Owner of a core only (0 reportable — cores don't carry reports)",
     session: sess(),
     grants: grants({ ownerUnitCount: 1, manageableUnitCount: 1 }),
     expect: ["profiles", "units", "administrators"],

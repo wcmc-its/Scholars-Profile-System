@@ -65,7 +65,7 @@ export default async function EditReportsGrantsPage({
   }
 
   const { center, asOf } = (await searchParams) ?? {};
-  const code = await resolveNumberedReportCenterCode(session, db.read, center);
+  const { code } = await resolveNumberedReportCenterCode(session, db.read, center);
   const ctx = await loadReportsContext(code, session, db.read);
   if (ctx === null) {
     return (

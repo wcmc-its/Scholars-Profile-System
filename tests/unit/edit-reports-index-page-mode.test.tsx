@@ -27,6 +27,9 @@ vi.mock("@/lib/edit/cancer-center-reports", () => ({
   loadReportLiveness: vi.fn().mockResolvedValue(new Map()),
   loadReportsContext: vi.fn(),
   resolveReportsCenterCode: vi.fn(),
+  // Real values, not mocked — page.tsx indexes REPORTS_BY_KIND off this at
+  // module scope (org-unit publications reports plan, 2026-08-16, #2459).
+  REPORT_NUMBERS_BY_KIND: { center: [1, 2, 3, 4, 5, 6], department: [3, 6], division: [3, 6] },
 }));
 vi.mock("@/components/edit/reports-index", () => ({
   ReportsIndex: mockReportsIndex,
@@ -50,8 +53,8 @@ vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
 import EditReportsIndexPage from "@/app/edit/reports/page";
 
 const TWO_UNITS = [
-  { code: "a", name: "A", centerType: "center" as const },
-  { code: "b", name: "B", centerType: "center" as const },
+  { code: "a", name: "A", kind: "center" as const, centerType: "center" as const },
+  { code: "b", name: "B", kind: "center" as const, centerType: "center" as const },
 ];
 const sp = () => Promise.resolve({});
 

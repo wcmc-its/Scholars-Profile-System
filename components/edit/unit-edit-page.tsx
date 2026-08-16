@@ -80,17 +80,24 @@ const hasFacultyExportTab = (ctx: UnitEditContext) =>
   isUnitRosterExportEnabled() &&
   (ctx.unit.unitType === "department" || ctx.unit.unitType === "division");
 
-// The same data-driven "has a program taxonomy" gate Programs/NCI-Table-2A/
-// Reports have always shared — a center with a program taxonomy is exactly
-// the population the Cancer Center reports cover. Reports moved off the
-// in-page attribute set to the top-level `/edit/reports` console
-// (cancer-center-reports-consolidation); this predicate now decides whether
-// `EditShell`'s header "View reports" link (`reportsHref`) renders — it used
-// to gate a rail-mounted link instead (`CenterReportsRailLink`, retired
-// Reports IA redesign 2026-08-14, so the link survives the roster/Members
-// page, which hides the rail).
-const hasCenterReports = (ctx: UnitEditContext) =>
-  ctx.unit.unitType === "center" && (ctx.programs?.length ?? 0) > 0;
+// A center keeps the same data-driven "has a program taxonomy" gate
+// Programs/NCI-Table-2A/Reports have always shared — a center with a program
+// taxonomy is exactly the population the Cancer Center reports cover.
+// Department/division have no such taxonomy to gate on — reports 3
+// (Publications) and 6 (NIH-funded pubs) are kind-generic and degrade to an
+// empty state rather than erroring (org-unit publications reports plan,
+// 2026-08-16; same ungated posture `loadReportableUnitsForActor` already
+// applies to these two kinds), so any department/division this actor can
+// edit is reportable. Reports moved off the in-page attribute set to the
+// top-level `/edit/reports` console (cancer-center-reports-consolidation);
+// this predicate now decides whether `EditShell`'s header "View reports"
+// link (`reportsHref`) renders — it used to gate a rail-mounted link instead
+// (`CenterReportsRailLink`, retired Reports IA redesign 2026-08-14, so the
+// link survives the roster/Members page, which hides the rail).
+const hasUnitReports = (ctx: UnitEditContext) =>
+  ctx.unit.unitType === "center"
+    ? (ctx.programs?.length ?? 0) > 0
+    : ctx.unit.unitType === "department" || ctx.unit.unitType === "division";
 
 /** The full attribute set; `visible` encodes the SPEC § attribute table. */
 const ATTRIBUTES: ReadonlyArray<AttrDef> = [
@@ -156,8 +163,10 @@ export function UnitEditPage({ ctx, attr }: UnitEditPageProps) {
       <SiblingDivisionsRail divisions={ctx.siblingDivisions} />
     ) : undefined;
 
-  const reportsHref = hasCenterReports(ctx)
-    ? `/edit/reports?center=${encodeURIComponent(ctx.unit.code)}`
+  const reportsHref = hasUnitReports(ctx)
+    ? ctx.unit.unitType === "center"
+      ? `/edit/reports?center=${encodeURIComponent(ctx.unit.code)}`
+      : `/edit/reports?center=${encodeURIComponent(ctx.unit.code)}&kind=${ctx.unit.unitType}`
     : undefined;
 
   return (

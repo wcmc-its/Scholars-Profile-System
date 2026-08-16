@@ -28,6 +28,7 @@ vi.mock("@/lib/edit/cancer-center-reports", () => ({
   loadReportLiveness: vi.fn().mockResolvedValue(new Map()),
   loadReportsContext: vi.fn(),
   resolveReportsCenterCode: vi.fn(),
+  REPORT_NUMBERS_BY_KIND: { center: [1, 2, 3, 4, 5, 6], department: [3, 6], division: [3, 6] },
 }));
 vi.mock("@/components/edit/reports-index", () => ({
   ReportsIndex: mockReportsIndex,

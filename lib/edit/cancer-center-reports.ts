@@ -2,9 +2,15 @@
  * Shared server-side plumbing for the `/edit/reports/*` console — the
  * top-level home for what used to be the `?attr=reports` / `?attr=nci-2a`
  * tabs buried inside `/edit/center/[code]` (unit-curation-edit-ui-spec.md).
- * Both the center-code resolution and the authorization gate live here so
- * the index page and its five numbered report pages can't drift from each
- * other, or from the per-unit editor surface they're replacing.
+ * Both the unit-code resolution and the authorization gate live here so the
+ * index page and its six numbered report pages can't drift from each other,
+ * or from the per-unit editor surface they're replacing.
+ *
+ * Center-only through 2026-08-14. The org-unit publications reports plan
+ * (2026-08-16) widened reports 3 (Publications) and 6 (NIH-funded pubs) to
+ * also serve department/division units — see `REPORT_NUMBERS_BY_KIND` below
+ * for which numbered reports apply to which kind, and `loadReportsContext`'s
+ * doc comment for the authz thread-through. Reports 1/2/4/5 stay center-only.
  */
 import { notFound, redirect } from "next/navigation";
 
@@ -13,6 +19,7 @@ import {
   type UnitEditContext,
   type UnitEditContextClient,
 } from "@/lib/api/unit-edit-context";
+import type { UnitEntityType } from "@/lib/api/manual-layer";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { countActiveCenterMembersByCode } from "@/lib/api/center-member-count";
 import type { EditSession } from "@/lib/auth/superuser";
@@ -66,27 +73,34 @@ export async function resolveReportsCenterCode(
 }
 
 /**
- * The SAME role gate `/edit/center/[code]` enforces — superuser, comms_steward
- * (global content-editor parity, comms-steward-profile-editing-spec.md §3b),
- * or a unit Owner/Curator of this center — reused wholesale via
- * `loadUnitEditContext` rather than re-derived, so the Reports console can
- * never drift from the per-unit editor's authz. `null` = denied (and logged);
- * the caller renders the same visible 403 the old `?attr=reports` /
- * `?attr=nci-2a` tabs sat behind.
+ * The SAME role gate `/edit/center/[code]` (or `/edit/department/[code]` /
+ * `/edit/division/[code]`) enforces — superuser, comms_steward (global
+ * content-editor parity, comms-steward-profile-editing-spec.md §3b), or a
+ * unit Owner/Curator of this unit — reused wholesale via `loadUnitEditContext`
+ * rather than re-derived, so the Reports console can never drift from the
+ * per-unit editor's authz. `null` = denied (and logged); the caller renders
+ * the same visible 403 the old `?attr=reports` / `?attr=nci-2a` tabs sat
+ * behind.
+ *
+ * `kind` defaults to `"center"` — org-unit publications reports plan
+ * (2026-08-16): reports 1/2/4/5 never pass it (center-only, unchanged), so
+ * every existing call site keeps resolving exactly as it always has. Reports
+ * 3 and 6 (department/division-eligible) pass the resolved kind through.
  */
 export async function loadReportsContext(
   code: string,
   session: EditSession,
   db: UnitEditContextClient,
+  kind: UnitEntityType = "center",
 ): Promise<UnitEditContext | null> {
-  const ctx = await loadUnitEditContext("center", code, session, db);
+  const ctx = await loadUnitEditContext(kind, code, session, db);
   if (ctx === null) {
     logEditDenial({
       actorCwid: session.cwid,
       targetCwid: code,
       path: "/edit/reports",
       reason: "not_curator",
-      targetEntityType: "center",
+      targetEntityType: kind,
       targetEntityId: code,
     });
   }
@@ -94,26 +108,42 @@ export async function loadReportsContext(
 }
 
 /**
- * Center-code resolution for one of the five numbered report pages
- * (`/edit/reports/{1..5}`) — actor-scoped, unlike `resolveReportsCenterCode`'s
+ * Unit resolution for one of the six numbered report pages
+ * (`/edit/reports/{1..6}`) — actor-scoped, unlike `resolveReportsCenterCode`'s
  * own default-pick (see `loadReportableUnitsForActor`'s doc comment for the
  * hazard). An explicit `?center=` still resolves the same way it always has
- * (validated against ANY reportable center org-wide, not just the actor's
+ * (validated against ANY reportable unit org-wide, not just the actor's
  * own — `loadReportsContext` is the real per-actor gate, so this never needed
  * actor-scoping). Without one: exactly one reportable unit resolves straight
  * to it (today's existing behavior, unchanged); zero or more than one
  * redirects to the index (`/edit/reports`), the only surface that can show a
  * 404 or a picker correctly — a numbered report page has no picker of its
  * own to fall back on.
+ *
+ * `opts.allowedKinds` (org-unit publications reports plan, 2026-08-16)
+ * defaults to `["center"]` — reports 1/2/4/5 call with no third argument at
+ * all, so their resolution is byte-for-byte unchanged. Reports 3 and 6 (the
+ * department/division-eligible pair) pass the widened set. `opts.requestedKind`
+ * only matters alongside an explicit `requested` code that ISN'T a center —
+ * `?center=<code>&kind=department` — since a department/division code has no
+ * `resolveReportsCenterCode`-style taxonomy gate to validate against (no
+ * `CenterProgram` equivalent exists for those kinds); `loadReportsContext`
+ * downstream is what actually 403s/renders-not-found for a bad one.
  */
 export async function resolveNumberedReportCenterCode(
   session: EditSession,
   db: UnitEditContextClient & ReportsDirectoryClient,
   requested: string | undefined,
-): Promise<string> {
-  if (requested) return resolveReportsCenterCode(db, requested);
-  const units = await loadReportableUnitsForActor(session, db);
-  if (units.length === 1) return units[0].code;
+  opts: { allowedKinds?: readonly UnitEntityType[]; requestedKind?: UnitEntityType } = {},
+): Promise<{ code: string; kind: UnitEntityType }> {
+  const allowedKinds = opts.allowedKinds ?? ["center"];
+  if (requested) {
+    const kind = opts.requestedKind ?? "center";
+    if (kind === "center") return { code: await resolveReportsCenterCode(db, requested), kind: "center" };
+    return { code: requested, kind };
+  }
+  const units = await loadReportableUnitsForActor(session, db, allowedKinds);
+  if (units.length === 1) return { code: units[0].code, kind: units[0].kind };
   redirect("/edit/reports");
 }
 
@@ -133,13 +163,19 @@ export type ReportsDirectoryClient = Pick<
   | "cancerCenterFundingAward"
 >;
 
-/** One unit in scope for the Reports index/nav — a center or institute with a
+/** One unit in scope for the Reports index/nav. A `center` must carry a
  *  CenterProgram taxonomy, the same data-driven gate `resolveReportsCenterCode`
- *  already applies to a single unit. */
+ *  already applies to a single unit — `department`/`division` have no such
+ *  taxonomy to gate on (org-unit publications reports plan, 2026-08-16):
+ *  reports 3/6 degrade gracefully to an empty state for a unit with no
+ *  members/publications rather than erroring, so any unit the actor can
+ *  administer is reportable. `centerType` is only meaningful when
+ *  `kind === "center"`; null otherwise. */
 export type ReportableUnit = {
   code: string;
+  kind: UnitEntityType;
   name: string;
-  centerType: "center" | "institute";
+  centerType: "center" | "institute" | null;
 };
 
 /**
@@ -167,44 +203,86 @@ export type ReportableUnit = {
  * it, a non-superuser Curator would see a retired unit's live report counts
  * in the index and then 403 on every link into it (dead-end + a metadata leak
  * `loadUnitEditContext` is specifically designed to prevent).
+ *
+ * `allowedKinds` (org-unit publications reports plan, 2026-08-16) defaults to
+ * `["center"]`, so every existing caller (`loadConsoleGrants`, reports 1/2/4/5)
+ * keeps its exact prior behavior with no call-site change. Reports 3/6 and the
+ * index page pass the widened `["center", "department", "division"]` set — a
+ * department/division candidate skips the CenterProgram/retirement-suppression
+ * machinery below entirely (there's no equivalent taxonomy, and `loadManageableUnits`
+ * already excludes a grant whose unit row is gone) and passes straight through.
  */
 export async function loadReportableUnitsForActor(
   session: EditSession,
   db: ReportsDirectoryClient,
+  allowedKinds: readonly UnitEntityType[] = ["center"],
 ): Promise<ReportableUnit[]> {
   const isGlobal = session.isSuperuser || session.isCommsSteward;
-  const candidates: Array<{ code: string; name: string; centerType: "center" | "institute" | null }> =
-    isGlobal
-      ? (await loadAllUnitsDirectory(db, { includeRetired: session.isSuperuser }))
-          .filter((u) => u.kind === "center")
-          .map((u) => ({ code: u.code, name: u.name, centerType: u.centerType }))
-      : (await loadManageableUnits(session.cwid, db)).centers.map((u) => ({
-          code: u.code,
-          name: u.name,
-          centerType: null,
-        }));
+  const wantsKind = (k: UnitEntityType) => allowedKinds.includes(k);
+
+  type Candidate = { code: string; kind: UnitEntityType; name: string; centerType: "center" | "institute" | null };
+  let candidates: Candidate[];
+  if (isGlobal) {
+    const all = await loadAllUnitsDirectory(db, { includeRetired: session.isSuperuser });
+    // `core` is a `ManageableUnitKind` but not a `UnitEntityType` (cores-as-
+    // org-units is out of scope for this report suite) — excluded via this
+    // type predicate so `u.kind` narrows to `UnitEntityType` with no cast.
+    const isReportableKind = (u: (typeof all)[number]): u is (typeof all)[number] & { kind: UnitEntityType } =>
+      u.kind !== "core" && wantsKind(u.kind);
+    candidates = all.filter(isReportableKind).map((u) => ({
+      code: u.code,
+      kind: u.kind,
+      name: u.name,
+      centerType: u.kind === "center" ? u.centerType : null,
+    }));
+  } else {
+    const manageable = await loadManageableUnits(session.cwid, db);
+    candidates = [
+      ...(wantsKind("center")
+        ? manageable.centers.map((u) => ({ code: u.code, kind: "center" as const, name: u.name, centerType: null }))
+        : []),
+      ...(wantsKind("department")
+        ? manageable.departments.map((u) => ({
+            code: u.code,
+            kind: "department" as const,
+            name: u.name,
+            centerType: null,
+          }))
+        : []),
+      ...(wantsKind("division")
+        ? manageable.divisions.map((u) => ({ code: u.code, kind: "division" as const, name: u.name, centerType: null }))
+        : []),
+    ];
+  }
 
   if (candidates.length === 0) return [];
 
-  const codes = candidates.map((c) => c.code);
+  const centerCodes = candidates.filter((c) => c.kind === "center").map((c) => c.code);
+  // Suppression covers every kind (a department/division can be retired too),
+  // so the retirement check below runs across ALL non-superuser candidates,
+  // not just centers — only the CenterProgram taxonomy gate is center-only.
+  const allCandidateCodes = candidates.map((c) => c.code);
+
   const [programRows, centerTypeRows, retiredCodes] = await Promise.all([
-    db.centerProgram.findMany({
-      where: { centerCode: { in: codes } },
-      select: { centerCode: true },
-      distinct: ["centerCode"],
-    }),
+    centerCodes.length > 0
+      ? db.centerProgram.findMany({
+          where: { centerCode: { in: centerCodes } },
+          select: { centerCode: true },
+          distinct: ["centerCode"],
+        })
+      : Promise.resolve([]),
     // `loadManageableUnits`'s thin shape carries no `centerType` — only fetch it
     // when we didn't already get it for free from `loadAllUnitsDirectory`.
-    isGlobal
-      ? Promise.resolve(null)
-      : db.center.findMany({ where: { code: { in: codes } }, select: { code: true, centerType: true } }),
+    !isGlobal && centerCodes.length > 0
+      ? db.center.findMany({ where: { code: { in: centerCodes } }, select: { code: true, centerType: true } })
+      : Promise.resolve(null),
     // Only the per-grant branch needs this — `loadAllUnitsDirectory` above
     // already excluded retired units at the source for everyone but a
     // superuser.
     isGlobal
       ? Promise.resolve(null)
       : db.suppression.findMany({
-          where: { entityType: "center", entityId: { in: codes }, revokedAt: null },
+          where: { entityType: { in: [...allowedKinds] }, entityId: { in: allCandidateCodes }, revokedAt: null },
           select: { entityId: true },
         }),
   ]);
@@ -218,92 +296,170 @@ export async function loadReportableUnitsForActor(
   const retiredSet = retiredCodes ? new Set(retiredCodes.map((r) => r.entityId)) : null;
 
   return candidates
-    .filter((c) => codesWithPrograms.has(c.code))
+    // Center: gated on the CenterProgram taxonomy, unchanged. Department/
+    // division: no equivalent gate — pass straight through.
+    .filter((c) => c.kind !== "center" || codesWithPrograms.has(c.code))
     .filter((c) => !retiredSet?.has(c.code))
     .map((c) => ({
       code: c.code,
+      kind: c.kind,
       name: c.name,
-      centerType: centerTypeByCode ? (centerTypeByCode.get(c.code) ?? "center") : (c.centerType ?? "center"),
+      centerType:
+        c.kind !== "center" ? null : centerTypeByCode ? (centerTypeByCode.get(c.code) ?? "center") : (c.centerType ?? "center"),
     }));
 }
 
-/** Fixed report catalog size (Reports IA redesign 2026-08-14, Decision 4) — the
- *  five numbered reports at `/edit/reports/{1..5}`, same list for every unit;
- *  "live" varies per unit, the catalog itself does not. */
-export const REPORT_CATALOG_SIZE = 5;
+export type ReportNumber = 1 | 2 | 3 | 4 | 5 | 6;
 
-/** Per-unit liveness, both aggregated (2a/1a's "N of 5"/"Last refreshed"
+/**
+ * Which numbered reports apply to a unit of this kind — the single source of
+ * truth `loadReportLiveness` and `app/edit/reports/page.tsx`'s catalog both
+ * key off, so a unit never shows a report card it can't produce output for
+ * (org-unit publications reports plan, 2026-08-16, "Report catalog by kind").
+ * `center` gets the full six; `department`/`division` get only the two
+ * kind-generic ones (3 Publications, 6 NIH-funded pubs) — reports 1/2/4/5 read
+ * `CenterProgram`/`CenterMembership`-family tables with no department/division
+ * equivalent (see the plan's "Reports 1 & 2 — considered, dropped").
+ */
+export const REPORT_NUMBERS_BY_KIND: Record<UnitEntityType, readonly ReportNumber[]> = {
+  center: [1, 2, 3, 4, 5, 6],
+  department: [3, 6],
+  division: [3, 6],
+};
+
+/** Size of the full (center) report catalog — six numbered reports. Kept as a
+ *  named export since `app/edit/reports/page.tsx` still needs a default
+ *  `totalCount` fallback; department/division totals are 2, not this. */
+export const REPORT_CATALOG_SIZE = REPORT_NUMBERS_BY_KIND.center.length;
+
+/** Per-unit liveness, both aggregated (2a/1a's "N of M"/"Last refreshed"
  *  columns) and per-report (1a's inline band rows, each report showing its
- *  own live/refreshed state). */
+ *  own live/refreshed state). `perReport` only carries the entries
+ *  `REPORT_NUMBERS_BY_KIND[kind]` lists — a department's `perReport` has
+ *  exactly 2 entries (3, 6), never a padded-out 6 with 4 fake "not live"
+ *  rows for reports it can never produce. */
 export type ReportLiveness = {
-  perReport: ReadonlyArray<{ n: 1 | 2 | 3 | 4 | 5; live: boolean; lastRefreshedAt: Date | null }>;
+  perReport: ReadonlyArray<{ n: ReportNumber; live: boolean; lastRefreshedAt: Date | null }>;
   liveCount: number;
   totalCount: number;
   lastRefreshedAt: Date | null;
 };
 
+/** Batched "has ≥1 active member" flag for department/division codes — the
+ *  same proxy `loadReportLiveness` already uses for a center's reports 3-5,
+ *  extended to the two kinds that have no `CenterMembership`-style table of
+ *  their own. Mirrors `lib/api/data-quality.ts`'s own `scholar.groupBy(by:
+ *  ["deptCode"|"divCode"])` batched-count pattern. A department's membership
+ *  is `Scholar.deptCode` outright (no manual-roster union to consider); a
+ *  division's is approximated the same way — this UNDER-counts a division
+ *  whose roster comes ONLY from a manual `DivisionMembership` row with no
+ *  matching LDAP `divCode` (unlike `loadDivisionMemberCwids`'s real report-3/6
+ *  membership resolution, which does union both). Acceptable for a liveness
+ *  PROXY (false negative here just means the badge under-promises; the report
+ *  page itself still resolves membership correctly) — not acceptable if this
+ *  ever became the real report data. */
+async function loadNonCenterActiveMemberFlags(
+  db: ReportsDirectoryClient,
+  units: ReadonlyArray<{ code: string; kind: UnitEntityType }>,
+): Promise<Map<string, boolean>> {
+  const result = new Map<string, boolean>();
+  const deptCodes = units.filter((u) => u.kind === "department").map((u) => u.code);
+  const divCodes = units.filter((u) => u.kind === "division").map((u) => u.code);
+  if (deptCodes.length === 0 && divCodes.length === 0) return result;
+
+  const [deptGroups, divGroups] = await Promise.all([
+    deptCodes.length > 0
+      ? db.scholar.groupBy({
+          by: ["deptCode"],
+          where: { deptCode: { in: deptCodes }, deletedAt: null, status: "active" },
+          _count: { _all: true },
+        })
+      : Promise.resolve([]),
+    divCodes.length > 0
+      ? db.scholar.groupBy({
+          by: ["divCode"],
+          where: { divCode: { in: divCodes }, deletedAt: null, status: "active" },
+          _count: { _all: true },
+        })
+      : Promise.resolve([]),
+  ]);
+  for (const g of deptGroups) if (g.deptCode) result.set(g.deptCode, (g._count?._all ?? 0) > 0);
+  for (const g of divGroups) if (g.divCode) result.set(g.divCode, (g._count?._all ?? 0) > 0);
+  return result;
+}
+
 /**
- * Batched liveness for a set of center codes — one groupBy per signal, never
- * N+1. "Live" means real data exists, not just that the route works (reports
- * 3-5 all run real queries today; the catalog used to call them "coming soon",
+ * Batched liveness for a set of units — one groupBy per signal, never N+1.
+ * "Live" means real data exists, not just that the route works (reports 3-6
+ * all run real queries today; the catalog used to call them "coming soon",
  * which was stale — see `app/edit/reports/page.tsx`).
  *
  * Reports 1 (`CenterCollabCandidate`) and 2 (`CancerCenterFundingAward`) each
  * have their own table keyed by `centerCode`, so their liveness is an exact
- * row-count. Reports 3-5 (Publications / Grants / Clinical Trials) are all
- * derived live-on-read from a center's active members, with no dedicated
- * table of their own to count.
+ * row-count — center units only, per `REPORT_NUMBERS_BY_KIND`. Reports 3-6
+ * (Publications / Grants / Clinical Trials / NIH-funded pubs) are all derived
+ * live-on-read from a unit's active members, with no dedicated table of their
+ * own to count.
  *
- * ponytail: reports 3-5's liveness is proxied by "this unit has ≥1 active
- * member" (`countActiveCenterMembersByCode` — the same canonical active-
- * member definition `AllUnitsDirectory`'s scholar counts use, joined through
- * `Scholar.deletedAt`/`status`, not a raw `CenterMembership` date-range check)
+ * ponytail: reports 3-6's liveness is proxied by "this unit has ≥1 active
+ * member" (`countActiveCenterMembersByCode` for centers — the same canonical
+ * active-member definition `AllUnitsDirectory`'s scholar counts use, joined
+ * through `Scholar.deletedAt`/`status`, not a raw `CenterMembership`
+ * date-range check; `loadNonCenterActiveMemberFlags` for department/division)
  * rather than re-running each report's own member→publication/grant/trial
- * join for every unit in the index (that would be 3 more derived, per-unit-
+ * join for every unit in the index (that would be 4 more derived, per-unit-
  * expensive queries). A unit with active members but zero indexed
- * publications/grants/trials over-counts as "live" here — false positive, not
- * false negative. Upgrade path: once any one of those three reports gets its
- * own batched cross-unit aggregation (mirroring this function's shape), swap
- * its proxy bit for the real count.
+ * publications/grants/trials/NIH-links over-counts as "live" here — false
+ * positive, not false negative. Upgrade path: once any one of those reports
+ * gets its own batched cross-unit aggregation (mirroring this function's
+ * shape), swap its proxy bit for the real count.
  */
 export async function loadReportLiveness(
-  codes: string[],
+  units: ReadonlyArray<{ code: string; kind: UnitEntityType }>,
   db: ReportsDirectoryClient,
 ): Promise<Map<string, ReportLiveness>> {
   const result = new Map<string, ReportLiveness>();
-  if (codes.length === 0) return result;
+  if (units.length === 0) return result;
 
-  const [collabRows, fundingRows, activeMembersByCode] = await Promise.all([
-    db.centerCollabCandidate.groupBy({
-      by: ["centerCode"],
-      where: { centerCode: { in: codes } },
-      _count: { _all: true },
-      _max: { lastRefreshedAt: true },
-    }),
-    db.cancerCenterFundingAward.groupBy({
-      by: ["centerCode"],
-      where: { centerCode: { in: codes } },
-      _count: { _all: true },
-      _max: { lastRefreshedAt: true },
-    }),
-    countActiveCenterMembersByCode(db, codes),
+  const centerCodes = units.filter((u) => u.kind === "center").map((u) => u.code);
+  const [collabRows, fundingRows, activeCenterMembersByCode, nonCenterHasActiveMembers] = await Promise.all([
+    centerCodes.length > 0
+      ? db.centerCollabCandidate.groupBy({
+          by: ["centerCode"],
+          where: { centerCode: { in: centerCodes } },
+          _count: { _all: true },
+          _max: { lastRefreshedAt: true },
+        })
+      : Promise.resolve([]),
+    centerCodes.length > 0
+      ? db.cancerCenterFundingAward.groupBy({
+          by: ["centerCode"],
+          where: { centerCode: { in: centerCodes } },
+          _count: { _all: true },
+          _max: { lastRefreshedAt: true },
+        })
+      : Promise.resolve([]),
+    centerCodes.length > 0 ? countActiveCenterMembersByCode(db, centerCodes) : Promise.resolve(new Map<string, number>()),
+    loadNonCenterActiveMemberFlags(db, units),
   ]);
 
   const collabByCode = new Map(collabRows.map((r) => [r.centerCode, r]));
   const fundingByCode = new Map(fundingRows.map((r) => [r.centerCode, r]));
 
-  for (const code of codes) {
-    const collab = collabByCode.get(code);
-    const funding = fundingByCode.get(code);
-    const hasActiveMembers = (activeMembersByCode.get(code) ?? 0) > 0;
+  for (const unit of units) {
+    const { code, kind } = unit;
+    const numbers = REPORT_NUMBERS_BY_KIND[kind];
+    const hasActiveMembers =
+      kind === "center" ? (activeCenterMembersByCode.get(code) ?? 0) > 0 : (nonCenterHasActiveMembers.get(code) ?? false);
+    const collab = kind === "center" ? collabByCode.get(code) : undefined;
+    const funding = kind === "center" ? fundingByCode.get(code) : undefined;
 
-    const perReport: ReportLiveness["perReport"] = [
-      { n: 1, live: (collab?._count._all ?? 0) > 0, lastRefreshedAt: collab?._max.lastRefreshedAt ?? null },
-      { n: 2, live: (funding?._count._all ?? 0) > 0, lastRefreshedAt: funding?._max.lastRefreshedAt ?? null },
-      { n: 3, live: hasActiveMembers, lastRefreshedAt: null },
-      { n: 4, live: hasActiveMembers, lastRefreshedAt: null },
-      { n: 5, live: hasActiveMembers, lastRefreshedAt: null },
-    ];
+    const perReport: ReportLiveness["perReport"] = numbers.map((n) => {
+      if (n === 1) return { n, live: (collab?._count._all ?? 0) > 0, lastRefreshedAt: collab?._max.lastRefreshedAt ?? null };
+      if (n === 2) return { n, live: (funding?._count._all ?? 0) > 0, lastRefreshedAt: funding?._max.lastRefreshedAt ?? null };
+      // 3, 4, 5, 6 — all proxied by active-membership existence.
+      return { n, live: hasActiveMembers, lastRefreshedAt: null };
+    });
 
     const lastRefreshedAt =
       perReport
@@ -314,7 +470,7 @@ export async function loadReportLiveness(
     result.set(code, {
       perReport,
       liveCount: perReport.filter((r) => r.live).length,
-      totalCount: REPORT_CATALOG_SIZE,
+      totalCount: numbers.length,
       lastRefreshedAt,
     });
   }
