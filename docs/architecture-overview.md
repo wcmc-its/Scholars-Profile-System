@@ -104,12 +104,14 @@ running **ECS Fargate tasks** (not Lambda — see corrections below).
 
 - **Cadences** (`PRODUCTION_ADDENDUM.md § EtlStack`; authoritative step lists in
   `cdk/lib/etl-stack.ts`): nightly (`ed → reciter → reciter-coi-statements → asms →
-  infoed → coi → coi-gap → jenzabar → dynamodb → identity → scholar-tool → mesh-coverage →
+  infoed → coi → jenzabar → dynamodb → identity → scholar-tool → mesh-coverage →
   pubmed-retractions → search-index → revalidate → integrity`; staging drops `infoed` — its
   internal host overlaps the VPC CIDR — and inserts `mesh-anchors` before
-  `pubmed-retractions`), weekly (`completeness → headshot → spotlight → reporter → nsf →
-  gates → nih-profile → pops → reporter-grants → clinical-trials → technologies → news →
-  search-index → revalidate → integrity`), annual (`hierarchy` + manual approval gate). Step Functions enforces
+  `pubmed-retractions`), weekly (`completeness → headshot → coi-gap → spotlight → reporter →
+  nsf → gates → nih-profile → pops → reporter-grants → clinical-trials → technologies → news →
+  search-index → revalidate → integrity` — `coi-gap` moved here from nightly, 2026-08-16: it
+  only computes against whatever COI/statement data SPS-DB already holds, so same-night
+  freshness was never load-bearing), annual (`hierarchy` + manual approval gate). Step Functions enforces
   ordering (`reciter` cascades into `dynamodb` within the nightly run) and classifies each
   step by failure tier (reliability-audit #1438): an **abort**-tier step (the spine —
   `ed`/`reciter`/`dynamodb`/`search-index` plus the terminal `integrity` gate) pages P1 via

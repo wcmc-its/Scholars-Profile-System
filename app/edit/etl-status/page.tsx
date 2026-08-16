@@ -395,7 +395,10 @@ function sortValue(row: EtlSourceRow, key: SortKey): string | number | null {
     case "import":
       return sourceLabel(row.source).toLowerCase();
     case "source":
-      return row.source.toLowerCase();
+      // The displayed string, not the bare key: "External: …" / "Internal: …"
+      // groups by origin first, so the qualifier this column shows is also
+      // what sorting it goes by.
+      return sourceKeyDisplay(row.source).toLowerCase();
     case "cadence":
       return CADENCE_RANK[row.cadence];
     case "status":
@@ -437,9 +440,12 @@ function SortableHeader({
   const nextDir: SortDir = active && sortDir === "asc" ? "desc" : "asc";
   return (
     <th className={thClass} aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-      <a href={`?sort=${col.key}&dir=${nextDir}`} className="hover:underline">
+      <a href={`?sort=${col.key}&dir=${nextDir}`} className="whitespace-nowrap hover:underline">
         {col.label}
-        {active ? <span aria-hidden="true">{sortDir === "asc" ? " ▲" : " ▼"}</span> : null}
+        {/* Plain "^"/"v", not a filled triangle — a light directional mark, not
+            a second status pill. whitespace-nowrap on the link (not just this
+            span) keeps a multi-word header from wrapping once this appends. */}
+        {active ? <span aria-hidden="true">{sortDir === "asc" ? " ^" : " v"}</span> : null}
       </a>
     </th>
   );

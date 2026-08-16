@@ -108,7 +108,11 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // keeps the step.
   InfoEd: { cadence: "nightly", envs: ["prod"] },
   COI: { cadence: "nightly" },
-  "COI-Gap": { cadence: "nightly" },
+  // Moved from nightly to weekly (Paul, 2026-08-16) — it only computes
+  // against whatever COI/statement data is already in SPS-DB (see the
+  // CoiGapWeekly comment in cdk/lib/etl-stack.ts), so same-night freshness
+  // was never load-bearing.
+  "COI-Gap": { cadence: "weekly" },
   // #608 — moved from the weekly machine to nightly (mentoring chips).
   Jenzabar: { cadence: "nightly" },
   "ReCiterAI-projection": { cadence: "nightly" },
