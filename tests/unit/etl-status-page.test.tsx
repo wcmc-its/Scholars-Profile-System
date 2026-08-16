@@ -801,7 +801,44 @@ describe("/edit/etl-status triage layout", () => {
       Array.from(screen.getByTestId("etl-status-table").querySelectorAll("thead th")).map(
         (th) => th.textContent,
       ),
-    ).toEqual(["Data import", "How often", "Status", "Last good data", "Run duration"]);
+    ).toEqual([
+      "Data import",
+      "Source",
+      "How often",
+      "Status",
+      "Last good data",
+      "Run duration",
+    ]);
+  });
+
+  it("sorts the healthy table by a clicked column, longest run duration first", async () => {
+    fixtures = allHealthy();
+    fixtures.ASMS.attempt = {
+      status: "success",
+      startedAt: new Date(NOW - 2 * HOUR - 3 * HOUR),
+      completedAt: new Date(NOW - 2 * HOUR),
+      errorMessage: null,
+    };
+    fixtures.ED.attempt = {
+      status: "success",
+      startedAt: new Date(NOW - 2 * HOUR - 7 * 60 * 1000),
+      completedAt: new Date(NOW - 2 * HOUR),
+      errorMessage: null,
+    };
+    render(await Page({ searchParams: Promise.resolve({ sort: "duration", dir: "desc" }) }));
+    const table = screen.getByTestId("etl-status-table");
+    const order = within(table)
+      .getAllByTestId(/^etl-status-row-/)
+      .map((r) => r.getAttribute("data-testid"));
+    // ASMS ran 3h, ED ran 7min, everything else in allHealthy() has a
+    // zero-gap start/completed pair — descending duration puts the longest
+    // run first regardless of the table's default (alphabetical) order.
+    expect(order.indexOf("etl-status-row-ASMS")).toBeLessThan(order.indexOf("etl-status-row-ED"));
+    // The clicked header carries the active state — the only visible sign a
+    // reader gets that the table is no longer in its default order. The sort
+    // arrow is aria-hidden, so the accessible name stays just the column name.
+    const durationHeader = within(table).getByRole("columnheader", { name: "Run duration" });
+    expect(durationHeader.getAttribute("aria-sort")).toBe("descending");
   });
 
   it("reports how long the newest attempt took", async () => {

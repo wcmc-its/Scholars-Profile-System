@@ -111,6 +111,9 @@ const CADENCE_LABEL: Record<Cadence, string> = {
   annual: "Once a year",
 };
 
+/** Fastest cadence first — the order a superuser expects, not alphabetical. */
+const CADENCE_RANK: Record<Cadence, number> = { nightly: 0, weekly: 1, monthly: 2, annual: 3 };
+
 /**
  * One label + emoji + pill per state. "Known issue" is slate, not green and not
  * red: it is a staleness somebody has already looked at and accepted until a
@@ -346,7 +349,93 @@ function AttentionCard({ row, timeoutHours }: { row: EtlSourceRow; timeoutHours:
   );
 }
 
-function StatusBody({ summary }: { summary: EtlStatusSummary }) {
+/**
+ * The "Running normally" table's columns, in header order. Sorting is a
+ * link, not a client component: clicking a header is a real navigation to
+ * `?sort=<key>&dir=<dir>`, which the server re-sorts on the way back — no JS
+ * added to a page that deliberately has none.
+ */
+type SortKey = "import" | "source" | "cadence" | "status" | "lastGood" | "duration";
+type SortDir = "asc" | "desc";
+
+const SORT_COLUMNS: ReadonlyArray<{ key: SortKey; label: string }> = [
+  { key: "import", label: "Data import" },
+  { key: "source", label: "Source" },
+  { key: "cadence", label: "How often" },
+  { key: "status", label: "Status" },
+  { key: "lastGood", label: "Last good data" },
+  { key: "duration", label: "Run duration" },
+];
+
+function parseSortKey(v: string | undefined): SortKey | null {
+  return SORT_COLUMNS.some((c) => c.key === v) ? (v as SortKey) : null;
+}
+
+/** Comparable value per column. `null` always sorts last, in either direction. */
+function sortValue(row: EtlSourceRow, key: SortKey): string | number | null {
+  switch (key) {
+    case "import":
+      return sourceLabel(row.source).toLowerCase();
+    case "source":
+      return row.source.toLowerCase();
+    case "cadence":
+      return CADENCE_RANK[row.cadence];
+    case "status":
+      return row.state;
+    case "lastGood":
+      return row.ageHours;
+    case "duration":
+      if (row.lastAttemptStartedAt === null) return null;
+      // Still running outlasts every finished run — that IS the longest duration.
+      if (row.lastAttemptEndedAt === null) return Infinity;
+      return row.lastAttemptEndedAt.getTime() - row.lastAttemptStartedAt.getTime();
+  }
+}
+
+function sortRows(rows: EtlSourceRow[], key: SortKey, dir: SortDir): EtlSourceRow[] {
+  const sign = dir === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const av = sortValue(a, key);
+    const bv = sortValue(b, key);
+    if (av === null || bv === null) return av === bv ? 0 : av === null ? 1 : -1;
+    if (typeof av === "string" || typeof bv === "string") return sign * String(av).localeCompare(String(bv));
+    return sign * (av - bv);
+  });
+}
+
+/** One clickable column header. Shows the direction only once it is active,
+ *  so a healthy page load looks exactly as plain as before this column
+ *  header links. */
+function SortableHeader({
+  col,
+  sortKey,
+  sortDir,
+}: {
+  col: { key: SortKey; label: string };
+  sortKey: SortKey | null;
+  sortDir: SortDir;
+}) {
+  const active = sortKey === col.key;
+  const nextDir: SortDir = active && sortDir === "asc" ? "desc" : "asc";
+  return (
+    <th className={thClass} aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+      <a href={`?sort=${col.key}&dir=${nextDir}`} className="hover:underline">
+        {col.label}
+        {active ? <span aria-hidden="true">{sortDir === "asc" ? " ▲" : " ▼"}</span> : null}
+      </a>
+    </th>
+  );
+}
+
+function StatusBody({
+  summary,
+  sortKey,
+  sortDir,
+}: {
+  summary: EtlStatusSummary;
+  sortKey: SortKey | null;
+  sortDir: SortDir;
+}) {
   const total = summary.sources.length;
   const attention = summary.sources.filter(inAttentionSection);
   const normal = summary.sources.filter((row) => !inAttentionSection(row));
@@ -367,6 +456,7 @@ function StatusBody({ summary }: { summary: EtlStatusSummary }) {
     oldestHealthy === null
       ? null
       : `Oldest: ${sourceLabel(oldestHealthy.source)}, ${formatAge(oldestHealthy.ageHours)}.`;
+  const sortedNormal = sortKey === null ? normal : sortRows(normal, sortKey, sortDir);
   return (
     <>
       <p className="text-muted-foreground mt-2">
@@ -460,15 +550,13 @@ function StatusBody({ summary }: { summary: EtlStatusSummary }) {
           <table className="w-full text-sm" data-testid="etl-status-table">
             <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
               <tr className="border-apollo-border border-b">
-                <th className={thClass}>Data import</th>
-                <th className={thClass}>How often</th>
-                <th className={thClass}>Status</th>
-                <th className={thClass}>Last good data</th>
-                <th className={thClass}>Run duration</th>
+                {SORT_COLUMNS.map((col) => (
+                  <SortableHeader key={col.key} col={col} sortKey={sortKey} sortDir={sortDir} />
+                ))}
               </tr>
             </thead>
             <tbody>
-              {normal.map((row) => (
+              {sortedNormal.map((row) => (
                 <tr
                   key={row.source}
                   className="border-apollo-border border-b align-top"
@@ -476,7 +564,7 @@ function StatusBody({ summary }: { summary: EtlStatusSummary }) {
                   data-state={row.state}
                 >
                   <td className={tdClass}>
-                    <SourceName source={row.source} />
+                    <span className="font-medium">{sourceLabel(row.source)}</span>
                     {/* The descriptions are the point of the rename; showing them only
                         on attention cards means 33 of 34 imports never explain
                         themselves on an ordinary day. */}
@@ -488,6 +576,12 @@ function StatusBody({ summary }: { summary: EtlStatusSummary }) {
                         {sourceDescription(row.source)}
                       </span>
                     )}
+                  </td>
+                  <td
+                    className={`${tdClass} text-muted-foreground whitespace-nowrap text-xs`}
+                    data-testid="etl-status-source-key"
+                  >
+                    {row.source}
                   </td>
                   <td className={`${tdClass} whitespace-nowrap`}>{CADENCE_LABEL[row.cadence]}</td>
                   <td className={`${tdClass} whitespace-nowrap`}>
@@ -519,7 +613,15 @@ function StatusBody({ summary }: { summary: EtlStatusSummary }) {
   );
 }
 
-export default async function EtlStatusPage() {
+export default async function EtlStatusPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ sort?: string; dir?: string }>;
+} = {}) {
+  const sp = (await searchParams) ?? {};
+  const sortKey = parseSortKey(sp.sort);
+  const sortDir: SortDir = sp.dir === "desc" ? "desc" : "asc";
+
   const session = await getEffectiveEditSession();
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/etl-status");
@@ -587,7 +689,7 @@ export default async function EtlStatusPage() {
           this persists.
         </p>
       ) : (
-        <StatusBody summary={summary!} />
+        <StatusBody summary={summary!} sortKey={sortKey} sortDir={sortDir} />
       )}
     </ConsoleShell>
   );
