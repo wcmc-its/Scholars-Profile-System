@@ -762,8 +762,12 @@ describe("/edit/etl-status triage layout", () => {
       const copy = SOURCE_COPY[source];
       expect(row.textContent).toContain(copy.label);
       // The raw `etl_run.source` key stays on the page — it is what anyone
-      // reporting the problem onward has to quote — just not as the name.
-      expect(within(row).getByTestId("etl-status-source-key").textContent).toBe(source);
+      // reporting the problem onward has to quote — just not as the name. It's
+      // qualified with whether a failure here is ours or someone else's system.
+      const prefix = copy.origin === "external" ? "External" : "Internal";
+      expect(within(row).getByTestId("etl-status-source-key").textContent).toBe(
+        `${prefix}: ${source}`,
+      );
     }
     // The description is the point of the label: it says what breaks.
     expect(screen.getByTestId("etl-status-row-COI-Gap").textContent).toContain(
@@ -910,6 +914,12 @@ describe("etl source copy", () => {
       expect(SOURCE_COPY[source]?.label, `${source} has no plain-language label`).toBeTruthy();
       expect(SOURCE_COPY[source]?.description, `${source} has no description`).toBeTruthy();
       expect(SOURCE_COPY[source]?.label, `${source} is labelled with its raw key`).not.toBe(source);
+      // Whether a failure here is ours to fix or someone else's system —
+      // graded from what the entrypoint actually reads, not guessable from
+      // the label alone, so every tracked source needs a real answer.
+      expect(SOURCE_COPY[source]?.origin, `${source} has no external/internal origin`).toMatch(
+        /^(external|internal)$/,
+      );
     }
   });
 });
