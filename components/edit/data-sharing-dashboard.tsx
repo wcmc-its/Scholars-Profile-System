@@ -52,6 +52,13 @@
  * in code. Reuses `TierChip`/`AccessChip` for the same severity coloring as
  * §3, per the existing convention: no new color system for this table
  * either.
+ *
+ * Mockup design pass (2026-08-16): adopted the v2 mockup's tier color
+ * palette (`TIER_COLORS`) page-wide — colored tier dots instead of gray
+ * Badge variants, a proportional §1 spectrum bar (`TierSpectrum`), per-repo
+ * counts inline in the tier table, and a `FACULTY_ROW_CAP` "+N more" cut on
+ * §4. Decision record: the DECISION 2026-08-16 section of the Projects
+ * handoff doc this mockup ships with.
  */
 import Link from "next/link";
 
@@ -103,17 +110,74 @@ const TIER_LABELS: Record<string, string> = {
   UNKNOWN: "Unclassified",
 };
 
-/** `variant` mirrors severity: `destructive` for CONCERN, `secondary` for
- *  the foreign-hosted tiers, `outline` otherwise — same visual language as
- *  `AccessChip`, no new color system introduced. */
+/** Tier palette from the v2 mockup (`data-sharing-dashboard-v2-mockup.html`,
+ *  adopted per the 2026-08-16 decision in the Projects handoff doc) — one hue
+ *  per tier, severity-ordered warm→cool. The single source for every tier
+ *  color on this page: chips, the §1 spectrum bar, and its legend. */
+const TIER_COLORS: Record<string, string> = {
+  CONCERN: "#B31B1B",
+  FOREIGN_OPEN: "#D97B29",
+  FOREIGN_CTRL: "#C9A227",
+  US_OPEN: "#3E6FB0",
+  US_CTRL: "#2E7D52",
+  REGISTRY: "#8A90A0",
+  UNKNOWN: "#C3C7D1",
+};
+
+/** Colored tier dot + label, the mockup's `.tierdot` idiom — replaced the
+ *  Badge-variant rendering when the mockup palette was adopted (08-16). */
 function TierChip({ tier }: { tier: string }) {
-  const variant =
-    tier === "CONCERN"
-      ? "destructive"
-      : tier === "FOREIGN_OPEN" || tier === "FOREIGN_CTRL"
-        ? "secondary"
-        : "outline";
-  return <Badge variant={variant}>{TIER_LABELS[tier] ?? tier}</Badge>;
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <span
+        aria-hidden
+        className="inline-block h-2 w-2 shrink-0 rounded-full"
+        style={{ backgroundColor: TIER_COLORS[tier] ?? TIER_COLORS.UNKNOWN }}
+      />
+      {TIER_LABELS[tier] ?? tier}
+    </span>
+  );
+}
+
+/** The mockup's signature element: a proportional stacked bar over
+ *  `pubsByTier` (already severity-sorted by `TIER_ORDER` upstream) with a
+ *  legend. Zero-count tiers get no bar segment but keep a legend entry, so
+ *  "Country of concern 0" stays visible as a statement rather than vanishing. */
+function TierSpectrum({ rows }: { rows: DataSharingReport["pubsByTier"] }) {
+  const total = rows.reduce((sum, t) => sum + t.pubs, 0);
+  return (
+    <>
+      {total > 0 && (
+        <div className="border-apollo-border mt-3 flex h-5 overflow-hidden rounded border">
+          {rows
+            .filter((t) => t.pubs > 0)
+            .map((t) => (
+              <div
+                key={t.tier}
+                style={{
+                  width: `${(t.pubs / total) * 100}%`,
+                  backgroundColor: TIER_COLORS[t.tier] ?? TIER_COLORS.UNKNOWN,
+                }}
+                title={`${TIER_LABELS[t.tier] ?? t.tier} · ${t.pubs.toLocaleString()}`}
+              />
+            ))}
+        </div>
+      )}
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        {rows.map((t) => (
+          <span key={t.tier} className="inline-flex items-center gap-1.5">
+            <span
+              aria-hidden
+              className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+              style={{ backgroundColor: TIER_COLORS[t.tier] ?? TIER_COLORS.UNKNOWN }}
+            />
+            <span className="text-muted-foreground">{TIER_LABELS[t.tier] ?? t.tier}</span>
+            <span className="font-semibold">{t.pubs.toLocaleString()}</span>
+          </span>
+        ))}
+      </div>
+    </>
+  );
 }
 
 function RollupSection({ report }: { report: DataSharingReport }) {
@@ -208,14 +272,7 @@ function RollupSection({ report }: { report: DataSharingReport }) {
           only (host jurisdiction × access model); a publication with deposits in repositories of
           different tiers is counted in each.
         </p>
-        <div className="mt-3 flex flex-wrap gap-x-6 gap-y-3">
-          {report.pubsByTier.map((t) => (
-            <div key={t.tier} className="flex items-baseline gap-1.5">
-              <span className="text-lg font-semibold">{t.pubs.toLocaleString()}</span>
-              <span className="text-muted-foreground text-xs">{TIER_LABELS[t.tier] ?? t.tier}</span>
-            </div>
-          ))}
-        </div>
+        <TierSpectrum rows={report.pubsByTier} />
       </div>
     </section>
   );
@@ -280,7 +337,16 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
                 <td className={tdClass}>
                   <TierChip tier={t.tier} />
                 </td>
-                <td className={tdClass}>{t.repositories.join(", ")}</td>
+                {/* Per-repo counts inline (mockup's "Zenodo 174 · figshare 67"
+                    chips) — derived from byRepository, which is already sorted
+                    datasets-desc and is the exact source byRepositoryTier
+                    groups from. */}
+                <td className={`${tdClass} text-muted-foreground`}>
+                  {report.byRepository
+                    .filter((r) => r.tier === t.tier)
+                    .map((r) => `${r.repository} ${r.datasets.toLocaleString()}`)
+                    .join(" · ")}
+                </td>
                 <td className={`${tdClass} text-right`}>{t.datasets.toLocaleString()}</td>
               </tr>
             ))}
@@ -382,12 +448,22 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
 const CONCERNING_CAVEAT =
   "Tier-based only — country-of-concern host or foreign-hosted repository; does not include sensitive data-type detection.";
 
+/** The mockup's "+N more" collapsed-row pattern: the table shows only the
+ *  top rows (byFaculty arrives sorted datasets-desc), a full 500+-row wall
+ *  was the explicit complaint. The full list stays one click away in the CSV
+ *  export. ponytail: static cap; a client-island expander if someone needs
+ *  row 26 on-page. */
+const FACULTY_ROW_CAP = 25;
+
 function FacultySection({ report }: { report: DataSharingReport }) {
+  const rows = report.byFaculty.slice(0, FACULTY_ROW_CAP);
+  const more = report.byFaculty.length - rows.length;
   return (
     <section id="faculty" className="mt-10 scroll-mt-4">
       <h2 className="text-base font-semibold">4 · Named faculty</h2>
       <p className="text-muted-foreground mt-1 text-sm">
-        Per-individual counts — same access as sections 1–3 above, no separate review.
+        Per-individual counts, top {FACULTY_ROW_CAP} by dataset count — same access as sections 1–3
+        above, no separate review.
       </p>
       <p className="text-muted-foreground mt-2 text-xs">
         <strong>Concerning / Foreign-hosted:</strong> {CONCERNING_CAVEAT}
@@ -412,7 +488,7 @@ function FacultySection({ report }: { report: DataSharingReport }) {
             </tr>
           </thead>
           <tbody>
-            {report.byFaculty.map((f) => (
+            {rows.map((f) => (
               <tr key={f.cwid} className="border-apollo-border border-b">
                 <td className={tdClass}>
                   <Link href={`/scholar/${f.slug}`} className="hover:underline">
@@ -432,6 +508,19 @@ function FacultySection({ report }: { report: DataSharingReport }) {
                 </td>
               </tr>
             ))}
+            {more > 0 && (
+              <tr>
+                <td className={`${tdClass} text-muted-foreground`} colSpan={8}>
+                  {/* Same route-handler <a> as the §1 "Download CSV" link —
+                      <Link> would prefetch the file itself. */}
+                  + {more.toLocaleString()} more — full list in the{" "}
+                  {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+                  <a href="/edit/data-sharing/export" className="hover:underline">
+                    CSV export
+                  </a>
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
