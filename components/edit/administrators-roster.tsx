@@ -35,6 +35,7 @@ import { ViewAsButton } from "@/components/edit/view-as-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import type { AdminRosterEntry, AdminRosterGrant } from "@/lib/api/administrators-roster";
 import type { DirectoryPerson } from "@/lib/sources/ldap";
@@ -120,6 +121,20 @@ type ResolvedPerson = {
   isBareCwid: boolean;
 };
 
+/** "By person" (alphabetical by name) or "by org unit" (§ SORT). */
+type SortMode = "person" | "orgUnit";
+
+/** The alphabetically-first `unitName` across a person's grants — the "by org
+ *  unit" sort key. A person can manage several units; we key on the min so the
+ *  sort is total and deterministic. Empty string (sorts first) if somehow
+ *  grant-less. */
+function minUnitName(grants: ReadonlyArray<AdminRosterGrant>): string {
+  return grants.reduce<string>(
+    (min, g) => (min === "" || g.unitName.localeCompare(min) < 0 ? g.unitName : min),
+    "",
+  );
+}
+
 export function AdministratorsRoster({
   entries,
   isSuperuser,
@@ -140,6 +155,10 @@ export function AdministratorsRoster({
   const [roster, setRoster] = React.useState<AdminRosterEntry[]>(() =>
     entries.map((e) => ({ ...e, grants: [...e.grants] })),
   );
+
+  // Sort + filter — client-only UI state (§ SORT / § FILTER), no persistence.
+  const [sortMode, setSortMode] = React.useState<SortMode>("person");
+  const [filterQuery, setFilterQuery] = React.useState("");
 
   // Per-card write state.
   const [busyKey, setBusyKey] = React.useState<string | null>(null);
@@ -212,6 +231,27 @@ export function AdministratorsRoster({
   }
 
   const resolved = roster.map((e) => ({ entry: e, person: resolve(e) }));
+
+  // Filter (substring, case-insensitive, against name / CWID / any grant's
+  // unitName) then sort (by person name, or by each person's alphabetically-
+  // first unit). A matching person-group keeps ALL of its grant rows — rows
+  // within a kept group are never individually filtered out.
+  const filterQueryTrimmed = filterQuery.trim().toLowerCase();
+  const searched =
+    filterQueryTrimmed.length === 0
+      ? resolved
+      : resolved.filter(
+          ({ entry, person }) =>
+            person.name.toLowerCase().includes(filterQueryTrimmed) ||
+            entry.cwid.toLowerCase().includes(filterQueryTrimmed) ||
+            entry.grants.some((g) => g.unitName.toLowerCase().includes(filterQueryTrimmed)),
+        );
+  const displayed = [...searched].sort((a, b) =>
+    sortMode === "orgUnit"
+      ? minUnitName(a.entry.grants).localeCompare(minUnitName(b.entry.grants)) ||
+        a.person.name.localeCompare(b.person.name)
+      : a.person.name.localeCompare(b.person.name) || a.entry.cwid.localeCompare(b.entry.cwid),
+  );
 
   // Recompute the #443 note from the post-enrichment state. If the directory
   // fetch failed entirely, trust the server's seed instead of the (un-enriched)
@@ -345,7 +385,34 @@ export function AdministratorsRoster({
         <p className="text-muted-foreground text-sm" data-testid="administrators-scope-caption">
           {scopeCaption}
         </p>
-        <AddAdministratorDialog units={unitOptions(roster, allCores)} onGranted={handleGranted} />
+        <div className="flex flex-wrap items-center gap-3">
+          {roster.length > 0 && (
+            <>
+              <Input
+                type="text"
+                value={filterQuery}
+                placeholder="Filter by name, org unit, or CWID"
+                onChange={(e) => setFilterQuery(e.target.value)}
+                aria-label="Filter administrators"
+                className="max-w-xs"
+                data-testid="administrators-filter-input"
+              />
+              <label className="text-muted-foreground flex items-center gap-2 text-sm">
+                Sort
+                <select
+                  value={sortMode}
+                  onChange={(e) => setSortMode(e.target.value as SortMode)}
+                  className="border-apollo-border-strong text-foreground h-9 rounded-md border bg-apollo-surface px-2 text-sm"
+                  data-testid="administrators-sort-select"
+                >
+                  <option value="person">Person</option>
+                  <option value="orgUnit">Org unit</option>
+                </select>
+              </label>
+            </>
+          )}
+          <AddAdministratorDialog units={unitOptions(roster, allCores)} onGranted={handleGranted} />
+        </div>
       </div>
 
       {showDegradedNote && (
@@ -365,6 +432,10 @@ export function AdministratorsRoster({
         <p className="text-muted-foreground text-sm" data-testid="administrators-empty">
           {isSuperuser ? "No administrators yet." : "No administrators within your units."}
         </p>
+      ) : displayed.length === 0 ? (
+        <p className="text-muted-foreground text-sm" data-testid="administrators-no-matches">
+          No administrators match your search.
+        </p>
       ) : (
         // One table for the whole roster (R11): the header renders once, and
         // each person becomes a group-header band row (name/title/CWID +
@@ -382,7 +453,7 @@ export function AdministratorsRoster({
                   <th className="py-2 pr-3 pl-6 text-right font-medium">Actions</th>
                 </tr>
               </thead>
-              {resolved.map(({ entry, person }) => {
+              {displayed.map(({ entry, person }) => {
                 const isSelf = entry.cwid === actorCwid;
                 return (
                   <tbody key={entry.cwid} data-testid={`administrators-person-${entry.cwid}`}>
@@ -390,7 +461,7 @@ export function AdministratorsRoster({
                       <th
                         scope="colgroup"
                         colSpan={COLUMN_COUNT}
-                        className="bg-apollo-surface-2 border-apollo-border border-y px-3 py-2 text-left align-middle text-sm font-normal"
+                        className="border-apollo-border border-y px-3 py-2 text-left align-middle text-sm font-normal"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
@@ -433,7 +504,7 @@ export function AdministratorsRoster({
                       return (
                         <tr
                           key={rowKey}
-                          className="border-apollo-border border-b align-middle"
+                          className="bg-apollo-surface-2 border-apollo-border border-b align-middle"
                           data-testid={`administrators-grant-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
                         >
                           <td className="py-2 pl-3">
