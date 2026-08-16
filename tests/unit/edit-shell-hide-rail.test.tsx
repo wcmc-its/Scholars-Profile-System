@@ -4,8 +4,7 @@
  * room to use. `hideRail` drops both the desktop rail and the phone
  * `<select>` swap, replacing them with a single "← Back" link (`backHref`).
  * Default (`hideRail` unset) is byte-identical to the existing shell —
- * covered by `edit-shell-history-link.test.tsx` / `edit-shell-rail-collapse
- * .test.tsx`, not repeated here.
+ * covered by `edit-shell-history-link.test.tsx`, not repeated here.
  */
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";

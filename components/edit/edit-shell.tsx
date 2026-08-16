@@ -13,12 +13,6 @@
  * full vertical rail collapses to a `<select>` below `md` so the editor is not
  * buried under nine links on phones (finding 4.5).
  *
- * On `md`+ the rail column is additionally wrapped in `RailCollapse`, a chevron
- * toggle that shrinks it to a thin strip so the detail panel can reclaim its
- * width — independent of, and layered on top of, the phone-only `<select>`
- * swap above. Defaults expanded and remembers the choice in localStorage; see
- * `rail-collapse.tsx`.
- *
  * `hideRail` drops BOTH the rail column and the phone `<select>` for one
  * dedicated attribute — content that wants the whole width (the Cancer
  * Center Members table, with its own filter bar + disease grid) rather than
@@ -32,7 +26,6 @@ import { ArrowRight, ArrowUpRight, ChevronLeftIcon } from "lucide-react";
 
 import { AttributeRail, type RailItem } from "@/components/edit/attribute-rail";
 import { RailSheet } from "@/components/edit/rail-sheet";
-import { RailCollapse } from "@/components/edit/rail-collapse";
 import { ProxyBanner } from "@/components/edit/proxy-banner";
 import { SuperuserBanner } from "@/components/edit/superuser-banner";
 import { UnitAdminBanner } from "@/components/edit/unit-admin-banner";
@@ -220,19 +213,16 @@ export function EditShell({
       )}
 
       {/* Body — rail + detail. The rail column is desktop-only; on phones a
-          compact <select> at the top of the detail column replaces it. The
-          first track is `auto`, not a fixed `16rem`, so `RailCollapse`'s own
-          width (`w-64` expanded / `w-9` collapsed) drives the column — no
-          state needs lifting up to this grid. `hideRail` drops that first
-          track altogether (both the desktop rail and the phone <select>) so
-          the detail panel is the only column. */}
+          compact <select> at the top of the detail column replaces it.
+          `hideRail` drops that first track altogether (both the desktop rail
+          and the phone <select>) so the detail panel is the only column. */}
       <div
         className={`mx-auto grid max-w-[var(--max-content)] grid-cols-1 gap-6 px-6 py-8 ${
           hideRail ? "" : "md:grid-cols-[auto_1fr]"
         }`}
       >
         {!hideRail && (
-          <RailCollapse>
+          <div className="hidden w-64 flex-col gap-3 md:flex">
             <AttributeRail
               items={railItems}
               active={activeAttr}
@@ -240,7 +230,7 @@ export function EditShell({
               groupMeta={railGroupMeta}
             />
             {subRail}
-          </RailCollapse>
+          </div>
         )}
 
         <main id="edit-detail" tabIndex={-1} aria-labelledby="panel-heading" className="min-w-0 scroll-mt-4">
