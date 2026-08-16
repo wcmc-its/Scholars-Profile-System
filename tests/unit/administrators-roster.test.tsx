@@ -523,7 +523,7 @@ describe("AdministratorsRoster — sort + filter", () => {
     expect(names).toEqual(["administrators-person-amy1", "administrators-person-zoe1"]);
   });
 
-  it("switching to 'Org unit' re-sorts groups by each person's alphabetically-first unitName", () => {
+  it("switching to 'Org unit' groups by org unit (not by person), sorted by unit name", () => {
     stubRouter();
     render(
       <AdministratorsRoster
@@ -533,16 +533,56 @@ describe("AdministratorsRoster — sort + filter", () => {
         nameResolutionDegraded={false}
       />,
     );
-    // Default (by person): amy1 before zoe1.
-    let names = screen.getAllByTestId(/^administrators-person-/).map((el) => el.getAttribute("data-testid"));
-    expect(names).toEqual(["administrators-person-amy1", "administrators-person-zoe1"]);
-
     fireEvent.change(screen.getByTestId("administrators-sort-select"), {
       target: { value: "orgUnit" },
     });
-    // By org unit: zoe manages "Anesthesiology" (< "Zoology"), so zoe1 now leads.
-    names = screen.getAllByTestId(/^administrators-person-/).map((el) => el.getAttribute("data-testid"));
-    expect(names).toEqual(["administrators-person-zoe1", "administrators-person-amy1"]);
+    // "Anesthesiology" (zoe's unit) sorts before "Zoology" (amy's) — each
+    // renders as its own group, with the header column now "Person".
+    const unitGroups = screen
+      .getAllByTestId(/^administrators-unit-/)
+      .map((el) => el.getAttribute("data-testid"));
+    expect(unitGroups).toEqual([
+      "administrators-unit-department:A1",
+      "administrators-unit-department:Z1",
+    ]);
+    expect(screen.getByTestId("administrators-admin-department:A1-zoe1")).toBeTruthy();
+    expect(screen.getByTestId("administrators-admin-department:Z1-amy1")).toBeTruthy();
+  });
+
+  it("lists a shared org unit once, with every admin nested underneath (not once per person)", () => {
+    stubRouter();
+    const zane = entry({
+      cwid: "zan1",
+      name: "Zane Zebra",
+      nameResolved: true,
+      grants: [
+        {
+          entityType: "department",
+          entityId: "A1",
+          unitName: "Anesthesiology",
+          role: "owner",
+          source: "manual",
+        },
+      ],
+    });
+    render(
+      <AdministratorsRoster
+        entries={[zoe, zane]}
+        isSuperuser
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("administrators-sort-select"), {
+      target: { value: "orgUnit" },
+    });
+    // Both zoe and zane administer "Anesthesiology" (department:A1) — the
+    // unit's group header must render exactly once, with both admins as
+    // separate rows underneath (the bug being fixed: it used to repeat the
+    // unit's name once per person instead of grouping them).
+    expect(screen.getAllByTestId("administrators-unit-department:A1")).toHaveLength(1);
+    expect(screen.getByTestId("administrators-admin-department:A1-zoe1")).toBeTruthy();
+    expect(screen.getByTestId("administrators-admin-department:A1-zan1")).toBeTruthy();
   });
 
   it("filters to person-groups matching name, cwid, or org unit (case-insensitive substring)", () => {
