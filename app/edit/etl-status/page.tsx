@@ -31,7 +31,12 @@ import {
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
-import { sourceDescription, sourceLabel } from "@/lib/edit/etl-source-copy";
+import {
+  type EtlSourceOrigin,
+  sourceDescription,
+  sourceLabel,
+  sourceOrigin,
+} from "@/lib/edit/etl-source-copy";
 import type { Cadence } from "@/lib/etl/freshness-policy";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
@@ -174,7 +179,20 @@ function StateIcon({ state }: { state: EtlSourceState }) {
   );
 }
 
-/** Plain name first, raw `etl_run.source` key second — the key is what ITS greps. */
+const ORIGIN_PREFIX: Record<EtlSourceOrigin, string> = { external: "External", internal: "Internal" };
+
+/**
+ * "Internal: CdnReconcile" / "External: ASMS" — the raw `etl_run.source` key
+ * (what ITS greps when a problem gets reported onward), qualified up front
+ * with whether a failure here is this app's own bug or someone else's system.
+ * Just the bare key for a source {@link sourceOrigin} hasn't caught up with.
+ */
+function sourceKeyDisplay(source: string): string {
+  const origin = sourceOrigin(source);
+  return origin === null ? source : `${ORIGIN_PREFIX[origin]}: ${source}`;
+}
+
+/** Plain name first, the qualified raw key second. */
 function SourceName({ source }: { source: string }) {
   const label = sourceLabel(source);
   return (
@@ -185,7 +203,7 @@ function SourceName({ source }: { source: string }) {
           className="text-muted-foreground ml-1.5 text-xs font-normal"
           data-testid="etl-status-source-key"
         >
-          {source}
+          {sourceKeyDisplay(source)}
         </span>
       )}
     </>
@@ -581,7 +599,7 @@ function StatusBody({
                     className={`${tdClass} text-muted-foreground whitespace-nowrap text-xs`}
                     data-testid="etl-status-source-key"
                   >
-                    {row.source}
+                    {sourceKeyDisplay(row.source)}
                   </td>
                   <td className={`${tdClass} whitespace-nowrap`}>{CADENCE_LABEL[row.cadence]}</td>
                   <td className={`${tdClass} whitespace-nowrap`}>
