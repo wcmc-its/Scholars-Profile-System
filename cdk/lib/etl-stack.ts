@@ -1399,10 +1399,10 @@ export class EtlStack extends Stack {
             { id: "Infoed", npmScript: "etl:infoed", external: true, tier: "continue" } as StepSpec,
           ]),
       { id: "Coi", npmScript: "etl:coi", external: true, tier: "continue" },
-      // COI-gap recommendations — reads SPS-DB only (disclosed COI from the Coi
-      // step + the PubMed statements above), so external:false. Computes whatever
-      // its inputs hold; zero candidates until the WCM statement path is flowing.
-      { id: "CoiGap", npmScript: "etl:coi-gap", external: false, tier: "continue" },
+      // COI-gap recommendations moved to the weekly machine (Paul, 2026-08-16,
+      // see CoiGapWeekly below) — it reads SPS-DB only and computes against
+      // whatever the Coi/ReciterCoiStatements steps above have already
+      // written, so it never needed same-night freshness.
       // #608 mentoring source — moved from the weekly machine to nightly (operator
       // request) so grad-school mentoring chips refresh within a day. Reads its own
       // MSSQL credential (etl/jenzabar), external:true. Chips are ISR-only (not
@@ -1546,6 +1546,14 @@ export class EtlStack extends Stack {
       // demand tighter freshness -- and `continue` so a failure here (or an unseeded
       // cancer_taxonomy_descriptor) never aborts the rest of the weekly chain.
       { id: "CancerCenterDiseaseAssignmentsWeekly", npmScript: "etl:cancer-center-disease-assignments", external: false, tier: "continue" },
+      // COI-gap recommendations (Paul, 2026-08-16; was CoiGap on the nightly
+      // machine — see the nightlySteps comment above). Aurora-only (disclosed
+      // COI from the Coi step + PubMed statements from ReciterCoiStatements,
+      // both nightly), so external:false. Computes against whatever the most
+      // recent nightly already wrote; same-night freshness was never
+      // load-bearing, so weekly is plenty. `continue` — zero candidates until
+      // the WCM statement path is flowing must not abort the weekly chain.
+      { id: "CoiGapWeekly", npmScript: "etl:coi-gap", external: false, tier: "continue" },
       { id: "Spotlight", npmScript: "etl:spotlight", external: true, tier: "continue" },
       // Grant-enrichment sources (#608). They key off the `grant` table that
       // etl:infoed refreshes nightly; neither needs 24h freshness, so they batch
