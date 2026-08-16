@@ -2,9 +2,9 @@
  * `/edit/reports/1` — "Optimize membership" (formerly the `?attr=reports` tab
  * inside `/edit/center/[code]`; Cancer Center collaboration-recommendations
  * v2, `2026-08-10-cancer-center-collaboration-recommendations-v2-cancer-
- * relevance-plan.md`). Hosts `CancerCenterCollabReportCard` UNCHANGED — this
- * PR only moved how it's reached, from an in-page unit-editor tab to a
- * top-level console route. See `app/edit/reports/page.tsx` for the shared
+ * relevance-plan.md`). Hosts `CancerCenterCollabReportCard`, passing
+ * `ctx.unit.name` for its subtitle line (`Reports View Fix` mockup review,
+ * 2026-08-16). See `app/edit/reports/page.tsx` for the shared
  * session/authz/center-resolution flow this mirrors (duplicated per page
  * rather than a shared server component, matching every other `/edit/*`
  * console page's convention).
@@ -72,7 +72,7 @@ export default async function EditReportsOptimizeMembershipPage({
       <h1 className="mb-4 text-xl font-bold">1. Optimize membership</h1>
       {/* ConsoleShell owns only the chrome — see app/edit/reports/page.tsx. */}
       <div className="apollo-card">
-        <CancerCenterCollabReportCard centerCode={code} />
+        <CancerCenterCollabReportCard centerCode={code} centerName={ctx.unit.name} />
       </div>
     </ConsoleShell>
   );

@@ -1,7 +1,7 @@
 /**
- * CancerCenterCollabReportCard — list/detail shell (REPORTS index, click to
- * open, "All reports" to go back) wrapping the Collaboration & Cancer-
- * Relevance report:
+ * CancerCenterCollabReportCard — renders the Collaboration & Cancer-Relevance
+ * report directly (no list/detail shell — removed 2026-08-16, `Reports View
+ * Fix` mockup review):
  *  - REMOVE / ADD (collaborator + relevant) / ADD (recruit) bucket rows
  *    correctly, and recruit EXCLUDES anyone already in collaborator+relevant
  *    (the exclusivity fix from the post-merge review);
@@ -50,17 +50,18 @@ beforeEach(() => {
 });
 
 describe("CancerCenterCollabReportCard", () => {
-  it("lands on the report list, not the report itself", () => {
+  it("shows the subtitle line (label · center name · last refreshed) and the advisory banner up front", async () => {
     mockFetch();
-    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" />);
-    expect(screen.getByText("Collaboration & Cancer-Relevance")).toBeTruthy();
-    expect(screen.queryByText(/active member, zero collaboration/)).toBeNull();
+    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" centerName="Meyer Cancer Center" />);
+    expect(screen.getByText(/Collaboration & cancer-relevance/)).toBeTruthy();
+    expect(screen.getByText(/Meyer Cancer Center/)).toBeTruthy();
+    expect(screen.getByText(/Advisory only/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/Last refreshed/)).toBeTruthy());
   });
 
-  it("opens the report on click and buckets rows correctly, with recruit exclusive of collaborator+relevant", async () => {
+  it("renders the report directly — no click-through, buckets rows correctly, recruit exclusive of collaborator+relevant", async () => {
     mockFetch();
-    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" />);
-    fireEvent.click(screen.getByText("Collaboration & Cancer-Relevance"));
+    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" centerName="Meyer Cancer Center" />);
     await waitFor(() => expect(screen.getByText(/REMOVE/)).toBeTruthy());
 
     const removeSection = screen.getByText(/REMOVE/).closest("section")!;
@@ -79,20 +80,9 @@ describe("CancerCenterCollabReportCard", () => {
     expect(within(recruitSection).queryByText(/Neitherperson/)).toBeNull();
   });
 
-  it("returns to the list via 'All reports'", async () => {
-    mockFetch();
-    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" />);
-    fireEvent.click(screen.getByText("Collaboration & Cancer-Relevance"));
-    await waitFor(() => expect(screen.getByText(/REMOVE/)).toBeTruthy());
-    fireEvent.click(screen.getByText(/All reports/));
-    expect(screen.getByText("Collaboration & Cancer-Relevance")).toBeTruthy();
-    expect(screen.queryByText(/active member, zero collaboration/)).toBeNull();
-  });
-
   it("gives every section and threshold an info-hover affordance", async () => {
     mockFetch();
-    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" />);
-    fireEvent.click(screen.getByText("Collaboration & Cancer-Relevance"));
+    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" centerName="Meyer Cancer Center" />);
     await waitFor(() => expect(screen.getByText(/REMOVE/)).toBeTruthy());
     expect(screen.getByLabelText(/About REMOVE/)).toBeTruthy();
     expect(screen.getByLabelText(/About ADD — collaborator \+ relevant/)).toBeTruthy();
@@ -103,8 +93,7 @@ describe("CancerCenterCollabReportCard", () => {
 
   it("each section's table filters and sorts client-side", async () => {
     mockFetch();
-    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" />);
-    fireEvent.click(screen.getByText("Collaboration & Cancer-Relevance"));
+    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" centerName="Meyer Cancer Center" />);
     await waitFor(() => expect(screen.getByText(/REMOVE/)).toBeTruthy());
 
     const removeSection = screen.getByText(/REMOVE/).closest("section")!;
@@ -126,26 +115,27 @@ describe("CancerCenterCollabReportCard", () => {
     expect(within(collabSection).getByText(/Collabrelevant/)).toBeTruthy();
   });
 
-  it("offers a per-row and a whole-report CSV download, each pointed at the right export URL", async () => {
+  it("offers a per-row and a whole-report CSV download, each visibly labeled and pointed at the right export URL", async () => {
     mockFetch();
-    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" />);
-    fireEvent.click(screen.getByText("Collaboration & Cancer-Relevance"));
+    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" centerName="Meyer Cancer Center" />);
     await waitFor(() => expect(screen.getByText(/REMOVE/)).toBeTruthy());
 
     const whole = screen.getByLabelText("Download full report (CSV)") as HTMLAnchorElement;
     expect(whole.getAttribute("href")).toBe("/api/edit/center/meyer_cancer_center/collab-report/export");
+    expect(whole.textContent).toContain("Download full report (CSV)");
 
     const removeSection = screen.getByText(/REMOVE/).closest("section")!;
     const perRow = within(removeSection).getByLabelText(/Download R Removeperson's papers/) as HTMLAnchorElement;
     expect(perRow.getAttribute("href")).toBe(
       "/api/edit/center/meyer_cancer_center/collab-report/export?cwid=m1",
     );
+    // Visible label, not an icon-only affordance relying on aria-label alone.
+    expect(perRow.textContent).toContain("CSV");
   });
 
   it("the mesh-logic modal fetches the taxonomy summary on open, and reveals topic buckets on demand", async () => {
     mockFetch();
-    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" />);
-    fireEvent.click(screen.getByText("Collaboration & Cancer-Relevance"));
+    render(<CancerCenterCollabReportCard centerCode="meyer_cancer_center" centerName="Meyer Cancer Center" />);
     await waitFor(() => expect(screen.getByText(/REMOVE/)).toBeTruthy());
 
     fireEvent.click(screen.getByText("How cancer-relevance is determined"));
