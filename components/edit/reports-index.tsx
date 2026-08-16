@@ -4,7 +4,7 @@
  * Three renderings of the same underlying per-report data
  * (`lib/edit/cancer-center-reports.ts`'s `loadReportLiveness`), chosen by the
  * page:
- * - `mode="table"` (2a, superuser/comms_steward with >3 units) — one row per
+ * - `mode="table"` (2a, superuser/comms_steward with 2+ units) — one row per
  *   unit, filter rail, row click opens that unit's report list
  *   (`/edit/reports?center=…`). Mirrors `AllUnitsDirectory`'s contract:
  *   server-bounded list, filter in-memory, no fetch, stretched-anchor rows
