@@ -617,7 +617,7 @@ export default async function EtlStatusPage({
   searchParams,
 }: {
   searchParams?: Promise<{ sort?: string; dir?: string }>;
-} = {}) {
+}) {
   const sp = (await searchParams) ?? {};
   const sortKey = parseSortKey(sp.sort);
   const sortDir: SortDir = sp.dir === "desc" ? "desc" : "asc";
