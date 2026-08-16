@@ -78,10 +78,32 @@
  * "genomic:WGS/WES"), grouped by coarse category, via `aggregateBySubtype`.
  * Dark until the companion columns exist on the live `reciterdb.dataset_deposit`
  * AND `etl/data-sharing` has re-run — see that PR's description.
+ *
+ * v3, stakeholder feedback pass (this PR): (1) Tier padding —
+ * `aggregateRepositoriesByTier` and `tierPubSpectrum` now emit a zero row for
+ * every tier rather than only tiers present in the data, so "Country of
+ * concern · 0" is a visible statement instead of a silent absence (see
+ * `paddedTiers`). (2) PMC coverage — `loadShareRateCorpus` now also reads the
+ * publication's `pmcid`; `overall.pmcCoveredPubs`/`.pmcDepositedPubs` (via
+ * `pmcCoverage`) bound the full-text arm of the deposit scan by the corpus it
+ * can actually inspect. (3) `dataset_url` on the item CSV, via the profile
+ * page's own `resolveDatasetUrl` resolver table — same deep link per accession
+ * as the public "Datasets" section, not just the repository homepage.
+ * (4) Item-grain section exports — `buildSectionItemsCsv` gives every
+ * aggregate table a one-row-per-(person, dataset)-link download, organized to
+ * match that table's grouping (the stakeholder wants drill-down items, not
+ * just the rollups). (5) Registry rows excluded from `depositedPmidSet`
+ * (review finding): the share-rate numerator and `pmcDepositedPubs` counted a
+ * pub whose only detected signal was a ClinicalTrials.gov registration, while
+ * the methods prose claimed registrations were excluded — see that function's
+ * doc comment. The headline distinct-dataset/faculty/link totals and
+ * `byRepository` still include registry rows on purpose (they describe
+ * everything detected, with registry visible in its own buckets).
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { resolveDatasetUrl } from "@/components/profile/datasets-section";
 import { loadContributorSuppressions } from "@/lib/api/manual-layer";
-import { toCsv } from "@/lib/csv";
+import { toCsv, type CsvCell } from "@/lib/csv";
 import { tierOf } from "@/lib/repository-tier";
 
 /** The Prisma surface this loader needs — kept narrow for unit tests. */
@@ -137,10 +159,10 @@ export type DatasetLinkRow = {
   /** `PersonDatasetDeposit.pmids` (top-level on the link, not on `dataset`)
    *  — the citing pmids for this (cwid, dataset) pair. Unlike the
    *  export-only fields above, this one IS read outside the CSV path:
-   *  `depositedPmidSet` (below) flattens it across every row to build the
-   *  share-rate numerator. Same optional-not-nullable shape so the existing
-   *  rollup-fixture rows in `tests/unit/data-sharing-report.test.ts` stay
-   *  valid untouched. */
+   *  `depositedPmidSet` (below) flattens it across every non-registry row to
+   *  build the share-rate numerator. Same optional-not-nullable shape so the
+   *  existing rollup-fixture rows in `tests/unit/data-sharing-report.test.ts`
+   *  stay valid untouched. */
   pmids?: string[];
   /** `DatasetDeposit.sensitiveCats`/`.sensitiveSubtypes` (S-Index v2 granular
    *  sub-types) — like `pmids` above, NOT export-only: `aggregateBySubtype`
@@ -249,14 +271,42 @@ export function bucketDatasetLink(row: Pick<DatasetLinkRow, "dataType" | "access
 /** One confirmed first/last-authored WCM publication in the share-rate
  *  denominator corpus (`loadShareRateCorpus`). Deliberately MeSH-free — no
  *  subject-matter filtering, just "is this a WCM-credited pub the deposit
- *  pipeline could have scanned". */
-export type ShareRateCorpusRow = { pmid: string; cwid: string; department: string | null };
+ *  pipeline could have scanned".
+ *
+ *  `inPmc` (`Publication.pmcid` non-null) is optional-not-nullable for the
+ *  same backward-compat reason as `DatasetLinkRow.pmids`: pre-PMC test
+ *  fixtures build these rows as literals and shouldn't need touching. Absent
+ *  reads as `false` (`pmcCoverage` below). Why it matters at all: the
+ *  full-text availability-statement arm of the deposit scan can only inspect
+ *  pubs whose full text is IN PMC — see `pmcCoverage`'s doc comment. */
+export type ShareRateCorpusRow = { pmid: string; cwid: string; department: string | null; inPmc?: boolean };
 
 /** `catalog.py`'s tier priority order, most to least severe — the sort order
  *  `aggregateRepositoriesByTier` and `pubsByTier` both use. `'UNKNOWN'`
  *  (a repository not in `@/lib/repository-tier`'s port) sorts last, after
  *  `REGISTRY`. */
 export const TIER_ORDER = ["CONCERN", "FOREIGN_OPEN", "FOREIGN_CTRL", "US_OPEN", "US_CTRL", "REGISTRY", "UNKNOWN"] as const;
+
+/** The tier list both tier aggregates emit rows for, in `TIER_ORDER`: every
+ *  real tier ALWAYS, whether or not the data has one, plus `UNKNOWN` only
+ *  when it actually occurs. Zero-padding is the point, not a convenience
+ *  (2026-08-16 stakeholder feedback): "Country of concern · 0" is a visible
+ *  compliance STATEMENT — "we checked, there are none" — and silently
+ *  dropping the row turned the strongest possible answer into an absence.
+ *  `UNKNOWN` is the one exception because it's not a real-world claim, just
+ *  a port-lag bucket (`tierOf`'s fallback) — a permanent "Unclassified · 0"
+ *  row would imply an unclassified category exists when it doesn't. */
+function paddedTiers(present: ReadonlySet<string>): string[] {
+  // Union, not intersection: a tier value present in the data but missing
+  // from TIER_ORDER (a future catalog.py sync adding a tier without updating
+  // the order list) must still be emitted — silently dropping it would make
+  // its datasets vanish from the tier table, the spectrum, and the tiers CSV
+  // with nothing failing loudly. Appended after the known order, sorted for
+  // determinism.
+  const base = TIER_ORDER.filter((tier) => tier !== "UNKNOWN" || present.has("UNKNOWN"));
+  const extras = [...present].filter((t) => !(TIER_ORDER as readonly string[]).includes(t)).sort();
+  return [...base, ...extras];
+}
 
 /** The tier-only "concerning" set per the SPEC's "Amended 08-13" note —
  *  CONCERN (country-of-concern host) plus both foreign-hosted tiers. Shared
@@ -296,6 +346,17 @@ export type DataSharingReport = {
     links: number;
     shareRateDenominator: number;
     shareRateNumerator: number;
+    /** PMC coverage of the share-rate corpus — `pmcCoveredPubs` is the count
+     *  of distinct corpus pmids whose full text is in PubMed Central
+     *  (`Publication.pmcid` non-null); `pmcDepositedPubs` is how many of THOSE
+     *  have a detected deposit. Why this matters (2026-08-16 stakeholder ask):
+     *  the full-text availability-statement arm of the deposit scan can only
+     *  inspect pubs whose full text is IN PMC, so the PMC-covered subset is
+     *  the fairest denominator for full-text-detected deposits — and "% of
+     *  corpus pubs in PMC" is itself a compliance figure (NIH public-access
+     *  deposit rate) stakeholders asked to see. Built by `pmcCoverage`. */
+    pmcCoveredPubs: number;
+    pmcDepositedPubs: number;
     /** Distinct publications with at least one detected OPEN-access deposit,
      *  and separately at least one detected CONTROLLED-access deposit — built
      *  by `pubAccessPmidSets`, registry rows excluded entirely (same rationale
@@ -436,12 +497,18 @@ export async function loadShareRateCorpus(client: DataSharingReportClient): Prom
       pmid: true,
       cwid: true,
       scholar: { select: { primaryDepartment: true } },
+      // `pmcid` non-null ⇒ the pub's full text is in PubMed Central — the only
+      // corpus the full-text availability-statement scan can inspect, so this
+      // is the PMC-coverage denominator (`pmcCoverage` below), not a display
+      // field.
+      publication: { select: { pmcid: true } },
     },
   });
   return rows.map((row) => ({
     pmid: row.pmid,
     cwid: row.cwid as string,
     department: row.scholar?.primaryDepartment ?? null,
+    inPmc: row.publication?.pmcid != null,
   }));
 }
 
@@ -519,7 +586,11 @@ export function aggregateByRepository(rows: readonly DatasetLinkRow[]): Reposito
  *  same tier is not expected here since `RepositoryBreakdown` is already
  *  one row per repository, but a dataset multi-deposited across repositories
  *  in the SAME tier would still sum, not dedup, across those repositories —
- *  no worse than `byRepository` itself). Sorted by `TIER_ORDER`. */
+ *  no worse than `byRepository` itself). Sorted by `TIER_ORDER`.
+ *
+ *  Emits one row for EVERY tier (zero-filled when absent from the data),
+ *  not just tiers present — a "Country of concern · 0" row is a deliberate
+ *  visible statement, see `paddedTiers`. `UNKNOWN` only when it has data. */
 export function aggregateRepositoriesByTier(byRepository: readonly RepositoryBreakdown[]): RepositoryTierRollup[] {
   const byTier = new Map<string, { datasets: number; repositories: string[] }>();
   for (const r of byRepository) {
@@ -528,9 +599,11 @@ export function aggregateRepositoriesByTier(byRepository: readonly RepositoryBre
     bucket.repositories.push(r.repository);
     byTier.set(r.tier, bucket);
   }
-  return [...byTier.entries()]
-    .map(([tier, b]) => ({ tier, datasets: b.datasets, repositories: b.repositories }))
-    .sort((a, b) => TIER_ORDER.indexOf(a.tier as (typeof TIER_ORDER)[number]) - TIER_ORDER.indexOf(b.tier as (typeof TIER_ORDER)[number]));
+  // Iterating `paddedTiers` (already in TIER_ORDER) IS the sort.
+  return paddedTiers(new Set(byTier.keys())).map((tier) => {
+    const b = byTier.get(tier);
+    return { tier, datasets: b?.datasets ?? 0, repositories: b?.repositories ?? [] };
+  });
 }
 
 /** Distinct-publication count per tier — the Rollup's tier "spectrum". Same
@@ -539,7 +612,13 @@ export function aggregateRepositoriesByTier(byRepository: readonly RepositoryBre
  *  NOT excluded here (unlike `pubAccessPmidSets`) — a registry repository has
  *  its own tier (`REGISTRY`) and belongs in its own spectrum bucket, same as
  *  every other tier. A pmid can land in multiple tiers; not reconciled away,
- *  see `TierPubSpectrumRow`'s comment. */
+ *  see `TierPubSpectrumRow`'s comment.
+ *
+ *  Emits one row for EVERY tier (`pubs: 0` when absent from the data), not
+ *  just tiers present — same `paddedTiers` rationale as
+ *  `aggregateRepositoriesByTier`: the §1 spectrum legend must be able to say
+ *  "Country of concern · 0" rather than omit the tier. `UNKNOWN` only when
+ *  it has data. */
 export function tierPubSpectrum(rows: readonly DatasetLinkRow[]): TierPubSpectrumRow[] {
   const byTier = new Map<string, Set<string>>();
   for (const r of rows) {
@@ -549,37 +628,54 @@ export function tierPubSpectrum(rows: readonly DatasetLinkRow[]): TierPubSpectru
     for (const pmid of r.pmids) set.add(pmid);
     byTier.set(tier, set);
   }
-  return [...byTier.entries()]
-    .map(([tier, pmids]) => ({ tier, pubs: pmids.size }))
-    .sort((a, b) => TIER_ORDER.indexOf(a.tier as (typeof TIER_ORDER)[number]) - TIER_ORDER.indexOf(b.tier as (typeof TIER_ORDER)[number]));
+  // Iterating `paddedTiers` (already in TIER_ORDER) IS the sort.
+  return paddedTiers(new Set(byTier.keys())).map((tier) => ({
+    tier,
+    pubs: byTier.get(tier)?.size ?? 0,
+  }));
 }
 
 export type SubtypeRow = { category: string; subtype: string; count: number };
 
-/** Parses `DatasetLinkRow.sensitiveSubtypes` — `'|'`-delimited
- *  `"coarseCategory:label"` pairs (e.g. `"genomic:WGS/WES"`), same source as
- *  `sensitiveCats` (`scripts/bulk-data-rule/taxonomy.py`'s `tag()`) — and
- *  counts DEPOSIT INSTANCES (row count, same grain as `links`, NOT distinct
- *  datasets or distinct pubs — same reasoning as `countConcerningDeposits`'s
- *  comment) per sub-type label, grouped by coarse category. A row listing
- *  more than one sub-type (a dataset spanning genomic + geolocation, say)
- *  counts once toward EACH sub-type it lists — not reconciled away, same
- *  spirit as this file's other multi-bucket caveats. A malformed entry (no
- *  `':'` separator, or an empty label) is skipped rather than crashing or
- *  landing in a silent "unknown" bucket. Sorted by category, then count
- *  descending within category. */
+/** Parse one row's `sensitiveSubtypes` string — `'|'`-delimited
+ *  `"coarseCategory:label"` pairs (e.g. `"genomic:WGS/WES"`, from
+ *  `scripts/bulk-data-rule/taxonomy.py`'s `tag()`) — into (category, subtype)
+ *  pairs. A malformed token (no `':'` separator, or an empty half) is skipped
+ *  rather than crashing or landing in a silent "unknown" bucket. THE single
+ *  parser: `aggregateBySubtype` (the §5 rollup), `buildSectionItemsCsv`'s
+ *  `"subtypes"` explosion, and the dashboard's §6 Sub-types column
+ *  (`components/edit/data-sharing-dashboard.tsx`) all call this, so the three
+ *  can't drift on what counts as a parseable token — exported for that third
+ *  consumer, not for general reuse. */
+export function parseSensitiveSubtypes(sensitiveSubtypes: string | null | undefined): { category: string; subtype: string }[] {
+  if (!sensitiveSubtypes) return [];
+  const pairs: { category: string; subtype: string }[] = [];
+  for (const token of sensitiveSubtypes.split("|")) {
+    const t = token.trim();
+    if (!t) continue;
+    const idx = t.indexOf(":");
+    if (idx <= 0) continue; // no category prefix — malformed, skip
+    const category = t.slice(0, idx).trim();
+    const subtype = t.slice(idx + 1).trim();
+    if (!category || !subtype) continue;
+    pairs.push({ category, subtype });
+  }
+  return pairs;
+}
+
+/** Parses `DatasetLinkRow.sensitiveSubtypes` (via `parseSensitiveSubtypes`,
+ *  same source as `sensitiveCats`) and counts DEPOSIT INSTANCES (row count,
+ *  same grain as `links`, NOT distinct datasets or distinct pubs — same
+ *  reasoning as `countConcerningDeposits`'s comment) per sub-type label,
+ *  grouped by coarse category. A row listing more than one sub-type (a
+ *  dataset spanning genomic + geolocation, say) counts once toward EACH
+ *  sub-type it lists — not reconciled away, same spirit as this file's other
+ *  multi-bucket caveats. Sorted by category, then count descending within
+ *  category. */
 export function aggregateBySubtype(rows: readonly DatasetLinkRow[]): SubtypeRow[] {
   const counts = new Map<string, SubtypeRow>(); // keyed "category subtype"
   for (const r of rows) {
-    if (!r.sensitiveSubtypes) continue;
-    for (const token of r.sensitiveSubtypes.split("|")) {
-      const t = token.trim();
-      if (!t) continue;
-      const idx = t.indexOf(":");
-      if (idx <= 0) continue; // no category prefix — malformed, skip
-      const category = t.slice(0, idx).trim();
-      const subtype = t.slice(idx + 1).trim();
-      if (!category || !subtype) continue;
+    for (const { category, subtype } of parseSensitiveSubtypes(r.sensitiveSubtypes)) {
       const key = `${category} ${subtype}`;
       const existing = counts.get(key);
       if (existing) existing.count++;
@@ -712,18 +808,29 @@ export function aggregateByFaculty(rows: readonly DatasetLinkRow[]): NamedFacult
     .sort((a, b) => b.datasets - a.datasets);
 }
 
-/** Flatten every link row's `pmids` into one deduped set — "this publication
- *  has at least one detected deposit somewhere". Deliberately NOT filtered by
- *  author position or by which cwid the link belongs to: a publication has a
- *  detected deposit if ANY row cites it, regardless of who's individually
- *  credited on the `PersonDatasetDeposit` row. This matters — a pub can be
- *  first-authored by Faculty A but have its deposit attributed to Faculty B,
- *  a middle author on the same pub; filtering by position/cwid here would
- *  wrongly mark Faculty A's paper as having no deposit. */
+/** Flatten every NON-REGISTRY link row's `pmids` into one deduped set —
+ *  "this publication has at least one detected dataset deposit". Two
+ *  deliberate rules, one inclusion and one exclusion:
+ *  (1) NOT filtered by author position or by which cwid the link belongs to:
+ *  a publication has a detected deposit if ANY row cites it, regardless of
+ *  who's individually credited on the `PersonDatasetDeposit` row. This
+ *  matters — a pub can be first-authored by Faculty A but have its deposit
+ *  attributed to Faculty B, a middle author on the same pub; filtering by
+ *  position/cwid here would wrongly mark Faculty A's paper as having no
+ *  deposit.
+ *  (2) Registry-type rows (`bucketDatasetLink` === `'registry'`) are skipped
+ *  entirely: a ClinicalTrials.gov registration is not a dataset deposit
+ *  (`REGISTRY_DATA_TYPE`'s doc comment), so a pub whose ONLY detected signal
+ *  is a registration must not count toward the share-rate numerator or
+ *  `pmcDepositedPubs` — before this filter (2026-08-16 v3 review finding),
+ *  registration-only pubs inflated both, while the methods prose claimed the
+ *  opposite. A pmid carried by both a registry row and a real deposit row
+ *  still counts, via the real row. */
 export function depositedPmidSet(rows: readonly DatasetLinkRow[]): Set<string> {
   const set = new Set<string>();
   for (const r of rows) {
     if (!r.pmids || r.pmids.length === 0) continue;
+    if (bucketDatasetLink(r) === "registry") continue;
     for (const pmid of r.pmids) set.add(pmid);
   }
   return set;
@@ -756,13 +863,13 @@ export function pubAccessPmidSets(rows: readonly DatasetLinkRow[]): {
 
 /** Every pmid that appears on at least one registry-type row (`bucketDatasetLink`
  *  === `'registry'`) — used only to carve the funding-lens population down to
- *  real data-sharing pmids (`loadFundingSplit`'s `where.pmid`). A pmid with
- *  BOTH a registry row and a non-registry row is still excluded here: the
- *  funding lens asks "of publications with a real (non-registry) data
- *  deposit, how many are NIH-funded", and mixing in a pmid whose only
- *  detected deposit signal might be a CT.gov registration would blur that
- *  question — simpler and more conservative than trying to partially credit
- *  a pmid that has both. */
+ *  real data-sharing pmids (`loadFundingSplit`'s `where.pmid`). Registry-ONLY
+ *  pmids never reach that population anyway now that `depositedPmidSet` skips
+ *  registry rows; what this carve still does is exclude a pmid with BOTH a
+ *  registry row and a non-registry row: the funding lens asks "of
+ *  publications with a real (non-registry) data deposit, how many are
+ *  NIH-funded", and it stays simpler and more conservative to drop a
+ *  both-rows pmid entirely than to partially credit it. */
 function registryPmidSet(rows: readonly DatasetLinkRow[]): Set<string> {
   const set = new Set<string>();
   for (const r of rows) {
@@ -823,12 +930,45 @@ export function buildShareRates(
   };
 }
 
+export type PmcCoverageTotals = { pmcCoveredPubs: number; pmcDepositedPubs: number };
+
+/** PMC coverage over the share-rate corpus — distinct corpus pmids with PMC
+ *  full text (`inPmc`, i.e. `Publication.pmcid` non-null), and how many of
+ *  those are in the deposited-pmid set. WHY: the full-text availability-
+ *  statement arm of the deposit scan can only see pubs whose full text is in
+ *  PMC (the DataBankList arm covers every PubMed record, full text or not),
+ *  so full-text-derived detection is bounded by PMC coverage — the
+ *  PMC-covered subset is the fairest denominator for full-text-detected
+ *  deposits, and "% of corpus pubs in PMC" is itself a compliance figure
+ *  stakeholders asked for (see `overall.pmcCoveredPubs`'s doc comment).
+ *  Distinct-pmid grain, same dedup rule as `buildShareRates.overall`: a pub
+ *  with both a first- and a last-author corpus row counts once. A pmid whose
+ *  rows disagree on `inPmc` can't really happen (`pmcid` is a fact about the
+ *  publication, not the author row) — OR'd defensively anyway rather than
+ *  trusting row order. */
+export function pmcCoverage(
+  corpusRows: readonly ShareRateCorpusRow[],
+  depositedPmids: ReadonlySet<string>,
+): PmcCoverageTotals {
+  const pmcPmids = new Set<string>();
+  for (const r of corpusRows) {
+    if (r.inPmc) pmcPmids.add(r.pmid);
+  }
+  let pmcDepositedPubs = 0;
+  for (const pmid of pmcPmids) {
+    if (depositedPmids.has(pmid)) pmcDepositedPubs++;
+  }
+  return { pmcCoveredPubs: pmcPmids.size, pmcDepositedPubs };
+}
+
 export type FundingSplitTotals = { nihFundedPubs: number; notNihFundedPubs: number };
 
 /** NIH-funded vs. not-NIH-funded split over the real (non-registry) data-
- *  sharing pmid population — `depositedPmidSet(rows)` minus every pmid that
- *  only shows up via a registry-type row (`registryPmidSet`), mirroring the
- *  registry exclusion `pubAccessPmidSets` applies. A pmid counts as
+ *  sharing pmid population — `depositedPmidSet(rows)` (which already skips
+ *  registry rows) minus every pmid that ALSO appears on a registry-type row
+ *  (`registryPmidSet`): the subtraction now only removes both-registry-and-
+ *  real pmids, the deliberately conservative carve that function's doc
+ *  comment defends. A pmid counts as
  *  NIH-funded if ANY of its `GrantPublication` rows resolves to a grant with
  *  a non-null `nihIc` — `nihIc` is populated only for NIH awards (see
  *  `Grant.nihIc`'s doc comment in `prisma/schema.prisma`), so "not
@@ -883,6 +1023,10 @@ export function buildDataSharingReport(
 ): Omit<DataSharingReport, "dataAsOf"> {
   const deposited = depositedPmidSet(rows);
   const rates = buildShareRates(corpusRows, deposited);
+  // PMC coverage inherits `corpusRows`'s backward-compat default: with no
+  // corpus supplied (or pre-PMC fixtures whose rows lack `inPmc`), both
+  // fields are 0 — same degrade-to-zero shape as the share-rate fields.
+  const pmc = pmcCoverage(corpusRows, deposited);
   const { openPmids, controlledPmids } = pubAccessPmidSets(rows);
 
   // Departments: UNION deposit-side departments with corpus-side ones, not just
@@ -938,6 +1082,8 @@ export function buildDataSharingReport(
       links: rows.length,
       shareRateDenominator: rates.overall.denominatorPubs,
       shareRateNumerator: rates.overall.numeratorPubs,
+      pmcCoveredPubs: pmc.pmcCoveredPubs,
+      pmcDepositedPubs: pmc.pmcDepositedPubs,
       openPubs: openPmids.size,
       controlledPubs: controlledPmids.size,
       nihFundedPubs: fundingSplit.nihFundedPubs,
@@ -996,11 +1142,10 @@ export type DataSharingExport = {
   truncated: boolean;
 };
 
-/** Slice a (person, dataset) link row set to `DATA_SHARING_EXPORT_CAP` — a
- *  pure helper (same shape as data-quality's `DataQualityExport`) so tests can
- *  exercise the truncation branch directly, without 5,001 fake DB rows
- *  end-to-end. */
-export function capDatasetLinkRows(rows: readonly DatasetLinkRow[]): DataSharingExport {
+/** Slice any export row set to `DATA_SHARING_EXPORT_CAP` — generic because
+ *  the item-grain section exports (`buildSectionItemsCsv`) cap EXPLODED rows
+ *  (one per (link row, sub-type) pair), which aren't `DatasetLinkRow`s. */
+function capExportRows<T>(rows: readonly T[]): { rows: T[]; total: number; truncated: boolean } {
   const total = rows.length;
   return {
     rows: rows.slice(0, DATA_SHARING_EXPORT_CAP),
@@ -1009,9 +1154,18 @@ export function capDatasetLinkRows(rows: readonly DatasetLinkRow[]): DataSharing
   };
 }
 
+/** Slice a (person, dataset) link row set to `DATA_SHARING_EXPORT_CAP` — a
+ *  pure helper (same shape as data-quality's `DataQualityExport`) so tests can
+ *  exercise the truncation branch directly, without 5,001 fake DB rows
+ *  end-to-end. */
+export function capDatasetLinkRows(rows: readonly DatasetLinkRow[]): DataSharingExport {
+  return capExportRows(rows);
+}
+
 const DATA_SHARING_CSV_HEADERS = [
   "repository",
   "accession_or_doi",
+  "dataset_url",
   "title",
   "resource_type",
   "data_type",
@@ -1027,15 +1181,20 @@ const DATA_SHARING_CSV_HEADERS = [
   "pmids",
 ] as const;
 
-/** Serialize item-level (person, dataset) link rows to a CSV string — one row
- *  per link (this loader's own grain), not one row per distinct dataset. No
- *  email/PII field: neither `DatasetDeposit` nor `PersonDatasetDeposit` carries
- *  one — `faculty_name` + `cwid` are the only person-identifying columns, same
- *  as the on-page "Named faculty" table. */
-export function buildDataSharingCsv(rows: readonly DatasetLinkRow[]): string {
-  const body = rows.map((r) => [
+/** One link row's cells, in `DATA_SHARING_CSV_HEADERS` order — the single
+ *  serializer both `buildDataSharingCsv` and `buildSectionItemsCsv` share, so
+ *  the two item-grain exports can't drift column-wise. `dataset_url` is the
+ *  same per-accession deep link the public profile "Datasets" section renders
+ *  (`resolveDatasetUrl` — DOI → doi.org, else the repository's accession
+ *  resolver), not the repository homepage; empty when the accession is
+ *  missing or no resolver matches. */
+function datasetLinkCsvCells(r: DatasetLinkRow): CsvCell[] {
+  return [
     r.repository,
     r.accessionOrDoi ?? "",
+    r.accessionOrDoi
+      ? resolveDatasetUrl({ repository: r.repository, accessionOrDoi: r.accessionOrDoi }) ?? ""
+      : "",
     r.title ?? "",
     r.resourceType ?? "",
     r.dataType ?? "",
@@ -1049,8 +1208,16 @@ export function buildDataSharingCsv(rows: readonly DatasetLinkRow[]): string {
     r.scholarName,
     r.cwid,
     r.pmids?.join("; ") ?? "",
-  ]);
-  return toCsv(DATA_SHARING_CSV_HEADERS, body);
+  ];
+}
+
+/** Serialize item-level (person, dataset) link rows to a CSV string — one row
+ *  per link (this loader's own grain), not one row per distinct dataset. No
+ *  email/PII field: neither `DatasetDeposit` nor `PersonDatasetDeposit` carries
+ *  one — `faculty_name` + `cwid` are the only person-identifying columns, same
+ *  as the on-page "Named faculty" table. */
+export function buildDataSharingCsv(rows: readonly DatasetLinkRow[]): string {
+  return toCsv(DATA_SHARING_CSV_HEADERS, rows.map(datasetLinkCsvCells));
 }
 
 /** Per-table CSV sections for `/edit/data-sharing/export?section=…` — one
@@ -1133,5 +1300,83 @@ export function buildSectionCsv(
         ["category", "subtype", "deposit_instances"],
         report.bySubtype.map((s) => [s.category, s.subtype, s.count]),
       );
+  }
+}
+
+/** ITEM-grain per-section export — `?section=<X>&grain=items`. One row per
+ *  (person, dataset) link (the same grain as `buildDataSharingCsv`, whose
+ *  columns and `datasetLinkCsvCells` serializer this reuses), scoped and
+ *  ordered to match the on-page table the section names — the 2026-08-16
+ *  stakeholder ask: every aggregate table should offer its underlying items,
+ *  not just the rollup counts (`buildSectionCsv` above).
+ *
+ *  Organization per section (each is the FULL row set, re-sorted — the
+ *  sections differ by ordering/explosion, not by filtering, because every
+ *  link row belongs to some repository AND some department AND some scholar):
+ *  - `"repositories"` — repository, then faculty name.
+ *  - `"departments"`  — department (null sorts last, serialized as `""`),
+ *    then faculty name.
+ *  - `"faculty"`      — faculty name, then repository.
+ *  - `"subtypes"`     — EXPLODED: one output row per (link row, parsed
+ *    sub-type) pair, via the same `parseSensitiveSubtypes` the §5 rollup
+ *    uses (malformed tokens skipped); rows with no parseable sub-type are
+ *    omitted — this is the one section that filters, because a row with no
+ *    sub-type has no place in a sub-type-grouped listing. Leading
+ *    `category`/`subtype` columns, then the standard item columns. Sorted
+ *    category, subtype, repository.
+ *  - `"tiers"`        — `null`: no items grain on purpose; tier is a pure
+ *    function of repository, so the `"repositories"` grain already IS the
+ *    tier drill-down, and a second byte-different ordering of the same rows
+ *    would just invite "which file is canonical" confusion.
+ *
+ *  `DATA_SHARING_EXPORT_CAP` applies to the OUTPUT rows (after exploding,
+ *  for `"subtypes"`) via the same `capExportRows` the default export's
+ *  `capDatasetLinkRows` wraps — silently truncated at the cap, same safety-
+ *  net-not-a-real-limit rationale as `DATA_SHARING_EXPORT_CAP`'s comment. */
+export function buildSectionItemsCsv(
+  rows: readonly DatasetLinkRow[],
+  section: CsvSection,
+): string | null {
+  const byName = (a: DatasetLinkRow, b: DatasetLinkRow) => a.scholarName.localeCompare(b.scholarName);
+  switch (section) {
+    case "tiers":
+      return null;
+    case "repositories": {
+      const sorted = [...rows].sort((a, b) => a.repository.localeCompare(b.repository) || byName(a, b));
+      return toCsv(DATA_SHARING_CSV_HEADERS, capExportRows(sorted).rows.map(datasetLinkCsvCells));
+    }
+    case "departments": {
+      const sorted = [...rows].sort((a, b) => {
+        // Null department sorts LAST (it serializes as "" — sorting by the
+        // serialized value would put it first, hiding the no-department rows
+        // above the fold instead of after every real department).
+        if (a.department === null && b.department !== null) return 1;
+        if (a.department !== null && b.department === null) return -1;
+        return (a.department ?? "").localeCompare(b.department ?? "") || byName(a, b);
+      });
+      return toCsv(DATA_SHARING_CSV_HEADERS, capExportRows(sorted).rows.map(datasetLinkCsvCells));
+    }
+    case "faculty": {
+      const sorted = [...rows].sort((a, b) => byName(a, b) || a.repository.localeCompare(b.repository));
+      return toCsv(DATA_SHARING_CSV_HEADERS, capExportRows(sorted).rows.map(datasetLinkCsvCells));
+    }
+    case "subtypes": {
+      const exploded: { category: string; subtype: string; row: DatasetLinkRow }[] = [];
+      for (const row of rows) {
+        for (const pair of parseSensitiveSubtypes(row.sensitiveSubtypes)) {
+          exploded.push({ ...pair, row });
+        }
+      }
+      exploded.sort(
+        (a, b) =>
+          a.category.localeCompare(b.category) ||
+          a.subtype.localeCompare(b.subtype) ||
+          a.row.repository.localeCompare(b.row.repository),
+      );
+      return toCsv(
+        ["category", "subtype", ...DATA_SHARING_CSV_HEADERS],
+        capExportRows(exploded).rows.map((e) => [e.category, e.subtype, ...datasetLinkCsvCells(e.row)]),
+      );
+    }
   }
 }
