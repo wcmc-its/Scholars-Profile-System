@@ -28,7 +28,15 @@ const pending = (
   candidateName: "Karuna Ganesh",
   candidateOrgs: "Memorial Sloan Kettering, Stanford University",
   grantCount: 3,
-  sampleGrants: [{ title: "Plasticity in cancer metastasis", startYear: 2019, endYear: 2024 }],
+  sampleGrants: [
+    {
+      title: "Plasticity in cancer metastasis",
+      startYear: 2019,
+      endYear: 2024,
+      awardNumber: "5R01CA245678-04",
+      applId: 10123456,
+    },
+  ],
   ...p,
 });
 
@@ -39,7 +47,15 @@ const confirmed = (
   candidateName: "Joel Sheinfeld",
   candidateOrgs: "Memorial Sloan Kettering",
   grantCount: 1,
-  sampleGrants: [{ title: "Germ cell tumor biology", startYear: 2015, endYear: 2020 }],
+  sampleGrants: [
+    {
+      title: "Germ cell tumor biology",
+      startYear: 2015,
+      endYear: 2020,
+      awardNumber: "5R01CA000002-05",
+      applId: 10999999,
+    },
+  ],
   reviewedAt: "2026-06-26",
   autolocked: true,
   ...p,
@@ -129,14 +145,42 @@ describe("ReporterProfileCard", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("renders the three status pills, with the public-profile consequence emphasized (§3.3)", () => {
+  it("confirmed matches are ONLY tagged public — never the admin/scholar-only pill, since they ARE public", () => {
     render(<ReporterProfileCard cwid="aaa1" confirmed={[confirmed({ candidateId: "rp-2" })]} />);
-    const pills = screen.getByTestId("reporter-profile-pills");
-    expect(within(pills).getByText("Visible to administrators and the scholar")).toBeTruthy();
+    const pills = screen.getByTestId("reporter-profile-pills-confirmed");
     expect(within(pills).getByText("Sourced from NIH RePORTER")).toBeTruthy();
     // The amber pill is the consequential fact — carries the warning tint, not slate.
     const publicPill = within(pills).getByText("Included on the public profile");
     expect(publicPill.closest("li")?.className).toMatch(/amber/);
+    // §3.3 regression: this pill contradicts "public" and must not appear here.
+    expect(screen.queryByText("Visible to administrators and the scholar")).toBeNull();
+  });
+
+  it("pending candidates ARE tagged admin/scholar-only — not yet public", () => {
+    render(<ReporterProfileCard cwid="aaa1" candidates={[pending({ candidateId: "rp-1" })]} />);
+    const pills = screen.getByTestId("reporter-profile-pills-pending");
+    expect(within(pills).getByText("Visible to administrators and the scholar")).toBeTruthy();
+    expect(within(pills).getByText("Sourced from NIH RePORTER")).toBeTruthy();
+    expect(screen.queryByText("Included on the public profile")).toBeNull();
+  });
+
+  it("renders sample grants as a table: title, funding source, dates, and an outbound RePORTER link", () => {
+    render(<ReporterProfileCard cwid="aaa1" candidates={[pending({ candidateId: "rp-1" })]} />);
+    const table = screen.getByTestId("reporter-profile-sample-grants");
+    expect(within(table).getByText("Plasticity in cancer metastasis")).toBeTruthy();
+    expect(within(table).getByText(/NIH\/NCI/)).toBeTruthy();
+    expect(within(table).getByText("2019–2024")).toBeTruthy();
+    const link = within(table).getByRole("link", { name: /View/ });
+    expect(link.getAttribute("href")).toBe("https://reporter.nih.gov/project-details/10123456");
+  });
+
+  it("explains the matching logic + staleness in a modal, with a link to the repo spec", () => {
+    render(<ReporterProfileCard cwid="aaa1" candidates={[pending({ candidateId: "rp-1" })]} />);
+    fireEvent.click(screen.getByRole("button", { name: /How do we find these matches/ }));
+    expect(screen.getByText(/rechecked every\s*night/)).toBeTruthy();
+    expect(screen.getByText(/locked in and won.t change on its own/)).toBeTruthy();
+    const specLink = screen.getByRole("link", { name: /Full technical details/ });
+    expect(specLink.getAttribute("href")).toMatch(/reporter-grants-v2-matcher-spec\.md$/);
   });
 
   it("heading names the scholar (opt-out framing), not the old 'Is this you?'", () => {

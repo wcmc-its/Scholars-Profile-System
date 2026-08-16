@@ -514,6 +514,10 @@ export type EditContextReporterSampleGrant = {
   title: string;
   startYear: number | null;
   endYear: number | null;
+  /** Most-recent-FY award number — funding-source column (`parseFunderEyebrow`). */
+  awardNumber: string | null;
+  /** Most-recent-FY appl_id — keys the outbound RePORTER project-detail link. */
+  applId: number | null;
 };
 
 /**
@@ -786,6 +790,8 @@ function coerceReporterSampleGrants(value: unknown): EditContextReporterSampleGr
       title: typeof g.title === "string" ? g.title : "",
       startYear: typeof g.startYear === "number" ? g.startYear : null,
       endYear: typeof g.endYear === "number" ? g.endYear : null,
+      awardNumber: typeof g.awardNumber === "string" ? g.awardNumber : null,
+      applId: typeof g.applId === "number" ? g.applId : null,
     }))
     .filter((g) => g.title.length > 0);
 }

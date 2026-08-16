@@ -187,6 +187,11 @@ export interface SampleGrant {
   title: string;
   startYear: number | null;
   endYear: number | null;
+  /** Most-recent-FY award number (e.g. "5R01CA245678-04") — the source for the
+   *  card's "funding source" column (`parseFunderEyebrow`/`parseNihAward`). */
+  awardNumber: string | null;
+  /** Most-recent-FY appl_id — keys the outbound RePORTER project-detail link. */
+  applId: number | null;
 }
 
 /** The card-summary fields persisted on a `ReporterProfileCandidate` row. */
@@ -230,6 +235,8 @@ export function summarizeCandidateGrants(
       title: g.title?.trim() || `(untitled grant ${g.coreProjectNum})`,
       startYear: yearOf(g.startDate),
       endYear: yearOf(g.endDate),
+      awardNumber: g.awardNumber,
+      applId: g.applId,
     }));
 
   return { grantCount: netNewGroups.length, candidateOrgs: orgs.join(", "), sampleGrants };

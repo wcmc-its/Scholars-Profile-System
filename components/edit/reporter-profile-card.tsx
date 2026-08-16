@@ -36,18 +36,32 @@
 "use client";
 
 import * as React from "react";
-import { Building2, Database, EyeOff, Globe } from "lucide-react";
+import { Building2, Database, EyeOff, Globe, HelpCircle } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { Button } from "@/components/ui/button";
-import { nihReporterPiUrl } from "@/lib/nih-reporter";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { parseFunderEyebrow } from "@/lib/grant-meta";
+import { nihReporterPiUrl, nihReporterProjectUrl } from "@/lib/nih-reporter";
 import { REJECT_REASONS, REJECT_REASON_LABEL, type RejectReason } from "@/lib/edit/reporter-profile";
 import type {
   EditContextReporterProfileCandidate,
   EditContextReporterProfileConfirmed,
   EditContextReporterSampleGrant,
 } from "@/lib/api/edit-context";
+
+/** The public repo's full matcher spec — linked from the "How this works" modal
+ *  below for anyone who wants the engineering detail past the plain-language copy. */
+const MATCHER_SPEC_URL =
+  "https://github.com/wcmc-its/Scholars-Profile-System/blob/master/docs/reporter-grants-v2-matcher-spec.md";
 
 type CardAction = "confirm" | "reject" | "revoke";
 
@@ -66,20 +80,106 @@ function yearRange(g: EditContextReporterSampleGrant): string {
   return `${g.startYear ?? ""}–${g.endYear ?? ""}`;
 }
 
-function SampleGrants({ grants }: { grants: ReadonlyArray<EditContextReporterSampleGrant> }) {
+function SampleGrantsTable({ grants }: { grants: ReadonlyArray<EditContextReporterSampleGrant> }) {
   if (grants.length === 0) return null;
   return (
-    <ul className="mt-2 space-y-1 text-[13px]">
-      {grants.map((g, i) => {
-        const yrs = yearRange(g);
-        return (
-          <li key={i} className="text-foreground">
-            {g.title}
-            {yrs ? <span className="text-muted-foreground"> ({yrs})</span> : null}
-          </li>
-        );
-      })}
-    </ul>
+    <div className="mt-2 overflow-x-auto">
+      <table className="w-full text-[13px]" data-testid="reporter-profile-sample-grants">
+        <thead className="text-muted-foreground text-left">
+          <tr className="border-apollo-border border-b">
+            <th className="py-1 pr-3 font-medium">Grant title</th>
+            <th className="py-1 pr-3 font-medium">Funding source</th>
+            <th className="py-1 pr-3 font-medium">Dates</th>
+            <th className="py-1 font-medium">
+              <span className="sr-only">RePORTER link</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {grants.map((g, i) => (
+            <tr key={i} className="border-apollo-border border-b last:border-0">
+              <td className="text-foreground py-1.5 pr-3">{g.title}</td>
+              <td className="text-muted-foreground py-1.5 pr-3 whitespace-nowrap">
+                {parseFunderEyebrow("NIH", g.awardNumber)}
+              </td>
+              <td className="text-muted-foreground py-1.5 pr-3 whitespace-nowrap">
+                {yearRange(g) || "—"}
+              </td>
+              <td className="py-1.5 whitespace-nowrap">
+                {g.applId != null ? (
+                  <a
+                    href={nihReporterProjectUrl(g.applId)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Opens this project's NIH RePORTER page"
+                    className="text-apollo-slate underline-offset-2 hover:underline"
+                  >
+                    View ↗
+                  </a>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Explains the matching signals + when a match can still change, in plain
+ *  language, with a link out to the full spec for anyone who wants it —
+ *  keeps the panel's own copy short (§ the modal is the "too much detail"
+ *  escape hatch). */
+function HowThisWorksDialog() {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          className="text-apollo-slate mt-1 inline-flex items-center gap-1 text-[13px] underline-offset-2 hover:underline"
+        >
+          <HelpCircle className="size-3.5" aria-hidden />
+          How do we find these matches?
+        </button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>How we match NIH grants</DialogTitle>
+          <DialogDescription asChild>
+            <div className="text-foreground space-y-3 text-sm">
+              <p>
+                We search NIH RePORTER for grants under the same name, then check whether that
+                investigator’s own grant-linked publications overlap with publications already
+                confirmed on this profile. A strong, one-sided overlap is what makes a match —
+                a common name alone is never enough.
+              </p>
+              <p>
+                When a name is shared by more than one NIH investigator, we only act when one
+                candidate’s publication overlap clearly stands out from the others. If it’s
+                close, we leave it for a human to confirm rather than guess.
+              </p>
+              <p>
+                <strong>Can this change?</strong> A suggestion awaiting review is rechecked every
+                night against NIH’s current data — its grant list can update, or it can disappear,
+                until someone confirms or declines it. Once a match is confirmed (by a person, or
+                automatically for an especially strong overlap), it’s locked in and won’t change
+                on its own — removing it is the only way to change it after that.
+              </p>
+              <a
+                href={MATCHER_SPEC_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-apollo-slate inline-block underline-offset-2 hover:underline"
+              >
+                Full technical details ↗
+              </a>
+            </div>
+          </DialogDescription>
+        </DialogHeader>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -260,18 +360,13 @@ export function ReporterProfileCard({
         `the nightly update — remove anything that isn't ${theirs}.`
       }
     >
-      <ul className="flex flex-wrap gap-2" data-testid="reporter-profile-pills">
-        <Pill icon={EyeOff} label="Visible to administrators and the scholar" />
-        <Pill icon={Globe} label="Included on the public profile" tint="warning" />
-        <Pill icon={Database} label="Sourced from NIH RePORTER" />
-      </ul>
-
       <p
-        className="text-muted-foreground -mt-1 text-[13px]"
+        className="text-muted-foreground text-[13px]"
         data-testid="reporter-profile-cv-purpose"
       >
         Matched grants also appear on {whose} <strong>CV</strong> when you generate one.
       </p>
+      <HowThisWorksDialog />
 
       {pending.length === 0 &&
       acted.length === 0 &&
@@ -283,7 +378,11 @@ export function ReporterProfileCard({
       {/* Pending — "Is this you?" (OPT-IN: not on the profile until confirmed). */}
       {pending.length > 0 ? (
         <section className="mt-2">
-          <p className="text-muted-foreground text-[13px]">
+          <ul className="flex flex-wrap gap-2" data-testid="reporter-profile-pills-pending">
+            <Pill icon={EyeOff} label="Visible to administrators and the scholar" />
+            <Pill icon={Database} label="Sourced from NIH RePORTER" />
+          </ul>
+          <p className="text-muted-foreground mt-2 text-[13px]">
             These aren’t on {whose} profile yet — confirm the ones that are {theirs} to add them.
           </p>
           <ul className="mt-3 space-y-4" data-testid="reporter-profile-pending">
@@ -305,7 +404,7 @@ export function ReporterProfileCard({
                     </span>
                   </p>
                   <InstitutionLine orgs={c.candidateOrgs} />
-                  <SampleGrants grants={c.sampleGrants} />
+                  <SampleGrantsTable grants={c.sampleGrants} />
                   <ReporterPiLink profileId={c.externalProfileId} />
 
                   <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -382,7 +481,11 @@ export function ReporterProfileCard({
       {history.length > 0 ? (
         <section className="mt-6" data-testid="reporter-profile-confirmed">
           <h3 className="text-sm font-medium">On the public profile</h3>
-          <ul className="mt-2 space-y-3">
+          <ul className="mt-2 flex flex-wrap gap-2" data-testid="reporter-profile-pills-confirmed">
+            <Pill icon={Globe} label="Included on the public profile" tint="warning" />
+            <Pill icon={Database} label="Sourced from NIH RePORTER" />
+          </ul>
+          <ul className="mt-3 space-y-3">
             {history.map((c) => {
               const isBusy = busy.has(c.candidateId);
               const err = errors.get(c.candidateId);
@@ -397,7 +500,7 @@ export function ReporterProfileCard({
                     </span>
                   </p>
                   <InstitutionLine orgs={c.candidateOrgs} />
-                  <SampleGrants grants={c.sampleGrants} />
+                  <SampleGrantsTable grants={c.sampleGrants} />
                   <ReporterPiLink profileId={c.externalProfileId} />
                   <div className="mt-2">
                     <Button

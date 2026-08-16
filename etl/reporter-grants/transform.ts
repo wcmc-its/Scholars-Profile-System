@@ -39,6 +39,9 @@ export interface GroupedProject {
   coreProjectNum: string;
   /** project_num of the most recent fiscal year — for display/award-number. */
   awardNumber: string | null;
+  /** appl_id of the most recent fiscal year — keys the RePORTER project-detail
+   *  outbound link (`nihReporterProjectUrl`). */
+  applId: number | null;
   /** Grantee org, preferring WCM when any fiscal year was WCM-administered. */
   orgName: string | null;
   title: string | null;
@@ -83,6 +86,7 @@ export function groupProjectsByCore(
       byCore.set(core, {
         coreProjectNum: core,
         awardNumber: p.project_num ?? null,
+        applId: p.appl_id ?? null,
         orgName: p.org_name ?? null,
         title: p.project_title ?? null,
         startDate: start,
@@ -110,6 +114,7 @@ export function groupProjectsByCore(
     if (fy !== null && fy >= existing.latestFyForMeta) {
       existing.latestFyForMeta = fy;
       if (p.project_num) existing.awardNumber = p.project_num;
+      if (p.appl_id) existing.applId = p.appl_id;
       if (p.project_title) existing.title = p.project_title;
     }
     // Prefer a WCM org over a non-WCM one for labeling/dedup.
@@ -121,6 +126,7 @@ export function groupProjectsByCore(
   return [...byCore.values()].map((acc) => ({
     coreProjectNum: acc.coreProjectNum,
     awardNumber: acc.awardNumber,
+    applId: acc.applId,
     orgName: acc.orgName,
     title: acc.title,
     startDate: acc.startDate,

@@ -213,6 +213,7 @@ describe("reconcileWithExisting (spec §11 #7/#8/#9 — idempotency / no resurre
 const grouped = (over: Partial<GroupedProject>): GroupedProject => ({
   coreProjectNum: "R01CA000001",
   awardNumber: "5R01CA000001-03",
+  applId: 1000001,
   orgName: "STANFORD UNIVERSITY",
   title: "A prior-institution study",
   startDate: new Date("2015-09-01"),
@@ -233,7 +234,13 @@ describe("summarizeCandidateGrants (card-summary fields for the ReporterProfileC
     );
     expect(summary.grantCount).toBe(2);
     expect(summary.candidateOrgs).toBe("STANFORD UNIVERSITY");
-    expect(summary.sampleGrants[0]).toEqual({ title: "Newer study", startYear: 2020, endYear: 2023 });
+    expect(summary.sampleGrants[0]).toEqual({
+      title: "Newer study",
+      startYear: 2020,
+      endYear: 2023,
+      awardNumber: "5R01CA000001-03",
+      applId: 1000001,
+    });
     expect(summary.sampleGrants).toHaveLength(2);
   });
 
