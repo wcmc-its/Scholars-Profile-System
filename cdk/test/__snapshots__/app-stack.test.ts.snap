@@ -4837,7 +4837,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "MATCHA_GLOSS_RERANK",
-                "Value": "on",
+                "Value": "off",
               },
               {
                 "Name": "MATCHA_GLOSS_RERANK_LAMBDA",

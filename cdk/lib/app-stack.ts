@@ -1486,14 +1486,18 @@ export class AppStack extends Stack {
         // by BM25(gloss). A RANKING change ⇒ eval-gated. The 2026-07-22 in-VPC λ-sweep cleared the
         // gate on the eval-fair metric: graded-only nDCG@20 rose 0.872→0.894 (λ=1.0), monotonic,
         // ~2.8× the 0.0074 noise floor; λ=0.5 = 0.890 (within 0.004 of peak, gentler displacement);
-        // graded-relevant retention rose 232→234 (zero experts lost). STAGING-ON at λ=0.5; prod held
-        // OFF pending an eyeball → deliberate prod flip. NOTE: the rescore is NOT recall-neutral on a
-        // multi-shard index (per-shard rescore-then-merge churns the ungraded deep tail, fused rank
-        // ≥66) — the win rests on the graded metric, not on recall-invariance. See
+        // graded-relevant retention rose 232→234 (zero experts lost). Was STAGING-ON pending the
+        // eyeball caveat 3 asked for; that eyeball (PR #2048, 2026-07-29) found it thinner than the
+        // aggregate metric suggests — top-10 is a near coin-flip (4 fixtures better / 3 worse), with
+        // reproducible 5/5-draw regressions on heme-malignancy and single-cell-genomics (a graded
+        // relevant result pushed out, a not-relevant one promoted in). Held OFF everywhere pending a
+        // domain-expert read of those two fixtures — see #2048. NOTE: the rescore is NOT recall-
+        // neutral on a multi-shard index (per-shard rescore-then-merge churns the ungraded deep tail,
+        // fused rank ≥66) — the win rests on the graded metric, not on recall-invariance. See
         // docs/2026-07-22-gloss-rerank-eval-result-and-fix-handoff.md.
-        MATCHA_GLOSS_RERANK: env === "staging" ? "on" : "off",
-        // λ = rescore_query_weight, wired per-env (was eval-only, set per-arm in the sweep). 0.5 is
-        // the picked value; inert in prod while the flag is off, so a plain literal is fine.
+        MATCHA_GLOSS_RERANK: "off",
+        // λ = rescore_query_weight (was eval-only, set per-arm in the sweep). 0.5 is the picked
+        // value; inert while the flag is off everywhere, so a plain literal is fine.
         MATCHA_GLOSS_RERANK_LAMBDA: "0.5",
         // MATCHA_GLOSS_INWORDS — the "in their words" evidence line: highlight the gloss's distinctive
         // terms (the sponsor's sense words that diverge from the MeSH canonical) in each candidate's
