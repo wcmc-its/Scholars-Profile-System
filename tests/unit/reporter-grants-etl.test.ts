@@ -50,12 +50,14 @@ describe("recencyShouldSuppress", () => {
 describe("groupProjectsByCore", () => {
   it("collapses fiscal years of one award: earliest start, latest end, max FY, summed amount", () => {
     const grouped = groupProjectsByCore([
-      fyProj({ fiscal_year: 2018, project_start_date: "2018-09-01", project_end_date: "2019-08-31", award_amount: 50000 }),
-      fyProj({ fiscal_year: 2020, project_start_date: "2020-09-01", project_end_date: "2023-08-31", award_amount: 70000 }),
+      fyProj({ fiscal_year: 2018, appl_id: 1, project_start_date: "2018-09-01", project_end_date: "2019-08-31", award_amount: 50000 }),
+      fyProj({ fiscal_year: 2020, appl_id: 2, project_start_date: "2020-09-01", project_end_date: "2023-08-31", award_amount: 70000 }),
     ]);
     expect(grouped).toHaveLength(1);
     const g = grouped[0]!;
     expect(g.coreProjectNum).toBe("R01CA245678");
+    // most-recent-FY wins, same rule as awardNumber/title.
+    expect(g.applId).toBe(2);
     expect(g.startDate?.toISOString().slice(0, 10)).toBe("2018-09-01");
     expect(g.endDate?.toISOString().slice(0, 10)).toBe("2023-08-31");
     expect(g.maxFiscalYear).toBe(2020);
@@ -86,6 +88,7 @@ describe("groupProjectsByCore", () => {
 const grouped = (over: Partial<GroupedProject>): GroupedProject => ({
   coreProjectNum: "R01CA245678",
   awardNumber: "5R01CA245678-03",
+  applId: 1000001,
   orgName: "STANFORD UNIVERSITY",
   title: "A study",
   startDate: new Date("2018-09-01"),
