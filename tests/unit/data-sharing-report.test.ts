@@ -1053,14 +1053,15 @@ describe("buildDataSharingCsv", () => {
         depositYear: 2025,
         provenance: "databank",
         confidence: "high",
+        pmids: ["11111111", "22222222"],
       },
     ]);
     const lines = csv.trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "repository,accession_or_doi,title,resource_type,data_type,sensitive_cats,sensitive_subtypes,access_model,deposit_year,provenance,confidence,department,faculty_name,cwid",
+      "repository,accession_or_doi,title,resource_type,data_type,sensitive_cats,sensitive_subtypes,access_model,deposit_year,provenance,confidence,department,faculty_name,cwid,pmids",
     );
     expect(lines[1]).toBe(
-      'GEO,GSE12345,"A dataset, with a comma in the title",Dataset,genomic,genomic,genomic:WGS/WES,open,2025,databank,high,Medicine,"Alice, A",aaa1',
+      'GEO,GSE12345,"A dataset, with a comma in the title",Dataset,genomic,genomic,genomic:WGS/WES,open,2025,databank,high,Medicine,"Alice, A",aaa1,11111111; 22222222',
     );
   });
 
@@ -1086,7 +1087,7 @@ describe("buildDataSharingCsv", () => {
       },
     ]);
     const line = csv.trimEnd().split("\r\n")[1];
-    expect(line).toBe("dbGaP,,,,,,,,,,,,Bob B,bbb2");
+    expect(line).toBe("dbGaP,,,,,,,,,,,,Bob B,bbb2,");
   });
 });
 

@@ -1024,6 +1024,7 @@ const DATA_SHARING_CSV_HEADERS = [
   "department",
   "faculty_name",
   "cwid",
+  "pmids",
 ] as const;
 
 /** Serialize item-level (person, dataset) link rows to a CSV string — one row
@@ -1047,6 +1048,90 @@ export function buildDataSharingCsv(rows: readonly DatasetLinkRow[]): string {
     r.department ?? "",
     r.scholarName,
     r.cwid,
+    r.pmids?.join("; ") ?? "",
   ]);
   return toCsv(DATA_SHARING_CSV_HEADERS, body);
+}
+
+/** Per-table CSV sections for `/edit/data-sharing/export?section=…` — one
+ *  entry per on-page aggregate table (the item-level export above stays the
+ *  no-param default). `recentItems` has no section on purpose: it's a slice
+ *  of the item-level grain the default export already covers in full. */
+export const CSV_SECTIONS = ["tiers", "repositories", "departments", "faculty", "subtypes"] as const;
+export type CsvSection = (typeof CSV_SECTIONS)[number];
+
+/** Serialize one aggregate table of an already-built report. Columns mirror
+ *  the on-page table (share rates exported as numerator/denominator pairs —
+ *  the page's own "never a bare percentage" rule applies to exports too). */
+export function buildSectionCsv(
+  report: Omit<DataSharingReport, "dataAsOf">,
+  section: CsvSection,
+): string {
+  switch (section) {
+    case "tiers":
+      return toCsv(
+        ["tier", "datasets", "repositories"],
+        report.byRepositoryTier.map((t) => [t.tier, t.datasets, t.repositories.join("; ")]),
+      );
+    case "repositories":
+      return toCsv(
+        ["repository", "tier", "access_model", "datasets"],
+        report.byRepository.map((r) => [r.repository, r.tier, r.accessModel ?? "", r.datasets]),
+      );
+    case "departments":
+      return toCsv(
+        [
+          "department",
+          "datasets",
+          "depositing_faculty",
+          "open",
+          "controlled",
+          "registry",
+          "share_rate_numerator",
+          "share_rate_denominator",
+        ],
+        report.byDepartment.map((d) => [
+          d.department,
+          d.datasets,
+          d.faculty,
+          d.openDatasets,
+          d.controlledDatasets,
+          d.registryDatasets,
+          d.shareRateNumerator ?? "",
+          d.shareRateDenominator ?? "",
+        ]),
+      );
+    case "faculty":
+      return toCsv(
+        [
+          "faculty_name",
+          "cwid",
+          "department",
+          "datasets",
+          "open",
+          "controlled",
+          "concerning",
+          "foreign_hosted",
+          "share_rate_numerator",
+          "share_rate_denominator",
+        ],
+        report.byFaculty.map((f) => [
+          f.name,
+          f.cwid,
+          f.department ?? "",
+          f.datasets,
+          f.openDatasets,
+          f.controlledDatasets,
+          f.concerningDeposits,
+          f.foreignHostedDeposits,
+          f.shareRateNumerator ?? "",
+          f.shareRateDenominator ?? "",
+        ]),
+      );
+    case "subtypes":
+      return toCsv(
+        ["category", "subtype", "deposit_instances"],
+        report.bySubtype.map((s) => [s.category, s.subtype, s.count]),
+      );
+  }
 }

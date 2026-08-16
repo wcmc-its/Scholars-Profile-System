@@ -38,4 +38,25 @@ describe("DataSharingDashboard — 08-16 mockup design pass", () => {
     // Tier-table repo chips carry per-repo counts, not bare names.
     expect(screen.getByText(/GEO 30/)).toBeTruthy();
   });
+
+  it("08-16 follow-ups: per-table downloads, Methods trigger, PMID links, no access pills", () => {
+    const { container } = render(<DataSharingDashboard report={report} />);
+    // One per-section CSV link per aggregate table.
+    const sectionLinks = [...container.querySelectorAll('a[href*="section="]')].map((a) =>
+      a.getAttribute("href"),
+    );
+    // No "subtypes" here: §5 hides itself when bySubtype is empty (this
+    // fixture has no sensitive subtypes), taking its download link with it.
+    for (const s of ["tiers", "repositories", "departments", "faculty"]) {
+      expect(sectionLinks.some((h) => h?.endsWith(`section=${s}`))).toBe(true);
+    }
+    // Methods dialog trigger present.
+    expect(screen.getByRole("button", { name: "Methods" })).toBeTruthy();
+    // Recent activity links each citing PMID out to PubMed.
+    expect(
+      container.querySelector('a[href="https://pubmed.ncbi.nlm.nih.gov/p0/"]'),
+    ).toBeTruthy();
+    // Access model renders as plain text, not a filled Badge pill.
+    expect(container.querySelector("td [data-slot='badge']")).toBeNull();
+  });
 });

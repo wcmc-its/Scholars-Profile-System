@@ -59,11 +59,19 @@
  * counts inline in the tier table, and a `FACULTY_ROW_CAP` "+N more" cut on
  * §4. Decision record: the DECISION 2026-08-16 section of the Projects
  * handoff doc this mockup ships with.
+ *
+ * Follow-up pass (same day): ArrowUpRight on every external link
+ * (`ExternalA`), a per-table "Download CSV" (`DownloadLink` →
+ * `?section=` on the export route), the methodology prose + copy-paragraph
+ * block folded into a Methods dialog (`data-sharing-methods.tsx`), a PMIDs
+ * column on §6 (the only table naming specific pubs), and `AccessChip`
+ * de-pilled to plain text.
  */
+import type { ReactNode } from "react";
 import Link from "next/link";
+import { ArrowUpRight } from "lucide-react";
 
-import { CopyButton } from "@/components/publication/copy-button";
-import { Badge } from "@/components/ui/badge";
+import { DataSharingMethodsDialog } from "@/components/edit/data-sharing-methods";
 import { SHARE_RATE_YEAR_FLOOR, type DataSharingReport } from "@/lib/api/data-sharing-report";
 import { tierOf, urlOf } from "@/lib/repository-tier";
 
@@ -88,12 +96,45 @@ function formatDate(d: Date | null): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+/** Plain text since the 08-16 follow-up pass — the filled Badge pills read
+ *  too heavy against the new tier-color scheme ("I don't like those dark
+ *  pills"). Don't reintroduce a pill here. */
 function AccessChip({ accessModel }: { accessModel: string | null }) {
   if (accessModel === null) return <span className="text-muted-foreground">—</span>;
+  return <span>{accessModel === "open" ? "Open" : "Controlled"}</span>;
+}
+
+/** External <a> with the console's ArrowUpRight affordance (the
+ *  email-card/coi-gap-card idiom) — for links that leave SPS. */
+function ExternalA({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <Badge variant={accessModel === "open" ? "default" : "secondary"}>
-      {accessModel === "open" ? "Open" : "Controlled"}
-    </Badge>
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-0.5 hover:underline"
+    >
+      {children}
+      <ArrowUpRight className="size-3.5 shrink-0" aria-hidden />
+    </a>
+  );
+}
+
+/** Per-table CSV link — a plain <a> because the target is a download route
+ *  handler; <Link>'s client nav + prefetch would fetch the file itself. */
+function DownloadLink({
+  href,
+  className = "text-xs hover:underline",
+  testId,
+}: {
+  href: string;
+  className?: string;
+  testId?: string;
+}) {
+  return (
+    <a href={href} className={className} data-testid={testId}>
+      Download CSV
+    </a>
   );
 }
 
@@ -191,16 +232,17 @@ function RollupSection({ report }: { report: DataSharingReport }) {
     <section id="rollup" className="scroll-mt-4">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-base font-semibold">1 · Institutional rollup</h2>
-        {/* A plain <a>: /export is a CSV download route (route.ts), not a page,
-            so <Link>'s client nav + prefetch would fetch the file itself. */}
-        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-        <a
-          href="/edit/data-sharing/export"
-          className="text-sm hover:underline"
-          data-testid="ds-export-link"
-        >
-          Download CSV
-        </a>
+        <span className="inline-flex items-center gap-4">
+          <DataSharingMethodsDialog
+            paragraph={paragraph}
+            shareRateYearFloor={SHARE_RATE_YEAR_FLOOR}
+          />
+          <DownloadLink
+            href="/edit/data-sharing/export"
+            className="text-sm hover:underline"
+            testId="ds-export-link"
+          />
+        </span>
       </div>
       <p className="text-muted-foreground mt-1 text-sm">
         Aggregate headline numbers for research leadership and compliance/grant reporting.
@@ -232,39 +274,8 @@ function RollupSection({ report }: { report: DataSharingReport }) {
         </div>
       </div>
 
-      <div className={`${sectionClass} mt-4 p-4`}>
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-medium">One paragraph for reporting</span>
-          <span className="inline-flex items-center gap-1 text-xs">
-            <CopyButton value={paragraph} label="Copy paragraph text" />
-            Copy paragraph
-          </span>
-        </div>
-        <p className="mt-2 text-sm">{paragraph}</p>
-        <p className="text-muted-foreground mt-2 text-xs">
-          Methodology travels with the number: extracted from PubMed DataBankList and full-text Data
-          Availability statements, attributed via ReCiter disambiguation, deposit-vs-use classified.
-          Counts are a floor, not a census — confirmed deposits only, not an estimate of the
-          ceiling.
-        </p>
-      </div>
-
-      <p className="text-muted-foreground mt-4 text-xs">
-        <strong>Coverage skew:</strong> the full-text scan only sees full text that is actually
-        retrievable. A department publishing more in low-PMC-coverage venues will look like it
-        shares less than it does — state this on any cross-department comparison.
-      </p>
-
-      <p className="text-muted-foreground mt-2 text-xs">
-        <strong>Share rate caveats:</strong> the denominator only counts publications from{" "}
-        {SHARE_RATE_YEAR_FLOOR} onward — the extraction pipeline never scanned earlier pubs, so
-        including them would manufacture &quot;no detected deposit&quot; for papers that were simply
-        never checked. Deposit detection today also only covers full-time faculty, an
-        extraction-pipeline scope rather than an SPS filter — a non-full-time scholar&apos;s rate
-        will read 0/0, or a low denominator with a zero numerator, by construction, not as a finding
-        about their sharing behavior.
-      </p>
-
+      {/* Methodology prose + the "One paragraph for reporting" copy block
+          moved into the Methods dialog above (08-16 follow-up pass). */}
       <div className={`${sectionClass} mt-4 p-4`}>
         <div className="text-sm font-medium">Publications by repository risk tier</div>
         <p className="text-muted-foreground mt-1 text-xs">
@@ -317,7 +328,10 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
         Audience: library / RDM team — targeting DMS training and repository support.
       </p>
 
-      <h3 className="text-sm font-semibold">Repositories by risk tier</h3>
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold">Repositories by risk tier</h3>
+        <DownloadLink href="/edit/data-sharing/export?section=tiers" />
+      </div>
       <p className="text-muted-foreground mt-1 text-xs">
         Tier-based only — country-of-concern host or foreign-hosted repository; does not include
         sensitive data-type detection.
@@ -354,7 +368,10 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
         </table>
       </div>
 
-      <h3 className="mt-6 text-sm font-semibold">By repository</h3>
+      <div className="mt-6 flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold">By repository</h3>
+        <DownloadLink href="/edit/data-sharing/export?section=repositories" />
+      </div>
       <div className={sectionClass}>
         <table className="w-full text-sm">
           <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
@@ -371,18 +388,7 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
               return (
                 <tr key={r.repository} className="border-apollo-border border-b">
                   <td className={`${tdClass} font-medium`}>
-                    {url ? (
-                      <a
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="hover:underline"
-                      >
-                        {r.repository}
-                      </a>
-                    ) : (
-                      r.repository
-                    )}
+                    {url ? <ExternalA href={url}>{r.repository}</ExternalA> : r.repository}
                   </td>
                   <td className={tdClass}>
                     <TierChip tier={r.tier} />
@@ -398,7 +404,10 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
         </table>
       </div>
 
-      <h3 className="mt-6 text-sm font-semibold">By department</h3>
+      <div className="mt-6 flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold">By department</h3>
+        <DownloadLink href="/edit/data-sharing/export?section=departments" />
+      </div>
       <div className={sectionClass}>
         <table className="w-full text-sm">
           <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
@@ -460,7 +469,10 @@ function FacultySection({ report }: { report: DataSharingReport }) {
   const more = report.byFaculty.length - rows.length;
   return (
     <section id="faculty" className="mt-10 scroll-mt-4">
-      <h2 className="text-base font-semibold">4 · Named faculty</h2>
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="text-base font-semibold">4 · Named faculty</h2>
+        <DownloadLink href="/edit/data-sharing/export?section=faculty" />
+      </div>
       <p className="text-muted-foreground mt-1 text-sm">
         Per-individual counts, top {FACULTY_ROW_CAP} by dataset count — same access as sections 1–3
         above, no separate review.
@@ -515,7 +527,7 @@ function FacultySection({ report }: { report: DataSharingReport }) {
                       <Link> would prefetch the file itself. */}
                   + {more.toLocaleString()} more — full list in the{" "}
                   {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-                  <a href="/edit/data-sharing/export" className="hover:underline">
+                  <a href="/edit/data-sharing/export?section=faculty" className="hover:underline">
                     CSV export
                   </a>
                 </td>
@@ -552,7 +564,10 @@ function SubtypesSection({ report }: { report: DataSharingReport }) {
   if (report.bySubtype.length === 0) return null;
   return (
     <section id="subtypes" className="scroll-mt-4 mt-10">
-      <h2 className="text-base font-semibold">5 · Deposits by data sub-type</h2>
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="text-base font-semibold">5 · Deposits by data sub-type</h2>
+        <DownloadLink href="/edit/data-sharing/export?section=subtypes" />
+      </div>
       <p className="text-muted-foreground mt-1 text-sm">
         Granular sensitive sub-types detected per deposit, grouped by coarse category —
         deposit-INSTANCE counts, same grain as the link counts elsewhere on this page, not
@@ -606,7 +621,11 @@ function SubtypesSection({ report }: { report: DataSharingReport }) {
 function RecentActivitySection({ report }: { report: DataSharingReport }) {
   return (
     <section id="recent" className="mt-10 scroll-mt-4">
-      <h2 className="text-base font-semibold">6 · Recent activity</h2>
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="text-base font-semibold">6 · Recent activity</h2>
+        {/* Item grain — the default (no-section) export IS this table, in full. */}
+        <DownloadLink href="/edit/data-sharing/export" />
+      </div>
       <p className="text-muted-foreground mt-1 text-sm">
         Item-level — one row per (person, dataset) link, same grain as the CSV export (a dataset
         with more than one depositing/citing faculty member can appear more than once). Sorted by
@@ -623,6 +642,7 @@ function RecentActivitySection({ report }: { report: DataSharingReport }) {
             <tr className="border-apollo-border border-b">
               <th className={thClass}>Repository</th>
               <th className={thClass}>Title</th>
+              <th className={thClass}>PMIDs</th>
               <th className={thClass}>Tier</th>
               <th className={thClass}>Access</th>
               <th className={`${thClass} text-right`}>Deposit year</th>
@@ -638,15 +658,22 @@ function RecentActivitySection({ report }: { report: DataSharingReport }) {
                 // already unique per row, no index needed.
                 <tr key={`${r.datasetId}|${r.cwid}`} className="border-apollo-border border-b">
                   <td className={`${tdClass} font-medium`}>
-                    {url ? (
-                      <a href={url} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                        {r.repository}
-                      </a>
-                    ) : (
-                      r.repository
-                    )}
+                    {url ? <ExternalA href={url}>{r.repository}</ExternalA> : r.repository}
                   </td>
                   <td className={tdClass}>{r.title || r.accessionOrDoi || "—"}</td>
+                  {/* Citing pubs for this (person, dataset) link — the only
+                      table naming specific publications, so the only PMIDs
+                      column (08-16 follow-up). */}
+                  <td className={tdClass}>
+                    {r.pmids?.length
+                      ? r.pmids.map((p, i) => (
+                          <span key={p} className="whitespace-nowrap">
+                            {i > 0 && ", "}
+                            <ExternalA href={`https://pubmed.ncbi.nlm.nih.gov/${p}/`}>{p}</ExternalA>
+                          </span>
+                        ))
+                      : "—"}
+                  </td>
                   <td className={tdClass}>
                     <TierChip tier={tierOf(r.repository)} />
                   </td>
