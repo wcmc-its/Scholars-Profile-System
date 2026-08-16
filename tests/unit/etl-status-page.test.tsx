@@ -843,6 +843,24 @@ describe("/edit/etl-status triage layout", () => {
     // arrow is aria-hidden, so the accessible name stays just the column name.
     const durationHeader = within(table).getByRole("columnheader", { name: "Run duration" });
     expect(durationHeader.getAttribute("aria-sort")).toBe("descending");
+    // A plain "v", not a filled triangle glyph.
+    expect(durationHeader.textContent).toContain(" v");
+    expect(durationHeader.textContent).not.toMatch(/[▲▼]/);
+  });
+
+  it("sorts the Source column by the displayed external/internal qualifier, not just the bare key", async () => {
+    fixtures = allHealthy();
+    render(await Page({ searchParams: Promise.resolve({ sort: "source", dir: "asc" }) }));
+    const table = screen.getByTestId("etl-status-table");
+    const order = within(table)
+      .getAllByTestId(/^etl-status-row-/)
+      .map((r) => r.getAttribute("data-testid"));
+    // "External: …" sorts before "Internal: …" ascending, even though "COI-Gap"
+    // alone would alphabetize before "ED" — the qualifier this column shows is
+    // also what it sorts by.
+    expect(order.indexOf("etl-status-row-ED")).toBeLessThan(
+      order.indexOf("etl-status-row-COI-Gap"),
+    );
   });
 
   it("reports how long the newest attempt took", async () => {
