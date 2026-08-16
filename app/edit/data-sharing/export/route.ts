@@ -33,9 +33,7 @@ export const dynamic = "force-dynamic";
 // `maxDuration` is inert under `output: "standalone"`; the real budget this route is
 // bound by in prod is CloudFront's 30s origin-read timeout (`/edit*` behavior).
 
-/** `request` is optional so the gating tests' bare `GET()` calls stay valid —
- *  Next always passes it in production. */
-export async function GET(request?: Request) {
+export async function GET(request: Request) {
   if (!isDataSharingDashboardEnabled()) {
     return new NextResponse("Not found", { status: 404 });
   }
@@ -49,7 +47,7 @@ export async function GET(request?: Request) {
 
   // ?section=<aggregate> → per-table CSV of the corresponding on-page table;
   // no param keeps the original item-level export. Unknown section → 400.
-  const rawSection = request ? new URL(request.url).searchParams.get("section") : null;
+  const rawSection = new URL(request.url).searchParams.get("section");
   if (rawSection !== null) {
     if (!(CSV_SECTIONS as readonly string[]).includes(rawSection)) {
       return new NextResponse("Unknown section", { status: 400 });

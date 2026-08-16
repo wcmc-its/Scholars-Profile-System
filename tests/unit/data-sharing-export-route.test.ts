@@ -34,6 +34,12 @@ vi.mock("@/lib/db", () => ({ db: { read: {} } }));
 
 import { GET } from "@/app/edit/data-sharing/export/route";
 
+/** Export-route Request — bare = item-level default; pass "?section=…" for a
+ *  per-table CSV. (GET's Request param is required: Next's route typegen
+ *  rejects an optional one.) */
+const exportRequest = (query = "") =>
+  new Request(`http://sps.test/edit/data-sharing/export${query}`);
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "log").mockImplementation(() => {});
@@ -48,27 +54,27 @@ beforeEach(() => {
 describe("/edit/data-sharing/export gating", () => {
   it("404s when the flag is off", async () => {
     mockEnabled.mockReturnValue(false);
-    const res = await GET();
+    const res = await GET(exportRequest());
     expect(res.status).toBe(404);
     expect(mockLoadRows).not.toHaveBeenCalled();
   });
 
   it("401s with no session", async () => {
     mockSession.mockResolvedValue(null);
-    const res = await GET();
+    const res = await GET(exportRequest());
     expect(res.status).toBe(401);
     expect(mockLoadRows).not.toHaveBeenCalled();
   });
 
   it("404s for a viewer who fails the view gate (not superuser/comms_steward)", async () => {
     mockCanView.mockReturnValue(false);
-    const res = await GET();
+    const res = await GET(exportRequest());
     expect(res.status).toBe(404);
     expect(mockLoadRows).not.toHaveBeenCalled();
   });
 
   it("returns a CSV attachment for an in-scope viewer", async () => {
-    const res = await GET();
+    const res = await GET(exportRequest());
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/csv");
     expect(res.headers.get("content-disposition")).toMatch(
@@ -83,7 +89,7 @@ describe("/edit/data-sharing/export gating", () => {
   it("logs one export_data_sharing audit line with row/total/truncated counts", async () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     mockCap.mockReturnValue({ rows: [{ cwid: "fac1" }], total: 5001, truncated: true });
-    await GET();
+    await GET(exportRequest());
     expect(logSpy).toHaveBeenCalledTimes(1);
     const logged = JSON.parse(logSpy.mock.calls[0][0] as string);
     expect(logged).toMatchObject({
@@ -99,7 +105,7 @@ describe("/edit/data-sharing/export gating", () => {
   it("?section=faculty serves the section CSV via loadDataSharingReport, not the item path", async () => {
     mockLoadReport.mockResolvedValue({ byFaculty: [] });
     mockSectionCsv.mockReturnValue("faculty_name,cwid\r\n");
-    const res = await GET(new Request("http://sps.test/edit/data-sharing/export?section=faculty"));
+    const res = await GET(exportRequest("?section=faculty"));
     expect(res.status).toBe(200);
     expect(res.headers.get("content-disposition")).toMatch(
       /attachment; filename="data-sharing-faculty-\d{4}-\d{2}-\d{2}\.csv"/,
@@ -109,7 +115,7 @@ describe("/edit/data-sharing/export gating", () => {
   });
 
   it("400s an unknown section without touching the DB", async () => {
-    const res = await GET(new Request("http://sps.test/edit/data-sharing/export?section=nope"));
+    const res = await GET(exportRequest("?section=nope"));
     expect(res.status).toBe(400);
     expect(mockLoadReport).not.toHaveBeenCalled();
     expect(mockLoadRows).not.toHaveBeenCalled();
@@ -117,7 +123,7 @@ describe("/edit/data-sharing/export gating", () => {
 
   it("section export still respects the gates (flag off → 404)", async () => {
     mockEnabled.mockReturnValue(false);
-    const res = await GET(new Request("http://sps.test/edit/data-sharing/export?section=faculty"));
+    const res = await GET(exportRequest("?section=faculty"));
     expect(res.status).toBe(404);
     expect(mockLoadReport).not.toHaveBeenCalled();
   });
