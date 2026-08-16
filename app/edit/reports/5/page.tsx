@@ -46,7 +46,7 @@ export default async function EditReportsClinicalTrialsPage({
   }
 
   const { center } = (await searchParams) ?? {};
-  const code = await resolveNumberedReportCenterCode(session, db.read, center);
+  const { code } = await resolveNumberedReportCenterCode(session, db.read, center);
   const ctx = await loadReportsContext(code, session, db.read);
   if (ctx === null) {
     return (

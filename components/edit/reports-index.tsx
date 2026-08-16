@@ -1,5 +1,12 @@
 /**
- * The Reports IA redesign (2026-08-14) — `2a`/`1a`/`3a`.
+ * The Reports IA redesign (2026-08-14) — `2a`/`1a`/`3a`. Widened to
+ * department/division units by the org-unit publications reports plan
+ * (2026-08-16): each unit now carries its OWN report catalog (`reports`,
+ * `perReport`), since a center's six reports and a department/division's two
+ * (Publications, NIH-funded pubs) are different lists, not one shared list
+ * with some rows "not live yet" — a department never shows a card for a
+ * report it structurally can't produce (`REPORT_NUMBERS_BY_KIND`,
+ * `lib/edit/cancer-center-reports.ts`).
  *
  * Three renderings of the same underlying per-report data
  * (`lib/edit/cancer-center-reports.ts`'s `loadReportLiveness`), chosen by the
@@ -10,15 +17,15 @@
  *   server-bounded list, filter in-memory, no fetch, stretched-anchor rows
  *   (R7).
  * - `mode="bands"` (1a, everyone else with >1 unit) — every unit inline on one
- *   page, each in its own band with its 5 report rows beneath, so a multi-unit
- *   admin never has to leave the page to see any of it.
+ *   page, each in its own band with its own report rows beneath, so a
+ *   multi-unit admin never has to leave the page to see any of it.
  * - `SingleUnitReportsTable` (3a — an actor with exactly one reportable unit,
  *   the common case today) — the SAME `Report | Focus | Last refreshed`
  *   table as one band's body, just without the band header (the page's own
  *   `<h1>` already names the unit). Exported separately since it's rendered
  *   from `app/edit/reports/page.tsx` directly, not through `ReportsIndex`.
  *
- * "Live reports" / "N of 5" is real per-report data presence, not a static
+ * "Live reports" / "N of M" is real per-report data presence, not a static
  * catalog flag — a not-live report renders as muted text, not a link.
  */
 "use client";
@@ -29,22 +36,27 @@ import Link from "next/link";
 const TH_CLASS =
   "text-muted-foreground px-3 py-2 text-xs font-semibold tracking-wide whitespace-nowrap uppercase";
 
-export type ReportsIndexReport = { n: 1 | 2 | 3 | 4 | 5; label: string; description: string };
+export type ReportsIndexUnitKind = "center" | "department" | "division";
+
+export type ReportsIndexReport = { n: 1 | 2 | 3 | 4 | 5 | 6; label: string; description: string };
 
 export type ReportsIndexUnit = {
   code: string;
+  kind: ReportsIndexUnitKind;
   name: string;
-  // "department" is unreachable today — `loadReportableUnitsForActor` only ever
-  // emits center/institute (kind === "center" is the hard gate) — but the 2a
-  // mockup's filter rail shows a (currently-empty) Department checkbox for
-  // parity with `AllUnitsDirectory`'s own rail, so the type carries it too.
-  centerType: "center" | "institute" | "department";
+  /** Only meaningful when `kind === "center"`; null for department/division
+   *  (no institute-vs-center distinction outside a center). */
+  centerType: "center" | "institute" | null;
   editHref: string;
   liveCount: number;
   totalCount: number;
   /** ISO string (plain-serializable) or null — nothing live yet. */
   lastRefreshedAt: string | null;
-  perReport: ReadonlyArray<{ n: 1 | 2 | 3 | 4 | 5; live: boolean; lastRefreshedAt: string | null }>;
+  /** This unit's OWN report catalog — `REPORT_NUMBERS_BY_KIND[kind]` resolved
+   *  to labels/descriptions. A center carries all six; department/division
+   *  carry only Publications + NIH-funded pubs. */
+  reports: ReadonlyArray<ReportsIndexReport>;
+  perReport: ReadonlyArray<{ n: 1 | 2 | 3 | 4 | 5 | 6; live: boolean; lastRefreshedAt: string | null }>;
 };
 
 function formatDate(iso: string | null): string {
@@ -52,26 +64,37 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function typeLabel(centerType: "center" | "institute" | "department"): string {
-  if (centerType === "institute") return "Institute";
-  if (centerType === "department") return "Department";
-  return "Center";
+function typeLabel(u: Pick<ReportsIndexUnit, "kind" | "centerType">): string {
+  if (u.kind === "department") return "Department";
+  if (u.kind === "division") return "Division";
+  return u.centerType === "institute" ? "Institute" : "Center";
+}
+
+/** `/edit/reports?center=<code>` — `&kind=` is only appended for a
+ *  department/division so an existing `?center=<centerCode>` bookmark (implied
+ *  `kind=center`) keeps resolving exactly as it always has. */
+function unitReportsHref(code: string, kind: ReportsIndexUnitKind): string {
+  const params = new URLSearchParams({ center: code });
+  if (kind !== "center") params.set("kind", kind);
+  return `/edit/reports?${params.toString()}`;
+}
+
+/** `/edit/reports/N?center=<code>` — same `&kind=` convention as
+ *  {@link unitReportsHref}. */
+function reportHref(n: number, code: string, kind: ReportsIndexUnitKind): string {
+  const params = new URLSearchParams({ center: code });
+  if (kind !== "center") params.set("kind", kind);
+  return `/edit/reports/${n}?${params.toString()}`;
 }
 
 export function ReportsIndex({
   units,
-  reports,
   mode,
 }: {
   units: ReadonlyArray<ReportsIndexUnit>;
-  reports: ReadonlyArray<ReportsIndexReport>;
   mode: "table" | "bands";
 }) {
-  return mode === "table" ? (
-    <ReportsTable units={units} />
-  ) : (
-    <ReportsBands units={units} reports={reports} />
-  );
+  return mode === "table" ? <ReportsTable units={units} /> : <ReportsBands units={units} />;
 }
 
 type SortKey = "unit" | "live" | "refreshed";
@@ -81,17 +104,21 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
   const [sort, setSort] = React.useState<SortKey>("unit");
   const [showCenters, setShowCenters] = React.useState(true);
   const [showInstitutes, setShowInstitutes] = React.useState(true);
-  // Default unchecked, matching the mockup's own default state for this bucket
-  // (today always empty — see the `ReportsIndexUnit.centerType` comment).
+  // Default unchecked, matching the mockup's own default state for these
+  // buckets — a department/division row stays hidden until explicitly toggled
+  // on, same posture the mockup gave the (formerly always-empty) Department
+  // checkbox.
   const [showDepartments, setShowDepartments] = React.useState(false);
+  const [showDivisions, setShowDivisions] = React.useState(false);
   const [liveOnly, setLiveOnly] = React.useState(false);
   const [noneYetOnly, setNoneYetOnly] = React.useState(false);
 
   const counts = React.useMemo(
     () => ({
-      centers: units.filter((u) => u.centerType === "center").length,
-      institutes: units.filter((u) => u.centerType === "institute").length,
-      departments: units.filter((u) => u.centerType === "department").length,
+      centers: units.filter((u) => u.kind === "center" && u.centerType !== "institute").length,
+      institutes: units.filter((u) => u.kind === "center" && u.centerType === "institute").length,
+      departments: units.filter((u) => u.kind === "department").length,
+      divisions: units.filter((u) => u.kind === "division").length,
       liveOnly: units.filter((u) => u.liveCount > 0).length,
       noneYet: units.filter((u) => u.liveCount === 0).length,
     }),
@@ -101,9 +128,10 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
   const filtered = React.useMemo(() => {
     const trimmed = query.trim().toLowerCase();
     const pool = units.filter((u) => {
-      if (u.centerType === "center" && !showCenters) return false;
-      if (u.centerType === "institute" && !showInstitutes) return false;
-      if (u.centerType === "department" && !showDepartments) return false;
+      if (u.kind === "center" && u.centerType !== "institute" && !showCenters) return false;
+      if (u.kind === "center" && u.centerType === "institute" && !showInstitutes) return false;
+      if (u.kind === "department" && !showDepartments) return false;
+      if (u.kind === "division" && !showDivisions) return false;
       if (liveOnly && u.liveCount === 0) return false;
       if (noneYetOnly && u.liveCount > 0) return false;
       if (trimmed.length === 0) return true;
@@ -120,7 +148,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
       });
     }
     return [...pool].sort((a, b) => a.name.localeCompare(b.name));
-  }, [units, query, sort, showCenters, showInstitutes, showDepartments, liveOnly, noneYetOnly]);
+  }, [units, query, sort, showCenters, showInstitutes, showDepartments, showDivisions, liveOnly, noneYetOnly]);
 
   return (
     <div className="flex flex-col gap-4" data-slot="reports-index-table" data-testid="reports-index-table">
@@ -151,6 +179,13 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
                 label="Department"
                 count={counts.departments}
                 testid="reports-index-filter-department"
+              />
+              <FilterCheckbox
+                checked={showDivisions}
+                onChange={setShowDivisions}
+                label="Division"
+                count={counts.divisions}
+                testid="reports-index-filter-division"
               />
             </div>
           </fieldset>
@@ -243,16 +278,14 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
                       >
                         <td className="px-3 py-2.5 align-middle">
                           <Link
-                            href={`/edit/reports?center=${encodeURIComponent(u.code)}`}
+                            href={unitReportsHref(u.code, u.kind)}
                             className="text-apollo-maroon font-medium after:absolute after:inset-0 hover:underline"
                             data-testid={`reports-index-link-${u.code}`}
                           >
                             {u.name}
                           </Link>
                         </td>
-                        <td className="px-3 py-2.5 align-middle whitespace-nowrap">
-                          {typeLabel(u.centerType)}
-                        </td>
+                        <td className="px-3 py-2.5 align-middle whitespace-nowrap">{typeLabel(u)}</td>
                         <td className="px-3 py-2.5 text-right align-middle tabular-nums whitespace-nowrap">
                           {u.liveCount > 0 ? `${u.liveCount} of ${u.totalCount}` : "—"}
                         </td>
@@ -305,19 +338,22 @@ function FilterCheckbox({
 
 type PerReport = ReportsIndexUnit["perReport"][number];
 
-/** One unit's 5 report rows — shared by a band body (`ReportsBands`) and the
+/** One unit's report rows — shared by a band body (`ReportsBands`) and the
  *  band-less single-unit table (`SingleUnitReportsTable`). A live report is a
  *  stretched-anchor link to `/edit/reports/N?center=…`; not-live renders as
  *  plain muted text, matching the "advisory, not a promise" tone of the rest
- *  of this console. */
+ *  of this console. `reports` is THIS unit's own catalog — see the module
+ *  doc comment for why it's no longer a shared prop. */
 function ReportRows({
   perReport,
   reports,
-  centerCode,
+  unitCode,
+  unitKind,
 }: {
   perReport: ReadonlyArray<PerReport>;
   reports: ReadonlyArray<ReportsIndexReport>;
-  centerCode: string;
+  unitCode: string;
+  unitKind: ReportsIndexUnitKind;
 }) {
   const liveByN = new Map(perReport.map((r) => [r.n, r]));
   return (
@@ -331,9 +367,9 @@ function ReportRows({
           >
             <td className="px-3 py-2.5 align-middle">
               <Link
-                href={`/edit/reports/${r.n}?center=${encodeURIComponent(centerCode)}`}
+                href={reportHref(r.n, unitCode, unitKind)}
                 className="text-apollo-maroon font-medium after:absolute after:inset-0 hover:underline"
-                data-testid={`reports-index-band-link-${centerCode}-${r.n}`}
+                data-testid={`reports-index-band-link-${unitCode}-${r.n}`}
               >
                 {r.label}
               </Link>
@@ -371,13 +407,7 @@ const REPORT_TABLE_HEAD = (
   </thead>
 );
 
-function ReportsBands({
-  units,
-  reports,
-}: {
-  units: ReadonlyArray<ReportsIndexUnit>;
-  reports: ReadonlyArray<ReportsIndexReport>;
-}) {
+function ReportsBands({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
   return (
     <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-xl border" data-testid="reports-index-bands">
       <table className="w-full border-collapse text-left text-sm">
@@ -388,7 +418,7 @@ function ReportsBands({
               <td colSpan={2} className="border-apollo-border border-t px-3 py-2 font-semibold">
                 {u.name}
                 <span className="text-muted-foreground ml-2 text-xs font-normal">
-                  {typeLabel(u.centerType)} · {u.liveCount} of {u.totalCount} reports live
+                  {typeLabel(u)} · {u.liveCount} of {u.totalCount} reports live
                 </span>
               </td>
               <td className="border-apollo-border border-t px-3 py-2 text-right">
@@ -397,11 +427,11 @@ function ReportsBands({
                   className="text-foreground relative z-10 text-xs hover:underline"
                   data-testid={`reports-index-edit-${u.code}`}
                 >
-                  Edit center profile
+                  Edit {u.kind === "center" ? "center" : u.kind} profile
                 </Link>
               </td>
             </tr>
-            <ReportRows perReport={u.perReport} reports={reports} centerCode={u.code} />
+            <ReportRows perReport={u.perReport} reports={u.reports} unitCode={u.code} unitKind={u.kind} />
           </tbody>
         ))}
       </table>
@@ -413,11 +443,15 @@ function ReportsBands({
  *  band's body, no band header (the page's own `<h1>` already names the
  *  unit) — replaces the old plain divided list. */
 export function SingleUnitReportsTable({
-  centerCode,
+  unitCode,
+  unitKind = "center",
   perReport,
   reports,
 }: {
-  centerCode: string;
+  unitCode: string;
+  /** Defaults to `"center"` so existing callers built before department/
+   *  division report links existed keep resolving the same URLs. */
+  unitKind?: ReportsIndexUnitKind;
   perReport: ReadonlyArray<PerReport>;
   reports: ReadonlyArray<ReportsIndexReport>;
 }) {
@@ -429,7 +463,7 @@ export function SingleUnitReportsTable({
       <table className="w-full border-collapse text-left text-sm">
         {REPORT_TABLE_HEAD}
         <tbody>
-          <ReportRows perReport={perReport} reports={reports} centerCode={centerCode} />
+          <ReportRows perReport={perReport} reports={reports} unitCode={unitCode} unitKind={unitKind} />
         </tbody>
       </table>
     </div>

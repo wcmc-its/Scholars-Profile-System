@@ -28,6 +28,7 @@
 import { cache } from "react";
 import { notFound } from "next/navigation";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
+import type { UnitEntityType } from "@/lib/api/manual-layer";
 import type { EditSession } from "@/lib/auth/superuser";
 import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import {
@@ -71,6 +72,12 @@ export const CONSOLE_TAB_IDS = [
 
 export type ConsoleTabId = (typeof CONSOLE_TAB_IDS)[number];
 
+/** Kinds `loadReportableUnitsForActor` should count for the `reports` tab —
+ *  same widened set reports 3/6 and `/edit/reports` itself pass (org-unit
+ *  publications reports plan, 2026-08-16). `core` is deliberately excluded:
+ *  no reportable-unit kind exists for it yet. */
+const REPORTABLE_KINDS: readonly UnitEntityType[] = ["center", "department", "division"];
+
 // ---------------------------------------------------------------------------
 // Inputs
 // ---------------------------------------------------------------------------
@@ -83,9 +90,11 @@ export interface ConsoleGrants {
   /** `loadManageableUnits(...).total` — owner OR curator, any of the four unit
    *  kinds. Feeds `profiles` / `units`. */
   manageableUnitCount: number;
-  /** `loadReportableUnitsForActor(...).length` — for a non-global viewer this
-   *  counts CENTERS only (departments/divisions/cores don't carry reports), so
-   *  it can be 0 even when `manageableUnitCount` isn't. Feeds `reports`. */
+  /** `loadReportableUnitsForActor(..., REPORTABLE_KINDS).length` — center,
+   *  department, and division all carry reports (org-unit publications
+   *  reports plan, 2026-08-16: reports 3/6 are kind-generic); only `core`
+   *  doesn't, so for a non-global viewer this can still be 0 while
+   *  `manageableUnitCount` isn't (a core-only grant). Feeds `reports`. */
   reportableUnitCount: number;
   /** `canViewUsage(...)` — any `UnitAdmin` grant holder, either role. Already
    *  ORs in `isSuperuser`. Feeds `usage`. */
@@ -178,7 +187,7 @@ export const loadConsoleGrants = cache(
     const [ownerScope, units, reportable, usage] = await Promise.all([
       session.isSuperuser ? Promise.resolve([]) : loadOwnerManagedUnitScope(session, db),
       loadManageableUnits(session.cwid, db),
-      loadReportableUnitsForActor(session, db),
+      loadReportableUnitsForActor(session, db, REPORTABLE_KINDS),
       canViewUsage(session, db),
     ]);
     return {

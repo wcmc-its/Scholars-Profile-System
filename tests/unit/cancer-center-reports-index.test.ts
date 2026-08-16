@@ -1,7 +1,8 @@
 /**
  * `lib/edit/cancer-center-reports.ts` — `loadReportableUnitsForActor`,
  * `loadReportLiveness`, and `resolveNumberedReportCenterCode`, the queries
- * behind the Reports IA redesign's cross-unit index (2026-08-14).
+ * behind the Reports IA redesign's cross-unit index (2026-08-14) and the
+ * org-unit publications reports plan's kind-widening (2026-08-16).
  * `resolveReportsCenterCode` has its own suite (`cancer-center-reports.test.ts`)
  * — this one is scoped to the multi-unit additions.
  */
@@ -28,6 +29,7 @@ import {
   loadReportableUnitsForActor,
   resolveNumberedReportCenterCode,
   REPORT_CATALOG_SIZE,
+  REPORT_NUMBERS_BY_KIND,
 } from "@/lib/edit/cancer-center-reports";
 
 beforeEach(() => {
@@ -69,7 +71,7 @@ describe("loadReportableUnitsForActor", () => {
       { cwid: "x", isSuperuser: true, isCommsSteward: false },
       db as never,
     );
-    expect(units).toEqual([{ code: "meyer", name: "Meyer Cancer Center", centerType: "center" }]);
+    expect(units).toEqual([{ code: "meyer", kind: "center", name: "Meyer Cancer Center", centerType: "center" }]);
     expect(mockLoadManageableUnits).not.toHaveBeenCalled();
     // Regression: a superuser bypasses loadUnitEditContext's retired-unit
     // gate, so retired centers must not be filtered out at the source.
@@ -85,7 +87,7 @@ describe("loadReportableUnitsForActor", () => {
       { cwid: "x", isSuperuser: false, isCommsSteward: true },
       db as never,
     );
-    expect(units).toEqual([{ code: "meyer", name: "Meyer Cancer Center", centerType: "institute" }]);
+    expect(units).toEqual([{ code: "meyer", kind: "center", name: "Meyer Cancer Center", centerType: "institute" }]);
     // loadUnitEditContext's retired gate excludes everyone but a superuser —
     // comms_steward must NOT get includeRetired even on the "global" path.
     expect(mockLoadAllUnitsDirectory).toHaveBeenCalledWith(expect.anything(), { includeRetired: false });
@@ -108,7 +110,7 @@ describe("loadReportableUnitsForActor", () => {
       { cwid: "curator1", isSuperuser: false, isCommsSteward: false },
       db as never,
     );
-    expect(units).toEqual([{ code: "meyer", name: "Meyer Cancer Center", centerType: "institute" }]);
+    expect(units).toEqual([{ code: "meyer", kind: "center", name: "Meyer Cancer Center", centerType: "institute" }]);
     expect(mockLoadAllUnitsDirectory).not.toHaveBeenCalled();
   });
 
@@ -149,7 +151,7 @@ describe("loadReportableUnitsForActor", () => {
       { cwid: "curator1", isSuperuser: false, isCommsSteward: false },
       db as never,
     );
-    expect(units).toEqual([{ code: "meyer", name: "Meyer Cancer Center", centerType: "center" }]);
+    expect(units).toEqual([{ code: "meyer", kind: "center", name: "Meyer Cancer Center", centerType: "center" }]);
   });
 
   it("returns [] with no further queries when the actor manages no centers at all", async () => {
@@ -162,6 +164,65 @@ describe("loadReportableUnitsForActor", () => {
     expect(units).toEqual([]);
     expect(db.centerProgram.findMany).not.toHaveBeenCalled();
   });
+
+  describe("allowedKinds widened to department/division", () => {
+    it("global actor: department/division candidates pass through with no CenterProgram gate, centerType null", async () => {
+      mockLoadAllUnitsDirectory.mockResolvedValue([
+        { kind: "center", code: "meyer", name: "Meyer Cancer Center", centerType: "center" },
+        { kind: "department", code: "surg", name: "Surgery", centerType: null },
+        { kind: "division", code: "n001", name: "Cardiology (Medicine)", centerType: null },
+        { kind: "core", code: "core1", name: "Some Core", centerType: null },
+      ]);
+      const db = fakeDirectoryDb({ programCodes: ["meyer"] });
+      const units = await loadReportableUnitsForActor(
+        { cwid: "x", isSuperuser: true, isCommsSteward: false },
+        db as never,
+        ["center", "department", "division"],
+      );
+      expect(units).toEqual([
+        { code: "meyer", kind: "center", name: "Meyer Cancer Center", centerType: "center" },
+        { code: "surg", kind: "department", name: "Surgery", centerType: null },
+        { code: "n001", kind: "division", name: "Cardiology (Medicine)", centerType: null },
+      ]);
+    });
+
+    it("non-superuser actor: pulls departments/divisions from loadManageableUnits, not just centers", async () => {
+      mockLoadManageableUnits.mockResolvedValue({
+        departments: [{ kind: "department", code: "surg", name: "Surgery", role: "curator", href: "/x" }],
+        divisions: [{ kind: "division", code: "n001", name: "Cardiology (Medicine)", role: "owner", href: "/y" }],
+        centers: [],
+        total: 2,
+      });
+      const db = fakeDirectoryDb();
+      const units = await loadReportableUnitsForActor(
+        { cwid: "curator1", isSuperuser: false, isCommsSteward: false },
+        db as never,
+        ["center", "department", "division"],
+      );
+      expect(units).toEqual([
+        { code: "surg", kind: "department", name: "Surgery", centerType: null },
+        { code: "n001", kind: "division", name: "Cardiology (Medicine)", centerType: null },
+      ]);
+      // No center candidates at all — the CenterProgram taxonomy query never runs.
+      expect(db.centerProgram.findMany).not.toHaveBeenCalled();
+    });
+
+    it("a retired department is still excluded for a non-superuser actor", async () => {
+      mockLoadManageableUnits.mockResolvedValue({
+        departments: [{ kind: "department", code: "surg", name: "Surgery", role: "curator", href: "/x" }],
+        divisions: [],
+        centers: [],
+        total: 1,
+      });
+      const db = fakeDirectoryDb({ retiredCodes: ["surg"] });
+      const units = await loadReportableUnitsForActor(
+        { cwid: "curator1", isSuperuser: false, isCommsSteward: false },
+        db as never,
+        ["center", "department", "division"],
+      );
+      expect(units).toEqual([]);
+    });
+  });
 });
 
 function fakeLivenessDb(
@@ -172,6 +233,9 @@ function fakeLivenessDb(
      *  `countActiveCenterMembersByCode`'s real query shape rather than
      *  re-deriving its own groupBy (loadReportLiveness reuses that helper). */
     activeMemberCenterCodes?: string[];
+    /** deptCode/divCode groupBy rows for the department/division proxy. */
+    deptGroups?: Array<{ deptCode: string; _count: { _all: number } }>;
+    divGroups?: Array<{ divCode: string; _count: { _all: number } }>;
   } = {},
 ) {
   const codes = opts.activeMemberCenterCodes ?? [];
@@ -185,28 +249,33 @@ function fakeLivenessDb(
           codes.map((centerCode, i) => ({ centerCode, cwid: `member${i}`, startDate: null, endDate: null })),
         ),
     },
-    scholar: { findMany: vi.fn().mockResolvedValue(codes.map((_, i) => ({ cwid: `member${i}` }))) },
+    scholar: {
+      findMany: vi.fn().mockResolvedValue(codes.map((_, i) => ({ cwid: `member${i}` }))),
+      groupBy: vi.fn((args: { by: string[] }) =>
+        Promise.resolve(args.by[0] === "deptCode" ? (opts.deptGroups ?? []) : (opts.divGroups ?? [])),
+      ),
+    },
   };
 }
 
 describe("loadReportLiveness", () => {
-  it("returns an empty map with no queries for an empty code list", async () => {
+  it("returns an empty map with no queries for an empty unit list", async () => {
     const db = fakeLivenessDb();
     const result = await loadReportLiveness([], db as never);
     expect(result.size).toBe(0);
     expect(db.centerCollabCandidate.groupBy).not.toHaveBeenCalled();
   });
 
-  it("reports 1 & 2 live from real row counts; reports 3-5 proxied by active-membership existence", async () => {
+  it("reports 1 & 2 live from real row counts; reports 3-6 proxied by active-membership existence (center)", async () => {
     const d1 = new Date("2026-08-11T00:00:00Z");
     const db = fakeLivenessDb({
       collab: [{ centerCode: "meyer", _count: { _all: 3 }, _max: { lastRefreshedAt: d1 } }],
       funding: [{ centerCode: "meyer", _count: { _all: 0 }, _max: { lastRefreshedAt: null } }],
       activeMemberCenterCodes: ["meyer"],
     });
-    const result = await loadReportLiveness(["meyer"], db as never);
+    const result = await loadReportLiveness([{ code: "meyer", kind: "center" }], db as never);
     const meyer = result.get("meyer");
-    expect(meyer?.liveCount).toBe(4); // 1, 3, 4, 5 — not 2 (zero funding rows)
+    expect(meyer?.liveCount).toBe(5); // 1, 3, 4, 5, 6 — not 2 (zero funding rows)
     expect(meyer?.totalCount).toBe(REPORT_CATALOG_SIZE);
     expect(meyer?.lastRefreshedAt).toEqual(d1);
     expect(meyer?.perReport).toEqual([
@@ -215,12 +284,13 @@ describe("loadReportLiveness", () => {
       { n: 3, live: true, lastRefreshedAt: null },
       { n: 4, live: true, lastRefreshedAt: null },
       { n: 5, live: true, lastRefreshedAt: null },
+      { n: 6, live: true, lastRefreshedAt: null },
     ]);
   });
 
-  it("a unit with zero rows anywhere still gets a full all-false entry, not a missing map key", async () => {
+  it("a center with zero rows anywhere still gets a full all-false entry, not a missing map key", async () => {
     const db = fakeLivenessDb();
-    const result = await loadReportLiveness(["empty_center"], db as never);
+    const result = await loadReportLiveness([{ code: "empty_center", kind: "center" }], db as never);
     expect(result.get("empty_center")).toEqual({
       perReport: [
         { n: 1, live: false, lastRefreshedAt: null },
@@ -228,6 +298,7 @@ describe("loadReportLiveness", () => {
         { n: 3, live: false, lastRefreshedAt: null },
         { n: 4, live: false, lastRefreshedAt: null },
         { n: 5, live: false, lastRefreshedAt: null },
+        { n: 6, live: false, lastRefreshedAt: null },
       ],
       liveCount: 0,
       totalCount: REPORT_CATALOG_SIZE,
@@ -242,8 +313,50 @@ describe("loadReportLiveness", () => {
       collab: [{ centerCode: "c1", _count: { _all: 1 }, _max: { lastRefreshedAt: older } }],
       funding: [{ centerCode: "c1", _count: { _all: 1 }, _max: { lastRefreshedAt: newer } }],
     });
-    const result = await loadReportLiveness(["c1"], db as never);
+    const result = await loadReportLiveness([{ code: "c1", kind: "center" }], db as never);
     expect(result.get("c1")?.lastRefreshedAt).toEqual(newer);
+  });
+
+  it("a department only carries reports 3 & 6 — no reports 1/2/4/5 entries at all", async () => {
+    const db = fakeLivenessDb({ deptGroups: [{ deptCode: "surg", _count: { _all: 4 } }] });
+    const result = await loadReportLiveness([{ code: "surg", kind: "department" }], db as never);
+    expect(result.get("surg")).toEqual({
+      perReport: [
+        { n: 3, live: true, lastRefreshedAt: null },
+        { n: 6, live: true, lastRefreshedAt: null },
+      ],
+      liveCount: 2,
+      totalCount: REPORT_NUMBERS_BY_KIND.department.length,
+      lastRefreshedAt: null,
+    });
+    // Center-only groupBys never run when there's no center in the batch.
+    expect(db.centerCollabCandidate.groupBy).not.toHaveBeenCalled();
+  });
+
+  it("a division with zero active members reports both 3 & 6 as not-live", async () => {
+    const db = fakeLivenessDb({ divGroups: [] });
+    const result = await loadReportLiveness([{ code: "n001", kind: "division" }], db as never);
+    expect(result.get("n001")?.perReport).toEqual([
+      { n: 3, live: false, lastRefreshedAt: null },
+      { n: 6, live: false, lastRefreshedAt: null },
+    ]);
+    expect(result.get("n001")?.totalCount).toBe(2);
+  });
+
+  it("mixes center and department units in one batched call, each getting its own catalog size", async () => {
+    const db = fakeLivenessDb({
+      activeMemberCenterCodes: ["meyer"],
+      deptGroups: [{ deptCode: "surg", _count: { _all: 1 } }],
+    });
+    const result = await loadReportLiveness(
+      [
+        { code: "meyer", kind: "center" },
+        { code: "surg", kind: "department" },
+      ],
+      db as never,
+    );
+    expect(result.get("meyer")?.totalCount).toBe(6);
+    expect(result.get("surg")?.totalCount).toBe(2);
   });
 });
 
@@ -253,12 +366,12 @@ describe("resolveNumberedReportCenterCode", () => {
       allCenters: [{ code: "meyer", name: "Meyer Cancer Center" }],
       programCodes: ["meyer"],
     });
-    const code = await resolveNumberedReportCenterCode(
+    const unit = await resolveNumberedReportCenterCode(
       { cwid: "x", isSuperuser: false, isCommsSteward: false },
       db as never,
       "meyer",
     );
-    expect(code).toBe("meyer");
+    expect(unit).toEqual({ code: "meyer", kind: "center" });
     expect(mockLoadManageableUnits).not.toHaveBeenCalled();
   });
 
@@ -270,12 +383,12 @@ describe("resolveNumberedReportCenterCode", () => {
       total: 1,
     });
     const db = fakeDirectoryDb({ programCodes: ["meyer"], centerTypeRows: [{ code: "meyer", centerType: "center" }] });
-    const code = await resolveNumberedReportCenterCode(
+    const unit = await resolveNumberedReportCenterCode(
       { cwid: "curator1", isSuperuser: false, isCommsSteward: false },
       db as never,
       undefined,
     );
-    expect(code).toBe("meyer");
+    expect(unit).toEqual({ code: "meyer", kind: "center" });
   });
 
   it("no ?center=, zero reportable units: redirects to the index instead of resolveReportsCenterCode's org-wide default-pick", async () => {
@@ -314,5 +427,37 @@ describe("resolveNumberedReportCenterCode", () => {
         undefined,
       ),
     ).rejects.toThrow("__REDIRECT__:/edit/reports");
+  });
+
+  describe("widened allowedKinds (reports 3/6)", () => {
+    it("an explicit ?center=<deptCode>&kind=department skips resolveReportsCenterCode's taxonomy gate entirely", async () => {
+      const db = fakeDirectoryDb();
+      const unit = await resolveNumberedReportCenterCode(
+        { cwid: "x", isSuperuser: false, isCommsSteward: false },
+        db as never,
+        "surg",
+        { allowedKinds: ["center", "department", "division"], requestedKind: "department" },
+      );
+      expect(unit).toEqual({ code: "surg", kind: "department" });
+      // Never touched the center-only taxonomy resolver.
+      expect(db.centerProgram.findMany).not.toHaveBeenCalled();
+    });
+
+    it("no ?center=, exactly one reportable unit which is a department: resolves to it with kind carried through", async () => {
+      mockLoadManageableUnits.mockResolvedValue({
+        departments: [{ kind: "department", code: "surg", name: "Surgery", role: "curator", href: "/x" }],
+        divisions: [],
+        centers: [],
+        total: 1,
+      });
+      const db = fakeDirectoryDb();
+      const unit = await resolveNumberedReportCenterCode(
+        { cwid: "curator1", isSuperuser: false, isCommsSteward: false },
+        db as never,
+        undefined,
+        { allowedKinds: ["center", "department", "division"] },
+      );
+      expect(unit).toEqual({ code: "surg", kind: "department" });
+    });
   });
 });
