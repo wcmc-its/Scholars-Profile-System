@@ -9,6 +9,7 @@ import {
   bucketDatasetLink,
   buildDataSharingCsv,
   buildDataSharingReport,
+  buildSectionItemsCsv,
   buildShareRates,
   capDatasetLinkRows,
   countConcerningDeposits,
@@ -18,6 +19,7 @@ import {
   loadFundingSplit,
   loadShareRateCorpus,
   mostRecentDeposits,
+  pmcCoverage,
   pubAccessPmidSets,
   RECENT_ITEMS_LIMIT,
   REGISTRY_DATA_TYPE,
@@ -260,8 +262,52 @@ describe("aggregateRepositoriesByTier", () => {
     ]);
   });
 
-  it("empty input produces an empty array", () => {
-    expect(aggregateRepositoriesByTier([])).toEqual([]);
+  it("zero-pads: a tier with no data still gets a row — 'Country of concern 0' is a statement, not an absence", () => {
+    // Only US-tier repositories in the input; CONCERN (and every other tier)
+    // must still appear, zero-filled, so the dashboard can SAY zero.
+    const byTier = aggregateRepositoriesByTier(aggregateByRepository(ROWS));
+    expect(byTier.map((t) => t.tier)).toEqual([
+      "CONCERN",
+      "FOREIGN_OPEN",
+      "FOREIGN_CTRL",
+      "US_OPEN",
+      "US_CTRL",
+      "REGISTRY",
+    ]);
+    expect(byTier.find((t) => t.tier === "CONCERN")).toEqual({
+      tier: "CONCERN",
+      datasets: 0,
+      repositories: [],
+    });
+    expect(byTier.find((t) => t.tier === "US_OPEN")).toEqual({
+      tier: "US_OPEN",
+      datasets: 1,
+      repositories: ["GEO"],
+    });
+  });
+
+  it("empty input still emits every real tier zero-filled (and no UNKNOWN)", () => {
+    expect(aggregateRepositoriesByTier([])).toEqual([
+      { tier: "CONCERN", datasets: 0, repositories: [] },
+      { tier: "FOREIGN_OPEN", datasets: 0, repositories: [] },
+      { tier: "FOREIGN_CTRL", datasets: 0, repositories: [] },
+      { tier: "US_OPEN", datasets: 0, repositories: [] },
+      { tier: "US_CTRL", datasets: 0, repositories: [] },
+      { tier: "REGISTRY", datasets: 0, repositories: [] },
+    ]);
+  });
+
+  it("includes UNKNOWN only when a row actually carries it — no permanent 'Unclassified 0' row", () => {
+    const withUnknown = aggregateRepositoriesByTier([
+      { repository: "Some Future Repo", accessModel: null, datasets: 3, tier: "UNKNOWN" },
+    ]);
+    expect(withUnknown.find((t) => t.tier === "UNKNOWN")).toEqual({
+      tier: "UNKNOWN",
+      datasets: 3,
+      repositories: ["Some Future Repo"],
+    });
+    // UNKNOWN sorts last, after REGISTRY, when present.
+    expect(withUnknown[withUnknown.length - 1].tier).toBe("UNKNOWN");
   });
 });
 
@@ -287,15 +333,55 @@ describe("tierPubSpectrum", () => {
     expect(byTier.get("US_OPEN")).toBe(1);
   });
 
-  it("skips rows with no pmids", () => {
+  it("skips rows with no pmids — every tier still present, all zero (padding)", () => {
     const rows: DatasetLinkRow[] = [
       { cwid: "s1", scholarName: "S", scholarSlug: "s", department: null, datasetId: "d1", repository: "GSA-Human", accessModel: "open" },
     ];
-    expect(tierPubSpectrum(rows)).toEqual([]);
+    // The no-pmids row contributes nothing — but zero-padding still emits
+    // every real tier, so the spectrum legend can render "0"s.
+    expect(tierPubSpectrum(rows)).toEqual([
+      { tier: "CONCERN", pubs: 0 },
+      { tier: "FOREIGN_OPEN", pubs: 0 },
+      { tier: "FOREIGN_CTRL", pubs: 0 },
+      { tier: "US_OPEN", pubs: 0 },
+      { tier: "US_CTRL", pubs: 0 },
+      { tier: "REGISTRY", pubs: 0 },
+    ]);
   });
 
-  it("empty input produces an empty array", () => {
-    expect(tierPubSpectrum([])).toEqual([]);
+  it("zero-pads tiers with no pubs and omits UNKNOWN unless a row carries it", () => {
+    // One US_OPEN pub only — the other five real tiers appear zero-filled
+    // ("Country of concern 0" must be a visible statement), UNKNOWN doesn't.
+    const spectrum = tierPubSpectrum([
+      { cwid: "s1", scholarName: "S", scholarSlug: "s", department: null, datasetId: "d1", repository: "GEO", accessModel: "open", pmids: ["p1"] },
+    ]);
+    expect(spectrum.map((s) => s.tier)).toEqual([
+      "CONCERN",
+      "FOREIGN_OPEN",
+      "FOREIGN_CTRL",
+      "US_OPEN",
+      "US_CTRL",
+      "REGISTRY",
+    ]);
+    expect(spectrum.find((s) => s.tier === "CONCERN")).toEqual({ tier: "CONCERN", pubs: 0 });
+    expect(spectrum.find((s) => s.tier === "US_OPEN")).toEqual({ tier: "US_OPEN", pubs: 1 });
+
+    // An unmapped repository → UNKNOWN appears, last.
+    const withUnknown = tierPubSpectrum([
+      { cwid: "s1", scholarName: "S", scholarSlug: "s", department: null, datasetId: "d2", repository: "Some Future Repo", accessModel: null, pmids: ["p9"] },
+    ]);
+    expect(withUnknown[withUnknown.length - 1]).toEqual({ tier: "UNKNOWN", pubs: 1 });
+  });
+
+  it("empty input still emits every real tier zero-filled (padding, not an empty array)", () => {
+    expect(tierPubSpectrum([])).toEqual([
+      { tier: "CONCERN", pubs: 0 },
+      { tier: "FOREIGN_OPEN", pubs: 0 },
+      { tier: "FOREIGN_CTRL", pubs: 0 },
+      { tier: "US_OPEN", pubs: 0 },
+      { tier: "US_CTRL", pubs: 0 },
+      { tier: "REGISTRY", pubs: 0 },
+    ]);
   });
 });
 
@@ -543,12 +629,16 @@ describe("buildDataSharingReport", () => {
     // `fundingSplit` argument was supplied either (same backward-compat path).
     // `concerningDepositInstances` is 0 too — ROWS is GEO (US_OPEN) + dbGaP
     // (US_CTRL) only, neither a concerning tier.
+    // `pmcCoveredPubs`/`pmcDepositedPubs` are 0 for the same no-corpus reason
+    // as the share-rate fields (PMC coverage is a corpus-side stat).
     expect(report.overall).toEqual({
       datasets: 2,
       faculty: 2,
       links: 3,
       shareRateDenominator: 0,
       shareRateNumerator: 0,
+      pmcCoveredPubs: 0,
+      pmcDepositedPubs: 0,
       openPubs: 0,
       controlledPubs: 0,
       nihFundedPubs: 0,
@@ -565,6 +655,8 @@ describe("buildDataSharingReport", () => {
       links: 0,
       shareRateDenominator: 0,
       shareRateNumerator: 0,
+      pmcCoveredPubs: 0,
+      pmcDepositedPubs: 0,
       openPubs: 0,
       controlledPubs: 0,
       nihFundedPubs: 0,
@@ -573,8 +665,17 @@ describe("buildDataSharingReport", () => {
     });
     expect(report.byDepartment).toEqual([]);
     expect(report.byRepository).toEqual([]);
-    expect(report.byRepositoryTier).toEqual([]);
-    expect(report.pubsByTier).toEqual([]);
+    // The tier aggregates zero-pad even on an empty report — "Country of
+    // concern 0" stays a visible statement (see the padding tests above).
+    expect(report.byRepositoryTier.map((t) => [t.tier, t.datasets])).toEqual([
+      ["CONCERN", 0],
+      ["FOREIGN_OPEN", 0],
+      ["FOREIGN_CTRL", 0],
+      ["US_OPEN", 0],
+      ["US_CTRL", 0],
+      ["REGISTRY", 0],
+    ]);
+    expect(report.pubsByTier.every((t) => t.pubs === 0)).toBe(true);
     expect(report.byFaculty).toEqual([]);
   });
 });
@@ -615,6 +716,25 @@ describe("depositedPmidSet", () => {
     // paper as having no deposit.
     const set = depositedPmidSet([row({ cwid: "faculty-b", datasetId: "d9", pmids: ["p1"] })]);
     expect(set.has("p1")).toBe(true);
+  });
+
+  it("skips registry-type rows — a registration is not a dataset deposit (v3 review finding)", () => {
+    // "p1" appears ONLY on a ClinicalTrials.gov registration row: it must not
+    // read as deposited (before the fix, a registration-only pub inflated the
+    // share-rate numerator and pmcDepositedPubs while the methods prose
+    // claimed registrations were excluded). "p2" sits on both the registry
+    // row and a real GEO row — the real row still counts it.
+    const set = depositedPmidSet([
+      row({
+        datasetId: "d1",
+        repository: "ClinicalTrials.gov",
+        accessModel: "open",
+        dataType: REGISTRY_DATA_TYPE,
+        pmids: ["p1", "p2"],
+      }),
+      row({ datasetId: "d2", pmids: ["p2"] }),
+    ]);
+    expect(set).toEqual(new Set(["p2"]));
   });
 });
 
@@ -938,6 +1058,25 @@ describe("buildDataSharingReport — access split & funding lens (v2)", () => {
     expect(cara).not.toHaveProperty("registryDatasets");
   });
 
+  it("excludes a registration-only pub from the share-rate numerator and pmcDepositedPubs (v3 review finding)", () => {
+    // p3's only detected signal is the ClinicalTrials.gov registration row —
+    // it stays in the DENOMINATOR (it is a real corpus pub) but must not
+    // count as deposited, in either the overall rate or the PMC-covered rate.
+    const corpus: ShareRateCorpusRow[] = [
+      { pmid: "p1", cwid: "aaa1", department: "Medicine", inPmc: true },
+      { pmid: "p2", cwid: "bbb2", department: "Surgery", inPmc: true },
+      { pmid: "p3", cwid: "ccc3", department: "Neurology", inPmc: true },
+    ];
+    const report = buildDataSharingReport(LINK_ROWS, corpus);
+    expect(report.overall.shareRateDenominator).toBe(3);
+    expect(report.overall.shareRateNumerator).toBe(2); // p1, p2 — never p3
+    expect(report.overall.pmcCoveredPubs).toBe(3);
+    expect(report.overall.pmcDepositedPubs).toBe(2);
+    const neurology = report.byDepartment.find((d) => d.department === "Neurology")!;
+    expect(neurology.shareRateDenominator).toBe(1);
+    expect(neurology.shareRateNumerator).toBe(0);
+  });
+
   it("defaults nihFundedPubs/notNihFundedPubs to 0 when no fundingSplit argument is supplied (backward compat)", () => {
     const report = buildDataSharingReport(LINK_ROWS);
     expect(report.overall.nihFundedPubs).toBe(0);
@@ -1058,10 +1197,12 @@ describe("buildDataSharingCsv", () => {
     ]);
     const lines = csv.trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "repository,accession_or_doi,title,resource_type,data_type,sensitive_cats,sensitive_subtypes,access_model,deposit_year,provenance,confidence,department,faculty_name,cwid,pmids",
+      "repository,accession_or_doi,dataset_url,title,resource_type,data_type,sensitive_cats,sensitive_subtypes,access_model,deposit_year,provenance,confidence,department,faculty_name,cwid,pmids",
     );
+    // dataset_url is the profile page's own per-accession deep link
+    // (resolveDatasetUrl) — GEO resolves through the acc.cgi query template.
     expect(lines[1]).toBe(
-      'GEO,GSE12345,"A dataset, with a comma in the title",Dataset,genomic,genomic,genomic:WGS/WES,open,2025,databank,high,Medicine,"Alice, A",aaa1,11111111; 22222222',
+      'GEO,GSE12345,https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE12345,"A dataset, with a comma in the title",Dataset,genomic,genomic,genomic:WGS/WES,open,2025,databank,high,Medicine,"Alice, A",aaa1,11111111; 22222222',
     );
   });
 
@@ -1087,7 +1228,164 @@ describe("buildDataSharingCsv", () => {
       },
     ]);
     const line = csv.trimEnd().split("\r\n")[1];
-    expect(line).toBe("dbGaP,,,,,,,,,,,,Bob B,bbb2,");
+    // No accessionOrDoi → dataset_url is empty too, not a homepage fallback.
+    expect(line).toBe("dbGaP,,,,,,,,,,,,,Bob B,bbb2,");
+  });
+
+  it("resolves dataset_url per accession: DOI → doi.org, unmapped repository → empty", () => {
+    const base = {
+      cwid: "aaa1",
+      scholarName: "Alice A",
+      scholarSlug: "alice-a",
+      department: null,
+      datasetId: "d1",
+      accessModel: null,
+    };
+    const csv = buildDataSharingCsv([
+      // A DOI-keyed row resolves via the DOI pattern regardless of repository.
+      { ...base, repository: "Dryad", accessionOrDoi: "10.5061/dryad.abc123" },
+      // A repository with no accession resolver (and a non-DOI accession) → "".
+      { ...base, datasetId: "d2", repository: "Some Future Repo", accessionOrDoi: "XYZ-1" },
+    ]);
+    const lines = csv.trimEnd().split("\r\n");
+    expect(lines[1].split(",")[2]).toBe("https://doi.org/10.5061/dryad.abc123");
+    expect(lines[2].split(",")[2]).toBe("");
+  });
+});
+
+describe("buildSectionItemsCsv", () => {
+  /** Two repositories × two faculty (names deliberately out of input order)
+   *  plus a null-department row — enough to see each section's ordering. */
+  const ITEM_ROWS: DatasetLinkRow[] = [
+    {
+      cwid: "bbb2",
+      scholarName: "Bob B",
+      scholarSlug: "bob-b",
+      department: "Surgery",
+      datasetId: "d2",
+      repository: "GEO",
+      accessModel: "open",
+    },
+    {
+      cwid: "aaa1",
+      scholarName: "Alice A",
+      scholarSlug: "alice-a",
+      department: "Medicine",
+      datasetId: "d1",
+      repository: "dbGaP",
+      accessModel: "controlled",
+    },
+    {
+      cwid: "aaa1",
+      scholarName: "Alice A",
+      scholarSlug: "alice-a",
+      department: "Medicine",
+      datasetId: "d3",
+      repository: "GEO",
+      accessModel: "open",
+    },
+    {
+      cwid: "zzz9",
+      scholarName: "Zed Z",
+      scholarSlug: "zed-z",
+      department: null,
+      datasetId: "d4",
+      repository: "Zenodo",
+      accessModel: "open",
+    },
+  ];
+
+  const HEADER =
+    "repository,accession_or_doi,dataset_url,title,resource_type,data_type,sensitive_cats,sensitive_subtypes,access_model,deposit_year,provenance,confidence,department,faculty_name,cwid,pmids";
+
+  it("returns null for the tiers section — the repositories grain is the tier drill-down", () => {
+    expect(buildSectionItemsCsv(ITEM_ROWS, "tiers")).toBeNull();
+  });
+
+  it("repositories: every row, same columns as the default export, sorted repository then faculty name", () => {
+    const lines = buildSectionItemsCsv(ITEM_ROWS, "repositories")!.trimEnd().split("\r\n");
+    expect(lines[0]).toBe(HEADER);
+    expect(lines.slice(1).map((l) => l.split(",")[0])).toEqual(["dbGaP", "GEO", "GEO", "Zenodo"]);
+    // Within GEO: Alice before Bob.
+    expect(lines[2]).toContain("Alice A");
+    expect(lines[3]).toContain("Bob B");
+  });
+
+  it("departments: sorted by department with the null department LAST (serialized as empty), then faculty name", () => {
+    const lines = buildSectionItemsCsv(ITEM_ROWS, "departments")!.trimEnd().split("\r\n");
+    expect(lines[0]).toBe(HEADER);
+    const depts = lines.slice(1).map((l) => l.split(",")[12]);
+    expect(depts).toEqual(["Medicine", "Medicine", "Surgery", ""]);
+    expect(lines[4]).toContain("Zed Z"); // the null-department row, last
+  });
+
+  it("faculty: sorted by faculty name then repository", () => {
+    const lines = buildSectionItemsCsv(ITEM_ROWS, "faculty")!.trimEnd().split("\r\n");
+    const nameRepo = lines.slice(1).map((l) => {
+      const cells = l.split(",");
+      return `${cells[13]}:${cells[0]}`;
+    });
+    // Locale collation orders by base letter, so dbGaP < GEO despite case.
+    expect(nameRepo).toEqual(["Alice A:dbGaP", "Alice A:GEO", "Bob B:GEO", "Zed Z:Zenodo"]);
+  });
+
+  it("subtypes: EXPLODED — one row per (link row, parsed sub-type) pair, leading category/subtype columns, no-subtype rows omitted", () => {
+    // SUBTYPE_ROWS (above): d1+d2 genomic:WGS/WES, d3 genomic:single-cell +
+    // geolocation:GPS trace, d4 null (omitted), d5 malformed + health:clinical
+    // — 5 exploded rows, the malformed token skipped exactly as
+    // aggregateBySubtype skips it.
+    const lines = buildSectionItemsCsv(SUBTYPE_ROWS, "subtypes")!.trimEnd().split("\r\n");
+    expect(lines[0]).toBe(`category,subtype,${HEADER}`);
+    const leading = lines.slice(1).map((l) => {
+      const cells = l.split(",");
+      return `${cells[0]}|${cells[1]}|${cells[2]}`;
+    });
+    // Sorted category ("genomic" < "geolocation" — 'n' < 'o'), then subtype,
+    // then repository; the d3 row appears once per sub-type it lists.
+    expect(leading).toEqual([
+      "genomic|single-cell|GEO",
+      "genomic|WGS/WES|dbGaP",
+      "genomic|WGS/WES|dbGaP",
+      "geolocation|GPS trace|GEO",
+      "health|clinical|dbGaP",
+    ]);
+    // No row for Dan D (null sensitiveSubtypes); the malformed token never
+    // becomes a category/subtype (though the raw sensitive_subtypes source
+    // column on Eve's row still carries it verbatim — that's the source
+    // value, exported as-is).
+    expect(lines.join("\n")).not.toContain("Dan D");
+    expect(lines.slice(1).some((l) => l.startsWith("malformed-no-colon,"))).toBe(false);
+  });
+
+  it("caps output rows at DATA_SHARING_EXPORT_CAP", () => {
+    const rows: DatasetLinkRow[] = Array.from({ length: DATA_SHARING_EXPORT_CAP + 1 }, (_, i) => ({
+      cwid: `s${i}`,
+      scholarName: `S${i}`,
+      scholarSlug: `s${i}`,
+      department: null,
+      datasetId: `d${i}`,
+      repository: "GEO",
+      accessModel: "open",
+    }));
+    const lines = buildSectionItemsCsv(rows, "repositories")!.trimEnd().split("\r\n");
+    expect(lines).toHaveLength(1 + DATA_SHARING_EXPORT_CAP);
+  });
+
+  it("caps subtypes AFTER exploding — the cap bounds the file, not the input rows", () => {
+    // 2,501 input rows × 2 sub-types each = 5,002 exploded rows → capped to
+    // DATA_SHARING_EXPORT_CAP even though the INPUT is well under the cap.
+    const rows: DatasetLinkRow[] = Array.from({ length: DATA_SHARING_EXPORT_CAP / 2 + 1 }, (_, i) => ({
+      cwid: `s${i}`,
+      scholarName: `S${i}`,
+      scholarSlug: `s${i}`,
+      department: null,
+      datasetId: `d${i}`,
+      repository: "dbGaP",
+      accessModel: "controlled",
+      sensitiveSubtypes: "genomic:WGS/WES|health:clinical",
+    }));
+    const lines = buildSectionItemsCsv(rows, "subtypes")!.trimEnd().split("\r\n");
+    expect(lines).toHaveLength(1 + DATA_SHARING_EXPORT_CAP);
   });
 });
 
@@ -1228,22 +1526,87 @@ describe("loadShareRateCorpus", () => {
     expect(call.where.publication.publicationType).toEqual({
       in: ["Academic Article", "Preprint"],
     });
+    // PMC coverage (v3): the select must reach through the publication
+    // relation for pmcid — dropping this silently zeroes pmcCoveredPubs.
+    expect(call.select.publication).toEqual({ select: { pmcid: true } });
   });
 
-  it("maps rows to pmid/cwid/department, defaulting a missing department to null", async () => {
+  it("maps rows to pmid/cwid/department/inPmc, defaulting a missing department to null", async () => {
     const findMany = vi.fn().mockResolvedValue([
-      { pmid: "p1", cwid: "aaa1", scholar: { primaryDepartment: "Medicine" } },
-      { pmid: "p2", cwid: "bbb2", scholar: { primaryDepartment: null } },
-      { pmid: "p3", cwid: "ccc3", scholar: null },
+      { pmid: "p1", cwid: "aaa1", scholar: { primaryDepartment: "Medicine" }, publication: { pmcid: "PMC111" } },
+      { pmid: "p2", cwid: "bbb2", scholar: { primaryDepartment: null }, publication: { pmcid: null } },
+      { pmid: "p3", cwid: "ccc3", scholar: null, publication: null },
     ]);
     const client = { publicationAuthor: { findMany } } as unknown as DataSharingReportClient;
 
     const rows = await loadShareRateCorpus(client);
 
+    // `inPmc` is simply "pmcid non-null" — p3's missing publication relation
+    // degrades to false, not a crash.
     expect(rows).toEqual([
-      { pmid: "p1", cwid: "aaa1", department: "Medicine" },
-      { pmid: "p2", cwid: "bbb2", department: null },
-      { pmid: "p3", cwid: "ccc3", department: null },
+      { pmid: "p1", cwid: "aaa1", department: "Medicine", inPmc: true },
+      { pmid: "p2", cwid: "bbb2", department: null, inPmc: false },
+      { pmid: "p3", cwid: "ccc3", department: null, inPmc: false },
     ]);
+  });
+});
+
+describe("pmcCoverage", () => {
+  it("counts distinct PMC-covered corpus pmids and the deposited subset", () => {
+    const corpus: ShareRateCorpusRow[] = [
+      { pmid: "p1", cwid: "aaa1", department: "Medicine", inPmc: true },
+      { pmid: "p2", cwid: "aaa1", department: "Medicine", inPmc: true },
+      { pmid: "p3", cwid: "bbb2", department: "Surgery", inPmc: false },
+    ];
+    // p1 deposited and in PMC; p2 in PMC, no deposit; p3 deposited but NOT in
+    // PMC — it counts toward neither field (the full-text arm never saw it).
+    const totals = pmcCoverage(corpus, new Set(["p1", "p3"]));
+    expect(totals).toEqual({ pmcCoveredPubs: 2, pmcDepositedPubs: 1 });
+  });
+
+  it("dedups a pmid with both a first- and a last-author corpus row (same distinct-pmid grain as buildShareRates.overall)", () => {
+    const corpus: ShareRateCorpusRow[] = [
+      { pmid: "p1", cwid: "aaa1", department: "Medicine", inPmc: true },
+      { pmid: "p1", cwid: "bbb2", department: "Surgery", inPmc: true },
+    ];
+    expect(pmcCoverage(corpus, new Set(["p1"]))).toEqual({ pmcCoveredPubs: 1, pmcDepositedPubs: 1 });
+  });
+
+  it("treats a pre-PMC fixture row with no inPmc field as not-in-PMC (backward compat)", () => {
+    const corpus: ShareRateCorpusRow[] = [{ pmid: "p1", cwid: "aaa1", department: null }];
+    expect(pmcCoverage(corpus, new Set(["p1"]))).toEqual({ pmcCoveredPubs: 0, pmcDepositedPubs: 0 });
+  });
+
+  it("empty corpus produces zeros", () => {
+    expect(pmcCoverage([], new Set(["p1"]))).toEqual({ pmcCoveredPubs: 0, pmcDepositedPubs: 0 });
+  });
+});
+
+describe("buildDataSharingReport — PMC coverage (v3)", () => {
+  it("wires overall.pmcCoveredPubs/pmcDepositedPubs from the corpus + deposited-pmid set", () => {
+    const linkRows: DatasetLinkRow[] = [
+      {
+        cwid: "aaa1",
+        scholarName: "Alice A",
+        scholarSlug: "alice-a",
+        department: "Medicine",
+        datasetId: "d1",
+        repository: "GEO",
+        accessModel: "open",
+        pmids: ["p1"],
+      },
+    ];
+    const corpus: ShareRateCorpusRow[] = [
+      { pmid: "p1", cwid: "aaa1", department: "Medicine", inPmc: true },
+      { pmid: "p2", cwid: "aaa1", department: "Medicine", inPmc: true },
+      { pmid: "p3", cwid: "aaa1", department: "Medicine", inPmc: false },
+    ];
+    const report = buildDataSharingReport(linkRows, corpus);
+    expect(report.overall.pmcCoveredPubs).toBe(2); // p1, p2
+    expect(report.overall.pmcDepositedPubs).toBe(1); // p1 only
+    // Unchanged share-rate fields still count the full corpus, not the PMC
+    // subset — the two denominators coexist on purpose.
+    expect(report.overall.shareRateDenominator).toBe(3);
+    expect(report.overall.shareRateNumerator).toBe(1);
   });
 });
