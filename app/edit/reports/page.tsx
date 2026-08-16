@@ -27,8 +27,9 @@
  * same single-unit list, resolved automatically (unchanged end-user
  * behavior); 2+ → the new cross-unit index (`ReportsIndex`), scoped to the
  * actor (org-wide for a superuser/comms_steward, else their own `UnitAdmin`
- * grants) — a table with a filter rail once there are enough units to
- * warrant one (`2a`), otherwise every unit banded inline on one page (`1a`).
+ * grants) — a table with a filter rail for a superuser/comms_steward (`2a`,
+ * no unit-count minimum), otherwise every unit banded inline on one page
+ * (`1a`).
  */
 import { notFound, redirect } from "next/navigation";
 
@@ -164,10 +165,9 @@ export default async function EditReportsIndexPage({
       perReport: serializePerReport(l),
     };
   });
-  // 2a (table + filter rail) once there are enough units for a picker to earn
-  // its keep; otherwise 1a (every unit banded inline) — including a
-  // superuser/comms_steward with a small org today.
-  const mode = (session.isSuperuser || session.isCommsSteward) && units.length > 3 ? "table" : "bands";
+  // 2a (table + filter rail) for a superuser/comms_steward at any unit count
+  // ≥2 — no size threshold; 1a (every unit banded inline) for everyone else.
+  const mode = session.isSuperuser || session.isCommsSteward ? "table" : "bands";
 
   return (
     <ConsoleShell active="reports" reportsTab {...shell}>

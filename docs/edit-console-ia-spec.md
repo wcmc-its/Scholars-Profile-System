@@ -81,12 +81,11 @@ Once a viewer opens the Reports tab, `EditReportsIndexPage` branches purely on `
                                    has centers with a program taxonomy, but a real I2 gap if it ever isn't)
 exactly 1 reportable unit      → SingleUnitReports, resolved automatically ("3a")
 2+ reportable units:
-  superuser/comms_steward
-    AND count > 3               → ReportsIndex, mode="table"  ("2a" — filter rail)
+  superuser/comms_steward       → ReportsIndex, mode="table"  ("2a" — filter rail)
   otherwise                     → ReportsIndex, mode="bands"  ("1a" — every unit banded inline)
 ```
 
-The `3` threshold is a bare inline literal (`units.length > 3 ? "table" : "bands"`) — not a named constant, not cited to a decision doc. The comment explains the *shape* of the choice ("once there are enough units for a picker to earn its keep") but not why 3 specifically. Worth a named constant with a citation if a real threshold decision was made, or an admission it's a placeholder if it wasn't.
+The old `units.length > 3` gate on `2a` was a bare inline literal — not a named constant, not cited to a decision doc — and it kept the filter rail unreachable at real unit counts (staging has 1 reportable unit today). Removed: a superuser/comms_steward now gets the table/filter-rail view starting at 2 units, no size minimum.
 
 `SingleUnitReports` renders the same `Report | Focus | Last refreshed` table each `1a` band uses, minus the band header — the page's own `<h1>` (`{ctx.unit.name} reports`) already names the unit, so the header would be redundant (this is the mockup-matching behavior landed in #2411, "3a's single-unit reports list now matches the mockup's table").
 
