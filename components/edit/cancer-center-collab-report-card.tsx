@@ -1,18 +1,21 @@
 /**
- * CancerCenterCollabReportCard — the Cancer Center Reports tab
+ * CancerCenterCollabReportCard — the whole content of `/edit/reports/1`
  * (`2026-08-10-cancer-center-collaboration-recommendations-v2-cancer-
- * relevance-plan.md`), under the `reports` attribute of `/edit/center/[code]`
- * (data-driven "has a program taxonomy" gate, same as Programs/NCI Table 2A).
+ * relevance-plan.md`).
  *
- * A small list/detail shell — `REPORTS` below is the index of everything this
- * tab can show; today there's exactly one. Click a report to open it, "All
- * reports" to go back. Adding a second report is: one more `REPORTS` entry +
- * one more component, not a rewrite of this shell.
+ * Renders directly — no internal list/detail shell. This used to wrap a
+ * single-entry `REPORTS` index (click "Collaboration & Cancer-Relevance" to
+ * open, "All reports" to go back) from when it lived as one of several
+ * attribute tabs under `/edit/center/[code]`. Now that it's the entire body
+ * of its own top-level route, that shell only produced two extra headings
+ * repeating the same title before showing anything (`Reports View Fix`
+ * mockup review, 2026-08-16) — removed; the page's own `<h1>` is the only
+ * heading above the report content.
  *
- * `CollabCancerRelevanceReport` reads the precomputed `CenterCollabCandidate`
- * table (weekly ETL) via `/api/edit/center/[code]/collab-report` — one fetch,
- * no MeSH matching or DB work at request time. Three sections, all derived
- * client-side from the same loaded rows:
+ * Reads the precomputed `CenterCollabCandidate` table (weekly ETL) via
+ * `/api/edit/center/[code]/collab-report` — one fetch, no MeSH matching or DB
+ * work at request time. Three sections, all derived client-side from the same
+ * loaded rows:
  *   REMOVE                        — current member, zero collaboration. Fixed,
  *                                    not slider-driven (unchanged from v1).
  *   ADD (collaborator + relevant) — non-member, clears BOTH the collaboration
@@ -33,8 +36,8 @@
 import * as React from "react";
 import { Download, HelpCircle } from "lucide-react";
 
-import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -554,14 +557,15 @@ function RowTable({
                     </td>
                     {extraCol && <td className="py-1.5 pr-2">{extraCol(r)}</td>}
                     <td className="py-1.5 pr-2">
-                      <a
-                        href={`/api/edit/center/${encodeURIComponent(centerCode)}/collab-report/export?cwid=${encodeURIComponent(r.cwid)}`}
-                        aria-label={`Download ${r.givenName} ${r.surname}'s papers (CSV)`}
-                        title="Download this person's papers (CSV)"
-                        className="text-muted-foreground hover:text-foreground"
-                      >
-                        <Download className="size-3.5" aria-hidden />
-                      </a>
+                      <Button asChild variant="outline" size="xs">
+                        <a
+                          href={`/api/edit/center/${encodeURIComponent(centerCode)}/collab-report/export?cwid=${encodeURIComponent(r.cwid)}`}
+                          aria-label={`Download ${r.givenName} ${r.surname}'s papers (CSV)`}
+                        >
+                          <Download className="size-3" aria-hidden />
+                          CSV
+                        </a>
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -575,7 +579,9 @@ function RowTable({
   );
 }
 
-function CollabCancerRelevanceReport({ centerCode }: { centerCode: string }) {
+export type CancerCenterCollabReportCardProps = { centerCode: string; centerName: string };
+
+export function CancerCenterCollabReportCard({ centerCode, centerName }: CancerCenterCollabReportCardProps) {
   const [state, setState] = React.useState<LoadedState | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [collabMode, setCollabMode] = React.useState<Mode>("count");
@@ -626,43 +632,73 @@ function CollabCancerRelevanceReport({ centerCode }: { centerCode: string }) {
     [state, relevanceMode, relevanceValue, collabMode, collabValue],
   );
 
+  // Subtitle + action row + advisory banner render regardless of load state
+  // (error/loading/empty included) — this is the report's identity, not
+  // something contingent on data having arrived yet.
+  const header = (
+    <>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <p className="text-muted-foreground text-sm">
+          Collaboration &amp; cancer-relevance · {centerName}
+          {state?.generatedAt && <> · Last refreshed {new Date(state.generatedAt).toLocaleString()}</>}
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <MeshLogicModal />
+          <Button asChild variant="outline" size="sm">
+            {/* Plain `<a download>` — no JS/blob dance, the browser handles the
+                download off the route's `Content-Disposition` header. */}
+            <a
+              href={`/api/edit/center/${encodeURIComponent(centerCode)}/collab-report/export`}
+              aria-label="Download full report (CSV)"
+            >
+              <Download className="size-3.5" aria-hidden />
+              Download full report (CSV)
+            </a>
+          </Button>
+        </div>
+      </div>
+      <div className="border-apollo-amber-tint-border bg-apollo-amber-tint rounded-md border px-4 py-3.5">
+        <p className="text-apollo-amber text-sm">
+          <span className="font-semibold">Advisory only</span> — apply any recommendation through the roster
+          editor. Nothing here writes to the roster.
+        </p>
+      </div>
+    </>
+  );
+
   if (error) {
     return (
-      <Alert variant="destructive">
-        <AlertDescription>{error}</AlertDescription>
-      </Alert>
+      <div className="space-y-4">
+        {header}
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      </div>
     );
   }
-  if (!state) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (!state) {
+    return (
+      <div className="space-y-4">
+        {header}
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      </div>
+    );
+  }
   if (state.rows.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
-        No data yet — the weekly report (<code>etl:cancer-center-collab-report</code>) hasn&apos;t run for this
-        center.
-      </p>
+      <div className="space-y-4">
+        {header}
+        <p className="text-sm text-muted-foreground">
+          No data yet — the weekly report (<code>etl:cancer-center-collab-report</code>) hasn&apos;t run for this
+          center.
+        </p>
+      </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
-          Last refreshed: {new Date(state.generatedAt!).toLocaleString()}
-        </p>
-        <div className="flex flex-wrap items-center gap-4">
-          <MeshLogicModal />
-          {/* Plain `<a download>` — no JS/blob dance, the browser handles the
-              download off the route's `Content-Disposition` header. */}
-          <a
-            href={`/api/edit/center/${encodeURIComponent(centerCode)}/collab-report/export`}
-            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-            aria-label="Download full report (CSV)"
-          >
-            <Download className="size-3.5" aria-hidden />
-            Download full report (CSV)
-          </a>
-        </div>
-      </div>
+      {header}
 
       <section>
         <SectionHeading
@@ -708,59 +744,5 @@ function CollabCancerRelevanceReport({ centerCode }: { centerCode: string }) {
         <RowTable rows={recruit} centerCode={centerCode} />
       </section>
     </div>
-  );
-}
-
-type ReportDef = { key: string; label: string; description: string };
-
-const REPORTS: readonly ReportDef[] = [
-  {
-    key: "collab-cancer-relevance",
-    label: "Collaboration & Cancer-Relevance",
-    description:
-      "REMOVE / ADD membership recommendations from PubMed co-authorship and MeSH cancer-relevance signals.",
-  },
-];
-
-export type CancerCenterCollabReportCardProps = { centerCode: string };
-
-export function CancerCenterCollabReportCard({ centerCode }: CancerCenterCollabReportCardProps) {
-  const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
-  const selected = REPORTS.find((r) => r.key === selectedKey) ?? null;
-
-  return (
-    <EditPanel
-      heading="Reports"
-      description="Advisory only — apply any recommendation through the roster editor. Nothing here writes to the roster."
-    >
-      {selected ? (
-        <div>
-          <button
-            type="button"
-            onClick={() => setSelectedKey(null)}
-            className="mb-4 text-sm text-muted-foreground hover:text-foreground"
-          >
-            &larr; All reports
-          </button>
-          <h3 className="mb-4 text-base font-semibold">{selected.label}</h3>
-          {selected.key === "collab-cancer-relevance" && <CollabCancerRelevanceReport centerCode={centerCode} />}
-        </div>
-      ) : (
-        <ul className="divide-y divide-border">
-          {REPORTS.map((r) => (
-            <li key={r.key}>
-              <button
-                type="button"
-                onClick={() => setSelectedKey(r.key)}
-                className="flex w-full flex-col items-start gap-0.5 py-3 text-left hover:bg-muted/50"
-              >
-                <span className="text-sm font-medium">{r.label}</span>
-                <span className="text-xs text-muted-foreground">{r.description}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </EditPanel>
   );
 }
