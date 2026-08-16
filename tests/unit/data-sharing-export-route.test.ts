@@ -5,14 +5,17 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockSession, mockEnabled, mockCanView, mockLoadRows, mockCap, mockCsv } = vi.hoisted(() => ({
-  mockSession: vi.fn(),
-  mockEnabled: vi.fn(),
-  mockCanView: vi.fn(),
-  mockLoadRows: vi.fn(),
-  mockCap: vi.fn(),
-  mockCsv: vi.fn(),
-}));
+const { mockSession, mockEnabled, mockCanView, mockLoadRows, mockCap, mockCsv, mockLoadReport, mockSectionCsv } =
+  vi.hoisted(() => ({
+    mockSession: vi.fn(),
+    mockEnabled: vi.fn(),
+    mockCanView: vi.fn(),
+    mockLoadRows: vi.fn(),
+    mockCap: vi.fn(),
+    mockCsv: vi.fn(),
+    mockLoadReport: vi.fn(),
+    mockSectionCsv: vi.fn(),
+  }));
 
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockSession }));
 vi.mock("@/lib/edit/data-sharing-dashboard", () => ({
@@ -23,6 +26,9 @@ vi.mock("@/lib/api/data-sharing-report", () => ({
   loadDatasetLinkRows: mockLoadRows,
   capDatasetLinkRows: mockCap,
   buildDataSharingCsv: mockCsv,
+  loadDataSharingReport: mockLoadReport,
+  buildSectionCsv: mockSectionCsv,
+  CSV_SECTIONS: ["tiers", "repositories", "departments", "faculty", "subtypes"],
 }));
 vi.mock("@/lib/db", () => ({ db: { read: {} } }));
 
@@ -88,5 +94,31 @@ describe("/edit/data-sharing/export gating", () => {
       truncated: true,
     });
     expect(typeof logged.ts).toBe("string");
+  });
+
+  it("?section=faculty serves the section CSV via loadDataSharingReport, not the item path", async () => {
+    mockLoadReport.mockResolvedValue({ byFaculty: [] });
+    mockSectionCsv.mockReturnValue("faculty_name,cwid\r\n");
+    const res = await GET(new Request("http://sps.test/edit/data-sharing/export?section=faculty"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-disposition")).toMatch(
+      /attachment; filename="data-sharing-faculty-\d{4}-\d{2}-\d{2}\.csv"/,
+    );
+    expect(mockSectionCsv).toHaveBeenCalledWith({ byFaculty: [] }, "faculty");
+    expect(mockLoadRows).not.toHaveBeenCalled();
+  });
+
+  it("400s an unknown section without touching the DB", async () => {
+    const res = await GET(new Request("http://sps.test/edit/data-sharing/export?section=nope"));
+    expect(res.status).toBe(400);
+    expect(mockLoadReport).not.toHaveBeenCalled();
+    expect(mockLoadRows).not.toHaveBeenCalled();
+  });
+
+  it("section export still respects the gates (flag off → 404)", async () => {
+    mockEnabled.mockReturnValue(false);
+    const res = await GET(new Request("http://sps.test/edit/data-sharing/export?section=faculty"));
+    expect(res.status).toBe(404);
+    expect(mockLoadReport).not.toHaveBeenCalled();
   });
 });
