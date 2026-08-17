@@ -637,7 +637,7 @@ export function CancerCenterCollabReportCard({ centerCode, centerName }: CancerC
   // something contingent on data having arrived yet.
   const header = (
     <>
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-muted-foreground text-sm">
           Collaboration &amp; cancer-relevance · {centerName}
           {state?.generatedAt && <> · Last refreshed {new Date(state.generatedAt).toLocaleString()}</>}

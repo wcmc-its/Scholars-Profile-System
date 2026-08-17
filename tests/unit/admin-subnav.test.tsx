@@ -261,6 +261,19 @@ describe("AdminSubnav", () => {
     expect(screen.getByTestId("admin-tab-reports")).toBeTruthy();
   });
 
+  // The Reports tab's "active" state spans 7 distinct routes (index + 6
+  // report detail pages), unlike every other tab where "active" means
+  // "already on this exact page" — so unlike e.g. Profiles (an inert span
+  // while active), Reports stays a real, clickable link back to its home
+  // page even while active.
+  it("keeps the Reports tab a clickable link back to /edit/reports even while active", () => {
+    render(<AdminSubnav active="reports" pendingSlugRequests={null} pendingHonors={null} />);
+    const tab = screen.getByTestId("admin-tab-reports");
+    expect(tab.tagName).toBe("A");
+    expect(tab.getAttribute("href")).toBe("/edit/reports");
+    expect(tab.getAttribute("aria-current")).toBe("page");
+  });
+
   // COI dashboard tab — superuser + `EDIT_DATA_QUALITY_DASHBOARD` only, no
   // grant escape hatch at all (mirrors the `coi` predicate in
   // `lib/edit/console-tabs.server.ts`).

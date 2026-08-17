@@ -27,6 +27,8 @@ import { db } from "@/lib/db";
 import type { UnitEntityType } from "@/lib/api/manual-layer";
 import { loadActiveCenterMemberCwids } from "@/lib/api/centers";
 import { loadDivisionMemberCwids } from "@/lib/api/divisions";
+import { loadProjectSiblingRows, type ProjectKeyRow } from "@/lib/api/project-siblings";
+import { groupGrantsByProject, sortPeople } from "@/lib/funding-projection";
 
 export type NihFundedPublicationRow = {
   pmid: string;
@@ -42,6 +44,14 @@ export type NihFundedPublicationRow = {
    *  to `lib/api/profile.ts`'s grant-publication mapping (issues #85/#86); see
    *  the `GrantPublication` schema doc comment for the confidence tiers. */
   isLowerConfidence: boolean;
+  /** Every investigator on this row's Grant's funding project: this row's own
+   *  `Grant.cwid` plus any sibling `Grant` rows sharing the same award/project
+   *  (a WCM Grant is one row PER investigator per InfoEd account, so a real
+   *  multi-investigator award is several sibling Grant rows) — lead-PI-first,
+   *  deduped by cwid. Falls back to this Grant's own `{cwid}` alone when its
+   *  `externalId` doesn't parse (should be rare/never — `Grant.externalId` is
+   *  a required unique column — but handled defensively). */
+  investigators: ReadonlyArray<{ cwid: string; name: string }>;
 };
 
 export type NihFundedPublicationsReport = {
@@ -107,17 +117,24 @@ export async function loadNihFundedPublicationsReport(
           sourceReporter: true,
           sourceReciterdb: true,
           reciterdbFirstSeen: true,
-          grant: { select: { title: true, awardNumber: true } },
+          grant: {
+            select: { title: true, awardNumber: true, externalId: true, role: true, cwid: true },
+          },
         },
       },
     },
   });
   if (pubs.length === 0) return EMPTY_REPORT;
 
-  const rows: NihFundedPublicationRow[] = [];
+  // One flat row per (publication, grant) link, plus one base row per DISTINCT
+  // grant (dedup by grantId — several pub rows can reference the same grant) to
+  // drive the investigator lookup below.
+  type FlatRow = Omit<NihFundedPublicationRow, "investigators">;
+  const flatRows: FlatRow[] = [];
+  const distinctGrantBaseRows = new Map<string, DistinctGrantBaseRow>();
   for (const p of pubs) {
     for (const gp of p.grants) {
-      rows.push({
+      flatRows.push({
         pmid: p.pmid,
         title: p.title,
         journal: p.journal,
@@ -127,8 +144,26 @@ export async function loadNihFundedPublicationsReport(
         awardNumber: gp.grant.awardNumber ?? null,
         isLowerConfidence: isLowerConfidenceLink(gp),
       });
+      if (!distinctGrantBaseRows.has(gp.grantId)) {
+        distinctGrantBaseRows.set(gp.grantId, {
+          grantId: gp.grantId,
+          cwid: gp.grant.cwid,
+          role: gp.grant.role,
+          externalId: gp.grant.externalId,
+          awardNumber: gp.grant.awardNumber,
+        });
+      }
     }
   }
+
+  const investigatorsByGrantId = await resolveInvestigatorsByGrantId(
+    Array.from(distinctGrantBaseRows.values()),
+  );
+
+  const rows: NihFundedPublicationRow[] = flatRows.map((r) => ({
+    ...r,
+    investigators: investigatorsByGrantId.get(r.grantId) ?? [],
+  }));
   rows.sort((a, b) => {
     if ((b.year ?? 0) !== (a.year ?? 0)) return (b.year ?? 0) - (a.year ?? 0);
     if (a.pmid !== b.pmid) return a.pmid.localeCompare(b.pmid);
@@ -136,4 +171,80 @@ export async function loadNihFundedPublicationsReport(
   });
 
   return { totalPublications: pubs.length, rows };
+}
+
+/** The columns of a distinct Grant row referenced by this report, keyed by the
+ *  Grant's own id (`GrantPublication.grantId`) so the investigator lookup can
+ *  be attached back to every flat pub/grant row that shares it. */
+type DistinctGrantBaseRow = {
+  grantId: string;
+  cwid: string;
+  role: string;
+  externalId: string | null;
+  awardNumber: string | null;
+};
+
+/**
+ * Resolve the co-investigator list for every distinct grant referenced by
+ * this report — one bulk sibling-grant query and one bulk scholar-name
+ * query, never per-row/per-grant.
+ *
+ * A WCM `Grant` is one row PER investigator per InfoEd account; a real
+ * multi-investigator award is several sibling `Grant` rows sharing the same
+ * award/project (`lib/api/project-siblings.ts`'s "family"). This groups
+ * `baseRows` together with every sibling row `loadProjectSiblingRows` finds
+ * using the SAME project-key formula the funding index uses
+ * (`groupGrantsByProject`), with no suppression filtering — this is an
+ * internal admin report, not the public search index.
+ */
+async function resolveInvestigatorsByGrantId(
+  baseRows: readonly DistinctGrantBaseRow[],
+): Promise<Map<string, ReadonlyArray<{ cwid: string; name: string }>>> {
+  const result = new Map<string, ReadonlyArray<{ cwid: string; name: string }>>();
+  if (baseRows.length === 0) return result;
+
+  const siblingRows = await loadProjectSiblingRows(baseRows);
+  const grouped = groupGrantsByProject<DistinctGrantBaseRow | ProjectKeyRow>(
+    [...baseRows, ...siblingRows],
+    new Set(),
+  );
+
+  const cwidsByGrantId = new Map<string, string[]>();
+  for (const group of grouped.values()) {
+    const seen = new Set<string>();
+    const dedupedCwids: string[] = [];
+    for (const r of sortPeople(group)) {
+      if (seen.has(r.cwid)) continue;
+      seen.add(r.cwid);
+      dedupedCwids.push(r.cwid);
+    }
+    for (const r of group) {
+      if ("grantId" in r) cwidsByGrantId.set(r.grantId, dedupedCwids);
+    }
+  }
+  // A grant whose externalId doesn't parse is dropped by groupGrantsByProject
+  // (no project key) — fall back to that grant's own cwid alone rather than
+  // dropping the row or throwing.
+  for (const base of baseRows) {
+    if (!cwidsByGrantId.has(base.grantId)) cwidsByGrantId.set(base.grantId, [base.cwid]);
+  }
+
+  const allCwids = new Set<string>();
+  for (const cwids of cwidsByGrantId.values()) for (const c of cwids) allCwids.add(c);
+  const scholars =
+    allCwids.size === 0
+      ? []
+      : await db.read.scholar.findMany({
+          where: { cwid: { in: Array.from(allCwids) } },
+          select: { cwid: true, preferredName: true },
+        });
+  const nameByCwid = new Map(scholars.map((s) => [s.cwid, s.preferredName]));
+
+  for (const [grantId, cwids] of cwidsByGrantId) {
+    result.set(
+      grantId,
+      cwids.map((cwid) => ({ cwid, name: nameByCwid.get(cwid) ?? cwid })),
+    );
+  }
+  return result;
 }

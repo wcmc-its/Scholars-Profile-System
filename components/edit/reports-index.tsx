@@ -191,7 +191,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
           </fieldset>
           <fieldset className="border-apollo-border border-t pt-3">
             <legend className="text-muted-foreground mb-2 text-xs font-semibold tracking-wide uppercase">
-              Reports
+              Status
             </legend>
             <div className="flex flex-col gap-1">
               <FilterCheckbox
@@ -200,7 +200,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
                   setLiveOnly(v);
                   if (v) setNoneYetOnly(false);
                 }}
-                label="Has live reports"
+                label="Live"
                 count={counts.liveOnly}
                 testid="reports-index-filter-has-live"
               />
@@ -210,7 +210,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
                   setNoneYetOnly(v);
                   if (v) setLiveOnly(false);
                 }}
-                label="None yet"
+                label="In progress"
                 count={counts.noneYet}
                 testid="reports-index-filter-none-yet"
               />
