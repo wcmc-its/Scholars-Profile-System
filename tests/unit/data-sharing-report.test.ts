@@ -1733,6 +1733,123 @@ describe("loadDataSharingReport: NIH-funded filter (2026-08-16, GitHub #2469)", 
     expect([...call.where.pmid.in].sort()).toEqual(["p1", "p2"]);
   });
 
+  it("REGRESSION 2026-08-17: a pmid on BOTH a registry row and a real deposit row is excluded from the funding totals, not silently counted not-NIH-funded", async () => {
+    // p2 (dbGaP, real deposit) ALSO appears on a ClinicalTrials.gov
+    // registration for the same pmid — registryPmidSet's carve says a
+    // both-rows pmid should be dropped from the funding population entirely
+    // (loadFundingSplit already did this correctly before this PR).
+    // deriveFundingTotals's first cut instead tallied the plain
+    // depositedPmidSet(rows), which still counts a both-rows pmid (that
+    // set's own doc comment says so, it's the RIGHT behavior for the
+    // share-rate numerator, WRONG for this narrower funding lens), and a
+    // pmid absent from nihByPmid degrades to not-NIH-funded, so p2 silently
+    // inflated notNihFundedPubs instead of being excluded like the
+    // no-filter-active case already correctly excludes it.
+    const client = makeClient();
+    (client.personDatasetDeposit.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        cwid: "aaa1",
+        datasetId: "d1",
+        pmids: ["p1"],
+        scholar: { preferredName: "Alice A", fullName: "Alice A", slug: "alice-a", primaryDepartment: "Medicine" },
+        dataset: {
+          repository: "GEO",
+          accessModel: "open",
+          title: null,
+          accessionOrDoi: null,
+          resourceType: null,
+          dataType: null,
+          sensitiveCats: null,
+          sensitiveSubtypes: null,
+          depositYear: 2020,
+          provenance: "databank",
+          confidence: "high",
+        },
+      },
+      {
+        cwid: "aaa1",
+        datasetId: "d2",
+        pmids: ["p2"],
+        scholar: { preferredName: "Alice A", fullName: "Alice A", slug: "alice-a", primaryDepartment: "Medicine" },
+        dataset: {
+          repository: "dbGaP",
+          accessModel: "controlled",
+          title: null,
+          accessionOrDoi: null,
+          resourceType: null,
+          dataType: null,
+          sensitiveCats: null,
+          sensitiveSubtypes: null,
+          depositYear: 2023,
+          provenance: "databank",
+          confidence: "high",
+        },
+      },
+      {
+        cwid: "aaa1",
+        datasetId: "d3",
+        pmids: ["p2"], // same pmid as d2's real deposit, on a registry row
+        scholar: { preferredName: "Alice A", fullName: "Alice A", slug: "alice-a", primaryDepartment: "Medicine" },
+        dataset: {
+          repository: "ClinicalTrials.gov",
+          accessModel: "open",
+          title: null,
+          accessionOrDoi: null,
+          resourceType: null,
+          dataType: REGISTRY_DATA_TYPE,
+          sensitiveCats: null,
+          sensitiveSubtypes: null,
+          depositYear: 2023,
+          provenance: "databank",
+          confidence: "high",
+        },
+      },
+    ]);
+    const report = await loadDataSharingReport(client);
+    // p1 NIH-funded (1), p2 dropped entirely (both-rows carve), not counted
+    // toward either bucket.
+    expect(report.overall.nihFundedPubs).toBe(1);
+    expect(report.overall.notNihFundedPubs).toBe(0);
+  });
+
+  it("REGRESSION 2026-08-17: under an active nihFunded filter, a surviving row's non-matching pmid does not appear in the opposite bucket", async () => {
+    // One row citing BOTH a NIH-funded pmid (p1) and a not-NIH-funded pmid
+    // (p3): it survives an nihFunded:true filter because of p1
+    // (applyNihFilter's "any pmid matches" rule), but p3 must not then show
+    // up as a "not NIH-funded" count on a view whose whole point is
+    // "NIH-funded only" — that read as self-contradictory before this fix.
+    const client = makeClient();
+    (client.personDatasetDeposit.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        cwid: "aaa1",
+        datasetId: "d1",
+        pmids: ["p1", "p3"],
+        scholar: { preferredName: "Alice A", fullName: "Alice A", slug: "alice-a", primaryDepartment: "Medicine" },
+        dataset: {
+          repository: "GEO",
+          accessModel: "open",
+          title: null,
+          accessionOrDoi: null,
+          resourceType: null,
+          dataType: null,
+          sensitiveCats: null,
+          sensitiveSubtypes: null,
+          depositYear: 2020,
+          provenance: "databank",
+          confidence: "high",
+        },
+      },
+    ]);
+    (client.grantPublication.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { pmid: "p1", grant: { nihIc: "NCI" } },
+      { pmid: "p3", grant: { nihIc: null } },
+    ]);
+    const report = await loadDataSharingReport(client, { nihFunded: true });
+    expect(report.overall.datasets).toBe(1); // the row survives, via p1
+    expect(report.overall.nihFundedPubs).toBe(1); // p1
+    expect(report.overall.notNihFundedPubs).toBe(0); // p3 excluded, not miscounted
+  });
+
   it("share-rate and PMC-coverage stats stay institution-wide regardless of the nihFunded filter", async () => {
     // Same year-floor/type-scoped corpus for both calls (loadShareRateCorpus
     // is mocked to return []), so both share-rate denominators read 0 either
@@ -1919,6 +2036,32 @@ describe("deriveFundingTotals", () => {
     expect(deriveFundingTotals(new Set(), new Map([["p1", true]]))).toEqual({
       nihFundedPubs: 0,
       notNihFundedPubs: 0,
+    });
+  });
+
+  it("2026-08-17: with nihFundedFilter set, a non-matching pmid is excluded from both counters, not counted into the opposite one", () => {
+    const nihByPmid = new Map([
+      ["p1", true],
+      ["p2", false],
+    ]);
+    expect(deriveFundingTotals(new Set(["p1", "p2"]), nihByPmid, true)).toEqual({
+      nihFundedPubs: 1,
+      notNihFundedPubs: 0,
+    });
+    expect(deriveFundingTotals(new Set(["p1", "p2"]), nihByPmid, false)).toEqual({
+      nihFundedPubs: 0,
+      notNihFundedPubs: 1,
+    });
+  });
+
+  it("nihFundedFilter undefined (no filter active) keeps today's behavior, both buckets populate normally", () => {
+    const nihByPmid = new Map([
+      ["p1", true],
+      ["p2", false],
+    ]);
+    expect(deriveFundingTotals(new Set(["p1", "p2"]), nihByPmid, undefined)).toEqual({
+      nihFundedPubs: 1,
+      notNihFundedPubs: 1,
     });
   });
 });
