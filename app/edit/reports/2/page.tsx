@@ -1,8 +1,12 @@
 /**
  * `/edit/reports/2` — "NCI Table 2a" (formerly the `?attr=nci-2a` tab inside
  * `/edit/center/[code]`; `2026-08-08-cancer-center-nci-table-2a-feature-
- * plan.md`). Hosts `Nci2aCard` UNCHANGED — this PR only moved how it's
- * reached, from an in-page unit-editor tab to a top-level console route. See
+ * plan.md`). Hosts `Nci2aCard`, which no longer wraps its content in
+ * `EditPanel` — that wrapper's `<h2 id="panel-heading">` duplicated this
+ * page's own `<h1>` right below it, and its `aria-labelledby="panel-heading"`
+ * contract is dead here (`ConsoleShell`'s `<main id="console-main">` doesn't
+ * reference it), so it was purely a second title (same precedent as
+ * `cancer-center-collab-report-card.tsx`, see its own top comment). See
  * `app/edit/reports/page.tsx` for the shared session/authz/center-resolution
  * flow this mirrors (duplicated per page rather than a shared server
  * component, matching every other `/edit/*` console page's convention).
