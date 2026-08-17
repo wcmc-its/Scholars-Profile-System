@@ -1,8 +1,9 @@
 /**
- * #1323 — the Historical Appointments reveal panel. Lists a scholar's past
- * (source "ED-HISTORICAL") appointments, each hidden from the public profile
- * until a reveal-capable editor shows it. Unlike the active Appointments panel
- * (hide-to-suppress), this is reveal-to-show: the toggle flips
+ * #1323 — the Historical Appointments panel. Lists a scholar's past
+ * (source "ED-HISTORICAL") appointments, each shown on the public profile
+ * until an authorized editor hides it — same hide-to-suppress model as the
+ * active Appointments panel (flipped 2026-08; hidden-by-default made
+ * long-tenured faculty look newly arrived). The toggle flips
  * `Appointment.showOnProfile` via POST /api/edit/appointment-visibility.
  *
  * Display-only: it does not change the underlying record, and the CV export
@@ -70,7 +71,7 @@ export function HistoricalAppointmentsCard({
       slot="historical-appointments-panel"
       heading="Historical appointments"
       subsection
-      description={`Past appointments from the Weill Cornell directory. They are hidden from ${scholarName}'s public profile until you show one. Showing or hiding here is display-only — it doesn't change the record, and the CV export always includes them.`}
+      description={`Past appointments from the Weill Cornell directory. They are shown on ${scholarName}'s public profile unless you hide one. Showing or hiding here is display-only — it doesn't change the record, and the CV export always includes them.`}
     >
       {appointments.length === 0 ? (
         <p className="text-muted-foreground text-sm">No historical appointments on file.</p>
