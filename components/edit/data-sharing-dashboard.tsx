@@ -91,6 +91,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 
+import { CopyButton } from "@/components/publication/copy-button";
 import { DataSharingMethodsDialog } from "@/components/edit/data-sharing-methods";
 import { DefinedTerm } from "@/components/edit/data-sharing-term";
 import { resolveDatasetUrl } from "@/components/profile/datasets-section";
@@ -98,8 +99,17 @@ import {
   parseSensitiveSubtypes,
   SHARE_RATE_YEAR_FLOOR,
   type DataSharingReport,
+  type DepartmentRollup,
+  type NamedFacultyRow,
 } from "@/lib/api/data-sharing-report";
 import { buildMethodsDoc } from "@/lib/edit/data-sharing-methods-doc";
+import {
+  FACULTY_ROW_CAP,
+  type DataSharingUiParams,
+  type DepartmentSortKey,
+  type FacultySortKey,
+  type SortDir,
+} from "@/lib/edit/data-sharing-dashboard";
 import { tierOf, urlOf } from "@/lib/repository-tier";
 
 const thClass = "px-3 py-2 font-medium";
@@ -110,11 +120,57 @@ const sectionClass =
 /** "n/N (x%)" — deliberately never a bare percentage (a past review flagged
  *  that a naked percent on a small denominator implies false precision).
  *  `undefined` (row has no share-rate data merged) or a zero denominator both
- *  render "—" rather than "0/0 (NaN%)" or a misleading "0%". */
+ *  render "—" rather than "0/0 (NaN%)" or a misleading "0%". A nonzero
+ *  numerator that rounds to 0% reads as "<1%" (2026-08-16 review: several
+ *  departments' entire signal was being rounded away, and "0%" next to a
+ *  nonzero numerator reads as an arithmetic error, not a small percentage). */
 function formatShareRate(numerator: number | undefined, denominator: number | undefined): string {
   if (numerator === undefined || denominator === undefined || denominator === 0) return "—";
   const pct = Math.round((numerator / denominator) * 100);
-  return `${numerator.toLocaleString()}/${denominator.toLocaleString()} (${pct}%)`;
+  const pctLabel = pct === 0 && numerator > 0 ? "<1%" : `${pct}%`;
+  return `${numerator.toLocaleString()}/${denominator.toLocaleString()} (${pctLabel})`;
+}
+
+/** Acronyms preserved as-is when `displayDepartmentName` title-cases an
+ *  all-caps department string — 2026-08-16 adversarial-review finding: the
+ *  fix's OWN motivating example, "WCMC QATAR," contains one (WCMC) that the
+ *  naive title-case would mangle to "Wcmc," which the doc comment on this
+ *  function previously (wrongly) claimed couldn't happen. Bounded allowlist,
+ *  not a general acronym detector — add an entry only when a real
+ *  all-caps department name surfaces one. */
+const PRESERVED_DEPARTMENT_ACRONYMS = new Set(["WCMC", "ICU", "NIH"]);
+
+/** Title-cases a department name if it's stored fully uppercase (e.g. "WCMC
+ *  QATAR" → "WCMC Qatar"), otherwise passes it through untouched — 2026-08-16
+ *  review: cosmetic, but the audience notices. Bounded to the all-uppercase
+ *  case on purpose: a normal Title Case or mixed-case name (which may
+ *  legitimately contain an acronym) passes through unchanged. Within an
+ *  all-caps string, a token in `PRESERVED_DEPARTMENT_ACRONYMS` stays
+ *  uppercase rather than being title-cased along with the rest. */
+function displayDepartmentName(department: string): string {
+  if (department !== department.toUpperCase() || department === department.toLowerCase()) return department;
+  return department
+    .split(" ")
+    .map((word) => {
+      if (PRESERVED_DEPARTMENT_ACRONYMS.has(word)) return word;
+      const lower = word.toLowerCase();
+      return lower.length > 0 ? lower[0].toUpperCase() + lower.slice(1) : lower;
+    })
+    .join(" ");
+}
+
+/** Repositories whose accession convention is a fixed-prefix uppercase code
+ *  (GSExxxx, SRRxxxx…) — uppercased for display when the stored value isn't
+ *  already (2026-08-16 review: "gse55096" vs GEO's own "GSE55096"
+ *  convention). Deliberately NOT applied to every repository: DOI-bearing
+ *  repositories (Dryad, Zenodo, figshare, …) use `accessionOrDoi` for a real
+ *  DOI, and dbGaP's own convention is a LOWERCASE "phs" prefix (e.g.
+ *  "phs000001.v1.p1") — uppercasing it would be wrong, not a fix (2026-08-16
+ *  adversarial-review finding: dbGaP was wrongly included here). */
+const UPPERCASE_ACCESSION_REPOSITORIES = new Set(["GEO", "SRA", "GenBank", "BioProject/BioSample"]);
+
+function displayAccession(repository: string, accession: string): string {
+  return UPPERCASE_ACCESSION_REPOSITORIES.has(repository) ? accession.toUpperCase() : accession;
 }
 
 /** `report.dataAsOf` — when the weekly data-sharing bridge last fully synced. */
@@ -170,6 +226,76 @@ function DownloadLink({
   );
 }
 
+/** `ui.filters` → the exact query-param shape `parseDataSharingParams`
+ *  reads back (2026-08-16 adversarial-review fix): `DataSharingReportFilters
+ *  .tiers` is plural (an array FIELD name) but the URL param it round-trips
+ *  through is singular `tier=` (repeated once per value, `parseDataSharingParams`
+ *  reads `searchParams.tier`) — spreading `...ui.filters` straight into
+ *  `buildQuery` emitted a `tiers=` key nothing parses, silently dropping the
+ *  active tier filter the instant someone clicked a sort-column or
+ *  pagination link built that way. This is the one place that translation
+ *  happens, so a sort/pagination href can't drift from the filter form's
+ *  own `name="tier"` checkboxes again. */
+function filterQueryParams(filters: DataSharingUiParams["filters"]): Record<string, string | number | readonly string[] | undefined> {
+  return { yearFrom: filters.yearFrom, yearTo: filters.yearTo, tier: filters.tiers };
+}
+
+/** Builds a query string, dropping `undefined`/empty-array values — the one
+ *  place every sort-link/filter-form href on this page assembles its
+ *  params, so none of them can drift on how a multi-value param (`tier=`)
+ *  or an absent one is encoded. */
+function buildQuery(params: Record<string, string | number | readonly string[] | undefined>): string {
+  const sp = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined) continue;
+    if (Array.isArray(value)) {
+      for (const v of value) sp.append(key, v);
+    } else {
+      sp.set(key, String(value));
+    }
+  }
+  const qs = sp.toString();
+  return qs ? `?${qs}` : "";
+}
+
+/** A sortable `<th>` — a plain link that reloads the page with the sort
+ *  param toggled, not a client island (see `parseDataSharingParams`'s doc
+ *  comment for why). Preserves every other active filter/sort param via
+ *  `otherParams`. Clicking the currently-active column flips direction;
+ *  clicking a different column switches to it, descending first (matches
+ *  every table's current datasets-desc default). */
+function SortableTh({
+  label,
+  sortKey,
+  activeSort,
+  activeDir,
+  otherParams,
+  sortParamName,
+  dirParamName,
+  align = "right",
+}: {
+  label: string;
+  sortKey: string;
+  activeSort: string | undefined;
+  activeDir: SortDir;
+  otherParams: Record<string, string | number | readonly string[] | undefined>;
+  sortParamName: string;
+  dirParamName: string;
+  align?: "left" | "right";
+}) {
+  const isActive = activeSort === sortKey;
+  const nextDir: SortDir = isActive && activeDir === "desc" ? "asc" : "desc";
+  const href = buildQuery({ ...otherParams, [sortParamName]: sortKey, [dirParamName]: nextDir });
+  return (
+    <th className={`${thClass} ${align === "right" ? "text-right" : ""}`}>
+      <a href={href} className="inline-flex items-center gap-1 hover:underline">
+        {label}
+        {isActive && <span aria-hidden>{activeDir === "desc" ? "↓" : "↑"}</span>}
+      </a>
+    </th>
+  );
+}
+
 /** The v2 mockup's `.newcol` band (its `#F2F8F4`), restored per the v3 pass:
  *  a faint tint that visually GROUPS the access-model/exposure columns — §3
  *  By department's Open/Controlled/Registry and §4 Named faculty's
@@ -210,14 +336,17 @@ const TIER_COLORS: Record<string, string> = {
 };
 
 /** Tier → `DATA_SHARING_TERMS` glossary key for the `DefinedTerm` hover on
- *  `TierChip` labels (v3 term-hover pass). Both FOREIGN_* tiers share the one
- *  "Foreign-hosted" entry. US tiers and UNKNOWN are absent on purpose — the
- *  glossary defines the risk vocabulary, and "US-hosted, open" needs no
- *  definition; an absent key renders the label plain, no hover. */
+ *  `TierChip` labels (v3 term-hover pass). FOREIGN_OPEN/FOREIGN_CTRL each get
+ *  their OWN entry (2026-08-16 fix — a shared "Foreign-hosted" definition
+ *  read identically for both tiers, which implied a live distinction that
+ *  carried no information; see `DATA_SHARING_TERMS`'s matching split). US
+ *  tiers and UNKNOWN are absent on purpose — the glossary defines the risk
+ *  vocabulary, and "US-hosted, open" needs no definition; an absent key
+ *  renders the label plain, no hover. */
 const TIER_GLOSSARY_TERM: Record<string, string> = {
   CONCERN: "Country of concern",
-  FOREIGN_OPEN: "Foreign-hosted",
-  FOREIGN_CTRL: "Foreign-hosted",
+  FOREIGN_OPEN: "Foreign-hosted, open",
+  FOREIGN_CTRL: "Foreign-hosted, controlled",
   REGISTRY: "Registry",
 };
 
@@ -240,41 +369,21 @@ function TierChip({ tier }: { tier: string }) {
   );
 }
 
-/** The mockup's signature element: a proportional stacked bar over
- *  `pubsByTier` (already severity-sorted by `TIER_ORDER` upstream) with a
- *  legend. Zero-count tiers get no bar segment but keep a legend entry, so
- *  "Country of concern 0" stays visible as a statement rather than vanishing. */
+/** Per-tier horizontal bars (small multiples) against one shared 0–max axis —
+ *  replaced the mockup's single stacked bar (2026-08-16 review): the
+ *  caption already admits a publication counted in more than one tier is
+ *  "counted in each," so the segments overlap and a STACKED bar's total
+ *  length visually promises a partition it doesn't have. Small multiples say
+ *  the same numbers without that implied promise. Zero-count tiers still get
+ *  a full-width-empty row, not a hidden one — "Country of concern 0" stays a
+ *  visible statement, same rationale as the old legend entries. */
 function TierSpectrum({ rows }: { rows: DataSharingReport["pubsByTier"] }) {
-  const total = rows.reduce((sum, t) => sum + t.pubs, 0);
+  const max = Math.max(1, ...rows.map((t) => t.pubs));
   return (
-    <>
-      {total > 0 && (
-        <div className="border-apollo-border mt-3 flex h-5 overflow-hidden rounded border">
-          {rows
-            .filter((t) => t.pubs > 0)
-            .map((t) => (
-              <div
-                key={t.tier}
-                style={{
-                  width: `${(t.pubs / total) * 100}%`,
-                  backgroundColor: TIER_COLORS[t.tier] ?? TIER_COLORS.UNKNOWN,
-                }}
-                title={`${TIER_LABELS[t.tier] ?? t.tier} · ${t.pubs.toLocaleString()}`}
-              />
-            ))}
-        </div>
-      )}
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-        {rows.map((t) => (
-          <span key={t.tier} className="inline-flex items-center gap-1.5">
-            <span
-              aria-hidden
-              className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
-              style={{ backgroundColor: TIER_COLORS[t.tier] ?? TIER_COLORS.UNKNOWN }}
-            />
-            {/* Same glossary hover as `TierChip` — the legend is where
-                "Country of concern 0" is most likely to be read first, so the
-                definition has to be reachable right here, not only in §3. */}
+    <div className="mt-3 space-y-1.5">
+      {rows.map((t) => (
+        <div key={t.tier} className="flex items-center gap-2 text-xs">
+          <span className="w-44 shrink-0 truncate text-right">
             {TIER_GLOSSARY_TERM[t.tier] ? (
               <DefinedTerm term={TIER_GLOSSARY_TERM[t.tier]}>
                 <span className="text-muted-foreground">{TIER_LABELS[t.tier] ?? t.tier}</span>
@@ -282,27 +391,88 @@ function TierSpectrum({ rows }: { rows: DataSharingReport["pubsByTier"] }) {
             ) : (
               <span className="text-muted-foreground">{TIER_LABELS[t.tier] ?? t.tier}</span>
             )}
-            <span className="font-semibold">{t.pubs.toLocaleString()}</span>
           </span>
-        ))}
-      </div>
-    </>
+          <div className="border-apollo-border h-3 flex-1 overflow-hidden rounded border">
+            {t.pubs > 0 && (
+              <div
+                className="h-full"
+                style={{
+                  width: `${(t.pubs / max) * 100}%`,
+                  backgroundColor: TIER_COLORS[t.tier] ?? TIER_COLORS.UNKNOWN,
+                }}
+              />
+            )}
+          </div>
+          <span className="w-10 shrink-0 text-right font-semibold">{t.pubs.toLocaleString()}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
-function RollupSection({ report }: { report: DataSharingReport }) {
-  const { overall } = report;
-  // Built here (server side) and passed down whole — the dialog is a client
-  // island and must never import the report lib itself; `buildMethodsDoc` is
-  // pure and `DataSharingReport` satisfies its structural param type.
-  const doc = buildMethodsDoc(report, { shareRateYearFloor: SHARE_RATE_YEAR_FLOOR });
+/** Small CSS-bar trend chart, same small-multiples idiom as `TierSpectrum` —
+ *  no chart library. 2026-08-16 ask: "leadership's first question after 'how
+ *  much' is 'is it going up.'" Ascending year order (see `aggregateByYear`'s
+ *  doc comment); the "Unknown year" bucket, if present, renders last and
+ *  muted so it reads as a caveat, not a real trend point. */
+function DepositsByYearChart({ rows }: { rows: DataSharingReport["byYear"] }) {
+  if (rows.length === 0) return null;
+  const max = Math.max(1, ...rows.map((r) => r.datasets));
+  return (
+    <div className={`${sectionClass} mt-4 p-4`}>
+      <div className="text-sm font-medium">Deposits by year</div>
+      <p className="text-muted-foreground mt-1 text-xs">
+        Distinct datasets by deposit year (repository metadata, or publication year as a fallback).
+      </p>
+      <div className="mt-3 flex h-28 items-end gap-1.5">
+        {rows.map((r) => (
+          <div key={r.year ?? "unknown"} className="flex flex-1 flex-col items-center gap-1">
+            <div className="w-full text-center text-xs font-semibold">{r.datasets.toLocaleString()}</div>
+            <div
+              className={`w-full rounded-t ${r.year === null ? "bg-apollo-border" : "bg-[#3E6FB0]"}`}
+              style={{ height: `${Math.max(4, (r.datasets / max) * 100)}%` }}
+            />
+            <div className="text-muted-foreground text-xs">{r.year ?? "Unknown"}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
+function RollupSection({
+  report,
+  doc,
+}: {
+  report: DataSharingReport;
+  /** Built once in `DataSharingDashboard` (server side) and passed down —
+   *  the sticky nav (2026-08-16 ask) repeats the same Methods dialog trigger,
+   *  so the doc can't be built separately in two places without risking
+   *  drift. The dialog itself is a client island and must never import the
+   *  report lib directly; `buildMethodsDoc` is pure and `DataSharingReport`
+   *  satisfies its structural param type. */
+  doc: ReturnType<typeof buildMethodsDoc>;
+}) {
+  const { overall } = report;
   return (
     <section id="rollup" className="scroll-mt-4">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-base font-semibold">1 · Institutional rollup</h2>
         <span className="inline-flex items-center gap-4">
-          <DataSharingMethodsDialog doc={doc} />
+          {/* The Methods dialog trigger now lives ONLY in the sticky nav
+              (2026-08-16 ask: "repeat the Methods link there rather than
+              only in section 1's corner") — one trigger, reachable from
+              anywhere on the page, not two that could drift or double up
+              in an accessibility tree query. */}
+          {/* Shortcut to the Methods dialog's "Copy paragraph" (2026-08-16
+              ask for a "copy summary" button) — reuses the same CopyButton +
+              paragraph rather than a second citation-text mechanism; the
+              gap was discoverability (buried in a dialog), not a missing
+              feature. */}
+          <span className="inline-flex items-center gap-1 text-sm">
+            <CopyButton value={doc.paragraph} label="Copy summary paragraph" />
+            Copy summary
+          </span>
           <DownloadLink
             href="/edit/data-sharing/export"
             className="text-sm hover:underline"
@@ -334,37 +504,33 @@ function RollupSection({ report }: { report: DataSharingReport }) {
             {formatShareRate(overall.shareRateNumerator, overall.shareRateDenominator)}
           </div>
           <div className="text-muted-foreground text-xs">
-            Confirmed first/last-author pubs with a detected deposit
+            Confirmed first/last-author, full-time-faculty pubs with a detected deposit
           </div>
-          <div className="text-muted-foreground mt-0.5 text-xs">
-            since {SHARE_RATE_YEAR_FLOOR}, no lock to a sensitive-data subset
-          </div>
+          <div className="text-muted-foreground mt-0.5 text-xs">since {SHARE_RATE_YEAR_FLOOR}</div>
         </div>
-        {/* PMC coverage pair (v3): the full-text arm of the deposit scan can
-            only inspect pubs whose full text is in PMC, so (a) how much of
-            the corpus that is, and (b) the share rate over just that
-            PMC-covered subset — the denominator the scan can actually see.
-            See `pmcCoverage`'s doc comment in the report lib. */}
+        {/* PMC coverage (v3, collapsed to ONE card 2026-08-16): both PMC
+            cards previously here read the same corpus-wide number twice
+            (pmcCoveredPubs == shareRateDenominator today, i.e. "100% in
+            PMC," confirmed via a live staging probe as institution-wide,
+            not a query bug — see `overall.pmcCoveredPubs`'s doc comment in
+            the report lib). Kept as ONE raw-count card, explicitly flagged
+            as a known data-quality gap rather than presented as a working
+            denominator — restoring the second card only makes sense once
+            the upstream PMC-identifier field is verified. */}
         <div className={`${sectionClass} p-4`}>
           <div className="text-2xl font-semibold">
             {formatShareRate(overall.pmcCoveredPubs, overall.shareRateDenominator)}
           </div>
-          <div className="text-muted-foreground text-xs">In PMC</div>
-          <div className="text-muted-foreground mt-0.5 text-xs">
-            corpus publications with PubMed Central full text
+          <div className="text-muted-foreground text-xs">
+            <DefinedTerm term="PMC">In PMC</DefinedTerm>
           </div>
-        </div>
-        <div className={`${sectionClass} p-4`}>
-          <div className="text-2xl font-semibold">
-            {formatShareRate(overall.pmcDepositedPubs, overall.pmcCoveredPubs)}
-          </div>
-          <div className="text-muted-foreground text-xs">PMC-covered share rate</div>
           <div className="text-muted-foreground mt-0.5 text-xs">
-            PMC-covered pubs with a detected deposit — the denominator the full-text scan can
-            actually see
+            known data-quality gap — see Methods, &ldquo;PMC coverage&rdquo;
           </div>
         </div>
       </div>
+
+      <DepositsByYearChart rows={report.byYear} />
 
       {/* Methodology prose + the "One paragraph for reporting" copy block
           moved into the Methods dialog above (08-16 follow-up pass). */}
@@ -383,15 +549,32 @@ function RollupSection({ report }: { report: DataSharingReport }) {
 
 function FundingSection({ report }: { report: DataSharingReport }) {
   const { overall } = report;
+  // Shared non-registry deposited-publication population both lenses below
+  // are built from — stated explicitly (2026-08-16 fix) so a reader doesn't
+  // subtract this from the §1 headline denominator and find "41 missing
+  // pubs": the two totals are DIFFERENT populations by design (this one is
+  // every detected non-registry deposit; §1's is scoped to the corpus), not
+  // a subset relationship.
+  const sharedTotal = overall.nihFundedPubs + overall.notNihFundedPubs;
+  const { accessFundingCrossTab: cross } = report;
   return (
     <section id="funding" className="mt-10 scroll-mt-4">
-      <h2 className="text-base font-semibold">2 · Funding</h2>
+      <h2 className="text-base font-semibold">2 · Funding &amp; access</h2>
       <p className="text-muted-foreground mt-1 text-sm">
-        NIH-funded share of the same non-registry deposited publications the access-model split
-        above is built from.
+        Access model and NIH funding, both over the same {sharedTotal.toLocaleString()} non-registry
+        deposited publications — a different, broader population than the §1 corpus-scoped share
+        rate (not a subset of it).
       </p>
 
       <div className="mt-4 grid grid-cols-2 gap-3">
+        <div className={`${sectionClass} p-4`}>
+          <div className="text-2xl font-semibold">{overall.openPubs.toLocaleString()}</div>
+          <div className="text-muted-foreground text-xs">Open-access publications</div>
+        </div>
+        <div className={`${sectionClass} p-4`}>
+          <div className="text-2xl font-semibold">{overall.controlledPubs.toLocaleString()}</div>
+          <div className="text-muted-foreground text-xs">Controlled-access publications</div>
+        </div>
         <div className={`${sectionClass} p-4`}>
           <div className="text-2xl font-semibold">{overall.nihFundedPubs.toLocaleString()}</div>
           <div className="text-muted-foreground text-xs">NIH-funded publications</div>
@@ -406,13 +589,91 @@ function FundingSection({ report }: { report: DataSharingReport }) {
         &quot;Not NIH-funded&quot; is not the same as non-federal: <code>nih_ic</code> is only ever
         populated for NIH awards, so other federal funders (CDC, NSF, and the like) aren&apos;t
         separately tracked here and are counted as not NIH-funded alongside genuinely non-federal
-        work.
+        work. A publication with more than one deposit of different access models can count toward
+        both open and controlled — the two access columns don&apos;t need to sum to the total above.
       </p>
+
+      {/* Access × NIH-funding cross-tab (2026-08-16 ask): the methods
+          guarantee the two lenses share a denominator; this is where they're
+          actually crossed instead of just adjacent. */}
+      <h3 className="mt-6 text-sm font-semibold">Access model × NIH funding</h3>
+      <div className={sectionClass}>
+        <table className="w-full text-sm">
+          <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
+            <tr className="border-apollo-border border-b">
+              <th className={thClass} />
+              <th className={`${thClass} text-right`}>NIH-funded</th>
+              <th className={`${thClass} text-right`}>Not NIH-funded</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-apollo-border border-b">
+              <td className={`${tdClass} font-medium`}>Open access</td>
+              <td className={`${tdClass} text-right`}>{cross.openNih.toLocaleString()}</td>
+              <td className={`${tdClass} text-right`}>{cross.openNotNih.toLocaleString()}</td>
+            </tr>
+            <tr>
+              <td className={`${tdClass} font-medium`}>Controlled access</td>
+              <td className={`${tdClass} text-right`}>{cross.controlledNih.toLocaleString()}</td>
+              <td className={`${tdClass} text-right`}>{cross.controlledNotNih.toLocaleString()}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }
 
-function RepositoriesSection({ report }: { report: DataSharingReport }) {
+/** Sorts a copy of `byDepartment` — see `SortableTh`'s doc comment for why
+ *  this is a plain server-side sort, not client state. `"shareRate"` sorts
+ *  by the computed percentage (0 when the row has no denominator), not the
+ *  numerator alone — that's the actual "rate-sorted" view the RDM team
+ *  asked for, not a raw-count reorder. Undefined `key` returns the input's
+ *  existing datasets-desc order unchanged (the report's own default). */
+function sortDepartments(
+  rows: readonly DepartmentRollup[],
+  key: DepartmentSortKey | undefined,
+  dir: SortDir,
+): DepartmentRollup[] {
+  if (!key) return [...rows];
+  const rate = (d: DepartmentRollup) =>
+    d.shareRateDenominator && d.shareRateDenominator > 0 ? (d.shareRateNumerator ?? 0) / d.shareRateDenominator : 0;
+  const value = (d: DepartmentRollup) => (key === "datasets" ? d.datasets : key === "faculty" ? d.faculty : rate(d));
+  const sorted = [...rows].sort((a, b) => value(a) - value(b));
+  return dir === "desc" ? sorted.reverse() : sorted;
+}
+
+/** Same shape as `sortDepartments`, over `byFaculty`. `"concerning"` sorts by
+ *  `concerningDeposits` (the union column, same one the table shows). */
+function sortFaculty(
+  rows: readonly NamedFacultyRow[],
+  key: FacultySortKey | undefined,
+  dir: SortDir,
+): NamedFacultyRow[] {
+  if (!key) return [...rows];
+  const rate = (f: NamedFacultyRow) =>
+    f.shareRateDenominator && f.shareRateDenominator > 0 ? (f.shareRateNumerator ?? 0) / f.shareRateDenominator : 0;
+  const value = (f: NamedFacultyRow) =>
+    key === "datasets" ? f.datasets : key === "concerning" ? f.concerningDeposits : rate(f);
+  const sorted = [...rows].sort((a, b) => value(a) - value(b));
+  return dir === "desc" ? sorted.reverse() : sorted;
+}
+
+function RepositoriesSection({ report, ui }: { report: DataSharingReport; ui: DataSharingUiParams }) {
+  const otherParams = { ...filterQueryParams(ui.filters), facSort: ui.facSort, facDir: ui.facDir, facPage: ui.facPage };
+  const sortedDepartments = sortDepartments(report.byDepartment, ui.deptSort, ui.deptDir);
+  // Synapse-shaped contradiction check (2026-08-16 review): does any
+  // repository's tier-implied access model (open/controlled, from
+  // TIER_LABELS) disagree with its actually-observed per-deposit Access
+  // column? Confirmed via staging probe this is currently true for Synapse
+  // (tiered US-hosted/open, all 11 observed deposits controlled) — a
+  // platform-level catalog classification, not a per-deposit fact, so the
+  // footnote only fires when the data actually shows a disagreement.
+  const tierAccessMismatch = report.byRepository.some((r) => {
+    const tierImpliesOpen = TIER_LABELS[r.tier]?.includes("open");
+    const tierImpliesControlled = TIER_LABELS[r.tier]?.includes("controlled");
+    return (tierImpliesOpen && r.accessModel === "controlled") || (tierImpliesControlled && r.accessModel === "open");
+  });
   return (
     <section id="repos" className="mt-10 scroll-mt-4">
       <h2 className="text-base font-semibold">3 · Repositories &amp; departments</h2>
@@ -425,8 +686,10 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
         <DownloadLink href="/edit/data-sharing/export?section=tiers" />
       </div>
       <p className="text-muted-foreground mt-1 text-xs">
-        Tier-based only — country-of-concern host or foreign-hosted repository; does not include
-        sensitive data-type detection.
+        The &ldquo;concerning&rdquo; flag elsewhere on this page is tier-based only (country-of-concern
+        host or foreign-hosted repository) and does not fold in sensitive-data-type detection —
+        §5 &ldquo;Deposits by data sub-type&rdquo; is a separate, not-yet-combined lens; see that
+        section for its own coverage.
       </p>
       <div className={sectionClass}>
         <table className="w-full text-sm">
@@ -497,6 +760,7 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
               <th className={thClass}>Tier</th>
               <th className={thClass}>Access</th>
               <th className={`${thClass} text-right`}>Datasets</th>
+              <th className={thClass} />
             </tr>
           </thead>
           <tbody>
@@ -514,12 +778,27 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
                     <AccessChip accessModel={r.accessModel} />
                   </td>
                   <td className={`${tdClass} text-right`}>{r.datasets.toLocaleString()}</td>
+                  <td className={tdClass}>
+                    <DownloadLink
+                      href={`/edit/data-sharing/export?section=repositories&grain=items&repository=${encodeURIComponent(r.repository)}`}
+                      label="Items"
+                    />
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+      {tierAccessMismatch && (
+        <p className="text-muted-foreground mt-2 text-xs">
+          Tier is the shared risk catalog&apos;s platform-level classification (host jurisdiction ×
+          typical access model), not a per-deposit fact — a repository&apos;s Access column (the
+          actually observed access model on WCM&apos;s deposits there) can disagree with what its
+          tier name implies, e.g. Synapse tiers &ldquo;US-hosted, open&rdquo; but every WCM deposit
+          observed there today is controlled.
+        </p>
+      )}
 
       <div className="mt-6 flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-semibold">By department</h3>
@@ -536,20 +815,45 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
           <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
             <tr className="border-apollo-border border-b">
               <th className={thClass}>Department</th>
-              <th className={`${thClass} text-right`}>Datasets</th>
-              <th className={`${thClass} text-right`}>Depositing faculty</th>
+              <SortableTh
+                label="Datasets"
+                sortKey="datasets"
+                activeSort={ui.deptSort}
+                activeDir={ui.deptDir}
+                otherParams={otherParams}
+                sortParamName="deptSort"
+                dirParamName="deptDir"
+              />
+              <SortableTh
+                label="Depositing faculty"
+                sortKey="faculty"
+                activeSort={ui.deptSort}
+                activeDir={ui.deptDir}
+                otherParams={otherParams}
+                sortParamName="deptSort"
+                dirParamName="deptDir"
+              />
               {/* Access-model group — `exposureColClass` bands th + td, see
                   the const's doc comment. */}
               <th className={`${thClass} ${exposureColClass} text-right`}>Open</th>
               <th className={`${thClass} ${exposureColClass} text-right`}>Controlled</th>
               <th className={`${thClass} ${exposureColClass} text-right`}>Registry</th>
-              <th className={`${thClass} text-right`}>Share rate</th>
+              <SortableTh
+                label="Share rate"
+                sortKey="shareRate"
+                activeSort={ui.deptSort}
+                activeDir={ui.deptDir}
+                otherParams={otherParams}
+                sortParamName="deptSort"
+                dirParamName="deptDir"
+              />
+              <th className={thClass} />
             </tr>
           </thead>
           <tbody>
-            {report.byDepartment.map((d) => (
+            {sortedDepartments.map((d) => (
               <tr key={d.department} className="border-apollo-border border-b">
-                <td className={tdClass}>{d.department}</td>
+                <td className={tdClass}>{displayDepartmentName(d.department)}</td>
                 <td className={`${tdClass} text-right`}>{d.datasets.toLocaleString()}</td>
                 <td className={`${tdClass} text-right`}>{d.faculty.toLocaleString()}</td>
                 <td className={`${tdClass} ${exposureColClass} text-right`}>
@@ -564,6 +868,12 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
                 <td className={`${tdClass} text-right`}>
                   {formatShareRate(d.shareRateNumerator, d.shareRateDenominator)}
                 </td>
+                <td className={tdClass}>
+                  <DownloadLink
+                    href={`/edit/data-sharing/export?section=departments&grain=items&department=${encodeURIComponent(d.department)}`}
+                    label="Items"
+                  />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -574,6 +884,16 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
         co-authors in two departments counts once in each. Don&apos;t treat this column as a
         partition of the rollup above. Open, Controlled, and Registry don&apos;t sum to Datasets
         either — a deposit with no recorded access model is uncounted in either of the first two.
+      </p>
+      <p className="text-muted-foreground mt-1 text-xs">
+        Datasets/Depositing-faculty attribute to whichever scholar actually holds the deposit; Share
+        rate attributes to whoever confirmed-first/last-authored the underlying publication —
+        different scopes on purpose. A publication can show a detected deposit even when the
+        depositing scholar is a co-author in a DIFFERENT department (any citing row counts, not just
+        the corresponding author&apos;s), so a department can show a nonzero share rate with zero
+        datasets of its own, or nonzero datasets with a 0% share rate (a dataset can be linked by any
+        co-author, while only first/last-authored publications count toward the rate). Neither is an
+        arithmetic error.
       </p>
     </section>
   );
@@ -588,16 +908,36 @@ function RepositoriesSection({ report }: { report: DataSharingReport }) {
 const CONCERNING_CAVEAT =
   "Tier-based only — country-of-concern host or foreign-hosted repository; does not include sensitive data-type detection.";
 
-/** The mockup's "+N more" collapsed-row pattern: the table shows only the
- *  top rows (byFaculty arrives sorted datasets-desc), a full 500+-row wall
- *  was the explicit complaint. The full list stays one click away in the CSV
- *  export. ponytail: static cap; a client-island expander if someone needs
- *  row 26 on-page. */
-const FACULTY_ROW_CAP = 25;
-
-function FacultySection({ report }: { report: DataSharingReport }) {
-  const rows = report.byFaculty.slice(0, FACULTY_ROW_CAP);
-  const more = report.byFaculty.length - rows.length;
+function FacultySection({ report, ui }: { report: DataSharingReport; ui: DataSharingUiParams }) {
+  const sorted = sortFaculty(report.byFaculty, ui.facSort, ui.facDir);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / FACULTY_ROW_CAP));
+  // Clamped, not raw `ui.facPage` (2026-08-16 adversarial-review finding): a
+  // stale or hand-edited `facPage` past the end (e.g. a filter just shrank
+  // the row count) rendered an empty table under a nonsensical "page N of M"
+  // label instead of falling back to the last real page.
+  const facPage = Math.min(Math.max(ui.facPage, 1), totalPages);
+  const start = (facPage - 1) * FACULTY_ROW_CAP;
+  const rows = sorted.slice(start, start + FACULTY_ROW_CAP);
+  // Includes facSort/facDir too (not just deptSort/deptDir) even though the
+  // SortableTh calls below override them via their own sortKey/nextDir —
+  // the Prev/Next pagination links (further down) use this SAME object and
+  // have no such override, so omitting them here silently reset the sort
+  // the moment someone paged a non-default-sorted table (2026-08-16
+  // adversarial-review finding).
+  const otherParams = {
+    ...filterQueryParams(ui.filters),
+    deptSort: ui.deptSort,
+    deptDir: ui.deptDir,
+    facSort: ui.facSort,
+    facDir: ui.facDir,
+  };
+  // Concerning == Foreign-hosted by construction while country-of-concern is
+  // 0 institution-wide (2026-08-16 review): two identical columns imply a
+  // live distinction that carries no information today. Collapse to one
+  // "Concerning" column; the Foreign-hosted split comes back automatically
+  // the moment a CONCERN-tier deposit is actually detected anywhere — not a
+  // flag someone has to remember to flip.
+  const hasCountryOfConcern = report.byRepositoryTier.some((t) => t.tier === "CONCERN" && t.datasets > 0);
   return (
     <section id="faculty" className="mt-10 scroll-mt-4">
       <div className="flex items-baseline justify-between gap-2">
@@ -611,11 +951,12 @@ function FacultySection({ report }: { report: DataSharingReport }) {
         </span>
       </div>
       <p className="text-muted-foreground mt-1 text-sm">
-        Per-individual counts, top {FACULTY_ROW_CAP} by dataset count — same access as sections 1–3
-        above, no separate review.
+        Per-individual counts, page {facPage} of {totalPages} ({sorted.length.toLocaleString()} total) —
+        same access as sections 1–3 above, no separate review. No Registry column here (unlike
+        §3&apos;s department table): this table stays Open/Controlled-only by design.
       </p>
       <p className="text-muted-foreground mt-2 text-xs">
-        <strong>Concerning / Foreign-hosted:</strong> {CONCERNING_CAVEAT}
+        <strong>Concerning{hasCountryOfConcern ? " / Foreign-hosted" : ""}:</strong> {CONCERNING_CAVEAT}
       </p>
 
       <div className={sectionClass}>
@@ -624,12 +965,19 @@ function FacultySection({ report }: { report: DataSharingReport }) {
             <tr className="border-apollo-border border-b">
               <th className={thClass}>Faculty</th>
               <th className={thClass}>Department</th>
-              <th className={`${thClass} text-right`}>Datasets</th>
+              <SortableTh
+                label="Datasets"
+                sortKey="datasets"
+                activeSort={ui.facSort}
+                activeDir={ui.facDir}
+                otherParams={otherParams}
+                sortParamName="facSort"
+                dirParamName="facDir"
+              />
               {/* Exposure group — `exposureColClass` bands th + td, see the
-                  const's doc comment. The Concerning/Foreign-hosted headers
-                  carry `DefinedTerm` hovers (glossary definition + the
-                  tier-only caveat) — these replaced bare `title=` attrs in
-                  the v3 pass; the caveat text itself must survive any future
+                  const's doc comment. The Concerning header carries a
+                  `DefinedTerm` hover (glossary definition + the tier-only
+                  caveat) — the caveat text itself must survive any future
                   restyle (SPEC "Amended 08-13"). */}
               <th className={`${thClass} ${exposureColClass} text-right`}>Open</th>
               <th className={`${thClass} ${exposureColClass} text-right`}>Controlled</th>
@@ -642,12 +990,30 @@ function FacultySection({ report }: { report: DataSharingReport }) {
                   Concerning
                 </DefinedTerm>
               </th>
-              <th className={`${thClass} ${exposureColClass} text-right`}>
-                <DefinedTerm term="Foreign-hosted" caveat={CONCERNING_CAVEAT}>
-                  Foreign-hosted
-                </DefinedTerm>
-              </th>
-              <th className={`${thClass} text-right`}>Share rate</th>
+              {hasCountryOfConcern && (
+                <th className={`${thClass} ${exposureColClass} text-right`}>
+                  {/* Neutral "Foreign-hosted" glossary entry (2026-08-16
+                      adversarial-review fix) — this column SUMS both
+                      FOREIGN_OPEN and FOREIGN_CTRL deposit instances
+                      (`foreignHostedDeposits`), so hovering it with either
+                      access-specific entry (the tier chips/spectrum use)
+                      would falsely claim the whole column is one access
+                      model. */}
+                  <DefinedTerm term="Foreign-hosted" caveat={CONCERNING_CAVEAT}>
+                    Foreign-hosted
+                  </DefinedTerm>
+                </th>
+              )}
+              <SortableTh
+                label="Share rate"
+                sortKey="shareRate"
+                activeSort={ui.facSort}
+                activeDir={ui.facDir}
+                otherParams={otherParams}
+                sortParamName="facSort"
+                dirParamName="facDir"
+              />
+              <th className={thClass} />
             </tr>
           </thead>
           <tbody>
@@ -658,7 +1024,7 @@ function FacultySection({ report }: { report: DataSharingReport }) {
                     {f.name}
                   </Link>
                 </td>
-                <td className={tdClass}>{f.department ?? "—"}</td>
+                <td className={tdClass}>{f.department ? displayDepartmentName(f.department) : "—"}</td>
                 <td className={`${tdClass} text-right`}>{f.datasets.toLocaleString()}</td>
                 <td className={`${tdClass} ${exposureColClass} text-right`}>
                   {f.openDatasets.toLocaleString()}
@@ -669,30 +1035,43 @@ function FacultySection({ report }: { report: DataSharingReport }) {
                 <td className={`${tdClass} ${exposureColClass} text-right`}>
                   {f.concerningDeposits.toLocaleString()}
                 </td>
-                <td className={`${tdClass} ${exposureColClass} text-right`}>
-                  {f.foreignHostedDeposits.toLocaleString()}
-                </td>
+                {hasCountryOfConcern && (
+                  <td className={`${tdClass} ${exposureColClass} text-right`}>
+                    {f.foreignHostedDeposits.toLocaleString()}
+                  </td>
+                )}
                 <td className={`${tdClass} text-right`}>
                   {formatShareRate(f.shareRateNumerator, f.shareRateDenominator)}
                 </td>
-              </tr>
-            ))}
-            {more > 0 && (
-              <tr>
-                <td className={`${tdClass} text-muted-foreground`} colSpan={8}>
-                  {/* Same route-handler <a> as the §1 "Download CSV" link —
-                      <Link> would prefetch the file itself. */}
-                  + {more.toLocaleString()} more — full list in the{" "}
-                  {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-                  <a href="/edit/data-sharing/export?section=faculty" className="hover:underline">
-                    CSV export
-                  </a>
+                <td className={tdClass}>
+                  <DownloadLink
+                    href={`/edit/data-sharing/export?section=faculty&grain=items&cwid=${encodeURIComponent(f.cwid)}`}
+                    label="Items"
+                  />
                 </td>
               </tr>
-            )}
+            ))}
           </tbody>
         </table>
       </div>
+      {totalPages > 1 && (
+        <div className="mt-2 flex items-center justify-between text-xs">
+          {facPage > 1 ? (
+            <a href={buildQuery({ ...otherParams, facPage: facPage - 1 })} className="hover:underline">
+              ← Previous
+            </a>
+          ) : (
+            <span />
+          )}
+          {facPage < totalPages ? (
+            <a href={buildQuery({ ...otherParams, facPage: facPage + 1 })} className="hover:underline">
+              Next →
+            </a>
+          ) : (
+            <span />
+          )}
+        </div>
+      )}
       {/* The institution-wide concerning-instances footnote that used to sit
           here moved to §7 (Compliance view) in the v3 pass — the per-column
           caveat line above the table stays. */}
@@ -732,6 +1111,12 @@ function SubtypesSection({ report }: { report: DataSharingReport }) {
         deposit-INSTANCE counts, same grain as the link counts elsewhere on this page, not
         distinct datasets. A deposit spanning more than one sub-type counts once toward each.
       </p>
+      <p className="text-muted-foreground mt-1 text-xs">
+        {formatShareRate(report.overall.subtypeClassifiedInstances, report.overall.links)} of every
+        deposit instance carries any sub-type classification at all — read the rows below as a
+        floor of a floor, not a census; most §6 Recent-activity rows show &ldquo;—&rdquo; for
+        sub-types for the same reason.
+      </p>
       <div className={sectionClass}>
         <table className="w-full text-sm">
           <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
@@ -739,6 +1124,7 @@ function SubtypesSection({ report }: { report: DataSharingReport }) {
               <th className={thClass}>Category</th>
               <th className={thClass}>Sub-type</th>
               <th className={`${thClass} text-right`}>Deposit instances</th>
+              <th className={thClass} />
             </tr>
           </thead>
           <tbody>
@@ -750,11 +1136,15 @@ function SubtypesSection({ report }: { report: DataSharingReport }) {
               // row in the group (R11).
               const rows = report.bySubtype;
               const isGroupStart = i === 0 || rows[i - 1].category !== s.category;
+              const itemsHref = `/edit/data-sharing/export?section=subtypes&grain=items&category=${encodeURIComponent(s.category)}&subtype=${encodeURIComponent(s.subtype)}`;
               if (!isGroupStart) {
                 return (
                   <tr key={`${s.category}|${s.subtype}`} className="border-apollo-border border-b">
                     <td className={tdClass}>{s.subtype}</td>
                     <td className={`${tdClass} text-right`}>{s.count.toLocaleString()}</td>
+                    <td className={tdClass}>
+                      <DownloadLink href={itemsHref} label="Items" />
+                    </td>
                   </tr>
                 );
               }
@@ -767,6 +1157,9 @@ function SubtypesSection({ report }: { report: DataSharingReport }) {
                   </td>
                   <td className={tdClass}>{s.subtype}</td>
                   <td className={`${tdClass} text-right`}>{s.count.toLocaleString()}</td>
+                  <td className={tdClass}>
+                    <DownloadLink href={itemsHref} label="Items" />
+                  </td>
                 </tr>
               );
             })}
@@ -837,17 +1230,24 @@ function RecentActivitySection({ report }: { report: DataSharingReport }) {
                   <td className={tdClass}>
                     {r.accessionOrDoi ? (
                       accessionUrl ? (
-                        <ExternalA href={accessionUrl}>{r.accessionOrDoi}</ExternalA>
+                        <ExternalA href={accessionUrl}>{displayAccession(r.repository, r.accessionOrDoi)}</ExternalA>
                       ) : (
-                        r.accessionOrDoi
+                        displayAccession(r.repository, r.accessionOrDoi)
                       )
                     ) : (
                       "—"
                     )}
                   </td>
                   {/* No accession fallback here anymore — the accession has
-                      its own adjacent column now (v3). */}
-                  <td className={tdClass}>{r.title || "—"}</td>
+                      its own adjacent column now (v3). Truncated to 2 lines
+                      (2026-08-16: long ClinicalTrials.gov titles were
+                      blowing row heights to 8+ lines) — native `title=`
+                      hover shows the full text instead of a JS expander. */}
+                  <td className={`${tdClass} max-w-xs`}>
+                    <span className="line-clamp-2" title={r.title ?? undefined}>
+                      {r.title || "—"}
+                    </span>
+                  </td>
                   <td className={tdClass}>{r.dataType ?? r.resourceType ?? "—"}</td>
                   <td className={`${tdClass} text-muted-foreground`}>
                     {subtypeLabels.length > 0 ? subtypeLabels.join(", ") : "—"}
@@ -877,7 +1277,7 @@ function RecentActivitySection({ report }: { report: DataSharingReport }) {
                       {r.scholarName}
                     </Link>
                   </td>
-                  <td className={tdClass}>{r.department ?? "—"}</td>
+                  <td className={tdClass}>{r.department ? displayDepartmentName(r.department) : "—"}</td>
                 </tr>
               );
             })}
@@ -922,22 +1322,42 @@ function ComplianceSection({ report }: { report: DataSharingReport }) {
             sensitive-data-type detection
           </div>
           <div className="text-muted-foreground mt-0.5 text-xs">
-            deposit-instance count, not distinct datasets or publications
+            deposit-instance count, not distinct datasets or publications — see §1&apos;s tier
+            spectrum for the publication-grain view of the same tiers
           </div>
         </div>
-        <div className={`${sectionClass} p-4`}>
+        {/* Ghosted/disabled styling (2026-08-16 review: "style them as
+            visibly disabled so the section reads pending at a glance rather
+            than broken") — opacity + a "Pending" badge, same three cards,
+            same COC_PULL_PENDING caption. */}
+        <div className={`${sectionClass} p-4 opacity-50`} aria-disabled="true">
           <div className="text-2xl font-semibold">—</div>
-          <div className="text-muted-foreground text-xs">Pubs with a COC-affiliated coauthor</div>
+          <div className="text-muted-foreground text-xs">
+            Pubs with a COC-affiliated coauthor{" "}
+            <span className="border-apollo-border rounded border px-1 py-0.5 text-[10px] uppercase tracking-wide">
+              Pending
+            </span>
+          </div>
           <div className="text-muted-foreground mt-0.5 text-xs">{COC_PULL_PENDING}</div>
         </div>
-        <div className={`${sectionClass} p-4`}>
+        <div className={`${sectionClass} p-4 opacity-50`} aria-disabled="true">
           <div className="text-2xl font-semibold">—</div>
-          <div className="text-muted-foreground text-xs">Combined exposure</div>
+          <div className="text-muted-foreground text-xs">
+            Combined exposure{" "}
+            <span className="border-apollo-border rounded border px-1 py-0.5 text-[10px] uppercase tracking-wide">
+              Pending
+            </span>
+          </div>
           <div className="text-muted-foreground mt-0.5 text-xs">{COC_PULL_PENDING}</div>
         </div>
-        <div className={`${sectionClass} p-4`}>
+        <div className={`${sectionClass} p-4 opacity-50`} aria-disabled="true">
           <div className="text-2xl font-semibold">—</div>
-          <div className="text-muted-foreground text-xs">Faculty on COC-coauthor pubs</div>
+          <div className="text-muted-foreground text-xs">
+            Faculty on COC-coauthor pubs{" "}
+            <span className="border-apollo-border rounded border px-1 py-0.5 text-[10px] uppercase tracking-wide">
+              Pending
+            </span>
+          </div>
           <div className="text-muted-foreground mt-0.5 text-xs">{COC_PULL_PENDING}</div>
         </div>
       </div>
@@ -951,14 +1371,131 @@ function ComplianceSection({ report }: { report: DataSharingReport }) {
   );
 }
 
-export function DataSharingDashboard({ report }: { report: DataSharingReport }) {
+/** The §1–§7 anchors, in page order — one source list so the sticky nav
+ *  (below) and the section headings can't drift apart. */
+const SECTION_NAV_ITEMS: { id: string; label: string }[] = [
+  { id: "rollup", label: "1 · Rollup" },
+  { id: "funding", label: "2 · Funding & access" },
+  { id: "repos", label: "3 · Repositories & departments" },
+  { id: "faculty", label: "4 · Faculty" },
+  { id: "subtypes", label: "5 · Sub-types" },
+  { id: "recent", label: "6 · Recent activity" },
+  { id: "compliance", label: "7 · Compliance" },
+];
+
+/** Sticky section jump-nav (2026-08-16 ask: "the page is ~6 screens tall
+ *  with no navigation"). Plain anchor links + `position: sticky` — no JS,
+ *  no client island; native in-page anchors already do this. Repeats the
+ *  Methods dialog trigger (same `doc` prop `RollupSection` uses) so it's
+ *  reachable from anywhere on the page, not just §1's corner. */
+function SectionNav({ doc }: { doc: ReturnType<typeof buildMethodsDoc> }) {
+  return (
+    <nav className="bg-apollo-surface border-apollo-border sticky top-0 z-10 -mx-1 mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-1 py-2 text-xs">
+      {SECTION_NAV_ITEMS.map((item) => (
+        <a key={item.id} href={`#${item.id}`} className="hover:underline">
+          {item.label}
+        </a>
+      ))}
+      <span className="ml-auto">
+        <DataSharingMethodsDialog doc={doc} />
+      </span>
+    </nav>
+  );
+}
+
+/** Tier codes offered in the filter form, in the same severity order as
+ *  `TIER_LABELS`/`TIER_ORDER` — `UNKNOWN` excluded, same rationale as
+ *  `paddedTiers` in the report lib (it's a port-lag bucket, not a real
+ *  filterable category). */
+const FILTERABLE_TIERS = ["CONCERN", "FOREIGN_OPEN", "FOREIGN_CTRL", "US_OPEN", "US_CTRL", "REGISTRY"] as const;
+
+/** Year-range + tier filter form (2026-08-16 ask). A plain GET `<form>` —
+ *  native platform feature, no client state: submitting reloads the page
+ *  with the new query string, which `parseDataSharingParams`/
+ *  `loadDataSharingReport` already handle. Preserves the current sort choice
+ *  via hidden inputs so applying a filter doesn't silently reset it. NIH-
+ *  funded filter deliberately NOT offered here — see
+ *  `DataSharingReportFilters`'s doc comment for why. */
+function FilterBar({ ui }: { ui: DataSharingUiParams }) {
+  const active = ui.filters.yearFrom !== undefined || ui.filters.yearTo !== undefined || !!ui.filters.tiers?.length;
+  return (
+    <form method="get" className={`${sectionClass} mb-4 flex flex-wrap items-end gap-3 p-3 text-xs`}>
+      <label className="flex flex-col gap-1">
+        <span className="text-muted-foreground">Deposit year from</span>
+        <input
+          type="number"
+          name="yearFrom"
+          defaultValue={ui.filters.yearFrom}
+          className="border-apollo-border w-20 rounded border px-2 py-1"
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-muted-foreground">to</span>
+        <input
+          type="number"
+          name="yearTo"
+          defaultValue={ui.filters.yearTo}
+          className="border-apollo-border w-20 rounded border px-2 py-1"
+        />
+      </label>
+      <fieldset className="flex flex-col gap-1">
+        <legend className="text-muted-foreground">Tier</legend>
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          {FILTERABLE_TIERS.map((tier) => (
+            <label key={tier} className="inline-flex items-center gap-1">
+              <input
+                type="checkbox"
+                name="tier"
+                value={tier}
+                defaultChecked={ui.filters.tiers?.includes(tier)}
+              />
+              {TIER_LABELS[tier]}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      {/* Preserve sort choice across a filter change — filters reset page 1
+          implicitly (no facPage hidden input), since the row count under a
+          new filter makes the old page number meaningless. */}
+      {ui.deptSort && <input type="hidden" name="deptSort" value={ui.deptSort} />}
+      <input type="hidden" name="deptDir" value={ui.deptDir} />
+      {ui.facSort && <input type="hidden" name="facSort" value={ui.facSort} />}
+      <input type="hidden" name="facDir" value={ui.facDir} />
+      <button type="submit" className="border-apollo-border rounded border px-3 py-1.5 hover:bg-apollo-surface-2">
+        Apply filters
+      </button>
+      {active && (
+        <Link href="/edit/data-sharing" className="hover:underline">
+          Clear filters
+        </Link>
+      )}
+      {active && (
+        <p className="text-muted-foreground basis-full text-xs">
+          Narrows the datasets/repositories/faculty/tier tables below. Share rate and PMC coverage on
+          §1 stay institution-wide on purpose — they&apos;re a rate over the full corpus, and pairing a
+          filtered numerator against that unfiltered denominator would read as sharing collapsing when
+          nothing changed. Clear filters to confirm. Every CSV download on this page (aggregate and
+          per-row items alike) exports the FULL unfiltered dataset, not this filtered view — there is
+          no filtered-export path yet.
+        </p>
+      )}
+    </form>
+  );
+}
+
+export function DataSharingDashboard({ report, ui }: { report: DataSharingReport; ui: DataSharingUiParams }) {
+  // Built once, passed to both the sticky nav and §1 — see `RollupSection`'s
+  // doc prop comment for why this can't be built twice.
+  const doc = buildMethodsDoc(report, { shareRateYearFloor: SHARE_RATE_YEAR_FLOOR });
   return (
     <>
+      <SectionNav doc={doc} />
       <p className="text-muted-foreground mb-3 text-sm">Data as of {formatDate(report.dataAsOf)}.</p>
-      <RollupSection report={report} />
+      <FilterBar ui={ui} />
+      <RollupSection report={report} doc={doc} />
       <FundingSection report={report} />
-      <RepositoriesSection report={report} />
-      <FacultySection report={report} />
+      <RepositoriesSection report={report} ui={ui} />
+      <FacultySection report={report} ui={ui} />
       <SubtypesSection report={report} />
       <RecentActivitySection report={report} />
       <ComplianceSection report={report} />

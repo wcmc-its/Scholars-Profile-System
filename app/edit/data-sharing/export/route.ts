@@ -7,9 +7,16 @@
  * would just duplicate the same query (see `lib/api/data-sharing-report.ts`'s
  * CSV-export section header).
  *
- * No scope/filter concept: `/edit/data-sharing` is global-only, no unit
- * scoping and no query-param filters (per its own page header comment), so
- * this route carries none either — unlike `/edit/data-quality/export`.
+ * No UNIT-scope concept: `/edit/data-sharing` is global-only (no unit
+ * scoping) — unlike `/edit/data-quality/export`. It DOES now have query
+ * params of its own, though (2026-08-16, stale wording here corrected by
+ * adversarial review): `?section=<X>&grain=items` carries a per-row
+ * department/cwid/repository/category/subtype drill-down filter (below),
+ * and the on-page year/tier filters (`lib/edit/data-sharing-dashboard.ts`'s
+ * `DataSharingReportFilters`) narrow the DASHBOARD but are deliberately NOT
+ * threaded through to this route yet — every CSV here always exports the
+ * full unfiltered dataset (the dashboard says so explicitly next to its
+ * filter form; see `FilterBar`'s caveat paragraph).
  *
  * v3 additions (2026-08-16 stakeholder pass), stacked on the `?section=`
  * aggregate CSVs:
@@ -39,6 +46,7 @@ import {
   loadDatasetLinkRows,
   SHARE_RATE_YEAR_FLOOR,
   type CsvSection,
+  type SectionItemsFilter,
 } from "@/lib/api/data-sharing-report";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -85,8 +93,19 @@ export async function GET(request: Request) {
       return new NextResponse("No items grain for that section", { status: 400 });
     }
     const section = rawSection as CsvSection;
+    // Per-row drill-down (2026-08-16 ask: each table row gets its own items
+    // link, not just one items link for the whole table) — every param is
+    // optional and independent of `section`; `buildSectionItemsCsv` ignores
+    // ones that don't apply (e.g. `cwid` on a `"departments"` request).
+    const filter: SectionItemsFilter = {
+      department: searchParams.get("department") ?? undefined,
+      cwid: searchParams.get("cwid") ?? undefined,
+      repository: searchParams.get("repository") ?? undefined,
+      category: searchParams.get("category") ?? undefined,
+      subtype: searchParams.get("subtype") ?? undefined,
+    };
     const linkRows = await loadDatasetLinkRows(db.read);
-    const csv = buildSectionItemsCsv(linkRows, section);
+    const csv = buildSectionItemsCsv(linkRows, section, filter);
     // Unreachable for the sections admitted above (only "tiers" returns
     // null) — defensive so a future null-returning section can't 200 an
     // empty body.

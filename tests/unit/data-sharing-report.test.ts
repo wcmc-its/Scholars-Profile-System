@@ -5,14 +5,18 @@ import {
   aggregateByFaculty,
   aggregateByRepository,
   aggregateBySubtype,
+  aggregateByYear,
   aggregateRepositoriesByTier,
+  applyReportFilters,
   bucketDatasetLink,
+  buildAccessFundingCrossTab,
   buildDataSharingCsv,
   buildDataSharingReport,
   buildSectionItemsCsv,
   buildShareRates,
   capDatasetLinkRows,
   countConcerningDeposits,
+  countSubtypeClassifiedInstances,
   DATA_SHARING_EXPORT_CAP,
   depositedPmidSet,
   loadDatasetLinkRows,
@@ -25,6 +29,7 @@ import {
   REGISTRY_DATA_TYPE,
   SHARE_RATE_YEAR_FLOOR,
   tierPubSpectrum,
+  UNKNOWN_DEPARTMENT_LABEL,
   type DataSharingReportClient,
   type DatasetLinkRow,
   type ShareRateCorpusRow,
@@ -644,6 +649,7 @@ describe("buildDataSharingReport", () => {
       nihFundedPubs: 0,
       notNihFundedPubs: 0,
       concerningDepositInstances: 0,
+      subtypeClassifiedInstances: 0,
     });
   });
 
@@ -662,6 +668,7 @@ describe("buildDataSharingReport", () => {
       nihFundedPubs: 0,
       notNihFundedPubs: 0,
       concerningDepositInstances: 0,
+      subtypeClassifiedInstances: 0,
     });
     expect(report.byDepartment).toEqual([]);
     expect(report.byRepository).toEqual([]);
@@ -993,6 +1000,64 @@ describe("buildDataSharingReport — share rate (second argument)", () => {
     expect(report.byDepartment.every((d) => d.shareRateDenominator === 0 && d.shareRateNumerator === 0)).toBe(true);
     expect(report.byFaculty.every((f) => f.shareRateDenominator === 0 && f.shareRateNumerator === 0)).toBe(true);
   });
+
+  it("4th arg (depositedPmidRows): share-rate numerator/PMC coverage use it instead of the (possibly filtered) rows param (2026-08-16 adversarial-review fix)", () => {
+    // Two genuinely-deposited pmids (p1 via a US_OPEN/GEO row, p2 via a
+    // CONCERN/GSA row) — simulates a tier filter that would keep only the
+    // GEO row as `rows` (the deposit-side aggregates' population) while
+    // `depositedPmidRows` carries both, unfiltered.
+    const fullRows: DatasetLinkRow[] = [
+      {
+        cwid: "aaa1",
+        scholarName: "Alice A",
+        scholarSlug: "alice-a",
+        department: "Medicine",
+        datasetId: "d1",
+        repository: "GEO",
+        accessModel: "open",
+        pmids: ["p1"],
+      },
+      {
+        cwid: "aaa1",
+        scholarName: "Alice A",
+        scholarSlug: "alice-a",
+        department: "Medicine",
+        datasetId: "d2",
+        repository: "GSA", // CONCERN tier
+        accessModel: "open",
+        pmids: ["p2"],
+      },
+    ];
+    const filteredRows = [fullRows[0]]; // a hypothetical tiers:["US_OPEN"] filter drops the GSA row
+    const corpus: ShareRateCorpusRow[] = [
+      { pmid: "p1", cwid: "aaa1", department: "Medicine" },
+      { pmid: "p2", cwid: "aaa1", department: "Medicine" },
+    ];
+
+    // Pre-fix shape (4th arg = the filtered rows, reproducing the bug): the
+    // numerator only sees p1, silently deflating the rate even though p2
+    // genuinely has a detected deposit too.
+    const buggy = buildDataSharingReport(filteredRows, corpus, undefined, filteredRows);
+    expect(buggy.overall.shareRateNumerator).toBe(1); // p2 wrongly excluded
+    expect(buggy.overall.shareRateDenominator).toBe(2);
+
+    // Fixed shape: pairing the FILTERED deposit-side aggregates with the
+    // UNFILTERED numerator — correctly counts both p1 and p2 as deposited,
+    // regardless of what the tier filter narrowed `rows` to.
+    const fixed = buildDataSharingReport(filteredRows, corpus, undefined, fullRows);
+    expect(fixed.overall.shareRateNumerator).toBe(2);
+    expect(fixed.overall.shareRateDenominator).toBe(2);
+    // The deposit-side aggregates themselves DO stay filtered — only the
+    // numerator is decoupled from `rows`.
+    expect(fixed.overall.datasets).toBe(1); // just d1, from filteredRows
+
+    // Omitting the 4th arg entirely defaults it to `rows` — full backward
+    // compatibility for every pre-existing call site/test (equivalent to
+    // the "buggy" shape above, which is correct when no filter is active:
+    // `rows` IS the full population in that case).
+    const defaulted = buildDataSharingReport(fullRows, corpus);
+    expect(defaulted.overall.shareRateNumerator).toBe(2);
+  });
 });
 
 describe("buildDataSharingReport — access split & funding lens (v2)", () => {
@@ -1139,7 +1204,14 @@ describe("loadFundingSplit", () => {
     expect(findMany).toHaveBeenCalledTimes(1);
     const call = findMany.mock.calls[0][0];
     expect([...call.where.pmid.in].sort()).toEqual(["p1", "p2"]); // p3 excluded — registry-only pmid
-    expect(split).toEqual({ nihFundedPubs: 1, notNihFundedPubs: 1 });
+    expect(split).toEqual({
+      nihFundedPubs: 1,
+      notNihFundedPubs: 1,
+      nihByPmid: new Map([
+        ["p1", true],
+        ["p2", false],
+      ]),
+    });
   });
 
   it("counts a pmid as NIH-funded if ANY of its grantPublication rows has a non-null nihIc", async () => {
@@ -1150,7 +1222,7 @@ describe("loadFundingSplit", () => {
     const client = { grantPublication: { findMany } } as unknown as DataSharingReportClient;
 
     const split = await loadFundingSplit(client, [LINK_ROWS[0]]);
-    expect(split).toEqual({ nihFundedPubs: 1, notNihFundedPubs: 0 });
+    expect(split).toEqual({ nihFundedPubs: 1, notNihFundedPubs: 0, nihByPmid: new Map([["p1", true]]) });
   });
 
   it("a deposited pmid with no matching grantPublication rows counts as not-NIH-funded", async () => {
@@ -1158,7 +1230,7 @@ describe("loadFundingSplit", () => {
     const client = { grantPublication: { findMany } } as unknown as DataSharingReportClient;
 
     const split = await loadFundingSplit(client, [LINK_ROWS[0]]);
-    expect(split).toEqual({ nihFundedPubs: 0, notNihFundedPubs: 1 });
+    expect(split).toEqual({ nihFundedPubs: 0, notNihFundedPubs: 1, nihByPmid: new Map([["p1", false]]) });
   });
 
   it("skips the DB round-trip entirely when the non-registry deposited pmid population is empty", async () => {
@@ -1327,6 +1399,37 @@ describe("buildSectionItemsCsv", () => {
     });
     // Locale collation orders by base letter, so dbGaP < GEO despite case.
     expect(nameRepo).toEqual(["Alice A:dbGaP", "Alice A:GEO", "Bob B:GEO", "Zed Z:Zenodo"]);
+  });
+
+  it("filter: department= narrows to that department's rows only (2026-08-16 adversarial-review case)", () => {
+    const lines = buildSectionItemsCsv(ITEM_ROWS, "departments", { department: "Medicine" })!
+      .trimEnd()
+      .split("\r\n");
+    expect(lines.slice(1)).toHaveLength(2); // Alice's two Medicine rows only
+    expect(lines.join("\n")).not.toContain("Bob B");
+    expect(lines.join("\n")).not.toContain("Zed Z");
+  });
+
+  it("filter: department=UNKNOWN_DEPARTMENT_LABEL matches the null-department row, not zero rows (regression — the dashboard's per-row link passes the display label, not raw null)", () => {
+    const lines = buildSectionItemsCsv(ITEM_ROWS, "departments", {
+      department: UNKNOWN_DEPARTMENT_LABEL,
+    })!
+      .trimEnd()
+      .split("\r\n");
+    expect(lines.slice(1)).toHaveLength(1);
+    expect(lines[1]).toContain("Zed Z");
+  });
+
+  it("filter: cwid= and repository= narrow independently", () => {
+    expect(
+      buildSectionItemsCsv(ITEM_ROWS, "faculty", { cwid: "aaa1" })!.trimEnd().split("\r\n").slice(1),
+    ).toHaveLength(2);
+    expect(
+      buildSectionItemsCsv(ITEM_ROWS, "repositories", { repository: "GEO" })!
+        .trimEnd()
+        .split("\r\n")
+        .slice(1),
+    ).toHaveLength(2);
   });
 
   it("subtypes: EXPLODED — one row per (link row, parsed sub-type) pair, leading category/subtype columns, no-subtype rows omitted", () => {
@@ -1500,6 +1603,103 @@ describe("loadDatasetLinkRows", () => {
     const rows = await loadDatasetLinkRows(client);
     expect(rows).toHaveLength(3);
   });
+
+  it("normalizes the 'Graduate School' department alias same as loadShareRateCorpus", async () => {
+    const client = {
+      personDatasetDeposit: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            cwid: "z1",
+            datasetId: "d9",
+            pmids: [],
+            scholar: { preferredName: "Z", fullName: "Z", slug: "z", primaryDepartment: "Graduate School" },
+            dataset: { repository: "GEO", accessModel: "open" },
+          },
+        ]),
+      },
+      suppression: { findMany: vi.fn().mockResolvedValue([]) },
+    } as unknown as DataSharingReportClient;
+    const rows = await loadDatasetLinkRows(client);
+    expect(rows[0].department).toBe("Weill Cornell Graduate School");
+  });
+});
+
+describe("aggregateByYear", () => {
+  it("counts distinct datasets per deposit year, ascending, with a trailing null-year bucket", () => {
+    const rows: DatasetLinkRow[] = [
+      { ...ROWS[0], datasetId: "d1", depositYear: 2023 },
+      { ...ROWS[1], datasetId: "d1", depositYear: 2023 }, // same dataset, co-author — counts once for 2023
+      { ...ROWS[2], datasetId: "d2", depositYear: 2021 },
+      { cwid: "c9", scholarName: "C", scholarSlug: "c", department: null, datasetId: "d3", repository: "OSF", accessModel: "open", depositYear: null },
+    ];
+    expect(aggregateByYear(rows)).toEqual([
+      { year: 2021, datasets: 1 },
+      { year: 2023, datasets: 1 },
+      { year: null, datasets: 1 },
+    ]);
+  });
+
+  it("empty input produces an empty array, not a crash", () => {
+    expect(aggregateByYear([])).toEqual([]);
+  });
+});
+
+describe("countSubtypeClassifiedInstances", () => {
+  it("counts only rows with a parseable sensitiveSubtypes token", () => {
+    const rows: DatasetLinkRow[] = [
+      { ...ROWS[0], sensitiveSubtypes: "genomic:WGS/WES" },
+      { ...ROWS[1], sensitiveSubtypes: "malformed-no-colon" },
+      { ...ROWS[2], sensitiveSubtypes: null },
+    ];
+    expect(countSubtypeClassifiedInstances(rows)).toBe(1);
+  });
+});
+
+describe("buildAccessFundingCrossTab", () => {
+  it("crosses open/controlled against NIH-funded/not, a pmid in both access sets counts in both rows", () => {
+    const openPmids = new Set(["p1", "p2"]);
+    const controlledPmids = new Set(["p2", "p3"]); // p2 deposited both open and controlled
+    const nihByPmid = new Map([
+      ["p1", true],
+      ["p2", false],
+      ["p3", true],
+    ]);
+    expect(buildAccessFundingCrossTab(openPmids, controlledPmids, nihByPmid)).toEqual({
+      openNih: 1, // p1
+      openNotNih: 1, // p2
+      controlledNih: 1, // p3
+      controlledNotNih: 1, // p2
+    });
+  });
+
+  it("a pmid absent from nihByPmid degrades to not-NIH-funded", () => {
+    const result = buildAccessFundingCrossTab(new Set(["p1"]), new Set(), new Map());
+    expect(result).toEqual({ openNih: 0, openNotNih: 1, controlledNih: 0, controlledNotNih: 0 });
+  });
+});
+
+describe("applyReportFilters", () => {
+  it("with no filters, returns a copy of every row unchanged", () => {
+    expect(applyReportFilters(ROWS, undefined)).toEqual(ROWS);
+  });
+
+  it("year range excludes rows outside the bound AND rows with no depositYear at all", () => {
+    const rows: DatasetLinkRow[] = [
+      { ...ROWS[0], depositYear: 2019 },
+      { ...ROWS[1], depositYear: 2022 },
+      { ...ROWS[2], depositYear: undefined },
+    ];
+    expect(applyReportFilters(rows, { yearFrom: 2020 }).map((r) => r.depositYear)).toEqual([2022]);
+  });
+
+  it("tiers keeps only rows whose repository resolves to a listed tier", () => {
+    // GEO → US_OPEN, dbGaP → US_CTRL (see @/lib/repository-tier).
+    expect(applyReportFilters(ROWS, { tiers: ["US_CTRL"] }).map((r) => r.repository)).toEqual(["dbGaP"]);
+  });
+
+  it("empty tiers array means every tier, not zero rows", () => {
+    expect(applyReportFilters(ROWS, { tiers: [] })).toHaveLength(ROWS.length);
+  });
 });
 
 describe("loadShareRateCorpus", () => {
@@ -1520,6 +1720,11 @@ describe("loadShareRateCorpus", () => {
     expect(call.where.OR).toEqual([{ isFirst: true }, { isLast: true }]);
     expect(call.where.isConfirmed).toBe(true);
     expect(call.where.cwid).toEqual({ not: null });
+    // 2026-08-16 review finding: the numerator pipeline is full-time-faculty
+    // only, and SPS DOES have a bridged field for it — a prior comment
+    // claiming otherwise was wrong. Dropping this filter silently doubles
+    // every share-rate percentage on the page.
+    expect(call.where.scholar).toEqual({ roleCategory: "full_time_faculty" });
     expect(call.where.publication.year.gte).toBe(SHARE_RATE_YEAR_FLOOR);
     // 2026-08-15: denominator scoped to the same types the deposit-scan pipeline
     // covers (extract_databanks.py / preprint_extend.py) — see the handoff.
@@ -1548,6 +1753,15 @@ describe("loadShareRateCorpus", () => {
       { pmid: "p2", cwid: "bbb2", department: null, inPmc: false },
       { pmid: "p3", cwid: "ccc3", department: null, inPmc: false },
     ]);
+  });
+
+  it("normalizes the 'Graduate School' / 'Weill Cornell Graduate School' duplicate (2026-08-16 confirmed via staging probe: 591 vs 6 scholars, same real org unit)", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { pmid: "p1", cwid: "aaa1", scholar: { primaryDepartment: "Graduate School" }, publication: null },
+    ]);
+    const client = { publicationAuthor: { findMany } } as unknown as DataSharingReportClient;
+    const rows = await loadShareRateCorpus(client);
+    expect(rows[0].department).toBe("Weill Cornell Graduate School");
   });
 });
 

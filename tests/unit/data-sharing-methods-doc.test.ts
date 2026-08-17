@@ -49,6 +49,8 @@ describe("DATA_SHARING_TERMS", () => {
     for (const term of [
       "Country of concern",
       "Foreign-hosted",
+      "Foreign-hosted, open",
+      "Foreign-hosted, controlled",
       "Open access",
       "Controlled access",
       "Registry",
@@ -84,20 +86,23 @@ describe("buildMethodsDoc — reporting paragraph", () => {
 
   it("carries every headline number and the strict-floor framing", () => {
     const { paragraph } = buildMethodsDoc(REPORT, OPTS);
-    for (const n of ["1,234", "987", "36", "456", "26", "9,876", "1,100", "800", "300"]) {
+    for (const n of ["1,234", "987", "36", "456", "26", "800", "300"]) {
       expect(paragraph).toContain(n);
     }
     expect(paragraph).toContain("strict floor");
-    expect(paragraph).toContain("2% of PMC full text");
     // Registry separation must survive any rewording.
     expect(paragraph).toContain("ClinicalTrials.gov");
   });
 
-  it("scopes its claims to what the code computes (v3 review findings)", () => {
+  it("scopes its claims to what the code computes (2026-08-16 review findings)", () => {
     const { paragraph } = buildMethodsDoc(REPORT, OPTS);
-    // The denominator has no FTE filter (see "Corpus and denominator" /
-    // "Known gaps") — attributing it to full-time faculty was the finding.
-    expect(paragraph).not.toContain("full-time");
+    // The denominator IS now full-time-faculty-scoped (2026-08-16 fix — see
+    // "Corpus and denominator") — the paragraph must say so, reversing the
+    // v3-era "not full-time" contract this test used to assert.
+    expect(paragraph).toContain("full-time faculty");
+    // The PMC-coverage figure is a known data-quality gap (2026-08-16) — a
+    // citation-ready summary must not restate it as settled fact.
+    expect(paragraph).not.toContain("have full text in PubMed Central");
     // Registry exclusion is scoped to the rates and the access split; the
     // record/repository/faculty totals in the same paragraph DO include
     // registry rows and are flagged inline — never a blanket
@@ -122,7 +127,7 @@ describe("buildMethodsDoc — sections", () => {
     expect(sections.map((s) => s.heading)).toEqual([
       "Corpus and denominator",
       "Extraction and attribution",
-      "PMC coverage",
+      "PMC coverage (known data-quality gap)",
       "Access model and risk tier",
       "Registry separation",
       "Funding lens",
@@ -132,11 +137,14 @@ describe("buildMethodsDoc — sections", () => {
     for (const s of sections) expect(s.body.length).toBeGreaterThan(0);
   });
 
-  it("PMC coverage interpolates the covered/total counts", () => {
-    const pmc = buildMethodsDoc(REPORT, OPTS).sections.find((s) => s.heading === "PMC coverage")!;
+  it("PMC coverage interpolates the covered/total counts and flags the data-quality gap", () => {
+    const pmc = buildMethodsDoc(REPORT, OPTS).sections.find(
+      (s) => s.heading === "PMC coverage (known data-quality gap)",
+    )!;
     expect(pmc.body).toContain("9,876");
     expect(pmc.body).toContain("12,345");
     expect(pmc.body).toContain("80%"); // 9876/12345 rounded
+    expect(pmc.body).toContain("not currently a trustworthy signal");
   });
 
   it("never softens the tier-only 'concerning' caveat (SPEC Amended 08-13)", () => {
