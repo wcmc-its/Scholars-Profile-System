@@ -331,3 +331,33 @@ describe("DataSharingDashboard — v3 stakeholder pass", () => {
     ).toBeTruthy();
   });
 });
+
+describe("DataSharingDashboard, Synapse access-aware effective tier (issue #2471, 2026-08-16)", () => {
+  it("an all-controlled Synapse deposit set (today's real data shape) renders the US-hosted, controlled tier chip and no longer trips the tier/access mismatch footnote", () => {
+    const synapseControlledRows: DatasetLinkRow[] = [
+      { ...ROWS[0], repository: "Synapse", accessModel: "controlled", cwid: "synctrl1", datasetId: "dsynctrl1", pmids: ["psynctrl1"] },
+    ];
+    const synapseReport = { ...buildDataSharingReport(synapseControlledRows, CORPUS), dataAsOf: null };
+    const { container } = render(<DataSharingDashboard report={synapseReport} ui={DEFAULT_UI} />);
+    // §3 "By repository" table (the second table in #repos, after the tier
+    // table) renders the access-aware tier, not the static US_OPEN default.
+    // Before the #2471 fix this would have read "US-hosted, open".
+    const repoTable = container.querySelectorAll("#repos table")[1];
+    expect(repoTable.textContent).toContain("US-hosted, controlled");
+    expect(repoTable.textContent).not.toContain("US-hosted, open");
+    // The mismatch footnote must NOT render: Synapse's tier now genuinely
+    // agrees with its observed Access column, so there is nothing left to
+    // footnote (confirmed by rendering, not assumed).
+    expect(screen.queryByText(/can disagree with what its/)).toBeNull();
+  });
+
+  it("an open-access Synapse deposit still renders US-hosted, open (regression guard, unchanged from today)", () => {
+    const synapseOpenRows: DatasetLinkRow[] = [
+      { ...ROWS[0], repository: "Synapse", accessModel: "open", cwid: "synopen1", datasetId: "dsynopen1", pmids: ["psynopen1"] },
+    ];
+    const synapseReport = { ...buildDataSharingReport(synapseOpenRows, CORPUS), dataAsOf: null };
+    const { container } = render(<DataSharingDashboard report={synapseReport} ui={DEFAULT_UI} />);
+    const repoTable = container.querySelectorAll("#repos table")[1];
+    expect(repoTable.textContent).toContain("US-hosted, open");
+  });
+});

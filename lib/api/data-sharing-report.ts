@@ -70,6 +70,18 @@
  * MeSH per citing publication and was cut this session. Never present this
  * flag as the full 3-way "concerning" definition in code or on the page.
  *
+ * Synapse access-aware tier (2026-08-16, issue #2471): every per-row tier
+ * lookup in this file now calls `effectiveTierOf(row)` (`@/lib/
+ * repository-tier`), not the bare `tierOf(row.repository)` this section
+ * originally described. For every repository except Synapse the two are
+ * identical: `effectiveTierOf` still falls through to `tierOf`. For Synapse
+ * specifically, a `row.accessModel === "controlled"` deposit reports
+ * `"US_CTRL"` (bumped up from the static `"US_OPEN"` `REPO_TIER` default);
+ * `"open"` or unknown (`null`/`undefined`) `accessModel` stays `"US_OPEN"`,
+ * unchanged. `REPO_TIER`/`tierOf` themselves are untouched; this is a
+ * one-repository dashboard-side carve-out, not a change to the static port.
+ * See `effectiveTierOf`'s own doc comment for the full rule and rationale.
+ *
  * S-Index v2, granular sub-types (this PR, stacked on the above): reads the
  * new `DatasetDeposit.sensitiveCats`/`.sensitiveSubtypes` columns (from
  * `scripts/bulk-data-rule/taxonomy.py`'s `tag()`, via the companion
@@ -104,7 +116,7 @@ import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { resolveDatasetUrl } from "@/components/profile/datasets-section";
 import { loadContributorSuppressions } from "@/lib/api/manual-layer";
 import { toCsv, type CsvCell } from "@/lib/csv";
-import { tierOf } from "@/lib/repository-tier";
+import { effectiveTierOf } from "@/lib/repository-tier";
 
 /** The Prisma surface this loader needs — kept narrow for unit tests. */
 export type DataSharingReportClient = Pick<
@@ -241,10 +253,14 @@ export type RepositoryBreakdown = {
    *  data model carries it per-deposit, not per-repository. */
   accessModel: string | null;
   datasets: number;
-  /** `tierOf(repository)` — `'CONCERN' | 'FOREIGN_OPEN' | 'FOREIGN_CTRL' |
-   *  'US_OPEN' | 'US_CTRL' | 'REGISTRY' | 'UNKNOWN'`. Pure function of
-   *  `repository`, computed here rather than stored — see `@/lib/
-   *  repository-tier`'s header for the tier-only SPEC-boundary note. */
+  /** `'CONCERN' | 'FOREIGN_OPEN' | 'FOREIGN_CTRL' | 'US_OPEN' | 'US_CTRL' |
+   *  'REGISTRY' | 'UNKNOWN'`. Computed here rather than stored; see `@/lib/
+   *  repository-tier`'s header for the tier-only SPEC-boundary note. For
+   *  every repository except Synapse this is `tierOf(repository)`, a pure
+   *  function of the name; for Synapse it's `effectiveTierOf`'s MOST SEVERE
+   *  effective tier across this repository's deposits (2026-08-16, issue
+   *  #2471). See `aggregateByRepository`'s doc comment for why this table
+   *  stays one row per repository instead of splitting Synapse into two. */
   tier: string;
 };
 
@@ -264,7 +280,7 @@ export type NamedFacultyRow = {
   controlledDatasets: number;
   /** Deposit-INSTANCE (row) counts, not distinct-dataset or distinct-pub
    *  counts — same grain as `links` above, not `datasets`. `concerningDeposits`
-   *  counts rows whose `tierOf(repository)` is `'CONCERN'` OR
+   *  counts rows whose `effectiveTierOf(row)` is `'CONCERN'` OR
    *  `'FOREIGN_OPEN'`/`'FOREIGN_CTRL'`; `foreignHostedDeposits` counts only
    *  the `FOREIGN_*` subset (`CONCERN` is its own, more severe bucket — not
    *  "foreign-hosted" in this taxonomy, so it does NOT also count toward
@@ -341,6 +357,19 @@ function paddedTiers(present: ReadonlySet<string>): string[] {
   const base = TIER_ORDER.filter((tier) => tier !== "UNKNOWN" || present.has("UNKNOWN"));
   const extras = [...present].filter((t) => !(TIER_ORDER as readonly string[]).includes(t)).sort();
   return [...base, ...extras];
+}
+
+/** `TIER_ORDER`'s position for a tier value, lower = more severe. Used by
+ *  `aggregateByRepository` (2026-08-16, issue #2471) to pick the single
+ *  MOST SEVERE effective tier across a repository's deposits when they
+ *  disagree. See that function's doc comment for the full design decision.
+ *  A tier not in `TIER_ORDER` ranks least severe (`Infinity`), same
+ *  treat-unknown-as-lowest-priority spirit as `paddedTiers`' extras; in
+ *  practice `effectiveTierOf` only ever returns a `TIER_ORDER` member, so
+ *  this branch is defensive, not reachable today. */
+function tierSeverityRank(tier: string): number {
+  const rank = (TIER_ORDER as readonly string[]).indexOf(tier);
+  return rank === -1 ? Infinity : rank;
 }
 
 /** The tier-only "concerning" set per the SPEC's "Amended 08-13" note —
@@ -623,20 +652,51 @@ export function aggregateByDepartment(rows: readonly DatasetLinkRow[]): Departme
 }
 
 /** Distinct-dataset count per repository. `accessModel` is read off whichever
- *  row is seen first for that repository — see `RepositoryBreakdown`'s note on
+ *  row is seen first for that repository; see `RepositoryBreakdown`'s note on
  *  why this is per-deposit data being read as if it were per-repository.
- *  `tier` is `tierOf(repository)` — a pure function of the repository name,
- *  so unlike `accessModel` there's no first-seen ambiguity to resolve. */
+ *
+ *  `tier` (2026-08-16, issue #2471 Synapse access-aware fix): each row's own
+ *  `effectiveTierOf` is now a genuinely per-deposit fact for Synapse, so a
+ *  single repository's deposits can in principle disagree on effective tier
+ *  (Synapse: `US_OPEN` default vs `US_CTRL` when `accessModel ===
+ *  "controlled"`), something that could never happen back when tier was a
+ *  pure function of `repository`.
+ *
+ *  DESIGN DECISION: this table stays ONE row per repository, not split into
+ *  two rows when a repository's deposits disagree on effective tier. The row
+ *  reports the MOST SEVERE effective tier present, using `TIER_ORDER`'s own
+ *  severity ranking (`tierSeverityRank`): `US_OPEN` ranks more severe than
+ *  `US_CTRL` there, so a repository with even one open-access deposit
+ *  displays as `US_OPEN`, the higher-risk fact, rather than averaging or
+ *  picking arbitrarily. This is a DISPLAY simplification only: every
+ *  consumer that needs the correct per-deposit tier (`countConcerningDeposits`,
+ *  `tierPubSpectrum`, the tier filter in `applyReportFilters`) calls
+ *  `effectiveTierOf` on each row directly and never routes through this
+ *  rollup's single tier value, so the undercount risk this simplification
+ *  would otherwise create for those counts doesn't exist.
+ *
+ *  Chose one-row-most-severe over a two-row split because today's data is
+ *  11/11 Synapse deposits controlled, 0 open: no live tier disagreement to
+ *  display, so splitting now would add UI/CSV shape (two rows sharing one
+ *  repository name and homepage URL, a new explanatory column) for a case
+ *  the data doesn't exhibit. Known limitation worth remembering if that
+ *  changes: `aggregateRepositoriesByTier` sums this row's WHOLE-repository
+ *  `datasets` count into whichever single tier wins here, so a genuinely
+ *  mixed repository's less-severe-tier datasets would be counted under the
+ *  more-severe tier in "Repositories by risk tier", acceptable only because
+ *  the mix doesn't exist yet. Split into two rows then, not before. */
 export function aggregateByRepository(rows: readonly DatasetLinkRow[]): RepositoryBreakdown[] {
-  const byRepo = new Map<string, { datasets: Set<string>; accessModel: string | null }>();
+  const byRepo = new Map<string, { datasets: Set<string>; accessModel: string | null; tier: string | null }>();
   for (const r of rows) {
-    const bucket = byRepo.get(r.repository) ?? { datasets: new Set(), accessModel: null };
+    const bucket = byRepo.get(r.repository) ?? { datasets: new Set(), accessModel: null, tier: null };
     bucket.datasets.add(r.datasetId);
     if (bucket.accessModel === null && r.accessModel !== null) bucket.accessModel = r.accessModel;
+    const rowTier = effectiveTierOf(r);
+    if (bucket.tier === null || tierSeverityRank(rowTier) < tierSeverityRank(bucket.tier)) bucket.tier = rowTier;
     byRepo.set(r.repository, bucket);
   }
   return [...byRepo.entries()]
-    .map(([repository, b]) => ({ repository, accessModel: b.accessModel, datasets: b.datasets.size, tier: tierOf(repository) }))
+    .map(([repository, b]) => ({ repository, accessModel: b.accessModel, datasets: b.datasets.size, tier: b.tier ?? "UNKNOWN" }))
     .sort((a, b) => b.datasets - a.datasets);
 }
 
@@ -668,7 +728,7 @@ export function aggregateRepositoriesByTier(byRepository: readonly RepositoryBre
 
 /** Distinct-publication count per tier — the Rollup's tier "spectrum". Same
  *  Set-per-bucket, flatten-`pmids` pattern as `pubAccessPmidSets`, keyed on
- *  `tierOf(r.repository)` instead of `bucketDatasetLink`. Registry rows are
+ *  `effectiveTierOf(r)` instead of `bucketDatasetLink`. Registry rows are
  *  NOT excluded here (unlike `pubAccessPmidSets`) — a registry repository has
  *  its own tier (`REGISTRY`) and belongs in its own spectrum bucket, same as
  *  every other tier. A pmid can land in multiple tiers; not reconciled away,
@@ -683,7 +743,7 @@ export function tierPubSpectrum(rows: readonly DatasetLinkRow[]): TierPubSpectru
   const byTier = new Map<string, Set<string>>();
   for (const r of rows) {
     if (!r.pmids || r.pmids.length === 0) continue;
-    const tier = tierOf(r.repository);
+    const tier = effectiveTierOf(r);
     const set = byTier.get(tier) ?? new Set<string>();
     for (const pmid of r.pmids) set.add(pmid);
     byTier.set(tier, set);
@@ -838,7 +898,7 @@ export function countConcerningDeposits(rows: readonly DatasetLinkRow[]): { conc
   let concerningDeposits = 0;
   let foreignHostedDeposits = 0;
   for (const r of rows) {
-    const tier = tierOf(r.repository);
+    const tier = effectiveTierOf(r);
     if (!CONCERNING_TIERS.has(tier)) continue;
     concerningDeposits++;
     if (FOREIGN_HOSTED_TIERS.has(tier)) foreignHostedDeposits++;
@@ -886,7 +946,7 @@ export function aggregateByFaculty(rows: readonly DatasetLinkRow[]): NamedFacult
     // it just doesn't land in either access column.
     if (kind === "open") bucket.openDatasets.add(r.datasetId);
     else if (kind === "controlled") bucket.controlledDatasets.add(r.datasetId);
-    const tier = tierOf(r.repository);
+    const tier = effectiveTierOf(r);
     if (CONCERNING_TIERS.has(tier)) {
       bucket.concerningDeposits++;
       if (FOREIGN_HOSTED_TIERS.has(tier)) bucket.foreignHostedDeposits++;
@@ -1314,7 +1374,7 @@ export function applyReportFilters(
       if (filters.yearFrom !== undefined && r.depositYear < filters.yearFrom) return false;
       if (filters.yearTo !== undefined && r.depositYear > filters.yearTo) return false;
     }
-    if (filters.tiers && filters.tiers.length > 0 && !filters.tiers.includes(tierOf(r.repository))) return false;
+    if (filters.tiers && filters.tiers.length > 0 && !filters.tiers.includes(effectiveTierOf(r))) return false;
     return true;
   });
 }
