@@ -8,22 +8,28 @@
  * CSV-export section header).
  *
  * No UNIT-scope concept: `/edit/data-sharing` is global-only (no unit
- * scoping) — unlike `/edit/data-quality/export`. It DOES now have query
- * params of its own, though (2026-08-16, stale wording here corrected by
- * adversarial review): `?section=<X>&grain=items` carries a per-row
- * department/cwid/repository/category/subtype drill-down filter (below),
- * and the on-page year/tier filters (`lib/edit/data-sharing-dashboard.ts`'s
- * `DataSharingReportFilters`) narrow the DASHBOARD but are deliberately NOT
- * threaded through to this route yet — every CSV here always exports the
- * full unfiltered dataset (the dashboard says so explicitly next to its
- * filter form; see `FilterBar`'s caveat paragraph).
+ * scoping), unlike `/edit/data-quality/export`. It DOES have query params of
+ * its own: `?section=<X>&grain=items` carries a per-row department/cwid/
+ * repository/category/subtype drill-down filter (below), and the on-page
+ * year/tier/nihFunded filters (`lib/api/data-sharing-report.ts`'s
+ * `DataSharingReportFilters`) now narrow every export path the same way they
+ * narrow the on-page tables (2026-08-16, GitHub #2470: this route used to
+ * ignore them entirely; the dashboard's `FilterBar` caption says so). All
+ * three export paths below parse the same `?yearFrom`/`yearTo`/`tier`/
+ * `nihFunded` query params the page itself reads, via `parseDataSharingParams`
+ * (this route builds that function's expected input from its own
+ * `URLSearchParams` via `searchParamsToRecord`, since a Route Handler doesn't
+ * get the page's already-parsed `searchParams` object for free).
  *
  * v3 additions (2026-08-16 stakeholder pass), stacked on the `?section=`
  * aggregate CSVs:
  * - `?section=methods` — the Methods document as a markdown attachment
  *   (`buildMethodsDoc` + `methodsMarkdown`), so the narrative can travel with
  *   the numbers instead of living only in the on-page dialog. Not a
- *   `CSV_SECTIONS` member — it's not a CSV.
+ *   `CSV_SECTIONS` member (it's not a CSV), and it does NOT apply the active
+ *   filter (it isn't a `DownloadLink` on the page either, so there is no
+ *   filter state to carry): it describes the methodology, not a filtered
+ *   slice of the data.
  * - `?section=<X>&grain=items` — ITEM-level (one row per (person, dataset)
  *   link) CSV scoped/organized per section (`buildSectionItemsCsv`), the
  *   drill-down behind each aggregate table. `grain` values other than
@@ -37,6 +43,8 @@
 import { NextResponse } from "next/server";
 
 import {
+  applyNihFilter,
+  applyReportFilters,
   buildDataSharingCsv,
   buildSectionCsv,
   buildSectionItemsCsv,
@@ -44,14 +52,61 @@ import {
   CSV_SECTIONS,
   loadDataSharingReport,
   loadDatasetLinkRows,
+  loadFundingSplit,
   SHARE_RATE_YEAR_FLOOR,
+  type DataSharingReportClient,
+  type DataSharingReportFilters,
+  type DatasetLinkRow,
   type CsvSection,
   type SectionItemsFilter,
 } from "@/lib/api/data-sharing-report";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { canViewDataSharingDashboard, isDataSharingDashboardEnabled } from "@/lib/edit/data-sharing-dashboard";
+import {
+  canViewDataSharingDashboard,
+  isDataSharingDashboardEnabled,
+  parseDataSharingParams,
+} from "@/lib/edit/data-sharing-dashboard";
 import { buildMethodsDoc, methodsMarkdown } from "@/lib/edit/data-sharing-methods-doc";
+
+/** Converts a `URLSearchParams` into the `Record<string, string | string[] |
+ *  undefined>` shape `parseDataSharingParams` expects (the page itself gets
+ *  this shape for free from Next's `searchParams` prop; a Route Handler only
+ *  gets a `Request`, so this route builds it). A plain `Object.fromEntries`
+ *  would silently keep just the LAST value of a repeated key, dropping every
+ *  tier but one from a multi-tier `tier=` filter (checkboxes emit exactly
+ *  that shape), so repeated keys are collected into an array instead. */
+function searchParamsToRecord(sp: URLSearchParams): Record<string, string | string[] | undefined> {
+  const record: Record<string, string | string[]> = {};
+  for (const [key, value] of sp.entries()) {
+    const existing = record[key];
+    if (existing === undefined) record[key] = value;
+    else if (Array.isArray(existing)) existing.push(value);
+    else record[key] = [existing, value];
+  }
+  return record;
+}
+
+/** Applies the on-page filters to an item-level row set, for the two export
+ *  paths that read `loadDatasetLinkRows` directly rather than a pre-built
+ *  `DataSharingReport` (`?section=<X>&grain=items` and the bare item-level
+ *  export; the `?section=<X>` aggregate path applies filters via
+ *  `loadDataSharingReport` itself, which already accepts a `filters` param).
+ *  The NIH-funded grant join (`loadFundingSplit`) only runs when the filter
+ *  actually asks for it, so a plain items export doesn't pay for an extra
+ *  query it doesn't need (2026-08-16, GitHub #2470). `linkRows` (unfiltered)
+ *  is the population `loadFundingSplit` computes `nihByPmid` from, same
+ *  reasoning as `loadDataSharingReport`'s own sequencing in the report lib. */
+async function filterExportRows(
+  client: DataSharingReportClient,
+  linkRows: DatasetLinkRow[],
+  filters: DataSharingReportFilters,
+): Promise<DatasetLinkRow[]> {
+  const filtered = applyReportFilters(linkRows, filters);
+  if (filters.nihFunded === undefined) return filtered;
+  const { nihByPmid } = await loadFundingSplit(client, linkRows);
+  return applyNihFilter(filtered, filters.nihFunded, nihByPmid);
+}
 
 export const dynamic = "force-dynamic";
 // `maxDuration` is inert under `output: "standalone"`; the real budget this route is
@@ -74,6 +129,11 @@ export async function GET(request: Request) {
   const searchParams = new URL(request.url).searchParams;
   const rawSection = searchParams.get("section");
   const rawGrain = searchParams.get("grain");
+  // The same year/tier/nihFunded filter the on-page tables read, parsed the
+  // same way the page itself does (2026-08-16, GitHub #2470) so this route
+  // can't drift from `parseDataSharingParams`'s own rules for what counts as
+  // a valid filter value.
+  const { filters } = parseDataSharingParams(searchParamsToRecord(searchParams));
 
   // `grain` is item-grain-only vocabulary: any other value (when present) is
   // a caller error, 400 before touching the DB — same posture as the unknown-
@@ -105,7 +165,8 @@ export async function GET(request: Request) {
       subtype: searchParams.get("subtype") ?? undefined,
     };
     const linkRows = await loadDatasetLinkRows(db.read);
-    const csv = buildSectionItemsCsv(linkRows, section, filter);
+    const rows = await filterExportRows(db.read, linkRows, filters);
+    const csv = buildSectionItemsCsv(rows, section, filter);
     // Unreachable for the sections admitted above (only "tiers" returns
     // null) — defensive so a future null-returning section can't 200 an
     // empty body.
@@ -162,7 +223,7 @@ export async function GET(request: Request) {
       return new NextResponse("Unknown section", { status: 400 });
     }
     const section = rawSection as CsvSection;
-    const report = await loadDataSharingReport(db.read);
+    const report = await loadDataSharingReport(db.read, filters);
     console.log(
       JSON.stringify({
         event: "export_data_sharing",
@@ -183,7 +244,8 @@ export async function GET(request: Request) {
   }
 
   const linkRows = await loadDatasetLinkRows(db.read);
-  const { rows, total, truncated } = capDatasetLinkRows(linkRows);
+  const filteredRows = await filterExportRows(db.read, linkRows, filters);
+  const { rows, total, truncated } = capDatasetLinkRows(filteredRows);
 
   console.log(
     JSON.stringify({

@@ -203,46 +203,32 @@ function ExternalA({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
-/** Rewrites a `DownloadLink` label when a page-level filter is active. Every
- *  CSV export on this page always reads the FULL unfiltered corpus (see
- *  `FilterBar`'s caption paragraph below), so the button itself should say
- *  so instead of silently mismatching the filtered tables sitting next to it
- *  (2026-08-16 ask). One pure function so every call site gets identical
- *  wording, not an inline ternary repeated, and liable to drift, at each of
- *  the ~16 `DownloadLink` uses on this page. The two named labels are the
- *  aggregate-table defaults (`DownloadLink`'s own `label` default, and the
- *  `?grain=items` drill-down's "Download items CSV"); anything else, like
- *  the compact per-row "Items" links, just gets the caveat appended. */
-function downloadLabelForFilters(label: string, filtersActive: boolean | undefined): string {
-  if (!filtersActive) return label;
-  if (label === "Download CSV") return "Download full CSV (ignores filters)";
-  if (label === "Download items CSV") return "Download full items CSV (ignores filters)";
-  return `${label} (ignores filters)`;
-}
-
 /** Per-table CSV link — a plain <a> because the target is a download route
  *  handler; <Link>'s client nav + prefetch would fetch the file itself.
  *  `label` defaults to the aggregate link's text; the `?grain=items`
  *  drill-down links pass "Download items CSV" (v3 — the stakeholder wants
  *  each table's underlying item rows one click away, not just the rollup).
- *  `filtersActive` (2026-08-16, optional so no call site is forced to pass
- *  it) runs the label through `downloadLabelForFilters` above. */
+ *
+ *  No filter-aware relabeling here anymore (2026-08-16, GitHub #2470): every
+ *  call site now passes an `href` already carrying the active filter via
+ *  `withFilters` below, and the export route actually applies it, so the
+ *  label can just say what the button does. A prior version of this
+ *  component appended "(ignores filters)" here, back when every export on
+ *  this page really did ignore the on-page filter state. */
 function DownloadLink({
   href,
   label = "Download CSV",
   className = "text-xs hover:underline",
   testId,
-  filtersActive,
 }: {
   href: string;
   label?: string;
   className?: string;
   testId?: string;
-  filtersActive?: boolean;
 }) {
   return (
     <a href={href} className={className} data-testid={testId}>
-      {downloadLabelForFilters(label, filtersActive)}
+      {label}
     </a>
   );
 }
@@ -258,7 +244,12 @@ function DownloadLink({
  *  happens, so a sort/pagination href can't drift from the filter form's
  *  own `name="tier"` checkboxes again. */
 function filterQueryParams(filters: DataSharingUiParams["filters"]): Record<string, string | number | readonly string[] | undefined> {
-  return { yearFrom: filters.yearFrom, yearTo: filters.yearTo, tier: filters.tiers };
+  return {
+    yearFrom: filters.yearFrom,
+    yearTo: filters.yearTo,
+    tier: filters.tiers,
+    nihFunded: filters.nihFunded === undefined ? undefined : String(filters.nihFunded),
+  };
 }
 
 /** Builds a query string, dropping `undefined`/empty-array values — the one
@@ -279,14 +270,42 @@ function buildQuery(params: Record<string, string | number | readonly string[] |
   return qs ? `?${qs}` : "";
 }
 
+/** Appends the active filter onto an existing `DownloadLink` href, merging
+ *  with whatever query string the href already carries (2026-08-16, GitHub
+ *  #2470). Some hrefs are already `?section=X&department=Y`-style per-row
+ *  drill-down links, and this must not clobber those. The export route now
+ *  actually applies the filter (`applyReportFilters`/`applyNihFilter` in
+ *  `app/edit/data-sharing/export/route.ts`), so every download link needs to
+ *  carry it, not just the on-page tables. Filter keys (`yearFrom`/`yearTo`/
+ *  `tier`/`nihFunded`) never collide with a drill-down key (`section`/
+ *  `grain`/`department`/`cwid`/`repository`/`category`/`subtype`), so this is
+ *  a plain merge, not a precedence rule. */
+function withFilters(href: string, filters: DataSharingUiParams["filters"]): string {
+  const [path, query = ""] = href.split("?");
+  const sp = new URLSearchParams(query);
+  for (const [key, value] of Object.entries(filterQueryParams(filters))) {
+    if (value === undefined) continue;
+    if (Array.isArray(value)) {
+      for (const v of value) sp.append(key, v);
+    } else {
+      sp.set(key, String(value));
+    }
+  }
+  const qs = sp.toString();
+  return qs ? `${path}?${qs}` : path;
+}
+
 /** "Is any filter currently active", extracted 2026-08-16 out of
- *  `FilterBar`'s own local `active` computation. Its "Clear filters" link
- *  and caption paragraph, and `DataSharingDashboard`'s page-level
- *  `filtersActive` (which every `DownloadLink`'s relabeled caption reads),
- *  now share the exact same one-line definition instead of two copies that
- *  could quietly drift apart. */
+ *  `FilterBar`'s own local `active` computation: its "Clear filters" link
+ *  and caption paragraph share this exact definition rather than a second
+ *  copy that could quietly drift apart. */
 function hasActiveFilters(filters: DataSharingUiParams["filters"]): boolean {
-  return filters.yearFrom !== undefined || filters.yearTo !== undefined || !!filters.tiers?.length;
+  return (
+    filters.yearFrom !== undefined ||
+    filters.yearTo !== undefined ||
+    !!filters.tiers?.length ||
+    filters.nihFunded !== undefined
+  );
 }
 
 /** A sortable `<th>` — a plain link that reloads the page with the sort
@@ -474,7 +493,7 @@ function DepositsByYearChart({ rows }: { rows: DataSharingReport["byYear"] }) {
 function RollupSection({
   report,
   doc,
-  filtersActive,
+  filters,
 }: {
   report: DataSharingReport;
   /** Built once in `DataSharingDashboard` (server side) and passed down —
@@ -484,10 +503,10 @@ function RollupSection({
    *  report lib directly; `buildMethodsDoc` is pure and `DataSharingReport`
    *  satisfies its structural param type. */
   doc: ReturnType<typeof buildMethodsDoc>;
-  /** Whether a year/tier filter is currently active. This section's own
-   *  export link is the full-corpus default export, so it needs the same
-   *  "ignores filters" relabeling as every other `DownloadLink` on the page. */
-  filtersActive: boolean;
+  /** The active filter (2026-08-16, GitHub #2470). This section's own
+   *  export link is the item-level default export, and needs the same
+   *  `withFilters` treatment as every other `DownloadLink` on the page. */
+  filters: DataSharingUiParams["filters"];
 }) {
   const { overall } = report;
   return (
@@ -510,10 +529,9 @@ function RollupSection({
             Copy summary
           </span>
           <DownloadLink
-            href="/edit/data-sharing/export"
+            href={withFilters("/edit/data-sharing/export", filters)}
             className="text-sm hover:underline"
             testId="ds-export-link"
-            filtersActive={filtersActive}
           />
         </span>
       </div>
@@ -698,9 +716,6 @@ function sortFaculty(
 
 function RepositoriesSection({ report, ui }: { report: DataSharingReport; ui: DataSharingUiParams }) {
   const otherParams = { ...filterQueryParams(ui.filters), facSort: ui.facSort, facDir: ui.facDir, facPage: ui.facPage };
-  // Already has `ui` (unlike RollupSection/SubtypesSection/etc below), so
-  // derive locally rather than taking a redundant `filtersActive` prop.
-  const filtersActive = hasActiveFilters(ui.filters);
   const sortedDepartments = sortDepartments(report.byDepartment, ui.deptSort, ui.deptDir);
   // Synapse-shaped contradiction check (2026-08-16 review): does any
   // repository's tier-implied access model (open/controlled, from
@@ -723,7 +738,7 @@ function RepositoriesSection({ report, ui }: { report: DataSharingReport; ui: Da
 
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-semibold">Repositories by risk tier</h3>
-        <DownloadLink href="/edit/data-sharing/export?section=tiers" filtersActive={filtersActive} />
+        <DownloadLink href={withFilters("/edit/data-sharing/export?section=tiers", ui.filters)} />
       </div>
       <p className="text-muted-foreground mt-1 text-xs">
         The &ldquo;concerning&rdquo; flag elsewhere on this page is tier-based only (country-of-concern
@@ -785,11 +800,10 @@ function RepositoriesSection({ report, ui }: { report: DataSharingReport; ui: Da
       <div className="mt-6 flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-semibold">By repository</h3>
         <span className="inline-flex items-center gap-3">
-          <DownloadLink href="/edit/data-sharing/export?section=repositories" filtersActive={filtersActive} />
+          <DownloadLink href={withFilters("/edit/data-sharing/export?section=repositories", ui.filters)} />
           <DownloadLink
-            href="/edit/data-sharing/export?section=repositories&grain=items"
+            href={withFilters("/edit/data-sharing/export?section=repositories&grain=items", ui.filters)}
             label="Download items CSV"
-            filtersActive={filtersActive}
           />
         </span>
       </div>
@@ -821,9 +835,11 @@ function RepositoriesSection({ report, ui }: { report: DataSharingReport; ui: Da
                   <td className={`${tdClass} text-right`}>{r.datasets.toLocaleString()}</td>
                   <td className={tdClass}>
                     <DownloadLink
-                      href={`/edit/data-sharing/export?section=repositories&grain=items&repository=${encodeURIComponent(r.repository)}`}
+                      href={withFilters(
+                        `/edit/data-sharing/export?section=repositories&grain=items&repository=${encodeURIComponent(r.repository)}`,
+                        ui.filters,
+                      )}
                       label="Items"
-                      filtersActive={filtersActive}
                     />
                   </td>
                 </tr>
@@ -845,11 +861,10 @@ function RepositoriesSection({ report, ui }: { report: DataSharingReport; ui: Da
       <div className="mt-6 flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-semibold">By department</h3>
         <span className="inline-flex items-center gap-3">
-          <DownloadLink href="/edit/data-sharing/export?section=departments" filtersActive={filtersActive} />
+          <DownloadLink href={withFilters("/edit/data-sharing/export?section=departments", ui.filters)} />
           <DownloadLink
-            href="/edit/data-sharing/export?section=departments&grain=items"
+            href={withFilters("/edit/data-sharing/export?section=departments&grain=items", ui.filters)}
             label="Download items CSV"
-            filtersActive={filtersActive}
           />
         </span>
       </div>
@@ -913,9 +928,11 @@ function RepositoriesSection({ report, ui }: { report: DataSharingReport; ui: Da
                 </td>
                 <td className={tdClass}>
                   <DownloadLink
-                    href={`/edit/data-sharing/export?section=departments&grain=items&department=${encodeURIComponent(d.department)}`}
+                    href={withFilters(
+                      `/edit/data-sharing/export?section=departments&grain=items&department=${encodeURIComponent(d.department)}`,
+                      ui.filters,
+                    )}
                     label="Items"
-                    filtersActive={filtersActive}
                   />
                 </td>
               </tr>
@@ -953,8 +970,6 @@ const CONCERNING_CAVEAT =
   "Tier-based only — country-of-concern host or foreign-hosted repository; does not include sensitive data-type detection.";
 
 function FacultySection({ report, ui }: { report: DataSharingReport; ui: DataSharingUiParams }) {
-  // Already has `ui`, same rationale as `RepositoriesSection`'s local copy.
-  const filtersActive = hasActiveFilters(ui.filters);
   const sorted = sortFaculty(report.byFaculty, ui.facSort, ui.facDir);
   const totalPages = Math.max(1, Math.ceil(sorted.length / FACULTY_ROW_CAP));
   // Clamped, not raw `ui.facPage` (2026-08-16 adversarial-review finding): a
@@ -989,11 +1004,10 @@ function FacultySection({ report, ui }: { report: DataSharingReport; ui: DataSha
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="text-base font-semibold">4 · Named faculty</h2>
         <span className="inline-flex items-center gap-3">
-          <DownloadLink href="/edit/data-sharing/export?section=faculty" filtersActive={filtersActive} />
+          <DownloadLink href={withFilters("/edit/data-sharing/export?section=faculty", ui.filters)} />
           <DownloadLink
-            href="/edit/data-sharing/export?section=faculty&grain=items"
+            href={withFilters("/edit/data-sharing/export?section=faculty&grain=items", ui.filters)}
             label="Download items CSV"
-            filtersActive={filtersActive}
           />
         </span>
       </div>
@@ -1092,9 +1106,11 @@ function FacultySection({ report, ui }: { report: DataSharingReport; ui: DataSha
                 </td>
                 <td className={tdClass}>
                   <DownloadLink
-                    href={`/edit/data-sharing/export?section=faculty&grain=items&cwid=${encodeURIComponent(f.cwid)}`}
+                    href={withFilters(
+                      `/edit/data-sharing/export?section=faculty&grain=items&cwid=${encodeURIComponent(f.cwid)}`,
+                      ui.filters,
+                    )}
                     label="Items"
-                    filtersActive={filtersActive}
                   />
                 </td>
               </tr>
@@ -1140,18 +1156,26 @@ const SUBTYPE_CATEGORY_LABELS: Record<string, string> = {
   geolocation: "Geolocation",
 };
 
-function SubtypesSection({ report, filtersActive }: { report: DataSharingReport; filtersActive: boolean }) {
+function SubtypesSection({
+  report,
+  filters,
+}: {
+  report: DataSharingReport;
+  /** The active filter (2026-08-16, GitHub #2470), threaded the same way
+   *  `filtersActive` used to be, so every `DownloadLink` href in this
+   *  section can carry it via `withFilters`. */
+  filters: DataSharingUiParams["filters"];
+}) {
   if (report.bySubtype.length === 0) return null;
   return (
     <section id="subtypes" className="scroll-mt-4 mt-10">
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="text-base font-semibold">5 · Deposits by data sub-type</h2>
         <span className="inline-flex items-center gap-3">
-          <DownloadLink href="/edit/data-sharing/export?section=subtypes" filtersActive={filtersActive} />
+          <DownloadLink href={withFilters("/edit/data-sharing/export?section=subtypes", filters)} />
           <DownloadLink
-            href="/edit/data-sharing/export?section=subtypes&grain=items"
+            href={withFilters("/edit/data-sharing/export?section=subtypes&grain=items", filters)}
             label="Download items CSV"
-            filtersActive={filtersActive}
           />
         </span>
       </div>
@@ -1185,14 +1209,17 @@ function SubtypesSection({ report, filtersActive }: { report: DataSharingReport;
               // row in the group (R11).
               const rows = report.bySubtype;
               const isGroupStart = i === 0 || rows[i - 1].category !== s.category;
-              const itemsHref = `/edit/data-sharing/export?section=subtypes&grain=items&category=${encodeURIComponent(s.category)}&subtype=${encodeURIComponent(s.subtype)}`;
+              const itemsHref = withFilters(
+                `/edit/data-sharing/export?section=subtypes&grain=items&category=${encodeURIComponent(s.category)}&subtype=${encodeURIComponent(s.subtype)}`,
+                filters,
+              );
               if (!isGroupStart) {
                 return (
                   <tr key={`${s.category}|${s.subtype}`} className="border-apollo-border border-b">
                     <td className={tdClass}>{s.subtype}</td>
                     <td className={`${tdClass} text-right`}>{s.count.toLocaleString()}</td>
                     <td className={tdClass}>
-                      <DownloadLink href={itemsHref} label="Items" filtersActive={filtersActive} />
+                      <DownloadLink href={itemsHref} label="Items" />
                     </td>
                   </tr>
                 );
@@ -1207,7 +1234,7 @@ function SubtypesSection({ report, filtersActive }: { report: DataSharingReport;
                   <td className={tdClass}>{s.subtype}</td>
                   <td className={`${tdClass} text-right`}>{s.count.toLocaleString()}</td>
                   <td className={tdClass}>
-                    <DownloadLink href={itemsHref} label="Items" filtersActive={filtersActive} />
+                    <DownloadLink href={itemsHref} label="Items" />
                   </td>
                 </tr>
               );
@@ -1221,21 +1248,20 @@ function SubtypesSection({ report, filtersActive }: { report: DataSharingReport;
 
 function RecentActivitySection({
   report,
-  filtersActive,
+  filters,
 }: {
   report: DataSharingReport;
-  /** Not named in the 2026-08-16 filters-feedback ask alongside Rollup/
-   *  Subtypes/Compliance, but this section's own export link is the same
-   *  always-full-corpus default export as Rollup's, and needs the identical
-   *  relabeling. So it gets the same additive `filtersActive` prop. */
-  filtersActive: boolean;
+  /** This section's own export link is the same item-level default export as
+   *  Rollup's, and needs the identical `withFilters` treatment (2026-08-16,
+   *  GitHub #2470). */
+  filters: DataSharingUiParams["filters"];
 }) {
   return (
     <section id="recent" className="mt-10 scroll-mt-4">
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="text-base font-semibold">6 · Recent activity</h2>
         {/* Item grain — the default (no-section) export IS this table, in full. */}
-        <DownloadLink href="/edit/data-sharing/export" filtersActive={filtersActive} />
+        <DownloadLink href={withFilters("/edit/data-sharing/export", filters)} />
       </div>
       <p className="text-muted-foreground mt-1 text-sm">
         Item-level — one row per (person, dataset) link, same grain as the CSV export (a dataset
@@ -1367,11 +1393,13 @@ function ComplianceSection({
   // three placeholder cards ship before there's anything to export (see
   // `COC_PULL_PENDING`). Accepted anyway so this section matches Rollup/
   // Subtypes' shape and a future §7 export doesn't have to remember to add
-  // it (2026-08-16 filters-feedback pass).
-  filtersActive,
+  // it (2026-08-16 filters-feedback pass; renamed from `filtersActive` to
+  // `filters` on 2026-08-16, GitHub #2470, the same rename every other
+  // section below got once real filtering replaced that prop).
+  filters,
 }: {
   report: DataSharingReport;
-  filtersActive: boolean;
+  filters: DataSharingUiParams["filters"];
 }) {
   const { concerningDepositInstances } = report.overall;
   return (
@@ -1480,13 +1508,13 @@ function SectionNav({ doc }: { doc: ReturnType<typeof buildMethodsDoc> }) {
  *  filterable category). */
 const FILTERABLE_TIERS = ["CONCERN", "FOREIGN_OPEN", "FOREIGN_CTRL", "US_OPEN", "US_CTRL", "REGISTRY"] as const;
 
-/** Year-range + tier filter form (2026-08-16 ask). A plain GET `<form>` —
- *  native platform feature, no client state: submitting reloads the page
- *  with the new query string, which `parseDataSharingParams`/
- *  `loadDataSharingReport` already handle. Preserves the current sort choice
- *  via hidden inputs so applying a filter doesn't silently reset it. NIH-
- *  funded filter deliberately NOT offered here — see
- *  `DataSharingReportFilters`'s doc comment for why. */
+/** Year-range + tier + NIH-funded filter form (2026-08-16 ask, all three
+ *  now shipped; see `DataSharingReportFilters`'s doc comment for why the
+ *  NIH-funded field landed after year/tier). A plain GET `<form>`: a native
+ *  platform feature, no client state, submitting reloads the page with the
+ *  new query string, which `parseDataSharingParams`/`loadDataSharingReport`
+ *  already handle. Preserves the current sort choice via hidden inputs so
+ *  applying a filter doesn't silently reset it. */
 function FilterBar({
   ui,
   bounds,
@@ -1545,6 +1573,18 @@ function FilterBar({
           ))}
         </div>
       </fieldset>
+      <label className="flex flex-col gap-1">
+        <span className="text-muted-foreground">NIH funding</span>
+        <select
+          name="nihFunded"
+          defaultValue={ui.filters.nihFunded === undefined ? "" : String(ui.filters.nihFunded)}
+          className="border-apollo-border rounded border px-2 py-1"
+        >
+          <option value="">Any</option>
+          <option value="true">NIH-funded only</option>
+          <option value="false">Not NIH-funded</option>
+        </select>
+      </label>
       {/* Preserve sort choice across a filter change — filters reset page 1
           implicitly (no facPage hidden input), since the row count under a
           new filter makes the old page number meaningless. */}
@@ -1562,12 +1602,11 @@ function FilterBar({
       )}
       {active && (
         <p className="text-muted-foreground basis-full text-xs">
-          Narrows the datasets/repositories/faculty/tier tables below. Share rate and PMC coverage on
-          §1 stay institution-wide on purpose — they&apos;re a rate over the full corpus, and pairing a
-          filtered numerator against that unfiltered denominator would read as sharing collapsing when
-          nothing changed. Clear filters to confirm. Every CSV download on this page (aggregate and
-          per-row items alike) exports the FULL unfiltered dataset, not this filtered view — there is
-          no filtered-export path yet.
+          Narrows the datasets/repositories/faculty/tier tables below, and the funding totals in §2.
+          Every CSV download on this page (aggregate and per-row items alike) narrows the same way, via
+          the same filter. Share rate and PMC coverage on §1 stay institution-wide on purpose: a rate
+          over the full corpus, since pairing a filtered numerator against that unfiltered denominator
+          would read as sharing collapsing when nothing changed. Clear filters to confirm.
         </p>
       )}
     </form>
@@ -1578,11 +1617,6 @@ export function DataSharingDashboard({ report, ui }: { report: DataSharingReport
   // Built once, passed to both the sticky nav and §1 — see `RollupSection`'s
   // doc prop comment for why this can't be built twice.
   const doc = buildMethodsDoc(report, { shareRateYearFloor: SHARE_RATE_YEAR_FLOOR });
-  // Computed once here (2026-08-16), not per-section. Every DownloadLink's
-  // relabeled caption needs the identical boolean `FilterBar` already
-  // computes for its own Clear-filters link, so both read `hasActiveFilters`
-  // instead of keeping two copies.
-  const filtersActive = hasActiveFilters(ui.filters);
   return (
     <>
       <SectionNav doc={doc} />
@@ -1600,13 +1634,13 @@ export function DataSharingDashboard({ report, ui }: { report: DataSharingReport
         figures published before this date.
       </p>
       <FilterBar ui={ui} bounds={report.depositYearBounds} />
-      <RollupSection report={report} doc={doc} filtersActive={filtersActive} />
+      <RollupSection report={report} doc={doc} filters={ui.filters} />
       <FundingSection report={report} />
       <RepositoriesSection report={report} ui={ui} />
       <FacultySection report={report} ui={ui} />
-      <SubtypesSection report={report} filtersActive={filtersActive} />
-      <RecentActivitySection report={report} filtersActive={filtersActive} />
-      <ComplianceSection report={report} filtersActive={filtersActive} />
+      <SubtypesSection report={report} filters={ui.filters} />
+      <RecentActivitySection report={report} filters={ui.filters} />
+      <ComplianceSection report={report} filters={ui.filters} />
     </>
   );
 }

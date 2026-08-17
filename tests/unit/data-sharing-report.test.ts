@@ -7,6 +7,7 @@ import {
   aggregateBySubtype,
   aggregateByYear,
   aggregateRepositoriesByTier,
+  applyNihFilter,
   applyReportFilters,
   bucketDatasetLink,
   buildAccessFundingCrossTab,
@@ -20,6 +21,8 @@ import {
   countSubtypeClassifiedInstances,
   DATA_SHARING_EXPORT_CAP,
   depositedPmidSet,
+  deriveFundingTotals,
+  loadDataSharingReport,
   loadDatasetLinkRows,
   loadFundingSplit,
   loadShareRateCorpus,
@@ -1625,6 +1628,124 @@ describe("loadDatasetLinkRows", () => {
   });
 });
 
+describe("loadDataSharingReport: NIH-funded filter (2026-08-16, GitHub #2469)", () => {
+  /** Two deposits, one NIH-funded pmid (p1, GEO/US_OPEN, depositYear 2020)
+   *  and one not-NIH-funded pmid (p2, dbGaP/US_CTRL, depositYear 2023): the
+   *  minimal fixture that can distinguish a year filter from a nihFunded
+   *  filter, and can catch a regression in either one's funding totals. */
+  function makeClient(): DataSharingReportClient {
+    const links = [
+      {
+        cwid: "aaa1",
+        datasetId: "d1",
+        pmids: ["p1"],
+        scholar: { preferredName: "Alice A", fullName: "Alice A", slug: "alice-a", primaryDepartment: "Medicine" },
+        dataset: {
+          repository: "GEO",
+          accessModel: "open",
+          title: null,
+          accessionOrDoi: null,
+          resourceType: null,
+          dataType: null,
+          sensitiveCats: null,
+          sensitiveSubtypes: null,
+          depositYear: 2020,
+          provenance: "databank",
+          confidence: "high",
+        },
+      },
+      {
+        cwid: "aaa1",
+        datasetId: "d2",
+        pmids: ["p2"],
+        scholar: { preferredName: "Alice A", fullName: "Alice A", slug: "alice-a", primaryDepartment: "Medicine" },
+        dataset: {
+          repository: "dbGaP",
+          accessModel: "controlled",
+          title: null,
+          accessionOrDoi: null,
+          resourceType: null,
+          dataType: null,
+          sensitiveCats: null,
+          sensitiveSubtypes: null,
+          depositYear: 2023,
+          provenance: "databank",
+          confidence: "high",
+        },
+      },
+    ];
+    return {
+      personDatasetDeposit: { findMany: vi.fn().mockResolvedValue(links) },
+      suppression: { findMany: vi.fn().mockResolvedValue([]) },
+      publicationAuthor: { findMany: vi.fn().mockResolvedValue([]) },
+      datasetDeposit: { aggregate: vi.fn().mockResolvedValue({ _max: { lastRefreshedAt: null } }) },
+      grantPublication: {
+        findMany: vi.fn().mockResolvedValue([
+          { pmid: "p1", grant: { nihIc: "NCI" } },
+          { pmid: "p2", grant: { nihIc: null } },
+        ]),
+      },
+    } as unknown as DataSharingReportClient;
+  }
+
+  it("with no filter active, funding totals describe the full corpus, same as before this feature", async () => {
+    const report = await loadDataSharingReport(makeClient());
+    expect(report.overall.datasets).toBe(2);
+    expect(report.overall.nihFundedPubs).toBe(1);
+    expect(report.overall.notNihFundedPubs).toBe(1);
+  });
+
+  it("nihFunded: true narrows deposit rows to the NIH-funded one, and the funding totals to match", async () => {
+    const report = await loadDataSharingReport(makeClient(), { nihFunded: true });
+    expect(report.overall.datasets).toBe(1);
+    expect(report.byRepository.map((r) => r.repository)).toEqual(["GEO"]);
+    expect(report.overall.nihFundedPubs).toBe(1);
+    expect(report.overall.notNihFundedPubs).toBe(0);
+  });
+
+  it("nihFunded: false narrows deposit rows to the not-NIH-funded one, and the funding totals to match", async () => {
+    const report = await loadDataSharingReport(makeClient(), { nihFunded: false });
+    expect(report.overall.datasets).toBe(1);
+    expect(report.byRepository.map((r) => r.repository)).toEqual(["dbGaP"]);
+    expect(report.overall.nihFundedPubs).toBe(0);
+    expect(report.overall.notNihFundedPubs).toBe(1);
+  });
+
+  it("REGRESSION: a year filter alone still correctly narrows the funding totals, exactly as before this PR", async () => {
+    const client = makeClient();
+    // Keeps only d2 (depositYear 2023, pmid p2, not NIH-funded). Before this
+    // fix, `loadFundingSplit` ran on the already-filtered rows and its totals
+    // were trusted as-is, so a year filter DID correctly narrow the funding
+    // totals. This PR moves `loadFundingSplit` onto the always-unfiltered
+    // corpus (so `nihFunded` itself can be applied against a complete map)
+    // and must recompute the reported totals from the final filtered rows to
+    // avoid silently regressing back to the full-corpus 1/1 split.
+    const report = await loadDataSharingReport(client, { yearFrom: 2022 });
+    expect(report.overall.datasets).toBe(1);
+    expect(report.overall.nihFundedPubs).toBe(0);
+    expect(report.overall.notNihFundedPubs).toBe(1);
+  });
+
+  it("loadFundingSplit always runs against the FULL unfiltered corpus, regardless of the active filter", async () => {
+    const client = makeClient();
+    await loadDataSharingReport(client, { yearFrom: 2022 });
+    const call = (client.grantPublication.findMany as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect([...call.where.pmid.in].sort()).toEqual(["p1", "p2"]);
+  });
+
+  it("share-rate and PMC-coverage stats stay institution-wide regardless of the nihFunded filter", async () => {
+    // Same year-floor/type-scoped corpus for both calls (loadShareRateCorpus
+    // is mocked to return []), so both share-rate denominators read 0 either
+    // way: the point is that a nihFunded filter doesn't change which corpus
+    // query runs (`publicationAuthor.findMany`'s own where clause has no
+    // nihFunded scoping to begin with).
+    const unfiltered = await loadDataSharingReport(makeClient());
+    const filtered = await loadDataSharingReport(makeClient(), { nihFunded: true });
+    expect(filtered.overall.shareRateDenominator).toBe(unfiltered.overall.shareRateDenominator);
+    expect(filtered.overall.pmcCoveredPubs).toBe(unfiltered.overall.pmcCoveredPubs);
+  });
+});
+
 describe("aggregateByYear", () => {
   it("counts distinct datasets per deposit year, ascending, with a trailing null-year bucket", () => {
     const rows: DatasetLinkRow[] = [
@@ -1729,6 +1850,76 @@ describe("applyReportFilters", () => {
 
   it("empty tiers array means every tier, not zero rows", () => {
     expect(applyReportFilters(ROWS, { tiers: [] })).toHaveLength(ROWS.length);
+  });
+});
+
+describe("applyNihFilter", () => {
+  it("keeps a row when ANY of its pmids matches the requested nihFunded state", () => {
+    const nihByPmid = new Map([
+      ["p1", true],
+      ["p2", false],
+    ]);
+    const rows: DatasetLinkRow[] = [
+      { ...ROWS[0], pmids: ["p1"] }, // NIH-funded
+      { ...ROWS[1], pmids: ["p2"] }, // not NIH-funded
+      { ...ROWS[2], pmids: ["p1", "p2"] }, // one of each, matches both states
+    ];
+    expect(applyNihFilter(rows, true, nihByPmid)).toHaveLength(2); // rows[0], rows[2]
+    expect(applyNihFilter(rows, false, nihByPmid)).toHaveLength(2); // rows[1], rows[2]
+  });
+
+  it("a pmid absent from nihByPmid degrades to not-NIH-funded, same convention loadFundingSplit uses", () => {
+    const rows: DatasetLinkRow[] = [{ ...ROWS[0], pmids: ["unknown-pmid"] }];
+    expect(applyNihFilter(rows, false, new Map())).toHaveLength(1);
+    expect(applyNihFilter(rows, true, new Map())).toHaveLength(0);
+  });
+
+  it("a row with no pmids never matches either state", () => {
+    const rows: DatasetLinkRow[] = [
+      { ...ROWS[0], pmids: [] },
+      { ...ROWS[1], pmids: undefined },
+    ];
+    const nihByPmid = new Map([["p1", true]]);
+    expect(applyNihFilter(rows, true, nihByPmid)).toHaveLength(0);
+    expect(applyNihFilter(rows, false, nihByPmid)).toHaveLength(0);
+  });
+
+  it("an undefined nihByPmid map degrades every row to not-NIH-funded", () => {
+    const rows: DatasetLinkRow[] = [{ ...ROWS[0], pmids: ["p1"] }];
+    expect(applyNihFilter(rows, false, undefined)).toHaveLength(1);
+    expect(applyNihFilter(rows, true, undefined)).toHaveLength(0);
+  });
+});
+
+describe("deriveFundingTotals", () => {
+  it("tallies a deposited-pmid set against nihByPmid", () => {
+    const nihByPmid = new Map([
+      ["p1", true],
+      ["p2", false],
+      ["p3", true],
+    ]);
+    expect(deriveFundingTotals(new Set(["p1", "p2", "p3"]), nihByPmid)).toEqual({
+      nihFundedPubs: 2,
+      notNihFundedPubs: 1,
+    });
+  });
+
+  it("a pmid absent from nihByPmid counts as not-NIH-funded", () => {
+    expect(deriveFundingTotals(new Set(["p9"]), new Map())).toEqual({ nihFundedPubs: 0, notNihFundedPubs: 1 });
+  });
+
+  it("an undefined nihByPmid map degrades every pmid to not-NIH-funded", () => {
+    expect(deriveFundingTotals(new Set(["p1", "p2"]), undefined)).toEqual({
+      nihFundedPubs: 0,
+      notNihFundedPubs: 2,
+    });
+  });
+
+  it("an empty pmid set produces zero totals", () => {
+    expect(deriveFundingTotals(new Set(), new Map([["p1", true]]))).toEqual({
+      nihFundedPubs: 0,
+      notNihFundedPubs: 0,
+    });
   });
 });
 

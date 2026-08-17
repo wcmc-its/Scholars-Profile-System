@@ -5,7 +5,7 @@ import { parseDataSharingParams } from "@/lib/edit/data-sharing-dashboard";
 describe("parseDataSharingParams", () => {
   it("defaults to no filters, desc sort direction, and page 1 on an empty query", () => {
     expect(parseDataSharingParams({})).toEqual({
-      filters: { yearFrom: undefined, yearTo: undefined, tiers: undefined },
+      filters: { yearFrom: undefined, yearTo: undefined, tiers: undefined, nihFunded: undefined },
       deptSort: undefined,
       deptDir: "desc",
       facSort: undefined,
@@ -19,7 +19,20 @@ describe("parseDataSharingParams", () => {
       yearFrom: 2020,
       yearTo: undefined,
       tiers: undefined,
+      nihFunded: undefined,
     });
+  });
+
+  it("parses nihFunded as a tri-state boolean, ignoring anything else", () => {
+    expect(parseDataSharingParams({ nihFunded: "true" }).filters.nihFunded).toBe(true);
+    expect(parseDataSharingParams({ nihFunded: "false" }).filters.nihFunded).toBe(false);
+    expect(parseDataSharingParams({ nihFunded: "" }).filters.nihFunded).toBeUndefined();
+    expect(parseDataSharingParams({ nihFunded: "garbage" }).filters.nihFunded).toBeUndefined();
+    expect(parseDataSharingParams({}).filters.nihFunded).toBeUndefined();
+  });
+
+  it("nihFunded takes the first entry when passed as an array, same convention as sort direction", () => {
+    expect(parseDataSharingParams({ nihFunded: ["true", "false"] }).filters.nihFunded).toBe(true);
   });
 
   it("collects a single tier= into a one-element array, multiple into all of them", () => {
