@@ -1682,9 +1682,8 @@ export class AppStack extends Stack {
         // REPORTER_MATCH_V2 -- the RePORTER PMID-overlap "Is this you?" card on the
         // /edit surface (the app side of the flag; the ETL side is set in
         // etl-stack.ts). Gates the EditContext load, the rail item, and the
-        // confirm/reject/revoke routes. NEW surface: staging-first, prod-dark until
-        // an approval-gated `cdk deploy --exclusively Sps-App-<env>`. No new IAM.
-        REPORTER_MATCH_V2: env === "staging" ? "on" : "off",
+        // confirm/reject/revoke routes.
+        REPORTER_MATCH_V2: "on", // Prod flipped 2026-08-17 (#1468, staging match-quality soak signed off).
         // POPS physician-directory base (clinical CV enrichment, zero-persist, over
         // NAT egress -- the public WCM physician-directory host, reachable from the
         // Sps VPC unlike the 10.x internal sources).

@@ -575,7 +575,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "REPORTER_MATCH_V2",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "POPS_BASE_URL",
