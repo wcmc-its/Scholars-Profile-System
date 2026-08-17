@@ -15,6 +15,7 @@ import {
   buildSectionItemsCsv,
   buildShareRates,
   capDatasetLinkRows,
+  computeDepositYearBounds,
   countConcerningDeposits,
   countSubtypeClassifiedInstances,
   DATA_SHARING_EXPORT_CAP,
@@ -1763,6 +1764,35 @@ describe("aggregateByYear", () => {
 
   it("empty input produces an empty array, not a crash", () => {
     expect(aggregateByYear([])).toEqual([]);
+  });
+});
+
+describe("computeDepositYearBounds", () => {
+  it("returns the true min/max depositYear, ignoring rows with no depositYear", () => {
+    // RECENT_ROWS spans 2022-2024 plus one `depositYear: undefined` row.
+    // That undefined row must not read as a phantom "year 0" min.
+    expect(computeDepositYearBounds(RECENT_ROWS)).toEqual({ min: 2022, max: 2024 });
+  });
+
+  it("returns null when nothing in the input carries a depositYear", () => {
+    expect(computeDepositYearBounds([{ ...ROWS[0], depositYear: null }, { ...ROWS[1], depositYear: undefined }])).toBeNull();
+  });
+
+  it("returns null for an empty input", () => {
+    expect(computeDepositYearBounds([])).toBeNull();
+  });
+
+  it("REGRESSION 2026-08-16: bounds stay fixed to the full unfiltered corpus even after applyReportFilters narrows the row set, since loadDataSharingReport must call this on rawRows, not the already-filtered rows", () => {
+    // RECENT_ROWS' true range is 2022-2024. Narrow it with the same
+    // applyReportFilters a year-range filter on the page would apply.
+    const filtered = applyReportFilters(RECENT_ROWS, { yearFrom: 2023 });
+    // The filtered view no longer contains the 2022 row...
+    expect(computeDepositYearBounds(filtered)).toEqual({ min: 2023, max: 2024 });
+    // ...but bounds computed over the UNFILTERED corpus (what
+    // `loadDataSharingReport` must actually pass in) still reports the true
+    // 2022 minimum. The ghost text/native clamp must never shrink just
+    // because a filter happens to be active.
+    expect(computeDepositYearBounds(RECENT_ROWS)).toEqual({ min: 2022, max: 2024 });
   });
 });
 

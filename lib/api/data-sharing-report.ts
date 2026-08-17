@@ -479,6 +479,19 @@ export type DataSharingReport = {
    *  timestamp, see `etl/data-sharing/shared.ts`'s `buildDepositsAndLinks`).
    *  Null if the table has never been populated. */
   dataAsOf: Date | null;
+  /** True min/max `depositYear` across the FULL unfiltered corpus, for the
+   *  §3 filter form's ghost text and native min/max clamp (2026-08-16 ask).
+   *  Deliberately NOT derived from whatever `filters` narrowed the rest of
+   *  this report down to, since a stakeholder narrowing the tier filter to
+   *  `CONCERN` must not see the year bounds themselves shrink to match. That
+   *  would make the ghost text misreport the true earliest/latest deposit
+   *  year in the data. Computed by `computeDepositYearBounds` over `rawRows`
+   *  and spread onto the return value only inside `loadDataSharingReport`
+   *  (alongside `dataAsOf`, same populate-point), NOT threaded through
+   *  `buildDataSharingReport`'s params. That way a test building a report
+   *  via that function directly never has to supply a value neither it nor
+   *  its own fixtures care about. */
+  depositYearBounds: DepositYearBounds;
 };
 
 /** Read every active (person, dataset) link, suppression-filtered — a whole-
@@ -882,6 +895,33 @@ export function aggregateByYear(rows: readonly DatasetLinkRow[]): YearlyDepositR
   return result;
 }
 
+export type DepositYearBounds = { min: number; max: number } | null;
+
+/** True min/max `depositYear` across `rows`, ignoring rows with no
+ *  `depositYear`. This is the year filter's ghost text and native min-max
+ *  clamp (2026-08-16 ask: "you can type a year below the earliest real
+ *  deposit and get a silently-empty table"). `null` when nothing in `rows`
+ *  carries a `depositYear` at all, same degrade-to-absent shape as
+ *  `aggregateByYear`'s own null-year bucket.
+ *
+ *  `loadDataSharingReport` is the ONLY caller, and it always passes
+ *  `rawRows` (the pre-filter set), never the currently-filtered rows. See
+ *  `DataSharingReport.depositYearBounds`'s doc comment for why the bounds
+ *  must stay fixed to the full corpus regardless of which filter is active.
+ *  Kept here as a plain pure function over `DatasetLinkRow[]`, not baked into
+ *  `buildDataSharingReport`, precisely so a future caller can't accidentally
+ *  wire it to the filtered `rows` that function already closes over. */
+export function computeDepositYearBounds(rows: readonly DatasetLinkRow[]): DepositYearBounds {
+  let min: number | undefined;
+  let max: number | undefined;
+  for (const r of rows) {
+    if (r.depositYear == null) continue;
+    if (min === undefined || r.depositYear < min) min = r.depositYear;
+    if (max === undefined || r.depositYear > max) max = r.depositYear;
+  }
+  return min !== undefined && max !== undefined ? { min, max } : null;
+}
+
 /** Deposit-INSTANCE (row) counts for the tier-only "concerning" flag — same
  *  grain as `links`/`NamedFacultyRow.concerningDeposits`, NOT distinct
  *  datasets or distinct pubs: a scholar with three link rows to the same
@@ -1248,7 +1288,7 @@ export function buildDataSharingReport(
   corpusRows: readonly ShareRateCorpusRow[] = [],
   fundingSplit: FundingSplitTotals = { nihFundedPubs: 0, notNihFundedPubs: 0 },
   depositedPmidRows: readonly DatasetLinkRow[] = rows,
-): Omit<DataSharingReport, "dataAsOf"> {
+): Omit<DataSharingReport, "dataAsOf" | "depositYearBounds"> {
   const deposited = depositedPmidSet(depositedPmidRows);
   const rates = buildShareRates(corpusRows, deposited);
   // PMC coverage inherits `corpusRows`'s backward-compat default: with no
@@ -1394,7 +1434,13 @@ export async function loadDataSharingReport(
   // `buildDataSharingReport`'s `depositedPmidRows` doc comment for why a
   // filtered numerator paired against the always-unfiltered corpus
   // denominator silently deflated every share-rate percentage.
-  return { ...buildDataSharingReport(rows, corpusRows, fundingSplit, rawRows), dataAsOf };
+  // `depositYearBounds` reads `rawRows`, not `rows`, for the same reason;
+  // see that field's doc comment on `DataSharingReport`.
+  return {
+    ...buildDataSharingReport(rows, corpusRows, fundingSplit, rawRows),
+    dataAsOf,
+    depositYearBounds: computeDepositYearBounds(rawRows),
+  };
 }
 
 // ---------------------------------------------------------------------------
