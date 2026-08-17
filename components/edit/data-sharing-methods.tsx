@@ -16,10 +16,11 @@
  * constructs prisma (the manageable-units trap in CLAUDE.md). The one
  * `MethodsDoc` import below is type-only against a pure module (no prisma/db
  * — see `lib/edit/data-sharing-methods-doc.ts`'s header), which is why it's
- * allowed. Widened to `max-w-2xl` for the eight-section content; the Glossary
- * section's body is `\n`-delimited "Term — definition" lines, rendered as a
- * plain list here (full text — the dotted `DefinedTerm` hovers are the
- * on-page affordance, this dialog is where someone reads it all).
+ * allowed. Widened to `max-w-2xl`, then `max-w-3xl` (2026-08-16 review: "widen
+ * the modal") for the eight-section content; the Glossary section's body is
+ * `\n`-delimited "Term — definition" lines, rendered as a plain list here
+ * (full text — the dotted `DefinedTerm` hovers are the on-page affordance,
+ * this dialog is where someone reads it all).
  */
 import { CopyButton } from "@/components/publication/copy-button";
 import {
@@ -41,7 +42,7 @@ export function DataSharingMethodsDialog({
   return (
     <Dialog>
       <DialogTrigger className="text-sm hover:underline">Methods</DialogTrigger>
-      <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
+      <DialogContent className="max-h-[80vh] max-w-3xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Methods</DialogTitle>
         </DialogHeader>

@@ -41,36 +41,54 @@ import type { DataSharingReport } from "@/lib/api/data-sharing-report";
  *  prevent. */
 export const DATA_SHARING_TERMS: Record<string, string> = {
   "Country of concern":
-    "A repository hosted in a jurisdiction on the DOJ Bulk Data Rule countries-of-concern list — " +
+    "A repository hosted in a jurisdiction on the DOJ Bulk Data Rule countries-of-concern list: " +
     "China (including Hong Kong and Macau), Russia, Iran, North Korea, Cuba, and Venezuela. " +
     "Classification is by the repository's HOST jurisdiction, not by any author's nationality or affiliation.",
+  // Split into two entries (2026-08-16 review finding), not one shared
+  // "Foreign-hosted" definition for both tiers — a hover that reads
+  // identically for the open and controlled tiers implies a distinction
+  // that carries no information; each entry now states its own access model.
+  "Foreign-hosted, open":
+    "A repository operated outside the US, e.g. EMBL-EBI or CERN infrastructure, whose access " +
+    "model is open (bulk download, no review step). Descriptive, not itself a violation.",
+  "Foreign-hosted, controlled":
+    "A repository operated outside the US, e.g. EGA, whose access model is controlled (requires " +
+    "an application or data-use agreement). Descriptive, not itself a violation.",
+  // Neutral, access-model-agnostic entry — for the ONE place this page sums
+  // both foreign-hosted tiers together (the faculty table's combined
+  // "Foreign-hosted" column, NamedFacultyRow.foreignHostedDeposits): using
+  // either access-specific entry above for that summed column would falsely
+  // claim the whole column shares one access model (2026-08-16
+  // adversarial-review finding).
   "Foreign-hosted":
-    "A repository operated outside the US, e.g. EMBL-EBI or CERN infrastructure. " +
-    "Descriptive, not itself a violation.",
+    "A repository operated outside the US — open- and controlled-access foreign-hosted " +
+    "repositories combined. Descriptive, not itself a violation.",
   // Deliberately broader than "Country of concern": the Concerning column/flag
   // counts the union of the three highest-severity tiers, and a hover that led
   // with only the country-of-concern definition overstated severity for rows
   // whose deposits are merely foreign-hosted (review finding, v3 pass).
   Concerning:
     "A deposit in a repository hosted in a country of concern, OR in any foreign-hosted " +
-    "repository — the union of the three highest-severity tiers, counted per deposit " +
+    "repository: the union of the three highest-severity tiers, counted per deposit " +
     "instance, not per distinct dataset.",
   "Open access": "Bulk download without an access-review step.",
   "Controlled access":
-    "Access requires an application or data-use agreement, e.g. dbGaP or EGA — " +
+    "Access requires an application or data-use agreement, e.g. dbGaP or EGA, " +
     "the compliant path for sensitive data.",
   Registry:
-    "Trial-registration metadata such as ClinicalTrials.gov — not bulk microdata; " +
-    "excluded from every deposit rate (share rate, PMC rate, access split, funding lens) " +
+    "Trial-registration metadata such as ClinicalTrials.gov, not bulk microdata; " +
+    "excluded from every deposit rate (share rate, access split, funding lens) " +
     "and shown in its own registry buckets.",
   "Strict floor": "Confirmed deposits only; a floor, not a census of all sharing.",
   "Deposit instance":
-    "One (person, dataset) link row — a dataset with three depositing faculty counts three instances.",
+    "One (person, dataset) link row: a dataset with three depositing faculty counts three instances.",
   PMC:
     "PubMed Central, NIH's full-text archive; the full-text scan can only inspect papers " +
-    "whose full text is deposited there.",
+    "whose full text is deposited there. As of 2026-08-16 the PMC-identifier field this " +
+    "dashboard reads is a known data-quality gap, see the Methods dialog's PMC section.",
   "Share rate":
-    "n/N of confirmed first/last-authored eligible publications with at least one detected deposit.",
+    "n/N of confirmed first/last-authored, full-time-faculty eligible publications with at " +
+    "least one detected deposit.",
 };
 
 /** The slice of `DataSharingReport` this builder actually reads — structural
@@ -132,14 +150,14 @@ export function buildMethodsDoc(
       heading: "Corpus and denominator",
       body:
         `The denominator is every confirmed first- or last-authored Weill Cornell Medicine publication of type ` +
-        `Academic Article or Preprint published in ${floor} or later: ${num(denominator)} publications. ` +
-        `The ${floor} floor is a coverage window, not an editorial choice — the deposit-detection pipeline never ` +
-        `scanned earlier publications, so counting them would manufacture "no detected deposit" for papers that ` +
-        `were simply never checked. Other publication types are excluded for the same reason: the pipeline never ` +
-        `scans them, so they would inflate the denominator with publications that have zero chance of contributing ` +
-        `to the numerator. One asymmetry remains open: the numerator's extraction pipeline covers full-time ` +
-        `faculty only, and SPS has no bridged full-time-status field to apply the same filter on the ` +
-        `denominator side.`,
+        `Academic Article or Preprint, published in ${floor} or later, by full-time faculty: ` +
+        `${num(denominator)} publications. The ${floor} floor is a coverage window, not an editorial choice. ` +
+        `The deposit-detection pipeline never scanned earlier publications, so counting them would manufacture ` +
+        `"no detected deposit" for papers that were simply never checked. Other publication types are excluded ` +
+        `for the same reason: the pipeline never scans them, so they would inflate the denominator with ` +
+        `publications that have zero chance of contributing to the numerator. The full-time-faculty scope ` +
+        `matches the numerator's own extraction pipeline ("fullTimeFaculty='yes'"), closing an asymmetry a ` +
+        `prior version of this denominator left open.`,
     },
     {
       heading: "Extraction and attribution",
@@ -147,23 +165,24 @@ export function buildMethodsDoc(
         `Deposits come from two arms: PubMed's structured DataBankList field, and a scan of Data Availability ` +
         `statements in PubMed Central full text. Author attribution uses ReCiter's identity disambiguation, so a ` +
         `deposit is credited to a specific person rather than a name string. Each detected mention is classified ` +
-        `as a genuine deposit versus reuse of someone else's dataset, and reuse is not counted. Everything on the ` +
-        `dashboard is the strict band — confirmed deposits only, no generous or estimated ceiling, because only ` +
-        `high-confidence rows are persisted at all. Deposits are deduplicated on the (person, repository, ` +
+        `as a genuine deposit versus reuse of someone else's dataset, and reuse is not counted. Everything on ` +
+        `the dashboard is the strict band: confirmed deposits only, no generous or estimated ceiling, because ` +
+        `only high-confidence rows are persisted at all. Deposits are deduplicated on the (person, repository, ` +
         `accession) triple: the same dataset cited from several of one author's papers counts once per person, ` +
         `while a dataset with three depositing faculty legitimately counts three deposit instances.`,
     },
     {
-      heading: "PMC coverage",
+      heading: "PMC coverage (known data-quality gap)",
       body:
         `${num(o.pmcCoveredPubs)} of the ${num(denominator)} corpus publications (${pct(o.pmcCoveredPubs, denominator)}%) ` +
-        `have full text in PubMed Central. The full-text arm of the deposit scan can only inspect those — a data ` +
-        `availability statement in a paywalled journal is invisible to it. The DataBankList arm covers every ` +
-        `PubMed record regardless of full-text availability, so detection is not zero outside PMC, but ` +
-        `full-text-derived detection is bounded by PMC coverage. The PMC-covered subset is therefore the fairest ` +
-        `denominator for full-text-detected deposits, and the coverage percentage is itself a compliance figure ` +
-        `stakeholders asked for, since PMC deposit is how NIH public-access obligations are met. Roughly 2% of ` +
-        `PMC full text is unscannable (image-only or malformed markup), so even within PMC the scan is a floor.`,
+        `carry a PubMed Central identifier in SPS today. A 2026-08-16 spot-check found that same field reads ` +
+        `roughly 100% across the ENTIRE SPS publication table, not just this corpus, which is not plausible as ` +
+        `genuine full-text-in-PMC coverage across pre-2008 papers, non-NIH-funded work, and non-biomedical ` +
+        `journals — whatever percentage the corpus figure above shows, treat it against that finding, not at ` +
+        `face value. The identifier field is sourced from a separate upstream system this dashboard does not ` +
+        `control, and it is not currently a trustworthy signal of full-text availability. This dashboard reports ` +
+        `the raw count without treating it as a bounding denominator for full-text-detected deposits until that ` +
+        `upstream field is verified; see "Known gaps."`,
     },
     {
       heading: "Access model and risk tier",
@@ -171,49 +190,55 @@ export function buildMethodsDoc(
         `Every repository is assigned a tier from the 36-repository catalog: host jurisdiction crossed with ` +
         `access model. The six tiers, most to least severe, are country-of-concern hosted, foreign-hosted open, ` +
         `foreign-hosted controlled, US-hosted open, US-hosted controlled, and registry. "Concerning" on this ` +
-        `dashboard is tier-derived ONLY — a deposit in a country-of-concern-hosted or foreign-hosted repository. ` +
+        `dashboard is tier-derived ONLY: a deposit in a country-of-concern-hosted or foreign-hosted repository. ` +
         `It does NOT include sensitive-data-type detection (an open deposit of a sensitive data category), which ` +
-        `requires raw MeSH terms per citing publication and is not yet built — do not read the concerning counts ` +
-        `as that fuller three-way definition. Zero rows are printed deliberately: "Country of concern — 0" is a ` +
-        `statement that we checked and found none, not an absence of data.`,
+        `requires raw MeSH terms per citing publication and is not yet built; do not read the concerning counts ` +
+        `as that fuller three-way definition. Zero rows are printed deliberately, so a line reading "Country of ` +
+        `concern: 0" is a statement that we checked and found none, not an absence of data. A tier is the ` +
+        `catalog's platform-level classification, not a per-deposit fact, so a specific repository's actually ` +
+        `observed access model (the Access column) can disagree with what its tier name implies.`,
     },
     {
       heading: "Registry separation",
       body:
-        `ClinicalTrials.gov and similar registries hold trial-registration metadata, not bulk microdata — ` +
-        `registering a trial is not sharing a dataset. Counting registrations as data sharing would roughly ` +
+        `ClinicalTrials.gov and similar registries hold trial-registration metadata, not bulk microdata. ` +
+        `Registering a trial is not sharing a dataset. Counting registrations as data sharing would roughly ` +
         `double every number on this dashboard, so registry rows never count toward any publication-grain ` +
-        `deposit figure: the share-rate numerator, the PMC-covered deposit rate, the open/controlled access ` +
-        `split, and the funding-lens population all exclude them. Registry deposits are shown in their own ` +
+        `deposit figure: the share-rate numerator, the open/controlled access split, and the funding-lens ` +
+        `population all exclude them (as does the PMC-deposited count feeding the PMC section's raw figures, ` +
+        `for the same reason — but see that section's own known-gap caveat before leaning on it). Registry ` +
+        `deposits are shown in their own ` +
         `explicitly labeled buckets (the registry tier and the department table's Registry column), and they ` +
-        `DO remain inside the headline distinct-dataset, distinct-faculty, and link totals — those totals ` +
+        `DO remain inside the headline distinct-dataset, distinct-faculty, and link totals. Those totals ` +
         `describe everything the pipeline detected, with the registry buckets keeping the registration share ` +
         `visible rather than hidden inside an undifferentiated count. If a future consumer wants registrations ` +
-        `included in the rates, that must ship as a new, clearly labeled figure — never as a silent widening ` +
+        `included in the rates, that must ship as a new, clearly labeled figure, never as a silent widening ` +
         `of the deposit counts reported here.`,
     },
     {
       heading: "Funding lens",
       body:
         `"NIH-funded" means the publication has at least one linked grant carrying a non-null NIH ` +
-        `institute/center code — a field populated only for NIH awards. "Not NIH-funded" is therefore the precise ` +
+        `institute/center code, a field populated only for NIH awards. "Not NIH-funded" is therefore the precise ` +
         `claim, and it is NOT the same as "non-federal": funding from other federal agencies (CDC, NSF, and the ` +
         `like) is indistinguishable from genuinely non-federal support with this field, and all of it lands in ` +
         `the not-NIH-funded bucket. The split is computed over the same non-registry deposited-publication ` +
         `population as the access-model split, so the two lenses describe the same set of publications and can ` +
-        `be read side by side without a denominator mismatch.`,
+        `be read side by side without a denominator mismatch; the dashboard states that shared total explicitly ` +
+        `next to the split so it is never left as an implied subtraction from the headline corpus.`,
     },
     {
       heading: "Known gaps",
       body:
-        `Four known gaps. Coverage skew: the full-text arm only sees PMC full text, so units publishing in ` +
-        `low-PMC-coverage venues undercount relative to their true sharing. No per-item discovery timestamp: ` +
-        `every row is stamped with the same sync time on each weekly refresh, so a deposit found this week and ` +
-        `one found months ago are indistinguishable — "recent activity" means deposit year, not detection date. ` +
-        `The country-of-concern coauthor pull is not yet ingested, so "concerning" remains tier-only. And the ` +
-        `denominator has no full-time-faculty filter while the numerator pipeline is full-time-only, so ` +
-        `per-person rates for non-full-time scholars read low by construction rather than as a finding about ` +
-        `their sharing behavior.`,
+        `Four known gaps. The PMC-identifier field this dashboard reads for "in PMC" coverage is non-null for ` +
+        `99.7% of every publication in SPS, not just this corpus, which is not a credible full-text-availability ` +
+        `rate; treat the PMC figures here as an open data-quality question pending investigation of that ` +
+        `upstream field, not a working denominator. No per-item discovery timestamp: every row is stamped with ` +
+        `the same sync time on each weekly refresh, so a deposit found this week and one found months ago are ` +
+        `indistinguishable. "Recent activity" means deposit year, not detection date. The country-of-concern ` +
+        `coauthor pull is not yet ingested, so "concerning" remains tier-only. And a repository's tier is a ` +
+        `platform-level classification from the shared risk catalog, not a per-deposit fact, so it can disagree ` +
+        `with an individual repository's actually observed access model.`,
     },
     {
       heading: "Glossary",
@@ -223,17 +248,23 @@ export function buildMethodsDoc(
     },
   ];
 
-  // Reporting paragraph — seven sentences, 215 whitespace-delimited words by
-  // construction (each interpolated number is one token; see module header).
-  // States the denominator explicitly and keeps the strict-floor framing. Two
-  // wording decisions here are review findings, not style (2026-08-16 v3):
-  // "scholars", NOT "full-time faculty" — the denominator has no FTE filter
-  // (see "Corpus and denominator" / "Known gaps"); and the registry exclusion
-  // is scoped to the rates and the access split, because the distinct-record/
+  // Reporting paragraph — whitespace-delimited word count asserted 180-220 in
+  // tests/unit/data-sharing-methods-doc.test.ts (each interpolated number is
+  // one token; see module header). States the denominator explicitly and
+  // keeps the strict-floor framing. Two wording decisions here are review
+  // findings, not style: "full-time faculty," NOT "scholars" (2026-08-16 —
+  // the denominator IS now full-time-faculty-scoped, see "Corpus and
+  // denominator"; the paragraph previously said "scholars" specifically
+  // because that filter didn't exist yet); and the registry exclusion is
+  // scoped to the rates and the access split, because the distinct-record/
   // repository/faculty totals in the same sentence DO include registry rows
-  // (flagged inline as "trial registrations included").
+  // (flagged inline as "trial registrations included"). The PMC-coverage
+  // sentence a prior version of this paragraph asserted as fact was dropped
+  // 2026-08-16 (known data-quality gap — see "PMC coverage"): a citation-
+  // ready summary must not restate a figure this dashboard itself now flags
+  // as untrustworthy.
   const paragraph =
-    `Between ${floor} and the present, Weill Cornell Medicine scholars serving as first or last ` +
+    `Between ${floor} and the present, Weill Cornell Medicine full-time faculty serving as first or last ` +
     `author published ${num(denominator)} academic articles and preprints. The denominator counts every ` +
     `confirmed, disambiguated first- or last-authored publication of those two types; types the ` +
     `pipeline never scans are excluded so the rate is not diluted by papers that could never register ` +
@@ -242,16 +273,13 @@ export function buildMethodsDoc(
     `carried at least one confirmed dataset deposit; in total the pipeline detected ${num(o.datasets)} ` +
     `distinct records, trial registrations included, across ${num(report.byRepository.length)} repositories ` +
     `from ${num(o.faculty)} faculty spanning ${num(report.byDepartment.length)} departments. ` +
-    `${num(o.pmcCoveredPubs)} of the corpus publications (${pct(o.pmcCoveredPubs, denominator)}%) have full ` +
-    `text in PubMed Central, the only corpus the full-text arm of the scan can inspect; among those ` +
-    `PMC-covered publications, the detected-deposit rate is ${num(o.pmcDepositedPubs)}/${num(o.pmcCoveredPubs)} ` +
-    `(${pct(o.pmcDepositedPubs, o.pmcCoveredPubs)}%). Publications with a detected deposit split ` +
-    `${num(o.openPubs)} open-access versus ${num(o.controlledPubs)} controlled-access; trial registrations ` +
-    `such as ClinicalTrials.gov are excluded from the share rate, the PMC rate, and this access split, and ` +
-    `reported separately in their own registry buckets. All figures ` +
-    `are a strict floor rather than a census: only confirmed deposits are counted, roughly 2% of PMC full ` +
-    `text is not machine-readable for scanning, and a statement that data are available on request is not ` +
-    `counted as a deposit.`;
+    `Publications with a detected deposit split ${num(o.openPubs)} open-access versus ${num(o.controlledPubs)} ` +
+    `controlled-access; trial registrations such as ClinicalTrials.gov are excluded from the share rate and ` +
+    `this access split, and reported separately in their own registry buckets. PubMed Central coverage of the ` +
+    `corpus is not yet a reliable figure pending review of an upstream data field, so it is omitted from this ` +
+    `summary rather than restated uncritically. All figures are a strict floor rather than a census: only ` +
+    `confirmed deposits are counted, and a statement that data are available on request is not counted as a ` +
+    `deposit.`;
 
   return { sections, paragraph };
 }

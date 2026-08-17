@@ -126,11 +126,46 @@ export const SHARE_RATE_YEAR_FLOOR = 2020;
  *  two types is ever scanned for deposits, so counting them in the
  *  denominator inflates it with pubs that have zero chance of ever
  *  contributing to the numerator (2026-08-15 fix — see the data-sharing
- *  dashboard handoff). Doesn't close the gap: the numerator is also
- *  full-time-faculty-only (`attribute.py`'s `fullTimeFaculty='yes'`), and SPS
- *  has no bridged FTE field to filter the denominator by — that piece stays
- *  open, needs its own reciterdb/`identity`-table bridge. */
+ *  dashboard handoff). The numerator's extraction pipeline is also
+ *  full-time-faculty-only (`attribute.py`'s `fullTimeFaculty='yes'`) — a
+ *  2026-08-15 comment here claimed SPS had no bridged field to match that on
+ *  the denominator side, which was wrong: `Scholar.roleCategory ===
+ *  'full_time_faculty'` is exactly that field (ETL-populated from ED/LDAP,
+ *  already the standard full-time check in 20+ other places — `lib/
+ *  eligibility.ts`, `lib/api/topics.ts`, `lib/api/spotlight.ts`, etc). Fixed
+ *  2026-08-16 (review finding): `loadShareRateCorpus` now scopes to it. */
 const SHARE_RATE_ELIGIBLE_TYPES = ["Academic Article", "Preprint"] as const;
+
+/** Two known duplicate `Scholar.primaryDepartment` strings for the same real
+ *  org unit — confirmed via a live staging probe (2026-08-16 review): 591
+ *  scholars carry "Weill Cornell Graduate School", 6 carry the shorter
+ *  "Graduate School". An upstream ED/LDAP naming inconsistency, not
+ *  something this dashboard's aggregation should surface as two separate
+ *  departments (a dean reading "0 datasets, 0 faculty" next to "Graduate
+ *  School" while "Weill Cornell Graduate School" has real numbers reads as a
+ *  missing-data bug, not a spelling variant). Applied once, at ingestion
+ *  (`loadDatasetLinkRows`/`loadShareRateCorpus`), not per-aggregate — a
+ *  bounded 1-entry map, not a general department-normalization system; add
+ *  an entry here only when another confirmed duplicate turns up. */
+const DEPARTMENT_ALIASES: Record<string, string> = {
+  "Graduate School": "Weill Cornell Graduate School",
+};
+
+function normalizeDepartmentName(department: string | null): string | null {
+  if (department === null) return null;
+  return DEPARTMENT_ALIASES[department] ?? department;
+}
+
+/** The display label a null `DatasetLinkRow.department`/`ShareRateCorpusRow
+ *  .department` groups under — `aggregateByDepartment` and `buildShareRates`
+ *  both fall back to this exact string so the two rollups' "no department on
+ *  file" bucket keys match. Exported (2026-08-16 adversarial-review finding)
+ *  so `matchesItemsFilter` can translate the label back to `null` when a §3
+ *  department-table row's "Items" link passes it as the filter value — the
+ *  dashboard's per-row link uses `DepartmentRollup.department` (already the
+ *  label, never raw `null`), so comparing it directly against a
+ *  `DatasetLinkRow.department` of `null` silently matched zero rows. */
+export const UNKNOWN_DEPARTMENT_LABEL = "Unknown / no department on file";
 
 /** One suppression-filtered (person, dataset) link, flattened for aggregation —
  *  the shape every `aggregateBy*` function below operates on. Exported so
@@ -349,12 +384,18 @@ export type DataSharingReport = {
     /** PMC coverage of the share-rate corpus — `pmcCoveredPubs` is the count
      *  of distinct corpus pmids whose full text is in PubMed Central
      *  (`Publication.pmcid` non-null); `pmcDepositedPubs` is how many of THOSE
-     *  have a detected deposit. Why this matters (2026-08-16 stakeholder ask):
-     *  the full-text availability-statement arm of the deposit scan can only
-     *  inspect pubs whose full text is IN PMC, so the PMC-covered subset is
-     *  the fairest denominator for full-text-detected deposits — and "% of
-     *  corpus pubs in PMC" is itself a compliance figure (NIH public-access
-     *  deposit rate) stakeholders asked to see. Built by `pmcCoverage`. */
+     *  have a detected deposit. KNOWN DATA-QUALITY GAP (2026-08-16 review,
+     *  confirmed via staging probe): `Publication.pmcid` reads non-null for
+     *  99.7% of the ENTIRE `Publication` table (191,377/191,974), not just
+     *  this corpus — a near-universal "in PMC" rate across pre-2008 pubs,
+     *  non-NIH-funded work, and non-biomedical journals isn't plausible as
+     *  genuine full-text coverage. The field (sourced from ReCiter's
+     *  `analysis_summary_article.pmcid`, a separate upstream system this repo
+     *  doesn't own) isn't currently a trustworthy "full text is in PMC"
+     *  signal. Kept on the report (raw counts, not hidden) but the dashboard
+     *  must NOT present it as a fair bounding denominator until the upstream
+     *  field is investigated — see the "Known gaps" methods section. Built by
+     *  `pmcCoverage`. */
     pmcCoveredPubs: number;
     pmcDepositedPubs: number;
     /** Distinct publications with at least one detected OPEN-access deposit,
@@ -381,6 +422,10 @@ export type DataSharingReport = {
      *  of grouped by faculty. NOT a distinct-dataset or distinct-pub count —
      *  see that field's comment. */
     concerningDepositInstances: number;
+    /** Deposit instances with at least one parseable sub-type token — see
+     *  `countSubtypeClassifiedInstances`. Compare against `links` for §5's
+     *  own coverage statement. */
+    subtypeClassifiedInstances: number;
   };
   byDepartment: DepartmentRollup[];
   byRepository: RepositoryBreakdown[];
@@ -388,10 +433,14 @@ export type DataSharingReport = {
   byRepositoryTier: RepositoryTierRollup[];
   /** Distinct-publication count per tier — see `TierPubSpectrumRow`. */
   pubsByTier: TierPubSpectrumRow[];
+  /** Distinct-dataset count per deposit year — see `aggregateByYear`. */
+  byYear: YearlyDepositRow[];
   byFaculty: NamedFacultyRow[];
   /** Deposit-instance counts per granular sensitive sub-type, grouped by
    *  coarse category — see `aggregateBySubtype`. */
   bySubtype: SubtypeRow[];
+  /** Access-model × NIH-funding cross-tab — see `buildAccessFundingCrossTab`. */
+  accessFundingCrossTab: AccessFundingCrossTab;
   /** The `RECENT_ITEMS_LIMIT` most recently deposited items — see
    *  `mostRecentDeposits`'s doc comment for what "recent" can and can't mean
    *  with this data model. */
@@ -454,7 +503,7 @@ export async function loadDatasetLinkRows(client: DataSharingReportClient): Prom
       cwid: l.cwid,
       scholarName: l.scholar.preferredName || l.scholar.fullName,
       scholarSlug: l.scholar.slug,
-      department: l.scholar.primaryDepartment,
+      department: normalizeDepartmentName(l.scholar.primaryDepartment),
       datasetId: l.datasetId,
       repository: l.dataset.repository,
       accessModel: l.dataset.accessModel,
@@ -476,18 +525,26 @@ export async function loadDatasetLinkRows(client: DataSharingReportClient): Prom
   return rows;
 }
 
-/** Read every confirmed first/last-authored WCM publication since
- *  `SHARE_RATE_YEAR_FLOOR`, scoped to `SHARE_RATE_ELIGIBLE_TYPES` — the
- *  share-rate denominator corpus. `cwid` is guaranteed non-null by the
- *  `where` clause (`cwid: { not: null }`) even though Prisma's generated type
- *  keeps the column's nullable declaration; asserted once here rather than
- *  threading `string | null` through every downstream aggregate. */
+/** Read every confirmed first/last-authored, full-time-faculty WCM
+ *  publication since `SHARE_RATE_YEAR_FLOOR`, scoped to
+ *  `SHARE_RATE_ELIGIBLE_TYPES` — the share-rate denominator corpus.
+ *  `roleCategory: "full_time_faculty"` (2026-08-16 review finding) matches
+ *  the numerator extraction pipeline's own `fullTimeFaculty='yes'` scope —
+ *  see `SHARE_RATE_ELIGIBLE_TYPES`'s doc comment for why a prior comment
+ *  here claiming no such field existed was wrong. Confirmed via staging
+ *  probe: this shrinks the corpus from 16,984 to 8,508 distinct pmids — a
+ *  real, roughly-2x change to every share-rate percentage on the page, not a
+ *  cosmetic fix. `cwid` is guaranteed non-null by the `where` clause
+ *  (`cwid: { not: null }`) even though Prisma's generated type keeps the
+ *  column's nullable declaration; asserted once here rather than threading
+ *  `string | null` through every downstream aggregate. */
 export async function loadShareRateCorpus(client: DataSharingReportClient): Promise<ShareRateCorpusRow[]> {
   const rows = await client.publicationAuthor.findMany({
     where: {
       OR: [{ isFirst: true }, { isLast: true }],
       isConfirmed: true,
       cwid: { not: null },
+      scholar: { roleCategory: "full_time_faculty" },
       publication: {
         year: { gte: SHARE_RATE_YEAR_FLOOR },
         publicationType: { in: [...SHARE_RATE_ELIGIBLE_TYPES] },
@@ -500,14 +557,17 @@ export async function loadShareRateCorpus(client: DataSharingReportClient): Prom
       // `pmcid` non-null ⇒ the pub's full text is in PubMed Central — the only
       // corpus the full-text availability-statement scan can inspect, so this
       // is the PMC-coverage denominator (`pmcCoverage` below), not a display
-      // field.
+      // field. 2026-08-16: empirically this reads ~100% institution-wide
+      // (99.7% of the ENTIRE Publication table, not just this corpus — see
+      // `PmcCoverageTotals`'s doc comment), so treat it as a known
+      // data-quality gap in the upstream field, not a working denominator.
       publication: { select: { pmcid: true } },
     },
   });
   return rows.map((row) => ({
     pmid: row.pmid,
     cwid: row.cwid as string,
-    department: row.scholar?.primaryDepartment ?? null,
+    department: normalizeDepartmentName(row.scholar?.primaryDepartment ?? null),
     inPmc: row.publication?.pmcid != null,
   }));
 }
@@ -531,7 +591,7 @@ export function aggregateByDepartment(rows: readonly DatasetLinkRow[]): Departme
     }
   >();
   for (const r of rows) {
-    const dept = r.department ?? "Unknown / no department on file";
+    const dept = r.department ?? UNKNOWN_DEPARTMENT_LABEL;
     const bucket = byDept.get(dept) ?? {
       datasets: new Set(),
       faculty: new Set(),
@@ -672,6 +732,21 @@ export function parseSensitiveSubtypes(sensitiveSubtypes: string | null | undefi
  *  sub-type it lists — not reconciled away, same spirit as this file's other
  *  multi-bucket caveats. Sorted by category, then count descending within
  *  category. */
+/** Deposit-instance count with at least one parseable `sensitiveSubtypes`
+ *  token — the §5 rollup's own coverage stat (2026-08-16 review: "most
+ *  Recent-activity rows show `—` for sub-types, section 5 should state its
+ *  own coverage" so `bySubtype`'s counts read as a floor-of-a-floor, not a
+ *  census). Same `links`/`overall.links` grain (deposit instances, not
+ *  distinct datasets), so it's directly comparable to `overall.links` as
+ *  "N/links have any sub-type classification at all". */
+export function countSubtypeClassifiedInstances(rows: readonly DatasetLinkRow[]): number {
+  let count = 0;
+  for (const r of rows) {
+    if (parseSensitiveSubtypes(r.sensitiveSubtypes).length > 0) count++;
+  }
+  return count;
+}
+
 export function aggregateBySubtype(rows: readonly DatasetLinkRow[]): SubtypeRow[] {
   const counts = new Map<string, SubtypeRow>(); // keyed "category subtype"
   for (const r of rows) {
@@ -719,6 +794,32 @@ export function mostRecentDeposits(
         a.datasetId.localeCompare(b.datasetId),
     )
     .slice(0, limit);
+}
+
+export type YearlyDepositRow = { year: number | null; datasets: number };
+
+/** Distinct-dataset count per `depositYear` — the §1 trend chart (2026-08-16
+ *  ask: "leadership's first question after 'how much' is 'is it going up'").
+ *  Same distinct-dataset grain as `overall.datasets`, not deposit instances —
+ *  a dataset with three depositing faculty counts once toward its year, same
+ *  reasoning as `aggregateByDepartment`. `year: null` (no `depositYear` on
+ *  any link to that dataset) sorts LAST as its own "Unknown year" bucket,
+ *  never silently dropped or folded into a real year. Ascending year order
+ *  (oldest first) — a trend chart reads left-to-right as time moving
+ *  forward, the opposite convention from every other table on this page
+ *  (which sort by volume descending). */
+export function aggregateByYear(rows: readonly DatasetLinkRow[]): YearlyDepositRow[] {
+  const byYear = new Map<number | null, Set<string>>();
+  for (const r of rows) {
+    const year = r.depositYear ?? null;
+    const set = byYear.get(year) ?? new Set<string>();
+    set.add(r.datasetId);
+    byYear.set(year, set);
+  }
+  const knownYears = [...byYear.keys()].filter((y): y is number => y !== null).sort((a, b) => a - b);
+  const result: YearlyDepositRow[] = knownYears.map((year) => ({ year, datasets: byYear.get(year)!.size }));
+  if (byYear.has(null)) result.push({ year: null, datasets: byYear.get(null)!.size });
+  return result;
 }
 
 /** Deposit-INSTANCE (row) counts for the tier-only "concerning" flag — same
@@ -913,7 +1014,7 @@ export function buildShareRates(
   const deptPmids = new Map<string, Set<string>>();
   const facultyPmids = new Map<string, Set<string>>();
   for (const r of corpusRows) {
-    const dept = r.department ?? "Unknown / no department on file";
+    const dept = r.department ?? UNKNOWN_DEPARTMENT_LABEL;
     const deptSet = deptPmids.get(dept) ?? new Set<string>();
     deptSet.add(r.pmid);
     deptPmids.set(dept, deptSet);
@@ -961,7 +1062,17 @@ export function pmcCoverage(
   return { pmcCoveredPubs: pmcPmids.size, pmcDepositedPubs };
 }
 
-export type FundingSplitTotals = { nihFundedPubs: number; notNihFundedPubs: number };
+export type FundingSplitTotals = {
+  nihFundedPubs: number;
+  notNihFundedPubs: number;
+  /** Per-pmid NIH-funded boolean, over the same `fundingPmids` population as
+   *  the two totals above — added 2026-08-16 for `buildAccessFundingCrossTab`
+   *  (the access-model × NIH-funding cross-tab), so that function doesn't
+   *  need its own grant query. Optional, same backward-compat shape as this
+   *  type's other callers/fixtures: an omitted map degrades to "nobody is
+   *  NIH-funded" for the cross-tab rather than throwing. */
+  nihByPmid?: Map<string, boolean>;
+};
 
 /** NIH-funded vs. not-NIH-funded split over the real (non-registry) data-
  *  sharing pmid population — `depositedPmidSet(rows)` (which already skips
@@ -989,6 +1100,7 @@ export async function loadFundingSplit(
   });
 
   const nihByPmid = new Map<string, boolean>();
+  for (const pmid of fundingPmids) nihByPmid.set(pmid, false); // every fundingPmid gets an explicit entry
   for (const l of links) {
     const alreadyNih = nihByPmid.get(l.pmid) ?? false;
     nihByPmid.set(l.pmid, alreadyNih || l.grant.nihIc !== null);
@@ -998,7 +1110,45 @@ export async function loadFundingSplit(
   for (const pmid of fundingPmids) {
     if (nihByPmid.get(pmid)) nihFundedPubs++;
   }
-  return { nihFundedPubs, notNihFundedPubs: fundingPmids.length - nihFundedPubs };
+  return { nihFundedPubs, notNihFundedPubs: fundingPmids.length - nihFundedPubs, nihByPmid };
+}
+
+export type AccessFundingCrossTab = {
+  openNih: number;
+  openNotNih: number;
+  controlledNih: number;
+  controlledNotNih: number;
+};
+
+/** Access-model (open/controlled) × NIH-funding cross-tab over the shared
+ *  non-registry deposited-pmid population both lenses already share
+ *  (2026-08-16 ask: "the methods go out of their way to guarantee the two
+ *  lenses share a denominator, then the page never actually crosses them").
+ *  `openPmids`/`controlledPmids` come from `pubAccessPmidSets` (registry
+ *  already excluded); `nihByPmid` from `loadFundingSplit`. A pmid absent from
+ *  `nihByPmid` (funding split never saw it, e.g. it has neither set truthy)
+ *  reads as not-NIH-funded, same degrade-to-false as `loadFundingSplit`
+ *  itself. A pmid in BOTH `openPmids` and `controlledPmids` (two deposits,
+ *  different access models) counts in both rows — same don't-reconcile-away
+ *  spirit as `pubAccessPmidSets`'s own doc comment. */
+export function buildAccessFundingCrossTab(
+  openPmids: ReadonlySet<string>,
+  controlledPmids: ReadonlySet<string>,
+  nihByPmid: ReadonlyMap<string, boolean>,
+): AccessFundingCrossTab {
+  let openNih = 0;
+  let openNotNih = 0;
+  let controlledNih = 0;
+  let controlledNotNih = 0;
+  for (const pmid of openPmids) {
+    if (nihByPmid.get(pmid)) openNih++;
+    else openNotNih++;
+  }
+  for (const pmid of controlledPmids) {
+    if (nihByPmid.get(pmid)) controlledNih++;
+    else controlledNotNih++;
+  }
+  return { openNih, openNotNih, controlledNih, controlledNotNih };
 }
 
 /** `corpusRows` defaults to `[]` for backward compatibility — existing
@@ -1015,13 +1165,31 @@ export async function loadFundingSplit(
  *  `fundingSplit` defaults to `{ nihFundedPubs: 0, notNihFundedPubs: 0 }` for
  *  the same backward-compat reason `corpusRows` defaults to `[]` — it can
  *  only be computed with a DB round-trip (`loadFundingSplit`), so this pure
- *  function accepts it pre-computed rather than becoming async itself. */
+ *  function accepts it pre-computed rather than becoming async itself.
+ *
+ *  `depositedPmidRows` (2026-08-16 adversarial-review fix, filters feature):
+ *  the population `depositedPmidSet` reads to build the share-rate numerator
+ *  and PMC-deposited count — defaults to `rows` when omitted, so every
+ *  existing caller/test is unaffected. `loadDataSharingReport` passes the
+ *  UNFILTERED rows here even when a year/tier filter narrows `rows` for the
+ *  deposit-side aggregates (byDepartment/byRepository/byFaculty/tiers):
+ *  `corpusRows` (the share-rate DENOMINATOR) is never filtered — see
+ *  `DataSharingReportFilters`'s doc comment — so pairing a FILTERED numerator
+ *  against that unfiltered denominator silently deflated every share-rate/
+ *  PMC-coverage percentage whenever a filter was active (a stakeholder
+ *  narrowing the tier filter to CONCERN would see the share rate collapse
+ *  toward 0%, not because sharing dropped, but because the numerator no
+ *  longer had a matching-scope denominator). Access-model/funding figures
+ *  are NOT affected — `pubAccessPmidSets`/`loadFundingSplit` compute both
+ *  their own numerator AND denominator from `rows`, so a filter narrows both
+ *  sides together and stays internally consistent. */
 export function buildDataSharingReport(
   rows: readonly DatasetLinkRow[],
   corpusRows: readonly ShareRateCorpusRow[] = [],
   fundingSplit: FundingSplitTotals = { nihFundedPubs: 0, notNihFundedPubs: 0 },
+  depositedPmidRows: readonly DatasetLinkRow[] = rows,
 ): Omit<DataSharingReport, "dataAsOf"> {
-  const deposited = depositedPmidSet(rows);
+  const deposited = depositedPmidSet(depositedPmidRows);
   const rates = buildShareRates(corpusRows, deposited);
   // PMC coverage inherits `corpusRows`'s backward-compat default: with no
   // corpus supplied (or pre-PMC fixtures whose rows lack `inPmc`), both
@@ -1089,13 +1257,16 @@ export function buildDataSharingReport(
       nihFundedPubs: fundingSplit.nihFundedPubs,
       notNihFundedPubs: fundingSplit.notNihFundedPubs,
       concerningDepositInstances: countConcerningDeposits(rows).concerningDeposits,
+      subtypeClassifiedInstances: countSubtypeClassifiedInstances(rows),
     },
     byDepartment,
     byRepository,
     byRepositoryTier: aggregateRepositoriesByTier(byRepository),
     pubsByTier: tierPubSpectrum(rows),
+    byYear: aggregateByYear(rows),
     byFaculty,
     bySubtype: aggregateBySubtype(rows),
+    accessFundingCrossTab: buildAccessFundingCrossTab(openPmids, controlledPmids, fundingSplit.nihByPmid ?? new Map()),
     recentItems: mostRecentDeposits(rows),
   };
 }
@@ -1107,14 +1278,63 @@ async function loadDataAsOf(client: DataSharingReportClient): Promise<Date | nul
   return agg._max.lastRefreshedAt ?? null;
 }
 
-export async function loadDataSharingReport(client: DataSharingReportClient): Promise<DataSharingReport> {
-  const [rows, corpusRows, dataAsOf] = await Promise.all([
+/** 2026-08-16 filters ask ("year range, NIH-funded, tier"). Shipped: deposit-
+ *  year range + tier. NOT shipped: a row-level NIH-funded filter — it would
+ *  need `loadFundingSplit` (an async grant join) to run BEFORE this filter
+ *  can select rows, then run AGAIN after filtering to report correct funding
+ *  totals for the now-doubly-filtered set, which self-referentially reports
+ *  "100% NIH-funded" once active — not wrong, but confusing enough to want
+ *  its own design pass rather than bolting on here. ponytail: two of three
+ *  shipped now; the third needs its own pass if asked for after using these
+ *  two. */
+export type DataSharingReportFilters = {
+  /** Inclusive deposit-year bounds, the §1 trend chart's own axis — applies
+   *  to the deposit-side rows only (datasets/repositories/faculty/tiers/
+   *  subtypes/recent/funding), NOT the share-rate corpus (which has no
+   *  `depositYear`; it's scoped by publication year, a different axis — see
+   *  `SHARE_RATE_YEAR_FLOOR`). A row with no `depositYear` is excluded once
+   *  either bound is set — there's no way to answer "was this in range" for
+   *  an unknown year, so it doesn't default to included. */
+  yearFrom?: number;
+  yearTo?: number;
+  /** Tier codes (`@/lib/repository-tier`'s values) to include; omitted or
+   *  empty = every tier. */
+  tiers?: readonly string[];
+};
+
+export function applyReportFilters(
+  rows: readonly DatasetLinkRow[],
+  filters: DataSharingReportFilters | undefined,
+): DatasetLinkRow[] {
+  if (!filters) return [...rows];
+  const hasYearBound = filters.yearFrom !== undefined || filters.yearTo !== undefined;
+  return rows.filter((r) => {
+    if (hasYearBound) {
+      if (r.depositYear == null) return false;
+      if (filters.yearFrom !== undefined && r.depositYear < filters.yearFrom) return false;
+      if (filters.yearTo !== undefined && r.depositYear > filters.yearTo) return false;
+    }
+    if (filters.tiers && filters.tiers.length > 0 && !filters.tiers.includes(tierOf(r.repository))) return false;
+    return true;
+  });
+}
+
+export async function loadDataSharingReport(
+  client: DataSharingReportClient,
+  filters?: DataSharingReportFilters,
+): Promise<DataSharingReport> {
+  const [rawRows, corpusRows, dataAsOf] = await Promise.all([
     loadDatasetLinkRows(client),
     loadShareRateCorpus(client),
     loadDataAsOf(client),
   ]);
+  const rows = applyReportFilters(rawRows, filters);
   const fundingSplit = await loadFundingSplit(client, rows);
-  return { ...buildDataSharingReport(rows, corpusRows, fundingSplit), dataAsOf };
+  // `rawRows` (not `rows`) backs the share-rate/PMC numerator — see
+  // `buildDataSharingReport`'s `depositedPmidRows` doc comment for why a
+  // filtered numerator paired against the always-unfiltered corpus
+  // denominator silently deflated every share-rate percentage.
+  return { ...buildDataSharingReport(rows, corpusRows, fundingSplit, rawRows), dataAsOf };
 }
 
 // ---------------------------------------------------------------------------
@@ -1333,20 +1553,65 @@ export function buildSectionCsv(
  *  for `"subtypes"`) via the same `capExportRows` the default export's
  *  `capDatasetLinkRows` wraps — silently truncated at the cap, same safety-
  *  net-not-a-real-limit rationale as `DATA_SHARING_EXPORT_CAP`'s comment. */
+/** One-row-per-table-row drill-down filter for `buildSectionItemsCsv`
+ *  (2026-08-16 ask: "download items CSV 3b/3c/4/5 should have download links
+ *  for each row," not just one items link per whole table). Each field
+ *  matches the section it's meaningful for — `department` narrows
+ *  `"departments"`, `cwid` narrows `"faculty"`, `repository` narrows
+ *  `"repositories"`, `category`/`subtype` narrow `"subtypes"`.
+ *
+ *  NOT symmetric across fields (2026-08-16 adversarial-review correction —
+ *  a prior version of this comment overclaimed): `department`/`cwid`/
+ *  `repository` go through `matchesItemsFilter` and so ARE checked
+ *  regardless of section (combining one of them with a different section is
+ *  a sensible AND, e.g. `section=repositories&department=X`). `category`/
+ *  `subtype` are NOT — they're applied only inside the `"subtypes"` case's
+ *  explode loop below, because a "category" only exists once a row's
+ *  `sensitiveSubtypes` has been parsed; passing them alongside a
+ *  non-`"subtypes"` section is silently a no-op, not a 400 — the dashboard
+ *  never builds that combination, but a hand-typed URL could. */
+export type SectionItemsFilter = {
+  department?: string;
+  cwid?: string;
+  repository?: string;
+  category?: string;
+  subtype?: string;
+};
+
+function matchesItemsFilter(row: DatasetLinkRow, filter: SectionItemsFilter | undefined): boolean {
+  if (!filter) return true;
+  if (filter.department !== undefined) {
+    // The dashboard's per-row "Items" link passes `DepartmentRollup
+    // .department` (already the `UNKNOWN_DEPARTMENT_LABEL` fallback, never
+    // raw `null`) — translate it back before comparing against a
+    // `DatasetLinkRow.department` that's genuinely `null` for that bucket
+    // (2026-08-16 adversarial-review finding: comparing the raw label
+    // against `row.department ?? ""` never matched, silently emptying that
+    // one department's export).
+    const want = filter.department === UNKNOWN_DEPARTMENT_LABEL ? null : filter.department;
+    if (row.department !== want) return false;
+  }
+  if (filter.cwid !== undefined && row.cwid !== filter.cwid) return false;
+  if (filter.repository !== undefined && row.repository !== filter.repository) return false;
+  return true;
+}
+
 export function buildSectionItemsCsv(
   rows: readonly DatasetLinkRow[],
   section: CsvSection,
+  filter?: SectionItemsFilter,
 ): string | null {
   const byName = (a: DatasetLinkRow, b: DatasetLinkRow) => a.scholarName.localeCompare(b.scholarName);
+  const filtered = rows.filter((r) => matchesItemsFilter(r, filter));
   switch (section) {
     case "tiers":
       return null;
     case "repositories": {
-      const sorted = [...rows].sort((a, b) => a.repository.localeCompare(b.repository) || byName(a, b));
+      const sorted = [...filtered].sort((a, b) => a.repository.localeCompare(b.repository) || byName(a, b));
       return toCsv(DATA_SHARING_CSV_HEADERS, capExportRows(sorted).rows.map(datasetLinkCsvCells));
     }
     case "departments": {
-      const sorted = [...rows].sort((a, b) => {
+      const sorted = [...filtered].sort((a, b) => {
         // Null department sorts LAST (it serializes as "" — sorting by the
         // serialized value would put it first, hiding the no-department rows
         // above the fold instead of after every real department).
@@ -1357,13 +1622,15 @@ export function buildSectionItemsCsv(
       return toCsv(DATA_SHARING_CSV_HEADERS, capExportRows(sorted).rows.map(datasetLinkCsvCells));
     }
     case "faculty": {
-      const sorted = [...rows].sort((a, b) => byName(a, b) || a.repository.localeCompare(b.repository));
+      const sorted = [...filtered].sort((a, b) => byName(a, b) || a.repository.localeCompare(b.repository));
       return toCsv(DATA_SHARING_CSV_HEADERS, capExportRows(sorted).rows.map(datasetLinkCsvCells));
     }
     case "subtypes": {
       const exploded: { category: string; subtype: string; row: DatasetLinkRow }[] = [];
-      for (const row of rows) {
+      for (const row of filtered) {
         for (const pair of parseSensitiveSubtypes(row.sensitiveSubtypes)) {
+          if (filter?.category !== undefined && pair.category !== filter.category) continue;
+          if (filter?.subtype !== undefined && pair.subtype !== filter.subtype) continue;
           exploded.push({ ...pair, row });
         }
       }

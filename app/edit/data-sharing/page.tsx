@@ -18,7 +18,7 @@ import { DataSharingDashboard } from "@/components/edit/data-sharing-dashboard";
 import { loadDataSharingReport } from "@/lib/api/data-sharing-report";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { canViewDataSharingDashboard } from "@/lib/edit/data-sharing-dashboard";
+import { canViewDataSharingDashboard, parseDataSharingParams } from "@/lib/edit/data-sharing-dashboard";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 
@@ -29,7 +29,11 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function EditDataSharingPage() {
+export default async function EditDataSharingPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await getEffectiveEditSession();
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/data-sharing");
@@ -41,8 +45,14 @@ export default async function EditDataSharingPage() {
     notFound();
   }
 
+  // Year-range/tier filters + per-table sort/page (2026-08-16 ask) — every
+  // value is server-parsed from the URL, no client state; see
+  // `parseDataSharingParams`'s doc comment for why sort is a plain link, not
+  // a client island.
+  const ui = parseDataSharingParams((await searchParams) ?? {});
+
   const [report, pendingSlugRequests, pendingHonors] = await Promise.all([
-    loadDataSharingReport(db.read),
+    loadDataSharingReport(db.read, ui.filters),
     isSlugRequestEnabled() ? countPendingSlugRequests(db.read) : Promise.resolve(null),
     isHonorsQueueTabVisible(session) ? countPendingHonors(db.read) : Promise.resolve(null),
   ]);
@@ -59,7 +69,7 @@ export default async function EditDataSharingPage() {
         Dataset deposits synced from reciterdb via the weekly data-sharing bridge — aggregate
         views for research leadership, compliance/grant reporting, and the library/RDM team.
       </p>
-      <DataSharingDashboard report={report} />
+      <DataSharingDashboard report={report} ui={ui} />
     </ConsoleShell>
   );
 }

@@ -204,9 +204,25 @@ describe("/edit/data-sharing/export?grain=items (v3)", () => {
       /attachment; filename="data-sharing-repositories-items-\d{4}-\d{2}-\d{2}\.csv"/,
     );
     expect(await res.text()).toBe("repository,cwid\r\nGEO,fac1\r\n");
-    expect(mockSectionItemsCsv).toHaveBeenCalledWith([{ cwid: "fac1" }], "repositories");
+    expect(mockSectionItemsCsv).toHaveBeenCalledWith([{ cwid: "fac1" }], "repositories", {
+      department: undefined,
+      cwid: undefined,
+      repository: undefined,
+      category: undefined,
+      subtype: undefined,
+    });
     // The item grain reads link rows, not the aggregate report.
     expect(mockLoadReport).not.toHaveBeenCalled();
+  });
+
+  it("?section=departments&grain=items&department=X passes the per-row drill-down filter through", async () => {
+    mockSectionItemsCsv.mockReturnValue("csv");
+    await GET(exportRequest("?section=departments&grain=items&department=Neurology"));
+    expect(mockSectionItemsCsv).toHaveBeenCalledWith(
+      [{ cwid: "fac1" }],
+      "departments",
+      expect.objectContaining({ department: "Neurology" }),
+    );
   });
 
   it("logs one export_data_sharing line with section + grain: items", async () => {
