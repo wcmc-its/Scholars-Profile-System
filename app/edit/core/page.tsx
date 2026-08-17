@@ -67,7 +67,7 @@ export default async function EditCoresIndexPage() {
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-        <h1 className="mb-1 text-xl font-semibold">Core facilities</h1>
+        <h1 className="mb-1 text-xl font-bold">Core facilities</h1>
         <p className="text-muted-foreground mb-6 text-sm">
           Review the engine-suggested publications for each core facility. Confirmed publications
           appear on the public core page; rejected ones are hidden. A core with no staff feed yet

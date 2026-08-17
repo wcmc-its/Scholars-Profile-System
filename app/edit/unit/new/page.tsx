@@ -243,7 +243,7 @@ function CreateChrome({
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <h1 className="mb-1 text-xl font-semibold">{heading}</h1>
+      <h1 className="mb-1 text-xl font-bold">{heading}</h1>
       <p className="text-muted-foreground mb-6 text-sm">{subtitle}</p>
       {children}
     </ConsoleShell>

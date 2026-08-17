@@ -214,7 +214,7 @@ export function GrantMatchaPanel() {
     return (
       <div>
         <div className="mb-5">
-          <h1 className="mb-1 text-2xl font-semibold tracking-tight">Grant Matcha</h1>
+          <h1 className="mb-1 text-2xl font-bold tracking-tight">Grant Matcha</h1>
           <p className="text-muted-foreground text-sm">
             Choose a funding opportunity to rank Weill Cornell researchers on its text.
           </p>

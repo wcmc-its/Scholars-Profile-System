@@ -21,7 +21,7 @@ export function PublicationTakedownPage({ ctx }: PublicationTakedownPageProps) {
       <ConsoleTopBar variant="console" />
       <main className="mx-auto w-full max-w-[var(--max-narrow)] px-6 py-10 md:py-12">
         <header className="mb-6">
-          <h1 className="page-title">Manage publication</h1>
+          <h1 className="page-title font-bold">Manage publication</h1>
           <p className="text-muted-foreground text-sm">
             Hide or restore this publication across the site.
           </p>

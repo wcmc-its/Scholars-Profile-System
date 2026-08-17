@@ -47,7 +47,7 @@ export function ConsoleTopBar({
           {isConsole ? (
             <span className="text-base font-semibold">Scholars Profile Console</span>
           ) : (
-            <h1 className="text-base font-semibold">Scholars Profile Console</h1>
+            <h1 className="text-base font-bold">Scholars Profile Console</h1>
           )}
         </div>
         {isConsole ? null : account ? (

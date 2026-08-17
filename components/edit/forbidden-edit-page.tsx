@@ -44,7 +44,7 @@ export function ForbiddenEditPage({
         data-variant="unit"
         data-target-entity={targetEntity ?? ""}
       >
-        <h1 className="page-title">You don&apos;t have permission to edit this unit.</h1>
+        <h1 className="page-title font-bold">You don&apos;t have permission to edit this unit.</h1>
         <p className="text-muted-foreground mt-4">
           Only an Owner, Curator, or administrator can edit this unit.
         </p>
@@ -63,7 +63,7 @@ export function ForbiddenEditPage({
       data-slot="forbidden-edit-page"
       data-target-cwid={targetCwid ?? ""}
     >
-      <h1 className="page-title">You don&apos;t have permission to edit this profile.</h1>
+      <h1 className="page-title font-bold">You don&apos;t have permission to edit this profile.</h1>
       <p className="text-muted-foreground mt-4">
         Only an administrator can edit another scholar&apos;s profile.
       </p>

@@ -302,7 +302,7 @@ export default async function EditActivityPage() {
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <h1 className="mb-1 text-xl font-semibold">Edit activity</h1>
+      <h1 className="mb-1 text-xl font-bold">Edit activity</h1>
       {unavailable ? (
         <p className="text-muted-foreground mt-8" data-testid="edit-activity-unavailable">
           Edit activity is temporarily unavailable. Please try again later or contact ITS Support if
