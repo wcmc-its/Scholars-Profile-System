@@ -80,11 +80,20 @@ function parseDir(v: string | string[] | undefined): SortDir {
   return (Array.isArray(v) ? v[0] : v) === "asc" ? "asc" : "desc";
 }
 
-/** Parses `/edit/data-sharing`'s query params — filters (year range, tier)
- *  and per-table sort/page. Every param is independently optional and
- *  invalid values degrade to "no filter"/"default sort", never a thrown
- *  error — this page has no client-side validation in front of it, a typed
- *  URL is the only input. */
+/** Reads a tri-state boolean query param: `"true"`/`"false"`/anything else
+ *  (including absent), the same shape `nihFunded`'s `<select>` control emits
+ *  (2026-08-16, GitHub #2469). Multi-value input (an array) takes the first
+ *  entry, same convention as `parseDir`. */
+function parseTriStateBoolean(v: string | string[] | undefined): boolean | undefined {
+  const s = Array.isArray(v) ? v[0] : v;
+  return s === "true" ? true : s === "false" ? false : undefined;
+}
+
+/** Parses `/edit/data-sharing`'s query params: filters (year range, tier,
+ *  NIH-funded) and per-table sort/page. Every param is independently
+ *  optional and invalid values degrade to "no filter"/"default sort", never
+ *  a thrown error, since this page has no client-side validation in front of
+ *  it: a typed URL is the only input. */
 export function parseDataSharingParams(
   searchParams: Record<string, string | string[] | undefined>,
 ): DataSharingUiParams {
@@ -98,6 +107,7 @@ export function parseDataSharingParams(
       yearFrom: parseNumericParam(searchParams.yearFrom),
       yearTo: parseNumericParam(searchParams.yearTo),
       tiers,
+      nihFunded: parseTriStateBoolean(searchParams.nihFunded),
     },
     deptSort: DEPARTMENT_SORT_KEYS.includes(deptSortRaw as DepartmentSortKey)
       ? (deptSortRaw as DepartmentSortKey)

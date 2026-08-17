@@ -422,35 +422,78 @@ describe("DataSharingDashboard: deposit-year bounds ghost text/clamp (2026-08-16
   });
 });
 
-describe("DataSharingDashboard: DownloadLink relabels when a filter is active (2026-08-16)", () => {
+describe("DataSharingDashboard: DownloadLink hrefs carry the active filter (2026-08-16, GitHub #2470)", () => {
   const filteredUi: DataSharingUiParams = { ...DEFAULT_UI, filters: { yearFrom: 2021 } };
 
-  it("leaves every Download link's default text alone when no filter is active", () => {
-    render(<DataSharingDashboard report={report} ui={DEFAULT_UI} />);
+  it("labels stay plain regardless of filter state, since every export now respects the active filter", () => {
+    render(<DataSharingDashboard report={report} ui={filteredUi} />);
     expect(screen.getAllByText("Download CSV").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Download items CSV").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Items").length).toBeGreaterThan(0);
+    // The old "(ignores filters)" caveat is gone now that every export path
+    // actually applies the filter.
     expect(screen.queryByText(/ignores filters/)).toBeNull();
   });
 
-  it('relabels "Download CSV" to "Download full CSV (ignores filters)" once a filter is active', () => {
-    render(<DataSharingDashboard report={report} ui={filteredUi} />);
-    expect(screen.getAllByText("Download full CSV (ignores filters)").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Download CSV")).toBeNull();
+  it("no filter active leaves the §1 export href at its plain, unfiltered form", () => {
+    const { container } = render(<DataSharingDashboard report={report} ui={DEFAULT_UI} />);
+    const link = container.querySelector('[data-testid="ds-export-link"]');
+    expect(link?.getAttribute("href")).toBe("/edit/data-sharing/export");
   });
 
-  it('relabels "Download items CSV" to "Download full items CSV (ignores filters)" once a filter is active', () => {
-    render(<DataSharingDashboard report={report} ui={filteredUi} />);
-    expect(screen.getAllByText("Download full items CSV (ignores filters)").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Download items CSV")).toBeNull();
-  });
-
-  it('appends "(ignores filters)" to the compact per-row "Items" links once a filter is active', () => {
+  it("the §1 rollup export link carries the active year filter", () => {
     const { container } = render(<DataSharingDashboard report={report} ui={filteredUi} />);
-    const relabeled = [...container.querySelectorAll("a")].filter(
-      (a) => a.textContent === "Items (ignores filters)",
-    );
-    expect(relabeled.length).toBeGreaterThan(0);
-    const bare = [...container.querySelectorAll("a")].filter((a) => a.textContent === "Items");
-    expect(bare).toHaveLength(0);
+    const link = container.querySelector('[data-testid="ds-export-link"]');
+    expect(link?.getAttribute("href")).toBe("/edit/data-sharing/export?yearFrom=2021");
+  });
+
+  it("an aggregate section export link carries the active filter", () => {
+    const { container } = render(<DataSharingDashboard report={report} ui={filteredUi} />);
+    const hrefs = [...container.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+    expect(hrefs).toContain("/edit/data-sharing/export?section=departments&yearFrom=2021");
+  });
+
+  it("merges the filter onto an href that already carries its own query params, without clobbering them", () => {
+    const { container } = render(<DataSharingDashboard report={report} ui={filteredUi} />);
+    const hrefs = [...container.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+    // A per-repo "Items" link already carries `repository=`.
+    expect(
+      hrefs.some(
+        (h) =>
+          h?.startsWith("/edit/data-sharing/export?section=repositories&grain=items&repository=") &&
+          h.includes("yearFrom=2021"),
+      ),
+    ).toBe(true);
+  });
+
+  it("carries a nihFunded filter onto download links too", () => {
+    const nihUi: DataSharingUiParams = { ...DEFAULT_UI, filters: { nihFunded: true } };
+    const { container } = render(<DataSharingDashboard report={report} ui={nihUi} />);
+    const link = container.querySelector('[data-testid="ds-export-link"]');
+    expect(link?.getAttribute("href")).toBe("/edit/data-sharing/export?nihFunded=true");
+  });
+});
+
+describe("DataSharingDashboard: NIH-funded filter control (2026-08-16, GitHub #2469)", () => {
+  it("filter bar offers a NIH-funded tri-state select alongside year-range and tier", () => {
+    const { container } = render(<DataSharingDashboard report={report} ui={DEFAULT_UI} />);
+    const select = container.querySelector('select[name="nihFunded"]') as HTMLSelectElement;
+    expect(select).toBeTruthy();
+    expect([...select.options].map((o) => o.value)).toEqual(["", "true", "false"]);
+    expect(select.value).toBe("");
+  });
+
+  it("the select's default value reflects the active nihFunded filter", () => {
+    const nihUi: DataSharingUiParams = { ...DEFAULT_UI, filters: { nihFunded: false } };
+    const { container } = render(<DataSharingDashboard report={report} ui={nihUi} />);
+    const select = container.querySelector('select[name="nihFunded"]') as HTMLSelectElement;
+    expect(select.value).toBe("false");
+  });
+
+  it("an active nihFunded filter alone counts as an active filter (Clear filters link renders)", () => {
+    const nihUi: DataSharingUiParams = { ...DEFAULT_UI, filters: { nihFunded: true } };
+    render(<DataSharingDashboard report={report} ui={nihUi} />);
+    expect(screen.getByText("Clear filters")).toBeTruthy();
   });
 });
 

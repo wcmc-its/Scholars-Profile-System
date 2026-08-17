@@ -111,6 +111,24 @@
  * doc comment. The headline distinct-dataset/faculty/link totals and
  * `byRepository` still include registry rows on purpose (they describe
  * everything detected, with registry visible in its own buckets).
+ *
+ * NIH-funded filter (2026-08-16, GitHub #2469): `DataSharingReportFilters
+ * .nihFunded` finishes the three-field filter ask that shipped year range and
+ * tier first (see `DataSharingReportFilters`'s own doc comment for why the
+ * NIH-funded row filter needed its own pass: a pmid's NIH-funded status
+ * needs `loadFundingSplit`'s async grant join to resolve before a row can be
+ * kept or dropped, so it can't fold into `applyReportFilters`'s synchronous
+ * pass). `loadDataSharingReport` runs `loadFundingSplit` on `rawRows` now,
+ * always the full unfiltered corpus, then applies `applyNihFilter` as a
+ * second pass over the year/tier-filtered rows, then recomputes the funding
+ * totals actually reported (`deriveFundingTotals`) from the FINAL filtered
+ * row set rather than trusting `loadFundingSplit`'s own (always-unfiltered)
+ * totals; see that function's doc comment for the regression this avoids.
+ * Filtered CSV export (2026-08-16, GitHub #2470): `/edit/data-sharing/export`
+ * now parses and applies the same filters (year/tier/nihFunded) the on-page
+ * tables use, on all three of its export paths; see that route's own doc
+ * comment. Every `DownloadLink` on the page reflects the active filter now,
+ * so the export caption no longer needs its old "ignores filters" caveat.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { resolveDatasetUrl } from "@/components/profile/datasets-section";
@@ -1174,12 +1192,27 @@ export type FundingSplitTotals = {
   nihByPmid?: Map<string, boolean>;
 };
 
-/** NIH-funded vs. not-NIH-funded split over the real (non-registry) data-
- *  sharing pmid population — `depositedPmidSet(rows)` (which already skips
- *  registry rows) minus every pmid that ALSO appears on a registry-type row
- *  (`registryPmidSet`): the subtraction now only removes both-registry-and-
- *  real pmids, the deliberately conservative carve that function's doc
- *  comment defends. A pmid counts as
+/** The funding lens's own pmid population: `depositedPmidSet(rows)` (which
+ *  already skips registry ROWS) minus every pmid that ALSO appears on a
+ *  registry-type row (`registryPmidSet`) — the subtraction removes
+ *  both-registry-and-real pmids too, the deliberately conservative carve
+ *  `registryPmidSet`'s own doc comment defends. Shared by `loadFundingSplit`
+ *  (which population to grant-join) and `loadDataSharingReport`'s
+ *  `deriveFundingTotals` call (which population to tally the FINAL, filtered
+ *  totals over), so the two can't independently drift on what counts as
+ *  "the funding population" — a 2026-08-17 adversarial-review finding caught
+ *  exactly that drift: `deriveFundingTotals` was tallying the plain
+ *  `depositedPmidSet(rows)` (which deliberately still counts a both-rows
+ *  pmid, see that function's own doc comment) instead of this narrower,
+ *  registry-carved population, so a both-registry-and-real pmid with no
+ *  matching grant silently inflated `notNihFundedPubs`. */
+function fundingPmidPopulation(rows: readonly DatasetLinkRow[]): Set<string> {
+  const registryPmids = registryPmidSet(rows);
+  return new Set([...depositedPmidSet(rows)].filter((pmid) => !registryPmids.has(pmid)));
+}
+
+/** NIH-funded vs. not-NIH-funded split over `fundingPmidPopulation(rows)`. A
+ *  pmid counts as
  *  NIH-funded if ANY of its `GrantPublication` rows resolves to a grant with
  *  a non-null `nihIc` — `nihIc` is populated only for NIH awards (see
  *  `Grant.nihIc`'s doc comment in `prisma/schema.prisma`), so "not
@@ -1190,8 +1223,7 @@ export async function loadFundingSplit(
   client: DataSharingReportClient,
   rows: readonly DatasetLinkRow[],
 ): Promise<FundingSplitTotals> {
-  const registryPmids = registryPmidSet(rows);
-  const fundingPmids = [...depositedPmidSet(rows)].filter((pmid) => !registryPmids.has(pmid));
+  const fundingPmids = [...fundingPmidPopulation(rows)];
   if (fundingPmids.length === 0) return { nihFundedPubs: 0, notNihFundedPubs: 0 };
 
   const links = await client.grantPublication.findMany({
@@ -1378,15 +1410,16 @@ async function loadDataAsOf(client: DataSharingReportClient): Promise<Date | nul
   return agg._max.lastRefreshedAt ?? null;
 }
 
-/** 2026-08-16 filters ask ("year range, NIH-funded, tier"). Shipped: deposit-
- *  year range + tier. NOT shipped: a row-level NIH-funded filter — it would
- *  need `loadFundingSplit` (an async grant join) to run BEFORE this filter
- *  can select rows, then run AGAIN after filtering to report correct funding
- *  totals for the now-doubly-filtered set, which self-referentially reports
- *  "100% NIH-funded" once active — not wrong, but confusing enough to want
- *  its own design pass rather than bolting on here. ponytail: two of three
- *  shipped now; the third needs its own pass if asked for after using these
- *  two. */
+/** 2026-08-16 filters ask ("year range, NIH-funded, tier"). All three now
+ *  shipped: deposit-year range and tier landed first; `nihFunded` (this PR,
+ *  GitHub #2469) needed its own pass because a pmid's NIH-funded status only
+ *  resolves via `loadFundingSplit`'s async grant join, so it can't fold into
+ *  this type's own synchronous filter the way year/tier do. See
+ *  `loadDataSharingReport`'s doc comment for the actual two-pass sequencing
+ *  (year/tier first, then `applyNihFilter` once the join resolves) and
+ *  `deriveFundingTotals` for why the funding totals reported alongside a
+ *  filtered report are recomputed rather than reused from `loadFundingSplit`
+ *  as-is. */
 export type DataSharingReportFilters = {
   /** Inclusive deposit-year bounds, the §1 trend chart's own axis — applies
    *  to the deposit-side rows only (datasets/repositories/faculty/tiers/
@@ -1400,6 +1433,16 @@ export type DataSharingReportFilters = {
   /** Tier codes (`@/lib/repository-tier`'s values) to include; omitted or
    *  empty = every tier. */
   tiers?: readonly string[];
+  /** `true` = NIH-funded publications only, `false` = not-NIH-funded only,
+   *  `undefined` = no filter (the same tri-state shape the on-page control
+   *  offers). Applied by `applyNihFilter`, a second pass after
+   *  `applyReportFilters`'s year/tier pass: a row passes if ANY of its
+   *  `pmids` matches the requested state, the same "any citing row counts"
+   *  rule `depositedPmidSet`/`registryPmidSet` already use elsewhere in this
+   *  file for multi-pmid rows. A pmid with no entry in the NIH-funded map
+   *  (`loadFundingSplit`'s `nihByPmid`) reads as not-NIH-funded, the same
+   *  degrade-to-false convention that function's own doc comment uses. */
+  nihFunded?: boolean;
 };
 
 export function applyReportFilters(
@@ -1419,6 +1462,63 @@ export function applyReportFilters(
   });
 }
 
+/** The `filters.nihFunded` pass, kept separate from `applyReportFilters`
+ *  (see `DataSharingReportFilters.nihFunded`'s doc comment for why it can't
+ *  be folded in) so `loadDataSharingReport` can run it only after
+ *  `loadFundingSplit`'s async grant join has resolved `nihByPmid`. A row
+ *  passes if ANY of its `pmids` matches the requested `nihFunded` state; a
+ *  pmid absent from `nihByPmid` reads as not-NIH-funded, same degrade-to-
+ *  false convention `loadFundingSplit` documents. */
+export function applyNihFilter(
+  rows: readonly DatasetLinkRow[],
+  nihFunded: boolean,
+  nihByPmid: ReadonlyMap<string, boolean> | undefined,
+): DatasetLinkRow[] {
+  return rows.filter((r) => (r.pmids ?? []).some((pmid) => (nihByPmid?.get(pmid) ?? false) === nihFunded));
+}
+
+/** Recomputes the NIH-funded/not-NIH-funded totals actually reported on
+ *  `overall`, from the FINAL, fully-filtered funding population
+ *  (`fundingPmidPopulation` over `loadDataSharingReport`'s step-6 `rows`,
+ *  NOT the plain `depositedPmidSet` — see `fundingPmidPopulation`'s doc
+ *  comment for the 2026-08-17 bug that distinction fixes), NOT from
+ *  `loadFundingSplit`'s own totals, which describe the full unfiltered
+ *  corpus (see `loadDataSharingReport`'s doc comment for why `nihByPmid`
+ *  itself must be built unfiltered). Reporting `loadFundingSplit`'s totals
+ *  as-is once any filter is active would silently stop reflecting that
+ *  filter, a real regression versus pre-nihFunded-filter behavior, where a
+ *  year filter DID correctly narrow the funding totals (the split used to
+ *  run on the already-filtered rows).
+ *
+ *  `nihFundedFilter` (`filters.nihFunded`, undefined when that filter isn't
+ *  active) is a second, 2026-08-17 adversarial-review fix: `applyNihFilter`
+ *  keeps a whole ROW if ANY of its pmids matches (documented there, the same
+ *  "any citing row counts" convention this file uses elsewhere), so a
+ *  surviving row can still carry a pmid that does NOT match — e.g. a row
+ *  citing one NIH-funded and one non-NIH pmid survives an "NIH-funded only"
+ *  filter because of the first pmid, but its second pmid would otherwise
+ *  inflate `notNihFundedPubs` on a view whose whole point is "NIH-funded
+ *  only," reading as self-contradictory. When `nihFundedFilter` is set, a
+ *  pmid that doesn't itself match gets excluded from BOTH counters (not
+ *  reassigned to the other one, it simply isn't part of what this filtered
+ *  view claims to show) rather than counted toward whichever bucket it
+ *  happens to fall in. */
+export function deriveFundingTotals(
+  depositedPmids: ReadonlySet<string>,
+  nihByPmid: ReadonlyMap<string, boolean> | undefined,
+  nihFundedFilter?: boolean,
+): Pick<FundingSplitTotals, "nihFundedPubs" | "notNihFundedPubs"> {
+  let nihFundedPubs = 0;
+  let notNihFundedPubs = 0;
+  for (const pmid of depositedPmids) {
+    const isNih = nihByPmid?.get(pmid) ?? false;
+    if (nihFundedFilter !== undefined && isNih !== nihFundedFilter) continue;
+    if (isNih) nihFundedPubs++;
+    else notNihFundedPubs++;
+  }
+  return { nihFundedPubs, notNihFundedPubs };
+}
+
 export async function loadDataSharingReport(
   client: DataSharingReportClient,
   filters?: DataSharingReportFilters,
@@ -1428,8 +1528,30 @@ export async function loadDataSharingReport(
     loadShareRateCorpus(client),
     loadDataAsOf(client),
   ]);
-  const rows = applyReportFilters(rawRows, filters);
-  const fundingSplit = await loadFundingSplit(client, rows);
+  const yearTierRows = applyReportFilters(rawRows, filters);
+  // Always `rawRows`, the FULL unfiltered non-registry population: must
+  // reflect the FULL unfiltered corpus regardless of the currently-active
+  // filter, same rule `depositYearBounds`'s doc comment already states for
+  // the year-bounds ghost text. `nihByPmid` needs complete pmid coverage so
+  // `applyNihFilter` below can classify every row, whether or not a year/
+  // tier filter is also active; pairing it against an already-filtered
+  // population would silently degrade rows outside that filter to "not
+  // NIH-funded" instead of correctly resolving them.
+  const fundingSplit = await loadFundingSplit(client, rawRows);
+  const rows =
+    filters?.nihFunded === undefined
+      ? yearTierRows
+      : applyNihFilter(yearTierRows, filters.nihFunded, fundingSplit.nihByPmid);
+  // `fundingSplit.nihFundedPubs`/`notNihFundedPubs` (computed above) describe
+  // the full unfiltered corpus, not `rows`; see `deriveFundingTotals`'s doc
+  // comment for why reporting them as-is would be wrong the moment any
+  // filter is active. Recompute the two counts actually reported from the
+  // FINAL, fully-filtered `rows`, leaving `nihByPmid` itself untouched:
+  // `buildAccessFundingCrossTab` still needs the full map.
+  const reportedFundingSplit: FundingSplitTotals = {
+    ...deriveFundingTotals(fundingPmidPopulation(rows), fundingSplit.nihByPmid, filters?.nihFunded),
+    nihByPmid: fundingSplit.nihByPmid,
+  };
   // `rawRows` (not `rows`) backs the share-rate/PMC numerator — see
   // `buildDataSharingReport`'s `depositedPmidRows` doc comment for why a
   // filtered numerator paired against the always-unfiltered corpus
@@ -1437,7 +1559,7 @@ export async function loadDataSharingReport(
   // `depositYearBounds` reads `rawRows`, not `rows`, for the same reason;
   // see that field's doc comment on `DataSharingReport`.
   return {
-    ...buildDataSharingReport(rows, corpusRows, fundingSplit, rawRows),
+    ...buildDataSharingReport(rows, corpusRows, reportedFundingSplit, rawRows),
     dataAsOf,
     depositYearBounds: computeDepositYearBounds(rawRows),
   };
