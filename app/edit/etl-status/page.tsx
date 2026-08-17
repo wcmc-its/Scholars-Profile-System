@@ -706,7 +706,7 @@ export default async function EtlStatusPage({
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <h1 className="mb-1 text-xl font-semibold">ETL status</h1>
+      <h1 className="mb-1 text-xl font-bold">ETL status</h1>
       {unavailable ? (
         <p className="text-muted-foreground mt-8" data-testid="etl-status-unavailable">
           Import status is temporarily unavailable. Please try again later or contact ITS Support if

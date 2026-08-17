@@ -311,7 +311,7 @@ export default async function EditUsagePage() {
       // holder), which implies `ConsoleShell`'s own `loadConsoleTabs`
       // derivation is already true for both.
     >
-      <h1 className="mb-1 text-xl font-semibold">Usage</h1>
+      <h1 className="mb-1 text-xl font-bold">Usage</h1>
       {unavailable ? (
         <p className="text-muted-foreground mt-8" data-testid="edit-usage-unavailable">
           Usage data is temporarily unavailable. Please try again later or contact ITS Support if

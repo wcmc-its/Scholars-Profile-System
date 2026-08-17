@@ -91,7 +91,7 @@ export default async function HonorsQueuePage() {
       pendingHonors={pendingCount}
     >
       <div className="mb-1 flex items-center justify-between gap-3">
-          <h1 className="text-xl font-semibold">Honors approval</h1>
+          <h1 className="text-xl font-bold">Honors approval</h1>
           {/* #1762 — the Research Dean's office exports the full record (all
               statuses) as CSV. Same gate as this page enforces the route. A plain
               <a>: /export is a CSV download route (route.ts), not a page, so

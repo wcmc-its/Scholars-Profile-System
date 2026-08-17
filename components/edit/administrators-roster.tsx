@@ -24,6 +24,7 @@
 
 import * as React from "react";
 import { Lock } from "lucide-react";
+import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
 
 import {
   AddAdministratorDialog,
@@ -36,13 +37,20 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import type { AdminRosterEntry, AdminRosterGrant } from "@/lib/api/administrators-roster";
 import type { DirectoryPerson } from "@/lib/sources/ldap";
+import { cn } from "@/lib/utils";
 
-/** The provenance badge for a `UnitAdmin.source`. The mockup renders all small
- *  inline pills with a single slate tint, so only the human-readable label
- *  varies per source; the palette is uniform. */
+/** Two-letter initials for the roster-card avatar, e.g. "Adela Vargas" → "AV". */
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0]?.[0] ?? "";
+  const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? "") : "";
+  return (first + last).toUpperCase();
+}
+
+/** The provenance label for a `UnitAdmin.source`. */
 function provenanceBadge(source: string): { label: string } {
   switch (source) {
     case "manual":
@@ -73,11 +81,11 @@ const KIND_LABEL: Record<AdminRosterGrant["entityType"], string> = {
   core: "Core",
 };
 
-const PROVENANCE_BADGE_BASE =
-  "bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium";
-
-/** Org unit · Role · Source · Actions — the per-person band row spans them all. */
-const COLUMN_COUNT = 4;
+/** Curator/Owner segmented-toggle button (styles a raw `RadioGroupPrimitive.Item`
+ *  — the app's shared `RadioGroupItem` hardcodes its own dot-indicator child and
+ *  can't render a text label inside the control, which the segmented look needs). */
+const ROLE_SEGMENT_BASE =
+  "px-3 py-1.5 text-xs font-medium transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-apollo-maroon data-[state=checked]:text-apollo-maroon-foreground data-[state=unchecked]:bg-apollo-surface data-[state=unchecked]:text-muted-foreground data-[state=unchecked]:hover:bg-apollo-surface-2";
 
 /** The caveat shown beside ED-locked controls (§ 4.4). */
 const ED_LOCKED_NOTE =
@@ -311,6 +319,8 @@ export function AdministratorsRoster({
     ? "Showing all administrators."
     : "Showing administrators within the units you own.";
 
+  const totalGrants = roster.reduce((sum, e) => sum + e.grants.length, 0);
+
   // ── Phase C writes (all POST /api/edit/grant) ──────────────────────────────
 
   /** Re-grant a row's `(unit, cwid)` with a new role (idempotent upsert). */
@@ -444,52 +454,33 @@ export function AdministratorsRoster({
     const revokeDisabled = controlsDisabled || isSelf || busy;
     return (
       <>
-        <td className="py-2 pl-6">
-          <RadioGroup
+        <td className="py-3 pl-5">
+          <RadioGroupPrimitive.Root
             value={grant.role}
             onValueChange={(v) => updateRole(entry.cwid, grant, v as "owner" | "curator")}
             disabled={controlsDisabled || busy}
-            className="flex gap-3"
+            className="border-apollo-border-strong inline-flex w-fit overflow-hidden rounded-md border"
             data-testid={`administrators-role-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
           >
-            <label className="flex items-center gap-1.5 text-xs">
-              <RadioGroupItem
-                value="curator"
-                data-testid={`administrators-role-curator-${entry.cwid}-${rowKey}`}
-              />{" "}
-              Curator
-            </label>
-            <label className="flex items-center gap-1.5 text-xs">
-              <RadioGroupItem
-                value="owner"
-                data-testid={`administrators-role-owner-${entry.cwid}-${rowKey}`}
-              />{" "}
-              Owner
-            </label>
-          </RadioGroup>
-        </td>
-        <td className="py-2 pl-6 whitespace-nowrap">
-          <span className={PROVENANCE_BADGE_BASE}>{prov.label}</span>
-        </td>
-        <td className="py-2 pr-3 pl-6 text-right">
-          <div className="flex flex-col items-end gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={revokeDisabled}
-              title={
-                isSelf
-                  ? "You can't remove your own access."
-                  : controlsDisabled
-                    ? ED_LOCKED_NOTE
-                    : undefined
-              }
-              onClick={() => setRevokeTarget({ cwid: entry.cwid, grant })}
-              data-testid={`administrators-revoke-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
+            <RadioGroupPrimitive.Item
+              value="curator"
+              className={cn(ROLE_SEGMENT_BASE, "border-apollo-border-strong border-r")}
+              data-testid={`administrators-role-curator-${entry.cwid}-${rowKey}`}
             >
-              Revoke
-            </Button>
+              Curator
+            </RadioGroupPrimitive.Item>
+            <RadioGroupPrimitive.Item
+              value="owner"
+              className={ROLE_SEGMENT_BASE}
+              data-testid={`administrators-role-owner-${entry.cwid}-${rowKey}`}
+            >
+              Owner
+            </RadioGroupPrimitive.Item>
+          </RadioGroupPrimitive.Root>
+        </td>
+        <td className="py-3 pl-5 whitespace-nowrap">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm">{prov.label}</span>
             {edLocked && (
               <a
                 href="https://directory.weill.cornell.edu/"
@@ -505,6 +496,25 @@ export function AdministratorsRoster({
               </a>
             )}
           </div>
+        </td>
+        <td className="py-3 pr-5 pl-5 text-right">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={revokeDisabled}
+            title={
+              isSelf
+                ? "You can't remove your own access."
+                : controlsDisabled
+                  ? ED_LOCKED_NOTE
+                  : undefined
+            }
+            onClick={() => setRevokeTarget({ cwid: entry.cwid, grant })}
+            data-testid={`administrators-revoke-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
+          >
+            Revoke
+          </Button>
         </td>
       </>
     );
@@ -546,6 +556,10 @@ export function AdministratorsRoster({
                 <option value="orgUnit">Org unit</option>
               </select>
             </label>
+            <span className="text-muted-foreground text-sm whitespace-nowrap">
+              {roster.length} {roster.length === 1 ? "person" : "people"} · {totalGrants}{" "}
+              {totalGrants === 1 ? "grant" : "grants"}
+            </span>
           </div>
         )}
       </div>
@@ -572,138 +586,182 @@ export function AdministratorsRoster({
           No administrators match your search.
         </p>
       ) : (
-        // One table for the whole roster (R11). "By person" groups by person
-        // (name/title/CWID header band + `ViewAsButton`, grant rows nested
-        // underneath); "by org unit" inverts it — the org unit is the group
-        // header (rendered once no matter how many admins it has) and each
-        // admin becomes a row underneath, with Revoke living on that person's
-        // row rather than the unit's. Same one-table/tbody-per-group shape
-        // `all-units-directory.tsx` uses for its kind groups.
-        <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-xl border">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm" data-testid="administrators-table">
-              <thead className="bg-apollo-surface-2">
-                <tr className="text-muted-foreground border-apollo-border border-b text-left">
-                  <th className="py-2 pl-3 font-medium">
-                    {sortMode === "orgUnit" ? "Person" : "Org unit"}
-                  </th>
-                  <th className="py-2 pl-6 font-medium whitespace-nowrap">Role</th>
-                  <th className="py-2 pl-6 font-medium whitespace-nowrap">Source</th>
-                  <th className="py-2 pr-3 pl-6 text-right font-medium">Actions</th>
-                </tr>
-              </thead>
-              {sortMode === "orgUnit"
-                ? unitGroups.map((group) => (
-                    <tbody key={group.key} data-testid={`administrators-unit-${group.key}`}>
-                      <tr>
-                        <th
-                          scope="colgroup"
-                          colSpan={COLUMN_COUNT}
-                          className="border-apollo-border border-y px-3 py-2 text-left align-middle text-sm font-normal"
-                        >
-                          <span className="font-semibold">{group.unitName}</span>
-                          <Badge
-                            variant="outline"
-                            className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border ml-2 rounded-full"
-                          >
-                            {KIND_LABEL[group.entityType]}
-                          </Badge>
-                        </th>
-                      </tr>
-                      {group.admins.map(({ entry, person, grant }) => {
-                        const isSelf = entry.cwid === actorCwid;
-                        return (
-                          <tr
-                            key={entry.cwid}
-                            className="bg-apollo-surface-2 border-apollo-border border-b align-middle"
-                            data-testid={`administrators-admin-${group.key}-${entry.cwid}`}
-                          >
-                            <td className="py-2 pl-3">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <span className="font-medium">{person.name}</span>
-                                  {person.title && (
-                                    <span className="text-muted-foreground font-normal">
-                                      {" "}
-                                      · {person.title}
-                                    </span>
-                                  )}
-                                  <span className="text-muted-foreground ml-2 text-xs font-normal tabular-nums">
-                                    {entry.cwid}
-                                  </span>
-                                </div>
-                                {canImpersonate && !isSelf && (
-                                  <ViewAsButton targetCwid={entry.cwid} targetName={person.name} />
-                                )}
-                              </div>
-                            </td>
-                            {renderGrantActionCells(entry, grant)}
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  ))
-                : personGroups.map(({ entry, person }) => {
-                    const isSelf = entry.cwid === actorCwid;
-                    return (
-                      <tbody key={entry.cwid} data-testid={`administrators-person-${entry.cwid}`}>
-                        <tr>
-                          <th
-                            scope="colgroup"
-                            colSpan={COLUMN_COUNT}
-                            className="border-apollo-border border-y px-3 py-2 text-left align-middle text-sm font-normal"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <span className="font-semibold">{person.name}</span>
-                                {person.title && (
-                                  <span className="text-muted-foreground font-normal">
-                                    {" "}
-                                    · {person.title}
-                                  </span>
-                                )}
-                                <span className="text-muted-foreground ml-2 text-xs font-normal tabular-nums">
-                                  {entry.cwid}
-                                </span>
-                                {person.email && (
-                                  <a
-                                    href={`mailto:${person.email}`}
-                                    className="text-muted-foreground block text-xs font-normal hover:underline"
-                                    data-testid={`administrators-email-${entry.cwid}`}
-                                  >
-                                    {person.email}
-                                  </a>
-                                )}
-                              </div>
-                              {canImpersonate && !isSelf && (
-                                <ViewAsButton targetCwid={entry.cwid} targetName={person.name} />
-                              )}
-                            </div>
+        // One card per group (R11). "By person" groups by person (avatar +
+        // name/title/CWID/email header band, grant rows nested underneath in
+        // their own small table); "by org unit" inverts it — the org unit is
+        // the card header (rendered once no matter how many admins it has)
+        // and each admin becomes a row underneath, with Revoke living on that
+        // person's row rather than the unit's. Each card's grant list keeps
+        // real `<table>` markup (native row/column semantics) — only the
+        // group header moved out into its own styled band.
+        <div className="flex flex-col gap-4" data-testid="administrators-table">
+          {sortMode === "orgUnit"
+            ? unitGroups.map((group) => (
+                <div
+                  key={group.key}
+                  data-testid={`administrators-unit-${group.key}`}
+                  className="border-apollo-border bg-apollo-surface shadow-xs overflow-hidden rounded-xl border"
+                >
+                  <div className="bg-apollo-surface-2 border-apollo-border flex items-center gap-3 border-b px-5 py-4">
+                    <span className="font-semibold">{group.unitName}</span>
+                    <Badge
+                      variant="outline"
+                      className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+                    >
+                      {KIND_LABEL[group.entityType]}
+                    </Badge>
+                    <span className="text-muted-foreground ml-auto text-xs whitespace-nowrap">
+                      {group.admins.length}{" "}
+                      {group.admins.length === 1 ? "administrator" : "administrators"}
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-muted-foreground border-apollo-border border-b text-left">
+                          <th className="py-2 pl-5 text-[11px] font-semibold tracking-wider uppercase">
+                            Person
+                          </th>
+                          <th className="py-2 pl-5 text-[11px] font-semibold tracking-wider uppercase whitespace-nowrap">
+                            Role
+                          </th>
+                          <th className="py-2 pl-5 text-[11px] font-semibold tracking-wider uppercase whitespace-nowrap">
+                            Source
+                          </th>
+                          <th className="py-2 pr-5 pl-5 text-right text-[11px] font-semibold tracking-wider uppercase">
+                            Actions
                           </th>
                         </tr>
-                        {entry.grants.map((grant) => (
-                          <tr
-                            key={`${grant.entityType}:${grant.entityId}`}
-                            className="bg-apollo-surface-2 border-apollo-border border-b align-middle"
-                            data-testid={`administrators-grant-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
-                          >
-                            <td className="py-2 pl-3">
-                              <span className="font-medium">{grant.unitName}</span>
-                              <Badge
-                                variant="outline"
-                                className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border ml-2 rounded-full"
-                              >
-                                {KIND_LABEL[grant.entityType]}
-                              </Badge>
-                            </td>
-                            {renderGrantActionCells(entry, grant)}
-                          </tr>
-                        ))}
+                      </thead>
+                      <tbody>
+                        {group.admins.map(({ entry, person, grant }) => {
+                          const isSelf = entry.cwid === actorCwid;
+                          return (
+                            <tr
+                              key={entry.cwid}
+                              className="border-apollo-border border-t align-middle"
+                              data-testid={`administrators-admin-${group.key}-${entry.cwid}`}
+                            >
+                              <td className="py-3 pl-5">
+                                <div className="flex items-center gap-2.5">
+                                  <div className="bg-apollo-maroon/10 text-apollo-maroon flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold">
+                                    {initials(person.name)}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <span className="font-medium">{person.name}</span>
+                                    {person.title && (
+                                      <span className="text-muted-foreground font-normal">
+                                        {" "}
+                                        · {person.title}
+                                      </span>
+                                    )}
+                                    <span className="text-muted-foreground ml-2 text-xs font-normal tabular-nums">
+                                      {entry.cwid}
+                                    </span>
+                                  </div>
+                                  {canImpersonate && !isSelf && (
+                                    <ViewAsButton
+                                      targetCwid={entry.cwid}
+                                      targetName={person.name}
+                                    />
+                                  )}
+                                </div>
+                              </td>
+                              {renderGrantActionCells(entry, grant)}
+                            </tr>
+                          );
+                        })}
                       </tbody>
-                    );
-                  })}
-            </table>
-          </div>
+                    </table>
+                  </div>
+                </div>
+              ))
+            : personGroups.map(({ entry, person }) => {
+                const isSelf = entry.cwid === actorCwid;
+                return (
+                  <div
+                    key={entry.cwid}
+                    data-testid={`administrators-person-${entry.cwid}`}
+                    className="border-apollo-border bg-apollo-surface shadow-xs overflow-hidden rounded-xl border"
+                  >
+                    <div className="bg-apollo-surface-2 border-apollo-border flex items-start gap-4 border-b px-5 py-4">
+                      <div className="bg-apollo-maroon/10 text-apollo-maroon flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-bold">
+                        {initials(person.name)}
+                      </div>
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <div className="flex flex-wrap items-baseline gap-2">
+                          <span className="font-semibold">{person.name}</span>
+                          {person.title && (
+                            <span className="text-muted-foreground text-sm font-normal">
+                              {person.title}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-muted-foreground flex flex-wrap gap-3 text-xs">
+                          <span className="tabular-nums">{entry.cwid}</span>
+                          {person.email && (
+                            <a
+                              href={`mailto:${person.email}`}
+                              className="hover:underline"
+                              data-testid={`administrators-email-${entry.cwid}`}
+                            >
+                              {person.email}
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                      <div className="ml-auto flex shrink-0 items-center gap-3">
+                        <span className="text-muted-foreground text-xs whitespace-nowrap">
+                          {entry.grants.length} {entry.grants.length === 1 ? "grant" : "grants"}
+                        </span>
+                        {canImpersonate && !isSelf && (
+                          <ViewAsButton targetCwid={entry.cwid} targetName={person.name} />
+                        )}
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-muted-foreground border-apollo-border border-b text-left">
+                            <th className="py-2 pl-5 text-[11px] font-semibold tracking-wider uppercase">
+                              Org unit
+                            </th>
+                            <th className="py-2 pl-5 text-[11px] font-semibold tracking-wider uppercase whitespace-nowrap">
+                              Role
+                            </th>
+                            <th className="py-2 pl-5 text-[11px] font-semibold tracking-wider uppercase whitespace-nowrap">
+                              Source
+                            </th>
+                            <th className="py-2 pr-5 pl-5 text-right text-[11px] font-semibold tracking-wider uppercase">
+                              Actions
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {entry.grants.map((grant) => (
+                            <tr
+                              key={`${grant.entityType}:${grant.entityId}`}
+                              className="border-apollo-border border-t align-middle"
+                              data-testid={`administrators-grant-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
+                            >
+                              <td className="py-3 pl-5">
+                                <span className="font-medium">{grant.unitName}</span>
+                                <Badge
+                                  variant="outline"
+                                  className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border ml-2 rounded-full"
+                                >
+                                  {KIND_LABEL[grant.entityType]}
+                                </Badge>
+                              </td>
+                              {renderGrantActionCells(entry, grant)}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })}
         </div>
       )}
 

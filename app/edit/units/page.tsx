@@ -75,7 +75,7 @@ export default async function EditUnitsPage() {
       // here), unlike the others.
       unitsTab
     >
-        <h1 className="mb-1 text-xl font-semibold">Org units</h1>
+        <h1 className="mb-1 text-xl font-bold">Org units</h1>
         <p className="text-muted-foreground mb-6 text-sm">
           Departments, divisions, and centers you can edit — their description, leadership, and (for
           centers) roster. Select one to edit it.

@@ -65,7 +65,7 @@ export default async function SlugRequestsPage() {
       pendingSlugRequests={requests.length}
       pendingHonors={pendingHonors}
     >
-      <h1 className="mb-1 text-xl font-semibold">Profile URL requests</h1>
+      <h1 className="mb-1 text-xl font-bold">Profile URL requests</h1>
       <p className="text-muted-foreground mb-6 text-sm">
         Pending scholar requests for a personalized URL, oldest first. Approving writes the override
         and redirects the old address.

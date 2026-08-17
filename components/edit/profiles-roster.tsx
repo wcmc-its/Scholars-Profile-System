@@ -142,7 +142,7 @@ export function ProfilesRoster({
 
   return (
     <div data-slot="profiles-roster">
-      <h1 className="mb-4 text-xl font-semibold">Profiles</h1>
+      <h1 className="mb-4 text-xl font-bold">Profiles</h1>
 
       <div className="flex flex-col gap-6 lg:flex-row">
         <aside className="lg:w-64 lg:shrink-0">

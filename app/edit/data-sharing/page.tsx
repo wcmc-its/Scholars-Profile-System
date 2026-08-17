@@ -64,7 +64,7 @@ export default async function EditDataSharingPage({
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <h1 className="mb-1 text-xl font-semibold">Data sharing</h1>
+      <h1 className="mb-1 text-xl font-bold">Data sharing</h1>
       <p className="text-muted-foreground mb-6 text-sm">
         Dataset deposits synced from reciterdb via the weekly data-sharing bridge — aggregate
         views for research leadership, compliance/grant reporting, and the library/RDM team.

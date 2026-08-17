@@ -93,7 +93,7 @@ export default async function EditCoreReviewPage({
           </Link>
         </p>
 
-        <h1 className="mb-1 text-xl font-semibold">{queue.core.name} — core publications</h1>
+        <h1 className="mb-1 text-xl font-bold">{queue.core.name} — core publications</h1>
         <p className="text-muted-foreground mb-6 text-sm">
           Publications our signals flag as having used this core. Confirm the ones that did and
           reject false positives — your decisions surface on the public profiles and prime the next

@@ -93,7 +93,7 @@ export default async function MethodFamiliesPage() {
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <h1 className="mb-1 text-xl font-semibold">Method families</h1>
+      <h1 className="mb-1 text-xl font-bold">Method families</h1>
       <p className="text-muted-foreground mb-6 max-w-3xl text-sm">
         Control the visibility tier of each method family and review the ones flagged as
         potentially sensitive. The review queue surfaces flagged families first; setting a tier

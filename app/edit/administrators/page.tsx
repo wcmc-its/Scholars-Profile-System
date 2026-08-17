@@ -112,7 +112,7 @@ export default async function AdministratorsPage() {
       // see the Forbidden gate above) silently lost a tab their role alone
       // already earned (docs/edit-console-ia-spec.md Gap 4b).
     >
-        <h1 className="mb-1 text-xl font-semibold">Administrators</h1>
+        <h1 className="mb-1 text-xl font-bold">Administrators</h1>
         <p className="text-muted-foreground mb-6 text-sm">
           Everyone with an Owner or Curator grant on an org unit, grouped by person. Add, change a
           role, or revoke a grant from each card. Grants sourced from the{" "}

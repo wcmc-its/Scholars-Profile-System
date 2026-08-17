@@ -88,7 +88,7 @@ export function ScholarHistoryView({
           </Link>
         </p>
 
-        <h1 className="page-title">Profile change history</h1>
+        <h1 className="page-title font-bold">Profile change history</h1>
         <p className="text-muted-foreground mt-2">
           {scholarName} — edits to this profile in the last {windowDays} days. Read-only.
           Publication and grant suppressions are recorded on their own surfaces.

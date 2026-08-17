@@ -64,7 +64,7 @@ export default async function NewsQueuePage() {
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-        <h1 className="mb-1 text-xl font-semibold">News approval</h1>
+        <h1 className="mb-1 text-xl font-bold">News approval</h1>
         <p className="text-muted-foreground mb-6 max-w-3xl text-sm">
           {pendingCount === 0
             ? "News mentions detected by name (not a VIVO link) awaiting confirmation. Nothing here shows on a profile until it is approved."

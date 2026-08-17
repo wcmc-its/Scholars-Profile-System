@@ -105,7 +105,7 @@ export function CenterHistoryView({
           </Link>
         </p>
 
-        <h1 className="page-title">Roster change history</h1>
+        <h1 className="page-title font-bold">Roster change history</h1>
         <p className="text-muted-foreground mt-2">
           {centerName} — roster changes in the last {windowDays} days. Read-only.
         </p>
