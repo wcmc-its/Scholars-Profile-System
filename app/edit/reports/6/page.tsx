@@ -108,6 +108,7 @@ export default async function EditReportsNihFundedPublicationsPage({
                   <th className={thClass}>Journal</th>
                   <th className={thClass}>Grant</th>
                   <th className={thClass}>Award number</th>
+                  <th className={thClass}>Investigators</th>
                 </tr>
               </thead>
               <tbody>
@@ -134,6 +135,11 @@ export default async function EditReportsNihFundedPublicationsPage({
                     <td className={tdClass}>{r.journal ?? "—"}</td>
                     <td className={tdClass}>{r.grantTitle}</td>
                     <td className={`${tdClass} whitespace-nowrap`}>{r.awardNumber ?? "—"}</td>
+                    <td className={tdClass}>
+                      {r.investigators.length === 0
+                        ? "—"
+                        : r.investigators.map((i) => `${i.name} (${i.cwid})`).join(", ")}
+                    </td>
                   </tr>
                 ))}
               </tbody>

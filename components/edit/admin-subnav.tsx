@@ -122,6 +122,7 @@ type TabSpec = {
   href: string;
   label: string;
   count?: number;
+  activeIsLink?: boolean;
 };
 
 export function AdminSubnav({
@@ -272,7 +273,13 @@ export function AdminSubnav({
       // reverses the 2026-08-12 "/edit/units only" decision). Declared here, right
       // before the Insights group's own members, so it also lands immediately to
       // their left when `CONSOLE_SUBNAV_GROUPED` is off and `tabs` renders verbatim.
-      { show: superuserSurfaces || reportsTab, id: "reports", href: "/edit/reports", label: "Reports" },
+      {
+        show: superuserSurfaces || reportsTab,
+        id: "reports",
+        href: "/edit/reports",
+        label: "Reports",
+        activeIsLink: true,
+      },
       // Superuser + flag only, no grant escape hatch — the one tab a unit
       // admin can never earn (`lib/edit/console-tabs.server.ts`'s `coi`
       // predicate mirrors this exactly).
@@ -329,6 +336,7 @@ export function AdminSubnav({
         label={t.label}
         active={active === t.id}
         count={t.count}
+        activeIsLink={t.activeIsLink}
       />
     );
 
@@ -416,6 +424,7 @@ function AdminTab({
   label,
   active,
   count,
+  activeIsLink = false,
 }: {
   href: string;
   /** e.g. `admin-tab-profiles`, or `admin-group-queues` for a tier-1 group entry. */
@@ -423,6 +432,12 @@ function AdminTab({
   label: string;
   active: boolean;
   count?: number;
+  /** When `active`, render as a clickable `Link` instead of an inert `span` —
+   *  for a tab whose "active" state spans multiple distinct routes (Reports:
+   *  index + 6 report detail pages), so a click always returns to the tab's
+   *  home page instead of being a no-op. Default `false` preserves the
+   *  existing "you are already here" convention for every other tab. */
+  activeIsLink?: boolean;
 }) {
   const inner = (
     <span className="inline-flex items-center gap-2">
@@ -437,22 +452,24 @@ function AdminTab({
       )}
     </span>
   );
-  const tab = active ? (
-    <span
-      className="border-apollo-maroon inline-block shrink-0 border-b-2 py-3 text-sm font-medium whitespace-nowrap"
-      aria-current="page"
-      data-testid={testId}
-    >
-      {inner}
-    </span>
-  ) : (
-    <Link
-      href={href}
-      className="text-muted-foreground hover:text-foreground inline-block shrink-0 border-b-2 border-transparent py-3 text-sm whitespace-nowrap"
-      data-testid={testId}
-    >
-      {inner}
-    </Link>
-  );
+  const activeClass =
+    "border-apollo-maroon inline-block shrink-0 border-b-2 py-3 text-sm font-medium whitespace-nowrap";
+  const inactiveClass =
+    "text-muted-foreground hover:text-foreground inline-block shrink-0 border-b-2 border-transparent py-3 text-sm whitespace-nowrap";
+  const tab =
+    active && !activeIsLink ? (
+      <span className={activeClass} aria-current="page" data-testid={testId}>
+        {inner}
+      </span>
+    ) : (
+      <Link
+        href={href}
+        className={active ? activeClass : inactiveClass}
+        aria-current={active ? "page" : undefined}
+        data-testid={testId}
+      >
+        {inner}
+      </Link>
+    );
   return tab;
 }
