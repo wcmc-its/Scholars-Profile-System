@@ -1868,7 +1868,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "REPORTER_MATCH_V2",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -2446,7 +2446,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "REPORTER_MATCH_V2",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -2951,7 +2951,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "REPORTER_MATCH_V2",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -3895,7 +3895,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "REPORTER_MATCH_V2",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",

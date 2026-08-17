@@ -737,11 +737,11 @@ export class EtlStack extends Stack {
       // Resolves lateral recruits with no person_nih_profile row (name →
       // candidate profile_ids → PMID overlap → auto-lock K≥3 / propose K=2). A
       // per-run scholar cap (REPORTER_MATCH_V2_MAX_PER_RUN, code default 500)
-      // bounds the nightly RePORTER call volume; tune it once the staging cohort
-      // is sized. STAGING-FIRST: "on" in staging now, prod stays "off" until the
-      // staging soak signs off. Applied via cdk deploy --exclusively
-      // Sps-Etl-<env> (CD only rolls the image, never deploys infra).
-      REPORTER_MATCH_V2: env === "staging" ? "on" : "off",
+      // bounds the nightly RePORTER call volume; tune it once the prod cohort
+      // is sized. Prod flipped 2026-08-17 (#1468, staging match-quality soak
+      // signed off). Applied via cdk deploy --exclusively Sps-Etl-<env> (CD
+      // only rolls the image, never deploys infra).
+      REPORTER_MATCH_V2: "on",
       // OpenSearch domain endpoint (https://...). Default: plaintext env from
       // the DataStack export. When openSearchNodeFromSecret is on (cutover
       // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is
