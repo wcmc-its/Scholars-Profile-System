@@ -373,39 +373,55 @@ export async function ProfileView({ slug }: { slug: string }) {
               </SidebarCard>
             ) : null}
 
-            {/* #1323 — Past Appointments: REVEALED historical (`ED-HISTORICAL`)
-                roles the scholar opted to show. Hidden ones never reach the
-                payload, so this card simply renders whatever survived. Each
-                row shows a start–end year range. `?? []` tolerates a stale
-                CloudFront/ISR payload built before this field existed during a
-                rolling deploy. */}
-            {(profile.pastAppointments ?? []).length > 0 ? (
-              <SidebarCard title="Past Appointments">
-                <ul className="flex flex-col gap-3">
-                  {(profile.pastAppointments ?? []).map((a, i) => {
-                    const startYear = a.startDate ? a.startDate.slice(0, 4) : null;
-                    const endYear = a.endDate ? a.endDate.slice(0, 4) : null;
-                    const yearRange =
-                      startYear && endYear
-                        ? `${startYear}–${endYear}`
-                        : startYear
-                          ? `${startYear}–`
-                          : endYear
-                            ? `–${endYear}`
-                            : "";
-                    return (
-                      <li key={i} className="leading-snug">
-                        <div className="font-semibold">{a.title}</div>
-                        <div className="text-muted-foreground mt-0.5 text-xs">
-                          {a.organization}
-                          {yearRange ? ` · ${yearRange}` : ""}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </SidebarCard>
-            ) : null}
+            {/* #1323 — Past Appointments: historical (`ED-HISTORICAL`) roles,
+                shown unless a curator hid one (see Appointment.showOnProfile).
+                `?? []` tolerates a stale CloudFront/ISR payload built before
+                this field existed during a rolling deploy. Capped at
+                PAST_APPOINTMENTS_CAP with the rest behind a zero-JS "Show
+                All" — long-tenured faculty can otherwise crowd this narrow
+                sidebar. */}
+            {(profile.pastAppointments ?? []).length > 0 ? (() => {
+              const PAST_APPOINTMENTS_CAP = 3;
+              const past = profile.pastAppointments ?? [];
+              const head = past.slice(0, PAST_APPOINTMENTS_CAP);
+              const rest = past.slice(PAST_APPOINTMENTS_CAP);
+              const row = (a: (typeof past)[number], i: number) => {
+                const startYear = a.startDate ? a.startDate.slice(0, 4) : null;
+                const endYear = a.endDate ? a.endDate.slice(0, 4) : null;
+                const yearRange =
+                  startYear && endYear
+                    ? `${startYear}–${endYear}`
+                    : startYear
+                      ? `${startYear}–`
+                      : endYear
+                        ? `–${endYear}`
+                        : "";
+                return (
+                  <li key={i} className="leading-snug">
+                    <div className="font-semibold">{a.title}</div>
+                    <div className="text-muted-foreground mt-0.5 text-xs">
+                      {a.organization}
+                      {yearRange ? ` · ${yearRange}` : ""}
+                    </div>
+                  </li>
+                );
+              };
+              return (
+                <SidebarCard title="Past Appointments">
+                  <ul className="flex flex-col gap-3">{head.map(row)}</ul>
+                  {rest.length > 0 ? (
+                    <details className="mt-3">
+                      <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-xs">
+                        + Show All
+                      </summary>
+                      <ul className="mt-3 flex flex-col gap-3">
+                        {rest.map((a, i) => row(a, i + head.length))}
+                      </ul>
+                    </details>
+                  ) : null}
+                </SidebarCard>
+              );
+            })() : null}
 
             {/* #1568 — self-asserted roles/leadership the ED feed doesn't carry
                 (WCM_LEADERSHIP). Owner-entered on /edit, profile-only. */}
@@ -815,14 +831,6 @@ export async function ProfileView({ slug }: { slug: string }) {
                   </div>
                 );
               })()}
-              <p className="text-muted-foreground mt-6 border-t border-border pt-4 text-sm">
-                <Link
-                  href="/about#disclosures"
-                  className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
-                >
-                  About these disclosures →
-                </Link>
-              </p>
             </Section>
           ) : null}
         </div>

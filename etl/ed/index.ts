@@ -378,8 +378,8 @@ async function refreshEdAppointments(
 
 /** Source tag for historical (faculty:expired) appointments. Distinct from
  *  "ED" so the active-faculty refresh (refreshEdAppointments) never touches
- *  these rows, and so the read layer can hide them from the public profile
- *  unless a curator reveals one (Appointment.showOnProfile). */
+ *  these rows, and so the read layer shows them on the public profile unless
+ *  a curator hides one (Appointment.showOnProfile). */
 const HISTORICAL_APPOINTMENT_SOURCE = "ED-HISTORICAL";
 
 /**
@@ -387,11 +387,15 @@ const HISTORICAL_APPOINTMENT_SOURCE = "ED-HISTORICAL";
  * WOOFA SOR. Mirrors refreshEdAppointments but scoped to {cwid,
  * source:"ED-HISTORICAL"} so the two populations never clobber each other.
  *
- * Curator-reveal invariant: `showOnProfile` is written ONLY on INSERT
- * (defaulted false), and is NEVER part of an UPDATE — so a row a curator
- * revealed (showOnProfile=true) stays revealed across ETL reruns. The content
- * key (appointmentContentKey) does not hash showOnProfile, so toggling reveal
- * causes no reconcile churn.
+ * Curator-hide invariant: `showOnProfile` is written ONLY on INSERT
+ * (defaulted true — flipped 2026-08, see #1323 follow-up: hiding prior
+ * appointments by default made faculty look newly arrived), and is NEVER
+ * part of an UPDATE — so a row a curator hid (showOnProfile=false) stays
+ * hidden across ETL reruns. The content key (appointmentContentKey) does not
+ * hash showOnProfile, so toggling visibility causes no reconcile churn.
+ * Rows created before this flip need a one-time backfill —
+ * scripts/backfill-reveal-historical-appointments.ts — since only NEW inserts
+ * pick up the new default.
  */
 async function refreshHistoricalAppointments(
   cwid: string,
@@ -424,13 +428,13 @@ async function refreshHistoricalAppointments(
     contentKey: appointmentContentKey,
   });
   if (plan.toCreate.length > 0) {
-    // showOnProfile defaults to false on INSERT only — see invariant above.
+    // showOnProfile defaults to true on INSERT only — see invariant above.
     await db.write.appointment.createMany({
-      data: plan.toCreate.map((a) => ({ ...a, showOnProfile: false })),
+      data: plan.toCreate.map((a) => ({ ...a, showOnProfile: true })),
     });
   }
   for (const a of plan.toUpdate) {
-    // No showOnProfile key here — a curator's reveal must survive the update.
+    // No showOnProfile key here — a curator's hide must survive the update.
     await db.write.appointment.update({
       where: { externalId: a.externalId },
       data: { ...a, lastRefreshedAt: new Date() },
@@ -796,6 +800,13 @@ async function main() {
      *  overzealous filter silently hides real divisions. */
     const EXCLUDED_DIV_NAMES = new Set<string>([
       "Administration",
+      // 99% of "Orthopaedic Surgery" dept faculty also land in this division
+      // (LDAP level2, HSS-affiliated) — it adds no information over the dept
+      // and reads as a confusing duplicate ("Orthopedic Surgery (HSS)
+      // (Orthopaedic Surgery)" on a profile). Confirmed live string via
+      // read-only staging probe 2026-08-17; exact match required, see class
+      // comment above.
+      "Orthopedic Surgery (HSS)",
     ]);
 
     /** Resolve the (deptCode, divCode, deptName, divName) tuple a single

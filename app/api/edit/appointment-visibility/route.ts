@@ -6,8 +6,8 @@
  *
  * Historical appointments are imported from the WOOFA faculty SOR's
  * `faculty:expired` records with `source = "ED-HISTORICAL"` and
- * `showOnProfile = false`; they are hidden from the public profile until a
- * curator or comms_steward reveals one. Only historical rows are toggleable —
+ * `showOnProfile = true`; they are shown on the public profile until a
+ * curator or comms_steward hides one. Only historical rows are toggleable —
  * an active appointment (`source` "ED" / "ED-NYP" / "JENZABAR-GSFACULTY") is
  * always shown and is refused here (409). The CV export ignores this flag
  * entirely (historical appointments are always exported).
