@@ -4,10 +4,27 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { DataSharingDashboard } from "@/components/edit/data-sharing-dashboard";
 import {
   buildDataSharingReport,
+  computeDepositYearBounds,
+  type DataSharingReport,
   type DatasetLinkRow,
   type ShareRateCorpusRow,
 } from "@/lib/api/data-sharing-report";
 import type { DataSharingUiParams } from "@/lib/edit/data-sharing-dashboard";
+
+/** `buildDataSharingReport` only builds the parts a pure function can build.
+ *  `dataAsOf`/`depositYearBounds` are `loadDataSharingReport`'s own
+ *  additions (see that function's doc comment), so every fixture needs the
+ *  same two-field patch to satisfy the full `DataSharingReport` type this
+ *  component takes. One helper (2026-08-16) instead of repeating the patch
+ *  at every fixture below. `dataAsOf: null` matches every existing fixture
+ *  here (none of these render tests exercise the "Data as of" date). */
+function testReport(rows: DatasetLinkRow[], corpus: ShareRateCorpusRow[] = []): DataSharingReport {
+  return {
+    ...buildDataSharingReport(rows, corpus),
+    dataAsOf: null,
+    depositYearBounds: computeDepositYearBounds(rows),
+  };
+}
 
 /** No filters, default sort/page — every test below exercises the default
  *  render, sort/filter/pagination interaction is `data-sharing-dashboard.ts`'s
@@ -48,7 +65,7 @@ const CORPUS: ShareRateCorpusRow[] = Array.from({ length: 30 }, (_, i) => ({
   inPmc: true,
 }));
 
-const report = { ...buildDataSharingReport(ROWS, CORPUS), dataAsOf: null };
+const report = testReport(ROWS, CORPUS);
 
 describe("DataSharingDashboard — 08-16 mockup design pass", () => {
   it("paginates Named faculty at 25 rows/page (2026-08-16: real pagination, not a static '+N more' cut)", () => {
@@ -265,7 +282,7 @@ describe("DataSharingDashboard — v3 stakeholder pass", () => {
     const dbgapRows: DatasetLinkRow[] = [
       { ...ROWS[0], repository: "dbGaP", accessionOrDoi: "phs000001.v1.p1", cwid: "dbgap1", datasetId: "ddbgap" },
     ];
-    const dbgapReport = { ...buildDataSharingReport(dbgapRows, CORPUS), dataAsOf: null };
+    const dbgapReport = testReport(dbgapRows, CORPUS);
     render(<DataSharingDashboard report={dbgapReport} ui={DEFAULT_UI} />);
     expect(screen.getByText("phs000001.v1.p1")).toBeTruthy();
     expect(screen.queryByText("PHS000001.V1.P1")).toBeNull();
@@ -275,7 +292,7 @@ describe("DataSharingDashboard — v3 stakeholder pass", () => {
     const qatarRows: DatasetLinkRow[] = [
       { ...ROWS[0], department: "WCMC QATAR", cwid: "qatar1", datasetId: "dqatar" },
     ];
-    const qatarReport = { ...buildDataSharingReport(qatarRows, CORPUS), dataAsOf: null };
+    const qatarReport = testReport(qatarRows, CORPUS);
     render(<DataSharingDashboard report={qatarReport} ui={DEFAULT_UI} />);
     // Renders in the department table, the faculty table, and recent
     // activity — all three should read "WCMC Qatar", none "Wcmc Qatar".
@@ -294,7 +311,7 @@ describe("DataSharingDashboard — v3 stakeholder pass", () => {
       { ...ROWS[0], repository: "GSA", cwid: "concern1", datasetId: "dconcern" },
       ...ROWS,
     ];
-    const concernReport = { ...buildDataSharingReport(concernRows, CORPUS), dataAsOf: null };
+    const concernReport = testReport(concernRows, CORPUS);
     const withConcern = render(<DataSharingDashboard report={concernReport} ui={DEFAULT_UI} />);
     expect(withConcern.container.querySelector("#faculty thead")?.textContent).toContain("Foreign-hosted");
   });
@@ -329,5 +346,96 @@ describe("DataSharingDashboard — v3 stakeholder pass", () => {
     expect(
       document.querySelector('a[href="/edit/data-sharing/export?section=methods"]'),
     ).toBeTruthy();
+  });
+});
+
+describe("DataSharingDashboard: deposit-year bounds ghost text/clamp (2026-08-16)", () => {
+  const boundedRows: DatasetLinkRow[] = [
+    { ...ROWS[0], datasetId: "dy1", depositYear: 2020 },
+    { ...ROWS[1], datasetId: "dy2", depositYear: 2026 },
+    { ...ROWS[2], datasetId: "dy3", depositYear: 2023 },
+  ];
+  const boundsReport = testReport(boundedRows, CORPUS);
+
+  it("feeds report.depositYearBounds into each year input's placeholder and native min/max clamp", () => {
+    const { container } = render(<DataSharingDashboard report={boundsReport} ui={DEFAULT_UI} />);
+    const yearFrom = container.querySelector('input[name="yearFrom"]') as HTMLInputElement;
+    const yearTo = container.querySelector('input[name="yearTo"]') as HTMLInputElement;
+    expect(yearFrom.placeholder).toBe("2020");
+    expect(yearFrom.min).toBe("2020");
+    expect(yearFrom.max).toBe("2026");
+    expect(yearTo.placeholder).toBe("2026");
+    expect(yearTo.min).toBe("2020");
+    expect(yearTo.max).toBe("2026");
+  });
+
+  it("stays fixed to the report's own bounds regardless of which filter is currently active", () => {
+    // A yearFrom=2023 filter narrows the VISIBLE tables, but the ghost
+    // text/clamp must still reflect the report's true 2020 corpus minimum.
+    // `report.depositYearBounds` is fixed at load time (see that field's
+    // doc comment), it isn't re-derived from `ui.filters` here.
+    const filteredUi: DataSharingUiParams = { ...DEFAULT_UI, filters: { yearFrom: 2023 } };
+    const { container } = render(<DataSharingDashboard report={boundsReport} ui={filteredUi} />);
+    const yearFrom = container.querySelector('input[name="yearFrom"]') as HTMLInputElement;
+    expect(yearFrom.placeholder).toBe("2020");
+    expect(yearFrom.min).toBe("2020");
+  });
+
+  it("renders no placeholder or min/max when the corpus has no depositYear at all", () => {
+    // The module-level `report` fixture's rows carry no `depositYear`, so
+    // `depositYearBounds` is null.
+    const { container } = render(<DataSharingDashboard report={report} ui={DEFAULT_UI} />);
+    const yearFrom = container.querySelector('input[name="yearFrom"]') as HTMLInputElement;
+    expect(yearFrom.placeholder).toBe("");
+    expect(yearFrom.hasAttribute("min")).toBe(false);
+    expect(yearFrom.hasAttribute("max")).toBe(false);
+  });
+});
+
+describe("DataSharingDashboard: DownloadLink relabels when a filter is active (2026-08-16)", () => {
+  const filteredUi: DataSharingUiParams = { ...DEFAULT_UI, filters: { yearFrom: 2021 } };
+
+  it("leaves every Download link's default text alone when no filter is active", () => {
+    render(<DataSharingDashboard report={report} ui={DEFAULT_UI} />);
+    expect(screen.getAllByText("Download CSV").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/ignores filters/)).toBeNull();
+  });
+
+  it('relabels "Download CSV" to "Download full CSV (ignores filters)" once a filter is active', () => {
+    render(<DataSharingDashboard report={report} ui={filteredUi} />);
+    expect(screen.getAllByText("Download full CSV (ignores filters)").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Download CSV")).toBeNull();
+  });
+
+  it('relabels "Download items CSV" to "Download full items CSV (ignores filters)" once a filter is active', () => {
+    render(<DataSharingDashboard report={report} ui={filteredUi} />);
+    expect(screen.getAllByText("Download full items CSV (ignores filters)").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Download items CSV")).toBeNull();
+  });
+
+  it('appends "(ignores filters)" to the compact per-row "Items" links once a filter is active', () => {
+    const { container } = render(<DataSharingDashboard report={report} ui={filteredUi} />);
+    const relabeled = [...container.querySelectorAll("a")].filter(
+      (a) => a.textContent === "Items (ignores filters)",
+    );
+    expect(relabeled.length).toBeGreaterThan(0);
+    const bare = [...container.querySelectorAll("a")].filter((a) => a.textContent === "Items");
+    expect(bare).toHaveLength(0);
+  });
+});
+
+describe("DataSharingDashboard: permanent FTE-denominator note (2026-08-16)", () => {
+  const NOTE =
+    "Aug 2026: share-rate denominator narrowed to full-time faculty; rates roughly doubled vs. figures published before this date.";
+
+  it("renders directly under the 'Data as of' line", () => {
+    render(<DataSharingDashboard report={report} ui={DEFAULT_UI} />);
+    expect(screen.getByText(NOTE)).toBeTruthy();
+  });
+
+  it("still renders when a filter is active, since this is a fixed historical note, not conditional on filter state", () => {
+    const filteredUi: DataSharingUiParams = { ...DEFAULT_UI, filters: { yearFrom: 2021 } };
+    render(<DataSharingDashboard report={report} ui={filteredUi} />);
+    expect(screen.getByText(NOTE)).toBeTruthy();
   });
 });
