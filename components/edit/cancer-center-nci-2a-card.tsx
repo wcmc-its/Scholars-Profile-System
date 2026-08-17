@@ -29,7 +29,6 @@
 
 import * as React from "react";
 
-import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { nihReporterProjectUrl } from "@/lib/nih-reporter";
@@ -280,17 +279,19 @@ export function Nci2aCard({ centerCode }: Nci2aCardProps) {
   }
 
   return (
-    <EditPanel
-      heading="NCI Table 2A"
-      description="Cancer-Relevant Percent marked AI-suggested is a Bedrock proposal per Meyer's cancer-relevance method, from the project title alone. Confirming or correcting it here is what makes it defensible in peer-review — review before this leaves the building."
-      headerAction={
-        state?.awards.length ? (
+    <div className="flex flex-col gap-4" data-slot="nci-2a-card">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-muted-foreground text-sm">
+          Cancer-Relevant Percent marked AI-suggested is a Bedrock proposal per Meyer&apos;s cancer-relevance method,
+          from the project title alone. Confirming or correcting it here is what makes it defensible in
+          peer-review — review before this leaves the building.
+        </p>
+        {state?.awards.length ? (
           <Button size="sm" variant="outline" onClick={() => downloadCsv(state.cycle!, state.awards)}>
             Download CSV
           </Button>
-        ) : undefined
-      }
-    >
+        ) : undefined}
+      </div>
       {error && (
         <Alert variant="destructive" className="mb-4">
           <AlertDescription>{error}</AlertDescription>
@@ -381,6 +382,6 @@ export function Nci2aCard({ centerCode }: Nci2aCardProps) {
           </table>
         </div>
       )}
-    </EditPanel>
+    </div>
   );
 }

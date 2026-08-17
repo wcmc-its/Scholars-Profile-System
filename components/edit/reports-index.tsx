@@ -12,10 +12,13 @@
  * (`lib/edit/cancer-center-reports.ts`'s `loadReportLiveness`), chosen by the
  * page:
  * - `mode="table"` (2a, superuser/comms_steward with 2+ units) — one row per
- *   unit, filter rail, row click opens that unit's report list
- *   (`/edit/reports?center=…`). Mirrors `AllUnitsDirectory`'s contract:
- *   server-bounded list, filter in-memory, no fetch, stretched-anchor rows
- *   (R7).
+ *   (unit, report) pair, each unit's own report catalog flattened out so the
+ *   Status column reads per-report instead of as a unit-level "N of M"
+ *   rollup. Filter rail narrows by unit type (still unit-scoped) and by
+ *   per-report status (Live/In progress, now row-scoped). A live row's click
+ *   target is that report itself (`/edit/reports/N?center=…`); a non-live row
+ *   has no link. Mirrors `AllUnitsDirectory`'s contract: server-bounded list,
+ *   filter in-memory, no fetch, stretched-anchor rows (R7).
  * - `mode="bands"` (1a, everyone else with >1 unit) — every unit inline on one
  *   page, each in its own band with its own report rows beneath, so a
  *   multi-unit admin never has to leave the page to see any of it.
@@ -25,8 +28,9 @@
  *   `<h1>` already names the unit). Exported separately since it's rendered
  *   from `app/edit/reports/page.tsx` directly, not through `ReportsIndex`.
  *
- * "Live reports" / "N of M" is real per-report data presence, not a static
- * catalog flag — a not-live report renders as muted text, not a link.
+ * "Live" / "In progress" (table) and "N of M reports live" (bands' per-unit
+ * summary) are both real per-report data presence, not a static catalog flag
+ * — a not-live report renders as muted text, not a link, wherever it appears.
  */
 "use client";
 
@@ -64,23 +68,15 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function typeLabel(u: Pick<ReportsIndexUnit, "kind" | "centerType">): string {
+function typeLabel(u: { kind: ReportsIndexUnitKind; centerType: "center" | "institute" | null }): string {
   if (u.kind === "department") return "Department";
   if (u.kind === "division") return "Division";
   return u.centerType === "institute" ? "Institute" : "Center";
 }
 
-/** `/edit/reports?center=<code>` — `&kind=` is only appended for a
+/** `/edit/reports/N?center=<code>` — `&kind=` is only appended for a
  *  department/division so an existing `?center=<centerCode>` bookmark (implied
  *  `kind=center`) keeps resolving exactly as it always has. */
-function unitReportsHref(code: string, kind: ReportsIndexUnitKind): string {
-  const params = new URLSearchParams({ center: code });
-  if (kind !== "center") params.set("kind", kind);
-  return `/edit/reports?${params.toString()}`;
-}
-
-/** `/edit/reports/N?center=<code>` — same `&kind=` convention as
- *  {@link unitReportsHref}. */
 function reportHref(n: number, code: string, kind: ReportsIndexUnitKind): string {
   const params = new URLSearchParams({ center: code });
   if (kind !== "center") params.set("kind", kind);
@@ -97,7 +93,21 @@ export function ReportsIndex({
   return mode === "table" ? <ReportsTable units={units} /> : <ReportsBands units={units} />;
 }
 
-type SortKey = "unit" | "live" | "refreshed";
+type SortKey = "unit" | "status" | "refreshed";
+
+/** One (org unit, report) pair — the table's actual row grain. Flattened from
+ *  a unit's own `reports` catalog against its `perReport` liveness, the same
+ *  lookup `ReportRows` below already does per unit. */
+type FlatRow = {
+  unitCode: string;
+  unitKind: ReportsIndexUnitKind;
+  unitName: string;
+  centerType: "center" | "institute" | null;
+  reportN: 1 | 2 | 3 | 4 | 5 | 6;
+  reportLabel: string;
+  live: boolean;
+  lastRefreshedAt: string | null;
+};
 
 function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
   const [query, setQuery] = React.useState("");
@@ -113,42 +123,73 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
   const [liveOnly, setLiveOnly] = React.useState(false);
   const [noneYetOnly, setNoneYetOnly] = React.useState(false);
 
+  const rows = React.useMemo<FlatRow[]>(() => {
+    const out: FlatRow[] = [];
+    for (const u of units) {
+      const liveByN = new Map(u.perReport.map((r) => [r.n, r]));
+      for (const r of u.reports) {
+        const live = liveByN.get(r.n);
+        out.push({
+          unitCode: u.code,
+          unitKind: u.kind,
+          unitName: u.name,
+          centerType: u.centerType,
+          reportN: r.n,
+          reportLabel: r.label,
+          live: live?.live ?? false,
+          lastRefreshedAt: live?.lastRefreshedAt ?? null,
+        });
+      }
+    }
+    return out;
+  }, [units]);
+
   const counts = React.useMemo(
     () => ({
       centers: units.filter((u) => u.kind === "center" && u.centerType !== "institute").length,
       institutes: units.filter((u) => u.kind === "center" && u.centerType === "institute").length,
       departments: units.filter((u) => u.kind === "department").length,
       divisions: units.filter((u) => u.kind === "division").length,
-      liveOnly: units.filter((u) => u.liveCount > 0).length,
-      noneYet: units.filter((u) => u.liveCount === 0).length,
+      // Row-scoped (per report), not unit-scoped — a unit with 1 of 6 reports
+      // live now contributes 1 row to liveOnly and 5 to noneYet, instead of
+      // reading as "has a live report" and never surfacing in "In progress".
+      liveOnly: rows.filter((r) => r.live).length,
+      noneYet: rows.filter((r) => !r.live).length,
     }),
-    [units],
+    [units, rows],
   );
 
   const filtered = React.useMemo(() => {
     const trimmed = query.trim().toLowerCase();
-    const pool = units.filter((u) => {
-      if (u.kind === "center" && u.centerType !== "institute" && !showCenters) return false;
-      if (u.kind === "center" && u.centerType === "institute" && !showInstitutes) return false;
-      if (u.kind === "department" && !showDepartments) return false;
-      if (u.kind === "division" && !showDivisions) return false;
-      if (liveOnly && u.liveCount === 0) return false;
-      if (noneYetOnly && u.liveCount > 0) return false;
+    const pool = rows.filter((r) => {
+      if (r.unitKind === "center" && r.centerType !== "institute" && !showCenters) return false;
+      if (r.unitKind === "center" && r.centerType === "institute" && !showInstitutes) return false;
+      if (r.unitKind === "department" && !showDepartments) return false;
+      if (r.unitKind === "division" && !showDivisions) return false;
+      if (liveOnly && !r.live) return false;
+      if (noneYetOnly && r.live) return false;
       if (trimmed.length === 0) return true;
-      return u.name.toLowerCase().includes(trimmed);
+      return r.unitName.toLowerCase().includes(trimmed);
     });
-    if (sort === "live") {
-      return [...pool].sort((a, b) => b.liveCount - a.liveCount || a.name.localeCompare(b.name));
+    if (sort === "status") {
+      return [...pool].sort(
+        (a, b) =>
+          Number(b.live) - Number(a.live) ||
+          a.unitName.localeCompare(b.unitName) ||
+          a.reportLabel.localeCompare(b.reportLabel),
+      );
     }
     if (sort === "refreshed") {
       return [...pool].sort((a, b) => {
         const at = a.lastRefreshedAt ? new Date(a.lastRefreshedAt).getTime() : -Infinity;
         const bt = b.lastRefreshedAt ? new Date(b.lastRefreshedAt).getTime() : -Infinity;
-        return bt - at || a.name.localeCompare(b.name);
+        return bt - at || a.unitName.localeCompare(b.unitName) || a.reportLabel.localeCompare(b.reportLabel);
       });
     }
-    return [...pool].sort((a, b) => a.name.localeCompare(b.name));
-  }, [units, query, sort, showCenters, showInstitutes, showDepartments, showDivisions, liveOnly, noneYetOnly]);
+    return [...pool].sort(
+      (a, b) => a.unitName.localeCompare(b.unitName) || a.reportLabel.localeCompare(b.reportLabel),
+    );
+  }, [rows, query, sort, showCenters, showInstitutes, showDepartments, showDivisions, liveOnly, noneYetOnly]);
 
   return (
     <div className="flex flex-col gap-4" data-slot="reports-index-table" data-testid="reports-index-table">
@@ -189,7 +230,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
               />
             </div>
           </fieldset>
-          <fieldset className="border-apollo-border border-t pt-3">
+          <fieldset className="border-apollo-border border-t">
             <legend className="text-muted-foreground mb-2 text-xs font-semibold tracking-wide uppercase">
               Status
             </legend>
@@ -238,31 +279,34 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
                 data-testid="reports-index-sort"
               >
                 <option value="unit">Unit</option>
-                <option value="live">Live reports</option>
+                <option value="status">Status</option>
                 <option value="refreshed">Last refreshed</option>
               </select>
             </label>
             <span className="text-muted-foreground ml-auto text-sm">
-              Showing {filtered.length} of {units.length}
+              Showing {filtered.length} of {rows.length}
             </span>
           </div>
 
           {filtered.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No units match the current filters.</p>
+            <p className="text-muted-foreground text-sm">No reports match the current filters.</p>
           ) : (
             <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-xl border">
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse text-left text-sm" data-testid="reports-index-rows">
                   <thead className="bg-apollo-surface-2">
                     <tr className="border-apollo-border border-b">
+                      <th scope="col" className={`${TH_CLASS} w-60`}>
+                        Report
+                      </th>
                       <th scope="col" className={TH_CLASS}>
-                        Unit
+                        Org unit
                       </th>
                       <th scope="col" className={`${TH_CLASS} w-28`}>
                         Type
                       </th>
-                      <th scope="col" className={`${TH_CLASS} w-28 text-right`}>
-                        Live reports
+                      <th scope="col" className={`${TH_CLASS} w-28`}>
+                        Status
                       </th>
                       <th scope="col" className={`${TH_CLASS} w-36 text-right`}>
                         Last refreshed
@@ -270,27 +314,34 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((u) => (
+                    {filtered.map((r) => (
                       <tr
-                        key={u.code}
+                        key={`${r.unitCode}-${r.reportN}`}
                         className="border-apollo-border hover:bg-apollo-surface-2 focus-within:outline focus-within:-outline-offset-2 focus-within:outline-apollo-maroon relative border-t focus-within:outline-2"
-                        data-testid={`reports-index-row-${u.code}`}
+                        data-testid={`reports-index-row-${r.unitCode}-${r.reportN}`}
                       >
                         <td className="px-3 py-2.5 align-middle">
-                          <Link
-                            href={unitReportsHref(u.code, u.kind)}
-                            className="text-apollo-maroon font-medium after:absolute after:inset-0 hover:underline"
-                            data-testid={`reports-index-link-${u.code}`}
-                          >
-                            {u.name}
-                          </Link>
+                          {r.live ? (
+                            <Link
+                              href={reportHref(r.reportN, r.unitCode, r.unitKind)}
+                              className="text-apollo-maroon font-medium after:absolute after:inset-0 hover:underline"
+                              data-testid={`reports-index-link-${r.unitCode}-${r.reportN}`}
+                            >
+                              {r.reportLabel}
+                            </Link>
+                          ) : (
+                            <span className="text-muted-foreground">{r.reportLabel}</span>
+                          )}
                         </td>
-                        <td className="px-3 py-2.5 align-middle whitespace-nowrap">{typeLabel(u)}</td>
-                        <td className="px-3 py-2.5 text-right align-middle tabular-nums whitespace-nowrap">
-                          {u.liveCount > 0 ? `${u.liveCount} of ${u.totalCount}` : "—"}
+                        <td className="px-3 py-2.5 align-middle">{r.unitName}</td>
+                        <td className="px-3 py-2.5 align-middle whitespace-nowrap">
+                          {typeLabel({ kind: r.unitKind, centerType: r.centerType })}
+                        </td>
+                        <td className="px-3 py-2.5 align-middle whitespace-nowrap">
+                          {r.live ? "Live" : "In progress"}
                         </td>
                         <td className="text-muted-foreground px-3 py-2.5 text-right align-middle tabular-nums whitespace-nowrap">
-                          {formatDate(u.lastRefreshedAt)}
+                          {formatDate(r.lastRefreshedAt)}
                         </td>
                       </tr>
                     ))}
@@ -299,9 +350,7 @@ function ReportsTable({ units }: { units: ReadonlyArray<ReportsIndexUnit> }) {
               </div>
             </div>
           )}
-          <p className="text-muted-foreground text-xs">
-            Row opens the unit&rsquo;s reports page.
-          </p>
+          <p className="text-muted-foreground text-xs">Row opens the report.</p>
         </div>
       </div>
     </div>

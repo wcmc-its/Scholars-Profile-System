@@ -231,7 +231,7 @@ export default async function EditReportsIndexPage({
     <ConsoleShell active="reports" reportsTab {...shell}>
       <h1 className="mb-1 text-xl font-bold">Reports</h1>
       <p className="text-muted-foreground text-sm">
-        Advisory only — every report reads precomputed data; nothing here writes to the roster.
+        Advisory only: every report reads precomputed data; nothing here writes to the roster.
       </p>
       {/* ConsoleShell owns only the chrome — content supplies its own surface
           (R1/the Apollo Surface Language "the page is never white"). Without
@@ -306,7 +306,7 @@ function SingleUnitReports({
     >
       <h1 className="mb-1 text-xl font-bold">{ctx.unit.name} reports</h1>
       <p className="text-muted-foreground mb-6 text-sm">
-        Advisory only — every report reads precomputed data; nothing here writes to the roster.
+        Advisory only: every report reads precomputed data; nothing here writes to the roster.
       </p>
       {/* ConsoleShell owns only the chrome — content supplies its own surface
           (R1/the Apollo Surface Language "the page is never white"). Without
