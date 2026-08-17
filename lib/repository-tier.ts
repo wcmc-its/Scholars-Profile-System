@@ -6,10 +6,20 @@
  * nothing on this dashboard reads them. Keep in sync if `catalog.py`'s `R`
  * list changes (repository added/removed, tier reclassified, or url moves).
  *
- * Tier is a pure function of `repository` (`DatasetDeposit.repository`,
- * always the canonical name — see `attribute.py`'s `d['repo']`). Priority
- * order, most to least severe, matches `catalog.py`'s own comment:
- * CONCERN > FOREIGN_OPEN > FOREIGN_CTRL > US_OPEN > US_CTRL > REGISTRY.
+ * `tierOf`'s tier is a pure function of `repository` (`DatasetDeposit
+ * .repository`, always the canonical name; see `attribute.py`'s
+ * `d['repo']`). Priority order, most to least severe, matches `catalog.py`'s
+ * own comment: CONCERN > FOREIGN_OPEN > FOREIGN_CTRL > US_OPEN > US_CTRL >
+ * REGISTRY.
+ *
+ * `effectiveTierOf` (2026-08-16, issue #2471) is the ONE deliberate exception
+ * to that pure-function invariant: Synapse hosts both open and access-
+ * controlled datasets, and `DatasetDeposit.accessModel` (per-deposit, synced
+ * from the pipeline) already knows which, a fact `catalog.py`'s static `R`
+ * list can't carry. Scoped to Synapse only, on this dashboard's own
+ * computations only; see that function's own doc comment for the exact rule.
+ * `REPO_TIER`/`tierOf` themselves are untouched and stay a faithful,
+ * access-blind port of `catalog.py`.
  *
  * Scope note (SPEC "Amended 08-13"): this tier lookup is the ONLY basis for
  * the "concerning" flag surfaced on the data-sharing dashboard
@@ -72,6 +82,40 @@ export const REPO_TIER: Record<string, string> = {
  *  upstream, port not yet updated). */
 export function tierOf(repository: string): string {
   return REPO_TIER[repository] ?? "UNKNOWN";
+}
+
+/** Effective tier for one deposit row (2026-08-16, issue #2471). Normally
+ *  identical to `tierOf(row.repository)` (every repository except Synapse,
+ *  unchanged). Synapse is a deliberate, ONE-REPOSITORY carve-out: `REPO_TIER`
+ *  above still lists Synapse as the static `"US_OPEN"` default (a faithful
+ *  port of `catalog.py`'s own classification, not touched by this function),
+ *  but `catalog.py`'s `R` list can't see the per-deposit access model that
+ *  `DatasetDeposit.accessModel` (`prisma/schema.prisma`, synced from the
+ *  pipeline) already carries. Synapse hosts both open and access-controlled
+ *  datasets, and the static table can only ever state one default.
+ *
+ *  Rule, in priority order: a Synapse row with `accessModel === "controlled"`
+ *  is bumped up to `"US_CTRL"` (more protected than the static default). A
+ *  Synapse row with `accessModel === "open"` stays `"US_OPEN"` (matches the
+ *  static default, nothing to bump). A Synapse row with `accessModel` `null`
+ *  or `undefined` (unknown) falls back to the static default `"US_OPEN"`
+ *  unchanged, same as today: this function never guesses a tier from
+ *  missing access-model data. Every non-Synapse repository ignores
+ *  `accessModel` entirely and returns `tierOf(row.repository)` as before.
+ *
+ *  This is NOT a general "any repository can be access-aware" mechanism;
+ *  see the confirmed approach on issue #2471. `catalog.py` and this file's
+ *  own `REPO_TIER`/`tierOf` stay the single static port; only this function,
+ *  and only for Synapse, reads a per-deposit fact on top of it. Callers with
+ *  an actual `DatasetLinkRow` in scope (`lib/api/data-sharing-report.ts`,
+ *  `components/edit/data-sharing-dashboard.tsx`) should call this instead of
+ *  `tierOf(row.repository)` directly; `tierOf` itself stays correct and in
+ *  use for every call site that only has a repository NAME, no row/
+ *  accessModel in scope (e.g. the dashboard's static `TIER_LABELS`/
+ *  `FILTERABLE_TIERS` UI lookups). */
+export function effectiveTierOf(row: { repository: string; accessModel?: string | null }): string {
+  if (row.repository === "Synapse" && row.accessModel === "controlled") return "US_CTRL";
+  return tierOf(row.repository);
 }
 
 /** Repository homepage, keyed identically to `REPO_TIER` (same 36 canonical

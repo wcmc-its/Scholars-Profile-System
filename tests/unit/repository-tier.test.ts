@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { REPO_TIER, REPO_URL, tierOf, urlOf } from "@/lib/repository-tier";
+import { effectiveTierOf, REPO_TIER, REPO_URL, tierOf, urlOf } from "@/lib/repository-tier";
 
 describe("tierOf", () => {
   it("resolves a CONCERN-tier repository", () => {
@@ -46,6 +46,33 @@ describe("tierOf", () => {
   it("has exactly 5 CONCERN-tier entries, matching catalog.py's R list", () => {
     const concernCount = Object.values(REPO_TIER).filter((t) => t === "CONCERN").length;
     expect(concernCount).toBe(5);
+  });
+});
+
+describe("effectiveTierOf, Synapse access-aware carve-out (issue #2471, 2026-08-16)", () => {
+  it("bumps a controlled-access Synapse row from the static US_OPEN default to US_CTRL", () => {
+    expect(effectiveTierOf({ repository: "Synapse", accessModel: "controlled" })).toBe("US_CTRL");
+    // Confirms the static port itself is untouched, still US_OPEN.
+    expect(tierOf("Synapse")).toBe("US_OPEN");
+  });
+
+  it("leaves an open-access Synapse row at US_OPEN, matching the static default with no bump", () => {
+    expect(effectiveTierOf({ repository: "Synapse", accessModel: "open" })).toBe("US_OPEN");
+  });
+
+  it("falls back to the static US_OPEN default for a Synapse row with unknown access model (regression guard: today's pre-fix behavior)", () => {
+    expect(effectiveTierOf({ repository: "Synapse", accessModel: null })).toBe("US_OPEN");
+    expect(effectiveTierOf({ repository: "Synapse", accessModel: undefined })).toBe("US_OPEN");
+    expect(effectiveTierOf({ repository: "Synapse" })).toBe("US_OPEN");
+  });
+
+  it("is a one-repository carve-out: every other repository ignores accessModel entirely, same as tierOf", () => {
+    // dbGaP is statically US_CTRL; a hypothetical "open" accessModel on a
+    // dbGaP row must NOT bump it toward US_OPEN. The access-aware rule is
+    // scoped to Synapse only, not a general mechanism.
+    expect(effectiveTierOf({ repository: "dbGaP", accessModel: "open" })).toBe("US_CTRL");
+    expect(effectiveTierOf({ repository: "GEO", accessModel: "controlled" })).toBe("US_OPEN");
+    expect(effectiveTierOf({ repository: "GEO", accessModel: null })).toBe(tierOf("GEO"));
   });
 });
 

@@ -110,7 +110,7 @@ import {
   type FacultySortKey,
   type SortDir,
 } from "@/lib/edit/data-sharing-dashboard";
-import { tierOf, urlOf } from "@/lib/repository-tier";
+import { effectiveTierOf, urlOf } from "@/lib/repository-tier";
 
 const thClass = "px-3 py-2 font-medium";
 const tdClass = "px-3 py-2";
@@ -702,13 +702,21 @@ function RepositoriesSection({ report, ui }: { report: DataSharingReport; ui: Da
   // derive locally rather than taking a redundant `filtersActive` prop.
   const filtersActive = hasActiveFilters(ui.filters);
   const sortedDepartments = sortDepartments(report.byDepartment, ui.deptSort, ui.deptDir);
-  // Synapse-shaped contradiction check (2026-08-16 review): does any
-  // repository's tier-implied access model (open/controlled, from
-  // TIER_LABELS) disagree with its actually-observed per-deposit Access
-  // column? Confirmed via staging probe this is currently true for Synapse
-  // (tiered US-hosted/open, all 11 observed deposits controlled) — a
-  // platform-level catalog classification, not a per-deposit fact, so the
-  // footnote only fires when the data actually shows a disagreement.
+  // Contradiction check (2026-08-16 review): does any repository's
+  // tier-implied access model (open/controlled, from TIER_LABELS) disagree
+  // with its actually-observed per-deposit Access column? Originally written
+  // against Synapse (tiered US-hosted/open, all 11 observed deposits
+  // controlled). That specific case is now RESOLVED by issue #2471's
+  // access-aware `effectiveTierOf` fix (2026-08-16): `report.byRepository`'s
+  // `tier` for Synapse is no longer the bare static "US-hosted, open"
+  // default, it's the most-severe effective tier actually observed
+  // (`aggregateByRepository`'s doc comment), which for today's all-controlled
+  // Synapse data is "US-hosted, controlled", matching its own Access column,
+  // so this predicate no longer fires for Synapse. Left in place as a general
+  // safety net for any OTHER repository whose static tier and observed
+  // per-deposit access disagree (a real data-quality signal worth a
+  // footnote, whichever repository it turns up on next); the check itself
+  // was never Synapse-specific, only its one observed trigger case was.
   const tierAccessMismatch = report.byRepository.some((r) => {
     const tierImpliesOpen = TIER_LABELS[r.tier]?.includes("open");
     const tierImpliesControlled = TIER_LABELS[r.tier]?.includes("controlled");
@@ -837,8 +845,8 @@ function RepositoriesSection({ report, ui }: { report: DataSharingReport; ui: Da
           Tier is the shared risk catalog&apos;s platform-level classification (host jurisdiction ×
           typical access model), not a per-deposit fact — a repository&apos;s Access column (the
           actually observed access model on WCM&apos;s deposits there) can disagree with what its
-          tier name implies, e.g. Synapse tiers &ldquo;US-hosted, open&rdquo; but every WCM deposit
-          observed there today is controlled.
+          tier name implies, e.g. a repository tiered &ldquo;open&rdquo; whose WCM deposits observed
+          today are all controlled.
         </p>
       )}
 
@@ -1325,7 +1333,7 @@ function RecentActivitySection({
                       : "—"}
                   </td>
                   <td className={tdClass}>
-                    <TierChip tier={tierOf(r.repository)} />
+                    <TierChip tier={effectiveTierOf(r)} />
                   </td>
                   <td className={tdClass}>
                     <AccessChip accessModel={r.accessModel} />

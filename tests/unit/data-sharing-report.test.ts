@@ -448,6 +448,128 @@ describe("buildDataSharingReport — risk tier (this PR)", () => {
   });
 });
 
+/** Synapse access-aware effective tier (issue #2471, 2026-08-16): three
+ *  Synapse rows, one per `accessModel` outcome (controlled, open, and
+ *  unknown/null), plus a non-Synapse US_CTRL row (dbGaP) so the tier
+ *  filter/rollup tests below have more than one tier to distinguish. */
+const SYNAPSE_ROWS: DatasetLinkRow[] = [
+  {
+    cwid: "syn1",
+    scholarName: "Syn One",
+    scholarSlug: "syn-one",
+    department: "Medicine",
+    datasetId: "dsyn-ctrl",
+    repository: "Synapse",
+    accessModel: "controlled",
+    pmids: ["psyn-ctrl"],
+  },
+  {
+    cwid: "syn2",
+    scholarName: "Syn Two",
+    scholarSlug: "syn-two",
+    department: "Medicine",
+    datasetId: "dsyn-open",
+    repository: "Synapse",
+    accessModel: "open",
+    pmids: ["psyn-open"],
+  },
+  {
+    cwid: "syn3",
+    scholarName: "Syn Three",
+    scholarSlug: "syn-three",
+    department: "Medicine",
+    datasetId: "dsyn-unknown",
+    repository: "Synapse",
+    accessModel: null,
+    pmids: ["psyn-unknown"],
+  },
+  {
+    cwid: "dbg1",
+    scholarName: "DbGaP One",
+    scholarSlug: "dbgap-one",
+    department: "Surgery",
+    datasetId: "ddbgap",
+    repository: "dbGaP",
+    accessModel: "controlled",
+    pmids: ["pdbgap"],
+  },
+];
+
+describe("Synapse access-aware effective tier (issue #2471, 2026-08-16)", () => {
+  it("aggregateByRepository: an all-controlled Synapse deposit set reports US_CTRL, not the static US_OPEN default", () => {
+    const byRepo = aggregateByRepository(SYNAPSE_ROWS.filter((r) => r.datasetId === "dsyn-ctrl"));
+    expect(byRepo.find((r) => r.repository === "Synapse")).toMatchObject({ tier: "US_CTRL" });
+  });
+
+  it("aggregateByRepository: an all-open Synapse deposit set still reports US_OPEN (regression guard, unchanged from today)", () => {
+    const byRepo = aggregateByRepository(SYNAPSE_ROWS.filter((r) => r.datasetId === "dsyn-open"));
+    expect(byRepo.find((r) => r.repository === "Synapse")).toMatchObject({ tier: "US_OPEN" });
+  });
+
+  it("aggregateByRepository: a null-accessModel Synapse deposit falls back to US_OPEN unchanged (no guessing on missing data)", () => {
+    const byRepo = aggregateByRepository(SYNAPSE_ROWS.filter((r) => r.datasetId === "dsyn-unknown"));
+    expect(byRepo.find((r) => r.repository === "Synapse")).toMatchObject({ tier: "US_OPEN" });
+  });
+
+  it("aggregateByRepository: a MIXED Synapse deposit set (controlled + open) reports the MOST SEVERE effective tier, US_OPEN, the documented one-row design decision", () => {
+    const mixed = SYNAPSE_ROWS.filter((r) => r.datasetId === "dsyn-ctrl" || r.datasetId === "dsyn-open");
+    const byRepo = aggregateByRepository(mixed);
+    // Still ONE Synapse row (no split), datasets = 2 (both counted), tier =
+    // US_OPEN because US_OPEN outranks US_CTRL in TIER_ORDER's severity
+    // order (open is the higher-risk fact); see aggregateByRepository's own
+    // doc comment for why this is the conservative, not arbitrary, choice.
+    const synapseRows = byRepo.filter((r) => r.repository === "Synapse");
+    expect(synapseRows).toHaveLength(1);
+    expect(synapseRows[0]).toMatchObject({ tier: "US_OPEN", datasets: 2 });
+  });
+
+  it("countConcerningDeposits: Synapse never counts as concerning or foreign-hosted regardless of accessModel, since US_OPEN/US_CTRL are both outside CONCERNING_TIERS", () => {
+    const totals = countConcerningDeposits(SYNAPSE_ROWS);
+    expect(totals).toEqual({ concerningDeposits: 0, foreignHostedDeposits: 0 });
+  });
+
+  it("tierPubSpectrum: a controlled Synapse row's citing pub lands in the US_CTRL bucket, not US_OPEN", () => {
+    const spectrum = tierPubSpectrum(SYNAPSE_ROWS.filter((r) => r.datasetId === "dsyn-ctrl"));
+    const byTier = new Map(spectrum.map((s) => [s.tier, s.pubs]));
+    expect(byTier.get("US_CTRL")).toBe(1);
+    expect(byTier.get("US_OPEN")).toBe(0);
+  });
+
+  it("applyReportFilters: the tier filter matches a controlled Synapse row against US_CTRL, not US_OPEN", () => {
+    const ctrlRow = SYNAPSE_ROWS.filter((r) => r.datasetId === "dsyn-ctrl");
+    expect(applyReportFilters(ctrlRow, { tiers: ["US_CTRL"] })).toHaveLength(1);
+    expect(applyReportFilters(ctrlRow, { tiers: ["US_OPEN"] })).toHaveLength(0);
+  });
+
+  it("applyReportFilters: an open Synapse row still matches US_OPEN (regression guard)", () => {
+    const openRow = SYNAPSE_ROWS.filter((r) => r.datasetId === "dsyn-open");
+    expect(applyReportFilters(openRow, { tiers: ["US_OPEN"] })).toHaveLength(1);
+    expect(applyReportFilters(openRow, { tiers: ["US_CTRL"] })).toHaveLength(0);
+  });
+
+  it("applyReportFilters: a null-accessModel Synapse row falls back to matching US_OPEN, same as today", () => {
+    const unknownRow = SYNAPSE_ROWS.filter((r) => r.datasetId === "dsyn-unknown");
+    expect(applyReportFilters(unknownRow, { tiers: ["US_OPEN"] })).toHaveLength(1);
+    expect(applyReportFilters(unknownRow, { tiers: ["US_CTRL"] })).toHaveLength(0);
+  });
+
+  it("buildDataSharingReport end-to-end: byRepository, byRepositoryTier, and the tier filter all agree a controlled Synapse deposit is US_CTRL (no cross-aggregate disagreement)", () => {
+    const report = buildDataSharingReport(SYNAPSE_ROWS);
+    const synapseRow = report.byRepository.find((r) => r.repository === "Synapse")!;
+    // Mixed today (controlled + open + unknown); most severe is US_OPEN,
+    // same rule exercised in isolation above.
+    expect(synapseRow.tier).toBe("US_OPEN");
+    // The US_CTRL tier bucket must still carry the controlled Synapse pub,
+    // not be swallowed by the rollup row's single displayed "US_OPEN" tier.
+    expect(report.pubsByTier.find((t) => t.tier === "US_CTRL")?.pubs).toBeGreaterThanOrEqual(2); // dbGaP + Synapse-controlled
+    // Filtering to US_CTRL only must return exactly the controlled Synapse
+    // row and the dbGaP row, not the open/unknown Synapse rows, proving the
+    // filter reads each row's OWN effective tier, not the rollup's.
+    const filtered = applyReportFilters(SYNAPSE_ROWS, { tiers: ["US_CTRL"] });
+    expect(filtered.map((r) => r.datasetId).sort()).toEqual(["dsyn-ctrl", "ddbgap"].sort());
+  });
+});
+
 /** One row per sub-type, plus a second row on the same (genomic, WGS/WES)
  *  sub-type as the first row, to exercise the deposit-INSTANCE (row) count —
  *  not distinct-dataset — counting rule; a row that lists two sub-types (the
