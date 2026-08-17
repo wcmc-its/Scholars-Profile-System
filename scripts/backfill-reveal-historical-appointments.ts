@@ -11,6 +11,15 @@
  * it on purpose" apart from "still at the old default" except via the audit
  * log, so the audit log is the source of truth for "untouched."
  *
+ * Two connections, one process: the `etl` DB role (DATABASE_URL, writable)
+ * has no grant on the `scholars_audit` schema — confirmed live on staging
+ * (ER_TABLEACCESS_DENIED_ERROR) — only the app-ro role (DATABASE_URL_RO,
+ * already injected on sps-etl-<env> alongside DATABASE_URL) can read it. So
+ * planning reads `appointment` + `scholars_audit` over the RO connection,
+ * and only the final UPDATE (`appointment` only, which the etl role can
+ * write) uses the RW connection. Local dev typically has one role with both
+ * grants — DATABASE_URL_RO absent there just falls back to DATABASE_URL.
+ *
  * Dry-run by default; pass --apply to write.
  *
  * Run (needs DATABASE_URL; in-VPC, e.g. via sps-etl-<env>):
@@ -18,7 +27,7 @@
  *   npx tsx scripts/backfill-reveal-historical-appointments.ts --apply
  */
 import "dotenv/config";
-import { createConnection } from "mariadb";
+import { createConnection, type Connection } from "mariadb";
 
 /** Pure set-difference so the "don't touch curator decisions" rule is
  *  testable without a database. */
@@ -28,55 +37,66 @@ export function idsToReveal(hiddenExternalIds: string[], auditedExternalIds: Set
 
 const CHUNK = 500;
 
-async function main(): Promise<void> {
-  const apply = process.argv.includes("--apply");
-  const url = process.env.DATABASE_URL;
+async function connect(url: string | undefined, label: string): Promise<Connection> {
   if (!url) {
-    console.error("DATABASE_URL not set. Copy .env.example to .env.local and set it.");
+    console.error(`${label} not set. Copy .env.example to .env.local and set it.`);
     process.exit(1);
   }
   const u = new URL(url);
-  const conn = await createConnection({
+  return createConnection({
     host: u.hostname,
     port: u.port ? Number(u.port) : 3306,
     user: decodeURIComponent(u.username),
     password: u.password ? decodeURIComponent(u.password) : undefined,
     database: u.pathname.slice(1),
   });
+}
 
+async function main(): Promise<void> {
+  const apply = process.argv.includes("--apply");
+  // RO first (sees scholars_audit); RW is the plain DATABASE_URL every env has.
+  const ro = await connect(process.env.DATABASE_URL_RO ?? process.env.DATABASE_URL, "DATABASE_URL_RO/DATABASE_URL");
+
+  let toReveal: string[];
   try {
-    const hiddenRows: Array<{ external_id: string }> = await conn.query(
+    const hiddenRows: Array<{ external_id: string }> = await ro.query(
       "SELECT external_id FROM appointment WHERE source = 'ED-HISTORICAL' AND show_on_profile = 0",
     );
-    const auditedRows: Array<{ target_entity_id: string }> = await conn.query(
+    const auditedRows: Array<{ target_entity_id: string }> = await ro.query(
       "SELECT DISTINCT target_entity_id FROM scholars_audit.manual_edit_audit " +
         "WHERE target_entity_type = 'appointment' AND action = 'appointment_visibility_set'",
     );
     const audited = new Set(auditedRows.map((r) => r.target_entity_id));
-    const toReveal = idsToReveal(hiddenRows.map((r) => r.external_id), audited);
+    toReveal = idsToReveal(hiddenRows.map((r) => r.external_id), audited);
 
     console.log(`${hiddenRows.length} historical rows currently hidden`);
     console.log(`${audited.size} appointments have a curator visibility decision on file`);
     console.log(`${toReveal.length} rows are untouched defaults -- would flip to showOnProfile=true`);
+  } finally {
+    await ro.end();
+  }
 
-    if (!apply) {
-      console.log("\nDry run only (default). Re-run with --apply to write.");
-      return;
-    }
-    if (toReveal.length === 0) {
-      console.log("nothing to do");
-      return;
-    }
+  if (!apply) {
+    console.log("\nDry run only (default). Re-run with --apply to write.");
+    return;
+  }
+  if (toReveal.length === 0) {
+    console.log("nothing to do");
+    return;
+  }
+
+  const rw = await connect(process.env.DATABASE_URL, "DATABASE_URL");
+  try {
     for (let i = 0; i < toReveal.length; i += CHUNK) {
       const chunk = toReveal.slice(i, i + CHUNK);
-      await conn.query(
+      await rw.query(
         `UPDATE appointment SET show_on_profile = 1 WHERE external_id IN (${chunk.map(() => "?").join(",")})`,
         chunk,
       );
     }
     console.log(`updated ${toReveal.length} rows`);
   } finally {
-    await conn.end();
+    await rw.end();
   }
 }
 
