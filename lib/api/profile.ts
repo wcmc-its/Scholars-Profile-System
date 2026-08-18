@@ -41,6 +41,7 @@ import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import { getScholarCenterAffiliations, type ScholarCenterAffiliation } from "@/lib/api/centers";
 import { isProfileCenterAffiliationEnabled } from "@/lib/profile/center-affiliation-flag";
 import type { ProfileAppointmentEntry } from "@/lib/profile/profile-appointments";
+import { shouldSuppressPreStart } from "@/lib/appointment-artifacts";
 import { rankForSelectedHighlights, scorePublication, type ScoredPublication } from "@/lib/ranking";
 
 // `isFundingActive` (issue #78, decision Q6) moved to the Prisma-free
@@ -1545,13 +1546,16 @@ export const getScholarFullProfileBySlug = cache(
       // #1323 — REVEALED historical appointments only (`ED-HISTORICAL` +
       // showOnProfile). Hidden rows are omitted so this CloudFront PATH-cached
       // payload stays viewer-independent. Sorted by end date descending (most
-      // recent first; nulls last).
+      // recent first; nulls last). `shouldSuppressPreStart` additionally hides
+      // a "Pre-Start Academic" placeholder once the scholar has any OTHER
+      // appointment on file — see lib/appointment-artifacts.ts.
       pastAppointments: scholar.appointments
         .filter(
           (a) =>
             a.source === "ED-HISTORICAL" &&
             a.showOnProfile === true &&
-            !suppressedAppointmentIds.has(a.externalId),
+            !suppressedAppointmentIds.has(a.externalId) &&
+            !shouldSuppressPreStart(a.title, scholar.appointments.length),
         )
         .sort((a, b) => {
           const ae = a.endDate ? a.endDate.getTime() : -Infinity;
