@@ -59,20 +59,21 @@ const ROLE_LABEL: Record<"owner" | "curator" | "scholar" | "comms_steward", stri
 };
 
 /** Compact unit-kind suffix for the banner's subject line. */
-const KIND_SHORT: Record<"department" | "division" | "center", string> = {
+const KIND_SHORT: Record<"department" | "division" | "center" | "core", string> = {
   department: "Dept",
   division: "Div",
   center: "Center",
+  core: "Core",
 };
 
 /**
  * The subject descriptor after the name: a plain `Scholar`, or
- * `Owner · {unit} ({Dept|Div|Center})` for a unit owner/curator (ADR-005
+ * `Owner · {unit} ({Dept|Div|Center|Core})` for a unit owner/curator (ADR-005
  * Amendment 1 role × unit-kind, #540).
  */
 function subjectDescriptor(im: {
   role: "owner" | "curator" | "scholar" | "comms_steward";
-  unitKind: "department" | "division" | "center" | null;
+  unitKind: "department" | "division" | "center" | "core" | null;
   unit: string | null;
 }): string {
   // A scholar and a comms_steward both carry no administered unit — the role

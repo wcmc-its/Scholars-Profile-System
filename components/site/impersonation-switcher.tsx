@@ -21,12 +21,14 @@ import { Button } from "@/components/ui/button";
  * non-superuser never even ships this control.
  *
  * Lets a superuser pick whom to view/act as: a debounced search by name or CWID,
- * **unit-kind** filter chips (All · Department · Division · Center · Scholar —
- * the data-scoping axis), and a list of assumable targets from
+ * **unit-kind** filter chips (All · Department · Division · Center · Core ·
+ * Scholar — the data-scoping axis), and a list of assumable targets from
  * `GET /api/impersonation/candidates`. Each row reads `Name` over
- * `{Owner|Curator} · {unit} ({Dept|Div|Center})` (or `Scholar`), per the real
- * RBAC model (ADR-005 Amendment 1 / #540). Superusers are pre-filtered
- * server-side (R2), so no row here can escalate.
+ * `{Owner|Curator} · {unit} ({Dept|Div|Center|Core})` (or `Scholar`), per the
+ * real RBAC model (ADR-005 Amendment 1 / #540, widened for cores-as-org-units —
+ * a core owner/curator is often non-faculty staff, exactly who "View as" exists
+ * to preview). Superusers are pre-filtered server-side (R2), so no row here can
+ * escalate.
  *
  * **Confirm semantics (§8).** Choosing a user **always** opens a confirm dialog
  * — it states writes are attributed to the real actor (R3), the confused-deputy
@@ -39,7 +41,7 @@ import { Button } from "@/components/ui/button";
  */
 
 type CandidateRole = "owner" | "curator" | "scholar" | "comms_steward";
-type UnitKind = "department" | "division" | "center";
+type UnitKind = "department" | "division" | "center" | "core";
 
 /** A row from `/api/impersonation/candidates` (§7). */
 type Candidate = {
@@ -57,6 +59,7 @@ const KIND_FILTERS: ReadonlyArray<{ key: "all" | UnitKind | "scholar"; label: st
   { key: "department", label: "Department" },
   { key: "division", label: "Division" },
   { key: "center", label: "Center" },
+  { key: "core", label: "Core" },
   { key: "scholar", label: "Scholar" },
 ];
 
@@ -71,6 +74,7 @@ const KIND_SHORT: Record<UnitKind, string> = {
   department: "Dept",
   division: "Div",
   center: "Center",
+  core: "Core",
 };
 
 /** `Owner · Cardiology (Dept)` for a unit role; plain `Scholar` or

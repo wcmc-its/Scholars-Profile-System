@@ -5,7 +5,7 @@
  * `GET /api/impersonation/candidates?kind=&q=` powers the switcher popover
  * (`components/site/impersonation-switcher.tsx`): the superuser searches by name
  * or CWID, optionally filtered by **unit-kind** chip
- * (All · Department · Division · Center · Scholar), and gets back rows
+ * (All · Department · Division · Center · Core · Scholar), and gets back rows
  * `{ cwid, preferredName, slug, role, unitKind, unit }` to "View as".
  *
  * Two security properties live in this query so the UI is never the boundary:
@@ -16,13 +16,13 @@
  *        return a target the actor would be rejected for at `POST` time
  *        (down-only escalation guard); the switcher should not even offer them.
  *
- * Role/unit labels follow the real RBAC model (ADR-005 Amendment 1 / #540): a
- * candidate's `role` (`owner`/`curator`) and `unitKind`
- * (`department`/`division`/`center`) come from their most-privileged
- * `unit_admin` grant (`pickDisplayGrant`, shared with the probe so both
- * classify identically); `unit` is that administered unit's display name. A
- * CWID with no grant is a `scholar` (`unitKind: null`, `unit`: home department
- * for context). The query is bounded (≤50 rows, `q`-filtered) so the
+ * Role/unit labels follow the real RBAC model (ADR-005 Amendment 1 / #540,
+ * widened for cores-as-org-units): a candidate's `role` (`owner`/`curator`) and
+ * `unitKind` (`department`/`division`/`center`/`core`) come from their
+ * most-privileged `unit_admin` grant (`pickDisplayGrant`, shared with the probe
+ * so both classify identically); `unit` is that administered unit's display
+ * name. A CWID with no grant is a `scholar` (`unitKind: null`, `unit`: home
+ * department for context). The query is bounded (≤50 rows, `q`-filtered) so the
  * per-candidate superuser pre-filter and the unit-name lookups stay small.
  *
  * Node runtime by construction: `isSuperuser` (`lib/auth/superuser.ts`) runs a
@@ -69,6 +69,7 @@ function parseKind(value: string | null): KindFilter {
   return value === "department" ||
     value === "division" ||
     value === "center" ||
+    value === "core" ||
     value === "scholar"
     ? value
     : "all";
@@ -179,11 +180,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     department: new Set(),
     division: new Set(),
     center: new Set(),
+    core: new Set(),
   };
   for (const top of topByCwid.values()) {
     if (top) codesByKind[top.entityType].add(top.entityId);
   }
-  const [deptNames, divNames, centerNames] = await Promise.all([
+  const [deptNames, divNames, centerNames, coreNames] = await Promise.all([
     unitNameMap(
       (codes) =>
         db.read.department.findMany({
@@ -208,11 +210,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         }),
       codesByKind.center,
     ),
+    // `Core`'s PK is `id`, not `code` — remapped to the shared `{code, name}` shape.
+    unitNameMap(
+      (codes) =>
+        db.read.core
+          .findMany({ where: { id: { in: codes } }, select: { id: true, name: true } })
+          .then((rows) => rows.map((r) => ({ code: r.id, name: r.name }))),
+      codesByKind.core,
+    ),
   ]);
   const nameMaps: Record<ImpersonationUnitKind, Map<string, string>> = {
     department: deptNames,
     division: divNames,
     center: centerNames,
+    core: coreNames,
   };
 
   // R2 pre-filter — drop any candidate who is themselves a superuser. The check
@@ -358,6 +369,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         department: new Set(),
         division: new Set(),
         center: new Set(),
+        core: new Set(),
       };
       for (const s of subjects) {
         const top = s.top!; // non-null: filtered above
@@ -365,7 +377,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           extraCodes[top.entityType].add(top.entityId);
         }
       }
-      const [xDept, xDiv, xCenter] = await Promise.all([
+      const [xDept, xDiv, xCenter, xCore] = await Promise.all([
         unitNameMap(
           (codes) =>
             db.read.department.findMany({
@@ -390,10 +402,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             }),
           extraCodes.center,
         ),
+        unitNameMap(
+          (codes) =>
+            db.read.core
+              .findMany({ where: { id: { in: codes } }, select: { id: true, name: true } })
+              .then((rows) => rows.map((r) => ({ code: r.id, name: r.name }))),
+          extraCodes.core,
+        ),
       ]);
       for (const [code, name] of xDept) nameMaps.department.set(code, name);
       for (const [code, name] of xDiv) nameMaps.division.set(code, name);
       for (const [code, name] of xCenter) nameMaps.center.set(code, name);
+      for (const [code, name] of xCore) nameMaps.core.set(code, name);
 
       subjects.forEach((s, i) => {
         if (adminSuperuserFlags[i]) return; // R2 — not assumable
