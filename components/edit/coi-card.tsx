@@ -118,7 +118,12 @@ export function CoiCard({
           Disclosures are managed in the Weill Research Gateway. Use Request a Change to correct one at
           its source.
         </p>
-        <RequestAChangeDialog attribute="coi" cwid={cwid} triggerTestId="request-a-change-toggle" />
+        <RequestAChangeDialog
+          attribute="coi"
+          cwid={cwid}
+          scholarName={scholarName}
+          triggerTestId="request-a-change-toggle"
+        />
       </div>
     </EditPanel>
   );

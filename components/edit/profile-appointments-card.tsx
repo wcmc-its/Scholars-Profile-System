@@ -30,6 +30,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { isCollegeProfessorialTitleBlocked } from "@/lib/edit/profile-appointment";
 import { cn } from "@/lib/utils";
 
 type Category = "WCM_LEADERSHIP" | "EXTERNAL";
@@ -179,7 +180,7 @@ export function ProfileAppointmentsCard({ cwid, mode, scholarName }: ProfileAppo
       heading="Additional positions"
       owned
       subsection
-      description={`Add roles and appointments the WCM directory feeds don't carry — internal WCM leadership and positions at other institutions. These appear only on ${possessive} public profile, never on center, department, division, or search pages.`}
+      description={`Add roles and appointments the WCM directory feeds don't carry: internal WCM leadership and positions at other institutions. These appear only on ${possessive} public profile, never on center, department, division, or search pages.`}
     >
       {loadError ? (
         <Alert variant="destructive">
@@ -325,7 +326,9 @@ function AppointmentForm({
   // Client mirror of the route's date-range rule (start ≤ end when both present);
   // the server re-validates regardless.
   const rangeOk = !draft.startDate || !draft.endDate || draft.startDate <= draft.endDate;
-  const canSubmit = titleOk && orgOk && rangeOk && !busy;
+  // Client mirror of the route's College-title rule (#2481); server re-validates.
+  const collegeTitleBlocked = isCollegeProfessorialTitleBlocked(draft.title, draft.organization);
+  const canSubmit = titleOk && orgOk && rangeOk && !collegeTitleBlocked && !busy;
 
   return (
     <div
@@ -370,6 +373,15 @@ function AppointmentForm({
           data-testid={`profile-appointment-organization-${idPrefix}`}
         />
       </label>
+
+      {collegeTitleBlocked ? (
+        <p className="text-destructive text-xs">
+          Faculty rank titles at Weill Cornell Medicine come from the official appointment record
+          and can&rsquo;t be added here. They&rsquo;ll appear automatically. For a Weill Cornell
+          Graduate School of Medical Sciences appointment, include &ldquo;Graduate School&rdquo; in
+          the organization field.
+        </p>
+      ) : null}
 
       <label className="flex flex-col gap-1 text-sm">
         <span className="font-medium">
@@ -499,9 +511,11 @@ function mapErrorToMessage(code: string): string {
     case "required":
       return "Title and organization are required.";
     case "too_long":
-      return "One of the fields is too long — please shorten it.";
+      return "One of the fields is too long. Please shorten it.";
     case "invalid_category":
       return "Please choose a valid appointment type.";
+    case "college_title_blocked":
+      return "Faculty rank titles at Weill Cornell Medicine come from the official appointment record and can't be added here. For a Graduate School appointment, include \"Graduate School\" in the organization field.";
     case "invalid_date":
       return "Please enter valid dates.";
     case "invalid_date_range":
@@ -512,6 +526,6 @@ function mapErrorToMessage(code: string): string {
     case "forbidden":
       return "You no longer have access to edit this profile. Refresh the page and try again.";
     default:
-      return "Something went wrong — your changes weren’t saved. Please try again.";
+      return "Something went wrong. Your changes weren’t saved. Please try again.";
   }
 }

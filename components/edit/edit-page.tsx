@@ -949,6 +949,7 @@ function renderPanel(
         <ReadonlyAttributePanel
           attribute="name-title"
           cwid={cwid}
+          scholarName={scholarName}
           heading="Name & Title"
           description="Name, title, degrees, department, and ORCID come from the WCM directory and faculty records."
           fields={[
@@ -978,6 +979,7 @@ function renderPanel(
         <ReadonlyAttributePanel
           attribute="photo"
           cwid={cwid}
+          scholarName={scholarName}
           heading="Photo"
           description="Your profile photo comes from the WCM directory."
           media={
@@ -1286,7 +1288,9 @@ function renderPanel(
         );
       }
       if (!slugRequestEnabled) {
-        return <ProfileUrlReadonlyPanel slug={ctx.scholar.slug} cwid={cwid} />;
+        return (
+          <ProfileUrlReadonlyPanel slug={ctx.scholar.slug} cwid={cwid} scholarName={scholarName} />
+        );
       }
       return (
         <SlugRequestCard
@@ -1314,7 +1318,15 @@ function renderPanel(
 /** The read-only Profile URL panel shown to scholars while `SELF_EDIT_SLUG_REQUEST`
  *  is off (T3.6): their live URL, plus an honest note that custom URLs aren't
  *  self-serve yet. No input, no request form, no unsaved-changes guard. */
-function ProfileUrlReadonlyPanel({ slug, cwid }: { slug: string; cwid: string }) {
+function ProfileUrlReadonlyPanel({
+  slug,
+  cwid,
+  scholarName,
+}: {
+  slug: string;
+  cwid: string;
+  scholarName: string;
+}) {
   const currentUrl = `${publicProfileHost()}/${slug}`;
   return (
     <EditPanel
@@ -1333,19 +1345,20 @@ function ProfileUrlReadonlyPanel({ slug, cwid }: { slug: string; cwid: string })
       </p>
       <div className="text-muted-foreground flex flex-col gap-2 text-sm">
         <p>
-          Personalized URLs aren&rsquo;t self-service, but you can request one &mdash; a Scholars
+          Personalized URLs aren&rsquo;t self-service, but you can request one: a Scholars
           administrator reviews every request.
         </p>
         <p>
-          A personalized URL must be a variation of your own first and last name &mdash; optionally
-          with a middle initial or fuller form &mdash; not a research area or other handle, using
-          lowercase letters, numbers, and hyphens only. The older{" "}
+          A personalized URL must be a variation of your own first and last name (optionally with a
+          middle initial or fuller form), not a research area or other handle, using lowercase
+          letters, numbers, and hyphens only. The older{" "}
           <code className="font-mono">/scholars/{slug}</code> address still redirects here.
         </p>
       </div>
       <RequestAChangeDialog
         attribute="profile-url"
         cwid={cwid}
+        scholarName={scholarName}
         triggerTestId="profile-url-request-change"
       />
     </EditPanel>
