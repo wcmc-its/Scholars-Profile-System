@@ -51,11 +51,25 @@ const RETURN_BUTTON_STYLE = {
   "--tw-ring-offset-color": "#7a4f01",
 } as CSSProperties;
 
-const ROLE_LABEL: Record<"owner" | "curator" | "scholar" | "comms_steward", string> = {
+type SubjectRole =
+  | "owner"
+  | "curator"
+  | "scholar"
+  | "comms_steward"
+  | "cv_generator"
+  | "honors_curator"
+  | "data_sharing_viewer"
+  | "development";
+
+const ROLE_LABEL: Record<SubjectRole, string> = {
   owner: "Owner",
   curator: "Curator",
   scholar: "Scholar",
   comms_steward: "Communications Steward",
+  cv_generator: "CV Generator",
+  honors_curator: "Honors Curator",
+  data_sharing_viewer: "Data Sharing Viewer",
+  development: "Development",
 };
 
 /** Compact unit-kind suffix for the banner's subject line. */
@@ -72,13 +86,15 @@ const KIND_SHORT: Record<"department" | "division" | "center" | "core", string> 
  * Amendment 1 role × unit-kind, #540).
  */
 function subjectDescriptor(im: {
-  role: "owner" | "curator" | "scholar" | "comms_steward";
+  role: SubjectRole;
   unitKind: "department" | "division" | "center" | "core" | null;
   unit: string | null;
 }): string {
-  // A scholar and a comms_steward both carry no administered unit — the role
-  // label stands alone.
-  if (im.role === "scholar" || im.role === "comms_steward") return ROLE_LABEL[im.role];
+  // Only owner/curator carry an administered unit — every other role (a plain
+  // scholar, comms_steward, or any global LDAP-group role) stands alone. A
+  // positive check (owner/curator) rather than an enumeration of the unit-less
+  // roles, so a future role added to `SubjectRole` needs no edit here.
+  if (im.role !== "owner" && im.role !== "curator") return ROLE_LABEL[im.role];
   const unit = im.unit ? ` · ${im.unit}` : "";
   const kind = im.unitKind ? ` (${KIND_SHORT[im.unitKind]})` : "";
   return `${ROLE_LABEL[im.role]}${unit}${kind}`;
