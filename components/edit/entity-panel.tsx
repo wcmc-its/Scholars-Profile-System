@@ -267,6 +267,7 @@ export function EntityPanel<T extends EntityRow>({
             <RequestAChangeDialog
               attribute={getRequestAttribute ? getRequestAttribute(e) : REQUEST_ATTR[entityType]}
               cwid={cwid}
+              scholarName={scholarName}
               itemLabel={getTitle(e)}
             />
           }

@@ -543,6 +543,7 @@ export function CoiGapCard({
       <RequestAChangeDialog
         attribute="coi"
         cwid={cwid}
+        scholarName={scholarName}
         itemLabel={label}
         triggerTestId={testid}
         trigger={(open) => (

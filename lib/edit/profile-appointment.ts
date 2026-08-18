@@ -25,6 +25,28 @@ export function isProfileAppointmentCategory(
   );
 }
 
+/**
+ * A "College" faculty rank (Professor / Associate Professor / Assistant
+ * Professor / Clinical Professor / etc.) at Weill Cornell Medicine comes from
+ * the official ED faculty-appointment feed, not self-entry (#2481) — letting a
+ * scholar hand-enter one here would create an unverified duplicate of the
+ * authoritative record. The Graduate School isn't on that feed, so it's exempt.
+ */
+const COLLEGE_PROFESSORIAL_TITLE = /\bprofessor\b/i;
+const WEILL_ORGANIZATION = /\bweill\b/i;
+const GRADUATE_SCHOOL_ORGANIZATION = /graduate school/i;
+
+/** True when `title`/`organization` looks like a self-entered College faculty
+ *  rank rather than a WCM leadership role or an external appointment. Shared
+ *  by the client form (live warning) and the server validator (authoritative). */
+export function isCollegeProfessorialTitleBlocked(title: string, organization: string): boolean {
+  return (
+    COLLEGE_PROFESSORIAL_TITLE.test(title) &&
+    WEILL_ORGANIZATION.test(organization) &&
+    !GRADUATE_SCHOOL_ORGANIZATION.test(organization)
+  );
+}
+
 /** VarChar(255) cap on the free-text fields (title / organization / unit / location). */
 export const PROFILE_APPOINTMENT_TEXT_MAX = 255;
 /** Upper bound on the manual `sortOrder` (mirrors the center-program editor). */
@@ -93,6 +115,9 @@ export function validateProfileAppointmentInput(
   if (!title.ok) return title;
   const organization = validateRequiredText(body.organization, "organization");
   if (!organization.ok) return organization;
+  if (isCollegeProfessorialTitleBlocked(title.value, organization.value)) {
+    return { ok: false, error: "college_title_blocked", field: "title" };
+  }
 
   const unit = validateOptionalText(body.unit, "unit");
   if (!unit.ok) return unit;

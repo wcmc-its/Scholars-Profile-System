@@ -586,6 +586,7 @@ function PublicationRow({
               <RequestAChangeDialog
                 attribute="publications"
                 cwid={cwid}
+                scholarName={scholarName}
                 itemLabel={pub.title}
                 initialIssueId="publication-not-mine"
                 trigger={(open) => (
@@ -602,7 +603,12 @@ function PublicationRow({
                 )}
               />
             ))}
-          <RequestAChangeDialog attribute="publications" cwid={cwid} itemLabel={pub.title} />
+          <RequestAChangeDialog
+            attribute="publications"
+            cwid={cwid}
+            scholarName={scholarName}
+            itemLabel={pub.title}
+          />
         </div>
       </div>
       {error && (

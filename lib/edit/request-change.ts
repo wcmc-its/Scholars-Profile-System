@@ -10,6 +10,7 @@
  * is defense in depth, not the primary gate).
  */
 import { REQUEST_A_CHANGE, type RequestAttribute } from "@/lib/edit/request-a-change";
+import { siteBaseUrl } from "@/lib/site-url";
 
 /** Human label per attribute — drives the email subject + body (mirrors the dialog map). */
 const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
@@ -84,25 +85,34 @@ function oneLine(value: string): string {
 
 /** The fixed subject for an attribute — never user free text (no injection vector). */
 export function subjectFor(attributeLabel: string): string {
-  return `Scholars profile correction — ${attributeLabel}`;
+  return `Scholars profile correction: ${attributeLabel}`;
 }
 
 /**
  * Compose the structured plain-text body (SPEC § 3.4). The single-line fields
- * (issue, item, source, signature) are CR/LF-collapsed for format integrity; the
- * free-text `detail` is preserved as the multi-line message content. When the
- * actor is acting on another scholar (superuser), the signature names the target
- * — cheap, no name lookup (the receipt-with-name path is deferred).
+ * (scholar, profile, issue, item, source, signature) are CR/LF-collapsed for
+ * format integrity; the free-text `detail` is preserved as the multi-line
+ * message content. `targetName` is looked up server-side (never client-supplied)
+ * so the recipient can identify whose profile the request is about without
+ * relying on the free-text box (#2480). When the actor is acting on another
+ * scholar (superuser), the signature names the target too.
  */
 export function composeBody(opts: {
+  attribute: RequestAttribute;
+  targetCwid: string;
+  targetName: string | null;
   issueLabel: string;
   itemLabel?: string;
   sourceSystem?: string;
   detail?: string;
   actorCwid: string;
-  targetCwid: string;
 }): string {
+  const scholarLine = opts.targetName
+    ? `${oneLine(opts.targetName)} (${oneLine(opts.targetCwid)})`
+    : oneLine(opts.targetCwid);
   const lines = [
+    `Scholar: ${scholarLine}`,
+    `Profile: ${siteBaseUrl()}/edit/scholar/${encodeURIComponent(opts.targetCwid)}?attr=${opts.attribute}`,
     `Issue: ${oneLine(opts.issueLabel)}`,
     `Item: ${opts.itemLabel ? oneLine(opts.itemLabel) : "(whole section)"}`,
   ];
@@ -116,14 +126,14 @@ export function composeBody(opts: {
     opts.targetCwid && opts.targetCwid !== opts.actorCwid
       ? ` on behalf of ${oneLine(opts.targetCwid)}`
       : "";
-  lines.push(`— Sent from the WCM Scholars profile editor by ${actor}${onBehalf}.`);
+  lines.push(`Sent from the WCM Scholars profile editor by ${actor}${onBehalf}.`);
 
   return lines.join("\n");
 }
 
 /** The subject of the courtesy receipt sent back to the submitter. */
 export function receiptSubjectFor(attributeLabel: string): string {
-  return `Your Scholars profile change request — ${attributeLabel}`;
+  return `Your Scholars profile change request: ${attributeLabel}`;
 }
 
 /**
@@ -147,9 +157,9 @@ export function composeReceiptBody(opts: {
   const detail = (opts.detail ?? "").trim();
   lines.push("", detail.length > 0 ? detail : "(no additional detail provided)", "");
   lines.push(
-    `${oneLine(opts.office)} will follow up if they need more information — you don't need to do anything else.`,
+    `${oneLine(opts.office)} will follow up if they need more information. You don't need to do anything else.`,
     "",
-    "— WCM Scholars",
+    "WCM Scholars",
   );
   return lines.join("\n");
 }

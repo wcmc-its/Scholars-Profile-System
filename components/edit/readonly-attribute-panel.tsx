@@ -16,8 +16,10 @@ import type { RequestAttribute } from "@/lib/edit/request-a-change";
 
 export type ReadonlyAttributePanelProps = {
   attribute: RequestAttribute;
-  /** The scholar whose profile this is — resolves `{cwid}` links (ORCID). */
+  /** The scholar whose profile this is: resolves `{cwid}` links (ORCID). */
   cwid: string;
+  /** The scholar's display name, echoed into the routed change-request email. */
+  scholarName: string;
   /** Panel heading, e.g. "Name & Title" or "Photo". */
   heading: string;
   /** The explanatory line under the heading. */
@@ -31,6 +33,7 @@ export type ReadonlyAttributePanelProps = {
 export function ReadonlyAttributePanel({
   attribute,
   cwid,
+  scholarName,
   heading,
   description,
   fields,
@@ -72,6 +75,7 @@ export function ReadonlyAttributePanel({
         <RequestAChangeDialog
           attribute={attribute}
           cwid={cwid}
+          scholarName={scholarName}
           triggerTestId="request-a-change-toggle"
         />
       </div>

@@ -46,6 +46,7 @@ import {
   type ChangeAction,
   type RequestAttribute,
 } from "@/lib/edit/request-a-change";
+import { siteBaseUrl } from "@/lib/site-url";
 
 /** Human label per attribute — drives the email subject + "Regarding" line. */
 const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
@@ -87,7 +88,10 @@ function sanitize(value: string): string {
 function buildMailto(opts: {
   email: string;
   cc?: string;
+  attribute: RequestAttribute;
   attributeLabel: string;
+  cwid: string;
+  scholarName: string;
   issueLabel: string;
   itemLabel?: string;
   sourceSystem?: string;
@@ -96,14 +100,16 @@ function buildMailto(opts: {
   // Subject is derived from a fixed map (never user free text) — no injection
   // vector. URLSearchParams renders spaces as "+", which mail clients show
   // literally; RFC 6068 wants %20, so encode by hand.
-  const subject = `Scholars profile correction — ${opts.attributeLabel}`;
+  const subject = `Scholars profile correction: ${opts.attributeLabel}`;
   const lines = [
+    `Scholar: ${sanitize(opts.scholarName)} (${sanitize(opts.cwid)})`,
+    `Profile: ${siteBaseUrl()}/edit/scholar/${encodeURIComponent(opts.cwid)}?attr=${opts.attribute}`,
     `Issue: ${sanitize(opts.issueLabel)}`,
     `Item: ${opts.itemLabel ? sanitize(opts.itemLabel) : "(whole section)"}`,
   ];
   if (opts.sourceSystem) lines.push(`Source: ${sanitize(opts.sourceSystem)}`);
   lines.push("", sanitize(opts.detail) || "(no additional detail provided)", "");
-  lines.push("— Sent from the WCM Scholars profile editor.");
+  lines.push("Sent from the WCM Scholars profile editor.");
 
   const parts = [`subject=${encodeURIComponent(subject)}`];
   if (opts.cc) parts.push(`cc=${encodeURIComponent(opts.cc)}`);
@@ -113,8 +119,11 @@ function buildMailto(opts: {
 
 export type RequestAChangeDialogProps = {
   attribute: RequestAttribute;
-  /** Resolves `{cwid}` self-service links (ORCID). */
+  /** Resolves `{cwid}` self-service links (ORCID); also identifies the scholar
+   *  in the routed email so the recipient doesn't have to guess (#2480). */
   cwid: string;
+  /** The scholar's display name, echoed into the routed email (#2480). */
+  scholarName: string;
   /** The specific row's label (entity panels); absent for section-level panels. */
   itemLabel?: string;
   /** Trigger `data-testid` (default `request-a-change-trigger`). */
@@ -137,6 +146,7 @@ export type RequestAChangeDialogProps = {
 export function RequestAChangeDialog({
   attribute,
   cwid,
+  scholarName,
   itemLabel,
   triggerTestId,
   initialIssueId,
@@ -225,7 +235,10 @@ export function RequestAChangeDialog({
       return buildMailto({
         email: action.email,
         cc: action.cc,
+        attribute,
         attributeLabel,
+        cwid,
+        scholarName,
         issueLabel: issue!.label,
         itemLabel,
         sourceSystem: action.sourceSystem,
@@ -235,7 +248,10 @@ export function RequestAChangeDialog({
     if (action?.kind === "explain" && action.fallbackEmail) {
       return buildMailto({
         email: action.fallbackEmail,
+        attribute,
         attributeLabel,
+        cwid,
+        scholarName,
         issueLabel: issue!.label,
         itemLabel,
         detail,
@@ -347,8 +363,8 @@ export function RequestAChangeDialog({
                   {config.heading}
                 </p>
                 <DialogDescription>
-                  Pick one — we&apos;ll point you to the right place, or route it to the team that
-                  owns it.
+                  Pick one, and we&apos;ll point you to the right place or route it to the team
+                  that owns it.
                 </DialogDescription>
               </div>
             )}
@@ -373,7 +389,7 @@ export function RequestAChangeDialog({
                     {/* Not a success claim: the mailer is dark, so nothing was sent
                         server-side — the request only completes once the user sends
                         from their own client (vision-round T1.9). */}
-                    <p className="text-base font-medium">Almost there — finish in your email app.</p>
+                    <p className="text-base font-medium">Almost there: finish in your email app.</p>
                     <p className="text-muted-foreground text-sm">
                       We opened a pre-filled message
                       {submitTarget.office ? ` to ${submitTarget.office}` : ""}. If nothing opened,
