@@ -217,16 +217,36 @@ type EditMode = "self" | "superuser" | "proxy" | "unit-admin" | "comms_steward" 
  *  the `comms_steward` profile editor, which is superuser parity minus slug +
  *  proxy-editors. The child cards collapse to this (`childMode` below).
  *  `cv-generator` (#2482) is included here too — it sees the same full content
- *  as a superuser, but `EditShell` wraps it `inert` (see `isReadOnlyMode`), so
- *  none of that editability is actually reachable. */
+ *  as a superuser, but `EditShell` wraps it `inert` (see `isContentInert`), so
+ *  none of that editability is actually reachable — except the one export
+ *  action that role exists for (`isContentInert`'s "cv" exception). */
 function isSuperuserLike(mode: EditMode): boolean {
   return mode === "superuser" || mode === "comms_steward" || mode === "cv-generator";
 }
 
-/** `cv_generator` (#2482): read-only — `EditShell` makes every write
- *  affordance in the panel `inert` and swaps the superuser banner's copy. */
+/** `cv_generator` (#2482): read-only on every panel — drives `EditShell`'s
+ *  banner copy ("viewing … read-only"). True regardless of which attr is
+ *  active; see `isContentInert` for the one exception to the `inert` wrap
+ *  that backs this up. */
 function isReadOnlyMode(mode: EditMode): boolean {
   return mode === "cv-generator";
+}
+
+/**
+ * `cv_generator` (#2482): whether the panel content should be native `inert`
+ * (unfocusable/unclickable, still fully visible). ONE exception to
+ * `isReadOnlyMode`: the "cv" attr (`CV (WCM format)`), whose "Download CV"
+ * button never writes anything (`authorizeCvExport`,
+ * `lib/edit/overview-authz.ts` — "nothing is saved to the profile, no version
+ * row is persisted") and is the role's named purpose ("generate CVs"). `inert`
+ * cascades to every descendant with no way for a nested element to opt back
+ * in, so the only way to keep that one button clickable is to not wrap the
+ * "cv" panel in `inert` at all — there is nothing else on that panel to
+ * protect. The banner still reads "read-only" there (`isReadOnlyMode` above),
+ * since downloading a CV doesn't change the profile either.
+ */
+function isContentInert(mode: EditMode, activeKey: AttrKey): boolean {
+  return mode === "cv-generator" && activeKey !== "cv";
 }
 
 /** The attribute set visible for a mode, before flag/candidate filtering.
@@ -830,6 +850,7 @@ export function EditPage({
       // makes cv_generator's copy of that chrome non-editable.
       mode={mode === "comms_steward" || mode === "cv-generator" ? "superuser" : mode}
       readOnly={isReadOnlyMode(mode)}
+      contentInert={isContentInert(mode, active.key)}
       scholarName={scholarName}
       railItems={railItems}
       activeAttr={active.key}

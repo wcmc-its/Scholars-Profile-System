@@ -74,3 +74,32 @@ export async function authorizeOverviewWrite(args: {
 
   return { ok: false, reason: "not_self" };
 }
+
+/**
+ * Authorization for the CV export surfaces (`POST /api/edit/cv` download,
+ * `GET /api/edit/cv/outline` preview) — `authorizeOverviewWrite`, WIDENED with
+ * the read-only `cv_generator` role (#2482, fast-follow to #2483).
+ *
+ * Exporting a CV never writes anything (both routes' own doc comments: "nothing
+ * is saved to the profile, no version row is persisted"), so admitting a
+ * read-only role here doesn't leak write capability the way adding it to
+ * `authorizeOverviewWrite` itself would — that predicate also backs 15+ genuine
+ * mutation routes (field edits, appointment CRUD, honor/news-mention decisions,
+ * biosketch generation), which must stay closed to `cv_generator`. Keeping the
+ * widening in its own function, rather than an inline `|| session.isCvGenerator`
+ * at each of the two call sites, is what stops a third CV-adjacent route from
+ * drifting out of sync the way `authorizeOverviewWrite`'s own doc comment
+ * describes for the overview write/generate pair.
+ */
+export async function authorizeCvExport(args: {
+  session: EditSession;
+  realCwid: string;
+  impersonatedCwid: string | null;
+  entityId: string;
+  proxyDb: ProxyLookup;
+  unitDb: UnitScholarLookup;
+}): Promise<OverviewWriteAuthz> {
+  const authz = await authorizeOverviewWrite(args);
+  if (authz.ok) return authz;
+  return args.session.isCvGenerator ? { ok: true, viaUnitAdminUnit: null } : authz;
+}
