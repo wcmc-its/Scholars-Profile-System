@@ -104,6 +104,7 @@ import EditScholarPage from "@/app/edit/scholar/[cwid]/page";
 
 const SELF = { cwid: "self01", isSuperuser: false };
 const ADMIN = { cwid: "adm001", isSuperuser: true };
+const CV_GENERATOR = { cwid: "cvg001", isSuperuser: false, isCvGenerator: true };
 
 const fakeCtx = (cwid: string) => ({
   scholar: { cwid, slug: cwid, preferredName: cwid, fullName: cwid, overview: "", slugOverride: null, suppression: { ownRow: null, adminRow: null } },
@@ -217,6 +218,16 @@ describe("/edit/scholar/[cwid] — authorization matrix", () => {
     const result = asElement(await EditScholarPage({ params: params("other7") }));
     expect(result.type).toBe(mockEditPage);
     expect(result.props.mode).toBe("superuser");
+    const ctx = result.props.ctx as { scholar: { cwid: string } };
+    expect(ctx.scholar.cwid).toBe("other7");
+  });
+
+  it("signed-in cv_generator on another cwid → EditPage(mode='cv-generator') (#2482, never falls to comms_steward)", async () => {
+    mockGetEditSession.mockResolvedValue(CV_GENERATOR);
+    mockLoadEditContext.mockResolvedValue(fakeCtx("other7"));
+    const result = asElement(await EditScholarPage({ params: params("other7") }));
+    expect(result.type).toBe(mockEditPage);
+    expect(result.props.mode).toBe("cv-generator");
     const ctx = result.props.ctx as { scholar: { cwid: string } };
     expect(ctx.scholar.cwid).toBe("other7");
   });

@@ -35,6 +35,16 @@ describe("SuperuserBanner", () => {
     expect(svg).not.toBeNull();
   });
 
+  it("uses the read-only copy when readOnly=true (#2482 cv_generator), not the editing claim", () => {
+    render(<SuperuserBanner targetLabel="Alex Other" readOnly />);
+    const banner = screen.getByRole("alert");
+    expect(banner.textContent).toContain("viewing");
+    expect(banner.textContent).toContain("read-only");
+    expect(banner.textContent).not.toContain("editing");
+    expect(banner.textContent).not.toContain("as an administrator");
+    expect(banner.querySelector("strong")?.textContent).toBe("Alex Other");
+  });
+
   it("uses the publication copy when targetKind='publication'", () => {
     render(<SuperuserBanner targetLabel="A landmark study" targetKind="publication" />);
     const banner = screen.getByRole("alert");

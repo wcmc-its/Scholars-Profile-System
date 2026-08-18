@@ -22,9 +22,21 @@ export type SuperuserBannerProps = {
    * copy "<Name>'s profile"; `'publication'` yields the publication copy.
    */
   targetKind?: "profile" | "publication";
+  /**
+   * The `cv_generator` role (#2482) reaches this same superuser-parity chrome
+   * for READ access only — every write affordance below is `inert` (see
+   * `EditShell`). Swaps the "editing … as an administrator" claim for an
+   * honest read-only line so the banner never overstates what the viewer can
+   * do.
+   */
+  readOnly?: boolean;
 };
 
-export function SuperuserBanner({ targetLabel, targetKind = "profile" }: SuperuserBannerProps) {
+export function SuperuserBanner({
+  targetLabel,
+  targetKind = "profile",
+  readOnly = false,
+}: SuperuserBannerProps) {
   return (
     <Alert
       variant="info"
@@ -38,7 +50,12 @@ export function SuperuserBanner({ targetLabel, targetKind = "profile" }: Superus
             and the trailing "'s profile…" each become their own grid row, which
             is what dropped the possessive onto its own line. */}
         <p>
-          {targetKind === "profile" ? (
+          {readOnly ? (
+            <>
+              You are viewing <strong>{targetLabel}</strong>&apos;s profile. This role is
+              read-only: nothing on this page can be changed.
+            </>
+          ) : targetKind === "profile" ? (
             <>
               You are editing <strong>{targetLabel}</strong>&apos;s profile as an administrator.
             </>

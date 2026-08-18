@@ -1642,6 +1642,21 @@ export class AppStack extends Stack {
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         DATA_SHARING_VIEWER_ENABLED: "on",
         SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN: "ITS:Library:Scholars/data-sharing-viewer-role",
+        // `cv_generator` role (#2482) -- read-only access to every scholar's
+        // /edit/scholar/[cwid] (superuser-parity content, EditShell renders it
+        // `inert`) and the /edit/scholars roster. For Faculty Affairs staff who
+        // need to browse profiles to assemble CVs, and more broadly to open the
+        // tool to people who shouldn't get write rights ("socialize the app").
+        //   CV_GENERATOR_ENABLED -- master kill switch, same shape as
+        //     DATA_SHARING_VIEWER_ENABLED above. While not "on", isCvGenerator()
+        //     short-circuits to false before any directory work -- safe to
+        //     enable ahead of the ED group existing (fails closed, not broken).
+        //   SCHOLARS_CV_GENERATOR_GROUP_CN -- the ED group whose membership
+        //     confers the role. Same shape as its siblings (groupOfURLs under
+        //     `ou=application security`); see the LDIF handoff for creation.
+        // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        CV_GENERATOR_ENABLED: "on",
+        SCHOLARS_CV_GENERATOR_GROUP_CN: "ITS:Library:Scholars/cv-generator-role",
         // #742 -- the /edit Overview "Generate a draft" surface: the Existing /
         // Generator tabs, the Sources drawer, and the AI overview-statement
         // generator. overviewGenerateEnabled() reads === "on"

@@ -44,12 +44,16 @@ import { resolveScholarEditAccess } from "@/lib/edit/scholar-edit-access";
 const TARGET = "abc1001";
 
 /** Wire raw + effective sessions for a non-impersonating actor. */
-function signedInAs(cwid: string, opts: { isSuperuser?: boolean; isCommsSteward?: boolean } = {}) {
+function signedInAs(
+  cwid: string,
+  opts: { isSuperuser?: boolean; isCommsSteward?: boolean; isCvGenerator?: boolean } = {},
+) {
   mockGetSession.mockResolvedValue({ cwid });
   mockGetEditSession.mockResolvedValue({
     cwid,
     isSuperuser: opts.isSuperuser ?? false,
     isCommsSteward: opts.isCommsSteward ?? false,
+    isCvGenerator: opts.isCvGenerator ?? false,
   });
 }
 
@@ -105,7 +109,7 @@ describe("resolveScholarEditAccess — five-gate matrix", () => {
     const access = await resolveScholarEditAccess(TARGET);
     expect(access).toEqual({
       kind: "authorized",
-      session: { cwid: TARGET, isSuperuser: false, isCommsSteward: false },
+      session: { cwid: TARGET, isSuperuser: false, isCommsSteward: false, isCvGenerator: false },
       isSelf: true,
       isProxy: false,
       isUnitAdmin: false,
@@ -157,6 +161,18 @@ describe("resolveScholarEditAccess — five-gate matrix", () => {
     expect(mockRequireSuperuserGet).not.toHaveBeenCalled();
   });
 
+  it("cv_generator (not self) → authorized read-only, superuser check skipped (#2482)", async () => {
+    signedInAs("cvg0001", { isCvGenerator: true });
+    const access = await resolveScholarEditAccess(TARGET);
+    expect(access.kind).toBe("authorized");
+    if (access.kind !== "authorized") return;
+    expect(access.isSelf).toBe(false);
+    expect(access.isProxy).toBe(false);
+    expect(access.isUnitAdmin).toBe(false);
+    expect(access.session.isCvGenerator).toBe(true);
+    expect(mockRequireSuperuserGet).not.toHaveBeenCalled();
+  });
+
   it("superuser (not self) → authorized via the GET-time re-check returning null", async () => {
     signedInAs("sup0001", { isSuperuser: true });
     mockRequireSuperuserGet.mockReturnValue(null);
@@ -164,7 +180,7 @@ describe("resolveScholarEditAccess — five-gate matrix", () => {
     expect(access.kind).toBe("authorized");
     // A non-self, non-steward actor still goes through the superuser gate.
     expect(mockRequireSuperuserGet).toHaveBeenCalledWith({
-      session: { cwid: "sup0001", isSuperuser: true, isCommsSteward: false },
+      session: { cwid: "sup0001", isSuperuser: true, isCommsSteward: false, isCvGenerator: false },
       path: "/edit/scholar/abc1001",
       targetId: TARGET,
     });
@@ -175,7 +191,7 @@ describe("resolveScholarEditAccess — five-gate matrix", () => {
     const access = await resolveScholarEditAccess(TARGET, "/history");
     expect(access).toEqual({ kind: "forbidden" });
     expect(mockRequireSuperuserGet).toHaveBeenCalledWith({
-      session: { cwid: "nob0001", isSuperuser: false, isCommsSteward: false },
+      session: { cwid: "nob0001", isSuperuser: false, isCommsSteward: false, isCvGenerator: false },
       path: "/edit/scholar/abc1001/history",
       targetId: TARGET,
     });

@@ -209,6 +209,7 @@ describe("getEditSession", () => {
       isDeveloper: false,
       isHonorsCurator: false,
       isDataSharingViewer: false,
+      isCvGenerator: false,
     });
   });
 
@@ -222,6 +223,7 @@ describe("getEditSession", () => {
       isDeveloper: false,
       isHonorsCurator: false,
       isDataSharingViewer: false,
+      isCvGenerator: false,
     });
   });
 });

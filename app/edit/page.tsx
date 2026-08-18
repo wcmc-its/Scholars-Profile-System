@@ -17,6 +17,7 @@ import { getSession } from "@/lib/auth/session-server";
 import { getEffectiveCwid } from "@/lib/auth/effective-identity";
 import { isSuperuser, type EditSession } from "@/lib/auth/superuser";
 import { isCommsSteward } from "@/lib/auth/comms-steward";
+import { isCvGenerator } from "@/lib/auth/cv-generator";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isDeveloper } from "@/lib/auth/development";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
@@ -112,6 +113,13 @@ export default async function EditSelfPage({
     // is off), so it's inert on a dark deployment.
     if (await isCommsSteward(editCwid)) {
       redirect("/edit/methods");
+    }
+    // A `cv_generator` (#2482) has no self-profile either — their entry point is
+    // the Profiles roster (read-only), the same landing a superuser reaches via
+    // "All profiles". Checked before the proxy fallback below since a global
+    // read-only role has nothing scholar-specific to route to first.
+    if (await isCvGenerator(editCwid)) {
+      redirect("/edit/scholars");
     }
     // A signed-in user with no Scholar row may still be a scholar-assigned proxy
     // editor (#779) — pure administrative staff (Beth Chunn) editing on a

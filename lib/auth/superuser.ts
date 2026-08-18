@@ -24,6 +24,7 @@
  */
 import { cache } from "react";
 import { isCommsSteward } from "@/lib/auth/comms-steward";
+import { isCvGenerator } from "@/lib/auth/cv-generator";
 import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
@@ -73,6 +74,18 @@ export interface EditSession {
    * (`canViewDataSharingDashboard`) only ever reads a session from those.
    */
   isDataSharingViewer?: boolean;
+  /**
+   * Live `cv_generator` verdict — read-only access to every scholar's
+   * `/edit/scholar/[cwid]` and the `/edit/scholars` roster, no write
+   * capability anywhere (#2482). A superuser is a superset of this. Gates
+   * ONLY the read-admitting arm of `resolveScholarEditAccess` and the
+   * `/edit/scholars` roster scope — no write predicate in `lib/edit/authz.ts`
+   * reads it, so like `isDataSharingViewer` it is OPTIONAL: the synthetic
+   * `EditSession` shapes the field / unit authz helpers build need not carry
+   * a flag they never consume. The live resolvers (`getEditSession` /
+   * `getEffectiveEditSession`) always populate it.
+   */
+  isCvGenerator?: boolean;
 }
 
 
@@ -123,15 +136,16 @@ export const isSuperuser = cache(async (cwid: string): Promise<boolean> => {
 export async function getEditSession(): Promise<EditSession | null> {
   const session = await getSession();
   if (!session) return null;
-  // #1514 — five independent LDAPS group checks; resolve concurrently so the
-  // wall-clock cost is one directory round-trip, not five. All five are
+  // #1514 — six independent LDAPS group checks; resolve concurrently so the
+  // wall-clock cost is one directory round-trip, not six. All six are
   // fail-closed and never throw, so Promise.all cannot reject.
-  const [su, cs, dev, hc, dsv] = await Promise.all([
+  const [su, cs, dev, hc, dsv, cvg] = await Promise.all([
     isSuperuser(session.cwid),
     isCommsSteward(session.cwid),
     isDeveloper(session.cwid),
     isHonorsCurator(session.cwid),
     isDataSharingViewer(session.cwid),
+    isCvGenerator(session.cwid),
   ]);
   return {
     cwid: session.cwid,
@@ -140,5 +154,6 @@ export async function getEditSession(): Promise<EditSession | null> {
     isDeveloper: dev,
     isHonorsCurator: hc,
     isDataSharingViewer: dsv,
+    isCvGenerator: cvg,
   };
 }

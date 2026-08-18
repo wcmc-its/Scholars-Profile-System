@@ -24,10 +24,13 @@ function fakeClient(grants: unknown[] = [], divisions: unknown[] = []): FakeClie
   };
 }
 const asClient = (c: FakeClient) => c as unknown as ScopeClient;
-const session = (over: Partial<{ cwid: string; isSuperuser: boolean; isCommsSteward: boolean }> = {}) => ({
+const session = (
+  over: Partial<{ cwid: string; isSuperuser: boolean; isCommsSteward: boolean; isCvGenerator: boolean }> = {},
+) => ({
   cwid: "edt1001",
   isSuperuser: false,
   isCommsSteward: false,
+  isCvGenerator: false,
   ...over,
 });
 
@@ -60,6 +63,13 @@ describe("loadDataQualityScope", () => {
   it("a comms_steward is a global editor — { all: true }", async () => {
     const scope = await loadDataQualityScope(session({ isCommsSteward: true }), asClient(fakeClient()));
     expect(scope).toEqual({ all: true });
+  });
+
+  it("a cv_generator is a global (read-only) viewer — { all: true }, no grant query (#2482)", async () => {
+    const c = fakeClient();
+    const scope = await loadDataQualityScope(session({ isCvGenerator: true }), asClient(c));
+    expect(scope).toEqual({ all: true });
+    expect(c.unitAdmin.findMany).not.toHaveBeenCalled();
   });
 
   it("a dept Owner gets the dept + its divisions (cascade); a curator counts too", async () => {
