@@ -382,20 +382,40 @@ async function refreshEdAppointments(
  *  a curator hides one (Appointment.showOnProfile). */
 const HISTORICAL_APPOINTMENT_SOURCE = "ED-HISTORICAL";
 
+/** A historical row this short is almost certainly a WOOFA effective-dating
+ *  artifact (an "(Interim)" title swap, a "Pre-Start Academic" placeholder),
+ *  not a real appointment worth showing by default. Measured on prod 2026-08:
+ *  276 of 12,177 historical rows are <= 7 days, with a clean gap to the next
+ *  bucket (35 at 2-7 days vs 484 at 8-30) — every sampled row at or below this
+ *  cutoff was one of these artifact shapes. Also incidentally catches the rare
+ *  end-before-start data bug (a negative "duration"). Exported so the one-time
+ *  remediation script (scripts/suppress-artifact-historical-appointments.ts)
+ *  uses the exact same rule, not a second copy that can drift. */
+export const ARTIFACT_MAX_DAYS = 7;
+
+export function looksLikeArtifactAppointment(startDate: Date | null, endDate: Date | null): boolean {
+  if (!startDate || !endDate) return false;
+  const days = (endDate.getTime() - startDate.getTime()) / 86_400_000;
+  return days <= ARTIFACT_MAX_DAYS;
+}
+
 /**
  * Reconcile this scholar's historical (faculty:expired) appointments from the
  * WOOFA SOR. Mirrors refreshEdAppointments but scoped to {cwid,
  * source:"ED-HISTORICAL"} so the two populations never clobber each other.
  *
  * Curator-hide invariant: `showOnProfile` is written ONLY on INSERT
- * (defaulted true — flipped 2026-08, see #1323 follow-up: hiding prior
- * appointments by default made faculty look newly arrived), and is NEVER
- * part of an UPDATE — so a row a curator hid (showOnProfile=false) stays
- * hidden across ETL reruns. The content key (appointmentContentKey) does not
+ * (defaulted true, EXCEPT a `looksLikeArtifactAppointment` row which defaults
+ * false — flipped 2026-08, see #1323 follow-up: hiding prior appointments by
+ * default made faculty look newly arrived, but showing WOOFA's effective-
+ * dating artifacts by default replaced that problem with a confusing one), and
+ * is NEVER part of an UPDATE — so a row a curator hid or revealed stays that
+ * way across ETL reruns. The content key (appointmentContentKey) does not
  * hash showOnProfile, so toggling visibility causes no reconcile churn.
- * Rows created before this flip need a one-time backfill —
- * scripts/backfill-reveal-historical-appointments.ts — since only NEW inserts
- * pick up the new default.
+ * Rows created before the 2026-08 flip need one-time backfills —
+ * scripts/backfill-reveal-historical-appointments.ts (reveal) and
+ * scripts/suppress-artifact-historical-appointments.ts (re-hide artifacts) —
+ * since only NEW inserts pick up these defaults.
  */
 async function refreshHistoricalAppointments(
   cwid: string,
@@ -428,9 +448,13 @@ async function refreshHistoricalAppointments(
     contentKey: appointmentContentKey,
   });
   if (plan.toCreate.length > 0) {
-    // showOnProfile defaults to true on INSERT only — see invariant above.
+    // showOnProfile defaults to true on INSERT only, unless the row itself
+    // looks like a WOOFA artifact — see invariant above.
     await db.write.appointment.createMany({
-      data: plan.toCreate.map((a) => ({ ...a, showOnProfile: true })),
+      data: plan.toCreate.map((a) => ({
+        ...a,
+        showOnProfile: !looksLikeArtifactAppointment(a.startDate, a.endDate),
+      })),
     });
   }
   for (const a of plan.toUpdate) {

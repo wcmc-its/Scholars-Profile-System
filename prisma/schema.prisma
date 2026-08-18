@@ -174,11 +174,15 @@ model Appointment {
   source          String    @default("ED") @db.VarChar(32)
   // #1323 — historical (source "ED-HISTORICAL") appointments are shown on the
   // public profile unless a curator or comms_steward hides one. True for every
-  // newly-imported historical row (flipped 2026-08 — hidden-by-default made
-  // faculty look newly arrived; rows from before the flip need the one-time
-  // scripts/backfill-reveal-historical-appointments.ts); irrelevant for active
-  // sources (always shown). The CV export ignores this flag (historical always
-  // exported).
+  // newly-imported historical row EXCEPT one `looksLikeArtifactAppointment`
+  // (etl/ed/index.ts) — a WOOFA effective-dating artifact (an "(Interim)"
+  // title swap, a "Pre-Start Academic" placeholder), not a real appointment.
+  // (Flipped 2026-08 — hidden-by-default made faculty look newly arrived;
+  // rows from before the flip need the one-time
+  // scripts/backfill-reveal-historical-appointments.ts and
+  // scripts/suppress-artifact-historical-appointments.ts.) Irrelevant for
+  // active sources (always shown). The CV export ignores this flag
+  // (historical always exported).
   showOnProfile   Boolean   @default(true) @map("show_on_profile")
   lastRefreshedAt DateTime  @default(now()) @map("last_refreshed_at")
 

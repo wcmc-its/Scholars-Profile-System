@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { shouldReconcileHistoricalAppointments } from "@/etl/ed/index";
+import { looksLikeArtifactAppointment, shouldReconcileHistoricalAppointments } from "@/etl/ed/index";
 
 describe("shouldReconcileHistoricalAppointments (#2112)", () => {
   it("retains existing rows when the fetch succeeded but returned zero rows", () => {
@@ -30,5 +30,31 @@ describe("shouldReconcileHistoricalAppointments (#2112)", () => {
 
   it("does not reconcile on a failed fetch even if a stale row count leaks through", () => {
     expect(shouldReconcileHistoricalAppointments(false, 3)).toBe(false);
+  });
+});
+
+describe("looksLikeArtifactAppointment (#1323 follow-up)", () => {
+  it("flags a same-day-to-next-day span (the '(Interim)' title-swap shape)", () => {
+    expect(looksLikeArtifactAppointment(new Date("2019-09-01"), new Date("2019-09-02"))).toBe(true);
+  });
+
+  it("flags an exactly-7-day span (the boundary)", () => {
+    expect(looksLikeArtifactAppointment(new Date("2025-01-08"), new Date("2025-01-15"))).toBe(true);
+  });
+
+  it("does not flag an 8-day span (one past the boundary)", () => {
+    expect(looksLikeArtifactAppointment(new Date("2025-01-08"), new Date("2025-01-16"))).toBe(false);
+  });
+
+  it("does not flag a genuine multi-year appointment", () => {
+    expect(looksLikeArtifactAppointment(new Date("1991-05-01"), new Date("2017-06-30"))).toBe(false);
+  });
+
+  it("does not flag an open-ended appointment (null end date)", () => {
+    expect(looksLikeArtifactAppointment(new Date("1991-05-01"), null)).toBe(false);
+  });
+
+  it("flags an end-before-start row (the rare negative-duration data bug)", () => {
+    expect(looksLikeArtifactAppointment(new Date("2026-08-10"), new Date("2026-06-25"))).toBe(true);
   });
 });
