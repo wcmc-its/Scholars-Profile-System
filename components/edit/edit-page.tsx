@@ -199,6 +199,7 @@ const DEFAULT_ATTR: Record<EditMode, AttrKey> = {
   proxy: "home",
   "unit-admin": "home",
   comms_steward: "home",
+  "cv-generator": "home",
 };
 
 /** The actor surfaces. `proxy` (#779) is a scholar-assigned designee, and
@@ -209,14 +210,23 @@ const DEFAULT_ATTR: Record<EditMode, AttrKey> = {
  *  `comms_steward` (comms-steward-profile-editing-spec.md §3b) edits any scholar
  *  at SUPERUSER parity MINUS slug + proxy delegation. Visual/interaction polish
  *  is a UI-SPEC deliverable. */
-type EditMode = "self" | "superuser" | "proxy" | "unit-admin" | "comms_steward";
+type EditMode = "self" | "superuser" | "proxy" | "unit-admin" | "comms_steward" | "cv-generator";
 
 /** Whether a mode renders with SUPERUSER editability (overview editable,
  *  publications hideable, generate enabled): the superuser surface itself, and
  *  the `comms_steward` profile editor, which is superuser parity minus slug +
- *  proxy-editors. The child cards collapse to this (`childMode` below). */
+ *  proxy-editors. The child cards collapse to this (`childMode` below).
+ *  `cv-generator` (#2482) is included here too — it sees the same full content
+ *  as a superuser, but `EditShell` wraps it `inert` (see `isReadOnlyMode`), so
+ *  none of that editability is actually reachable. */
 function isSuperuserLike(mode: EditMode): boolean {
-  return mode === "superuser" || mode === "comms_steward";
+  return mode === "superuser" || mode === "comms_steward" || mode === "cv-generator";
+}
+
+/** `cv_generator` (#2482): read-only — `EditShell` makes every write
+ *  affordance in the panel `inert` and swaps the superuser banner's copy. */
+function isReadOnlyMode(mode: EditMode): boolean {
+  return mode === "cv-generator";
 }
 
 /** The attribute set visible for a mode, before flag/candidate filtering.
@@ -244,6 +254,13 @@ function attrsForMode(mode: EditMode): AttrDef[] {
         a.key !== "profile-url" && // slug — out of the steward's scope (§3b)
         a.key !== "proxy-editors", // delegation — out of the steward's scope (§3b)
     );
+  }
+  // `cv_generator` (#2482) sees the FULL superuser attribute set, unfiltered —
+  // "see all the other content" (issue body) — since every write affordance is
+  // `inert` regardless of which panel it's on, there is no per-attribute reason
+  // to hold anything back the way comms_steward's narrower scope does.
+  if (mode === "cv-generator") {
+    return ATTRIBUTES.filter((a) => a.modes.includes("superuser"));
   }
   return ATTRIBUTES.filter((a) => a.modes.includes(mode));
 }
@@ -805,11 +822,14 @@ export function EditPage({
 
   return (
     <EditShell
-      // The shell chrome (breadcrumb back to Profiles + the "editing … as an
-      // administrator" banner) is the same a superuser sees — a comms_steward
-      // reaches this editor from the same roster and edits in an administrative
-      // capacity, so reuse it rather than add bespoke chrome.
-      mode={mode === "comms_steward" ? "superuser" : mode}
+      // The shell chrome (breadcrumb back to Profiles + the superuser banner) is
+      // the same a superuser sees — a comms_steward reaches this editor from the
+      // same roster and edits in an administrative capacity, and cv_generator
+      // (#2482) reads the same content read-only, so both reuse superuser chrome
+      // rather than add bespoke chrome. `readOnly` (below) is what actually
+      // makes cv_generator's copy of that chrome non-editable.
+      mode={mode === "comms_steward" || mode === "cv-generator" ? "superuser" : mode}
+      readOnly={isReadOnlyMode(mode)}
       scholarName={scholarName}
       railItems={railItems}
       activeAttr={active.key}

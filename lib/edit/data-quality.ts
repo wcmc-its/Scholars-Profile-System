@@ -60,7 +60,11 @@ export async function loadDataQualityScope(
   session: EditSession,
   db: DataQualityScopeClient,
 ): Promise<DataQualityScope> {
-  if (session.isSuperuser || session.isCommsSteward) return { all: true };
+  // `cv_generator` (#2482) is a global READ-only role: it gets the same `{ all:
+  // true }` scope as superuser/comms_steward here (this resolver only decides
+  // WHICH scholars are listed, never write access), but stays excluded from
+  // the superuser-only COI-review column (`session.isSuperuser`, unaffected).
+  if (session.isSuperuser || session.isCommsSteward || session.isCvGenerator) return { all: true };
 
   const grants = await db.unitAdmin.findMany({
     where: { cwid: session.cwid },

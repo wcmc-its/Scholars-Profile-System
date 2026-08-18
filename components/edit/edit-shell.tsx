@@ -99,6 +99,14 @@ export type EditShellProps = {
   /** Unit-admin mode only (Amendment 4): the unit through which the viewer
    *  administers this scholar, naming the "via {unit} administrator" banner. */
   unitAdmin?: { unitKind: "department" | "division" | "center"; unitName: string };
+  /**
+   * `cv_generator` role (#2482): superuser-parity chrome, but every write
+   * affordance in the panel is `inert` (native, unfocusable/unclickable, still
+   * fully visible) and the superuser banner reads "viewing" instead of
+   * "editing … as an administrator". Default false leaves every existing
+   * caller unchanged.
+   */
+  readOnly?: boolean;
   children: React.ReactNode;
 };
 
@@ -120,6 +128,7 @@ export function EditShell({
   hideRail = false,
   backHref,
   unitAdmin,
+  readOnly = false,
   children,
 }: EditShellProps) {
   const isSuperuser = mode === "superuser";
@@ -304,7 +313,7 @@ export function EditShell({
             </div>
           )}
 
-          {isSuperuser && <SuperuserBanner targetLabel={scholarName} />}
+          {isSuperuser && <SuperuserBanner targetLabel={scholarName} readOnly={readOnly} />}
           {isProxy && <ProxyBanner targetLabel={scholarName} />}
           {isUnitAdmin && unitAdmin && (
             <UnitAdminBanner
@@ -314,7 +323,13 @@ export function EditShell({
             />
           )}
 
-          <div className="apollo-card">{children}</div>
+          {/* `cv_generator` (#2482): native `inert` makes every control below
+              unfocusable/unclickable while staying fully visible — "see
+              everything, act on nothing" without threading a read-only variant
+              through every card's own mode prop. */}
+          <div className="apollo-card" inert={readOnly || undefined}>
+            {children}
+          </div>
         </main>
       </div>
     </div>

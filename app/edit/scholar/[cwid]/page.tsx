@@ -155,9 +155,12 @@ export default async function EditScholarPage({
   // request, so it matches /edit exactly. The superuser direct-set card is
   // unaffected (it has no flag).
   const slugRequestEnabled = isSelf && isSlugRequestEnabled();
-  // Superuser is checked before comms_steward so a viewer who is both gets the
-  // full superuser surface; a steward-only viewer gets the restricted
-  // `comms_steward` mode (superuser rail minus slug + proxy-editors).
+  // Superuser is checked before comms_steward/cv_generator so a viewer who is
+  // more than one of these gets the higher-privilege surface. `cv_generator`
+  // (#2482) is the LAST resort, never an implicit "else": `resolveScholarEditAccess`
+  // gate 5 only admits us past `forbidden` when isSelf/isProxy/isUnitAdmin/
+  // isCommsSteward/isCvGenerator/isSuperuser — one of the two is guaranteed true
+  // here, so this is exhaustive, not a fallback guess.
   const mode = isSelf
     ? "self"
     : isProxy
@@ -166,7 +169,9 @@ export default async function EditScholarPage({
         ? "unit-admin"
         : session.isSuperuser
           ? "superuser"
-          : "comms_steward";
+          : session.isCommsSteward
+            ? "comms_steward"
+            : "cv-generator";
 
   // Canonicalize a present-but-invalid `?attr` (T1.13): redirect to the bare
   // route rather than render the default panel behind a stale URL. The valid set

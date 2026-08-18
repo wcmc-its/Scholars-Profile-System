@@ -34,6 +34,7 @@ const {
   mockCountPendingSlugRequests,
   mockIsHonorsCurator,
   mockIsDeveloper,
+  mockIsCvGenerator,
 } = vi.hoisted(() => ({
   mockGetSession: vi.fn(),
   mockGetEffectiveCwid: vi.fn(),
@@ -54,6 +55,7 @@ const {
   mockCountPendingSlugRequests: vi.fn(),
   mockIsHonorsCurator: vi.fn(),
   mockIsDeveloper: vi.fn(),
+  mockIsCvGenerator: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -70,6 +72,7 @@ vi.mock("@/lib/auth/comms-steward", () => ({
   isCommsSteward: vi.fn(async () => false),
   isMethodsTabVisible: () => false,
 }));
+vi.mock("@/lib/auth/cv-generator", () => ({ isCvGenerator: mockIsCvGenerator }));
 vi.mock("@/lib/api/edit-context", () => ({ loadEditContext: mockLoadEditContext }));
 vi.mock("@/lib/db", () => ({
   db: {
@@ -171,6 +174,23 @@ beforeEach(() => {
   mockCountPendingSlugRequests.mockResolvedValue(0);
   mockIsHonorsCurator.mockResolvedValue(false);
   mockIsDeveloper.mockResolvedValue(false);
+  mockIsCvGenerator.mockResolvedValue(false);
+});
+
+describe("/edit (self) — cv_generator landing (#2482)", () => {
+  it("no self-profile + cv_generator → redirect to /edit/scholars (read-only roster)", async () => {
+    mockLoadEditContext.mockResolvedValue(null);
+    mockIsCvGenerator.mockResolvedValue(true);
+    await expect(EditSelfPage({ searchParams: searchParams() })).rejects.toThrow(
+      "__REDIRECT__:/edit/scholars",
+    );
+    expect(mockNotFound).not.toHaveBeenCalled();
+  });
+
+  it("not a cv_generator, no self-profile, no proxy grants → notFound() (unchanged)", async () => {
+    mockLoadEditContext.mockResolvedValue(null);
+    await expect(EditSelfPage({ searchParams: searchParams() })).rejects.toThrow("__NOT_FOUND__");
+  });
 });
 
 describe("/edit (self) — #536 hidden-identity-class guard", () => {
