@@ -5,6 +5,7 @@ import { isDeveloper } from "@/lib/auth/development";
 import { isCommsSteward, isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { buildConsoleLinks, type ConsoleLink } from "@/lib/auth/console-links";
 import { impersonationActive } from "@/lib/auth/effective-identity";
+import { resolveGlobalRole, type GlobalRole } from "@/lib/auth/global-roles";
 import {
   pickDisplayGrant,
   resolveImpersonationDisplay,
@@ -57,7 +58,7 @@ type ScholarLite = { slug: string; preferredName: string };
 type ImpersonatingBlock = {
   targetCwid: string;
   targetName: string;
-  role: "owner" | "curator" | "scholar" | "comms_steward";
+  role: "owner" | "curator" | "scholar" | "comms_steward" | GlobalRole;
   unitKind: ImpersonationUnitKind | null;
   unit: string | null;
   startedAt: number;
@@ -222,6 +223,24 @@ export async function GET(): Promise<NextResponse> {
           unit: display.unit,
           startedAt: session.impersonating.startedAt,
         };
+      } else {
+        // A profile-less GLOBAL-ROLE target (cv_generator / honors_curator /
+        // data_sharing_viewer / development, `lib/auth/global-roles.ts`) — the
+        // same stranding hazard the steward/unit-admin branches above exist to
+        // prevent. These roles have no name-resolution bridge of their own (no
+        // steward_directory-equivalent), so the name degrades to the bare CWID —
+        // still functional, never missing.
+        const globalRole = await resolveGlobalRole(targetCwid).catch(() => null);
+        if (globalRole) {
+          impersonating = {
+            targetCwid,
+            targetName: targetCwid,
+            role: globalRole,
+            unitKind: null,
+            unit: null,
+            startedAt: session.impersonating.startedAt,
+          };
+        }
       }
     }
     // else: the target vanished (departed / invalid) — leave `impersonating`

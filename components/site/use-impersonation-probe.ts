@@ -33,8 +33,16 @@ export type ProbeScholar = { slug: string; preferredName: string };
 export type ProbeImpersonating = {
   targetCwid: string;
   targetName: string;
-  role: "owner" | "curator" | "scholar" | "comms_steward";
-  /** The administered unit's kind, or `null` for a plain scholar / steward. */
+  role:
+    | "owner"
+    | "curator"
+    | "scholar"
+    | "comms_steward"
+    | "cv_generator"
+    | "honors_curator"
+    | "data_sharing_viewer"
+    | "development";
+  /** The administered unit's kind, or `null` for a plain scholar / any global role. */
   unitKind: "department" | "division" | "center" | "core" | null;
   unit: string | null;
   startedAt: number;

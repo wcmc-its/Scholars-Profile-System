@@ -36,6 +36,18 @@ import { Button } from "@/components/ui/button";
  * reloads so the whole app re-renders through the effective seam and the amber
  * banner appears.
  *
+ * **Exact-CWID fallback.** Four global roles (`cv_generator`, `honors_curator`,
+ * `data_sharing_viewer`, `development`, `lib/auth/global-roles.ts`) are valid
+ * "View as" targets but can never appear in the search results above: ED group
+ * membership can only be checked one CWID at a time (the read-only LDAP bind
+ * can `compare`, not `read`, a group's member list — `lib/auth/ldap-group.ts`),
+ * so there is no query this panel could send that would enumerate them. When a
+ * single-token query has zero matches, the empty state offers "View as this
+ * exact CWID" — it reuses the same confirm dialog and `startImpersonation`, just
+ * with a synthetic candidate built from the typed text instead of a search row;
+ * the POST route is the real authority either way and re-validates the target
+ * fully regardless of how the CWID was supplied.
+ *
  * This is a self-contained panel (its own search/list state) so it can be
  * dropped into the account-menu popover without threading state through it.
  */
@@ -159,6 +171,17 @@ export function ImpersonationSwitcher() {
 
   const hasRows = candidates.length > 0;
 
+  // The exact-CWID fallback (see docblock): only offered for a single-token
+  // query (a name search has a space; a CWID never does) with no search
+  // matches. `role: "scholar"` is a throwaway placeholder — this candidate is
+  // never rendered as a list row, only handed to the confirm dialog + POST,
+  // neither of which reads `role`/`unitKind`/`unit`.
+  const trimmedQuery = query.trim();
+  const exactCwidCandidate: Candidate | null =
+    !hasRows && trimmedQuery && !trimmedQuery.includes(" ")
+      ? { cwid: trimmedQuery, preferredName: trimmedQuery, slug: null, role: "scholar", unitKind: null, unit: null }
+      : null;
+
   return (
     <div data-slot="impersonation-switcher" className="flex w-full flex-col gap-2">
       <p className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -208,7 +231,20 @@ export function ImpersonationSwitcher() {
         ) : errored ? (
           <p className="px-1 py-2 text-xs text-destructive">Couldn’t load people. Try again.</p>
         ) : !hasRows ? (
-          <p className="px-1 py-2 text-xs text-muted-foreground">No matching people.</p>
+          <div className="px-1 py-2 text-xs text-muted-foreground">
+            <p>No matching people.</p>
+            {exactCwidCandidate && (
+              <button
+                type="button"
+                onClick={() => setPending(exactCwidCandidate)}
+                className="mt-1 text-left font-medium text-primary hover:underline"
+                data-testid="impersonation-view-as-exact-cwid"
+              >
+                View as “{exactCwidCandidate.cwid}” by exact CWID — some roles (CV Generator, Honors
+                Curator, Data Sharing Viewer, Development) can’t be searched.
+              </button>
+            )}
+          </div>
         ) : (
           candidates.map((c) => (
             <div
