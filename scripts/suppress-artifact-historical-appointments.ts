@@ -8,13 +8,14 @@
  * (e.g. "Assistant Professor of Surgery (Interim)" for exactly one day).
  * Measured on prod 2026-08: 276 of 12,177 historical rows are <= 7 days, with
  * a clean gap to the next bucket (35 at 2-7 days vs 484 at 8-30) — every
- * sampled row at or below the cutoff was one of these shapes. Same threshold
- * as `ARTIFACT_MAX_DAYS` / `looksLikeArtifactAppointment` in etl/ed/index.ts,
- * which now applies it going forward on INSERT; this script re-hides the
- * already-revealed backlog. Duplicated as a raw SQL predicate rather than
- * imported — etl/ed/index.ts runs its full ED sync as an import side effect
- * outside vitest (`if (!process.env.VITEST) main()`), so importing it from a
- * plain script would kick off a full sync.
+ * sampled row at or below the cutoff was one of these shapes. Excludes
+ * "Pre-Start Academic" rows: those are exempt from the duration default
+ * (durations run 2 to 1200+ days) and get their own read-time rule in
+ * lib/api/profile.ts instead — this script re-hiding a short one by mistake
+ * would break that rule for the rare scholar where it's their sole
+ * appointment. Same constants as etl/ed/index.ts's write-time default, via
+ * lib/appointment-artifacts.ts (safe to import here — unlike etl/ed/index.ts,
+ * which runs a full ED sync as an import side effect outside vitest).
  *
  * Only touches rows nobody has ever acted on — same rule as the reveal
  * backfill: anything with an `appointment_visibility_set` audit row (a
@@ -32,9 +33,7 @@
  */
 import "dotenv/config";
 import { createConnection, type Connection } from "mariadb";
-
-/** Same source of truth as etl/ed/index.ts's ARTIFACT_MAX_DAYS. */
-const ARTIFACT_MAX_DAYS = 7;
+import { ARTIFACT_MAX_DAYS, PRE_START_ACADEMIC_TITLE } from "@/lib/appointment-artifacts";
 
 /** Pure set-difference so the "don't touch curator decisions" rule is
  *  testable without a database. */
@@ -67,8 +66,8 @@ async function main(): Promise<void> {
   try {
     const artifactRows: Array<{ external_id: string }> = await ro.query(
       "SELECT external_id FROM appointment WHERE source = 'ED-HISTORICAL' AND show_on_profile = 1 " +
-        "AND end_date IS NOT NULL AND DATEDIFF(end_date, start_date) <= ?",
-      [ARTIFACT_MAX_DAYS],
+        "AND title != ? AND end_date IS NOT NULL AND DATEDIFF(end_date, start_date) <= ?",
+      [PRE_START_ACADEMIC_TITLE, ARTIFACT_MAX_DAYS],
     );
     const auditedRows: Array<{ target_entity_id: string }> = await ro.query(
       "SELECT DISTINCT target_entity_id FROM scholars_audit.manual_edit_audit " +

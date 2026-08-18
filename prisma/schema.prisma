@@ -175,10 +175,13 @@ model Appointment {
   // #1323 — historical (source "ED-HISTORICAL") appointments are shown on the
   // public profile unless a curator or comms_steward hides one. True for every
   // newly-imported historical row EXCEPT one `looksLikeArtifactAppointment`
-  // (etl/ed/index.ts) — a WOOFA effective-dating artifact (an "(Interim)"
-  // title swap, a "Pre-Start Academic" placeholder), not a real appointment.
-  // (Flipped 2026-08 — hidden-by-default made faculty look newly arrived;
-  // rows from before the flip need the one-time
+  // (etl/ed/index.ts, lib/appointment-artifacts.ts) — a WOOFA effective-dating
+  // artifact (an "(Interim)" title swap), not a real appointment. A
+  // "Pre-Start Academic" row is exempt from THAT check (durations run 2 to
+  // 1200+ days, too wide for a duration cutoff) and instead has its own
+  // read-time rule in lib/api/profile.ts: shown only when it's the scholar's
+  // sole appointment. (Flipped 2026-08 — hidden-by-default made faculty look
+  // newly arrived; rows from before the flip need the one-time
   // scripts/backfill-reveal-historical-appointments.ts and
   // scripts/suppress-artifact-historical-appointments.ts.) Irrelevant for
   // active sources (always shown). The CV export ignores this flag
