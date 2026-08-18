@@ -35,7 +35,7 @@ export type ProbeImpersonating = {
   targetName: string;
   role: "owner" | "curator" | "scholar" | "comms_steward";
   /** The administered unit's kind, or `null` for a plain scholar / steward. */
-  unitKind: "department" | "division" | "center" | null;
+  unitKind: "department" | "division" | "center" | "core" | null;
   unit: string | null;
   startedAt: number;
 };

@@ -3,12 +3,17 @@
  * impersonation-spec.md §7/§8).
  *
  * The banner and the switcher render each impersonation subject by the real
- * RBAC shape (ADR-005 Amendment 1 / #540): a **role** — `owner` | `curator`
- * (`UnitRole`) — held over a **unit kind** — `department` | `division` |
- * `center` (`EntityType`) — or plain `scholar` (a `Scholar` row, no
- * `unit_admin` grant). The switcher filters by unit kind
- * (`All · Department · Division · Center · Scholar`) and each row reads
- * `Name · {Owner|Curator} · {unit name} ({Dept|Div|Center})`.
+ * RBAC shape (ADR-005 Amendment 1 / #540, widened for cores-as-org-units): a
+ * **role** — `owner` | `curator` (`UnitRole`) — held over a **unit kind** —
+ * `department` | `division` | `center` | `core` (`EntityType`) — or plain
+ * `scholar` (a `Scholar` row, no `unit_admin` grant). Core owners/curators are
+ * frequently NOT faculty (e.g. facility staff), which is exactly the
+ * population "View as" needs to reach — they were previously invisible to the
+ * switcher/probe even though `POST /api/impersonation` already accepted them
+ * (its target check is grant-existence only, no `entityType` filter). The
+ * switcher filters by unit kind (`All · Department · Division · Center · Core
+ * · Scholar`) and each row reads `Name · {Owner|Curator} · {unit name}
+ * ({Dept|Div|Center|Core})`.
  *
  * Both the `/api/auth/session` probe (the active overlay's target) and
  * `/api/impersonation/candidates` (the assumable-target list) MUST classify a
@@ -36,8 +41,8 @@ import type { PrismaClient } from "@/lib/generated/prisma/client";
 /** The role half of the display label — the two `UnitRole`s plus the `scholar` floor. */
 export type ImpersonationDisplayRole = "owner" | "curator" | "scholar";
 
-/** The unit-kind half — the three org-unit `EntityType`s a grant can target. */
-export type ImpersonationUnitKind = "department" | "division" | "center";
+/** The unit-kind half — the four org-unit `EntityType`s a grant can target. */
+export type ImpersonationUnitKind = "department" | "division" | "center" | "core";
 
 /** What the banner / switcher render per subject (§7 probe + candidates shape). */
 export type ImpersonationDisplay = {
@@ -49,7 +54,7 @@ export type ImpersonationDisplay = {
   unit: string | null;
 };
 
-/** A unit-scoped `unit_admin` grant, narrowed to the three org-unit kinds. */
+/** A unit-scoped `unit_admin` grant, narrowed to the four org-unit kinds. */
 export type DisplayGrant = {
   role: "owner" | "curator";
   entityType: ImpersonationUnitKind;
@@ -59,18 +64,19 @@ export type DisplayGrant = {
 /** The narrow Prisma surface this helper reads — a `db.read` client satisfies it. */
 export type ImpersonationDisplayClient = Pick<
   PrismaClient,
-  "unitAdmin" | "department" | "division" | "center"
+  "unitAdmin" | "department" | "division" | "center" | "core"
 >;
 
 /** Tie-break only: which unit kind wins when a CWID holds equal-role grants. */
 const KIND_RANK: Record<ImpersonationUnitKind, number> = {
+  core: 4,
   center: 3,
   division: 2,
   department: 1,
 };
 
 function isUnitKind(value: string): value is ImpersonationUnitKind {
-  return value === "department" || value === "division" || value === "center";
+  return value === "department" || value === "division" || value === "center" || value === "core";
 }
 
 /**
@@ -157,17 +163,20 @@ async function resolveUnitName(
   code: string,
 ): Promise<string | null> {
   // Call each delegate explicitly — a `client.department | client.division |
-  // client.center` union is not callable (the Prisma `findUnique` overloads
-  // don't unify), so narrow on `kind` first.
-  const where = { code };
+  // client.center | client.core` union is not callable (the Prisma
+  // `findUnique` overloads don't unify), so narrow on `kind` first.
   const select = { name: true } as const;
   if (kind === "department") {
-    return (await client.department.findUnique({ where, select }))?.name ?? null;
+    return (await client.department.findUnique({ where: { code }, select }))?.name ?? null;
   }
   if (kind === "division") {
-    return (await client.division.findUnique({ where, select }))?.name ?? null;
+    return (await client.division.findUnique({ where: { code }, select }))?.name ?? null;
   }
-  return (await client.center.findUnique({ where, select }))?.name ?? null;
+  if (kind === "center") {
+    return (await client.center.findUnique({ where: { code }, select }))?.name ?? null;
+  }
+  // `Core`'s PK is `id`, not `code` — it predates the org-unit `code` convention.
+  return (await client.core.findUnique({ where: { id: code }, select }))?.name ?? null;
 }
 
 /**
