@@ -10,11 +10,12 @@
  * single buffered `.docx` ATTACHMENT (not JSON). The output is a copy/export
  * artifact — nothing is saved to the profile and no version row is persisted (v1).
  *
- * Authorization is the SHARED `authorizeOverviewWrite` (self OR superuser OR
- * granted proxy OR org-unit owner/curator), keyed on `realCwid`, exactly like the
- * biosketch generate route — generating a CV for a profile you cannot write would
- * be pointless, so this reuses the bio-write predicate rather than authoring one
- * that could drift.
+ * Authorization is the SHARED `authorizeCvExport` (self OR superuser OR granted
+ * proxy OR org-unit owner/curator OR the read-only `cv_generator` role, #2482),
+ * keyed on `realCwid`, exactly like the biosketch generate route — generating a
+ * CV for a profile you cannot write would be pointless, so this reuses the
+ * bio-write predicate (widened for `cv_generator`, since exporting a CV never
+ * writes anything) rather than authoring one that could drift.
  *
  * Flag-gated behind `EDIT_CV_EXPORT` (off ⇒ 404), default-off and staging-first.
  * The M1 research summary is best-effort: a Bedrock throw is logged and §15 falls
@@ -27,7 +28,7 @@ import { bedrockClient } from "@/lib/llm/client";
 import { DEFAULT_GENERATE_MODEL, modelAcceptsTemperature } from "@/lib/llm/models";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
-import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
+import { authorizeCvExport } from "@/lib/edit/overview-authz";
 import { assembleOverviewFacts, type OverviewFacts } from "@/lib/edit/overview-facts";
 import {
   overviewSystemPromptFor,
@@ -99,9 +100,10 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   // --- authorization: the SHARED bio-write predicate (self OR superuser OR
-  //     granted proxy OR org-unit owner/curator). Keyed on `realCwid`, gated to
-  //     non-impersonating for the delegated legs. ---
-  const authz = await authorizeOverviewWrite({
+  //     granted proxy OR org-unit owner/curator), WIDENED with the read-only
+  //     cv_generator role (#2482) — exporting a CV never writes anything.
+  //     Keyed on `realCwid`, gated to non-impersonating for the delegated legs. ---
+  const authz = await authorizeCvExport({
     session,
     realCwid,
     impersonatedCwid,

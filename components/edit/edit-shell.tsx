@@ -100,13 +100,22 @@ export type EditShellProps = {
    *  administers this scholar, naming the "via {unit} administrator" banner. */
   unitAdmin?: { unitKind: "department" | "division" | "center"; unitName: string };
   /**
-   * `cv_generator` role (#2482): superuser-parity chrome, but every write
-   * affordance in the panel is `inert` (native, unfocusable/unclickable, still
-   * fully visible) and the superuser banner reads "viewing" instead of
-   * "editing … as an administrator". Default false leaves every existing
-   * caller unchanged.
+   * `cv_generator` role (#2482): the superuser banner reads "viewing … this
+   * role is read-only" instead of "editing … as an administrator" — true on
+   * every panel this role reaches, including the one exception below, since
+   * downloading a CV doesn't change the profile either. Default false leaves
+   * every existing caller unchanged.
    */
   readOnly?: boolean;
+  /**
+   * Whether the panel content is native `inert` (unfocusable/unclickable,
+   * still fully visible) — the actual write-prevention mechanism. Defaults to
+   * `readOnly`. Pass `false` while `readOnly` is `true` for the ONE cv_generator
+   * exception (the "cv" attr's "Download CV" button, which never writes
+   * anything and is the role's named purpose) so that one panel stays
+   * interactive while the banner still tells the truth about the role.
+   */
+  contentInert?: boolean;
   children: React.ReactNode;
 };
 
@@ -129,6 +138,7 @@ export function EditShell({
   backHref,
   unitAdmin,
   readOnly = false,
+  contentInert = readOnly,
   children,
 }: EditShellProps) {
   const isSuperuser = mode === "superuser";
@@ -326,8 +336,10 @@ export function EditShell({
           {/* `cv_generator` (#2482): native `inert` makes every control below
               unfocusable/unclickable while staying fully visible — "see
               everything, act on nothing" without threading a read-only variant
-              through every card's own mode prop. */}
-          <div className="apollo-card" inert={readOnly || undefined}>
+              through every card's own mode prop. `contentInert` (not `readOnly`
+              — see its doc comment) is what the caller flips off for the one
+              CV-export exception. */}
+          <div className="apollo-card" inert={contentInert || undefined}>
             {children}
           </div>
         </main>

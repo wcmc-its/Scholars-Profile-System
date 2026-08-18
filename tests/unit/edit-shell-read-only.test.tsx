@@ -1,9 +1,13 @@
 /**
- * `EditShell`'s `readOnly` prop (#2482, the `cv_generator` role) — every write
- * affordance in the panel is made native `inert` (unfocusable/unclickable,
- * still fully visible) and the superuser banner swaps its "editing … as an
- * administrator" claim for an honest "viewing … read-only" line. Default
- * (`readOnly` unset) is byte-identical to the existing shell.
+ * `EditShell`'s `readOnly` / `contentInert` props (#2482, the `cv_generator`
+ * role) — `readOnly` swaps the superuser banner's "editing … as an
+ * administrator" claim for an honest "viewing … read-only" line;
+ * `contentInert` (defaults to `readOnly`) makes the panel content native
+ * `inert` (unfocusable/unclickable, still fully visible). They're split apart
+ * so the CV-export panel can stay interactive (`contentInert={false}`) while
+ * the banner still tells the truth (`readOnly={true}`) — CV export never
+ * writes anything. Default (both unset) is byte-identical to the existing
+ * shell.
  */
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -66,5 +70,32 @@ describe("EditShell — readOnly", () => {
       </EditShell>,
     );
     expect(screen.getByRole("alert").textContent).toContain("as an administrator");
+  });
+
+  it("contentInert=false keeps the panel interactive even while readOnly=true (the CV-export exception, #2482)", () => {
+    render(
+      <EditShell {...base} readOnly contentInert={false}>
+        <button type="button" data-testid="download-cv">
+          Download CV (WCM format)
+        </button>
+      </EditShell>,
+    );
+    // The button stays clickable...
+    expect(screen.getByTestId("download-cv").closest("[inert]")).toBeNull();
+    // ...but the banner still tells the truth about the role.
+    const banner = screen.getByRole("alert");
+    expect(banner.textContent).toContain("read-only");
+    expect(banner.textContent).not.toContain("as an administrator");
+  });
+
+  it("contentInert defaults to readOnly when omitted", () => {
+    render(
+      <EditShell {...base} readOnly>
+        <button type="button" data-testid="the-button">
+          Hide
+        </button>
+      </EditShell>,
+    );
+    expect(screen.getByTestId("the-button").closest("[inert]")).not.toBeNull();
   });
 });

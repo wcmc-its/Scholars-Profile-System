@@ -16,6 +16,15 @@ vi.mock("@/components/edit/overview-editor", () => ({
     <textarea data-testid="mock-editor" defaultValue={initialHtml} />
   ),
 }));
+// Mock the CV tool to skip its fetch-on-mount — its own internals are covered
+// elsewhere; here we only care whether EditShell wraps it `inert` (#2482).
+vi.mock("@/components/edit/cv-tool", () => ({
+  CvTool: () => (
+    <button type="button" data-testid="download-cv">
+      Download CV (WCM format)
+    </button>
+  ),
+}));
 
 import { EditPage } from "@/components/edit/edit-page";
 import type { EditContext } from "@/lib/api/edit-context";
@@ -1079,5 +1088,28 @@ describe("EditPage rail — restructured layout (SELF_EDIT_RAIL_RESTRUCTURE)", (
     expect(q.queryByText("Tools")).toBeNull();
     expect(q.queryByText("Settings")).toBeNull();
     expect(q.queryByText("landing")).toBeNull();
+  });
+});
+
+describe("EditPage router — cv_generator mode (#2482, read-only)", () => {
+  it("?attr=overview is inert (write affordance blocked) and the banner reads read-only", () => {
+    render(<EditPage ctx={superuserCtx} mode="cv-generator" attr="overview" />);
+    expect(screen.getByRole("alert").textContent).toContain("read-only");
+    expect(screen.getByRole("alert").textContent).not.toContain("as an administrator");
+    // The overview editor mount (mock-editor) renders inside the inert wrapper.
+    expect(screen.getByTestId("mock-editor").closest("[inert]")).not.toBeNull();
+  });
+
+  it("?attr=cv is the ONE exception — the Download CV button stays interactive", () => {
+    render(<EditPage ctx={superuserCtx} mode="cv-generator" attr="cv" cvEnabled />);
+    // Banner still tells the truth even on the exempted panel.
+    expect(screen.getByRole("alert").textContent).toContain("read-only");
+    // But the download control is NOT wrapped inert.
+    expect(screen.getByTestId("download-cv").closest("[inert]")).toBeNull();
+  });
+
+  it("sees the CV rail item (superuser-parity content set) when cvEnabled", () => {
+    render(<EditPage ctx={superuserCtx} mode="cv-generator" attr="home" cvEnabled />);
+    expect(screen.getByText("CV (WCM format)")).toBeTruthy();
   });
 });
