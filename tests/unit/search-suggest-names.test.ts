@@ -5,22 +5,27 @@
  * Root cause: `buildPeopleDoc` (lib/search-index-docs.ts) indexes a
  * last-name-only `nameSuggest` input at a fixed weight (95) whose surface
  * text is just the surname — every scholar sharing a surname contributes an
- * identical-text option at the same weight. OpenSearch's completion
- * suggester with `skip_duplicates: true` only dedupes within a candidate
- * window proportional to the requested `completion.size`, so when 3+
- * same-surname scholars tie at weight 95 and `completion.size` equals the
- * small caller-facing `size` (5), the suggester can collapse the tie down to
- * a single survivor and never reach the next tier of legitimately-distinct
- * inputs (e.g. "Bender, Heidi Bender" at weight 90). Confirmed live in prod:
- * GET /api/search/suggest?q=Bender surfaced only Anna Bender, never Heidi.
+ * identical-text option at the same weight. `skip_duplicates: true` was
+ * assumed to dedupe those ties while falling through to each scholar's
+ * other, lower-weight inputs — but measured directly against staging's live
+ * OpenSearch, it instead drops every tied scholar but one and never
+ * backfills, at ANY `completion.size` (confirmed identical at size 5 and
+ * size 25 — NOT a fetch-depth/windowing problem; an earlier version of this
+ * fix wrongly assumed it was, shipped an over-fetch alone, and measurably
+ * changed nothing on the real cluster). `skip_duplicates: false` on the same
+ * query returns every tied scholar correctly. Confirmed live: GET
+ * /api/search/suggest?q=Bender surfaced only Anna Bender, never Heidi, both
+ * before AND after the size-only fix; only turning `skip_duplicates` off
+ * resolved it.
  *
- * These tests don't (and can't, without a live cluster) reproduce OpenSearch's
- * internal windowing — the live repro in #2484 already established that. They
- * verify our side of the fix: given a raw completion-suggester response that
- * contains the same-text collision (multiple distinct cwids sharing a surface
- * form) alongside each scholar's distinct lower-weight input, `suggestNames`
- * must dedupe by cwid (first occurrence = highest weight, since options
- * arrive pre-sorted) and then truncate back down to the caller-facing `size`.
+ * These tests can't reproduce OpenSearch's real `skip_duplicates` behavior
+ * without a live cluster (that's what the #2484 live probes are for). They
+ * verify our side of the fix: `suggestNames` must request
+ * `skip_duplicates: false`, and do the same-scholar dedupe itself — given a
+ * raw completion-suggester response with a same-text collision (distinct
+ * cwids sharing a surface form) alongside each scholar's distinct
+ * lower-weight input, dedupe by cwid (first occurrence = highest weight,
+ * since options arrive pre-sorted) and truncate to the caller-facing `size`.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -122,6 +127,15 @@ describe("suggestNames — same-surname collision (#2484)", () => {
       scholar: { completion: { size: number } };
     };
     expect(suggest.scholar.completion.size).toBeGreaterThan(5);
+  });
+
+  it("requests skip_duplicates: false — true silently drops tied scholars on the real cluster, confirmed live (#2484)", async () => {
+    capturedSearchBodies.length = 0;
+    await suggestNames("Bender", 5);
+    const suggest = capturedSearchBodies[0]?.suggest as {
+      scholar: { completion: { skip_duplicates: boolean } };
+    };
+    expect(suggest.scholar.completion.skip_duplicates).toBe(false);
   });
 
   it("returns all 3 distinct same-surname scholars, not just the first collapsed survivor", async () => {
