@@ -5769,6 +5769,25 @@ export async function searchPublications(opts: {
 /**
  * Autocomplete suggestions (spec line 184: fires on 2 chars).
  * Returns up to `size` distinct suggestions from the people index.
+ *
+ * #2484 — over-fetch + dedupe-by-cwid. `buildPeopleDoc` (lib/search-index-docs.ts)
+ * indexes a last-name-only `nameSuggest` input (weight 95) whose surface text is
+ * just the surname, so every scholar sharing a surname contributes an
+ * identical-text option at the same weight. OpenSearch's completion suggester
+ * with `skip_duplicates: true` only dedupes *within* the candidate window it
+ * already pulled — that window is proportional to the requested
+ * `completion.size` — so when 3+ same-surname scholars tie at weight 95 and
+ * `completion.size` equals the caller-facing `size` (5), the suggester can
+ * collapse the tie down to a single survivor and never reaches the next tier
+ * of legitimately-distinct inputs (e.g. "Bender, Heidi Bender" at weight 90).
+ * Requesting a larger completion window than we intend to return gives
+ * skip_duplicates enough headroom to fall through same-text collisions to
+ * those distinct lower-weight inputs; deduping by `_id` (cwid) afterward
+ * collapses the now-possible case of one scholar supplying *multiple*
+ * surviving options (e.g. both their "Bender" and "Bender, Heidi Bender"
+ * inputs matching the same prefix), and truncating to `size` right after
+ * restores the function's documented "up to size distinct suggestions"
+ * contract before the mget hydration call below (so mget cost is unchanged).
  */
 export async function suggestNames(prefix: string, size = 5): Promise<
   Array<{
@@ -5785,6 +5804,11 @@ export async function suggestNames(prefix: string, size = 5): Promise<
   const trimmed = prefix.trim();
   if (trimmed.length < 2) return [];
 
+  // Over-fetch: ask OpenSearch for more candidates than we'll return, so
+  // skip_duplicates has room to skip past same-surname text collisions
+  // instead of collapsing them to one result. See #2484 doc comment above.
+  const completionSize = size * 5;
+
   const resp = await searchClient().search({
     index: PEOPLE_INDEX,
     body: {
@@ -5792,7 +5816,7 @@ export async function suggestNames(prefix: string, size = 5): Promise<
       suggest: {
         scholar: {
           prefix: trimmed,
-          completion: { field: "nameSuggest", size, skip_duplicates: true },
+          completion: { field: "nameSuggest", size: completionSize, skip_duplicates: true },
         },
       },
       _source: false,
@@ -5801,10 +5825,26 @@ export async function suggestNames(prefix: string, size = 5): Promise<
 
   type SuggestOption = { text: string; _index: string; _id: string };
   type SuggestEntry = { options: SuggestOption[] };
-  const suggestPayload = (resp.body as unknown as { suggest?: { scholar?: SuggestEntry[] } })
+  const rawOptions = (resp.body as unknown as { suggest?: { scholar?: SuggestEntry[] } })
     .suggest?.scholar?.[0]?.options ?? [];
 
-  if (suggestPayload.length === 0) return [];
+  if (rawOptions.length === 0) return [];
+
+  // Dedupe by cwid (`_id`) — a single scholar can supply multiple surviving
+  // options (e.g. both the surname-only and "Last, Full Name" inputs). Options
+  // arrive pre-sorted by weight descending, so first-seen = highest-weight
+  // match for that person. Then truncate to the caller-facing `size` so the
+  // mget below — and this function's external contract — are unaffected by
+  // the larger internal fetch.
+  const seenCwids = new Set<string>();
+  const suggestPayload: SuggestOption[] = [];
+  for (const o of rawOptions) {
+    if (seenCwids.has(o._id)) continue;
+    seenCwids.add(o._id);
+    suggestPayload.push(o);
+    if (suggestPayload.length >= size) break;
+  }
+
   const cwids = suggestPayload.map((o) => o._id);
   // Perf (#1881) — restrict the mget to the 7 scalars the mapper below reads.
   // Without this the autocomplete endpoint (fires per keystroke) ships each
