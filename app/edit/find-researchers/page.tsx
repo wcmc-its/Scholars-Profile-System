@@ -62,7 +62,7 @@ export default async function FindResearchersPage() {
         pendingSlugRequests={null}
         pendingHonors={null}
       >
-        <ForbiddenEditPage />
+        <ForbiddenEditPage session={session} />
       </ConsoleShell>
     );
   }

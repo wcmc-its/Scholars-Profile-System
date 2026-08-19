@@ -58,3 +58,36 @@ describe("ForbiddenEditPage", () => {
     expect(root?.getAttribute("data-target-cwid")).toBe("");
   });
 });
+
+describe("ForbiddenEditPage — session-aware own-destination link (2026-08-19)", () => {
+  it.each([
+    ["isCvGenerator", "/edit/scholars", "Profiles (read-only)"],
+    ["isHonorsCurator", "/edit/honors-queue", "Honors queue"],
+    ["isDataSharingViewer", "/edit/data-sharing", "Data sharing"],
+    ["isDeveloper", "/edit/find-researchers", "Funding matcher"],
+  ] as const)(
+    "with %s on the session, links straight to %s instead of bouncing through /edit",
+    (flag, href, label) => {
+      render(<ForbiddenEditPage session={{ [flag]: true }} />);
+      const link = screen.getByRole("link", { name: `Go to ${label}` });
+      expect(link.getAttribute("href")).toBe(href);
+    },
+  );
+
+  it("falls back to the generic /edit link when no session is passed (the two bare-ConsoleTopBar detail pages)", () => {
+    render(<ForbiddenEditPage />);
+    const link = screen.getByRole("link", { name: /Go to your own console/i });
+    expect(link.getAttribute("href")).toBe("/edit");
+  });
+
+  it("falls back to /edit for a session with none of the four global roles (superuser/comms_steward/unit-admin/plain scholar)", () => {
+    render(<ForbiddenEditPage session={{}} />);
+    const link = screen.getByRole("link", { name: /Go to your own console/i });
+    expect(link.getAttribute("href")).toBe("/edit");
+  });
+
+  it("picks cv_generator first on an (unexpected) multi-role session, matching resolveGlobalRole's own priority order", () => {
+    render(<ForbiddenEditPage session={{ isCvGenerator: true, isDeveloper: true }} />);
+    expect(screen.getByRole("link", { name: /Go to Profiles/i })).toBeTruthy();
+  });
+});

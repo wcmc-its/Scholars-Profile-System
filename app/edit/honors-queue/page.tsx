@@ -59,7 +59,7 @@ export default async function HonorsQueuePage() {
         pendingSlugRequests={null}
         pendingHonors={null}
       >
-        <ForbiddenEditPage />
+        <ForbiddenEditPage session={session} />
       </ConsoleShell>
     );
   }

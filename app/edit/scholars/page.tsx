@@ -70,7 +70,7 @@ export default async function EditScholarsPage({
     if (denial !== null) {
       return (
         <ConsoleShell active="profiles" session={session} pendingSlugRequests={null} pendingHonors={null}>
-          <ForbiddenEditPage />
+          <ForbiddenEditPage session={session} />
         </ConsoleShell>
       );
     }

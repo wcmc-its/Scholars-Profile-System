@@ -63,7 +63,7 @@ export default async function EditSlugsPage({
   if (denial !== null) {
     return (
       <ConsoleShell active="slugs" session={session} pendingSlugRequests={null} pendingHonors={null}>
-        <ForbiddenEditPage />
+        <ForbiddenEditPage session={session} />
       </ConsoleShell>
     );
   }

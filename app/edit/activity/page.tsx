@@ -266,7 +266,7 @@ export default async function EditActivityPage() {
     });
     return (
       <ConsoleShell active="activity" session={session} pendingSlugRequests={null} pendingHonors={null}>
-        <ForbiddenEditPage />
+        <ForbiddenEditPage session={session} />
       </ConsoleShell>
     );
   }

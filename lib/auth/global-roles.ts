@@ -42,14 +42,20 @@ export const GLOBAL_ROLE_LABEL: Record<GlobalRole, string> = {
 };
 
 /** Each role's one console entry point (every one of these modules' own
- *  docblock names its single surface) — reused by `/edit`'s profile-less
- *  fallthrough (`app/edit/page.tsx`) so a global-role holder with no Scholar
- *  row lands on their actual page instead of 404ing. */
-export const GLOBAL_ROLE_HOME: Record<GlobalRole, string> = {
-  cv_generator: "/edit/scholars",
-  honors_curator: "/edit/honors-queue",
-  data_sharing_viewer: "/edit/data-sharing",
-  development: "/edit/find-researchers",
+ *  docblock names its single surface) + the page-name label for a link to it
+ *  (deliberately NOT `GLOBAL_ROLE_LABEL` above — that's the ROLE's name, e.g.
+ *  "Development", which reads as a place called Development, not a
+ *  description of what's there; this is the PAGE's name, "Funding matcher").
+ *  Reused by `/edit`'s profile-less fallthrough (`app/edit/page.tsx`, href
+ *  only) and `ForbiddenEditPage` (`components/edit/forbidden-edit-page.tsx`,
+ *  href + label) so a global-role holder with no Scholar row lands on their
+ *  actual page — by redirect in the first case, by a direct link in the
+ *  second — instead of 404ing or bouncing through a generic `/edit`. */
+export const GLOBAL_ROLE_HOME: Record<GlobalRole, { href: string; label: string }> = {
+  cv_generator: { href: "/edit/scholars", label: "Profiles (read-only)" },
+  honors_curator: { href: "/edit/honors-queue", label: "Honors queue" },
+  data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
+  development: { href: "/edit/find-researchers", label: "Funding matcher" },
 };
 
 const GLOBAL_ROLE_CHECKS: ReadonlyArray<{ role: GlobalRole; check: (cwid: string) => Promise<boolean> }> = [

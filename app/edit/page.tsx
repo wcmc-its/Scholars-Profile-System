@@ -127,7 +127,7 @@ export default async function EditSelfPage({
     // three roles, the same profile-less trap #2482 had already found once.
     const globalRole = await resolveGlobalRole(editCwid);
     if (globalRole) {
-      redirect(GLOBAL_ROLE_HOME[globalRole]);
+      redirect(GLOBAL_ROLE_HOME[globalRole].href);
     }
     // A signed-in user with no Scholar row may still be a scholar-assigned proxy
     // editor (#779) — pure administrative staff (Beth Chunn) editing on a

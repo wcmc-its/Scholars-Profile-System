@@ -47,7 +47,7 @@ export default async function GrantMatchaPage() {
     });
     return (
       <ConsoleShell active="matcha" session={session} pendingSlugRequests={null} pendingHonors={null}>
-        <ForbiddenEditPage />
+        <ForbiddenEditPage session={session} />
       </ConsoleShell>
     );
   }

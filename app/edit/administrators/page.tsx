@@ -52,7 +52,7 @@ export default async function AdministratorsPage() {
     });
     return (
       <ConsoleShell active="administrators" session={session} pendingSlugRequests={null} pendingHonors={null}>
-        <ForbiddenEditPage />
+        <ForbiddenEditPage session={session} />
       </ConsoleShell>
     );
   }
@@ -72,7 +72,7 @@ export default async function AdministratorsPage() {
       });
       return (
         <ConsoleShell active="administrators" session={session} pendingSlugRequests={null} pendingHonors={null}>
-          <ForbiddenEditPage />
+          <ForbiddenEditPage session={session} />
         </ConsoleShell>
       );
     }

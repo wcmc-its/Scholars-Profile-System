@@ -659,7 +659,7 @@ export default async function EtlStatusPage({
     });
     return (
       <ConsoleShell active="etl-status" session={session} pendingSlugRequests={null} pendingHonors={null}>
-        <ForbiddenEditPage />
+        <ForbiddenEditPage session={session} />
       </ConsoleShell>
     );
   }

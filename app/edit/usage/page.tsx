@@ -269,7 +269,7 @@ export default async function EditUsagePage() {
     });
     return (
       <ConsoleShell active="usage" session={session} pendingSlugRequests={null} pendingHonors={null}>
-        <ForbiddenEditPage />
+        <ForbiddenEditPage session={session} />
       </ConsoleShell>
     );
   }

@@ -77,10 +77,10 @@ vi.mock("@/lib/auth/global-roles", () => ({
   // Real values, not mocked-away — plain data, no I/O — so a redirect
   // assertion below catches a drifted href the same way it would in prod.
   GLOBAL_ROLE_HOME: {
-    cv_generator: "/edit/scholars",
-    honors_curator: "/edit/honors-queue",
-    data_sharing_viewer: "/edit/data-sharing",
-    development: "/edit/find-researchers",
+    cv_generator: { href: "/edit/scholars", label: "Profiles (read-only)" },
+    honors_curator: { href: "/edit/honors-queue", label: "Honors queue" },
+    data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
+    development: { href: "/edit/find-researchers", label: "Funding matcher" },
   },
 }));
 vi.mock("@/lib/api/edit-context", () => ({ loadEditContext: mockLoadEditContext }));
