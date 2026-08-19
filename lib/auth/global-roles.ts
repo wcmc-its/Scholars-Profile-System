@@ -41,6 +41,17 @@ export const GLOBAL_ROLE_LABEL: Record<GlobalRole, string> = {
   development: "Development",
 };
 
+/** Each role's one console entry point (every one of these modules' own
+ *  docblock names its single surface) — reused by `/edit`'s profile-less
+ *  fallthrough (`app/edit/page.tsx`) so a global-role holder with no Scholar
+ *  row lands on their actual page instead of 404ing. */
+export const GLOBAL_ROLE_HOME: Record<GlobalRole, string> = {
+  cv_generator: "/edit/scholars",
+  honors_curator: "/edit/honors-queue",
+  data_sharing_viewer: "/edit/data-sharing",
+  development: "/edit/find-researchers",
+};
+
 const GLOBAL_ROLE_CHECKS: ReadonlyArray<{ role: GlobalRole; check: (cwid: string) => Promise<boolean> }> = [
   { role: "cv_generator", check: isCvGenerator },
   { role: "honors_curator", check: isHonorsCurator },

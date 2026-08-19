@@ -1,7 +1,8 @@
 /**
- * `components/edit/forbidden-edit-page.tsx` — the visible 403 page rendered by
- * `/edit/scholar/[cwid]` and `/edit/publication/[pmid]` for an authenticated-
- * but-unauthorized request (#356 Phase 7 C5, UI-SPEC § States row 2).
+ * `components/edit/forbidden-edit-page.tsx` — the visible 403 page rendered for
+ * an authenticated-but-unauthorized `/edit/*` request (#356 Phase 7 C5, UI-SPEC
+ * § States row 2), generalized 2026-08-19 to also cover the ~20 console list/
+ * queue/dashboard pages this component is shared with.
  */
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -27,23 +28,19 @@ import { vi } from "vitest";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 
 describe("ForbiddenEditPage", () => {
-  it("renders the SPEC-specified title copy", () => {
+  it("renders a generic title — no specific page/action named, true for both a record editor and a console dashboard", () => {
     render(<ForbiddenEditPage />);
-    expect(
-      screen.getByText("You don't have permission to edit this profile."),
-    ).toBeTruthy();
+    expect(screen.getByText("You don't have access to this page.")).toBeTruthy();
   });
 
-  it("renders the explanatory subline naming the administrator role", () => {
+  it("renders an explanatory subline naming no specific role (accurate for both an admin-only page and a narrower-role one)", () => {
     render(<ForbiddenEditPage />);
-    expect(
-      screen.getByText(/Only an administrator can edit another scholar's profile/i),
-    ).toBeTruthy();
+    expect(screen.getByText(/Your account's role doesn't include it/i)).toBeTruthy();
   });
 
   it("links to /edit so the signed-in user can fall back to their own surface", () => {
     render(<ForbiddenEditPage />);
-    const link = screen.getByRole("link", { name: /Go to my own profile editor/i });
+    const link = screen.getByRole("link", { name: /Go to your own console/i });
     expect(link.getAttribute("href")).toBe("/edit");
   });
 
