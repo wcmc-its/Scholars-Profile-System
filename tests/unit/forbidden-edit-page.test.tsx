@@ -40,7 +40,7 @@ describe("ForbiddenEditPage", () => {
 
   it("links to /edit so the signed-in user can fall back to their own surface", () => {
     render(<ForbiddenEditPage />);
-    const link = screen.getByRole("link", { name: /Go to your own console/i });
+    const link = screen.getByRole("link", { name: "your own console" });
     expect(link.getAttribute("href")).toBe("/edit");
   });
 
@@ -59,35 +59,59 @@ describe("ForbiddenEditPage", () => {
   });
 });
 
-describe("ForbiddenEditPage — session-aware own-destination link (2026-08-19)", () => {
+describe("ForbiddenEditPage — session-aware own-destination link(s) (2026-08-19)", () => {
   it.each([
     ["isCvGenerator", "/edit/scholars", "Profiles (read-only)"],
     ["isHonorsCurator", "/edit/honors-queue", "Honors queue"],
     ["isDataSharingViewer", "/edit/data-sharing", "Data sharing"],
     ["isDeveloper", "/edit/find-researchers", "Funding matcher"],
   ] as const)(
-    "with %s on the session, links straight to %s instead of bouncing through /edit",
+    "with %s alone on the session, links straight to %s instead of bouncing through /edit",
     (flag, href, label) => {
       render(<ForbiddenEditPage session={{ [flag]: true }} />);
-      const link = screen.getByRole("link", { name: `Go to ${label}` });
+      const link = screen.getByRole("link", { name: label });
       expect(link.getAttribute("href")).toBe(href);
+      // The one link this session has — no extras.
+      expect(screen.getAllByRole("link")).toHaveLength(1);
     },
   );
 
+  it.each([["isSuperuser"], ["isCommsSteward"]] as const)(
+    "%s goes to Profiles, not the generic /edit — they can genuinely edit any scholar's profile",
+    (flag) => {
+      render(<ForbiddenEditPage session={{ [flag]: true }} />);
+      const link = screen.getByRole("link", { name: "Profiles" });
+      expect(link.getAttribute("href")).toBe("/edit/scholars");
+    },
+  );
+
+  it("a superuser who also happens to be cv_generator gets ONE 'Profiles' link, not a redundant read-only duplicate", () => {
+    render(<ForbiddenEditPage session={{ isSuperuser: true, isCvGenerator: true }} />);
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "Profiles" }).getAttribute("href")).toBe("/edit/scholars");
+    expect(screen.queryByText(/read-only/i)).toBeNull();
+  });
+
+  it("a viewer holding more than one grant gets a link to EACH, not just the first match", () => {
+    render(<ForbiddenEditPage session={{ isCommsSteward: true, isHonorsCurator: true, isDeveloper: true }} />);
+    const links = screen.getAllByRole("link");
+    expect(links.map((l) => l.textContent)).toEqual(["Profiles", "Honors queue", "Funding matcher"]);
+    expect(links.map((l) => l.getAttribute("href"))).toEqual([
+      "/edit/scholars",
+      "/edit/honors-queue",
+      "/edit/find-researchers",
+    ]);
+  });
+
   it("falls back to the generic /edit link when no session is passed (the two bare-ConsoleTopBar detail pages)", () => {
     render(<ForbiddenEditPage />);
-    const link = screen.getByRole("link", { name: /Go to your own console/i });
+    const link = screen.getByRole("link", { name: "your own console" });
     expect(link.getAttribute("href")).toBe("/edit");
   });
 
-  it("falls back to /edit for a session with none of the four global roles (superuser/comms_steward/unit-admin/plain scholar)", () => {
+  it("falls back to /edit for a session with none of the recognized grants (e.g. a unit admin with no other role)", () => {
     render(<ForbiddenEditPage session={{}} />);
-    const link = screen.getByRole("link", { name: /Go to your own console/i });
+    const link = screen.getByRole("link", { name: "your own console" });
     expect(link.getAttribute("href")).toBe("/edit");
-  });
-
-  it("picks cv_generator first on an (unexpected) multi-role session, matching resolveGlobalRole's own priority order", () => {
-    render(<ForbiddenEditPage session={{ isCvGenerator: true, isDeveloper: true }} />);
-    expect(screen.getByRole("link", { name: /Go to Profiles/i })).toBeTruthy();
   });
 });
