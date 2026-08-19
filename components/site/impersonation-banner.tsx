@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type CSSProperties } from "react";
+import Link from "next/link";
 
 import { useImpersonationProbe } from "@/components/site/use-impersonation-probe";
 
@@ -33,6 +34,12 @@ import { useImpersonationProbe } from "@/components/site/use-impersonation-probe
  * (`NEXT_PUBLIC_IMPERSONATION_TTL_SECONDS`, default 1800) measured from the
  * overlay's `startedAt`; it is advisory — the authoritative expiry is the server
  * seam (`lib/auth/effective-identity.ts`).
+ *
+ * A third line ("Can access: …", `ROLE_LINKS` below) links straight to the
+ * target's own destination(s). Without it, a superuser previewing a narrower
+ * role has no way to know where that role's own console page lives — the four
+ * global roles aren't even searchable in the switcher, and reloading on
+ * whatever `/edit/*` page they started from just as likely 403s.
  */
 
 const AMBER_GRADIENT = "linear-gradient(90deg, #7a4f01 0%, #92611a 100%)";
@@ -70,6 +77,37 @@ const ROLE_LABEL: Record<SubjectRole, string> = {
   honors_curator: "Honors Curator",
   data_sharing_viewer: "Data Sharing Viewer",
   development: "Development",
+};
+
+/**
+ * Where the target's own role actually goes (2026-08-19 — a superuser
+ * impersonating a search-blind global role, e.g. `development`, otherwise has
+ * no way to find the one page it unlocks: the switcher can't enumerate them
+ * (`impersonation-switcher.tsx`'s exact-CWID-fallback docblock), and reloading
+ * on whatever `/edit/*` page the superuser started from just as likely lands
+ * on `ForbiddenEditPage` for the target's real, narrower permissions). Static,
+ * not probe-fetched — every one of these roles has a FIXED destination (each
+ * global role's own doc comment calls out its single entry point; `owner`/
+ * `curator` get the same two links `lib/auth/console-links.ts` gives a
+ * non-superuser unit admin), so no extra round trip is needed. `Record<SubjectRole,
+ * …>` mirrors `ROLE_LABEL` above — a role added to the union fails to compile
+ * here until it's placed.
+ */
+const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href: string }>> = {
+  scholar: [{ label: "Their profile", href: "/edit" }],
+  owner: [
+    { label: "Profiles", href: "/edit/scholars" },
+    { label: "Org units", href: "/edit/units" },
+  ],
+  curator: [
+    { label: "Profiles", href: "/edit/scholars" },
+    { label: "Org units", href: "/edit/units" },
+  ],
+  comms_steward: [{ label: "Method families", href: "/edit/methods" }],
+  cv_generator: [{ label: "Profiles (read-only)", href: "/edit/scholars" }],
+  honors_curator: [{ label: "Honors queue", href: "/edit/honors-queue" }],
+  data_sharing_viewer: [{ label: "Data sharing", href: "/edit/data-sharing" }],
+  development: [{ label: "Funding matcher", href: "/edit/find-researchers" }],
 };
 
 /** Compact unit-kind suffix for the banner's subject line. */
@@ -177,6 +215,17 @@ export function ImpersonationBanner() {
           <p className="text-xs leading-tight" style={{ color: "#f6e6c4" }}>
             You are {realName ?? "signed in as yourself"}. Changes are made as{" "}
             {firstName} and logged to you.
+          </p>
+          <p className="text-xs leading-tight" style={{ color: "#f6e6c4" }} data-testid="impersonation-role-links">
+            Can access:{" "}
+            {ROLE_LINKS[impersonating.role].map((link, i) => (
+              <span key={link.href}>
+                {i > 0 && " · "}
+                <Link href={link.href} className="underline hover:no-underline" style={{ color: AMBER_TEXT }}>
+                  {link.label}
+                </Link>
+              </span>
+            ))}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-3">
