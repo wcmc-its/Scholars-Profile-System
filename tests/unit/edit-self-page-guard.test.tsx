@@ -34,7 +34,7 @@ const {
   mockCountPendingSlugRequests,
   mockIsHonorsCurator,
   mockIsDeveloper,
-  mockIsCvGenerator,
+  mockResolveGlobalRole,
 } = vi.hoisted(() => ({
   mockGetSession: vi.fn(),
   mockGetEffectiveCwid: vi.fn(),
@@ -55,7 +55,7 @@ const {
   mockCountPendingSlugRequests: vi.fn(),
   mockIsHonorsCurator: vi.fn(),
   mockIsDeveloper: vi.fn(),
-  mockIsCvGenerator: vi.fn(),
+  mockResolveGlobalRole: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -72,7 +72,17 @@ vi.mock("@/lib/auth/comms-steward", () => ({
   isCommsSteward: vi.fn(async () => false),
   isMethodsTabVisible: () => false,
 }));
-vi.mock("@/lib/auth/cv-generator", () => ({ isCvGenerator: mockIsCvGenerator }));
+vi.mock("@/lib/auth/global-roles", () => ({
+  resolveGlobalRole: mockResolveGlobalRole,
+  // Real values, not mocked-away — plain data, no I/O — so a redirect
+  // assertion below catches a drifted href the same way it would in prod.
+  GLOBAL_ROLE_HOME: {
+    cv_generator: { href: "/edit/scholars", label: "Profiles (read-only)" },
+    honors_curator: { href: "/edit/honors-queue", label: "Honors queue" },
+    data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
+    development: { href: "/edit/find-researchers", label: "Funding matcher" },
+  },
+}));
 vi.mock("@/lib/api/edit-context", () => ({ loadEditContext: mockLoadEditContext }));
 vi.mock("@/lib/db", () => ({
   db: {
@@ -174,20 +184,25 @@ beforeEach(() => {
   mockCountPendingSlugRequests.mockResolvedValue(0);
   mockIsHonorsCurator.mockResolvedValue(false);
   mockIsDeveloper.mockResolvedValue(false);
-  mockIsCvGenerator.mockResolvedValue(false);
+  mockResolveGlobalRole.mockResolvedValue(null);
 });
 
-describe("/edit (self) — cv_generator landing (#2482)", () => {
-  it("no self-profile + cv_generator → redirect to /edit/scholars (read-only roster)", async () => {
+describe("/edit (self) — global-role landing (#2482, widened 2026-08-19)", () => {
+  it.each([
+    ["cv_generator", "/edit/scholars"],
+    ["honors_curator", "/edit/honors-queue"],
+    ["data_sharing_viewer", "/edit/data-sharing"],
+    ["development", "/edit/find-researchers"],
+  ] as const)("no self-profile + %s → redirect to %s", async (role, home) => {
     mockLoadEditContext.mockResolvedValue(null);
-    mockIsCvGenerator.mockResolvedValue(true);
+    mockResolveGlobalRole.mockResolvedValue(role);
     await expect(EditSelfPage({ searchParams: searchParams() })).rejects.toThrow(
-      "__REDIRECT__:/edit/scholars",
+      `__REDIRECT__:${home}`,
     );
     expect(mockNotFound).not.toHaveBeenCalled();
   });
 
-  it("not a cv_generator, no self-profile, no proxy grants → notFound() (unchanged)", async () => {
+  it("no global role, no self-profile, no proxy grants → notFound() (unchanged)", async () => {
     mockLoadEditContext.mockResolvedValue(null);
     await expect(EditSelfPage({ searchParams: searchParams() })).rejects.toThrow("__NOT_FOUND__");
   });

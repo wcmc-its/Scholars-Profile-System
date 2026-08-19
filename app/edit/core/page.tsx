@@ -42,7 +42,7 @@ export default async function EditCoresIndexPage() {
     });
     return (
       <ConsoleShell active="cores" session={session} pendingSlugRequests={null} pendingHonors={null}>
-        <ForbiddenEditPage />
+        <ForbiddenEditPage session={session} />
       </ConsoleShell>
     );
   }

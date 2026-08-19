@@ -297,7 +297,7 @@ Covers what the **user sees**; `self-edit-spec.md`'s edge-case table covers the 
 | # | Scenario | What the user sees |
 |---|---|---|
 | 1 | Unauthenticated request to any `/edit/*` | Server-side redirect to WCM SSO (B01); the `/edit/*` shell never renders — no flash. |
-| 2 | Authenticated non-superuser opens `/edit/scholar/[other-cwid]` | A 403 page: *"You don't have permission to edit this profile."* + a link to their own `/edit`. (Authenticated — so a 403 page, not the SSO redirect.) |
+| 2 | Authenticated non-superuser opens `/edit/scholar/[other-cwid]` | A 403 page: *"You don't have access to this page."* + a link to their own `/edit`. (Authenticated — so a 403 page, not the SSO redirect. Copy genericized 2026-08-19 — `ForbiddenEditPage` is shared with ~20 console pages that aren't about editing a specific profile.) |
 | 3 | Self-suppressed scholar opens own `/edit` | Page loads (suppression-OFF read); Profile-visibility card in the **Hidden — self-applied** state with "Make my profile visible". |
 | 4 | Superuser-suppressed scholar opens own `/edit` | Loads; Profile-visibility card **Hidden — by an administrator**, no restore control; the Overview editor still works. |
 | 5 | `overview` exceeds 20,000 characters | Counter turns `--destructive`; "Save bio" disabled; on a forced save attempt, an inline `destructive` Alert. |
@@ -375,7 +375,7 @@ The user-facing strings, collected for the build. Tone: plain, second-person, no
 | Slug card | "Profile URL" / "Current URL: `/scholars/{slug}`" / "Save URL" / "Clear override" |
 | Slug applied | "Override saved: `/scholars/{slug}` — the new URL takes effect after the next directory sync." |
 | Slug errors | "Use lowercase letters, numbers, and hyphens only." / "That URL is already in use." |
-| 403 page | "You don't have permission to edit this profile." |
+| 403 page | "You don't have access to this page." |
 | Save failure | "Something went wrong — your changes weren't saved. Please try again." |
 
 Dialog copy is in [§ Suppression and confirmation dialogs](#suppression-and-confirmation-dialogs).

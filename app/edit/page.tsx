@@ -17,9 +17,9 @@ import { getSession } from "@/lib/auth/session-server";
 import { getEffectiveCwid } from "@/lib/auth/effective-identity";
 import { isSuperuser, type EditSession } from "@/lib/auth/superuser";
 import { isCommsSteward } from "@/lib/auth/comms-steward";
-import { isCvGenerator } from "@/lib/auth/cv-generator";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isDeveloper } from "@/lib/auth/development";
+import { GLOBAL_ROLE_HOME, resolveGlobalRole } from "@/lib/auth/global-roles";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { db } from "@/lib/db";
@@ -114,12 +114,20 @@ export default async function EditSelfPage({
     if (await isCommsSteward(editCwid)) {
       redirect("/edit/methods");
     }
-    // A `cv_generator` (#2482) has no self-profile either — their entry point is
-    // the Profiles roster (read-only), the same landing a superuser reaches via
-    // "All profiles". Checked before the proxy fallback below since a global
-    // read-only role has nothing scholar-specific to route to first.
-    if (await isCvGenerator(editCwid)) {
-      redirect("/edit/scholars");
+    // A holder of one of the other four global LDAP-group roles
+    // (`cv_generator`/`honors_curator`/`data_sharing_viewer`/`development`,
+    // `lib/auth/global-roles.ts`) has no self-profile either — each has
+    // exactly one console entry point, none of them scholar-specific, so route
+    // there before the proxy fallback below. One `resolveGlobalRole` call
+    // checks all four in parallel (a single bounded LDAPS round trip, not a
+    // chain of four sequential ones) — the same reuse `/api/impersonation`'s
+    // POST route already makes for the identical "which global role, if any"
+    // question. Was cv_generator-only (#2482); widened 2026-08-19 after
+    // `/edit`'s own "Go to my own profile editor" link 404'd for the other
+    // three roles, the same profile-less trap #2482 had already found once.
+    const globalRole = await resolveGlobalRole(editCwid);
+    if (globalRole) {
+      redirect(GLOBAL_ROLE_HOME[globalRole].href);
     }
     // A signed-in user with no Scholar row may still be a scholar-assigned proxy
     // editor (#779) — pure administrative staff (Beth Chunn) editing on a

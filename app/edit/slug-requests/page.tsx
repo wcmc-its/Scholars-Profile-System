@@ -41,7 +41,7 @@ export default async function SlugRequestsPage() {
   if (denial !== null) {
     return (
       <ConsoleShell active="slug-requests" session={session} pendingSlugRequests={null} pendingHonors={null}>
-        <ForbiddenEditPage />
+        <ForbiddenEditPage session={session} />
       </ConsoleShell>
     );
   }
