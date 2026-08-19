@@ -5770,24 +5770,24 @@ export async function searchPublications(opts: {
  * Autocomplete suggestions (spec line 184: fires on 2 chars).
  * Returns up to `size` distinct suggestions from the people index.
  *
- * #2484 — over-fetch + dedupe-by-cwid. `buildPeopleDoc` (lib/search-index-docs.ts)
- * indexes a last-name-only `nameSuggest` input (weight 95) whose surface text is
- * just the surname, so every scholar sharing a surname contributes an
- * identical-text option at the same weight. OpenSearch's completion suggester
- * with `skip_duplicates: true` only dedupes *within* the candidate window it
- * already pulled — that window is proportional to the requested
- * `completion.size` — so when 3+ same-surname scholars tie at weight 95 and
- * `completion.size` equals the caller-facing `size` (5), the suggester can
- * collapse the tie down to a single survivor and never reaches the next tier
- * of legitimately-distinct inputs (e.g. "Bender, Heidi Bender" at weight 90).
- * Requesting a larger completion window than we intend to return gives
- * skip_duplicates enough headroom to fall through same-text collisions to
- * those distinct lower-weight inputs; deduping by `_id` (cwid) afterward
- * collapses the now-possible case of one scholar supplying *multiple*
- * surviving options (e.g. both their "Bender" and "Bender, Heidi Bender"
- * inputs matching the same prefix), and truncating to `size` right after
- * restores the function's documented "up to size distinct suggestions"
- * contract before the mget hydration call below (so mget cost is unchanged).
+ * #2484 — `skip_duplicates: true` DOES NOT WORK on this cluster and must stay
+ * off. `buildPeopleDoc` (lib/search-index-docs.ts) indexes a last-name-only
+ * `nameSuggest` input (weight 95) whose surface text is just the surname, so
+ * scholars sharing a surname tie on identical text. `skip_duplicates: true`
+ * was meant to collapse that tie to one survivor per distinct text while
+ * still falling through to each scholar's other, lower-weight inputs — but
+ * measured directly against staging's live OpenSearch (raw `client.search`,
+ * bypassing this function), it instead drops the other ties ENTIRELY and
+ * never backfills, at ANY `completion.size` (confirmed identical at size 5
+ * and size 25 — this is not a fetch-depth/windowing problem, an earlier
+ * version of this fix wrongly assumed it was and shipped an over-fetch that
+ * measurably changed nothing). With `skip_duplicates: false` on the same
+ * query, all tied scholars come back correctly, pre-sorted by weight
+ * descending. So: leave `skip_duplicates` off, and do the DEDUPE OURSELVES
+ * by `_id` (cwid) below — a single scholar can legitimately supply multiple
+ * matching options for one prefix (e.g. both their "Bender" and
+ * "Bender, Heidi Bender" inputs), which our own first-seen-wins loop
+ * collapses correctly.
  */
 export async function suggestNames(prefix: string, size = 5): Promise<
   Array<{
@@ -5804,9 +5804,11 @@ export async function suggestNames(prefix: string, size = 5): Promise<
   const trimmed = prefix.trim();
   if (trimmed.length < 2) return [];
 
-  // Over-fetch: ask OpenSearch for more candidates than we'll return, so
-  // skip_duplicates has room to skip past same-surname text collisions
-  // instead of collapsing them to one result. See #2484 doc comment above.
+  // Over-fetch: a scholar can match more than once for a given prefix (their
+  // surname-only input AND their "Last, Full Name" input), and our own dedupe
+  // below collapses those — request some headroom so `size` distinct people
+  // still fit after that collapse. `skip_duplicates` stays OFF; see #2484 doc
+  // comment above for why it can't be relied on here.
   const completionSize = size * 5;
 
   const resp = await searchClient().search({
@@ -5816,7 +5818,7 @@ export async function suggestNames(prefix: string, size = 5): Promise<
       suggest: {
         scholar: {
           prefix: trimmed,
-          completion: { field: "nameSuggest", size: completionSize, skip_duplicates: true },
+          completion: { field: "nameSuggest", size: completionSize, skip_duplicates: false },
         },
       },
       _source: false,
