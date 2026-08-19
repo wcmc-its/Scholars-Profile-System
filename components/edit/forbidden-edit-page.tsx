@@ -16,9 +16,16 @@
  * the route handler's responsibility — App Router has no `forbidden()`
  * primitive in Next 15.5, so the page response remains HTTP 200 in v1.
  *
- * Server component (no interactivity, no state).
+ * Server component (no interactivity, no state) — except when `ownDestinations`
+ * resolves to exactly one place, in which case this redirects there instead of
+ * rendering anything (2026-08-19; see that function's doc comment). `redirect()`
+ * from a Server Component works no matter how deep it's thrown from in the RSC
+ * tree — the same pattern `notFound()` already uses at several nested call
+ * sites in this codebase — so this stays a drop-in `<ForbiddenEditPage />` for
+ * every caller; no page had to change to opt in.
  */
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { GLOBAL_ROLE_HOME } from "@/lib/auth/global-roles";
 
@@ -69,6 +76,18 @@ const PROFILES_LINK = { href: "/edit/scholars", label: "Profiles" };
  * — `resolveScholarEditAccess`'s `"forbidden"` result carries no session) or
  * carrying none of these grants falls back to the generic `/edit` link,
  * unchanged.
+ *
+ * When this resolves to exactly ONE entry, the caller below redirects there
+ * immediately instead of showing a page with one link on it — there's no
+ * reason to make someone click through an interstitial to the only place
+ * they can go. This mirrors `/edit`'s own profile-less fallthrough
+ * (`app/edit/page.tsx`), which has always redirected `comms_steward` /
+ * `cv_generator` / the other global roles straight through with no
+ * interstitial of its own. A page IS still shown when there's more than one
+ * destination (can't silently pick for the viewer) or none resolved at all
+ * (the generic `/edit` single-entry case still redirects — `/edit` does its
+ * own further routing/404ing from there, unchanged from what the link used
+ * to point at).
  */
 function ownDestinations(session?: OwnHomeSession): ReadonlyArray<{ href: string; label: string }> {
   const links: Array<{ href: string; label: string }> = [];
@@ -136,6 +155,12 @@ export function ForbiddenEditPage({
   }
 
   const homes = ownDestinations(session);
+  // Exactly one place to go — take them there directly (see the doc comment
+  // on `ownDestinations` above). `redirect()` throws; nothing below this line
+  // runs when it fires.
+  if (homes.length === 1) {
+    redirect(homes[0].href);
+  }
   return (
     <main
       className="bg-apollo-page min-h-screen mx-auto w-full max-w-[var(--max-narrow)] px-6 py-16 text-center"
