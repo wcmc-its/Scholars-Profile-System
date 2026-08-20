@@ -23,6 +23,7 @@ import { BrowseList } from "@/components/edit/find-researchers";
 import { MatchaPanel, type EligibilityRequirements } from "@/components/edit/matcha-panel";
 import type { CareerStage } from "@/lib/career-stage";
 import { careerStagesOf, facultyPiMayHold } from "@/lib/funding/screening";
+import { appealByStageSummary } from "@/lib/match-display";
 
 type Selected = {
   title: string | null;
@@ -32,6 +33,8 @@ type Selected = {
   requirements: EligibilityRequirements;
   /** Why ranking researchers on this award will not work — null when it will. See `askNote`. */
   note: string | null;
+  /** ReciterAI's {grad, postdoc, early, mid, senior} appeal spread — badge only, not a scoring input. */
+  appealByStage: Partial<Record<CareerStage, number>>;
 };
 
 /**
@@ -169,6 +172,7 @@ export function GrantMatchaPanel() {
           eligibilityFlags?: unknown;
           eligibility?: unknown;
           eligibilityRaw?: unknown;
+          appealByStage?: unknown;
         };
         if (!active) return;
         const askSeed = buildAskSeed(full.title, full.synopsis);
@@ -187,6 +191,7 @@ export function GrantMatchaPanel() {
                     full.eligibilityRaw,
                   ),
                   note: askNote(full),
+                  appealByStage: (full.appealByStage ?? {}) as Partial<Record<CareerStage, number>>,
                 },
               }
             : {
@@ -256,6 +261,17 @@ export function GrantMatchaPanel() {
             <span className="text-foreground">
               {current.selected.title ?? "Untitled opportunity"}
             </span>
+            {(() => {
+              const appeal = appealByStageSummary(current.selected.appealByStage);
+              return appeal ? (
+                <span
+                  data-testid="matcha-appeal-badge"
+                  className="border-apollo-border bg-apollo-surface-2 text-muted-foreground ml-2 rounded-full border px-2 py-0.5 text-xs"
+                >
+                  {appeal}
+                </span>
+              ) : null;
+            })()}
           </div>
           {current.selected.note ? (
             <p className="border-apollo-border bg-apollo-surface-2 text-foreground/90 mb-4 rounded-md border px-3 py-2 text-sm">

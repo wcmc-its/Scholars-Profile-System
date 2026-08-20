@@ -82,6 +82,7 @@ import {
 } from "@/components/ui/sheet";
 import {
   conceptCoverage,
+  assessMatchSignal,
   evidenceMatchCount,
   evidenceProvenance,
   fitTier,
@@ -106,6 +107,7 @@ import {
   type MatchaFitTier,
   type MatchaResponse,
   type MatchaPreference,
+  type MatchSignal,
   type GrantCandidate,
 } from "@/lib/api/matcha-contract";
 import type { CareerStage } from "@/lib/career-stage";
@@ -352,6 +354,15 @@ const ELIG_BADGE_CLASS: Record<EligBadge, string> = {
   eligible: "bg-elig-border/15 text-elig-text",
   relaxed: "bg-apollo-amber-tint text-apollo-amber border border-apollo-amber-tint-border",
   filtered: "text-muted-foreground border border-dashed border-border",
+};
+
+/** Copy for the ask card's thin-match caution, keyed on `assessMatchSignal`'s `reason` — see
+ *  `MatchSignal`'s doc comment in matcha-contract.ts for what each case means. */
+const THIN_SIGNAL_COPY: Record<Extract<MatchSignal, { thin: true }>["reason"], string> = {
+  "single-broad-concept":
+    "This match is based on a single broad concept — it may surface anyone who touches the general category, not the funder's specific target.",
+  "single-bare-method":
+    "This match is based on a single method with nothing to narrow it — it may surface anyone using that method, regardless of disease or population.",
 };
 
 /** The inline eligibility pill (mockup: badge inline, beside the fit tier). */
@@ -791,6 +802,10 @@ export function MatchaPanel({
   // Rarity is judged across the WHOLE ask, not per panel — a method is scarce relative to
   // the other concepts the sponsor named, not just to the other methods.
   const rare = useMemo(() => rareTerms(concepts), [concepts]);
+
+  // Self-awareness for a thin extraction — see `assessMatchSignal`'s doc comment. Render-only:
+  // the officer gets a caution up front rather than discovering the scatter in the ranking.
+  const matchSignal = useMemo(() => assessMatchSignal(concepts), [concepts]);
 
   // #1780 Phase 2 — culled chips still worth offering: the extractor's tail minus anything now in
   // the searched set (a just-added term drops off). `atCap` disables adds once the searched set
@@ -1299,6 +1314,19 @@ export function MatchaPanel({
                   {historyDrawer}
                 </div>
               </div>
+
+              {/* Self-awareness caveat for a thin extraction — read BEFORE the highlighted terms
+                  below, so it caveats the ask rather than trailing the ranking it explains. */}
+              {matchSignal.thin ? (
+                <div
+                  role="status"
+                  data-testid="matcha-thin-signal"
+                  className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200"
+                >
+                  <span className="font-medium">Thin match.</span>{" "}
+                  {THIN_SIGNAL_COPY[matchSignal.reason]}
+                </div>
+              ) : null}
 
               {/* The pasted request, read-only, each pulled-out term marked. `break-words` for the
                   300-char Outlook SafeLinks URL that carries no break opportunity. D11 — clamped to

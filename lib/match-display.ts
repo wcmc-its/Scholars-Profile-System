@@ -119,6 +119,42 @@ export function careerStageLabel(stage: CareerStage | null): string {
   return stage ? CAREER_STAGE_LABELS[stage] : "";
 }
 
+// Same order find-researchers.tsx / matcha-panel.tsx use for their own local copies of this
+// array — this file imports from neither, so it keeps its own.
+const CAREER_STAGE_ORDER: readonly CareerStage[] = ["grad", "postdoc", "early", "mid", "senior"];
+
+// A flat spread doesn't single out any one stage as the target.
+const APPEAL_FLAT_SPREAD = 0.3;
+// Stages within this of the max are "tied for best" (usually one, occasionally two neighbors).
+const APPEAL_NEAR_MAX = 0.15;
+
+/**
+ * DISPLAY ONLY (a badge), not a scoring input. Reduces `Opportunity.appealByStage`
+ * (ReciterAI's {grad, postdoc, early, mid, senior} spread, each 0–1) to one short line,
+ * or null when there's nothing to show.
+ *
+ * The 0.3 / 0.15 thresholds are a lazy first cut calibrated on 3 anecdotal opportunities
+ * (Harry Weaver: early 0.9 / senior 0.1 → skewed; A-T Children's Project → broad), not a
+ * validated model — tune if a real case reads wrong.
+ */
+export function appealByStageSummary(appeal: Partial<Record<CareerStage, number>>): string | null {
+  const entries = CAREER_STAGE_ORDER.filter((stage) => Number.isFinite(appeal[stage])).map(
+    (stage) => [stage, appeal[stage] as number] as const,
+  );
+  if (entries.length === 0) return null;
+
+  const values = entries.map(([, v]) => v);
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  if (max - min <= APPEAL_FLAT_SPREAD) return "Appeals broadly across career stages";
+
+  const label = entries
+    .filter(([, v]) => max - v <= APPEAL_NEAR_MAX)
+    .map(([stage]) => careerStageLabel(stage))
+    .join(", ");
+  return `Best fit: ${label}`;
+}
+
 // ED's `role_category` codes, as the person-type facet renders them. The vocabulary is the
 // one `careerStageBucket` switches on (lib/career-stage.ts) — this is a display map for it,
 // not a second source of truth about what roles exist.

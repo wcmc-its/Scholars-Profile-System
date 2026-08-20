@@ -91,6 +91,31 @@ describe("GrantMatchaPanel — ?opp= URL state", () => {
       "Outstanding New Environmental Scientist\n\nSupports early-stage investigators studying environmental exposures.",
     );
     expect(screen.queryByRole("link", { name: "browse table" })).toBeNull();
+    // No appealByStage on this payload — no badge.
+    expect(screen.queryByTestId("matcha-appeal-badge")).toBeNull();
+  });
+
+  it("surfaces appealByStage as a badge when the opportunity carries it", async () => {
+    searchParams.value = new URLSearchParams("opp=abc");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          title: "Harry Weaver Neuroscience Scholar Award",
+          sponsor: "National MS Society",
+          synopsis: "Supports early-career neuroscience investigators.",
+          eligibilityFlags: ["faculty_eligible"],
+          eligibility: {},
+          appealByStage: { early: 0.9, senior: 0.1 },
+        }),
+      })),
+    );
+
+    render(<GrantMatchaPanel />);
+    await waitFor(() => expect(screen.getByTestId("matcha-appeal-badge")).toBeTruthy());
+    expect(screen.getByTestId("matcha-appeal-badge").textContent).toBe("Best fit: Early career");
   });
 
   it("never mounts Matcha with the previous opportunity's seed when ?opp= changes", async () => {
