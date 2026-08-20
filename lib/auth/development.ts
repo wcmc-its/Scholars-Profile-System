@@ -1,6 +1,7 @@
 /**
- * `development` role resolution (GrantRecs Phase 4 — the "Find researchers"
- * reverse-matcher admin surface, `2026-06-20-grantrecs-phase4-design-plan.md`).
+ * `development` role resolution (GrantRecs Phase 4,
+ * `2026-06-20-grantrecs-phase4-design-plan.md`; its original surface,
+ * `/edit/find-researchers`, was sunset in favor of `/edit/grant-matcha`).
  *
  * `isDeveloper(cwid)` answers "is this CWID a member of the development group?"
  * with a live LDAPS query against the WCM Enterprise Directory — re-evaluated
@@ -10,9 +11,9 @@
  * `isDeveloper` by `getEditSession()` / `getEffectiveEditSession()`.
  *
  * The role is **global** (not per-scholar, not unit-scoped). Its only purpose is
- * to open in-progress admin tooling — currently the `/edit/find-researchers`
- * page and its data route — to a tightly-scoped operator set WITHOUT making them
- * full superusers. It confers no profile-field writes and no other `/edit` tabs.
+ * to open in-progress admin tooling — currently the `/edit/grant-matcha` and
+ * `/edit/matcha` pages and their data routes — to a tightly-scoped operator set
+ * WITHOUT making them full superusers. It confers no profile-field writes and no other `/edit` tabs.
  * Superusers pass every `development` guard (superset) — that direction lives in
  * the authz predicate at the call site (`isSuperuser || isDeveloper`), not here.
  *

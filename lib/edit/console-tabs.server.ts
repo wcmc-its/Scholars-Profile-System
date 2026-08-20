@@ -67,7 +67,6 @@ export const CONSOLE_TAB_IDS = [
   "usage",
   "etlStatus",
   "cores",
-  "fundingMatcher",
   "matcha",
   "grantMatcha",
 ] as const;
@@ -162,7 +161,6 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
 
   // Gap 1b: developers get these from the `/edit` landing page too, because
   // visibility no longer depends on which page you're standing on.
-  fundingMatcher: (s) => s.isSuperuser || s.isDeveloper === true,
   matcha: (s) => (s.isSuperuser || s.isDeveloper === true) && isMatchaEnabled(),
   // GRANT_MATCHA depends on MATCHA (the Matcha spine is what it seeds), so the
   // tab needs BOTH flags — mirroring the page's own `notFound()` gate

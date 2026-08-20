@@ -42,8 +42,8 @@ describe("ImpersonationBanner role links", () => {
     render(<ImpersonationBanner />);
 
     await screen.findByTestId("impersonation-role-links");
-    const link = screen.getByRole("link", { name: "Funding matcher" });
-    expect(link.getAttribute("href")).toBe("/edit/find-researchers");
+    const link = screen.getByRole("link", { name: "Grant Matcha" });
+    expect(link.getAttribute("href")).toBe("/edit/grant-matcha");
   });
 
   it("gives a unit owner both of the same two links a non-superuser unit admin gets", async () => {

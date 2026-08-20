@@ -4,8 +4,8 @@
  * `role-aware-navigation-entry-points-spec.md`). The maroon-underlined tab strip
  * under the black Apollo bar, linking the Profiles roster (`/edit/scholars`), the
  * Profile-URL request queue (`/edit/slug-requests`), the URL registry,
- * Administrators, Method Families, and the Funding matcher
- * (`/edit/find-researchers`). A pending-count pill sits on the "URL requests"
+ * Administrators, Method Families, and the matcher tools
+ * (`/edit/matcha`, `/edit/grant-matcha`). A pending-count pill sits on the "URL requests"
  * tab; the account chip/dropdown anchors the right end (account-dropdown-nav
  * handoff, Workstream A — its `ACCOUNT_CONSOLE_NAV_RESTRUCTURE` flag was
  * retired in #1440).
@@ -47,7 +47,6 @@ export type AdminSubnavActive =
   | "etl-status"
   | "reports"
   | "cores"
-  | "find-researchers"
   | "matcha"
   | "grant-matcha"
   /** The viewer's own self-edit surface (`/edit`) — no list tab is active;
@@ -111,7 +110,6 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   // `EditShell`'s `reportsHref` — Phase 1 of this redesign).
   reports: "reports",
   /** Paste an input, get a ranked result. */
-  "find-researchers": "tools",
   matcha: "tools",
   "grant-matcha": "tools",
   /** The viewer's own `/edit` — no group is active, so tier 2 does not render. */
@@ -204,10 +202,10 @@ export function AdminSubnav({
    *  (`/edit/scholars`'s `unitScope !== null` override), showing a News link
    *  that 404s on `isNewsQueueTabVisible`'s actual gate. Default `false`. */
   newsTab?: boolean;
-  /** Show the "Funding matcher" tab to a pure development-role viewer who is NOT
-   *  a superuser. Superusers already get it via `superuserSurfaces`; this is the
-   *  dev-role escape hatch on `/edit/find-researchers` (their only console page).
-   *  Default `false`. */
+  /** Show the Matcha / Grant Matcha tabs to a pure development-role viewer who
+   *  is NOT a superuser. Superusers already get them via `superuserSurfaces`;
+   *  this is the dev-role escape hatch on `/edit/grant-matcha` (their console
+   *  landing since the find-researchers sunset). Default `false`. */
   viewerIsDeveloper?: boolean;
 }) {
   /**
@@ -305,16 +303,8 @@ export function AdminSubnav({
       // Gated on the same `CORE_PAGES` flag as the public core surfaces, so it stays
       // dark in any env where cores aren't live yet (staging-on / prod-off).
       { show: superuserSurfaces && isCorePagesEnabled(), id: "cores", href: "/edit/core", label: "Cores" },
-      // GrantRecs reverse-matcher — its only entry point is this bar.
-      // `viewerIsDeveloper` is the escape hatch for a pure development-role viewer.
-      {
-        show: superuserSurfaces || viewerIsDeveloper,
-        id: "find-researchers",
-        href: "/edit/find-researchers",
-        label: "Funding matcher",
-      },
-      // CTL sponsor match — same audience as the Funding matcher; dark while
-      // SPONSOR_MATCH is off.
+      // CTL sponsor match — `viewerIsDeveloper` is the escape hatch for a pure
+      // development-role viewer; dark while SPONSOR_MATCH is off.
       {
         show: (superuserSurfaces || viewerIsDeveloper) && isMatchaEnabled(),
         id: "matcha",
@@ -373,7 +363,7 @@ export function AdminSubnav({
         ...groups.map((g) =>
           // Single-member promotion. Not a nicety: narrow roles are common here
           // (`honors_curator` → Queues={Honors}; a comms_steward → Registries={Method
-          // families}; a pure dev-role viewer → Tools={Funding matcher}), and
+          // families}), and
           // wrapping one tab in a group turns their entire console into a pointless
           // extra hop.
           g.members.length === 1 ? (

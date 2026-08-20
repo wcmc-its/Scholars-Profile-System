@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Opportunity URL intake — the submit-a-URL panel on `/edit/find-researchers`
+ * Opportunity URL intake — the submit-a-URL panel on `/edit/grant-matcha`
  * (`docs/opportunity-url-intake-spec.md` §5/§10, flag `OPPORTUNITY_URL_INTAKE`).
  *
  * Submitting queues the URL for ReciterAI's pipeline; nothing is scraped or

@@ -1,6 +1,6 @@
 /**
  * `components/edit/grant-matcha-tabs.tsx` — the Browse / Submissions sub-tab
- * strip on `/edit/grant-matcha` (mirrors `find-researchers-tabs.test.tsx`):
+ * strip on `/edit/grant-matcha` (patterned on the retired `find-researchers-tabs.test.tsx`):
  *  - `?tab=` drives the active tab (default Browse); `intakeEnabled={false}`
  *    renders the bare panel with no strip at all;
  *  - the precedence rule: a non-empty `?opp=<id>` is a deep-linked SELECTED

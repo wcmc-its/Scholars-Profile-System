@@ -7,7 +7,7 @@
  * (`/edit/scholar/[other-cwid]`, `/edit/publication/[pmid]` — "edit this
  * profile" / "edit another scholar's profile"), but `ForbiddenEditPage` is the
  * shared 403 for the ~20 `ConsoleShell`-wrapped list/queue/dashboard pages too
- * (`/edit/scholars`, `/edit/usage`, `/edit/find-researchers`, …), most of which
+ * (`/edit/scholars`, `/edit/usage`, `/edit/grant-matcha`, …), most of which
  * aren't about editing any specific profile at all — a `development`-role
  * viewer denied `/edit/scholars` was never trying to "edit another scholar's
  * profile", they were trying to browse a roster their role doesn't cover. The

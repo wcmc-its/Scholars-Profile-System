@@ -8,7 +8,7 @@
  * ranking engine is reusable.
  *
  * Audience: superuser OR development role — the same gate as
- * `/edit/find-researchers`; the data route (`/api/edit/matcha`) is the
+ * `/edit/grant-matcha`; the data route (`/api/edit/matcha`) is the
  * real authorization boundary and re-checks it. `notFound()` while
  * `MATCHA` is off (mirrors `/edit/methods` — never reveal a dark
  * surface). `force-dynamic` + `noindex`, mirroring the other `/edit/*` pages.
@@ -53,7 +53,7 @@ export default async function MatchaPage() {
     );
   }
 
-  // Fold into the shared console — mirrors `/edit/find-researchers`.
+  // Fold into the shared console — mirrors `/edit/grant-matcha`.
   const pendingSlugRequests =
     session.isSuperuser && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
   // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:

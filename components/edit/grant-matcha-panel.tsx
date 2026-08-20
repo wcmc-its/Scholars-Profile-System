@@ -13,13 +13,25 @@
  * same curated-first ordering — parameterized by `hrefFor`. The selection lives in the URL
  * (`?opp=<id>`), not component state, so the page is deep-linkable and browser Back returns to
  * the table.
+ *
+ * The selected view (matcha-admin Phase 3b, mockup 4) frames the seeded panel with the
+ * opportunity's own facts: clamped synopsis in the main column, `OpportunityFactRail` on the
+ * right — every field off the SAME detail fetch that seeds the ask, dashes for what the corpus
+ * doesn't carry. The thin-match caution stays where #2494 put it, inside `MatchaPanel`
+ * (`assessMatchSignal`); this surface adds no second banner and never reads the structured
+ * matcher's abstain signal.
  */
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
-import { BrowseList } from "@/components/edit/opportunity-browse";
+import {
+  BrowseList,
+  ClampedText,
+  OpportunityFactRail,
+  SourceBadge,
+} from "@/components/edit/opportunity-browse";
 import { MatchaPanel, type EligibilityRequirements } from "@/components/edit/matcha-panel";
 import type { CareerStage } from "@/lib/career-stage";
 import { careerStagesOf, facultyPiMayHold } from "@/lib/funding/screening";
@@ -28,6 +40,10 @@ import { appealByStageSummary } from "@/lib/match-display";
 type Selected = {
   title: string | null;
   sponsor: string | null;
+  /** Corpus source (`wcm_curated` etc.) — the header's source pill. */
+  source: string | null;
+  /** Full synopsis for the clamped header prose (mockup 4) — the ask seed carries it too. */
+  synopsis: string | null;
   askSeed: string;
   /** Derived once per fetched opportunity, so the panel's memo deps stay referentially stable. */
   requirements: EligibilityRequirements;
@@ -35,6 +51,17 @@ type Selected = {
   note: string | null;
   /** ReciterAI's {grad, postdoc, early, mid, senior} appeal spread — badge only, not a scoring input. */
   appealByStage: Partial<Record<CareerStage, number>>;
+  /** Mockup-4 fact rail, straight off the detail payload — missing values stay null (muted dash). */
+  facts: {
+    awardFloor: number | null;
+    awardCeiling: number | null;
+    estimatedFunding: number | null;
+    numberOfAwards: number | null;
+    openDate: string | null;
+    dueDate: string | null;
+    cfdaList: string[];
+    sourceUrl: string | null;
+  };
 };
 
 /**
@@ -173,7 +200,16 @@ export function GrantMatchaPanel({
         const full = (await r.json()) as {
           title: string | null;
           sponsor: string | null;
+          source?: string | null;
           synopsis: string | null;
+          sourceUrl?: string | null;
+          openDate?: string | null;
+          dueDate?: string | null;
+          awardFloor?: number | null;
+          awardCeiling?: number | null;
+          estimatedFunding?: number | null;
+          numberOfAwards?: number | null;
+          cfdaList?: unknown;
           eligibilityFlags?: unknown;
           eligibility?: unknown;
           eligibilityRaw?: unknown;
@@ -189,6 +225,8 @@ export function GrantMatchaPanel({
                 selected: {
                   title: full.title,
                   sponsor: full.sponsor,
+                  source: full.source ?? null,
+                  synopsis: full.synopsis,
                   askSeed,
                   requirements: requirementsFrom(
                     full.eligibilityFlags,
@@ -197,6 +235,16 @@ export function GrantMatchaPanel({
                   ),
                   note: askNote(full),
                   appealByStage: (full.appealByStage ?? {}) as Partial<Record<CareerStage, number>>,
+                  facts: {
+                    awardFloor: full.awardFloor ?? null,
+                    awardCeiling: full.awardCeiling ?? null,
+                    estimatedFunding: full.estimatedFunding ?? null,
+                    numberOfAwards: full.numberOfAwards ?? null,
+                    openDate: full.openDate ?? null,
+                    dueDate: full.dueDate ?? null,
+                    cfdaList: asStringArray(full.cfdaList),
+                    sourceUrl: full.sourceUrl ?? null,
+                  },
                 },
               }
             : {
@@ -261,43 +309,60 @@ export function GrantMatchaPanel({
       ) : current.kind === "error" ? (
         <p className="text-destructive text-sm">{current.message}</p>
       ) : (
-        <>
-          <div className="mb-4 min-w-0 text-sm">
-            {current.selected.sponsor ? (
-              <span className="font-semibold text-[var(--color-accent-slate)]">
-                {current.selected.sponsor}
-                {" · "}
+        // Mockup 4: header + clamped synopsis + caution + the seeded panel in the
+        // main column, the always-every-row fact rail as a Duke-style right column.
+        <div className="flex flex-col gap-x-8 gap-y-4 sm:flex-row">
+          <div className="min-w-0 flex-1">
+            <div className="min-w-0 text-sm">
+              {current.selected.sponsor ? (
+                <span className="font-semibold text-[var(--color-accent-slate)]">
+                  {current.selected.sponsor}
+                  {" · "}
+                </span>
+              ) : null}
+              <span className="text-foreground">
+                {current.selected.title ?? "Untitled opportunity"}
               </span>
-            ) : null}
-            <span className="text-foreground">
-              {current.selected.title ?? "Untitled opportunity"}
-            </span>
+            </div>
             {(() => {
               const appeal = appealByStageSummary(current.selected.appealByStage);
-              return appeal ? (
-                <span
-                  data-testid="matcha-appeal-badge"
-                  className="border-apollo-border bg-apollo-surface-2 text-muted-foreground ml-2 rounded-full border px-2 py-0.5 text-xs"
-                >
-                  {appeal}
-                </span>
+              return appeal || current.selected.source ? (
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  {appeal ? (
+                    <span
+                      data-testid="matcha-appeal-badge"
+                      className="border-apollo-border bg-apollo-surface-2 text-muted-foreground rounded-full border px-2 py-0.5 text-xs"
+                    >
+                      {appeal}
+                    </span>
+                  ) : null}
+                  <SourceBadge source={current.selected.source} />
+                </div>
               ) : null;
             })()}
+            {current.selected.synopsis ? (
+              <div className="mt-3">
+                <ClampedText text={current.selected.synopsis} lines={3} />
+              </div>
+            ) : null}
+            {current.selected.note ? (
+              <p className="border-apollo-border bg-apollo-surface-2 text-foreground/90 mt-4 rounded-md border px-3 py-2 text-sm">
+                {current.selected.note}
+              </p>
+            ) : null}
+            <div className="mt-4">
+              <MatchaPanel
+                key={current.id}
+                initialDescription={current.selected.askSeed}
+                // A stated reason not to rank replaces the auto-run: the ask is seeded and waiting,
+                // but no Bedrock call is billed for a question we already know the answer to.
+                autoRun={current.selected.note === null}
+                eligibility={current.selected.requirements}
+              />
+            </div>
           </div>
-          {current.selected.note ? (
-            <p className="border-apollo-border bg-apollo-surface-2 text-foreground/90 mb-4 rounded-md border px-3 py-2 text-sm">
-              {current.selected.note}
-            </p>
-          ) : null}
-          <MatchaPanel
-            key={current.id}
-            initialDescription={current.selected.askSeed}
-            // A stated reason not to rank replaces the auto-run: the ask is seeded and waiting,
-            // but no Bedrock call is billed for a question we already know the answer to.
-            autoRun={current.selected.note === null}
-            eligibility={current.selected.requirements}
-          />
-        </>
+          <OpportunityFactRail {...current.selected.facts} />
+        </div>
       )}
     </div>
   );

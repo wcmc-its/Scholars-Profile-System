@@ -1,12 +1,15 @@
 /**
- * `components/edit/find-researchers.tsx` — the browse list renders as a TABLE.
+ * `components/edit/opportunity-browse.tsx` — `BrowseList` renders as a TABLE.
  *
- * 200 opportunities all carry the same four attributes, so they are rows, not
- * cards (R5). The load-bearing detail is R7: the row is clickable because the
- * title is a REAL anchor with a stretched pseudo-element, NOT because the `<tr>`
- * has an onClick. These tests pin the anchor — an onClick row would still "work"
- * in a click test while silently breaking cmd-click, middle-click, copy-link and
- * screen-reader link announcement, so asserting `href` is the point.
+ * Re-homed from the retired `/edit/find-researchers` suite (matcha-admin Phase
+ * 3c): the browse table survives as the grant-matcha picker, so its invariants
+ * do too. 200 opportunities all carry the same four attributes, so they are
+ * rows, not cards (R5). The load-bearing detail is R7: the row is clickable
+ * because the title is a REAL anchor with a stretched pseudo-element, NOT
+ * because the `<tr>` has an onClick. These tests pin the anchor — an onClick
+ * row would still "work" in a click test while silently breaking cmd-click,
+ * middle-click, copy-link and screen-reader link announcement, so asserting
+ * `href` is the point.
  *
  * next/link renders a plain <a> under jsdom (see browse-by-method-section.test).
  */
@@ -15,11 +18,11 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
-  usePathname: () => "/edit/find-researchers",
+  usePathname: () => "/edit/grant-matcha",
   useSearchParams: () => new URLSearchParams(""),
 }));
 
-import { FindResearchers } from "@/components/edit/find-researchers";
+import { BrowseList } from "@/components/edit/opportunity-browse";
 
 const OPPS = [
   {
@@ -59,13 +62,16 @@ function mockFetch(opportunities: unknown[] = OPPS) {
   );
 }
 
+/** The grant-matcha picker's `hrefFor` — the selection lives in the URL (`?opp=`). */
+const hrefFor = (id: string) => `/edit/grant-matcha?opp=${encodeURIComponent(id)}`;
+
 async function renderBrowse(opportunities: unknown[] = OPPS) {
   mockFetch(opportunities);
-  render(<FindResearchers />);
+  render(<BrowseList hrefFor={hrefFor} />);
   await waitFor(() => expect(screen.getByRole("table")).toBeTruthy());
 }
 
-describe("FindResearchers browse — table", () => {
+describe("BrowseList — table", () => {
   beforeEach(() => vi.unstubAllGlobals());
   afterEach(() => vi.unstubAllGlobals());
 
@@ -84,7 +90,7 @@ describe("FindResearchers browse — table", () => {
       name: /NIH Outstanding New Environmental Scientist/,
     });
     expect(link.getAttribute("href")).toBe(
-      "/edit/find-researchers?opp=wcm_curated%3Aones-abc123",
+      "/edit/grant-matcha?opp=wcm_curated%3Aones-abc123",
     );
     // The stretched pseudo-element is what makes the whole row clickable.
     expect(link.className).toContain("after:absolute");
@@ -140,7 +146,7 @@ describe("FindResearchers browse — table", () => {
 
   it("keeps the empty state (and no table) when nothing matches", async () => {
     mockFetch([]);
-    render(<FindResearchers />);
+    render(<BrowseList hrefFor={hrefFor} />);
     await waitFor(() =>
       expect(screen.getByText("No opportunities match the current filters.")).toBeTruthy(),
     );

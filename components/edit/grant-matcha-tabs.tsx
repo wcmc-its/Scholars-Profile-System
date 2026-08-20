@@ -1,16 +1,16 @@
 "use client";
 
 /**
- * Sub-tabs on `/edit/grant-matcha`, mirroring `find-researchers-tabs.tsx` (the
- * two surfaces share the intake pipeline until the sunset phase retires the
- * find-researchers mount):
+ * Sub-tabs on `/edit/grant-matcha` (patterned on the retired
+ * `find-researchers-tabs.tsx`; the sunset made this the intake pipeline's only
+ * mount):
  *
  *   - **Browse** (default) — `GrantMatchaPanel`, exactly as before: the shared
  *     opportunity table, and the Matcha run once one is picked (`?opp=<id>`).
  *   - **Submissions** — the submit-a-URL intake form + the whole team's queue
  *     history (`OpportunityIntakePanel`). Rendered ONLY while the server passed
  *     `intakeEnabled` (`OPPORTUNITY_URL_INTAKE`); flag off renders the bare
- *     panel with no tab strip, matching `/edit/find-researchers`' posture.
+ *     panel with no tab strip — the dark-ship posture.
  *
  * The active tab lives in the URL (`?tab=submissions`), so it is deep-linkable
  * and browser Back returns to the previous tab. One precedence rule on top: a

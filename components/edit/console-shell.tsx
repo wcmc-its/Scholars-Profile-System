@@ -85,7 +85,7 @@ export async function ConsoleShell({
         reportsTab={tabs.reports || reportsTab}
         newsTab={tabs.news}
         usageTab={tabs.usage}
-        viewerIsDeveloper={tabs.fundingMatcher}
+        viewerIsDeveloper={session.isDeveloper === true}
       />
       <main id="console-main" tabIndex={-1} className="mx-auto max-w-[var(--max-content)] px-6 py-8">
         {children}

@@ -63,7 +63,6 @@ const NO_TABS: ConsoleTabState = {
   usage: false,
   etlStatus: false,
   cores: false,
-  fundingMatcher: false,
   matcha: false,
   grantMatcha: false,
 };

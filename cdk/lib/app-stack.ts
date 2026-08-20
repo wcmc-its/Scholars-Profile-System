@@ -1235,9 +1235,6 @@ export class AppStack extends Stack {
         // corpus carries match_dsl); lib/api/match-researchers.ts also self-gates
         // on the opportunity's compiled match_dsl, so "on" is safe pre-reproject.
         GRANT_MATCHER_SUBTOPIC_GRAIN: envConfig.grantMatcherSubtopicGrain ? "on" : "off",
-        // Abstention floor for the reverse matcher (0 = off). Staging-first; must
-        // stay 0 wherever subtopic-grain is off. See config.ts grantMatcherAbstainFloor.
-        GRANT_MATCHER_ABSTAIN_FLOOR: String(envConfig.grantMatcherAbstainFloor),
         // OpenSearch domain endpoint (https://...). Default: a plaintext env
         // baked from the DataStack cross-stack export. When
         // openSearchNodeFromSecret is on (consolidation cutover de-coupling,
@@ -1508,11 +1505,11 @@ export class AppStack extends Stack {
         // docs/2026-07-22-gloss-mechanism-cognitive-probe-and-inwords-evidence-handoff.md §5). Flip
         // staging on via a deliberate cdk deploy once that measurement clears.
         MATCHA_GLOSS_INWORDS: "off",
-        // GRANT_MATCHA — the Grant Matcha convergence surfaces: the /edit/find-researchers "Matcha"
-        // mode (opportunity → researchers via the spine, #1866) AND the /edit/matcha people|grants
-        // target toggle + query→grants result cards (#1867 route + #1870 UI). Read via
-        // isGrantMatchaEnabled() (=== "on"); a strict, reversible add — flag-off keeps the existing
-        // topic-vector view as the only engine, and the surface stays admin-only regardless.
+        // GRANT_MATCHA — the Grant Matcha convergence surfaces: /edit/grant-matcha (opportunity →
+        // researchers via the spine, #1866; the find-researchers sunset made it the only mount) AND
+        // the /edit/matcha people|grants target toggle + query→grants result cards (#1867 route + #1870 UI). Read via
+        // isGrantMatchaEnabled() (=== "on"); a strict, reversible add — flag-off darkens
+        // /edit/grant-matcha, and the surface stays admin-only regardless.
         // DEPENDS ON MATCHA (on in both envs): the modes POST to /api/edit/matcha, which 404s when
         // MATCHA is off. Staging-soaked since 2026-07-22 (#1872), owner-approved on the eyeball
         // 2026-07-24 (#1906).
@@ -1520,8 +1517,11 @@ export class AppStack extends Stack {
         // hold was STALE — measured that day, `opportunity` holds 1,122 rows in prod vs 1,151 in
         // staging (97.5% parity), so the picker is data-backed in both envs. Blast radius stays
         // small regardless: the page gate is isMatchaEnabled() && isGrantMatchaEnabled() &&
-        // (superuser||developer), and there is still no nav tab — /edit/grant-matcha is URL-only.
+        // (superuser||developer), with a Tools nav tab for exactly that audience.
         // ⚠ Each ask bills a Bedrock Sonnet call (no cheap model on SPS), bounded by admin-only access.
+        // ⚠ Since the find-researchers sunset (Phase 3c), /edit/grant-matcha is the development
+        // role's ONLY console page and their GLOBAL_ROLE_HOME landing. Flipping this (or MATCHA)
+        // off no longer degrades to an older surface — it 404s that role's entire console entry.
         GRANT_MATCHA: "on",
         // MATCHA_ADMIN — the Grant Matcha corpus-admin surface (matcha-admin plan Phase 1b):
         // /api/edit/opportunity-admin suppress/restore on `opportunity` rows + the Browse-tab
@@ -2602,7 +2602,7 @@ export class AppStack extends Stack {
         CORE_PAGES: "on",
         CORE_CLAIM_WRITEBACK: "on",
         // Opportunity URL intake (docs/opportunity-url-intake-spec.md). Gates
-        // the submit-a-URL panel on /edit/find-researchers + both
+        // the submit-a-URL panel on /edit/grant-matcha + both
         // /api/edit/opportunity-intake verbs (they 404 while off). The writes
         // go to the SUBMISSION partition of the shared reciterai table
         // (TaskRoleOpportunitySubmissionPolicy above -- grant + flag deploy
@@ -2733,16 +2733,14 @@ export class AppStack extends Stack {
         COMMS_STEWARD_ENABLED: env === "staging" || env === "prod" ? "on" : "off",
         SCHOLARS_COMMS_STEWARD_GROUP_CN: "ITS:Library:Scholars/comms-steward-role",
         SCHOLARS_COMMS_STEWARD_ALLOWLIST: "",
-        // `development` role (GrantRecs Phase 4 — the /edit/find-researchers
-        // reverse-matcher admin surface). The page + its data route admit
-        // `isSuperuser || isDeveloper`, so superusers always retain access; the
-        // dev role adds a non-superuser operator tier.
+        // `development` role (GrantRecs Phase 4; its landing is /edit/grant-matcha
+        // since the find-researchers sunset). The matcher pages + their data routes
+        // admit `isSuperuser || isDeveloper`, so superusers always retain access;
+        // the dev role adds a non-superuser operator tier.
         //   DEVELOPMENT_ENABLED -- master kill switch. While not "on",
         //     isDeveloper() short-circuits to false BEFORE any directory work.
         //     ENABLED for staging + prod. Prod was validated on staging first
-        //     and promoted via a reviewer-gated `cdk deploy Sps-App-prod`; note
-        //     the flag is inert until the prod image carries the find-researchers
-        //     feature (#1185), so it ships with the next full prod release.
+        //     and promoted via a reviewer-gated `cdk deploy Sps-App-prod` (#1185).
         //   SCHOLARS_DEVELOPMENT_GROUP_CN -- the ED group whose membership
         //     confers the role: ITS:Library:Scholars/development-role, now the
         //     source of truth. isDeveloper() (lib/auth/development.ts) is called

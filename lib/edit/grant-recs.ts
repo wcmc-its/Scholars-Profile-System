@@ -19,11 +19,10 @@ export function isGrantRecsEnabled(): boolean {
 
 /**
  * The `GRANT_MATCHA` feature flag (Grant Matcha — convergence plan 2026-07-22, increment 1).
- * Off by default. When on, the `/edit/find-researchers` matched view gains a "Matcha" mode
- * that ranks researchers for the selected opportunity through the Matcha spine (extractor →
- * per-concept OpenSearch fan-out → RRF fuse) instead of the structured topic-vector matcher —
- * seeding the ask from the opportunity's title + synopsis. The existing topic-vector view stays
- * the default; this is a strict, reversible add (the retire-gate hasn't cleared).
+ * Off by default. When on, `/edit/grant-matcha` ranks researchers for the selected opportunity
+ * through the Matcha spine (extractor → per-concept OpenSearch fan-out → RRF fuse), seeding the
+ * ask from the opportunity's title + synopsis. (Its original home, a "Matcha" mode on the
+ * `/edit/find-researchers` matched view, was retired by the find-researchers sunset.)
  *
  * Depends on `MATCHA` being on in the env: the Matcha mode POSTs to `/api/edit/matcha`, which
  * `isMatchaEnabled()` gates. Wire per-env in `cdk/lib/app-stack.ts` (value "off" in both envs,

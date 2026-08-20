@@ -1,18 +1,22 @@
 "use client";
 
 /**
- * Opportunity browse — `BrowseList` and its private closure, extracted verbatim
- * from `components/edit/find-researchers.tsx` (matcha-admin Phase 3a, a pure
- * mechanical move; no behavior change). The browse list is a TABLE, not a card
- * list: every opportunity carries the same four attributes in the same order
- * (opportunity, sponsor, activity code, deadline), so a row is the honest shape.
- * The whole row is the click target via a stretched anchor on the title (a REAL
- * link, so cmd-click / middle-click / copy-link-address all work), never a
- * click handler on the `<tr>`.
+ * Opportunity browse — the shared opportunity-UI module. `BrowseList` and its
+ * private closure were extracted verbatim from the retired
+ * `components/edit/find-researchers.tsx` (matcha-admin Phase 3a, a pure
+ * mechanical move; no behavior change); Phase 3b moved `ClampedText` and the
+ * mockup-4 `OpportunityFactRail` in beside them so the grant-matcha selected
+ * view renders opportunity facts from one place. The browse list is a TABLE,
+ * not a card list: every opportunity carries the same four attributes in the
+ * same order (opportunity, sponsor, activity code, deadline), so a row is the
+ * honest shape. The whole
+ * row is the click target via a stretched anchor on the title (a REAL link, so
+ * cmd-click / middle-click / copy-link-address all work), never a click handler
+ * on the `<tr>`.
  */
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ExternalLink } from "lucide-react";
 
 import { PrestigeBadge } from "@/components/edit/prestige-badge";
 import { Button } from "@/components/ui/button";
@@ -1037,7 +1041,9 @@ function formatSuppressedDate(iso: string): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function SourceBadge({ source }: { source: string | null }) {
+/** Curated-vs-external source pill — inline beside whatever it qualifies (a row title, the
+ *  grant-matcha selected header). Renders nothing for a null source. */
+export function SourceBadge({ source }: { source: string | null }) {
   const label = sourceLabel(source);
   if (!label) return null;
   const curated = source === "wcm_curated";
@@ -1051,5 +1057,135 @@ function SourceBadge({ source }: { source: string | null }) {
     >
       {label}
     </span>
+  );
+}
+
+/**
+ * Long NOFO prose (synopsis, eligibility) collapsed behind a Show-more toggle,
+ * mirroring the abstract clamp in `components/funding/expanded-grant.tsx`, so
+ * the content below stays near the fold. `lines` picks the clamp height —
+ * the grant-matcha selected header clamps at three lines (mockup 4); the
+ * reverse-matcher card keeps its original four.
+ */
+// ponytail: char-count heuristic for "long", not measured lines.
+const CLAMP_THRESHOLD = 400;
+
+// Literal class names — Tailwind can't see a computed `line-clamp-${n}`.
+const CLAMP_CLASS: Record<3 | 4, string> = { 3: "line-clamp-3", 4: "line-clamp-4" };
+
+export function ClampedText({ text, lines = 4 }: { text: string; lines?: 3 | 4 }) {
+  const [expanded, setExpanded] = useState(false);
+  const long = text.length > CLAMP_THRESHOLD;
+  return (
+    <div>
+      <p
+        className={`whitespace-pre-line text-sm leading-relaxed text-foreground/90 ${
+          long && !expanded ? CLAMP_CLASS[lines] : ""
+        }`}
+      >
+        {text}
+      </p>
+      {long ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          className="mt-1 text-xs text-[var(--color-accent-slate)] hover:underline"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+
+/**
+ * Mockup-4 fact rail for the grant-matcha selected view — a standalone
+ * Duke-style right column (that surface renders its own header + synopsis)
+ * with EVERY row always present: a missing value
+ * renders the muted dash rather than silently dropping the row, so the officer
+ * can tell "not recorded" from "not shown". Values come straight off
+ * `/api/opportunities/[id]`; nothing here is ever invented.
+ */
+export function OpportunityFactRail({
+  awardFloor,
+  awardCeiling,
+  estimatedFunding,
+  numberOfAwards,
+  openDate,
+  dueDate,
+  cfdaList,
+  sourceUrl,
+}: {
+  awardFloor: number | null;
+  awardCeiling: number | null;
+  estimatedFunding: number | null;
+  numberOfAwards: number | null;
+  /** ISO dates as the detail route serializes its `@db.Date` columns. */
+  openDate: string | null;
+  dueDate: string | null;
+  cfdaList: string[];
+  sourceUrl: string | null;
+}) {
+  const due = formatDue(dueDate);
+  const urgency = dueUrgency(dueDate, Date.now());
+  const facts: Array<{ label: string; value: string | null; className?: string; warn?: boolean }> =
+    [
+      { label: "Award", value: awardRange(awardFloor, awardCeiling) },
+      { label: "Est. total funding", value: formatMoney(estimatedFunding) },
+      { label: "Awards", value: numberOfAwards != null ? `~${numberOfAwards}` : null },
+      { label: "Opens", value: formatDue(openDate) },
+      {
+        label: "Due",
+        value: due ? (urgency === "past" ? `${due} (passed)` : due) : null,
+        className: urgency === "soon" ? "font-medium text-apollo-amber" : undefined,
+        warn: urgency === "soon",
+      },
+      { label: "CFDA", value: cfdaList.length > 0 ? cfdaList.join(", ") : null },
+    ];
+
+  return (
+    <aside
+      data-testid="opportunity-fact-rail"
+      aria-label="Opportunity facts"
+      className="w-full shrink-0 space-y-4 sm:w-56"
+    >
+      <dl className="space-y-3">
+        {facts.map((f) => (
+          <div key={f.label}>
+            <dt className="text-muted-foreground text-xs uppercase tracking-wide">{f.label}</dt>
+            {f.value !== null ? (
+              <dd className={`text-sm ${f.className ?? "text-foreground"}`}>
+                {f.value}
+                {f.warn ? (
+                  <AlertTriangle
+                    className="text-apollo-amber ml-1 inline size-3.5 align-[-2px]"
+                    aria-hidden
+                  />
+                ) : null}
+              </dd>
+            ) : (
+              // The em-dash case carries a spoken equivalent — a bare "—"
+              // reaches a screen reader as nothing at all (the DeadlineCell
+              // precedent above).
+              <dd className="text-muted-foreground text-sm">
+                <span aria-hidden>—</span>
+                <span className="sr-only">Not recorded</span>
+              </dd>
+            )}
+          </div>
+        ))}
+      </dl>
+      {sourceUrl ? (
+        <a
+          href={sourceUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-[var(--color-accent-slate)] px-3 text-sm font-medium text-white hover:opacity-90"
+        >
+          <ExternalLink className="size-3.5" aria-hidden /> More information
+        </a>
+      ) : null}
+    </aside>
   );
 }
