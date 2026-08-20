@@ -96,16 +96,16 @@ describe("buildConsoleLinks", () => {
     expect(links).toEqual([]);
   });
 
-  // GrantRecs "Funding matcher" is NO LONGER a dropdown row — it moved into the
-  // in-console AdminSubnav (`/edit/find-researchers`). The dropdown never carries it.
-  it("never surfaces a find-researchers / Funding-matcher row, for any viewer", () => {
+  // The GrantRecs matcher tools are NOT dropdown rows — they live in the
+  // in-console AdminSubnav (`/edit/grant-matcha`). The dropdown never carries them.
+  it("never surfaces a grant-matcha / matcher-tool row, for any viewer", () => {
     const matrices = [
       { isSuperuser: true, canManageMethods: false, managesUnits: false },
       { isSuperuser: true, canManageMethods: true, managesUnits: true },
       { isSuperuser: false, canManageMethods: true, managesUnits: true },
     ];
     for (const v of matrices) {
-      expect(buildConsoleLinks(v).some((l) => l.href === "/edit/find-researchers")).toBe(false);
+      expect(buildConsoleLinks(v).some((l) => l.href === "/edit/grant-matcha")).toBe(false);
     }
   });
 });

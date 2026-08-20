@@ -13,8 +13,8 @@
  * other `/edit/*` pages.
  *
  * The page splits into Browse / Submissions sub-tabs (`GrantMatchaTabs`): Browse is the
- * matcher exactly as before; Submissions rehomes the opportunity URL intake, which stays
- * mounted on `/edit/find-researchers` too until the sunset phase.
+ * matcher exactly as before; Submissions rehomes the opportunity URL intake (its original
+ * `/edit/find-researchers` mount was retired by the sunset).
  */
 import { notFound, redirect } from "next/navigation";
 

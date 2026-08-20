@@ -80,7 +80,7 @@ vi.mock("@/lib/auth/global-roles", () => ({
     cv_generator: { href: "/edit/scholars", label: "Profiles (read-only)" },
     honors_curator: { href: "/edit/honors-queue", label: "Honors queue" },
     data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
-    development: { href: "/edit/find-researchers", label: "Funding matcher" },
+    development: { href: "/edit/grant-matcha", label: "Grant Matcha" },
   },
 }));
 vi.mock("@/lib/api/edit-context", () => ({ loadEditContext: mockLoadEditContext }));
@@ -192,7 +192,7 @@ describe("/edit (self) — global-role landing (#2482, widened 2026-08-19)", () 
     ["cv_generator", "/edit/scholars"],
     ["honors_curator", "/edit/honors-queue"],
     ["data_sharing_viewer", "/edit/data-sharing"],
-    ["development", "/edit/find-researchers"],
+    ["development", "/edit/grant-matcha"],
   ] as const)("no self-profile + %s → redirect to %s", async (role, home) => {
     mockLoadEditContext.mockResolvedValue(null);
     mockResolveGlobalRole.mockResolvedValue(role);
@@ -277,6 +277,11 @@ describe("/edit (self) — loadConsoleTabs migration (Gaps 1 / 1b)", () => {
   });
 
   it("Gap 1b — a pure development-role viewer gets viewerIsDeveloper threaded into AdminSubnav", async () => {
+    // Since the find-researchers sunset the dev role's tabs are Matcha / Grant
+    // Matcha, both flag-gated — stub them on (they are on in staging AND prod)
+    // so the strip has something to show for a pure developer.
+    vi.stubEnv("MATCHA", "on");
+    vi.stubEnv("GRANT_MATCHA", "on");
     mockLoadEditContext.mockResolvedValue(fakeCtx("self01", "full_time_faculty"));
     mockIsDeveloper.mockResolvedValue(true);
     const result = asElement(await EditSelfPage({ searchParams: searchParams() }));

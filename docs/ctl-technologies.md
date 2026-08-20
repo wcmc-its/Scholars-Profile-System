@@ -5,7 +5,7 @@ Licensing), 2026-07-09. Three asks: (1) find researchers when a commercial
 sponsor makes an inbound inquiry, (2) link to Scholars from CTL's site, (3) pull
 CTL's available technologies through to a researcher's profile.
 
-Ask 1 needs no code — it is `/edit/find-researchers`, already shipped. Ask 2 is a
+Ask 1 needs no code — it shipped as `/edit/find-researchers`, since retired in favor of `/edit/grant-matcha` (Phase 3 sunset). Ask 2 is a
 URL. Ask 3 is what this document covers, plus the resulting funding-matcher signal.
 
 ## The join: CTL already publishes CWIDs
@@ -137,13 +137,16 @@ opportunities rather than a real corpus, and that corpus carried no `mechanism`,
 so the mechanism list was judged, not measured. Re-measure against the real
 grants.gov corpus before rebuilding anything like it. What survives is the
 display data: `technologyCount` is attached to every ranked row and feeds the
-★ column on `/edit/find-researchers` — it is never a ranking input.
+CTL badge + filter on `/edit/grant-matcha` (formerly the ★ column on the retired
+`/edit/find-researchers`) — it is never a ranking input.
 
-## Granting CTL access to /edit/find-researchers
+## Granting CTL access to /edit/grant-matcha
 
 Use the **`development`** role. Not superuser — that would confer profile writes,
 unit admin, and "View as" impersonation. `development` exists precisely for this:
-it opens `/edit/find-researchers` and its data route and nothing else.
+it opens `/edit/grant-matcha` (the retired `/edit/find-researchers`'s successor)
+and its data routes and nothing else. Note: that page is gated on the MATCHA +
+GRANT_MATCHA flags (both on in staging and prod today).
 
 Two mechanisms back the role, and **only one currently works**:
 

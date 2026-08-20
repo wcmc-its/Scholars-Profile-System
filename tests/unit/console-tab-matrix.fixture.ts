@@ -47,7 +47,6 @@ export const ALL_TABS: ConsoleTabId[] = [
   "usage",
   "etlStatus",
   "cores",
-  "fundingMatcher",
   "matcha",
   "grantMatcha",
 ];
@@ -129,7 +128,7 @@ export const INTENDED_MATRIX: MatrixRow[] = [
     name: "pure developer",
     session: sess({ isDeveloper: true }),
     grants: grants(),
-    expect: ["fundingMatcher", "matcha", "grantMatcha"],
+    expect: ["matcha", "grantMatcha"],
     pins: "Gap 1b — reachable from the /edit landing page, not only once already there",
   },
   {

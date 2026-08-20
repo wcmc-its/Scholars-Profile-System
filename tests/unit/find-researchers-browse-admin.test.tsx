@@ -1,10 +1,10 @@
 /**
  * Matcha-admin Phase 1b — the Browse-tab corpus-freshness strip and the
- * MATCHA_ADMIN suppress/restore controls (`components/edit/find-researchers.tsx`):
+ * MATCHA_ADMIN suppress/restore controls (`components/edit/opportunity-browse.tsx`):
  *  - `freshnessTone` bucket boundaries (13/14/30/31 days);
  *  - the strip's headline (newest ingest, warning-toned when stale) + per-source rows;
- *  - NO admin affordances and NO strip without the opt-in props — the
- *    find-researchers mount renders byte-identically to before Phase 1b;
+ *  - NO admin affordances and NO strip without the opt-in props — a plain
+ *    `BrowseList` mount renders byte-identically to before Phase 1b;
  *  - Suppress → confirm dialog (mockup copy) → PATCH `/api/edit/opportunity-admin`
  *    with the optional reason → list refetch;
  *  - Show suppressed refetches with `includeSuppressed=1`; suppressed rows render
@@ -167,7 +167,7 @@ describe("BrowseList — admin gating (default off)", () => {
 
   it("renders no strip, no toggle, no row actions, and the unchanged fetch URL", async () => {
     stubFetch();
-    render(<BrowseList hrefFor={(id) => `/edit/find-researchers?opp=${id}`} />);
+    render(<BrowseList hrefFor={(id) => `/edit/grant-matcha?opp=${id}`} />);
     await waitFor(() => expect(screen.getByRole("table")).toBeTruthy());
 
     // The exact pre-Phase-1b URL — no includeSuppressed param leaks in.

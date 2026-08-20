@@ -45,12 +45,13 @@ export interface EditSession {
   isCommsSteward: boolean;
   /**
    * Live `development` verdict (GrantRecs Phase 4); a superuser is a superset of
-   * this. Gates ONLY the in-progress admin tooling (`/edit/find-researchers` and
-   * its data route) — no edit-authz predicate reads it, so unlike `isSuperuser` /
-   * `isCommsSteward` it is OPTIONAL: the synthetic `EditSession` shapes the field
-   * / unit authz helpers build need not carry a flag they never consume. The live
-   * resolvers (`getEditSession` / `getEffectiveEditSession`) always populate it,
-   * and the find-researchers gate only ever reads a session from those.
+   * this. Gates ONLY the in-progress admin tooling (`/edit/grant-matcha`,
+   * `/edit/matcha`, and their data routes) — no edit-authz predicate reads it, so
+   * unlike `isSuperuser` / `isCommsSteward` it is OPTIONAL: the synthetic
+   * `EditSession` shapes the field / unit authz helpers build need not carry a
+   * flag they never consume. The live resolvers (`getEditSession` /
+   * `getEffectiveEditSession`) always populate it, and those matcher gates only
+   * ever read a session from those.
    */
   isDeveloper?: boolean;
   /**

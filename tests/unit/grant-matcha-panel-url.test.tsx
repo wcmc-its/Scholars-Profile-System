@@ -1,8 +1,8 @@
 /**
  * `/edit/grant-matcha` — the opportunity selection lives in the URL, not component state.
  *
- * Two things are load-bearing: with no `?opp=` the page is the SAME browse table
- * `/edit/find-researchers` renders (not a second bespoke picker), and with `?opp=<id>` the panel
+ * Two things are load-bearing: with no `?opp=` the page is the shared `BrowseList`
+ * table from `opportunity-browse.tsx` (not a second bespoke picker), and with `?opp=<id>` the panel
  * seeds Matcha from the DETAIL route — the only route that carries `synopsis`. Both are pinned
  * here because a regression to component state would still "work" by clicking while silently
  * breaking the deep link the officer is meant to paste into Teams.
@@ -35,6 +35,11 @@ vi.mock("@/components/edit/opportunity-browse", () => ({
     browseListProps.push({ freshness, admin });
     return <a href={hrefFor("wcm_curated:abc")}>browse table</a>;
   },
+  // Phase 3b siblings the selected view renders — real behavior is pinned in
+  // grant-matcha-opportunity-rail.test.tsx; here they just need to exist.
+  ClampedText: ({ text }: { text: string }) => <p>{text}</p>,
+  SourceBadge: () => null,
+  OpportunityFactRail: () => null,
 }));
 
 /**

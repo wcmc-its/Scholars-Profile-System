@@ -139,8 +139,16 @@ const nextConfig: NextConfig = {
   // page (#573 follow-up). `/about/help` was removed in #573 and `/about/
   // methodology` is now a redirect stub (app/(public)/about/methodology); this
   // 308s `/about/help` so stale links land on /about rather than 404.
+  //
+  // `/edit/find-researchers` retired in the matcha-admin Phase 3 sunset —
+  // grant-matcha reads the same `?opp=` param, and Next forwards unmatched
+  // query params, so pasted/bookmarked deep links keep resolving. Temporary
+  // (307) so the path can be reclaimed later without fighting browser caches.
   async redirects() {
-    return [{ source: "/about/help", destination: "/about", permanent: true }];
+    return [
+      { source: "/about/help", destination: "/about", permanent: true },
+      { source: "/edit/find-researchers", destination: "/edit/grant-matcha", permanent: false },
+    ];
   },
   webpack: (config, { isServer }) => {
     if (!isServer) return config;

@@ -304,7 +304,7 @@ export default async function EditSelfPage({
   // entirely (Gap 1) and none of which read `isDeveloper` at all (Gap 1b). One
   // `loadConsoleTabs` call now derives the full, correct tab set from an
   // `EditSession` shaped from the EFFECTIVE roles already resolved above — no
-  // separate gate left to forget a role in, and `fundingMatcher`/`matcha` are
+  // separate gate left to forget a role in, and `matcha`/`grantMatcha` are
   // ordinary predicates like every other tab, reachable from this landing page
   // like anywhere else.
   const hasUnitGrants = manageableUnits.length > 0;
@@ -349,7 +349,7 @@ export default async function EditSelfPage({
             reportsTab={tabs.reports}
             newsTab={tabs.news}
             usageTab={tabs.usage}
-            viewerIsDeveloper={tabs.fundingMatcher}
+            viewerIsDeveloper={developer}
           />
         ) : undefined
       }

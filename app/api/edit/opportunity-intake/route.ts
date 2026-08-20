@@ -32,7 +32,7 @@
  * already-suppressed rows are skipped), so a partial failure is never stranded
  * behind the 409.
  *
- * Authorization mirrors the surface this lives on (`/edit/find-researchers`
+ * Authorization mirrors the surface this lives on (`/edit/grant-matcha`
  * and `/api/opportunities`): superuser OR development role — the queue is a
  * shared team surface, so any authorized member can clean up any row. All
  * verbs 404 while `OPPORTUNITY_URL_INTAKE` is off — the dark-ship posture; the

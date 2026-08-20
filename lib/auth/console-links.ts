@@ -67,9 +67,9 @@ export type ConsoleLinkVerdicts = {
  *
  * The superuser roster row is labeled "Admin console" (account-dropdown-nav
  * handoff, Workstream B; the `ACCOUNT_CONSOLE_NAV_RESTRUCTURE` flag that gated
- * the relabel was retired in #1440). The GrantRecs "Funding matcher" is no
- * longer a dropdown row — it lives in the in-console `AdminSubnav`
- * (`/edit/find-researchers`).
+ * the relabel was retired in #1440). The GrantRecs matcher tools are not
+ * dropdown rows — they live in the in-console `AdminSubnav`
+ * (`/edit/grant-matcha`, `/edit/matcha`).
  */
 export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
   const links: ConsoleLink[] = [];

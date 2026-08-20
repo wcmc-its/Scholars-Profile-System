@@ -45,7 +45,7 @@ export const GLOBAL_ROLE_LABEL: Record<GlobalRole, string> = {
  *  docblock names its single surface) + the page-name label for a link to it
  *  (deliberately NOT `GLOBAL_ROLE_LABEL` above — that's the ROLE's name, e.g.
  *  "Development", which reads as a place called Development, not a
- *  description of what's there; this is the PAGE's name, "Funding matcher").
+ *  description of what's there; this is the PAGE's name, "Grant Matcha").
  *  Reused by `/edit`'s profile-less fallthrough (`app/edit/page.tsx`, href
  *  only) and `ForbiddenEditPage` (`components/edit/forbidden-edit-page.tsx`,
  *  href + label) so a global-role holder with no Scholar row lands on their
@@ -55,7 +55,7 @@ export const GLOBAL_ROLE_HOME: Record<GlobalRole, { href: string; label: string 
   cv_generator: { href: "/edit/scholars", label: "Profiles (read-only)" },
   honors_curator: { href: "/edit/honors-queue", label: "Honors queue" },
   data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
-  development: { href: "/edit/find-researchers", label: "Funding matcher" },
+  development: { href: "/edit/grant-matcha", label: "Grant Matcha" },
 };
 
 const GLOBAL_ROLE_CHECKS: ReadonlyArray<{ role: GlobalRole; check: (cwid: string) => Promise<boolean> }> = [

@@ -115,37 +115,6 @@ describe("AdminSubnav", () => {
     expect(screen.getByTestId("admin-tab-methods").getAttribute("aria-current")).toBe("page");
   });
 
-  it("shows the Funding matcher tab on every superuser surface (rides superuserSurfaces)", () => {
-    // Default superuserSurfaces=true (a superuser-only page like Profiles).
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
-    expect(screen.getByTestId("admin-tab-find-researchers").getAttribute("href")).toBe(
-      "/edit/find-researchers",
-    );
-  });
-
-  it("hides the Funding matcher tab for a non-superuser, non-developer (comms_steward)", () => {
-    render(
-      <AdminSubnav active="methods" pendingSlugRequests={null} pendingHonors={null} methodsTab={0} superuserSurfaces={false} />,
-    );
-    expect(screen.queryByTestId("admin-tab-find-researchers")).toBeNull();
-  });
-
-  it("shows the Funding matcher tab to a pure dev-role viewer via viewerIsDeveloper", () => {
-    render(
-      <AdminSubnav
-        active="find-researchers"
-        pendingSlugRequests={null} pendingHonors={null}
-        superuserSurfaces={false}
-        viewerIsDeveloper
-      />,
-    );
-    const tab = screen.getByTestId("admin-tab-find-researchers");
-    expect(tab.getAttribute("aria-current")).toBe("page");
-    // the superuser-only surfaces stay hidden for a pure dev-role viewer
-    expect(screen.queryByTestId("admin-tab-slugs")).toBeNull();
-    expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
-  });
-
   it("superuserSurfaces=false, no administratorsTab, shows ONLY Method families (a comms_steward who is not a superuser, not a unit Owner)", () => {
     render(
       <AdminSubnav
@@ -606,6 +575,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
     vi.stubEnv("CORE_PAGES", "on");
     vi.stubEnv("MATCHA", "on");
+    vi.stubEnv("GRANT_MATCHA", "on");
   }
 
   it("collapses 15 tabs into a 6-item tier 1", () => {
@@ -630,7 +600,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     expect(screen.getByTestId("admin-group-queues").getAttribute("href")).toBe("/edit/slug-requests");
     expect(screen.getByTestId("admin-group-registries").getAttribute("href")).toBe("/edit/slugs");
     expect(screen.getByTestId("admin-group-insights").getAttribute("href")).toBe("/edit/activity");
-    expect(screen.getByTestId("admin-group-tools").getAttribute("href")).toBe("/edit/find-researchers");
+    expect(screen.getByTestId("admin-group-tools").getAttribute("href")).toBe("/edit/matcha");
   });
 
   it("derives the active group correctly for every grouped id", () => {
@@ -640,7 +610,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
       "slug-requests": "queues", "honors-queue": "queues", "news-queue": "queues", cores: "queues",
       slugs: "registries", administrators: "registries", methods: "registries",
       activity: "insights", usage: "insights", "etl-status": "insights",
-      "find-researchers": "tools", matcha: "tools",
+      matcha: "tools", "grant-matcha": "tools",
     };
     for (const [id, group] of Object.entries(expected)) {
       grouped();
@@ -758,21 +728,22 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
       expect(screen.queryByTestId("admin-group-insights")).toBeNull();
     });
 
-    it("dev-role viewer → Tools={Funding matcher} promoted while MATCHA is off, grouped when on", () => {
+    it("dev-role viewer → Tools={Matcha} promoted while GRANT_MATCHA is off, grouped when on", () => {
       vi.stubEnv("CONSOLE_SUBNAV_GROUPED", "on");
+      vi.stubEnv("MATCHA", "on");
       const props = {
-        active: "find-researchers",
+        active: "matcha",
         pendingSlugRequests: null,
         pendingHonors: null,
         superuserSurfaces: false,
         viewerIsDeveloper: true,
       } as const;
       const { unmount } = render(<AdminSubnav {...props} />);
-      expect(screen.getByTestId("admin-tab-find-researchers").textContent).toContain("Funding matcher");
+      expect(screen.getByTestId("admin-tab-matcha").textContent).toContain("Matcha");
       expect(screen.queryByTestId("admin-group-tools")).toBeNull();
       unmount();
-      // Flipping MATCHA on gives Tools a second member, so the group appears.
-      vi.stubEnv("MATCHA", "on");
+      // Flipping GRANT_MATCHA on gives Tools a second member, so the group appears.
+      vi.stubEnv("GRANT_MATCHA", "on");
       render(<AdminSubnav {...props} />);
       expect(screen.getByTestId("admin-group-tools").getAttribute("aria-current")).toBe("page");
       expect(screen.queryByTestId("admin-subnav-tier2-tools")).toBeNull();
@@ -794,7 +765,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     const matcha = menu.querySelector('[data-testid="admin-tab-matcha"]');
     expect(matcha).toBeTruthy();
     expect(matcha!.getAttribute("href")).toBe("/edit/matcha");
-    expect(menu.querySelector('[data-testid="admin-tab-find-researchers"]')).toBeTruthy();
+    expect(menu.querySelector('[data-testid="admin-tab-grant-matcha"]')).toBeTruthy();
   });
 
   // Order is spec-pinned twice — the tier-1 bar as `Profiles · Org units · Queues ·
@@ -855,7 +826,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     ]);
   });
 
-  it("is dark by default — the flag off reproduces the flat 15-tab strip", () => {
+  it("is dark by default — the flag off reproduces the flat tab strip", () => {
     vi.stubEnv("NEWS_APPROVAL_QUEUE", "on");
     vi.stubEnv("CORE_PAGES", "on");
     render(<AdminSubnav active="profiles" {...allOn} />);
@@ -863,7 +834,6 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
       [
         "profiles", "units", "slug-requests", "honors-queue", "news-queue", "slugs",
         "administrators", "methods", "reports", "activity", "usage", "etl-status", "cores",
-        "find-researchers",
       ].map((id) => `admin-tab-${id}`),
     );
     for (const g of ["queues", "registries", "insights", "tools"])

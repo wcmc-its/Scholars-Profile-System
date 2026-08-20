@@ -107,7 +107,7 @@ const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href: strin
   cv_generator: [{ label: "Profiles (read-only)", href: "/edit/scholars" }],
   honors_curator: [{ label: "Honors queue", href: "/edit/honors-queue" }],
   data_sharing_viewer: [{ label: "Data sharing", href: "/edit/data-sharing" }],
-  development: [{ label: "Funding matcher", href: "/edit/find-researchers" }],
+  development: [{ label: "Grant Matcha", href: "/edit/grant-matcha" }],
 };
 
 /** Compact unit-kind suffix for the banner's subject line. */

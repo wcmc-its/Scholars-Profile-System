@@ -63,16 +63,6 @@ function parseMatchDsl(raw: unknown): MatchDsl | null {
 // knob reverts to BM25 without a reproject (set "off"), the rollback lever for the ranking change.
 const grantMatcherDenseRel = () => process.env.GRANT_MATCHER_DENSE_REL !== "off";
 
-// Abstention floor: when > 0, a match is flagged weak ("no strong WCM match") if the mean of the
-// top-8 ranked scholars' top-3 pub relevances falls below it. 0 = off (ships dark). Strict add —
-// only ever sets a flag, never reorders/drops. 0.10 is the offline-validated PRIOR (match_v9b vs the
-// 32-grant baseline); the served OpenSearch pool differs, so re-validate on staging before prod.
-// Subtopic-grain path only (that's where the per-pub relevance signal exists).
-const grantMatcherAbstainFloor = () => {
-  const n = Number(process.env.GRANT_MATCHER_ABSTAIN_FLOOR);
-  return Number.isFinite(n) && n > 0 ? n : 0;
-};
-
 /** Parse the stored match_rel JSON → `{pmid: cosine∈[0,1]}` as a Map (same shape as the BM25
  *  `relevanceScoresForQuery`, a drop-in rel source); null when absent/empty so the matcher falls
  *  back to the BM25 query boost. Values are already pool-max-normalized + floored by the producer. */
@@ -422,7 +412,7 @@ async function subtopicPoolResults(
   matchQuery: unknown,
   matchRel: unknown,
   now: Date,
-): Promise<{ topicResults: TopicResult[]; relByCwid: Map<string, number[]> }> {
+): Promise<TopicResult[]> {
   const rows = await db.read.publicationTopic.findMany({
     where: {
       // SUBSTRING match: the compiler emits `require` as substring patterns (e.g. "biochem",
@@ -468,7 +458,7 @@ async function subtopicPoolResults(
 
   const byScholar = new Map<
     string,
-    { entry: ScholarTopicScore; pmids: Set<string>; minYear: number | null; rels: number[] }
+    { entry: ScholarTopicScore; pmids: Set<string>; minYear: number | null }
   >();
   for (const r of kept) {
     // ponytail: rankable build mirrors topicVectorResults; ~8 lines, not worth a shared helper.
@@ -496,56 +486,28 @@ async function subtopicPoolResults(
       },
       pmids: new Set<string>(),
       minYear: null as number | null,
-      rels: [] as number[],
     };
     slot.entry.variantBScore += boosted;
     slot.pmids.add(r.publication.pmid);
-    slot.rels.push(nr); // per-pub normalized relevance — kept for the abstention floor (else discarded)
     if (r.year != null)
       slot.minYear = slot.minYear == null ? r.year : Math.min(slot.minYear, r.year);
     byScholar.set(r.scholar.cwid, slot);
   }
-  const relByCwid = new Map<string, number[]>([...byScholar].map(([cwid, s]) => [cwid, s.rels]));
-  return {
-    topicResults: [
-      {
-        topicId: SUBTOPIC_SYNTHETIC_TOPIC_ID,
-        topicWeight: 1,
-        scholars: [...byScholar.values()].map((s) => ({
-          ...s.entry,
-          pubCount: s.pmids.size,
-          minYear: s.minYear,
-        })),
-      },
-    ],
-    relByCwid,
-  };
-}
-
-/**
- * Pure: the abstention signal — mean over the top-`k` ranked scholars of each one's top-3 pub
- * relevances. Mirrors match_v9b's `meanTopRel`. Exported for unit coverage (the DB-gated
- * `rankResearchersForOpportunity` wrapper can't be unit-tested directly).
- */
-export function meanTopRelevance(
-  cwidsInRankOrder: string[],
-  relByCwid: Map<string, number[]>,
-  k = 8,
-): number {
-  const rels = cwidsInRankOrder
-    .slice(0, k)
-    .flatMap((c) => (relByCwid.get(c) ?? []).slice().sort((a, b) => b - a).slice(0, 3));
-  return rels.length > 0 ? rels.reduce((a, b) => a + b, 0) / rels.length : 0;
+  return [
+    {
+      topicId: SUBTOPIC_SYNTHETIC_TOPIC_ID,
+      topicWeight: 1,
+      scholars: [...byScholar.values()].map((s) => ({
+        ...s.entry,
+        pubCount: s.pmids.size,
+        minYear: s.minYear,
+      })),
+    },
+  ];
 }
 
 export type OpportunityMatchResult = {
   scholars: RankedScholar[];
-  /** True when the top matches are too weak to trust — mean top-8 relevance below the abstention
-   *  floor (`GRANT_MATCHER_ABSTAIN_FLOOR`). Always false when the floor is off or the opportunity
-   *  took the topicVector fallback (no per-pub relevance signal there). */
-  abstain: boolean;
-  /** The signal the abstain decision reads; 0 when not computed (floor off / non-subtopic path). */
-  meanTopRel: number;
 };
 
 /**
@@ -578,7 +540,7 @@ export async function rankResearchersForOpportunity(
       matchRel: true,
     },
   });
-  if (!opp) return { scholars: [], abstain: false, meanTopRel: 0 };
+  if (!opp) return { scholars: [] };
 
   // Subtopic-grain path (flag-gated, ships dark): when the flag is on and the
   // opportunity carries a compiled match_dsl, draw ONE subtopic pool with a relevance
@@ -586,21 +548,13 @@ export async function rankResearchersForOpportunity(
   // require slugs) so a bad DSL degrades instead of 500ing.
   const dsl = grantMatcherSubtopicGrain() ? parseMatchDsl(opp.matchDsl) : null;
   let topicResults: TopicResult[];
-  // Per-scholar relevance from the subtopic pool — present only when that path actually served
-  // (not the topicVector fallback); it's the signal the abstention floor reads.
-  let relByCwid: Map<string, number[]> | null = null;
   if (dsl) {
     const pooled = await subtopicPoolResults(dsl, opp.matchQuery, opp.matchRel, now);
-    if (pooled.topicResults[0].scholars.length > 0) {
-      topicResults = pooled.topicResults;
-      relByCwid = pooled.relByCwid;
-    } else {
-      topicResults = await topicVectorResults(opp, opts, now);
-    }
+    topicResults = pooled[0].scholars.length > 0 ? pooled : await topicVectorResults(opp, opts, now);
   } else {
     topicResults = await topicVectorResults(opp, opts, now);
   }
-  if (topicResults.every((tr) => tr.scholars.length === 0)) return { scholars: [], abstain: false, meanTopRel: 0 };
+  if (topicResults.every((tr) => tr.scholars.length === 0)) return { scholars: [] };
 
   // Career stage + display metadata per candidate. One query: stage feeds the
   // stageAppeal axis; primaryTitle/primaryDepartment are denormalized on the
@@ -687,17 +641,7 @@ export async function rankResearchersForOpportunity(
     for (const r of ranked) r.inMyTopMatches = inTop.has(r.cwid);
   }
 
-  // Abstention floor (subtopic path only): mirror match_v9b's meanTopRel = mean over the top-8
-  // ranked scholars of their top-3 pub relevances. Below the floor the shortlist is tangential —
-  // flag it so the UI can warn "no strong WCM match" instead of presenting weak matches as strong.
-  const floor = grantMatcherAbstainFloor();
-  let abstain = false;
-  let meanTopRel = 0;
-  if (floor > 0 && relByCwid) {
-    meanTopRel = meanTopRelevance(ranked.map((r) => r.cwid), relByCwid);
-    abstain = meanTopRel < floor;
-  }
-  return { scholars: ranked, abstain, meanTopRel };
+  return { scholars: ranked };
 }
 
 const CROSSREF_TOP_N = 10;

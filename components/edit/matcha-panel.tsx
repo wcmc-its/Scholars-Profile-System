@@ -37,7 +37,7 @@
  * VISUAL: skinned to `sponsor-match-scholars.html`, but to that mockup's INFORMATION design and
  * token values only — not its chrome. The mockup is drawn as the PUBLIC Scholars site (Cornell-red
  * header, serif title, a white card per candidate); this is an `/edit` console surface that sits
- * next to `/edit/find-researchers` under the Apollo bar, so it keeps the console's h1, its list
+ * next to `/edit/grant-matcha` under the Apollo bar, so it keeps the console's h1, its list
  * rows, and its two-column shell. The mockup's palette needed no translation: it was authored from
  * this app's own tokens (its `--accent #2C4F6E` IS `--color-accent-slate`, its shadow IS
  * `--apollo-shadow-card`), so the reskin adds no new CSS.
@@ -172,9 +172,9 @@ const RESULT_MAX = 100;
  *  you can re-weight. The always-visible subtitle was removed in the warm-palette redesign — this
  *  copy now backs the h1's hover `ⓘ` (the "on the page" explainer; the nav-tab hover serves the
  *  "before you land" moment). Keep it verbatim: §5 of the redesign handoff quotes this exact text.
- *  ⚠ "Recommendations, not endorsements" was dropped DELIBERATELY (user, 2026-07-17), not lost. It
- *  still stands on the Funding matcher (`find-researchers.tsx`); do not re-add it here on the
- *  assumption that its absence is an oversight. */
+ *  ⚠ "Recommendations, not endorsements" was dropped DELIBERATELY (user, 2026-07-17), not lost —
+ *  do not re-add it here on the assumption that its absence is an oversight. (It last stood on the
+ *  Funding matcher, retired by the find-researchers sunset.) */
 const MATCHA_BLURB =
   "Paste any ask — a funding call, a request for collaborators, an email, a few bullet points. Matcha pulls out the topics and methods it's really asking for, weighs how much each one matters, and ranks scholars by fit across all of them. Every recommendation comes with the evidence behind it, and you can adjust the weights to re-rank on the spot.";
 

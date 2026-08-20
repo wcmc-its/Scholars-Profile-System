@@ -1,9 +1,10 @@
 /**
  * READ-ONLY measurement (NOT an ETL): researcher-exposure concentration in the
- * reverse grant matcher — the /edit/find-researchers admin surface. Refs #1611.
+ * reverse grant matcher (`rankResearchersForOpportunity`; its /edit/find-researchers
+ * admin surface was retired by the sunset). Refs #1611.
  *
  * WHAT: for every indexed opportunity, take the top-8 via the deployed
- * `rankResearchersForOpportunity` with the admin route's defaults (sort="fit",
+ * `rankResearchersForOpportunity` with the retired admin route's defaults (sort="fit",
  * stageLens off, esiOnly off), then aggregate exposure over the matcher's own
  * eligible-faculty gate: distinct slot-holders vs eligible FT faculty, appearance
  * histogram, Gini, top-1%/top-decile slot shares, professorialRank crosstab, and

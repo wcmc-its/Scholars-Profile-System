@@ -10,7 +10,7 @@
  * through the SAME scorer as the rest of the corpus and DynamoDB stays the
  * source of truth. Rows come back through the ordinary nightly `etl:dynamodb`
  * projection; the drain marks each item `processed` / `rejected` and this
- * module's Query surfaces that status on `/edit/find-researchers`.
+ * module's Query surfaces that status on `/edit/grant-matcha`.
  *
  * Key shape: every queue item shares the constant partition key `SUBMISSION`
  * with a time-ordered sort key (`<ISO ts>#<uuid8>`). One partition keeps the

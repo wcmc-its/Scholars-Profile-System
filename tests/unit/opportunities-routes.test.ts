@@ -8,7 +8,6 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const matchOpportunitiesForScholar = vi.fn();
-const rankResearchersForOpportunity = vi.fn();
 const getEffectiveEditSession = vi.fn();
 const findUnique = vi.fn();
 const opportunityFindMany = vi.fn();
@@ -18,11 +17,6 @@ const topicFindMany = vi.fn();
 vi.mock("@/lib/api/match-opportunities", async (orig) => {
   const actual = await orig<typeof import("@/lib/api/match-opportunities")>();
   return { ...actual, matchOpportunitiesForScholar: (...a: unknown[]) => matchOpportunitiesForScholar(...a) };
-});
-// Keep the real (pure) opportunityTopTopics; only stub the I/O-bound matcher.
-vi.mock("@/lib/api/match-researchers", async (orig) => {
-  const actual = await orig<typeof import("@/lib/api/match-researchers")>();
-  return { ...actual, rankResearchersForOpportunity: (...a: unknown[]) => rankResearchersForOpportunity(...a) };
 });
 vi.mock("@/lib/auth/effective-identity", () => ({
   getEffectiveEditSession: () => getEffectiveEditSession(),
@@ -41,7 +35,6 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import { GET as forwardGET } from "@/app/api/scholars/[cwid]/opportunities/route";
-import { GET as reverseGET } from "@/app/api/opportunities/[opportunityId]/researchers/route";
 import { GET as detailGET } from "@/app/api/opportunities/[opportunityId]/route";
 import { GET as listGET } from "@/app/api/opportunities/route";
 
@@ -114,108 +107,6 @@ describe("GET /api/scholars/[cwid]/opportunities (forward, public)", () => {
       params: p({ cwid: "abc1234" }),
     });
     expect(resp.status).toBe(400);
-  });
-});
-
-describe("GET /api/opportunities/[opportunityId]/researchers (reverse, admin-gated)", () => {
-  it("403s when not a superuser", async () => {
-    getEffectiveEditSession.mockResolvedValue(null);
-    const resp = await reverseGET(req("/api/opportunities/g:1/researchers"), { params: p({ opportunityId: "g:1" }) });
-    expect(resp.status).toBe(403);
-    expect(rankResearchersForOpportunity).not.toHaveBeenCalled();
-  });
-
-  it("403s for an authenticated non-superuser who is not a developer", async () => {
-    getEffectiveEditSession.mockResolvedValue({ cwid: "x", isSuperuser: false, isDeveloper: false });
-    const resp = await reverseGET(req("/api/opportunities/g:1/researchers"), { params: p({ opportunityId: "g:1" }) });
-    expect(resp.status).toBe(403);
-    expect(rankResearchersForOpportunity).not.toHaveBeenCalled();
-  });
-
-  it("returns results for a development-role member who is not a superuser (Phase 4 gate)", async () => {
-    getEffectiveEditSession.mockResolvedValue({ cwid: "dev", isSuperuser: false, isDeveloper: true });
-    rankResearchersForOpportunity.mockResolvedValue({
-      scholars: [
-        { cwid: "bbb", slug: "b", axes: { topicFit: 4.2, stageAppeal: 0.5 }, topicContributions: [], defaultScore: 4.2 },
-      ],
-      abstain: false,
-      meanTopRel: 0,
-    });
-    const resp = await reverseGET(req("/api/opportunities/g:1/researchers"), { params: p({ opportunityId: "g:1" }) });
-    expect(resp.status).toBe(200);
-    expect(rankResearchersForOpportunity).toHaveBeenCalledTimes(1);
-  });
-
-  it("returns the view-model (card + matching-on chips + topic labels) and passes stageLens through", async () => {
-    getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
-    rankResearchersForOpportunity.mockResolvedValue({
-      scholars: [
-        {
-          cwid: "aaa",
-          slug: "a",
-          careerStage: "early",
-          title: "Assistant Professor",
-          department: "Medicine",
-          axes: { topicFit: 9.7, stageAppeal: 0 },
-          topicContributions: [{ topicId: "t1", contribution: 9.7, pubCount: 3, minYear: 2021 }],
-          defaultScore: 9.7,
-        },
-      ],
-      abstain: false,
-      meanTopRel: 0,
-    });
-    findUnique.mockResolvedValue({
-      title: "Opp T",
-      mechanism: "R01",
-      dueDate: null,
-      sponsor: "NIH",
-      source: "grants_gov",
-      sourceUrl: "https://x",
-      status: "open",
-      topicVector: [{ topic_id: "t1", score: 0.8 }],
-    });
-    topicFindMany.mockResolvedValue([{ id: "t1", label: "Topic One" }]);
-    const resp = await reverseGET(req("/api/opportunities/g:1/researchers?stageLens=1"), {
-      params: p({ opportunityId: "g:1" }),
-    });
-    expect(resp.status).toBe(200);
-    const body = await resp.json();
-    expect(body.results[0]).toMatchObject({ title: "Assistant Professor", department: "Medicine" });
-    expect(body.opportunity).toMatchObject({ title: "Opp T", mechanism: "R01", source: "grants_gov" });
-    expect(body.matchingOn).toEqual([{ topicId: "t1", label: "Topic One", score: 0.8 }]);
-    expect(body.topicLabels).toMatchObject({ t1: "Topic One" });
-    expect(rankResearchersForOpportunity).toHaveBeenCalledWith("g:1", expect.objectContaining({ stageLens: true }));
-  });
-
-  it("404s a manually-suppressed opportunity before running the matcher (matcha-admin Phase 1b)", async () => {
-    getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
-    findUnique.mockResolvedValue({
-      title: "Suppressed Opp",
-      status: "open",
-      topicVector: [],
-      suppressedAt: new Date("2026-08-01T00:00:00Z"),
-    });
-    const resp = await reverseGET(req("/api/opportunities/g:1/researchers"), { params: p({ opportunityId: "g:1" }) });
-    expect(resp.status).toBe(404);
-    expect(rankResearchersForOpportunity).not.toHaveBeenCalled();
-  });
-
-  it("passes the abstention flag through to the response body", async () => {
-    getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
-    rankResearchersForOpportunity.mockResolvedValue({
-      scholars: [
-        { cwid: "aaa", slug: "a", axes: { topicFit: 0.3, stageAppeal: 0 }, topicContributions: [], defaultScore: 0.3 },
-      ],
-      abstain: true,
-      meanTopRel: 0.04,
-    });
-    findUnique.mockResolvedValue({ title: "Weak Opp", status: "open", topicVector: [] });
-    const resp = await reverseGET(req("/api/opportunities/g:1/researchers"), { params: p({ opportunityId: "g:1" }) });
-    expect(resp.status).toBe(200);
-    const body = await resp.json();
-    expect(body.abstain).toBe(true);
-    expect(body.meanTopRel).toBe(0.04);
-    expect(body.count).toBe(1); // the weak list is still returned (Option A: banner over the list)
   });
 });
 
