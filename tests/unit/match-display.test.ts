@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  appealByStageSummary,
   buildResearcherCsv,
   careerStageLabel,
   dueUrgency,
@@ -99,6 +100,25 @@ describe("careerStageLabel", () => {
     expect(careerStageLabel("early")).toBe("Early career");
     expect(careerStageLabel("grad")).toBe("Graduate");
     expect(careerStageLabel(null)).toBe("");
+  });
+});
+
+describe("appealByStageSummary", () => {
+  it("names the top stage for a skewed spread (Harry Weaver-shaped)", () => {
+    expect(appealByStageSummary({ early: 0.9, senior: 0.1 })).toBe("Best fit: Early career");
+  });
+  it("reads as broad when the spread is flat (A-T Children's Project-shaped)", () => {
+    expect(
+      appealByStageSummary({ grad: 0.6, postdoc: 0.65, early: 0.7, mid: 0.65, senior: 0.6 }),
+    ).toBe("Appeals broadly across career stages");
+  });
+  it("is null when there is no signal", () => {
+    expect(appealByStageSummary({})).toBeNull();
+  });
+  it("joins two stages that tie near the top", () => {
+    expect(appealByStageSummary({ grad: 0.2, postdoc: 0.9, early: 0.85, mid: 0.3, senior: 0.1 })).toBe(
+      "Best fit: Postdoc, Early career",
+    );
   });
 });
 

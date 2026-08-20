@@ -1037,6 +1037,40 @@ describe("MatchaPanel", () => {
     expect(screen.getByRole("button", { name: "Rank researchers" })).toBeTruthy();
   });
 
+  // ── Thin-match caution (assessMatchSignal) ───────────────────────────────
+  it("cautions on the ask card when the ask reduces to a single bare method", async () => {
+    stubFetch({
+      concepts: [
+        {
+          term: "CRISPR screening",
+          kind: "method",
+          members: ["CRISPR screening"],
+          centrality: 0.4,
+          weightFactor: 1.0,
+          // No `meshDescendantCount` — stays under the broad floor, so this is judged on
+          // `kind` alone: a single bare method with nothing to narrow it.
+        },
+      ],
+      candidates: [candidate({ cwid: "a", name: "Alice Alpha", fusedScore: 0.9 })],
+    });
+    render(<MatchaPanel />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), {
+      target: { value: "CRISPR screening collaborators" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    const note = screen.getByTestId("matcha-thin-signal");
+    expect(note.textContent).toMatch(
+      /Thin match\..*single method with nothing to narrow it/,
+    );
+  });
+
+  it("renders no thin-match caution once more than one concept was searched", async () => {
+    await renderAndSearch(); // CONCEPTS has 3 concepts
+    expect(screen.queryByTestId("matcha-thin-signal")).toBeNull();
+  });
+
   // ── Evidence, via the SEARCH's own renderer (#1689/#1696) ───────────────────
   /**
    * The rendered evidence blocks, in DOM order: `[concept caption, reason line]` each.
