@@ -4358,6 +4358,32 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::IAM::Policy",
     },
+    "EtlTaskRoleCloudWatchMetricPolicy24CFC406": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "cloudwatch:PutMetricData",
+              "Condition": {
+                "StringEquals": {
+                  "cloudwatch:namespace": "SPS/ETL",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-etl-task-prod-cloudwatch-metrics",
+        "Roles": [
+          {
+            "Ref": "EtlTaskRoleD514E3A1",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "EtlTaskRoleD514E3A1": {
       "Properties": {
         "AssumeRolePolicyDocument": {
@@ -6666,6 +6692,32 @@ exports[`EtlStack prod matches the snapshot 1`] = `
           },
         ],
         "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "OpportunityFreshnessAlarmF2B40B91": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS opportunity corpus (prod) -- no source has ingested a new funding opportunity in >=21 days. Nothing crashed: the nightly ETL is still projecting the GRANT# store, but the store itself has stopped receiving fresh opportunities upstream. Next: check the upstream pipeline_grants producer and its sources; re-running the SPS ETL changes nothing, it will re-project the same frozen corpus. The per-source series (SPS/ETL OpportunityCorpusIngestAgeDays, dims Env+Source) shows which sources are stale.",
+        "AlarmName": "sps-etl-opportunity-freshness-prod",
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "Dimensions": [
+          {
+            "Name": "Env",
+            "Value": "prod",
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "OpportunityCorpusIngestAgeDays",
+        "Namespace": "SPS/ETL",
+        "Period": 86400,
+        "Statistic": "Maximum",
+        "Threshold": 21,
         "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
@@ -13948,6 +14000,32 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::IAM::Policy",
     },
+    "EtlTaskRoleCloudWatchMetricPolicy24CFC406": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "cloudwatch:PutMetricData",
+              "Condition": {
+                "StringEquals": {
+                  "cloudwatch:namespace": "SPS/ETL",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-etl-task-staging-cloudwatch-metrics",
+        "Roles": [
+          {
+            "Ref": "EtlTaskRoleD514E3A1",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "EtlTaskRoleD514E3A1": {
       "Properties": {
         "AssumeRolePolicyDocument": {
@@ -16245,6 +16323,32 @@ exports[`EtlStack staging matches the snapshot 1`] = `
           },
         ],
         "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "OpportunityFreshnessAlarmF2B40B91": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS opportunity corpus (staging) -- no source has ingested a new funding opportunity in >=21 days. Nothing crashed: the nightly ETL is still projecting the GRANT# store, but the store itself has stopped receiving fresh opportunities upstream. Next: check the upstream pipeline_grants producer and its sources; re-running the SPS ETL changes nothing, it will re-project the same frozen corpus. The per-source series (SPS/ETL OpportunityCorpusIngestAgeDays, dims Env+Source) shows which sources are stale.",
+        "AlarmName": "sps-etl-opportunity-freshness-staging",
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "Dimensions": [
+          {
+            "Name": "Env",
+            "Value": "staging",
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "OpportunityCorpusIngestAgeDays",
+        "Namespace": "SPS/ETL",
+        "Period": 86400,
+        "Statistic": "Maximum",
+        "Threshold": 21,
         "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
