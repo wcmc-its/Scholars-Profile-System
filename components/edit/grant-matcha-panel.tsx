@@ -19,7 +19,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
-import { BrowseList } from "@/components/edit/find-researchers";
+import { BrowseList } from "@/components/edit/opportunity-browse";
 import { MatchaPanel, type EligibilityRequirements } from "@/components/edit/matcha-panel";
 import type { CareerStage } from "@/lib/career-stage";
 import { careerStagesOf, facultyPiMayHold } from "@/lib/funding/screening";

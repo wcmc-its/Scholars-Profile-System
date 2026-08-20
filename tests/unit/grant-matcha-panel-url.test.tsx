@@ -22,7 +22,7 @@ vi.mock("next/navigation", () => ({
 /** Props each BrowseList mount received — pins the Phase 1b freshness/admin threading. */
 const browseListProps: Array<{ freshness?: boolean; admin?: boolean }> = [];
 
-vi.mock("@/components/edit/find-researchers", () => ({
+vi.mock("@/components/edit/opportunity-browse", () => ({
   BrowseList: ({
     hrefFor,
     freshness,
