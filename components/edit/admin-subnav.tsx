@@ -26,6 +26,7 @@ import { AccountMenu } from "@/components/site/account-menu";
 import { AdminGroupMenu } from "@/components/edit/admin-group-menu";
 import { MatchaTab } from "@/components/edit/matcha-tab";
 import { isMatchaEnabled } from "@/lib/api/matcha";
+import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { isNewsQueueEnabled } from "@/lib/edit/news-queue";
@@ -48,6 +49,7 @@ export type AdminSubnavActive =
   | "cores"
   | "find-researchers"
   | "matcha"
+  | "grant-matcha"
   /** The viewer's own self-edit surface (`/edit`) — no list tab is active;
    *  profile actions live in the right-end account menu. */
   | "self";
@@ -111,6 +113,7 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   /** Paste an input, get a ranked result. */
   "find-researchers": "tools",
   matcha: "tools",
+  "grant-matcha": "tools",
   /** The viewer's own `/edit` — no group is active, so tier 2 does not render. */
   self: null,
 };
@@ -317,6 +320,17 @@ export function AdminSubnav({
         id: "matcha",
         href: "/edit/matcha",
         label: "Matcha",
+      },
+      // Grant Matcha — Matcha seeded from a funding opportunity. Same audience
+      // as Matcha, additionally dark while GRANT_MATCHA is off (both flags read
+      // here in the server component; mirrors the `grantMatcha` predicate in
+      // `lib/edit/console-tabs.server.ts`). Unlike Matcha this renders through
+      // the plain `AdminTab` link — no Radix hover content (#1783).
+      {
+        show: (superuserSurfaces || viewerIsDeveloper) && isMatchaEnabled() && isGrantMatchaEnabled(),
+        id: "grant-matcha",
+        href: "/edit/grant-matcha",
+        label: "Grant Matcha",
       },
     ] satisfies TabSpec[]
   ).filter((t) => t.show);
