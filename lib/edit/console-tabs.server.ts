@@ -44,6 +44,7 @@ import { isDataSharingDashboardTabVisible } from "@/lib/edit/data-sharing-dashbo
 import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 import { isMatchaEnabled } from "@/lib/api/matcha";
+import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
 
 // ---------------------------------------------------------------------------
 // Tab ids — one per `AdminSubnavActive` entry in `admin-subnav.tsx`, minus
@@ -68,6 +69,7 @@ export const CONSOLE_TAB_IDS = [
   "cores",
   "fundingMatcher",
   "matcha",
+  "grantMatcha",
 ] as const;
 
 export type ConsoleTabId = (typeof CONSOLE_TAB_IDS)[number];
@@ -162,6 +164,11 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
   // visibility no longer depends on which page you're standing on.
   fundingMatcher: (s) => s.isSuperuser || s.isDeveloper === true,
   matcha: (s) => (s.isSuperuser || s.isDeveloper === true) && isMatchaEnabled(),
+  // GRANT_MATCHA depends on MATCHA (the Matcha spine is what it seeds), so the
+  // tab needs BOTH flags — mirroring the page's own `notFound()` gate
+  // (`app/edit/grant-matcha/page.tsx`). Same audience as `matcha`.
+  grantMatcha: (s) =>
+    (s.isSuperuser || s.isDeveloper === true) && isMatchaEnabled() && isGrantMatchaEnabled(),
 };
 
 // ---------------------------------------------------------------------------

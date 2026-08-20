@@ -32,6 +32,7 @@ const ALL_FLAGS_ON: Record<string, string> = {
   EDIT_DATA_SHARING_DASHBOARD: "on",
   CORE_PAGES: "on",
   MATCHA: "on",
+  GRANT_MATCHA: "on",
 };
 
 afterEach(() => {
@@ -103,18 +104,23 @@ describe("invariant I3 — adding roles/grants never removes a tab", () => {
 // --- 3. Flags only ever subtract their own tab ------------------------------
 
 describe("feature flags", () => {
-  const flagToTab: Array<[string, ConsoleTabId]> = [
-    ["HONORS_APPROVAL_QUEUE", "honors"],
-    ["NEWS_APPROVAL_QUEUE", "news"],
-    ["SELF_EDIT_ADMINISTRATORS_TAB", "administrators"],
-    ["COMMS_STEWARD_ENABLED", "methods"],
-    ["EDIT_DATA_QUALITY_DASHBOARD", "coi"],
-    ["EDIT_DATA_SHARING_DASHBOARD", "dataSharing"],
-    ["CORE_PAGES", "cores"],
-    ["MATCHA", "matcha"],
+  // A flag may gate more than one tab: GRANT_MATCHA layers on top of MATCHA
+  // (the Grant Matcha page seeds the Matcha spine), so MATCHA off takes the
+  // `grantMatcha` tab down with `matcha` — exactly as the page's own
+  // `notFound()` gate does.
+  const flagToTabs: Array<[string, ConsoleTabId[]]> = [
+    ["HONORS_APPROVAL_QUEUE", ["honors"]],
+    ["NEWS_APPROVAL_QUEUE", ["news"]],
+    ["SELF_EDIT_ADMINISTRATORS_TAB", ["administrators"]],
+    ["COMMS_STEWARD_ENABLED", ["methods"]],
+    ["EDIT_DATA_QUALITY_DASHBOARD", ["coi"]],
+    ["EDIT_DATA_SHARING_DASHBOARD", ["dataSharing"]],
+    ["CORE_PAGES", ["cores"]],
+    ["MATCHA", ["matcha", "grantMatcha"]],
+    ["GRANT_MATCHA", ["grantMatcha"]],
   ];
 
-  it.each(flagToTab)("flag %s off hides only %s", (flagKey, tab) => {
+  it.each(flagToTabs)("flag %s off hides only %s", (flagKey, tabs) => {
     const superuser = INTENDED_MATRIX[0];
     const on = visibleTabs(superuser.session, superuser.grants);
 
@@ -124,7 +130,7 @@ describe("feature flags", () => {
       CONSOLE_TAB_IDS.filter((id) => TAB_PREDICATES[id](superuser.session, superuser.grants)),
     );
 
-    expect(off.has(tab)).toBe(false);
-    expect([...off, tab].sort()).toEqual([...on].sort());
+    for (const tab of tabs) expect(off.has(tab), `"${tab}" still visible`).toBe(false);
+    expect([...off, ...tabs].sort()).toEqual([...on].sort());
   });
 });

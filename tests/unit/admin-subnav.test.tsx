@@ -426,6 +426,96 @@ describe("AdminSubnav", () => {
   });
 });
 
+// ── The Grant Matcha tab ────────────────────────────────────────────────────
+//
+// Same audience as Matcha (superuser or dev-role), additionally gated on
+// GRANT_MATCHA layered over MATCHA. Both flags are env reads inside the server
+// component, so they are stubbed ON here rather than left to the ambient env
+// (the lesson of the Matcha block above). Unlike Matcha it is a PLAIN link tab
+// — no Radix hover content (#1783), so no client wrapper.
+describe("AdminSubnav — the Grant Matcha tab", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  const bothFlagsOn = () => {
+    vi.stubEnv("MATCHA", "on");
+    vi.stubEnv("GRANT_MATCHA", "on");
+  };
+
+  it("renders as a plain link (href /edit/grant-matcha) for a superuser when both flags are on", () => {
+    bothFlagsOn();
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+    const tab = screen.getByTestId("admin-tab-grant-matcha");
+    expect(tab.tagName).toBe("A");
+    expect(tab.textContent).toContain("Grant Matcha");
+    expect(tab.getAttribute("href")).toBe("/edit/grant-matcha");
+    // …right next to the Matcha tab it layers on.
+    expect(screen.getByTestId("admin-tab-matcha")).toBeTruthy();
+  });
+
+  it('marks the tab active with aria-current for active="grant-matcha"', () => {
+    bothFlagsOn();
+    render(<AdminSubnav active="grant-matcha" pendingSlugRequests={null} pendingHonors={null} />);
+    expect(screen.getByTestId("admin-tab-grant-matcha").getAttribute("aria-current")).toBe(
+      "page",
+    );
+  });
+
+  it("shows the tab to a pure dev-role viewer via viewerIsDeveloper", () => {
+    bothFlagsOn();
+    render(
+      <AdminSubnav
+        active="grant-matcha"
+        pendingSlugRequests={null}
+        pendingHonors={null}
+        superuserSurfaces={false}
+        viewerIsDeveloper
+      />,
+    );
+    expect(screen.getByTestId("admin-tab-grant-matcha")).toBeTruthy();
+    // the superuser-only surfaces stay hidden for a pure dev-role viewer
+    expect(screen.queryByTestId("admin-tab-slugs")).toBeNull();
+  });
+
+  it("hides the tab from a non-superuser, non-developer even with both flags on", () => {
+    bothFlagsOn();
+    render(
+      <AdminSubnav
+        active="profiles"
+        pendingSlugRequests={null}
+        pendingHonors={null}
+        superuserSurfaces={false}
+        profilesTab
+      />,
+    );
+    expect(screen.queryByTestId("admin-tab-grant-matcha")).toBeNull();
+  });
+
+  it("stays hidden while GRANT_MATCHA is off, even with MATCHA on", () => {
+    vi.stubEnv("MATCHA", "on");
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+    expect(screen.queryByTestId("admin-tab-grant-matcha")).toBeNull();
+    // Matcha itself is unaffected — GRANT_MATCHA only layers on top.
+    expect(screen.getByTestId("admin-tab-matcha")).toBeTruthy();
+  });
+
+  it("stays hidden while MATCHA is off, even with GRANT_MATCHA on — the dependency runs one way", () => {
+    vi.stubEnv("GRANT_MATCHA", "on");
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+    expect(screen.queryByTestId("admin-tab-grant-matcha")).toBeNull();
+  });
+
+  it("lands in the Tools group menu when CONSOLE_SUBNAV_GROUPED is on", async () => {
+    bothFlagsOn();
+    vi.stubEnv("CONSOLE_SUBNAV_GROUPED", "on");
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
+    fireEvent.focus(screen.getByTestId("admin-group-tools"));
+    const menu = await screen.findByTestId("admin-group-menu-tools");
+    const tab = menu.querySelector('[data-testid="admin-tab-grant-matcha"]');
+    expect(tab).toBeTruthy();
+    expect(tab!.getAttribute("href")).toBe("/edit/grant-matcha");
+  });
+});
+
 describe("AdminSubnav — the Honors tab (#1762)", () => {
   it("shows the tab without a pending-count badge (round 4)", () => {
     // #1762 round 4: the curator asked to drop the pending count from the tab.
