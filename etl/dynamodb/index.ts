@@ -68,7 +68,10 @@ import { buildScholarToolWrites } from "./scholar-tool-mapper";
 import { buildPublicationCoreWrites } from "./publication-core-mapper";
 import { CORE_CATALOG, CORE_CATALOG_SOURCE } from "./core-catalog";
 import { resolveScholarToolSource } from "../../lib/etl/scholar-tool-source";
-import { projectGrantOpportunities } from "./grant-opportunity-etl";
+import {
+  emitOpportunityCorpusFreshnessMetric,
+  projectGrantOpportunities,
+} from "./grant-opportunity-etl";
 import { guardedReplace } from "./projection-replace";
 import { partitionRecords } from "./partition";
 import { fetchExcludedTopicIds } from "./excluded-topics";
@@ -897,6 +900,18 @@ async function main() {
       log: (m) => console.log(`  ${m}`),
     });
     const opportunityRowsUpserted = grantResult.upserted;
+
+    // Phase 0a — opportunity corpus freshness. A "successful" Block 7 says
+    // nothing about the corpus being alive UPSTREAM: the projection happily
+    // re-upserts whatever GRANT# holds, so a frozen upstream corpus kept
+    // "succeeding" nightly for 6+ weeks with no alarm. Emit the per-source
+    // MAX(ingested_at) ages to CloudWatch right after the projection; the
+    // etl-stack alarm on SPS/ETL OpportunityCorpusIngestAgeDays does the
+    // paging. SCHOLARS_ENV-gated and fail-soft inside the helper — a metric
+    // hiccup must never fail or delay the nightly.
+    await emitOpportunityCorpusFreshnessMetric(db.write, {
+      log: (m) => console.log(`  ${m}`),
+    });
 
     // ===================================================================
     // Bookkeeping

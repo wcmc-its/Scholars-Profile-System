@@ -572,6 +572,30 @@ export class EtlStack extends Stack {
     });
 
     // ------------------------------------------------------------------
+    // Custom-metric grant (Phase 0a opportunity corpus freshness).
+    //
+    // etl:dynamodb Block 7 emits `SPS/ETL` / `OpportunityCorpusIngestAgeDays`
+    // (per-source MAX(ingested_at) age) right after the GRANT# -> opportunity
+    // projection — see etl/dynamodb/grant-opportunity-etl.ts. The freshness
+    // alarm below watches that metric. `cloudwatch:PutMetricData` supports no
+    // resource-level scoping (the resource must be `*`); the condition key
+    // confines the grant to this app's custom namespace, so the role still
+    // cannot write into `AWS/*` or any other namespace.
+    // ------------------------------------------------------------------
+    new iam.Policy(this, "EtlTaskRoleCloudWatchMetricPolicy", {
+      policyName: `sps-etl-task-${env}-cloudwatch-metrics`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["cloudwatch:PutMetricData"],
+          resources: ["*"],
+          conditions: { StringEquals: { "cloudwatch:namespace": "SPS/ETL" } },
+        }),
+      ],
+    });
+
+    // ------------------------------------------------------------------
     // Curated-tables logical-backup bucket (belt-and-suspenders over AWS
     // Backup / Aurora PITR).
     //
@@ -2039,6 +2063,45 @@ export class EtlStack extends Stack {
         cadenceAlarm.addAlarmAction(alarmAction);
       }
     }
+
+    // ------------------------------------------------------------------
+    // Phase 0a -- opportunity corpus freshness (upstream data-liveness, not
+    // run health). Every alarm above watches whether a RUN succeeded; none of
+    // them can see a corpus that froze UPSTREAM: nightly Block 7 re-upserts
+    // whatever the GRANT# store holds and "succeeds" even when nothing new
+    // has been ingested for weeks (observed: 6+ weeks frozen, zero alarms).
+    // etl:dynamodb now emits `SPS/ETL` / `OpportunityCorpusIngestAgeDays`
+    // (dims {Env}) after the projection -- corpus-wide age in days of the
+    // newest `ingested_at` across all sources (the per-{Env,Source} series is
+    // for dashboards only; no alarm per source). >=21 days means three weeks
+    // with no new opportunity anywhere: upstream producer is stuck.
+    //
+    // NOTE: this alarm is expected to be BORN RED on first deploy -- the
+    // corpus is already >21d stale, which is exactly the incident it exists
+    // to surface, not a misconfiguration.
+    //
+    // TreatMissingData NOT_BREACHING on purpose: if the nightly stops running
+    // (so no datapoints arrive), the nightly status/cadence alarms above
+    // already page -- missing data here must not double-page the same outage.
+    // 1 * 86400s <= 604800s, so the deploy-only evaluation-window constraint
+    // above holds.
+    // ------------------------------------------------------------------
+    const opportunityFreshnessAlarm = new cloudwatch.Alarm(this, "OpportunityFreshnessAlarm", {
+      alarmName: `sps-etl-opportunity-freshness-${env}`,
+      alarmDescription: `SPS opportunity corpus (${env}) -- no source has ingested a new funding opportunity in >=21 days. Nothing crashed: the nightly ETL is still projecting the GRANT# store, but the store itself has stopped receiving fresh opportunities upstream. Next: check the upstream pipeline_grants producer and its sources; re-running the SPS ETL changes nothing, it will re-project the same frozen corpus. The per-source series (SPS/ETL OpportunityCorpusIngestAgeDays, dims Env+Source) shows which sources are stale.`,
+      metric: new cloudwatch.Metric({
+        namespace: "SPS/ETL",
+        metricName: "OpportunityCorpusIngestAgeDays",
+        statistic: cloudwatch.Stats.MAXIMUM,
+        period: Duration.days(1),
+        dimensionsMap: { Env: env },
+      }),
+      evaluationPeriods: 1,
+      threshold: 21,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    opportunityFreshnessAlarm.addAlarmAction(alarmAction);
 
     // ------------------------------------------------------------------
     // #393 PR-2 -- suppression search-index reconciler (ADR-005 layer 3).

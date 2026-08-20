@@ -342,13 +342,15 @@ describe("EtlStack", () => {
         template.hasResourceProperties("AWS::SNS::Topic", { TopicName: "etl-page-prod" });
       });
 
-      it("creates sixteen CloudWatch alarms (4 status + 3 cadence + 3 duration + reconciler status/cadence + cdn reconciler status/cadence + grants export status/cadence)", () => {
+      it("creates seventeen CloudWatch alarms (4 status + 3 cadence + 3 duration + reconciler status/cadence + cdn reconciler status/cadence + grants export status/cadence + opportunity freshness)", () => {
         // 10 cadence-machine alarms (4 status + 3 cadence: nightly/weekly/heartbeat
         // + 3 duration: nightly/weekly/heartbeat, #2190 -- annual is excluded, its
         // ExecutionTime is approval-gate wait) + 2 reconciler alarms (#393)
         // + 2 cdn reconciler alarms (#353) + 2 grants-export alarms (status +
-        // cadence), now that grantsExportScheduleEnabled is true in prod too.
-        template.resourceCountIs("AWS::CloudWatch::Alarm", 16);
+        // cadence), now that grantsExportScheduleEnabled is true in prod too,
+        // + the Phase 0a opportunity-corpus-freshness alarm (custom SPS/ETL
+        // metric, not an AWS/States one).
+        template.resourceCountIs("AWS::CloudWatch::Alarm", 17);
       });
 
       it("creates seven ECS task definitions (4 ETL credential-split defs + lean reconciler + lean cdn reconciler + bulk-data-rule one-off) and one SG-to-SG ingress rule on the internal ALB SG", () => {
@@ -701,10 +703,11 @@ describe("EtlStack", () => {
         // 10 cadence-machine alarms (4 status + 3 cadence + 3 duration, #2190)
         // + 2 reconciler alarms (#393) + 2 cdn reconciler alarms (#353) + 2
         // grants-export alarms (status + cadence), now that
-        // grantsExportScheduleEnabled is true in prod too; all share the
+        // grantsExportScheduleEnabled is true in prod too, + the Phase 0a
+        // opportunity-corpus-freshness alarm; all share the
         // topic -- a duration alarm that routed elsewhere would be invisible,
         // so it is covered by the same loop below.
-        expect(Object.keys(alarms)).toHaveLength(16);
+        expect(Object.keys(alarms)).toHaveLength(17);
         for (const [id, alarm] of Object.entries(alarms)) {
           const actions = (alarm.Properties?.AlarmActions ?? []) as unknown[];
           expect({ id, hasAction: actions.length > 0 }).toEqual({
@@ -889,6 +892,32 @@ describe("EtlStack", () => {
           .filter(([, a]) => alarmMetricShape(a.Properties).periods.length === 0)
           .map(([id, a]) => `${id}: ${a.Properties?.AlarmName}`);
         expect(unreadable).toEqual([]);
+      });
+
+      // Phase 0a -- the opportunity corpus froze upstream for 6+ weeks while
+      // every run-health alarm stayed green (a "successful" nightly re-upserts
+      // the frozen GRANT# store). This alarm watches the custom data-liveness
+      // metric the ETL now emits (SPS/ETL, not AWS/States); missing data is
+      // NOT breaching because a dead nightly already pages via the status +
+      // cadence alarms above.
+      it("the opportunity-freshness alarm watches SPS/ETL corpus age >= 21d, missing data not breaching", () => {
+        const alarm = Object.values(
+          template.findResources("AWS::CloudWatch::Alarm"),
+        ).find((a) => a.Properties?.AlarmName === "sps-etl-opportunity-freshness-prod");
+        expect(alarm).toBeDefined();
+        expect(alarm?.Properties?.Namespace).toBe("SPS/ETL");
+        expect(alarm?.Properties?.MetricName).toBe("OpportunityCorpusIngestAgeDays");
+        expect(alarm?.Properties?.Statistic).toBe("Maximum");
+        expect(alarm?.Properties?.Period).toBe(86400);
+        expect(alarm?.Properties?.EvaluationPeriods).toBe(1);
+        expect(alarm?.Properties?.Threshold).toBe(21);
+        expect(alarm?.Properties?.ComparisonOperator).toBe(
+          "GreaterThanOrEqualToThreshold",
+        );
+        expect(alarm?.Properties?.TreatMissingData).toBe("notBreaching");
+        expect(alarm?.Properties?.Dimensions).toEqual([
+          { Name: "Env", Value: "prod" },
+        ]);
       });
     });
 
