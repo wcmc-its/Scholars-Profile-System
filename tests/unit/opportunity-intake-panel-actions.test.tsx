@@ -147,4 +147,25 @@ describe("OpportunityIntakePanel row actions", () => {
     const alert = await screen.findByTestId("intake-row-action-error");
     expect(alert.textContent).toContain("use Suppress");
   });
+
+  it("submit 409 duplicate_url of a SUPPRESSED row says so instead of pointing at Browse (matcha-admin Phase 1b)", async () => {
+    stubFetch({
+      status: 409,
+      body: {
+        ok: false,
+        error: "duplicate_url",
+        existing: { opportunityId: "manual_url:z-def456", suppressedAt: "2026-08-20T12:00:00.000Z" },
+      },
+    });
+    render(<OpportunityIntakePanel />);
+    await screen.findByText("https://x.org/grants");
+
+    fireEvent.change(screen.getByPlaceholderText("https://sponsor.org/research-grants"), {
+      target: { value: "https://z.org/award" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+    const msg = await screen.findByText(/but suppressed/);
+    expect(msg.textContent).toContain("manual_url:z-def456");
+    expect(msg.textContent).toContain("show suppressed");
+  });
 });

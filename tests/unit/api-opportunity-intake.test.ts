@@ -4,7 +4,11 @@
  *  - dev-role gate (superuser OR isDeveloper), GET 403 / POST 403 + denial log;
  *  - POST validation + the two 409 duplicate shapes;
  *  - happy path: queue Put with the NORMALIZED url as dedup key, then the B03
- *    audit row (action/entity `opportunity_submission`, target = the SK).
+ *    audit row (action/entity `opportunity_submission`, target = the SK);
+ *  - PATCH/suppress unification cascade (matcha-admin Phase 1b): projected
+ *    corpus rows carrying the submission's URL are suppressed immediately —
+ *    read BEFORE the queue flip, gated on MATCHA_ADMIN (drain-only while off),
+ *    re-driven idempotently on a retried suppress.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
@@ -18,6 +22,7 @@ const {
   mockDeleteSubmission,
   mockSuppressSubmission,
   mockOpportunityFindMany,
+  mockOpportunityUpdate,
   mockTransaction,
   mockAppendAuditRow,
   mockLogEditDenial,
@@ -30,6 +35,7 @@ const {
   mockDeleteSubmission: vi.fn(),
   mockSuppressSubmission: vi.fn(),
   mockOpportunityFindMany: vi.fn(),
+  mockOpportunityUpdate: vi.fn(),
   mockTransaction: vi.fn(),
   mockAppendAuditRow: vi.fn(),
   mockLogEditDenial: vi.fn(),
@@ -78,9 +84,12 @@ function postRequest(body: Record<string, unknown>) {
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.OPPORTUNITY_URL_INTAKE = "on";
+  process.env.MATCHA_ADMIN = "on";
   mockListSubmissions.mockResolvedValue([]);
   mockOpportunityFindMany.mockResolvedValue([]);
-  mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => fn({}));
+  mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) =>
+    fn({ opportunity: { update: mockOpportunityUpdate } }),
+  );
   mockPutSubmission.mockImplementation(async (input: Record<string, unknown>) => ({
     submissionId: "2026-07-06T12:00:00.000Z#ab12cd34",
     ...input,
@@ -160,6 +169,7 @@ describe("POST", () => {
         opportunityId: "wcm_curated:hartwell-abc123",
         title: "Hartwell Award",
         sourceUrl: "https://WWW.hartwell.org/award/",
+        suppressedAt: null,
       },
     ]);
     const res = await POST(postRequest({ url: "https://www.hartwell.org/award?utm_source=x" }));
@@ -167,9 +177,29 @@ describe("POST", () => {
     expect(await res.json()).toEqual({
       ok: false,
       error: "duplicate_url",
-      existing: { opportunityId: "wcm_curated:hartwell-abc123", title: "Hartwell Award" },
+      existing: {
+        opportunityId: "wcm_curated:hartwell-abc123",
+        title: "Hartwell Award",
+        suppressedAt: null,
+      },
     });
     expect(mockPutSubmission).not.toHaveBeenCalled();
+  });
+
+  it("carries the duplicate's suppressed state so the panel can say 'duplicate of a suppressed row'", async () => {
+    mockOpportunityFindMany.mockResolvedValue([
+      {
+        opportunityId: "manual_url:x-abc123",
+        title: "Suppressed Award",
+        sourceUrl: "https://x.org/award",
+        suppressedAt: new Date("2026-08-01T00:00:00.000Z"),
+      },
+    ]);
+    const res = await POST(postRequest({ url: "https://x.org/award" }));
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe("duplicate_url");
+    expect(body.existing.suppressedAt).toBe("2026-08-01T00:00:00.000Z");
   });
 
   it("409s on an already-queued URL", async () => {
@@ -387,7 +417,11 @@ describe("PATCH (suppress)", () => {
     mockSuppressSubmission.mockResolvedValue(undefined);
     const res = await PATCH(postRequest({ submissionId: SK, action: "suppress" }));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, submissionId: SK });
+    expect(await res.json()).toEqual({
+      ok: true,
+      submissionId: SK,
+      suppressedOpportunityIds: [],
+    });
 
     expect(mockSuppressSubmission).toHaveBeenCalledWith(
       SK,
@@ -403,9 +437,108 @@ describe("PATCH (suppress)", () => {
           status: "processed",
           produced_opportunity_ids: ["manual_url:x-abc123"],
         }),
-        afterValues: { status: "suppressed" },
+        afterValues: { status: "suppressed", suppressed_opportunity_ids: [] },
       }),
     );
+    expect(mockOpportunityUpdate).not.toHaveBeenCalled();
+  });
+
+  it("cascades the suppression to a projected corpus row carrying the same URL", async () => {
+    mockGetSubmission.mockResolvedValue(
+      queueItem({ status: "processed", producedOpportunityIds: ["manual_url:x-abc123"] }),
+    );
+    mockSuppressSubmission.mockResolvedValue(undefined);
+    // Corpus URLs are stored raw — the match must normalize at compare time.
+    // The already-suppressed row keeps its original attribution (skipped).
+    mockOpportunityFindMany.mockResolvedValue([
+      {
+        opportunityId: "manual_url:x-abc123",
+        sourceUrl: "https://X.org/grants/",
+        suppressedAt: null,
+      },
+      {
+        opportunityId: "manual_url:y-def456",
+        sourceUrl: "https://x.org/grants",
+        suppressedAt: new Date("2026-08-01T00:00:00Z"),
+      },
+      { opportunityId: "grants_gov:1", sourceUrl: "https://other.org/nofo", suppressedAt: null },
+    ]);
+    const res = await PATCH(
+      postRequest({ submissionId: SK, action: "suppress", reason: "  dead link  " }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      submissionId: SK,
+      suppressedOpportunityIds: ["manual_url:x-abc123"],
+    });
+
+    // The cascade read must land BEFORE the queue flip — a read failure after
+    // the flip would strand the cascade behind the already_suppressed guard.
+    expect(mockOpportunityFindMany.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSuppressSubmission.mock.invocationCallOrder[0],
+    );
+    expect(mockOpportunityUpdate).toHaveBeenCalledTimes(1);
+    expect(mockOpportunityUpdate).toHaveBeenCalledWith({
+      where: { opportunityId: "manual_url:x-abc123" },
+      data: {
+        suppressedAt: expect.any(Date),
+        suppressedBy: "flm4001",
+        suppressReason: "dead link",
+      },
+    });
+    // One `opportunity` suppression_create per cascaded row + the submission row.
+    expect(mockAppendAuditRow).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        targetEntityType: "opportunity",
+        targetEntityId: "manual_url:x-abc123",
+        action: "suppression_create",
+        afterValues: expect.objectContaining({
+          suppressed_by: "flm4001",
+          suppress_reason: "dead link",
+        }),
+      }),
+    );
+    expect(mockAppendAuditRow).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "opportunity_submission_suppress",
+        afterValues: {
+          status: "suppressed",
+          suppressed_opportunity_ids: ["manual_url:x-abc123"],
+        },
+      }),
+    );
+  });
+
+  it("stays drain-only while MATCHA_ADMIN is off — no corpus read or write", async () => {
+    process.env.MATCHA_ADMIN = "off";
+    mockGetSubmission.mockResolvedValue(queueItem({ status: "processed" }));
+    mockSuppressSubmission.mockResolvedValue(undefined);
+    const res = await PATCH(postRequest({ submissionId: SK, action: "suppress" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, submissionId: SK, suppressedOpportunityIds: [] });
+    expect(mockOpportunityFindMany).not.toHaveBeenCalled();
+    expect(mockOpportunityUpdate).not.toHaveBeenCalled();
+  });
+
+  it("re-drives a stranded cascade on a retried suppress instead of 409ing", async () => {
+    // An earlier PATCH committed the queue flip, then lost its cascade
+    // transaction — the retry finds status=suppressed with a live corpus row.
+    mockGetSubmission.mockResolvedValue(queueItem({ status: "suppressed" }));
+    mockOpportunityFindMany.mockResolvedValue([
+      { opportunityId: "manual_url:x-abc123", sourceUrl: "https://x.org/grants", suppressedAt: null },
+    ]);
+    const res = await PATCH(postRequest({ submissionId: SK, action: "suppress" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      submissionId: SK,
+      suppressedOpportunityIds: ["manual_url:x-abc123"],
+    });
+    expect(mockSuppressSubmission).not.toHaveBeenCalled();
+    expect(mockOpportunityUpdate).toHaveBeenCalledTimes(1);
   });
 
   it("409s when the drain raced the condition, 502s on a queue failure", async () => {

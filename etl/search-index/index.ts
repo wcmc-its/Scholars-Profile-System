@@ -44,6 +44,7 @@ import { isPubliclyDisplayed } from "@/lib/eligibility";
 import {
   FUNDING_INDEX,
   OPPORTUNITIES_INDEX,
+  OPPORTUNITY_INDEX_WHERE,
   PEOPLE_INDEX,
   PUBLICATIONS_INDEX,
   buildOpportunityDoc,
@@ -683,10 +684,11 @@ async function indexOpportunities(concreteIndex: string) {
   const client = searchClient();
   // GrantRecs Phase 2 — project research opportunities into their index. One doc
   // per `opportunity` row; non-research rows are excluded at the source (the ETL
-  // mapper already drops them, but the filter is cheap insurance). The pure
-  // shaping (topic gate, _source re-rank payload) is buildOpportunityDoc.
+  // mapper already drops them, but the filter is cheap insurance), and
+  // manually-suppressed rows drop out here on the nightly rebuild (matcha-admin
+  // Phase 1b). The pure shaping (topic gate, _source payload) is buildOpportunityDoc.
   const rows = (await prisma.opportunity.findMany({
-    where: { isResearch: true },
+    where: OPPORTUNITY_INDEX_WHERE,
     select: {
       opportunityId: true,
       title: true,

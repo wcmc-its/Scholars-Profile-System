@@ -32,11 +32,21 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Check, ChevronRight, Download, ExternalLink } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Check, ChevronRight, Download, ExternalLink } from "lucide-react";
 
 import { MatchaPanel } from "@/components/edit/matcha-panel";
 import { PrestigeBadge } from "@/components/edit/prestige-badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import type { CareerStage } from "@/lib/career-stage";
 import type { Prestige } from "@/lib/funding/prestige";
 import {
@@ -121,6 +131,10 @@ type OpportunityListItem = {
   awardFloor?: number | null;
   /** Screening spec §3.1, derived server-side. Absent counts as eligible (fail open). */
   facultyPiEligible?: boolean;
+  /** Matcha-admin Phase 1b manual suppression — set means hidden from every non-admin surface. */
+  suppressedAt?: string | null;
+  suppressedBy?: string | null;
+  suppressReason?: string | null;
 };
 
 type MatchingTopic = { topicId: string; label: string; score: number };
@@ -155,6 +169,109 @@ const SOURCE_LABELS: Record<string, string> = {
 function sourceLabel(source: string | null): string | null {
   if (!source) return null;
   return SOURCE_LABELS[source] ?? source.replace(/_/g, " ");
+}
+
+/** One per-source freshness aggregate from `/api/opportunities` (`sources`). */
+export type SourceFreshness = {
+  source: string | null;
+  count: number;
+  newestIngestedAt: string | null;
+};
+
+export type FreshnessTone = "fresh" | "aging" | "stale";
+
+/** Age buckets for the freshness strip: green under 14 days, amber through 30, red beyond. */
+export function freshnessTone(ageDays: number): FreshnessTone {
+  if (ageDays < 14) return "fresh";
+  if (ageDays <= 30) return "aging";
+  return "stale";
+}
+
+const MS_PER_DAY = 86_400_000;
+
+function ingestAgeDays(iso: string, now: number): number {
+  return Math.max(0, Math.floor((now - new Date(iso).getTime()) / MS_PER_DAY));
+}
+
+/** "Jul 6" — the strip is about recency, so the year would be noise. */
+function ingestDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+const FRESHNESS_DOT: Record<FreshnessTone, string> = {
+  fresh: "text-green-600 dark:text-green-400",
+  aging: "text-apollo-amber",
+  stale: "text-red-600 dark:text-red-400",
+};
+
+/**
+ * Corpus-freshness strip (matcha-admin Phase 1b) — the Browse-tab header on
+ * `/edit/grant-matcha`. Headline: the newest ingest across the WHOLE corpus
+ * (the pipeline's pulse, warning-toned when stale); per-source rows: count +
+ * newest ingest + an age dot. Reads `ingestedAt` ONLY — `lastRefreshedAt` is
+ * re-stamped by the nightly upsert and would always read fresh (the Phase 0a
+ * lesson, and the reason the corpus froze unnoticed for six weeks).
+ */
+export function CorpusFreshness({ sources, now }: { sources: SourceFreshness[]; now: number }) {
+  const dated = sources.filter(
+    (s): s is SourceFreshness & { newestIngestedAt: string } => s.newestIngestedAt !== null,
+  );
+  if (dated.length === 0) return null;
+
+  // Curated leads (the corpus's reason to exist), then by size.
+  const rows = [...dated].sort((a, b) => {
+    const ra = a.source === "wcm_curated" ? 0 : 1;
+    const rb = b.source === "wcm_curated" ? 0 : 1;
+    if (ra !== rb) return ra - rb;
+    return b.count - a.count;
+  });
+
+  const newest = rows.reduce((max, s) =>
+    new Date(s.newestIngestedAt).getTime() > new Date(max.newestIngestedAt).getTime() ? s : max,
+  );
+  const headAge = ingestAgeDays(newest.newestIngestedAt, now);
+  const headTone = freshnessTone(headAge);
+
+  return (
+    <section
+      data-testid="corpus-freshness"
+      aria-label="Corpus freshness"
+      className="border-apollo-border bg-apollo-surface mb-4 rounded-lg border px-4 py-3 text-sm"
+    >
+      <p
+        data-testid="corpus-freshness-headline"
+        data-tone={headTone}
+        className={
+          headTone === "fresh"
+            ? "text-muted-foreground"
+            : headTone === "aging"
+              ? "font-medium text-apollo-amber"
+              : "font-medium text-red-700 dark:text-red-400"
+        }
+      >
+        {headTone !== "fresh" ? (
+          <AlertTriangle className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />
+        ) : null}
+        Corpus freshness — newest row {ingestDate(newest.newestIngestedAt)}, {headAge} day
+        {headAge === 1 ? "" : "s"} ago
+      </p>
+      <ul className="text-muted-foreground mt-1.5 flex flex-wrap gap-x-5 gap-y-1">
+        {rows.map((s) => {
+          const age = ingestAgeDays(s.newestIngestedAt, now);
+          const tone = freshnessTone(age);
+          return (
+            <li key={s.source ?? "unknown"} data-testid={`freshness-${s.source ?? "unknown"}`}>
+              <span className="text-foreground">{sourceLabel(s.source) ?? "Unknown"}</span>{" "}
+              {s.count} · {ingestDate(s.newestIngestedAt)} ({age}d){" "}
+              <span aria-hidden data-tone={tone} className={FRESHNESS_DOT[tone]}>
+                ●
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
 }
 
 function formatMoney(n: number | null): string | null {
@@ -369,7 +486,7 @@ export function FindResearchers({ grantMatcha = false }: { grantMatcha?: boolean
 
 type BrowseStatus =
   | { kind: "loading" }
-  | { kind: "ok"; opportunities: OpportunityListItem[] }
+  | { kind: "ok"; opportunities: OpportunityListItem[]; sources: SourceFreshness[] }
   | { kind: "error"; message: string };
 
 type BrowseSort = "curated" | "deadline";
@@ -438,12 +555,44 @@ function facetOptions(
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
+/** Mapped 4xx bodies from `/api/edit/opportunity-admin` (409s mean the list went stale). */
+const ADMIN_ACTION_ERRORS: Record<string, string> = {
+  already_suppressed: "Already suppressed — refreshing the list.",
+  not_suppressed: "Already restored — refreshing the list.",
+  not_found: "That opportunity no longer exists — refreshing the list.",
+  write_failed: "The change couldn't be recorded. Please try again.",
+};
+
+function adminActionErrorMessage(error: string | undefined): string {
+  return ADMIN_ACTION_ERRORS[error ?? ""] ?? "Something went wrong. Please try again.";
+}
+
 /** Exported so `/edit/grant-matcha` reuses the SAME browse table rather than a second picker. */
-export function BrowseList({ hrefFor }: { hrefFor: (id: string) => string }) {
+export function BrowseList({
+  hrefFor,
+  freshness = false,
+  admin = false,
+}: {
+  hrefFor: (id: string) => string;
+  /** Render the corpus-freshness strip (the grant-matcha Browse header; NOT flag-gated). */
+  freshness?: boolean;
+  /** `MATCHA_ADMIN` — suppress/restore row actions + the show-suppressed toggle. */
+  admin?: boolean;
+}) {
   const [includeGrantsGov, setIncludeGrantsGov] = useState(false);
   const [sort, setSort] = useState<BrowseSort>("curated");
   const [filters, setFilters] = useState<BrowseFilters>(EMPTY_BROWSE_FILTERS);
   const [status, setStatus] = useState<BrowseStatus>({ kind: "loading" });
+  // Matcha-admin Phase 1b. `showSuppressed` can only turn on where the toggle
+  // renders (admin), so the non-admin fetch URL is byte-identical to before.
+  const [showSuppressed, setShowSuppressed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [suppressTarget, setSuppressTarget] = useState<{
+    opportunityId: string;
+    title: string;
+  } | null>(null);
+  const [adminBusyId, setAdminBusyId] = useState<string | null>(null);
+  const [adminError, setAdminError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -455,11 +604,21 @@ export function BrowseList({ hrefFor }: { hrefFor: (id: string) => string }) {
     // duplicates a public site, so it stays truncated. Page it if anyone actually browses it.
     const qs = new URLSearchParams({ limit: "500" });
     if (includeGrantsGov) qs.set("includeGrantsGov", "1");
+    if (admin && showSuppressed) qs.set("includeSuppressed", "1");
     fetch(`/api/opportunities?${qs}`, { cache: "no-store", credentials: "same-origin" })
       .then(async (r) => {
         if (r.ok) {
-          const data = (await r.json()) as { opportunities?: OpportunityListItem[] };
-          if (active) setStatus({ kind: "ok", opportunities: data.opportunities ?? [] });
+          const data = (await r.json()) as {
+            opportunities?: OpportunityListItem[];
+            sources?: SourceFreshness[];
+          };
+          if (active) {
+            setStatus({
+              kind: "ok",
+              opportunities: data.opportunities ?? [],
+              sources: data.sources ?? [],
+            });
+          }
           return;
         }
         if (active) {
@@ -478,7 +637,38 @@ export function BrowseList({ hrefFor }: { hrefFor: (id: string) => string }) {
     return () => {
       active = false;
     };
-  }, [includeGrantsGov]);
+  }, [includeGrantsGov, admin, showSuppressed, reloadKey]);
+
+  /**
+   * The confirmed suppress/restore — PATCH `/api/edit/opportunity-admin`, then
+   * refetch. Refetch on a 4xx too: `already_suppressed` / `not_found` mean the
+   * list is stale, and the fresh list IS the corrected picture.
+   */
+  async function performAdmin(
+    opportunityId: string,
+    action: "suppress" | "restore",
+    reason: string | null,
+  ) {
+    setAdminBusyId(opportunityId);
+    setAdminError(null);
+    try {
+      const r = await fetch("/api/edit/opportunity-admin", {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ opportunityId, action, ...(reason ? { reason } : {}) }),
+      });
+      if (!r.ok) {
+        const data = (await r.json().catch(() => ({}))) as { error?: string };
+        setAdminError(adminActionErrorMessage(data.error));
+      }
+      setReloadKey((k) => k + 1);
+    } catch {
+      setAdminError(adminActionErrorMessage(undefined));
+    } finally {
+      setAdminBusyId(null);
+    }
+  }
 
   const all = status.kind === "ok" ? status.opportunities : [];
   const now = Date.now();
@@ -503,6 +693,9 @@ export function BrowseList({ hrefFor }: { hrefFor: (id: string) => string }) {
 
   return (
     <div>
+      {freshness && status.kind === "ok" ? (
+        <CorpusFreshness sources={status.sources} now={now} />
+      ) : null}
       <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
         <input
           type="search"
@@ -525,7 +718,30 @@ export function BrowseList({ hrefFor }: { hrefFor: (id: string) => string }) {
             <option value="deadline">Deadline (soonest)</option>
           </select>
         </label>
+        {admin ? (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={showSuppressed}
+              onChange={(e) => setShowSuppressed(e.target.checked)}
+              className="size-4 accent-[var(--color-accent-slate)]"
+            />
+            <span title="Fold manually-suppressed rows back in, muted, with a Restore action.">
+              Show suppressed
+            </span>
+          </label>
+        ) : null}
       </div>
+
+      {adminError ? (
+        <p
+          className="mb-2 text-sm text-red-700"
+          role="alert"
+          data-testid="opportunity-admin-error"
+        >
+          {adminError}
+        </p>
+      ) : null}
 
       <div className="flex flex-col gap-x-10 gap-y-6 lg:flex-row">
         <div className="min-w-0 flex-1">
@@ -597,11 +813,29 @@ export function BrowseList({ hrefFor }: { hrefFor: (id: string) => string }) {
                       <th scope="col" className={`${thClass} whitespace-nowrap`}>
                         Deadline
                       </th>
+                      {admin ? (
+                        <th scope="col" className={thClass}>
+                          <span className="sr-only">Actions</span>
+                        </th>
+                      ) : null}
                     </tr>
                   </thead>
                   <tbody>
                     {shown.map((o) => (
-                      <OpportunityRow key={o.opportunityId} o={o} href={hrefFor(o.opportunityId)} />
+                      <OpportunityRow
+                        key={o.opportunityId}
+                        o={o}
+                        href={hrefFor(o.opportunityId)}
+                        admin={admin}
+                        actionBusy={adminBusyId === o.opportunityId}
+                        onSuppress={() =>
+                          setSuppressTarget({
+                            opportunityId: o.opportunityId,
+                            title: stripSponsorPrefix(o.title, o.sponsor) ?? o.opportunityId,
+                          })
+                        }
+                        onRestore={() => void performAdmin(o.opportunityId, "restore", null)}
+                      />
                     ))}
                   </tbody>
                 </table>
@@ -619,7 +853,106 @@ export function BrowseList({ hrefFor }: { hrefFor: (id: string) => string }) {
           setIncludeGrantsGov={setIncludeGrantsGov}
         />
       </div>
+
+      {admin ? (
+        <SuppressOpportunityDialog
+          target={suppressTarget}
+          onOpenChange={(open) => {
+            if (!open) setSuppressTarget(null);
+          }}
+          onConfirm={async (reason) => {
+            if (!suppressTarget) return;
+            await performAdmin(suppressTarget.opportunityId, "suppress", reason);
+            setSuppressTarget(null);
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * Matcha-admin Phase 1b suppress confirm (mockup 2). Cancel is the
+ * default-focused element, never Suppress — `confirm-dialog.tsx`'s safety
+ * invariant. Reason is optional free text; the server trims and caps it.
+ */
+function SuppressOpportunityDialog({
+  target,
+  onOpenChange,
+  onConfirm,
+}: {
+  target: { opportunityId: string; title: string } | null;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (reason: string | null) => Promise<void>;
+}) {
+  const [reason, setReason] = useState("");
+  const [pending, setPending] = useState(false);
+  const open = target !== null;
+
+  // Re-opening starts fresh — a stale reason must never carry across rows.
+  useEffect(() => {
+    if (open) {
+      setReason("");
+      setPending(false);
+    }
+  }, [open]);
+
+  async function handleConfirm() {
+    if (pending) return;
+    setPending(true);
+    try {
+      await onConfirm(reason.trim() || null);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Suppress this opportunity?</DialogTitle>
+          <DialogDescription>&ldquo;{target?.title}&rdquo;</DialogDescription>
+        </DialogHeader>
+        <p className="text-foreground/90 text-sm">
+          Hidden immediately from browse; cached detail pages can linger up to ~15 minutes (CDN).
+          Matching surfaces that read the search index clear on the next nightly run. The nightly
+          sync will NOT undo this; restore any time from Browse.
+        </p>
+        <div className="flex flex-col gap-2">
+          <label htmlFor="suppress-opportunity-reason" className="text-sm font-medium">
+            Reason (optional)
+          </label>
+          <Textarea
+            id="suppress-opportunity-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={3}
+            placeholder="Why this row shouldn't surface"
+          />
+        </div>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            autoFocus
+            onClick={() => onOpenChange(false)}
+            disabled={pending}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={handleConfirm}
+            disabled={pending}
+            data-testid="suppress-opportunity-confirm"
+          >
+            {pending ? "Working…" : "Suppress"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -805,12 +1138,33 @@ const tdClass = "px-3 py-2.5 align-middle";
  * If a secondary control is ever added to a row it MUST carry `relative z-10`,
  * or the stretched pseudo-element will sit on top of it and swallow the click.
  */
-function OpportunityRow({ o, href }: { o: OpportunityListItem; href: string }) {
+function OpportunityRow({
+  o,
+  href,
+  admin = false,
+  actionBusy = false,
+  onSuppress,
+  onRestore,
+}: {
+  o: OpportunityListItem;
+  href: string;
+  /** Matcha-admin Phase 1b — render the Suppress/Restore action cell. */
+  admin?: boolean;
+  actionBusy?: boolean;
+  onSuppress?: () => void;
+  onRestore?: () => void;
+}) {
   const award = awardRange(o.awardFloor ?? null, o.awardCeiling ?? null);
   // Sponsor has its own column now, so a title that restates it is noise.
   const title = stripSponsorPrefix(o.title, o.sponsor) ?? o.opportunityId;
+  // Only the includeSuppressed=1 admin fetch ever returns a suppressed row.
+  const suppressed = Boolean(o.suppressedAt);
   return (
-    <tr className="border-apollo-border hover:bg-apollo-surface-2 focus-within:outline-apollo-maroon relative border-b transition-colors last:border-b-0 focus-within:outline focus-within:outline-2 focus-within:-outline-offset-2">
+    <tr
+      className={`border-apollo-border hover:bg-apollo-surface-2 focus-within:outline-apollo-maroon relative border-b transition-colors last:border-b-0 focus-within:outline focus-within:outline-2 focus-within:-outline-offset-2${
+        suppressed ? " opacity-60" : ""
+      }`}
+    >
       <td className={tdClass}>
         <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <Link
@@ -824,6 +1178,13 @@ function OpportunityRow({ o, href }: { o: OpportunityListItem; href: string }) {
           <SourceBadge source={o.source} />
           <PrestigeBadge prestige={o.prestige} />
         </span>
+        {suppressed && o.suppressedAt ? (
+          <span className="text-muted-foreground block text-xs" data-testid="suppressed-note">
+            suppressed {formatSuppressedDate(o.suppressedAt)}
+            {o.suppressedBy ? ` by ${o.suppressedBy}` : ""}
+            {o.suppressReason ? ` — “${o.suppressReason}”` : ""}
+          </span>
+        ) : null}
       </td>
       <td className={`${tdClass} text-muted-foreground`}>{o.sponsor ?? "—"}</td>
       <td className={`${tdClass} whitespace-nowrap`}>{o.mechanism ?? "—"}</td>
@@ -831,8 +1192,29 @@ function OpportunityRow({ o, href }: { o: OpportunityListItem; href: string }) {
       <td className={`${tdClass} whitespace-nowrap`}>
         <DeadlineCell iso={o.dueDate} status={o.status} />
       </td>
+      {admin ? (
+        <td className={`${tdClass} whitespace-nowrap text-right`}>
+          {/* `relative z-10` — without it the row's stretched anchor sits on top
+              and swallows the click (the row-doc invariant above). */}
+          <button
+            type="button"
+            onClick={suppressed ? onRestore : onSuppress}
+            disabled={actionBusy}
+            className="text-muted-foreground hover:text-foreground relative z-10 text-xs underline decoration-dotted underline-offset-2 disabled:opacity-50"
+            data-testid={`opportunity-${suppressed ? "restore" : "suppress"}`}
+          >
+            {actionBusy ? "Working…" : suppressed ? "Restore" : "Suppress"}
+          </button>
+        </td>
+      ) : null}
     </tr>
   );
+}
+
+function formatSuppressedDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 function SourceBadge({ source }: { source: string | null }) {

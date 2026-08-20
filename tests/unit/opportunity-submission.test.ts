@@ -110,8 +110,19 @@ describe("findDuplicate", () => {
     expect(result.opportunity).toEqual({
       opportunityId: "wcm_curated:hartwell-abc123",
       title: "Hartwell Award",
+      suppressedAt: null,
     });
     expect(result.submission).toBeNull();
+  });
+
+  it("carries a matched corpus row's suppressedAt through (matcha-admin Phase 1b)", () => {
+    const suppressedAt = new Date("2026-08-01T00:00:00Z");
+    const result = findDuplicate(
+      "https://www.hartwell.org/award",
+      [{ ...corpus[0], suppressedAt }],
+      [],
+    );
+    expect(result.opportunity?.suppressedAt).toBe(suppressedAt);
   });
 
   it("matches pending and processed submissions but never rejected or suppressed ones", () => {

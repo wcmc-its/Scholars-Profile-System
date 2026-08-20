@@ -146,7 +146,12 @@ export function requirementsFrom(
   };
 }
 
-export function GrantMatchaPanel() {
+export function GrantMatchaPanel({
+  adminEnabled = false,
+}: {
+  /** `MATCHA_ADMIN` (server-read, threaded as a prop like `intakeEnabled`) — suppress/restore. */
+  adminEnabled?: boolean;
+} = {}) {
   // Selection lives in the URL (`?opp=`) — deep-linkable, and browser Back returns to the
   // browse table. The page is force-dynamic, so `useSearchParams` needs no Suspense boundary.
   const pathname = usePathname();
@@ -224,7 +229,13 @@ export function GrantMatchaPanel() {
             Choose a funding opportunity to rank Weill Cornell researchers on its text.
           </p>
         </div>
-        <BrowseList hrefFor={(id) => `${pathname}?opp=${encodeURIComponent(id)}`} />
+        {/* `freshness` is unconditional here — the strip is part of the grant-matcha Browse
+            header for everyone; only the suppress/restore controls are MATCHA_ADMIN-gated. */}
+        <BrowseList
+          hrefFor={(id) => `${pathname}?opp=${encodeURIComponent(id)}`}
+          freshness
+          admin={adminEnabled}
+        />
       </div>
     );
   }

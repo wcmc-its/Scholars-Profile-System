@@ -18,14 +18,23 @@ export async function GET(
   if (!OPPORTUNITY_ID_RE.test(opportunityId)) return apiError("invalid opportunityId", 400);
 
   const row = await db.read.opportunity.findUnique({ where: { opportunityId } });
-  if (!row) return apiError("opportunity not found", 404);
+  // A manually-suppressed row (matcha-admin Phase 1b) is indistinguishable
+  // from an absent one on this public surface.
+  if (!row || row.suppressedAt != null) return apiError("opportunity not found", 404);
 
-  // BigInt award fields aren't JSON-serializable — coerce to number for the wire.
+  // BigInt award fields aren't JSON-serializable — coerce to number for the
+  // wire. The suppression trio never leaves this public, CDN-cached surface:
+  // a 200 row has all three null today, but suppressedBy is a CWID and this
+  // spread would publish any future partial write.
   const json = {
     ...row,
     awardCeiling: row.awardCeiling != null ? Number(row.awardCeiling) : null,
     awardFloor: row.awardFloor != null ? Number(row.awardFloor) : null,
     estimatedFunding: row.estimatedFunding != null ? Number(row.estimatedFunding) : null,
+    // undefined keys are dropped by JSON.stringify.
+    suppressedAt: undefined,
+    suppressedBy: undefined,
+    suppressReason: undefined,
   };
 
   return NextResponse.json(json, {
