@@ -5,7 +5,7 @@ import {
   deadlineLabel,
   matchesBrowseFilters,
   stripSponsorPrefix,
-} from "@/components/edit/find-researchers";
+} from "@/components/edit/opportunity-browse";
 
 const now = Date.parse("2026-07-06T12:00:00Z");
 

@@ -19,7 +19,7 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(""),
 }));
 
-import { BrowseList, CorpusFreshness, freshnessTone } from "@/components/edit/find-researchers";
+import { BrowseList, CorpusFreshness, freshnessTone } from "@/components/edit/opportunity-browse";
 
 const DAY = 86_400_000;
 const NOW = new Date("2026-08-20T12:00:00.000Z").getTime();
