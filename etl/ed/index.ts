@@ -437,14 +437,46 @@ async function refreshHistoricalAppointments(
   if (plan.toCreate.length > 0) {
     // showOnProfile defaults to true on INSERT only, unless the row itself
     // looks like a WOOFA artifact — see invariant above.
-    await db.write.appointment.createMany({
-      data: plan.toCreate.map((a) => ({
-        ...a,
-        showOnProfile:
-          a.title === PRE_START_ACADEMIC_TITLE ||
-          !looksLikeArtifactAppointment(a.startDate, a.endDate),
-      })),
+    const withInsertVisibility = (a: (typeof plan.toCreate)[number]) => ({
+      ...a,
+      showOnProfile:
+        a.title === PRE_START_ACADEMIC_TITLE ||
+        !looksLikeArtifactAppointment(a.startDate, a.endDate),
     });
+    try {
+      await db.write.appointment.createMany({
+        data: plan.toCreate.map(withInsertVisibility),
+      });
+    } catch (err) {
+      // Same failure mode #1448 fixed for the active refresh: external_id is
+      // GLOBALLY unique but this reconcile is scoped to {cwid, ED-HISTORICAL},
+      // so a toCreate row can collide with the same SORID owned by another
+      // cwid — or still parked under source "ED" for a scholar this run no
+      // longer processes as active. createMany is one atomic statement
+      // (InnoDB), so nothing was inserted; fall back to per-row upsert so the
+      // row is reassigned instead of aborting the ED nightly. The update arm
+      // never touches showOnProfile, so a curator's hide survives the move.
+      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002")) {
+        throw err;
+      }
+      for (const a of plan.toCreate) {
+        const clash = await db.write.appointment.findUnique({
+          where: { externalId: a.externalId },
+          select: { cwid: true, source: true },
+        });
+        if (clash && (clash.cwid !== a.cwid || clash.source !== a.source)) {
+          console.warn(
+            `[ED historical appointments] external_id ${a.externalId} reassigned ` +
+              `${clash.cwid}/${clash.source} -> ${a.cwid}/${a.source}`,
+          );
+        }
+        await db.write.appointment.upsert({
+          where: { externalId: a.externalId },
+          create: withInsertVisibility(a),
+          update: { ...a, lastRefreshedAt: new Date() },
+        });
+      }
+    }
   }
   for (const a of plan.toUpdate) {
     // No showOnProfile key here — a curator's hide must survive the update.
