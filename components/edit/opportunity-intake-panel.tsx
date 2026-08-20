@@ -43,9 +43,18 @@ const ERROR_MESSAGES: Record<string, string> = {
   write_failed: "The submission couldn't be recorded. Please try again.",
 };
 
-function errorMessage(error: string | undefined, existing?: { opportunityId?: string }): string {
+function errorMessage(
+  error: string | undefined,
+  existing?: { opportunityId?: string; suppressedAt?: string | null },
+): string {
   if (error === "duplicate_url") {
-    return `Already in the corpus${existing?.opportunityId ? ` (${existing.opportunityId})` : ""} — search for it on the Browse tab.`;
+    const id = existing?.opportunityId ? ` (${existing.opportunityId})` : "";
+    // A suppressed duplicate does NOT appear on the Browse tab — pointing the
+    // user at a search that can't find it would be misdirection.
+    if (existing?.suppressedAt != null) {
+      return `Already in the corpus${id} but suppressed — restore it from the Browse tab's "show suppressed" view if it should be visible again.`;
+    }
+    return `Already in the corpus${id} — search for it on the Browse tab.`;
   }
   if (error === "duplicate_submission") {
     return "That URL has already been submitted — see the list below.";

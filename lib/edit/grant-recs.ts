@@ -33,3 +33,15 @@ export function isGrantRecsEnabled(): boolean {
 export function isGrantMatchaEnabled(): boolean {
   return process.env.GRANT_MATCHA === "on";
 }
+
+/**
+ * The `MATCHA_ADMIN` feature flag (matcha-admin plan Phase 1b). Off by default.
+ * Gates `/api/edit/opportunity-admin` — the corpus suppress/restore surface
+ * (the route 404s while off, the dark-ship posture) and, later, the admin
+ * affordances on the Browse tab. Wire per-env in `cdk/lib/app-stack.ts`
+ * (value "off" in both envs, flip staging on to activate), not just
+ * `.env.local`, so local-on / deployed-off can't ship silently (flag parity).
+ */
+export function isMatchaAdminEnabled(): boolean {
+  return process.env.MATCHA_ADMIN === "on";
+}

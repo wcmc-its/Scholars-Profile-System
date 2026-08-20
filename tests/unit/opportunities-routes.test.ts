@@ -12,6 +12,7 @@ const rankResearchersForOpportunity = vi.fn();
 const getEffectiveEditSession = vi.fn();
 const findUnique = vi.fn();
 const opportunityFindMany = vi.fn();
+const opportunityGroupBy = vi.fn();
 const topicFindMany = vi.fn();
 
 vi.mock("@/lib/api/match-opportunities", async (orig) => {
@@ -32,6 +33,7 @@ vi.mock("@/lib/db", () => ({
       opportunity: {
         findUnique: (...a: unknown[]) => findUnique(...a),
         findMany: (...a: unknown[]) => opportunityFindMany(...a),
+        groupBy: (...a: unknown[]) => opportunityGroupBy(...a),
       },
       topic: { findMany: (...a: unknown[]) => topicFindMany(...a) },
     },
@@ -50,6 +52,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   topicFindMany.mockResolvedValue([]); // default: no labels unless a test sets them
   opportunityFindMany.mockResolvedValue([]);
+  opportunityGroupBy.mockResolvedValue([]); // per-source freshness aggregate
 });
 
 describe("GET /api/scholars/[cwid]/opportunities (forward, public)", () => {
@@ -184,6 +187,19 @@ describe("GET /api/opportunities/[opportunityId]/researchers (reverse, admin-gat
     expect(rankResearchersForOpportunity).toHaveBeenCalledWith("g:1", expect.objectContaining({ stageLens: true }));
   });
 
+  it("404s a manually-suppressed opportunity before running the matcher (matcha-admin Phase 1b)", async () => {
+    getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
+    findUnique.mockResolvedValue({
+      title: "Suppressed Opp",
+      status: "open",
+      topicVector: [],
+      suppressedAt: new Date("2026-08-01T00:00:00Z"),
+    });
+    const resp = await reverseGET(req("/api/opportunities/g:1/researchers"), { params: p({ opportunityId: "g:1" }) });
+    expect(resp.status).toBe(404);
+    expect(rankResearchersForOpportunity).not.toHaveBeenCalled();
+  });
+
   it("passes the abstention flag through to the response body", async () => {
     getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
     rankResearchersForOpportunity.mockResolvedValue({
@@ -210,6 +226,19 @@ describe("GET /api/opportunities/[opportunityId] (detail)", () => {
     expect(resp.status).toBe(404);
   });
 
+  it("404s a manually-suppressed row (matcha-admin Phase 1b)", async () => {
+    findUnique.mockResolvedValue({
+      opportunityId: "g:1",
+      title: "T",
+      suppressedAt: new Date("2026-08-01T00:00:00Z"),
+      awardCeiling: null,
+      awardFloor: null,
+      estimatedFunding: null,
+    });
+    const resp = await detailGET(req("/api/opportunities/g:1"), { params: p({ opportunityId: "g:1" }) });
+    expect(resp.status).toBe(404);
+  });
+
   it("coerces BigInt award fields and returns the row", async () => {
     findUnique.mockResolvedValue({ opportunityId: "g:1", title: "T", awardCeiling: 500000n, awardFloor: null, estimatedFunding: 3000000n });
     const resp = await detailGET(req("/api/opportunities/g:1"), { params: p({ opportunityId: "g:1" }) });
@@ -217,6 +246,19 @@ describe("GET /api/opportunities/[opportunityId] (detail)", () => {
     const body = await resp.json();
     expect(body.awardCeiling).toBe(500000);
     expect(body.estimatedFunding).toBe(3000000);
+  });
+
+  it("never serializes the suppression trio on the public wire (matcha-admin Phase 1b)", async () => {
+    findUnique.mockResolvedValue({
+      opportunityId: "g:1", title: "T", awardCeiling: null, awardFloor: null, estimatedFunding: null,
+      suppressedAt: null, suppressedBy: null, suppressReason: null,
+    });
+    const resp = await detailGET(req("/api/opportunities/g:1"), { params: p({ opportunityId: "g:1" }) });
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body).not.toHaveProperty("suppressedAt");
+    expect(body).not.toHaveProperty("suppressedBy");
+    expect(body).not.toHaveProperty("suppressReason");
   });
 });
 
@@ -271,5 +313,62 @@ describe("GET /api/opportunities (browse list, admin-gated, curated-first)", () 
     getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
     const resp = await listGET(req("/api/opportunities?limit=0"));
     expect(resp.status).toBe(400);
+  });
+
+  it("excludes suppressed rows by default; includeSuppressed=1 folds them in with the admin fields", async () => {
+    getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
+
+    await listGET(req("/api/opportunities"));
+    expect(opportunityFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ suppressedAt: null }) }),
+    );
+
+    opportunityFindMany.mockResolvedValue([
+      {
+        opportunityId: "manual_url:x-abc123",
+        title: "Suppressed Award",
+        source: "manual_url",
+        suppressedAt: new Date("2026-08-01T00:00:00.000Z"),
+        suppressedBy: "flm4001",
+        suppressReason: "dup",
+      },
+    ]);
+    const resp = await listGET(req("/api/opportunities?includeSuppressed=1"));
+    expect(resp.status).toBe(200);
+    const callArg = opportunityFindMany.mock.calls[1][0] as { where: Record<string, unknown> };
+    expect(callArg.where.suppressedAt).toBeUndefined();
+    const body = await resp.json();
+    // the admin view renders muted rows + Restore off these three fields
+    expect(body.opportunities[0]).toMatchObject({
+      suppressedAt: "2026-08-01T00:00:00.000Z",
+      suppressedBy: "flm4001",
+      suppressReason: "dup",
+    });
+  });
+
+  it("returns the per-source freshness aggregate (count + newest ingestedAt, source-sorted)", async () => {
+    getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
+    opportunityGroupBy.mockResolvedValue([
+      {
+        source: "wcm_curated",
+        _count: { _all: 320 },
+        _max: { ingestedAt: new Date("2026-07-06T00:00:00.000Z") },
+      },
+      {
+        source: "grants_gov",
+        _count: { _all: 800 },
+        _max: { ingestedAt: new Date("2026-07-01T00:00:00.000Z") },
+      },
+    ]);
+    const resp = await listGET(req("/api/opportunities"));
+    expect(resp.status).toBe(200);
+    expect(opportunityGroupBy).toHaveBeenCalledWith(
+      expect.objectContaining({ by: ["source"], _max: { ingestedAt: true } }),
+    );
+    const body = await resp.json();
+    expect(body.sources).toEqual([
+      { source: "grants_gov", count: 800, newestIngestedAt: "2026-07-01T00:00:00.000Z" },
+      { source: "wcm_curated", count: 320, newestIngestedAt: "2026-07-06T00:00:00.000Z" },
+    ]);
   });
 });

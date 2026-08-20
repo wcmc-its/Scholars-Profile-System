@@ -748,6 +748,8 @@ export async function opportunitiesInTopMatches(
     where: {
       status: { in: OPEN_OPPORTUNITY_STATUSES },
       OR: [{ dueDate: null }, { dueDate: { gte: now } }, { status: "continuous" }],
+      // Manually-suppressed rows (matcha-admin Phase 1b) never count as a match.
+      suppressedAt: null,
     },
     select: { opportunityId: true, topicVector: true },
   });

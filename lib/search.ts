@@ -1457,6 +1457,14 @@ export const OPPORTUNITY_TOPIC_GATE = 0.3;
 /** A `topic_vector` entry as stored on the `opportunity` row. */
 export type OpportunityTopicScore = { topic_id: string; score: number; rationale?: string };
 
+/**
+ * The `opportunity` rows the index builder projects (mirrors PEOPLE_INDEX_WHERE /
+ * GRANT_INDEX_WHERE): research rows only, and never a manually-suppressed one
+ * (matcha-admin Phase 1b) — a suppression drops the doc on the next nightly
+ * rebuild, so the matchers stop retrieving it without a manual reindex.
+ */
+export const OPPORTUNITY_INDEX_WHERE = { isResearch: true, suppressedAt: null } as const;
+
 /** The `opportunity` columns the index builder selects (Prisma row subset). */
 export type OpportunityIndexRow = {
   opportunityId: string;

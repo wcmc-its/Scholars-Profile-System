@@ -59,18 +59,12 @@ export async function GET(
     limit = Math.min(n, MAX_LIMIT);
   }
 
-  const { scholars: results, abstain, meanTopRel } = await rankResearchersForOpportunity(opportunityId, {
-    sort: sortRaw as ResearcherSort,
-    stageLens,
-    esiOnly,
-    limit,
-    crossRef: true,
-  });
-
-  // View-model assembly for the redesigned screen: opportunity card fields, the
+  // View-model read for the redesigned screen: opportunity card fields, the
   // "matching on" chips (the opportunity's top topics), and a slug→label map for
   // the per-row topic evidence. ponytail: re-reads the opportunity row the matcher
-  // already loaded — one PK lookup on a tiny table, not worth threading it out.
+  // also loads — one PK lookup on a tiny table, not worth threading it out. Read
+  // FIRST so a manually-suppressed row (matcha-admin Phase 1b) 404s like the
+  // detail route, before the matcher spends its fan-out.
   const opp = await db.read.opportunity.findUnique({
     where: { opportunityId },
     select: {
@@ -90,7 +84,17 @@ export async function GET(
       estimatedFunding: true,
       numberOfAwards: true,
       topicVector: true,
+      suppressedAt: true,
     },
+  });
+  if (opp?.suppressedAt != null) return apiError("opportunity not found", 404);
+
+  const { scholars: results, abstain, meanTopRel } = await rankResearchersForOpportunity(opportunityId, {
+    sort: sortRaw as ResearcherSort,
+    stageLens,
+    esiOnly,
+    limit,
+    crossRef: true,
   });
 
   const rawVector = opp?.topicVector;

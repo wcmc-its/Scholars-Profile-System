@@ -35,7 +35,14 @@ const TABS: ReadonlyArray<{ key: TabKey; label: string }> = [
   { key: "submissions", label: "Submissions" },
 ];
 
-export function GrantMatchaTabs({ intakeEnabled = false }: { intakeEnabled?: boolean } = {}) {
+export function GrantMatchaTabs({
+  intakeEnabled = false,
+  adminEnabled = false,
+}: {
+  intakeEnabled?: boolean;
+  /** `MATCHA_ADMIN` (server-read) — threaded to the Browse panel's suppress/restore controls. */
+  adminEnabled?: boolean;
+} = {}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -47,7 +54,7 @@ export function GrantMatchaTabs({ intakeEnabled = false }: { intakeEnabled?: boo
 
   // Flag off → the bare panel, no tab strip — the intake surface is not
   // advertised anywhere it cannot be used.
-  if (!intakeEnabled) return <GrantMatchaPanel />;
+  if (!intakeEnabled) return <GrantMatchaPanel adminEnabled={adminEnabled} />;
 
   // Keep the rest of the query when switching tabs; Browse is the default, so
   // its href simply drops the `tab` param. Submissions drops `opp` too — a
@@ -90,7 +97,11 @@ export function GrantMatchaTabs({ intakeEnabled = false }: { intakeEnabled?: boo
           );
         })}
       </div>
-      {active === "browse" ? <GrantMatchaPanel /> : <OpportunityIntakePanel />}
+      {active === "browse" ? (
+        <GrantMatchaPanel adminEnabled={adminEnabled} />
+      ) : (
+        <OpportunityIntakePanel />
+      )}
     </div>
   );
 }

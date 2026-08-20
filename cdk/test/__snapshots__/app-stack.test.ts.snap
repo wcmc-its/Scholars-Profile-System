@@ -522,6 +522,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "MATCHA_ADMIN",
+                "Value": "off",
+              },
+              {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
                 "Value": "on",
               },
@@ -4857,6 +4861,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "GRANT_MATCHA",
+                "Value": "on",
+              },
+              {
+                "Name": "MATCHA_ADMIN",
                 "Value": "on",
               },
               {

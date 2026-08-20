@@ -23,7 +23,7 @@ import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { GrantMatchaTabs } from "@/components/edit/grant-matcha-tabs";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { isMatchaEnabled } from "@/lib/api/matcha";
-import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
+import { isGrantMatchaEnabled, isMatchaAdminEnabled } from "@/lib/edit/grant-recs";
 import { isOpportunityIntakeEnabled } from "@/lib/edit/opportunity-submission";
 import { logEditDenial } from "@/lib/edit/authz";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
@@ -78,7 +78,10 @@ export default async function GrantMatchaPage() {
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <GrantMatchaTabs intakeEnabled={isOpportunityIntakeEnabled()} />
+      <GrantMatchaTabs
+        intakeEnabled={isOpportunityIntakeEnabled()}
+        adminEnabled={isMatchaAdminEnabled()}
+      />
     </ConsoleShell>
   );
 }

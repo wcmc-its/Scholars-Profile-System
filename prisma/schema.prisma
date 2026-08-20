@@ -559,6 +559,12 @@ model Opportunity {
   taxonomyVersion  String    @map("taxonomy_version") @db.VarChar(32)
   ingestedAt       DateTime  @map("ingested_at")
   lastRefreshedAt  DateTime  @default(now()) @map("last_refreshed_at")
+  /// Matcha-admin manual suppression (Phase 1b): set → hidden from browse/detail
+  /// and dropped from the search index on the next nightly rebuild; restore nulls
+  /// all three. Survives the nightly GRANT# upsert, which never names these columns.
+  suppressedAt   DateTime? @map("suppressed_at")
+  suppressedBy   String?   @map("suppressed_by") @db.VarChar(64)
+  suppressReason String?   @map("suppress_reason") @db.VarChar(255)
 
   @@index([status])
   @@index([dueDate])

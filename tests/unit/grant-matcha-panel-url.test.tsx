@@ -19,10 +19,22 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => searchParams.value,
 }));
 
+/** Props each BrowseList mount received — pins the Phase 1b freshness/admin threading. */
+const browseListProps: Array<{ freshness?: boolean; admin?: boolean }> = [];
+
 vi.mock("@/components/edit/find-researchers", () => ({
-  BrowseList: ({ hrefFor }: { hrefFor: (id: string) => string }) => (
-    <a href={hrefFor("wcm_curated:abc")}>browse table</a>
-  ),
+  BrowseList: ({
+    hrefFor,
+    freshness,
+    admin,
+  }: {
+    hrefFor: (id: string) => string;
+    freshness?: boolean;
+    admin?: boolean;
+  }) => {
+    browseListProps.push({ freshness, admin });
+    return <a href={hrefFor("wcm_curated:abc")}>browse table</a>;
+  },
 }));
 
 /**
@@ -49,6 +61,7 @@ describe("GrantMatchaPanel — ?opp= URL state", () => {
   beforeEach(() => {
     searchParams.value = new URLSearchParams("");
     mounted.length = 0;
+    browseListProps.length = 0;
     vi.unstubAllGlobals();
   });
   afterEach(() => vi.unstubAllGlobals());
@@ -59,6 +72,14 @@ describe("GrantMatchaPanel — ?opp= URL state", () => {
     // The row href is what makes the selection deep-linkable.
     expect(link.getAttribute("href")).toBe("/edit/grant-matcha?opp=wcm_curated%3Aabc");
     expect(screen.queryByTestId("matcha-panel")).toBeNull();
+    // Phase 1b: the freshness strip is unconditional on this surface; the
+    // suppress/restore controls stay off until the server passes adminEnabled.
+    expect(browseListProps).toEqual([{ freshness: true, admin: false }]);
+  });
+
+  it("threads adminEnabled through to the browse table's admin prop", () => {
+    render(<GrantMatchaPanel adminEnabled />);
+    expect(browseListProps).toEqual([{ freshness: true, admin: true }]);
   });
 
   it("fetches the detail route for ?opp= and seeds Matcha from title + synopsis", async () => {

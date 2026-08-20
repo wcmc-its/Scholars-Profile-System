@@ -33,6 +33,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const q = (sp.get("q") ?? "").trim();
   const includeGrantsGov =
     sp.get("includeGrantsGov") === "1" || sp.get("includeGrantsGov") === "true";
+  // Matcha-admin Phase 1b: manually-suppressed rows are excluded by default;
+  // the admin view passes includeSuppressed=1 to render them muted + Restore.
+  const includeSuppressed =
+    sp.get("includeSuppressed") === "1" || sp.get("includeSuppressed") === "true";
 
   let limit = 200;
   const limitRaw = sp.get("limit");
@@ -59,6 +63,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       // unclassified AS honorific, so the recommender excludes these too (#2041).
       isHonorific: false,
       ...(includeGrantsGov ? {} : { source: { not: "grants_gov" } }),
+      ...(includeSuppressed ? {} : { suppressedAt: null }),
       ...(q ? { title: { contains: q } } : {}),
     },
     select: {
@@ -73,6 +78,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       isHonorific: true,
       awardCeiling: true,
       awardFloor: true,
+      suppressedAt: true,
+      suppressedBy: true,
+      suppressReason: true,
       // Read to DERIVE `facultyPiEligible` below; never returned — a per-row eligibility map is
       // ~500 rows of JSON the browse has no use for.
       eligibilityFlags: true,
@@ -103,5 +111,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     facultyPiEligible: facultyPiMayHold(eligibilityFlags, eligibility),
   }));
 
-  return NextResponse.json({ count: opportunities.length, opportunities });
+  // Per-source freshness for the Browse-tab strip: row count + newest
+  // `ingestedAt` per source. `ingestedAt` is the upstream producer timestamp
+  // and the only real freshness signal — `lastRefreshedAt` is re-stamped every
+  // night by the upsert (the Phase 0a metric's rationale). Grouped over the
+  // whole table (unfiltered): freshness describes the pipeline, not the
+  // filtered view, so per-source MAX stays epoch-fallback-safe.
+  const bySource = await db.read.opportunity.groupBy({
+    by: ["source"],
+    _count: { _all: true },
+    _max: { ingestedAt: true },
+  });
+  const sources = bySource
+    .map((g) => ({
+      source: g.source,
+      count: g._count._all,
+      newestIngestedAt: g._max.ingestedAt,
+    }))
+    .sort((a, b) => a.source.localeCompare(b.source));
+
+  return NextResponse.json({ count: opportunities.length, opportunities, sources });
 }

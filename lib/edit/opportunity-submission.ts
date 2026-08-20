@@ -326,8 +326,10 @@ export async function suppressSubmission(
 // ---------------------------------------------------------------------------
 
 export interface DuplicateCheckResult {
-  /** A corpus row already carries this URL (any source). */
-  opportunity: { opportunityId: string; title: string } | null;
+  /** A corpus row already carries this URL (any source). `suppressedAt` rides
+   *  along (matcha-admin Phase 1b) so the 409 payload can say "duplicate of a
+   *  SUPPRESSED row" — the caller may restore it instead of resubmitting. */
+  opportunity: { opportunityId: string; title: string; suppressedAt: Date | string | null } | null;
   /** A queue item (pending or processed) already carries this URL. */
   submission: { submissionId: string; status: SubmissionStatus } | null;
 }
@@ -344,14 +346,23 @@ export interface DuplicateCheckResult {
  */
 export function findDuplicate(
   normalizedUrl: string,
-  corpus: ReadonlyArray<{ opportunityId: string; title: string; sourceUrl: string }>,
+  corpus: ReadonlyArray<{
+    opportunityId: string;
+    title: string;
+    sourceUrl: string;
+    suppressedAt?: Date | string | null;
+  }>,
   submissions: ReadonlyArray<OpportunitySubmission>,
 ): DuplicateCheckResult {
   let opportunity: DuplicateCheckResult["opportunity"] = null;
   for (const row of corpus) {
     const normalized = normalizeOpportunityUrl(row.sourceUrl);
     if (normalized.ok && normalized.normalized === normalizedUrl) {
-      opportunity = { opportunityId: row.opportunityId, title: row.title };
+      opportunity = {
+        opportunityId: row.opportunityId,
+        title: row.title,
+        suppressedAt: row.suppressedAt ?? null,
+      };
       break;
     }
   }

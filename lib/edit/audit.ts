@@ -245,7 +245,14 @@ export type AuditEntityType =
   /** a data-sharing suppression (Phase 2, S-Index spec) — per-contributor hide
    *  or superuser whole-entity takedown of a `dataset_deposit` row via
    *  `/api/edit/suppress`; `targetEntityId` is the `dataset_deposit.id`. */
-  | "dataset_deposit";
+  | "dataset_deposit"
+  /** a corpus `opportunity` row suppressed / restored via
+   *  `/api/edit/opportunity-admin` (matcha-admin Phase 1b) or the intake
+   *  suppress cascade; `targetEntityId` is the `opportunity.opportunityId`.
+   *  Reuses `suppression_create` / `suppression_revoke` (the `dataset_deposit`
+   *  precedent) — no new action value. Requires the `scholars_audit`
+   *  target_entity_type ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "opportunity";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

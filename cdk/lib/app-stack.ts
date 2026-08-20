@@ -1523,6 +1523,14 @@ export class AppStack extends Stack {
         // (superuser||developer), and there is still no nav tab — /edit/grant-matcha is URL-only.
         // ⚠ Each ask bills a Bedrock Sonnet call (no cheap model on SPS), bounded by admin-only access.
         GRANT_MATCHA: "on",
+        // MATCHA_ADMIN — the Grant Matcha corpus-admin surface (matcha-admin plan Phase 1b):
+        // /api/edit/opportunity-admin suppress/restore on `opportunity` rows + the Browse-tab
+        // admin affordances. Read via isMatchaAdminEnabled() (=== "on"); the route 404s while
+        // off. ON in staging (Phase 1b rollout); OFF in prod (armed — flips on a deliberate
+        // Sps-App-prod deploy after the staging soak). Suppression is data-only (nullable
+        // columns), so flag-off leaves any already-suppressed rows suppressed in reads — the
+        // flag gates the WRITE surface, not the read filters.
+        MATCHA_ADMIN: env === "staging" ? "on" : "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
