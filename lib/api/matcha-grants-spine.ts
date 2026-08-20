@@ -185,10 +185,16 @@ export async function rankGrantsForDescriptionSpine(
   // is a concept-display concern, not a clustering input, so it is threaded via a side map keyed
   // on the raw extracted term instead.
   const confidenceByTerm = new Map<string, NonNullable<MatchaConcept["meshConfidence"]>>();
+  // Same side-map idiom as confidenceByTerm, feeding `meshDescendantCount` /
+  // `assessMatchSignal` (matcha-contract.ts) instead of `meshConfidence`.
+  const descendantCountByTerm = new Map<string, number>();
   const clusterTerms: ClusterTerm[] = await Promise.all(
     extraction.concepts.map(async (c) => {
       const resolution = (await matchQueryToTaxonomy(c.term)).meshResolution;
-      if (resolution) confidenceByTerm.set(c.term, resolution.confidence);
+      if (resolution) {
+        confidenceByTerm.set(c.term, resolution.confidence);
+        descendantCountByTerm.set(c.term, resolution.descendantUis.length);
+      }
       return {
         term: c.term,
         centrality: c.centrality,
@@ -218,6 +224,7 @@ export async function rankGrantsForDescriptionSpine(
     // spine: a cluster whose kind matches the ask's target kind is weighted up.
     const weightFactor = cluster.kind === targetKind ? KIND_ALIGNED : KIND_OFF_TARGET;
     const meshConfidence = confidenceByTerm.get(term);
+    const meshDescendantCount = descendantCountByTerm.get(term);
     const concept: MatchaConcept = {
       term,
       kind: cluster.kind,
@@ -228,6 +235,8 @@ export async function rankGrantsForDescriptionSpine(
       // descriptor at all; distinct from `"partial"`, which means it DID resolve, just via the
       // decompose-and-resolve fallback window.
       ...(meshConfidence ? { meshConfidence } : {}),
+      // Same absence condition as meshConfidence. Feeds `assessMatchSignal` (matcha-contract.ts).
+      ...(meshDescendantCount !== undefined ? { meshDescendantCount } : {}),
     };
     concepts.push(concept);
 

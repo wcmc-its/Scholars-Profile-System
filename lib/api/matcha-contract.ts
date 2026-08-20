@@ -368,6 +368,18 @@ export type MatchaConcept = {
    * (resolved, but only via the fallback window).
    */
   meshConfidence?: MeshResolution["confidence"];
+  /**
+   * `MeshResolution.descendantUis.length` for this concept's representative term — how much
+   * of the MeSH tree it covers, capped at `DESCENDANT_HARD_CAP` (200, `search-taxonomy.ts`; the
+   * number is duplicated as `BROAD_MESH_DESCENDANT_FLOOR` below rather than imported, because
+   * that module pulls in `@/lib/db` at module scope and this contract reaches the CLIENT bundle
+   * via `matcha-panel.tsx`).
+   *
+   * DISPLAY ONLY, and the raw ingredient `assessMatchSignal` below reads — a hit at the cap
+   * means "at least this broad, possibly broader" (the count itself is truncated, not the real
+   * tree size). ABSENT under the same condition as `meshConfidence`: no MeSH resolution at all.
+   */
+  meshDescendantCount?: number;
 };
 
 /**
@@ -808,6 +820,47 @@ export function askTitleFrom(
 
 /** Two concepts name a search; five are a list, not a handle. */
 const ASK_TITLE_CONCEPTS = 2;
+
+/** Mirrors `search-taxonomy.ts`'s `DESCENDANT_HARD_CAP` — see `meshDescendantCount`'s doc
+ *  comment for why this is a duplicated literal, not an import. Keep the two in sync. */
+const BROAD_MESH_DESCENDANT_FLOOR = 200;
+
+export type MatchSignal =
+  | { thin: false }
+  | {
+      thin: true;
+      /** `single-broad-concept` — the only concept resolves to a MeSH descriptor near the
+       *  top of the tree ("neoplasms", 200+ descendants): matches whoever touches the broad
+       *  category, not the funder's actual target. `single-bare-method` — the only concept is
+       *  a METHOD ("drug discovery") with no accompanying disease/population concept to narrow
+       *  it, so it matches anyone touching that method across every disease area. Both were
+       *  found by eyeballing real staging opportunities 2026-08-19/20 — see
+       *  `docs/grant-matcha-challenging-cases.md`. */
+      reason: "single-broad-concept" | "single-bare-method";
+    };
+
+/**
+ * Self-awareness for a thin extraction, not a ranking input. A single concept isn't
+ * inherently a bad match (`ataxia-telangiectasia` alone, 1 descendant, is a perfectly good
+ * search) — it's specifically ONE BROAD concept or ONE BARE METHOD, with nothing to narrow
+ * it, that produces a scattered result the officer has no way to tell from a confident one.
+ * Deliberately NOT computed for concepts.length > 1: a broad concept sitting alongside others
+ * is already being narrowed by them, and this signal isn't slider-reactive (concept count
+ * never changes on a drag), so there is nothing here for a client-only "derived" split to buy —
+ * unlike `fitTier`/`matchedConcepts`, this is stable for the life of one search and safe to
+ * call from either side of the wire.
+ */
+export function assessMatchSignal(concepts: readonly MatchaConcept[]): MatchSignal {
+  if (concepts.length !== 1) return { thin: false };
+  const [only] = concepts;
+  if ((only.meshDescendantCount ?? 0) >= BROAD_MESH_DESCENDANT_FLOOR) {
+    return { thin: true, reason: "single-broad-concept" };
+  }
+  if (only.kind === "method") {
+    return { thin: true, reason: "single-bare-method" };
+  }
+  return { thin: false };
+}
 
 /** Options for the reference scorers. `prefBoost` is injected because the UI owns the
  *  preference match predicate (the ranker ships `measures`, not verdicts). Absent ⇒ the

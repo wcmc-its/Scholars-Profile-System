@@ -810,6 +810,8 @@ export async function rankResearchersForDescriptionSpine(
       // Absent when the term never resolved to a MeSH descriptor at all — distinct from
       // `"partial"`, which means it DID resolve, just via the fallback window.
       ...(rep ? { meshConfidence: rep.confidence } : {}),
+      // Same absence condition as meshConfidence. Feeds `assessMatchSignal` (matcha-contract.ts).
+      ...(rep ? { meshDescendantCount: rep.descendantUis.length } : {}),
     };
     concepts.push(concept);
 

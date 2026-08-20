@@ -1178,6 +1178,7 @@ describe("rankResearchersForDescriptionSpine", () => {
         weightFactor: expect.closeTo(1.25, 6), // aligned kind prior, full stop
         corpusCoverage: 0.5, // the raw measured fraction, for the badge only
         meshConfidence: "exact", // #1972 — the meshRes() stub's default tier
+        meshDescendantCount: 1, // meshRes()'s single-element descendantUis stub
       },
       {
         term: "CAR-T",
@@ -1187,6 +1188,7 @@ describe("rankResearchersForDescriptionSpine", () => {
         weightFactor: expect.closeTo(0.8, 6), // off-target kind prior
         corpusCoverage: 0.001,
         meshConfidence: "exact",
+        meshDescendantCount: 1,
       },
     ]);
 
