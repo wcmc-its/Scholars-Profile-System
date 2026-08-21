@@ -185,3 +185,147 @@ describe("BrowseList — cards", () => {
     );
   });
 });
+
+/**
+ * Redesign 2026-08 — the rail's facet groups, the active-filter chip row, and
+ * "Clear all". Its own fixture rather than `OPPS`: two sponsors, two mechanisms
+ * and one award no WCM faculty PI can hold is the minimum shape that renders the
+ * Sponsor facet, the Mechanism facet, a chip and the faculty-PI counterfactual
+ * all at once, and it leaves the card tests above untouched.
+ */
+const FILTER_OPPS = [
+  {
+    opportunityId: "wcm_curated:alpha",
+    title: "Alpha Investigator Award",
+    sponsor: "Hartwell Foundation",
+    mechanism: "R01",
+    dueDate: null,
+    source: "wcm_curated",
+    status: "open",
+    awardFloor: null,
+    awardCeiling: null,
+    facultyPiEligible: true,
+  },
+  {
+    opportunityId: "wcm_curated:beta",
+    title: "Beta Early Career Award",
+    sponsor: "Beta Trust",
+    mechanism: "K99",
+    dueDate: null,
+    source: "wcm_curated",
+    status: "open",
+    awardFloor: null,
+    awardCeiling: null,
+    facultyPiEligible: true,
+  },
+  {
+    opportunityId: "wcm_curated:delta",
+    title: "Delta Program Award",
+    sponsor: "Beta Trust",
+    mechanism: "R01",
+    dueDate: null,
+    source: "wcm_curated",
+    status: "open",
+    awardFloor: null,
+    awardCeiling: null,
+    facultyPiEligible: true,
+  },
+  {
+    // The one the faculty-PI gate holds back, so the counterfactual sentence renders.
+    opportunityId: "wcm_curated:gamma",
+    title: "Gamma Trainee Prize",
+    sponsor: "Hartwell Foundation",
+    mechanism: "R01",
+    dueDate: null,
+    source: "wcm_curated",
+    status: "open",
+    awardFloor: null,
+    awardCeiling: null,
+    facultyPiEligible: false,
+  },
+];
+
+const rail = () => screen.getByRole("complementary", { name: "Filter opportunities" });
+const cards = () =>
+  within(screen.getByRole("list", { name: "Funding opportunities" })).getAllByRole("listitem");
+
+describe("BrowseList — rail facets, filter chips and Clear all", () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+
+  /**
+   * 🔴 MECHANISM REGRESSION GUARD. Deleting the entire `<FacetGroup title="Mechanism">`
+   * block from `FilterRail` left every other test in the repo green — the artboard does
+   * not draw the group, so a future session following it could drop the only way to
+   * filter by activity code and never learn. This test is the tripwire: it pins the
+   * group's presence, its option counts, and that toggling one actually narrows the list.
+   */
+  it("pins the Mechanism facet in the rail, with counts, and filters by it", async () => {
+    await renderBrowse(FILTER_OPPS);
+    const mech = within(rail()).getByRole("group", { name: "Mechanism" });
+    // Counts are computed with this group's own selections skipped, over the rows the
+    // faculty-PI gate lets through: R01 = alpha + delta, K99 = beta (gamma is gated out).
+    expect(within(mech).getByRole("checkbox", { name: /^R01/ }).closest("label")!.textContent).toMatch(
+      /^R01\s*2$/,
+    );
+    expect(within(mech).getByRole("checkbox", { name: /^K99/ }).closest("label")!.textContent).toMatch(
+      /^K99\s*1$/,
+    );
+
+    fireEvent.click(within(mech).getByRole("checkbox", { name: /^K99/ }));
+    await waitFor(() => expect(cards()).toHaveLength(1));
+    expect(screen.getByRole("link", { name: "Beta Early Career Award" })).toBeTruthy();
+  });
+
+  it("chips an active facet and removes it again from the chip's own button", async () => {
+    await renderBrowse(FILTER_OPPS);
+    expect(cards()).toHaveLength(3);
+    expect(screen.queryByText("Filtering by:")).toBeNull();
+
+    const sponsors = within(rail()).getByRole("group", { name: "Sponsor" });
+    fireEvent.click(within(sponsors).getByRole("checkbox", { name: /^Hartwell Foundation/ }));
+    await waitFor(() => expect(cards()).toHaveLength(1));
+
+    // Group-prefixed: a bare "Hartwell Foundation" would be indistinguishable from a
+    // Mechanism chip carrying the same string, on screen and read aloud.
+    const remove = screen.getByRole("button", { name: "Remove filter: Sponsor: Hartwell Foundation" });
+    fireEvent.click(remove);
+
+    await waitFor(() => expect(cards()).toHaveLength(3));
+    expect(screen.queryByRole("button", { name: /^Remove filter:/ })).toBeNull();
+    expect(
+      (within(sponsors).getByRole("checkbox", { name: /^Hartwell Foundation/ }) as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+  });
+
+  /**
+   * 🔴 CLEAR-ALL GUARD. `EMPTY_BROWSE_FILTERS.facultyPiOnly` is `true`, so spreading it
+   * blind on Clear all silently RE-APPLIES a gate that no chip ever represented and that
+   * hides ~13.2% of the corpus — the list gets SHORTER after a control named "Clear all".
+   * The honest observable is the counterfactual sentence's own control: while the gate is
+   * relaxed the line offers "hide awards no faculty PI can hold", and while it is on the
+   * line offers "show".
+   */
+  it("Clear all drops the chips but carries the relaxed faculty-PI gate through", async () => {
+    await renderBrowse(FILTER_OPPS);
+    expect(cards()).toHaveLength(3);
+
+    fireEvent.click(screen.getByRole("button", { name: "show" }));
+    await waitFor(() => expect(cards()).toHaveLength(4));
+    expect(screen.getByRole("button", { name: "hide awards no faculty PI can hold" })).toBeTruthy();
+
+    const sponsors = within(rail()).getByRole("group", { name: "Sponsor" });
+    fireEvent.click(within(sponsors).getByRole("checkbox", { name: /^Hartwell Foundation/ }));
+    await waitFor(() => expect(cards()).toHaveLength(2));
+    expect(screen.getByText("Filtering by:")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+
+    // The chips go; the gate stays exactly where the user left it.
+    await waitFor(() => expect(screen.queryByText("Filtering by:")).toBeNull());
+    expect(cards()).toHaveLength(4);
+    expect(screen.getByRole("button", { name: "hide awards no faculty PI can hold" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "show" })).toBeNull();
+  });
+});

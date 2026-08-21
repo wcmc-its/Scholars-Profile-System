@@ -113,21 +113,39 @@ const FRESHNESS_TEXT: Record<FreshnessTone, string> = {
 
 /**
  * Corpus-freshness disclosure (matcha-admin Phase 1b; redesign 2026-08) — the
- * Browse-tab header on `/edit/grant-matcha`. Collapsed it is one pill carrying
- * the pipeline's pulse: the newest ingest across the WHOLE corpus, warning-toned
- * when stale. Expanded it adds a Source / Rows / Last-updated grid, a row per
- * source. Reads `ingestedAt` ONLY — `lastRefreshedAt` is re-stamped by the
- * nightly upsert and would always read fresh (the Phase 0a lesson, and the
- * reason the corpus froze unnoticed for six weeks).
+ * Browse-tab header on `/edit/grant-matcha`. Collapsed it is one pill; expanded
+ * it adds a Source / Corpus rows / Last ingested table, a row per source. Reads
+ * `ingestedAt` ONLY — `lastRefreshedAt` is re-stamped by the nightly upsert and
+ * would always read fresh (the Phase 0a lesson, and the reason the corpus froze
+ * unnoticed for six weeks).
  *
- * The grid stays MOUNTED when collapsed and is hidden with a display utility,
+ * 🔴 The pill is toned by the WORST source, never by the newest. Newest-across-
+ * the-corpus is a MAX, so one healthy source masks every dead one — that is the
+ * six-week freeze, exactly. The pill still NAMES the newest row (it is the
+ * pipeline's pulse) but takes its colour, its icon and its icon's colour from
+ * the oldest, and the disclosure SEEDS ITSELF OPEN whenever any source has
+ * fallen behind. An all-fresh corpus may collapse: there is nothing to hide.
+ *
+ * The table stays MOUNTED when collapsed and is hidden with a display utility,
  * so the trigger's `aria-controls` points at something real and find-in-page
  * still reaches the rows. `hidden`/`grid` are swapped, never both applied —
  * two display utilities on one element resolve by stylesheet order, not by the
- * order they are written in the attribute.
+ * order they are written in the attribute. Each source's three cells sit in a
+ * `display:contents` wrapper so they align to the header without a subgrid,
+ * which strips the default list/table semantics — hence the explicit ARIA
+ * table/row/columnheader/cell roles, which are read off the DOM and so survive
+ * `display:contents`.
  */
 export function CorpusFreshness({ sources, now }: { sources: SourceFreshness[]; now: number }) {
-  const [open, setOpen] = useState(false);
+  // Seeded from the sources themselves, before the early return so the hook order is
+  // fixed: any source off "fresh" opens the disclosure on first paint.
+  const [open, setOpen] = useState(() =>
+    sources.some(
+      (s) =>
+        s.newestIngestedAt !== null &&
+        freshnessTone(ingestAgeDays(s.newestIngestedAt, now)) !== "fresh",
+    ),
+  );
   const dated = sources.filter(
     (s): s is SourceFreshness & { newestIngestedAt: string } => s.newestIngestedAt !== null,
   );
@@ -145,74 +163,112 @@ export function CorpusFreshness({ sources, now }: { sources: SourceFreshness[]; 
     new Date(s.newestIngestedAt).getTime() > new Date(max.newestIngestedAt).getTime() ? s : max,
   );
   const headAge = ingestAgeDays(newest.newestIngestedAt, now);
-  const headTone = freshnessTone(headAge);
+  // The pill's severity. `freshnessTone` is monotonic in age, so the OLDEST source is
+  // the worst-toned one and no separate severity ranking is needed.
+  const oldest = rows.reduce((min, s) =>
+    new Date(s.newestIngestedAt).getTime() < new Date(min.newestIngestedAt).getTime() ? s : min,
+  );
+  const oldestAge = ingestAgeDays(oldest.newestIngestedAt, now);
+  const pillTone = freshnessTone(oldestAge);
 
   return (
     <section
       data-testid="corpus-freshness"
       aria-label="Corpus freshness"
-      className="border-apollo-border bg-apollo-surface mb-4 rounded-[10px] border text-sm"
+      className="border-apollo-border bg-apollo-surface mb-4 rounded-[var(--apollo-radius-card)] border text-sm"
     >
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-controls="corpus-freshness-detail"
-        className="hover:bg-apollo-surface-2 flex w-full items-center gap-2 rounded-[10px] px-4 py-2.5 text-left"
+        className="hover:bg-apollo-surface-2 flex w-full items-center gap-2 rounded-[var(--apollo-radius-card)] px-4 py-2.5 text-left"
       >
-        {headTone === "fresh" ? (
+        {pillTone === "fresh" ? (
           <Clock className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
         ) : (
-          <AlertTriangle className="text-apollo-amber size-3.5 shrink-0" aria-hidden />
+          <AlertTriangle className={`size-3.5 shrink-0 ${FRESHNESS_TEXT[pillTone]}`} aria-hidden />
         )}
         <span
           data-testid="corpus-freshness-headline"
-          data-tone={headTone}
-          className={`min-w-0 flex-1 ${FRESHNESS_TEXT[headTone]}`}
+          data-tone={pillTone}
+          className={`min-w-0 flex-1 ${FRESHNESS_TEXT[pillTone]}`}
         >
           Corpus freshness — newest row {ingestDate(newest.newestIngestedAt)}, {headAge} day
           {headAge === 1 ? "" : "s"} ago
+          {/* Without this the pill can read "newest row 3 days ago" in red and look like a
+              bug. Named only when the worst source is a DIFFERENT one — otherwise the
+              headline already is the worst source. */}
+          {pillTone !== "fresh" && oldest.source !== newest.source
+            ? ` · oldest ${sourceLabel(oldest.source) ?? "Unknown"} ${oldestAge}d`
+            : ""}
         </span>
         <ChevronDown
-          className={`text-muted-foreground size-4 shrink-0 transition-transform${open ? " rotate-180" : ""}`}
+          className={`text-muted-foreground size-4 shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
           aria-hidden
         />
       </button>
       <div
         id="corpus-freshness-detail"
+        role="table"
+        aria-label="Corpus freshness by source"
         className={
           open
             ? "border-apollo-border grid grid-cols-[1fr_auto_auto] gap-x-6 gap-y-1.5 border-t px-4 py-3"
             : "hidden"
         }
       >
-        {(["Source", "Rows", "Last updated"] as const).map((h, i) => (
+        <div role="row" className="contents">
           <span
-            key={h}
-            className={`text-muted-foreground text-[10.5px] uppercase tracking-wider${
-              i === 0 ? "" : " text-right"
-            }`}
+            role="columnheader"
+            className="text-muted-foreground text-[10.5px] tracking-wider uppercase"
           >
-            {h}
+            Source
           </span>
-        ))}
+          {/* NOT "Rows": `/api/opportunities` builds `sources` from a groupBy with NO
+              `where`, so this counts the WHOLE table, while the list beside it filters
+              isHonorific/suppressedAt/grants_gov. It is never the list's denominator. */}
+          <span
+            role="columnheader"
+            className="text-muted-foreground text-right text-[10.5px] tracking-wider uppercase"
+          >
+            Corpus rows
+          </span>
+          {/* "Last ingested", never "Last updated" — the cell renders `ingestedAt`, and the
+              whole point of this strip is that `lastRefreshedAt` is the field that lies. */}
+          <span
+            role="columnheader"
+            className="text-muted-foreground text-right text-[10.5px] tracking-wider uppercase"
+          >
+            Last ingested
+          </span>
+        </div>
         {rows.map((s) => {
           const age = ingestAgeDays(s.newestIngestedAt, now);
           const tone = freshnessTone(age);
           // ponytail: `contents` keeps each source's three cells column-aligned with
           // the header row without a subgrid; the wrapper exists only to carry the
-          // test hook. Source names render as plain text — there is no source→URL
-          // registry anywhere in the system, and only `sourceUrl` (per-opportunity,
-          // not on the list item) is a real link.
+          // test hook and the row role. Source names render as plain text — there is
+          // no source→URL registry anywhere in the system, and only `sourceUrl`
+          // (per-opportunity, not on the list item) is a real link.
           return (
             <div
               key={s.source ?? "unknown"}
               data-testid={`freshness-${s.source ?? "unknown"}`}
+              role="row"
               className="contents"
             >
-              <span className="text-foreground">{sourceLabel(s.source) ?? "Unknown"}</span>
-              <span className="text-muted-foreground text-right tabular-nums">{s.count}</span>
-              <span data-tone={tone} className={`text-right tabular-nums ${FRESHNESS_TEXT[tone]}`}>
+              <span role="cell" className="text-foreground">
+                {sourceLabel(s.source) ?? "Unknown"}
+              </span>
+              <span role="cell" className="text-muted-foreground text-right tabular-nums">
+                {s.count}
+              </span>
+              <span
+                role="cell"
+                data-tone={tone}
+                className={`text-right tabular-nums ${FRESHNESS_TEXT[tone]}`}
+              >
                 {ingestDate(s.newestIngestedAt)} ({age}d)
               </span>
             </div>
@@ -323,12 +379,23 @@ export function deadlineLabel(dueDate: string | null, status: string | null, now
 function DeadlineCell({ iso, status }: { iso: string | null; status: string | null }) {
   const label = deadlineLabel(iso, status, Date.now());
   if (label === "—") {
-    // Redesign 2026-08: a bare em dash reaches a screen reader as nothing at all
-    // AND reads to everyone else as "no deadline", which is a stronger claim than
-    // the data supports — `dueDate` is null on 99.0% of the corpus because nothing
-    // extracted one, not because none exists. `deadlineLabel` still returns "—"
-    // (it is the exported string helper, pinned by tests); only this cell renames it.
-    return <span className="text-muted-foreground">Not extracted</span>;
+    // ponytail: `Browse Redesign.dc.html` draws "Not extracted" here. REJECTED as an
+    // unbacked provenance claim, do not re-add it from the artboard:
+    //  - `deadlineLabel` above lands on "—" precisely because we do NOT know whether
+    //    the award rolls or was simply never captured; "Not extracted" resolves that
+    //    documented ambiguity in one direction on no evidence;
+    //  - it also lands here for an UNPARSEABLE dueDate (pinned:
+    //    `deadlineLabel("not-a-date", "open", now) === "—"`), so a row that HAS a date
+    //    would claim nothing was extracted;
+    //  - `lib/match-display.ts`'s own `deadlineLabel` — the one matcha-panel and
+    //    grant-recs-card render — calls this same null case "Rolling · continuous",
+    //    so shipping it would put two surfaces of one product in direct contradiction.
+    return (
+      <span className="text-muted-foreground">
+        <span aria-hidden>—</span>
+        <span className="sr-only">No deadline recorded</span>
+      </span>
+    );
   }
   const urgency = dueUrgency(iso, Date.now());
   return (
@@ -845,6 +912,9 @@ function SuppressOpportunityDialog({
   );
 }
 
+/** Chip prefixes — the same words the rail uses as its `FacetGroup` legends. */
+const FACET_GROUP_LABEL = { sponsors: "Sponsor", mechanisms: "Mechanism" } as const;
+
 /** Immutably drop one value from a checkbox facet group. */
 function withoutFacet(
   f: BrowseFilters,
@@ -861,10 +931,17 @@ function withoutFacet(
  * currently narrowing the list, sitting above the results count so the reason a
  * short list is short is visible without opening the rail.
  *
- * Deliberately mirrors `FilterRail`'s own `active` test and does NOT chip the
- * faculty-PI gate: that gate is ON by default, so chipping it would put a chip on
- * every resting render, and its relax/re-apply control already lives on the
- * counterfactual sentence below — the one line that admits rows are hidden.
+ * This is NARROWER than `FilterRail`'s `active` test, which also counts a RELAXED
+ * faculty-PI gate (`!filters.facultyPiOnly`). The gate is deliberately un-chipped
+ * in both of its states: it is ON by default, so chipping it would put a chip on
+ * every resting render, and relaxed it does not narrow anything. Its relax/re-apply
+ * control already lives on the counterfactual sentence below — the one line that
+ * admits rows are hidden.
+ *
+ * 🔴 Because the gate has no chip, "Clear all" must CARRY IT THROUGH rather than
+ * reset it: `EMPTY_BROWSE_FILTERS.facultyPiOnly` is `true`, so spreading it blind
+ * silently re-applies a gate that hides ~13.2% of the corpus and makes the list
+ * SHORTER, with no chip having represented that state.
  */
 function ActiveFilterChips({
   filters,
@@ -877,7 +954,7 @@ function ActiveFilterChips({
   if (filters.openOnly) {
     chips.push({
       key: "availability",
-      label: "Only open",
+      label: "Availability: Only open",
       clear: () => setFilters((f) => ({ ...f, openOnly: false })),
     });
   }
@@ -885,7 +962,10 @@ function ActiveFilterChips({
     for (const value of [...filters[group]]) {
       chips.push({
         key: `${group}:${value}`,
-        label: value,
+        // Group-prefixed, matching the rail's own legends: a bare facet value leaves a
+        // Sponsor chip and a Mechanism chip carrying the same string indistinguishable,
+        // on screen and to a screen reader reading the remove button's name.
+        label: `${FACET_GROUP_LABEL[group]}: ${value}`,
         clear: () => setFilters((f) => withoutFacet(f, group, value)),
       });
     }
@@ -913,7 +993,14 @@ function ActiveFilterChips({
       ))}
       <button
         type="button"
-        onClick={() => setFilters((f) => ({ ...EMPTY_BROWSE_FILTERS, q: f.q }))}
+        // `facultyPiOnly` is carried through, not reset — see the 🔴 note above.
+        onClick={() =>
+          setFilters((f) => ({
+            ...EMPTY_BROWSE_FILTERS,
+            q: f.q,
+            facultyPiOnly: f.facultyPiOnly,
+          }))
+        }
         className="text-[var(--color-accent-slate)] hover:underline"
       >
         Clear all

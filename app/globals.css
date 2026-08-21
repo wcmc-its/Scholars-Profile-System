@@ -297,6 +297,24 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  /* Aliases for three names that 53 references across 18 components already used but
+     NOTHING ever defined. The `border-border-strong` utility (32) generated no rule at
+     all, so those borders silently fell through to the `* { border-color: var(--border) }`
+     base rule below; `text-[var(--color-text-primary|secondary)]` (20) was invalid-at-
+     computed-value-time, so the declaration dropped and `color` inherited — and
+     grant-card.tsx's lone inline `borderLeft: "2px dotted var(--color-border-strong)"`
+     lost the whole shorthand, dropping an entire dotted border.
+
+     Aliases, not new hues — nothing above this line changed. Primary/secondary text ride
+     --foreground/--muted-foreground, so the .dark block covers them for free;
+     --apollo-border-strong is theme-invariant by design, like every apollo token.
+
+     These are consumed as spelled-out `var(--color-…)`, which is what makes them emit:
+     an `@theme inline` variable is inlined into its utilities and is only written to
+     :root when the source scan finds the variable named literally. */
+  --color-border-strong: var(--apollo-border-strong);
+  --color-text-primary: var(--foreground);
+  --color-text-secondary: var(--muted-foreground);
   /* Apollo chrome utilities (bg-apollo-bar, text-apollo-maroon, …). */
   --color-apollo-bar: var(--apollo-bar);
   --color-apollo-maroon: var(--apollo-maroon);

@@ -275,7 +275,11 @@ export function GrantMatchaPanel({
           <h1 className="text-2xl font-bold tracking-tight">Grant Matcha</h1>
           {/* Brand rule, same mechanism as the panel-title rule in `edit-panel.tsx`
               (a sibling span in a flex-col header, not a border-b, not a ::after);
-              this surface is the dominant one, so it carries maroon. */}
+              this surface is the dominant one, so it carries maroon.
+              32x3 is DELIBERATE and differs from edit-panel.tsx's 40x4. The
+              divergence was raised, shown to the owner, and the artboard
+              (`Browse Redesign.dc.html`) was chosen. Not drift — do not "correct"
+              it to match edit-panel. */}
           <span aria-hidden className="bg-apollo-maroon h-[3px] w-8 rounded-full" />
           <p className="text-muted-foreground text-sm">
             Choose a funding opportunity to rank Weill Cornell researchers on its text.
