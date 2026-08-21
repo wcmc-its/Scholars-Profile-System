@@ -34,7 +34,7 @@ import {
 } from "@/components/edit/opportunity-browse";
 import { MatchaPanel, type EligibilityRequirements } from "@/components/edit/matcha-panel";
 import type { CareerStage } from "@/lib/career-stage";
-import { careerStagesOf, facultyPiMayHold } from "@/lib/funding/screening";
+import { careerStagesOf, facultyPiMayHold, requirementsFrom } from "@/lib/funding/screening";
 import { appealByStageSummary } from "@/lib/match-display";
 
 type Selected = {
@@ -78,9 +78,6 @@ function buildAskSeed(title: string | null, synopsis: string | null): string {
   return [title, synopsis].filter((s): s is string => Boolean(s && s.trim())).join("\n\n");
 }
 
-/** Faculty maps to the three post-training stages; `careerStageBucket` has no "faculty" bucket. */
-const FACULTY_STAGES: readonly CareerStage[] = ["early", "mid", "senior"];
-
 /**
  * Say up front why this opportunity will not rank researchers, instead of spending a Sonnet call
  * to produce a page the officer has to interpret.
@@ -115,63 +112,11 @@ function asStringArray(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 }
 
-/**
- * Values that appear in `career_stages` but are NOT career stages (screening spec §3.2 — the
- * extraction contract mixes two axes into one array).
- *
- * 🔴 A role must not trip the restriction signal. Measured on staging 2026-07-28: 27 of 304
- * opportunities carry `clinician`, and on the 2 where it is the ONLY value the rail stated
- * "Required: Early career · Mid career · Senior" — stages taken from the derived flags, which the
- * sponsor never mentioned — while the restriction it DID state (be a clinician) went unshown and
- * unenforced. Dropping roles here makes those 2 render no axis, which is the truth: they state no
- * career-stage requirement.
- *
- * Enforcing the clinician restriction is a separate, larger job (#2042): SPS has `isClinician`, but
- * a second hard axis needs its own gate, badge, floor and relax control for 0.7% of the corpus.
- */
-const NON_STAGE_ROLES: ReadonlySet<string> = new Set(["clinician"]);
-
-/**
- * Turn an opportunity's stored eligibility into the axes the rail should render.
- *
- * The RESTRICTION SIGNAL is the structured map's `career_stages` being non-empty — the same test
- * `deriveEligibilityFlagsFromMap` uses (`etl/dynamodb/grant-opportunity-mapper.ts`), where an empty
- * array explicitly means "no person-level restriction". The ALLOWED SET then comes from the derived
- * flags, which are what SPS already reads. Deriving the axis from the flags alone would render it on
- * ~88% of opportunities and bury the officer in a filter that mostly restricts nothing.
- */
-export function requirementsFrom(
-  eligibilityFlags: unknown,
-  eligibility: unknown,
-  eligibilityRaw?: unknown,
-): EligibilityRequirements {
-  const flags = asStringArray(eligibilityFlags);
-  const map =
-    eligibility && typeof eligibility === "object" && !Array.isArray(eligibility)
-      ? (eligibility as Record<string, unknown>)
-      : {};
-  // Only STAGE values restrict — a role in this array says who may apply, not at what stage.
-  const restricts = asStringArray(map.career_stages).some((s) => !NON_STAGE_ROLES.has(s));
-
-  const allowed: CareerStage[] = [];
-  if (flags.includes("student_only")) allowed.push("grad");
-  if (flags.includes("faculty_eligible")) allowed.push(...FACULTY_STAGES);
-  if (flags.includes("postdoc_eligible")) allowed.push("postdoc");
-
-  // The sponsor's own eligibility wording, so the rail can cite what the stage list came from.
-  // Usually a short semicolon list ("Faculty Member; Postdoctoral | United States"); the rail
-  // clamps it, so no length cap here. Blank when the column is empty — never a fabricated source.
-  const source = typeof eligibilityRaw === "string" ? eligibilityRaw.trim() : "";
-
-  return {
-    // An empty allowed set would hide EVERYONE off malformed data, so it degrades to "no axis"
-    // rather than to an empty page — a filter that can only filter everything is worse than none.
-    careerStages: restricts && allowed.length > 0 ? allowed : null,
-    stageSource: source || null,
-    esiTargeted: map.esi_targeted === true,
-    usRequired: map.us_citizen_or_permanent_resident_required === true,
-  };
-}
+// `requirementsFrom` (with its `FACULTY_STAGES`/`NON_STAGE_ROLES` helpers) moved to
+// `lib/funding/screening.ts` (browse data-wiring 2026-08): the list route now derives
+// per-row eligibility labels from it server-side, and a route cannot import a client
+// component. Re-exported so existing consumers (and its test suite) keep resolving here.
+export { requirementsFrom };
 
 export function GrantMatchaPanel({
   adminEnabled = false,

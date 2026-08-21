@@ -219,6 +219,205 @@ describe("BrowseList — cards", () => {
 });
 
 /**
+ * Browse data-wiring 2026-08 — the Concepts/Eligibility tag rows on a card. Both are
+ * SERVER-DERIVED (`concepts` is already label-resolved, sorted, floor-dropped and capped at 3
+ * by the route — pinned in opportunities-routes.test.ts); the card's job is chrome: the
+ * raw-score opacity ramp + centrality tooltip on concept chips, full-opacity tooltip-free
+ * eligibility chips, and rendering NO row at all when a row has no data.
+ */
+describe("BrowseList — concepts and eligibility tag rows", () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const TAGGED = [
+    {
+      ...OPPS[0],
+      opportunityId: "wcm_curated:tagged",
+      title: "Tagged Award",
+      concepts: [
+        { label: "Cancer Genomics", score: 0.9 },
+        { label: "Implementation science", score: 0.2 },
+      ],
+      eligibilityLabels: ["Faculty", "Early Stage Investigators"],
+    },
+    {
+      // The 70-row empty-vector case AND the ~88% no-restriction case: empty arrays.
+      ...OPPS[0],
+      opportunityId: "wcm_curated:bare",
+      title: "Bare Award",
+      concepts: [],
+      eligibilityLabels: [],
+    },
+    {
+      // An older payload with the fields entirely absent must render the same as empty.
+      ...OPPS[0],
+      opportunityId: "wcm_curated:legacy",
+      title: "Legacy Award",
+    },
+  ];
+
+  it("renders concept chips with the raw-score opacity ramp and a centrality tooltip", async () => {
+    await renderBrowse(TAGGED);
+    const card = screen.getByRole("link", { name: "Tagged Award" }).closest("li")!;
+    expect(within(card).getByText("Concepts:")).toBeTruthy();
+    const strong = within(card).getByText("Cancer Genomics");
+    const weak = within(card).getByText("Implementation science");
+    // opacity = 0.55 + score × 0.45 off the RAW score — no per-card normalization, so a
+    // card of weak tags reads uniformly faint instead of promoting its own best to full ink.
+    expect(parseFloat(strong.style.opacity)).toBeCloseTo(0.955, 5);
+    expect(parseFloat(weak.style.opacity)).toBeCloseTo(0.64, 5);
+    expect(strong.getAttribute("title")).toBe(
+      "Centrality 0.90 — how central this is to the opportunity text",
+    );
+  });
+
+  it("renders eligibility chips at full opacity with no tooltip", async () => {
+    await renderBrowse(TAGGED);
+    const card = screen.getByRole("link", { name: "Tagged Award" }).closest("li")!;
+    expect(within(card).getByText("Eligibility:")).toBeTruthy();
+    const chip = within(card).getByText("Early Stage Investigators");
+    expect(chip.style.opacity).toBe("");
+    expect(chip.getAttribute("title")).toBeNull();
+  });
+
+  it("renders neither row on a card without tag data — empty OR absent fields", async () => {
+    await renderBrowse(TAGGED);
+    for (const title of ["Bare Award", "Legacy Award"]) {
+      const card = screen.getByRole("link", { name: title }).closest("li")!;
+      expect(within(card).queryByText("Concepts:")).toBeNull();
+      expect(within(card).queryByText("Eligibility:")).toBeNull();
+    }
+  });
+});
+
+/** The Research-area rail facet's fixture: two areas (one shared by two rows), one row the
+ *  producer never assigned (`researchArea: null`) — enough to pin label display, id-keyed
+ *  counts, filtering, and the chip + both reset paths. */
+const RA_OPPS = [
+  {
+    ...OPPS[0],
+    opportunityId: "wcm_curated:ra-genomics",
+    title: "Genomics Award",
+    researchArea: { id: "cancer_genomics", label: "Cancer Genomics" },
+  },
+  {
+    ...OPPS[0],
+    opportunityId: "wcm_curated:ra-workforce-1",
+    title: "Workforce Award",
+    researchArea: {
+      id: "research_infrastructure_workforce",
+      label: "Research infrastructure workforce",
+    },
+  },
+  {
+    ...OPPS[0],
+    opportunityId: "wcm_curated:ra-workforce-2",
+    title: "Second Workforce Award",
+    researchArea: {
+      id: "research_infrastructure_workforce",
+      label: "Research infrastructure workforce",
+    },
+  },
+  {
+    ...OPPS[0],
+    opportunityId: "wcm_curated:ra-none",
+    title: "Unassigned Award",
+    researchArea: null,
+  },
+];
+
+describe("BrowseList — Research area rail facet", () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const railEl = () => screen.getByRole("complementary", { name: "Filter opportunities" });
+  const cardsEl = () =>
+    within(screen.getByRole("list", { name: "Funding opportunities" })).getAllByRole("listitem");
+
+  it("sits between Sponsor and Mechanism, shows labels with counts, and filters on the id", async () => {
+    await renderBrowse(RA_OPPS);
+    const groups = within(railEl())
+      .getAllByRole("group")
+      .map((g) => (g.querySelector("legend")?.textContent ?? "").trim());
+    expect(groups.join("|")).toContain("Sponsor|Research area|Mechanism");
+
+    const ra = within(railEl()).getByRole("group", { name: "Research area" });
+    // Labels, never slugs; count is per-id over the loaded rows.
+    expect(
+      within(ra).getByRole("checkbox", { name: /^Research infrastructure workforce/ }).closest(
+        "label",
+      )!.textContent,
+    ).toMatch(/^Research infrastructure workforce\s*2$/);
+    expect(
+      within(ra).getByRole("checkbox", { name: /^Cancer Genomics/ }).closest("label")!.textContent,
+    ).toMatch(/^Cancer Genomics\s*1$/);
+    expect(within(ra).queryByText(/research_infrastructure_workforce/)).toBeNull();
+
+    fireEvent.click(within(ra).getByRole("checkbox", { name: /^Research infrastructure workforce/ }));
+    await waitFor(() => expect(cardsEl()).toHaveLength(2));
+    expect(screen.getByRole("link", { name: "Workforce Award" })).toBeTruthy();
+    // The unassigned row is out too — null researchArea matches no selection.
+    expect(screen.queryByRole("link", { name: "Unassigned Award" })).toBeNull();
+  });
+
+  it("chips a checked research area by label, and BOTH reset paths clear it", async () => {
+    await renderBrowse(RA_OPPS);
+    const ra = () => within(railEl()).getByRole("group", { name: "Research area" });
+
+    // Path 1 — the chip row's "Clear all".
+    fireEvent.click(within(ra()).getByRole("checkbox", { name: /^Cancer Genomics/ }));
+    await waitFor(() => expect(cardsEl()).toHaveLength(1));
+    // The chip reads the resolved label (group-prefixed), never the slug id.
+    expect(screen.getByText("Research area: Cancer Genomics")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    await waitFor(() => expect(cardsEl()).toHaveLength(4));
+    expect(screen.queryByText("Filtering by:")).toBeNull();
+    expect(
+      (within(ra()).getByRole("checkbox", { name: /^Cancer Genomics/ }) as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+
+    // Path 2 — the rail's "reset all", which must also dismiss itself afterwards.
+    fireEvent.click(within(ra()).getByRole("checkbox", { name: /^Cancer Genomics/ }));
+    await waitFor(() => expect(cardsEl()).toHaveLength(1));
+    fireEvent.click(within(railEl()).getByRole("button", { name: "reset all" }));
+    await waitFor(() => expect(cardsEl()).toHaveLength(4));
+    expect(within(railEl()).queryByRole("button", { name: "reset all" })).toBeNull();
+  });
+
+  it("keeps the chip's resolved label when the checked area drops out of the loaded rows", async () => {
+    // Regression: the id→label map is a session cache, not a per-render rebuild — a reload
+    // whose rows no longer carry the area (e.g. a source toggle) must not degrade the active
+    // chip to the raw slug.
+    let payload: unknown[] = RA_OPPS;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ count: payload.length, opportunities: payload }),
+      })),
+    );
+    render(<BrowseList hrefFor={hrefFor} />);
+    await waitFor(() =>
+      expect(screen.getByRole("list", { name: "Funding opportunities" })).toBeTruthy(),
+    );
+
+    const ra = within(railEl()).getByRole("group", { name: "Research area" });
+    fireEvent.click(within(ra).getByRole("checkbox", { name: /^Cancer Genomics/ }));
+    await screen.findByText("Research area: Cancer Genomics");
+
+    payload = [RA_OPPS[3]]; // the next load carries no cancer_genomics row at all
+    fireEvent.click(screen.getByRole("checkbox", { name: /Include Grants\.gov/ }));
+    await waitFor(() =>
+      expect(screen.queryByRole("link", { name: "Genomics Award" })).toBeNull(),
+    );
+    expect(screen.getByText("Research area: Cancer Genomics")).toBeTruthy();
+    expect(screen.queryByText(/cancer_genomics/)).toBeNull();
+  });
+});
+
+/**
  * Redesign 2026-08 — the rail's facet groups, the active-filter chip row, and the two
  * reset controls ("Clear all" and the rail's "reset all", which must agree about the
  * faculty-PI gate). Its own fixture rather than `OPPS`: two sponsors, two mechanisms

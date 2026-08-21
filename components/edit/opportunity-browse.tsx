@@ -16,7 +16,7 @@
  * title (a REAL link, so cmd-click / middle-click / copy-link-address all
  * work), never a click handler on the `<li>`.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -62,6 +62,15 @@ type OpportunityListItem = {
   suppressedAt?: string | null;
   suppressedBy?: string | null;
   suppressReason?: string | null;
+  /** Browse data-wiring 2026-08 — top-3 `topicVector` entries, resolved to labels and
+   *  floor-dropped SERVER-SIDE (the raw vector never reaches the wire). Empty ⇒ no Concepts
+   *  row (70 corpus rows carry no vector). */
+  concepts?: Array<{ label: string; score: number }>;
+  /** Display labels derived from the eligibility columns server-side. Empty for the ~88% of
+   *  rows with no person-level restriction ⇒ no Eligibility row. */
+  eligibilityLabels?: string[];
+  /** `primaryTopicId` resolved to a label server-side — the Research-area facet keys on `id`. */
+  researchArea?: { id: string; label: string } | null;
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -337,6 +346,10 @@ type BrowseStatus =
 
 type BrowseSort = "curated" | "deadline";
 
+/** The rail's checkbox facet groups — `researchAreas` holds `researchArea.id`s, the other
+ *  two hold the displayed strings themselves. */
+type FacetGroupKey = "sponsors" | "mechanisms" | "researchAreas";
+
 /** Client-side browse filters (search box + Duke-style sidebar). */
 export type BrowseFilters = {
   q: string;
@@ -346,6 +359,8 @@ export type BrowseFilters = {
   facultyPiOnly: boolean;
   sponsors: ReadonlySet<string>;
   mechanisms: ReadonlySet<string>;
+  /** Selected `researchArea.id`s (slugs, not labels — two labels can collide, ids cannot). */
+  researchAreas: ReadonlySet<string>;
 };
 
 export const EMPTY_BROWSE_FILTERS: BrowseFilters = {
@@ -354,6 +369,7 @@ export const EMPTY_BROWSE_FILTERS: BrowseFilters = {
   facultyPiOnly: true,
   sponsors: new Set(),
   mechanisms: new Set(),
+  researchAreas: new Set(),
 };
 
 /**
@@ -365,7 +381,7 @@ export function matchesBrowseFilters(
   o: OpportunityListItem,
   f: BrowseFilters,
   now: number,
-  skip?: "sponsors" | "mechanisms",
+  skip?: FacetGroupKey,
 ): boolean {
   const q = f.q.trim().toLowerCase();
   if (
@@ -382,6 +398,13 @@ export function matchesBrowseFilters(
   if (skip !== "mechanisms" && f.mechanisms.size > 0 && !f.mechanisms.has(o.mechanism ?? "")) {
     return false;
   }
+  if (
+    skip !== "researchAreas" &&
+    f.researchAreas.size > 0 &&
+    !f.researchAreas.has(o.researchArea?.id ?? "")
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -390,7 +413,7 @@ function facetOptions(
   all: readonly OpportunityListItem[],
   f: BrowseFilters,
   now: number,
-  group: "sponsors" | "mechanisms",
+  group: FacetGroupKey,
   key: (o: OpportunityListItem) => string | null,
 ): Array<[string, number]> {
   const counts = new Map<string, number>();
@@ -443,6 +466,11 @@ export function BrowseList({
   // real page needs a real page size. Client-side slice of the already-fetched
   // set — no API change, `limit=500` above still fetches everything up front.
   const [page, setPage] = useState(0);
+  // id → label, merged across loads (never rebuilt from scratch): a reload empties the loaded
+  // rows while the active-filter chips still render, and a checked area can drop out of the
+  // loaded set entirely (checked under "include grants.gov", then toggled off) — either way the
+  // chip must keep the resolved label, never degrade to the raw slug.
+  const researchAreaLabelCache = useRef(new Map<string, string>());
 
   useEffect(() => {
     let active = true;
@@ -540,6 +568,20 @@ export function BrowseList({
 
   const sponsorOptions = facetOptions(all, filters, now, "sponsors", (o) => o.sponsor);
   const mechanismOptions = facetOptions(all, filters, now, "mechanisms", (o) => o.mechanism);
+  // Keyed on the id; displayed via the label map below (both halves come off the same
+  // server-resolved pair, so an id maps to exactly one label).
+  const researchAreaOptions = facetOptions(
+    all,
+    filters,
+    now,
+    "researchAreas",
+    (o) => o.researchArea?.id ?? null,
+  );
+  const researchAreaLabels = researchAreaLabelCache.current;
+  for (const o of all) {
+    if (o.researchArea) researchAreaLabels.set(o.researchArea.id, o.researchArea.label);
+  }
+  const researchAreaLabel = (id: string) => researchAreaLabels.get(id) ?? id;
 
   // ponytail: fixed page size, not a setting — tune the constant if 20 ever feels wrong.
   const PAGE_SIZE = 20;
@@ -604,7 +646,11 @@ export function BrowseList({
           never stretches to the length of the results column. */}
       <div className="flex flex-col gap-x-5 gap-y-6 lg:flex-row lg:items-start">
         <div className="min-w-0 flex-1">
-          <ActiveFilterChips filters={filters} setFilters={setFilters} />
+          <ActiveFilterChips
+            filters={filters}
+            setFilters={setFilters}
+            researchAreaLabel={researchAreaLabel}
+          />
           {status.kind === "loading" ? (
             <ListSkeleton label="Loading opportunities…" />
           ) : status.kind === "error" ? (
@@ -705,6 +751,8 @@ export function BrowseList({
           setFilters={setFilters}
           sponsorOptions={sponsorOptions}
           mechanismOptions={mechanismOptions}
+          researchAreaOptions={researchAreaOptions}
+          researchAreaLabel={researchAreaLabel}
           includeGrantsGov={includeGrantsGov}
           setIncludeGrantsGov={setIncludeGrantsGov}
         />
@@ -813,14 +861,14 @@ function SuppressOpportunityDialog({
 }
 
 /** Chip prefixes — the same words the rail uses as its `FacetGroup` legends. */
-const FACET_GROUP_LABEL = { sponsors: "Sponsor", mechanisms: "Mechanism" } as const;
+const FACET_GROUP_LABEL = {
+  sponsors: "Sponsor",
+  mechanisms: "Mechanism",
+  researchAreas: "Research area",
+} as const;
 
 /** Immutably drop one value from a checkbox facet group. */
-function withoutFacet(
-  f: BrowseFilters,
-  group: "sponsors" | "mechanisms",
-  value: string,
-): BrowseFilters {
+function withoutFacet(f: BrowseFilters, group: FacetGroupKey, value: string): BrowseFilters {
   const next = new Set(f[group]);
   next.delete(value);
   return { ...f, [group]: next };
@@ -832,7 +880,8 @@ function withoutFacet(
  * short list is short is visible without opening the rail.
  *
  * The render test here and `FilterRail`'s `active` test are the SAME condition
- * (`openOnly || sponsors.size || mechanisms.size`). The faculty-PI gate is deliberately
+ * (`openOnly || sponsors.size || mechanisms.size || researchAreas.size`).
+ * The faculty-PI gate is deliberately
  * un-chipped in both of its states and counts toward neither: it is ON by default, so
  * chipping it would put a chip on every resting render, and relaxed it does not narrow
  * anything. Its relax/re-apply control already lives on the counterfactual sentence
@@ -851,9 +900,12 @@ function withoutFacet(
 function ActiveFilterChips({
   filters,
   setFilters,
+  researchAreaLabel,
 }: {
   filters: BrowseFilters;
   setFilters: React.Dispatch<React.SetStateAction<BrowseFilters>>;
+  /** Research-area sets hold ids; the chip must read the resolved label, never the slug. */
+  researchAreaLabel: (id: string) => string;
 }) {
   const chips: Array<{ key: string; label: string; clear: () => void }> = [];
   if (filters.openOnly) {
@@ -863,14 +915,16 @@ function ActiveFilterChips({
       clear: () => setFilters((f) => ({ ...f, openOnly: false })),
     });
   }
-  for (const group of ["sponsors", "mechanisms"] as const) {
+  for (const group of ["sponsors", "mechanisms", "researchAreas"] as const) {
     for (const value of [...filters[group]]) {
       chips.push({
         key: `${group}:${value}`,
         // Group-prefixed, matching the rail's own legends: a bare facet value leaves a
         // Sponsor chip and a Mechanism chip carrying the same string indistinguishable,
         // on screen and to a screen reader reading the remove button's name.
-        label: `${FACET_GROUP_LABEL[group]}: ${value}`,
+        label: `${FACET_GROUP_LABEL[group]}: ${
+          group === "researchAreas" ? researchAreaLabel(value) : value
+        }`,
         clear: () => setFilters((f) => withoutFacet(f, group, value)),
       });
     }
@@ -923,25 +977,25 @@ function ActiveFilterChips({
 // exist is worse than no filter. Restore it when typed deadline extraction lands, not before.
 //
 // `Browse Redesign.dc.html` draws Availability / Sponsor / Research area / Eligibility; the rail
-// below is Availability / Sponsor / Mechanism / Sources. Research area and Eligibility were
-// considered and declined on DATA, not taste, and the artboard is not evidence they can be built:
-//   - Research area would key off `primaryTopicId`, which `app/api/opportunities/route.ts` does
-//     not select — the browse rows never carry it;
-//   - `eligibility` and `eligibilityFlags` ARE selected there, then deliberately destructured out
-//     before the response (they exist only to derive `facultyPiEligible`), so they are not on the
-//     wire either;
-//   - and two of the artboard's six eligibility labels ("MD/PhD", "Tenure track") have no
-//     corresponding `career_stages` value in EITHER half of the vocabulary — neither
-//     `HOLDABLE_STAGES` in `lib/funding/screening.ts` nor `FACULTY_STAGES`/`STUDENT_STAGES`
-//     in `etl/dynamodb/grant-opportunity-mapper.ts`. Both files have to be read to say that:
+// below is Availability / Sponsor / Research area / Mechanism / Sources. Research area landed
+// with the browse data-wiring (2026-08): the route now resolves `primaryTopicId` to a
+// `researchArea` on every row, and the facet keys on its id. The artboard's ELIGIBILITY group
+// stays declined on DATA, not taste:
+//   - two of its six labels ("MD/PhD", "Tenure track") have no corresponding `career_stages`
+//     value in EITHER half of the vocabulary — neither `HOLDABLE_STAGES` in
+//     `lib/funding/screening.ts` nor `FACULTY_STAGES`/`STUDENT_STAGES` in
+//     `etl/dynamodb/grant-opportunity-mapper.ts`. Both files have to be read to say that:
 //     "Grad/Prof students" maps to `graduate_student`, which appears ONLY in the mapper, so
 //     screening.ts alone would put the count at three.
-// Land the field on the wire first; do not re-raise either group from the artboard alone.
+// The per-card Eligibility ROW ships the real-data subset (`eligibilityLabels`); a rail facet
+// over it is a separate decision — do not re-raise it from the artboard alone.
 function FilterRail({
   filters,
   setFilters,
   sponsorOptions,
   mechanismOptions,
+  researchAreaOptions,
+  researchAreaLabel,
   includeGrantsGov,
   setIncludeGrantsGov,
 }: {
@@ -949,13 +1003,20 @@ function FilterRail({
   setFilters: React.Dispatch<React.SetStateAction<BrowseFilters>>;
   sponsorOptions: Array<[string, number]>;
   mechanismOptions: Array<[string, number]>;
+  /** `[id, count]` — ids on the wire, labels via `researchAreaLabel` at render time. */
+  researchAreaOptions: Array<[string, number]>;
+  researchAreaLabel: (id: string) => string;
   includeGrantsGov: boolean;
   setIncludeGrantsGov: (v: boolean) => void;
 }) {
   // EXACTLY the chip row's render test, not a superset — see `ActiveFilterChips`.
-  const active = filters.openOnly || filters.sponsors.size > 0 || filters.mechanisms.size > 0;
+  const active =
+    filters.openOnly ||
+    filters.sponsors.size > 0 ||
+    filters.mechanisms.size > 0 ||
+    filters.researchAreas.size > 0;
 
-  function toggleIn(group: "sponsors" | "mechanisms", value: string) {
+  function toggleIn(group: FacetGroupKey, value: string) {
     setFilters((f) => {
       const next = new Set(f[group]);
       if (next.has(value)) next.delete(value);
@@ -1026,6 +1087,13 @@ function FilterRail({
         onToggle={(v) => toggleIn("sponsors", v)}
       />
       <FacetGroup
+        title="Research area"
+        options={researchAreaOptions}
+        selected={filters.researchAreas}
+        onToggle={(v) => toggleIn("researchAreas", v)}
+        labelFor={researchAreaLabel}
+      />
+      <FacetGroup
         title="Mechanism"
         options={mechanismOptions}
         selected={filters.mechanisms}
@@ -1059,11 +1127,15 @@ function FacetGroup({
   options,
   selected,
   onToggle,
+  labelFor,
 }: {
   title: string;
   options: Array<[string, number]>;
   selected: ReadonlySet<string>;
   onToggle: (value: string) => void;
+  /** Display text for a value — Research area filters on ids but must show labels.
+   *  Defaults to the value itself (Sponsor/Mechanism display what they filter on). */
+  labelFor?: (value: string) => string;
 }) {
   const [showAll, setShowAll] = useState(false);
   if (options.length === 0) return null;
@@ -1083,8 +1155,8 @@ function FacetGroup({
               onChange={() => onToggle(value)}
               className="mt-0.5 size-4 shrink-0 accent-[var(--color-accent-slate)]"
             />
-            <span className="min-w-0 flex-1 break-words" title={value}>
-              {value}
+            <span className="min-w-0 flex-1 break-words" title={labelFor?.(value) ?? value}>
+              {labelFor?.(value) ?? value}
             </span>
             <span className="text-muted-foreground rounded-full bg-muted px-1.5 py-0.5 text-xs tabular-nums">
               {count}
@@ -1140,6 +1212,9 @@ function OpportunityCard({
   const title = stripSponsorPrefix(o.title, o.sponsor) ?? o.opportunityId;
   // Only the includeSuppressed=1 admin fetch ever returns a suppressed row.
   const suppressed = Boolean(o.suppressedAt);
+  // Server-derived tag rows (browse data-wiring 2026-08) — absent on older payloads.
+  const concepts = o.concepts ?? [];
+  const eligibilityLabels = o.eligibilityLabels ?? [];
   return (
     <li
       className={`border-apollo-border bg-apollo-surface hover:border-apollo-border-strong hover:bg-apollo-surface-2 focus-within:outline-apollo-maroon relative flex items-center gap-3 rounded-[var(--apollo-radius-card)] border p-4 shadow-[var(--apollo-shadow-card)] transition-colors focus-within:outline focus-within:outline-2 focus-within:-outline-offset-2 ${
@@ -1188,6 +1263,44 @@ function OpportunityCard({
           {o.mechanism ? <span>{o.mechanism}</span> : null}
           {award ? <span>{award}</span> : null}
         </div>
+        {/* Tag rows (Browse Redesign.dc.html) — each renders only when it has data, so the
+            wrapper supplies the FIRST rendered row's 10px offset and `space-y` the 6px
+            between rows, whichever subset made it. NO Methods row — `topicVector` carries
+            no method axis (Track B handoff). */}
+        {concepts.length > 0 || eligibilityLabels.length > 0 ? (
+          <div className="mt-2.5 space-y-1.5">
+            {concepts.length > 0 ? (
+              <div className="flex flex-wrap items-baseline gap-1.5">
+                <span className="w-[74px] flex-none text-xs text-[#6f6a5e]">Concepts:</span>
+                {concepts.map((c) => (
+                  <span
+                    key={c.label}
+                    className="whitespace-nowrap rounded-[6px] border border-[var(--color-facet-topic-border)] bg-[var(--color-facet-topic-fill)] px-2 py-0.5 text-xs font-medium text-[var(--color-facet-topic-text)]"
+                    // RAW score, no per-card normalization — a card of weak tags reads
+                    // uniformly faint rather than promoting its own strongest to full ink.
+                    style={{ opacity: 0.55 + c.score * 0.45 }}
+                    title={`Centrality ${c.score.toFixed(2)} — how central this is to the opportunity text`}
+                  >
+                    {c.label}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {eligibilityLabels.length > 0 ? (
+              <div className="flex flex-wrap items-baseline gap-1.5">
+                <span className="w-[74px] flex-none text-xs text-[#6f6a5e]">Eligibility:</span>
+                {eligibilityLabels.map((label) => (
+                  <span
+                    key={label}
+                    className="whitespace-nowrap rounded-[6px] border border-[var(--color-facet-position-border)] bg-[var(--color-facet-position-fill)] px-2 py-0.5 text-xs font-medium text-[var(--color-facet-position-text)]"
+                  >
+                    {label}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         {suppressed && o.suppressedAt ? (
           <span className="text-muted-foreground mt-1 block text-xs" data-testid="suppressed-note">
             suppressed {formatSuppressedDate(o.suppressedAt)}

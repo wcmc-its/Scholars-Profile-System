@@ -237,6 +237,156 @@ describe("GET /api/opportunities (browse list, admin-gated, curated-first)", () 
     });
   });
 
+  /**
+   * Browse data-wiring 2026-08 — the card rows + Research-area facet ship as derived fields
+   * (`concepts`, `eligibilityLabels`, `researchArea`); the raw JSON columns they come from
+   * must never reach the wire.
+   */
+  it("derives concepts from topicVector — label-resolved, score-sorted, floor-dropped, top-3", async () => {
+    getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
+    topicFindMany.mockResolvedValue([{ id: "cancer_genomics", label: "Cancer Genomics" }]);
+    opportunityFindMany.mockResolvedValue([
+      {
+        opportunityId: "wcm_curated:a",
+        title: "Alpha",
+        source: "wcm_curated",
+        topicVector: [
+          // Stored unsorted; the route sorts by score desc.
+          { topic_id: "implementation_science", score: 0.4, rationale: "r" },
+          { topic_id: "cancer_genomics", score: 0.9, rationale: "r" },
+          { topic_id: "neuroscience_neurology", score: 0.2 },
+          { topic_id: "oral_craniofacial_health", score: 0.1 }, // 4th — capped off
+          { topic_id: "noise", score: 0.04 }, // under the 0.05 floor
+        ],
+        primaryTopicId: "cancer_genomics",
+      },
+    ]);
+    const resp = await listGET(req("/api/opportunities"));
+    expect(resp.status).toBe(200);
+    expect(opportunityFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ topicVector: true, primaryTopicId: true }),
+      }),
+    );
+    const body = await resp.json();
+    expect(body.opportunities[0].concepts).toEqual([
+      { label: "Cancer Genomics", score: 0.9 }, // resolved via the topic table
+      { label: "Implementation science", score: 0.4 }, // no topic row → humanized slug
+      { label: "Neuroscience neurology", score: 0.2 },
+    ]);
+    expect(body.opportunities[0].researchArea).toEqual({
+      id: "cancer_genomics",
+      label: "Cancer Genomics",
+    });
+    // The raw columns exist only to derive the fields above.
+    expect(body.opportunities[0]).not.toHaveProperty("topicVector");
+    expect(body.opportunities[0]).not.toHaveProperty("primaryTopicId");
+    expect(body.opportunities[0]).not.toHaveProperty("eligibility");
+    expect(body.opportunities[0]).not.toHaveProperty("eligibilityFlags");
+  });
+
+  it("dedupes concepts on the resolved label (the chip's React key), keeping the higher score", async () => {
+    getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
+    topicFindMany.mockResolvedValue([{ id: "cancer_genomics", label: "Cancer Genomics" }]);
+    opportunityFindMany.mockResolvedValue([
+      {
+        opportunityId: "wcm_curated:a",
+        title: "Alpha",
+        source: "wcm_curated",
+        topicVector: [
+          { topic_id: "cancer_genomics", score: 0.9, rationale: "r" },
+          { topic_id: "cancer_genomics", score: 0.7, rationale: "r" }, // duplicated id — one chip
+          { topic_id: "implementation_science", score: 0.6 },
+          { topic_id: "immunology", score: 0.5 }, // still fills the third slot past the dupe
+        ],
+        primaryTopicId: null,
+      },
+    ]);
+    const resp = await listGET(req("/api/opportunities"));
+    const body = await resp.json();
+    expect(body.opportunities[0].concepts).toEqual([
+      { label: "Cancer Genomics", score: 0.9 },
+      { label: "Implementation science", score: 0.6 },
+      { label: "Immunology", score: 0.5 },
+    ]);
+  });
+
+  it("humanizes an unresolved primaryTopicId slug; a row without one gets null", async () => {
+    getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
+    opportunityFindMany.mockResolvedValue([
+      {
+        opportunityId: "wcm_curated:a",
+        title: "Alpha",
+        source: "wcm_curated",
+        primaryTopicId: "implementation_science", // 353 staging opps carry a slug with no topic row
+      },
+      { opportunityId: "wcm_curated:b", title: "Beta", source: "wcm_curated", primaryTopicId: null },
+    ]);
+    const resp = await listGET(req("/api/opportunities"));
+    const body = await resp.json();
+    expect(body.opportunities[0].researchArea).toEqual({
+      id: "implementation_science",
+      label: "Implementation science",
+    });
+    expect(body.opportunities[1].researchArea).toBeNull();
+  });
+
+  it("survives an absent, empty or malformed topicVector — concepts is just empty", async () => {
+    getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
+    opportunityFindMany.mockResolvedValue([
+      { opportunityId: "wcm_curated:a", title: "A", source: "wcm_curated" }, // column absent
+      { opportunityId: "wcm_curated:b", title: "B", source: "wcm_curated", topicVector: [] },
+      { opportunityId: "wcm_curated:c", title: "C", source: "wcm_curated", topicVector: "junk" },
+      {
+        opportunityId: "wcm_curated:d",
+        title: "D",
+        source: "wcm_curated",
+        // Entry-level junk: wrong types, missing halves, nulls, nested arrays.
+        topicVector: [null, {}, { topic_id: 42, score: 0.9 }, { topic_id: "x", score: "high" }, []],
+      },
+    ]);
+    const resp = await listGET(req("/api/opportunities"));
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    for (const o of body.opportunities) expect(o.concepts).toEqual([]);
+  });
+
+  it("derives eligibilityLabels from real data only; an unrestricted row gets none", async () => {
+    getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
+    opportunityFindMany.mockResolvedValue([
+      {
+        opportunityId: "wcm_curated:a",
+        title: "Alpha",
+        source: "wcm_curated",
+        eligibilityFlags: ["faculty_eligible", "postdoc_eligible", "student_only"],
+        eligibility: {
+          career_stages: ["early_career_faculty", "postdoc", "graduate_student"],
+          esi_targeted: true,
+          us_citizen_or_permanent_resident_required: true,
+        },
+      },
+      {
+        // `career_stages: []` explicitly means "no person-level restriction" — no labels,
+        // even though the derived flags carry a faculty signal.
+        opportunityId: "wcm_curated:b",
+        title: "Beta",
+        source: "wcm_curated",
+        eligibilityFlags: ["faculty_eligible"],
+        eligibility: { career_stages: [] },
+      },
+    ]);
+    const resp = await listGET(req("/api/opportunities"));
+    const body = await resp.json();
+    expect(body.opportunities[0].eligibilityLabels).toEqual([
+      "Faculty",
+      "Postdocs",
+      "Students",
+      "Early Stage Investigators",
+      "US required",
+    ]);
+    expect(body.opportunities[1].eligibilityLabels).toEqual([]);
+  });
+
   it("returns the per-source freshness aggregate (count + newest ingestedAt, source-sorted)", async () => {
     getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
     opportunityGroupBy.mockResolvedValue([

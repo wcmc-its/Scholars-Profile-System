@@ -112,6 +112,7 @@ import {
 } from "@/lib/api/matcha-contract";
 import type { CareerStage } from "@/lib/career-stage";
 import { buildMatchaCsv } from "@/lib/edit/matcha-export";
+import type { EligibilityRequirements } from "@/lib/funding/screening";
 import {
   careerStageLabel,
   roleCategoryLabel,
@@ -313,32 +314,10 @@ function downloadCsv(filename: string, csv: string) {
   URL.revokeObjectURL(url);
 }
 
-/**
- * Grant Matcha — what THIS opportunity actually requires of a researcher. Every field is
- * "absent ⇒ that axis does not render": the rail is relevance-driven, not a fixed 3-axis panel.
- *
- * `careerStages` is the load-bearing HARD axis (33.8% of mapped opportunities restrict it).
- * `esiTargeted` is SOFT by design — the extractor's `esi_targeted` is a priority, not a gate,
- * so it demotes and never hides. `usRequired` is DISPLAY-ONLY: person-level US citizenship is
- * required by only 4.2% of opportunities and SPS holds no scholar citizenship field, so a US
- * toggle would either filter nothing or imply data we do not have.
- */
-export type EligibilityRequirements = {
-  /** Stages the opportunity admits. `null` ⇒ unrestricted ⇒ no career-stage axis. */
-  careerStages: readonly CareerStage[] | null;
-  /**
-   * The sponsor's OWN eligibility wording, verbatim, so the axis can cite what produced it.
-   *
-   * 🔴 Without this the rail states "Required: Early career · Mid career · Senior · Postdoc" —
-   * SPS's internal stage vocabulary — over an opportunity whose SYNOPSIS never mentions career
-   * stage, because the eligibility text lives in a different column that nothing renders. It reads
-   * as a requirement the matcher invented. It is not: `spin:095001` carries "Physician or Medical
-   * Professional; Faculty Member; Researcher or Investigator; Postdoctoral".
-   */
-  stageSource?: string | null;
-  esiTargeted: boolean;
-  usRequired: boolean;
-};
+// `EligibilityRequirements` moved to `lib/funding/screening.ts` beside `requirementsFrom`
+// (browse data-wiring 2026-08 — the list route derives eligibility labels server-side and must
+// not import a client component). Re-exported so this panel's consumers keep importing it here.
+export type { EligibilityRequirements };
 
 /** Per-row eligibility verdict. `eligible`/`relaxed` are computed from the opportunity's stated
  *  rule; `filtered` is asserted by the eligibility floor for the rows the gate dropped. */
