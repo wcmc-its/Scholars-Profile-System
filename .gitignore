@@ -198,3 +198,6 @@ ds-bundle/
 .design-sync/.cache/
 .design-sync/learnings/
 .design-sync/node_modules
+
+# Scratch: standalone renders of the WAF block-page bodies (edge-stack.ts). Never commit.
+.preview-*.html
