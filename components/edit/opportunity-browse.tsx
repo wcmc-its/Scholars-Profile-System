@@ -16,11 +16,12 @@
  * title (a REAL link, so cmd-click / middle-click / copy-link-address all
  * work), never a click handler on the `<li>`.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
   Building2,
+  ChevronDown,
   ChevronRight,
   Clock,
   ExternalLink,
@@ -119,14 +120,17 @@ const FRESHNESS_DOT: Record<FreshnessTone, string> = {
 };
 
 /**
- * Corpus-freshness strip (matcha-admin Phase 1b) — the Browse-tab header on
- * `/edit/grant-matcha`. Headline: the newest ingest across the WHOLE corpus
- * (the pipeline's pulse, warning-toned when stale); per-source rows: count +
- * newest ingest + an age dot. Reads `ingestedAt` ONLY — `lastRefreshedAt` is
- * re-stamped by the nightly upsert and would always read fresh (the Phase 0a
- * lesson, and the reason the corpus froze unnoticed for six weeks).
+ * Corpus-freshness pill (matcha-admin Phase 1b; collapsed top-right per
+ * `Browse Redesign.dc.html`, owner call 2026-08-21 superseding the always-visible
+ * strip). Collapsed: the newest ingest across the WHOLE corpus as text, PLUS the
+ * WORST source's tone dot — the newest row alone would let a healthy Grants.gov
+ * mask a frozen curated feed, the exact six-week silent freeze this surface
+ * exists to catch. Expanded: one row per source (count + newest ingest + age
+ * dot). Reads `ingestedAt` ONLY — `lastRefreshedAt` is re-stamped by the
+ * nightly upsert and would always read fresh (the Phase 0a lesson).
  */
 export function CorpusFreshness({ sources, now }: { sources: SourceFreshness[]; now: number }) {
+  const [open, setOpen] = useState(false);
   const dated = sources.filter(
     (s): s is SourceFreshness & { newestIngestedAt: string } => s.newestIngestedAt !== null,
   );
@@ -144,46 +148,82 @@ export function CorpusFreshness({ sources, now }: { sources: SourceFreshness[]; 
     new Date(s.newestIngestedAt).getTime() > new Date(max.newestIngestedAt).getTime() ? s : max,
   );
   const headAge = ingestAgeDays(newest.newestIngestedAt, now);
-  const headTone = freshnessTone(headAge);
+  const worst = rows.reduce((max, s) =>
+    ingestAgeDays(s.newestIngestedAt, now) > ingestAgeDays(max.newestIngestedAt, now) ? s : max,
+  );
+  const worstAge = ingestAgeDays(worst.newestIngestedAt, now);
+  const worstTone = freshnessTone(worstAge);
 
   return (
     <section
       data-testid="corpus-freshness"
       aria-label="Corpus freshness"
-      className="border-apollo-border bg-apollo-surface mb-4 rounded-lg border px-4 py-3 text-sm"
+      className="border-apollo-border bg-apollo-surface flex-none rounded-[10px] border text-sm"
     >
-      <p
-        data-testid="corpus-freshness-headline"
-        data-tone={headTone}
-        className={
-          headTone === "fresh"
-            ? "text-muted-foreground"
-            : headTone === "aging"
-              ? "font-medium text-apollo-amber"
-              : "font-medium text-red-700 dark:text-red-400"
-        }
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        data-testid="corpus-freshness-toggle"
+        className="flex w-full items-center justify-between gap-3.5 whitespace-nowrap px-3 py-1.5"
       >
-        {headTone !== "fresh" ? (
-          <AlertTriangle className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />
-        ) : null}
-        Corpus freshness — newest row {ingestDate(newest.newestIngestedAt)}, {headAge} day
-        {headAge === 1 ? "" : "s"} ago
-      </p>
-      <ul className="text-muted-foreground mt-1.5 flex flex-wrap gap-x-5 gap-y-1">
-        {rows.map((s) => {
-          const age = ingestAgeDays(s.newestIngestedAt, now);
-          const tone = freshnessTone(age);
-          return (
-            <li key={s.source ?? "unknown"} data-testid={`freshness-${s.source ?? "unknown"}`}>
-              <span className="text-foreground">{sourceLabel(s.source) ?? "Unknown"}</span>{" "}
-              {s.count} · {ingestDate(s.newestIngestedAt)} ({age}d){" "}
-              <span aria-hidden data-tone={tone} className={FRESHNESS_DOT[tone]}>
-                ●
+        <span className="inline-flex items-center gap-1.5">
+          <Clock className="text-apollo-amber size-3.5" aria-hidden />
+          <span className="text-apollo-amber text-xs font-semibold">Corpus freshness</span>
+        </span>
+        <span
+          data-testid="corpus-freshness-headline"
+          data-tone={worstTone}
+          className="text-muted-foreground inline-flex items-center gap-2 text-xs"
+          title={`Worst source: ${sourceLabel(worst.source) ?? "Unknown"}, newest row ${worstAge}d ago`}
+        >
+          newest row {ingestDate(newest.newestIngestedAt)} · {headAge}d ago
+          <span aria-hidden data-tone={worstTone} className={FRESHNESS_DOT[worstTone]}>
+            ●
+          </span>
+          <ChevronDown
+            aria-hidden
+            className={`size-3.5 flex-none transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </span>
+      </button>
+      {open ? (
+        <div className="border-apollo-border border-t px-3.5 pb-2.5 pt-1.5">
+          <ul className="grid grid-cols-[minmax(110px,1fr)_auto_auto] items-baseline gap-x-4 gap-y-1 text-xs">
+            <li aria-hidden className="contents">
+              <span className="text-muted-foreground pt-1 text-[10px] font-semibold uppercase tracking-wider">
+                Source
+              </span>
+              <span className="text-muted-foreground pt-1 text-right text-[10px] font-semibold uppercase tracking-wider">
+                Rows
+              </span>
+              <span className="text-muted-foreground pt-1 text-right text-[10px] font-semibold uppercase tracking-wider">
+                Last updated
               </span>
             </li>
-          );
-        })}
-      </ul>
+            {rows.map((s) => {
+              const age = ingestAgeDays(s.newestIngestedAt, now);
+              const tone = freshnessTone(age);
+              return (
+                <li
+                  key={s.source ?? "unknown"}
+                  data-testid={`freshness-${s.source ?? "unknown"}`}
+                  className="contents"
+                >
+                  <span className="text-foreground">{sourceLabel(s.source) ?? "Unknown"}</span>
+                  <span className="text-right font-semibold">{s.count}</span>
+                  <span className="text-muted-foreground whitespace-nowrap text-right">
+                    {ingestDate(s.newestIngestedAt)} ({age}d){" "}
+                    <span aria-hidden data-tone={tone} className={FRESHNESS_DOT[tone]}>
+                      ●
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -441,12 +481,17 @@ export function BrowseList({
   hrefFor,
   freshness = false,
   admin = false,
+  header,
 }: {
   hrefFor: (id: string) => string;
-  /** Render the corpus-freshness strip (the grant-matcha Browse header; NOT flag-gated). */
+  /** Render the corpus-freshness pill (the grant-matcha Browse header; NOT flag-gated). */
   freshness?: boolean;
   /** `MATCHA_ADMIN` — suppress/restore row actions + the show-suppressed toggle. */
   admin?: boolean;
+  /** Page h1 lockup, rendered in one row with the freshness pill (pill top-right, per
+   *  the artboard). Lives here rather than in the caller because the pill's data
+   *  arrives with this component's fetch. */
+  header?: ReactNode;
 }) {
   const [includeGrantsGov, setIncludeGrantsGov] = useState(false);
   const [sort, setSort] = useState<BrowseSort>("curated");
@@ -590,10 +635,17 @@ export function BrowseList({
   const pageStart = clampedPage * PAGE_SIZE;
   const pageItems = shown.slice(pageStart, pageStart + PAGE_SIZE);
 
+  const pill = freshness && status.kind === "ok" ? (
+    <CorpusFreshness sources={status.sources} now={now} />
+  ) : null;
+
   return (
     <div>
-      {freshness && status.kind === "ok" ? (
-        <CorpusFreshness sources={status.sources} now={now} />
+      {header || pill ? (
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+          {header ?? <span />}
+          {pill}
+        </div>
       ) : null}
       <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
         <input

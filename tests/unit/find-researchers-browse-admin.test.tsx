@@ -106,8 +106,8 @@ describe("freshnessTone — age buckets", () => {
   });
 });
 
-describe("CorpusFreshness — the strip", () => {
-  it("renders the headline off the newest ingest and one toned row per source", () => {
+describe("CorpusFreshness — the pill", () => {
+  it("collapsed: newest-row text but the WORST source's tone dot; expanded: one toned row per source", () => {
     render(
       <CorpusFreshness
         sources={[
@@ -118,10 +118,22 @@ describe("CorpusFreshness — the strip", () => {
         now={NOW}
       />,
     );
+    const toggle = screen.getByTestId("corpus-freshness-toggle");
+    expect(toggle.textContent).toContain("Corpus freshness");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    // The load-bearing invariant: the text reads off the NEWEST ingest, but the tone reads
+    // off the WORST source — a healthy grants_gov (13d fresh) must never mask a frozen
+    // manual_url (31d stale). The always-visible strip enforced this by showing everything;
+    // collapsed, the worst-source dot is what's left of that guarantee.
     const headline = screen.getByTestId("corpus-freshness-headline");
-    expect(headline.textContent).toContain("Corpus freshness — newest row");
-    expect(headline.textContent).toContain("13 days ago");
-    expect(headline.getAttribute("data-tone")).toBe("fresh");
+    expect(headline.textContent).toContain("13d ago");
+    expect(headline.getAttribute("data-tone")).toBe("stale");
+
+    // Per-source rows render only once expanded.
+    expect(screen.queryByTestId("freshness-wcm_curated")).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
 
     const curated = screen.getByTestId("freshness-wcm_curated");
     expect(curated.textContent).toContain("WCM curated");
@@ -136,9 +148,13 @@ describe("CorpusFreshness — the strip", () => {
     ).toBe("stale");
     // "Submitted URL" is the manual_url display label — raw source keys never render.
     expect(screen.getByTestId("freshness-manual_url").textContent).toContain("Submitted URL");
+
+    // And it collapses back.
+    fireEvent.click(toggle);
+    expect(screen.queryByTestId("freshness-wcm_curated")).toBeNull();
   });
 
-  it("warning-tones the headline when even the newest row is stale", () => {
+  it("stale-tones the collapsed pill when the only source is stale", () => {
     render(
       <CorpusFreshness
         sources={[{ source: "manual_url", count: 1, newestIngestedAt: iso(45) }]}
@@ -147,7 +163,7 @@ describe("CorpusFreshness — the strip", () => {
     );
     const headline = screen.getByTestId("corpus-freshness-headline");
     expect(headline.getAttribute("data-tone")).toBe("stale");
-    expect(headline.textContent).toContain("45 days ago");
+    expect(headline.textContent).toContain("45d ago");
   });
 
   it("renders nothing at all with no dated sources", () => {
