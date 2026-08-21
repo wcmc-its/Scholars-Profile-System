@@ -1,20 +1,21 @@
 /**
- * `components/edit/opportunity-browse.tsx` — `BrowseList` renders as a TABLE.
+ * `components/edit/opportunity-browse.tsx` — `BrowseList` renders as a card list.
  *
  * Re-homed from the retired `/edit/find-researchers` suite (matcha-admin Phase
- * 3c): the browse table survives as the grant-matcha picker, so its invariants
- * do too. 200 opportunities all carry the same four attributes, so they are
- * rows, not cards (R5). The load-bearing detail is R7: the row is clickable
- * because the title is a REAL anchor with a stretched pseudo-element, NOT
- * because the `<tr>` has an onClick. These tests pin the anchor — an onClick
- * row would still "work" in a click test while silently breaking cmd-click,
- * middle-click, copy-link and screen-reader link announcement, so asserting
- * `href` is the point.
+ * 3c); redesign 2026-08 (`Browse Redesign.dc.html`) moved rows to cards — Track
+ * B is expected to give opportunities a variable amount of tag data
+ * (concepts/methods/eligibility), which a fixed-column table can't hold
+ * honestly, so cards were the right shape even before Track B lands. The
+ * load-bearing detail is still R7: a card is clickable because the title is a
+ * REAL anchor with a stretched pseudo-element, NOT because the card has an
+ * onClick. These tests pin the anchor — an onClick card would still "work" in
+ * a click test while silently breaking cmd-click, middle-click, copy-link and
+ * screen-reader link announcement, so asserting `href` is the point.
  *
  * next/link renders a plain <a> under jsdom (see browse-by-method-section.test).
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -27,7 +28,7 @@ import { BrowseList } from "@/components/edit/opportunity-browse";
 const OPPS = [
   {
     opportunityId: "wcm_curated:ones-abc123",
-    // The sponsor is restated inside the title — the row must not print it twice.
+    // The sponsor is restated inside the title — the card must not print it twice.
     title:
       "National Institutes of Health (NIH) - NIH Outstanding New Environmental Scientist (ONES) Award (R01)",
     sponsor: "National Institutes of Health (NIH)",
@@ -68,89 +69,88 @@ const hrefFor = (id: string) => `/edit/grant-matcha?opp=${encodeURIComponent(id)
 async function renderBrowse(opportunities: unknown[] = OPPS) {
   mockFetch(opportunities);
   render(<BrowseList hrefFor={hrefFor} />);
-  await waitFor(() => expect(screen.getByRole("table")).toBeTruthy());
+  await waitFor(() =>
+    expect(screen.getByRole("list", { name: "Funding opportunities" })).toBeTruthy(),
+  );
 }
 
-describe("BrowseList — table", () => {
+describe("BrowseList — cards", () => {
   beforeEach(() => vi.unstubAllGlobals());
   afterEach(() => vi.unstubAllGlobals());
 
-  it("renders one row per opportunity under the four+ named column headers", async () => {
+  it("renders one card per opportunity", async () => {
     await renderBrowse();
-    const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
-    expect(headers).toEqual(["Opportunity", "Sponsor", "Activity code", "Award", "Deadline"]);
-    // Two body rows (getAllByRole("row") also counts the header row).
-    expect(screen.getAllByRole("row")).toHaveLength(3);
+    const list = screen.getByRole("list", { name: "Funding opportunities" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
     expect(screen.getByText("2 opportunities")).toBeTruthy();
   });
 
-  it("R7 — the title is a real link carrying the row's href, not a click handler", async () => {
+  it("R7 — the title is a real link carrying the card's href, not a click handler", async () => {
     await renderBrowse();
     const link = screen.getByRole("link", {
       name: /NIH Outstanding New Environmental Scientist/,
     });
-    expect(link.getAttribute("href")).toBe(
-      "/edit/grant-matcha?opp=wcm_curated%3Aones-abc123",
-    );
-    // The stretched pseudo-element is what makes the whole row clickable.
+    expect(link.getAttribute("href")).toBe("/edit/grant-matcha?opp=wcm_curated%3Aones-abc123");
+    // The stretched pseudo-element is what makes the whole card clickable.
     expect(link.className).toContain("after:absolute");
     expect(link.className).toContain("after:inset-0");
 
-    // The row positions that pseudo-element and shows focus, but is NOT itself
+    // The card positions that pseudo-element and shows focus, but is NOT itself
     // a control: no role="button", no tabindex, no click/keydown handler.
-    const row = link.closest("tr");
-    expect(row).not.toBeNull();
-    expect(row!.className).toContain("relative");
-    expect(row!.className).toContain("focus-within:outline");
-    expect(row!.getAttribute("role")).toBeNull();
-    expect(row!.getAttribute("tabindex")).toBeNull();
-    expect(row!.getAttribute("onclick")).toBeNull();
+    const card = link.closest("li");
+    expect(card).not.toBeNull();
+    expect(card!.className).toContain("relative");
+    expect(card!.className).toContain("focus-within:outline");
+    expect(card!.getAttribute("role")).toBeNull();
+    expect(card!.getAttribute("tabindex")).toBeNull();
+    expect(card!.getAttribute("onclick")).toBeNull();
   });
 
-  it("defect 1 — the sponsor prints once: its own column, stripped off the title", async () => {
+  it("defect 1 — the sponsor prints once: in the meta row, stripped off the title", async () => {
     await renderBrowse();
-    const row = screen.getByRole("link", { name: /ONES/ }).closest("tr")!;
-    const cells = within(row).getAllByRole("cell");
-    // Title no longer restates the sponsor…
-    expect(cells[0].textContent).toContain("NIH Outstanding New Environmental Scientist");
-    expect(cells[0].textContent).not.toContain("National Institutes of Health");
-    // …which now lives in exactly one place.
-    expect(cells[1].textContent).toBe("National Institutes of Health (NIH)");
+    const title = screen.getByRole("link", { name: /ONES/ });
+    expect(title.textContent).toContain("NIH Outstanding New Environmental Scientist");
+    expect(title.textContent).not.toContain("National Institutes of Health");
+    // …which now lives in exactly one place: the card's meta row.
+    expect(title.closest("li")!.textContent).toContain("National Institutes of Health (NIH)");
   });
 
   it("defect 2 — the deadline is visible, and only a continuous status reads Rolling", async () => {
     await renderBrowse();
-    const dated = screen.getByRole("link", { name: /ONES/ }).closest("tr")!;
-    expect(within(dated).getAllByRole("cell")[4].textContent).toBe("Mar 15, 2027");
+    const dated = screen.getByRole("link", { name: /ONES/ }).closest("li")!;
+    expect(dated.textContent).toContain("Mar 15, 2027");
 
-    const undated = screen.getByRole("link", { name: "Patient Safety Learning Laboratories" })
-      .closest("tr")!;
-    expect(within(undated).getAllByRole("cell")[4].textContent).toBe("Rolling");
+    const undated = screen
+      .getByRole("link", { name: "Patient Safety Learning Laboratories" })
+      .closest("li")!;
+    expect(undated.textContent).toContain("Rolling");
   });
 
-  it("defect 3 — the curated badge sits inline with the title it modifies", async () => {
+  it("defect 3 — the curated badge sits with the card it modifies", async () => {
     await renderBrowse();
-    const row = screen.getByRole("link", { name: /ONES/ }).closest("tr")!;
-    // Same cell as the title, not a detached top-right corner of a card.
-    expect(within(row).getAllByRole("cell")[0].textContent).toContain("WCM curated");
+    const card = screen.getByRole("link", { name: /ONES/ }).closest("li")!;
+    expect(card.textContent).toContain("WCM curated");
   });
 
-  it("shows an em dash for the columns an opportunity genuinely lacks", async () => {
+  it("omits the meta line's activity-code/award tags rather than dashing them when absent", async () => {
+    // Cards, unlike the old fixed-column table, don't carry a placeholder cell for every
+    // field — Track B adds concepts/methods/eligibility tags of variable count per card, so
+    // "just don't render the missing one" is the shape already, not new for this field pair.
     await renderBrowse();
-    const row = screen.getByRole("link", { name: "Patient Safety Learning Laboratories" })
-      .closest("tr")!;
-    const cells = within(row).getAllByRole("cell");
-    expect(cells[2].textContent).toBe("—"); // no activity code
-    expect(cells[3].textContent).toBe("—"); // no award range
+    const card = screen
+      .getByRole("link", { name: "Patient Safety Learning Laboratories" })
+      .closest("li")!;
+    expect(card.textContent).not.toMatch(/R01/);
+    expect(card.textContent).not.toContain("—".repeat(2)); // no stray double-dash artifact
   });
 
-  it("keeps the empty state (and no table) when nothing matches", async () => {
+  it("keeps the empty state (and no list) when nothing matches", async () => {
     mockFetch([]);
     render(<BrowseList hrefFor={hrefFor} />);
     await waitFor(() =>
       expect(screen.getByText("No opportunities match the current filters.")).toBeTruthy(),
     );
-    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.queryByRole("list", { name: "Funding opportunities" })).toBeNull();
   });
 
   it("keeps the search box, the Sort control and the sidebar filters", async () => {
@@ -159,5 +159,29 @@ describe("BrowseList — table", () => {
     expect(screen.getByRole("combobox")).toBeTruthy();
     expect(screen.getByRole("complementary", { name: "Filter opportunities" })).toBeTruthy();
     expect(screen.getByRole("checkbox", { name: /Include Grants.gov/ })).toBeTruthy();
+  });
+
+  it("shows no pagination controls under one page's worth of opportunities", async () => {
+    await renderBrowse(); // 2 opportunities, well under PAGE_SIZE
+    expect(screen.queryByText(/Page \d+ of \d+/)).toBeNull();
+  });
+
+  it("paginates for real once there's more than one page", async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      ...OPPS[0],
+      opportunityId: `wcm_curated:many-${i}`,
+      title: `Opportunity number ${i}`,
+    }));
+    await renderBrowse(many);
+    const list = () => screen.getByRole("list", { name: "Funding opportunities" });
+    expect(screen.getByText("Page 1 of 2")).toBeTruthy();
+    expect(within(list()).getAllByRole("listitem")).toHaveLength(20);
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(screen.getByText("Page 2 of 2")).toBeTruthy());
+    expect(within(list()).getAllByRole("listitem")).toHaveLength(5);
+    expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 });

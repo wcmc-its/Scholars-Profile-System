@@ -6,17 +6,19 @@
  * `components/edit/find-researchers.tsx` (matcha-admin Phase 3a, a pure
  * mechanical move; no behavior change); Phase 3b moved `ClampedText` and the
  * mockup-4 `OpportunityFactRail` in beside them so the grant-matcha selected
- * view renders opportunity facts from one place. The browse list is a TABLE,
- * not a card list: every opportunity carries the same four attributes in the
- * same order (opportunity, sponsor, activity code, deadline), so a row is the
- * honest shape. The whole
- * row is the click target via a stretched anchor on the title (a REAL link, so
- * cmd-click / middle-click / copy-link-address all work), never a click handler
- * on the `<tr>`.
+ * view renders opportunity facts from one place. Redesign 2026-08
+ * (`Browse Redesign.dc.html`) moved the list from a table to a card per
+ * opportunity — Track B is expected to give rows a variable amount of tag
+ * data (concepts/methods/eligibility), which a fixed-column table can't hold
+ * honestly; cards were the right shape for that even before Track B lands.
+ * Client-side paginated (the whole set is already fetched — see `PAGE_SIZE`).
+ * The whole card is still the click target via a stretched anchor on the
+ * title (a REAL link, so cmd-click / middle-click / copy-link-address all
+ * work), never a click handler on the `<li>`.
  */
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ExternalLink } from "lucide-react";
+import { AlertTriangle, Building2, Clock, ExternalLink, Eye, EyeOff } from "lucide-react";
 
 import { PrestigeBadge } from "@/components/edit/prestige-badge";
 import { Button } from "@/components/ui/button";
@@ -417,6 +419,10 @@ export function BrowseList({
   } | null>(null);
   const [adminBusyId, setAdminBusyId] = useState<string | null>(null);
   const [adminError, setAdminError] = useState<string | null>(null);
+  // Redesign 2026-08 (Browse Redesign.dc.html): cards replace the table, so a
+  // real page needs a real page size. Client-side slice of the already-fetched
+  // set — no API change, `limit=500` above still fetches everything up front.
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -515,6 +521,13 @@ export function BrowseList({
   const sponsorOptions = facetOptions(all, filters, now, "sponsors", (o) => o.sponsor);
   const mechanismOptions = facetOptions(all, filters, now, "mechanisms", (o) => o.mechanism);
 
+  // ponytail: fixed page size, not a setting — tune the constant if 20 ever feels wrong.
+  const PAGE_SIZE = 20;
+  const pageCount = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const clampedPage = Math.min(page, pageCount - 1);
+  const pageStart = clampedPage * PAGE_SIZE;
+  const pageItems = shown.slice(pageStart, pageStart + PAGE_SIZE);
+
   return (
     <div>
       {freshness && status.kind === "ok" ? (
@@ -611,59 +624,55 @@ export function BrowseList({
                   </>
                 ) : null}
               </p>
-              {/* The wrapping border + radius IS the boundary between the page
-                  and the table surface; `overflow-x-auto` both clips the thead
-                  fill to those corners and lets the columns scroll on a narrow
-                  viewport instead of bleeding out of the layout. */}
-              <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-lg border">
-                <table className="w-full border-collapse text-sm">
-                  <caption className="sr-only">
-                    Funding opportunities. Select a row to rank researchers against it.
-                  </caption>
-                  <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
-                    <tr className="border-apollo-border border-b">
-                      <th scope="col" className={thClass}>
-                        Opportunity
-                      </th>
-                      <th scope="col" className={thClass}>
-                        Sponsor
-                      </th>
-                      <th scope="col" className={`${thClass} whitespace-nowrap`}>
-                        Activity code
-                      </th>
-                      <th scope="col" className={`${thClass} whitespace-nowrap`}>
-                        Award
-                      </th>
-                      <th scope="col" className={`${thClass} whitespace-nowrap`}>
-                        Deadline
-                      </th>
-                      {admin ? (
-                        <th scope="col" className={thClass}>
-                          <span className="sr-only">Actions</span>
-                        </th>
-                      ) : null}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shown.map((o) => (
-                      <OpportunityRow
-                        key={o.opportunityId}
-                        o={o}
-                        href={hrefFor(o.opportunityId)}
-                        admin={admin}
-                        actionBusy={adminBusyId === o.opportunityId}
-                        onSuppress={() =>
-                          setSuppressTarget({
-                            opportunityId: o.opportunityId,
-                            title: stripSponsorPrefix(o.title, o.sponsor) ?? o.opportunityId,
-                          })
-                        }
-                        onRestore={() => void performAdmin(o.opportunityId, "restore", null)}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {/* Redesign 2026-08 (Browse Redesign.dc.html): cards, not a table row per
+                  opportunity — each card's own heading is the a11y equivalent of a table
+                  caption + row, so `<ul>` is the honest shape here instead. */}
+              <ul aria-label="Funding opportunities" className="flex flex-col gap-3">
+                {pageItems.map((o) => (
+                  <OpportunityCard
+                    key={o.opportunityId}
+                    o={o}
+                    href={hrefFor(o.opportunityId)}
+                    admin={admin}
+                    actionBusy={adminBusyId === o.opportunityId}
+                    onSuppress={() =>
+                      setSuppressTarget({
+                        opportunityId: o.opportunityId,
+                        title: stripSponsorPrefix(o.title, o.sponsor) ?? o.opportunityId,
+                      })
+                    }
+                    onRestore={() => void performAdmin(o.opportunityId, "restore", null)}
+                  />
+                ))}
+              </ul>
+              {pageCount > 1 ? (
+                <div className="text-muted-foreground mt-3 flex items-center justify-between text-xs">
+                  <span>
+                    Showing {pageStart + 1}–{pageStart + pageItems.length} of {shown.length}
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setPage(clampedPage - 1)}
+                      disabled={clampedPage === 0}
+                      className="text-[var(--color-accent-slate)] hover:underline disabled:pointer-events-none disabled:opacity-40"
+                    >
+                      Previous
+                    </button>
+                    <span>
+                      Page {clampedPage + 1} of {pageCount}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPage(clampedPage + 1)}
+                      disabled={clampedPage >= pageCount - 1}
+                      className="text-[var(--color-accent-slate)] hover:underline disabled:pointer-events-none disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </>
           )}
         </div>
@@ -945,11 +954,8 @@ function FacetGroup({
   );
 }
 
-const thClass = "px-3 py-2 text-xs font-medium";
-const tdClass = "px-3 py-2.5 align-middle";
-
 /**
- * One opportunity as a table row.
+ * One opportunity as a card.
  *
  * THE WHOLE ROW IS THE CLICK TARGET, and it gets there the boring way: the
  * title is a real `<Link>` whose `after:absolute after:inset-0` pseudo-element
@@ -962,7 +968,7 @@ const tdClass = "px-3 py-2.5 align-middle";
  * If a secondary control is ever added to a row it MUST carry `relative z-10`,
  * or the stretched pseudo-element will sit on top of it and swallow the click.
  */
-function OpportunityRow({
+function OpportunityCard({
   o,
   href,
   admin = false,
@@ -972,66 +978,72 @@ function OpportunityRow({
 }: {
   o: OpportunityListItem;
   href: string;
-  /** Matcha-admin Phase 1b — render the Suppress/Restore action cell. */
+  /** Matcha-admin Phase 1b — render the Suppress/Restore action. */
   admin?: boolean;
   actionBusy?: boolean;
   onSuppress?: () => void;
   onRestore?: () => void;
 }) {
   const award = awardRange(o.awardFloor ?? null, o.awardCeiling ?? null);
-  // Sponsor has its own column now, so a title that restates it is noise.
+  // Sponsor's shown in the meta row now, so a title that restates it is noise.
   const title = stripSponsorPrefix(o.title, o.sponsor) ?? o.opportunityId;
   // Only the includeSuppressed=1 admin fetch ever returns a suppressed row.
   const suppressed = Boolean(o.suppressedAt);
   return (
-    <tr
-      className={`border-apollo-border hover:bg-apollo-surface-2 focus-within:outline-apollo-maroon relative border-b transition-colors last:border-b-0 focus-within:outline focus-within:outline-2 focus-within:-outline-offset-2${
+    <li
+      className={`border-apollo-border bg-apollo-surface hover:bg-apollo-surface-2 focus-within:outline-apollo-maroon relative rounded-lg border p-4 transition-colors focus-within:outline focus-within:outline-2 focus-within:-outline-offset-2${
         suppressed ? " opacity-60" : ""
       }`}
     >
-      <td className={tdClass}>
-        <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <Link
-            href={href}
-            className="font-medium leading-snug text-[var(--color-accent-slate)] after:absolute after:inset-0 after:content-[''] hover:underline focus:outline-none"
-          >
-            {title}
-          </Link>
-          {/* Badges sit INLINE with the title they modify — the curated badge
-              used to float top-right, detached from what it qualified. */}
+      <div className="text-muted-foreground mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
+        <span className="flex items-center gap-1">
+          <Clock className="size-3.5" aria-hidden />
+          Deadline: <DeadlineCell iso={o.dueDate} status={o.status} />
+        </span>
+        <span className="flex flex-wrap items-center gap-2">
+          {o.sponsor ? (
+            <span className="flex items-center gap-1">
+              <Building2 className="size-3.5" aria-hidden />
+              {o.sponsor}
+            </span>
+          ) : null}
           <SourceBadge source={o.source} />
           <PrestigeBadge prestige={o.prestige} />
+          {admin ? (
+            // `relative z-10` — without it the card's stretched anchor (below)
+            // sits on top and swallows the click.
+            <button
+              type="button"
+              onClick={suppressed ? onRestore : onSuppress}
+              disabled={actionBusy}
+              className="text-muted-foreground hover:text-foreground relative z-10 disabled:opacity-50"
+              aria-label={actionBusy ? "Working…" : suppressed ? "Restore" : "Suppress"}
+              title={actionBusy ? "Working…" : suppressed ? "Restore" : "Suppress"}
+              data-testid={`opportunity-${suppressed ? "restore" : "suppress"}`}
+            >
+              {suppressed ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+            </button>
+          ) : null}
         </span>
-        {suppressed && o.suppressedAt ? (
-          <span className="text-muted-foreground block text-xs" data-testid="suppressed-note">
-            suppressed {formatSuppressedDate(o.suppressedAt)}
-            {o.suppressedBy ? ` by ${o.suppressedBy}` : ""}
-            {o.suppressReason ? ` — “${o.suppressReason}”` : ""}
-          </span>
-        ) : null}
-      </td>
-      <td className={`${tdClass} text-muted-foreground`}>{o.sponsor ?? "—"}</td>
-      <td className={`${tdClass} whitespace-nowrap`}>{o.mechanism ?? "—"}</td>
-      <td className={`${tdClass} whitespace-nowrap tabular-nums`}>{award ?? "—"}</td>
-      <td className={`${tdClass} whitespace-nowrap`}>
-        <DeadlineCell iso={o.dueDate} status={o.status} />
-      </td>
-      {admin ? (
-        <td className={`${tdClass} whitespace-nowrap text-right`}>
-          {/* `relative z-10` — without it the row's stretched anchor sits on top
-              and swallows the click (the row-doc invariant above). */}
-          <button
-            type="button"
-            onClick={suppressed ? onRestore : onSuppress}
-            disabled={actionBusy}
-            className="text-muted-foreground hover:text-foreground relative z-10 text-xs underline decoration-dotted underline-offset-2 disabled:opacity-50"
-            data-testid={`opportunity-${suppressed ? "restore" : "suppress"}`}
-          >
-            {actionBusy ? "Working…" : suppressed ? "Restore" : "Suppress"}
-          </button>
-        </td>
+      </div>
+      <Link
+        href={href}
+        className="font-medium leading-snug text-[var(--color-accent-slate)] after:absolute after:inset-0 after:content-[''] hover:underline focus:outline-none"
+      >
+        {title}
+      </Link>
+      <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
+        {o.mechanism ? <span>{o.mechanism}</span> : null}
+        {award ? <span>{award}</span> : null}
+      </div>
+      {suppressed && o.suppressedAt ? (
+        <span className="text-muted-foreground mt-1 block text-xs" data-testid="suppressed-note">
+          suppressed {formatSuppressedDate(o.suppressedAt)}
+          {o.suppressedBy ? ` by ${o.suppressedBy}` : ""}
+          {o.suppressReason ? ` — “${o.suppressReason}”` : ""}
+        </span>
       ) : null}
-    </tr>
+    </li>
   );
 }
 
