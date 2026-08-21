@@ -16,6 +16,127 @@ import * as wafv2 from "aws-cdk-lib/aws-wafv2";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
 
+/**
+ * Same-origin echo path that returns the caller's public IP as `text/plain`.
+ *
+ * Served entirely by a viewer-request CloudFront Function (no origin contact)
+ * and carved out of the `block-non-wcm` WAF rule below, so an OFF-network
+ * visitor -- who by definition cannot reach anything else -- can still fetch it
+ * from the block page. Value is a literal, not a config knob: it is baked into
+ * the static WAF response body, so the two can never be allowed to diverge.
+ */
+const EDGE_IP_PATH = "/edge-ip";
+
+/**
+ * Body served by the `block-non-wcm` WAF rule instead of AWS's stock
+ * "The request could not be satisfied / Request blocked" 403.
+ *
+ * Hard constraints, all load-bearing:
+ *  - **<= 4096 bytes.** The AWS WAF quotas page fixes the size of a single
+ *    custom response body at 4 KB (the WAFv2 API's 10240 is only the string
+ *    validator; the service quota is the one that bites at apply time). If a
+ *    copy change overflows, TIGHTEN THE HTML -- the limit is not raisable.
+ *    `cdk/test/edge-stack.test.ts` ratchets this.
+ *  - **Fully static.** WAF does no interpolation of any kind: no client IP, no
+ *    request id, no header echo. That is exactly why `EDGE_IP_PATH` exists.
+ *  - **Zero external references.** A blocked client cannot fetch a font, a
+ *    stylesheet, an image, or the origin -- WAF terminates before CloudFront
+ *    even matches a cache behavior. Everything is inline, system fonts only.
+ *  - Inline `<style>`/`<script>` are safe here: no CSP reaches this response.
+ *    Neither `securityHeaders` nor `htmlHeaders` sets one (HSTS only, see
+ *    below), the app's CSP comes from the origin, and a response-headers
+ *    policy is attached to a cache behavior -- which is never selected for a
+ *    WAF-blocked request. The script degrades to the static "Unavailable"
+ *    already in the markup if any of that turns out to be wrong.
+ *
+ * Copy state machine -- the markup ships in its FAILURE state on purpose, so
+ * every path where the echo does not produce a usable address still reads
+ * correctly and stays actionable:
+ *  - **No JS / script blocked** -- nothing runs, so the visitor sees
+ *    "Unavailable" next to "Email support ... and tell us which network you
+ *    are connecting from." Correct as-is; that is why there is no
+ *    `<noscript>` block (it would only restate the default markup).
+ *  - **In flight** -- the script's first act is to swap the dd to the neutral
+ *    "Checking...", so the page never asserts "Unavailable" before it knows.
+ *  - **Terminal failure** -- non-2xx (the carve-out leaves `/edge-ip` subject
+ *    to the managed groups and the rate limit), network error, empty body, a
+ *    body that is not IP-shaped (a TLS-inspecting proxy answering 200 with its
+ *    own block page), or 4s elapsed: back to "Unavailable", failure copy
+ *    intact, reason on `console.warn`. A late-but-valid response still
+ *    upgrades the page -- the 4s timer is a floor on the message, not an
+ *    abort.
+ *  - **Success** -- and ONLY then -- the dd gets the address and the note is
+ *    rewritten to "Send the address above to support@...".
+ *
+ * The IP-shape test is deliberately a character-class check, not a parser: it
+ * has to reject prose (a proxy block page) in ~40 bytes, not validate RFC 4291.
+ *
+ * Palette/wordmark match the site: `#B31B1B` and `#2c4f6e` are the locked
+ * brand tokens from `app/globals.css`; the two-line text lockup mirrors
+ * `components/site/header.tsx` and `app/global-error.tsx` (there is no logo
+ * asset in the repo, by design).
+ */
+/**
+ * Shared chrome for the WAF block bodies below: same Scholars / Weill Cornell
+ * Medicine lockup, same tokens, same responsive + dark rules. Two callers
+ * (off-network and rate-limited) is exactly why this is a function -- the two
+ * pages are seen by different people in different situations and must not be
+ * allowed to drift into looking like different sites.
+ *
+ * `main` is everything inside `<main class="w">`; the caller closes it, so a
+ * page can put a `<script>` after it (only OFF_NETWORK_HTML does).
+ */
+const wafPage = (title: string, main: string): string =>
+  `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>${title}</title><style>
+:root{color-scheme:light dark;--red:#B31B1B;--slate:#2c4f6e;--ink:#191919;--mut:#5a5f66;--bg:#fff;--chip:#fbf1ee;--line:rgba(0,0,0,.12)}
+@media(prefers-color-scheme:dark){:root{--red:#e08585;--slate:#9dc0dd;--ink:#ededed;--mut:#a3a9b0;--bg:#151515;--chip:#241a1a;--line:rgba(255,255,255,.15)}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+.w{max-width:560px;margin:0 auto;padding:72px 24px 56px}
+.m{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:48px}
+.m b{display:block;font:600 22px/1.1 Georgia,"Times New Roman",serif;letter-spacing:-.005em;color:var(--red)}
+.m span{display:block;margin-top:4px;font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}
+h1{margin:0 0 16px;font:600 34px/1.15 Georgia,"Times New Roman",serif;letter-spacing:-.01em}
+p{margin:0 0 20px;color:var(--mut)}
+dl{margin:36px 0;padding:16px 18px;background:var(--chip);border-left:3px solid var(--red);border-radius:4px}
+dt{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--slate)}
+dd{margin:6px 0 0;font:17px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--ink);word-break:break-all}
+.n{margin:0;padding-top:20px;border-top:1px solid var(--line);font-size:13px}
+a{color:var(--slate)}
+@media(max-width:420px){.w{padding:44px 18px 36px}h1{font-size:27px}}
+</style></head><body><main class="w">
+${main}`;
+
+const OFF_NETWORK_HTML = wafPage(
+  "Coming soon - Scholars @ Weill Cornell Medicine",
+  `<div class="m"><b>Scholars</b><span>Weill Cornell Medicine</span></div>
+<h1>Coming soon</h1>
+<p>Scholars @ Weill Cornell Medicine is not publicly available yet. While we finish testing, the site is open only to visitors on the Weill Cornell Medicine network.</p>
+<dl><dt>Your IP address</dt><dd id="i" aria-live="polite" aria-label="Your IP address">Unavailable</dd></dl>
+<p class="n"><span id="s">We could not detect your address. Email </span><a href="mailto:support@med.cornell.edu">support@med.cornell.edu</a><span id="e"> and tell us which network you are connecting from.</span></p>
+</main><script>(function(){var d=document.getElementById("i"),s=document.getElementById("s"),e=document.getElementById("e"),st=0;
+function bad(w){if(st)return;st=1;d.textContent="Unavailable";if(window.console)console.warn("edge-ip: "+w)}
+d.textContent="Checking...";setTimeout(function(){bad("timeout")},4000);
+fetch("${EDGE_IP_PATH}").then(function(r){return r.ok?r.text():Promise.reject("http "+r.status)}).then(function(t){t=(t||"").trim();if(!/^[0-9a-fA-F.:]{3,45}$/.test(t))return bad("shape");st=2;d.textContent=t;s.textContent="Already on campus or on the WCM VPN? Send the address above to ";e.textContent=" and we will get your network added."}).catch(bad);})();</script></body></html>`,
+);
+
+/**
+ * Body for the `rate-limit` rule. NOT the off-network page: whoever sees this
+ * tripped the per-IP cap, which means they are INSIDE the WCM allowlist -- the
+ * priority-0 rule would have caught them first otherwise. Telling them they are
+ * "outside the network" would be a flat lie, which is why this is a second body
+ * rather than a reuse of `offNetwork`. No IP echo either: their address is not
+ * the problem and `/edge-ip` should not grow callers.
+ */
+const RATE_LIMITED_HTML = wafPage(
+  "Too many requests - Scholars @ Weill Cornell Medicine",
+  `<div class="m"><b>Scholars</b><span>Weill Cornell Medicine</span></div>
+<h1>Too many requests</h1>
+<p>Scholars has paused requests from your network because it received an unusually large number of them in a short time. This is automatic and temporary - access resumes on its own within a few minutes.</p>
+<p class="n">If this keeps happening, or you believe it is a mistake, email <a href="mailto:support@med.cornell.edu">support@med.cornell.edu</a>.</p>
+</main></body></html>`,
+);
+
 /** Props for {@link EdgeStack}. */
 export interface EdgeStackProps extends StackProps {
   /** Resolved per-environment configuration. */
@@ -758,6 +879,49 @@ export class EdgeStack extends Stack {
       compress: true,
     };
 
+    // `/edge-ip` -- the IP echo the off-network block page fetches. A
+    // viewer-request CloudFront Function answers it entirely at the POP:
+    // `event.viewer.ip` is the TCP peer address, which is the SAME address the
+    // WAF IPSet matches on, so what the visitor is shown is exactly what an
+    // operator would need to allowlist. The function returns a synthetic
+    // response, so CloudFront never consults the cache or the origin -- the
+    // `origin` below is only here because `BehaviorOptions` requires one.
+    //
+    // ponytail: no CORS headers, no JSON envelope, no versioning. It is a
+    // same-origin fetch of one line of text/plain by exactly one caller
+    // (OFF_NETWORK_HTML). If a second caller ever appears, that is the moment
+    // to give it a real contract, not now.
+    const ipEchoFn = new cloudfront.Function(this, "EdgeIpEcho", {
+      functionName: `sps-edge-ip-${env}`,
+      comment: `SPS off-network page IP echo (${env}) -- returns event.viewer.ip as text/plain.`,
+      runtime: cloudfront.FunctionRuntime.JS_2_0,
+      code: cloudfront.FunctionCode.fromInline(`function handler(event) {
+  return {
+    statusCode: 200,
+    statusDescription: "OK",
+    headers: {
+      "content-type": { value: "text/plain; charset=utf-8" },
+      "cache-control": { value: "no-store" },
+    },
+    body: event.viewer.ip,
+  };
+}`),
+    });
+    additionalBehaviors[EDGE_IP_PATH] = {
+      origin,
+      cachePolicy: cachingDisabled,
+      allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+      responseHeadersPolicy: securityHeaders,
+      viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+      compress: true,
+      functionAssociations: [
+        {
+          function: ipEchoFn,
+          eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+        },
+      ],
+    };
+
     // Uncacheable (existing + #634 Group A) FIRST so the scholars-export
     // behaviors precede the cacheable `/scholars/*` glob (first-match-wins).
     for (const [pathPattern, allowedMethods] of uncacheableBehaviors) {
@@ -865,16 +1029,79 @@ export class EdgeStack extends Stack {
         // default-BLOCK + a terminating allow-wcm rule, which short-circuited
         // evaluation so no later rule could inspect WCM requests.)
         defaultAction: { allow: {} },
+        // Referenced by `block-non-wcm` below. TEXT_HTML is one of WAF's three
+        // permitted content types and it derives the Content-Type header from
+        // it -- a custom response header named `content-type` is rejected.
+        customResponseBodies: {
+          offNetwork: {
+            contentType: "TEXT_HTML",
+            content: OFF_NETWORK_HTML,
+          },
+          rateLimited: {
+            contentType: "TEXT_HTML",
+            content: RATE_LIMITED_HTML,
+          },
+        },
         rules: [
           {
             name: "block-non-wcm",
             priority: 0,
-            action: { block: {} },
-            statement: {
-              notStatement: {
-                statement: {
-                  ipSetReferenceStatement: { arn: ipAllowSet.attrArn },
+            // Branded "coming soon" page instead of AWS's stock 403 body. The
+            // body is static (WAF interpolates nothing) -- the visitor's IP is
+            // filled in client-side from EDGE_IP_PATH, carved out below.
+            action: {
+              block: {
+                customResponse: {
+                  responseCode: 403,
+                  customResponseBodyKey: "offNetwork",
                 },
+              },
+            },
+            statement: {
+              andStatement: {
+                statements: [
+                  {
+                    notStatement: {
+                      statement: {
+                        ipSetReferenceStatement: { arn: ipAllowSet.attrArn },
+                      },
+                    },
+                  },
+                  // The block page's IP echo must survive the block that
+                  // renders it. WAF evaluates BEFORE CloudFront matches a
+                  // cache behavior, so the viewer-request function never runs
+                  // on a blocked request -- a carve-out here is the only way
+                  // an off-network client can reach `/edge-ip`. Exempting the
+                  // path (rather than adding a priority -1 allow rule, which
+                  // WAF has no room for: 0 is the minimum priority) also keeps
+                  // `/edge-ip` subject to the managed rule groups and the
+                  // rate limit that follow. Telling a caller its own IP
+                  // discloses nothing it could not already learn elsewhere.
+                  //
+                  // NONE, not LOWERCASE: the exemption must be exactly as wide
+                  // as the thing it protects, and CloudFront path patterns are
+                  // CASE-SENSITIVE, so only the literal `/edge-ip` selects the
+                  // echo behavior. Under LOWERCASE all 128 case variants
+                  // (`/EDGE-IP`, `/Edge-Ip`, ...) satisfied the byteMatch, so
+                  // the AndStatement went false and the WebACL's default ALLOW
+                  // let them through -- but CloudFront matched no additional
+                  // behavior for them either, so they fell to the DEFAULT
+                  // behavior and hit the ALB origin. That is a hole, not a
+                  // convenience: `/EDGE-IP` could never have reached the echo
+                  // function, so blocking it is the correct outcome.
+                  {
+                    notStatement: {
+                      statement: {
+                        byteMatchStatement: {
+                          fieldToMatch: { uriPath: {} },
+                          positionalConstraint: "EXACTLY",
+                          searchString: EDGE_IP_PATH,
+                          textTransformations: [{ priority: 0, type: "NONE" }],
+                        },
+                      },
+                    },
+                  },
+                ],
               },
             },
             visibilityConfig: {
@@ -950,7 +1177,21 @@ export class EdgeStack extends Stack {
             // WCM shared-NAT pooling worry did not materialize at pre-launch
             // volume. Re-check the per-IP aggregation once launch traffic
             // ramps (#1455 also rides this).
-            action: { block: {} },
+            //
+            // 429, not 403: anyone who reaches this rule is inside the IP
+            // allowlist, so the request is not forbidden -- it is throttled,
+            // and 429 is the only code that tells a client (or a crawler) to
+            // back off and retry rather than to stop asking. WAF permits 429.
+            // It is deliberately NOT in the distribution's `errorResponses`
+            // list, so CloudFront applies no TTL of its own to it.
+            action: {
+              block: {
+                customResponse: {
+                  responseCode: 429,
+                  customResponseBodyKey: "rateLimited",
+                },
+              },
+            },
             statement: {
               rateBasedStatement: {
                 limit: 5000,

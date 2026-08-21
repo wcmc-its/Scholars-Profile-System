@@ -269,7 +269,7 @@ describe("EdgeStack", () => {
           template.findResources("AWS::CloudFront::Distribution"),
         ).map((r) => r.Properties as Record<string, unknown>);
 
-      it("has one default behavior plus thirty-three additional cache behaviors (acceptance #2)", () => {
+      it("has one default behavior plus thirty-four additional cache behaviors (acceptance #2)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
@@ -283,8 +283,10 @@ describe("EdgeStack", () => {
         // + the two GrantRecs Phase 2 matcher routes
         // (/api/scholars/*/opportunities, /api/opportunities/*/researchers)
         // + the GrantRecs slice-3 browse list (/api/opportunities)
-        // + the SEARCH_EVIDENCE_ROWS `/api/scholar/*/grants` funding-row fetcher.
-        expect(cacheBehaviors).toHaveLength(34);
+        // + the SEARCH_EVIDENCE_ROWS `/api/scholar/*/grants` funding-row fetcher
+        // + `/edge-ip`, the off-network block page's IP echo (CloudFront
+        // Function only, never reaches the origin).
+        expect(cacheBehaviors).toHaveLength(35);
       });
 
       it("evaluates additional behaviors in the spec-defined order (static first, then uncacheable, then #634 query-keyed)", () => {
@@ -295,6 +297,8 @@ describe("EdgeStack", () => {
         expect(paths).toEqual([
           // -- Immutable build assets (long-cache, CachingOptimized) ------
           "/_next/static/*",
+          // -- Off-network block page IP echo (CloudFront Function only) ---
+          "/edge-ip",
           // -- Uncacheable (CachingDisabled + AllViewer) ------------------
           "/api/edit*",
           "/api/impersonation*",
@@ -458,9 +462,16 @@ describe("EdgeStack", () => {
         ]);
         for (const behavior of cacheBehaviors) {
           const path = behavior.PathPattern as string;
-          if (path === "/_next/static/*" || QUERY_KEYED_PATTERNS.has(path)) {
+          if (
+            path === "/_next/static/*" ||
+            path === "/edge-ip" ||
+            QUERY_KEYED_PATTERNS.has(path)
+          ) {
             // `/_next/static/*` (immutable assets) and Group B (highest-traffic
             // pages) must NOT forward cookies -- it would fragment the cache.
+            // `/edge-ip` never issues an origin request at all: its
+            // viewer-request function returns a synthetic response, so an
+            // origin request policy would be dead configuration.
             expect(behavior.OriginRequestPolicyId).toBeUndefined();
           } else if (INTERNAL_VIEWER_ORP_PATHS.has(path)) {
             // #866 internal-viewer ORP (forwards CloudFront-Viewer-Address) -- a Ref.
@@ -1293,6 +1304,167 @@ describe("EdgeStack", () => {
         const stmt = JSON.stringify(block?.Statement);
         expect(stmt).toContain("NotStatement");
         expect(stmt).toContain("IPSetReferenceStatement");
+      });
+
+      it("serves the branded off-network page and exempts /edge-ip from the block", () => {
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        const rules = acl.Rules as Array<Record<string, unknown>>;
+        const block = rules.find((r) => r.Name === "block-non-wcm");
+        const action = block?.Action as {
+          Block?: { CustomResponse?: Record<string, unknown> };
+        };
+        expect(action.Block?.CustomResponse?.ResponseCode).toBe(403);
+        expect(action.Block?.CustomResponse?.CustomResponseBodyKey).toBe(
+          "offNetwork",
+        );
+
+        const bodies = acl.CustomResponseBodies as Record<
+          string,
+          { ContentType: string; Content: string }
+        >;
+        expect(bodies.offNetwork.ContentType).toBe("TEXT_HTML");
+
+        // A single WAF custom response body is capped at 4 KB by a FIXED,
+        // non-adjustable service quota. The WAFv2 API string validator accepts
+        // 10240, so neither `cdk synth` nor CFN catches an overflow -- only the
+        // deploy does. If this fails, tighten the HTML; the limit cannot move.
+        const bytes = Buffer.byteLength(bodies.offNetwork.Content, "utf8");
+        expect(bytes).toBeLessThanOrEqual(4096);
+
+        // The page fetches its IP from /edge-ip. WAF runs before CloudFront
+        // matches a cache behavior, so without this carve-out the viewer-request
+        // function never runs for the very clients that see the page.
+        expect(bodies.offNetwork.Content).toContain('fetch("/edge-ip")');
+        const stmt = JSON.stringify(block?.Statement);
+        expect(stmt).toContain("AndStatement");
+        expect(stmt).toContain('"SearchString":"/edge-ip"');
+
+        // Nothing in the body may reach off-box: a blocked client cannot load
+        // a font, stylesheet, image, or script from anywhere.
+        expect(bodies.offNetwork.Content).not.toMatch(/https?:\/\//);
+      });
+
+      it("serves a DIFFERENT branded body on the rate-limit rule, with 429 not 403", () => {
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        const rules = acl.Rules as Array<Record<string, unknown>>;
+        const rl = rules.find((r) => r.Name === "rate-limit");
+        const action = rl?.Action as {
+          Block?: { CustomResponse?: Record<string, unknown> };
+        };
+
+        // 429, not 403: whoever trips this is INSIDE the allowlist, so the
+        // request is throttled rather than forbidden, and only 429 tells a
+        // client to retry later.
+        expect(action.Block?.CustomResponse?.ResponseCode).toBe(429);
+        expect(action.Block?.CustomResponse?.CustomResponseBodyKey).toBe(
+          "rateLimited",
+        );
+
+        const bodies = acl.CustomResponseBodies as Record<
+          string,
+          { ContentType: string; Content: string }
+        >;
+        expect(bodies.rateLimited.ContentType).toBe("TEXT_HTML");
+        expect(
+          Buffer.byteLength(bodies.rateLimited.Content, "utf8"),
+        ).toBeLessThanOrEqual(4096);
+        expect(bodies.rateLimited.Content).not.toMatch(/https?:\/\//);
+
+        // The two bodies must NOT be interchangeable. Someone who tripped the
+        // per-IP cap is on the WCM network, so the off-network copy would be a
+        // lie -- this is the whole reason there is a second body.
+        expect(bodies.rateLimited.Content).not.toBe(bodies.offNetwork.Content);
+        expect(bodies.rateLimited.Content).not.toContain("Coming soon");
+        expect(bodies.rateLimited.Content).not.toContain("only to visitors on");
+        // ...and it must not echo an IP: /edge-ip has exactly one caller.
+        expect(bodies.rateLimited.Content).not.toContain("/edge-ip");
+
+        // Shared chrome: both pages must still read as the same site.
+        expect(bodies.rateLimited.Content).toContain(
+          '<div class="m"><b>Scholars</b><span>Weill Cornell Medicine</span></div>',
+        );
+        expect(bodies.rateLimited.Content).toContain("#B31B1B");
+
+        // Combined size across every body on one WebACL is capped at 50 KB.
+        const total = Object.values(bodies).reduce(
+          (n, b) => n + Buffer.byteLength(b.Content, "utf8"),
+          0,
+        );
+        expect(total).toBeLessThanOrEqual(51200);
+      });
+
+      it("matches the /edge-ip carve-out CASE-SENSITIVELY, exactly as wide as the CloudFront behavior", () => {
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        const rules = acl.Rules as Array<Record<string, unknown>>;
+        const block = rules.find((r) => r.Name === "block-non-wcm");
+        const byteMatch = (
+          block?.Statement as {
+            AndStatement: {
+              Statements: Array<{
+                NotStatement?: {
+                  Statement?: {
+                    ByteMatchStatement?: {
+                      SearchString?: string;
+                      PositionalConstraint?: string;
+                      TextTransformations?: Array<{
+                        Priority: number;
+                        Type: string;
+                      }>;
+                    };
+                  };
+                };
+              }>;
+            };
+          }
+        ).AndStatement.Statements.map(
+          (s) => s.NotStatement?.Statement?.ByteMatchStatement,
+        ).find((b) => b?.SearchString === "/edge-ip");
+
+        // MUST stay NONE. CloudFront path patterns are case-sensitive, so only
+        // the literal `/edge-ip` selects the echo behavior; a LOWERCASE (or
+        // any normalizing) transform would exempt all 128 case variants from
+        // block-non-wcm, the WebACL's default ALLOW would pass them, and
+        // CloudFront -- matching no additional behavior -- would send them to
+        // the DEFAULT behavior and the ALB origin. That is an off-network
+        // origin path, which this rule exists to make impossible.
+        expect(byteMatch?.TextTransformations).toEqual([
+          { Priority: 0, Type: "NONE" },
+        ]);
+        expect(byteMatch?.PositionalConstraint ?? "EXACTLY").toBe("EXACTLY");
+      });
+
+      it("ships the off-network page in its FAILURE state so a dead echo never contradicts the copy", () => {
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        const html = (
+          acl.CustomResponseBodies as Record<string, { Content: string }>
+        ).offNetwork.Content;
+
+        // Static markup == the JS-off / terminal-failure state: an
+        // "Unavailable" address must never sit above "send the address above".
+        expect(html).toContain(
+          '<dd id="i" aria-live="polite" aria-label="Your IP address">Unavailable</dd>',
+        );
+        expect(html).toContain("We could not detect your address.");
+        // The "send the address above" copy is script-written on success only.
+        const staticMarkup = html.slice(0, html.indexOf("<script>"));
+        expect(staticMarkup).not.toContain("Send the address above");
+
+        // The echo body is untrusted: a TLS-inspecting proxy answers 200 with
+        // its own HTML block page, which must not be painted as an IP.
+        expect(html).toContain("/^[0-9a-fA-F.:]{3,45}$/.test(t)");
+        // Non-2xx is routed to the failure copy, not silently swallowed.
+        expect(html).toContain("Promise.reject");
+        // In-flight is a distinct, neutral state, and it is bounded.
+        expect(html).toContain('d.textContent="Checking..."');
+        expect(html).toContain('bad("timeout")');
       });
 
       it("ENFORCES the SQLi/known-bad/common managed groups, keeping only SizeRestrictions_BODY in count (#1434)", () => {
