@@ -271,10 +271,10 @@ export function deadlineLabel(dueDate: string | null, status: string | null, now
 }
 
 /**
- * Deadline cell: the date toned by urgency (amber inside the 30-day window, a
- * "(passed)" suffix once behind us) so staff can triage actionable vs dead
- * opportunities by scanning one column. The em-dash case carries a spoken
- * equivalent — a bare "—" reaches a screen reader as nothing at all.
+ * The deadline in a card's meta row: the date toned by urgency (amber inside the
+ * 30-day window, a "(passed)" suffix once behind us) so staff can triage actionable
+ * vs dead opportunities scanning straight down the card list. The em-dash case
+ * carries a spoken equivalent — a bare "—" reaches a screen reader as nothing at all.
  */
 function DeadlineCell({ iso, status }: { iso: string | null; status: string | null }) {
   const label = deadlineLabel(iso, status, Date.now());
@@ -831,19 +831,22 @@ function withoutFacet(
  * currently narrowing the list, sitting above the results count so the reason a
  * short list is short is visible without opening the rail.
  *
- * This is NARROWER than `FilterRail`'s `active` test, which also counts a RELAXED
- * faculty-PI gate (`!filters.facultyPiOnly`). The gate is deliberately un-chipped
- * in both of its states: it is ON by default, so chipping it would put a chip on
- * every resting render, and relaxed it does not narrow anything. Its relax/re-apply
- * control already lives on the counterfactual sentence below — the one line that
- * admits rows are hidden.
+ * The render test here and `FilterRail`'s `active` test are the SAME condition
+ * (`openOnly || sponsors.size || mechanisms.size`). The faculty-PI gate is deliberately
+ * un-chipped in both of its states and counts toward neither: it is ON by default, so
+ * chipping it would put a chip on every resting render, and relaxed it does not narrow
+ * anything. Its relax/re-apply control already lives on the counterfactual sentence
+ * below — the one line that admits rows are hidden.
  *
  * 🔴 Because the gate has no chip, BOTH reset controls — this row's "Clear all" and
  * the rail's "reset all" — must CARRY IT THROUGH rather than reset it:
  * `EMPTY_BROWSE_FILTERS.facultyPiOnly` is `true`, so spreading it blind silently
  * re-applies a gate that hides ~13.2% of the corpus and makes the list SHORTER, with
- * no chip having represented that state. They are always on screen together, so the
- * two must agree; each is pinned by its own test.
+ * no chip having represented that state. That is also why `active` may not count the
+ * relaxed gate: it would render a "reset all" whose one set term the handler is
+ * forbidden to touch, so the button would click to an identical state and never dismiss
+ * itself. They are always on screen together, so the two must agree; each is pinned by
+ * its own test.
  */
 function ActiveFilterChips({
   filters,
@@ -928,7 +931,11 @@ function ActiveFilterChips({
 //     before the response (they exist only to derive `facultyPiEligible`), so they are not on the
 //     wire either;
 //   - and two of the artboard's six eligibility labels ("MD/PhD", "Tenure track") have no
-//     corresponding `career_stages` value in `lib/funding/screening.ts` at all.
+//     corresponding `career_stages` value in EITHER half of the vocabulary — neither
+//     `HOLDABLE_STAGES` in `lib/funding/screening.ts` nor `FACULTY_STAGES`/`STUDENT_STAGES`
+//     in `etl/dynamodb/grant-opportunity-mapper.ts`. Both files have to be read to say that:
+//     "Grad/Prof students" maps to `graduate_student`, which appears ONLY in the mapper, so
+//     screening.ts alone would put the count at three.
 // Land the field on the wire first; do not re-raise either group from the artboard alone.
 function FilterRail({
   filters,
@@ -945,11 +952,8 @@ function FilterRail({
   includeGrantsGov: boolean;
   setIncludeGrantsGov: (v: boolean) => void;
 }) {
-  const active =
-    filters.openOnly ||
-    !filters.facultyPiOnly ||
-    filters.sponsors.size > 0 ||
-    filters.mechanisms.size > 0;
+  // EXACTLY the chip row's render test, not a superset — see `ActiveFilterChips`.
+  const active = filters.openOnly || filters.sponsors.size > 0 || filters.mechanisms.size > 0;
 
   function toggleIn(group: "sponsors" | "mechanisms", value: string) {
     setFilters((f) => {
@@ -974,10 +978,12 @@ function FilterRail({
           <button
             type="button"
             // `facultyPiOnly` is carried through, exactly as the chip row's "Clear all"
-            // does. `active` below is a SUPERSET of the chip row's render test, so both
+            // does. `active` above is EQUAL to the chip row's render test, so both
             // controls are always on screen together; resetting the gate here while the
             // chip row carries it would leave two adjacent controls disagreeing about
-            // one piece of state.
+            // one piece of state. Counting the relaxed gate in `active` instead would put
+            // this button over a state whose only set term the handler may not touch — it
+            // would click to an identical state and never dismiss itself.
             onClick={() =>
               setFilters((f) => ({
                 ...EMPTY_BROWSE_FILTERS,
@@ -1102,15 +1108,15 @@ function FacetGroup({
 /**
  * One opportunity as a card.
  *
- * THE WHOLE ROW IS THE CLICK TARGET, and it gets there the boring way: the
+ * THE WHOLE CARD IS THE CLICK TARGET, and it gets there the boring way: the
  * title is a real `<Link>` whose `after:absolute after:inset-0` pseudo-element
- * covers the `relative` row. No onClick/onKeyDown/role="button" on the `<tr>` —
+ * covers the `relative` card. No onClick/onKeyDown/role="button" on the `<li>` —
  * that would forfeit cmd-click, middle-click, right-click "copy link address",
  * tab focus and the screen-reader "link" announcement, all of which an anchor
- * gives for free. `focus-within` puts the focus ring on the row so keyboard
+ * gives for free. `focus-within` puts the focus ring on the card so keyboard
  * users see what they are about to open.
  *
- * If a secondary control is ever added to a row it MUST carry `relative z-10`,
+ * If a secondary control is ever added to a card it MUST carry `relative z-10`,
  * or the stretched pseudo-element will sit on top of it and swallow the click.
  */
 function OpportunityCard({

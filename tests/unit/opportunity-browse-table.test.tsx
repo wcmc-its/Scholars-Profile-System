@@ -103,7 +103,9 @@ describe("BrowseList — cards", () => {
     expect(card!.className).toContain("focus-within:outline");
     expect(card!.getAttribute("role")).toBeNull();
     expect(card!.getAttribute("tabindex")).toBeNull();
-    expect(card!.getAttribute("onclick")).toBeNull();
+    // No `onclick`-attribute assertion here: React attaches handlers as props, never as a
+    // DOM attribute, so `getAttribute("onclick")` reads null even on a card that HAS one.
+    // The href + stretched-pseudo-element assertions above are the guard that can fail.
   });
 
   it("defect 1 — the sponsor prints once: in the meta row, stripped off the title", async () => {
@@ -379,10 +381,12 @@ describe("BrowseList — rail facets, filter chips and Clear all", () => {
 
   /**
    * 🔴 The rail's "reset all" and the chip row's "Clear all" are ALWAYS on screen together —
-   * `FilterRail`'s `active` test is a superset of the chip row's render test — so they cannot
-   * be allowed to disagree about `facultyPiOnly`. Blind-spreading `EMPTY_BROWSE_FILTERS` in
+   * `FilterRail`'s `active` test is EXACTLY the chip row's render test — so they cannot be
+   * allowed to disagree about `facultyPiOnly`. Blind-spreading `EMPTY_BROWSE_FILTERS` in
    * either one re-applies a gate no chip ever represented and makes the list SHORTER after a
-   * control named "reset". This pins the rail control specifically, with the gate relaxed.
+   * control named "reset". This pins the rail control specifically, with the gate relaxed,
+   * INCLUDING that it dismisses itself afterwards — which is what separates a live control
+   * from one whose only remaining term it is forbidden to touch.
    */
   it("the rail's reset all carries the relaxed faculty-PI gate through, like Clear all", async () => {
     await renderBrowse(FILTER_OPPS);
@@ -393,6 +397,7 @@ describe("BrowseList — rail facets, filter chips and Clear all", () => {
     const sponsors = within(rail()).getByRole("group", { name: "Sponsor" });
     fireEvent.click(within(sponsors).getByRole("checkbox", { name: /^Hartwell Foundation/ }));
     await waitFor(() => expect(cards()).toHaveLength(2));
+    expect(within(rail()).getByRole("button", { name: "reset all" })).toBeTruthy();
 
     fireEvent.click(within(rail()).getByRole("button", { name: "reset all" }));
 
@@ -401,5 +406,28 @@ describe("BrowseList — rail facets, filter chips and Clear all", () => {
     expect(screen.queryByText("Filtering by:")).toBeNull();
     expect(screen.getByRole("button", { name: "hide awards no faculty PI can hold" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "show" })).toBeNull();
+    // …and the button itself is gone. Without this line the test passes against a "reset all"
+    // that is a permanent no-op — still on screen, one click from a resting Browse view.
+    expect(within(rail()).queryByRole("button", { name: "reset all" })).toBeNull();
+  });
+
+  /**
+   * 🔴 The other half of the same invariant, and the one that regressed: with the gate
+   * relaxed and NOTHING else set, "reset all" must not render at all. It carries
+   * `facultyPiOnly` through, so in that state it has nothing left to change — it would
+   * render, click to an identical state, and never dismiss itself. Re-applying the gate is
+   * the counterfactual line's own control, which is on screen the whole time.
+   */
+  it("offers no reset all when the relaxed faculty-PI gate is the only thing set", async () => {
+    await renderBrowse(FILTER_OPPS);
+    expect(within(rail()).queryByRole("button", { name: "reset all" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "show" }));
+    await waitFor(() => expect(cards()).toHaveLength(4));
+
+    expect(within(rail()).queryByRole("button", { name: "reset all" })).toBeNull();
+    // The chip row, whose render test this now EQUALS, is absent in the same state.
+    expect(screen.queryByText("Filtering by:")).toBeNull();
+    expect(screen.getByRole("button", { name: "hide awards no faculty PI can hold" })).toBeTruthy();
   });
 });
