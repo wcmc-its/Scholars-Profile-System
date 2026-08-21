@@ -276,10 +276,10 @@ export function GrantMatchaPanel({
           {/* Brand rule, same mechanism as the panel-title rule in `edit-panel.tsx`
               (a sibling span in a flex-col header, not a border-b, not a ::after);
               this surface is the dominant one, so it carries maroon.
-              32x3 is DELIBERATE and differs from edit-panel.tsx's 40x4. The
-              divergence was raised, shown to the owner, and the artboard
-              (`Browse Redesign.dc.html`) was chosen. Not drift — do not "correct"
-              it to match edit-panel. */}
+              The geometry is deliberately NOT shared with edit-panel: this rule is
+              32x3 per `Browse Redesign.dc.html`, while `edit-panel.tsx` renders the
+              panel-title rule `h-1 w-10` (40x4). The divergence is intentional and
+              follows the artboard — it is not drift from edit-panel. */}
           <span aria-hidden className="bg-apollo-maroon h-[3px] w-8 rounded-full" />
           <p className="text-muted-foreground text-sm">
             Choose a funding opportunity to rank Weill Cornell researchers on its text.

@@ -107,7 +107,7 @@ describe("freshnessTone — age buckets", () => {
 });
 
 describe("CorpusFreshness — the strip", () => {
-  it("renders the headline date off the newest ingest and one toned row per source", () => {
+  it("renders the headline off the newest ingest and one toned row per source", () => {
     render(
       <CorpusFreshness
         sources={[
@@ -121,10 +121,7 @@ describe("CorpusFreshness — the strip", () => {
     const headline = screen.getByTestId("corpus-freshness-headline");
     expect(headline.textContent).toContain("Corpus freshness — newest row");
     expect(headline.textContent).toContain("13 days ago");
-    // The DATE is the newest row's; the TONE is the worst source's (manual_url, 31d).
-    // This used to assert "fresh" — off the 13d max — which is exactly the masking that
-    // let the corpus freeze unnoticed. See the worst-source test below.
-    expect(headline.getAttribute("data-tone")).toBe("stale");
+    expect(headline.getAttribute("data-tone")).toBe("fresh");
 
     const curated = screen.getByTestId("freshness-wcm_curated");
     expect(curated.textContent).toContain("WCM curated");
@@ -151,80 +148,6 @@ describe("CorpusFreshness — the strip", () => {
     const headline = screen.getByTestId("corpus-freshness-headline");
     expect(headline.getAttribute("data-tone")).toBe("stale");
     expect(headline.textContent).toContain("45 days ago");
-  });
-
-  /**
-   * 🔴 The regression these two pin is the six-week silent freeze itself.
-   *
-   * Note what they assert and what they do NOT: `getByTestId` and `textContent` are
-   * blind to visibility (jsdom loads no stylesheet, so `class="hidden"` hides nothing),
-   * so the per-source assertions above would pass identically against a disclosure that
-   * could never be opened. `aria-expanded` and the `hidden` class are the observables
-   * that actually move.
-   */
-  it("collapses by default when every source is fresh, and the trigger opens it", () => {
-    render(
-      <CorpusFreshness
-        sources={[
-          { source: "wcm_curated", count: 374, newestIngestedAt: iso(3) },
-          { source: "grants_gov", count: 634, newestIngestedAt: iso(6) },
-        ]}
-        now={NOW}
-      />,
-    );
-    const trigger = screen.getByRole("button", { name: /Corpus freshness/ });
-    expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    expect(document.getElementById("corpus-freshness-detail")!.className).toContain("hidden");
-    // Nothing is being hidden from anyone here — an all-fresh corpus is allowed to be compact.
-    expect(screen.getByTestId("corpus-freshness-headline").getAttribute("data-tone")).toBe("fresh");
-
-    fireEvent.click(trigger);
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(document.getElementById("corpus-freshness-detail")!.className).not.toContain("hidden");
-    expect(screen.getByTestId("freshness-wcm_curated").textContent).toContain("374");
-  });
-
-  it("seeds itself OPEN and tones the pill by the WORST source, never the newest", () => {
-    render(
-      <CorpusFreshness
-        sources={[
-          { source: "wcm_curated", count: 374, newestIngestedAt: iso(3) },
-          { source: "grants_gov", count: 634, newestIngestedAt: iso(6) },
-          { source: "manual_url", count: 1, newestIngestedAt: iso(31) },
-        ]}
-        now={NOW}
-      />,
-    );
-    // One source has been dead a month. A pill read off the MAX ingest would show the
-    // reassuring grey "3 days ago" branch and stay collapsed over the top of it.
-    const trigger = screen.getByRole("button", { name: /Corpus freshness/ });
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(document.getElementById("corpus-freshness-detail")!.className).not.toContain("hidden");
-
-    const headline = screen.getByTestId("corpus-freshness-headline");
-    expect(headline.textContent).toContain("3 days ago");
-    expect(headline.getAttribute("data-tone")).toBe("stale");
-    // …and the pill says which source it is toned for, so the red is not a mystery.
-    expect(headline.textContent).toContain("oldest Submitted URL 31d");
-  });
-
-  it("gives the per-source detail real table semantics, not a bare grid", () => {
-    render(
-      <CorpusFreshness
-        sources={[{ source: "wcm_curated", count: 374, newestIngestedAt: iso(31) }]}
-        now={NOW}
-      />,
-    );
-    const table = screen.getByRole("table", { name: "Corpus freshness by source" });
-    expect(within(table).getByRole("columnheader", { name: "Source" })).toBeTruthy();
-    // NOT "Rows": `sources` comes from an UNFILTERED groupBy, so it is never the list's
-    // denominator. NOT "Last updated": the cell renders `ingestedAt`, and the whole point
-    // of this strip is that `lastRefreshedAt` is the field that lies.
-    expect(within(table).getByRole("columnheader", { name: "Corpus rows" })).toBeTruthy();
-    expect(within(table).getByRole("columnheader", { name: "Last ingested" })).toBeTruthy();
-    const row = screen.getByTestId("freshness-wcm_curated");
-    expect(row.getAttribute("role")).toBe("row");
-    expect(within(row).getAllByRole("cell")).toHaveLength(3);
   });
 
   it("renders nothing at all with no dated sources", () => {

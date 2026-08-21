@@ -126,6 +126,30 @@ describe("BrowseList — cards", () => {
     expect(undated.textContent).toContain("Rolling");
   });
 
+  /**
+   * 🔴 BLOCKER-1 TRIPWIRE. `Browse Redesign.dc.html` draws "Not extracted" in this cell, and a
+   * build following the artboard shipped exactly that — a provenance claim the data does not
+   * carry (see `DeadlineCell`'s own note). Every `deadlineLabel` pin stayed green throughout,
+   * because the pure helper never changed and only the DOM moved; so pin the DOM instead: the
+   * visible glyph, the screen-reader replacement for it, and the ABSENCE of the artboard string.
+   */
+  it("an undated open row renders the em dash + sr-only text, never “Not extracted”", async () => {
+    await renderBrowse([
+      {
+        ...OPPS[0],
+        opportunityId: "wcm_curated:undated",
+        title: "Undated Open Award",
+        dueDate: null,
+        status: "open",
+      },
+    ]);
+    const card = screen.getByRole("link", { name: "Undated Open Award" }).closest("li")!;
+    // A bare em dash reaches a screen reader as nothing, hence the paired sr-only sentence.
+    expect(within(card).getByText("—").getAttribute("aria-hidden")).toBe("true");
+    expect(within(card).getByText("No deadline recorded").className).toContain("sr-only");
+    expect(card.textContent).not.toContain("Not extracted");
+  });
+
   it("defect 3 — the curated badge sits with the card it modifies", async () => {
     await renderBrowse();
     const card = screen.getByRole("link", { name: /ONES/ }).closest("li")!;
@@ -187,8 +211,9 @@ describe("BrowseList — cards", () => {
 });
 
 /**
- * Redesign 2026-08 — the rail's facet groups, the active-filter chip row, and
- * "Clear all". Its own fixture rather than `OPPS`: two sponsors, two mechanisms
+ * Redesign 2026-08 — the rail's facet groups, the active-filter chip row, and the two
+ * reset controls ("Clear all" and the rail's "reset all", which must agree about the
+ * faculty-PI gate). Its own fixture rather than `OPPS`: two sponsors, two mechanisms
  * and one award no WCM faculty PI can hold is the minimum shape that renders the
  * Sponsor facet, the Mechanism facet, a chip and the faculty-PI counterfactual
  * all at once, and it leaves the card tests above untouched.
@@ -265,12 +290,12 @@ describe("BrowseList — rail facets, filter chips and Clear all", () => {
     const mech = within(rail()).getByRole("group", { name: "Mechanism" });
     // Counts are computed with this group's own selections skipped, over the rows the
     // faculty-PI gate lets through: R01 = alpha + delta, K99 = beta (gamma is gated out).
-    expect(within(mech).getByRole("checkbox", { name: /^R01/ }).closest("label")!.textContent).toMatch(
-      /^R01\s*2$/,
-    );
-    expect(within(mech).getByRole("checkbox", { name: /^K99/ }).closest("label")!.textContent).toMatch(
-      /^K99\s*1$/,
-    );
+    expect(
+      within(mech).getByRole("checkbox", { name: /^R01/ }).closest("label")!.textContent,
+    ).toMatch(/^R01\s*2$/);
+    expect(
+      within(mech).getByRole("checkbox", { name: /^K99/ }).closest("label")!.textContent,
+    ).toMatch(/^K99\s*1$/);
 
     fireEvent.click(within(mech).getByRole("checkbox", { name: /^K99/ }));
     await waitFor(() => expect(cards()).toHaveLength(1));
@@ -288,7 +313,9 @@ describe("BrowseList — rail facets, filter chips and Clear all", () => {
 
     // Group-prefixed: a bare "Hartwell Foundation" would be indistinguishable from a
     // Mechanism chip carrying the same string, on screen and read aloud.
-    const remove = screen.getByRole("button", { name: "Remove filter: Sponsor: Hartwell Foundation" });
+    const remove = screen.getByRole("button", {
+      name: "Remove filter: Sponsor: Hartwell Foundation",
+    });
     fireEvent.click(remove);
 
     await waitFor(() => expect(cards()).toHaveLength(3));
@@ -325,6 +352,53 @@ describe("BrowseList — rail facets, filter chips and Clear all", () => {
     // The chips go; the gate stays exactly where the user left it.
     await waitFor(() => expect(screen.queryByText("Filtering by:")).toBeNull());
     expect(cards()).toHaveLength(4);
+    expect(screen.getByRole("button", { name: "hide awards no faculty PI can hold" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "show" })).toBeNull();
+  });
+
+  /**
+   * 🔴 AVAILABILITY-CHIP GUARD. Deleting the whole `if (filters.openOnly)` push from
+   * `ActiveFilterChips` left every test in the repo green — Sponsor and Mechanism are pinned
+   * above, this one was not. It is also the only chip fed by a radio rather than a checkbox,
+   * so it is the only one whose removal has to put a sibling control back.
+   */
+  it("chips the availability filter and clears it back to Open and past", async () => {
+    await renderBrowse(FILTER_OPPS);
+    expect(screen.queryByText("Filtering by:")).toBeNull();
+
+    fireEvent.click(within(rail()).getByRole("radio", { name: "Only open" }));
+    await waitFor(() => expect(screen.getByText("Filtering by:")).toBeTruthy());
+    expect(screen.getByText("Availability: Only open")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove filter: Availability: Only open" }));
+    await waitFor(() => expect(screen.queryByText("Filtering by:")).toBeNull());
+    expect(
+      (within(rail()).getByRole("radio", { name: "Open and past" }) as HTMLInputElement).checked,
+    ).toBe(true);
+  });
+
+  /**
+   * 🔴 The rail's "reset all" and the chip row's "Clear all" are ALWAYS on screen together —
+   * `FilterRail`'s `active` test is a superset of the chip row's render test — so they cannot
+   * be allowed to disagree about `facultyPiOnly`. Blind-spreading `EMPTY_BROWSE_FILTERS` in
+   * either one re-applies a gate no chip ever represented and makes the list SHORTER after a
+   * control named "reset". This pins the rail control specifically, with the gate relaxed.
+   */
+  it("the rail's reset all carries the relaxed faculty-PI gate through, like Clear all", async () => {
+    await renderBrowse(FILTER_OPPS);
+
+    fireEvent.click(screen.getByRole("button", { name: "show" }));
+    await waitFor(() => expect(cards()).toHaveLength(4));
+
+    const sponsors = within(rail()).getByRole("group", { name: "Sponsor" });
+    fireEvent.click(within(sponsors).getByRole("checkbox", { name: /^Hartwell Foundation/ }));
+    await waitFor(() => expect(cards()).toHaveLength(2));
+
+    fireEvent.click(within(rail()).getByRole("button", { name: "reset all" }));
+
+    // The facets go; the gate stays exactly where the user left it.
+    await waitFor(() => expect(cards()).toHaveLength(4));
+    expect(screen.queryByText("Filtering by:")).toBeNull();
     expect(screen.getByRole("button", { name: "hide awards no faculty PI can hold" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "show" })).toBeNull();
   });

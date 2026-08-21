@@ -21,7 +21,6 @@ import Link from "next/link";
 import {
   AlertTriangle,
   Building2,
-  ChevronDown,
   ChevronRight,
   Clock,
   ExternalLink,
@@ -104,48 +103,21 @@ function ingestDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-/** Tone → text treatment, shared by the pill headline and each source's age cell. */
-const FRESHNESS_TEXT: Record<FreshnessTone, string> = {
-  fresh: "text-muted-foreground",
-  aging: "font-medium text-apollo-amber",
-  stale: "font-medium text-red-700 dark:text-red-400",
+const FRESHNESS_DOT: Record<FreshnessTone, string> = {
+  fresh: "text-green-600 dark:text-green-400",
+  aging: "text-apollo-amber",
+  stale: "text-red-600 dark:text-red-400",
 };
 
 /**
- * Corpus-freshness disclosure (matcha-admin Phase 1b; redesign 2026-08) — the
- * Browse-tab header on `/edit/grant-matcha`. Collapsed it is one pill; expanded
- * it adds a Source / Corpus rows / Last ingested table, a row per source. Reads
- * `ingestedAt` ONLY — `lastRefreshedAt` is re-stamped by the nightly upsert and
- * would always read fresh (the Phase 0a lesson, and the reason the corpus froze
- * unnoticed for six weeks).
- *
- * 🔴 The pill is toned by the WORST source, never by the newest. Newest-across-
- * the-corpus is a MAX, so one healthy source masks every dead one — that is the
- * six-week freeze, exactly. The pill still NAMES the newest row (it is the
- * pipeline's pulse) but takes its colour, its icon and its icon's colour from
- * the oldest, and the disclosure SEEDS ITSELF OPEN whenever any source has
- * fallen behind. An all-fresh corpus may collapse: there is nothing to hide.
- *
- * The table stays MOUNTED when collapsed and is hidden with a display utility,
- * so the trigger's `aria-controls` points at something real and find-in-page
- * still reaches the rows. `hidden`/`grid` are swapped, never both applied —
- * two display utilities on one element resolve by stylesheet order, not by the
- * order they are written in the attribute. Each source's three cells sit in a
- * `display:contents` wrapper so they align to the header without a subgrid,
- * which strips the default list/table semantics — hence the explicit ARIA
- * table/row/columnheader/cell roles, which are read off the DOM and so survive
- * `display:contents`.
+ * Corpus-freshness strip (matcha-admin Phase 1b) — the Browse-tab header on
+ * `/edit/grant-matcha`. Headline: the newest ingest across the WHOLE corpus
+ * (the pipeline's pulse, warning-toned when stale); per-source rows: count +
+ * newest ingest + an age dot. Reads `ingestedAt` ONLY — `lastRefreshedAt` is
+ * re-stamped by the nightly upsert and would always read fresh (the Phase 0a
+ * lesson, and the reason the corpus froze unnoticed for six weeks).
  */
 export function CorpusFreshness({ sources, now }: { sources: SourceFreshness[]; now: number }) {
-  // Seeded from the sources themselves, before the early return so the hook order is
-  // fixed: any source off "fresh" opens the disclosure on first paint.
-  const [open, setOpen] = useState(() =>
-    sources.some(
-      (s) =>
-        s.newestIngestedAt !== null &&
-        freshnessTone(ingestAgeDays(s.newestIngestedAt, now)) !== "fresh",
-    ),
-  );
   const dated = sources.filter(
     (s): s is SourceFreshness & { newestIngestedAt: string } => s.newestIngestedAt !== null,
   );
@@ -163,118 +135,46 @@ export function CorpusFreshness({ sources, now }: { sources: SourceFreshness[]; 
     new Date(s.newestIngestedAt).getTime() > new Date(max.newestIngestedAt).getTime() ? s : max,
   );
   const headAge = ingestAgeDays(newest.newestIngestedAt, now);
-  // The pill's severity. `freshnessTone` is monotonic in age, so the OLDEST source is
-  // the worst-toned one and no separate severity ranking is needed.
-  const oldest = rows.reduce((min, s) =>
-    new Date(s.newestIngestedAt).getTime() < new Date(min.newestIngestedAt).getTime() ? s : min,
-  );
-  const oldestAge = ingestAgeDays(oldest.newestIngestedAt, now);
-  const pillTone = freshnessTone(oldestAge);
+  const headTone = freshnessTone(headAge);
 
   return (
     <section
       data-testid="corpus-freshness"
       aria-label="Corpus freshness"
-      className="border-apollo-border bg-apollo-surface mb-4 rounded-[var(--apollo-radius-card)] border text-sm"
+      className="border-apollo-border bg-apollo-surface mb-4 rounded-lg border px-4 py-3 text-sm"
     >
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        aria-controls="corpus-freshness-detail"
-        className="hover:bg-apollo-surface-2 flex w-full items-center gap-2 rounded-[var(--apollo-radius-card)] px-4 py-2.5 text-left"
-      >
-        {pillTone === "fresh" ? (
-          <Clock className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
-        ) : (
-          <AlertTriangle className={`size-3.5 shrink-0 ${FRESHNESS_TEXT[pillTone]}`} aria-hidden />
-        )}
-        <span
-          data-testid="corpus-freshness-headline"
-          data-tone={pillTone}
-          className={`min-w-0 flex-1 ${FRESHNESS_TEXT[pillTone]}`}
-        >
-          Corpus freshness — newest row {ingestDate(newest.newestIngestedAt)}, {headAge} day
-          {headAge === 1 ? "" : "s"} ago
-          {/* Without this the pill can read "newest row 3 days ago" in red and look like a
-              bug. Named only when the worst source is a DIFFERENT one — otherwise the
-              headline already is the worst source. */}
-          {pillTone !== "fresh" && oldest.source !== newest.source
-            ? ` · oldest ${sourceLabel(oldest.source) ?? "Unknown"} ${oldestAge}d`
-            : ""}
-        </span>
-        <ChevronDown
-          className={`text-muted-foreground size-4 shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
-          aria-hidden
-        />
-      </button>
-      <div
-        id="corpus-freshness-detail"
-        role="table"
-        aria-label="Corpus freshness by source"
+      <p
+        data-testid="corpus-freshness-headline"
+        data-tone={headTone}
         className={
-          open
-            ? "border-apollo-border grid grid-cols-[1fr_auto_auto] gap-x-6 gap-y-1.5 border-t px-4 py-3"
-            : "hidden"
+          headTone === "fresh"
+            ? "text-muted-foreground"
+            : headTone === "aging"
+              ? "font-medium text-apollo-amber"
+              : "font-medium text-red-700 dark:text-red-400"
         }
       >
-        <div role="row" className="contents">
-          <span
-            role="columnheader"
-            className="text-muted-foreground text-[10.5px] tracking-wider uppercase"
-          >
-            Source
-          </span>
-          {/* NOT "Rows": `/api/opportunities` builds `sources` from a groupBy with NO
-              `where`, so this counts the WHOLE table, while the list beside it filters
-              isHonorific/suppressedAt/grants_gov. It is never the list's denominator. */}
-          <span
-            role="columnheader"
-            className="text-muted-foreground text-right text-[10.5px] tracking-wider uppercase"
-          >
-            Corpus rows
-          </span>
-          {/* "Last ingested", never "Last updated" — the cell renders `ingestedAt`, and the
-              whole point of this strip is that `lastRefreshedAt` is the field that lies. */}
-          <span
-            role="columnheader"
-            className="text-muted-foreground text-right text-[10.5px] tracking-wider uppercase"
-          >
-            Last ingested
-          </span>
-        </div>
+        {headTone !== "fresh" ? (
+          <AlertTriangle className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />
+        ) : null}
+        Corpus freshness — newest row {ingestDate(newest.newestIngestedAt)}, {headAge} day
+        {headAge === 1 ? "" : "s"} ago
+      </p>
+      <ul className="text-muted-foreground mt-1.5 flex flex-wrap gap-x-5 gap-y-1">
         {rows.map((s) => {
           const age = ingestAgeDays(s.newestIngestedAt, now);
           const tone = freshnessTone(age);
-          // ponytail: `contents` keeps each source's three cells column-aligned with
-          // the header row without a subgrid; the wrapper exists only to carry the
-          // test hook and the row role. Source names render as plain text — there is
-          // no source→URL registry anywhere in the system, and only `sourceUrl`
-          // (per-opportunity, not on the list item) is a real link.
           return (
-            <div
-              key={s.source ?? "unknown"}
-              data-testid={`freshness-${s.source ?? "unknown"}`}
-              role="row"
-              className="contents"
-            >
-              <span role="cell" className="text-foreground">
-                {sourceLabel(s.source) ?? "Unknown"}
+            <li key={s.source ?? "unknown"} data-testid={`freshness-${s.source ?? "unknown"}`}>
+              <span className="text-foreground">{sourceLabel(s.source) ?? "Unknown"}</span>{" "}
+              {s.count} · {ingestDate(s.newestIngestedAt)} ({age}d){" "}
+              <span aria-hidden data-tone={tone} className={FRESHNESS_DOT[tone]}>
+                ●
               </span>
-              <span role="cell" className="text-muted-foreground text-right tabular-nums">
-                {s.count}
-              </span>
-              <span
-                role="cell"
-                data-tone={tone}
-                className={`text-right tabular-nums ${FRESHNESS_TEXT[tone]}`}
-              >
-                {ingestDate(s.newestIngestedAt)} ({age}d)
-              </span>
-            </div>
+            </li>
           );
         })}
-      </div>
+      </ul>
     </section>
   );
 }
@@ -938,10 +838,12 @@ function withoutFacet(
  * control already lives on the counterfactual sentence below — the one line that
  * admits rows are hidden.
  *
- * 🔴 Because the gate has no chip, "Clear all" must CARRY IT THROUGH rather than
- * reset it: `EMPTY_BROWSE_FILTERS.facultyPiOnly` is `true`, so spreading it blind
- * silently re-applies a gate that hides ~13.2% of the corpus and makes the list
- * SHORTER, with no chip having represented that state.
+ * 🔴 Because the gate has no chip, BOTH reset controls — this row's "Clear all" and
+ * the rail's "reset all" — must CARRY IT THROUGH rather than reset it:
+ * `EMPTY_BROWSE_FILTERS.facultyPiOnly` is `true`, so spreading it blind silently
+ * re-applies a gate that hides ~13.2% of the corpus and makes the list SHORTER, with
+ * no chip having represented that state. They are always on screen together, so the
+ * two must agree; each is pinned by its own test.
  */
 function ActiveFilterChips({
   filters,
@@ -978,7 +880,7 @@ function ActiveFilterChips({
       {chips.map((c) => (
         <span
           key={c.key}
-          className="border-apollo-border bg-apollo-surface inline-flex max-w-full items-center gap-1 rounded-full border py-0.5 pl-2.5 pr-1"
+          className="border-apollo-border bg-apollo-surface inline-flex max-w-full items-center gap-1 rounded-full border py-0.5 pr-1 pl-2.5"
         >
           <span className="min-w-0 truncate">{c.label}</span>
           <button
@@ -1016,6 +918,18 @@ function ActiveFilterChips({
 // 99.0% of the corpus, and the range test rejects an undated row, so setting either bound
 // silently hid almost everything while appearing to narrow. A filter over a field that does not
 // exist is worse than no filter. Restore it when typed deadline extraction lands, not before.
+//
+// `Browse Redesign.dc.html` draws Availability / Sponsor / Research area / Eligibility; the rail
+// below is Availability / Sponsor / Mechanism / Sources. Research area and Eligibility were
+// considered and declined on DATA, not taste, and the artboard is not evidence they can be built:
+//   - Research area would key off `primaryTopicId`, which `app/api/opportunities/route.ts` does
+//     not select — the browse rows never carry it;
+//   - `eligibility` and `eligibilityFlags` ARE selected there, then deliberately destructured out
+//     before the response (they exist only to derive `facultyPiEligible`), so they are not on the
+//     wire either;
+//   - and two of the artboard's six eligibility labels ("MD/PhD", "Tenure track") have no
+//     corresponding `career_stages` value in `lib/funding/screening.ts` at all.
+// Land the field on the wire first; do not re-raise either group from the artboard alone.
 function FilterRail({
   filters,
   setFilters,
@@ -1059,7 +973,18 @@ function FilterRail({
         {active ? (
           <button
             type="button"
-            onClick={() => setFilters((f) => ({ ...EMPTY_BROWSE_FILTERS, q: f.q }))}
+            // `facultyPiOnly` is carried through, exactly as the chip row's "Clear all"
+            // does. `active` below is a SUPERSET of the chip row's render test, so both
+            // controls are always on screen together; resetting the gate here while the
+            // chip row carries it would leave two adjacent controls disagreeing about
+            // one piece of state.
+            onClick={() =>
+              setFilters((f) => ({
+                ...EMPTY_BROWSE_FILTERS,
+                q: f.q,
+                facultyPiOnly: f.facultyPiOnly,
+              }))
+            }
             className="text-xs text-[var(--color-accent-slate)] hover:underline"
           >
             reset all
@@ -1211,8 +1136,8 @@ function OpportunityCard({
   const suppressed = Boolean(o.suppressedAt);
   return (
     <li
-      className={`border-apollo-border bg-apollo-surface hover:border-apollo-border-strong hover:bg-apollo-surface-2 focus-within:outline-apollo-maroon relative flex items-center gap-3 rounded-[var(--apollo-radius-card)] border p-4 shadow-[var(--apollo-shadow-card)] transition-colors focus-within:outline focus-within:outline-2 focus-within:-outline-offset-2${
-        suppressed ? " opacity-60" : ""
+      className={`border-apollo-border bg-apollo-surface hover:border-apollo-border-strong hover:bg-apollo-surface-2 focus-within:outline-apollo-maroon relative flex items-center gap-3 rounded-[var(--apollo-radius-card)] border p-4 shadow-[var(--apollo-shadow-card)] transition-colors focus-within:outline focus-within:outline-2 focus-within:-outline-offset-2 ${
+        suppressed ? "opacity-60" : ""
       }`}
     >
       <div className="min-w-0 flex-1">
