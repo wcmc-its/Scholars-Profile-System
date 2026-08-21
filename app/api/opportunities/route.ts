@@ -14,7 +14,7 @@ import { apiError } from "@/lib/api/error-response";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { asPrestige } from "@/lib/funding/prestige";
-import { facultyPiMayHold } from "@/lib/funding/screening";
+import { FACULTY_STAGES, facultyPiMayHold, requirementsFrom } from "@/lib/funding/screening";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +22,76 @@ const MAX_LIMIT = 500;
 // Lower rank sorts first. Curated leads — hand-vetted WCM awards and staff-submitted
 // URLs (`manual_url`, the opportunity-intake queue) — everything else trails.
 const SOURCE_RANK: Record<string, number> = { wcm_curated: 0, manual_url: 0 };
+
+/**
+ * Sentence-case a snake_case topic slug (`implementation_science` → "Implementation science") —
+ * the same rule as `humanizeAreaSlug` in `lib/api/search.ts` (#824), restated locally rather
+ * than dragging that whole module into this route. Used only when no `topic` row carries the id.
+ */
+function humanizeSlug(slug: string): string {
+  const words = slug.split("_").filter(Boolean).join(" ");
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : slug;
+}
+
+// Noise floor — measured corpus scores span [0, 0.98]; entries under 0.05 are tail weight
+// that would render as a chip indistinguishable from a real signal.
+const CONCEPT_SCORE_FLOOR = 0.05;
+// The median vector is 6 entries and the max is 61 — uncapped chips are unreadable on a card.
+const CONCEPT_TOP_N = 3;
+
+/**
+ * A card's Concepts row from the stored `topicVector` (`[{topic_id, score, rationale}]`):
+ * top-3 by score, floor-dropped, ids resolved to labels via `labelOf`. Fail-soft on ANY
+ * malformed shape — a row whose vector is absent, empty or junk simply renders no Concepts row.
+ */
+function conceptsFrom(
+  topicVector: unknown,
+  labelOf: (id: string) => string,
+): Array<{ label: string; score: number }> {
+  if (!Array.isArray(topicVector)) return [];
+  const scored: Array<{ id: string; score: number }> = [];
+  for (const entry of topicVector) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const { topic_id: id, score } = entry as { topic_id?: unknown; score?: unknown };
+    if (typeof id !== "string" || !id) continue;
+    if (typeof score !== "number" || !Number.isFinite(score) || score < CONCEPT_SCORE_FLOOR) {
+      continue;
+    }
+    scored.push({ id, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  // Dedupe on the RESOLVED label — it is the chip's React key, and two ids can share one
+  // (a duplicated vector entry, or a humanized slug colliding with a catalog label).
+  const out: Array<{ label: string; score: number }> = [];
+  const seen = new Set<string>();
+  for (const s of scored) {
+    if (out.length === CONCEPT_TOP_N) break;
+    const label = labelOf(s.id);
+    if (seen.has(label)) continue;
+    seen.add(label);
+    out.push({ label, score: s.score });
+  }
+  return out;
+}
+
+/**
+ * A card's Eligibility row — display labels derivable from REAL data only, via the same
+ * `requirementsFrom` the grant-matcha rail renders (so the two surfaces cannot disagree).
+ * The artboard's "MD/PhD" / "Tenure track" / "Grad/Prof students" chips have no source in
+ * either half of the stage vocabulary and are deliberately NOT here. `[]` (~88% of the
+ * corpus: `careerStages` null, no ESI/US signal) renders no row at all.
+ */
+function eligibilityLabelsFrom(eligibilityFlags: unknown, eligibility: unknown): string[] {
+  const r = requirementsFrom(eligibilityFlags, eligibility);
+  const stages = r.careerStages ?? [];
+  const labels: string[] = [];
+  if (stages.some((s) => FACULTY_STAGES.includes(s))) labels.push("Faculty");
+  if (stages.includes("postdoc")) labels.push("Postdocs");
+  if (stages.includes("grad")) labels.push("Students");
+  if (r.esiTargeted) labels.push("Early Stage Investigators");
+  if (r.usRequired) labels.push("US required");
+  return labels;
+}
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const session = await getEffectiveEditSession();
@@ -46,7 +116,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     limit = Math.min(n, MAX_LIMIT);
   }
 
-  const rows = await db.read.opportunity.findMany({
+  const rowsPromise = db.read.opportunity.findMany({
     where: {
       isResearch: true,
       // Reverse-view honorific gate. 🔴 This drops NULL as well as true — Prisma's `not` compiles
@@ -81,12 +151,28 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       suppressedAt: true,
       suppressedBy: true,
       suppressReason: true,
-      // Read to DERIVE `facultyPiEligible` below; never returned — a per-row eligibility map is
-      // ~500 rows of JSON the browse has no use for.
+      // Read to DERIVE `facultyPiEligible` + `eligibilityLabels` below; never returned — a
+      // per-row eligibility map is ~500 rows of JSON the browse has no use for.
       eligibilityFlags: true,
       eligibility: true,
+      // Read to DERIVE `concepts` / `researchArea` below; the raw vector (median 6 entries,
+      // max 61, rationale prose included) is likewise never returned.
+      topicVector: true,
+      primaryTopicId: true,
     },
   });
+
+  // ONE topic-label lookup per request, shared by `concepts` and `researchArea`. The slug
+  // fallback is LOAD-BEARING, not belt-and-braces: `primaryTopicId`/`topic_id` are soft slug
+  // references, and five live slugs resolve to no `topic` row on staging — among them
+  // `implementation_science` (353 opps) and `neuroscience_neurology` (116) — so an unresolved
+  // id humanizes rather than leaking a raw slug or dropping the chip.
+  const [rows, topicRows] = await Promise.all([
+    rowsPromise,
+    db.read.topic.findMany({ select: { id: true, label: true } }),
+  ]);
+  const topicLabels = new Map(topicRows.map((t) => [t.id, t.label]));
+  const labelOf = (id: string) => topicLabels.get(id) ?? humanizeSlug(id);
 
   // ponytail: the whole corpus is small (hundreds), so sort curated-first in JS
   // rather than leaning on a fragile source-string orderBy; slice to the cap.
@@ -102,14 +188,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return (a.title ?? "").localeCompare(b.title ?? "");
   });
   // BigInt award fields → number for JSON (mirrors the detail route).
-  const opportunities = rows.slice(0, limit).map(({ eligibility, eligibilityFlags, ...r }) => ({
-    ...r,
-    awardCeiling: r.awardCeiling == null ? null : Number(r.awardCeiling),
-    awardFloor: r.awardFloor == null ? null : Number(r.awardFloor),
-    // Screening spec §3.1 — false means no WCM faculty PI can hold this award (13.2% of the
-    // corpus). The browse gates on it by default; the flag is fail-open, so absent data is `true`.
-    facultyPiEligible: facultyPiMayHold(eligibilityFlags, eligibility),
-  }));
+  const opportunities = rows
+    .slice(0, limit)
+    .map(({ eligibility, eligibilityFlags, topicVector, primaryTopicId, ...r }) => ({
+      ...r,
+      awardCeiling: r.awardCeiling == null ? null : Number(r.awardCeiling),
+      awardFloor: r.awardFloor == null ? null : Number(r.awardFloor),
+      // Screening spec §3.1 — false means no WCM faculty PI can hold this award (13.2% of the
+      // corpus). The browse gates on it by default; the flag is fail-open, so absent data is `true`.
+      facultyPiEligible: facultyPiMayHold(eligibilityFlags, eligibility),
+      // Browse data-wiring 2026-08 — the card rows + Research-area facet. Derived here so the
+      // wire carries labels, not the raw JSON columns they come from.
+      eligibilityLabels: eligibilityLabelsFrom(eligibilityFlags, eligibility),
+      concepts: conceptsFrom(topicVector, labelOf),
+      researchArea: primaryTopicId ? { id: primaryTopicId, label: labelOf(primaryTopicId) } : null,
+    }));
 
   // Per-source freshness for the Browse-tab strip: row count + newest
   // `ingestedAt` per source. `ingestedAt` is the upstream producer timestamp

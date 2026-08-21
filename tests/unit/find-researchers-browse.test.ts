@@ -82,6 +82,21 @@ describe("matchesBrowseFilters", () => {
     expect(matchesBrowseFilters(opp(), f, now, "sponsors")).toBe(true);
     expect(matchesBrowseFilters(opp(), f, now, "mechanisms")).toBe(false);
   });
+
+  it("filters research areas on the id, never the label, and null never matches a selection", () => {
+    const area = opp({ researchArea: { id: "cancer_genomics", label: "Cancer Genomics" } });
+    const f = { ...EMPTY_BROWSE_FILTERS, researchAreas: new Set(["cancer_genomics"]) };
+    expect(matchesBrowseFilters(area, f, now)).toBe(true);
+    // The set holds ids — a label sneaking in matches nothing.
+    expect(
+      matchesBrowseFilters(area, { ...EMPTY_BROWSE_FILTERS, researchAreas: new Set(["Cancer Genomics"]) }, now),
+    ).toBe(false);
+    // Unassigned (null) and absent-field rows drop out under any selection…
+    expect(matchesBrowseFilters(opp({ researchArea: null }), f, now)).toBe(false);
+    expect(matchesBrowseFilters(opp(), f, now)).toBe(false);
+    // …and `skip` restores them for this group's own facet counts.
+    expect(matchesBrowseFilters(opp(), f, now, "researchAreas")).toBe(true);
+  });
 });
 
 /**
