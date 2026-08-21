@@ -271,12 +271,20 @@ export function GrantMatchaPanel({
   if (!selectedId) {
     return (
       <div>
-        <div className="mb-5">
-          <h1 className="mb-1 text-2xl font-bold tracking-tight">Grant Matcha</h1>
+        <header className="mb-5 flex flex-col gap-1.5">
+          <h1 className="text-2xl font-bold tracking-tight">Grant Matcha</h1>
+          {/* Brand rule, same mechanism as the panel-title rule in `edit-panel.tsx`
+              (a sibling span in a flex-col header, not a border-b, not a ::after);
+              this surface is the dominant one, so it carries maroon.
+              The geometry is deliberately NOT shared with edit-panel: this rule is
+              32x3 per `Browse Redesign.dc.html`, while `edit-panel.tsx` renders the
+              panel-title rule `h-1 w-10` (40x4). The divergence is intentional and
+              follows the artboard — it is not drift from edit-panel. */}
+          <span aria-hidden className="bg-apollo-maroon h-[3px] w-8 rounded-full" />
           <p className="text-muted-foreground text-sm">
             Choose a funding opportunity to rank Weill Cornell researchers on its text.
           </p>
-        </div>
+        </header>
         {/* `freshness` is unconditional here — the strip is part of the grant-matcha Browse
             header for everyone; only the suppress/restore controls are MATCHA_ADMIN-gated. */}
         <BrowseList

@@ -81,7 +81,7 @@ export function GrantMatchaTabs({
             "-mb-px py-2.5 text-sm transition-colors border-b-2",
             isActive
               ? "border-[var(--color-accent-slate)] font-medium text-[var(--color-accent-slate)]"
-              : "border-transparent text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:no-underline",
+              : "text-muted-foreground hover:text-foreground border-transparent hover:no-underline",
           ].join(" ");
           return (
             <Link

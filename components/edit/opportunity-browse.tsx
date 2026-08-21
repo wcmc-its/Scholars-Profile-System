@@ -18,7 +18,16 @@
  */
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Building2, Clock, ExternalLink, Eye, EyeOff } from "lucide-react";
+import {
+  AlertTriangle,
+  Building2,
+  ChevronRight,
+  Clock,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  X,
+} from "lucide-react";
 
 import { PrestigeBadge } from "@/components/edit/prestige-badge";
 import { Button } from "@/components/ui/button";
@@ -262,14 +271,25 @@ export function deadlineLabel(dueDate: string | null, status: string | null, now
 }
 
 /**
- * Deadline cell: the date toned by urgency (amber inside the 30-day window, a
- * "(passed)" suffix once behind us) so staff can triage actionable vs dead
- * opportunities by scanning one column. The em-dash case carries a spoken
- * equivalent — a bare "—" reaches a screen reader as nothing at all.
+ * The deadline in a card's meta row: the date toned by urgency (amber inside the
+ * 30-day window, a "(passed)" suffix once behind us) so staff can triage actionable
+ * vs dead opportunities scanning straight down the card list. The em-dash case
+ * carries a spoken equivalent — a bare "—" reaches a screen reader as nothing at all.
  */
 function DeadlineCell({ iso, status }: { iso: string | null; status: string | null }) {
   const label = deadlineLabel(iso, status, Date.now());
   if (label === "—") {
+    // ponytail: `Browse Redesign.dc.html` draws "Not extracted" here. REJECTED as an
+    // unbacked provenance claim, do not re-add it from the artboard:
+    //  - `deadlineLabel` above lands on "—" precisely because we do NOT know whether
+    //    the award rolls or was simply never captured; "Not extracted" resolves that
+    //    documented ambiguity in one direction on no evidence;
+    //  - it also lands here for an UNPARSEABLE dueDate (pinned:
+    //    `deadlineLabel("not-a-date", "open", now) === "—"`), so a row that HAS a date
+    //    would claim nothing was extracted;
+    //  - `lib/match-display.ts`'s own `deadlineLabel` — the one matcha-panel and
+    //    grant-recs-card render — calls this same null case "Rolling · continuous",
+    //    so shipping it would put two surfaces of one product in direct contradiction.
     return (
       <span className="text-muted-foreground">
         <span aria-hidden>—</span>
@@ -580,8 +600,11 @@ export function BrowseList({
         </p>
       ) : null}
 
-      <div className="flex flex-col gap-x-10 gap-y-6 lg:flex-row">
+      {/* Redesign 2026-08: a 250px rail and a 20px gutter, top-aligned so the rail
+          never stretches to the length of the results column. */}
+      <div className="flex flex-col gap-x-5 gap-y-6 lg:flex-row lg:items-start">
         <div className="min-w-0 flex-1">
+          <ActiveFilterChips filters={filters} setFilters={setFilters} />
           {status.kind === "loading" ? (
             <ListSkeleton label="Loading opportunities…" />
           ) : status.kind === "error" ? (
@@ -789,6 +812,108 @@ function SuppressOpportunityDialog({
   );
 }
 
+/** Chip prefixes — the same words the rail uses as its `FacetGroup` legends. */
+const FACET_GROUP_LABEL = { sponsors: "Sponsor", mechanisms: "Mechanism" } as const;
+
+/** Immutably drop one value from a checkbox facet group. */
+function withoutFacet(
+  f: BrowseFilters,
+  group: "sponsors" | "mechanisms",
+  value: string,
+): BrowseFilters {
+  const next = new Set(f[group]);
+  next.delete(value);
+  return { ...f, [group]: next };
+}
+
+/**
+ * Active-filter chips (redesign 2026-08) — one removable chip per filter that is
+ * currently narrowing the list, sitting above the results count so the reason a
+ * short list is short is visible without opening the rail.
+ *
+ * The render test here and `FilterRail`'s `active` test are the SAME condition
+ * (`openOnly || sponsors.size || mechanisms.size`). The faculty-PI gate is deliberately
+ * un-chipped in both of its states and counts toward neither: it is ON by default, so
+ * chipping it would put a chip on every resting render, and relaxed it does not narrow
+ * anything. Its relax/re-apply control already lives on the counterfactual sentence
+ * below — the one line that admits rows are hidden.
+ *
+ * 🔴 Because the gate has no chip, BOTH reset controls — this row's "Clear all" and
+ * the rail's "reset all" — must CARRY IT THROUGH rather than reset it:
+ * `EMPTY_BROWSE_FILTERS.facultyPiOnly` is `true`, so spreading it blind silently
+ * re-applies a gate that hides ~13.2% of the corpus and makes the list SHORTER, with
+ * no chip having represented that state. That is also why `active` may not count the
+ * relaxed gate: it would render a "reset all" whose one set term the handler is
+ * forbidden to touch, so the button would click to an identical state and never dismiss
+ * itself. They are always on screen together, so the two must agree; each is pinned by
+ * its own test.
+ */
+function ActiveFilterChips({
+  filters,
+  setFilters,
+}: {
+  filters: BrowseFilters;
+  setFilters: React.Dispatch<React.SetStateAction<BrowseFilters>>;
+}) {
+  const chips: Array<{ key: string; label: string; clear: () => void }> = [];
+  if (filters.openOnly) {
+    chips.push({
+      key: "availability",
+      label: "Availability: Only open",
+      clear: () => setFilters((f) => ({ ...f, openOnly: false })),
+    });
+  }
+  for (const group of ["sponsors", "mechanisms"] as const) {
+    for (const value of [...filters[group]]) {
+      chips.push({
+        key: `${group}:${value}`,
+        // Group-prefixed, matching the rail's own legends: a bare facet value leaves a
+        // Sponsor chip and a Mechanism chip carrying the same string indistinguishable,
+        // on screen and to a screen reader reading the remove button's name.
+        label: `${FACET_GROUP_LABEL[group]}: ${value}`,
+        clear: () => setFilters((f) => withoutFacet(f, group, value)),
+      });
+    }
+  }
+  if (chips.length === 0) return null;
+
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+      <span className="text-muted-foreground">Filtering by:</span>
+      {chips.map((c) => (
+        <span
+          key={c.key}
+          className="border-apollo-border bg-apollo-surface inline-flex max-w-full items-center gap-1 rounded-full border py-0.5 pr-1 pl-2.5"
+        >
+          <span className="min-w-0 truncate">{c.label}</span>
+          <button
+            type="button"
+            onClick={c.clear}
+            aria-label={`Remove filter: ${c.label}`}
+            className="text-muted-foreground hover:bg-apollo-red-tint hover:text-apollo-maroon shrink-0 rounded-full p-0.5"
+          >
+            <X className="size-3" aria-hidden />
+          </button>
+        </span>
+      ))}
+      <button
+        type="button"
+        // `facultyPiOnly` is carried through, not reset — see the 🔴 note above.
+        onClick={() =>
+          setFilters((f) => ({
+            ...EMPTY_BROWSE_FILTERS,
+            q: f.q,
+            facultyPiOnly: f.facultyPiOnly,
+          }))
+        }
+        className="text-[var(--color-accent-slate)] hover:underline"
+      >
+        Clear all
+      </button>
+    </div>
+  );
+}
+
 // Duke-style right-rail filters: availability, then checkbox facet groups with
 // counts. All client-side over the fetched corpus.
 //
@@ -796,6 +921,22 @@ function SuppressOpportunityDialog({
 // 99.0% of the corpus, and the range test rejects an undated row, so setting either bound
 // silently hid almost everything while appearing to narrow. A filter over a field that does not
 // exist is worse than no filter. Restore it when typed deadline extraction lands, not before.
+//
+// `Browse Redesign.dc.html` draws Availability / Sponsor / Research area / Eligibility; the rail
+// below is Availability / Sponsor / Mechanism / Sources. Research area and Eligibility were
+// considered and declined on DATA, not taste, and the artboard is not evidence they can be built:
+//   - Research area would key off `primaryTopicId`, which `app/api/opportunities/route.ts` does
+//     not select — the browse rows never carry it;
+//   - `eligibility` and `eligibilityFlags` ARE selected there, then deliberately destructured out
+//     before the response (they exist only to derive `facultyPiEligible`), so they are not on the
+//     wire either;
+//   - and two of the artboard's six eligibility labels ("MD/PhD", "Tenure track") have no
+//     corresponding `career_stages` value in EITHER half of the vocabulary — neither
+//     `HOLDABLE_STAGES` in `lib/funding/screening.ts` nor `FACULTY_STAGES`/`STUDENT_STAGES`
+//     in `etl/dynamodb/grant-opportunity-mapper.ts`. Both files have to be read to say that:
+//     "Grad/Prof students" maps to `graduate_student`, which appears ONLY in the mapper, so
+//     screening.ts alone would put the count at three.
+// Land the field on the wire first; do not re-raise either group from the artboard alone.
 function FilterRail({
   filters,
   setFilters,
@@ -811,11 +952,8 @@ function FilterRail({
   includeGrantsGov: boolean;
   setIncludeGrantsGov: (v: boolean) => void;
 }) {
-  const active =
-    filters.openOnly ||
-    !filters.facultyPiOnly ||
-    filters.sponsors.size > 0 ||
-    filters.mechanisms.size > 0;
+  // EXACTLY the chip row's render test, not a superset — see `ActiveFilterChips`.
+  const active = filters.openOnly || filters.sponsors.size > 0 || filters.mechanisms.size > 0;
 
   function toggleIn(group: "sponsors" | "mechanisms", value: string) {
     setFilters((f) => {
@@ -831,7 +969,7 @@ function FilterRail({
   // 1.035:1 on the rail and dies.
   return (
     <aside
-      className="bg-apollo-rail border-apollo-rail-border w-full shrink-0 space-y-5 rounded-xl border p-4 lg:order-first lg:w-64"
+      className="bg-apollo-rail border-apollo-rail-border w-full shrink-0 space-y-5 rounded-[var(--apollo-radius-card)] border p-4 lg:order-first lg:w-[250px]"
       aria-label="Filter opportunities"
     >
       <div className="flex items-baseline justify-between">
@@ -839,7 +977,20 @@ function FilterRail({
         {active ? (
           <button
             type="button"
-            onClick={() => setFilters((f) => ({ ...EMPTY_BROWSE_FILTERS, q: f.q }))}
+            // `facultyPiOnly` is carried through, exactly as the chip row's "Clear all"
+            // does. `active` above is EQUAL to the chip row's render test, so both
+            // controls are always on screen together; resetting the gate here while the
+            // chip row carries it would leave two adjacent controls disagreeing about
+            // one piece of state. Counting the relaxed gate in `active` instead would put
+            // this button over a state whose only set term the handler may not touch — it
+            // would click to an identical state and never dismiss itself.
+            onClick={() =>
+              setFilters((f) => ({
+                ...EMPTY_BROWSE_FILTERS,
+                q: f.q,
+                facultyPiOnly: f.facultyPiOnly,
+              }))
+            }
             className="text-xs text-[var(--color-accent-slate)] hover:underline"
           >
             reset all
@@ -957,15 +1108,15 @@ function FacetGroup({
 /**
  * One opportunity as a card.
  *
- * THE WHOLE ROW IS THE CLICK TARGET, and it gets there the boring way: the
+ * THE WHOLE CARD IS THE CLICK TARGET, and it gets there the boring way: the
  * title is a real `<Link>` whose `after:absolute after:inset-0` pseudo-element
- * covers the `relative` row. No onClick/onKeyDown/role="button" on the `<tr>` —
+ * covers the `relative` card. No onClick/onKeyDown/role="button" on the `<li>` —
  * that would forfeit cmd-click, middle-click, right-click "copy link address",
  * tab focus and the screen-reader "link" announcement, all of which an anchor
- * gives for free. `focus-within` puts the focus ring on the row so keyboard
+ * gives for free. `focus-within` puts the focus ring on the card so keyboard
  * users see what they are about to open.
  *
- * If a secondary control is ever added to a row it MUST carry `relative z-10`,
+ * If a secondary control is ever added to a card it MUST carry `relative z-10`,
  * or the stretched pseudo-element will sit on top of it and swallow the click.
  */
 function OpportunityCard({
@@ -991,58 +1142,64 @@ function OpportunityCard({
   const suppressed = Boolean(o.suppressedAt);
   return (
     <li
-      className={`border-apollo-border bg-apollo-surface hover:bg-apollo-surface-2 focus-within:outline-apollo-maroon relative rounded-lg border p-4 transition-colors focus-within:outline focus-within:outline-2 focus-within:-outline-offset-2${
-        suppressed ? " opacity-60" : ""
+      className={`border-apollo-border bg-apollo-surface hover:border-apollo-border-strong hover:bg-apollo-surface-2 focus-within:outline-apollo-maroon relative flex items-center gap-3 rounded-[var(--apollo-radius-card)] border p-4 shadow-[var(--apollo-shadow-card)] transition-colors focus-within:outline focus-within:outline-2 focus-within:-outline-offset-2 ${
+        suppressed ? "opacity-60" : ""
       }`}
     >
-      <div className="text-muted-foreground mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
-        <span className="flex items-center gap-1">
-          <Clock className="size-3.5" aria-hidden />
-          Deadline: <DeadlineCell iso={o.dueDate} status={o.status} />
-        </span>
-        <span className="flex flex-wrap items-center gap-2">
-          {o.sponsor ? (
-            <span className="flex items-center gap-1">
-              <Building2 className="size-3.5" aria-hidden />
-              {o.sponsor}
-            </span>
-          ) : null}
-          <SourceBadge source={o.source} />
-          <PrestigeBadge prestige={o.prestige} />
-          {admin ? (
-            // `relative z-10` — without it the card's stretched anchor (below)
-            // sits on top and swallows the click.
-            <button
-              type="button"
-              onClick={suppressed ? onRestore : onSuppress}
-              disabled={actionBusy}
-              className="text-muted-foreground hover:text-foreground relative z-10 disabled:opacity-50"
-              aria-label={actionBusy ? "Working…" : suppressed ? "Restore" : "Suppress"}
-              title={actionBusy ? "Working…" : suppressed ? "Restore" : "Suppress"}
-              data-testid={`opportunity-${suppressed ? "restore" : "suppress"}`}
-            >
-              {suppressed ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
-            </button>
-          ) : null}
-        </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-muted-foreground mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
+          <span className="flex items-center gap-1">
+            <Clock className="size-3.5" aria-hidden />
+            Deadline: <DeadlineCell iso={o.dueDate} status={o.status} />
+          </span>
+          <span className="flex flex-wrap items-center gap-2">
+            {o.sponsor ? (
+              <span className="flex items-center gap-1">
+                <Building2 className="size-3.5" aria-hidden />
+                {o.sponsor}
+              </span>
+            ) : null}
+            <SourceBadge source={o.source} />
+            <PrestigeBadge prestige={o.prestige} />
+            {admin ? (
+              // `relative z-10` — without it the card's stretched anchor (below)
+              // sits on top and swallows the click.
+              <button
+                type="button"
+                onClick={suppressed ? onRestore : onSuppress}
+                disabled={actionBusy}
+                className="text-muted-foreground hover:text-foreground relative z-10 disabled:opacity-50"
+                aria-label={actionBusy ? "Working…" : suppressed ? "Restore" : "Suppress"}
+                title={actionBusy ? "Working…" : suppressed ? "Restore" : "Suppress"}
+                data-testid={`opportunity-${suppressed ? "restore" : "suppress"}`}
+              >
+                {suppressed ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+              </button>
+            ) : null}
+          </span>
+        </div>
+        <Link
+          href={href}
+          className="font-medium leading-snug text-[var(--color-accent-slate)] after:absolute after:inset-0 after:content-[''] hover:underline focus:outline-none"
+        >
+          {title}
+        </Link>
+        <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
+          {o.mechanism ? <span>{o.mechanism}</span> : null}
+          {award ? <span>{award}</span> : null}
+        </div>
+        {suppressed && o.suppressedAt ? (
+          <span className="text-muted-foreground mt-1 block text-xs" data-testid="suppressed-note">
+            suppressed {formatSuppressedDate(o.suppressedAt)}
+            {o.suppressedBy ? ` by ${o.suppressedBy}` : ""}
+            {o.suppressReason ? ` — “${o.suppressReason}”` : ""}
+          </span>
+        ) : null}
       </div>
-      <Link
-        href={href}
-        className="font-medium leading-snug text-[var(--color-accent-slate)] after:absolute after:inset-0 after:content-[''] hover:underline focus:outline-none"
-      >
-        {title}
-      </Link>
-      <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
-        {o.mechanism ? <span>{o.mechanism}</span> : null}
-        {award ? <span>{award}</span> : null}
-      </div>
-      {suppressed && o.suppressedAt ? (
-        <span className="text-muted-foreground mt-1 block text-xs" data-testid="suppressed-note">
-          suppressed {formatSuppressedDate(o.suppressedAt)}
-          {o.suppressedBy ? ` by ${o.suppressedBy}` : ""}
-          {o.suppressReason ? ` — “${o.suppressReason}”` : ""}
-        </span>
-      ) : null}
+      {/* Affordance only — decorative, so it stays out of the a11y tree: the card
+          already announces itself through the title link. Non-interactive, so it
+          needs no `relative z-10` escape from the stretched pseudo-element. */}
+      <ChevronRight className="text-muted-foreground size-4 shrink-0" aria-hidden />
     </li>
   );
 }
@@ -1064,7 +1221,7 @@ export function SourceBadge({ source }: { source: string | null }) {
       className={
         curated
           ? "shrink-0 rounded-full bg-[var(--color-accent-slate)]/15 px-2 py-0.5 text-xs font-medium text-[var(--color-accent-slate)]"
-          : "border-border-strong text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-xs"
+          : "border-apollo-border-strong text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-xs"
       }
     >
       {label}
