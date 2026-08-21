@@ -18,11 +18,49 @@
  * the rows fall out of the matcher on the next nightly projection).
  */
 import { useCallback, useEffect, useState } from "react";
+import { Mail } from "lucide-react";
 
+import { ClampedText } from "@/components/edit/opportunity-browse";
 import {
   type OpportunitySubmission,
   type SubmissionStatus,
 } from "@/lib/edit/opportunity-submission";
+
+const ALL_STATUSES: SubmissionStatus[] = ["pending", "processed", "rejected", "suppressed"];
+
+/**
+ * Redesign 2026-08 (`Submissions Redesign.dc.html`): group consecutive
+ * submissions that share the same note + submitter into one batch card — a
+ * copy-pasted digest of URLs gets the same note on every line today, so this
+ * is a front-end reorganization of data already on each row, not new data.
+ * A `note`-less submission (the common one-off case) gets no batch header.
+ */
+type SubmissionGroup = {
+  key: string;
+  note: string | null;
+  submittedBy: string;
+  submittedAt: string;
+  items: OpportunitySubmission[];
+};
+
+function groupSubmissions(items: OpportunitySubmission[]): SubmissionGroup[] {
+  const groups: SubmissionGroup[] = [];
+  for (const s of items) {
+    const last = groups[groups.length - 1];
+    if (last && s.note && last.note === s.note && last.submittedBy === s.submittedBy) {
+      last.items.push(s);
+      continue;
+    }
+    groups.push({
+      key: s.submissionId,
+      note: s.note ?? null,
+      submittedBy: s.submittedBy,
+      submittedAt: s.submittedAt,
+      items: [s],
+    });
+  }
+  return groups;
+}
 
 type ListState =
   | { kind: "loading" }
@@ -103,6 +141,7 @@ export function OpportunityIntakePanel() {
   const [list, setList] = useState<ListState>({ kind: "loading" });
   const [rowAction, setRowAction] = useState<RowAction | null>(null);
   const [rowActionError, setRowActionError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<SubmissionStatus | "all">("all");
 
   const refresh = useCallback(() => {
     fetch("/api/edit/opportunity-intake", { cache: "no-store", credentials: "same-origin" })
@@ -242,51 +281,126 @@ export function OpportunityIntakePanel() {
           <p className="text-muted-foreground text-sm">No submissions yet.</p>
         )}
         {list.kind === "ok" && list.submissions.length > 0 && (
-          <ul className="divide-border divide-y">
-            {list.submissions.map((s) => (
-              <li key={s.submissionId} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2 text-sm">
-                <span
-                  className={`inline-block rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[s.status]}`}
-                >
-                  {s.status}
-                </span>
-                <a
-                  href={s.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="max-w-full truncate break-all underline decoration-dotted underline-offset-2"
-                >
-                  {s.url}
-                </a>
-                <span className="text-muted-foreground">
-                  {s.submittedBy} · {formatSubmitted(s.submittedAt)}
-                </span>
-                {s.status === "processed" && s.producedOpportunityIds.length > 0 && (
-                  <span className="text-muted-foreground">
-                    →{" "}
-                    {s.producedOpportunityIds.map((id) => (
-                      <code key={id} className="mr-1 rounded bg-muted px-1 py-0.5 text-xs">
-                        {id}
-                      </code>
-                    ))}
-                  </span>
-                )}
-                {s.status === "rejected" && s.rejectReason && (
-                  <span className="text-red-700">{s.rejectReason}</span>
-                )}
-                {s.note && <span className="text-muted-foreground italic">“{s.note}”</span>}
-                <RowActions
-                  submission={s}
-                  rowAction={rowAction}
-                  onArm={(kind) =>
-                    setRowAction({ submissionId: s.submissionId, kind, phase: "confirm" })
-                  }
-                  onCancel={() => setRowAction(null)}
-                  onConfirm={(action) => void performRowAction(action)}
-                />
-              </li>
-            ))}
-          </ul>
+          <>
+            {/* Redesign 2026-08: status tabs — only shown for a status with ≥1 row, "All"
+                always present. Counts come from the UNFILTERED list, so they don't shift
+                as you switch tabs. */}
+            <div className="mb-3 flex flex-wrap gap-1.5 text-sm">
+              {(["all", ...ALL_STATUSES] as const)
+                .filter((s) => s === "all" || list.submissions.some((x) => x.status === s))
+                .map((s) => {
+                  const count =
+                    s === "all"
+                      ? list.submissions.length
+                      : list.submissions.filter((x) => x.status === s).length;
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setStatusFilter(s)}
+                      className={`rounded-md px-2.5 py-1 ${
+                        statusFilter === s
+                          ? "bg-apollo-surface-2 font-medium text-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {s === "all" ? "All" : s[0].toUpperCase() + s.slice(1)} {count}
+                    </button>
+                  );
+                })}
+            </div>
+            {(() => {
+              const filtered =
+                statusFilter === "all"
+                  ? list.submissions
+                  : list.submissions.filter((s) => s.status === statusFilter);
+              if (filtered.length === 0) {
+                return <p className="text-muted-foreground text-sm">No submissions match.</p>;
+              }
+              return (
+                <div className="flex flex-col gap-3">
+                  {groupSubmissions(filtered).map((g) => {
+                    // A batch card is for a genuine multi-item batch — a lone submission that
+                    // happens to carry a note isn't a "batch of one," it's the same one-off row
+                    // as always, with its note shown inline like before.
+                    const isBatch = g.note !== null && g.items.length > 1;
+                    return (
+                    <div key={g.key} className="border-apollo-border overflow-hidden rounded-lg border">
+                      {isBatch ? (
+                        <div className="bg-apollo-surface-2 border-apollo-border flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2 text-xs">
+                          <span className="flex min-w-0 items-center gap-2 font-medium">
+                            <Mail className="size-3.5 shrink-0" aria-hidden />
+                            <span className="truncate">{g.note}</span>
+                          </span>
+                          <span className="text-muted-foreground shrink-0">
+                            {g.items.length} submissions · {g.submittedBy} ·{" "}
+                            {formatSubmitted(g.submittedAt)}
+                          </span>
+                        </div>
+                      ) : null}
+                      <ul className="divide-border divide-y">
+                        {g.items.map((s) => (
+                          <li
+                            key={s.submissionId}
+                            className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2 text-sm"
+                          >
+                            <span
+                              className={`inline-block rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[s.status]}`}
+                            >
+                              {s.status}
+                            </span>
+                            <a
+                              href={s.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="max-w-full truncate break-all underline decoration-dotted underline-offset-2"
+                            >
+                              {s.url}
+                            </a>
+                            {/* Not part of a batch card — attribution has nowhere else to
+                                live, so it stays on the row. */}
+                            {!isBatch && (
+                              <span className="text-muted-foreground">
+                                {s.submittedBy} · {formatSubmitted(s.submittedAt)}
+                              </span>
+                            )}
+                            {s.status === "processed" && s.producedOpportunityIds.length > 0 && (
+                              <span className="text-muted-foreground">
+                                CREATED{" "}
+                                {s.producedOpportunityIds.map((id) => (
+                                  <code key={id} className="mr-1 rounded bg-muted px-1 py-0.5 text-xs">
+                                    {id}
+                                  </code>
+                                ))}
+                              </span>
+                            )}
+                            {s.status === "rejected" && s.rejectReason && (
+                              <span className="text-red-700">
+                                <ClampedText text={s.rejectReason} lines={3} />
+                              </span>
+                            )}
+                            {!isBatch && s.note && (
+                              <span className="text-muted-foreground italic">“{s.note}”</span>
+                            )}
+                            <RowActions
+                              submission={s}
+                              rowAction={rowAction}
+                              onArm={(kind) =>
+                                setRowAction({ submissionId: s.submissionId, kind, phase: "confirm" })
+                              }
+                              onCancel={() => setRowAction(null)}
+                              onConfirm={(action) => void performRowAction(action)}
+                            />
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </>
         )}
       </div>
     </section>

@@ -382,6 +382,7 @@ export function MatchaPanel({
   autoRun,
   grantMatcha = false,
   eligibility,
+  allowEditPaste = true,
 }: {
   /** Grant Matcha — seed the ask from an opportunity's title + synopsis so the officer lands on
    *  the extracted concepts + ranked researchers instead of a blank textarea. */
@@ -396,6 +397,12 @@ export function MatchaPanel({
    *  ask the route for signals. The rail is RELEVANCE-DRIVEN — an axis renders only when the
    *  opportunity actually carries that requirement, so most opportunities show 0–2 axes. */
   eligibility?: EligibilityRequirements;
+  /** Default true (`/edit/matcha`, search): the ask IS user-typed, so editing it back is the
+   *  point. Grant Matcha seeds the ask from the opportunity record — source-originated data,
+   *  not user input — so `grant-matcha-panel.tsx` passes `false` and drops "Edit paste"
+   *  (redesign 2026-08, owner: "editing the paste doesn't make sense" for that case).
+   *  `/edit/matcha`'s own paste-an-email flow is unaffected either way. */
+  allowEditPaste?: boolean;
 } = {}) {
   const [description, setDescription] = useState(initialDescription ?? "");
   // Grant Matcha — which corpus this ask searches. "grants" POSTs `{ target: "grants" }` and
@@ -1300,9 +1307,11 @@ export function MatchaPanel({
                   ) : null}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-1.5">
-                  <Button type="button" variant="outline" onClick={() => setEditing(true)}>
-                    Edit paste
-                  </Button>
+                  {allowEditPaste ? (
+                    <Button type="button" variant="outline" onClick={() => setEditing(true)}>
+                      Edit paste
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     disabled={pending}

@@ -24,7 +24,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ExternalLink } from "lucide-react";
 
 import {
   BrowseList,
@@ -343,6 +343,19 @@ export function GrantMatchaPanel({
             {current.selected.synopsis ? (
               <div className="mt-3">
                 <ClampedText text={current.selected.synopsis} lines={3} />
+                {/* Redesign 2026-08 (Matcha Redesign.dc.html): the fact rail already has
+                    this link — duplicated here so it's not a scroll away from the synopsis
+                    that prompted the click. Same `sourceUrl`, not new data. */}
+                {current.selected.facts.sourceUrl ? (
+                  <a
+                    href={current.selected.facts.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-1.5 inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)] hover:underline"
+                  >
+                    More information <ExternalLink className="size-3.5" aria-hidden />
+                  </a>
+                ) : null}
               </div>
             ) : null}
             {current.selected.note ? (
@@ -358,6 +371,11 @@ export function GrantMatchaPanel({
                 // but no Bedrock call is billed for a question we already know the answer to.
                 autoRun={current.selected.note === null}
                 eligibility={current.selected.requirements}
+                // Redesign 2026-08: the ask here is the opportunity's own title + synopsis, not
+                // something the officer typed — owner confirmed editing it back doesn't make
+                // sense for source-originated data. `/edit/matcha`'s paste-an-email flow keeps
+                // "Edit paste" (this prop's default).
+                allowEditPaste={false}
               />
             </div>
           </div>

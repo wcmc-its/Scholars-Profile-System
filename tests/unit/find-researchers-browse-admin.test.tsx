@@ -168,21 +168,26 @@ describe("BrowseList — admin gating (default off)", () => {
   it("renders no strip, no toggle, no row actions, and the unchanged fetch URL", async () => {
     stubFetch();
     render(<BrowseList hrefFor={(id) => `/edit/grant-matcha?opp=${id}`} />);
-    await waitFor(() => expect(screen.getByRole("table")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("list", { name: "Funding opportunities" })).toBeTruthy(),
+    );
 
     // The exact pre-Phase-1b URL — no includeSuppressed param leaks in.
     expect(calls[0].url).toBe("/api/opportunities?limit=500");
     expect(screen.queryByTestId("corpus-freshness")).toBeNull();
     expect(screen.queryByRole("checkbox", { name: /Show suppressed/ })).toBeNull();
     expect(screen.queryByTestId("opportunity-suppress")).toBeNull();
-    // Still exactly the five pre-existing columns.
-    expect(screen.getAllByRole("columnheader")).toHaveLength(5);
+    // Still the pre-existing fields, unaffected by the flag being off.
+    const list = screen.getByRole("list", { name: "Funding opportunities" });
+    expect(within(list).getByText("The Hartwell Foundation")).toBeTruthy();
   });
 
   it("freshness alone (flag off) shows the strip but still no admin controls", async () => {
     stubFetch();
     render(<BrowseList hrefFor={(id) => `/edit/grant-matcha?opp=${id}`} freshness />);
-    await waitFor(() => expect(screen.getByRole("table")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("list", { name: "Funding opportunities" })).toBeTruthy(),
+    );
     expect(screen.getByTestId("corpus-freshness")).toBeTruthy();
     expect(screen.queryByRole("checkbox", { name: /Show suppressed/ })).toBeNull();
     expect(screen.queryByTestId("opportunity-suppress")).toBeNull();
@@ -199,7 +204,9 @@ describe("BrowseList — MATCHA_ADMIN suppress/restore", () => {
   async function renderAdmin(opts?: Parameters<typeof stubFetch>[0]) {
     stubFetch(opts);
     render(<BrowseList hrefFor={(id) => `/edit/grant-matcha?opp=${id}`} freshness admin />);
-    await waitFor(() => expect(screen.getByRole("table")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("list", { name: "Funding opportunities" })).toBeTruthy(),
+    );
   }
 
   it("Suppress opens the confirm dialog and PATCHes with the typed reason, then refetches", async () => {
@@ -262,7 +269,7 @@ describe("BrowseList — MATCHA_ADMIN suppress/restore", () => {
 
     const note = screen.getByTestId("suppressed-note");
     expect(note.textContent).toContain("suppressed Aug 18, 2026 by flm4001");
-    const row = note.closest("tr")!;
+    const row = note.closest("li")!;
     expect(row.className).toContain("opacity-60");
     // Suppressed rows offer Restore; live rows keep Suppress.
     expect(within(row).getByTestId("opportunity-restore")).toBeTruthy();
