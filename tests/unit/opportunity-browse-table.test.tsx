@@ -17,8 +17,10 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
+const { routerPush } = vi.hoisted(() => ({ routerPush: vi.fn() }));
+
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: routerPush }),
   usePathname: () => "/edit/grant-matcha",
   useSearchParams: () => new URLSearchParams(""),
 }));
@@ -103,9 +105,13 @@ describe("BrowseList — cards", () => {
     expect(card!.className).toContain("focus-within:outline");
     expect(card!.getAttribute("role")).toBeNull();
     expect(card!.getAttribute("tabindex")).toBeNull();
-    // No `onclick`-attribute assertion here: React attaches handlers as props, never as a
-    // DOM attribute, so `getAttribute("onclick")` reads null even on a card that HAS one.
-    // The href + stretched-pseudo-element assertions above are the guard that can fail.
+    // `getAttribute("onclick")` cannot pin this — React attaches handlers as props, never
+    // as a DOM attribute, so it reads null even on a card that HAS one. Clicking the card
+    // OFF the anchor is the assertion that can actually fail: a card wired to
+    // `router.push` would navigate here, and cmd-click / copy-link would be dead.
+    routerPush.mockClear();
+    fireEvent.click(card!);
+    expect(routerPush).not.toHaveBeenCalled();
   });
 
   it("defect 1 — the sponsor prints once: in the meta row, stripped off the title", async () => {
@@ -371,6 +377,10 @@ describe("BrowseList — rail facets, filter chips and Clear all", () => {
     fireEvent.click(within(rail()).getByRole("radio", { name: "Only open" }));
     await waitFor(() => expect(screen.getByText("Filtering by:")).toBeTruthy());
     expect(screen.getByText("Availability: Only open")).toBeTruthy();
+    // `active` and the chip row's render test must stay the SAME condition, in both
+    // directions. Dropping `openOnly` from `active` alone kept every other test green
+    // while leaving "Clear all" on screen with no "reset all" beside it.
+    expect(within(rail()).getByRole("button", { name: "reset all" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Remove filter: Availability: Only open" }));
     await waitFor(() => expect(screen.queryByText("Filtering by:")).toBeNull());
