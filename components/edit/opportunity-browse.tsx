@@ -18,7 +18,17 @@
  */
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Building2, Clock, ExternalLink, Eye, EyeOff } from "lucide-react";
+import {
+  AlertTriangle,
+  Building2,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  X,
+} from "lucide-react";
 
 import { PrestigeBadge } from "@/components/edit/prestige-badge";
 import { Button } from "@/components/ui/button";
@@ -94,21 +104,30 @@ function ingestDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-const FRESHNESS_DOT: Record<FreshnessTone, string> = {
-  fresh: "text-green-600 dark:text-green-400",
-  aging: "text-apollo-amber",
-  stale: "text-red-600 dark:text-red-400",
+/** Tone → text treatment, shared by the pill headline and each source's age cell. */
+const FRESHNESS_TEXT: Record<FreshnessTone, string> = {
+  fresh: "text-muted-foreground",
+  aging: "font-medium text-apollo-amber",
+  stale: "font-medium text-red-700 dark:text-red-400",
 };
 
 /**
- * Corpus-freshness strip (matcha-admin Phase 1b) — the Browse-tab header on
- * `/edit/grant-matcha`. Headline: the newest ingest across the WHOLE corpus
- * (the pipeline's pulse, warning-toned when stale); per-source rows: count +
- * newest ingest + an age dot. Reads `ingestedAt` ONLY — `lastRefreshedAt` is
- * re-stamped by the nightly upsert and would always read fresh (the Phase 0a
- * lesson, and the reason the corpus froze unnoticed for six weeks).
+ * Corpus-freshness disclosure (matcha-admin Phase 1b; redesign 2026-08) — the
+ * Browse-tab header on `/edit/grant-matcha`. Collapsed it is one pill carrying
+ * the pipeline's pulse: the newest ingest across the WHOLE corpus, warning-toned
+ * when stale. Expanded it adds a Source / Rows / Last-updated grid, a row per
+ * source. Reads `ingestedAt` ONLY — `lastRefreshedAt` is re-stamped by the
+ * nightly upsert and would always read fresh (the Phase 0a lesson, and the
+ * reason the corpus froze unnoticed for six weeks).
+ *
+ * The grid stays MOUNTED when collapsed and is hidden with a display utility,
+ * so the trigger's `aria-controls` points at something real and find-in-page
+ * still reaches the rows. `hidden`/`grid` are swapped, never both applied —
+ * two display utilities on one element resolve by stylesheet order, not by the
+ * order they are written in the attribute.
  */
 export function CorpusFreshness({ sources, now }: { sources: SourceFreshness[]; now: number }) {
+  const [open, setOpen] = useState(false);
   const dated = sources.filter(
     (s): s is SourceFreshness & { newestIngestedAt: string } => s.newestIngestedAt !== null,
   );
@@ -132,40 +151,74 @@ export function CorpusFreshness({ sources, now }: { sources: SourceFreshness[]; 
     <section
       data-testid="corpus-freshness"
       aria-label="Corpus freshness"
-      className="border-apollo-border bg-apollo-surface mb-4 rounded-lg border px-4 py-3 text-sm"
+      className="border-apollo-border bg-apollo-surface mb-4 rounded-[10px] border text-sm"
     >
-      <p
-        data-testid="corpus-freshness-headline"
-        data-tone={headTone}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls="corpus-freshness-detail"
+        className="hover:bg-apollo-surface-2 flex w-full items-center gap-2 rounded-[10px] px-4 py-2.5 text-left"
+      >
+        {headTone === "fresh" ? (
+          <Clock className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
+        ) : (
+          <AlertTriangle className="text-apollo-amber size-3.5 shrink-0" aria-hidden />
+        )}
+        <span
+          data-testid="corpus-freshness-headline"
+          data-tone={headTone}
+          className={`min-w-0 flex-1 ${FRESHNESS_TEXT[headTone]}`}
+        >
+          Corpus freshness — newest row {ingestDate(newest.newestIngestedAt)}, {headAge} day
+          {headAge === 1 ? "" : "s"} ago
+        </span>
+        <ChevronDown
+          className={`text-muted-foreground size-4 shrink-0 transition-transform${open ? " rotate-180" : ""}`}
+          aria-hidden
+        />
+      </button>
+      <div
+        id="corpus-freshness-detail"
         className={
-          headTone === "fresh"
-            ? "text-muted-foreground"
-            : headTone === "aging"
-              ? "font-medium text-apollo-amber"
-              : "font-medium text-red-700 dark:text-red-400"
+          open
+            ? "border-apollo-border grid grid-cols-[1fr_auto_auto] gap-x-6 gap-y-1.5 border-t px-4 py-3"
+            : "hidden"
         }
       >
-        {headTone !== "fresh" ? (
-          <AlertTriangle className="mr-1 inline size-3.5 align-[-2px]" aria-hidden />
-        ) : null}
-        Corpus freshness — newest row {ingestDate(newest.newestIngestedAt)}, {headAge} day
-        {headAge === 1 ? "" : "s"} ago
-      </p>
-      <ul className="text-muted-foreground mt-1.5 flex flex-wrap gap-x-5 gap-y-1">
+        {(["Source", "Rows", "Last updated"] as const).map((h, i) => (
+          <span
+            key={h}
+            className={`text-muted-foreground text-[10.5px] uppercase tracking-wider${
+              i === 0 ? "" : " text-right"
+            }`}
+          >
+            {h}
+          </span>
+        ))}
         {rows.map((s) => {
           const age = ingestAgeDays(s.newestIngestedAt, now);
           const tone = freshnessTone(age);
+          // ponytail: `contents` keeps each source's three cells column-aligned with
+          // the header row without a subgrid; the wrapper exists only to carry the
+          // test hook. Source names render as plain text — there is no source→URL
+          // registry anywhere in the system, and only `sourceUrl` (per-opportunity,
+          // not on the list item) is a real link.
           return (
-            <li key={s.source ?? "unknown"} data-testid={`freshness-${s.source ?? "unknown"}`}>
-              <span className="text-foreground">{sourceLabel(s.source) ?? "Unknown"}</span>{" "}
-              {s.count} · {ingestDate(s.newestIngestedAt)} ({age}d){" "}
-              <span aria-hidden data-tone={tone} className={FRESHNESS_DOT[tone]}>
-                ●
+            <div
+              key={s.source ?? "unknown"}
+              data-testid={`freshness-${s.source ?? "unknown"}`}
+              className="contents"
+            >
+              <span className="text-foreground">{sourceLabel(s.source) ?? "Unknown"}</span>
+              <span className="text-muted-foreground text-right tabular-nums">{s.count}</span>
+              <span data-tone={tone} className={`text-right tabular-nums ${FRESHNESS_TEXT[tone]}`}>
+                {ingestDate(s.newestIngestedAt)} ({age}d)
               </span>
-            </li>
+            </div>
           );
         })}
-      </ul>
+      </div>
     </section>
   );
 }
@@ -270,12 +323,12 @@ export function deadlineLabel(dueDate: string | null, status: string | null, now
 function DeadlineCell({ iso, status }: { iso: string | null; status: string | null }) {
   const label = deadlineLabel(iso, status, Date.now());
   if (label === "—") {
-    return (
-      <span className="text-muted-foreground">
-        <span aria-hidden>—</span>
-        <span className="sr-only">No deadline recorded</span>
-      </span>
-    );
+    // Redesign 2026-08: a bare em dash reaches a screen reader as nothing at all
+    // AND reads to everyone else as "no deadline", which is a stronger claim than
+    // the data supports — `dueDate` is null on 99.0% of the corpus because nothing
+    // extracted one, not because none exists. `deadlineLabel` still returns "—"
+    // (it is the exported string helper, pinned by tests); only this cell renames it.
+    return <span className="text-muted-foreground">Not extracted</span>;
   }
   const urgency = dueUrgency(iso, Date.now());
   return (
@@ -580,8 +633,11 @@ export function BrowseList({
         </p>
       ) : null}
 
-      <div className="flex flex-col gap-x-10 gap-y-6 lg:flex-row">
+      {/* Redesign 2026-08: a 250px rail and a 20px gutter, top-aligned so the rail
+          never stretches to the length of the results column. */}
+      <div className="flex flex-col gap-x-5 gap-y-6 lg:flex-row lg:items-start">
         <div className="min-w-0 flex-1">
+          <ActiveFilterChips filters={filters} setFilters={setFilters} />
           {status.kind === "loading" ? (
             <ListSkeleton label="Loading opportunities…" />
           ) : status.kind === "error" ? (
@@ -789,6 +845,83 @@ function SuppressOpportunityDialog({
   );
 }
 
+/** Immutably drop one value from a checkbox facet group. */
+function withoutFacet(
+  f: BrowseFilters,
+  group: "sponsors" | "mechanisms",
+  value: string,
+): BrowseFilters {
+  const next = new Set(f[group]);
+  next.delete(value);
+  return { ...f, [group]: next };
+}
+
+/**
+ * Active-filter chips (redesign 2026-08) — one removable chip per filter that is
+ * currently narrowing the list, sitting above the results count so the reason a
+ * short list is short is visible without opening the rail.
+ *
+ * Deliberately mirrors `FilterRail`'s own `active` test and does NOT chip the
+ * faculty-PI gate: that gate is ON by default, so chipping it would put a chip on
+ * every resting render, and its relax/re-apply control already lives on the
+ * counterfactual sentence below — the one line that admits rows are hidden.
+ */
+function ActiveFilterChips({
+  filters,
+  setFilters,
+}: {
+  filters: BrowseFilters;
+  setFilters: React.Dispatch<React.SetStateAction<BrowseFilters>>;
+}) {
+  const chips: Array<{ key: string; label: string; clear: () => void }> = [];
+  if (filters.openOnly) {
+    chips.push({
+      key: "availability",
+      label: "Only open",
+      clear: () => setFilters((f) => ({ ...f, openOnly: false })),
+    });
+  }
+  for (const group of ["sponsors", "mechanisms"] as const) {
+    for (const value of [...filters[group]]) {
+      chips.push({
+        key: `${group}:${value}`,
+        label: value,
+        clear: () => setFilters((f) => withoutFacet(f, group, value)),
+      });
+    }
+  }
+  if (chips.length === 0) return null;
+
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+      <span className="text-muted-foreground">Filtering by:</span>
+      {chips.map((c) => (
+        <span
+          key={c.key}
+          className="border-apollo-border bg-apollo-surface inline-flex max-w-full items-center gap-1 rounded-full border py-0.5 pl-2.5 pr-1"
+        >
+          <span className="min-w-0 truncate">{c.label}</span>
+          <button
+            type="button"
+            onClick={c.clear}
+            aria-label={`Remove filter: ${c.label}`}
+            className="text-muted-foreground hover:bg-apollo-red-tint hover:text-apollo-maroon shrink-0 rounded-full p-0.5"
+          >
+            <X className="size-3" aria-hidden />
+          </button>
+        </span>
+      ))}
+      <button
+        type="button"
+        onClick={() => setFilters((f) => ({ ...EMPTY_BROWSE_FILTERS, q: f.q }))}
+        className="text-[var(--color-accent-slate)] hover:underline"
+      >
+        Clear all
+      </button>
+    </div>
+  );
+}
+
 // Duke-style right-rail filters: availability, then checkbox facet groups with
 // counts. All client-side over the fetched corpus.
 //
@@ -831,7 +964,7 @@ function FilterRail({
   // 1.035:1 on the rail and dies.
   return (
     <aside
-      className="bg-apollo-rail border-apollo-rail-border w-full shrink-0 space-y-5 rounded-xl border p-4 lg:order-first lg:w-64"
+      className="bg-apollo-rail border-apollo-rail-border w-full shrink-0 space-y-5 rounded-[var(--apollo-radius-card)] border p-4 lg:order-first lg:w-[250px]"
       aria-label="Filter opportunities"
     >
       <div className="flex items-baseline justify-between">
@@ -991,58 +1124,64 @@ function OpportunityCard({
   const suppressed = Boolean(o.suppressedAt);
   return (
     <li
-      className={`border-apollo-border bg-apollo-surface hover:bg-apollo-surface-2 focus-within:outline-apollo-maroon relative rounded-lg border p-4 transition-colors focus-within:outline focus-within:outline-2 focus-within:-outline-offset-2${
+      className={`border-apollo-border bg-apollo-surface hover:border-apollo-border-strong hover:bg-apollo-surface-2 focus-within:outline-apollo-maroon relative flex items-center gap-3 rounded-[var(--apollo-radius-card)] border p-4 shadow-[var(--apollo-shadow-card)] transition-colors focus-within:outline focus-within:outline-2 focus-within:-outline-offset-2${
         suppressed ? " opacity-60" : ""
       }`}
     >
-      <div className="text-muted-foreground mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
-        <span className="flex items-center gap-1">
-          <Clock className="size-3.5" aria-hidden />
-          Deadline: <DeadlineCell iso={o.dueDate} status={o.status} />
-        </span>
-        <span className="flex flex-wrap items-center gap-2">
-          {o.sponsor ? (
-            <span className="flex items-center gap-1">
-              <Building2 className="size-3.5" aria-hidden />
-              {o.sponsor}
-            </span>
-          ) : null}
-          <SourceBadge source={o.source} />
-          <PrestigeBadge prestige={o.prestige} />
-          {admin ? (
-            // `relative z-10` — without it the card's stretched anchor (below)
-            // sits on top and swallows the click.
-            <button
-              type="button"
-              onClick={suppressed ? onRestore : onSuppress}
-              disabled={actionBusy}
-              className="text-muted-foreground hover:text-foreground relative z-10 disabled:opacity-50"
-              aria-label={actionBusy ? "Working…" : suppressed ? "Restore" : "Suppress"}
-              title={actionBusy ? "Working…" : suppressed ? "Restore" : "Suppress"}
-              data-testid={`opportunity-${suppressed ? "restore" : "suppress"}`}
-            >
-              {suppressed ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
-            </button>
-          ) : null}
-        </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-muted-foreground mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
+          <span className="flex items-center gap-1">
+            <Clock className="size-3.5" aria-hidden />
+            Deadline: <DeadlineCell iso={o.dueDate} status={o.status} />
+          </span>
+          <span className="flex flex-wrap items-center gap-2">
+            {o.sponsor ? (
+              <span className="flex items-center gap-1">
+                <Building2 className="size-3.5" aria-hidden />
+                {o.sponsor}
+              </span>
+            ) : null}
+            <SourceBadge source={o.source} />
+            <PrestigeBadge prestige={o.prestige} />
+            {admin ? (
+              // `relative z-10` — without it the card's stretched anchor (below)
+              // sits on top and swallows the click.
+              <button
+                type="button"
+                onClick={suppressed ? onRestore : onSuppress}
+                disabled={actionBusy}
+                className="text-muted-foreground hover:text-foreground relative z-10 disabled:opacity-50"
+                aria-label={actionBusy ? "Working…" : suppressed ? "Restore" : "Suppress"}
+                title={actionBusy ? "Working…" : suppressed ? "Restore" : "Suppress"}
+                data-testid={`opportunity-${suppressed ? "restore" : "suppress"}`}
+              >
+                {suppressed ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+              </button>
+            ) : null}
+          </span>
+        </div>
+        <Link
+          href={href}
+          className="font-medium leading-snug text-[var(--color-accent-slate)] after:absolute after:inset-0 after:content-[''] hover:underline focus:outline-none"
+        >
+          {title}
+        </Link>
+        <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
+          {o.mechanism ? <span>{o.mechanism}</span> : null}
+          {award ? <span>{award}</span> : null}
+        </div>
+        {suppressed && o.suppressedAt ? (
+          <span className="text-muted-foreground mt-1 block text-xs" data-testid="suppressed-note">
+            suppressed {formatSuppressedDate(o.suppressedAt)}
+            {o.suppressedBy ? ` by ${o.suppressedBy}` : ""}
+            {o.suppressReason ? ` — “${o.suppressReason}”` : ""}
+          </span>
+        ) : null}
       </div>
-      <Link
-        href={href}
-        className="font-medium leading-snug text-[var(--color-accent-slate)] after:absolute after:inset-0 after:content-[''] hover:underline focus:outline-none"
-      >
-        {title}
-      </Link>
-      <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
-        {o.mechanism ? <span>{o.mechanism}</span> : null}
-        {award ? <span>{award}</span> : null}
-      </div>
-      {suppressed && o.suppressedAt ? (
-        <span className="text-muted-foreground mt-1 block text-xs" data-testid="suppressed-note">
-          suppressed {formatSuppressedDate(o.suppressedAt)}
-          {o.suppressedBy ? ` by ${o.suppressedBy}` : ""}
-          {o.suppressReason ? ` — “${o.suppressReason}”` : ""}
-        </span>
-      ) : null}
+      {/* Affordance only — decorative, so it stays out of the a11y tree: the card
+          already announces itself through the title link. Non-interactive, so it
+          needs no `relative z-10` escape from the stretched pseudo-element. */}
+      <ChevronRight className="text-muted-foreground size-4 shrink-0" aria-hidden />
     </li>
   );
 }
@@ -1064,7 +1203,7 @@ export function SourceBadge({ source }: { source: string | null }) {
       className={
         curated
           ? "shrink-0 rounded-full bg-[var(--color-accent-slate)]/15 px-2 py-0.5 text-xs font-medium text-[var(--color-accent-slate)]"
-          : "border-border-strong text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-xs"
+          : "border-apollo-border-strong text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-xs"
       }
     >
       {label}

@@ -271,12 +271,16 @@ export function GrantMatchaPanel({
   if (!selectedId) {
     return (
       <div>
-        <div className="mb-5">
-          <h1 className="mb-1 text-2xl font-bold tracking-tight">Grant Matcha</h1>
+        <header className="mb-5 flex flex-col gap-1.5">
+          <h1 className="text-2xl font-bold tracking-tight">Grant Matcha</h1>
+          {/* Brand rule, same mechanism as the panel-title rule in `edit-panel.tsx`
+              (a sibling span in a flex-col header, not a border-b, not a ::after);
+              this surface is the dominant one, so it carries maroon. */}
+          <span aria-hidden className="bg-apollo-maroon h-[3px] w-8 rounded-full" />
           <p className="text-muted-foreground text-sm">
             Choose a funding opportunity to rank Weill Cornell researchers on its text.
           </p>
-        </div>
+        </header>
         {/* `freshness` is unconditional here — the strip is part of the grant-matcha Browse
             header for everyone; only the suppress/restore controls are MATCHA_ADMIN-gated. */}
         <BrowseList
