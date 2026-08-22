@@ -638,7 +638,12 @@ describe("MatchaPanel", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
 
-    const bar = await screen.findByRole("button", { name: /115 researchers filtered out/ });
+    // Reskin 2026-08: the grant path's bar reads "Filtered by eligibility · N researchers,
+    // well-matched but ineligible" (the artboard's full-width toggle bar). Same count, same
+    // toggle behavior — only the chrome-level copy moved.
+    const bar = await screen.findByRole("button", {
+      name: /Filtered by eligibility · 115 researchers/,
+    });
     fireEvent.click(bar);
     const floor = document.querySelector('[data-slot="matcha-elig-floor"]')!;
     expect(floor.querySelectorAll("ul > li")).toHaveLength(100);
@@ -661,7 +666,7 @@ describe("MatchaPanel", () => {
 
     expect(await screen.findByText(/Nobody in these results is excluded by it/)).toBeTruthy();
     // …and it must NOT claim that when the gate is actually dropping people.
-    expect(screen.queryByRole("button", { name: /researchers filtered out/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Filtered by eligibility/ })).toBeNull();
   });
 
   it("says nothing about exclusions when the gate IS dropping people", async () => {
@@ -678,7 +683,7 @@ describe("MatchaPanel", () => {
     fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "CAR T collaborators" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
 
-    await screen.findByRole("button", { name: /115 researchers filtered out/ });
+    await screen.findByRole("button", { name: /Filtered by eligibility · 115 researchers/ });
     expect(screen.queryByText(/Nobody in these results is excluded by it/)).toBeNull();
   });
 
@@ -3116,5 +3121,103 @@ describe("MatchaPanel — #1780 Phase 2 culled chip-picker", () => {
     }) as HTMLButtonElement;
     expect(chip.disabled).toBe(true);
     expect(screen.getByText(/maximum terms reached/i)).toBeTruthy();
+  });
+});
+
+/**
+ * Grant-path reskin chrome (Matcha Redesign.dc.html) — gated on `eligibility`, the file's own
+ * grant-vs-email boundary. Two invariants ride every test here: the re-chrome is REACHABLE only
+ * on the grant path (the email surface renders exactly as before — its own suite above pins
+ * that), and re-chromed controls keep their behavior contracts (testids, toggles, counts).
+ */
+describe("MatchaPanel — grant-path reskin (Matcha Redesign.dc.html)", () => {
+  /** No hard stage gate — chrome tests should not entangle the eligibility floor. */
+  const NO_GATE = { careerStages: null, esiTargeted: false, usRequired: false } as const;
+
+  async function renderGrantAndSearch() {
+    render(<MatchaPanel grantMatcha eligibility={NO_GATE} />);
+    fireEvent.change(screen.getByLabelText(/the ask/i), {
+      target: { value: "CAR T collaborators" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+  }
+
+  it("summary card: opportunity-text label, concept summary line, icon re-run — no dates", async () => {
+    await renderGrantAndSearch();
+
+    expect(screen.getByText("Matcha · what we read from the opportunity text")).toBeTruthy();
+    // The 16px/600 summary line is ALL extracted concepts, joined — not the 2-concept handle.
+    expect(document.querySelector('[data-slot="matcha-ask"]')!.textContent).toBe(
+      "Immuno-oncology, Cancer Metabolism, CRISPR screening",
+    );
+    // The artboard's "parsed …/scored …" dates are fiction (no data source) and must not ship.
+    expect(screen.queryByText(/parsed|scored/i)).toBeNull();
+    // The re-run is the circular-arrows icon button; the email path's text button is gone here.
+    expect(screen.getByRole("button", { name: "Match researchers again" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Re-run match" })).toBeNull();
+  });
+
+  it("source-text disclosure starts COLLAPSED and toggles the existing highlighted paste", async () => {
+    await renderGrantAndSearch();
+
+    // Collapsed by default: no highlighted paste, no marks.
+    expect(document.querySelector('[data-slot="matcha-ask-quote"]')).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Show source text with matched concepts/ }),
+    );
+    // The EXISTING rendering, unchanged, now inside the disclosure: the read-only paste with
+    // its term marks (the ask "CAR T collaborators" carries no verbatim concept, so the
+    // explainer's honest lower bound shows too).
+    expect(document.querySelector('[data-slot="matcha-ask-quote"]')).not.toBeNull();
+    expect(screen.getByText(/0 of 3 concepts are highlighted/)).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Hide source text with matched concepts/ }),
+    );
+    expect(document.querySelector('[data-slot="matcha-ask-quote"]')).toBeNull();
+  });
+
+  it("compact table: header row, artboard chip tones, evidence bar — testids kept", async () => {
+    window.localStorage.clear(); // the app default IS compact — the table is the first-visit view
+    await renderGrantAndSearch();
+
+    // The artboard's uppercase header cells.
+    for (const label of ["Researcher", "Match", "Evidence · concepts hit", "Latest work"]) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+    // Rows keep the pinned slot, and each still carries its shortlist checkbox + expand button.
+    const rows = document.querySelectorAll('[data-slot="matcha-compact-row"]');
+    expect(rows.length).toBeGreaterThan(0);
+    expect(screen.getByRole("checkbox", { name: "Shortlist Alice Alpha" })).toBeTruthy();
+
+    // Chip tones: Alice tops the ranking (strong ⇒ green tint); the chip is the artboard's
+    // borderless tint, not the email path's outlined TIER_CLASS.
+    const alice = screen.getByRole("button", { name: "Expand Alice Alpha" });
+    // The tier chip is the row's one `capitalize` span (its cell wrapper carries no class).
+    const chip = alice.querySelector("span.capitalize")!;
+    expect(chip.textContent).toBe("strong");
+    expect(chip.className).toContain("bg-apollo-green-tint");
+
+    // The evidence cell keeps the pinned count beside the artboard's single fill bar.
+    expect(alice.querySelector('[data-slot="matcha-asks-count"]')!.textContent).toBe("1/3");
+  });
+
+  it("relevance floor: the artboard bar re-chromes the SAME toggle — count, Show/Hide, dimmed rows", async () => {
+    await renderGrantAndSearch(); // detailed density (suite pin) — the bar is density-agnostic
+
+    // Cara is weak-tier against Alice's top score ⇒ the floor bar, in the artboard's copy.
+    const bar = screen.getByRole("button", { name: /Relevance floor · 1 weaker match, below/ });
+    expect(screen.queryByText("Cara Gamma")).toBeNull();
+
+    fireEvent.click(bar);
+    expect(screen.getByText("Cara Gamma")).toBeTruthy();
+    // Revealed rows render dimmed (the artboard's 0.65), inside the same slot as ever.
+    const floor = document.querySelector('[data-slot="matcha-floor"]')!;
+    expect(floor.querySelector("ul")!.className).toContain("opacity-65");
+
+    fireEvent.click(screen.getByRole("button", { name: /Relevance floor/ }));
+    expect(screen.queryByText("Cara Gamma")).toBeNull();
   });
 });

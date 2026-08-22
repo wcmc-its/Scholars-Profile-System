@@ -62,7 +62,7 @@
  * to skew a ranking with no way for the officer to say so.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download } from "lucide-react";
+import { Download, RefreshCw } from "lucide-react";
 
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
@@ -231,6 +231,32 @@ type SortKey = (typeof SORT_TABS)[number]["key"];
 type Density = "detailed" | "compact";
 const DENSITY_KEY = "sponsor-match-density";
 
+/** Grant-path reskin (Matcha Redesign.dc.html) — the artboard's segmented pill: greige track,
+ *  white active segment with a shadow. CHROME ONLY: every control keeps its role/aria wiring,
+ *  and `/edit/matcha` (no `eligibility`) keeps its detached-pill chrome verbatim. */
+const SEG_TRACK =
+  "border-apollo-border bg-apollo-surface-2 inline-flex items-center rounded-lg border p-[3px]";
+const segClass = (active: boolean) =>
+  `rounded-md px-2.5 py-1 text-[12.5px] transition-colors ${
+    active
+      ? "bg-white font-semibold text-foreground shadow-[0_1px_2px_rgba(34,30,28,0.1)]"
+      : "text-foreground/80 hover:text-foreground"
+  }`;
+
+/** The grant table's grid — the artboard's six columns (# / Researcher / Match / Evidence /
+ *  Latest work / chevron). Shared by the header row and every compact row so they cannot
+ *  misalign. The shortlist checkbox rides a fixed cell BEFORE this grid (see `CompactRow`'s
+ *  table branch): the artboard omits it, and artboard omission is not a removal decision. */
+const GRANT_TABLE_COLUMNS = "34px minmax(200px,1fr) 120px minmax(120px,0.6fr) 90px 24px";
+
+/** Artboard match-chip tones for the grant table: green tint = strong, amber tint = good,
+ *  neutral greige = weak. Every value is a house token; borderless per the artboard. */
+const GRANT_TIER_CLASS: Record<MatchaFitTier, string> = {
+  strong: "bg-apollo-green-tint text-apollo-green-foreground",
+  good: "bg-apollo-amber-tint text-apollo-amber",
+  weak: "bg-apollo-surface-2 text-muted-foreground",
+};
+
 /** D3 — the recency dial. Stays DETACHED pills: it is a three-mode dial with a year sub-control, not
  *  a clean binary, so it does not conjoin the way the density and sort pairs now do (see the header).
  *  "Since" carries a year, so it opens on a sensible cutoff and offers a span back from today. */
@@ -397,6 +423,11 @@ export function MatchaPanel({
   // D11 — the read-only paste clamps to ~4 lines until the officer asks for the rest. Reset per
   // search so a new paste always starts clamped.
   const [showFullText, setShowFullText] = useState(false);
+  // Grant-path reskin — the highlighted source text sits behind a collapsed-by-default
+  // disclosure ("Show source text with matched concepts"). Reset per search like the clamp
+  // above; unused (always false, nothing reads it) on `/edit/matcha`, where the paste stays
+  // inline.
+  const [showSource, setShowSource] = useState(false);
   const [history, setHistory] = useState<Submission[]>([]);
   /** Defaults to `"own"` so a response without a `scope` never renders a submitter column the
    *  server did not authorise — the same fail-closed direction the route's `where` takes. */
@@ -481,6 +512,11 @@ export function MatchaPanel({
   const pending = status.kind === "loading";
   // What this ask ranks — drives the submit/loading/empty copy so grant mode never says "researchers".
   const targetNoun = target === "grants" ? "opportunities" : "researchers";
+  // The grant-path reskin gate (Matcha Redesign.dc.html). `eligibility` presence is already this
+  // file's grant-vs-email boundary (see the prop's doc comment), so the re-chrome hangs off the
+  // same fact rather than a second flag that could drift from it. `/edit/matcha` passes no
+  // `eligibility` and must render exactly as before.
+  const grantPath = eligibility != null;
 
   // #6d — the retained searches, from the SERVER. This REPLACES the old localStorage history
   // outright rather than sitting beside it: the server list does everything the private one did
@@ -575,6 +611,7 @@ export function MatchaPanel({
       setPreferences([]);
       setActivePrefs(new Set());
       setShowFullText(false); // D11 — a new paste starts clamped
+      setShowSource(false); // grant path — a new paste starts with the source text collapsed
     }
     try {
       const r = await fetch("/api/edit/matcha", {
@@ -615,6 +652,7 @@ export function MatchaPanel({
           setMatchedText(text);
           setEditing(false);
           setShowFullText(false);
+          setShowSource(false);
           setRunId((n) => n + 1);
           setPreferences([]); // grant path ships none — never surface stale people prefs in the ask
           setActivePrefs(new Set());
@@ -640,6 +678,7 @@ export function MatchaPanel({
         setMatchedText(text);
         setEditing(false); // a committed search → show the read-only ask, not the textarea
         setShowFullText(false); // D11 — new paste starts clamped
+        setShowSource(false); // grant path — the source-text disclosure starts collapsed
         setRecency("recent"); // D3 — the dial is per-ask; a new sponsor starts at the ranker's default
         setRunId((n) => n + 1); // #1696 — a new run: every row's claimed-pmid set starts empty
         // #1654 — detected preferences arrive ACTIVE. The sponsor said it; the default is to
@@ -833,6 +872,82 @@ export function MatchaPanel({
   const askMarked = useMemo(() => markedConceptCount(askSegments), [askSegments]);
   // Show the read-only ask once a search has committed and the officer is not editing the paste.
   const showAskCard = !editing && matchedText.length > 0;
+
+  // The committed paste with its marks, the D11 clamp, and the honest-lower-bound explainer —
+  // ONE block with two homes: inline on `/edit/matcha`, behind the grant path's collapsed
+  // "Show source text" disclosure (Matcha Redesign.dc.html). Extracted so the two cannot drift.
+  const askQuote = (
+    <>
+      {/* The pasted request, read-only, each pulled-out term marked. `break-words` for the
+          300-char Outlook SafeLinks URL that carries no break opportunity. D11 — clamped to
+          ~4 lines until "Show full text". The marks are facet-blue: the highlights ARE the
+          provenance ("what we read"), the one place this console reaches for that accent. */}
+      <p
+        data-slot="matcha-ask-quote"
+        className={`text-muted-foreground mt-3 text-[13px] leading-[1.6] break-words whitespace-pre-wrap ${
+          showFullText ? "" : "line-clamp-4"
+        }`}
+      >
+        {askSegments.map((s, i) =>
+          s.term ? (
+            // The wrapper span is `inline-flex`, so a marked RUN can no longer break across
+            // lines — it wraps as a unit. Accepted: a mark spans one canonicalised term (a
+            // word or two), never the 300-char SafeLinks URL `break-words` above exists for.
+            // If a long term ever wraps badly here, that is this trade, not a mystery.
+            <HoverTooltip key={i} text={s.term}>
+              {/* #1780 — method marks take the rail's purple (facet-method) token, concepts
+                  the blue (facet-topic) one, so the paste read-back matches the Concept/Method
+                  rail split. */}
+              <mark
+                data-slot="matcha-ask-mark"
+                data-term={s.term}
+                data-kind={s.kind}
+                className={`rounded-[3px] px-[3px] ${
+                  s.kind === "method"
+                    ? "bg-[var(--color-facet-method-fill)] text-[var(--color-facet-method-text)]"
+                    : "bg-[var(--color-facet-topic-fill)] text-[var(--color-facet-topic-text)]"
+                }`}
+              >
+                {s.text}
+              </mark>
+            </HoverTooltip>
+          ) : (
+            <span key={i}>{s.text}</span>
+          ),
+        )}
+      </p>
+      {/* D11 — expand the clamped paste. */}
+      <div className="mt-1.5 flex items-center gap-3.5">
+        <button
+          type="button"
+          onClick={() => setShowFullText((v) => !v)}
+          className="text-xs text-[var(--color-facet-topic-count)] underline-offset-4 hover:underline"
+        >
+          {showFullText ? "Show less ▴" : "Show full text ▾"}
+        </button>
+      </div>
+      {/* Honest lower bound: a concept goes unmarked when the matcher canonicalised it to a
+          form not verbatim in the paste — never because it was ignored. Shown only when
+          something is actually unmarked; sits at the card foot, ruled off, per the mockup.
+          ⚠ THE SECOND SENTENCE EXISTS BECAUSE THE FIRST ANSWERS THE WRONG QUESTION. This
+          note explains why a CONCEPT is unmarked. A reader who notices unhighlighted PROSE
+          is looking at text that was never elected a concept at all, and reads this line as
+          the explanation for THAT — so "unmarked never means ignored" reassured about
+          something they had not asked. Observed live (#1780): a reader asked why "induced
+          pluripotent stem cell models" was unhighlighted; it was not a concept. Whether it
+          SHOULD have been is extractor coverage, and is not this sentence's job — but the
+          sentence must not imply the highlight is a complete account of the paste. */}
+      {concepts.length > 0 && askMarked < concepts.length ? (
+        <p className="text-muted-foreground border-border mt-3 border-t pt-2.5 text-[11px] leading-[1.5]">
+          {askMarked} of {concepts.length} concepts are highlighted — a concept goes unmarked
+          when the matcher wrote it in standard terms (an abbreviation expanded, a brand
+          resolved). Unmarked never means ignored. Highlighting marks the concepts and methods
+          above, so other wording in the paste going unmarked does not mean it was read — it
+          means it is not one of them.
+        </p>
+      ) : null}
+    </>
+  );
 
   // Facet over the POOL (see RESULT_MAX) — which under a year cutoff IS the year-restricted pool.
   // A facet offering "Neurology · 12" that filters down to 9 because 3 were hidden by the cutoff
@@ -1110,7 +1225,9 @@ export function MatchaPanel({
     history.length > 0 ? (
       <Sheet>
         <SheetTrigger asChild>
-          <Button type="button" variant="outline">
+          {/* Grant path — the artboard sits this beside the icon re-run in the summary card's
+              corner, at the small control scale. Same trigger, same drawer, either way. */}
+          <Button type="button" variant="outline" {...(grantPath ? { size: "sm" as const } : {})}>
             Recent ({history.length})
           </Button>
         </SheetTrigger>
@@ -1232,10 +1349,153 @@ export function MatchaPanel({
         onExpand={() => setExpanded((s) => toggled(s, c.cwid))}
         selected={shortlist.has(c.cwid)}
         onSelect={() => setShortlist((s) => toggled(s, c.cwid))}
+        table={grantTable}
         {...(badge ? { eligBadge: badge } : {})}
       />
     );
   };
+
+  // Grant path × compact density = the artboard's results TABLE: header row + grid rows in one
+  // card. Detailed keeps its card list untouched (spec), and `/edit/matcha` keeps everything.
+  const grantTable = grantPath && density === "compact";
+
+  /** The relevance floor, in either chrome. Grant path: the artboard's full-width greige toggle
+   *  bar (label inline, slate Show/Hide right, revealed rows dimmed); email path: the dashed
+   *  divider + rounded bar, verbatim. Numbers come from what the code computes today — no
+   *  threshold or predicate moved. */
+  const weakFloorSection =
+    collapsedWeak.length > 0 ? (
+      <div data-slot="matcha-floor">
+        {grantPath ? (
+          <button
+            type="button"
+            onClick={() => setShowWeak((v) => !v)}
+            aria-expanded={showWeak}
+            className={`bg-apollo-surface-2 hover:bg-apollo-rail flex w-full items-center justify-between gap-3 px-[18px] py-[11px] text-left text-[12.5px] transition-colors ${
+              grantTable ? "border-apollo-border border-t" : "my-4 rounded-lg"
+            }`}
+          >
+            <span className="text-muted-foreground">
+              Relevance floor · {collapsedWeak.length} weaker match
+              {collapsedWeak.length === 1 ? "" : "es"}, below {Math.round(TIER_GOOD * 100)}% of
+              the top result
+            </span>
+            <span className="text-apollo-slate shrink-0 font-medium">
+              {showWeak ? "Hide" : "Show"}
+            </span>
+          </button>
+        ) : (
+          <>
+            <div className="my-4 flex items-center gap-3" aria-hidden="true">
+              <div className="border-border h-0 flex-1 border-t border-dashed" />
+              <span className="text-muted-foreground text-[11px] tracking-[0.04em]">
+                RELEVANCE FLOOR
+              </span>
+              <div className="border-border h-0 flex-1 border-t border-dashed" />
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowWeak((v) => !v)}
+              aria-expanded={showWeak}
+              className="bg-muted/40 hover:bg-muted/60 flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors"
+            >
+              <span className="text-muted-foreground">
+                {collapsedWeak.length} weaker match{collapsedWeak.length === 1 ? "" : "es"} —
+                below {Math.round(TIER_GOOD * 100)}% of the top result
+              </span>
+              <span className="shrink-0 font-medium text-[var(--color-accent-slate)]">
+                {showWeak ? "Hide ↑" : "Show ↓"}
+              </span>
+            </button>
+          </>
+        )}
+        {showWeak ? (
+          /* Artboard: revealed floor rows render dimmed — they are below the floor for a
+             reason, and 0.65 says so without hiding them. */
+          <ul className={grantPath ? (grantTable ? "opacity-65" : "mt-4 opacity-65") : "mt-4"}>
+            {collapsedWeak.map(({ c, rank }) => (
+              <li key={c.cwid}>{renderResult({ c, rank })}</li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    ) : null;
+
+  /** Grant Matcha — the ELIGIBILITY floor, distinct from the relevance floor above. Everyone the
+   *  hard axis dropped stays reachable behind a toggle: a matcher that silently buries a
+   *  well-matched researcher teaches the officer to distrust it. Empty (so absent) on
+   *  `/edit/matcha`, which has no hard axis — the non-grant chrome branch below survives only
+   *  for that impossibility's sake (this floor cannot render without `eligibility`). */
+  const eligFloorSection =
+    ineligibleRows.length > 0 ? (
+      <div data-slot="matcha-elig-floor">
+        {grantPath ? (
+          <button
+            type="button"
+            onClick={() => setShowIneligible((v) => !v)}
+            aria-expanded={showIneligible}
+            className={`bg-apollo-surface-2 hover:bg-apollo-rail flex w-full items-center justify-between gap-3 px-[18px] py-[11px] text-left text-[12.5px] transition-colors ${
+              grantTable ? "border-apollo-border border-t" : "my-4 rounded-lg"
+            }`}
+          >
+            <span className="text-muted-foreground">
+              Filtered by eligibility · {ineligibleRows.length} researcher
+              {ineligibleRows.length === 1 ? "" : "s"}, well-matched but ineligible
+            </span>
+            <span className="text-apollo-slate shrink-0 font-medium">
+              {showIneligible ? "Hide" : "Show"}
+            </span>
+          </button>
+        ) : (
+          <>
+            <div className="my-4 flex items-center gap-3" aria-hidden="true">
+              <div className="border-border h-0 flex-1 border-t border-dashed" />
+              <span className="text-muted-foreground text-[11px] tracking-[0.04em]">
+                FILTERED BY ELIGIBILITY
+              </span>
+              <div className="border-border h-0 flex-1 border-t border-dashed" />
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowIneligible((v) => !v)}
+              aria-expanded={showIneligible}
+              className="bg-muted/40 hover:bg-muted/60 flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors"
+            >
+              <span className="text-muted-foreground">
+                {ineligibleRows.length} researcher
+                {ineligibleRows.length === 1 ? "" : "s"} filtered out — well-matched but
+                ineligible for this opportunity
+              </span>
+              <span className="shrink-0 font-medium text-[var(--color-accent-slate)]">
+                {showIneligible ? "Hide ↑" : "Show ↓"}
+              </span>
+            </button>
+          </>
+        )}
+        {showIneligible ? (
+          <>
+            <ul className={grantPath ? (grantTable ? "opacity-65" : "mt-4 opacity-65") : "mt-4"}>
+              {ineligibleShown.map(({ c, rank }) => (
+                <li key={c.cwid}>{renderResult({ c, rank, eligBadge: "filtered" })}</li>
+              ))}
+            </ul>
+            {/* The bar counts the whole exclusion (that IS the number the officer
+                needs); the list is capped by the same render bound as the main one.
+                Say so when it bites, or the bar promises N and delivers 100. */}
+            {ineligibleRows.length > ineligibleShown.length ? (
+              <p
+                className={`text-muted-foreground text-[11px] ${
+                  grantTable ? "px-[18px] py-3" : "mt-4"
+                }`}
+              >
+                Showing the first {ineligibleShown.length} of {ineligibleRows.length} — narrow
+                the results to see the rest
+              </p>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    ) : null;
 
   return (
     <div data-slot="matcha-panel">
@@ -1267,16 +1527,51 @@ export function MatchaPanel({
         <div className="mb-4">
             <section
               data-slot="matcha-ask-card"
-              className="border-apollo-border bg-apollo-surface rounded-xl border px-5 py-4 shadow-[var(--apollo-shadow-card)]"
+              className={`border-apollo-border bg-apollo-surface border px-5 py-4 shadow-[var(--apollo-shadow-card)] ${
+                grantPath ? "rounded-[var(--apollo-radius-card)]" : "rounded-xl"
+              }`}
             >
               {/* The mockup's header row: eyebrow + title on the left, the actions on the right —
-                  ONE continuous padded card, no rule between header and body. */}
+                  ONE continuous padded card, no rule between header and body. Grant path
+                  (Matcha Redesign.dc.html): the eyebrow names the SOURCE ("…from the opportunity
+                  text" — the ask is the opportunity's own words, not something the officer
+                  typed), the summary line is the extracted concepts, and the re-run is the
+                  circular-arrows icon. NO "parsed …/scored …" dates ride this label: no data
+                  source exists for them, and the artboard's dates are fiction. */}
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <span className="text-muted-foreground block text-[11px] tracking-[0.05em] uppercase">
-                    What we read from the ask
-                  </span>
-                  {ask ? (
+                  {grantPath ? (
+                    <span className="block text-[11px] font-semibold tracking-[0.06em] text-[#6f6a5e] uppercase">
+                      Matcha · what we read from the opportunity text
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground block text-[11px] tracking-[0.05em] uppercase">
+                      What we read from the ask
+                    </span>
+                  )}
+                  {grantPath ? (
+                    concepts.length > 0 ? (
+                      /* The artboard's 16px/600 summary: every extracted concept, joined — with
+                         the active non-topical asks as a muted suffix, live under the officer's
+                         checkboxes exactly as `ask.title` is on the email path. text-[16px], not
+                         text-base — this theme remaps text-base to 15px (globals.css --text-base)
+                         and the artboard's one exact headline value for this card is 16px. */
+                      <h2 data-slot="matcha-ask" className="mt-1 text-[16px] font-semibold">
+                        {concepts.map((c) => c.term).join(", ")}
+                        {(() => {
+                          const suffix = preferences
+                            .filter((p) => activePrefs.has(p.label))
+                            .map((p) => p.label);
+                          return suffix.length > 0 ? (
+                            <span className="font-normal text-[#8b857b]">
+                              {" · "}
+                              {suffix.join(" · ")}
+                            </span>
+                          ) : null;
+                        })()}
+                      </h2>
+                    ) : null
+                  ) : ask ? (
                     <h2
                       data-slot="matcha-ask"
                       className="mt-1 text-base font-medium"
@@ -1285,21 +1580,42 @@ export function MatchaPanel({
                     </h2>
                   ) : null}
                 </div>
-                <div className="flex shrink-0 flex-wrap gap-1.5">
+                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                   {allowEditPaste ? (
                     <Button type="button" variant="outline" onClick={() => setEditing(true)}>
                       Edit paste
                     </Button>
                   ) : null}
-                  <Button
-                    type="button"
-                    disabled={pending}
-                    onClick={() => void runSearch(matchedText, { include: included })}
-                    className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
-                  >
-                    {pending ? "Ranking…" : "Re-run match"}
-                  </Button>
-                  {historyDrawer}
+                  {grantPath ? (
+                    <>
+                      {historyDrawer}
+                      {/* The artboard's circular-arrows re-run. Same handler as "Re-run match";
+                          `title` + `aria-label` because the visible content is an icon. */}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        disabled={pending}
+                        onClick={() => void runSearch(matchedText, { include: included })}
+                        title="Match researchers again"
+                        aria-label="Match researchers again"
+                      >
+                        <RefreshCw className="size-4" aria-hidden />
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => void runSearch(matchedText, { include: included })}
+                        className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
+                      >
+                        {pending ? "Ranking…" : "Re-run match"}
+                      </Button>
+                      {historyDrawer}
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -1316,74 +1632,27 @@ export function MatchaPanel({
                 </div>
               ) : null}
 
-              {/* The pasted request, read-only, each pulled-out term marked. `break-words` for the
-                  300-char Outlook SafeLinks URL that carries no break opportunity. D11 — clamped to
-                  ~4 lines until "Show full text". The marks are facet-blue: the highlights ARE the
-                  provenance ("what we read"), the one place this console reaches for that accent. */}
-              <p
-                data-slot="matcha-ask-quote"
-                className={`text-muted-foreground mt-3 text-[13px] leading-[1.6] break-words whitespace-pre-wrap ${
-                  showFullText ? "" : "line-clamp-4"
-                }`}
-              >
-                {askSegments.map((s, i) =>
-                  s.term ? (
-                    // The wrapper span is `inline-flex`, so a marked RUN can no longer break across
-                    // lines — it wraps as a unit. Accepted: a mark spans one canonicalised term (a
-                    // word or two), never the 300-char SafeLinks URL `break-words` above exists for.
-                    // If a long term ever wraps badly here, that is this trade, not a mystery.
-                    <HoverTooltip key={i} text={s.term}>
-                      {/* #1780 — method marks take the rail's purple (facet-method) token, concepts
-                          the blue (facet-topic) one, so the paste read-back matches the Concept/Method
-                          rail split. */}
-                      <mark
-                        data-slot="matcha-ask-mark"
-                        data-term={s.term}
-                        data-kind={s.kind}
-                        className={`rounded-[3px] px-[3px] ${
-                          s.kind === "method"
-                            ? "bg-[var(--color-facet-method-fill)] text-[var(--color-facet-method-text)]"
-                            : "bg-[var(--color-facet-topic-fill)] text-[var(--color-facet-topic-text)]"
-                        }`}
-                      >
-                        {s.text}
-                      </mark>
-                    </HoverTooltip>
-                  ) : (
-                    <span key={i}>{s.text}</span>
-                  ),
-                )}
-              </p>
-              {/* D11 — expand the clamped paste. */}
-              <div className="mt-1.5 flex items-center gap-3.5">
-                <button
-                  type="button"
-                  onClick={() => setShowFullText((v) => !v)}
-                  className="text-xs text-[var(--color-facet-topic-count)] underline-offset-4 hover:underline"
-                >
-                  {showFullText ? "Show less ▴" : "Show full text ▾"}
-                </button>
-              </div>
-              {/* Honest lower bound: a concept goes unmarked when the matcher canonicalised it to a
-                  form not verbatim in the paste — never because it was ignored. Shown only when
-                  something is actually unmarked; sits at the card foot, ruled off, per the mockup.
-                  ⚠ THE SECOND SENTENCE EXISTS BECAUSE THE FIRST ANSWERS THE WRONG QUESTION. This
-                  note explains why a CONCEPT is unmarked. A reader who notices unhighlighted PROSE
-                  is looking at text that was never elected a concept at all, and reads this line as
-                  the explanation for THAT — so "unmarked never means ignored" reassured about
-                  something they had not asked. Observed live (#1780): a reader asked why "induced
-                  pluripotent stem cell models" was unhighlighted; it was not a concept. Whether it
-                  SHOULD have been is extractor coverage, and is not this sentence's job — but the
-                  sentence must not imply the highlight is a complete account of the paste. */}
-              {concepts.length > 0 && askMarked < concepts.length ? (
-                <p className="text-muted-foreground border-border mt-3 border-t pt-2.5 text-[11px] leading-[1.5]">
-                  {askMarked} of {concepts.length} concepts are highlighted — a concept goes unmarked
-                  when the matcher wrote it in standard terms (an abbreviation expanded, a brand
-                  resolved). Unmarked never means ignored. Highlighting marks the concepts and methods
-                  above, so other wording in the paste going unmarked does not mean it was read — it
-                  means it is not one of them.
-                </p>
-              ) : null}
+              {/* The committed paste (see `askQuote`). Grant path: collapsed behind the
+                  artboard's disclosure — the opportunity's own synopsis is already on the page
+                  above this card, so its highlighted copy is a reveal, not the headline. The
+                  existing highlight markup and its explainer render unchanged inside. */}
+              {grantPath ? (
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowSource((v) => !v)}
+                    aria-expanded={showSource}
+                    className="text-xs font-medium text-[var(--apollo-slate)] underline-offset-4 hover:underline"
+                  >
+                    {showSource
+                      ? "Hide source text with matched concepts ▴"
+                      : "Show source text with matched concepts ▾"}
+                  </button>
+                  {showSource ? askQuote : null}
+                </div>
+              ) : (
+                askQuote
+              )}
             </section>
           </div>
       ) : (
@@ -1796,7 +2065,8 @@ export function MatchaPanel({
 
               <main className="min-w-0 flex-1">
                 <div className="mb-3 flex flex-wrap items-center gap-3">
-                  <h2 className="text-base font-semibold">
+                  {/* Grant path — the artboard's 15px/600 header; the email path keeps 16px. */}
+                  <h2 className={grantPath ? "text-[15px] font-semibold" : "text-base font-semibold"}>
                     {resultsSummary(visible.length, filtered.length, ranked.length)}
                   </h2>
                   {/* gap-4 BETWEEN groups, tighter WITHIN: three adjacent pill groups with a
@@ -1816,31 +2086,40 @@ export function MatchaPanel({
                         never hides it (D4). */}
                     {hasRecencyData ? (
                       <div role="group" aria-label="Recency" className="flex items-center gap-1">
-                        {RECENCY_TABS.map((t) => {
-                          const active =
-                            t.key === "since" ? typeof recency === "object" : recency === t.key;
-                          return (
-                            <button
-                              key={t.key}
-                              type="button"
-                              aria-pressed={active}
-                              onClick={() =>
-                                setRecency(
-                                  t.key === "since"
-                                    ? { since: currentYear - RECENCY_SINCE_DEFAULT_AGE }
-                                    : t.key,
-                                )
-                              }
-                              className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
-                                active
-                                  ? "border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
-                                  : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
-                              }`}
-                            >
-                              {t.label}
-                            </button>
-                          );
-                        })}
+                        {/* Grant path — the three modes ride ONE artboard segmented pill (the
+                            year sub-control stays a detached select beside it); the email path
+                            keeps its detached pills. Same buttons, same handlers, either way. */}
+                        <div className={grantPath ? SEG_TRACK : "contents"}>
+                          {RECENCY_TABS.map((t) => {
+                            const active =
+                              t.key === "since" ? typeof recency === "object" : recency === t.key;
+                            return (
+                              <button
+                                key={t.key}
+                                type="button"
+                                aria-pressed={active}
+                                onClick={() =>
+                                  setRecency(
+                                    t.key === "since"
+                                      ? { since: currentYear - RECENCY_SINCE_DEFAULT_AGE }
+                                      : t.key,
+                                  )
+                                }
+                                className={
+                                  grantPath
+                                    ? segClass(active)
+                                    : `rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                                        active
+                                          ? "border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
+                                          : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
+                                      }`
+                                }
+                              >
+                                {grantPath && t.key === "since" ? "Since…" : t.label}
+                              </button>
+                            );
+                          })}
+                        </div>
                         {typeof recency === "object" ? (
                           <select
                             aria-label="Recency cutoff year"
@@ -1867,20 +2146,28 @@ export function MatchaPanel({
                         read as a control with a position, not two independent pills that happen to
                         disagree. Recency stays detached: three-mode dial + year sub-control, not a
                         clean binary. The gap-4 between the three groups still does the grouping. */}
-                    <div role="group" aria-label="Result density" className="flex items-center">
+                    <div
+                      role="group"
+                      aria-label="Result density"
+                      className={grantPath ? SEG_TRACK : "flex items-center"}
+                    >
                       {(["detailed", "compact"] as const).map((d, i, arr) => (
                         <button
                           key={d}
                           type="button"
                           aria-pressed={density === d}
                           onClick={() => setDensity(d)}
-                          className={`relative border px-2.5 py-0.5 text-xs capitalize transition-colors ${
-                            i === 0 ? "rounded-l-full" : "-ml-px"
-                          } ${i === arr.length - 1 ? "rounded-r-full" : ""} ${
-                            density === d
-                              ? "z-10 border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
-                              : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
-                          }`}
+                          className={
+                            grantPath
+                              ? `${segClass(density === d)} capitalize`
+                              : `relative border px-2.5 py-0.5 text-xs capitalize transition-colors ${
+                                  i === 0 ? "rounded-l-full" : "-ml-px"
+                                } ${i === arr.length - 1 ? "rounded-r-full" : ""} ${
+                                  density === d
+                                    ? "z-10 border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
+                                    : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
+                                }`
+                          }
                         >
                           {d}
                         </button>
@@ -1895,20 +2182,30 @@ export function MatchaPanel({
                         groups above still does the grouping, and must stay. `-ml-px` laps the
                         second pill's border onto the first's so the seam is one line, not two;
                         `z-10` on the active pill lifts its slate edge over that seam. */}
-                    <div role="group" aria-label="Sort researchers" className="flex items-center">
+                    {/* Fit/Name is NOT on the artboard — artboard omission is not a removal
+                        decision, so it stays, restyled to the same segmented idiom. */}
+                    <div
+                      role="group"
+                      aria-label="Sort researchers"
+                      className={grantPath ? SEG_TRACK : "flex items-center"}
+                    >
                       {SORT_TABS.map((t, i) => (
                         <button
                           key={t.key}
                           type="button"
                           aria-pressed={sort === t.key}
                           onClick={() => setSort(t.key)}
-                          className={`relative border px-2.5 py-0.5 text-xs transition-colors ${
-                            i === 0 ? "rounded-l-full" : "-ml-px"
-                          } ${i === SORT_TABS.length - 1 ? "rounded-r-full" : ""} ${
-                            sort === t.key
-                              ? "z-10 border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
-                              : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
-                          }`}
+                          className={
+                            grantPath
+                              ? segClass(sort === t.key)
+                              : `relative border px-2.5 py-0.5 text-xs transition-colors ${
+                                  i === 0 ? "rounded-l-full" : "-ml-px"
+                                } ${i === SORT_TABS.length - 1 ? "rounded-r-full" : ""} ${
+                                  sort === t.key
+                                    ? "z-10 border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
+                                    : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
+                                }`
+                          }
                         >
                           {t.label}
                         </button>
@@ -1995,97 +2292,51 @@ export function MatchaPanel({
                   </p>
                 ) : (
                   <>
-                    <ul>
-                      {primaryRows.map(({ c, rank }) => (
-                        <li key={c.cwid}>{renderResult({ c, rank })}</li>
-                      ))}
-                    </ul>
-
-                    {/* The relevance floor: everything in the weak tier collapses into one bar the
-                        officer can open — a toggle, never a silent cut. The divider names the line. */}
-                    {collapsedWeak.length > 0 ? (
-                      <div data-slot="matcha-floor">
-                        <div className="my-4 flex items-center gap-3" aria-hidden="true">
-                          <div className="border-border h-0 flex-1 border-t border-dashed" />
-                          <span className="text-muted-foreground text-[11px] tracking-[0.04em]">
-                            RELEVANCE FLOOR
-                          </span>
-                          <div className="border-border h-0 flex-1 border-t border-dashed" />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setShowWeak((v) => !v)}
-                          aria-expanded={showWeak}
-                          className="bg-muted/40 hover:bg-muted/60 flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors"
-                        >
-                          <span className="text-muted-foreground">
-                            {collapsedWeak.length} weaker match{collapsedWeak.length === 1 ? "" : "es"}{" "}
-                            — below {Math.round(TIER_GOOD * 100)}% of the top result
-                          </span>
-                          <span className="shrink-0 font-medium text-[var(--color-accent-slate)]">
-                            {showWeak ? "Hide ↑" : "Show ↓"}
-                          </span>
-                        </button>
-                        {showWeak ? (
-                          <ul className="mt-4">
-                            {collapsedWeak.map(({ c, rank }) => (
-                              <li key={c.cwid}>{renderResult({ c, rank })}</li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </div>
-                    ) : null}
-
-                    {/* Grant Matcha — the ELIGIBILITY floor, distinct from the relevance floor above.
-                        Everyone the hard axis dropped stays reachable behind a toggle: a matcher that
-                        silently buries a well-matched researcher teaches the officer to distrust it.
-                        Empty (so absent) on `/edit/matcha`, which has no hard axis. */}
-                    {ineligibleRows.length > 0 ? (
-                      <div data-slot="matcha-elig-floor">
-                        <div className="my-4 flex items-center gap-3" aria-hidden="true">
-                          <div className="border-border h-0 flex-1 border-t border-dashed" />
-                          <span className="text-muted-foreground text-[11px] tracking-[0.04em]">
-                            FILTERED BY ELIGIBILITY
-                          </span>
-                          <div className="border-border h-0 flex-1 border-t border-dashed" />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setShowIneligible((v) => !v)}
-                          aria-expanded={showIneligible}
-                          className="bg-muted/40 hover:bg-muted/60 flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors"
-                        >
-                          <span className="text-muted-foreground">
-                            {ineligibleRows.length} researcher
-                            {ineligibleRows.length === 1 ? "" : "s"} filtered out — well-matched but
-                            ineligible for this opportunity
-                          </span>
-                          <span className="shrink-0 font-medium text-[var(--color-accent-slate)]">
-                            {showIneligible ? "Hide ↑" : "Show ↓"}
-                          </span>
-                        </button>
-                        {showIneligible ? (
+                    {(() => {
+                      const primaryList = (
+                        <ul>
+                          {primaryRows.map(({ c, rank }) => (
+                            <li key={c.cwid}>{renderResult({ c, rank })}</li>
+                          ))}
+                        </ul>
+                      );
+                      // Grant path × compact — the artboard's TABLE: one card (its own x-scroll,
+                      // so a narrow console never squeezes the grid), header row on greige, the
+                      // rows + both floor bars inside so their columns and rules line up. The
+                      // header's leading spacer mirrors the row's checkbox cell (w-[44px]).
+                      if (!grantTable) {
+                        return (
                           <>
-                            <ul className="mt-4">
-                              {ineligibleShown.map(({ c, rank }) => (
-                                <li key={c.cwid}>
-                                  {renderResult({ c, rank, eligBadge: "filtered" })}
-                                </li>
-                              ))}
-                            </ul>
-                            {/* The bar counts the whole exclusion (that IS the number the officer
-                                needs); the list is capped by the same render bound as the main one.
-                                Say so when it bites, or the bar promises N and delivers 100. */}
-                            {ineligibleRows.length > ineligibleShown.length ? (
-                              <p className="text-muted-foreground mt-4 text-[11px]">
-                                Showing the first {ineligibleShown.length} of{" "}
-                                {ineligibleRows.length} — narrow the results to see the rest
-                              </p>
-                            ) : null}
+                            {primaryList}
+                            {weakFloorSection}
+                            {eligFloorSection}
                           </>
-                        ) : null}
-                      </div>
-                    ) : null}
+                        );
+                      }
+                      return (
+                        <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-[var(--apollo-radius-card)] border shadow-[var(--apollo-shadow-card)]">
+                          <div className="min-w-[660px]">
+                            <div className="bg-apollo-surface-2 flex items-center text-[10.5px] font-semibold tracking-[0.06em] text-[#6f6a5e] uppercase">
+                              <span className="w-[44px] shrink-0" aria-hidden />
+                              <div
+                                className="grid flex-1 items-center gap-3 py-[11px] pr-[18px]"
+                                style={{ gridTemplateColumns: GRANT_TABLE_COLUMNS }}
+                              >
+                                <span className="text-right">#</span>
+                                <span>Researcher</span>
+                                <span>Match</span>
+                                <span>Evidence · concepts hit</span>
+                                <span>Latest work</span>
+                                <span aria-hidden />
+                              </div>
+                            </div>
+                            {primaryList}
+                            {weakFloorSection}
+                            {eligFloorSection}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Excluded entirely (not collapsed): scholars the spine ranked but shipped no
                         research-match evidence for. A count, not names — a results view names people
@@ -2668,6 +2919,7 @@ function CompactRow({
   onExpand,
   selected,
   onSelect,
+  table = false,
   eligBadge,
 }: {
   candidate: MatchaCandidate;
@@ -2680,6 +2932,10 @@ function CompactRow({
   /** Shortlist membership, and its toggle. Per-ask; owned by the panel (see `shortlist`). */
   selected: boolean;
   onSelect: () => void;
+  /** Grant-path reskin — render as the artboard's TABLE row (`GRANT_TABLE_COLUMNS`) instead of
+   *  the flex row. Same checkbox, same expand button, same slots; chrome only. False on
+   *  `/edit/matcha`, whose row is untouched. */
+  table?: boolean;
   /** Grant Matcha — inline eligibility pill. Absent ⇒ no pill (the `/edit/matcha` case). */
   eligBadge?: EligBadge;
 }) {
@@ -2706,6 +2962,105 @@ function CompactRow({
   const tier = fitTier(candidate.fusedScore, topScore);
   const year = latestEvidenceYear(candidate);
   const stale = year != null && staleYear != null && year < staleYear;
+  if (table) {
+    // Grant-path reskin — the artboard's grid row. Structure is the SAME two siblings as the
+    // flex row below (checkbox cell + expand button), for the same invalid-HTML reason; the
+    // button carries the grid so its cells align under the header row, which mirrors the
+    // 44px checkbox cell with a spacer. The evidence cell swaps the segmented strip for the
+    // artboard's single fill bar (fraction = concepts hit); the per-segment detail stays one
+    // click away on the expanded card. Stale years turn amber here (the artboard's tone) but
+    // the boundary is still `staleBefore` — under "Any" nothing claims stale, exactly as the
+    // flex row behaves.
+    const hitFraction =
+      coverage.length > 0 ? Math.round((asksCovered / coverage.length) * 100) : 0;
+    return (
+      <div
+        data-slot="matcha-compact-row"
+        className="border-apollo-border hover:bg-apollo-surface-2 flex w-full items-center border-t transition-colors"
+      >
+        <span className="flex w-[44px] shrink-0 items-center justify-center">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onSelect}
+            aria-label={`Shortlist ${candidate.name}`}
+            className="size-3.5 shrink-0 accent-[var(--color-accent-slate)]"
+          />
+        </span>
+        <button
+          type="button"
+          onClick={onExpand}
+          aria-label={`Expand ${candidate.name}`}
+          className="grid min-w-0 flex-1 items-center gap-3 py-[11px] pr-[18px] text-left"
+          style={{ gridTemplateColumns: GRANT_TABLE_COLUMNS }}
+        >
+          <span className="text-muted-foreground text-right text-xs tabular-nums">{rank}</span>
+          <span className="min-w-0">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate text-[13.5px] font-semibold">{candidate.name}</span>
+              {eligBadge ? <EligBadgePill badge={eligBadge} /> : null}
+            </span>
+            {candidate.title ? (
+              <span className="text-muted-foreground block truncate text-xs">
+                {candidate.title}
+              </span>
+            ) : null}
+          </span>
+          <span>
+            <span
+              className={`inline-flex rounded-full px-[9px] py-[2px] text-[11.5px] font-semibold capitalize ${GRANT_TIER_CLASS[tier]}`}
+            >
+              {tier}
+            </span>
+          </span>
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="bg-apollo-surface-2 h-[6px] min-w-0 flex-1 overflow-hidden rounded-[3px]">
+              <span
+                aria-hidden
+                className="bg-apollo-slate block h-full rounded-[3px]"
+                style={{ width: `${hitFraction}%` }}
+              />
+            </span>
+            <HoverTooltip
+              wide
+              text={`Ranks under ${asksCovered} of the ${coverage.length} concepts this opportunity calls for — every concept the scholar ranks under, not only the ones we can show evidence for. Open the row to see which.`}
+            >
+              <span
+                className="text-muted-foreground shrink-0 text-right text-xs tabular-nums"
+                data-slot="matcha-asks-count"
+              >
+                {asksCovered}/{coverage.length}
+              </span>
+            </HoverTooltip>
+          </span>
+          {stale ? (
+            <HoverTooltip
+              wide
+              triggerClassName="justify-self-end"
+              text={`Latest evidence predates ${staleYear} — recency is down-weighting this match`}
+            >
+              <span
+                data-slot="matcha-latest-year"
+                className="text-apollo-amber text-right text-xs tabular-nums"
+              >
+                {year != null ? year : ""}
+              </span>
+            </HoverTooltip>
+          ) : (
+            <span
+              data-slot="matcha-latest-year"
+              className="text-right text-xs tabular-nums text-[#1a1a1a]"
+            >
+              {year != null ? year : ""}
+            </span>
+          )}
+          <span className="text-muted-foreground justify-self-end text-xs" aria-hidden="true">
+            ›
+          </span>
+        </button>
+      </div>
+    );
+  }
   return (
     // THE ROOT IS A DIV, AND IT HAS TO BE. It was a `<button>` — the whole row was the expand
     // target — and a checkbox cannot live inside one: interactive content nested in a button is

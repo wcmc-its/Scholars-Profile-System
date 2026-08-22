@@ -27,6 +27,7 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  Lock,
   X,
 } from "lucide-react";
 
@@ -1379,11 +1380,31 @@ function formatSuppressedDate(iso: string): string {
 }
 
 /** Curated-vs-external source pill — inline beside whatever it qualifies (a row title, the
- *  grant-matcha selected header). Renders nothing for a null source. */
-export function SourceBadge({ source }: { source: string | null }) {
+ *  grant-matcha selected header). Renders nothing for a null source.
+ *
+ *  `variant="lock"` (grant-matcha detail header, Matcha Redesign.dc.html): the CURATED pill
+ *  reads as the console's LOCKED role — lock-bg + lock icon, `LockedBadge`'s cue at the
+ *  artboard's 11.5px chip scale. Non-curated sources keep the default outline pill under
+ *  either variant: the artboard draws only the curated case, and an external source is not
+ *  "locked" anything. */
+export function SourceBadge({
+  source,
+  variant,
+}: {
+  source: string | null;
+  variant?: "lock";
+}) {
   const label = sourceLabel(source);
   if (!label) return null;
   const curated = source === "wcm_curated";
+  if (variant === "lock" && curated) {
+    return (
+      <span className="bg-apollo-lock-bg border-apollo-border text-muted-foreground inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-[2px] text-[11.5px] font-medium">
+        <Lock className="size-3" aria-hidden />
+        {label}
+      </span>
+    );
+  }
   return (
     <span
       className={

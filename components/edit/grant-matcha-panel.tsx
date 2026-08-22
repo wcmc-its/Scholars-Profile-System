@@ -28,7 +28,6 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 
 import {
   BrowseList,
-  ClampedText,
   OpportunityFactRail,
   SourceBadge,
 } from "@/components/edit/opportunity-browse";
@@ -110,6 +109,55 @@ export function askNote(full: {
 
 function asStringArray(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+// ponytail: char-count heuristic for "long", like `ClampedText`'s — ~2 lines of 13px prose in
+// the 820px column, not measured lines.
+const SYNOPSIS_CLAMP_THRESHOLD = 200;
+
+/**
+ * Detail-header synopsis clamp (Matcha Redesign.dc.html): two lines of the artboard's 13px/1.55
+ * greige prose, an inline "Show full text"/"Show less" toggle, and the More-information link
+ * BESIDE the toggle rather than a scroll away (same `sourceUrl` the fact rail renders — not new
+ * data). Local rather than the shared `ClampedText`: this chrome (clamp height, type, toggle
+ * copy) is the artboard's, and re-theming the shared clamp would bleed into the reverse-matcher
+ * card that also uses it. Mounted with `key={id}` so a new opportunity starts clamped.
+ */
+function ClampedSynopsis({ text, sourceUrl }: { text: string; sourceUrl: string | null }) {
+  const [expanded, setExpanded] = useState(false);
+  const long = text.length > SYNOPSIS_CLAMP_THRESHOLD;
+  return (
+    <div className="max-w-[820px]">
+      <p
+        className={`text-[13px] leading-[1.55] whitespace-pre-line text-[#5c574d] ${
+          long && !expanded ? "line-clamp-2" : ""
+        }`}
+      >
+        {text}
+      </p>
+      <div className="mt-1.5 flex flex-wrap items-center gap-3.5">
+        {long ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((e) => !e)}
+            className="text-sm text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+          >
+            {expanded ? "Show less" : "Show full text"}
+          </button>
+        ) : null}
+        {sourceUrl ? (
+          <a
+            href={sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)] hover:underline"
+          >
+            More information <ExternalLink className="size-3.5" aria-hidden />
+          </a>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 // `requirementsFrom` (with its `FACULTY_STAGES`/`NON_STAGE_ROLES` helpers) moved to
@@ -270,49 +318,49 @@ export function GrantMatchaPanel({
         // main column, the always-every-row fact rail as a Duke-style right column.
         <div className="flex flex-col gap-x-8 gap-y-4 sm:flex-row">
           <div className="min-w-0 flex-1">
-            <div className="min-w-0 text-sm">
-              {current.selected.sponsor ? (
-                <span className="font-semibold text-[var(--color-accent-slate)]">
-                  {current.selected.sponsor}
-                  {" · "}
-                </span>
-              ) : null}
-              <span className="text-foreground">
-                {current.selected.title ?? "Untitled opportunity"}
-              </span>
+            {/* Artboard header lockup (Matcha Redesign.dc.html): sponsor EYEBROW over the title,
+                brand rule, then the chip row. The eyebrow renders ONLY when the corpus carries a
+                sponsor — many curated rows have none, and degrading to no eyebrow beats an empty
+                slot gapping the title. */}
+            {current.selected.sponsor ? (
+              <p
+                data-slot="opportunity-eyebrow"
+                className="mb-1.5 text-xs font-semibold tracking-[0.05em] text-[#6f6a5e] uppercase"
+              >
+                {current.selected.sponsor}
+              </p>
+            ) : null}
+            <div className="max-w-[820px] text-[22px] leading-[1.3] font-bold tracking-[-0.01em]">
+              {current.selected.title ?? "Untitled opportunity"}
             </div>
+            {/* Brand rule, same mechanism as the Browse header's (a sibling span, not a
+                border-b) — the artboard's 32×3 maroon at radius 2. */}
+            <span aria-hidden className="bg-apollo-maroon mt-2.5 mb-3 block h-[3px] w-8 rounded-[2px]" />
             {(() => {
               const appeal = appealByStageSummary(current.selected.appealByStage);
               return appeal || current.selected.source ? (
-                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Lock pill first (the artboard's order): "WCM curated" reads as the
+                      console's LOCKED role — lock-bg + lock icon (see SourceBadge). */}
+                  <SourceBadge source={current.selected.source} variant="lock" />
                   {appeal ? (
                     <span
                       data-testid="matcha-appeal-badge"
-                      className="border-apollo-border bg-apollo-surface-2 text-muted-foreground rounded-full border px-2 py-0.5 text-xs"
+                      className="border-apollo-slate-tint-border bg-apollo-slate-tint text-apollo-slate rounded-full border px-2 py-[2px] text-[11.5px] font-medium"
                     >
                       {appeal}
                     </span>
                   ) : null}
-                  <SourceBadge source={current.selected.source} />
                 </div>
               ) : null;
             })()}
             {current.selected.synopsis ? (
               <div className="mt-3">
-                <ClampedText text={current.selected.synopsis} lines={3} />
-                {/* Redesign 2026-08 (Matcha Redesign.dc.html): the fact rail already has
-                    this link — duplicated here so it's not a scroll away from the synopsis
-                    that prompted the click. Same `sourceUrl`, not new data. */}
-                {current.selected.facts.sourceUrl ? (
-                  <a
-                    href={current.selected.facts.sourceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-1.5 inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)] hover:underline"
-                  >
-                    More information <ExternalLink className="size-3.5" aria-hidden />
-                  </a>
-                ) : null}
+                <ClampedSynopsis
+                  key={current.id}
+                  text={current.selected.synopsis}
+                  sourceUrl={current.selected.facts.sourceUrl}
+                />
               </div>
             ) : null}
             {current.selected.note ? (

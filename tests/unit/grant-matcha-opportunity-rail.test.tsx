@@ -14,7 +14,7 @@
  *   and never consumes the structured matcher's abstain signal.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const searchParams = { value: new URLSearchParams("opp=abc") };
 
@@ -138,14 +138,30 @@ describe("GrantMatchaPanel — mockup-4 opportunity frame (?opp= selected view)"
     expect(due.nextElementSibling?.className).toContain("text-apollo-amber");
   });
 
-  it("clamps a long synopsis at three lines behind Show more", async () => {
+  it("clamps a long synopsis at two lines behind Show full text (redesign chrome)", async () => {
     const { container } = await renderSelected({
       ...FULL_PAYLOAD,
       synopsis: "Supports outstanding postdoctoral researchers. ".repeat(12).trim(),
     });
 
-    expect(container.querySelector("p.line-clamp-3")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Show more" })).toBeTruthy();
+    expect(container.querySelector("p.line-clamp-2")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show full text" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show full text" }));
+    expect(container.querySelector("p.line-clamp-2")).toBeNull();
+    expect(screen.getByRole("button", { name: "Show less" })).toBeTruthy();
+  });
+
+  it("renders the sponsor EYEBROW only when the corpus carries a sponsor", async () => {
+    const { container, unmount } = await renderSelected(FULL_PAYLOAD);
+    const eyebrow = container.querySelector('[data-slot="opportunity-eyebrow"]');
+    expect(eyebrow?.textContent).toBe("NCI");
+    unmount();
+
+    // Many curated rows carry no sponsor — the header degrades to NO eyebrow, never an
+    // empty slot gapping the title.
+    const { container: bare } = await renderSelected({ ...FULL_PAYLOAD, sponsor: null });
+    expect(bare.querySelector('[data-slot="opportunity-eyebrow"]')).toBeNull();
+    expect(screen.getByText("K99/R00 Pathway to Independence Award")).toBeTruthy();
   });
 
   it("ports no StageBadge — appealByStage is the only career-stage read", async () => {
