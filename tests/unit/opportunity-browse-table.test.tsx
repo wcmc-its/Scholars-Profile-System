@@ -509,6 +509,37 @@ describe("BrowseList — rail facets, filter chips and Clear all", () => {
     expect(screen.getByRole("link", { name: "Beta Early Career Award" })).toBeTruthy();
   });
 
+  /**
+   * Long facet labels stay on ONE line (`Browse Redesign.dc.html`) — staging showed
+   * "Pharmaceutical Research & Manufacturers of America (PhRMA) Foundation" wrapped
+   * across four Sponsor-facet lines. The span truncates; the row's `title` carries
+   * the full name so hover still reveals it.
+   */
+  it("truncates option labels to one line and titles the row with the full name", async () => {
+    await renderBrowse(FILTER_OPPS);
+    const sponsors = within(rail()).getByRole("group", { name: "Sponsor" });
+    const row = within(sponsors)
+      .getByRole("checkbox", { name: /^Hartwell Foundation/ })
+      .closest("label")!;
+    expect(row.getAttribute("title")).toBe("Hartwell Foundation");
+    const span = within(row as HTMLElement).getByText("Hartwell Foundation");
+    expect(span.className).toContain("truncate");
+    expect(span.className).toContain("min-w-0");
+    expect(span.className).toContain("flex-1");
+  });
+
+  it("titles a labelFor facet row with the resolved label, never the raw id", async () => {
+    // The labelFor branch (Research area) — a regression to title={value} would show the
+    // slug on hover and this suite would stay green if only the Sponsor path were pinned.
+    await renderBrowse(RA_OPPS);
+    const ra = within(rail()).getByRole("group", { name: "Research area" });
+    const row = within(ra)
+      .getByRole("checkbox", { name: /^Cancer Genomics/ })
+      .closest("label")!;
+    expect(row.getAttribute("title")).toBe("Cancer Genomics");
+    expect(within(rail()).queryByTitle("cancer_genomics")).toBeNull();
+  });
+
   it("chips an active facet and removes it again from the chip's own button", async () => {
     await renderBrowse(FILTER_OPPS);
     expect(cards()).toHaveLength(3);
