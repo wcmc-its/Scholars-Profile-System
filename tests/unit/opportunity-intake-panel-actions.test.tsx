@@ -76,20 +76,20 @@ describe("OpportunityIntakePanel row actions", () => {
   it("offers Delete on pending, Suppress on processed, nothing on suppressed", async () => {
     stubFetch();
     render(<OpportunityIntakePanel />);
-    await screen.findByText("https://x.org/grants");
+    await screen.findByText("x.org");
 
     expect(screen.getAllByTestId("intake-action-delete")).toHaveLength(1);
     expect(screen.getAllByTestId("intake-action-suppress")).toHaveLength(1);
     // The suppressed row renders its badge but no action affordance.
     expect(screen.getByText("suppressed")).toBeTruthy();
-    const suppressedRow = screen.getByText("https://z.org/award").closest("li")!;
+    const suppressedRow = screen.getByText("z.org").closest("li")!;
     expect(suppressedRow.querySelector("button")).toBeNull();
   });
 
   it("Delete: arm → confirm → DELETE {submissionId} → list refresh", async () => {
     const f = stubFetch();
     render(<OpportunityIntakePanel />);
-    await screen.findByText("https://x.org/grants");
+    await screen.findByText("x.org");
 
     fireEvent.click(screen.getByTestId("intake-action-delete"));
     // Nothing fired yet — the confirm step is armed.
@@ -112,7 +112,7 @@ describe("OpportunityIntakePanel row actions", () => {
   it("Cancel disarms without firing", async () => {
     const f = stubFetch();
     render(<OpportunityIntakePanel />);
-    await screen.findByText("https://x.org/grants");
+    await screen.findByText("x.org");
 
     fireEvent.click(screen.getByTestId("intake-action-delete"));
     fireEvent.click(screen.getByTestId("intake-action-cancel"));
@@ -123,7 +123,7 @@ describe("OpportunityIntakePanel row actions", () => {
   it("Suppress: confirm → PATCH {submissionId, action:'suppress'}", async () => {
     const f = stubFetch();
     render(<OpportunityIntakePanel />);
-    await screen.findByText("https://y.org/rfa");
+    await screen.findByText("y.org");
 
     fireEvent.click(screen.getByTestId("intake-action-suppress"));
     fireEvent.click(screen.getByTestId("intake-action-confirm"));
@@ -140,7 +140,7 @@ describe("OpportunityIntakePanel row actions", () => {
   it("maps a 409 to its message (drain won the race)", async () => {
     stubFetch({ status: 409, body: { ok: false, error: "submission_processed" } });
     render(<OpportunityIntakePanel />);
-    await screen.findByText("https://x.org/grants");
+    await screen.findByText("x.org");
 
     fireEvent.click(screen.getByTestId("intake-action-delete"));
     fireEvent.click(screen.getByTestId("intake-action-confirm"));
@@ -158,7 +158,7 @@ describe("OpportunityIntakePanel row actions", () => {
       },
     });
     render(<OpportunityIntakePanel />);
-    await screen.findByText("https://x.org/grants");
+    await screen.findByText("x.org");
 
     fireEvent.change(screen.getByPlaceholderText("https://sponsor.org/research-grants"), {
       target: { value: "https://z.org/award" },

@@ -2,6 +2,8 @@
  * `/api/edit/opportunity-intake` route wiring (`docs/opportunity-url-intake-spec.md` §5):
  *  - both verbs 404 while OPPORTUNITY_URL_INTAKE is off (dark-ship posture);
  *  - dev-role gate (superuser OR isDeveloper), GET 403 / POST 403 + denial log;
+ *  - GET's produced-id → corpus-title batch join (one deduped query, no
+ *    suppressed filter, fail-soft to an empty map);
  *  - POST validation + the two 409 duplicate shapes;
  *  - happy path: queue Put with the NORMALIZED url as dedup key, then the B03
  *    audit row (action/entity `opportunity_submission`, target = the SK);
@@ -22,6 +24,7 @@ const {
   mockDeleteSubmission,
   mockSuppressSubmission,
   mockOpportunityFindMany,
+  mockScholarFindMany,
   mockOpportunityUpdate,
   mockTransaction,
   mockAppendAuditRow,
@@ -35,6 +38,7 @@ const {
   mockDeleteSubmission: vi.fn(),
   mockSuppressSubmission: vi.fn(),
   mockOpportunityFindMany: vi.fn(),
+  mockScholarFindMany: vi.fn(),
   mockOpportunityUpdate: vi.fn(),
   mockTransaction: vi.fn(),
   mockAppendAuditRow: vi.fn(),
@@ -58,7 +62,10 @@ vi.mock("@/lib/edit/opportunity-submission", async (importOriginal) => ({
 }));
 vi.mock("@/lib/db", () => ({
   db: {
-    read: { opportunity: { findMany: mockOpportunityFindMany } },
+    read: {
+      opportunity: { findMany: mockOpportunityFindMany },
+      scholar: { findMany: mockScholarFindMany },
+    },
     write: { $transaction: mockTransaction },
   },
 }));
@@ -87,6 +94,7 @@ beforeEach(() => {
   process.env.MATCHA_ADMIN = "on";
   mockListSubmissions.mockResolvedValue([]);
   mockOpportunityFindMany.mockResolvedValue([]);
+  mockScholarFindMany.mockResolvedValue([]);
   mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) =>
     fn({ opportunity: { update: mockOpportunityUpdate } }),
   );
@@ -120,10 +128,81 @@ describe("GET", () => {
     expect((await GET()).status).toBe(403);
 
     mockGetEffectiveEditSession.mockResolvedValue({ isSuperuser: false, isDeveloper: true });
-    mockListSubmissions.mockResolvedValue([{ submissionId: "s1" }]);
+    mockListSubmissions.mockResolvedValue([{ submissionId: "s1", producedOpportunityIds: [] }]);
     const ok = await GET();
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ ok: true, submissions: [{ submissionId: "s1" }] });
+    expect(await ok.json()).toEqual({
+      ok: true,
+      submissions: [{ submissionId: "s1", producedOpportunityIds: [] }],
+      opportunityTitles: {},
+      submitterNames: {},
+    });
+    // No produced ids anywhere on the page → the corpus join never runs.
+    expect(mockOpportunityFindMany).not.toHaveBeenCalled();
+  });
+
+  it("joins produced ids to corpus titles in ONE deduped query, suppressed rows included", async () => {
+    mockGetEffectiveEditSession.mockResolvedValue({ isSuperuser: true, isDeveloper: false });
+    mockListSubmissions.mockResolvedValue([
+      { submissionId: "s1", producedOpportunityIds: ["manual_url:a-1", "manual_url:b-2"] },
+      // Same id twice across the page → still one entry in the `in` list.
+      { submissionId: "s2", producedOpportunityIds: ["manual_url:a-1"] },
+      { submissionId: "s3", producedOpportunityIds: [] },
+    ]);
+    // b-2 is corpus-suppressed — its title must still come back (the detail
+    // route 404s suppressed rows, which is exactly why this join can't filter).
+    mockOpportunityFindMany.mockResolvedValue([
+      { opportunityId: "manual_url:a-1", title: "Hartwell Fellowship" },
+      { opportunityId: "manual_url:b-2", title: "Retracted Award" },
+    ]);
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect((await res.json()).opportunityTitles).toEqual({
+      "manual_url:a-1": "Hartwell Fellowship",
+      "manual_url:b-2": "Retracted Award",
+    });
+    expect(mockOpportunityFindMany).toHaveBeenCalledTimes(1);
+    // Exact args: id-scoped, title-only select, and NO suppressedAt filter.
+    expect(mockOpportunityFindMany).toHaveBeenCalledWith({
+      where: { opportunityId: { in: ["manual_url:a-1", "manual_url:b-2"] } },
+      select: { opportunityId: true, title: true },
+    });
+  });
+
+  it("joins submitter cwids to scholar names in one deduped query, fail-soft to {}", async () => {
+    mockGetEffectiveEditSession.mockResolvedValue({ isSuperuser: true, isDeveloper: false });
+    mockListSubmissions.mockResolvedValue([
+      { submissionId: "s1", submittedBy: "admin", producedOpportunityIds: [] },
+      { submissionId: "s2", submittedBy: "admin", producedOpportunityIds: [] },
+      // A submitter with no scholar row (e.g. IT staff) simply has no entry.
+      { submissionId: "s3", submittedBy: "ops", producedOpportunityIds: [] },
+    ]);
+    mockScholarFindMany.mockResolvedValue([{ cwid: "admin", preferredName: "Ada Admin" }]);
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect((await res.json()).submitterNames).toEqual({ admin: "Ada Admin" });
+    expect(mockScholarFindMany).toHaveBeenCalledTimes(1);
+    expect(mockScholarFindMany).toHaveBeenCalledWith({
+      where: { cwid: { in: ["admin", "ops"] } },
+      select: { cwid: true, preferredName: true },
+    });
+
+    // And the fail-soft posture, same as titles: a scholar read failure is a 200.
+    mockScholarFindMany.mockRejectedValue(new Error("mysql down"));
+    const res2 = await GET();
+    expect(res2.status).toBe(200);
+    expect((await res2.json()).submitterNames).toEqual({});
+  });
+
+  it("degrades to an empty title map (still 200) when the corpus read fails", async () => {
+    mockGetEffectiveEditSession.mockResolvedValue({ isSuperuser: true, isDeveloper: false });
+    mockListSubmissions.mockResolvedValue([
+      { submissionId: "s1", producedOpportunityIds: ["manual_url:a-1"] },
+    ]);
+    mockOpportunityFindMany.mockRejectedValue(new Error("mysql down"));
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect((await res.json()).opportunityTitles).toEqual({});
   });
 
   it("502s when the queue is unreachable", async () => {

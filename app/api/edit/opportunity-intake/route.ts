@@ -75,12 +75,54 @@ export async function GET(): Promise<NextResponse> {
   if (!session || !(session.isSuperuser || session.isDeveloper)) {
     return new NextResponse(null, { status: 403 });
   }
+  let submissions;
   try {
-    return editOk({ submissions: await listSubmissions() });
+    submissions = await listSubmissions();
   } catch (err) {
     logEditFailure(`${PATH}#list`, err);
     return editError(502, "queue_unavailable");
   }
+
+  // Redesign 2026-08: the panel's Created chips show each produced
+  // opportunity's TITLE, not its `manual_url:` slug — ONE batched corpus join
+  // across the whole page of submissions, never a per-id fan-out. Deliberately
+  // NO suppressed filter: `/api/opportunities/[id]` 404s suppressed rows, but
+  // a processed-then-suppressed chip must still say what it created. A
+  // produced id with no surviving row simply has no entry — the panel
+  // degrades that chip to the raw slug.
+  const producedIds = [...new Set(submissions.flatMap((s) => s.producedOpportunityIds))];
+  let opportunityTitles: Record<string, string> = {};
+  if (producedIds.length > 0) {
+    try {
+      const rows = await db.read.opportunity.findMany({
+        where: { opportunityId: { in: producedIds } },
+        select: { opportunityId: true, title: true },
+      });
+      opportunityTitles = Object.fromEntries(rows.map((r) => [r.opportunityId, r.title]));
+    } catch (err) {
+      // Title decoration only — the queue list is still fully usable without
+      // it, so a corpus read failure degrades every chip to its slug rather
+      // than 502ing the whole surface. Loudly logged; never cached.
+      logEditFailure(`${PATH}#titles`, err);
+    }
+  }
+  // Same decoration posture for the batch header's "<name> (<cwid>)" — one batched
+  // scholar join over the page's submitter cwids, fail-soft to the bare cwid (a
+  // submitter who is not a scholar row, e.g. IT staff, simply has no entry).
+  const submitterCwids = [...new Set(submissions.map((s) => s.submittedBy).filter(Boolean))];
+  let submitterNames: Record<string, string> = {};
+  if (submitterCwids.length > 0) {
+    try {
+      const rows = await db.read.scholar.findMany({
+        where: { cwid: { in: submitterCwids } },
+        select: { cwid: true, preferredName: true },
+      });
+      submitterNames = Object.fromEntries(rows.map((r) => [r.cwid, r.preferredName]));
+    } catch (err) {
+      logEditFailure(`${PATH}#submitterNames`, err);
+    }
+  }
+  return editOk({ submissions, opportunityTitles, submitterNames });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
