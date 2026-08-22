@@ -1200,17 +1200,20 @@ function FacetGroup({
       <legend className="mb-1.5 text-sm font-medium">{title}</legend>
       <div className="space-y-1">
         {shown.map(([value, count]) => (
-          <label key={value} className="flex items-start gap-2 text-sm">
+          <label
+            key={value}
+            className="flex items-start gap-2 text-sm"
+            title={labelFor?.(value) ?? value}
+          >
             <input
               type="checkbox"
               checked={selected.has(value)}
               onChange={() => onToggle(value)}
               className="mt-0.5 size-4 shrink-0 accent-[var(--color-accent-slate)]"
             />
-            <span className="min-w-0 flex-1 break-words" title={labelFor?.(value) ?? value}>
-              {labelFor?.(value) ?? value}
-            </span>
-            <span className="text-muted-foreground rounded-full bg-muted px-1.5 py-0.5 text-xs tabular-nums">
+            {/* One line per option (Browse Redesign) — the row's `title` reveals the full name. */}
+            <span className="min-w-0 flex-1 truncate">{labelFor?.(value) ?? value}</span>
+            <span className="text-muted-foreground flex-none rounded-full bg-muted px-1.5 py-0.5 text-xs tabular-nums">
               {count}
             </span>
           </label>
