@@ -15,9 +15,10 @@
  * the table.
  *
  * The selected view (matcha-admin Phase 3b, mockup 4) frames the seeded panel with the
- * opportunity's own facts: clamped synopsis in the main column, `OpportunityFactRail` on the
- * right — every field off the SAME detail fetch that seeds the ask, dashes for what the corpus
- * doesn't carry. The thin-match caution stays where #2494 put it, inside `MatchaPanel`
+ * opportunity's own facts: clamped synopsis, then `OpportunityFactsLine` at the bottom of the
+ * request block — every field off the SAME detail fetch that seeds the ask, populated fields
+ * only (the always-dashed right rail was removed by owner ruling 2026-08-24). The thin-match
+ * caution stays where #2494 put it, inside `MatchaPanel`
  * (`assessMatchSignal`); this surface adds no second banner and never reads the structured
  * matcher's abstain signal.
  */
@@ -28,7 +29,7 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 
 import {
   BrowseList,
-  OpportunityFactRail,
+  OpportunityFactsLine,
   SourceBadge,
 } from "@/components/edit/opportunity-browse";
 import { MatchaPanel, type EligibilityRequirements } from "@/components/edit/matcha-panel";
@@ -50,7 +51,7 @@ type Selected = {
   note: string | null;
   /** ReciterAI's {grad, postdoc, early, mid, senior} appeal spread — badge only, not a scoring input. */
   appealByStage: Partial<Record<CareerStage, number>>;
-  /** Mockup-4 fact rail, straight off the detail payload — missing values stay null (muted dash). */
+  /** Feeds `OpportunityFactsLine` at the bottom of the request block — missing values stay null and render nothing. */
   facts: {
     awardFloor: number | null;
     awardCeiling: number | null;
@@ -118,8 +119,8 @@ const SYNOPSIS_CLAMP_THRESHOLD = 200;
 /**
  * Detail-header synopsis clamp (Matcha Redesign.dc.html): two lines of the artboard's 13px/1.55
  * greige prose, an inline "Show full text"/"Show less" toggle, and the More-information link
- * BESIDE the toggle rather than a scroll away (same `sourceUrl` the fact rail renders — not new
- * data). Local rather than the shared `ClampedText`: this chrome (clamp height, type, toggle
+ * BESIDE the toggle rather than a scroll away (same `sourceUrl` the facts line below renders —
+ * not new data). Local rather than the shared `ClampedText`: this chrome (clamp height, type, toggle
  * copy) is the artboard's, and re-theming the shared clamp would bleed into the reverse-matcher
  * card that also uses it. Mounted with `key={id}` so a new opportunity starts clamped.
  */
@@ -314,10 +315,11 @@ export function GrantMatchaPanel({
       ) : current.kind === "error" ? (
         <p className="text-destructive text-sm">{current.message}</p>
       ) : (
-        // Mockup 4: header + clamped synopsis + caution + the seeded panel in the
-        // main column, the always-every-row fact rail as a Duke-style right column.
-        <div className="flex flex-col gap-x-8 gap-y-4 sm:flex-row">
-          <div className="min-w-0 flex-1">
+        // Header + clamped synopsis + populated facts + caution + the seeded panel,
+        // one column. The Duke-style fact rail is gone (owner ruling 2026-08-24) —
+        // its facts fold into the bottom of the request block instead.
+        <div>
+          <div className="min-w-0">
             {/* Artboard header lockup (Matcha Redesign.dc.html): sponsor EYEBROW over the title,
                 brand rule, then the chip row. The eyebrow renders ONLY when the corpus carries a
                 sponsor — many curated rows have none, and degrading to no eyebrow beats an empty
@@ -355,6 +357,7 @@ export function GrantMatchaPanel({
               ) : null;
             })()}
             {current.selected.synopsis ? (
+              // ClampedSynopsis caps its own width (max-w on its root).
               <div className="mt-3">
                 <ClampedSynopsis
                   key={current.id}
@@ -363,6 +366,14 @@ export function GrantMatchaPanel({
                 />
               </div>
             ) : null}
+            <div className="max-w-[820px]">
+              <OpportunityFactsLine
+                {...current.selected.facts}
+                // A payload with no synopsis renders no ClampedSynopsis — the facts
+                // line is then the only home for the outbound source link.
+                showSourceLink={!current.selected.synopsis}
+              />
+            </div>
             {current.selected.note ? (
               <p className="border-apollo-border bg-apollo-surface-2 text-foreground/90 mt-4 rounded-md border px-3 py-2 text-sm">
                 {current.selected.note}
@@ -383,12 +394,11 @@ export function GrantMatchaPanel({
                 allowEditPaste={false}
                 // Zero-results fix 4 — the nothing-extracted (RM1) empty state links out to the
                 // FOA so the officer can fetch the research-strategy text the synopsis lacks.
-                // Same `sourceUrl` the fact rail and synopsis header already render.
+                // Same `sourceUrl` the facts line and synopsis header already render.
                 sourceUrl={current.selected.facts.sourceUrl}
               />
             </div>
           </div>
-          <OpportunityFactRail {...current.selected.facts} />
         </div>
       )}
     </div>

@@ -5,8 +5,9 @@
  * private closure were extracted verbatim from the retired
  * `components/edit/find-researchers.tsx` (matcha-admin Phase 3a, a pure
  * mechanical move; no behavior change); Phase 3b moved `ClampedText` and the
- * mockup-4 `OpportunityFactRail` in beside them so the grant-matcha selected
- * view renders opportunity facts from one place. Redesign 2026-08
+ * opportunity facts (now `OpportunityFactsLine`; the mockup-4 rail it replaced
+ * was removed by owner ruling 2026-08-24) in beside them so the grant-matcha
+ * selected view renders opportunity facts from one place. Redesign 2026-08
  * (`Browse Redesign.dc.html`) moved the list from a table to a card per
  * opportunity — Track B is expected to give rows a variable amount of tag
  * data (concepts/methods/eligibility), which a fixed-column table can't hold
@@ -1462,14 +1463,19 @@ export function ClampedText({ text, lines = 4 }: { text: string; lines?: 3 | 4 }
 
 
 /**
- * Mockup-4 fact rail for the grant-matcha selected view — a standalone
- * Duke-style right column (that surface renders its own header + synopsis)
- * with EVERY row always present: a missing value
- * renders the muted dash rather than silently dropping the row, so the officer
- * can tell "not recorded" from "not shown". Values come straight off
+ * Populated opportunity facts folded into the bottom of the request block
+ * (owner ruling 2026-08-24: the Duke-style right rail is GONE — most curated
+ * rows parse none of these fields, and six labeled dashes told the officer
+ * nothing). A missing value now drops its row, and when nothing is recorded
+ * the whole line renders nothing. Values come straight off
  * `/api/opportunities/[id]`; nothing here is ever invented.
+ *
+ * The rail's duplicate More-information button died with the rail — the
+ * synopsis header (ClampedSynopsis) already links the source. `showSourceLink`
+ * is the one exception: a payload with NO synopsis has no other home for its
+ * outbound link, so the line carries it then.
  */
-export function OpportunityFactRail({
+export function OpportunityFactsLine({
   awardFloor,
   awardCeiling,
   estimatedFunding,
@@ -1478,6 +1484,7 @@ export function OpportunityFactRail({
   dueDate,
   cfdaList,
   sourceUrl,
+  showSourceLink = false,
 }: {
   awardFloor: number | null;
   awardCeiling: number | null;
@@ -1488,6 +1495,7 @@ export function OpportunityFactRail({
   dueDate: string | null;
   cfdaList: string[];
   sourceUrl: string | null;
+  showSourceLink?: boolean;
 }) {
   const due = formatDue(dueDate);
   const urgency = dueUrgency(dueDate, Date.now());
@@ -1506,48 +1514,44 @@ export function OpportunityFactRail({
       { label: "CFDA", value: cfdaList.length > 0 ? cfdaList.join(", ") : null },
     ];
 
+  const shown = facts.filter((f) => f.value !== null);
+  if (shown.length === 0 && !(showSourceLink && sourceUrl)) return null;
+
   return (
-    <aside
-      data-testid="opportunity-fact-rail"
+    <dl
+      data-testid="opportunity-facts-line"
       aria-label="Opportunity facts"
-      className="w-full shrink-0 space-y-4 sm:w-56"
+      className="mt-3 flex flex-wrap items-baseline gap-x-5 gap-y-1.5"
     >
-      <dl className="space-y-3">
-        {facts.map((f) => (
-          <div key={f.label}>
-            <dt className="text-muted-foreground text-xs uppercase tracking-wide">{f.label}</dt>
-            {f.value !== null ? (
-              <dd className={`text-sm ${f.className ?? "text-foreground"}`}>
-                {f.value}
-                {f.warn ? (
-                  <AlertTriangle
-                    className="text-apollo-amber ml-1 inline size-3.5 align-[-2px]"
-                    aria-hidden
-                  />
-                ) : null}
-              </dd>
-            ) : (
-              // The em-dash case carries a spoken equivalent — a bare "—"
-              // reaches a screen reader as nothing at all (the DeadlineCell
-              // precedent above).
-              <dd className="text-muted-foreground text-sm">
-                <span aria-hidden>—</span>
-                <span className="sr-only">Not recorded</span>
-              </dd>
-            )}
-          </div>
-        ))}
-      </dl>
-      {sourceUrl ? (
-        <a
-          href={sourceUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-[var(--color-accent-slate)] px-3 text-sm font-medium text-white hover:opacity-90"
-        >
-          <ExternalLink className="size-3.5" aria-hidden /> More information
-        </a>
+      {shown.map((f) => (
+        <div key={f.label} className="flex items-baseline gap-1.5">
+          <dt className="text-muted-foreground text-xs uppercase tracking-wide">{f.label}</dt>
+          <dd className={`text-sm ${f.className ?? "text-foreground"}`}>
+            {f.value}
+            {f.warn ? (
+              <AlertTriangle
+                className="text-apollo-amber ml-1 inline size-3.5 align-[-2px]"
+                aria-hidden
+              />
+            ) : null}
+          </dd>
+        </div>
+      ))}
+      {showSourceLink && sourceUrl ? (
+        <div>
+          <dt className="sr-only">Source</dt>
+          <dd>
+            <a
+              href={sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)] hover:underline"
+            >
+              More information <ExternalLink className="size-3.5" aria-hidden />
+            </a>
+          </dd>
+        </div>
       ) : null}
-    </aside>
+    </dl>
   );
 }

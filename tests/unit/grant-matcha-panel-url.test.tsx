@@ -36,10 +36,10 @@ vi.mock("@/components/edit/opportunity-browse", () => ({
     return <a href={hrefFor("wcm_curated:abc")}>browse table</a>;
   },
   // Phase 3b siblings the selected view renders — real behavior is pinned in
-  // grant-matcha-opportunity-rail.test.tsx; here they just need to exist.
+  // grant-matcha-opportunity-frame.test.tsx; here they just need to exist.
   ClampedText: ({ text }: { text: string }) => <p>{text}</p>,
   SourceBadge: () => null,
-  OpportunityFactRail: () => null,
+  OpportunityFactsLine: () => null,
 }));
 
 /**

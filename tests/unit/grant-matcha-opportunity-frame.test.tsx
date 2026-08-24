@@ -2,11 +2,13 @@
  * `/edit/grant-matcha` selected view — the mockup-4 opportunity frame (matcha-admin Phase 3b).
  *
  * Unlike grant-matcha-panel-url.test.tsx (which mocks opportunity-browse to pin URL wiring),
- * this suite renders the REAL shared module, because the behavior under test IS what the rail
- * and clamped synopsis render from the detail payload. Three things are load-bearing:
+ * this suite renders the REAL shared module, because the behavior under test IS what the facts
+ * line and clamped synopsis render from the detail payload. Three things are load-bearing:
  *
- * - every rail row is always present, a missing value showing the muted dash — an officer must
- *   be able to tell "not recorded" from "not shown", and nothing may be invented;
+ * - only POPULATED facts render, at the bottom of the request block (owner ruling 2026-08-24:
+ *   the always-dashed right rail is gone); when nothing is recorded the line renders nothing,
+ *   and nothing may be invented — the one exception is a no-synopsis payload, whose facts line
+ *   carries the outbound More-information link that would otherwise have no home;
  * - the header carries the appeal pill + source pill but NO StageBadge — appealByStage covers
  *   career stage; StageBadge was an ungoverned one-off and deliberately did not come along;
  * - the caution slot stays exactly #2494's: the askNote paragraph here, the thin-match amber
@@ -67,7 +69,9 @@ function stubDetailFetch(payload: Record<string, unknown>) {
 async function renderSelected(payload: Record<string, unknown>) {
   stubDetailFetch(payload);
   const result = render(<GrantMatchaPanel />);
-  await waitFor(() => expect(screen.getByTestId("opportunity-fact-rail")).toBeTruthy());
+  // The facts line is legitimately absent on an all-empty payload — wait on the
+  // panel mount instead, which every selected view renders.
+  await waitFor(() => expect(screen.getByTestId("matcha-panel")).toBeTruthy());
   return result;
 }
 
@@ -79,22 +83,24 @@ describe("GrantMatchaPanel — mockup-4 opportunity frame (?opp= selected view)"
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("renders every rail fact from the detail payload", async () => {
+  it("renders every populated fact in the facts line", async () => {
     await renderSelected(FULL_PAYLOAD);
 
-    const rail = within(screen.getByTestId("opportunity-fact-rail"));
-    expect(rail.getByText("Award").nextElementSibling?.textContent).toBe("$100,000–$250,000");
-    expect(rail.getByText("Est. total funding").nextElementSibling?.textContent).toBe(
+    const line = within(screen.getByTestId("opportunity-facts-line"));
+    expect(line.getByText("Award").nextElementSibling?.textContent).toBe("$100,000–$250,000");
+    expect(line.getByText("Est. total funding").nextElementSibling?.textContent).toBe(
       "$2,000,000",
     );
-    expect(rail.getByText("Awards").nextElementSibling?.textContent).toBe("~8");
-    expect(rail.getByText("Opens").nextElementSibling?.textContent).toBe("Aug 1, 2099");
-    expect(rail.getByText("Due").nextElementSibling?.textContent).toBe("Oct 12, 2099");
-    expect(rail.getByText("CFDA").nextElementSibling?.textContent).toBe("93.398");
-    // Nothing missing, so no dashes anywhere in the rail.
-    expect(rail.queryByText("—")).toBeNull();
-
-    const link = rail.getByRole("link", { name: /More information/ });
+    expect(line.getByText("Awards").nextElementSibling?.textContent).toBe("~8");
+    expect(line.getByText("Opens").nextElementSibling?.textContent).toBe("Aug 1, 2099");
+    expect(line.getByText("Due").nextElementSibling?.textContent).toBe("Oct 12, 2099");
+    expect(line.getByText("CFDA").nextElementSibling?.textContent).toBe("93.398");
+    // Populated-only semantics: never a dash.
+    expect(line.queryByText("—")).toBeNull();
+    // With a synopsis present, the outbound link lives in the synopsis header,
+    // NOT the facts line.
+    expect(line.queryByRole("link")).toBeNull();
+    const link = screen.getByRole("link", { name: /More information/ });
     expect(link.getAttribute("href")).toBe("https://grants.example.gov/k99");
 
     // Header: appeal pill + source pill (mockup line 2), Matcha seeded and auto-run.
@@ -105,7 +111,7 @@ describe("GrantMatchaPanel — mockup-4 opportunity frame (?opp= selected view)"
     expect(panelMounts).toEqual([{ autoRun: true }]);
   });
 
-  it("renders the muted dash for every missing value, and no invented link", async () => {
+  it("renders NO facts line when nothing is recorded, and no invented link", async () => {
     await renderSelected({
       ...FULL_PAYLOAD,
       source: null,
@@ -120,22 +126,26 @@ describe("GrantMatchaPanel — mockup-4 opportunity frame (?opp= selected view)"
       appealByStage: undefined,
     });
 
-    const rail = within(screen.getByTestId("opportunity-fact-rail"));
-    // All six rows still render — a dash apiece, never a dropped row or a made-up value.
-    for (const label of ["Award", "Est. total funding", "Awards", "Opens", "Due", "CFDA"]) {
-      expect(rail.getByText(label)).toBeTruthy();
-    }
-    expect(rail.getAllByText("—")).toHaveLength(6);
-    expect(rail.queryByRole("link")).toBeNull();
+    expect(screen.queryByTestId("opportunity-facts-line")).toBeNull();
+    expect(screen.queryByRole("link", { name: /More information/ })).toBeNull();
     expect(screen.queryByTestId("matcha-appeal-badge")).toBeNull();
+  });
+
+  it("carries the outbound link in the facts line ONLY when there is no synopsis", async () => {
+    await renderSelected({ ...FULL_PAYLOAD, synopsis: null });
+
+    const line = within(screen.getByTestId("opportunity-facts-line"));
+    const link = line.getByRole("link", { name: /More information/ });
+    expect(link.getAttribute("href")).toBe("https://grants.example.gov/k99");
   });
 
   it("tones an imminent deadline amber", async () => {
     const soon = new Date(Date.now() + 10 * DAY_MS).toISOString().slice(0, 10);
     await renderSelected({ ...FULL_PAYLOAD, dueDate: soon });
 
-    const due = within(screen.getByTestId("opportunity-fact-rail")).getByText("Due");
+    const due = within(screen.getByTestId("opportunity-facts-line")).getByText("Due");
     expect(due.nextElementSibling?.className).toContain("text-apollo-amber");
+    expect(due.nextElementSibling?.querySelector("svg")).toBeTruthy();
   });
 
   it("clamps a long synopsis at two lines behind Show full text (redesign chrome)", async () => {
