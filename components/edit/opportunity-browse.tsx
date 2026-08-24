@@ -1197,7 +1197,11 @@ function FacetGroup({
     ? options
     : options.filter(([v], i) => i < FACET_COLLAPSED || selected.has(v));
   return (
-    <fieldset>
+    // min-w-0 defeats the fieldset's UA default `min-inline-size: min-content` — without it the
+    // nowrap labels (#2509) set the min-content width, the fieldset outgrows the rail, and
+    // `truncate` never engages (labels underlap the result cards; count badges escape the rail).
+    // Only pixels can see this: jsdom has no layout, so the eyeball is the regression test.
+    <fieldset className="min-w-0">
       <legend className="mb-1.5 text-sm font-medium">{title}</legend>
       <div className="space-y-1">
         {shown.map(([value, count]) => (
