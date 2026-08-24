@@ -481,7 +481,11 @@ describe("pubcount-prominence lever — the third prior", () => {
     capturedBodies.length = 0;
     groupByMock.mockResolvedValue([]);
   });
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+    // No-op unless a test froze Date (the byte-identical one does); restores even on failure.
+    vi.useRealTimers();
+  });
 
   it("pubcountProminence:false drops the outer ln1p term (faculty + grant intact)", async () => {
     await searchPeople({ q: "cantley", relevanceMode: "v3", shape: "name", pubcountProminence: false });
@@ -539,6 +543,9 @@ describe("pubcount-prominence lever — the third prior", () => {
    * a spot check — a spot check cannot see a field this lever moved by accident.
    */
   it("omitting the option is byte-identical to before the lever existed", async () => {
+    // Freeze Date (only Date — real timers keep the awaited fetches live): both calls derive a
+    // recency `gte` from `new Date()`, and a millisecond tick between them fails the deep-equal.
+    vi.useFakeTimers({ toFake: ["Date"] });
     await searchPeople({
       q: "ras signaling pancreatic cancer",
       relevanceMode: "v3",
