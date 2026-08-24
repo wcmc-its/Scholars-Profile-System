@@ -145,6 +145,7 @@ describe("GrantMatchaPanel — mockup-4 opportunity frame (?opp= selected view)"
 
     const due = within(screen.getByTestId("opportunity-facts-line")).getByText("Due");
     expect(due.nextElementSibling?.className).toContain("text-apollo-amber");
+    expect(due.nextElementSibling?.querySelector("svg")).toBeTruthy();
   });
 
   it("clamps a long synopsis at two lines behind Show full text (redesign chrome)", async () => {

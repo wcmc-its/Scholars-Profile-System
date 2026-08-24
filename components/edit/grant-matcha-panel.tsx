@@ -51,7 +51,7 @@ type Selected = {
   note: string | null;
   /** ReciterAI's {grad, postdoc, early, mid, senior} appeal spread — badge only, not a scoring input. */
   appealByStage: Partial<Record<CareerStage, number>>;
-  /** Mockup-4 fact rail, straight off the detail payload — missing values stay null (muted dash). */
+  /** Feeds `OpportunityFactsLine` at the bottom of the request block — missing values stay null and render nothing. */
   facts: {
     awardFloor: number | null;
     awardCeiling: number | null;
@@ -119,8 +119,8 @@ const SYNOPSIS_CLAMP_THRESHOLD = 200;
 /**
  * Detail-header synopsis clamp (Matcha Redesign.dc.html): two lines of the artboard's 13px/1.55
  * greige prose, an inline "Show full text"/"Show less" toggle, and the More-information link
- * BESIDE the toggle rather than a scroll away (same `sourceUrl` the fact rail renders — not new
- * data). Local rather than the shared `ClampedText`: this chrome (clamp height, type, toggle
+ * BESIDE the toggle rather than a scroll away (same `sourceUrl` the facts line below renders —
+ * not new data). Local rather than the shared `ClampedText`: this chrome (clamp height, type, toggle
  * copy) is the artboard's, and re-theming the shared clamp would bleed into the reverse-matcher
  * card that also uses it. Mounted with `key={id}` so a new opportunity starts clamped.
  */
@@ -357,9 +357,8 @@ export function GrantMatchaPanel({
               ) : null;
             })()}
             {current.selected.synopsis ? (
-              // max-w matches the title's cap — without the rail column this
-              // block would otherwise run full-bleed on wide screens.
-              <div className="mt-3 max-w-[820px]">
+              // ClampedSynopsis caps its own width (max-w on its root).
+              <div className="mt-3">
                 <ClampedSynopsis
                   key={current.id}
                   text={current.selected.synopsis}
@@ -372,7 +371,7 @@ export function GrantMatchaPanel({
                 {...current.selected.facts}
                 // A payload with no synopsis renders no ClampedSynopsis — the facts
                 // line is then the only home for the outbound source link.
-                showSourceLink={current.selected.synopsis === null}
+                showSourceLink={!current.selected.synopsis}
               />
             </div>
             {current.selected.note ? (
@@ -395,7 +394,7 @@ export function GrantMatchaPanel({
                 allowEditPaste={false}
                 // Zero-results fix 4 — the nothing-extracted (RM1) empty state links out to the
                 // FOA so the officer can fetch the research-strategy text the synopsis lacks.
-                // Same `sourceUrl` the fact rail and synopsis header already render.
+                // Same `sourceUrl` the facts line and synopsis header already render.
                 sourceUrl={current.selected.facts.sourceUrl}
               />
             </div>

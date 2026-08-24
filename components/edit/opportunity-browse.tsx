@@ -1535,14 +1535,17 @@ export function OpportunityFactsLine({
       ))}
       {showSourceLink && sourceUrl ? (
         <div>
-          <a
-            href={sourceUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)] hover:underline"
-          >
-            More information <ExternalLink className="size-3.5" aria-hidden />
-          </a>
+          <dt className="sr-only">Source</dt>
+          <dd>
+            <a
+              href={sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)] hover:underline"
+            >
+              More information <ExternalLink className="size-3.5" aria-hidden />
+            </a>
+          </dd>
         </div>
       ) : null}
     </dl>
