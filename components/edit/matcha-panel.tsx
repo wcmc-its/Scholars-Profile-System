@@ -62,7 +62,7 @@
  * to skew a ranking with no way for the officer to say so.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, ExternalLink, RefreshCw } from "lucide-react";
+import { Download, ExternalLink, Lock, RefreshCw, Trash2 } from "lucide-react";
 
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
@@ -218,6 +218,15 @@ export function resultsSummary(
 /** Coverage 7.17e-4 → "about 1 in 1,400 papers". Reads better than a fraction in a tooltip. */
 function oneInN(coverage: number): string {
   return `about 1 in ${Math.round(1 / coverage).toLocaleString()} Weill Cornell papers`;
+}
+
+/** Matcha Empty State redesign — "Aug 20, 2026" for a retained search's `createdAt`. Unlike
+ *  `formatDue` (lib/match-display.ts), `createdAt` is a real timestamp, not a date-only DB
+ *  column, so this renders in the viewer's local time rather than pinning UTC. */
+function formatSubmittedDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 const TIER_LABEL: Record<MatchaFitTier, string> = {
@@ -457,6 +466,10 @@ export function MatchaPanel({
   /** Defaults to `"own"` so a response without a `scope` never renders a submitter column the
    *  server did not authorise — the same fail-closed direction the route's `where` takes. */
   const [historyScope, setHistoryScope] = useState<HistoryScope>("own");
+  // Matcha Empty State — the inline recent-searches card collapses to 7 rows; this expands it
+  // client-side, no re-fetch. Not reset per search: the officer's "show all" choice is a view
+  // preference on a list that already refreshes itself after every run.
+  const [showAllRecent, setShowAllRecent] = useState(false);
   const [deptSel, setDeptSel] = useState<ReadonlySet<string>>(new Set());
   const [conceptSel, setConceptSel] = useState<ReadonlySet<string>>(new Set());
   const [ctlOnly, setCtlOnly] = useState(false);
@@ -1249,9 +1262,10 @@ export function MatchaPanel({
   }
 
   // #6d retained searches, in a right-side drawer (reused shadcn Sheet — no hand-rolled
-  // overlay/focus-trap). Declared once and rendered beside the search action in BOTH the edit
-  // form and the read-only ask, so history stays reachable in either state. The retention notice
-  // lives in the drawer header, where #6d requires it be said.
+  // overlay/focus-trap). Rendered beside the search action in the read-only ask cards (grant and
+  // email paths), where results already fill the page; the IDLE form lists the same history
+  // inline instead (`recentSearchesSection` below — Matcha Empty State redesign). The retention
+  // notice lives in the drawer header, where #6d requires it be said.
   const historyDrawer =
     history.length > 0 ? (
       <Sheet>
@@ -1329,6 +1343,96 @@ export function MatchaPanel({
           </ul>
         </SheetContent>
       </Sheet>
+    ) : null;
+
+  // Matcha Empty State redesign — retained searches, inline, below the idle ask card. Replaces the
+  // drawer trigger on THAT one call site (the "Recent (N)" button below the textarea): the drawer
+  // still exists (`historyDrawer` above) and still fires from the grant-path and email-path ask
+  // cards once a search has committed, where the officer is already reading results and a full-page
+  // panel would cover them. Idle has nothing to cover, so the list is on the page instead of behind
+  // a click — same data (`history`/`historyScope`), same replay + delete handlers, no new fetch.
+  const recentSearchesSection =
+    history.length > 0 ? (
+      <div data-slot="matcha-recent" className="mt-4">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <h2 className="text-[15px] font-semibold">
+            Recent searches <span className="font-normal text-[#8b857b]">· {history.length}</span>
+          </h2>
+          {/* §9 — this note (and the drawer's own retention notice) only needs to say WHO can see
+              the list when that list is bigger than "just you", i.e. the superuser view. */}
+          {historyScope === "all" ? (
+            <div className="text-muted-foreground flex items-center gap-1 text-[11px]">
+              <Lock className="size-[11px]" aria-hidden />
+              <span>Admin view: all users&rsquo; searches.</span>
+              <HoverTooltip
+                wide
+                text="Searches are saved, including the description pasted, so match quality can be measured against real opportunity text. Deleting a search removes its text for good."
+              >
+                <span tabIndex={0} className="cursor-help underline decoration-dotted underline-offset-2">
+                  Why?
+                </span>
+              </HoverTooltip>
+            </div>
+          ) : null}
+        </div>
+        <div className="border-apollo-border bg-apollo-surface overflow-hidden rounded-xl border shadow-[var(--apollo-shadow-card)]">
+          {(showAllRecent ? history : history.slice(0, 7)).map((h) => (
+            <div key={h.id} className="group relative">
+              {/* Same replay as the drawer row: set the textarea, run it — the read-only ask
+                  card renders once the response lands (D10). */}
+              <button
+                type="button"
+                onClick={() => {
+                  setDescription(h.description);
+                  void runSearch(h.description);
+                }}
+                className="border-apollo-border hover:bg-apollo-rail block w-full border-b px-5 py-[13px] pr-10 text-left transition-colors last:border-b-0"
+              >
+                <div className="flex items-baseline gap-3">
+                  <span className="min-w-0 flex-1 text-[13.5px] font-semibold">
+                    {h.title ?? "Untitled search"}
+                  </span>
+                  <span className="text-muted-foreground shrink-0 text-[12px] whitespace-nowrap">
+                    {h.candidateCount} matched
+                  </span>
+                </div>
+                {/* §10 — SUPERUSER VIEW ONLY, same rule the drawer applies: once the list is
+                    scoped (§9) a normal user's rows are all their own, so the name is a constant
+                    repeated down the list. It earns its place only where rows differ by actor. */}
+                <div className="text-muted-foreground mt-1 text-[12px]">
+                  {formatSubmittedDate(h.createdAt)}
+                  {historyScope === "all" ? ` · ${h.submittedByName}` : null}
+                </div>
+              </button>
+              {/* Hover-revealed, and a SIBLING of the row button (not nested inside it) — a
+                  button-in-a-button is invalid HTML and would make this un-clickable in some
+                  browsers. `stopPropagation` isn't needed for that reason, only so a click here
+                  never bubbles into a parent that isn't there. */}
+              <button
+                type="button"
+                aria-label={`Delete search: ${h.title ?? h.description.slice(0, 60)}`}
+                title="Delete: removes the saved text for good"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void deleteSubmission(h.id);
+                }}
+                className="text-muted-foreground hover:bg-apollo-red-tint hover:text-apollo-maroon absolute top-2 right-2 rounded-md p-1.5 opacity-0 transition-colors group-hover:opacity-100 group-focus-within:opacity-100"
+              >
+                <Trash2 className="size-3.5" aria-hidden />
+              </button>
+            </div>
+          ))}
+          {history.length > 7 && !showAllRecent ? (
+            <button
+              type="button"
+              onClick={() => setShowAllRecent(true)}
+              className="block w-full px-5 py-2.5 text-center text-[12.5px] font-medium text-[var(--color-accent-slate)] hover:underline"
+            >
+              Show all {history.length} searches
+            </button>
+          ) : null}
+        </div>
+      </div>
     ) : null;
 
   // D8 — a result row is the detailed card when density is Detailed OR the officer expanded it from
@@ -1687,6 +1791,7 @@ export function MatchaPanel({
             </section>
           </div>
       ) : (
+        <>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -1749,7 +1854,16 @@ export function MatchaPanel({
           />
           {/* Slate, not `variant="apollo"` (maroon) — the whole matcher family (find-researchers,
               opportunity intake, and the mockup) is slate. */}
-          <div className="mt-2 flex flex-wrap items-center gap-3">
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+            {/* Matcha Empty State — the idle hint. Empty paste: what nothing-typed-yet means
+                (and, since nothing is sent until submit, that nothing is retained yet either).
+                Non-empty: a live word count, so the officer has some sense of what they pasted
+                before running it. */}
+            <span className="text-muted-foreground text-[12px]">
+              {description.trim().length === 0
+                ? "Paste text to enable matching. Nothing is saved until you run it"
+                : `${description.trim().split(/\s+/).length} words read`}
+            </span>
             <Button
               type="submit"
               disabled={pending || description.trim().length === 0}
@@ -1761,9 +1875,10 @@ export function MatchaPanel({
                   ? "Rank opportunities"
                   : "Rank researchers"}
             </Button>
-            {historyDrawer}
           </div>
         </form>
+        {recentSearchesSection}
+        </>
       )}
 
       {status.kind === "loading" ? (
