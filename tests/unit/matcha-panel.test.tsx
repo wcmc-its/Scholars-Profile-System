@@ -3108,6 +3108,44 @@ describe("MatchaPanel", () => {
       screen.getByText("Paste text to enable matching. Nothing is saved until you run it"),
     ).toBeTruthy();
   });
+
+  // ── Idle page chrome: maroon accent + subtitle + ask card (Matcha Empty State) ──
+  it("idle renders the maroon accent bar and the subtitle prose", async () => {
+    render(<MatchaPanel />);
+    expect(document.querySelector(".bg-apollo-maroon")).toBeTruthy();
+    expect(
+      screen.getByText(
+        /Paste an opportunity description, an email from a sponsor, or a few phrases\./,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("the accent bar and subtitle are gone once a search completes", async () => {
+    await renderAndSearch();
+    expect(document.querySelector(".bg-apollo-maroon")).toBeNull();
+    expect(
+      screen.queryByText(/Paste an opportunity description, an email from a sponsor/),
+    ).toBeNull();
+  });
+
+  it("grantMatcha idle: the accent + ask card still render, but NO subtitle", async () => {
+    // The corpus toggle changes what this surface ranks, so the people-path/paste-flow prose
+    // would misdescribe it — only the subtitle is gated on `grantMatcha`.
+    render(<MatchaPanel grantMatcha />);
+    expect(document.querySelector(".bg-apollo-maroon")).toBeTruthy();
+    expect(screen.getByTestId("matcha-target-grants")).toBeTruthy(); // the ask card still renders
+    expect(
+      screen.queryByText(/Paste an opportunity description, an email from a sponsor/),
+    ).toBeNull();
+  });
+
+  it("the textarea keeps its accessible name ('The ask') now that it's wrapped in the ask card", async () => {
+    render(<MatchaPanel />);
+    const textarea = screen.getByLabelText("The ask");
+    expect(textarea.tagName).toBe("TEXTAREA");
+    // It's actually wrapped in the new card now, not just still label-associated.
+    expect(textarea.closest(".border-apollo-border.rounded-xl")).toBeTruthy();
+  });
 });
 
 describe("MatchaPanel — #1780 Phase 2 culled chip-picker", () => {
