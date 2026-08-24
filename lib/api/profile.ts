@@ -679,8 +679,9 @@ export type ProfilePayload = {
   }>;
   /** Dataset deposits this scholar authored/deposited (S-Index / Bulk Data
    *  Rule spec, Phase 2). Sourced from reciterdb by etl/data-sharing. EMPTY
-   *  unless DATA_SHARING_SECTION is on — ships dark, same precedent as
-   *  clinicalTrials. All author positions (display scope, not metric scope —
+   *  unless DATA_SHARING_SECTION is on, or the scholar has opted in via
+   *  `showDatasets` (the env default flipped off 2026-08-24) — ships dark,
+   *  same precedent as clinicalTrials. All author positions (display scope, not metric scope —
    *  spec Attribution: display vs. metric). A per-contributor suppression
    *  (this scholar hid their own row) drops it from THIS profile only; a
    *  whole-entity suppression drops it everywhere. */
@@ -1271,11 +1272,13 @@ export const getScholarFullProfileBySlug = cache(
     // Dataset deposits (#data-sharing) — per-contributor suppression, same
     // shape as publication (a wrong extraction on one co-author's profile
     // shouldn't take the row down for every depositor). Flag-gated like the
-    // mapper below (dark unless DATA_SHARING_SECTION is on) so this never
-    // touches `scholar.datasetDeposits` in an env/test fixture that predates
-    // the relation.
+    // mapper below (dark unless DATA_SHARING_SECTION is on, OR the scholar's
+    // own `showDatasets` opt-in — the env default flipped off 2026-08-24) so
+    // this never touches `scholar.datasetDeposits` in an env/test fixture that
+    // predates the relation.
     const datasetsSectionOn =
-      process.env.DATA_SHARING_SECTION === "on" && !hiddenSections.has("hideDatasets");
+      (process.env.DATA_SHARING_SECTION === "on" && !hiddenSections.has("hideDatasets")) ||
+      hiddenSections.has("showDatasets");
     const datasetSuppressions = datasetsSectionOn
       ? await loadContributorSuppressions(
           "dataset_deposit",
@@ -1721,8 +1724,10 @@ export const getScholarFullProfileBySlug = cache(
               })
           : [],
       // Dataset deposits (#data-sharing). Dark unless DATA_SHARING_SECTION is
-      // on, same precedent as clinicalTrials/CLINICAL_TRIALS_SECTION.
-      // section-visibility — `hideDatasets` drops the whole section. A
+      // on, or the scholar's own `showDatasets` opt-in (env default off since
+      // 2026-08-24) — same precedent as clinicalTrials/CLINICAL_TRIALS_SECTION.
+      // section-visibility — `hideDatasets` drops the whole section when the
+      // env default is on (preserved for that case). A
       // whole-entity suppression (darkIds) drops the deposit for every
       // scholar; a per-contributor suppression (hiddenContributorsById) drops
       // it from just this profile. Sorted by deposit year descending — no

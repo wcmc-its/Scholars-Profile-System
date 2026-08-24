@@ -55,6 +55,14 @@ import { repairEncoding } from "@/lib/text/repair-encoding";
  * the payload boundary (`lib/api/profile.ts`). It rides this list to reuse the
  * boolean write / authz / audit path, and is deliberately absent from the
  * Visibility card's Sections panel — its switch lives on the Education panel.
+ *
+ * `showDatasets` is the one INVERTED key: `DATA_SHARING_SECTION` defaults off
+ * at the env level (2026-08-24), so there is nothing for `hideDatasets` to hide
+ * by default — instead a scholar opts BACK IN. Value `"true"` SHOWS the
+ * Datasets section despite the env default; absent/`"false"` leaves it hidden.
+ * `hideDatasets` stays in the list too (unused while the env default is off,
+ * but preserved so a scholar's prior hide choice is honored if the env default
+ * is ever flipped back to "on").
  */
 export const SECTION_VISIBILITY_FIELDS = [
   "hideMentoring",
@@ -68,6 +76,7 @@ export const SECTION_VISIBILITY_FIELDS = [
   "hideTechnologies",
   "hideNews",
   "hideDatasets",
+  "showDatasets",
 ] as const;
 export type SectionVisibilityField = (typeof SECTION_VISIBILITY_FIELDS)[number];
 

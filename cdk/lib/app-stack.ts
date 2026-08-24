@@ -1409,9 +1409,9 @@ export class AppStack extends Stack {
         // no deposits), so this is safe to leave off even after the
         // etl:data-sharing backfill lands — it also produces no real rows yet
         // (the reciterdb-side dataset_deposit table is a separate, not-yet-built
-        // prerequisite). Dark-launched staging-first, same precedent as
-        // CLINICAL_TRIALS_SECTION and NEWS_MENTIONS_SECTION.
-        DATA_SHARING_SECTION: env === "staging" ? "on" : "off",
+        // prerequisite). Off by default both envs (flipped back off 2026-08-24 —
+        // was staging-on for soak; no per-user override, this is a blanket gate).
+        DATA_SHARING_SECTION: "off",
         // AVAILABLE_TECHNOLOGIES_SECTION — the profile "Available technologies"
         // section, sourced from the CTL portfolio via `npm run etl:technologies`.
         // The profile payload returns [] when off, and the section is
