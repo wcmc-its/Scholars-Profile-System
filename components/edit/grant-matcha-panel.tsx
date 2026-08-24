@@ -15,9 +15,10 @@
  * the table.
  *
  * The selected view (matcha-admin Phase 3b, mockup 4) frames the seeded panel with the
- * opportunity's own facts: clamped synopsis in the main column, `OpportunityFactRail` on the
- * right — every field off the SAME detail fetch that seeds the ask, dashes for what the corpus
- * doesn't carry. The thin-match caution stays where #2494 put it, inside `MatchaPanel`
+ * opportunity's own facts: clamped synopsis, then `OpportunityFactsLine` at the bottom of the
+ * request block — every field off the SAME detail fetch that seeds the ask, populated fields
+ * only (the always-dashed right rail was removed by owner ruling 2026-08-24). The thin-match
+ * caution stays where #2494 put it, inside `MatchaPanel`
  * (`assessMatchSignal`); this surface adds no second banner and never reads the structured
  * matcher's abstain signal.
  */
@@ -28,7 +29,7 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 
 import {
   BrowseList,
-  OpportunityFactRail,
+  OpportunityFactsLine,
   SourceBadge,
 } from "@/components/edit/opportunity-browse";
 import { MatchaPanel, type EligibilityRequirements } from "@/components/edit/matcha-panel";
@@ -314,10 +315,11 @@ export function GrantMatchaPanel({
       ) : current.kind === "error" ? (
         <p className="text-destructive text-sm">{current.message}</p>
       ) : (
-        // Mockup 4: header + clamped synopsis + caution + the seeded panel in the
-        // main column, the always-every-row fact rail as a Duke-style right column.
-        <div className="flex flex-col gap-x-8 gap-y-4 sm:flex-row">
-          <div className="min-w-0 flex-1">
+        // Header + clamped synopsis + populated facts + caution + the seeded panel,
+        // one column. The Duke-style fact rail is gone (owner ruling 2026-08-24) —
+        // its facts fold into the bottom of the request block instead.
+        <div>
+          <div className="min-w-0">
             {/* Artboard header lockup (Matcha Redesign.dc.html): sponsor EYEBROW over the title,
                 brand rule, then the chip row. The eyebrow renders ONLY when the corpus carries a
                 sponsor — many curated rows have none, and degrading to no eyebrow beats an empty
@@ -355,7 +357,9 @@ export function GrantMatchaPanel({
               ) : null;
             })()}
             {current.selected.synopsis ? (
-              <div className="mt-3">
+              // max-w matches the title's cap — without the rail column this
+              // block would otherwise run full-bleed on wide screens.
+              <div className="mt-3 max-w-[820px]">
                 <ClampedSynopsis
                   key={current.id}
                   text={current.selected.synopsis}
@@ -363,6 +367,14 @@ export function GrantMatchaPanel({
                 />
               </div>
             ) : null}
+            <div className="max-w-[820px]">
+              <OpportunityFactsLine
+                {...current.selected.facts}
+                // A payload with no synopsis renders no ClampedSynopsis — the facts
+                // line is then the only home for the outbound source link.
+                showSourceLink={current.selected.synopsis === null}
+              />
+            </div>
             {current.selected.note ? (
               <p className="border-apollo-border bg-apollo-surface-2 text-foreground/90 mt-4 rounded-md border px-3 py-2 text-sm">
                 {current.selected.note}
@@ -388,7 +400,6 @@ export function GrantMatchaPanel({
               />
             </div>
           </div>
-          <OpportunityFactRail {...current.selected.facts} />
         </div>
       )}
     </div>
