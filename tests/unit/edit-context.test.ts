@@ -1011,6 +1011,19 @@ describe("loadEditContext — dataset deposits (suppressible, flag-gated, #2348)
     expect(c.personDatasetDeposit.findMany).not.toHaveBeenCalled();
   });
 
+  it("queries person_dataset_deposit when the flag is off but the scholar's own showDatasets override is set", async () => {
+    delete process.env.DATA_SHARING_SECTION;
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.fieldOverride.findMany.mockResolvedValue([{ fieldName: "showDatasets" }]);
+    c.personDatasetDeposit.findMany.mockResolvedValue(DATASET_ROWS);
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.datasets).toHaveLength(1);
+    expect(c.personDatasetDeposit.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { cwid: SELF } }),
+    );
+  });
+
   it("populates datasets as 'shown' (flag on, no suppressions) using the cwid scope", async () => {
     process.env.DATA_SHARING_SECTION = "on";
     const c = fakeClient();

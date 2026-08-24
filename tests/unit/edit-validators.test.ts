@@ -55,7 +55,7 @@ describe("isEditableField", () => {
 // ---------------------------------------------------------------------------
 
 describe("section visibility", () => {
-  it("SECTION_VISIBILITY_FIELDS lists the ten hideable sections + hideEducationYears", () => {
+  it("SECTION_VISIBILITY_FIELDS lists the ten hideable sections + hideEducationYears + showDatasets", () => {
     expect([...SECTION_VISIBILITY_FIELDS]).toEqual([
       "hideMentoring",
       "hideEducation",
@@ -70,6 +70,10 @@ describe("section visibility", () => {
       "hideTechnologies",
       "hideNews",
       "hideDatasets",
+      // Inverted opt-in — DATA_SHARING_SECTION defaults off, so "true" SHOWS
+      // the section instead of hiding it (see the SECTION_VISIBILITY_FIELDS
+      // doc comment).
+      "showDatasets",
     ]);
   });
 

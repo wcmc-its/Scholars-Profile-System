@@ -264,8 +264,9 @@ export type EditContextNews = {
  * superuser may take the whole deposit down (whole-entity, drops it
  * everywhere). Unlike publications there is no ReCiter-reject equivalent —
  * datasets carry no `rejected` state, `isSoleDisplayedAuthor`, or "Not mine"
- * interstitial. Empty unless `DATA_SHARING_SECTION` is on (dark-launch,
- * mirroring `technologies`/`news`).
+ * interstitial. Empty unless `DATA_SHARING_SECTION` is on, or the scholar's
+ * own `showDatasets` opt-in is set (dark-launch, mirroring `technologies`/
+ * `news`).
  */
 export type EditContextDataset = {
   /** `DatasetDeposit.id` — deterministic (sha256 of repository|accessionOrDoi,
@@ -605,7 +606,8 @@ export type EditContext = {
   /**
    * The scholar's dataset deposits for the interactive /edit "Datasets" card
    * (data-sharing spec, #2348). All author positions (display scope). Empty
-   * unless `DATA_SHARING_SECTION` is on.
+   * unless `DATA_SHARING_SECTION` is on, or the scholar's own `showDatasets`
+   * opt-in is set.
    */
   datasets: ReadonlyArray<EditContextDataset>;
   /** Suppressible mentees (derived from training records; mentor may hide). */
@@ -1110,13 +1112,16 @@ export async function loadEditContext(
 
   // Dataset deposits — the interactive /edit "Datasets" card (data-sharing
   // spec, #2348). Loaded for every caller; only queried when
-  // DATA_SHARING_SECTION is on (else the loader returns [] and never touches
-  // this delegate) — same dark-launch precedent as technologies/news. Computed
-  // here (ABOVE the pmids/early-return branch below) and threaded into BOTH
-  // `return` statements, so a scholar with zero confirmed publications but
-  // real dataset deposits still gets the card.
+  // DATA_SHARING_SECTION is on, or the scholar has opted in via `showDatasets`
+  // (the env default flipped off 2026-08-24 — they need this card even while
+  // the public section stays dark, to curate which deposits show once they
+  // opt in) — else the loader returns [] and never touches this delegate,
+  // same dark-launch precedent as technologies/news. Computed here (ABOVE the
+  // pmids/early-return branch below) and threaded into BOTH `return`
+  // statements, so a scholar with zero confirmed publications but real
+  // dataset deposits still gets the card.
   const datasetRows =
-    process.env.DATA_SHARING_SECTION === "on"
+    process.env.DATA_SHARING_SECTION === "on" || hiddenSections.includes("showDatasets")
       ? await client.personDatasetDeposit.findMany({
           where: { cwid },
           select: {

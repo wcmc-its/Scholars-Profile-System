@@ -634,8 +634,9 @@ export function visibleAttrKeys(
       // the valid-attr set, so `?attr=news` canonicalizes away.
       .filter((a) => a.key !== "news" || hasNews)
       // Datasets appear only when the scholar has ≥1 deposit (loader-gated on
-      // DATA_SHARING_SECTION). Empty ⇒ dropped from the rail and the valid-attr
-      // set, so `?attr=datasets` canonicalizes away.
+      // DATA_SHARING_SECTION or the scholar's showDatasets opt-in). Empty ⇒
+      // dropped from the rail and the valid-attr set, so `?attr=datasets`
+      // canonicalizes away.
       .filter((a) => a.key !== "datasets" || hasDatasets)
       .map((a) => a.key)
   );
@@ -692,7 +693,8 @@ export function EditPage({
   // NEWS_MENTIONS_SECTION is on AND there is ≥1 published mention.
   const hasNews = ctx.news.length > 0;
   // Datasets — same gate: the loader populates `ctx.datasets` only when
-  // DATA_SHARING_SECTION is on AND there is ≥1 deposit.
+  // (DATA_SHARING_SECTION is on OR the scholar's own showDatasets opt-in is
+  // set) AND there is ≥1 deposit.
   const hasDatasets = ctx.datasets.length > 0;
   // GrantRecs Phase 3 — "Grants for me" shows on self / superuser surfaces. A genuine
   // superuser ALWAYS sees it (QA lens, flag-independent) so the recommendations can be
@@ -1167,9 +1169,10 @@ function renderPanel(
       );
     case "datasets":
       // Interactive "Datasets" — the loader populates `ctx.datasets` only when
-      // DATA_SHARING_SECTION is on AND the scholar has ≥1 deposit, and the rail
-      // item is dropped when the array is empty. `voiceMode` reframes the intro
-      // copy for a third-person editor.
+      // (DATA_SHARING_SECTION is on OR the scholar's showDatasets opt-in is
+      // set) AND the scholar has ≥1 deposit, and the rail item is dropped when
+      // the array is empty. `voiceMode` reframes the intro copy for a
+      // third-person editor.
       return (
         <DatasetsCard cwid={cwid} mode={voiceMode} scholarName={scholarName} datasets={ctx.datasets} />
       );
