@@ -1635,10 +1635,11 @@ export function MatchaPanel({
   return (
     <div data-slot="matcha-panel">
       <div className="mb-5 flex items-center gap-2">
-        {/* The always-visible subtitle is gone (warm-palette redesign): its scope copy now rides the
-            hover `ⓘ` beside the h1 — the "on the page" explainer. The nav-tab hover (`admin-subnav`)
-            keeps the "before you land here" moment; the name is opaque until then, which is why BOTH
-            hovers exist rather than one. */}
+        {/* The SCOPE copy rides the hover `ⓘ` beside the h1 — the "on the page" explainer. The
+            nav-tab hover (`admin-subnav`) keeps the "before you land here" moment; the name is
+            opaque until then, which is why BOTH hovers exist rather than one. (The idle-only
+            subtitle below is different copy — paste-flow HOW-TO, not scope — per the Matcha
+            Empty State artboard; it disappears once a search commits, the ⓘ never does.) */}
         <h1 className="text-2xl font-bold tracking-tight">Matcha</h1>
         <HoverTooltip wide text={MATCHA_BLURB}>
           {/* tabIndex so the ⓘ is keyboard-reachable: this hover now carries the tool's scope copy
@@ -1653,6 +1654,23 @@ export function MatchaPanel({
           </span>
         </HoverTooltip>
       </div>
+
+      {/* Matcha Empty State — the artboard's maroon title rule + subtitle. Idle-only (the same
+          `!showAskCard` condition the ask form below renders on): once a search commits, the
+          ask card takes over as the page's headline element and this chrome steps back. */}
+      {!showAskCard ? (
+        <>
+          <div aria-hidden="true" className="bg-apollo-maroon mt-2 mb-2.5 h-[3px] w-8 rounded-[2px]" />
+          {/* Grant Matcha's corpus toggle changes what this surface ranks, so the paste-flow /
+              researcher-ranking prose below would misdescribe it — subtitle is people-path only. */}
+          {!grantMatcha ? (
+            <p className="text-muted-foreground mb-4 max-w-[620px] text-[13.5px] leading-[1.55] text-pretty">
+              Paste an opportunity description, an email from a sponsor, or a few phrases. Matcha
+              reads it, extracts the concepts, and ranks Weill Cornell researchers against them.
+            </p>
+          ) : null}
+        </>
+      ) : null}
 
       {showAskCard ? (
         /* The mockup's "THE ASK": once a search commits, the textarea is replaced by the request
@@ -1799,82 +1817,87 @@ export function MatchaPanel({
           }}
           className="mb-4"
         >
-          {/* Grant Matcha (increment 3) — the corpus toggle, mirroring the increment-1 engine
-              toggle chrome. Switching clears results back to the editable textarea so the officer
-              re-runs the ask under the new target rather than reading a stale cross-target list. */}
-          {grantMatcha ? (
-            <div
-              role="tablist"
-              aria-label="Search target"
-              className="mb-3 inline-flex rounded-md border border-[var(--color-border)] p-0.5 text-sm"
-            >
-              {(["people", "grants"] as const).map((t) => {
-                const isActive = target === t;
-                return (
-                  <button
-                    key={t}
-                    type="button"
-                    role="tab"
-                    aria-selected={isActive}
-                    onClick={() => {
-                      if (t === target) return;
-                      setTarget(t);
-                      setStatus({ kind: "idle" });
-                      setEditing(true);
-                    }}
-                    data-testid={`matcha-target-${t}`}
-                    className={[
-                      "rounded px-3 py-1 transition-colors",
-                      isActive
-                        ? "bg-[var(--color-accent-slate)] font-medium text-white"
-                        : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
-                    ].join(" ")}
-                  >
-                    {t === "people" ? "Researchers" : "Opportunities"}
-                  </button>
-                );
-              })}
+          {/* Matcha Empty State — the artboard's ask card. Wraps the whole idle ask block (label,
+              corpus toggle, textarea, footer) in the file's standard apollo card chrome; the
+              recents section below stays a SIBLING, outside this card. */}
+          <div className="border-apollo-border bg-apollo-surface rounded-xl border px-[22px] py-5 shadow-[var(--apollo-shadow-card)]">
+            <label htmlFor="matcha-description" className="mb-1.5 block text-[13px] font-semibold">
+              The ask
+            </label>
+            {/* Grant Matcha (increment 3) — the corpus toggle, mirroring the increment-1 engine
+                toggle chrome. Switching clears results back to the editable textarea so the officer
+                re-runs the ask under the new target rather than reading a stale cross-target list. */}
+            {grantMatcha ? (
+              <div
+                role="tablist"
+                aria-label="Search target"
+                className="mb-3 inline-flex rounded-md border border-[var(--color-border)] p-0.5 text-sm"
+              >
+                {(["people", "grants"] as const).map((t) => {
+                  const isActive = target === t;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      onClick={() => {
+                        if (t === target) return;
+                        setTarget(t);
+                        setStatus({ kind: "idle" });
+                        setEditing(true);
+                      }}
+                      data-testid={`matcha-target-${t}`}
+                      className={[
+                        "rounded px-3 py-1 transition-colors",
+                        isActive
+                          ? "bg-[var(--color-accent-slate)] font-medium text-white"
+                          : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
+                      ].join(" ")}
+                    >
+                      {t === "people" ? "Researchers" : "Opportunities"}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+            <textarea
+              id="matcha-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={6}
+              placeholder={
+                target === "grants"
+                  ? "Describe the research to find matching funding opportunities…"
+                  : "Paste the opportunity's description of their interest…"
+              }
+              className="border-border w-full rounded-md border bg-background px-3 py-2 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]"
+              spellCheck={false}
+            />
+            {/* Slate, not `variant="apollo"` (maroon) — the whole matcher family (find-researchers,
+                opportunity intake, and the mockup) is slate. */}
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+              {/* Matcha Empty State — the idle hint. Empty paste: what nothing-typed-yet means
+                  (and, since nothing is sent until submit, that nothing is retained yet either).
+                  Non-empty: a live word count, so the officer has some sense of what they pasted
+                  before running it. */}
+              <span className="text-muted-foreground text-[12px]">
+                {description.trim().length === 0
+                  ? "Paste text to enable matching. Nothing is saved until you run it"
+                  : `${description.trim().split(/\s+/).length} words read`}
+              </span>
+              <Button
+                type="submit"
+                disabled={pending || description.trim().length === 0}
+                className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
+              >
+                {pending
+                  ? "Ranking…"
+                  : target === "grants"
+                    ? "Rank opportunities"
+                    : "Rank researchers"}
+              </Button>
             </div>
-          ) : null}
-          <label htmlFor="matcha-description" className="mb-1.5 block text-sm font-medium">
-            The ask
-          </label>
-          <textarea
-            id="matcha-description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={6}
-            placeholder={
-              target === "grants"
-                ? "Describe the research to find matching funding opportunities…"
-                : "Paste the opportunity's description of their interest…"
-            }
-            className="border-border w-full rounded-md border bg-background px-3 py-2 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]"
-            spellCheck={false}
-          />
-          {/* Slate, not `variant="apollo"` (maroon) — the whole matcher family (find-researchers,
-              opportunity intake, and the mockup) is slate. */}
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-            {/* Matcha Empty State — the idle hint. Empty paste: what nothing-typed-yet means
-                (and, since nothing is sent until submit, that nothing is retained yet either).
-                Non-empty: a live word count, so the officer has some sense of what they pasted
-                before running it. */}
-            <span className="text-muted-foreground text-[12px]">
-              {description.trim().length === 0
-                ? "Paste text to enable matching. Nothing is saved until you run it"
-                : `${description.trim().split(/\s+/).length} words read`}
-            </span>
-            <Button
-              type="submit"
-              disabled={pending || description.trim().length === 0}
-              className="bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
-            >
-              {pending
-                ? "Ranking…"
-                : target === "grants"
-                  ? "Rank opportunities"
-                  : "Rank researchers"}
-            </Button>
           </div>
         </form>
         {recentSearchesSection}
