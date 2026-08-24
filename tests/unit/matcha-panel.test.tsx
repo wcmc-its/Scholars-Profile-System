@@ -2695,12 +2695,15 @@ describe("MatchaPanel", () => {
     expect(document.body.textContent).toContain("keyword only");
   });
 
-  // ── Retained searches (#6d) ────────────────────────────────────────────────
-  it("lists retained searches from the SERVER and says they are kept", async () => {
+  // ── Retained searches (#6d) — Matcha Empty State: inline on the idle form ────
+  it("lists retained searches from the SERVER, inline below the idle ask", async () => {
     // The server list replaced a localStorage history because only it can offer a delete that
     // actually erases the sponsor's words rather than clearing one browser. (It ALSO used to be
     // cross-officer, and that WAS the headline reason — §9 removed it for everyone but a
     // superuser once the audience became chairs pasting email. See the scope tests below.)
+    //
+    // Matcha Empty State redesign: the idle form no longer hides this behind a "Recent (N)"
+    // drawer trigger — it renders inline, below the ask card, from the SAME fetched `history`.
     stubFetch({
       concepts: CONCEPTS,
       candidates: THREE,
@@ -2717,16 +2720,17 @@ describe("MatchaPanel", () => {
       ],
     });
     render(<MatchaPanel />);
-    // The count rides the drawer trigger; opening it reveals the list + the retention notice.
-    fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
-    expect(await screen.findByText(/Recent searches \(1\)/)).toBeTruthy();
+    // No drawer trigger on the idle form any more.
+    expect(screen.queryByRole("button", { name: /Recent \(/ })).toBeNull();
+    expect(await screen.findByRole("heading", { name: "Recent searches · 1" })).toBeTruthy();
     expect(screen.getByText("cardiac fibrosis")).toBeTruthy();
-    // The officer is TOLD, on the surface where it happens — not in a policy page.
-    expect(screen.getByText(/They’re saved/)).toBeTruthy();
-    expect(screen.getByText(/improve match quality/)).toBeTruthy();
+    expect(screen.getByText("12 matched")).toBeTruthy();
+    // Default (own) scope — §10 holds inline too: date only, no submitter name.
+    expect(screen.getByText("Jul 13, 2026")).toBeTruthy();
+    expect(screen.queryByText(/Dana Ellis/)).toBeNull();
   });
 
-  it("replaying a Recent opens the ask FULL, not collapsed to the pinned bar", async () => {
+  it("replaying a Recent row opens the ask FULL, not collapsed to the pinned bar", async () => {
     // The gripe: a Recent replay used to open the compact pinned bar ("already read"), hiding the
     // full "What we read from the ask" card. A replay is still the officer's context, so it now
     // opens Full exactly like a fresh paste; the scroll-tuck (D10) and manual Collapse still apply.
@@ -2746,8 +2750,8 @@ describe("MatchaPanel", () => {
       ],
     });
     render(<MatchaPanel />);
-    fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
-    fireEvent.click(await screen.findByText("cardiac fibrosis")); // replay the saved ask
+    // The inline row itself is the click target now — no drawer to open first.
+    fireEvent.click(await screen.findByRole("button", { name: /^cardiac fibrosis/ }));
 
     // Full card (its eyebrow) is present; the compact bar's "Show original ▾" is NOT.
     expect(await screen.findByText(/What we read from the ask/)).toBeTruthy();
@@ -2902,7 +2906,11 @@ describe("MatchaPanel", () => {
       };
     }
 
-    it("scope 'own': NO submitter column — every row is yours, so the name is a constant", async () => {
+    // Matcha Empty State redesign: the inline card follows the SAME §10 rule the drawer always
+    // did — the submitter name is superuser-view-only. Only the DATE half of the meta line
+    // (`{date}` alone for 'own', `{date} · {submittedByName}` for 'all') is unconditional; the
+    // name and the admin-view note (Lock icon + "Why?" tooltip) both gate on `historyScope`.
+    it("scope 'own': NO submitter name in the meta line — §10 holds inline too; no admin-view note", async () => {
       stubFetch({
         concepts: CONCEPTS,
         candidates: THREE,
@@ -2910,18 +2918,16 @@ describe("MatchaPanel", () => {
         submissions: [submission()],
       });
       render(<MatchaPanel />);
-      fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
-      await screen.findByText(/Recent searches \(1\)/);
+      await screen.findByRole("heading", { name: "Recent searches · 1" });
 
       expect(screen.getByText("cardiac fibrosis")).toBeTruthy();
-      expect(screen.queryByText("Dana Ellis")).toBeNull();
-      // And the notice must not tell a chair that the console at large reads their donor email.
-      expect(
-        screen.getByText(/Only you and console administrators can see your searches/),
-      ).toBeTruthy();
+      expect(screen.getByText("Jul 13, 2026")).toBeTruthy();
+      expect(screen.queryByText(/Dana Ellis/)).toBeNull();
+      // And the note must not tell a chair the console at large reads their donor email.
+      expect(screen.queryByText(/Admin view/)).toBeNull();
     });
 
-    it("scope 'all': the submitter's NAME renders — it is what distinguishes a superuser's rows", async () => {
+    it("scope 'all': the admin-view note renders, with a Why? tooltip on retention", async () => {
       stubFetch({
         concepts: CONCEPTS,
         candidates: THREE,
@@ -2932,12 +2938,15 @@ describe("MatchaPanel", () => {
         ],
       });
       render(<MatchaPanel />);
-      fireEvent.click(await screen.findByRole("button", { name: /Recent \(2\)/ }));
-      await screen.findByText(/Recent searches \(2\)/);
+      await screen.findByRole("heading", { name: "Recent searches · 2" });
 
-      expect(screen.getByText("Dana Ellis")).toBeTruthy();
-      expect(screen.getByText("Chris Hale")).toBeTruthy();
-      expect(screen.getByText(/you are seeing every user's searches/)).toBeTruthy();
+      expect(screen.getByText(/Dana Ellis/)).toBeTruthy();
+      expect(screen.getByText(/Chris Hale/)).toBeTruthy();
+      expect(screen.getByText(/Admin view: all users. searches\./)).toBeTruthy();
+
+      const why = screen.getByText("Why?");
+      const tip = await tooltipTextOf(why);
+      expect(tip).toContain("Deleting a search removes its text for good");
     });
 
     it("renders the CWID fallback verbatim when the route could not resolve a name", async () => {
@@ -2951,13 +2960,12 @@ describe("MatchaPanel", () => {
         submissions: [submission({ submittedByName: "abc1234" })],
       });
       render(<MatchaPanel />);
-      fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
-      await screen.findByText(/Recent searches \(1\)/);
+      await screen.findByRole("heading", { name: "Recent searches · 1" });
 
-      expect(screen.getByText("abc1234")).toBeTruthy();
+      expect(screen.getByText(/abc1234/)).toBeTruthy();
     });
 
-    it("FAILS CLOSED on a response with no scope — no submitter column", async () => {
+    it("FAILS CLOSED on a response with no scope — no admin-view note, no submitter name", async () => {
       // An older/partial payload must not default to the privileged rendering. `"omit"` really
       // drops the key (see stubFetch) — with `undefined` this test would pass on any code.
       stubFetch({
@@ -2967,14 +2975,14 @@ describe("MatchaPanel", () => {
         submissions: [submission()],
       });
       render(<MatchaPanel />);
-      fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
-      await screen.findByText(/Recent searches \(1\)/);
+      await screen.findByRole("heading", { name: "Recent searches · 1" });
 
-      expect(screen.queryByText("Dana Ellis")).toBeNull();
+      expect(screen.queryByText(/Admin view/)).toBeNull();
+      expect(screen.queryByText(/Dana Ellis/)).toBeNull();
     });
   });
 
-  it("deletes a retained search and drops it from the list", async () => {
+  it("deletes a retained search and drops it from the inline list", async () => {
     const fetchMock = stubFetch({
       concepts: CONCEPTS,
       candidates: THREE,
@@ -2991,12 +2999,12 @@ describe("MatchaPanel", () => {
       ],
     });
     render(<MatchaPanel />);
-    fireEvent.click(await screen.findByRole("button", { name: /Recent \(1\)/ }));
-    await screen.findByText(/Recent searches \(1\)/);
+    await screen.findByText("cardiac fibrosis");
 
     fireEvent.click(screen.getByRole("button", { name: /Delete search: cardiac fibrosis/ }));
-    // Last search deleted ⇒ the trigger (and the drawer) unmount; the row is gone.
+    // Last search deleted ⇒ the whole section (heading + card) unmounts; the row is gone.
     await waitFor(() => expect(screen.queryByText("cardiac fibrosis")).toBeNull());
+    expect(screen.queryByRole("heading", { name: /Recent searches/ })).toBeNull();
 
     // The row is gone from the list, and a DELETE actually went to the server — a client-only
     // hide would leave the sponsor's text sitting in the database.
@@ -3007,7 +3015,98 @@ describe("MatchaPanel", () => {
     expect(JSON.parse(String((deletes[0][1] as { body: string }).body))).toEqual({
       submissionId: "s1",
     });
-    expect(screen.queryByText("cardiac fibrosis")).toBeNull();
+    // The delete icon is a SIBLING of the row's replay button, not nested inside it — clicking it
+    // must never also fire a replay (no ranking POST at all here).
+    expect(rankCalls(fetchMock)).toBe(0);
+  });
+
+  it("a row click POSTs the row's OWN description — the replay path, verified end to end", async () => {
+    const fetchMock = stubFetch({
+      concepts: CONCEPTS,
+      candidates: THREE,
+      submissions: [
+        {
+          id: "s1",
+          description: "We fund cardiac fibrosis work.",
+          title: "cardiac fibrosis",
+          engine: "spine",
+          candidateCount: 12,
+          submittedByName: "Dana Ellis",
+          createdAt: "2026-07-13T10:00:00.000Z",
+        },
+      ],
+    });
+    render(<MatchaPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /^cardiac fibrosis/ }));
+    await waitFor(() => expect(rankCalls(fetchMock)).toBe(1));
+
+    const post = fetchMock.mock.calls.find(
+      (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
+    )!;
+    const body = JSON.parse((post[1] as { body: string }).body) as { description: string };
+    expect(body.description).toBe("We fund cardiac fibrosis work.");
+  });
+
+  it("collapses to 7 rows with a Show-all control, which expands the full list", async () => {
+    const submissions = Array.from({ length: 9 }, (_, i) => ({
+      id: `s${i + 1}`,
+      description: `ask ${i + 1}`,
+      title: `search ${i + 1}`,
+      engine: "spine",
+      candidateCount: i + 1,
+      submittedByName: "Dana Ellis",
+      createdAt: "2026-07-13T10:00:00.000Z",
+    }));
+    stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions });
+    render(<MatchaPanel />);
+    await screen.findByRole("heading", { name: "Recent searches · 9" });
+
+    // Only the first 7 rows render, plus the Show-all control — never rows 8 and 9.
+    for (let i = 1; i <= 7; i++) expect(screen.getByText(`search ${i}`)).toBeTruthy();
+    expect(screen.queryByText("search 8")).toBeNull();
+    expect(screen.queryByText("search 9")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show all 9 searches" }));
+    expect(screen.getByText("search 8")).toBeTruthy();
+    expect(screen.getByText("search 9")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();
+  });
+
+  it("renders NO recent-searches section when history is empty", async () => {
+    stubFetch({ concepts: CONCEPTS, candidates: THREE, submissions: [] });
+    render(<MatchaPanel />);
+    // Let the mount history GET settle before asserting its absence.
+    await screen.findByLabelText(/the ask/i);
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: /Recent searches/ })).toBeNull();
+      expect(document.querySelector('[data-slot="matcha-recent"]')).toBeNull();
+    });
+  });
+
+  // ── Idle ask-card footer hint (Matcha Empty State) ───────────────────────────
+  it("idle submit is disabled with an empty ask, and the hint swaps to a word count once typed", async () => {
+    render(<MatchaPanel />);
+    const submit = screen.getByRole("button", { name: "Rank researchers" }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    expect(
+      screen.getByText("Paste text to enable matching. Nothing is saved until you run it"),
+    ).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText(/the ask/i), {
+      target: { value: "glioblastoma immunotherapy trial" },
+    });
+    expect(submit.disabled).toBe(false);
+    expect(screen.getByText("3 words read")).toBeTruthy();
+    expect(
+      screen.queryByText("Paste text to enable matching. Nothing is saved until you run it"),
+    ).toBeNull();
+
+    // Whitespace-only is still an empty ask.
+    fireEvent.change(screen.getByLabelText(/the ask/i), { target: { value: "   " } });
+    expect(submit.disabled).toBe(true);
+    expect(
+      screen.getByText("Paste text to enable matching. Nothing is saved until you run it"),
+    ).toBeTruthy();
   });
 });
 
