@@ -4809,7 +4809,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "DATA_SHARING_SECTION",
-                "Value": "on",
+                "Value": "off",
               },
               {
                 "Name": "AVAILABLE_TECHNOLOGIES_SECTION",
