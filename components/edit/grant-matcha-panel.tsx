@@ -381,6 +381,10 @@ export function GrantMatchaPanel({
                 // sense for source-originated data. `/edit/matcha`'s paste-an-email flow keeps
                 // "Edit paste" (this prop's default).
                 allowEditPaste={false}
+                // Zero-results fix 4 — the nothing-extracted (RM1) empty state links out to the
+                // FOA so the officer can fetch the research-strategy text the synopsis lacks.
+                // Same `sourceUrl` the fact rail and synopsis header already render.
+                sourceUrl={current.selected.facts.sourceUrl}
               />
             </div>
           </div>

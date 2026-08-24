@@ -23,9 +23,9 @@
  * fetch is stubbed — no route/engine involvement.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import { MatchaPanel } from "@/components/edit/matcha-panel";
+import { MatchaPanel, resultsSummary } from "@/components/edit/matcha-panel";
 import { conceptWeight } from "@/lib/api/matcha-contract";
 import type { ResultEvidence as ResultEvidenceT } from "@/lib/api/result-evidence";
 import type {
@@ -3219,5 +3219,94 @@ describe("MatchaPanel — grant-path reskin (Matcha Redesign.dc.html)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Relevance floor/ }));
     expect(screen.queryByText("Cara Gamma")).toBeNull();
+  });
+});
+
+describe("MatchaPanel — zero-results honesty (owner ruling 2026-08-21)", () => {
+  const NO_GATE = { careerStages: null, esiTargeted: false, usRequired: false } as const;
+
+  it("resultsSummary: every number in one phrase comes from one pipeline stage", () => {
+    // No gate — unchanged legacy shapes.
+    expect(resultsSummary(100, 120, 120)).toBe("Top 100 of 120 researchers");
+    expect(resultsSummary(1, 1, 1)).toBe("1 researcher");
+    expect(resultsSummary(5, 5, 20)).toBe("5 matching · 20 ranked");
+    // The K99 shape: the gate hid every match — never "Top 0 of 77".
+    expect(resultsSummary(0, 0, 77, 77)).toBe("0 eligible · 77 filtered by eligibility");
+    // Gate hid some; facets narrowed nothing further.
+    expect(resultsSummary(72, 72, 75, 3)).toBe("72 eligible · 3 filtered by eligibility");
+    // Facets ALSO narrowing — the pool earns naming.
+    expect(resultsSummary(10, 10, 75, 3)).toBe("10 matching · 75 ranked · 3 filtered by eligibility");
+  });
+
+  it("when the gate hides EVERYONE, the page says so and keeps the fold reachable", async () => {
+    // 133 staging opportunities reproduce this: a postdoc-only stage gate over a
+    // faculty-dominant pool. Nobody in POOL carries a stage, and absent FAILS the gate.
+    stubFetch({ concepts: CONCEPTS, candidates: POOL });
+    render(
+      <MatchaPanel
+        grantMatcha
+        eligibility={{ careerStages: ["early"], esiTargeted: false, usRequired: false }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/the ask/i), {
+      target: { value: "CAR T collaborators" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+
+    // The explanation names the axis in the rail's own vocabulary…
+    const explain = await screen.findByText(
+      /All 120 matched researchers are hidden by the Career stage filter/,
+    );
+    expect(explain.closest('[data-slot="matcha-gate-empty"]')).toBeTruthy();
+    expect(screen.getByText(/Uncheck Career stage under Eligibility/)).toBeTruthy();
+    // …the generic empty line does NOT render over a hidden-everyone state…
+    expect(screen.queryByText("No researchers match the selected filters.")).toBeNull();
+    // …the header counts one pipeline stage…
+    expect(screen.getByText(/0 eligible · 120 filtered by eligibility/)).toBeTruthy();
+    // …and the fold is on screen and opens to the hidden rows.
+    const bar = screen.getByRole("button", {
+      name: /Filtered by eligibility · 120 researchers/,
+    });
+    fireEvent.click(bar);
+    const floor = document.querySelector('[data-slot="matcha-elig-floor"]')!;
+    expect(floor.querySelectorAll("ul > li").length).toBeGreaterThan(0);
+  });
+
+  it("RM1 empty state: grant path gains the recovery sentence and a sourceUrl link", async () => {
+    stubFetch({ concepts: [], candidates: [] });
+    render(
+      <MatchaPanel
+        grantMatcha
+        eligibility={NO_GATE}
+        initialDescription="Applications are due May 27. One per institution."
+        autoRun
+        sourceUrl="https://grants.example.org/rm1"
+      />,
+    );
+    await screen.findByText(/Nothing was extracted to search on/);
+    expect(screen.getByText(/research-strategy or program-description section/)).toBeTruthy();
+    const link = screen.getByRole("link", { name: /More information/ });
+    expect(link.getAttribute("href")).toBe("https://grants.example.org/rm1");
+  });
+
+  it("RM1 empty state: no sourceUrl → no link; email path → no recovery sentence", async () => {
+    stubFetch({ concepts: [], candidates: [] });
+    render(
+      <MatchaPanel
+        grantMatcha
+        eligibility={NO_GATE}
+        initialDescription="Applications are due May 27."
+        autoRun
+      />,
+    );
+    await screen.findByText(/Nothing was extracted to search on/);
+    expect(screen.queryByRole("link", { name: /More information/ })).toBeNull();
+
+    cleanup();
+    // The email path's ask is the officer's own paste — no FOA to point at.
+    stubFetch({ concepts: [], candidates: [] });
+    render(<MatchaPanel initialDescription="Applications are due May 27." autoRun />);
+    await screen.findByText(/Nothing was extracted to search on/);
+    expect(screen.queryByText(/research-strategy or program-description section/)).toBeNull();
   });
 });

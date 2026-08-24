@@ -62,7 +62,7 @@
  * to skew a ranking with no way for the officer to say so.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, RefreshCw } from "lucide-react";
+import { Download, ExternalLink, RefreshCw } from "lucide-react";
 
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
@@ -189,9 +189,27 @@ const PRIMARY_BLOCKS = 2;
 /** Three numbers, and they are three DIFFERENT things: how many rows we painted, how many the
  *  filters matched, how many are in the pool. The old header printed two of them as if they
  *  were one ("100 of 100 researchers", while the history row beside it said 430). Say all
- *  three, or say the one that is true. */
-export function resultsSummary(shown: number, matched: number, pool: number): string {
+ *  three, or say the one that is true.
+ *
+ *  `gateHidden` (Grant Matcha) is what the hard eligibility gate dropped from `matched` — and
+ *  `matched` is the POST-gate count. The header once passed the pre-gate count there, which put
+ *  two pipelines in one phrase: a postdoc-only gate over a faculty pool rendered "Top 0 of 77"
+ *  above an empty list. When the gate is hiding anyone, `matched` is named "eligible" and the
+ *  hidden count is said out loud, so every number in the phrase comes from one stage. */
+export function resultsSummary(
+  shown: number,
+  matched: number,
+  pool: number,
+  gateHidden = 0,
+): string {
   const head = shown < matched ? `Top ${shown} of ${matched}` : `${matched}`;
+  if (gateHidden > 0) {
+    // `matched + gateHidden` is the pre-gate filter-match count, so `< pool` still means "the
+    // facet filters are ALSO narrowing" — the only case that earns naming the pool.
+    const base =
+      matched + gateHidden < pool ? `${head} matching · ${pool} ranked` : `${head} eligible`;
+    return `${base} · ${gateHidden} filtered by eligibility`;
+  }
   if (matched < pool) return `${head} matching · ${pool} ranked`;
   return `${head} researcher${matched === 1 ? "" : "s"}`;
 }
@@ -388,6 +406,7 @@ export function MatchaPanel({
   grantMatcha = false,
   eligibility,
   allowEditPaste = true,
+  sourceUrl,
 }: {
   /** Grant Matcha — seed the ask from an opportunity's title + synopsis so the officer lands on
    *  the extracted concepts + ranked researchers instead of a blank textarea. */
@@ -408,6 +427,11 @@ export function MatchaPanel({
    *  (redesign 2026-08, owner: "editing the paste doesn't make sense" for that case).
    *  `/edit/matcha`'s own paste-an-email flow is unaffected either way. */
   allowEditPaste?: boolean;
+  /** Grant Matcha — the opportunity's own landing page, off the SAME detail fetch that seeds
+   *  the ask (`grant-matcha-panel.tsx`). Read ONLY by the nothing-extracted empty state (the
+   *  NIGMS RM1 case), where the FOA's full text is the recovery path and this is the link to
+   *  it. Absent — the email path, or an opportunity without one — renders exactly as before. */
+  sourceUrl?: string | null;
 } = {}) {
   const [description, setDescription] = useState(initialDescription ?? "");
   // Grant Matcha — which corpus this ask searches. "grants" POSTs `{ target: "grants" }` and
@@ -1192,7 +1216,13 @@ export function MatchaPanel({
           profilePath(c.profileSlug),
           window.location.origin,
         ).toString(),
+        // The export deliberately carries the PRE-gate set (an officer's outreach list), so
+        // each row must say whether the page's gate shows it. `meetsStageRule` is the SAME
+        // predicate the gate and the badges use — the stated rule, not the toggle — and it is
+        // null on `/edit/matcha`, where the column (see the option below) does not exist.
+        ...(meetsStageRule ? { eligible: meetsStageRule(c) ? "Yes" : "No" } : {}),
       })),
+      { eligibility: meetsStageRule != null },
     );
     downloadCsv(filename, csv);
   }
@@ -1769,10 +1799,36 @@ export function MatchaPanel({
             <div className="text-muted-foreground py-4 text-sm">
               <p>No researchers matched this description.</p>
               {concepts.length === 0 ? (
-                <p className="mt-1">
-                  Nothing was extracted to search on — the ask may describe a funding mechanism or
-                  its eligibility rules rather than a research area.
-                </p>
+                <>
+                  <p className="mt-1">
+                    Nothing was extracted to search on — the ask may describe a funding mechanism or
+                    its eligibility rules rather than a research area.
+                  </p>
+                  {/* The recovery path (grant path only — the email path's ask is the officer's
+                      own paste, with its own Edit paste affordance): the synopsis this ask was
+                      seeded from is often pure mechanism prose, while the FOA's research-strategy
+                      section carries the science the extractor needs. Extraction, seeding and the
+                      auto-run are deliberately untouched — this is advice, not behavior. */}
+                  {grantPath ? (
+                    <p className="mt-1">
+                      Pasting the FOA&rsquo;s research-strategy or program-description section into
+                      the ask and re-running it usually finds the research area.
+                    </p>
+                  ) : null}
+                  {/* Same idiom as the synopsis header's More-information link (grant-matcha-panel):
+                      the officer needs the FOA's full text to do the recovery above, and this is
+                      where it lives. Absent `sourceUrl` — today's render, byte-identical. */}
+                  {sourceUrl ? (
+                    <a
+                      href={sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)] hover:underline"
+                    >
+                      More information <ExternalLink className="size-3.5" aria-hidden />
+                    </a>
+                  ) : null}
+                </>
               ) : (
                 <p className="mt-1">
                   Searched on {concepts.map((c) => c.term).join(", ")} — no Weill Cornell
@@ -2067,7 +2123,16 @@ export function MatchaPanel({
                 <div className="mb-3 flex flex-wrap items-center gap-3">
                   {/* Grant path — the artboard's 15px/600 header; the email path keeps 16px. */}
                   <h2 className={grantPath ? "text-[15px] font-semibold" : "text-base font-semibold"}>
-                    {resultsSummary(visible.length, filtered.length, ranked.length)}
+                    {/* `eligibleRows`, not `filtered` — the header must count the post-gate stage
+                        it paints, with the gate's own count named beside it (see resultsSummary).
+                        No gate ⇒ eligibleRows === filtered and the fourth argument is 0, so
+                        `/edit/matcha` renders byte-identically. */}
+                    {resultsSummary(
+                      visible.length,
+                      eligibleRows.length,
+                      ranked.length,
+                      ineligibleRows.length,
+                    )}
                   </h2>
                   {/* gap-4 BETWEEN groups, tighter WITHIN: three adjacent pill groups with a
                       near-equal gap read as one long undifferentiated row (the D3 dial made it
@@ -2286,14 +2351,42 @@ export function MatchaPanel({
                   </div>
                 ) : null}
 
-                {visible.length === 0 ? (
+                {visible.length === 0 && ineligibleRows.length === 0 ? (
+                  /* Genuinely empty — the facets matched nobody and the gate hid nobody. The
+                     gate-hid-everyone case is NOT this branch: it renders below, where the
+                     eligibility fold can come with it. */
                   <p className="text-muted-foreground py-4 text-sm">
                     No researchers match the selected filters.
                   </p>
                 ) : (
                   <>
                     {(() => {
-                      const primaryList = (
+                      /* Zero-results fix (2026-08-21): when the hard career-stage gate hides
+                         EVERY match (a postdoc-only K99 against a faculty-dominant pool), the
+                         old empty-state branch swallowed the eligibility fold with the rows —
+                         "No researchers match the selected filters" over nothing, with every
+                         match one unreachable click away. Say what happened, in the rail's own
+                         vocabulary (the "Career stage" axis under "Eligibility"), and keep the
+                         fold on screen. NO predicate moved: the gate still hides exactly the
+                         same rows, and the fold's own show/hide behavior is unchanged. */
+                      const gateHidAll = visible.length === 0;
+                      const explain = gateHidAll ? (
+                        <div
+                          data-slot="matcha-gate-empty"
+                          className="text-muted-foreground py-4 text-sm"
+                        >
+                          <p>
+                            All {ineligibleRows.length} matched researcher
+                            {ineligibleRows.length === 1 ? " is" : "s are"} hidden by the Career
+                            stage filter.
+                          </p>
+                          <p className="mt-1">
+                            Uncheck Career stage under Eligibility in the rail to reveal them,
+                            badged as ineligible.
+                          </p>
+                        </div>
+                      ) : null;
+                      const primaryList = gateHidAll ? null : (
                         <ul>
                           {primaryRows.map(({ c, rank }) => (
                             <li key={c.cwid}>{renderResult({ c, rank })}</li>
@@ -2307,6 +2400,7 @@ export function MatchaPanel({
                       if (!grantTable) {
                         return (
                           <>
+                            {explain}
                             {primaryList}
                             {weakFloorSection}
                             {eligFloorSection}
@@ -2314,27 +2408,32 @@ export function MatchaPanel({
                         );
                       }
                       return (
-                        <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-[var(--apollo-radius-card)] border shadow-[var(--apollo-shadow-card)]">
-                          <div className="min-w-[660px]">
-                            <div className="bg-apollo-surface-2 flex items-center text-[10.5px] font-semibold tracking-[0.06em] text-[#6f6a5e] uppercase">
-                              <span className="w-[44px] shrink-0" aria-hidden />
-                              <div
-                                className="grid flex-1 items-center gap-3 py-[11px] pr-[18px]"
-                                style={{ gridTemplateColumns: GRANT_TABLE_COLUMNS }}
-                              >
-                                <span className="text-right">#</span>
-                                <span>Researcher</span>
-                                <span>Match</span>
-                                <span>Evidence · concepts hit</span>
-                                <span>Latest work</span>
-                                <span aria-hidden />
+                        <>
+                          {explain}
+                          <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-[var(--apollo-radius-card)] border shadow-[var(--apollo-shadow-card)]">
+                            <div className="min-w-[660px]">
+                              {/* The header row stays even when the gate hid every row — it is
+                                  what labels the columns the fold reveals. */}
+                              <div className="bg-apollo-surface-2 flex items-center text-[10.5px] font-semibold tracking-[0.06em] text-[#6f6a5e] uppercase">
+                                <span className="w-[44px] shrink-0" aria-hidden />
+                                <div
+                                  className="grid flex-1 items-center gap-3 py-[11px] pr-[18px]"
+                                  style={{ gridTemplateColumns: GRANT_TABLE_COLUMNS }}
+                                >
+                                  <span className="text-right">#</span>
+                                  <span>Researcher</span>
+                                  <span>Match</span>
+                                  <span>Evidence · concepts hit</span>
+                                  <span>Latest work</span>
+                                  <span aria-hidden />
+                                </div>
                               </div>
+                              {primaryList}
+                              {weakFloorSection}
+                              {eligFloorSection}
                             </div>
-                            {primaryList}
-                            {weakFloorSection}
-                            {eligFloorSection}
                           </div>
-                        </div>
+                        </>
                       );
                     })()}
 
