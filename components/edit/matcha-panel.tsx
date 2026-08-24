@@ -204,8 +204,9 @@ export function resultsSummary(
 ): string {
   const head = shown < matched ? `Top ${shown} of ${matched}` : `${matched}`;
   if (gateHidden > 0) {
-    // `matched + gateHidden` is the pre-gate filter-match count, so `< pool` still means "the
-    // facet filters are ALSO narrowing" — the only case that earns naming the pool.
+    // `matched + gateHidden` is the pre-gate filter-match count, so `< pool` still means "an
+    // earlier stage (the year window or the facet filters) is ALSO narrowing" — the only case
+    // that earns naming the pool.
     const base =
       matched + gateHidden < pool ? `${head} matching · ${pool} ranked` : `${head} eligible`;
     return `${base} · ${gateHidden} filtered by eligibility`;
@@ -1804,15 +1805,17 @@ export function MatchaPanel({
                     Nothing was extracted to search on — the ask may describe a funding mechanism or
                     its eligibility rules rather than a research area.
                   </p>
-                  {/* The recovery path (grant path only — the email path's ask is the officer's
-                      own paste, with its own Edit paste affordance): the synopsis this ask was
-                      seeded from is often pure mechanism prose, while the FOA's research-strategy
-                      section carries the science the extractor needs. Extraction, seeding and the
+                  {/* The recovery path (grant path only — the email path's ask is already the
+                      officer's own paste): the synopsis this ask was seeded from is often pure
+                      mechanism prose, while the FOA's research-strategy section carries the
+                      science the extractor needs. The grant ask itself is READ-ONLY
+                      (allowEditPaste={false}, owner-ruled), so the paste has to happen on
+                      /edit/matcha — the copy names that page. Extraction, seeding and the
                       auto-run are deliberately untouched — this is advice, not behavior. */}
                   {grantPath ? (
                     <p className="mt-1">
                       Pasting the FOA&rsquo;s research-strategy or program-description section into
-                      the ask and re-running it usually finds the research area.
+                      a new ask on the Matcha page usually finds the research area.
                     </p>
                   ) : null}
                   {/* Same idiom as the synopsis header's More-information link (grant-matcha-panel):
