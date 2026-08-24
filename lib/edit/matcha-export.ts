@@ -49,6 +49,12 @@ export type MatchaCsvRow = {
   personType: string;
   /** Absolute profile URL, so the cell is clickable when pasted anywhere. */
   profileUrl: string;
+  /** Grant Matcha — "Yes"/"No" against the opportunity's STATED career-stage rule, the same
+   *  predicate the results gate applies. The export deliberately carries the PRE-gate set (an
+   *  officer's outreach list), so this column is what keeps the file from silently contradicting
+   *  the page that produced it. Only written when `buildMatchaCsv` is asked for the column —
+   *  `/edit/matcha` states no rule, and its file must not grow a column of blanks. */
+  eligible?: string;
 };
 
 const HEADERS = [
@@ -66,9 +72,14 @@ const HEADERS = [
   "Profile URL",
 ] as const;
 
-export function buildMatchaCsv(rows: readonly MatchaCsvRow[]): string {
+export function buildMatchaCsv(
+  rows: readonly MatchaCsvRow[],
+  /** `eligibility: true` (Grant Matcha) appends the `Eligible` column — an OPTION, not inferred
+   *  from the rows, so an empty grant-path export still writes the header the full one would. */
+  opts: { eligibility?: boolean } = {},
+): string {
   return toCsv(
-    HEADERS,
+    opts.eligibility ? [...HEADERS, "Eligible"] : HEADERS,
     rows.map((r) => [
       r.rank,
       r.cwid,
@@ -82,6 +93,7 @@ export function buildMatchaCsv(rows: readonly MatchaCsvRow[]): string {
       r.clinician,
       r.technologyCount,
       r.profileUrl,
+      ...(opts.eligibility ? [r.eligible ?? ""] : []),
     ]),
   );
 }
