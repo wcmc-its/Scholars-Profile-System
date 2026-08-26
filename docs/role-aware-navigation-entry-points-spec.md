@@ -207,13 +207,25 @@ historical context.
 | Anonymous | — *(Sign in in bar)* | — | — | — |
 | Scholar (self only) | ✓ | — | — | ✓ |
 | Unit Owner/Curator, has profile | ✓ | Units you manage | — | ✓ |
-| comms_steward, has profile | ✓ | Method Families | — | ✓ |
-| **comms_steward, no profile (dwd2001)** | — | **Method Families** | — | ✓ |
+| comms_steward, has profile | ✓ | Admin console | — | ✓ |
+| **comms_steward, no profile (dwd2001)** | — *(trigger label falls back to the `stewardDirectory` display name)* | **Admin console** | — | ✓ |
 | Superuser, has profile | ✓ | Manage profiles | ✓ *(flag)* | ✓ |
 | Superuser, no profile (staff) | — | Manage profiles | ✓ *(flag)* | ✓ |
 
+**Note (reconciled):** a steward's row was originally "Method Families"
+(`/edit/methods`), matching the root-cause fix's minimal scope. A later change
+collapsed comms_steward to "Admin console" (`/edit/scholars`) too, the same as
+a superuser — the steward's own `AdminSubnav` already fans out to Method
+Families once they land in the console, so a dedicated dropdown row was a
+redundant second door. Gaining a unit grant does not remove this row
+(monotonic union, `lib/auth/console-links.ts`). The same change added a
+`displayName` fallback (read from `stewardDirectory` by cwid) so a
+profile-less steward's trigger shows a real name instead of the bare
+"Account" default whenever one is on file.
+
 A viewer holding several roles sees several links (e.g. unit Owner who is also a
-steward → both entries). Superuser collapses to "Manage profiles" because the
+steward → both entries collapse to the single Admin console row, since a
+steward's collapse wins). Superuser collapses to "Manage profiles" because the
 in-console `AdminSubnav` already fans out to every superuser surface (incl.
 Method Families when the comms flag is on).
 
@@ -223,9 +235,10 @@ Method Families when the comms flag is on).
 
 | Case | Expected |
 |---|---|
-| comms_steward, no profile (dwd2001) | Dropdown shows **Method Families**; trigger label "Account"; no Edit/View. |
-| comms_steward, has profile | Edit/View my profile **and** Method Families. |
-| `COMMS_STEWARD_ENABLED` off | `isMethodsTabVisible` false → no Method Families link (surface 404s anyway). No betrayal of the dark surface. |
+| comms_steward, no profile (dwd2001) | Dropdown shows **Admin console** (reconciled — see §5's note); trigger label falls back to the `stewardDirectory` `displayName` when one is on file, else "Account"; no Edit/View. |
+| comms_steward, has profile | Edit/View my profile **and** Admin console (reconciled — see §5's note). |
+| comms_steward AND unit admin | Still just **Admin console** — the unit grant does not remove the row (I3-style monotonic union, `lib/auth/console-links.ts`). |
+| `COMMS_STEWARD_ENABLED` off | `isCommsSteward` false → no Admin console collapse for this role (surface 404s anyway). No betrayal of the dark surface. |
 | Superuser (steward or not) | Manage profiles only; no separate Method Families row (reached via AdminSubnav). |
 | Unit Curator of 1 div, no profile | Units you manage; no Edit/View. |
 | Plain scholar | Edit/View + Sign out; no console section. |
@@ -245,7 +258,9 @@ Method Families when the comms flag is on).
 - **`AdminSubnav`:** no change needed — already covered by
   `tests/unit/admin-subnav.test.tsx` (#900).
 - **Manual on staging:** sign in as dwd2001, open the account menu, confirm a
-  single "Method Families" entry that lands on `/edit/methods`.
+  single "Admin console" entry that lands on `/edit/scholars` (reconciled — see
+  §5's note), with the trigger showing the `stewardDirectory` display name
+  instead of "Account".
 - Run the suite (`vitest --maxWorkers=4`) before pushing — tsc alone won't catch
   the rendered-order / probe-shape regressions.
 

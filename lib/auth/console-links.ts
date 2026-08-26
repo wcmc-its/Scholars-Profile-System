@@ -18,13 +18,22 @@
  * `isMethodsTabVisible` / `superuserSurfaces` discipline in `AdminSubnav`).
  *
  * Policy (one entry per privileged role-entry-point, deduped):
- *   - **Superuser** → "Manage profiles" (`/edit/scholars`) only. The in-console
+ *   - **Superuser** → "Admin console" (`/edit/scholars`) only. The in-console
  *     `AdminSubnav` fans out from the roster to every other surface (URL requests /
  *     URL registry / Administrators / Method Families / Funding matcher), so the
  *     dropdown stays short — it routes them to the console, not to every tab.
- *   - **comms_steward** (not a superuser) → "Method Families" (`/edit/methods`).
- *   - **Unit Owner / Curator** (not a superuser) → "Profiles" (`/edit/scholars`,
- *     scope-filtered to their units — B3), then "Org units" (`/edit/units`).
+ *   - **comms_steward** (not a superuser) → also "Admin console"
+ *     (`/edit/scholars`), same collapse as a superuser. A steward's own
+ *     `AdminSubnav` fans out too — just narrower (Method Families is the one
+ *     tab it actually admits them to, per `TAB_PREDICATES` in
+ *     `lib/edit/console-tabs.server.ts`) — so a dedicated "Method Families"
+ *     dropdown row would be a redundant second door to the same console entry.
+ *     This union is deliberately checked before `managesUnits` below: gaining a
+ *     unit grant must never remove this row (I3-style monotonicity, mirroring
+ *     `console-tabs.server.ts`'s own invariant).
+ *   - **Unit Owner / Curator** (not a superuser, not a steward) → "Profiles"
+ *     (`/edit/scholars`, scope-filtered to their units — B3), then "Org units"
+ *     (`/edit/units`).
  *     People first: the roster is what they sign in to do, and it was
  *     previously not linked at all — `/edit/scholars` was superuser-gated, so
  *     their only door was "Org units". (The roster's own COI-review column is
@@ -51,10 +60,12 @@ export type ConsoleLink = {
  */
 export type ConsoleLinkVerdicts = {
   isSuperuser: boolean;
-  /** `isMethodsTabVisible(session)` — `COMMS_STEWARD_ENABLED` on AND the viewer
-   *  is a steward or superuser. The superuser branch returns early, so for the
-   *  non-superuser path this reduces to "flag on AND a steward". */
-  canManageMethods: boolean;
+  /** `isCommsSteward(cwid)` — a live LDAPS group check already gated by its
+   *  own `COMMS_STEWARD_ENABLED` kill switch (`lib/auth/comms-steward.ts`):
+   *  `false` for everyone, with no directory call, when the flag is off. A
+   *  `true` here collapses the dropdown to "Admin console", the same as a
+   *  superuser — see the module doc comment. */
+  isCommsSteward: boolean;
   /** The viewer holds ≥1 direct `unit_admin` grant
    *  (`loadManageableUnits(...).total > 0`). */
   managesUnits: boolean;
@@ -74,19 +85,20 @@ export type ConsoleLinkVerdicts = {
 export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
   const links: ConsoleLink[] = [];
 
-  // A superuser collapses to the Profiles roster — its AdminSubnav already fans
-  // out to the rest, so a superuser who also happens to be a steward / unit
-  // admin gets no redundant rows for surfaces the roster already reaches.
-  if (v.isSuperuser) {
+  // A superuser OR a comms_steward collapses to the Profiles roster — each has
+  // an AdminSubnav that already fans out to whatever else they can reach (the
+  // full surface set for a superuser, just Method Families for a steward), so
+  // neither needs a second, redundant dropdown row for a surface their own
+  // console nav already reaches. Checked BEFORE `managesUnits` on purpose: a
+  // steward who later also picks up a unit grant must keep this row, never
+  // fall back to the narrower Profiles/Org-units pair below.
+  if (v.isSuperuser || v.isCommsSteward) {
     links.push({
       id: "manage-profiles",
       label: "Admin console",
       href: "/edit/scholars",
     });
   } else {
-    if (v.canManageMethods) {
-      links.push({ id: "methods", label: "Method families", href: "/edit/methods" });
-    }
     // PEOPLE BEFORE UNITS. A unit Owner/Curator's own words for what they came
     // to do are "the people I edit", not "the org unit I administer" — and until
     // this row existed their only door was "Org units". Same destination and

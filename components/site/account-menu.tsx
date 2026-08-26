@@ -115,7 +115,11 @@ export function AccountMenu({
   const consoleLinks = probe?.consoleLinks ?? [];
   // The signed-in scholar: the prop (public header) or the probe (console mount).
   const effectiveScholar = scholar ?? probe?.scholar ?? null;
-  const label = effectiveScholar?.preferredName ?? "Account";
+  // A profile-less comms_steward / unit admin (e.g. dwd2001) has no scholar row
+  // to name the trigger after, but the probe's `displayName` fallback
+  // (`stewardDirectory`) still gives them a real name instead of the bare
+  // "Account" default.
+  const label = effectiveScholar?.preferredName ?? probe?.displayName ?? "Account";
   // In the console the per-role roster link is replaced by "Back to Scholars",
   // so drop the manage-profiles row; any remaining role destinations (Method
   // Families / Units) stay reachable.
