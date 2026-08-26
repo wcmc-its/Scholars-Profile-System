@@ -104,6 +104,17 @@ SCHOLARS_VIVO_ORG_REDIRECT_OUTPUT
 SCHOLARS_VIVO_PUB_REDIRECT_OUTPUT
 SCHOLARS_VIVO_REDIRECT_OUTPUT
 
+# --- #2519 Cornell (Ithaca) directory members: PR 1 of 3 ---
+# Required secret-backed vars for lib/sources/cornell-ldap.ts. PR 3 wires them
+# into cdk/lib/app-stack.ts's `secrets:` block (like the existing
+# SCHOLARS_LDAP_*) + appConsumerSecretArns, at which point this whole section
+# is removed. Until then the master CORNELL_DIRECTORY_MEMBERS flag (wired,
+# default "off" both envs) keeps every caller dark, so an unset secret is
+# never reached at runtime.
+SCHOLARS_CORNELL_LDAP_URL
+SCHOLARS_CORNELL_LDAP_BIND_DN
+SCHOLARS_CORNELL_LDAP_BIND_PASSWORD
+
 # --- ETL source locations with code defaults (bucket/key/table/base DNs) ---
 CLINICAL_TRIALS_BUCKET
 CLINICAL_TRIALS_KEY
