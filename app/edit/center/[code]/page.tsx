@@ -28,6 +28,7 @@ import { loadUnitEditContext } from "@/lib/api/unit-edit-context";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
+import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
 
 export const dynamic = "force-dynamic";
 
@@ -76,5 +77,8 @@ export default async function EditCenterPage({
   }
 
   const { attr } = (await searchParams) ?? {};
-  return <UnitEditPage ctx={ctx} attr={attr} />;
+  // Drives `EditShell`'s "Org units" breadcrumb (dwd2001 bug #7) — the same
+  // units-tab predicate `/edit/units` itself gates on, not a bespoke check.
+  const consoleTabs = await loadConsoleTabs(session, db.read);
+  return <UnitEditPage ctx={ctx} attr={attr} orgUnitsNavVisible={consoleTabs.units} />;
 }

@@ -37,6 +37,7 @@ import { isRailRestructureEnabled } from "@/lib/edit/rail-layout";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 import { isReporterMatchV2Enabled } from "@/lib/edit/reporter-match";
 import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
+import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
 
 export const dynamic = "force-dynamic";
 
@@ -211,7 +212,7 @@ export default async function EditScholarPage({
   // The earlier proxy / unit-admin authorization gates stay sequential by design
   // (each depends on the previous gate's verdict). Each read's comment is below.
   const panelEditable = mode !== "proxy" && mode !== "unit-admin";
-  const [latestSlugRequest, proxyEditorRows, unitAdminEditorRows] = await Promise.all([
+  const [latestSlugRequest, proxyEditorRows, unitAdminEditorRows, consoleTabs] = await Promise.all([
     // Seed the flag-gated "Profile URL" request card (#497 PR-3) with the
     // scholar's latest request, matching /edit (see `slugRequestEnabled` above).
     slugRequestEnabled ? loadLatestSlugRequest(session.cwid, db.read) : Promise.resolve(null),
@@ -234,6 +235,9 @@ export default async function EditScholarPage({
     panelEditable
       ? listUnitAdminEditorsForScholar(targetCwid, db.read as unknown as UnitAdminEditorsLookup)
       : Promise.resolve(null),
+    // Drives `EditShell`'s unit-admin "Profiles" breadcrumb (dwd2001 bug #7) —
+    // only unit-admin mode reads it, so skip the read for every other mode.
+    isUnitAdmin ? loadConsoleTabs(session, db.read) : Promise.resolve(null),
   ]);
 
   const proxyEditors =
@@ -263,6 +267,7 @@ export default async function EditScholarPage({
       proxyEditors={proxyEditors}
       unitAdminEditors={unitAdminEditors}
       unitAdminBanner={unitAdminBanner}
+      profilesNavVisible={consoleTabs?.profiles ?? false}
       reciterPendingEnabled={reciterPendingEnabled}
       grantRecsEnabled={isGrantRecsEnabled()}
       biosketchEnabled={isBiosketchGenerateEnabled()}

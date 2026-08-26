@@ -136,9 +136,16 @@ export type UnitEditPageProps = {
   ctx: UnitEditContext;
   /** The selected attribute from `?attr=`; falls back to `description`. */
   attr?: string;
+  /** Whether the viewer satisfies the units-tab predicate
+   *  (`TAB_PREDICATES.units`, `lib/edit/console-tabs.server.ts`) — forwarded
+   *  verbatim to `EditShell`'s `orgUnitsNavVisible`, which gates the
+   *  navigable "Org units / {name}" breadcrumb (dwd2001 bug #7). The caller
+   *  page computes this server-side (`loadConsoleTabs(session, db.read)`);
+   *  default `false` keeps the flat label for a caller that hasn't. */
+  orgUnitsNavVisible?: boolean;
 };
 
-export function UnitEditPage({ ctx, attr }: UnitEditPageProps) {
+export function UnitEditPage({ ctx, attr, orgUnitsNavVisible = false }: UnitEditPageProps) {
   const visible = ATTRIBUTES.filter((a) => a.visible(ctx));
   const active: AttrDef =
     visible.find((a) => a.key === attr) ??
@@ -174,8 +181,10 @@ export function UnitEditPage({ ctx, attr }: UnitEditPageProps) {
       mode="superuser"
       scholarName={ctx.unit.name}
       // A unit, not a scholar profile — "Profiles" never has anywhere useful
-      // to go from a unit editor.
+      // to go from a unit editor. Its OWN structural crumb ("Org units") is
+      // `orgUnitsNavVisible`, gated on the caller's units-tab predicate.
       isProfileEntity={false}
+      orgUnitsNavVisible={orgUnitsNavVisible}
       railItems={railItems}
       activeAttr={active.key}
       basePath={basePath}

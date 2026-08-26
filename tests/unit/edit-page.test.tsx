@@ -806,6 +806,29 @@ describe("EditPage — proxy / unit-admin third-person parity (#955 #10)", () =>
   );
 });
 
+describe("EditPage — unit-admin Profiles crumb (dwd2001 bug #7)", () => {
+  it("forwards profilesNavVisible={true} to EditShell's navigable 'Profiles' crumb for a unit admin", () => {
+    render(<EditPage ctx={superuserCtx} mode="unit-admin" profilesNavVisible={true} />);
+    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    const link = within(crumb).getByTestId("edit-subnav-profiles");
+    expect(link.getAttribute("href")).toBe("/edit/scholars");
+  });
+
+  it("defaults to the flat unit-admin label when profilesNavVisible is omitted", () => {
+    render(<EditPage ctx={superuserCtx} mode="unit-admin" />);
+    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(crumb).queryByTestId("edit-subnav-profiles")).toBeNull();
+    expect(within(crumb).getByTestId("edit-subnav-unit-admin")).toBeTruthy();
+  });
+
+  it("a proxy editor stays flat even when profilesNavVisible={true} — proxy mode never reads it", () => {
+    render(<EditPage ctx={superuserCtx} mode="proxy" profilesNavVisible={true} />);
+    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(crumb).queryByTestId("edit-subnav-profiles")).toBeNull();
+    expect(within(crumb).getByTestId("edit-subnav-proxy")).toBeTruthy();
+  });
+});
+
 describe("EditPage router — superuser mode", () => {
   it("defaults to the Home completeness panel, shows the admin banner, and the superuser rail (Home + Profile URL at the top, Publications yes)", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" />);
