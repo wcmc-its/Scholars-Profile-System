@@ -87,6 +87,34 @@ vi.mock("@/lib/db", () => ({
     write: {},
   },
 }));
+// dwd2001 nav fix #7 — unit-admin mode now also calls `loadConsoleTabs` (for
+// the unit-admin "Profiles" breadcrumb), which fans out into FOUR grant reads
+// (`loadOwnerManagedUnitScope` / `loadManageableUnits` / `loadReportableUnitsForActor`
+// / `canViewUsage`) neither this file's raw `db.read` mock above nor the
+// unit-admin resolver it drives ever needed before. Mocked at the module
+// level rather than added to the raw db mock — same convention
+// `edit-self-page-guard.test.tsx` / `edit-units-page.test.tsx` already use for
+// every other `loadConsoleTabs`-exercising test, and it keeps these grant
+// reads decoupled from the (unrelated) `unitAdmin`/`department`/`division`
+// raw-db mocks above that drive the resolver itself.
+vi.mock("@/lib/edit/administrators", () => ({
+  isAdministratorsTabVisible: () => false,
+  loadOwnerManagedUnitScope: async () => [],
+}));
+vi.mock("@/lib/edit/usage-access", () => ({ canViewUsage: async () => false }));
+vi.mock("@/lib/edit/cancer-center-reports", () => ({
+  loadReportableUnitsForActor: async () => [],
+}));
+vi.mock("@/lib/edit/manageable-units", () => ({
+  loadManageableUnits: async () => ({
+    departments: [],
+    divisions: [],
+    centers: [],
+    cores: [],
+    total: 0,
+  }),
+  loadAllUnitsDirectory: async () => [],
+}));
 vi.mock("@/components/edit/edit-page", () => ({
   EditPage: mockEditPage,
   // The route canonicalizes an invalid `?attr` against this set (T1.13). Mirror
