@@ -461,8 +461,9 @@ export function canEditUnit(
   // A comms_steward edits any EXISTING unit's content at curator parity
   // (description / leadership / roster) — comms-steward-profile-editing-spec.md
   // §3b "minus adding/remove org units" excludes only create/delete + grants,
-  // not editing existing units. Grants stay Owner/Superuser (`canManageAccess`)
-  // and unit create/delete is not widened — so this confers content editing only.
+  // not editing existing units. As of the 2026-08-26 policy widening
+  // (decision #3), `canManageAccess` ALSO admits comms_steward now — it's
+  // unit create/delete specifically that stays unwidened, not grants.
   if (session.isSuperuser || session.isCommsSteward) return ALLOW;
   if (effectiveRole === "owner" || effectiveRole === "curator") return ALLOW;
   return { ok: false, reason: "not_curator" };

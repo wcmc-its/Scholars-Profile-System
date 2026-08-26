@@ -349,6 +349,7 @@ export default async function EditSelfPage({
             reportsTab={tabs.reports}
             newsTab={tabs.news}
             usageTab={tabs.usage}
+            coresTab={tabs.cores}
             viewerIsDeveloper={developer}
           />
         ) : undefined

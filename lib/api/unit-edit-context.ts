@@ -64,6 +64,7 @@ import {
 } from "@/lib/api/manual-layer";
 import { parseCsv } from "@/lib/csv";
 import {
+  canManageAccess as canManageAccessPredicate,
   getEffectiveUnitRole,
   type UnitAdminLookup,
   type UnitRef,
@@ -526,10 +527,15 @@ export async function loadUnitEditContext(
   const leaderCwid =
     merged.leaderCwid === null || merged.leaderCwid === "" ? null : merged.leaderCwid;
 
-  // 4. Access list (Owner/Superuser/comms_steward — `canManageAccess` in
-  // `lib/edit/authz.ts`, mirrored here since this local never calls that
-  // predicate directly) and roster (center/manual-division).
-  const canManageAccess = session.isSuperuser || session.isCommsSteward || actorRole === "owner";
+  // 4. Access list (Owner/Superuser/comms_steward, delegated to `lib/edit/
+  // authz.ts`'s own `canManageAccess` predicate — same inputs already in
+  // scope: `session` and `effective`, the `EffectiveUnitRole`. Passing
+  // `effective` rather than `actorRole` is deliberate: `actorRole` collapses
+  // to `"superuser"` for a superuser, which would never equal `"owner"`, but
+  // the predicate's `session.isSuperuser` branch already ALLOWs first, so the
+  // `effectiveRole === "owner"` arm is only ever reached for a non-superuser
+  // actor anyway) and roster (center/manual-division).
+  const canManageAccess = canManageAccessPredicate(session, effective).ok;
   const hasRoster = unitType === "center" || (unitType === "division" && source === "manual");
 
   const accessRows = canManageAccess

@@ -42,6 +42,7 @@ import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import {
   authorizeCoreClaim,
+  canManageAccess as canManageAccessPredicate,
   getCoreOwnerRole,
   logEditDenial,
   type CoreOwnerLookup,
@@ -94,11 +95,11 @@ export default async function EditCorePage({
 
   // Access (Owner/Superuser/comms_steward — "Curators grant nothing", but a
   // steward is full access-management parity regardless of their own core
-  // role, 2026-08-26 policy widening decision #3) mirrors
-  // `unit-edit-context.ts`'s own `canManageAccess` local, not the
-  // `lib/edit/authz` predicate of the same name (that one gates
-  // `/api/edit/unit`'s create-unit path, unrelated here).
-  const canManageAccess = session.isSuperuser || session.isCommsSteward || coreRole === "owner";
+  // role, 2026-08-26 policy widening decision #3), delegated to `lib/edit/
+  // authz`'s own `canManageAccess` predicate — `coreRole` is already the
+  // `EffectiveUnitRole` it expects, so this is the same check
+  // `unit-edit-context.ts`'s local now also delegates to.
+  const canManageAccess = canManageAccessPredicate(session, coreRole).ok;
   const [core, leaderRows, accessRows, queue] = await Promise.all([
     db.read.core.findUnique({
       where: { id: coreId },
