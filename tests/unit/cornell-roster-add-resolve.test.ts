@@ -13,7 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   resolveCornellRosterAdd,
   type CornellAddDeps,
-} from "@/app/api/edit/roster/route";
+} from "@/lib/edit/cornell-roster";
 import type { CornellDirectoryPerson } from "@/lib/sources/cornell-ldap";
 
 const PERSON: CornellDirectoryPerson = {

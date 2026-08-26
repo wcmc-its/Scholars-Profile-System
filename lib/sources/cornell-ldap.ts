@@ -135,7 +135,7 @@ export function buildCornellNameFilter(q: string): string {
  * Open a bound connection to the Cornell directory. Caller is responsible for
  * `await client.unbind()`.
  */
-export async function openCornellLdap(): Promise<Client> {
+async function openCornellLdap(): Promise<Client> {
   const url = process.env.SCHOLARS_CORNELL_LDAP_URL;
   const bindDn = process.env.SCHOLARS_CORNELL_LDAP_BIND_DN;
   const password = process.env.SCHOLARS_CORNELL_LDAP_BIND_PASSWORD;
