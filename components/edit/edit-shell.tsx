@@ -55,9 +55,13 @@ export type EditShellProps = {
    *  rail-mounted `CenterReportsRailLink` (Reports IA redesign, 2026-08-14). */
   reportsHref?: string;
   /**
-   * The signed-in (actor) scholar's identity for the header account menu. In
-   * self mode this is the scholar themselves; omit it for surfaces that don't
-   * have the actor's scholar row (the account menu then degrades to Sign out).
+   * The signed-in (actor) scholar's identity. UNUSED by `ConsoleTopBar` as of
+   * the dwd2001 nav fix — the top bar now mounts the self-fetching
+   * `AccountMenu context="console"` directly (same as `AdminSubnav`), which
+   * derives the scholar + display name from the `/api/auth/session` probe
+   * instead of a threaded prop. Kept on the type only because one caller
+   * (`edit-page.tsx`) still passes it; cleaning up that call site is outside
+   * this ticket's scope.
    */
   account?: { slug: string; preferredName: string } | null;
   /** Self mode only: the viewer has the right to edit ≥1 profile that isn't
@@ -129,7 +133,7 @@ export function EditShell({
   previewHref,
   historyHref,
   reportsHref,
-  account,
+  account: _account,
   canBrowseProfiles = false,
   isProfileEntity = true,
   consoleNav,
@@ -154,8 +158,9 @@ export function EditShell({
         Skip to editor
       </a>
 
-      {/* Top bar (black) — the shared Apollo chrome with a real account/exit menu. */}
-      <ConsoleTopBar account={account} />
+      {/* Top bar (black) — the shared Apollo chrome with a real account/exit menu
+          (self-fetching `AccountMenu context="console"`; see `_account` above). */}
+      <ConsoleTopBar />
 
       {/* Sub-nav — maroon underline on the active tab. A superuser editing a
           scholar gets a "Profiles / <name>" breadcrumb back to the roster; a
