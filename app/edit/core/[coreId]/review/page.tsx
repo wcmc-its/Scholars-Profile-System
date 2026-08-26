@@ -13,8 +13,10 @@
  *
  * Server Component. Authorization mirrors the core editor route:
  *   1. **No session** → SAML-login redirect carrying this URL.
- *   2. **Effective core role** (Superuser / owner / curator of this core, i.e.
- *      `UnitAdmin(entityType="core", entityId=coreId)`) → render.
+ *   2. **Effective core role** (Superuser / comms_steward / owner / curator of
+ *      this core, i.e. `UnitAdmin(entityType="core", entityId=coreId)`) →
+ *      render (2026-08-26 policy widening decision #6 — a steward passes
+ *      regardless of any personal `UnitAdmin` row).
  *   3. **No role + core exists** → one `edit_authz_denied` line + a visible 403;
  *      **core absent** → 404.
  *

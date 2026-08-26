@@ -139,6 +139,7 @@ export function AdminSubnav({
   usageTab = false,
   reportsTab = false,
   newsTab = false,
+  coresTab = false,
   viewerIsDeveloper = false,
 }: {
   active: AdminSubnavActive;
@@ -202,6 +203,15 @@ export function AdminSubnav({
    *  (`/edit/scholars`'s `unitScope !== null` override), showing a News link
    *  that 404s on `isNewsQueueTabVisible`'s actual gate. Default `false`. */
   newsTab?: boolean;
+  /** Show the "Cores" tab (`/edit/core`) to a non-superuser comms_steward.
+   *  Superusers already get it via `superuserSurfaces`; this is the escape
+   *  hatch, mirroring `newsTab`/`reportsTab` — 2026-08-26 policy widening
+   *  (decision #6, full curator-parity on cores) matches `TAB_PREDICATES.cores`
+   *  in `lib/edit/console-tabs.server.ts`. Without this, the tab was ANDed
+   *  with `superuserSurfaces` alone — the same Gap-3 shape already fixed for
+   *  Administrators above — which would hide it from every steward even
+   *  though `/edit/core` itself now admits them. Default `false`. */
+  coresTab?: boolean;
   /** Show the Matcha / Grant Matcha tabs to a pure development-role viewer who
    *  is NOT a superuser. Superusers already get them via `superuserSurfaces`;
    *  this is the dev-role escape hatch on `/edit/grant-matcha` (their console
@@ -302,7 +312,13 @@ export function AdminSubnav({
       { show: superuserSurfaces, id: "etl-status", href: "/edit/etl-status", label: "ETL status" },
       // Gated on the same `CORE_PAGES` flag as the public core surfaces, so it stays
       // dark in any env where cores aren't live yet (staging-on / prod-off).
-      { show: superuserSurfaces && isCorePagesEnabled(), id: "cores", href: "/edit/core", label: "Cores" },
+      // `coresTab` is the comms_steward escape hatch (2026-08-26, decision #6).
+      {
+        show: (superuserSurfaces || coresTab) && isCorePagesEnabled(),
+        id: "cores",
+        href: "/edit/core",
+        label: "Cores",
+      },
       // CTL sponsor match — `viewerIsDeveloper` is the escape hatch for a pure
       // development-role viewer; dark while SPONSOR_MATCH is off.
       {

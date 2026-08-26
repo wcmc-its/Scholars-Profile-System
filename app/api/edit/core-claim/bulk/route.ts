@@ -21,8 +21,9 @@
  * no-op for that caller).
  *
  * Authorization (403): owner OR curator of THIS core
- * (`UnitAdmin(entityType="core", entityId=coreId)`), or a Superuser — resolved
- * ONCE (the core dimension is identical for every pmid in the batch).
+ * (`UnitAdmin(entityType="core", entityId=coreId)`), a Superuser, or (2026-08-26
+ * policy widening, decision #6) a comms_steward — resolved ONCE (the core
+ * dimension is identical for every pmid in the batch).
  */
 import { type NextRequest, type NextResponse } from "next/server";
 

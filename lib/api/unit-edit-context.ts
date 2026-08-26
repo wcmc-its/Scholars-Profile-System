@@ -4,7 +4,7 @@
  *
  * One server call loads everything a `/edit/{department,division,center}/[code]`
  * page renders: the override-merged unit fields, the leader chip, the access
- * list (Owner/Superuser only), the roster (centers + manual divisions only),
+ * list (Owner, Superuser, or comms_steward), the roster (centers + manual divisions only),
  * and — on a department — its child divisions for the sub-rail. The actor's
  * effective role rides along so the client can filter the attribute rail
  * without a second round-trip.
@@ -117,7 +117,8 @@ export type UnitEditContext = {
     };
     suppression: { id: string; suppressedAt: Date; actorCwid: string } | null;
   };
-  /** Present iff the actor can manage access (Owner or Superuser); else null. */
+  /** Present iff the actor can manage access (Owner, Superuser, or
+   *  comms_steward — 2026-08-26 policy widening, decision #3); else null. */
   access: ReadonlyArray<{
     cwid: string;
     name: string;
@@ -498,9 +499,16 @@ export async function loadUnitEditContext(
   if (suppressionRow !== null && !session.isSuperuser) return null;
 
   // A steward without a real grant (`effective === "none"`, having passed the
-  // gate above) acts as a CURATOR: edits content but never manages access
-  // (`canManageAccess` below stays Superuser/Owner-only, so a steward gets no
-  // grant UI). A steward who ALSO holds a real owner/curator grant keeps it.
+  // gate above) acts as a CURATOR for content-editing purposes — `actorRole`
+  // (client-side rail filtering) stays whatever the actor's real grant says,
+  // "curator" as the floor. Access-management no longer rides on `actorRole`
+  // at all: per the 2026-08-26 policy widening (decision #3,
+  // `comms-steward-profile-editing-spec.md` §11) a comms_steward gets FULL
+  // access-management parity on every unit — grant/revoke owner AND curator
+  // rows — regardless of any grant they personally hold, so `canManageAccess`
+  // below ORs in `session.isCommsSteward` directly rather than deriving it
+  // from `actorRole`. A steward who ALSO holds a real owner/curator grant
+  // keeps that `actorRole`.
   const actorRole: UnitActorRole = session.isSuperuser
     ? "superuser"
     : effective === "none"
@@ -518,8 +526,10 @@ export async function loadUnitEditContext(
   const leaderCwid =
     merged.leaderCwid === null || merged.leaderCwid === "" ? null : merged.leaderCwid;
 
-  // 4. Access list (Owner/Superuser only) and roster (center/manual-division).
-  const canManageAccess = session.isSuperuser || actorRole === "owner";
+  // 4. Access list (Owner/Superuser/comms_steward — `canManageAccess` in
+  // `lib/edit/authz.ts`, mirrored here since this local never calls that
+  // predicate directly) and roster (center/manual-division).
+  const canManageAccess = session.isSuperuser || session.isCommsSteward || actorRole === "owner";
   const hasRoster = unitType === "center" || (unitType === "division" && source === "manual");
 
   const accessRows = canManageAccess

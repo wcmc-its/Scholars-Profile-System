@@ -155,3 +155,26 @@ describe("POST /api/edit/core-claim — claim path + validation", () => {
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 });
+
+// 2026-08-26 policy widening (decision #6) — full curator-parity on cores,
+// with no UnitAdmin row of their own (`authorizeCoreClaim` covers the pure
+// predicate in tests/unit/core-claim-authz.test.ts; this exercises the route).
+describe("POST /api/edit/core-claim — comms_steward parity", () => {
+  it("a comms_steward with no UnitAdmin row on the core may claim", async () => {
+    mockClaimFindUnique.mockResolvedValue(null);
+    mockUnitAdminFindUnique.mockResolvedValue(null);
+    mockReadEditRequest.mockResolvedValue({
+      ok: true,
+      ctx: {
+        session: { cwid: "stw001", isSuperuser: false, isCommsSteward: true },
+        realCwid: "stw001",
+        impersonatedCwid: null,
+        requestId: "req-2",
+        body: { pmid: "30418319", coreId: "2", status: "claimed" },
+      },
+    });
+    const res = await POST(req());
+    expect(res.status).toBe(200);
+    expect(mockClaimUpsert).toHaveBeenCalledTimes(1);
+  });
+});

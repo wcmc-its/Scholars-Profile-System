@@ -58,7 +58,6 @@ type AttrDef = {
   visible: (ctx: UnitEditContext) => boolean;
 };
 
-const isOwnerPlus = (role: UnitActorRole) => role === "owner" || role === "superuser";
 const isSuperuser = (role: UnitActorRole) => role === "superuser";
 
 /** Whether SPS — not the enterprise directory — owns this unit's data.
@@ -120,7 +119,13 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
     label: "Programs",
     visible: (ctx) => ctx.unit.unitType === "center" && (ctx.programs?.length ?? 0) > 0,
   },
-  { key: "access", label: "Access", visible: (ctx) => isOwnerPlus(ctx.actorRole) },
+  // Visibility is driven directly by whether the context populated the access
+  // array — `loadUnitEditContext`'s `canManageAccess` local already resolves
+  // Owner/Superuser/comms_steward (2026-08-26 policy widening, decision #3),
+  // so gating on `ctx.actorRole` here would re-derive a narrower answer: a
+  // grant-less steward's `actorRole` floors at "curator" for content-editing
+  // purposes even though `access` is non-null for them.
+  { key: "access", label: "Access", visible: (ctx) => ctx.access !== null },
   { key: "slug", label: "Profile URL", visible: (ctx) => isSuperuser(ctx.actorRole) },
   {
     key: "center-type",

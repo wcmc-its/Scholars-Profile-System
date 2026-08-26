@@ -84,8 +84,10 @@ export const INTENDED_MATRIX: MatrixRow[] = [
     name: "comms_steward",
     session: sess({ isCommsSteward: true }),
     grants: grants(),
-    expect: ["profiles", "units", "news", "methods", "reports", "dataSharing"],
-    pins: "Gap 2 — news via isNewsQueueTabVisible, never via a profilesTab piggyback",
+    expect: ["profiles", "units", "news", "methods", "reports", "dataSharing", "cores"],
+    pins:
+      "Gap 2 — news via isNewsQueueTabVisible, never via a profilesTab piggyback; " +
+      "cores per the 2026-08-26 policy widening (decision #6, full curator-parity on cores)",
   },
   {
     name: "pure honors_curator",
@@ -156,6 +158,7 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "dataSharing",
       "administrators",
       "usage",
+      "cores",
     ],
     pins: "Gap 4b — a comms_steward loses Units on /edit/administrators (unitsTab={session.isSuperuser})",
   },

@@ -121,9 +121,13 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
   slugs: (s) => s.isSuperuser,
   activity: (s) => s.isSuperuser,
   etlStatus: (s) => s.isSuperuser,
-  // Owner-scoped Cores index is a deliberately deferred gap, self-documented
-  // in `app/edit/core/page.tsx`'s own comment — when it lands, it lands here.
-  cores: (s) => s.isSuperuser && isCorePagesEnabled(),
+  // 2026-08-26 policy widening (decision #6): a comms_steward gets full
+  // curator-parity on cores (content, leaders/roster, the claim queue —
+  // `authorizeCoreClaim`), so the Cores tab is steward-visible too (I2 nav/
+  // page parity with `/edit/core` and `/edit/core/[coreId]`'s own gates).
+  // Owner-scoped Cores index is still a deliberately deferred gap,
+  // self-documented in `app/edit/core/page.tsx`'s own comment.
+  cores: (s) => (s.isSuperuser || s.isCommsSteward) && isCorePagesEnabled(),
 
   // Gap 1: the curator signal now lives in the one gate that matters — no
   // separate `app/edit/page.tsx` `showConsoleNav` check to forget it in.

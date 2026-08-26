@@ -25,12 +25,15 @@
  *     actions. `role` is an open string (`CoreLeader.role`, schema default
  *     `"director"`), not a closed enum like `CenterProgramLeader.role`.
  *
- * Authz: Owner / Curator of the core, or Superuser — `getCoreOwnerRole` +
- * `authorizeCoreClaim`, the SAME check `/edit/core/[coreId]` and
- * `/api/edit/core-claim` already use for this page's other owner-only
- * actions. Deliberately NOT `canEditUnit` — cores have no comms_steward
- * parity (a separate domain from profile-content stewardship, per
- * `authorizeCoreClaim`'s own doc comment).
+ * Authz: Owner / Curator of the core, Superuser, or comms_steward —
+ * `getCoreOwnerRole` + `authorizeCoreClaim`, the SAME check `/edit/core/[coreId]`
+ * and `/api/edit/core-claim` already use for this page's other owner-only
+ * actions. Deliberately NOT `canEditUnit` (that predicate is department/
+ * division/center-shaped and has no core branch) — cores get their
+ * comms_steward parity through `authorizeCoreClaim` instead, per the
+ * 2026-08-26 policy widening (decision #6, full curator-parity on cores:
+ * content edits, leaders/roster, and the claim queue —
+ * `comms-steward-profile-editing-spec.md` §11).
  *
  * Each mutation is one MySQL transaction with a B03 audit row
  * (`targetEntityType: "core"`, `targetEntityId: coreId` — distinct from the

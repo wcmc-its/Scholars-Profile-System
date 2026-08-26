@@ -3,11 +3,14 @@
  * linking to its owner review queue (`/edit/core/[coreId]`). Reached from the
  * "Cores" tab in the admin sub-nav.
  *
- * Audience: superuser-only for now — the admin-toolbar tab is the entry point and
- * is itself superuser-gated. A non-superuser core owner/curator still reaches
- * THEIR queue via the per-core deep link (`/edit/core/[coreId]`, auth-gated on
- * `getCoreOwnerRole`); an owner-scoped index is a future add (the account-menu
- * entry point). `force-dynamic` + `noindex`, mirroring the rest of `/edit/*`.
+ * Audience: superuser or comms_steward (2026-08-26 policy widening, decision
+ * #6 — full curator-parity on cores, `comms-steward-profile-editing-spec.md`
+ * §11) — the admin-toolbar tab is the entry point and is gated the same way
+ * (`TAB_PREDICATES.cores`). A non-superuser, non-steward core owner/curator
+ * still reaches THEIR queue via the per-core deep link (`/edit/core/[coreId]`,
+ * auth-gated on `getCoreOwnerRole`); an owner-scoped index is a future add
+ * (the account-menu entry point). `force-dynamic` + `noindex`, mirroring the
+ * rest of `/edit/*`.
  */
 import { redirect } from "next/navigation";
 import Link from "next/link";
@@ -33,7 +36,7 @@ export default async function EditCoresIndexPage() {
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/core");
   }
-  if (!session.isSuperuser) {
+  if (!session.isSuperuser && !session.isCommsSteward) {
     logEditDenial({
       actorCwid: session.cwid,
       targetCwid: "core",

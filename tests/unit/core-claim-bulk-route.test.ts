@@ -166,6 +166,18 @@ describe("POST /api/edit/core-claim/bulk", () => {
     expect(mockClaimUpsert).toHaveBeenCalledTimes(1);
   });
 
+  // 2026-08-26 policy widening (decision #6) — full curator-parity on cores,
+  // with no UnitAdmin row of their own on this core.
+  it("allows a comms_steward with no UnitAdmin row on the core", async () => {
+    mockUnitAdminFindUnique.mockResolvedValue(null);
+    const res = await call(
+      { pmids: ["1"] },
+      { isSuperuser: false, isCommsSteward: true },
+    );
+    expect(res.status).toBe(200);
+    expect(mockClaimUpsert).toHaveBeenCalledTimes(1);
+  });
+
   it("counts only successful writebacks (best-effort; a failure never fails the claim)", async () => {
     mockWriteBack
       .mockResolvedValueOnce({ ok: true, skipped: false })

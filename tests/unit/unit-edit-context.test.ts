@@ -17,6 +17,9 @@ const CURATOR = { cwid: "cur001", isSuperuser: false, isCommsSteward: false };
 const OWNER = { cwid: "own001", isSuperuser: false, isCommsSteward: false };
 const NONADMIN = { cwid: "non001", isSuperuser: false, isCommsSteward: false };
 const SUPERUSER = { cwid: "sup001", isSuperuser: true, isCommsSteward: false };
+// 2026-08-26 policy widening (decision #3) — full access-management parity,
+// with NO unit_admin row of their own.
+const STEWARD = { cwid: "stw001", isSuperuser: false, isCommsSteward: true };
 
 type Opts = {
   department?: unknown;
@@ -222,6 +225,33 @@ describe("loadUnitEditContext — department", () => {
     expect(ctx!.access![0]).toMatchObject({ cwid: "cur001", name: "Casey Curator", title: "MD", role: "curator" });
     // a non-Scholar grantee falls back to the cwid (the access card re-resolves it).
     expect(ctx!.access![1]).toMatchObject({ cwid: "staff9", name: "staff9", title: null });
+  });
+
+  // 2026-08-26 policy widening (decision #3) — a comms_steward with NO
+  // unit_admin row of their own still sees the access array (full grant
+  // parity, uniform across unit kinds); `actorRole` still floors at
+  // "curator" for content-editing rail filtering, which is a separate signal
+  // from access management (`components/edit/unit-edit-page.tsx` gates the
+  // Access tab on `ctx.access !== null`, not on `actorRole`).
+  it("a comms_steward with no unit_admin row still sees the access array", async () => {
+    const ctx = await loadUnitEditContext(
+      "department",
+      "N1280",
+      STEWARD,
+      asClient(
+        fakeClient({
+          department: DEPT,
+          roleRows: [],
+          accessRows: [
+            { cwid: "own001", role: "owner", grantedBy: "sup001", createdAt: new Date("2026-05-02") },
+          ],
+        }),
+      ),
+    );
+    expect(ctx).not.toBeNull();
+    expect(ctx!.actorRole).toBe("curator");
+    expect(ctx!.access).toHaveLength(1);
+    expect(ctx!.access![0]).toMatchObject({ cwid: "own001", role: "owner" });
   });
 
   it("resolves the leader chip from Scholar", async () => {

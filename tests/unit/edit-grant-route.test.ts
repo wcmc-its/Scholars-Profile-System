@@ -88,6 +88,9 @@ const OWNER = { cwid: "own001", isSuperuser: false };
 const CURATOR = { cwid: "cur001", isSuperuser: false };
 const NONADMIN = { cwid: "non001", isSuperuser: false };
 const SUPERUSER = { cwid: "sup001", isSuperuser: true };
+// 2026-08-26 policy widening (decision #3) — full access-management parity,
+// with NO unit_admin row of their own.
+const STEWARD = { cwid: "stw001", isSuperuser: false, isCommsSteward: true };
 
 const fakeTx = {
   unitAdmin: { upsert: mockTxUnitAdminUpsert, delete: mockTxUnitAdminDelete },
@@ -227,6 +230,34 @@ describe("/api/edit/grant", () => {
       }),
     );
     expect(res.status).toBe(200);
+  });
+
+  // 2026-08-26 policy widening (decision #3) — a comms_steward grants any
+  // role on any unit even with NO unit_admin row of their own.
+  it("comms_steward grants owner on a unit with no unit_admin row of their own", async () => {
+    mockGetEditSession.mockResolvedValue(STEWARD);
+    mockUnitAdminFindMany.mockResolvedValue([]);
+    const res = await POST(
+      post({
+        entityType: "center",
+        entityId: "MEYER",
+        cwid: "new001",
+        role: "owner",
+        action: "grant",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxUnitAdminUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          entityType: "center",
+          entityId: "MEYER",
+          cwid: "new001",
+          role: "owner",
+          grantedBy: "stw001",
+        }),
+      }),
+    );
   });
 
   it("Revoke uses the same predicate; revoke of non-existent row → 200 no-op", async () => {
@@ -487,6 +518,25 @@ describe("/api/edit/grant", () => {
           entityId: "2",
           cwid: "new001",
           role: "owner",
+          action: "grant",
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(mockReflectUnitChange).not.toHaveBeenCalled();
+    });
+
+    // 2026-08-26 policy widening (decision #3) — canManageAccess/canGrant is
+    // deliberately NOT kind-specific; a comms_steward grants on a core too,
+    // with no unit_admin row of their own on that core.
+    it("comms_steward grants a role on a core with no unit_admin row of their own", async () => {
+      mockGetEditSession.mockResolvedValue(STEWARD);
+      mockUnitAdminFindUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      const res = await POST(
+        post({
+          entityType: "core",
+          entityId: "2",
+          cwid: "new001",
+          role: "curator",
           action: "grant",
         }),
       );

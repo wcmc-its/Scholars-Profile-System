@@ -84,6 +84,7 @@ export async function ConsoleShell({
         dataSharingTab={tabs.dataSharing ? 0 : null}
         reportsTab={tabs.reports || reportsTab}
         newsTab={tabs.news}
+        coresTab={tabs.cores}
         usageTab={tabs.usage}
         viewerIsDeveloper={session.isDeveloper === true}
       />
