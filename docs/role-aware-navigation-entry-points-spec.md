@@ -209,8 +209,8 @@ historical context.
 | Unit Owner/Curator, has profile | ✓ | Units you manage | — | ✓ |
 | comms_steward, has profile | ✓ | Admin console | — | ✓ |
 | **comms_steward, no profile (dwd2001)** | — *(trigger label falls back to the `stewardDirectory` display name)* | **Admin console** | — | ✓ |
-| Superuser, has profile | ✓ | Manage profiles | ✓ *(flag)* | ✓ |
-| Superuser, no profile (staff) | — | Manage profiles | ✓ *(flag)* | ✓ |
+| Superuser, has profile | ✓ | Admin console | ✓ *(flag)* | ✓ |
+| Superuser, no profile (staff) | — | Admin console | ✓ *(flag)* | ✓ |
 
 **Note (reconciled):** a steward's row was originally "Method Families"
 (`/edit/methods`), matching the root-cause fix's minimal scope. A later change
@@ -225,9 +225,10 @@ profile-less steward's trigger shows a real name instead of the bare
 
 A viewer holding several roles sees several links (e.g. unit Owner who is also a
 steward → both entries collapse to the single Admin console row, since a
-steward's collapse wins). Superuser collapses to "Manage profiles" because the
-in-console `AdminSubnav` already fans out to every superuser surface (incl.
-Method Families when the comms flag is on).
+steward's collapse wins). Superuser collapses to "Admin console" (the row's
+`manage-profiles` id keeps the historical name; the label was relabeled in
+#1440) because the in-console `AdminSubnav` already fans out to every
+superuser surface (incl. Method Families when the comms flag is on).
 
 ---
 
@@ -239,7 +240,7 @@ Method Families when the comms flag is on).
 | comms_steward, has profile | Edit/View my profile **and** Admin console (reconciled — see §5's note). |
 | comms_steward AND unit admin | Still just **Admin console** — the unit grant does not remove the row (I3-style monotonic union, `lib/auth/console-links.ts`). |
 | `COMMS_STEWARD_ENABLED` off | `isCommsSteward` false → no Admin console collapse for this role (surface 404s anyway). No betrayal of the dark surface. |
-| Superuser (steward or not) | Manage profiles only; no separate Method Families row (reached via AdminSubnav). |
+| Superuser (steward or not) | Admin console only; no separate Method Families row (reached via AdminSubnav). |
 | Unit Curator of 1 div, no profile | Units you manage; no Edit/View. |
 | Plain scholar | Edit/View + Sign out; no console section. |
 | Probe fails / returns `authenticated:false` | Bar shows "Sign in"; no dropdown. Fail-closed — a probe error never invents a link. |

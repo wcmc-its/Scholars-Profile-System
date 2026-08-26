@@ -24,10 +24,11 @@
  *     dropdown stays short — it routes them to the console, not to every tab.
  *   - **comms_steward** (not a superuser) → also "Admin console"
  *     (`/edit/scholars`), same collapse as a superuser. A steward's own
- *     `AdminSubnav` fans out too — just narrower (Method Families is the one
- *     tab it actually admits them to, per `TAB_PREDICATES` in
- *     `lib/edit/console-tabs.server.ts`) — so a dedicated "Method Families"
- *     dropdown row would be a redundant second door to the same console entry.
+ *     `AdminSubnav` fans out too — Profiles, Org units, Methods, News,
+ *     Reports, Data quality, Data sharing all admit stewards per
+ *     `TAB_PREDICATES` in `lib/edit/console-tabs.server.ts` — so a dedicated
+ *     "Method Families" dropdown row would be a redundant second door to a
+ *     surface their own console nav already reaches.
  *     This union is deliberately checked before `managesUnits` below: gaining a
  *     unit grant must never remove this row (I3-style monotonicity, mirroring
  *     `console-tabs.server.ts`'s own invariant).
@@ -87,9 +88,10 @@ export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
 
   // A superuser OR a comms_steward collapses to the Profiles roster — each has
   // an AdminSubnav that already fans out to whatever else they can reach (the
-  // full surface set for a superuser, just Method Families for a steward), so
-  // neither needs a second, redundant dropdown row for a surface their own
-  // console nav already reaches. Checked BEFORE `managesUnits` on purpose: a
+  // full surface set for a superuser; a broad steward set — Profiles, Org
+  // units, Methods, News, Reports, Data quality, Data sharing — per
+  // `TAB_PREDICATES`), so neither needs a second, redundant dropdown row for
+  // a surface their own console nav already reaches. Checked BEFORE `managesUnits` on purpose: a
   // steward who later also picks up a unit grant must keep this row, never
   // fall back to the narrower Profiles/Org-units pair below.
   if (v.isSuperuser || v.isCommsSteward) {
