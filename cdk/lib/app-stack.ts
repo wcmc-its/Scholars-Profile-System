@@ -1412,6 +1412,14 @@ export class AppStack extends Stack {
         // prerequisite). Off by default both envs (flipped back off 2026-08-24 —
         // was staging-on for soak; no per-user override, this is a blanket gate).
         DATA_SHARING_SECTION: "off",
+        // CORNELL_DIRECTORY_MEMBERS (#2519 PR 1) — the dark Cornell (Ithaca)
+        // directory-members surface: `GET /api/directory/people?source=cornell`
+        // and the `source:"cornell"` branch of `POST /api/edit/roster`'s `add`
+        // action. Both 404/no-op when off. No UI reads this in PR 1 (PR 2) and
+        // the Cornell LDAP secret is not yet wired into `secrets:` (PR 3), so
+        // even "on" would 500 on first use until that lands. Off by default
+        // both envs.
+        CORNELL_DIRECTORY_MEMBERS: "off",
         // AVAILABLE_TECHNOLOGIES_SECTION — the profile "Available technologies"
         // section, sourced from the CTL portfolio via `npm run etl:technologies`.
         // The profile payload returns [] when off, and the section is

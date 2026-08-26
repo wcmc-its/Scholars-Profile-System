@@ -30,8 +30,19 @@
  * (`action: "roster_change"`); `before`/`after` carry the full row snapshot
  * (`{ cwid, membershipType, programCode, startDate, endDate }`) so consumers can
  * diff. Post-commit: `reflectUnitChange` on the unit page + `/browse`.
+ *
+ * #2519 PR 1 (`docs/2026-08-26-cornell-ithaca-membership-SPEC.md` §5) — the
+ * `add` action additionally accepts `source:"cornell"` + a `netid`, behind the
+ * `CORNELL_DIRECTORY_MEMBERS` flag. A completely separate identifier path from
+ * the WCM `cwid` flow above (`handleCornellAdd`): the server re-fetches the
+ * person by netid from the Cornell client (never trusts client-supplied
+ * display data), resolves the disjoint-union bridge, and either inserts a
+ * normal WCM membership row or upserts `ExternalMember` + inserts a
+ * `source: "cornell-ithaca"` membership row. Reuses the SAME `roster_change`
+ * `AuditAction` / `center`|`division` `AuditEntityType` as the WCM path above
+ * — no new audit enum value (the `scripts/sql/audit-log.sql` trap in CLAUDE.md).
  */
-import { type NextRequest, type NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
@@ -41,6 +52,8 @@ import {
   logEditDenial,
   type UnitAdminLookup,
 } from "@/lib/edit/authz";
+import { isCornellDirectoryMembersEnabled } from "@/lib/edit/cornell-directory-flag";
+import { resolveCornellRosterAdd } from "@/lib/edit/cornell-roster";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { reflectUnitChange } from "@/lib/edit/revalidation";
 import {
@@ -50,6 +63,8 @@ import {
   isValidDateRange,
   validateRosterDate,
 } from "@/lib/edit/validators";
+import type { EditSession } from "@/lib/auth/superuser";
+import { fetchCornellPersonByNetid } from "@/lib/sources/cornell-ldap";
 
 const PATH = "/api/edit/roster";
 
@@ -90,6 +105,31 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (typeof unitCode !== "string" || unitCode.length === 0) {
     return editError(400, "invalid_unit_code", "unitCode");
   }
+
+  // #2519 — Cornell (Ithaca) external-member add. A distinct identifier path:
+  // the client supplies a `netid`, never a `cwid` (resolved server-side, never
+  // trusting client-supplied display data — §5). Diverges completely from the
+  // WCM flow starting here; `source` absent or `"wcm"` falls through unchanged
+  // to the existing behavior below.
+  const rawSource = body.source;
+  if (rawSource !== undefined && rawSource !== "wcm" && rawSource !== "cornell") {
+    return editError(400, "invalid_source", "source");
+  }
+  if (rawSource === "cornell") {
+    if (action !== "add") {
+      return editError(400, "cornell_source_add_only", "action");
+    }
+    return handleCornellAdd({
+      unitType,
+      unitCode,
+      netid: body.netid,
+      session,
+      realCwid,
+      impersonatedCwid,
+      requestId,
+    });
+  }
+
   if (typeof cwid !== "string" || !CWID_PATTERN.test(cwid)) {
     return editError(400, "invalid_cwid", "cwid");
   }
@@ -401,4 +441,184 @@ async function handleCenter(p: {
 
   await reflectUnitChange({ unitKind: "center", unitSlug });
   return editOk({ unitCode, cwid, action, changed: true });
+}
+
+// ---------------------------------------------------------------------------
+// #2519 PR 1 — Cornell (Ithaca) external-member add
+// (`docs/2026-08-26-cornell-ithaca-membership-SPEC.md` §5). A separate
+// identifier path from the WCM `handleCenter`/`handleDivision` above: the
+// membership `cwid` is resolved server-side (either an active Scholar.cwid the
+// netid bridges to, or the netid itself), so the unit-existence + authz
+// preamble is intentionally re-run here rather than shared with the WCM path,
+// to avoid touching that path's tested behavior at all.
+// ---------------------------------------------------------------------------
+
+async function handleCornellAdd(p: {
+  unitType: "center" | "division";
+  unitCode: string;
+  netid: unknown;
+  session: EditSession;
+  realCwid: string;
+  impersonatedCwid: string | null;
+  requestId: string | null;
+}): Promise<NextResponse> {
+  const { unitType, unitCode, netid, session, realCwid, impersonatedCwid, requestId } = p;
+
+  if (!isCornellDirectoryMembersEnabled()) {
+    return new NextResponse(null, { status: 404 });
+  }
+  if (typeof netid !== "string" || !CWID_PATTERN.test(netid)) {
+    return editError(400, "invalid_netid", "netid");
+  }
+
+  // --- unit existence + manually-owned check (mirrors the WCM path above) ---
+  let unitSlug: string;
+  let parentDeptSlug: string | undefined;
+  let parentDeptCode: string | null = null;
+  if (unitType === "center") {
+    const center = await db.read.center.findUnique({
+      where: { code: unitCode },
+      select: { code: true, slug: true },
+    });
+    if (!center) return editError(400, "unit_not_found", "unitCode");
+    unitSlug = center.slug;
+  } else {
+    const division = await db.read.division.findUnique({
+      where: { code: unitCode },
+      select: {
+        code: true,
+        slug: true,
+        source: true,
+        deptCode: true,
+        department: { select: { slug: true } },
+      },
+    });
+    if (!division) return editError(400, "unit_not_found", "unitCode");
+    if (division.source !== "manual") {
+      return editError(400, "no_manual_roster", "unitType");
+    }
+    unitSlug = division.slug;
+    parentDeptCode = division.deptCode;
+    parentDeptSlug = division.department?.slug ?? undefined;
+  }
+
+  // --- authz: Curator/Owner of the unit (cascade for division), or Superuser ---
+  const effective = await getEffectiveUnitRole(
+    session,
+    unitType === "center"
+      ? { kind: "center", code: unitCode }
+      : { kind: "division", code: unitCode, parentDeptCode },
+    db.read as unknown as UnitAdminLookup,
+  );
+  const authz = canEditUnit(session, effective);
+  if (!authz.ok) {
+    logEditDenial({
+      actorCwid: session.cwid,
+      targetCwid: netid,
+      path: PATH,
+      reason: authz.reason,
+      targetEntityType: unitType,
+      targetEntityId: unitCode,
+    });
+    return editError(403, authz.reason);
+  }
+
+  // --- resolve the Cornell person server-side (§5) ---
+  const resolution = await resolveCornellRosterAdd(netid, {
+    fetchByNetid: fetchCornellPersonByNetid,
+    findActiveScholarByCwid: (activeCwid) =>
+      db.read.scholar.findFirst({
+        where: { cwid: activeCwid, deletedAt: null, status: "active" },
+        select: { cwid: true },
+      }),
+  });
+
+  if (resolution.kind === "not_found") {
+    return editError(404, "cornell_person_not_found", "netid");
+  }
+  if (resolution.kind === "disjoint_violation") {
+    return editError(409, "cuid_disjointness_violation", "netid");
+  }
+
+  const finalCwid = resolution.kind === "wcm" ? resolution.cwid : resolution.cuid;
+  const membershipSource = resolution.kind === "wcm" ? "manual-ui" : "cornell-ithaca";
+
+  if (unitType === "division") {
+    const existing = await db.read.divisionMembership.findUnique({
+      where: { divisionCode_cwid: { divisionCode: unitCode, cwid: finalCwid } },
+      select: { cwid: true },
+    });
+    if (existing) return editOk({ unitCode, cwid: finalCwid, action: "add", changed: false });
+
+    try {
+      await db.write.$transaction(async (tx) => {
+        if (resolution.kind === "external") {
+          await tx.externalMember.upsert({
+            where: { cuid: resolution.cuid },
+            create: { cuid: resolution.cuid, ...resolution.snapshot },
+            update: { ...resolution.snapshot },
+          });
+        }
+        await tx.divisionMembership.create({
+          data: { divisionCode: unitCode, cwid: finalCwid, source: membershipSource },
+        });
+        await appendAuditRow(tx, {
+          actorCwid: realCwid,
+          impersonatedCwid,
+          targetEntityType: "division",
+          targetEntityId: unitCode,
+          action: "roster_change",
+          fieldsChanged: null,
+          beforeValues: null,
+          afterValues: { cwid: finalCwid, source: membershipSource },
+          ts: new Date(),
+          requestId,
+        });
+      });
+    } catch (err) {
+      logEditFailure(PATH, err);
+      return editError(500, "write_failed");
+    }
+    await reflectUnitChange({ unitKind: "division", unitSlug, parentDeptSlug });
+    return editOk({ unitCode, cwid: finalCwid, action: "add", changed: true });
+  }
+
+  // center
+  const existing = await db.read.centerMembership.findUnique({
+    where: { centerCode_cwid: { centerCode: unitCode, cwid: finalCwid } },
+    select: { cwid: true },
+  });
+  if (existing) return editOk({ unitCode, cwid: finalCwid, action: "add", changed: false });
+
+  try {
+    await db.write.$transaction(async (tx) => {
+      if (resolution.kind === "external") {
+        await tx.externalMember.upsert({
+          where: { cuid: resolution.cuid },
+          create: { cuid: resolution.cuid, ...resolution.snapshot },
+          update: { ...resolution.snapshot },
+        });
+      }
+      await tx.centerMembership.create({
+        data: { centerCode: unitCode, cwid: finalCwid, source: membershipSource },
+      });
+      await appendAuditRow(tx, {
+        actorCwid: realCwid,
+        impersonatedCwid,
+        targetEntityType: "center",
+        targetEntityId: unitCode,
+        action: "roster_change",
+        fieldsChanged: null,
+        beforeValues: null,
+        afterValues: { cwid: finalCwid, source: membershipSource },
+        ts: new Date(),
+        requestId,
+      });
+    });
+  } catch (err) {
+    logEditFailure(PATH, err);
+    return editError(500, "write_failed");
+  }
+  await reflectUnitChange({ unitKind: "center", unitSlug });
+  return editOk({ unitCode, cwid: finalCwid, action: "add", changed: true });
 }

@@ -1949,6 +1949,40 @@ model DivisionMembership {
   @@map("division_membership")
 }
 
+/// Cornell (Ithaca) directory-member side table (#2519, PR 1 of the Cornell
+/// membership feature; `docs/2026-08-26-cornell-ithaca-membership-SPEC.md`
+/// §§ 1-3). A snapshot of a Cornell NetID's LDAP attributes, captured at the
+/// moment a unit curator adds them to a center/division roster.
+///
+/// `cuid` is the Cornell NetID — under the identity model in the spec's §1,
+/// the WCM-CWID and Cornell-NetID namespaces are asserted disjoint, so a
+/// membership row's existing `cwid` column can hold a NetID directly with no
+/// separate column and no collision guard beyond that disjointness assertion.
+/// This table does NOT mint a `Scholar` row (§2): minting one would drag
+/// Cornell people into public search, profiles, exports, and every
+/// WCM-eligibility surface, and would fight the nightly ED sync. The render
+/// union (PR 2) left-joins `CenterMembership`/`DivisionMembership` rows whose
+/// `source = 'cornell-ithaca'` against this table instead of `Scholar`.
+///
+/// `CenterMembership`/`DivisionMembership` are UNCHANGED by this feature — a
+/// Cornell member is an ordinary row with `cwid = <netid>` and the existing
+/// free-text `source` column set to `"cornell-ithaca"`.
+model ExternalMember {
+  cuid        String   @id @db.VarChar(32) // Cornell NetID (a cuid, see model doc)
+  displayName String   @map("display_name") @db.VarChar(255)
+  givenName   String?  @map("given_name") @db.VarChar(128)
+  familyName  String?  @map("family_name") @db.VarChar(128)
+  title       String?  @db.VarChar(255)
+  dept        String?  @db.VarChar(255)
+  email       String?  @db.VarChar(255)
+  affiliation String?  @db.VarChar(64) // cornelleduprimaryaffiliation, for display/filter
+  source      String   @default("cornell-ithaca") @db.VarChar(64)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("external_member")
+}
+
 /// Per-unit administrator grant (ADR-005 Amendment 1 § A1.1 / #540). One row
 /// per (unit, cwid) — `@@unique([entityType, entityId, cwid])` is implicit via
 /// the compound `@@id`. Inserted on grant, **hard-deleted** on revoke (B03
