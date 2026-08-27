@@ -47,6 +47,7 @@ import {
   logEditDenial,
   type CoreOwnerLookup,
 } from "@/lib/edit/authz";
+import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
 
 export const dynamic = "force-dynamic";
 
@@ -100,7 +101,7 @@ export default async function EditCorePage({
   // `EffectiveUnitRole` it expects, so this is the same check
   // `unit-edit-context.ts`'s local now also delegates to.
   const canManageAccess = canManageAccessPredicate(session, coreRole).ok;
-  const [core, leaderRows, accessRows, queue] = await Promise.all([
+  const [core, leaderRows, accessRows, queue, consoleTabs] = await Promise.all([
     db.read.core.findUnique({
       where: { id: coreId },
       select: { name: true, description: true, url: true, visible: true },
@@ -121,6 +122,9 @@ export default async function EditCorePage({
     // query the review page runs, not a hand-rolled parallel count that could
     // drift from its candidate/confirmed/rejected partition logic.
     loadCoreReviewQueue(coreId, db.read),
+    // Drives `EditShell`'s "Org units" breadcrumb (dwd2001 bug #7) — the same
+    // units-tab predicate `/edit/units` itself gates on, not a bespoke check.
+    loadConsoleTabs(session, db.read),
   ]);
   if (!core) notFound();
   const pendingCount = queue?.candidates.length ?? 0;
@@ -172,8 +176,10 @@ export default async function EditCorePage({
       mode="superuser"
       scholarName={core.name}
       // A unit, not a scholar profile — "Profiles" never has anywhere useful
-      // to go from a unit editor.
+      // to go from a unit editor. Its OWN structural crumb ("Org units") is
+      // `orgUnitsNavVisible`, gated on the viewer's units-tab predicate.
       isProfileEntity={false}
+      orgUnitsNavVisible={consoleTabs.units}
       railItems={railItems}
       activeAttr={active}
       basePath={basePath}

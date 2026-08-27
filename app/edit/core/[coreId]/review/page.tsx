@@ -83,7 +83,9 @@ export default async function EditCoreReviewPage({
 
   return (
     <div className="min-h-screen bg-apollo-page" data-slot="edit-core-review-page">
-      <ConsoleTopBar variant="console" />
+      {/* This page has no `AdminSubnav` below it, so the top bar must supply the
+          account menu / Back-to-Scholars / Sign-out itself (dwd2001 nav fix). */}
+      <ConsoleTopBar variant="console" showAccountMenu />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
         <p className="mb-4">

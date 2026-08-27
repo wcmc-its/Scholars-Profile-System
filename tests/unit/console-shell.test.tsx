@@ -88,10 +88,13 @@ describe("ConsoleShell", () => {
     expect(container.querySelector(".bg-apollo-page")).toBeTruthy();
     expect(screen.getByText("Skip to content").getAttribute("href")).toBe("#console-main");
 
-    // The console-variant top bar: the console name is a NON-heading span, so the
-    // page's own <h1> is the ONLY h1 — no double-heading.
-    const title = screen.getByText("Scholars Profile Console");
-    expect(title.tagName).toBe("SPAN");
+    // The console-variant top bar: the console name is a NON-heading span (now
+    // wrapping a brand Link to /edit — dwd2001 nav fix), so the page's own
+    // <h1> is the ONLY h1 — no double-heading.
+    const brandLink = screen.getByRole("link", { name: /Scholars Profile Console/ });
+    expect(brandLink.getAttribute("href")).toBe("/edit");
+    expect(brandLink.closest("span")?.tagName).toBe("SPAN");
+    expect(screen.queryByRole("heading", { name: /^Scholars Profile Console$/ })).toBeNull();
     const h1s = container.querySelectorAll("h1");
     expect(h1s.length).toBe(1);
     expect(h1s[0].textContent).toBe("Edit activity");

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session-server";
 import { isSuperuser } from "@/lib/auth/superuser";
 import { isDeveloper } from "@/lib/auth/development";
-import { isCommsSteward, isMethodsTabVisible } from "@/lib/auth/comms-steward";
+import { isCommsSteward } from "@/lib/auth/comms-steward";
 import { buildConsoleLinks, type ConsoleLink } from "@/lib/auth/console-links";
 import { impersonationActive } from "@/lib/auth/effective-identity";
 import { resolveGlobalRole, type GlobalRole } from "@/lib/auth/global-roles";
@@ -50,6 +50,13 @@ import { db } from "@/lib/db";
  *     admin finally has a clickable path into the console (replacing the old
  *     superuser-only `canBrowseProfiles` flag). Computed against the REAL cwid;
  *     `[]` for a plain scholar.
+ *   - `displayName` — a fallback name for the account-menu trigger when `scholar`
+ *     is `null` (a profile-less comms_steward or unit admin, e.g. dwd2001), read
+ *     from `stewardDirectory` by the REAL cwid. `null` when there is no
+ *     `Scholar` row AND no directory entry, or `scholar` was found (the trigger
+ *     then prefers `scholar.preferredName`, per `account-menu.tsx`). This is
+ *     display-only — it never stands in for a `Scholar` row, so the Edit/View-
+ *     profile rows stay gated on `scholar` alone.
  */
 export const dynamic = "force-dynamic";
 
@@ -73,6 +80,7 @@ export async function GET(): Promise<NextResponse> {
       {
         authenticated: false,
         scholar: null,
+        displayName: null,
         impersonating: null,
         canImpersonate: false,
         canAccessFundingMatcher: false,
@@ -91,6 +99,23 @@ export async function GET(): Promise<NextResponse> {
       select: { slug: true, preferredName: true },
     })
     .catch(() => null);
+
+  // A signed-in viewer with no `Scholar` row (a profile-less comms_steward,
+  // e.g. dwd2001, or a unit admin) still deserves a real name in the header
+  // trigger instead of the bare "Account" fallback. `stewardDirectory` is the
+  // same ED-name bridge the impersonation-target branch below already reads
+  // (comms-steward-profile-editing-spec.md §5); looked up by the REAL cwid,
+  // same `.catch(() => null)` resilience as the scholar lookup above, and
+  // skipped entirely once a real `scholar` row exists — this is a fallback,
+  // never a second source of truth for the Edit/View-profile rows, which stay
+  // keyed on `scholar` alone.
+  const displayName = scholar
+    ? null
+    : (
+        await db.read.stewardDirectory
+          .findUnique({ where: { cwid: session.cwid }, select: { displayName: true } })
+          .catch(() => null)
+      )?.displayName ?? null;
 
   // The superuser verdict, resolved once and reused below. Live LDAPS check
   // against the REAL cwid; `isSuperuser` is fail-closed, so a directory hiccup
@@ -123,7 +148,7 @@ export async function GET(): Promise<NextResponse> {
   if (superuser) {
     consoleLinks = buildConsoleLinks({
       isSuperuser: true,
-      canManageMethods: false,
+      isCommsSteward: false,
       managesUnits: false,
     });
   } else {
@@ -132,7 +157,7 @@ export async function GET(): Promise<NextResponse> {
     const managesUnits = manageable !== null && manageable.total > 0;
     consoleLinks = buildConsoleLinks({
       isSuperuser: false,
-      canManageMethods: isMethodsTabVisible({ isSuperuser: false, isCommsSteward: commsSteward }),
+      isCommsSteward: commsSteward,
       managesUnits,
     });
   }
@@ -251,6 +276,7 @@ export async function GET(): Promise<NextResponse> {
     {
       authenticated: true,
       scholar,
+      displayName,
       impersonating,
       canImpersonate,
       canAccessFundingMatcher,

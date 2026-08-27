@@ -25,6 +25,12 @@ vi.mock("@/components/edit/cv-tool", () => ({
     </button>
   ),
 }));
+// EditShell's top bar now mounts the real, self-fetching AccountMenu
+// (context="console" — dwd2001 nav fix), which probes /api/auth/session on
+// every mount. Stub it out: this file isn't testing the account menu (that's
+// account-menu.test.tsx / console-top-bar.test.tsx), and several cases here
+// assert exact `fetch` call counts that a live probe would pollute.
+vi.mock("@/components/site/account-menu", () => ({ AccountMenu: () => null }));
 
 import { EditPage } from "@/components/edit/edit-page";
 import type { EditContext } from "@/lib/api/edit-context";
@@ -194,7 +200,12 @@ describe("EditPage router — the Apollo shell + rail", () => {
 
   it("uses a single app-level h1 (no repeated '{Attribute} for {Name}' heading)", () => {
     render(<EditPage ctx={ctx} mode="self" />);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Scholars Profile Console");
+    // The h1 now wraps a brand Link (badge + wordmark) to /edit (dwd2001 nav
+    // fix), so match by accessible name — not raw textContent, which also
+    // includes the aria-hidden "WCM" badge glyph — for the console name.
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Scholars Profile Console" }),
+    ).toBeTruthy();
   });
 
   it("defaults to the task-first Home panel for self", () => {
@@ -793,6 +804,29 @@ describe("EditPage — proxy / unit-admin third-person parity (#955 #10)", () =>
       ).toBe("self");
     },
   );
+});
+
+describe("EditPage — unit-admin Profiles crumb (dwd2001 bug #7)", () => {
+  it("forwards profilesNavVisible={true} to EditShell's navigable 'Profiles' crumb for a unit admin", () => {
+    render(<EditPage ctx={superuserCtx} mode="unit-admin" profilesNavVisible={true} />);
+    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    const link = within(crumb).getByTestId("edit-subnav-profiles");
+    expect(link.getAttribute("href")).toBe("/edit/scholars");
+  });
+
+  it("defaults to the flat unit-admin label when profilesNavVisible is omitted", () => {
+    render(<EditPage ctx={superuserCtx} mode="unit-admin" />);
+    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(crumb).queryByTestId("edit-subnav-profiles")).toBeNull();
+    expect(within(crumb).getByTestId("edit-subnav-unit-admin")).toBeTruthy();
+  });
+
+  it("a proxy editor stays flat even when profilesNavVisible={true} — proxy mode never reads it", () => {
+    render(<EditPage ctx={superuserCtx} mode="proxy" profilesNavVisible={true} />);
+    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(crumb).queryByTestId("edit-subnav-profiles")).toBeNull();
+    expect(within(crumb).getByTestId("edit-subnav-proxy")).toBeTruthy();
+  });
 });
 
 describe("EditPage router — superuser mode", () => {

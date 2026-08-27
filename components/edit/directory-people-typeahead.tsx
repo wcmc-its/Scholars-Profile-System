@@ -13,6 +13,11 @@
  * ARIA: `role="combobox"` + `aria-expanded` + `aria-activedescendant`, and the
  * listbox rows are `role="option"`. Stale fetches are aborted so a slow earlier
  * query can't overwrite a newer result.
+ *
+ * #2519 — `source="cornell"` switches the fetch to
+ * `?source=cornell&q=` (the Cornell (Ithaca) directory, PR 1) instead of the
+ * default WCM lookup. Every existing caller omits `source` (defaults to
+ * `"wcm"`), so this is additive — byte-identical unless a caller opts in.
  */
 "use client";
 
@@ -26,9 +31,40 @@ export type DirectoryValue = {
   cwid: string;
   name: string;
   title: string | null;
+  /** #2519 — set only for a `source="cornell"` selection: the Cornell NetID.
+   *  Undefined for a WCM-sourced value. */
+  netid?: string;
+  /** #2519 — set only for a `source="cornell"` selection: the netid's
+   *  resolved WCM cwid when the Cornell person also holds an active WCM
+   *  identity, else `null`. Undefined for a WCM-sourced value. */
+  wcmMatch?: string | null;
 };
 
 type DirectoryResult = DirectoryValue & { dept: string | null };
+
+/** Raw shape of one `?source=cornell` result (PR 1's `CornellDirectoryPerson`
+ *  plus the server-resolved `wcmMatch` bridge). */
+type CornellApiPerson = {
+  netid: string;
+  name: string;
+  title: string | null;
+  dept: string | null;
+  wcmMatch: string | null;
+};
+
+function fromCornellApiPerson(p: CornellApiPerson): DirectoryResult {
+  // No WCM cwid for a Cornell-only person — `wcmMatch` steers the caller's
+  // add flow, and `cwid` here is never read on that path (see
+  // `center-roster-card.tsx` / `unit-roster-card.tsx`'s cornell-source add).
+  return {
+    cwid: p.wcmMatch ?? p.netid,
+    name: p.name,
+    title: p.title,
+    dept: p.dept,
+    netid: p.netid,
+    wcmMatch: p.wcmMatch,
+  };
+}
 
 export type DirectoryPeopleTypeaheadProps = {
   value: DirectoryValue | null;
@@ -37,6 +73,11 @@ export type DirectoryPeopleTypeaheadProps = {
   disabled?: boolean;
   /** Distinguishes multiple typeaheads on one page (test ids + ARIA ids). */
   idPrefix?: string;
+  /** #2519 — which directory to search. Defaults to `"wcm"` (today's
+   *  behavior, byte-identical); `"cornell"` searches the Cornell (Ithaca)
+   *  directory instead (dark until `CORNELL_DIRECTORY_MEMBERS` is on — the
+   *  route 404s off, surfaced here as the existing "Search failed" state). */
+  source?: "wcm" | "cornell";
 };
 
 const DEBOUNCE_MS = 300;
@@ -48,6 +89,7 @@ export function DirectoryPeopleTypeahead({
   placeholder = "Search by name…",
   disabled = false,
   idPrefix = "directory",
+  source = "wcm",
 }: DirectoryPeopleTypeaheadProps) {
   const reactId = React.useId();
   const listboxId = `${idPrefix}-${reactId}-listbox`;
@@ -79,17 +121,24 @@ export function DirectoryPeopleTypeahead({
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        const res = await fetch(`/api/directory/people?q=${encodeURIComponent(trimmed)}`, {
-          signal: controller.signal,
-        });
-        const data = (await res.json()) as
-          | { ok: true; people: DirectoryResult[] }
-          | { ok: false; error: string };
-        if (!res.ok || data.ok !== true) {
+        const url =
+          source === "cornell"
+            ? `/api/directory/people?source=cornell&q=${encodeURIComponent(trimmed)}`
+            : `/api/directory/people?q=${encodeURIComponent(trimmed)}`;
+        const res = await fetch(url, { signal: controller.signal });
+        const data = (await res.json().catch(() => null)) as
+          | { ok: true; people: DirectoryResult[] | CornellApiPerson[] }
+          | { ok: false; error: string }
+          | null;
+        if (!res.ok || !data || data.ok !== true) {
           setResults([]);
           setError(true);
         } else {
-          setResults(data.people);
+          setResults(
+            source === "cornell"
+              ? (data.people as CornellApiPerson[]).map(fromCornellApiPerson)
+              : (data.people as DirectoryResult[]),
+          );
           setError(false);
         }
         setOpen(true);
@@ -107,7 +156,17 @@ export function DirectoryPeopleTypeahead({
   }, [query, value]);
 
   function select(result: DirectoryResult) {
-    onChange({ cwid: result.cwid, name: result.name, title: result.title });
+    onChange(
+      source === "cornell"
+        ? {
+            cwid: result.cwid,
+            name: result.name,
+            title: result.title,
+            netid: result.netid,
+            wcmMatch: result.wcmMatch,
+          }
+        : { cwid: result.cwid, name: result.name, title: result.title },
+    );
     setQuery("");
     setResults([]);
     setOpen(false);

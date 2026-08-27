@@ -263,6 +263,21 @@ describe("UnitEditPage — rail filtering", () => {
   });
 });
 
+describe("UnitEditPage — Org units breadcrumb (dwd2001 bug #7)", () => {
+  it("forwards orgUnitsNavVisible={true} to EditShell's navigable 'Org units' crumb", () => {
+    render(<UnitEditPage ctx={ctx({})} orgUnitsNavVisible={true} />);
+    const link = screen.getByTestId("edit-subnav-units");
+    expect(link.getAttribute("href")).toBe("/edit/units");
+  });
+
+  it("defaults to the flat, non-navigable label when orgUnitsNavVisible is omitted", () => {
+    render(<UnitEditPage ctx={ctx({})} />);
+    expect(screen.queryByTestId("edit-subnav-units")).toBeNull();
+    const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(crumb.textContent).toBe("Medicine");
+  });
+});
+
 describe("UnitEditPage — active panel selection", () => {
   it("defaults to the description panel", () => {
     render(<UnitEditPage ctx={ctx({})} />);

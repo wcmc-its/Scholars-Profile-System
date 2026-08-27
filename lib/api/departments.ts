@@ -341,6 +341,16 @@ export type DepartmentFacultyHit = {
    *  when ORG_UNIT_METHODS_CHIPS (+ METHODS_LENS_ENABLED) is on AND the member
    *  has ≥1 public family; undefined otherwise (off-path payload carries nothing). */
   topMethods?: MemberMethodFamily[];
+  /** #2519 — true only for a Cornell (Ithaca) external member (no `Scholar`
+   *  row). Undefined on every WCM hit. `PersonRow` must branch on this BEFORE
+   *  the `isPubliclyDisplayed`/`slug` profile-link logic, which does not apply
+   *  to an external member (no role category, no WCM profile). */
+  isExternal?: true;
+  /** #2519 — the Cornell directory SSO landing page for this member, present
+   *  only when `isExternal` is true. Precomputed server-side so no client
+   *  component needs to import `lib/api/external-members.ts` (which pulls in
+   *  `@/lib/db` at module scope). */
+  externalProfileUrl?: string;
 };
 
 export type DepartmentFacultyResult = {

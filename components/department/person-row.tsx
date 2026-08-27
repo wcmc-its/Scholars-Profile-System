@@ -7,6 +7,7 @@ import { htmlToPlainText } from "@/lib/utils";
 import { formatRoleCategory } from "@/lib/role-display";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { profilePath } from "@/lib/profile-url";
+import { Badge } from "@/components/ui/badge";
 
 /**
  * Per neurology_dept_body_per_spec.html: 11px uppercase role tag with 0.06em
@@ -38,9 +39,15 @@ export function PersonRow({
    *  of `CenterMemberFamily`, so `topMethods` satisfies it directly. */
   methodChips?: Array<{ value: string; familyLabel: string; exemplarTools: string[] }>;
 }) {
-  const deptLine = hit.divisionName
-    ? `${hit.divisionName} · Department of ${hit.departmentName}`
-    : `Department of ${hit.departmentName}`;
+  // #2519 — a Cornell (Ithaca) external member's `departmentName` is a raw
+  // Cornell dept string (e.g. "CIO - IT Security Office"), not a WCM
+  // department to prefix, and has no division segment; it's also `""` when
+  // the person has no dept, in which case no department line renders at all.
+  const deptLine = hit.isExternal
+    ? hit.departmentName || null
+    : hit.divisionName
+      ? `${hit.divisionName} · Department of ${hit.departmentName}`
+      : `Department of ${hit.departmentName}`;
   const snippet = hit.overview ? htmlToPlainText(hit.overview) : null;
 
   const pubLabel = hit.pubCount === 1 ? "pub" : "pubs";
@@ -63,7 +70,20 @@ export function PersonRow({
               enum. The fallback keeps older payloads working — and now that the
               predicate fails closed, an unrecognized label de-links rather than
               leaks. */}
-          {isPubliclyDisplayed(hit.roleCategoryRaw ?? hit.roleCategory) ? (
+          {hit.isExternal ? (
+            // #2519 — a Cornell (Ithaca) external member has no WCM profile
+            // (no slug, no Scholar row): link out to the Cornell directory
+            // instead, and skip `PersonPopover` (it has no WCM data to show).
+            <a
+              href={hit.externalProfileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:underline"
+              style={{ textDecoration: "none", color: "var(--color-text-primary)" }}
+            >
+              {hit.preferredName}
+            </a>
+          ) : isPubliclyDisplayed(hit.roleCategoryRaw ?? hit.roleCategory) ? (
             <PersonPopover cwid={hit.cwid} surface="facet">
               <a
                 href={profilePath(hit.slug)}
@@ -82,6 +102,11 @@ export function PersonRow({
             const label = formatRoleCategory(hit.roleCategory);
             return label ? <RoleTag role={label} /> : null;
           })()}
+          {hit.isExternal && (
+            <Badge variant="outline" className="rounded-full">
+              Cornell University
+            </Badge>
+          )}
           {trailingBadge}
         </div>
         {hit.primaryTitle && (
@@ -89,9 +114,11 @@ export function PersonRow({
             {hit.primaryTitle}
           </div>
         )}
-        <div className="mb-[5px] text-[12.5px] text-[var(--color-text-tertiary)]">
-          {deptLine}
-        </div>
+        {deptLine && (
+          <div className="mb-[5px] text-[12.5px] text-[var(--color-text-tertiary)]">
+            {deptLine}
+          </div>
+        )}
         {snippet && (
           <div className="text-[13px] leading-[1.5] text-muted-foreground">
             {snippet}

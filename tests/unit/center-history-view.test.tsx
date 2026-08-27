@@ -6,8 +6,18 @@
  * which mocks this component — they cannot share a file, since `vi.mock` is
  * hoisted module-wide.)
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+
+// The top bar mounts the real AccountMenu (a client island that probes
+// /api/auth/session) now that this page has no AdminSubnav to supply it
+// (dwd2001 nav fix). Stub it so these content assertions run without a live
+// fetch / Popover — the menu mount itself is pinned in console-top-bar.test.tsx.
+vi.mock("@/components/site/account-menu", () => ({
+  AccountMenu: ({ context }: { context?: string }) => (
+    <div data-testid="account-menu-stub" data-context={context} />
+  ),
+}));
 
 import { CenterHistoryView } from "@/components/edit/center-history-view";
 import type { CenterAuditEntry } from "@/lib/api/center-audit";
@@ -25,6 +35,20 @@ function entry(over: Partial<CenterAuditEntry> & { id: string }): CenterAuditEnt
 }
 
 describe("CenterHistoryView", () => {
+  // dwd2001 nav fix: this page has no AdminSubnav, so the top bar must carry
+  // the account menu itself (ConsoleTopBar's showAccountMenu).
+  it("renders an account menu — this page has no AdminSubnav to supply one", () => {
+    render(
+      <CenterHistoryView
+        centerCode="meyer_cancer_center"
+        centerName="Meyer Cancer Center"
+        entries={[]}
+        windowDays={90}
+      />,
+    );
+    expect(screen.getByTestId("account-menu-stub").getAttribute("data-context")).toBe("console");
+  });
+
   it("renders the table with headers and a back-link to the editor", () => {
     render(
       <CenterHistoryView

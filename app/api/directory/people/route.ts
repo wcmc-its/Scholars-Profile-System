@@ -11,15 +11,28 @@
  * Minimal attribute list (name + title + dept); never PII. This is a read
  * endpoint, so no audit row. Any authenticated `/edit/*` user may call it;
  * the directory is already an internal resource and carries no editable state.
+ *
+ * `?source=wcm|cornell` (default `wcm`) — #2519 PR 1
+ * (`docs/2026-08-26-cornell-ithaca-membership-SPEC.md` §5). `source=wcm` is
+ * this same path, byte-identical. `source=cornell` is a completely separate
+ * branch behind the `CORNELL_DIRECTORY_MEMBERS` flag (dark-shipped, 404 when
+ * off — the `MATCHA`-route pattern): name search only (`?q=`, no `?cwids=`
+ * mode) against the Cornell (Ithaca) directory, with each result annotated
+ * server-side with `wcmMatch: <cwid> | null` — the entry's `cornellEduCWID`
+ * resolved against an ACTIVE Scholar, so the UI (PR 2) can steer a bridged
+ * person to the normal WCM add instead of an external one.
  */
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { db } from "@/lib/db";
+import { isCornellDirectoryMembersEnabled } from "@/lib/edit/cornell-directory-flag";
 import {
   fetchDirectoryPeopleByCwid,
   searchDirectoryPeopleByName,
   type DirectoryPerson,
 } from "@/lib/sources/ldap";
+import { searchCornellPeopleByName } from "@/lib/sources/cornell-ldap";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +52,47 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q");
   const cwidsParam = searchParams.get("cwids");
+
+  const rawSource = searchParams.get("source");
+  if (rawSource !== null && rawSource !== "wcm" && rawSource !== "cornell") {
+    return jsonError(400, "invalid_source");
+  }
+
+  if (rawSource === "cornell") {
+    // Dark until the flag flips (§6) — same 404-when-off posture as the
+    // MATCHA route (lib/api/matcha.ts `isMatchaEnabled()`).
+    if (!isCornellDirectoryMembersEnabled()) return new NextResponse(null, { status: 404 });
+    if (q === null || cwidsParam !== null) {
+      return jsonError(400, "cornell_source_requires_q");
+    }
+    const trimmed = q.trim();
+    if (trimmed.length < MIN_QUERY_LENGTH) return jsonError(400, "query_too_short");
+    try {
+      const people = await searchCornellPeopleByName(trimmed);
+      const bridgeCwids = [
+        ...new Set(
+          people
+            .map((p) => p.cornellEduCWID)
+            .filter((c): c is string => c !== null),
+        ),
+      ];
+      const activeScholars = bridgeCwids.length
+        ? await db.read.scholar.findMany({
+            where: { cwid: { in: bridgeCwids }, deletedAt: null, status: "active" },
+            select: { cwid: true },
+          })
+        : [];
+      const activeSet = new Set(activeScholars.map((s) => s.cwid));
+      const annotated = people.map((p) => ({
+        ...p,
+        // Resolved server-side (§5) — never trust a client-supplied classification.
+        wcmMatch: p.cornellEduCWID !== null && activeSet.has(p.cornellEduCWID) ? p.cornellEduCWID : null,
+      }));
+      return NextResponse.json({ ok: true, people: annotated }, { headers: NO_STORE });
+    } catch {
+      return jsonError(503, "directory_unavailable");
+    }
+  }
 
   // Exactly one mode.
   if ((q === null) === (cwidsParam === null)) {
