@@ -85,6 +85,31 @@ describe("DepartmentFacultyClient — unfiltered ?page= preservation (#review-07
   });
 });
 
+describe("DepartmentFacultyClient — role-category chip survives pagination (#2528)", () => {
+  it("carries the active role chip into the page-2 pagination href", () => {
+    renderClient({ total: 45, page: 1 });
+    fireEvent.click(screen.getByRole("button", { name: /Full-time faculty/ }));
+    const page2 = screen.getByRole("link", { name: "2" });
+    expect(page2.getAttribute("href")).toBe(
+      "/departments/medicine?page=2&type=Full-time+faculty",
+    );
+  });
+
+  it("seeds the role chip from ?type= on mount (survives the full-page reload)", () => {
+    window.history.replaceState(null, "", "/departments/medicine?type=Full-time+faculty");
+    renderClient({ total: 2, page: 1 });
+    const chip = screen.getByRole("button", { name: /Full-time faculty/ });
+    expect(chip.className).toContain("bg-[var(--color-accent-slate)]");
+  });
+
+  it("ignores an invalid ?type= value (falls back to All)", () => {
+    window.history.replaceState(null, "", "/departments/medicine?type=not-a-real-category");
+    renderClient({ total: 2, page: 1 });
+    const allChip = screen.getByRole("button", { name: /^All/ });
+    expect(allChip.className).toContain("bg-[var(--color-accent-slate)]");
+  });
+});
+
 describe("DepartmentFacultyClient — filter fetch failure is not an empty result (#review-0707)", () => {
   it("shows a retryable error, not 'No scholars match', when the members fetch fails", async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error("500"));
