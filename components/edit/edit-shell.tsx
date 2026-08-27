@@ -31,6 +31,55 @@ import { SuperuserBanner } from "@/components/edit/superuser-banner";
 import { UnitAdminBanner } from "@/components/edit/unit-admin-banner";
 import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 
+/** A navigable "{label} / {current}" breadcrumb — shared by the "Profiles"
+ *  crumb (superuser-on-a-profile, unit-admin-with-a-grant) and the "Org
+ *  units" crumb (superuser-on-a-unit-with-a-grant), so the two structural
+ *  breadcrumbs render identically rather than drifting apart. */
+function BreadcrumbCrumb({
+  href,
+  label,
+  current,
+  testId,
+}: {
+  href: string;
+  label: string;
+  current: string;
+  testId: string;
+}) {
+  return (
+    <nav aria-label="Breadcrumb" className="flex items-center gap-2 py-3 text-sm">
+      <Link
+        href={href}
+        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+        data-testid={testId}
+      >
+        <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
+        {label}
+      </Link>
+      <span className="text-muted-foreground" aria-hidden>
+        /
+      </span>
+      <span className="font-medium" aria-current="page">
+        {current}
+      </span>
+    </nav>
+  );
+}
+
+/** A flat, non-navigable "{current}" breadcrumb — the fallback shape for a
+ *  unit editor whose viewer doesn't hold a units-tab grant, a proxy editor
+ *  (no roster to return to at all), and a unit admin whose grant doesn't
+ *  admit `profilesNavVisible`. */
+function FlatBreadcrumb({ current, testId }: { current: string; testId?: string }) {
+  return (
+    <nav aria-label="Breadcrumb" className="flex items-center gap-2 py-3 text-sm">
+      <span className="font-medium" aria-current="page" data-testid={testId}>
+        {current}
+      </span>
+    </nav>
+  );
+}
+
 export type EditShellProps = {
   mode: "self" | "superuser" | "proxy" | "unit-admin";
   /** The entity display name (scholar preferred name, or a unit name). Kept as
@@ -55,27 +104,54 @@ export type EditShellProps = {
    *  rail-mounted `CenterReportsRailLink` (Reports IA redesign, 2026-08-14). */
   reportsHref?: string;
   /**
-   * The signed-in (actor) scholar's identity for the header account menu. In
-   * self mode this is the scholar themselves; omit it for surfaces that don't
-   * have the actor's scholar row (the account menu then degrades to Sign out).
+   * The signed-in (actor) scholar's identity. UNUSED by `ConsoleTopBar` as of
+   * the dwd2001 nav fix — the top bar now mounts the self-fetching
+   * `AccountMenu context="console"` directly (same as `AdminSubnav`), which
+   * derives the scholar + display name from the `/api/auth/session` probe
+   * instead of a threaded prop. Kept on the type only because one caller
+   * (`edit-page.tsx`) still passes it; cleaning up that call site is outside
+   * this ticket's scope.
    */
   account?: { slug: string; preferredName: string } | null;
   /** Self mode only: the viewer has the right to edit ≥1 profile that isn't
    *  their own (`session.isSuperuser`) — adds the "All profiles" cross-link.
    *  Superseded by `consoleNav` when that is supplied. No longer read in
-   *  superuser mode (see `isProfileEntity`) — a unit owner/curator with real
-   *  profile-editing rights elsewhere still has nowhere useful for "Profiles"
-   *  to go FROM a unit page, so the crumb is gated purely on page identity,
-   *  not on the viewer's other permissions. */
+   *  superuser mode (see `isProfileEntity`) — "Profiles" still has nowhere
+   *  useful to go FROM a unit page (it names scholars, not units), but a unit
+   *  page now gets its OWN structural crumb back to its own roster — see
+   *  `orgUnitsNavVisible` below, which replaced the permanently-flat label
+   *  this comment used to describe (dwd2001 bug #7). */
   canBrowseProfiles?: boolean;
   /** Superuser mode only: true when `scholarName` names an actual scholar
    *  profile (the default — every caller before cores-as-org-units P3 was
    *  scholar-shaped) rather than a unit. The "Profiles / {name}" breadcrumb
    *  is navigable only when this is true; set false for a unit editor
-   *  (department/division/center/core), where it degrades to a flat,
-   *  non-navigable label — "Profiles" only ever makes sense as a way back
-   *  from an individual profile, never from a unit's own editor. */
+   *  (department/division/center/core), where the crumb becomes "Org units /
+   *  {name}" instead (see `orgUnitsNavVisible`) — "Profiles" specifically
+   *  only ever makes sense as a way back from an individual profile, never
+   *  from a unit's own editor. */
   isProfileEntity?: boolean;
+  /** Unit editor pages only (`isProfileEntity=false`): whether the viewer
+   *  satisfies the units-tab predicate (`TAB_PREDICATES.units` —
+   *  superuser, comms_steward, or a `manageableUnitCount>0` grant on ANY
+   *  unit, `lib/edit/console-tabs.server.ts`), gating a navigable
+   *  "Org units / {name}" breadcrumb (→ `/edit/units`) in place of the flat
+   *  unit-name label a unit editor rendered before (dwd2001 bug #7 — a
+   *  detail page with no way back except the browser's own Back button).
+   *  Callers compute this server-side via `loadConsoleTabs` and pass a plain
+   *  boolean; default `false` keeps the flat label for any caller that
+   *  hasn't computed it (and for the rare viewer the predicate genuinely
+   *  fails for, e.g. a role that reaches a unit page without a real grant). */
+  orgUnitsNavVisible?: boolean;
+  /** Unit-admin mode only: whether the viewer (the org-unit administrator
+   *  editing this scholar on a unit's behalf) satisfies the profiles-tab
+   *  predicate (`TAB_PREDICATES.profiles` — true whenever
+   *  `manageableUnitCount>0`, which a unit admin always has). Gates the same
+   *  navigable "Profiles / {name}" crumb superuser mode always gets — a unit
+   *  admin has a real roster to return to (their own units' scholars), so
+   *  they get the same structural crumb, not the permanent dead end proxy
+   *  mode has (dwd2001 bug #7). Default `false` keeps the flat label. */
+  profilesNavVisible?: boolean;
   /** Self mode only: a pre-built console tab strip (the shared `AdminSubnav`)
    *  rendered IN PLACE OF the minimal "My Profile / All profiles" strip. The
    *  `/edit` page supplies it for a superuser or comms_steward so the full
@@ -129,9 +205,11 @@ export function EditShell({
   previewHref,
   historyHref,
   reportsHref,
-  account,
+  account: _account,
   canBrowseProfiles = false,
   isProfileEntity = true,
+  orgUnitsNavVisible = false,
+  profilesNavVisible = false,
   consoleNav,
   subRail,
   hideRail = false,
@@ -154,60 +232,70 @@ export function EditShell({
         Skip to editor
       </a>
 
-      {/* Top bar (black) — the shared Apollo chrome with a real account/exit menu. */}
-      <ConsoleTopBar account={account} />
+      {/* Top bar (black) — the shared Apollo chrome with a real account/exit menu
+          (self-fetching `AccountMenu context="console"`; see `_account` above). */}
+      <ConsoleTopBar />
 
       {/* Sub-nav — maroon underline on the active tab. A superuser editing a
           scholar gets a "Profiles / <name>" breadcrumb back to the roster; a
-          superuser on their own /edit gets an "All profiles" link across — or,
-          when `consoleNav` is supplied (superuser / comms_steward self-edit), the
-          full shared admin tab strip in its place. */}
+          unit editor gets an "Org units / <name>" breadcrumb back to its own
+          roster when the viewer's units-tab grant admits them
+          (`orgUnitsNavVisible`); a unit admin editing a scholar gets the same
+          "Profiles / <name>" crumb superuser mode does when their
+          profiles-tab grant admits them (`profilesNavVisible`) — a real
+          proxy editor never gets a navigable crumb, since a proxy grant names
+          no roster at all. A superuser on their own /edit gets an "All
+          profiles" link across — or, when `consoleNav` is supplied (superuser
+          / comms_steward self-edit), the full shared admin tab strip in its
+          place. */}
       {mode === "self" && consoleNav ? (
         consoleNav
       ) : (
       <div className="border-border border-b">
         <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-2 px-6">
-          {isSuperuser ? (
-            isProfileEntity ? (
-              <nav aria-label="Breadcrumb" className="flex items-center gap-2 py-3 text-sm">
-                <Link
-                  href="/edit/scholars"
-                  className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-                  data-testid="edit-subnav-profiles"
-                >
-                  <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
-                  Profiles
-                </Link>
-                <span className="text-muted-foreground" aria-hidden>
-                  /
-                </span>
-                <span className="font-medium" aria-current="page">
-                  {scholarName}
-                </span>
-              </nav>
+          {isSuperuser && isProfileEntity ? (
+            <BreadcrumbCrumb
+              href="/edit/scholars"
+              label="Profiles"
+              current={scholarName}
+              testId="edit-subnav-profiles"
+            />
+          ) : isSuperuser ? (
+            // A unit editor (department/division/center/core) — "Profiles"
+            // still has nowhere useful to go from here, but the unit itself
+            // has a real roster to go back to (`/edit/units`) whenever the
+            // viewer's own units-tab grant admits them; when it doesn't (a
+            // role that somehow reaches a unit page with no real grant),
+            // fall back to the same flat, non-navigable label as proxy mode.
+            orgUnitsNavVisible ? (
+              <BreadcrumbCrumb
+                href="/edit/units"
+                label="Org units"
+                current={scholarName}
+                testId="edit-subnav-units"
+              />
             ) : (
-              // A unit editor (department/division/center/core) — "Profiles"
-              // has nowhere useful to go from here regardless of the viewer's
-              // own rights, so just the unit name, same flat-label shape as
-              // proxy/unit-admin.
-              <nav aria-label="Breadcrumb" className="flex items-center gap-2 py-3 text-sm">
-                <span className="font-medium" aria-current="page">
-                  {scholarName}
-                </span>
-              </nav>
+              <FlatBreadcrumb current={scholarName} />
             )
+          ) : isUnitAdmin && profilesNavVisible ? (
+            // A unit admin edits a scholar on behalf of a unit they actually
+            // manage — the same roster ("Profiles") a superuser returns to,
+            // gated on their own profiles-tab grant rather than assumed.
+            <BreadcrumbCrumb
+              href="/edit/scholars"
+              label="Profiles"
+              current={scholarName}
+              testId="edit-subnav-profiles"
+            />
           ) : isProxy || isUnitAdmin ? (
-            // A proxy / unit admin has no roster to return to — a flat label
-            // naming the scholar they are editing, not a navigable breadcrumb.
-            <nav aria-label="Breadcrumb" className="flex items-center gap-2 py-3 text-sm">
-              <span
-                className="font-medium"
-                aria-current="page"
-                data-testid={isUnitAdmin ? "edit-subnav-unit-admin" : "edit-subnav-proxy"}
-              >
-                {scholarName}
-              </span>
-            </nav>
+            // A proxy grant names no roster at all, and a unit admin whose
+            // grant doesn't admit `profilesNavVisible` falls back the same
+            // way — a flat label naming the scholar being edited, not a
+            // navigable breadcrumb.
+            <FlatBreadcrumb
+              current={scholarName}
+              testId={isUnitAdmin ? "edit-subnav-unit-admin" : "edit-subnav-proxy"}
+            />
           ) : (
             <div className="flex items-center gap-6">
               <span

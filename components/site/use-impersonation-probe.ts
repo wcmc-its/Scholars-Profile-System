@@ -52,6 +52,13 @@ export type ProbeImpersonating = {
 export type ImpersonationProbe = {
   authenticated: boolean;
   scholar: ProbeScholar | null;
+  /** Fallback display name for the account-menu trigger when `scholar` is
+   *  `null` (a profile-less comms_steward or unit admin, e.g. dwd2001),
+   *  resolved server-side from `stewardDirectory`. `null` when no fallback
+   *  name exists — the trigger then falls back further, to "Account". Never a
+   *  substitute for `scholar`: the Edit/View-profile rows stay gated on it
+   *  alone. */
+  displayName: string | null;
   impersonating: ProbeImpersonating | null;
   canImpersonate: boolean;
   /** The role-aware `/edit` console entry points the viewer may open, computed
@@ -93,6 +100,7 @@ export function useImpersonationProbe(enabled = true): ImpersonationProbe | null
         setProbe({
           authenticated: data.authenticated ?? false,
           scholar: data.scholar ?? null,
+          displayName: data.displayName ?? null,
           impersonating: data.impersonating ?? null,
           canImpersonate: data.canImpersonate ?? false,
           consoleLinks: data.consoleLinks ?? [],

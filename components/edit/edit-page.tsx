@@ -517,6 +517,16 @@ export type EditPageProps = {
   /** Self mode only: the viewer is a superuser, so the shell shows a link
    *  across to the Profiles roster. Forwarded to `EditShell`. */
   canBrowseProfiles?: boolean;
+  /** Unit-admin mode only (dwd2001 bug #7): whether the org-unit administrator
+   *  editing this scholar satisfies the profiles-tab predicate
+   *  (`TAB_PREDICATES.profiles`, `lib/edit/console-tabs.server.ts`) — gates
+   *  the same navigable "Profiles / {name}" breadcrumb superuser mode always
+   *  gets, in place of the flat, non-navigable label a unit admin got before.
+   *  The server page computes this via `loadConsoleTabs(session, db.read)`
+   *  and forwards it verbatim to `EditShell`'s `profilesNavVisible`. Default
+   *  `false` keeps the flat label for any other mode (proxy has no roster to
+   *  return to at all, and self/superuser never read this prop). */
+  profilesNavVisible?: boolean;
   /** Self mode only: a pre-built console tab strip (the shared `AdminSubnav`)
    *  for a superuser / comms_steward, rendered by `EditShell` in place of the
    *  minimal self-edit sub-nav. Built by the `/edit` page (which holds the
@@ -649,6 +659,7 @@ export function EditPage({
   slugRequestEnabled = false,
   latestSlugRequest = null,
   canBrowseProfiles = false,
+  profilesNavVisible = false,
   consoleNav,
   manageableUnits = [],
   proxyEditors = null,
@@ -865,6 +876,7 @@ export function EditPage({
       historyHref={`/edit/scholar/${ctx.scholar.cwid}/history`}
       account={mode === "self" ? { slug: ctx.scholar.slug, preferredName: scholarName } : undefined}
       canBrowseProfiles={canBrowseProfiles}
+      profilesNavVisible={profilesNavVisible}
       consoleNav={consoleNav}
       unitAdmin={unitAdminBanner ?? undefined}
     >

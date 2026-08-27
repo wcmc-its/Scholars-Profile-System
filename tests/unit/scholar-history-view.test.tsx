@@ -5,8 +5,18 @@
  * note, and the empty state. (Page authorization gates live in
  * `scholar-history-page.test.tsx`, which mocks this component.)
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+
+// The top bar mounts the real AccountMenu (a client island that probes
+// /api/auth/session) now that this page has no AdminSubnav to supply it
+// (dwd2001 nav fix). Stub it so these content assertions run without a live
+// fetch / Popover — the menu mount itself is pinned in console-top-bar.test.tsx.
+vi.mock("@/components/site/account-menu", () => ({
+  AccountMenu: ({ context }: { context?: string }) => (
+    <div data-testid="account-menu-stub" data-context={context} />
+  ),
+}));
 
 import { ScholarHistoryView } from "@/components/edit/scholar-history-view";
 import type { ScholarAuditEntry } from "@/lib/api/scholar-audit";
@@ -25,6 +35,20 @@ function entry(over: Partial<ScholarAuditEntry> & { id: string }): ScholarAuditE
 }
 
 describe("ScholarHistoryView", () => {
+  // dwd2001 nav fix: this page has no AdminSubnav, so the top bar must carry
+  // the account menu itself (ConsoleTopBar's showAccountMenu).
+  it("renders an account menu — this page has no AdminSubnav to supply one", () => {
+    render(
+      <ScholarHistoryView
+        cwid="abc1001"
+        scholarName="Jane Doe"
+        entries={[]}
+        windowDays={90}
+      />,
+    );
+    expect(screen.getByTestId("account-menu-stub").getAttribute("data-context")).toBe("console");
+  });
+
   it("renders the table with headers and a back-link to the editor", () => {
     render(
       <ScholarHistoryView

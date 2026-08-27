@@ -73,7 +73,9 @@ export function ScholarHistoryView({
 }: ScholarHistoryViewProps) {
   return (
     <div className="bg-apollo-page min-h-screen">
-      <ConsoleTopBar variant="console" />
+      {/* This page has no `AdminSubnav` below it, so the top bar must supply the
+          account menu / Back-to-Scholars / Sign-out itself (dwd2001 nav fix). */}
+      <ConsoleTopBar variant="console" showAccountMenu />
       <main
         className="mx-auto w-full max-w-[var(--max-content)] px-6 py-10"
         data-slot="scholar-history-view"

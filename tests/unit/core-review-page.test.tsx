@@ -52,6 +52,7 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: mockForbidden }));
 vi.mock("@/components/edit/core-claim-queue", () => ({ CoreClaimQueue: mockQueueComponent }));
 
+import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import EditCoreReviewPage from "@/app/edit/core/[coreId]/review/page";
 
 type El = { type: unknown; props: Record<string, unknown> };
@@ -144,5 +145,17 @@ describe("/edit/core/[coreId]/review — authorization", () => {
     mockGetEditSession.mockResolvedValue({ cwid: "sup001", isSuperuser: true });
     mockLoadQueue.mockResolvedValue(null);
     await expect(EditCoreReviewPage({ params: params("2") })).rejects.toThrow("__NOTFOUND__");
+  });
+
+  // dwd2001 nav fix: this page has no AdminSubnav, so the top bar must carry
+  // the account menu itself (ConsoleTopBar's showAccountMenu) — same pattern
+  // as ScholarHistoryView / CenterHistoryView.
+  it("owner/curator/superuser → the top bar carries the account menu itself (no AdminSubnav on this page)", async () => {
+    mockGetEditSession.mockResolvedValue({ cwid: "own001", isSuperuser: false });
+    mockUnitAdminFindUnique.mockResolvedValue({ role: "owner" });
+    const result = asEl(await EditCoreReviewPage({ params: params("2") }));
+    const topBar = findByType(result, ConsoleTopBar);
+    expect(topBar).toBeTruthy();
+    expect(topBar!.props.showAccountMenu).toBe(true);
   });
 });
