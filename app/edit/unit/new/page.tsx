@@ -11,9 +11,12 @@
  * Page-level authorization (an unauthorized GET renders the same visible 403 as
  * the rest of `/edit/*`):
  *   - division → Superuser only.
- *   - center → Superuser, or Owner of the named parent department (the create
- *     endpoint's `canManageAccess` check, mirrored here so the form never
- *     renders for someone who can't submit it).
+ *   - center → Superuser, or Owner of the named parent department (mirrors the
+ *     create endpoint's inline Owner-or-Superuser check so the form never
+ *     renders for someone who can't submit it — deliberately NOT
+ *     `canManageAccess`, which since the 2026-08-26 policy widening also
+ *     admits a comms_steward; org-unit create/delete stays excluded from
+ *     steward parity, `comms-steward-profile-editing-spec.md` §3b).
  *
  * A Superuser sees the mode toggle and a department picker (the full list is
  * loaded here — a small bounded set — so the client filters in-memory with no
@@ -44,12 +47,7 @@ import type { DepartmentOption } from "@/components/edit/department-picker";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import type { EditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
-import {
-  canManageAccess,
-  getEffectiveUnitRole,
-  logEditDenial,
-  type UnitAdminLookup,
-} from "@/lib/edit/authz";
+import { getEffectiveUnitRole, logEditDenial, type UnitAdminLookup } from "@/lib/edit/authz";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { isOrgUnitCreateSuperuserOnly } from "@/lib/edit/unit-create-flags";
@@ -191,8 +189,14 @@ export default async function NewUnitPage({
     { kind: "department", code: dept },
     db.read as unknown as UnitAdminLookup,
   );
-  const authz = canManageAccess(session, effective);
-  if (!authz.ok) return forbidden("not_curator");
+  // Deliberately NOT `canManageAccess` — that predicate now also admits a
+  // comms_steward (2026-08-26 policy widening, decision #3, scoped to
+  // granting/revoking `unit_admin` rows), but org-unit CREATE stays excluded
+  // from steward parity (`comms-steward-profile-editing-spec.md` §3b:
+  // "adding/remove org units"). Inlined equivalent of the pre-widening
+  // Owner-or-Superuser check, mirroring the create endpoint's own guard.
+  const canCreate = session.isSuperuser || effective === "owner";
+  if (!canCreate) return forbidden("not_curator");
 
   return (
     <CreateChrome

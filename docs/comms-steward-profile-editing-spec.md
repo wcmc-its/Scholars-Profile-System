@@ -1,6 +1,6 @@
 # Comms Steward — profile editing + ED-name bridge (plan)
 
-**Status:** Implemented — shipped #963 (profile-edit parity), #964 (org-unit curator parity), #959 (ED-name bridge), #958 (/edit/methods effective identity); parity asymmetries reconciled in #994. Dark in prod behind `COMMS_STEWARD_ENABLED` (armed #968). The §3 field-scope decision was confirmed as **full superuser parity minus slug/governance, including publication suppression** (§3b; #987 closed GRANT). (Spec reconciled to shipped code 2026-06-14, #990.)
+**Status:** Implemented — shipped #963 (profile-edit parity), #964 (org-unit curator parity), #959 (ED-name bridge), #958 (/edit/methods effective identity); parity asymmetries reconciled in #994. Dark in prod behind `COMMS_STEWARD_ENABLED` (armed #968). The §3 field-scope decision was confirmed as **full superuser parity minus slug/governance, including publication suppression** (§3b; #987 closed GRANT). (Spec reconciled to shipped code 2026-06-14, #990.) **2026-08-26 policy widening (§11):** decisions #3 (full unit access-management parity) and #6 (full curator-parity on cores) further narrow the "governance" exclusion — see §11.
 **Driver:** Operator feedback (2026-06-13) while viewing as dwd2001 — (1) the
 "View as" banner shows the CWID, not a name; (2) the console offers tabs a
 steward can't use, and "comms_steward should be able to see and edit profiles."
@@ -64,8 +64,12 @@ users, adding/remove org units"):
 
 - ❌ **Slug** — no URL-requests queue (`/edit/slug-requests`), no Slug registry
   (`/edit/slugs`), and no per-profile "Profile URL" (`profile-url`) field.
-- ❌ **Administrators** — no admin / unit-admin grant management
-  (`/edit/administrators`).
+- ❌ **Administrators roster page** — still no `/edit/administrators` (the
+  read-only cross-unit grant roster). ⚠️ **Narrowed 2026-08-26 (§11, decision
+  #3):** the underlying grant/revoke *capability* — `canManageAccess` /
+  `canGrant`, i.e. each unit's own "Access" panel + `/api/edit/grant` — is now
+  full parity, uniform across every unit kind including cores. Only the
+  dedicated cross-unit roster page stays out of scope.
 - ❌ **Org-unit create/remove** (`/edit/unit/new`, unit CRUD).
 - ✅ **All other profile fields** a superuser edits: `overview`, `highlights`,
   `visibility`, `publications` (incl. suppression). Read-only/sourced fields
@@ -257,10 +261,70 @@ actually means exclude only unit **create/delete** (+ grants) — editing
 - A comms_steward edits any **existing** department / division / center's content
   (description, leadership, roster) at **curator parity** — `canEditUnit` admits
   the steward, and `loadUnitEditContext` maps a grant-less steward's `actorRole`
-  to `curator` (so `canManageAccess` stays Owner/Superuser-only → **no grant UI**).
+  to `curator` for content-editing rail filtering. ⚠️ **Superseded 2026-08-26
+  (§11, decision #3):** `canManageAccess` / `canGrant` now ALSO admit the
+  steward directly (not derived from `actorRole`), so a grant-less steward
+  DOES get the grant UI — see §11.
 - **Excluded** (unchanged): create/delete a unit (`/edit/unit/new` + the
-  "Create a unit" affordance stay superuser-only), and admin/unit-admin grants
-  (`canManageAccess` / `canGrant`). Retired units stay superuser-only.
+  "Create a unit" affordance stay superuser-only). Retired units stay
+  superuser-only. Admin/unit-admin grants (`canManageAccess` / `canGrant`) are
+  **no longer excluded** — see §11.
 - **Nav:** a "Units" tab (`AdminSubnav` `unitsTab` capability) → `/edit/units`,
   whose finder is opened to the steward (`canFindAnyUnit`), so they can jump to
   any unit. Shown to steward + superuser on the roster + Method-Families surfaces.
+
+## 11. Addendum — full access-management + cores parity (2026-08-26 policy decisions #3/#6)
+
+Two further operator-approved widenings, auth-sensitive, applied directly to the
+predicates rather than layered on top:
+
+**Decision #3 — full access-management parity, every unit kind.** A comms_steward
+may now grant/revoke `owner` AND `curator` `unit_admin` rows on ANY department,
+division, or center — and, per decision #6 below, ANY core — regardless of any
+`unit_admin` row the steward personally holds. This reverses §10's "canManageAccess
+stays Owner/Superuser-only" and §3b's "no admin/unit-admin grant management":
+
+- `canManageAccess` (`lib/edit/authz.ts`) — `session.isSuperuser || session.isCommsSteward`
+  short-circuits, ahead of the `effectiveRole === "owner"` check. The Curator
+  non-delegation line (§ the load-bearing comment on that function) is untouched
+  for a non-steward, non-superuser actor.
+- `canGrant` — same shape, modeled on the Superuser branch: a steward grants
+  either role, on any unit, even with `effectiveRole === "none"`.
+- `lib/api/unit-edit-context.ts`'s `canManageAccess` local now ORs in
+  `session.isCommsSteward` directly (not derived from `actorRole`, which still
+  floors a grant-less steward at `"curator"` for content-editing rail
+  filtering — that's a different, unchanged signal). The Access rail item
+  (`components/edit/unit-edit-page.tsx`) is gated on `ctx.access !== null`,
+  not on `actorRole === "owner"`, so this flows through without a new
+  `UnitActorRole` variant.
+- Deliberately NOT kind-specific — `canManageAccess`/`canGrant` take no unit-kind
+  parameter, so this is uniform by construction across department/division/
+  center/core; there is no separate "core access management" branch to keep in
+  sync.
+- **Still excluded:** the `/edit/administrators` cross-unit read-only roster
+  page (Administrators tab), and unit create/delete. Those are separate gates
+  (`isAdministratorsTabVisible`, the `/edit/unit/new` route) untouched by this
+  decision.
+
+**Decision #6 — full curator-parity on cores.** Cores were previously "a separate
+domain from profile-content stewardship" with explicitly NO comms_steward
+parity (`authorizeCoreClaim`'s prior doc comment). Now a comms_steward gets:
+
+- Content edits (description / URL / visibility) via `/api/edit/core`.
+- Leader/roster CRUD, same route.
+- The publication-claim queue — `/api/edit/core-claim(/bulk)` and the
+  `/edit/core/[coreId]/review` page.
+- The "Access" panel on `/edit/core/[coreId]` (via decision #3's
+  `canManageAccess` widening — the page's own local mirrors it).
+
+All four ride the ONE predicate, `authorizeCoreClaim` — it now admits
+`session.isCommsSteward` alongside Superuser, ahead of the owner/curator role
+check, so every core-gated route/page picked up the widening without a
+per-surface change. `/edit/core` (the review-queue index) and the "Cores"
+console tab (`TAB_PREDICATES.cores`, `AdminSubnav`'s new `coresTab` escape
+hatch) are steward-visible too — required for I2 nav/page parity (a tab that
+shows must lead somewhere that admits the viewer, and vice versa).
+
+**Both decisions are inert while `COMMS_STEWARD_ENABLED` is off** — `isCommsSteward`
+on `EditSession` is hard-`false` whenever the flag isn't `"on"` (`lib/auth/
+comms-steward.ts`), so every branch added above is unreachable until the flag is.

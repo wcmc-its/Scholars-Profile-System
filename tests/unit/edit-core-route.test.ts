@@ -368,6 +368,16 @@ describe("/api/edit/core — authz + existence", () => {
     expect(res.status).toBe(200);
   });
 
+  // 2026-08-26 policy widening (decision #6) — full curator-parity on cores,
+  // with no UnitAdmin row of their own (cores were previously "a separate
+  // domain" with no comms_steward parity at all).
+  it("comms_steward may act with no UnitAdmin row on the core at all", async () => {
+    mockGetEditSession.mockResolvedValue({ cwid: "stw001", isSuperuser: false, isCommsSteward: true });
+    mockUnitAdminFindUnique.mockResolvedValue(null);
+    const res = await POST(post({ ...BASE, action: "set_visible", visible: true }));
+    expect(res.status).toBe(200);
+  });
+
   it("Unknown core → 404 core_not_found", async () => {
     mockCoreFindUnique.mockResolvedValue(null);
     const res = await POST(post({ ...BASE, action: "set_description", description: "New blurb." }));

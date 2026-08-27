@@ -40,6 +40,7 @@ Plus **break-glass** — the emergency-access and kill-switch procedures.
 | **Superuser** | Enterprise Directory group `ITS:Library:Scholars/superuser-role` (LDAPS lookup of the group's `member` list, keyed on session CWID) | **every `/edit/*` GET and `/api/edit/*` POST** — never cached in the session | Everything: edit any field incl. `slug`, suppress/revoke anything (incl. whole-publication takedown), grant/revoke any unit role, view suppressed data on the superuser GET pages. |
 | **Unit Owner** | a `unit_admin` row (`role=owner`) for the unit | per POST | Edit the unit (`description`, leadership, roster) **and manage access** (grant/revoke `owner`/`curator`) within the owned subtree; proxy-edit scholars whose LDAP-primary unit is in scope. |
 | **Unit Curator** | a `unit_admin` row (`role=curator`) | per POST | Edit the unit **only**. Cannot delegate (cannot grant any role) — the load-bearing line that stops a curator self-escalating. |
+| **comms_steward** | Enterprise Directory group, resolved via `isCommsSteward(cwid)`; whole role dark unless `COMMS_STEWARD_ENABLED=on` | per `/edit/*` GET / `/api/edit/*` POST, same as Superuser | Near-superuser profile parity across **all** scholars (bio, highlights, visibility, publication suppression) minus `slug` and unit create/delete. Edits any *existing* unit's content at curator parity. **2026-08-26 widening:** ALSO full access-management parity on every unit (department/division/center/core) — grant/revoke `owner`/`curator` rows anywhere, with no `unit_admin` row of their own — and full curator-parity on cores (content, leaders/roster, the claim queue). Still excluded: the `/edit/administrators` roster page, unit create/delete, and `slug`. See [`comms-steward-profile-editing-spec.md`](./comms-steward-profile-editing-spec.md) §3b/§11. |
 | **Proxy editor** | a `scholar_proxy` row `(scholarCwid, proxyCwid)` — the scholar's explicit designee (#779, ADR-005 Amendment 3); the proxy holds **no other role** (not Self/Superuser/Unit role), enforced at grant **and** re-checked at every edit | per request, keyed on the **real** cwid | Edit *the granted scholar's* `overview` and hide *that scholar's* own misattributed publications — exactly self-edit scope, on exactly that one scholar. Cannot edit `slug`/upstream fields; cannot manage the proxy list. Distinct from a Unit Owner/Curator's unit-scoped proxy edit. |
 
 Key properties:
@@ -62,8 +63,10 @@ The per-unit predicates live in [`lib/edit/authz.ts`](../lib/edit/authz.ts):
   denials for triage — `scope_violation` (no role on the target subtree at all) vs
   `authority_violation` (in scope but only a curator, so cannot delegate). Owner→owner is a
   deliberately permitted widening.
-- **Manage-access requires Owner:** `canManageAccess` — granting/revoking a `unit_admin` row
-  needs Owner (or Superuser). A Curator can edit but never delegate.
+- **Manage-access requires Owner (or Superuser, or comms_steward):** `canManageAccess` —
+  granting/revoking a `unit_admin` row needs Owner, Superuser, or (2026-08-26 policy
+  widening) comms_steward — uniformly across every unit kind including cores, with no
+  `unit_admin` row of the steward's own required. A Curator can edit but never delegate.
 - **Proxy edit (T3):** an Owner/Curator may proxy-edit a scholar's `overview` (and per-author
   publication hide) **iff the scholar's LDAP-primary `deptCode`/`divCode` is in the actor's
   subtree** — read from the LDAP-authoritative `Scholar` columns, never `field_override`-able.
@@ -80,7 +83,7 @@ The per-unit predicates live in [`lib/edit/authz.ts`](../lib/edit/authz.ts):
 | Edit `slug` (vanity URL) | **Superuser only.** A scholar *requests* a slug ([`slug-personalization-spec.md`](./slug-personalization-spec.md)); a superuser approves/sets it. |
 | Hide whole publication (retraction/takedown) | **Superuser only.** |
 | Hide self as a contributor | The contributor themselves. |
-| Grant/revoke a unit role | Owner (within subtree) or Superuser. |
+| Grant/revoke a unit role | Owner (within subtree), Superuser, or comms_steward (any unit, incl. cores). |
 
 ### Defense in depth (beyond the role check)
 

@@ -17,8 +17,10 @@
  * Server Component. Authorization mirrors the unit-curation editor routes
  * (`/edit/center/[code]`):
  *   1. **No session** → SAML-login redirect carrying this URL.
- *   2. **Effective core role** (Superuser / owner / curator of this core, i.e.
- *      `UnitAdmin(entityType="core", entityId=coreId)`) → render.
+ *   2. **Effective core role** (Superuser / comms_steward / owner / curator of
+ *      this core, i.e. `UnitAdmin(entityType="core", entityId=coreId)`) →
+ *      render. A comms_steward passes regardless of any personal `UnitAdmin`
+ *      row (`authorizeCoreClaim`, 2026-08-26 policy widening decision #6).
  *   3. **No role + core exists** → one `edit_authz_denied` line + a visible 403;
  *      **core absent** → 404.
  *
@@ -40,6 +42,7 @@ import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import {
   authorizeCoreClaim,
+  canManageAccess as canManageAccessPredicate,
   getCoreOwnerRole,
   logEditDenial,
   type CoreOwnerLookup,
@@ -91,11 +94,13 @@ export default async function EditCorePage({
     );
   }
 
-  // Access (Owner/Superuser only — "Curators grant nothing") mirrors
-  // `unit-edit-context.ts`'s own `canManageAccess` local, not the
-  // `lib/edit/authz` predicate of the same name (that one gates
-  // `/api/edit/unit`'s create-unit path, unrelated here).
-  const canManageAccess = session.isSuperuser || coreRole === "owner";
+  // Access (Owner/Superuser/comms_steward — "Curators grant nothing", but a
+  // steward is full access-management parity regardless of their own core
+  // role, 2026-08-26 policy widening decision #3), delegated to `lib/edit/
+  // authz`'s own `canManageAccess` predicate — `coreRole` is already the
+  // `EffectiveUnitRole` it expects, so this is the same check
+  // `unit-edit-context.ts`'s local now also delegates to.
+  const canManageAccess = canManageAccessPredicate(session, coreRole).ok;
   const [core, leaderRows, accessRows, queue, consoleTabs] = await Promise.all([
     db.read.core.findUnique({
       where: { id: coreId },

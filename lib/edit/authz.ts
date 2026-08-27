@@ -429,16 +429,21 @@ export async function getCoreOwnerRole(
 }
 
 /**
- * `POST /api/edit/core-claim`. An owner/curator of the core (or a Superuser) may
+ * `POST /api/edit/core-claim` (and the shared gate for `/api/edit/core`'s
+ * content/leader writes + the `/edit/core/[coreId]` pages). An owner/curator of
+ * the core, a Superuser, or — per the 2026-08-26 policy widening (decision #6,
+ * `comms-steward-profile-editing-spec.md` §11) — a comms_steward may
  * claim/reject a (publication, core) usage candidate for THAT core. Pure given
- * the looked-up role. No comms_steward parity — cores are a separate domain from
- * profile-content stewardship.
+ * the looked-up role. Cores were previously a separate domain with NO
+ * comms_steward parity; the operator confirmed full curator-parity on cores
+ * (content edits, leaders/roster, and this claim queue) reusing this one
+ * predicate, so every core-gated surface picks up the widening for free.
  */
 export function authorizeCoreClaim(
   session: EditSession,
   coreRole: EffectiveUnitRole,
 ): AuthzResult {
-  if (session.isSuperuser) return ALLOW;
+  if (session.isSuperuser || session.isCommsSteward) return ALLOW;
   if (coreRole === "owner" || coreRole === "curator") return ALLOW;
   return { ok: false, reason: "not_core_owner" };
 }
@@ -456,8 +461,9 @@ export function canEditUnit(
   // A comms_steward edits any EXISTING unit's content at curator parity
   // (description / leadership / roster) — comms-steward-profile-editing-spec.md
   // §3b "minus adding/remove org units" excludes only create/delete + grants,
-  // not editing existing units. Grants stay Owner/Superuser (`canManageAccess`)
-  // and unit create/delete is not widened — so this confers content editing only.
+  // not editing existing units. As of the 2026-08-26 policy widening
+  // (decision #3), `canManageAccess` ALSO admits comms_steward now — it's
+  // unit create/delete specifically that stays unwidened, not grants.
   if (session.isSuperuser || session.isCommsSteward) return ALLOW;
   if (effectiveRole === "owner" || effectiveRole === "curator") return ALLOW;
   return { ok: false, reason: "not_curator" };
@@ -468,12 +474,21 @@ export function canEditUnit(
  * row requires Owner role on the target unit (or Superuser). A Curator can
  * edit but cannot delegate — this is the load-bearing line that keeps
  * Curators from widening their own access via a self-granted Owner row.
+ *
+ * A comms_steward is also admitted, full stop — the 2026-08-26 policy
+ * widening (decision #3, `comms-steward-profile-editing-spec.md` §11): FULL
+ * access-management parity on every org unit kind (department / division /
+ * center / core), uniformly, regardless of the actor's own `effectiveRole`
+ * on that unit. This is deliberately NOT kind-specific — do not special-case
+ * cores here or anywhere `canManageAccess` is read. It does not touch the
+ * Curator-non-delegation line above, which still turns on `effectiveRole`
+ * alone for a non-steward, non-superuser actor.
  */
 export function canManageAccess(
   session: EditSession,
   effectiveRole: EffectiveUnitRole,
 ): AuthzResult {
-  if (session.isSuperuser) return ALLOW;
+  if (session.isSuperuser || session.isCommsSteward) return ALLOW;
   if (effectiveRole === "owner") return ALLOW;
   return { ok: false, reason: "not_unit_owner" };
 }
@@ -492,13 +507,22 @@ export function canManageAccess(
  * The split matches Amendment 1 § A1.5 #1 — the event payload also carries
  * the target `role` so an `authority_violation` makes plain *which* role the
  * actor failed to mint.
+ *
+ * A comms_steward is modeled on the Superuser branch — the 2026-08-26 policy
+ * widening (decision #3, `comms-steward-profile-editing-spec.md` §11): FULL
+ * access-management parity on every unit, every kind, so a steward grants
+ * either role anywhere even though they hold no `unit_admin` row of their
+ * own (`effectiveRole` stays whatever it actually is — "none" for a steward
+ * with no personal grant — for the audit log's sake; it just never gates
+ * them). This does not touch the Curator (`authority_violation`) or no-role
+ * (`scope_violation`) denials for a NON-steward, non-superuser actor.
  */
 export function canGrant(
   session: EditSession,
   effectiveRole: EffectiveUnitRole,
   _targetRole: "owner" | "curator",
 ): AuthzResult {
-  if (session.isSuperuser) return ALLOW;
+  if (session.isSuperuser || session.isCommsSteward) return ALLOW;
   if (effectiveRole === "none") return { ok: false, reason: "scope_violation" };
   if (effectiveRole === "curator") return { ok: false, reason: "authority_violation" };
   // effectiveRole === "owner": Amendment 1 § A1.4 C — owner→owner is permitted

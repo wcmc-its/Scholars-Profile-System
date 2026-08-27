@@ -35,6 +35,7 @@ const {
   mockIsHonorsCurator,
   mockIsDeveloper,
   mockResolveGlobalRole,
+  mockIsCommsSteward,
 } = vi.hoisted(() => ({
   mockGetSession: vi.fn(),
   mockGetEffectiveCwid: vi.fn(),
@@ -56,6 +57,7 @@ const {
   mockIsHonorsCurator: vi.fn(),
   mockIsDeveloper: vi.fn(),
   mockResolveGlobalRole: vi.fn(),
+  mockIsCommsSteward: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -69,7 +71,7 @@ vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveCwid: mockGetEffec
 // The guard re-checks the REAL signed-in user's superuser verdict (`session.cwid`).
 vi.mock("@/lib/auth/superuser", () => ({ isSuperuser: mockIsSuperuser }));
 vi.mock("@/lib/auth/comms-steward", () => ({
-  isCommsSteward: vi.fn(async () => false),
+  isCommsSteward: mockIsCommsSteward,
   isMethodsTabVisible: () => false,
 }));
 vi.mock("@/lib/auth/global-roles", () => ({
@@ -185,6 +187,7 @@ beforeEach(() => {
   mockIsHonorsCurator.mockResolvedValue(false);
   mockIsDeveloper.mockResolvedValue(false);
   mockResolveGlobalRole.mockResolvedValue(null);
+  mockIsCommsSteward.mockResolvedValue(false);
 });
 
 describe("/edit (self) — global-role landing (#2482, widened 2026-08-19)", () => {
@@ -293,5 +296,18 @@ describe("/edit (self) — loadConsoleTabs migration (Gaps 1 / 1b)", () => {
     mockLoadEditContext.mockResolvedValue(fakeCtx("self01", "full_time_faculty"));
     const result = asElement(await EditSelfPage({ searchParams: searchParams() }));
     expect(result.props.consoleNav).toBeUndefined();
+  });
+
+  it("a comms_steward gets coresTab threaded into AdminSubnav, same as every ConsoleShell page", async () => {
+    // Regression pin: this page used to hand the AdminSubnav every other
+    // `loadConsoleTabs` prop (news/reports/usage/...) but omitted `coresTab`,
+    // so a non-superuser steward lost the Cores tab only on the `/edit`
+    // console home even though `tabs.cores` was already true for them.
+    vi.stubEnv("CORE_PAGES", "on");
+    mockLoadEditContext.mockResolvedValue(fakeCtx("self01", "full_time_faculty"));
+    mockIsCommsSteward.mockResolvedValue(true);
+    const result = asElement(await EditSelfPage({ searchParams: searchParams() }));
+    const consoleNav = asElement(result.props.consoleNav);
+    expect(consoleNav.props.coresTab).toBe(true);
   });
 });

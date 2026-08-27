@@ -8,7 +8,11 @@
  * target unit's subtree (the grant's `role` must also be ≤ the grantor's
  * own role, but at v1 we offer only `owner` and `curator` and an Owner can
  * grant either, so the role check collapses to the predicate
- * `canGrant`). A Superuser grants any role on any unit.
+ * `canGrant`). A Superuser grants any role on any unit; per the 2026-08-26
+ * policy widening (decision #3, `comms-steward-profile-editing-spec.md` §11)
+ * a comms_steward does too — full access-management parity on every unit
+ * kind (department/division/center/core), uniformly, regardless of any
+ * `unit_admin` row the steward personally holds.
  *
  * Revoke uses the same predicate — by SPEC line 218 ("clearing is gated
  * identically to setting, and revoking identically to granting").

@@ -31,7 +31,6 @@ import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import {
   canEditUnit,
-  canManageAccess,
   getEffectiveUnitRole,
   logEditDenial,
   type UnitAdminLookup,
@@ -231,7 +230,16 @@ async function createInformalCenter(params: {
       { kind: "department", code: deptCode },
       db.read as unknown as UnitAdminLookup,
     );
-    const authz = canManageAccess(session, effective);
+    // Deliberately NOT `canManageAccess` — that predicate now also admits a
+    // comms_steward (2026-08-26 policy widening, decision #3, scoped to
+    // granting/revoking `unit_admin` rows), but org-unit CREATE stays
+    // excluded from steward parity (`comms-steward-profile-editing-spec.md`
+    // §3b: "adding/remove org units"). Inlined equivalent of the
+    // pre-widening Owner-or-Superuser check.
+    const authz: { ok: true } | { ok: false; reason: "not_unit_owner" } =
+      session.isSuperuser || effective === "owner"
+        ? { ok: true }
+        : { ok: false, reason: "not_unit_owner" };
     if (!authz.ok) {
       logEditDenial({
         actorCwid: session.cwid,

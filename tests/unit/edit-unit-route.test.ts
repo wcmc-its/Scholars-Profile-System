@@ -199,6 +199,31 @@ describe("/api/edit/unit op:'create' — informal center", () => {
     expect(await res.json()).toMatchObject({ ok: false, error: "not_unit_owner" });
   });
 
+  // 2026-08-26 policy widening (decision #3) is scoped to `canManageAccess` /
+  // `canGrant` (granting/revoking `unit_admin` rows) — org-unit CREATE stays
+  // excluded from comms_steward parity (`comms-steward-profile-editing-
+  // spec.md` §3b: "adding/remove org units"). This route deliberately does
+  // NOT call the widened `canManageAccess` for this reason.
+  it("comms_steward with no unit_admin row → 403 not_unit_owner (create stays excluded)", async () => {
+    mockGetEditSession.mockResolvedValue({
+      cwid: "stw001",
+      isSuperuser: false,
+      isCommsSteward: true,
+    });
+    mockUnitAdminFindMany.mockResolvedValue([]);
+    const res = await POST(
+      post({
+        op: "create",
+        unitType: "center",
+        name: "X",
+        slug: "x",
+        deptCode: "MED",
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ ok: false, error: "not_unit_owner" });
+  });
+
   it("Superuser creates an informal center without an Owner row", async () => {
     mockGetEditSession.mockResolvedValue(SUPERUSER);
     mockUnitAdminFindMany.mockResolvedValue([]);

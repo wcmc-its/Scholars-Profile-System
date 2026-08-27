@@ -514,13 +514,20 @@ describe("comms_steward — page access", () => {
   });
 });
 
-describe("comms_steward — org-unit editing (content, not governance)", () => {
+describe("comms_steward — org-unit editing + access management (not unit create/delete)", () => {
   it("CAN edit any existing unit's content even with no grant (curator parity, §3b)", () => {
     expect(canEditUnit(STEWARD, "none")).toEqual({ ok: true });
   });
 
-  it("CANNOT manage unit access / grant roles ('adding/removing users')", () => {
-    expect(canManageAccess(STEWARD, "none").ok).toBe(false);
-    expect(canGrant(STEWARD, "none", "curator").ok).toBe(false);
+  // 2026-08-26 policy widening (decision #3, comms-steward-profile-editing-
+  // spec.md §11) REVERSES the prior "adding/removing users" exclusion: a
+  // steward now gets FULL access-management parity — grant/revoke owner AND
+  // curator rows — on every unit, uniformly, with no unit_admin row of their
+  // own. This does not touch unit create/delete, which stays superuser-only
+  // and is untested here (no predicate change).
+  it("CAN manage unit access / grant roles — full parity (decision #3, was excluded pre-2026-08-26)", () => {
+    expect(canManageAccess(STEWARD, "none").ok).toBe(true);
+    expect(canGrant(STEWARD, "none", "curator").ok).toBe(true);
+    expect(canGrant(STEWARD, "none", "owner").ok).toBe(true);
   });
 });

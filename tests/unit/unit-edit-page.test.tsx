@@ -119,6 +119,15 @@ describe("UnitEditPage — rail filtering", () => {
     expect(railKeys()).toEqual(["description", "url", "leader", "access"]);
   });
 
+  // 2026-08-26 policy widening (decision #3) — a comms_steward with no
+  // unit_admin row of their own still gets the Access tab: `actorRole` floors
+  // at "curator" for them (unit-edit-context.ts), so visibility must key off
+  // `ctx.access !== null` directly, not off `actorRole === "owner"`.
+  it("a comms_steward (actorRole curator, access populated) still sees Access", () => {
+    render(<UnitEditPage ctx={ctx({ actorRole: "curator", access: [] })} />);
+    expect(railKeys()).toEqual(["description", "url", "leader", "access"]);
+  });
+
   it("a Superuser on a department adds slug + retire (but not center-type)", () => {
     render(<UnitEditPage ctx={ctx({ actorRole: "superuser", access: [] })} />);
     expect(railKeys()).toEqual(["description", "url", "leader", "access", "slug", "retire"]);

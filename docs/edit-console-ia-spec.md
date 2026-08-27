@@ -23,7 +23,8 @@ The matrix is `tests/unit/console-tab-matrix.fixture.ts`, not this table. That f
 | Tab | Superuser | comms_steward | honors_curator | unit Owner | unit Curator | pure `developer` |
 |---|---|---|---|---|---|---|
 | Profiles / Org units | ✓ | ✓ | ✗ | ✓ (`manageableUnitCount > 0`) | ✓ same | ✗ |
-| URL requests / URL registry / Activity / ETL status / Cores | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| URL requests / URL registry / Activity / ETL status | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Cores | ✓ (flag) | ✓ (flag; 2026-08-26 policy widening, decision #6 — full curator-parity on cores) | ✗ | ✗ (owner-scoped index still a deliberately deferred gap) | ✗ | ✗ |
 | Honors | ✓ (flag) | ✗ | ✓ | ✗ | ✗ | ✗ |
 | News | ✓ | ✓ (flag) | ✗ | ✗ | ✗ | ✗ |
 | Administrators | ✓ (flag) | ✗ | ✗ | ✓ — `ownerUnitCount > 0` only, D5 | ✗ (by design, D5) | ✗ |
@@ -149,7 +150,7 @@ The related bug on `/edit/administrators`: `unitsTab={session.isSuperuser}` is p
 - Superuser gets a uniform experience on every page; no page-specific drift found for that role.
 - The five numbered Reports pages + both index branches — consistent `reportsTab` wiring throughout (Part B §3).
 - `canViewDataSharingDashboard` and `isDataSharingDashboardTabVisible` are the same function under two names — no divergence.
-- The Cores tab having no non-superuser escape hatch is already self-documented as a deliberately deferred gap in `app/edit/core/page.tsx`'s own comment ("an owner-scoped index is a future add") — unlike Gaps 1–5 above, this one isn't silent.
+- The Cores tab now has a comms_steward escape hatch (`coresTab`, mirroring `newsTab`/`reportsTab`) per the 2026-08-26 policy widening (decision #6). The remaining gap — no *owner-scoped* index for a plain core owner/curator — is still self-documented as deliberately deferred in `app/edit/core/page.tsx`'s own comment ("an owner-scoped index is a future add") — unlike Gaps 1–5 above, this one isn't silent.
 - Curators correctly excluded from Administrators (Part A §2, D5) — matches D5's Owner-only wording exactly.
 
 ## Related docs
