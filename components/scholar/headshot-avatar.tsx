@@ -7,16 +7,18 @@ import { cn, initials } from "@/lib/utils";
 
 type HeadshotState = "loading" | "image" | "fallback";
 
-const SIZE_CLASS: Record<"sm" | "md" | "lg", string> = {
+const SIZE_CLASS: Record<"sm" | "md" | "lg" | "roster", string> = {
   sm: "size-6",
   md: "h-12 w-12",
   lg: "h-24 w-24 sm:h-28 sm:w-28",
+  roster: "h-10 w-10",
 };
 
-const FALLBACK_TEXT_CLASS: Record<"sm" | "md" | "lg", string> = {
+const FALLBACK_TEXT_CLASS: Record<"sm" | "md" | "lg" | "roster", string> = {
   sm: "text-xs",
   md: "text-sm",
   lg: "text-xl",
+  roster: "text-sm",
 };
 
 // Deterministic warm two-tone gradient from a name string.
@@ -51,7 +53,7 @@ export function HeadshotAvatar({
    *  payload, and this component rebuilds it from `cwid`. `??` (not `||`) so an
    *  explicit `""` still forces the fallback, preserving existing callers. */
   identityImageEndpoint?: string;
-  size: "sm" | "md" | "lg";
+  size: "sm" | "md" | "lg" | "roster";
   className?: string;
 }) {
   const [imgStatus, setImgStatus] = useState<"loading" | "loaded" | "error">(

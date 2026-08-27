@@ -57,7 +57,7 @@ export function PersonRow({
     <div className="grid grid-cols-[48px_1fr_auto] items-start gap-[13px] py-4 border-b border-border last:border-b-0">
       <div>
         <HeadshotAvatar
-          size="md"
+          size="roster"
           cwid={hit.cwid}
           preferredName={hit.preferredName}
           identityImageEndpoint={hit.identityImageEndpoint}
