@@ -15,6 +15,15 @@
  * the authz boundary here, the same role it plays for the un-FK'd award rows
  * on the NCI 2A route.
  *
+ * Defense in depth (bug fix, staging report 2026-08-26): `[code]` must ALSO
+ * resolve to a center with a `CenterProgram` taxonomy — the same data-driven
+ * Cancer-Center-only gate `resolveReportsCenterCode`
+ * (`lib/edit/cancer-center-reports.ts`) and `unit-edit-context.ts` §4b/§7
+ * use, not a hardcoded center code. `400 no_program_taxonomy` otherwise
+ * (same status as the unknown-center-code check just above it), so a
+ * decision can never be posted THROUGH a program-less center even if a
+ * curator somehow has a role there and a client sent the request directly.
+ *
  * `"confirmed"` / `"rejected"` upsert `CancerCenterDiseaseDecision`, snapshotting
  * `scoreAtDecision` / `confidenceAtDecision` off the CURRENT
  * `CancerCenterDiseaseAssignment` row for the pair, read inside the SAME
@@ -108,6 +117,15 @@ export async function POST(
   const { code } = await params;
   const center = await db.read.center.findUnique({ where: { code }, select: { code: true } });
   if (!center) return editError(400, "unit_not_found", "code");
+
+  // Defense in depth — see docblock: `[code]` must resolve to a center with a
+  // `CenterProgram` taxonomy, the same data-driven Cancer-Center-only gate
+  // `unit-edit-context.ts` §4b/§7 apply to the read side.
+  const program = await db.read.centerProgram.findFirst({
+    where: { centerCode: center.code },
+    select: { code: true },
+  });
+  if (!program) return editError(400, "no_program_taxonomy", "code");
 
   const effective = await getEffectiveUnitRole(
     session,
