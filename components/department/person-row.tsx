@@ -54,7 +54,7 @@ export function PersonRow({
   const grantLabel = hit.grantCount === 1 ? "grant" : "grants";
 
   return (
-    <div className="grid grid-cols-[48px_1fr_auto] items-start gap-[13px] py-4 border-b border-border last:border-b-0">
+    <div className="grid grid-cols-[40px_1fr_auto] items-start gap-[13px] py-4 border-b border-border last:border-b-0">
       <div>
         <HeadshotAvatar
           size="roster"
