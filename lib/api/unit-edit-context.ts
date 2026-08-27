@@ -37,8 +37,15 @@
  * `diseases` list — `CancerCenterDiseaseAssignment` merged with any curator
  * `CancerCenterDiseaseDecision` for the same (cwid, diseaseCode) pair, plus a
  * v1 drift flag comparing the decision's snapshot against the CURRENT
- * assignment row. Always `[]` for a department/division and for a center with
- * no assignment/decision rows. A decision with NO matching assignment row
+ * assignment row. Always `[]` for a department/division, for a center with
+ * no assignment/decision rows, AND (bug fix, staging report 2026-08-26) for a
+ * center with no `CenterProgram` taxonomy at all — `CancerCenterDiseaseAssignment`
+ * is keyed (cwid, diseaseCode) with no center column, so a program-less center
+ * that happens to SHARE roster members with the Cancer Center (e.g. Health
+ * Equity) would otherwise inherit their disease rows. Gated the same
+ * data-driven way `resolveReportsCenterCode` (`lib/edit/cancer-center-
+ * reports.ts`) picks the Cancer Center: "a center with a `CenterProgram`
+ * taxonomy," not a hardcoded center code. A decision with NO matching assignment row
  * (the manual-add case — a curator attaching a disease code the generator
  * never suggested for this member) still produces a `diseases` entry:
  * `assignment: null`, `decision` populated. The merge below keys off BOTH
@@ -618,8 +625,18 @@ export async function loadUnitEditContext(
   // `/disease-assignments` route's own docblock), so this is "assignments +
   // decisions for THIS center's current roster members," not a query scoped
   // by a center FK.
+  //
+  // Gated on `hasProgramTaxonomy` (bug fix, staging report 2026-08-26): a
+  // center with NO `CenterProgram` rows is not the Cancer Center, but this
+  // person-scoped query would otherwise still surface its roster members'
+  // disease rows whenever they overlap with the Cancer Center's own roster
+  // (e.g. Health Equity shares members with Meyer). This is the same
+  // data-driven "has a program taxonomy" gate `resolveReportsCenterCode`
+  // (`lib/edit/cancer-center-reports.ts`) uses to resolve the Cancer Center —
+  // not a hardcoded center code.
+  const hasProgramTaxonomy = unitType === "center" && (programRowsRaw?.length ?? 0) > 0;
   const diseasesByCwid = new Map<string, RosterDiseaseRow[]>();
-  if (unitType === "center" && rosterRows.length > 0) {
+  if (hasProgramTaxonomy && rosterRows.length > 0) {
     const rosterCwids = rosterRows.map((r) => r.cwid);
     const [assignmentRows, decisionRows] = await Promise.all([
       client.cancerCenterDiseaseAssignment.findMany({
@@ -811,8 +828,12 @@ export async function loadUnitEditContext(
   // entirely) degrades the picker to empty rather than failing the whole unit
   // page — `loadDiseaseCodeOptions` itself stays fail-loud so a genuinely
   // missing/malformed CSV is easy to spot from this one call site.
+  //
+  // Gated on the same `hasProgramTaxonomy` check as §4b (bug fix, staging
+  // report 2026-08-26): a program-less center gets no manual-add picker
+  // payload either — there's no disease surface for it to attach to.
   let diseaseOptions: ReadonlyArray<DiseaseCodeOption> | null = null;
-  if (unitType === "center") {
+  if (hasProgramTaxonomy) {
     try {
       diseaseOptions = loadDiseaseCodeOptions();
     } catch (err) {

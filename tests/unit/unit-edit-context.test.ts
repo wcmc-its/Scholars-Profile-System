@@ -560,6 +560,12 @@ describe("loadUnitEditContext — center disease assignments (plan §5/§6)", ()
     centerType: "center",
     leaderInterim: false,
   };
+  // A stand-in `CenterProgram` taxonomy — the gate these tests all run under
+  // (bug fix, staging report 2026-08-26): `diseases` only ever populates for a
+  // center that has one, see the dedicated describe block below.
+  const PROGRAMS: NonNullable<Opts["centerPrograms"]> = [
+    { code: "BR", label: "Breast", sortOrder: 1, description: null, leaders: [] },
+  ];
   const assignment = (over: Partial<NonNullable<Opts["diseaseAssignments"]>[number]> = {}) => ({
     cwid: "mem1",
     diseaseCode: "BREAST",
@@ -601,6 +607,7 @@ describe("loadUnitEditContext — center disease assignments (plan §5/§6)", ()
         fakeClient({
           center,
           centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: PROGRAMS,
           diseaseAssignments: [assignment()],
         }),
       ),
@@ -619,6 +626,7 @@ describe("loadUnitEditContext — center disease assignments (plan §5/§6)", ()
         fakeClient({
           center,
           centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: PROGRAMS,
           diseaseAssignments: [assignment({ confidence: "high" })],
           diseaseDecisions: [decision({ decision: "rejected", confidenceAtDecision: "medium" })],
         }),
@@ -636,6 +644,7 @@ describe("loadUnitEditContext — center disease assignments (plan §5/§6)", ()
         fakeClient({
           center,
           centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: PROGRAMS,
           diseaseAssignments: [assignment({ confidence: "medium" })],
           diseaseDecisions: [decision({ decision: "rejected", confidenceAtDecision: "low" })],
         }),
@@ -653,6 +662,7 @@ describe("loadUnitEditContext — center disease assignments (plan §5/§6)", ()
         fakeClient({
           center,
           centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: PROGRAMS,
           diseaseAssignments: [], // the ETL's latest full-replace dropped this pair
           diseaseDecisions: [decision({ decision: "confirmed" })],
         }),
@@ -672,6 +682,7 @@ describe("loadUnitEditContext — center disease assignments (plan §5/§6)", ()
         fakeClient({
           center,
           centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: PROGRAMS,
           diseaseAssignments: [assignment()],
           diseaseDecisions: [decision()],
         }),
@@ -689,6 +700,7 @@ describe("loadUnitEditContext — center disease assignments (plan §5/§6)", ()
         fakeClient({
           center,
           centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: PROGRAMS,
           diseaseAssignments: [assignment({ diseaseCode: "LUNG", rank: 1 }), assignment({ diseaseCode: "GYN", rank: 2 })],
           diseaseDecisions: [decision({ diseaseCode: "BREAST" })], // orphaned — no assignment row
         }),
@@ -706,6 +718,7 @@ describe("loadUnitEditContext — center disease assignments (plan §5/§6)", ()
         fakeClient({
           center,
           centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: PROGRAMS,
           // No assignment rows at all for this member — the generator never
           // suggested BREAST for them — only a curator's manual-add decision.
           diseaseAssignments: [],
@@ -732,6 +745,42 @@ describe("loadUnitEditContext — center disease assignments (plan §5/§6)", ()
       },
     ]);
   });
+
+  it("bug fix (staging report 2026-08-26): a center with NO CenterProgram taxonomy gets an empty diseases list even though its roster members DO have assignment/decision rows — a Cancer-Center-adjacent center (e.g. Health Equity) must not inherit shared members' disease data", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: [], // no program taxonomy — not the Cancer Center
+          diseaseAssignments: [assignment()],
+          diseaseDecisions: [decision()],
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases).toEqual([]);
+  });
+
+  it("control: a center WITH a CenterProgram taxonomy still gets its diseases populated", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center,
+          centerMembers: [{ cwid: "mem1", source: "manual" }],
+          centerPrograms: PROGRAMS,
+          diseaseAssignments: [assignment()],
+          diseaseDecisions: [decision()],
+        }),
+      ),
+    );
+    expect(ctx!.roster![0].diseases).not.toEqual([]);
+  });
 });
 
 describe("loadUnitEditContext — diseaseOptions (manual-add extension)", () => {
@@ -746,12 +795,17 @@ describe("loadUnitEditContext — diseaseOptions (manual-add extension)", () => 
     leaderInterim: false,
   };
 
-  it("a center context carries the canonical disease-code -> label list, sorted by label", async () => {
+  it("a center WITH a CenterProgram taxonomy carries the canonical disease-code -> label list, sorted by label", async () => {
     const ctx = await loadUnitEditContext(
       "center",
       "meyer",
       SUPERUSER,
-      asClient(fakeClient({ center })),
+      asClient(
+        fakeClient({
+          center,
+          centerPrograms: [{ code: "BR", label: "Breast", sortOrder: 1, description: null, leaders: [] }],
+        }),
+      ),
     );
     expect(ctx!.diseaseOptions).not.toBeNull();
     expect(ctx!.diseaseOptions!.length).toBeGreaterThan(0);
@@ -760,6 +814,16 @@ describe("loadUnitEditContext — diseaseOptions (manual-add extension)", () => 
     // Sorted by label — every entry's label is <= the next one's.
     const labels = ctx!.diseaseOptions!.map((o) => o.label);
     expect(labels).toEqual([...labels].sort((a, b) => a.localeCompare(b)));
+  });
+
+  it("bug fix (staging report 2026-08-26): a center with NO CenterProgram taxonomy gets no manual-add picker payload — diseaseOptions is null", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(fakeClient({ center, centerPrograms: [] })),
+    );
+    expect(ctx!.diseaseOptions).toBeNull();
   });
 
   it("is null for a department/division — not a center", async () => {

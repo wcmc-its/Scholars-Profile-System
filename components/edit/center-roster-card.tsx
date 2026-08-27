@@ -38,7 +38,12 @@
  *
  * Diseases (`2026-08-12-cancer-center-disease-assignment-edit-ui-plan.md`
  * §5, mockup-fidelity pass): a "Diseases" column renders only for a center
- * that actually has assignment data at all (`hasDiseases` below). Each
+ * that actually has assignment data at all (`hasDiseases` below) — purely
+ * data-driven here, since `unit-edit-context.ts` §4b/§7 (bug fix, staging
+ * report 2026-08-26) already gates the whole `diseases`/`diseaseOptions`
+ * payload upstream on the center having a `CenterProgram` taxonomy, so a
+ * program-less center (even one sharing roster members with the Cancer
+ * Center) never has anything for `hasDiseases` to find. Each
  * member's LIVE (non-rejected) assignments render as confidence-tinted
  * chips, capped at `MAX_DISEASE_CHIPS` with a "+N more" overflow chip, plus
  * an amber "N to review" pill for any undecided rows. Clicking ANY chip/pill

@@ -14,6 +14,7 @@ import { NextRequest } from "next/server";
 
 const {
   mockCenterFindUnique,
+  mockCenterProgramFindFirst,
   mockUnitAdminFindMany,
   mockReadDecisionFindUnique,
   mockTransaction,
@@ -24,6 +25,7 @@ const {
   mockReadEditRequest,
 } = vi.hoisted(() => ({
   mockCenterFindUnique: vi.fn(),
+  mockCenterProgramFindFirst: vi.fn(),
   mockUnitAdminFindMany: vi.fn(),
   mockReadDecisionFindUnique: vi.fn(),
   mockTransaction: vi.fn(),
@@ -38,6 +40,7 @@ vi.mock("@/lib/db", () => ({
   db: {
     read: {
       center: { findUnique: mockCenterFindUnique },
+      centerProgram: { findFirst: mockCenterProgramFindFirst },
       unitAdmin: { findMany: mockUnitAdminFindMany },
       cancerCenterDiseaseDecision: { findUnique: mockReadDecisionFindUnique },
     },
@@ -104,6 +107,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => {});
   mockCenterFindUnique.mockResolvedValue(CENTER);
+  mockCenterProgramFindFirst.mockResolvedValue({ code: "BR" });
   mockUnitAdminFindMany.mockResolvedValue([
     { entityType: "center", entityId: CENTER.code, role: "curator" },
   ]);
@@ -149,6 +153,15 @@ describe("POST /api/edit/center/[code]/disease-assignments — validation", () =
     const res = await call({ cwid: "fac001", diseaseCode: "BREAST", decision: "confirmed" });
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("unit_not_found");
+  });
+
+  it("400s a center with no CenterProgram taxonomy — defense in depth against the disease-UI gate", async () => {
+    mockCenterProgramFindFirst.mockResolvedValue(null);
+    const res = await call({ cwid: "fac001", diseaseCode: "BREAST", decision: "confirmed" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("no_program_taxonomy");
+    expect(mockUnitAdminFindMany).not.toHaveBeenCalled();
+    expect(mockTransaction).not.toHaveBeenCalled();
   });
 
   it("403s a non-curator, non-superuser caller — no writes reached", async () => {
