@@ -1455,10 +1455,11 @@ export class AppStack extends Stack {
         // and the `source:"cornell"` branch of `POST /api/edit/roster`'s `add`
         // action. Both 404/no-op when off. PR 3 wired the Cornell LDAP secret
         // (scholars/<env>/directory/cornell-ithaca-ldap) into `secrets:` above,
-        // so the vars are present at task start -- still dark until this flag
-        // flips, which will not happen before FERPA sign-off. Off by default
-        // both envs.
-        CORNELL_DIRECTORY_MEMBERS: "off",
+        // so the vars are present at task start. ON in both envs since
+        // 2026-08-27 (owner-approved go-live). Note prod's IMAGE must also be
+        // current for the surfaces to exist -- the flag gates code that only
+        // ships with a pipeline prod deploy.
+        CORNELL_DIRECTORY_MEMBERS: "on",
         // AVAILABLE_TECHNOLOGIES_SECTION — the profile "Available technologies"
         // section, sourced from the CTL portfolio via `npm run etl:technologies`.
         // The profile payload returns [] when off, and the section is

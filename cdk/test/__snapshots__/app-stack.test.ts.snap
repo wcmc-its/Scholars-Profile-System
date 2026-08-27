@@ -475,7 +475,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "CORNELL_DIRECTORY_MEMBERS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "AVAILABLE_TECHNOLOGIES_SECTION",
@@ -4893,7 +4893,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "CORNELL_DIRECTORY_MEMBERS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "AVAILABLE_TECHNOLOGIES_SECTION",
