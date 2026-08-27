@@ -1,10 +1,19 @@
 /**
- * #974 Phase 2 — one page of DEPARTMENT/DIVISION roster members filtered to those
- * with ≥1 of the SELECTED public method families. Backs the uncacheable
+ * #974 Phase 2 / #2537 — one page of DEPARTMENT/DIVISION roster members filtered
+ * by ≥1 of the SELECTED public method families, by a role-category GROUP, or
+ * both (AND across the two facets). Backs the uncacheable
  * `/api/units/[kind]/[code]/members` route (the page itself stays CloudFront-
  * cacheable; only this `force-dynamic` route does per-request filtering).
  *
- * Steps:
+ * Two independent filter paths, chosen by whether `methodKeys` is non-empty:
+ *
+ *   TYPE-ONLY (#2537, `filter.roleGroup` set, no methods): filters the unit's
+ *   member cwids directly by `roleCategory: { in: groupToRawValues(roleGroup) }`
+ *   AND `publicRoleWhere()`. Paginated/ordered by the SAME cwid-sort-then-
+ *   preferredName-resort convention as the methods path below (see (4)), so the
+ *   two filter modes agree on pagination semantics.
+ *
+ *   METHODS (methods-only, or methods+type combined) — steps:
  *   (1) Resolve the unit's FULL active member CWIDs — department via a cheap
  *       `scholar.findMany`; division via `loadDivisionMemberCwids` (which also
  *       unions the manual `DivisionMembership` roster + re-gates on active).
@@ -13,10 +22,16 @@
  *       `?method=` for a suppressed/#801-sensitive family can never select a
  *       non-public family (HARD CONSTRAINT A: never query a non-public family).
  *   (3) `scholarFamily.findMany` with an OR over the public pairs (OR within the
- *       facet), `distinct: ["cwid"]` → the filtered member set.
+ *       facet), `distinct: ["cwid"]` → the filtered member set. A `roleGroup`
+ *       (combined filter) nests its `roleCategory: { in }` condition INSIDE the
+ *       `scholar:` relation filter alongside `publicRoleWhere()` — NOT at the top
+ *       level, which already owns `OR: publicPairs` (#2202 note below).
  *   (4) Paginate that set (20/page) and assemble the same `DepartmentFacultyHit[]`
  *       shape the SSR roster returns, including the public-gated `topMethods` chips
- *       (reusing `loadPublicFamiliesForMembers`, the Phase-1 chip loader).
+ *       (reusing `loadPublicFamiliesForMembers`, the Phase-1 chip loader). A
+ *       `roleGroup` is re-applied inside `buildHits`' own row query too (#2537 —
+ *       same "carry the guard itself" posture as the #2202 carve below it: rows
+ *       must agree with `total` even if they only trusted the caller's cwid list).
  *
  * Server-only (Prisma + server-only overlay/flag helpers); never import into a
  * client component.
@@ -24,6 +39,7 @@
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { formatRoleCategory } from "@/lib/role-display";
+import { groupToRawValues, type RoleGroupLabel } from "@/lib/role-groups";
 import { publicRoleWhere } from "@/lib/eligibility";
 import { loadDivisionMemberCwids } from "@/lib/api/divisions";
 import type { DepartmentFacultyHit } from "@/lib/api/departments";
@@ -41,14 +57,34 @@ const FACULTY_PAGE_SIZE = 20;
 export type UnitMembersByMethodsResult = {
   hits: DepartmentFacultyHit[];
   total: number;
+  /** 0-indexed, matching the uncacheable route's `?page=` convention. */
   page: number;
   pageSize: number;
 };
 
+/** #2537 — one or both facets. `methodKeys` empty + `roleGroup` set is the
+ *  type-only path; `methodKeys` non-empty + `roleGroup` set is the combined
+ *  path; `methodKeys` non-empty alone is the original #974 methods-only path. */
+export type UnitMemberFilter = {
+  methodKeys?: string[];
+  roleGroup?: RoleGroupLabel;
+};
+
+/** @deprecated #2537 — sibling of `getUnitMembersFiltered({ methodKeys }, page)`,
+ *  kept so existing callers/tests of the methods-only path keep resolving. */
 export async function getUnitMembersByMethods(
   kind: "department" | "division",
   code: string,
   methodKeys: string[],
+  page: number,
+): Promise<UnitMembersByMethodsResult> {
+  return getUnitMembersFiltered(kind, code, { methodKeys }, page);
+}
+
+export async function getUnitMembersFiltered(
+  kind: "department" | "division",
+  code: string,
+  filter: UnitMemberFilter,
   page: number,
 ): Promise<UnitMembersByMethodsResult> {
   const safePage = Math.max(0, page);
@@ -58,6 +94,16 @@ export async function getUnitMembersByMethods(
     page: safePage,
     pageSize: FACULTY_PAGE_SIZE,
   };
+  const methodKeys = filter.methodKeys ?? [];
+  const roleRawValues = filter.roleGroup ? groupToRawValues(filter.roleGroup) : undefined;
+  // A `roleGroup` that resolves to no raw values (e.g. "All", or a future
+  // unrecognized label) can never match anything — the route validates against
+  // `FILTERABLE_ROLE_GROUPS` before calling in, but fail safe here too rather
+  // than silently falling through to an unfiltered query.
+  if (filter.roleGroup && (!roleRawValues || roleRawValues.length === 0)) return empty;
+  // Nothing to filter on at all — the route always supplies ≥1 of methods/type,
+  // but fail safe rather than issue an unfiltered `roleCategory: { in: undefined }`.
+  if (methodKeys.length === 0 && !filter.roleGroup) return empty;
 
   // (1) Full active member cwids for the unit.
   // #2202 edit 1 of 3 — the department branch carves here. The division branch
@@ -80,6 +126,22 @@ export async function getUnitMembersByMethods(
           })
         ).map((r) => r.cwid);
   if (memberCwids.length === 0) return empty;
+
+  if (methodKeys.length === 0) {
+    // #2537 TYPE-ONLY path: filter the member cwids directly by role-category
+    // group. `roleRawValues` is guaranteed non-empty here (checked above).
+    const matchRows = (await prisma.scholar.findMany({
+      where: {
+        cwid: { in: memberCwids },
+        deletedAt: null,
+        status: "active",
+        roleCategory: { in: roleRawValues },
+        ...publicRoleWhere(),
+      },
+      select: { cwid: true },
+    })) as Array<{ cwid: string }>;
+    return paginateAndBuild(matchRows.map((r) => r.cwid), safePage, roleRawValues);
+  }
 
   // (2) Re-derive (sc, label) pairs, then DROP any that are NOT public — never
   // select a suppressed/#801-sensitive family even if the client tampered the URL.
@@ -104,22 +166,45 @@ export async function getUnitMembersByMethods(
   // goes inside the `scholar:` relation filter, NOT at the top level: the outer
   // where already owns `OR: publicPairs` (the method facet), and
   // `publicRoleWhere()` also carries an `OR` — spreading it here would clobber
-  // the facet and match every family.
+  // the facet and match every family. #2537 — a combined `roleGroup` filter
+  // nests the SAME way, alongside `publicRoleWhere()`, for the same reason.
   const matchRows = (await prisma.scholarFamily.findMany({
     where: {
       cwid: { in: memberCwids },
       OR: publicPairs,
-      scholar: { deletedAt: null, status: "active", ...publicRoleWhere() },
+      scholar: {
+        deletedAt: null,
+        status: "active",
+        ...(roleRawValues ? { roleCategory: { in: roleRawValues } } : {}),
+        ...publicRoleWhere(),
+      },
     },
     select: { cwid: true },
     distinct: ["cwid"],
   })) as Array<{ cwid: string }>;
-  const filteredCwids = matchRows.map((r) => r.cwid);
-  const total = filteredCwids.length;
-  if (total === 0) return empty;
+  return paginateAndBuild(
+    matchRows.map((r) => r.cwid),
+    safePage,
+    roleRawValues,
+  );
+}
 
-  // (4) Paginate the filtered cwid set (preferredName-ASC parity is restored after
-  // the row fetch; sort cwids here only for a stable page slice), assemble hits.
+/**
+ * Shared pagination + hit-assembly tail for both filter paths: sort the
+ * filtered cwid set alphabetically for a stable page slice, take one page, and
+ * assemble hits (which re-sorts that page preferredName ASC — the SSR roster's
+ * name ordering). `roleRawValues`, when set, is re-applied inside `buildHits`'
+ * own row query so a page's rows can never disagree with `total`.
+ */
+async function paginateAndBuild(
+  filteredCwids: string[],
+  safePage: number,
+  roleRawValues?: string[],
+): Promise<UnitMembersByMethodsResult> {
+  const total = filteredCwids.length;
+  if (total === 0) {
+    return { hits: [], total: 0, page: safePage, pageSize: FACULTY_PAGE_SIZE };
+  }
   const orderedCwids = [...filteredCwids].sort((a, b) => a.localeCompare(b));
   const pageCwids = orderedCwids.slice(
     safePage * FACULTY_PAGE_SIZE,
@@ -128,8 +213,7 @@ export async function getUnitMembersByMethods(
   if (pageCwids.length === 0) {
     return { hits: [], total, page: safePage, pageSize: FACULTY_PAGE_SIZE };
   }
-
-  const hits = await buildHits(pageCwids);
+  const hits = await buildHits(pageCwids, roleRawValues);
   return { hits, total, page: safePage, pageSize: FACULTY_PAGE_SIZE };
 }
 
@@ -137,9 +221,14 @@ export async function getUnitMembersByMethods(
  * Assemble `DepartmentFacultyHit[]` for a fixed cwid set — the same shape both
  * `getDepartmentFaculty` and `getDivisionFaculty` return (name, title, dept/div
  * names, role, overview snippet, pub/grant counts, public-gated `topMethods`),
- * sorted preferredName ASC to match the SSR roster ordering.
+ * sorted preferredName ASC to match the SSR roster ordering. `roleRawValues`
+ * (#2537), when set, re-applies the role-group filter here too — see the
+ * `getUnitMembersFiltered` doc comment.
  */
-async function buildHits(cwids: string[]): Promise<DepartmentFacultyHit[]> {
+async function buildHits(
+  cwids: string[],
+  roleRawValues?: string[],
+): Promise<DepartmentFacultyHit[]> {
   const includeClause = {
     department: { select: { name: true } },
     division: { select: { name: true } },
@@ -153,6 +242,7 @@ async function buildHits(cwids: string[]): Promise<DepartmentFacultyHit[]> {
       cwid: { in: cwids },
       deletedAt: null,
       status: "active",
+      ...(roleRawValues ? { roleCategory: { in: roleRawValues } } : {}),
       ...publicRoleWhere(),
     },
     orderBy: [{ preferredName: "asc" }],

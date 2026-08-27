@@ -139,6 +139,7 @@ export async function CenterProgramPage({
               total: detail.members.length,
             }}
             centerSlug={detail.center.slug}
+            centerCode={detail.center.code}
             singleProgram
           />
         )}

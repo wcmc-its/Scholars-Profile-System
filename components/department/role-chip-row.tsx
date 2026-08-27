@@ -1,47 +1,29 @@
 "use client";
 
 import { useMemo } from "react";
+import {
+  ROLE_GROUPS as ROLE_GROUP_DEFS,
+  ROLE_CATEGORIES as ROLE_GROUP_LABELS,
+  groupMatchesDisplay,
+  type RoleGroupLabel,
+} from "@/lib/role-groups";
 
-export type RoleCategory =
-  | "All"
-  | "Full-time faculty"
-  | "Affiliated faculty"
-  | "Postdocs & non-faculty"
-  | "Doctoral students";
+// #2537 — re-exported (not re-declared) so existing importers of `RoleCategory`
+// keep resolving; the label set now lives in lib/role-groups.ts, the single
+// source of truth shared with the server-side `?type=` filter.
+export type RoleCategory = RoleGroupLabel;
 
 const ROLE_GROUPS: {
   label: RoleCategory;
   matches: (role: string | null) => boolean;
-}[] = [
-  { label: "All", matches: () => true },
-  {
-    label: "Full-time faculty",
-    matches: (r) => r === "Full-time faculty",
-  },
-  {
-    label: "Affiliated faculty",
-    matches: (r) =>
-      r === "Affiliated faculty" ||
-      r === "Voluntary faculty" ||
-      r === "Adjunct faculty" ||
-      r === "Courtesy faculty" ||
-      r === "Faculty emeritus",
-  },
-  {
-    label: "Postdocs & non-faculty",
-    matches: (r) =>
-      r === "Postdoc" ||
-      r === "Fellow" ||
-      r === "Research staff" ||
-      r === "Instructor" ||
-      r === "Lecturer",
-  },
-  { label: "Doctoral students", matches: (r) => r === "Doctoral student" },
-];
+}[] = ROLE_GROUP_DEFS.map((g) => ({
+  label: g.label,
+  matches: (r: string | null) => groupMatchesDisplay(g.label, r),
+}));
 
 // Consumed by department-faculty-client.tsx to validate a `?type=` deep-link
 // param against the known chip labels.
-export const ROLE_CATEGORIES: RoleCategory[] = ROLE_GROUPS.map((g) => g.label);
+export const ROLE_CATEGORIES: RoleCategory[] = ROLE_GROUP_LABELS;
 
 export function RoleChipRow({
   faculty,

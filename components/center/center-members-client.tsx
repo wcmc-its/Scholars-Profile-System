@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   RoleChipRow,
   filterByRoleCategory,
@@ -31,11 +31,18 @@ import type {
 export function CenterMembersClient({
   result,
   centerSlug,
+  centerCode,
   programPagesEnabled = false,
   singleProgram = false,
 }: {
   result: CenterMembersResult;
   centerSlug: string;
+  /** #2537 — center's code, for the `FlatMembers` server-filtered `?type=`
+   *  fetch (`/api/units/center/[centerCode]/members`). Unused by `GroupedRoster`
+   *  (its Appointment chip stays a client-side facet over the already-loaded
+   *  page, same as the other sidebar facets) — optional so a caller that only
+   *  ever renders the grouped mode (the program page) still type-checks. */
+  centerCode?: string;
   /** #1105 — when on, eligible (non-excluded) program section headers link to
    *  the dedicated `/centers/[slug]/programs/[code]` page. */
   programPagesEnabled?: boolean;
@@ -55,7 +62,7 @@ export function CenterMembersClient({
       />
     );
   }
-  return <FlatMembers result={result} centerSlug={centerSlug} />;
+  return <FlatMembers result={result} centerSlug={centerSlug} centerCode={centerCode} />;
 }
 
 /**
@@ -420,29 +427,104 @@ function GroupedRoster({
   );
 }
 
-/** Unprogrammed center: flat list, paginated (today's behavior). */
+/**
+ * Unprogrammed center: flat list, paginated. #2537 — the Appointment chip joins
+ * the server-filtered fetch path (mirrors `DepartmentFacultyClient`): selecting
+ * a chip other than "All" fetches `/api/units/center/[centerCode]/members?type=`
+ * and pagination becomes client-side (`fetchPage`) over the filtered total;
+ * "All" keeps today's SSR roster + real-href pagination unchanged. `centerCode`
+ * is optional only so a caller without it (none today) still type-checks — when
+ * absent the chip degrades to a page-only filter, same as `hasFacet=false` in
+ * the department client.
+ */
 function FlatMembers({
   result,
   centerSlug,
+  centerCode,
 }: {
   result: Extract<CenterMembersResult, { mode: "flat" }>;
   centerSlug: string;
+  centerCode?: string;
 }) {
-  const { hits, total, page, pageSize } = result;
+  const { hits, total, page, pageSize, roleCategoryCounts } = result;
   const [activeCategory, setActiveCategory] = useState<RoleCategory>("All");
-  const filtered = filterByRoleCategory(hits, activeCategory);
+  const [fetchPage, setFetchPage] = useState(1); // 1-based, like the SSR `page`
+  const [filtered, setFiltered] = useState<{ hits: CenterMemberHit[]; total: number } | null>(
+    null,
+  );
+  const [loading, setLoading] = useState(false);
+  // Distinct from an empty result: a failed type-filter fetch (network / 5xx)
+  // must not read as "no members match" — the API returning [] and the request
+  // dying are different facts. Drives a retryable error state below.
+  const [error, setError] = useState(false);
+  // Bumped by the Retry affordance to re-run the fetch effect after a failure
+  // (same chip + page, so nothing else in the dep list changes).
+  const [retryNonce, setRetryNonce] = useState(0);
 
-  // #2533 — seed the chip from a `?type=` deep-link param so pagination (a real
-  // navigation, not client state) doesn't reset it back to "All".
+  const isFiltered = Boolean(centerCode) && activeCategory !== "All";
+
+  // #2533/#2537 — seed the chip from a `?type=` deep-link param (arrival path);
+  // when `centerCode` is present this now also puts the roster into the
+  // server-filtered view (the fetch effect below fires once the chip is
+  // seeded), so a `?type=X&page=N` link restores the intended filtered page
+  // too — the same #991 pattern the department client's deep-link seed uses.
   useEffect(() => {
-    const type = new URLSearchParams(window.location.search).get("type");
+    const params = new URLSearchParams(window.location.search);
+    const type = params.get("type");
     if (type && (ROLE_CATEGORIES as string[]).includes(type)) {
       setActiveCategory(type as RoleCategory);
+      if (centerCode) {
+        const pageParam = Number.parseInt(params.get("page") ?? "1", 10);
+        if (Number.isFinite(pageParam) && pageParam > 1) setFetchPage(pageParam);
+      }
     }
-    // mount-only
+    // mount-only; centerCode is stable for a given render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Fetch the type-filtered roster whenever the chip or page changes. "All" (or
+  // no `centerCode`) clears the filtered state so the SSR roster renders.
+  useEffect(() => {
+    if (!centerCode || activeCategory === "All") {
+      setFiltered(null);
+      setError(false);
+      setLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setLoading(true);
+    setError(false);
+    const params = new URLSearchParams();
+    params.set("type", activeCategory);
+    params.set("page", String(Math.max(0, fetchPage - 1)));
+    fetch(`/api/units/center/${centerCode}/members?${params.toString()}`, {
+      signal: controller.signal,
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((data: { hits: CenterMemberHit[]; total: number }) => {
+        setFiltered({ hits: data.hits, total: data.total });
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (err?.name === "AbortError") return;
+        // Keep the previous `filtered` (don't overwrite with an empty result —
+        // that would render as "No members match these filters."). Surface a
+        // retryable error instead.
+        setError(true);
+        setLoading(false);
+      });
+    return () => controller.abort();
+  }, [centerCode, activeCategory, fetchPage, retryNonce]);
+
+  // Changing the chip resets to the first filtered page.
+  const handleCategoryChange = useCallback((cat: RoleCategory) => {
+    setActiveCategory(cat);
+    setFetchPage(1);
+  }, []);
+
+  // Pagination URL builder — the unfiltered ("All") case navigates (SSR,
+  // cacheable links); preserves the page (when >1) and the active chip (when
+  // not "All") so paging in from an unfiltered page doesn't drop it (#2533).
   const buildHref = (p: number) => {
     const qs = new URLSearchParams();
     if (p > 1) qs.set("page", String(p));
@@ -451,7 +533,12 @@ function FlatMembers({
     return q ? `/centers/${centerSlug}?${q}` : `/centers/${centerSlug}`;
   };
 
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const baseHits = isFiltered ? (filtered?.hits ?? []) : hits;
+  const renderedTotal = isFiltered ? (filtered?.total ?? 0) : total;
+  const currentPage = isFiltered ? fetchPage : page;
+  // Client-side fallback (no `centerCode`) mirrors the old page-only filter.
+  const visible = isFiltered ? baseHits : filterByRoleCategory(baseHits, activeCategory);
+  const totalPages = Math.max(1, Math.ceil(renderedTotal / pageSize));
 
   if (hits.length === 0) {
     return (
@@ -464,79 +551,139 @@ function FlatMembers({
     );
   }
 
-  const start = (page - 1) * pageSize + 1;
-  const end = Math.min(page * pageSize, total);
+  // #2234 regression: `page` is the 1-indexed display page (see the
+  // `CenterMembersResult` JSDoc) — page 1 must render "Showing 1–pageSize",
+  // never "Showing -{pageSize-1}–0".
+  const start = renderedTotal === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const end = Math.min(currentPage * pageSize, renderedTotal);
+
+  const pagination = (
+    <div className="mt-8">
+      <Pagination>
+        <PaginationContent>
+          <PaginationItem>
+            <PaginationPrevious
+              {...(isFiltered
+                ? {
+                    href: "#",
+                    onClick: (e: React.MouseEvent) => {
+                      e.preventDefault();
+                      if (currentPage > 1) setFetchPage(currentPage - 1);
+                    },
+                  }
+                : { href: buildHref(Math.max(1, page - 1)) })}
+              aria-disabled={currentPage <= 1}
+            />
+          </PaginationItem>
+          {(() => {
+            const pages: (number | "ellipsis")[] = [];
+            if (totalPages <= 6) {
+              for (let i = 1; i <= totalPages; i++) pages.push(i);
+            } else {
+              const win: number[] = [];
+              for (
+                let i = Math.max(2, currentPage - 2);
+                i <= Math.min(totalPages - 1, currentPage + 2);
+                i++
+              )
+                win.push(i);
+              pages.push(1);
+              if (win[0] > 2) pages.push("ellipsis");
+              win.forEach((p) => pages.push(p));
+              if (win[win.length - 1] < totalPages - 1) pages.push("ellipsis");
+              pages.push(totalPages);
+            }
+            return pages.map((p, i) =>
+              p === "ellipsis" ? (
+                <PaginationItem key={`e${i}`}>
+                  <PaginationEllipsis />
+                </PaginationItem>
+              ) : (
+                <PaginationItem key={p}>
+                  <PaginationLink
+                    {...(isFiltered
+                      ? {
+                          href: "#",
+                          onClick: (e: React.MouseEvent) => {
+                            e.preventDefault();
+                            setFetchPage(p);
+                          },
+                        }
+                      : { href: buildHref(p) })}
+                    isActive={p === currentPage}
+                  >
+                    {p}
+                  </PaginationLink>
+                </PaginationItem>
+              ),
+            );
+          })()}
+          <PaginationItem>
+            <PaginationNext
+              {...(isFiltered
+                ? {
+                    href: "#",
+                    onClick: (e: React.MouseEvent) => {
+                      e.preventDefault();
+                      if (currentPage < totalPages) setFetchPage(currentPage + 1);
+                    },
+                  }
+                : { href: buildHref(Math.min(totalPages, page + 1)) })}
+              aria-disabled={currentPage >= totalPages}
+            />
+          </PaginationItem>
+        </PaginationContent>
+      </Pagination>
+    </div>
+  );
 
   return (
     <>
       <div className="mb-4 text-sm text-muted-foreground">
-        Showing {start}&ndash;{end} of {total.toLocaleString()} members
+        {isFiltered && loading
+          ? "Loading…"
+          : `Showing ${start}–${end} of ${renderedTotal.toLocaleString()} members`}
       </div>
       <div className="mb-6">
+        {/* #2235 — chip counts stay WHOLE-CENTER (`result.roleCategoryCounts`,
+            computed server-side over every active member) regardless of the
+            active chip, matching the department client's whole-scope posture. */}
         <RoleChipRow
-          faculty={hits}
+          faculty={baseHits}
+          roleCategoryCounts={roleCategoryCounts}
+          totalCount={total}
           active={activeCategory}
-          onChange={setActiveCategory}
+          onChange={handleCategoryChange}
         />
       </div>
-      <div className="flex flex-col">
-        {filtered.map((hit) => (
-          <PersonRow key={hit.cwid} hit={hit} />
-        ))}
-      </div>
-      {totalPages > 1 && (
-        <div className="mt-8">
-          <Pagination>
-            <PaginationContent>
-              <PaginationItem>
-                <PaginationPrevious
-                  href={buildHref(Math.max(1, page - 1))}
-                  aria-disabled={page <= 1}
-                />
-              </PaginationItem>
-              {(() => {
-                const pages: (number | "ellipsis")[] = [];
-                if (totalPages <= 6) {
-                  for (let i = 1; i <= totalPages; i++) pages.push(i);
-                } else {
-                  const win: number[] = [];
-                  for (
-                    let i = Math.max(2, page - 2);
-                    i <= Math.min(totalPages - 1, page + 2);
-                    i++
-                  )
-                    win.push(i);
-                  pages.push(1);
-                  if (win[0] > 2) pages.push("ellipsis");
-                  win.forEach((p) => pages.push(p));
-                  if (win[win.length - 1] < totalPages - 1)
-                    pages.push("ellipsis");
-                  pages.push(totalPages);
-                }
-                return pages.map((p, i) =>
-                  p === "ellipsis" ? (
-                    <PaginationItem key={`e${i}`}>
-                      <PaginationEllipsis />
-                    </PaginationItem>
-                  ) : (
-                    <PaginationItem key={p}>
-                      <PaginationLink href={buildHref(p)} isActive={p === page}>
-                        {p}
-                      </PaginationLink>
-                    </PaginationItem>
-                  ),
-                );
-              })()}
-              <PaginationItem>
-                <PaginationNext
-                  href={buildHref(Math.min(totalPages, page + 1))}
-                  aria-disabled={page >= totalPages}
-                />
-              </PaginationItem>
-            </PaginationContent>
-          </Pagination>
+      {isFiltered && error ? (
+        <p className="py-8 text-center text-sm text-muted-foreground">
+          Couldn’t load matching members.{" "}
+          <button
+            type="button"
+            onClick={() => {
+              setError(false);
+              setRetryNonce((n) => n + 1);
+            }}
+            className="underline underline-offset-2 hover:no-underline"
+          >
+            Retry
+          </button>
+        </p>
+      ) : isFiltered && loading && filtered === null ? (
+        <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+      ) : visible.length === 0 ? (
+        <p className="py-8 text-center text-sm text-muted-foreground">
+          No members match these filters.
+        </p>
+      ) : (
+        <div className="flex flex-col">
+          {visible.map((hit) => (
+            <PersonRow key={hit.cwid} hit={hit} />
+          ))}
         </div>
       )}
+      {totalPages > 1 && pagination}
     </>
   );
 }
