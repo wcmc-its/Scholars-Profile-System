@@ -182,7 +182,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
         "DeletionProtection": true,
         "EnableIAMDatabaseAuthentication": false,
         "Engine": "aurora-mysql",
-        "EngineVersion": "8.0.mysql_aurora.3.08.0",
+        "EngineVersion": "8.0.mysql_aurora.3.10.5",
         "MasterUserPassword": {
           "Fn::Join": [
             "",
