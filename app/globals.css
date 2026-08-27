@@ -40,15 +40,17 @@
    * styling hook is the `.page-title` class, not the HTML tag, because the
    * page-subject is sometimes h1 and sometimes nested inside a structural
    * container (e.g. profile sidebar) where a wider-column h2 would otherwise
-   * out-weight it. Use `.page-title` exactly once per page. Charter falls
-   * back to Tiempos/Georgia so the rule holds during font load.
+   * out-weight it. Use `.page-title` exactly once per page. Charter is
+   * self-hosted via next/font/local (#2530) so it renders identically across
+   * OS/browser instead of depending on whatever system font each resolves;
+   * Georgia is the fallback while the face loads.
    */
   --text-sm: 13px;
   --text-base: 15px;
   --text-lg: 18px;
   --text-4xl: 44px;
   --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-serif: 'Charter', 'Tiempos', 'Georgia', serif;
+  --font-serif: var(--font-charter), 'Charter', 'Georgia', serif;
   /* Weights (only normal + semibold used in Phase 2 per UI-SPEC checker) */
   --weight-normal: 400;
   --weight-semibold: 500;
