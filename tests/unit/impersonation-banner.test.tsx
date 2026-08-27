@@ -63,6 +63,22 @@ describe("ImpersonationBanner role links", () => {
     expect(units.getAttribute("href")).toBe("/edit/units");
   });
 
+  it("sends a comms_steward to the Admin console (the #2521 collapse, not the old Method-families deep link)", async () => {
+    stubProbe({
+      targetCwid: "dwd2001",
+      targetName: "Dan Dickinson",
+      role: "comms_steward",
+      unitKind: null,
+      unit: null,
+      startedAt: Math.floor(Date.now() / 1000),
+    });
+    render(<ImpersonationBanner />);
+
+    const link = await screen.findByRole("link", { name: "Admin console" });
+    expect(link.getAttribute("href")).toBe("/edit/scholars");
+    expect(screen.queryByRole("link", { name: "Method families" })).toBeNull();
+  });
+
   it("sends a plain scholar to their own self-edit surface", async () => {
     stubProbe({
       targetCwid: "sch001",

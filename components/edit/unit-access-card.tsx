@@ -202,7 +202,7 @@ export function UnitAccessCard({
       slot="unit-access-card"
       headingId={headingId}
       heading="Access"
-      description={`Owners and Curators can edit this ${entityType}. Only Owners can manage access.`}
+      description={`Owners, Curators, and Communications stewards can edit this ${entityType}. Owners and Communications stewards can manage access.`}
     >
       <div className="flex flex-col gap-4">
         {hint && <p className="text-muted-foreground text-sm">{hint}</p>}
