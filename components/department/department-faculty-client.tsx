@@ -78,20 +78,44 @@ export function DepartmentFacultyClient({
   const [retryNonce, setRetryNonce] = useState(0);
 
   const hasFacet = Boolean(methodFacet && methodFacet.length > 0 && unitKind && unitCode);
+  // #2537 — the chip joins the server-filtered fetch path: "filtered" now means
+  // either facet is active, not just methods. When `hasFacet` is false (facet
+  // flag off, or no method families), the chip stays a client-side page-only
+  // filter and this is always false — today's behavior, untouched.
+  const isFiltered = hasFacet && (selMethods.size > 0 || activeCategory !== "All");
 
-  // Deep-link: read `?method=` on mount and seed the selection (the page HTML is
-  // the cached unfiltered shell; the edge strips the param for the origin, so the
-  // client reapplies the filter here). Only valid keys present in the facet count.
+  // Deep-link on mount: seed `?method=` (#974) and/or `?type=` (#2528) from the
+  // URL — the page HTML is the cached unfiltered shell, so the client reapplies
+  // both facets here. Unified into one effect (rather than #2537 methods) so a
+  // combined `?type=X&page=N` or `?method=X&type=Y&page=N` link seeds `fetchPage`
+  // exactly once, off whichever facet(s) the link actually carries — a chip-only
+  // deep link now implies the filtered view just as a method-only one always has.
   useEffect(() => {
-    if (!hasFacet) return;
     const params = new URLSearchParams(window.location.search);
-    const valid = new Set(methodFacet!.map((o) => o.value));
-    const seeded = params.getAll("method").filter((m) => valid.has(m));
-    if (seeded.length > 0) {
-      setSelMethods(new Set(seeded));
-      // #991 — restore the shared `?page=` too, so a filtered+paged deep-link
-      // (e.g. ?method=X&page=3) opens on the intended page rather than silently
-      // loading page 1 (which the replaceState effect would then rewrite back).
+    let seededFilteredView = false;
+
+    if (hasFacet) {
+      const valid = new Set(methodFacet!.map((o) => o.value));
+      const seededMethods = params.getAll("method").filter((m) => valid.has(m));
+      if (seededMethods.length > 0) {
+        setSelMethods(new Set(seededMethods));
+        seededFilteredView = true;
+      }
+    }
+
+    // The chip itself seeds regardless of `hasFacet` — the unfiltered pagination
+    // path (buildHref) navigates via real hrefs and carries `type=` forward, so
+    // this reads it back on the fresh mount even when the facet flag is off.
+    const type = params.get("type");
+    if (type && (ROLE_CATEGORIES as string[]).includes(type)) {
+      setActiveCategory(type as RoleCategory);
+      if (hasFacet) seededFilteredView = true;
+    }
+
+    // #991 — restore the shared `?page=` too, so a filtered+paged deep-link opens
+    // on the intended page rather than silently loading page 1 (which the
+    // replaceState effect below would then rewrite back).
+    if (seededFilteredView) {
       const pageParam = Number.parseInt(params.get("page") ?? "1", 10);
       if (Number.isFinite(pageParam) && pageParam > 1) setFetchPage(pageParam);
     }
@@ -99,47 +123,37 @@ export function DepartmentFacultyClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Deep-link: read `?type=` on mount and seed the role-category chip (#2528).
-  // The unfiltered pagination below navigates via real hrefs (full page load),
-  // so without this the chip silently resets to "All" on every page change —
-  // buildHref carries `type=` forward, this reads it back on the fresh mount.
-  useEffect(() => {
-    const type = new URLSearchParams(window.location.search).get("type");
-    if (type && (ROLE_CATEGORIES as string[]).includes(type)) {
-      setActiveCategory(type as RoleCategory);
-    }
-    // mount-only
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Reflect the selection (+ page) in `?method=&page=` via replaceState — keeps
-  // the URL shareable without a navigation (the page stays the cached shell).
+  // Reflect the selection (+ chip + page) in `?method=&type=&page=` via
+  // replaceState — keeps the URL shareable without a navigation (the page stays
+  // the cached shell).
   useEffect(() => {
     if (!hasFacet) return;
     const params = new URLSearchParams(window.location.search);
     params.delete("method");
     params.delete("page");
+    params.delete("type");
     for (const v of selMethods) params.append("method", v);
-    if (selMethods.size > 0) {
+    if (activeCategory !== "All") params.set("type", activeCategory);
+    if (isFiltered) {
       // Filtered view paginates client-side via `fetchPage`.
       if (fetchPage > 1) params.set("page", String(fetchPage));
     } else if (page > 1) {
-      // No method filter: reflect the SSR `page` prop, NOT whatever `?page=` is
+      // No facet active: reflect the SSR `page` prop, NOT whatever `?page=` is
       // already in the URL. This preserves a genuine unfiltered arrival at
       // `?page=3` while dropping a stale filtered `?page=N` when the user
-      // deselects the last method (the unfiltered roster then renders SSR
-      // `page`, so the address bar must agree with it).
+      // clears the last facet (the unfiltered roster then renders SSR `page`,
+      // so the address bar must agree with it).
       params.set("page", String(page));
     }
     const qs = params.toString();
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-  }, [selMethods, fetchPage, hasFacet, page]);
+  }, [selMethods, activeCategory, fetchPage, hasFacet, page, isFiltered]);
 
-  // Fetch the filtered roster whenever the selection or page changes. No selection
-  // → clear the filtered state so the SSR roster renders.
+  // Fetch the filtered roster whenever the selection, chip, or page changes.
+  // Neither facet active → clear the filtered state so the SSR roster renders.
   useEffect(() => {
     if (!hasFacet) return;
-    if (selMethods.size === 0) {
+    if (!isFiltered) {
       setFiltered(null);
       setError(false);
       setLoading(false);
@@ -150,6 +164,7 @@ export function DepartmentFacultyClient({
     setError(false);
     const params = new URLSearchParams();
     for (const v of selMethods) params.append("method", v);
+    if (activeCategory !== "All") params.set("type", activeCategory);
     params.set("page", String(Math.max(0, fetchPage - 1)));
     fetch(`/api/units/${unitKind}/${unitCode}/members?${params.toString()}`, {
       signal: controller.signal,
@@ -168,9 +183,8 @@ export function DepartmentFacultyClient({
         setLoading(false);
       });
     return () => controller.abort();
-  }, [selMethods, fetchPage, hasFacet, unitKind, unitCode, retryNonce]);
+  }, [isFiltered, selMethods, activeCategory, fetchPage, hasFacet, unitKind, unitCode, retryNonce]);
 
-  const isFiltered = hasFacet && selMethods.size > 0;
   const baseHits = isFiltered ? (filtered?.hits ?? []) : faculty;
   const renderedTotal = isFiltered ? (filtered?.total ?? 0) : total;
   const currentPage = isFiltered ? fetchPage : page;
@@ -182,6 +196,13 @@ export function DepartmentFacultyClient({
       ? [...base].sort((a, b) => b.preferredName.localeCompare(a.preferredName))
       : base;
   }, [baseHits, activeCategory, sortOrder]);
+
+  // Changing the chip resets to the first filtered page — mirrors `makeToggle`
+  // below (methods facet) so the two facets behave identically on change.
+  const handleCategoryChange = useCallback((cat: RoleCategory) => {
+    setActiveCategory(cat);
+    setFetchPage(1);
+  }, []);
 
   const makeToggle = useCallback(
     (value: string) => {
@@ -333,10 +354,14 @@ export function DepartmentFacultyClient({
       <div className="mb-6">
         <RoleChipRow
           faculty={baseHits}
-          roleCategoryCounts={isFiltered ? undefined : roleCategoryCounts}
-          totalCount={isFiltered ? undefined : total}
+          // #2537 — chip counts stay WHOLE-SCOPE while only the chip is active;
+          // they only fall back to per-page (undefined) when methods are
+          // selected, since a methods-filtered set has no server-computed
+          // whole-scope role tally to show.
+          roleCategoryCounts={selMethods.size > 0 ? undefined : roleCategoryCounts}
+          totalCount={selMethods.size > 0 ? undefined : total}
           active={activeCategory}
-          onChange={setActiveCategory}
+          onChange={handleCategoryChange}
         />
       </div>
       {isFiltered && error ? (

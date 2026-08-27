@@ -245,6 +245,7 @@ export async function CenterPage({
           <CenterMembersClient
             result={members}
             centerSlug={detail.slug}
+            centerCode={detail.code}
             programPagesEnabled={programPagesEnabled}
           />
         )}
