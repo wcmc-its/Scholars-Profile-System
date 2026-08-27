@@ -244,12 +244,15 @@ describe("getCenterMembers — active filter + grouping (#552 §6.2)", () => {
     ]);
 
     const result = await getCenterMembers("MEYER", {});
+    // #2537 — flat-mode `page` is 1-indexed (page 1 is the first page); the
+    // loader's internal `opts.page` stays 0-indexed input (unpassed here, so 0).
     expect(result).toEqual({
       mode: "flat",
       hits: [],
       total: 0,
-      page: 0,
+      page: 1,
       pageSize: 20,
+      roleCategoryCounts: {},
     });
     // short-circuits before touching Scholar
     expect(mockScholarFindMany).not.toHaveBeenCalled();

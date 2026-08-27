@@ -43,6 +43,9 @@ function hit(cwid: string, roleCategory: string): CenterMemberHit {
 }
 
 // 21 members across two pages (pageSize 20) so pagination controls render.
+// `page` here is the 1-indexed display page (#2537) — matches what
+// `getCenterMembers`'s flat mode now returns and what `FlatMembers` has
+// always assumed.
 function flatResult(page: number): CenterMembersResult {
   return {
     mode: "flat",
@@ -50,6 +53,7 @@ function flatResult(page: number): CenterMembersResult {
     total: 21,
     page,
     pageSize: 20,
+    roleCategoryCounts: {},
   };
 }
 

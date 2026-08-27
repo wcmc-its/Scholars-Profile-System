@@ -47,7 +47,7 @@ vi.mock("@/lib/api/divisions", () => ({
 // loadPublicFamiliesForMembers (chips) is exercised via the real methods-roster
 // module against the mocked scholarFamily.findMany below.
 
-import { getUnitMembersByMethods } from "@/lib/api/unit-members";
+import { getUnitMembersByMethods, getUnitMembersFiltered } from "@/lib/api/unit-members";
 
 const SC = "imaging_x";
 
@@ -214,5 +214,95 @@ describe("getUnitMembersByMethods — division", () => {
     const result = await getUnitMembersByMethods("division", "N2466", [`${SC}::A`], 0);
     expect(result.total).toBe(0);
     expect(mockFamilyFindMany).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #2537 — `getUnitMembersFiltered`: the type-only (no methods) and combined
+ * (methods + type) paths added alongside the original methods-only path above.
+ */
+describe("getUnitMembersFiltered — type-only (department)", () => {
+  it("filters member cwids by roleCategory: { in } AND publicRoleWhere(), paginates, builds hits", async () => {
+    // scholar.findMany is called three possible ways here: (1) member-cwid
+    // select (no cwid.in, no include) — the deptCode query; (2) the type-only
+    // match select (cwid.in + roleCategory.in, no include); (3) the page-row
+    // assembly (cwid.in + include).
+    mockScholarFindMany.mockImplementation(
+      (args: { where?: { deptCode?: string; roleCategory?: unknown }; include?: unknown }) => {
+        if (args.where?.deptCode) {
+          return Promise.resolve([{ cwid: "m1" }, { cwid: "m2" }, { cwid: "m3" }]);
+        }
+        if ("include" in args) {
+          return Promise.resolve(
+            (args as { where: { cwid: { in: string[] } } }).where.cwid.in.map(scholarRow),
+          );
+        }
+        // Type-only match select — must carry the roleCategory filter.
+        expect(args.where?.roleCategory).toEqual({ in: expect.any(Array) });
+        return Promise.resolve([{ cwid: "m1" }, { cwid: "m2" }]);
+      },
+    );
+
+    const result = await getUnitMembersFiltered(
+      "department",
+      "N1140",
+      { roleGroup: "Full-time faculty" },
+      0,
+    );
+
+    expect(result.total).toBe(2);
+    expect(result.hits.map((h) => h.cwid).sort()).toEqual(["m1", "m2"]);
+    // No OR-across-families filter query ran — this is the type-only path.
+    // (scholarFamily.findMany IS still called once, by buildHits' own chip
+    // loader — that's the `distinct: ["cwid"]` call, absent here, that would
+    // signal the methods filter path.)
+    expect(
+      mockFamilyFindMany.mock.calls.some((c) => (c[0] as { distinct?: string[] })?.distinct),
+    ).toBe(false);
+  });
+
+  it("returns empty (no queries beyond the member-cwid select) when the group is All", async () => {
+    mockScholarFindMany.mockResolvedValue([{ cwid: "m1" }]);
+    const result = await getUnitMembersFiltered("department", "N1140", { roleGroup: "All" }, 0);
+    expect(result.total).toBe(0);
+    expect(result.hits).toEqual([]);
+  });
+});
+
+describe("getUnitMembersFiltered — combined methods + type (department)", () => {
+  it("nests roleCategory inside the scholar: relation filter, not top-level", async () => {
+    mockScholarFindMany.mockImplementation((args: { include?: unknown }) =>
+      "include" in args
+        ? Promise.resolve(
+            (args as { where: { cwid: { in: string[] } } }).where.cwid.in.map(scholarRow),
+          )
+        : Promise.resolve([{ cwid: "m1" }, { cwid: "m2" }]),
+    );
+    mockFamilyFindMany.mockImplementation((args: { distinct?: string[] }) =>
+      args.distinct?.includes("cwid")
+        ? Promise.resolve([{ cwid: "m1" }])
+        : Promise.resolve([]),
+    );
+
+    const result = await getUnitMembersFiltered(
+      "department",
+      "N1140",
+      { methodKeys: [`${SC}::A`], roleGroup: "Full-time faculty" },
+      0,
+    );
+
+    const filterCall = mockFamilyFindMany.mock.calls.find((c) => c[0]?.distinct?.includes("cwid"))![0];
+    // The facet's own OR is intact at the top level...
+    expect(filterCall.where.OR).toEqual([{ supercategory: SC, familyLabel: "A" }]);
+    // ...and roleCategory nests INSIDE scholar:, alongside the carve, never at
+    // the top level (which would clobber the facet OR).
+    expect(filterCall.where.roleCategory).toBeUndefined();
+    expect(filterCall.where.scholar.roleCategory).toEqual({ in: expect.any(Array) });
+    expect(result.total).toBe(1);
+    expect(result.hits[0].cwid).toBe("m1");
+
+    // buildHits' own row query re-applies the same filter (rows agree with total).
+    const rowCall = mockScholarFindMany.mock.calls.find((c) => "include" in c[0])![0];
+    expect(rowCall.where.roleCategory).toEqual({ in: expect.any(Array) });
   });
 });
