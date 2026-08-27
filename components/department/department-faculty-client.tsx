@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   RoleChipRow,
   filterByRoleCategory,
+  ROLE_CATEGORIES,
   type RoleCategory,
 } from "@/components/department/role-chip-row";
 import { PersonRow } from "@/components/department/person-row";
@@ -98,6 +99,19 @@ export function DepartmentFacultyClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Deep-link: read `?type=` on mount and seed the role-category chip (#2528).
+  // The unfiltered pagination below navigates via real hrefs (full page load),
+  // so without this the chip silently resets to "All" on every page change —
+  // buildHref carries `type=` forward, this reads it back on the fresh mount.
+  useEffect(() => {
+    const type = new URLSearchParams(window.location.search).get("type");
+    if (type && (ROLE_CATEGORIES as string[]).includes(type)) {
+      setActiveCategory(type as RoleCategory);
+    }
+    // mount-only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Reflect the selection (+ page) in `?method=&page=` via replaceState — keeps
   // the URL shareable without a navigation (the page stays the cached shell).
   useEffect(() => {
@@ -183,12 +197,17 @@ export function DepartmentFacultyClient({
   );
 
   // Pagination URL builder — the unfiltered case navigates (cacheable links);
-  // appends ?page= and preserves the division path.
+  // preserves the division path, the page (when >1), and the active role
+  // chip (when not "All") so paging doesn't silently drop the filter (#2528).
   const buildHref = (p: number) => {
     const base = divisionSlug
       ? `/departments/${deptSlug}/divisions/${divisionSlug}`
       : `/departments/${deptSlug}`;
-    return p === 1 ? base : `${base}?page=${p}`;
+    const params = new URLSearchParams();
+    if (p > 1) params.set("page", String(p));
+    if (activeCategory !== "All") params.set("type", activeCategory);
+    const qs = params.toString();
+    return qs ? `${base}?${qs}` : base;
   };
 
   const totalPages = Math.max(1, Math.ceil(renderedTotal / pageSize));

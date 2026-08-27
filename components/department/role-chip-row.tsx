@@ -39,6 +39,10 @@ const ROLE_GROUPS: {
   { label: "Doctoral students", matches: (r) => r === "Doctoral student" },
 ];
 
+// Consumed by department-faculty-client.tsx to validate a `?type=` deep-link
+// param against the known chip labels.
+export const ROLE_CATEGORIES: RoleCategory[] = ROLE_GROUPS.map((g) => g.label);
+
 export function RoleChipRow({
   faculty,
   roleCategoryCounts,
