@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   RoleChipRow,
   filterByRoleCategory,
+  ROLE_CATEGORIES,
   type RoleCategory,
 } from "@/components/department/role-chip-row";
 import { PersonRow } from "@/components/department/person-row";
@@ -431,8 +432,24 @@ function FlatMembers({
   const [activeCategory, setActiveCategory] = useState<RoleCategory>("All");
   const filtered = filterByRoleCategory(hits, activeCategory);
 
-  const buildHref = (p: number) =>
-    p === 1 ? `/centers/${centerSlug}` : `/centers/${centerSlug}?page=${p}`;
+  // #2533 — seed the chip from a `?type=` deep-link param so pagination (a real
+  // navigation, not client state) doesn't reset it back to "All".
+  useEffect(() => {
+    const type = new URLSearchParams(window.location.search).get("type");
+    if (type && (ROLE_CATEGORIES as string[]).includes(type)) {
+      setActiveCategory(type as RoleCategory);
+    }
+    // mount-only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const buildHref = (p: number) => {
+    const qs = new URLSearchParams();
+    if (p > 1) qs.set("page", String(p));
+    if (activeCategory !== "All") qs.set("type", activeCategory);
+    const q = qs.toString();
+    return q ? `/centers/${centerSlug}?${q}` : `/centers/${centerSlug}`;
+  };
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
