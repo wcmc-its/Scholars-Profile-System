@@ -38,6 +38,7 @@ import { UnitSlugCard } from "@/components/edit/unit-slug-card";
 import type { RailItem } from "@/components/edit/attribute-rail";
 import type { UnitActorRole, UnitEditContext } from "@/lib/api/unit-edit-context";
 import { isUnitRosterExportEnabled } from "@/lib/edit/unit-roster-export";
+import { isCornellDirectoryMembersEnabled } from "@/lib/edit/cornell-directory-flag";
 
 type AttrKey =
   | "description"
@@ -258,6 +259,7 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
             // already computed by `loadUnitEditContext` for the API route's
             // own server-side validation but never reached this component.
             diseaseOptions={ctx.diseaseOptions ?? []}
+            cornellDirectoryEnabled={isCornellDirectoryMembersEnabled()}
           />
         );
       }
@@ -271,6 +273,7 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
                 entityType="division"
                 unitCode={ctx.unit.code}
                 members={ctx.roster ?? []}
+                cornellDirectoryEnabled={isCornellDirectoryMembersEnabled()}
               />
             )}
             {/* Faculty CSV export (count + link) — extends #1102 to divisions. */}

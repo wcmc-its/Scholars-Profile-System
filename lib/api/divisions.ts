@@ -50,6 +50,13 @@ import {
   isOrgUnitMethodsChipsEnabled,
   isOrgUnitMethodsFacetEnabled,
 } from "@/lib/profile/methods-lens-flags";
+import { extractLastNameSort } from "@/lib/name-sort";
+import { isCornellDirectoryMembersEnabled } from "@/lib/edit/cornell-directory-flag";
+import {
+  buildExternalMemberHit,
+  loadExternalMembersByCuid,
+  type ExternalMemberHit,
+} from "@/lib/api/external-members";
 
 const FACULTY_PAGE_SIZE = 20;
 const PUB_PAGE_SIZE = 20;
@@ -282,6 +289,18 @@ async function getDivisionUncached(
         }),
   ]);
 
+  // #2519 — Cornell members carry no `Scholar` row, so `visibleScholarCount`
+  // above never sees them (no double-count risk). Add them to the headline
+  // total so it agrees with the roster's rendered length (`getDivisionFaculty`).
+  // Cornell adds are manual-division-only (the roster route's own gate), and
+  // `DivisionMembership` has no active-window columns — every row counts.
+  const cornellScholarCount =
+    isCornellDirectoryMembersEnabled() && division.source === "manual"
+      ? await prisma.divisionMembership.count({
+          where: { divisionCode: division.code, source: "cornell-ithaca" },
+        })
+      : 0;
+
   return {
     division: {
       code: division.code,
@@ -296,7 +315,7 @@ async function getDivisionUncached(
     topResearchAreas,
     siblingDivisions,
     stats: {
-      scholars: visibleScholarCount,
+      scholars: visibleScholarCount + cornellScholarCount,
       publications: pubCount,
       activeGrants: grantCount,
     },
@@ -365,6 +384,11 @@ export type DivisionFacultyResult = {
      *  when ORG_UNIT_METHODS_CHIPS (+ METHODS_LENS_ENABLED) is on AND the member
      *  has ≥1 public family; undefined otherwise. */
     topMethods?: MemberMethodFamily[];
+    /** #2519 — true only for a Cornell (Ithaca) external member. See
+     *  `DepartmentFacultyHit.isExternal`. */
+    isExternal?: true;
+    /** #2519 — present only when `isExternal` is true. */
+    externalProfileUrl?: string;
   }>;
   total: number;
   /** Whole-scope role-category counts for the role-chip-row. (#17) */
@@ -391,10 +415,33 @@ async function getDivisionFacultyUncached(
   });
   const chiefCwid = div?.chiefCwid ?? null;
 
+  // #2519 — Cornell (Ithaca) render union. `DivisionMembership` has no
+  // active-window columns (unlike `CenterMembership`) — every row is active
+  // by presence — so this is a plain source-filtered read, no date filter.
+  // Cornell adds are only ever written to a `source: 'manual'` division (the
+  // roster route's own gate), so an ETL division never issues this query.
+  // Flag off, or no cornell rows for this division ⇒ `cornellHits` is `[]`
+  // and every branch below is byte-identical to today.
+  let cornellHits: ExternalMemberHit[] = [];
+  if (isCornellDirectoryMembersEnabled() && div?.source === "manual") {
+    const cornellRows = await prisma.divisionMembership.findMany({
+      where: { divisionCode: divCode, source: "cornell-ithaca" },
+      select: { cwid: true },
+    });
+    if (cornellRows.length > 0) {
+      const netids = cornellRows.map((r) => r.cwid);
+      const externalByCuid = await loadExternalMembersByCuid(netids);
+      cornellHits = netids
+        .map((netid) => externalByCuid.get(netid))
+        .filter((m): m is NonNullable<typeof m> => m !== undefined)
+        .map((m) => buildExternalMemberHit(m));
+    }
+  }
+
   const allMemberCwids = await loadDivisionMemberCwids(divCode, {
     source: div?.source,
   });
-  if (allMemberCwids.length === 0) {
+  if (allMemberCwids.length === 0 && cornellHits.length === 0) {
     return { hits: [], total: 0, roleCategoryCounts: {}, page, pageSize: FACULTY_PAGE_SIZE };
   }
 
@@ -418,7 +465,7 @@ async function getDivisionFacultyUncached(
     })
   ).map((r) => r.cwid);
   const total = memberCwids.length;
-  if (total === 0) {
+  if (total === 0 && cornellHits.length === 0) {
     return { hits: [], total: 0, roleCategoryCounts: {}, page, pageSize: FACULTY_PAGE_SIZE };
   }
   const memberCwidSet = new Set(memberCwids);
@@ -468,90 +515,98 @@ async function getDivisionFacultyUncached(
   const restSkip =
     chiefRow && page > 0 ? page * FACULTY_PAGE_SIZE - 1 : page * FACULTY_PAGE_SIZE;
 
-  const rest = await prisma.scholar.findMany({
-    where: restWhere,
-    skip: Math.max(0, restSkip),
-    take: restTake,
-    orderBy: [{ preferredName: "asc" }],
-    include: includeClause,
-  });
-  const allRows = chiefRow ? [chiefRow, ...rest] : rest;
-
-  // Pub/grant counts per scholar — same shape as dept faculty rows.
-  const cwids = allRows.map((r) => r.cwid);
-  const [pubCounts, grantCounts] = await Promise.all([
-    cwids.length === 0
-      ? Promise.resolve([] as Array<{ cwid: string; _count: { _all: number } }>)
-      : (prisma.publicationAuthor.groupBy as unknown as (
-          args: unknown,
-        ) => Promise<Array<{ cwid: string; _count: { _all: number } }>>)({
-          by: ["cwid"],
-          where: { isConfirmed: true, cwid: { in: cwids } },
-          _count: { _all: true },
-          orderBy: { cwid: "asc" },
-        }),
-    cwids.length === 0
-      ? Promise.resolve([] as Array<{ cwid: string; _count: { _all: number } }>)
-      : (prisma.grant.groupBy as unknown as (
-          args: unknown,
-        ) => Promise<Array<{ cwid: string; _count: { _all: number } }>>)({
-          by: ["cwid"],
-          where: { cwid: { in: cwids }, source: { not: "RePORTER" } },
-          _count: { _all: true },
-          orderBy: { cwid: "asc" },
-        }),
-  ]);
-  // #356 — subtract each scholar's per-author hides from their pub count.
-  const hiddenCounts = await loadHiddenAuthorshipCounts(cwids, prisma);
-  const pubByCwid = new Map(
-    pubCounts.map((r) => [
-      r.cwid,
-      Math.max(0, r._count._all - (hiddenCounts.get(r.cwid) ?? 0)),
-    ]),
-  );
-  const grantByCwid = new Map(grantCounts.map((r) => [r.cwid, r._count._all]));
-
-  type RowWithRelations = (typeof allRows)[number] & {
+  // The minimal shape `buildWcmHits` reads. A `scholar.findFirst`/`findMany`
+  // call's inferred TS return type does not carry the `include`d relations
+  // (a known Prisma/TS limitation when `where`/`include` are pre-declared
+  // variables rather than inline literals) even though they ARE present at
+  // runtime — hence the `(typeof rows)[number] & RowFields` cast at each call
+  // site below, mirroring the pre-#2519 `RowWithRelations` pattern.
+  type RowFields = {
+    cwid: string;
+    preferredName: string;
+    slug: string;
+    primaryTitle: string | null;
+    overview: string | null;
+    roleCategory: string | null;
     department: { name: string } | null;
     division: { name: string } | null;
   };
-  const hits = (allRows as RowWithRelations[]).map((r) => ({
-    cwid: r.cwid,
-    preferredName: r.preferredName,
-    slug: r.slug,
-    primaryTitle: r.primaryTitle,
-    divisionName: r.division?.name ?? null,
-    departmentName: r.department?.name ?? "",
-    identityImageEndpoint: identityImageEndpoint(r.cwid),
-    // #974 Phase 2 — normalize to the display label (mirrors departments.ts L480 +
-    // the filtered API in unit-members.ts) so the Role chip actually matches on the
-    // division SSR view, not just after a method is selected. (roleCategoryCounts at
-    // L386 already normalizes; the hit was the lone raw outlier.)
-    roleCategory: formatRoleCategory(r.roleCategory),
-    // #2202 — the label above is display-only; the #536 carve reads this.
-    roleCategoryRaw: r.roleCategory,
-    overview: r.overview ? r.overview.slice(0, 120) : null,
-    pubCount: pubByCwid.get(r.cwid) ?? 0,
-    grantCount: grantByCwid.get(r.cwid) ?? 0,
-  }));
 
-  // #974 — attach top-≤3 PUBLIC method families for the per-row chips, keyed on
-  // the visible page's ≤20 CWIDs (no whole-dataset aggregation — that's Phase 2).
-  // The loader self-gates on the flag, so off → empty map → hits pass through
-  // byte-identical, and the page stays CloudFront-cacheable (a plain DB read,
-  // no per-viewer call).
-  const famByCwid = await loadPublicFamiliesForMembers(cwids, {
-    enabled: isOrgUnitMethodsChipsEnabled(),
-  });
-  const finalHits =
-    famByCwid.size === 0
-      ? hits
-      : hits.map((h) => {
+  /**
+   * Pub/grant counts + top-method-family chips for a set of scholar rows.
+   * Factored out (#2519) so the Cornell-merge branch below — which needs the
+   * FULL matching set, not just the current DB page, to interleave correctly
+   * — and the original page-window path share one implementation.
+   */
+  async function buildWcmHits<R extends RowFields>(rows: R[]) {
+    const rowCwids = rows.map((r) => r.cwid);
+    const [pubCounts, grantCounts] = await Promise.all([
+      rowCwids.length === 0
+        ? Promise.resolve([] as Array<{ cwid: string; _count: { _all: number } }>)
+        : (prisma.publicationAuthor.groupBy as unknown as (
+            args: unknown,
+          ) => Promise<Array<{ cwid: string; _count: { _all: number } }>>)({
+            by: ["cwid"],
+            where: { isConfirmed: true, cwid: { in: rowCwids } },
+            _count: { _all: true },
+            orderBy: { cwid: "asc" },
+          }),
+      rowCwids.length === 0
+        ? Promise.resolve([] as Array<{ cwid: string; _count: { _all: number } }>)
+        : (prisma.grant.groupBy as unknown as (
+            args: unknown,
+          ) => Promise<Array<{ cwid: string; _count: { _all: number } }>>)({
+            by: ["cwid"],
+            where: { cwid: { in: rowCwids }, source: { not: "RePORTER" } },
+            _count: { _all: true },
+            orderBy: { cwid: "asc" },
+          }),
+    ]);
+    // #356 — subtract each scholar's per-author hides from their pub count.
+    const hiddenCounts = await loadHiddenAuthorshipCounts(rowCwids, prisma);
+    const pubByCwid = new Map(
+      pubCounts.map((r) => [
+        r.cwid,
+        Math.max(0, r._count._all - (hiddenCounts.get(r.cwid) ?? 0)),
+      ]),
+    );
+    const grantByCwid = new Map(grantCounts.map((r) => [r.cwid, r._count._all]));
+
+    const rowHits = rows.map((r) => ({
+      cwid: r.cwid,
+      preferredName: r.preferredName,
+      slug: r.slug,
+      primaryTitle: r.primaryTitle,
+      divisionName: r.division?.name ?? null,
+      departmentName: r.department?.name ?? "",
+      identityImageEndpoint: identityImageEndpoint(r.cwid),
+      // #974 Phase 2 — normalize to the display label (mirrors departments.ts L480 +
+      // the filtered API in unit-members.ts) so the Role chip actually matches on the
+      // division SSR view, not just after a method is selected. (roleCategoryCounts at
+      // L386 already normalizes; the hit was the lone raw outlier.)
+      roleCategory: formatRoleCategory(r.roleCategory),
+      // #2202 — the label above is display-only; the #536 carve reads this.
+      roleCategoryRaw: r.roleCategory,
+      overview: r.overview ? r.overview.slice(0, 120) : null,
+      pubCount: pubByCwid.get(r.cwid) ?? 0,
+      grantCount: grantByCwid.get(r.cwid) ?? 0,
+    }));
+
+    // #974 — attach top-≤3 PUBLIC method families for the per-row chips. The
+    // loader self-gates on the flag, so off → empty map → hits pass through
+    // byte-identical.
+    const famByCwid = await loadPublicFamiliesForMembers(rowCwids, {
+      enabled: isOrgUnitMethodsChipsEnabled(),
+    });
+    return famByCwid.size === 0
+      ? rowHits
+      : rowHits.map((h) => {
           const fams = famByCwid.get(h.cwid);
           return fams && fams.length > 0
             ? { ...h, topMethods: fams.slice(0, ROSTER_ROW_METHODS_CAP) }
             : h;
         });
+  }
 
   // #974 Phase 2 — unit-wide "Methods & tools" facet buckets over the FULL active
   // member set. `memberCwids` is already in hand (loaded above for the roster), so
@@ -562,9 +617,68 @@ async function getDivisionFacultyUncached(
     ? await aggregatePublicFamiliesForUnit(memberCwids, { enabled: true })
     : undefined;
 
+  if (cornellHits.length === 0) {
+    // Byte-identical to pre-#2519 behavior: DB-level skip/take pagination,
+    // preferredName-asc DB order, no merge/re-sort.
+    const rest = await prisma.scholar.findMany({
+      where: restWhere,
+      skip: Math.max(0, restSkip),
+      take: restTake,
+      orderBy: [{ preferredName: "asc" }],
+      include: includeClause,
+    });
+    const allRows = chiefRow ? [chiefRow, ...rest] : rest;
+    const finalHits = await buildWcmHits(
+      allRows as ((typeof allRows)[number] & RowFields)[],
+    );
+    return {
+      hits: finalHits,
+      total,
+      roleCategoryCounts,
+      page,
+      pageSize: FACULTY_PAGE_SIZE,
+      methodFacet,
+    };
+  }
+
+  // #2519 — Cornell present: fetch every matching WCM row (not just this DB
+  // page) so the two sources interleave correctly by surname across page
+  // boundaries, matching the public-roster convention (`extractLastNameSort`,
+  // same helper `lib/api/centers.ts`'s flat roster uses). Only this
+  // flag-gated, Cornell-populated path pays the extra cost — every other
+  // division keeps the cheap skip/take query above untouched.
+  const allRest = await prisma.scholar.findMany({
+    where: restWhere,
+    orderBy: [{ preferredName: "asc" }],
+    include: includeClause,
+  });
+  const allRowsFull = chiefRow ? [chiefRow, ...allRest] : allRest;
+  const wcmHitsFull = await buildWcmHits(
+    allRowsFull as ((typeof allRowsFull)[number] & RowFields)[],
+  );
+
+  const chiefHit = chiefRow
+    ? wcmHitsFull.find((h) => h.cwid === chiefRow!.cwid)
+    : undefined;
+  const restHits = chiefRow
+    ? wcmHitsFull.filter((h) => h.cwid !== chiefRow!.cwid)
+    : wcmHitsFull;
+  const mergedRest = [...restHits, ...cornellHits].sort(
+    (a, b) =>
+      extractLastNameSort(a.preferredName).localeCompare(
+        extractLastNameSort(b.preferredName),
+      ) || a.preferredName.localeCompare(b.preferredName),
+  );
+  const mergedAll = chiefHit ? [chiefHit, ...mergedRest] : mergedRest;
+  const mergedTotal = mergedAll.length;
+  const pageHits = mergedAll.slice(
+    page * FACULTY_PAGE_SIZE,
+    (page + 1) * FACULTY_PAGE_SIZE,
+  );
+
   return {
-    hits: finalHits,
-    total,
+    hits: pageHits,
+    total: mergedTotal,
     roleCategoryCounts,
     page,
     pageSize: FACULTY_PAGE_SIZE,

@@ -7,6 +7,7 @@ import { htmlToPlainText } from "@/lib/utils";
 import { formatRoleCategory } from "@/lib/role-display";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { profilePath } from "@/lib/profile-url";
+import { Badge } from "@/components/ui/badge";
 
 /**
  * Per neurology_dept_body_per_spec.html: 11px uppercase role tag with 0.06em
@@ -63,7 +64,20 @@ export function PersonRow({
               enum. The fallback keeps older payloads working — and now that the
               predicate fails closed, an unrecognized label de-links rather than
               leaks. */}
-          {isPubliclyDisplayed(hit.roleCategoryRaw ?? hit.roleCategory) ? (
+          {hit.isExternal ? (
+            // #2519 — a Cornell (Ithaca) external member has no WCM profile
+            // (no slug, no Scholar row): link out to the Cornell directory
+            // instead, and skip `PersonPopover` (it has no WCM data to show).
+            <a
+              href={hit.externalProfileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:underline"
+              style={{ textDecoration: "none", color: "var(--color-text-primary)" }}
+            >
+              {hit.preferredName}
+            </a>
+          ) : isPubliclyDisplayed(hit.roleCategoryRaw ?? hit.roleCategory) ? (
             <PersonPopover cwid={hit.cwid} surface="facet">
               <a
                 href={profilePath(hit.slug)}
@@ -82,6 +96,11 @@ export function PersonRow({
             const label = formatRoleCategory(hit.roleCategory);
             return label ? <RoleTag role={label} /> : null;
           })()}
+          {hit.isExternal && (
+            <Badge variant="outline" className="rounded-full">
+              Cornell University
+            </Badge>
+          )}
           {trailingBadge}
         </div>
         {hit.primaryTitle && (
