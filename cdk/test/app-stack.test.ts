@@ -838,19 +838,22 @@ describe("AppStack", () => {
     });
 
     describe("IAM role split (B06)", () => {
-      it("the app task-execution role policy lists exactly the eleven app consumer secret ARNs (ADR-009: no migrate, no bootstrap)", () => {
+      it("the app task-execution role policy lists exactly the twelve app consumer secret ARNs (ADR-009: no migrate, no bootstrap)", () => {
         // No `*` resource on secretsmanager:* (Phase 1 hard rule).
-        // The eleven ARNs are scholars/prod/db/app-rw, db/app-ro, opensearch/app,
+        // The twelve ARNs are scholars/prod/db/app-rw, db/app-ro, opensearch/app,
         // revalidate-token, session-cookie-key, the SAML SP private key,
         // etl/reciter (ReciterDB connection for funding/mentoring surfaces),
         // saml/idp-cert (the IdP signing-cert trust anchor, #466),
         // saml-sp/prod/cert (the SP public cert for metadata, #466),
         // newrelic-license-key (the New Relic ingest key for the ADOT
-        // collector's otlphttp/newrelic exporter, B24), and etl/ed (the
+        // collector's otlphttp/newrelic exporter, B24), etl/ed (the
         // read-only WCM Enterprise Directory bind the app injects as
         // SCHOLARS_LDAP_* for the SSO-gated /api/directory/people route,
-        // #1592/#1595). ADR-009 moved db/bootstrap to the deploy execution role
-        // and keeps db/migrate off this role entirely (req 4).
+        // #1592/#1595), and directory/cornell-ithaca-ldap (the read-only
+        // Cornell (Ithaca) LDAP bind the app injects as SCHOLARS_CORNELL_LDAP_*
+        // for the dark Cornell directory surfaces, #2519 PR 3). ADR-009 moved
+        // db/bootstrap to the deploy execution role and keeps db/migrate off
+        // this role entirely (req 4).
         const policies = template.findResources("AWS::IAM::Policy");
         const execPolicy = Object.values(policies).find((p) => {
           const roles = p.Properties?.Roles as
@@ -873,7 +876,7 @@ describe("AppStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        expect(resourceList).toHaveLength(11);
+        expect(resourceList).toHaveLength(12);
         // No `*` ever appears in the resource list.
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);

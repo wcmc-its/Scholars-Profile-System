@@ -1334,6 +1334,51 @@ exports[`AppStack prod matches the snapshot 1`] = `
                   ],
                 },
               },
+              {
+                "Name": "SCHOLARS_CORNELL_LDAP_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/directory/cornell-ithaca-ldap:SCHOLARS_CORNELL_LDAP_URL::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_CORNELL_LDAP_BIND_DN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/directory/cornell-ithaca-ldap:SCHOLARS_CORNELL_LDAP_BIND_DN::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_CORNELL_LDAP_BIND_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/directory/cornell-ithaca-ldap:SCHOLARS_CORNELL_LDAP_BIND_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
             ],
           },
           {
@@ -3525,6 +3570,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/directory/cornell-ithaca-ldap",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -3813,6 +3870,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/ed-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/directory/cornell-ithaca-ldap-??????",
                   ],
                 ],
               },
@@ -5672,6 +5748,51 @@ exports[`AppStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/ed:SCHOLARS_LDAP_BIND_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_CORNELL_LDAP_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/directory/cornell-ithaca-ldap:SCHOLARS_CORNELL_LDAP_URL::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_CORNELL_LDAP_BIND_DN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/directory/cornell-ithaca-ldap:SCHOLARS_CORNELL_LDAP_BIND_DN::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_CORNELL_LDAP_BIND_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/directory/cornell-ithaca-ldap:SCHOLARS_CORNELL_LDAP_BIND_PASSWORD::",
                     ],
                   ],
                 },
@@ -7867,6 +7988,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/directory/cornell-ithaca-ldap",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -8155,6 +8288,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/ed-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/directory/cornell-ithaca-ldap-??????",
                   ],
                 ],
               },
