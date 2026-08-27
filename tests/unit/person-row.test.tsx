@@ -197,5 +197,34 @@ describe("PersonRow", () => {
       const link = screen.getByRole("link", { name: "Jane Smith" });
       expect(link.getAttribute("target")).toBeNull();
     });
+
+    it("renders the raw Cornell dept with no 'Department of' prefix and no division segment", () => {
+      const { container } = render(
+        <PersonRow
+          hit={{
+            ...externalHit,
+            departmentName: "CIO - IT Security Office",
+            divisionName: "Some Division",
+          }}
+        />,
+      );
+      expect(container.textContent).toContain("CIO - IT Security Office");
+      expect(container.textContent).not.toContain("Department of");
+      expect(container.textContent).not.toContain("Some Division");
+    });
+
+    it("renders no department line at all when the external member has no dept", () => {
+      const { container } = render(
+        <PersonRow hit={{ ...externalHit, departmentName: "" }} />,
+      );
+      expect(container.textContent).not.toContain("Department of");
+    });
+
+    it("a WCM hit still renders 'Department of …' unaffected by the external fix", () => {
+      const { container } = render(
+        <PersonRow hit={{ ...baseHit, departmentName: "Medicine" }} />,
+      );
+      expect(container.textContent).toContain("Department of Medicine");
+    });
   });
 });

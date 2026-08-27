@@ -39,9 +39,15 @@ export function PersonRow({
    *  of `CenterMemberFamily`, so `topMethods` satisfies it directly. */
   methodChips?: Array<{ value: string; familyLabel: string; exemplarTools: string[] }>;
 }) {
-  const deptLine = hit.divisionName
-    ? `${hit.divisionName} · Department of ${hit.departmentName}`
-    : `Department of ${hit.departmentName}`;
+  // #2519 — a Cornell (Ithaca) external member's `departmentName` is a raw
+  // Cornell dept string (e.g. "CIO - IT Security Office"), not a WCM
+  // department to prefix, and has no division segment; it's also `""` when
+  // the person has no dept, in which case no department line renders at all.
+  const deptLine = hit.isExternal
+    ? hit.departmentName || null
+    : hit.divisionName
+      ? `${hit.divisionName} · Department of ${hit.departmentName}`
+      : `Department of ${hit.departmentName}`;
   const snippet = hit.overview ? htmlToPlainText(hit.overview) : null;
 
   const pubLabel = hit.pubCount === 1 ? "pub" : "pubs";
@@ -108,9 +114,11 @@ export function PersonRow({
             {hit.primaryTitle}
           </div>
         )}
-        <div className="mb-[5px] text-[12.5px] text-[var(--color-text-tertiary)]">
-          {deptLine}
-        </div>
+        {deptLine && (
+          <div className="mb-[5px] text-[12.5px] text-[var(--color-text-tertiary)]">
+            {deptLine}
+          </div>
+        )}
         {snippet && (
           <div className="text-[13px] leading-[1.5] text-muted-foreground">
             {snippet}
