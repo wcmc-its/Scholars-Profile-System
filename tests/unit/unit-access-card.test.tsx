@@ -63,6 +63,15 @@ describe("UnitAccessCard", () => {
     expect(screen.getByText(/covers this department and its divisions/i)).toBeTruthy();
   });
 
+  it("the description names steward parity (#2522) — who edits AND who manages access", () => {
+    render(<UnitAccessCard {...base} access={rows} />);
+    expect(
+      screen.getByText(
+        /Owners, Curators, and Communications stewards can edit this department\. Owners and Communications stewards can manage access\./i,
+      ),
+    ).toBeTruthy();
+  });
+
   it("disables Remove on the acting user's own row (self-revoke guard)", () => {
     render(<UnitAccessCard {...base} access={rows} />);
     expect(screen.getByTestId("unit-access-remove-own001").hasAttribute("disabled")).toBe(true);

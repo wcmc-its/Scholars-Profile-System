@@ -103,7 +103,10 @@ const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href: strin
     { label: "Profiles", href: "/edit/scholars" },
     { label: "Org units", href: "/edit/units" },
   ],
-  comms_steward: [{ label: "Method families", href: "/edit/methods" }],
+  // Mirrors `buildConsoleLinks`' steward collapse (#2521): one "Admin console"
+  // door; the steward's own AdminSubnav fans out to Method families and the
+  // rest from there (incl. cores + access management since #2522).
+  comms_steward: [{ label: "Admin console", href: "/edit/scholars" }],
   cv_generator: [{ label: "Profiles (read-only)", href: "/edit/scholars" }],
   honors_curator: [{ label: "Honors queue", href: "/edit/honors-queue" }],
   data_sharing_viewer: [{ label: "Data sharing", href: "/edit/data-sharing" }],
