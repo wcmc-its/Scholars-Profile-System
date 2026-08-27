@@ -363,6 +363,37 @@ export class AppStack extends Stack {
       "AppEtlEdSecret",
       `scholars/${env}/etl/ed`,
     );
+    // Read-only Cornell (Ithaca) LDAP bind (#2519 PR 3). Consumed by
+    // lib/sources/cornell-ldap.ts for the flag-gated Cornell (Ithaca)
+    // unit-member surfaces: `GET /api/directory/people?source=cornell` and
+    // the `source:"cornell"` branch of `POST /api/edit/roster`'s `add`
+    // action. Read-only bind, no DDL -- same class as edSecret above.
+    //
+    // Name is "cornell-ithaca-ldap", not the spec'd "cornell-ithaca": an
+    // earlier out-of-band secret used the latter, and its "-ithaca" tail (a
+    // 6-char token) collides with the Secrets Manager random-suffix
+    // heuristic, so the suffix-less partial ARN fromSecretNameV2 injects did
+    // NOT resolve -- proven deterministically: GetSecretValue on the partial
+    // ARN returned ResourceNotFoundException. App tasks would have failed at
+    // startup. The "-ldap" tail (4 chars) is clear of the gotcha -- same
+    // pattern as sessionCookieSecret's "-key" tail, newRelicLicenseKeySecret's
+    // "-key" tail, and edSecret's "/ed" tail above.
+    //
+    // Created out-of-band in BOTH envs (like edSecret's sibling
+    // scholars/*/etl/bulk-data-rule): SecretsStack is deliberately NOT
+    // touched here, since `Sps-Secrets-prod` cannot be cdk-deployed today
+    // (pre-existing CloudFormation import blocker on
+    // scholars/prod/research-informatics-token). Fold this into SecretsStack
+    // if that import puzzle is ever solved.
+    //
+    // PR 3 of #2519 wires the secret only -- dark until CORNELL_DIRECTORY_MEMBERS
+    // flips (see the flag block below), which will not happen before FERPA
+    // sign-off.
+    const cornellLdapSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "CornellLdapSecret",
+      `scholars/${env}/directory/cornell-ithaca-ldap`,
+    );
 
     // ADR-009 exec-role split -- two execution roles, two secret-ARN lists:
     //
@@ -398,6 +429,11 @@ export class AppStack extends Stack {
       // (ADR-009: still no migrate, no bootstrap). Lands on the EXECUTION role
       // only; the task role keeps zero secretsmanager:* (asserted in tests).
       edSecret.secretArn,
+      // Read-only Cornell (Ithaca) LDAP bind (#2519 PR 3): the app
+      // task-execution role must GetSecretValue on this secret to inject
+      // SCHOLARS_CORNELL_LDAP_* into the app container. Same ADR-009 class
+      // as edSecret above -- no migrate, no bootstrap.
+      cornellLdapSecret.secretArn,
     ];
     // The deploy-time tasks' DSNs (ADR-009). migrate injects only the migrate
     // DSN; verify-grants injects all four role DSNs; db-bootstrap injects
@@ -558,9 +594,11 @@ export class AppStack extends Stack {
     // - **Task-execution role** (`taskExecutionRole`) is the role ECS assumes
     //   for the 24/7 APP task to pull the image, inject secrets, and write log
     //   streams. Tightly scoped: ECR auth + Batch* on the app repo only;
-    //   secrets:GetSecretValue on the eleven app consumer ARNs only (ADR-009: no
+    //   secrets:GetSecretValue on the twelve app consumer ARNs only (ADR-009: no
     //   migrate, no bootstrap) -- the eleventh is the read-only ED bind secret
-    //   (#1592) the app injects for the SSO-gated /api/directory/people route;
+    //   (#1592) the app injects for the SSO-gated /api/directory/people route,
+    //   and the twelfth is the read-only Cornell (Ithaca) LDAP bind secret
+    //   (#2519 PR 3) the app injects for the dark Cornell directory surfaces;
     //   logs on the app + ADOT-sidecar groups only.
     // - **Deploy execution role** (`deployTaskExecutionRole`, ADR-009) is the
     //   parallel role for the short-lived deploy-time tasks (migrate,
@@ -602,7 +640,7 @@ export class AppStack extends Stack {
         resources: [this.ecrRepository.repositoryArn],
       }),
     );
-    // Secrets -- exactly the eleven app consumer ARNs (ADR-009 split: no migrate,
+    // Secrets -- exactly the twelve app consumer ARNs (ADR-009 split: no migrate,
     // no bootstrap). Asserted in tests.
     taskExecutionRole.addToPolicy(
       new iam.PolicyStatement({
@@ -1415,9 +1453,10 @@ export class AppStack extends Stack {
         // CORNELL_DIRECTORY_MEMBERS (#2519 PR 1) — the dark Cornell (Ithaca)
         // directory-members surface: `GET /api/directory/people?source=cornell`
         // and the `source:"cornell"` branch of `POST /api/edit/roster`'s `add`
-        // action. Both 404/no-op when off. No UI reads this in PR 1 (PR 2) and
-        // the Cornell LDAP secret is not yet wired into `secrets:` (PR 3), so
-        // even "on" would 500 on first use until that lands. Off by default
+        // action. Both 404/no-op when off. PR 3 wired the Cornell LDAP secret
+        // (scholars/<env>/directory/cornell-ithaca-ldap) into `secrets:` above,
+        // so the vars are present at task start -- still dark until this flag
+        // flips, which will not happen before FERPA sign-off. Off by default
         // both envs.
         CORNELL_DIRECTORY_MEMBERS: "off",
         // AVAILABLE_TECHNOLOGIES_SECTION — the profile "Available technologies"
@@ -2847,6 +2886,22 @@ export class AppStack extends Stack {
         SCHOLARS_LDAP_BIND_PASSWORD: ecs.Secret.fromSecretsManager(
           edSecret,
           "SCHOLARS_LDAP_BIND_PASSWORD",
+        ),
+        // Read-only Cornell (Ithaca) LDAP bind (#2519 PR 3). Same pattern as
+        // the WCM ED bind above; the env-var name == the secret's JSON key.
+        // Consumed by lib/sources/cornell-ldap.ts once CORNELL_DIRECTORY_MEMBERS
+        // flips on -- dark until then (still "off" both envs below).
+        SCHOLARS_CORNELL_LDAP_URL: ecs.Secret.fromSecretsManager(
+          cornellLdapSecret,
+          "SCHOLARS_CORNELL_LDAP_URL",
+        ),
+        SCHOLARS_CORNELL_LDAP_BIND_DN: ecs.Secret.fromSecretsManager(
+          cornellLdapSecret,
+          "SCHOLARS_CORNELL_LDAP_BIND_DN",
+        ),
+        SCHOLARS_CORNELL_LDAP_BIND_PASSWORD: ecs.Secret.fromSecretsManager(
+          cornellLdapSecret,
+          "SCHOLARS_CORNELL_LDAP_BIND_PASSWORD",
         ),
       },
     });
