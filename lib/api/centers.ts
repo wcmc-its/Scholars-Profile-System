@@ -50,6 +50,11 @@ import {
   type MemberMethodFamily,
 } from "@/lib/api/methods-roster";
 import { isCenterMethodsFacetEnabled } from "@/lib/profile/methods-lens-flags";
+import { isCornellDirectoryMembersEnabled } from "@/lib/edit/cornell-directory-flag";
+import {
+  buildExternalMemberHit,
+  loadExternalMembersByCuid,
+} from "@/lib/api/external-members";
 
 /**
  * Active CWID set for a center's public surfaces. Reads the membership rows,
@@ -375,7 +380,23 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
           },
           select: { roleCategory: true },
         });
-  const scholarCount = countRows.filter((s) => isPubliclyDisplayed(s.roleCategory)).length;
+  // #2519 — a Cornell (Ithaca) external member has no `Scholar` row, so the
+  // query above never sees them (no double-count risk). Add active
+  // `source: "cornell-ithaca"` memberships so the hero count agrees with the
+  // roster's rendered length (`getCenterMembersUncached`, #2235/#2237).
+  const cornellMemberCount = isCornellDirectoryMembersEnabled()
+    ? await (async () => {
+        const rows = await prisma.centerMembership.findMany({
+          where: { centerCode: center.code, source: "cornell-ithaca" },
+          select: { startDate: true, endDate: true },
+        });
+        const today = todayIso();
+        return rows.filter((r) => isCenterMembershipActive(r.startDate, r.endDate, today))
+          .length;
+      })()
+    : 0;
+  const scholarCount =
+    countRows.filter((s) => isPubliclyDisplayed(s.roleCategory)).length + cornellMemberCount;
 
   return {
     code: center.code,
@@ -500,6 +521,7 @@ async function getCenterMembersUncached(
       programCode: true,
       startDate: true,
       endDate: true,
+      source: true,
     },
   })) as Array<{
     cwid: string;
@@ -507,12 +529,36 @@ async function getCenterMembersUncached(
     programCode: string | null;
     startDate: Date | null;
     endDate: Date | null;
+    source: string;
   }>;
   const activeMemberships = memberships.filter((m) =>
     isCenterMembershipActive(m.startDate, m.endDate, today),
   );
   const activeCwids = activeMemberships.map((m) => m.cwid);
   if (activeCwids.length === 0) return emptyFlat;
+
+  // #2519 — Cornell (Ithaca) render union. Off (or no cornell rows on this
+  // center) ⇒ `cornellHits` is `[]` and every branch below is byte-identical
+  // to today. Cornell members are always active (no date window narrows
+  // them further than presence — `isCenterMembershipActive` above already
+  // ran on their row, same as a WCM row's).
+  let cornellHits: CenterMemberHit[] = [];
+  if (isCornellDirectoryMembersEnabled()) {
+    const cornellCwids = activeMemberships
+      .filter((m) => m.source === "cornell-ithaca")
+      .map((m) => m.cwid);
+    if (cornellCwids.length > 0) {
+      const externalByCuid = await loadExternalMembersByCuid(cornellCwids);
+      cornellHits = cornellCwids
+        .map((cwid) => externalByCuid.get(cwid))
+        .filter((m): m is NonNullable<typeof m> => m !== undefined)
+        .map((m): CenterMemberHit => ({
+          ...buildExternalMemberHit(m),
+          membershipType: null,
+          professorialRank: null,
+        }));
+    }
+  }
 
   // Per-cwid membership type, attached to each hit so the facet sidebar +
   // row badge don't need a second query.
@@ -588,7 +634,7 @@ async function getCenterMembersUncached(
       ) || a.preferredName.localeCompare(b.preferredName),
   );
   const total = scholars.length;
-  if (total === 0) return emptyFlat;
+  if (total === 0 && cornellHits.length === 0) return emptyFlat;
 
   // Is this a programmed center with at least one active programmed member?
   // (§6.2 / edge 9 — zero programmed actives renders flat, never an empty
@@ -605,13 +651,31 @@ async function getCenterMembersUncached(
     scholars.some((s) => programByCwid.get(s.cwid) != null);
 
   if (!programmed) {
-    // Flat, paginated list — today's behavior for unprogrammed centers.
-    const pageRows = scholars.slice(
-      page * MEMBERS_PAGE_SIZE,
-      (page + 1) * MEMBERS_PAGE_SIZE,
+    if (cornellHits.length === 0) {
+      // Flat, paginated list — today's behavior for unprogrammed centers.
+      const pageRows = scholars.slice(
+        page * MEMBERS_PAGE_SIZE,
+        (page + 1) * MEMBERS_PAGE_SIZE,
+      );
+      const hits = attachType(await buildCenterMemberHits(pageRows));
+      return { mode: "flat", hits, total, page, pageSize: MEMBERS_PAGE_SIZE };
+    }
+    // #2519 — Cornell present: build hits for the WHOLE WCM roster (not just
+    // this page) so the two sources interleave correctly by surname across
+    // page boundaries, then paginate the merged list. Only this flag-gated,
+    // Cornell-populated path pays the extra per-request cost — an
+    // unprogrammed center with no Cornell members keeps the cheap
+    // page-only query above untouched.
+    const wcmHitsAll = attachType(await buildCenterMemberHits(scholars));
+    const merged = [...wcmHitsAll, ...cornellHits].sort(
+      (a, b) =>
+        extractLastNameSort(a.preferredName).localeCompare(
+          extractLastNameSort(b.preferredName),
+        ) || a.preferredName.localeCompare(b.preferredName),
     );
-    const hits = attachType(await buildCenterMemberHits(pageRows));
-    return { mode: "flat", hits, total, page, pageSize: MEMBERS_PAGE_SIZE };
+    const mergedTotal = merged.length;
+    const hits = merged.slice(page * MEMBERS_PAGE_SIZE, (page + 1) * MEMBERS_PAGE_SIZE);
+    return { mode: "flat", hits, total: mergedTotal, page, pageSize: MEMBERS_PAGE_SIZE };
   }
 
   // Grouped: all active members on one page (#552 §6.2; decision: grouped =
@@ -635,10 +699,21 @@ async function getCenterMembersUncached(
       groups.push({ code: p.code, label: p.label, members });
     }
   }
-  const other = hits.filter((h) => !placed.has(h.cwid));
+  // #2519 — Cornell members never carry a `programCode` (the roster route's
+  // Cornell-add branch never parses the extended fields), so they always
+  // land in "Other" alongside any unplaced WCM member, sorted by surname
+  // with them (`extractLastNameSort`, same as the flat-path merge above).
+  // Zero cornell hits ⇒ this is a no-op concat + a re-sort of an
+  // already-sorted array (`hits` was already surname-ordered on the way in).
+  const other = [...hits.filter((h) => !placed.has(h.cwid)), ...cornellHits].sort(
+    (a, b) =>
+      extractLastNameSort(a.preferredName).localeCompare(
+        extractLastNameSort(b.preferredName),
+      ) || a.preferredName.localeCompare(b.preferredName),
+  );
   if (other.length > 0) groups.push({ code: null, label: "Other", members: other });
 
-  return { mode: "grouped", groups, total };
+  return { mode: "grouped", groups, total: total + cornellHits.length };
 }
 
 /**

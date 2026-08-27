@@ -156,4 +156,75 @@ describe("PersonRow", () => {
       expect(container.querySelector("a")).toBeNull();
     });
   });
+
+  // #2519 — Cornell (Ithaca) external member render.
+  describe("external (Cornell) member", () => {
+    const externalHit: DepartmentFacultyHit = {
+      ...baseHit,
+      cwid: "ab123",
+      preferredName: "Ada Byron",
+      slug: "",
+      isExternal: true,
+      externalProfileUrl: "https://www.cornell.edu/search/sso/people.cfm?netid=ab123",
+    };
+
+    it("links out to the Cornell directory in a new tab instead of a WCM profile", () => {
+      render(<PersonRow hit={externalHit} />);
+      const link = screen.getByRole("link", { name: "Ada Byron" });
+      expect(link.getAttribute("href")).toBe(
+        "https://www.cornell.edu/search/sso/people.cfm?netid=ab123",
+      );
+      expect(link.getAttribute("target")).toBe("_blank");
+      expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    });
+
+    it("renders the Cornell University badge", () => {
+      render(<PersonRow hit={externalHit} />);
+      expect(screen.getByText("Cornell University")).toBeTruthy();
+    });
+
+    it("does not render a WCM profile link (no PersonPopover, no profilePath)", () => {
+      const { container } = render(<PersonRow hit={externalHit} />);
+      const link = screen.getByRole("link", { name: "Ada Byron" });
+      expect(link.getAttribute("href")).not.toContain("/scholar/");
+      // Exactly one link on the row — the external anchor — not a popover trigger.
+      expect(container.querySelectorAll("a").length).toBe(1);
+    });
+
+    it("a normal WCM hit renders unaffected — no Cornell badge, ordinary profile link", () => {
+      render(<PersonRow hit={{ ...baseHit, roleCategory: "FULL_TIME_FACULTY" }} />);
+      expect(screen.queryByText("Cornell University")).toBeNull();
+      const link = screen.getByRole("link", { name: "Jane Smith" });
+      expect(link.getAttribute("target")).toBeNull();
+    });
+
+    it("renders the raw Cornell dept with no 'Department of' prefix and no division segment", () => {
+      const { container } = render(
+        <PersonRow
+          hit={{
+            ...externalHit,
+            departmentName: "CIO - IT Security Office",
+            divisionName: "Some Division",
+          }}
+        />,
+      );
+      expect(container.textContent).toContain("CIO - IT Security Office");
+      expect(container.textContent).not.toContain("Department of");
+      expect(container.textContent).not.toContain("Some Division");
+    });
+
+    it("renders no department line at all when the external member has no dept", () => {
+      const { container } = render(
+        <PersonRow hit={{ ...externalHit, departmentName: "" }} />,
+      );
+      expect(container.textContent).not.toContain("Department of");
+    });
+
+    it("a WCM hit still renders 'Department of …' unaffected by the external fix", () => {
+      const { container } = render(
+        <PersonRow hit={{ ...baseHit, departmentName: "Medicine" }} />,
+      );
+      expect(container.textContent).toContain("Department of Medicine");
+    });
+  });
 });

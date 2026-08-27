@@ -121,6 +121,11 @@ export type CenterRosterCardProps = {
    *  this roster. Defaults to `[]` (a non-Cancer-Center roster, or the
    *  context loader's own catch-and-degrade path). */
   diseaseOptions?: ReadonlyArray<DiseaseCodeOption>;
+  /** #2519 — when true, render the WCM/Cornell source toggle above the add
+   *  typeahead (the `CORNELL_DIRECTORY_MEMBERS` flag, resolved server-side —
+   *  same pattern as `exportEnabled`). Defaults to false, so a caller that
+   *  doesn't pass it gets today's WCM-only add form, byte-identical. */
+  cornellDirectoryEnabled?: boolean;
 };
 
 type Status = "active" | "pending" | "inactive";
@@ -698,11 +703,15 @@ export function CenterRosterCard({
   today,
   exportEnabled = false,
   diseaseOptions = [],
+  cornellDirectoryEnabled = false,
 }: CenterRosterCardProps) {
   const now = today ?? todayIso();
   const hasPrograms = programs.length > 0;
 
   const [members, setMembers] = React.useState<RosterMember[]>(() => [...initial]);
+  // #2519 — which directory the add typeahead searches. Only reachable when
+  // `cornellDirectoryEnabled` renders the toggle; otherwise always "wcm".
+  const [addSource, setAddSource] = React.useState<"wcm" | "cornell">("wcm");
   // One mutually-exclusive filter, defaulting to the WHOLE roster. Two
   // checkboxes could not express "only" honestly: two independent "X only"
   // boxes both unchecked means no restriction, and both checked means an
@@ -908,14 +917,19 @@ export function CenterRosterCard({
   async function add() {
     if (!addValue || adding) return;
     const picked = addValue;
-    if (members.some((m) => m.cwid === picked.cwid)) {
+    // #2519 — a Cornell pick with no WCM bridge (`wcmMatch`) adds as an
+    // external member; a bridged Cornell pick steers to the ordinary WCM add
+    // below (same as `addSource === "wcm"`, which never sets `wcmMatch`).
+    const isCornellAdd = addSource === "cornell" && !picked.wcmMatch;
+    const effectiveCwid = picked.wcmMatch ?? picked.netid ?? picked.cwid;
+    if (members.some((m) => m.cwid === effectiveCwid)) {
       setAddValue(null);
       return;
     }
     setError(null);
     setAdding(true);
     const member: RosterMember = {
-      cwid: picked.cwid,
+      cwid: effectiveCwid,
       name: picked.name,
       title: picked.title,
       membershipType: null,
@@ -925,8 +939,10 @@ export function CenterRosterCard({
     };
     setMembers((ms) => [member, ...ms]);
     setAddValue(null);
-    const ok = await post({ cwid: picked.cwid, action: "add" });
-    if (!ok) setMembers((ms) => ms.filter((m) => m.cwid !== picked.cwid));
+    const ok = isCornellAdd
+      ? await post({ source: "cornell", netid: picked.netid, action: "add" })
+      : await post({ cwid: effectiveCwid, action: "add" });
+    if (!ok) setMembers((ms) => ms.filter((m) => m.cwid !== effectiveCwid));
     setAdding(false);
   }
 
@@ -1039,7 +1055,44 @@ export function CenterRosterCard({
       <div className="flex flex-col gap-4">
         <div className="border-apollo-border flex flex-col gap-3 rounded-md border p-4" data-slot="center-roster-add">
           <p className="text-sm font-medium">Add member</p>
-          <DirectoryPeopleTypeahead idPrefix="roster" value={addValue} onChange={setAddValue} />
+          {cornellDirectoryEnabled && (
+            <div
+              className="border-apollo-border flex w-fit overflow-hidden rounded-md border"
+              role="group"
+              aria-label="Directory source"
+            >
+              {(
+                [
+                  ["wcm", "WCM"],
+                  ["cornell", "Cornell"],
+                ] as ReadonlyArray<readonly ["wcm" | "cornell", string]>
+              ).map(([value, label], i) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => {
+                    setAddSource(value);
+                    setAddValue(null);
+                  }}
+                  aria-pressed={addSource === value}
+                  className={`px-3 py-1 text-sm font-medium transition-colors ${i > 0 ? "border-apollo-border border-l" : ""} ${
+                    addSource === value
+                      ? "bg-apollo-maroon text-white"
+                      : "text-muted-foreground hover:bg-accent"
+                  }`}
+                  data-testid={`center-roster-add-source-${value}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          <DirectoryPeopleTypeahead
+            idPrefix="roster"
+            value={addValue}
+            onChange={setAddValue}
+            source={cornellDirectoryEnabled ? addSource : "wcm"}
+          />
           <div className="flex justify-end">
             <Button type="button" variant="apollo" onClick={add} disabled={!addValue || adding} data-testid="center-roster-add">
               {adding ? "Adding…" : "Add"}
