@@ -8,7 +8,12 @@
  * - **center** (Owner of the parent dept, or Superuser): name + slug + parent
  *   department + center type. An Owner's parent department is fixed (read-only,
  *   from `?dept=`) and the center type is locked to `center`; a Superuser picks
- *   the department and may choose `institute`.
+ *   the department and may choose `institute`. For a Superuser the department
+ *   can be OMITTED (#2541) — it scopes who may edit the center rather than
+ *   placing it in a hierarchy (`Center` has no parent column), so a
+ *   cross-campus center is created with none. That omission is an explicit
+ *   checkbox, never a blank field: the picker can show typed-but-unselected
+ *   text, so "blank" would be an ambiguous signal.
  * - **division** (Superuser only): a pre-registered LDAP N-code + name + slug +
  *   parent department. The form does not look the code up — that's the point
  *   (pre-registration before LDAP catches up).
@@ -30,6 +35,7 @@ import { DepartmentPicker, type DepartmentOption } from "@/components/edit/depar
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
@@ -66,6 +72,7 @@ export function UnitCreateForm({
   const [code, setCode] = React.useState("");
   const [centerType, setCenterType] = React.useState<"center" | "institute">("center");
   const [dept, setDept] = React.useState<DepartmentOption | null>(fixedDept);
+  const [noParentDept, setNoParentDept] = React.useState(false);
 
   const [submitting, setSubmitting] = React.useState(false);
   const [done, setDone] = React.useState(false);
@@ -83,10 +90,18 @@ export function UnitCreateForm({
   // Effective parent department: the Owner's fixed dept, or the Superuser's pick.
   const effectiveDept = isSuperuser ? dept : fixedDept;
 
+  // A center's dept is only the authz key (#2541) and a Superuser needs none;
+  // a division's is a real FK, and an Owner's is what admits them — neither may
+  // opt out. The opt-out is a deliberate tick rather than an empty picker: the
+  // picker holds its typed query internally, so an empty `dept` can mean either
+  // "none" or "typed a name and never picked it".
+  const canOmitDept = mode === "center" && isSuperuser;
+  const omitDept = canOmitDept && noParentDept;
+
   const nameOk = validateUnitName(name).ok;
   const slugOk = validateSlugFormat(slug).ok;
   const codeOk = mode === "division" ? validateLdapCode(code).ok : true;
-  const deptOk = effectiveDept !== null;
+  const deptOk = omitDept || effectiveDept !== null;
   const canSubmit = !submitting && nameOk && slugOk && codeOk && deptOk;
 
   const dirty = !done && (name.length > 0 || slug.length > 0 || code.length > 0);
@@ -97,7 +112,9 @@ export function UnitCreateForm({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!canSubmit || effectiveDept === null) return;
+    // The second clause is what `deptOk` already enforces, kept as its own gate
+    // so nothing can submit a department-less body without the explicit tick.
+    if (!canSubmit || (effectiveDept === null && !omitDept)) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -108,7 +125,9 @@ export function UnitCreateForm({
               unitType: "center",
               name: validateUnitName(name).ok ? name.trim() : name,
               slug: slug.trim(),
-              deptCode: effectiveDept.code,
+              // Explicit `null` = no parent; the endpoint reads an absent key
+              // the same way, but never accepts "".
+              deptCode: effectiveDept?.code ?? null,
               centerType,
             }
           : {
@@ -117,7 +136,7 @@ export function UnitCreateForm({
               code: code.trim().toUpperCase(),
               name: name.trim(),
               slug: slug.trim(),
-              deptCode: effectiveDept.code,
+              deptCode: effectiveDept?.code ?? null,
             };
       const res = await fetch("/api/edit/unit", {
         method: "POST",
@@ -153,6 +172,9 @@ export function UnitCreateForm({
             value={mode}
             onValueChange={(v) => {
               setMode(v as Mode);
+              // A division's dept is required, so the opt-out resets with the
+              // mode rather than carrying a stale tick into the other form.
+              setNoParentDept(false);
               clearError();
             }}
             className="flex gap-4"
@@ -235,12 +257,17 @@ export function UnitCreateForm({
         <label className="text-sm font-medium">Parent department</label>
         {isSuperuser ? (
           <DepartmentPicker
+            // Remounting on the opt-out clears the picker's own typed query, so
+            // a disabled field can never keep showing a name it never selected.
+            key={omitDept ? "no-parent" : "pick-parent"}
             departments={departments}
             value={dept}
             onChange={(d) => {
               setDept(d);
               clearError();
             }}
+            placeholder={omitDept ? "No parent department" : undefined}
+            disabled={omitDept}
             idPrefix="create-dept"
           />
         ) : (
@@ -256,6 +283,34 @@ export function UnitCreateForm({
               "—"
             )}
           </div>
+        )}
+        {canOmitDept && (
+          <>
+            <label className="mt-1 flex items-center gap-2 text-sm">
+              <Checkbox
+                id="create-dept-none"
+                aria-describedby="create-dept-none-note"
+                checked={noParentDept}
+                onCheckedChange={(c) => {
+                  const on = c === true;
+                  setNoParentDept(on);
+                  // The tick IS the choice — drop whatever was picked.
+                  if (on) setDept(null);
+                  clearError();
+                }}
+                data-testid="create-dept-none"
+              />
+              No parent department (cross-campus initiative)
+            </label>
+            <p
+              id="create-dept-none-note"
+              className="text-muted-foreground text-xs"
+              data-testid="create-dept-none-note"
+            >
+              Scopes who can edit this center — it is not a parent in the hierarchy (a center has no
+              parent unit). Tick the box for a cross-campus center that belongs to no department.
+            </p>
+          </>
         )}
       </div>
 

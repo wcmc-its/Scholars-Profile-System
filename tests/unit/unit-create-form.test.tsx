@@ -90,6 +90,58 @@ describe("UnitCreateForm — Superuser", () => {
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/edit/division/N9999?attr=description"));
   });
 
+  it("creates a center with NO parent department once the control is ticked — deptCode: null (#2541)", async () => {
+    const fetchMock = stubFetch({ body: { ok: true, code: "man-nodept", slug: "cross-campus" } });
+    render(<UnitCreateForm {...superuserCenter} />);
+    fireEvent.change(screen.getByTestId("create-name"), { target: { value: "Cross Campus" } });
+    fireEvent.change(screen.getByTestId("create-slug"), { target: { value: "cross-campus" } });
+    expect(screen.getByTestId("create-dept-none-note")).toBeTruthy();
+    // A blank picker is not the choice — the choice is the checkbox.
+    expect(screen.getByTestId("create-submit").hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByTestId("create-dept-none"));
+    expect(screen.getByTestId("create-submit").hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByTestId("create-submit"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body).toMatchObject({ unitType: "center", deptCode: null });
+  });
+
+  it("a typed-but-unselected department cannot submit (#2541 regression)", () => {
+    const fetchMock = stubFetch({ body: { ok: true, code: "man-typed", slug: "typed" } });
+    render(<UnitCreateForm {...superuserCenter} />);
+    fireEvent.change(screen.getByTestId("create-name"), { target: { value: "Typed Center" } });
+    fireEvent.change(screen.getByTestId("create-slug"), { target: { value: "typed" } });
+    // Types a real department name but never picks the option out of the
+    // listbox, so the field SHOWS text the form never received.
+    fireEvent.change(screen.getByTestId("create-dept-input"), { target: { value: "Medicine" } });
+    expect((screen.getByTestId("create-dept-input") as HTMLInputElement).value).toBe("Medicine");
+    expect(screen.getByTestId("create-submit").hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByTestId("create-submit"));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("ticking 'no parent department' drops a picked department and clears the picker (#2541)", () => {
+    render(<UnitCreateForm {...superuserCenter} />);
+    pickDept("N1280");
+    expect(screen.getByTestId("create-dept-clear")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("create-dept-none"));
+    const input = screen.getByTestId("create-dept-input") as HTMLInputElement;
+    expect(input.value).toBe("");
+    expect(input.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("switching to division mode re-requires the department (#2541)", () => {
+    render(<UnitCreateForm {...superuserCenter} />);
+    fireEvent.change(screen.getByTestId("create-name"), { target: { value: "New Division" } });
+    fireEvent.change(screen.getByTestId("create-slug"), { target: { value: "new-div" } });
+    fireEvent.click(screen.getByTestId("create-dept-none"));
+    fireEvent.click(screen.getByTestId("create-mode-division"));
+    fireEvent.change(screen.getByTestId("create-code"), { target: { value: "N9999" } });
+    expect(screen.queryByTestId("create-dept-none-note")).toBeNull();
+    expect(screen.queryByTestId("create-dept-none")).toBeNull();
+    expect(screen.getByTestId("create-submit").hasAttribute("disabled")).toBe(true);
+  });
+
   it("disables submit while the slug format is invalid", () => {
     render(<UnitCreateForm {...superuserCenter} />);
     fireEvent.change(screen.getByTestId("create-name"), { target: { value: "X Center" } });
@@ -124,6 +176,8 @@ describe("UnitCreateForm — Owner", () => {
     expect(screen.queryByTestId("create-mode-division")).toBeNull();
     expect(screen.getByTestId("create-dept-fixed").textContent).toMatch(/Medicine/);
     expect(screen.queryByTestId("create-dept-input")).toBeNull();
+    // The no-parent opt-out is Superuser-only (#2541).
+    expect(screen.queryByTestId("create-dept-none")).toBeNull();
     expect(screen.getByTestId("create-type-institute").hasAttribute("disabled")).toBe(true);
   });
 

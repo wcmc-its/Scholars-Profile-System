@@ -210,7 +210,7 @@ A department-level grant **cascades to that department's divisions**; a division
 |---|---|
 | `field` — `fieldName ∈ {description, leaderCwid, leaderInterim}`; `roster` add/remove | `curatorOf(target)` **or** Superuser. (A department or `source='ED'` division roster → `400`: no manual roster, not an authz failure.) |
 | `grant` / revoke of `owner` or `curator` | `ownerOf(target unit)` **and** the grant's `role` ∈ {owner, curator} **and** the target unit is within the grantor's owned subtree — **or** Superuser (any role, any unit). |
-| `unit` `op:"create"` — informal no-code subunit under department D | `ownerOf(D)` **or** Superuser. |
+| `unit` `op:"create"` — informal no-code subunit under department D | `ownerOf(D)` **or** Superuser. `deptCode` is the authz key only (a `Center` has no parent column), so a Superuser may omit it — the center is then scoped to no department and the audit row records `dept_code: null` (#2541). A non-Superuser, and any division, must still name D. |
 | `field` — `fieldName='slug'`; `unit` `centerType`; coded/adoptable division or department creation; `suppress`/`revoke` of a unit (retire) | **Superuser only** (structural). |
 | `field` — `entityType='scholar'`, `fieldName='overview'` (proxy) | Superuser, **or** `curatorOf` the scholar's **LDAP-primary** `deptCode`/`divCode`. (Self-edit by the scholar is self-edit-spec's row.) |
 | `suppress` — `entityType='publication'`, per-author (proxy hide) | Superuser, **or** `curatorOf` the contributor's LDAP-primary unit, **or** the contributor themselves (self-edit-spec). |

@@ -11,6 +11,8 @@
  *      - centerType="institute" by a non-Superuser → 403 not_superuser.
  *      - Parent dept not found → 400 dept_not_found.
  *      - Slug collision → 400 slug_taken.
+ *      - Superuser omits deptCode on a center → 200, audits dept_code: null
+ *        (#2541); everyone else, and every division, still 400s without one.
  *
  *  - `op:"update"` (center in-row):
  *      - Curator edits description; success + reflectUnitChange.
@@ -285,6 +287,102 @@ describe("/api/edit/unit op:'create' — informal center", () => {
     );
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ ok: false, error: "slug_taken" });
+  });
+});
+
+describe("/api/edit/unit op:'create' — center with no parent department (#2541)", () => {
+  /** `after_values` is the 7th bound value of the audit INSERT (see
+   *  `appendAuditRow`'s positional order); arg 0 is the template strings. */
+  function auditAfterValues(): Record<string, unknown> {
+    return JSON.parse(mockExecuteRaw.mock.calls[0][7] as string);
+  }
+
+  it("Superuser omits deptCode entirely → 200, no dept lookup, dept_code audited null", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockUnitAdminFindMany.mockResolvedValue([]);
+    const res = await POST(
+      post({
+        op: "create",
+        unitType: "center",
+        name: "Cross-Campus Initiative",
+        slug: "cross-campus-initiative",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockDepartmentFindUnique).not.toHaveBeenCalled();
+    expect(mockTxCenterCreate).toHaveBeenCalledTimes(1);
+    expect(auditAfterValues()).toMatchObject({ unit_type: "center", dept_code: null });
+  });
+
+  it("Superuser sends deptCode: null (the form's wire value) → 200", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockUnitAdminFindMany.mockResolvedValue([]);
+    const res = await POST(
+      post({
+        op: "create",
+        unitType: "center",
+        name: "Cross-Campus Initiative",
+        slug: "cross-campus-initiative",
+        deptCode: null,
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(auditAfterValues()).toMatchObject({ dept_code: null });
+  });
+
+  it("Owner (non-Superuser) still needs a deptCode — it is what admits them", async () => {
+    const res = await POST(
+      post({ op: "create", unitType: "center", name: "X", slug: "x" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_dept_code" });
+    expect(mockTxCenterCreate).not.toHaveBeenCalled();
+  });
+
+  it("a division still needs a deptCode even for a Superuser — it is a real FK", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    const res = await POST(
+      post({ op: "create", unitType: "division", name: "X", slug: "x", code: "N9999" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_dept_code" });
+    expect(mockTxDivisionCreate).not.toHaveBeenCalled();
+  });
+
+  it("a SUPPLIED deptCode is still validated — unknown → 400 dept_not_found", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockDepartmentFindUnique.mockResolvedValue(null);
+    const res = await POST(
+      post({ op: "create", unitType: "center", name: "X", slug: "x", deptCode: "GHOST" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "dept_not_found" });
+  });
+
+  it("deptCode:'' is NOT an omission — 400 invalid_dept_code even for a Superuser", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    const res = await POST(
+      post({ op: "create", unitType: "center", name: "X", slug: "x", deptCode: "" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_dept_code" });
+  });
+
+  it("lockdown flag ON: a Superuser may still omit it; a non-Superuser 400s before the 403", async () => {
+    // Deliberate ordering: the file's "a 400 precedes any authz check"
+    // invariant means the missing-deptCode 400 wins over `not_superuser`.
+    mockIsOrgUnitCreateSuperuserOnly.mockReturnValue(true);
+    const denied = await POST(
+      post({ op: "create", unitType: "center", name: "X", slug: "x" }),
+    );
+    expect(denied.status).toBe(400);
+    expect(await denied.json()).toMatchObject({ ok: false, error: "invalid_dept_code" });
+
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    const allowed = await POST(
+      post({ op: "create", unitType: "center", name: "Y", slug: "y" }),
+    );
+    expect(allowed.status).toBe(200);
   });
 });
 
