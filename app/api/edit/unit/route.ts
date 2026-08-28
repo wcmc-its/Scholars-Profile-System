@@ -14,7 +14,10 @@
  *      Superuser (#2541): nothing admits them by department, so a
  *      cross-campus center is created with none and audits `dept_code: null`.
  *      It stays required for a non-Superuser (it is what admits them), and
- *      for a division (a real NOT NULL FK).
+ *      for a division (a real NOT NULL FK). A non-Superuser creator is also
+ *      seeded as Owner of the new center in the same transaction (#2544) —
+ *      centers never cascade, so without that row the creator would hold no
+ *      role on the center they just made.
  *    - **Coded division** (`unitType: "division"` with a real LDAP `code`):
  *      Superuser-only (SPEC line 214 — structural; a wrong code is
  *      permanently unadoptable; audit query C is the back-office guard).
@@ -352,6 +355,43 @@ async function createInformalCenter(params: {
         ts: new Date(),
         requestId,
       });
+      // Seed the creator as Owner of the center they just made (#2544).
+      // `getEffectiveUnitRole` cascades to a parent department for DIVISIONS
+      // only, and a Center has no parent column — so without this row a
+      // non-Superuser Owner holds no role on their own center: they cannot
+      // edit it, add members, or even self-grant (POST /api/edit/grant builds
+      // `{kind:"center", code}`, gets `none` back, and 403s). The center would
+      // be Superuser-only from the instant it existed.
+      //
+      // Superusers are excluded deliberately: they already pass every check
+      // without a row, so minting one would only add noise to the
+      // Administrators roster.
+      if (!session.isSuperuser) {
+        await tx.unitAdmin.create({
+          data: {
+            entityType: "center",
+            entityId: created.code,
+            cwid: session.cwid,
+            role: "owner",
+            grantedBy: session.cwid,
+          },
+        });
+        // Second audit row, same transaction, mirroring /api/edit/grant's
+        // shape — the grant is a real `unit_admin` write and the audit log is
+        // the only history that table keeps.
+        await appendAuditRow(tx, {
+          actorCwid: realCwid,
+          impersonatedCwid,
+          targetEntityType: "center",
+          targetEntityId: created.code,
+          action: "grant_change",
+          fieldsChanged: null,
+          beforeValues: null,
+          afterValues: { cwid: session.cwid, role: "owner", granted_by: session.cwid },
+          ts: new Date(),
+          requestId,
+        });
+      }
     });
   } catch (err) {
     logEditFailure(PATH, err);
