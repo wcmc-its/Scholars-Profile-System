@@ -27,6 +27,23 @@
  *
  * Replaces the v1 native `window.confirm` (UI-SPEC dirty-state scope) and
  * closes the documented Back/forward gap (former KNOWN v1 GAP D6.3).
+ *
+ * ⚠ HAZARD FOR A FORM THAT NAVIGATES ON SAVE (#2546). Route 3's effect cleanup
+ * pops the sentinel with `history.back()` whenever `dirty` goes false OR the
+ * component unmounts. If the consumer clears `dirty` and calls
+ * `router.push(...)` in the same commit, that pop races the push — and wins:
+ * measured on staging, the redirect was eaten on every attempt, silently
+ * (`bypassRef` swallows the resulting popstate, so there is no console output
+ * and no dialog). The write had already committed, so the operator saw a
+ * completed action with no navigation and no feedback.
+ *
+ * Every current consumer is safe: five of the six save in place with
+ * `router.refresh()`, and `unit-create-form` deliberately no longer pushes at
+ * all — it renders a success panel with a real link instead. If you add a form
+ * under this guard that MUST navigate on save, do not simply call
+ * `router.push` — you will hit this. Route the navigation through the
+ * `pendingPushRef` mechanism (as the confirmed-href path does), or land the
+ * user with a real link rather than a programmatic push.
  */
 "use client";
 
