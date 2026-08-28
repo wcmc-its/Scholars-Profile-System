@@ -10,7 +10,11 @@
  *      `source='manual'`. Authz: `ownerOf(deptCode)` OR Superuser (SPEC
  *      line 213). The `deptCode` carried in the body is the parent dept
  *      whose Owner this is — it does NOT persist on the Center row (no FK),
- *      but is the authz key.
+ *      but is the authz key. Being ONLY an authz key, it is optional for a
+ *      Superuser (#2541): nothing admits them by department, so a
+ *      cross-campus center is created with none and audits `dept_code: null`.
+ *      It stays required for a non-Superuser (it is what admits them), and
+ *      for a division (a real NOT NULL FK).
  *    - **Coded division** (`unitType: "division"` with a real LDAP `code`):
  *      Superuser-only (SPEC line 214 — structural; a wrong code is
  *      permanently unadoptable; audit query C is the back-office guard).
@@ -53,6 +57,11 @@ import {
 } from "@/lib/edit/validators";
 
 const PATH = "/api/edit/unit";
+
+/** The `edit_authz_denied` target when a create carries no parent dept (#2541).
+ *  One constant for both keys, so the denial stream shows a single target for
+ *  the condition rather than two spellings of the same absence. */
+const NO_PARENT_DEPT_TARGET = "new-unit";
 
 /** The set of Center fields a per-field update touches. */
 const CENTER_UPDATE_FIELDS = [
@@ -136,16 +145,30 @@ async function handleCreate(
   const slugResult = validateSlugFormat(slug);
   if (!slugResult.ok) return editError(400, slugResult.error, "slug");
 
-  if (typeof deptCode !== "string" || deptCode.length === 0) {
+  // Omitting `deptCode` (absent or `null`) is allowed only for a Superuser
+  // creating a center, where it is an authz key nobody needs (#2541). A
+  // supplied value is validated exactly as before — "" or a non-string still
+  // 400s, so a mistyped code can't be smuggled past the existence check below.
+  let parentDeptCode: string | null = null;
+  if (deptCode === undefined || deptCode === null) {
+    if (unitType !== "center" || !session.isSuperuser) {
+      return editError(400, "invalid_dept_code", "deptCode");
+    }
+  } else if (typeof deptCode !== "string" || deptCode.length === 0) {
     return editError(400, "invalid_dept_code", "deptCode");
+  } else {
+    parentDeptCode = deptCode;
   }
 
-  // Parent dept must exist — a 400 precedes any authz check.
-  const parentDept = await db.read.department.findUnique({
-    where: { code: deptCode },
-    select: { code: true, slug: true },
-  });
-  if (!parentDept) return editError(400, "dept_not_found", "deptCode");
+  // A supplied parent dept must exist — a 400 precedes any authz check.
+  const parentDept =
+    parentDeptCode === null
+      ? null
+      : await db.read.department.findUnique({
+          where: { code: parentDeptCode },
+          select: { code: true, slug: true },
+        });
+  if (parentDeptCode !== null && !parentDept) return editError(400, "dept_not_found", "deptCode");
 
   if (unitType === "center") {
     return createInformalCenter({
@@ -155,9 +178,15 @@ async function handleCreate(
       requestId,
       name: nameResult.value,
       slug: slugResult.value,
-      deptCode,
+      deptCode: parentDeptCode,
       centerType,
     });
+  }
+  // A division's `deptCode` is a real NOT NULL FK, so it is required for
+  // everyone — the guard above already refused an omission here; this only
+  // narrows the two values for tsc.
+  if (parentDeptCode === null || parentDept === null) {
+    return editError(400, "invalid_dept_code", "deptCode");
   }
   return createCodedDivision({
     session,
@@ -166,7 +195,7 @@ async function handleCreate(
     requestId,
     name: nameResult.value,
     slug: slugResult.value,
-    deptCode,
+    deptCode: parentDeptCode,
     parentDeptSlug: parentDept.slug,
     code,
   });
@@ -179,7 +208,10 @@ async function createInformalCenter(params: {
   requestId: string | null;
   name: string;
   slug: string;
-  deptCode: string;
+  /** The parent dept whose Owner this is — an authz key, never a stored parent
+   *  (`Center` has no parent column). `null` = a Superuser created a center
+   *  scoped to no department (#2541). */
+  deptCode: string | null;
   centerType: unknown;
 }): Promise<NextResponse> {
   const { session, realCwid, impersonatedCwid, requestId, name, slug, deptCode, centerType } =
@@ -196,11 +228,11 @@ async function createInformalCenter(params: {
     if (centerType === "institute" && !session.isSuperuser) {
       logEditDenial({
         actorCwid: session.cwid,
-        targetCwid: deptCode,
+        targetCwid: deptCode ?? NO_PARENT_DEPT_TARGET,
         path: PATH,
         reason: "not_superuser",
         targetEntityType: "department",
-        targetEntityId: deptCode,
+        targetEntityId: deptCode ?? NO_PARENT_DEPT_TARGET,
       });
       return editError(403, "not_superuser");
     }
@@ -216,20 +248,25 @@ async function createInformalCenter(params: {
     if (!session.isSuperuser) {
       logEditDenial({
         actorCwid: session.cwid,
-        targetCwid: deptCode,
+        targetCwid: deptCode ?? NO_PARENT_DEPT_TARGET,
         path: PATH,
         reason: "not_superuser",
         targetEntityType: "department",
-        targetEntityId: deptCode,
+        targetEntityId: deptCode ?? NO_PARENT_DEPT_TARGET,
       });
       return editError(403, "not_superuser");
     }
   } else {
-    const effective = await getEffectiveUnitRole(
-      session,
-      { kind: "department", code: deptCode },
-      db.read as unknown as UnitAdminLookup,
-    );
+    // No parent dept means no ownership to inherit, so only the Superuser arm
+    // of the predicate below can pass — which is exactly the #2541 contract.
+    const effective =
+      deptCode === null
+        ? "none"
+        : await getEffectiveUnitRole(
+            session,
+            { kind: "department", code: deptCode },
+            db.read as unknown as UnitAdminLookup,
+          );
     // Deliberately NOT `canManageAccess` — that predicate now also admits a
     // comms_steward (2026-08-26 policy widening, decision #3, scoped to
     // granting/revoking `unit_admin` rows), but org-unit CREATE stays
@@ -243,11 +280,11 @@ async function createInformalCenter(params: {
     if (!authz.ok) {
       logEditDenial({
         actorCwid: session.cwid,
-        targetCwid: deptCode,
+        targetCwid: deptCode ?? NO_PARENT_DEPT_TARGET,
         path: PATH,
         reason: authz.reason,
         targetEntityType: "department",
-        targetEntityId: deptCode,
+        targetEntityId: deptCode ?? NO_PARENT_DEPT_TARGET,
       });
       return editError(403, authz.reason);
     }
@@ -301,6 +338,11 @@ async function createInformalCenter(params: {
         beforeValues: null,
         afterValues: {
           unit_type: "center",
+          // Nullable (#2541): `null` records that a Superuser scoped this
+          // center to no department. It is a key inside the `after_values`
+          // JSON, not a column, and nothing reads it back — audit query C
+          // (`scripts/backfills/audit-unit-curation.ts`) lists manual units
+          // straight off `center`/`division`, never this row.
           dept_code: deptCode,
           name,
           slug,

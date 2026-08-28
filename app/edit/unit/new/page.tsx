@@ -20,8 +20,10 @@
  *
  * A Superuser sees the mode toggle and a department picker (the full list is
  * loaded here — a small bounded set — so the client filters in-memory with no
- * extra endpoint). An Owner sees the center form only, with the parent
- * department fixed read-only from `?dept=`.
+ * extra endpoint). On the center path a Superuser may skip that picker (#2541)
+ * by ticking "No parent department", which creates a center scoped to none. An
+ * Owner sees the center form only, with the parent department fixed read-only
+ * from `?dept=`.
  *
  * No caching: `force-dynamic` + `noindex`, matching the rest of `/edit/*`.
  *
