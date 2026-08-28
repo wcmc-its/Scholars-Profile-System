@@ -209,12 +209,13 @@ export function UnitCreateForm({
       >
         <h2 className="text-base font-medium">{unitNoun} created</h2>
         <p className="text-muted-foreground text-sm">
-          <span className="text-foreground font-medium">{createdName}</span> was created. Opening
-          its editor now — if this page doesn&apos;t move, use the link below.
+          <span className="text-foreground font-medium">{createdName}</span> was created. Open its
+          editor to add a description and members.
         </p>
-        {/* Deliberately a bare <a>, NOT next/link: this link exists BECAUSE a
-            soft nav failed, so routing it through the same App Router
-            machinery would reproduce the hang it is the escape hatch for. */}
+        {/* Deliberately a bare <a>, NOT next/link. This is the ONLY way off
+            this panel (#2548 removed the programmatic redirect), and a soft
+            nav here would run the same App Router path that UnsavedChangesGuard
+            was eating — see the hazard note in unsaved-changes-guard.tsx. */}
         <a
           href={unitEditorHref(mode, createdCode)}
           className="text-apollo-slate text-sm underline"
