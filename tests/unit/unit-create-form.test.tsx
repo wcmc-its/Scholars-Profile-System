@@ -2,6 +2,10 @@
  * `components/edit/unit-create-form.tsx` — the two-mode `/edit/unit/new` form
  * (#540 Phase 7d). Covers the center + division submits, the Superuser mode
  * toggle, the Owner-locked variant, slug format gating, and a collision error.
+ * Plus #2545: a successful create replaces the form with a success panel whose
+ * link is the same destination `router.push` was given, so a soft-nav that
+ * never commits still leaves the operator a working way forward instead of a
+ * populated form that invites a duplicate submit.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
@@ -149,6 +153,61 @@ describe("UnitCreateForm — Superuser", () => {
     pickDept("N1280");
     expect(screen.getByTestId("create-slug-error")).toBeTruthy();
     expect(screen.getByTestId("create-submit").hasAttribute("disabled")).toBe(true);
+  });
+
+  it("replaces the form with a success panel linking to the push destination (#2545)", async () => {
+    const fetchMock = stubFetch({ body: { ok: true, code: "man-abc123", slug: "precision" } });
+    render(<UnitCreateForm {...superuserCenter} />);
+    fireEvent.change(screen.getByTestId("create-name"), { target: { value: "Precision Center" } });
+    fireEvent.change(screen.getByTestId("create-slug"), { target: { value: "precision" } });
+    pickDept("N1280");
+    fireEvent.click(screen.getByTestId("create-submit"));
+    await waitFor(() => expect(screen.getByTestId("create-success")).toBeTruthy());
+
+    // The form is GONE — there is nothing left to submit a second time, which
+    // is what used to produce the misleading `slug_taken`.
+    expect(screen.queryByTestId("unit-create-form")).toBeNull();
+    expect(screen.queryByTestId("create-submit")).toBeNull();
+
+    // Announced, and it names the unit that was created.
+    const panel = screen.getByTestId("create-success");
+    expect(panel.getAttribute("role")).toBe("status");
+    expect(panel.textContent).toMatch(/Precision Center/);
+
+    // The escape hatch: the SAME href router.push was given.
+    const link = screen.getByTestId("create-success-link") as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("/edit/center/man-abc123?attr=description");
+    expect(mockPush).toHaveBeenCalledWith(link.getAttribute("href"));
+
+    // Exactly one create round-trip.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("the success panel links to the DIVISION editor when a division was created (#2545)", async () => {
+    stubFetch({ body: { ok: true, code: "N9999", slug: "new-div" } });
+    render(<UnitCreateForm {...superuserCenter} />);
+    fireEvent.click(screen.getByTestId("create-mode-division"));
+    fireEvent.change(screen.getByTestId("create-code"), { target: { value: "n9999" } });
+    fireEvent.change(screen.getByTestId("create-name"), { target: { value: "New Division" } });
+    fireEvent.change(screen.getByTestId("create-slug"), { target: { value: "new-div" } });
+    pickDept("N2000");
+    fireEvent.click(screen.getByTestId("create-submit"));
+    await waitFor(() => expect(screen.getByTestId("create-success")).toBeTruthy());
+    expect(screen.getByTestId("create-success-link").getAttribute("href")).toBe(
+      "/edit/division/N9999?attr=description",
+    );
+  });
+
+  it("a FAILED create keeps the form (no success panel) (#2545)", async () => {
+    stubFetch({ status: 400, body: { ok: false, error: "slug_taken" } });
+    render(<UnitCreateForm {...superuserCenter} />);
+    fireEvent.change(screen.getByTestId("create-name"), { target: { value: "Dup Center" } });
+    fireEvent.change(screen.getByTestId("create-slug"), { target: { value: "taken" } });
+    pickDept("N1280");
+    fireEvent.click(screen.getByTestId("create-submit"));
+    await waitFor(() => expect(screen.getByTestId("create-error")).toBeTruthy());
+    expect(screen.queryByTestId("create-success")).toBeNull();
+    expect(screen.getByTestId("unit-create-form")).toBeTruthy();
   });
 
   it("surfaces a slug collision from the server", async () => {

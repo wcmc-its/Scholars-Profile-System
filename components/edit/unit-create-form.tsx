@@ -24,6 +24,15 @@
  * does not accept one). Format validation reuses the server's validators
  * (`validateUnitName` / `validateSlugFormat` / `validateLdapCode`); a slug/code
  * collision is reported by the server on submit.
+ *
+ * A committed `router.push` unmounts this component, so the redirect IS the
+ * success feedback — except when the soft-nav does not commit (#1995). Then the
+ * operator was left looking at a populated form with no signal that the unit
+ * existed, clicked Create again, and read the resulting `slug_taken` as a
+ * failure — an invitation to file a DUPLICATE under a different slug. So a
+ * successful create REPLACES the form with a success panel carrying a real
+ * `<Link>` to the same destination (#2545): a hung soft-nav degrades to a link
+ * the operator can click, and the double-submit path stops existing.
  */
 "use client";
 
@@ -45,6 +54,12 @@ import {
 } from "@/lib/edit/validators";
 
 type Mode = "center" | "division";
+
+/** The post-create destination. ONE builder so the `router.push` target and the
+ *  success panel's fallback link can never drift apart (#2545). */
+function unitEditorHref(mode: Mode, code: string): string {
+  return `/edit/${mode}/${encodeURIComponent(code)}?attr=description`;
+}
 
 export type UnitCreateFormProps = {
   initialMode: Mode;
@@ -76,7 +91,17 @@ export function UnitCreateForm({
 
   const [submitting, setSubmitting] = React.useState(false);
   const [done, setDone] = React.useState(false);
+  /** The code the server minted — held so the success panel can build the same
+   *  href `router.push` was given (#2545). */
+  const [createdCode, setCreatedCode] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+
+  // Move focus to the success panel when it replaces the form, so a screen
+  // reader lands on the confirmation (and its link) rather than on nothing.
+  const successRef = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    if (done) successRef.current?.focus();
+  }, [done]);
 
   const [cancelHref, setCancelHref] = React.useState("/edit/scholars");
   React.useEffect(() => {
@@ -151,14 +176,51 @@ export function UnitCreateForm({
         return;
       }
       // Land on the new unit's editor, on the description panel (the create form
-      // has no description field — this is where the operator sets it).
+      // has no description field — this is where the operator sets it). Kept
+      // exactly as-is: when the soft-nav commits, this component unmounts and
+      // the success panel below is never seen.
       setDone(true);
-      router.push(`/edit/${mode}/${encodeURIComponent(data.code)}?attr=description`);
+      setCreatedCode(data.code);
+      router.push(unitEditorHref(mode, data.code));
     } catch {
       setError(mapErrorToMessage(""));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // Success REPLACES the form (#2545). The `router.push` above normally
+  // unmounts this component first; this panel is what the operator sees when
+  // the soft-nav never commits — a plain statement that the unit exists plus a
+  // real link to the same destination. Because the form is gone, the
+  // double-submit that produced a misleading `slug_taken` cannot happen.
+  if (done && createdCode !== null) {
+    const unitNoun =
+      mode === "division" ? "Division" : centerType === "institute" ? "Institute" : "Center";
+    const createdName = name.trim() || slug.trim();
+    return (
+      <div
+        ref={successRef}
+        tabIndex={-1}
+        role="status"
+        aria-live="polite"
+        className="border-apollo-border-strong bg-apollo-surface flex max-w-xl flex-col gap-3 rounded-md border p-5"
+        data-testid="create-success"
+      >
+        <h2 className="text-base font-medium">{unitNoun} created</h2>
+        <p className="text-muted-foreground text-sm">
+          <span className="text-foreground font-medium">{createdName}</span> was created. Opening
+          its editor now — if this page doesn&apos;t move, use the link below.
+        </p>
+        <Link
+          href={unitEditorHref(mode, createdCode)}
+          className="text-apollo-slate text-sm underline"
+          data-testid="create-success-link"
+        >
+          Go to {createdName}
+        </Link>
+      </div>
+    );
   }
 
   return (
