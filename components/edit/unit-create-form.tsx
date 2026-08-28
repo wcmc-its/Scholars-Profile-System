@@ -25,20 +25,20 @@
  * (`validateUnitName` / `validateSlugFormat` / `validateLdapCode`); a slug/code
  * collision is reported by the server on submit.
  *
- * A committed `router.push` unmounts this component, so the redirect IS the
- * success feedback — except when the soft-nav does not commit (#1995). Then the
- * operator was left looking at a populated form with no signal that the unit
- * existed, clicked Create again, and read the resulting `slug_taken` as a
- * failure — an invitation to file a DUPLICATE under a different slug. So a
- * successful create REPLACES the form with a success panel carrying a hard link
- * to the same destination (#2545): a hung soft-nav degrades to a link the
- * operator can click, and the double-submit path stops existing.
+ * A successful create REPLACES the form with a success panel naming the unit
+ * and linking to its editor (#2545). Previously this relied on a `router.push`
+ * redirect, which left the operator on a populated form with no signal when it
+ * failed to commit; clicking Create again returned `slug_taken`, which reads as
+ * failure and invites a DUPLICATE under a different slug.
+ *
+ * The push is now gone entirely (#2546): `dirty` is always true at submit here,
+ * so UnsavedChangesGuard's disarm cleanup fired `history.back()` and ate the
+ * navigation on every create. The panel is the landing, not a fallback.
  */
 "use client";
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 
 import { DepartmentPicker, type DepartmentOption } from "@/components/edit/department-picker";
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
@@ -55,8 +55,7 @@ import {
 
 type Mode = "center" | "division";
 
-/** The post-create destination. ONE builder so the `router.push` target and the
- *  success panel's fallback link can never drift apart (#2545). */
+/** The post-create destination — where the success panel sends the operator. */
 function unitEditorHref(mode: Mode, code: string): string {
   return `/edit/${mode}/${encodeURIComponent(code)}?attr=description`;
 }
@@ -79,7 +78,6 @@ export function UnitCreateForm({
   departments,
   fixedDept,
 }: UnitCreateFormProps) {
-  const router = useRouter();
 
   const [mode, setMode] = React.useState<Mode>(initialMode);
   const [name, setName] = React.useState("");
@@ -91,8 +89,8 @@ export function UnitCreateForm({
 
   const [submitting, setSubmitting] = React.useState(false);
   const [done, setDone] = React.useState(false);
-  /** The code the server minted — held so the success panel can build the same
-   *  href `router.push` was given (#2545). */
+  /** The code the server minted — held so the success panel can build the
+   *  editor href for it (#2545). */
   const [createdCode, setCreatedCode] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -175,14 +173,16 @@ export function UnitCreateForm({
         setError(mapErrorToMessage("error" in data ? data.error : ""));
         return;
       }
-      // Land on the new unit's editor, on the description panel (the create form
-      // has no description field — this is where the operator sets it). These
-      // two setState calls are urgent, so the panel below commits BEFORE the
-      // push's async navigation resolves: on a healthy create it shows for the
-      // duration of the nav, and simply stays put when the nav never lands.
+      // Deliberately NO `router.push` here (#2546). This form's `dirty` is
+      // always true at submit — a valid name is required — so
+      // UnsavedChangesGuard has always pushed its history sentinel, and its
+      // disarm cleanup fires `history.back()` the instant `done` flips. That
+      // pop raced, and reliably beat, the push: measured on staging, the
+      // redirect was eaten on every create. Rather than operate on a guard
+      // mounted by five other /edit forms to rescue a navigation nobody has
+      // ever actually received, the success panel below IS the landing.
       setDone(true);
       setCreatedCode(data.code);
-      router.push(unitEditorHref(mode, data.code));
     } catch {
       setError(mapErrorToMessage(""));
     } finally {
@@ -190,11 +190,10 @@ export function UnitCreateForm({
     }
   }
 
-  // Success REPLACES the form (#2545). The `router.push` above normally
-  // unmounts this component first; this panel is what the operator sees when
-  // the soft-nav never commits — a plain statement that the unit exists plus a
-  // real link to the same destination. Because the form is gone, the
-  // double-submit that produced a misleading `slug_taken` cannot happen.
+  // Success REPLACES the form (#2545). This panel is the ONLY success path —
+  // a plain statement that the unit exists plus a real link to its editor.
+  // Because the form is gone, the double-submit that produced a misleading
+  // `slug_taken` cannot happen.
   if (done && createdCode) {
     const unitNoun =
       mode === "division" ? "Division" : centerType === "institute" ? "Institute" : "Center";

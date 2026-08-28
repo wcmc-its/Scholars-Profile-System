@@ -50,7 +50,7 @@ const superuserCenter = {
 };
 
 describe("UnitCreateForm — Superuser", () => {
-  it("creates a center via /api/edit/unit op:create and redirects to its editor", async () => {
+  it("creates a center via /api/edit/unit op:create and lands on the success panel", async () => {
     const fetchMock = stubFetch({ body: { ok: true, code: "man-abc123", slug: "precision" } });
     render(<UnitCreateForm {...superuserCenter} />);
     fireEvent.change(screen.getByTestId("create-name"), { target: { value: "Precision Center" } });
@@ -67,9 +67,13 @@ describe("UnitCreateForm — Superuser", () => {
       deptCode: "N1280",
       centerType: "center",
     });
+    // #2546 — no `router.push`: the success panel IS the landing.
     await waitFor(() =>
-      expect(mockPush).toHaveBeenCalledWith("/edit/center/man-abc123?attr=description"),
+      expect(
+        screen.getByTestId("create-success-link").getAttribute("href"),
+      ).toBe("/edit/center/man-abc123?attr=description"),
     );
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   it("toggles to division mode and creates a coded division (code uppercased)", async () => {
@@ -91,7 +95,12 @@ describe("UnitCreateForm — Superuser", () => {
       slug: "new-div",
       deptCode: "N2000",
     });
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/edit/division/N9999?attr=description"));
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("create-success-link").getAttribute("href"),
+      ).toBe("/edit/division/N9999?attr=description"),
+    );
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   it("creates a center with NO parent department once the control is ticked — deptCode: null (#2541)", async () => {
@@ -155,7 +164,7 @@ describe("UnitCreateForm — Superuser", () => {
     expect(screen.getByTestId("create-submit").hasAttribute("disabled")).toBe(true);
   });
 
-  it("replaces the form with a success panel linking to the push destination (#2545)", async () => {
+  it("replaces the form with a success panel linking to the new unit's editor (#2545)", async () => {
     const fetchMock = stubFetch({ body: { ok: true, code: "man-abc123", slug: "precision" } });
     render(<UnitCreateForm {...superuserCenter} />);
     fireEvent.change(screen.getByTestId("create-name"), { target: { value: "Precision Center" } });
@@ -174,10 +183,13 @@ describe("UnitCreateForm — Superuser", () => {
     expect(panel.getAttribute("role")).toBe("status");
     expect(panel.textContent).toMatch(/Precision Center/);
 
-    // The escape hatch: the SAME href router.push was given.
+    // The landing: a real anchor to the new unit's editor. Deliberately NOT a
+    // `router.push` — the guard's disarm cleanup ate that on every create
+    // (#2546), so a programmatic redirect here must never come back.
     const link = screen.getByTestId("create-success-link") as HTMLAnchorElement;
+    expect(link.tagName).toBe("A");
     expect(link.getAttribute("href")).toBe("/edit/center/man-abc123?attr=description");
-    expect(mockPush).toHaveBeenCalledWith(link.getAttribute("href"));
+    expect(mockPush).not.toHaveBeenCalled();
 
     // Exactly one create round-trip.
     expect(fetchMock).toHaveBeenCalledTimes(1);
