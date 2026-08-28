@@ -30,9 +30,9 @@
  * operator was left looking at a populated form with no signal that the unit
  * existed, clicked Create again, and read the resulting `slug_taken` as a
  * failure — an invitation to file a DUPLICATE under a different slug. So a
- * successful create REPLACES the form with a success panel carrying a real
- * `<Link>` to the same destination (#2545): a hung soft-nav degrades to a link
- * the operator can click, and the double-submit path stops existing.
+ * successful create REPLACES the form with a success panel carrying a hard link
+ * to the same destination (#2545): a hung soft-nav degrades to a link the
+ * operator can click, and the double-submit path stops existing.
  */
 "use client";
 
@@ -176,9 +176,10 @@ export function UnitCreateForm({
         return;
       }
       // Land on the new unit's editor, on the description panel (the create form
-      // has no description field — this is where the operator sets it). Kept
-      // exactly as-is: when the soft-nav commits, this component unmounts and
-      // the success panel below is never seen.
+      // has no description field — this is where the operator sets it). These
+      // two setState calls are urgent, so the panel below commits BEFORE the
+      // push's async navigation resolves: on a healthy create it shows for the
+      // duration of the nav, and simply stays put when the nav never lands.
       setDone(true);
       setCreatedCode(data.code);
       router.push(unitEditorHref(mode, data.code));
@@ -194,7 +195,7 @@ export function UnitCreateForm({
   // the soft-nav never commits — a plain statement that the unit exists plus a
   // real link to the same destination. Because the form is gone, the
   // double-submit that produced a misleading `slug_taken` cannot happen.
-  if (done && createdCode !== null) {
+  if (done && createdCode) {
     const unitNoun =
       mode === "division" ? "Division" : centerType === "institute" ? "Institute" : "Center";
     const createdName = name.trim() || slug.trim();
@@ -212,13 +213,16 @@ export function UnitCreateForm({
           <span className="text-foreground font-medium">{createdName}</span> was created. Opening
           its editor now — if this page doesn&apos;t move, use the link below.
         </p>
-        <Link
+        {/* Deliberately a bare <a>, NOT next/link: this link exists BECAUSE a
+            soft nav failed, so routing it through the same App Router
+            machinery would reproduce the hang it is the escape hatch for. */}
+        <a
           href={unitEditorHref(mode, createdCode)}
           className="text-apollo-slate text-sm underline"
           data-testid="create-success-link"
         >
           Go to {createdName}
-        </Link>
+        </a>
       </div>
     );
   }

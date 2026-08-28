@@ -344,6 +344,10 @@ describe("/api/edit/unit op:'create' — the creator's owner grant (#2544)", () 
     expect(res.status).toBe(200);
     const createdCode = (await res.json()).code as string;
 
+    // ONE transaction, not two: a refactor that moved the grant into its own
+    // `$transaction` would produce identical row counts but could leave an
+    // ownerless center behind on a partial failure — the original bug.
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
     expect(mockExecuteRaw).toHaveBeenCalledTimes(2);
     expect(auditCall(0)[4]).toBe("unit_create");
 
