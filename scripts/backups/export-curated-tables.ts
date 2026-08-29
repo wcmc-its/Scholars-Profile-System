@@ -83,6 +83,11 @@ const CURATED_TABLES: readonly string[] = [
   // (research/clinical) is a Prisma ENUM realized as the `membership_type`
   // column on `center_membership`, so that data is already captured below.
   "center_membership",
+  // #2542 — the per-center role vocabulary. `center_membership`'s role keys FK
+  // to it, so dumping the memberships without it would restore rows pointing at
+  // a vocabulary that no longer exists (the dump header disables FK checks, so
+  // that restore would SUCCEED and leave the keys orphaned rather than erroring).
+  "center_role",
   "division_membership",
   "unit_admin",
   // --- Methods & tools: family-visibility overlays (DB is the SOR) ---

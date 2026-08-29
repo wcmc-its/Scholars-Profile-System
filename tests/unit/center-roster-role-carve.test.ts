@@ -90,8 +90,8 @@ describe("centers — fail-closed pass on the raw role column (#2271)", () => {
       slug: "test-center-hero",
       description: null,
       url: null,
-      directorCwid: null,
-      leaderInterim: false,
+      // #2542 — no director assignment.
+      members: [],
     });
 
     const center = await getCenter("test-center-hero");

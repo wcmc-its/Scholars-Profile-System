@@ -98,8 +98,8 @@ beforeEach(() => {
     slug: "meyer-cancer-center",
     description: null,
     url: null,
-    directorCwid: null,
-    leaderInterim: false,
+    // #2542 — no director assignment.
+    members: [],
   });
   mockSuppressionFindFirst.mockResolvedValue(null); // not whole-unit-suppressed
   mockSuppressionFindMany.mockResolvedValue([]);

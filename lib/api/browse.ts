@@ -21,6 +21,7 @@
  * All callers are Server Components / ISR pages. Public-data only — no auth.
  */
 import { prisma } from "@/lib/db";
+import { DIRECTOR_ROLE_KEY } from "@/lib/center-roles";
 import { countActiveCenterMembersByCode } from "@/lib/api/center-member-count";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
@@ -257,7 +258,15 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
       name: true,
       slug: true,
       description: true,
-      directorCwid: true,
+      // #2542 Phase 1 — the director moved off `Center.directorCwid` onto the
+      // holder's membership row. Nested on the same `findMany`, so this stays
+      // one extra query for the whole list rather than one per center.
+      members: {
+        where: { leadershipRoleKey: DIRECTOR_ROLE_KEY },
+        select: { cwid: true },
+        orderBy: { leadershipSortOrder: "asc" },
+        take: 1,
+      },
       // NB: `scholarCount` is deliberately NOT selected — the column is never
       // maintained for centers. Counted live below.
       sortOrder: true,
@@ -273,8 +282,10 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
     { publicOnly: true },
   );
 
+  const directorCwidOf = (c: (typeof centers)[number]): string | null =>
+    c.members[0]?.cwid ?? null;
   const directorCwids = centers
-    .map((c) => c.directorCwid)
+    .map(directorCwidOf)
     .filter((c): c is string => c !== null);
   const directors =
     directorCwids.length === 0
@@ -290,11 +301,11 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
     name: c.name,
     slug: c.slug,
     description: c.description,
-    directorName: c.directorCwid
-      ? (directorMap.get(c.directorCwid)?.preferredName ?? null)
+    directorName: directorCwidOf(c)
+      ? (directorMap.get(directorCwidOf(c)!)?.preferredName ?? null)
       : null,
-    directorSlug: c.directorCwid
-      ? (directorMap.get(c.directorCwid)?.slug ?? null)
+    directorSlug: directorCwidOf(c)
+      ? (directorMap.get(directorCwidOf(c)!)?.slug ?? null)
       : null,
     scholarCount: centerCounts.get(c.code) ?? 0,
     sortOrder: c.sortOrder,

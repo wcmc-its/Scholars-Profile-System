@@ -8,6 +8,7 @@
  */
 import { cache } from "react";
 import { prisma } from "@/lib/db";
+import { formatLeadershipTitle } from "@/lib/center-roles";
 import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import {
   getEffectiveOverview,
@@ -500,8 +501,9 @@ export type ProfilePayload = {
   division: string | null;
   /** #1266 — formatted leadership-role lines (Chair / Chief / Center Director /
    *  Program Leader), in that order; empty when the scholar holds none. Sourced
-   *  from Department.chairCwid / Division.chiefCwid / Center.directorCwid +
-   *  CenterProgramLeader rows and rendered beneath `primaryTitle`. Center and
+   *  from Department.chairCwid / Division.chiefCwid / a `CenterMembership`
+   *  leadership assignment (#2542; was Center.directorCwid) / CenterProgramLeader
+   *  rows and rendered beneath `primaryTitle`. Center and
    *  program lines are curated and sparse, so they appear only where curation
    *  exists. */
   leadershipTitles: string[];
@@ -1169,9 +1171,24 @@ export const getScholarFullProfileBySlug = cache(
           where: { chiefCwid: scholar.cwid },
           select: { name: true },
         }),
-        prisma.center.findMany({
-          where: { directorCwid: scholar.cwid },
-          select: { name: true, officialName: true, leaderInterim: true },
+        // #2542 Phase 1 — center leadership is a membership row now, not
+        // `CenterMembership.leadershipRoleKey` (#2542; was `Center.directorCwid`). `profileTitle` is what decides whether holding
+        // a role shows as a title here: Phase 2 folds in `coe_liaison`, which
+        // deliberately does NOT (see the `CenterProgramLeader` query below).
+        prisma.centerMembership.findMany({
+          where: {
+            cwid: scholar.cwid,
+            leadershipRoleKey: { not: null },
+            leadershipRole: { roleGroup: "leadership", profileTitle: true },
+          },
+          select: {
+            leadershipInterim: true,
+            leadershipQualifier: true,
+            leadershipSortOrder: true,
+            leadershipRole: { select: { label: true, sortOrder: true } },
+            center: { select: { name: true, officialName: true } },
+          },
+          orderBy: [{ leadershipSortOrder: "asc" }, { centerCode: "asc" }],
         }),
         prisma.centerProgramLeader.findMany({
           // #1570 — only program LEADS produce a "Leader, {program}" title line;
@@ -1192,7 +1209,11 @@ export const getScholarFullProfileBySlug = cache(
         ...chiefDivs.map((d) => `Chief, ${d.name}`),
         ...dirCenters.map(
           (c) =>
-            `${c.leaderInterim ? "Interim Director" : "Director"}, ${c.officialName ?? c.name}`,
+            `${formatLeadershipTitle(
+              c.leadershipRole?.label ?? "Director",
+              c.leadershipInterim,
+              c.leadershipQualifier,
+            )}, ${c.center?.officialName ?? c.center?.name}`,
         ),
         ...progLeads.map(
           (l) =>

@@ -33,6 +33,7 @@
  * reflection: `reflectUnitChange` on the unit page + `/browse`.
  */
 import { type NextRequest, type NextResponse } from "next/server";
+import { DIRECTOR_ROLE_KEY, centerRoleSeedRows } from "@/lib/center-roles";
 
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
@@ -327,6 +328,11 @@ async function createInformalCenter(params: {
           slug,
           centerType: centerTypeValue,
           source: "manual",
+          // #2542 Phase 1 — seed the default role vocabulary with the center, in
+          // the same transaction. A center created without it has no `director`
+          // key for a leadership assignment to reference, so its leadership
+          // editor would FK-error forever.
+          roles: { createMany: { data: centerRoleSeedRows(mintedCode) } },
         },
         select: { code: true },
       });
@@ -596,6 +602,13 @@ async function handleUpdate(
   }
   let updatePayload: Record<string, unknown>;
   let storedValue: string | boolean;
+  // #2542 Phase 1 — `directorCwid` / `leaderInterim` no longer map to a center
+  // column; they move the `director` assignment on a `CenterMembership` row.
+  // The REQUEST contract is unchanged (same two field names, same two POSTs
+  // from `unit-leader-card.tsx`, same `field_override` audit action and
+  // `fieldsChanged` label), so only the storage moves — which is what keeps the
+  // pre-#2542 center curation history queryable by the same key.
+  let leadershipWrite: { setCwid: string | null } | { setInterim: boolean } | null = null;
   if (fieldName === "name") {
     const r = validateUnitName(value);
     if (!r.ok) return editError(400, r.error, "value");
@@ -628,14 +641,17 @@ async function handleUpdate(
     const r = validateUnitLeaderCwid(value);
     if (!r.ok) return editError(400, r.error, "value");
     storedValue = r.value;
-    // "" = explicit vacancy → null on the column (centers don't have a
-    // three-state read-merge — the column is the only source).
-    updatePayload = { directorCwid: r.value === "" ? null : r.value };
+    // "" = explicit vacancy. Under #2542 that is no longer "null a column" but
+    // "drop the director assignment", which may also mean deleting a row that
+    // existed ONLY to carry it (a director who was never on the roster).
+    leadershipWrite = { setCwid: r.value === "" ? null : r.value };
+    updatePayload = {};
   } else if (fieldName === "leaderInterim") {
     const r = validateUnitLeaderInterim(value);
     if (!r.ok) return editError(400, r.error, "value");
     storedValue = r.value === "true";
-    updatePayload = { leaderInterim: storedValue };
+    leadershipWrite = { setInterim: storedValue };
+    updatePayload = {};
   } else {
     // centerType — Superuser-only, allowlist already validated indirectly
     // (the field name dispatches; the value still needs the enum check).
@@ -678,15 +694,72 @@ async function handleUpdate(
           slug: true,
           description: true,
           url: true,
-          directorCwid: true,
-          leaderInterim: true,
           centerType: true,
         },
       });
-      await tx.center.update({
-        where: { code: entityId },
-        data: updatePayload,
+      // #2542 — the current director assignment, which is what `directorCwid`
+      // and `leaderInterim` now read and write.
+      const beforeLeader = await tx.centerMembership.findFirst({
+        where: { centerCode: entityId, leadershipRoleKey: DIRECTOR_ROLE_KEY },
+        select: { cwid: true, leadershipInterim: true, membershipRoleKey: true },
+        orderBy: { leadershipSortOrder: "asc" },
       });
+      if (Object.keys(updatePayload).length > 0) {
+        await tx.center.update({
+          where: { code: entityId },
+          data: updatePayload,
+        });
+      }
+      if (leadershipWrite && "setCwid" in leadershipWrite) {
+        // Vacate the incumbent first: strip the role, and delete the row
+        // outright when it carried nothing else (a leadership-only row).
+        // A row that is also a roster member keeps its membership.
+        if (beforeLeader && beforeLeader.cwid !== leadershipWrite.setCwid) {
+          if (beforeLeader.membershipRoleKey === null) {
+            await tx.centerMembership.delete({
+              where: { centerCode_cwid: { centerCode: entityId, cwid: beforeLeader.cwid } },
+            });
+          } else {
+            await tx.centerMembership.update({
+              where: { centerCode_cwid: { centerCode: entityId, cwid: beforeLeader.cwid } },
+              data: { leadershipRoleKey: null, leadershipInterim: false },
+            });
+          }
+        }
+        if (leadershipWrite.setCwid !== null) {
+          // The interim qualifier rides with the POST, not with the person —
+          // `Center.leaderInterim` was a separate column that survived a
+          // director change, so carry it onto the new holder.
+          await tx.centerMembership.upsert({
+            where: {
+              centerCode_cwid: { centerCode: entityId, cwid: leadershipWrite.setCwid },
+            },
+            create: {
+              centerCode: entityId,
+              cwid: leadershipWrite.setCwid,
+              membershipRoleKey: null,
+              membershipType: null,
+              leadershipRoleKey: DIRECTOR_ROLE_KEY,
+              leadershipInterim: beforeLeader?.leadershipInterim ?? false,
+            },
+            update: {
+              leadershipRoleKey: DIRECTOR_ROLE_KEY,
+              leadershipInterim: beforeLeader?.leadershipInterim ?? false,
+            },
+          });
+        }
+      } else if (leadershipWrite && "setInterim" in leadershipWrite) {
+        // No director => nothing to qualify. `unit-leader-card.tsx` always POSTs
+        // the cwid before the interim flag, so the row exists by now on a real
+        // save; the no-op case is toggling interim on a vacant center, which
+        // used to persist on the column and now simply does not stick.
+        if (beforeLeader) {
+          await tx.centerMembership.update({
+            where: { centerCode_cwid: { centerCode: entityId, cwid: beforeLeader.cwid } },
+            data: { leadershipInterim: leadershipWrite.setInterim },
+          });
+        }
+      }
       const beforeValue =
         fieldName === "name"
           ? before?.name
@@ -697,9 +770,9 @@ async function handleUpdate(
             : fieldName === "url"
               ? before?.url
               : fieldName === "directorCwid"
-                ? before?.directorCwid
+                ? (beforeLeader?.cwid ?? null)
                 : fieldName === "leaderInterim"
-                  ? before?.leaderInterim
+                  ? (beforeLeader?.leadershipInterim ?? false)
                   : before?.centerType;
       await appendAuditRow(tx, {
         actorCwid: realCwid,

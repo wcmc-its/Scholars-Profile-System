@@ -20,7 +20,8 @@
  *      - Curator edits description; success + reflectUnitChange.
  *      - slug + centerType are Superuser-only.
  *      - Slug update revalidates the old slug too (previousSlug).
- *      - directorCwid="" stores null (explicit vacancy).
+ *      - directorCwid="" vacates the `director` assignment on the membership
+ *        row (#2542; was "stores null on the column").
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
@@ -101,6 +102,11 @@ const OWNER = { cwid: "own001", isSuperuser: false };
 const NONADMIN = { cwid: "non001", isSuperuser: false };
 const SUPERUSER = { cwid: "sup001", isSuperuser: true };
 
+const mockTxCenterMembershipFindFirst = vi.fn();
+const mockTxCenterMembershipUpsert = vi.fn();
+const mockTxCenterMembershipUpdate = vi.fn();
+const mockTxCenterMembershipDelete = vi.fn();
+
 const fakeTx = {
   center: {
     create: mockTxCenterCreate,
@@ -113,6 +119,14 @@ const fakeTx = {
     update: mockTxDivisionUpdate,
   },
   unitAdmin: { create: mockTxUnitAdminCreate },
+  // #2542 — center leadership writes land on `CenterMembership` now, so the
+  // transaction stub needs the delegate or every center update throws.
+  centerMembership: {
+    findFirst: mockTxCenterMembershipFindFirst,
+    upsert: mockTxCenterMembershipUpsert,
+    update: mockTxCenterMembershipUpdate,
+    delete: mockTxCenterMembershipDelete,
+  },
   $executeRaw: mockExecuteRaw,
 };
 
@@ -774,7 +788,17 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
     );
   });
 
-  it("directorCwid='' stores null on the column (explicit vacancy)", async () => {
+  // #2542 Phase 1 — a vacancy is no longer "null a column". Leadership lives on
+  // the incumbent's `CenterMembership` row, which the composite
+  // `@@id([centerCode, cwid])` shares with their roster membership — so vacating
+  // must strip ONLY the leadership half, unless the row existed solely to carry
+  // it (a director who was never on the roster), in which case it goes.
+  it("directorCwid='' on a director who IS a roster member keeps the membership", async () => {
+    mockTxCenterMembershipFindFirst.mockResolvedValue({
+      cwid: "dir0001",
+      leadershipInterim: false,
+      membershipRoleKey: "research",
+    });
     const res = await POST(
       post({
         op: "update",
@@ -785,8 +809,61 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
       }),
     );
     expect(res.status).toBe(200);
-    expect(mockTxCenterUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { directorCwid: null } }),
+    expect(mockTxCenterMembershipUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { leadershipRoleKey: null, leadershipInterim: false } }),
+    );
+    expect(mockTxCenterMembershipDelete).not.toHaveBeenCalled();
+    // The center row itself is not written at all any more.
+    expect(mockTxCenterUpdate).not.toHaveBeenCalled();
+  });
+
+  it("directorCwid='' on a leadership-only row deletes it", async () => {
+    mockTxCenterMembershipFindFirst.mockResolvedValue({
+      cwid: "dir0001",
+      leadershipInterim: false,
+      membershipRoleKey: null,
+    });
+    const res = await POST(
+      post({
+        op: "update",
+        entityType: "center",
+        entityId: "MEYER",
+        fieldName: "directorCwid",
+        value: "",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxCenterMembershipDelete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { centerCode_cwid: { centerCode: "MEYER", cwid: "dir0001" } },
+      }),
+    );
+    expect(mockTxCenterMembershipUpdate).not.toHaveBeenCalled();
+  });
+
+  it("naming a director carries the incumbent's interim qualifier onto them", async () => {
+    mockTxCenterMembershipFindFirst.mockResolvedValue({
+      cwid: "old0001",
+      leadershipInterim: true,
+      membershipRoleKey: "research",
+    });
+    const res = await POST(
+      post({
+        op: "update",
+        entityType: "center",
+        entityId: "MEYER",
+        fieldName: "directorCwid",
+        value: "new0001",
+      }),
+    );
+    expect(res.status).toBe(200);
+    // `Center.leaderInterim` was a column that survived a director change, so
+    // the qualifier must follow the ROLE, not the person.
+    expect(mockTxCenterMembershipUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { centerCode_cwid: { centerCode: "MEYER", cwid: "new0001" } },
+        update: { leadershipRoleKey: "director", leadershipInterim: true },
+      }),
     );
   });
 

@@ -11,12 +11,13 @@
  * "Clear override" drops both override rows so detection resumes.
  *
  * **Two write paths.** Dept/div POST `/api/edit/field` (`field_override` rows on
- * `leaderCwid` / `leaderInterim`). A **center** edits in-row via
- * `/api/edit/unit` op:"update" on the `directorCwid` / `leaderInterim` columns —
- * a center is always `source:"manual"`, so there is no ETL "detect" state and no
+ * `leaderCwid` / `leaderInterim`). A **center** POSTs the SAME two field names
+ * to `/api/edit/unit` op:"update" — but since #2542 Phase 1 those no longer map
+ * to center columns: the server moves the `director` assignment on a
+ * `CenterMembership` row. The request contract here is unchanged. A center is
+ * always `source:"manual"`, so there is no ETL "detect" state and no
  * `field_override`: the leader is either a curated person or vacant
- * (`directorCwid:""` → null). `canClear` is false for a center (nothing to
- * clear).
+ * (`directorCwid:""` → drop the assignment). `canClear` is false for a center.
  */
 "use client";
 
@@ -116,8 +117,9 @@ export function UnitLeaderCard({
     return true;
   }
 
-  // Center in-row write: /api/edit/unit op:"update" (no field_override). A
-  // vacant director is `directorCwid:""` (stored null), not a clear.
+  // Center write: /api/edit/unit op:"update" (no field_override). A vacant
+  // director is `directorCwid:""`, which drops the `director` assignment on the
+  // membership row (#2542; it used to null a center column), not a clear.
   async function postCenterField(fieldName: string, value: string): Promise<boolean> {
     const res = await fetch("/api/edit/unit", {
       method: "POST",

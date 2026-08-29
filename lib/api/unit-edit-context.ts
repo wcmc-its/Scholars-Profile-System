@@ -61,6 +61,7 @@
  * `programs`.
  */
 import { readFileSync } from "node:fs";
+import { DIRECTOR_ROLE_KEY } from "@/lib/center-roles";
 import path from "node:path";
 
 import {
@@ -461,9 +462,14 @@ export async function loadUnitEditContext(
         description: true,
         url: true,
         slug: true,
-        directorCwid: true,
         centerType: true,
-        leaderInterim: true,
+        // #2542 Phase 1 — leadership is a membership row, not a center column.
+        members: {
+          where: { leadershipRoleKey: DIRECTOR_ROLE_KEY },
+          select: { cwid: true, leadershipInterim: true },
+          orderBy: { leadershipSortOrder: "asc" },
+          take: 1,
+        },
       },
     });
     if (!row) return null;
@@ -475,8 +481,8 @@ export async function loadUnitEditContext(
     // "manual" regardless of the seed/import provenance on the row.
     source = "manual";
     centerType = row.centerType === "institute" ? "institute" : "center";
-    rowLeaderCwid = row.directorCwid;
-    rowLeaderInterim = row.leaderInterim;
+    rowLeaderCwid = row.members[0]?.cwid ?? null;
+    rowLeaderInterim = row.members[0]?.leadershipInterim ?? false;
   }
 
   // 2. Effective role + the superuser/retired gates.

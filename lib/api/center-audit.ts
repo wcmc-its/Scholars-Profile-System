@@ -55,7 +55,7 @@ export type RosterChangeKind = "add" | "remove" | "modify";
  *  (the code itself never changes), so it renders as "Disease: BREAST →
  *  confirmed" through the same `FIELD_LABEL`-keyed template roster fields use. */
 export type RosterFieldChange = {
-  field: "type" | "program" | "start" | "end" | "disease";
+  field: "type" | "program" | "start" | "end" | "disease" | "role" | "leadership" | "interim";
   from: string | null;
   to: string | null;
 };
@@ -81,6 +81,11 @@ export type CenterAuditEntry = {
 type RosterSnapshot = {
   cwid?: string | null;
   membershipType?: string | null;
+  /** #2542 — the stored role key `membershipType` is derived from. */
+  membershipRoleKey?: string | null;
+  /** #2542 — the leadership role held at this center, or null. */
+  leadershipRoleKey?: string | null;
+  leadershipInterim?: boolean | null;
   programCode?: string | null;
   startDate?: string | null;
   endDate?: string | null;
@@ -178,6 +183,11 @@ export function deriveChange(
       }
     };
     cmp("type", "membershipType");
+    // #2542 — without these three a leadership assignment renders in the history
+    // table as a `modify` with an EMPTY diff: a change that says nothing.
+    cmp("role", "membershipRoleKey");
+    cmp("leadership", "leadershipRoleKey");
+    cmp("interim", "leadershipInterim");
     cmp("program", "programCode");
     cmp("start", "startDate");
     cmp("end", "endDate");

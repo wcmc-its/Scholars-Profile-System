@@ -1,4 +1,11 @@
 /**
+ * #2542 Phase 1 NOTE — `Center.directorCwid` is DEPRECATED and nothing reads it
+ * any more; the director is a `CenterMembership` row with
+ * `leadershipRoleKey = "director"`. This script still writes the old column, so
+ * a run has NO visible effect until
+ * `scripts/backfills/2026-08-29-center-role-vocabulary.ts` is re-run to move the
+ * value across. Retire this script, or re-run that one after it.
+ *
  * Org-unit comms update backfill (2026-06-12, one-shot per DB).
  *
  * Applies the Head of Communications' department / center / institute changes to

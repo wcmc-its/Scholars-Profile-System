@@ -22,7 +22,7 @@ const {
   mockAppointmentFindMany,
   mockDepartmentFindMany,
   mockDivisionFindMany,
-  mockCenterFindMany,
+  mockCenterMembershipFindMany,
   mockCenterProgramLeaderFindMany,
   mockFieldOverrideFindFirst,
 } = vi.hoisted(() => ({
@@ -39,7 +39,7 @@ const {
   mockAppointmentFindMany: vi.fn(),
   mockDepartmentFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
-  mockCenterFindMany: vi.fn(),
+  mockCenterMembershipFindMany: vi.fn(),
   mockCenterProgramLeaderFindMany: vi.fn(),
   mockFieldOverrideFindFirst: vi.fn(),
 }));
@@ -63,7 +63,7 @@ vi.mock("@/lib/db", () => ({
       // #742 §2.5 — org-unit leadership-FK title augmentation.
       department: { findMany: mockDepartmentFindMany },
       division: { findMany: mockDivisionFindMany },
-      center: { findMany: mockCenterFindMany },
+      centerMembership: { findMany: mockCenterMembershipFindMany },
       centerProgramLeader: { findMany: mockCenterProgramLeaderFindMany },
       // #1997 — the scholar's `hideEducationYears` section-visibility override.
       fieldOverride: { findFirst: mockFieldOverrideFindFirst },
@@ -206,7 +206,7 @@ beforeEach(() => {
   mockAppointmentFindMany.mockResolvedValue([]);
   mockDepartmentFindMany.mockResolvedValue([]);
   mockDivisionFindMany.mockResolvedValue([]);
-  mockCenterFindMany.mockResolvedValue([]);
+  mockCenterMembershipFindMany.mockResolvedValue([]);
   mockCenterProgramLeaderFindMany.mockResolvedValue([]);
   mockFieldOverrideFindFirst.mockResolvedValue(null);
 });
@@ -866,12 +866,14 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
   });
 
   it("uses the curated official name and surfaces an interim center director", async () => {
-    mockCenterFindMany.mockResolvedValue([
+    mockCenterMembershipFindMany.mockResolvedValue([
       {
-        code: "meyer",
-        name: "Meyer Cancer Center",
-        officialName: "Sandra and Edward Meyer Cancer Center",
-        leaderInterim: true,
+        centerCode: "meyer",
+        leadershipRoleKey: "director",
+        leadershipInterim: true,
+        leadershipQualifier: null,
+        leadershipRole: { label: "Director" },
+        center: { name: "Meyer Cancer Center", officialName: "Sandra and Edward Meyer Cancer Center" },
       },
     ]);
     const facts = await assembleOverviewFacts("self01");
@@ -917,7 +919,13 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
     await assembleOverviewFacts("self01");
     expect(mockDepartmentFindMany.mock.calls[0][0].where).toEqual({ chairCwid: "self01" });
     expect(mockDivisionFindMany.mock.calls[0][0].where).toEqual({ chiefCwid: "self01" });
-    expect(mockCenterFindMany.mock.calls[0][0].where).toEqual({ directorCwid: "self01" });
+    // #2542 — center leadership moved onto the membership row; `profileTitle`
+    // is what keeps a non-title leadership role (Phase 2's coe_liaison) out.
+    expect(mockCenterMembershipFindMany.mock.calls[0][0].where).toEqual({
+      cwid: "self01",
+      leadershipRoleKey: { not: null },
+      leadershipRole: { roleGroup: "leadership", profileTitle: true },
+    });
     // #1570 — scoped to program LEADS only; a coe_liaison row is not a title.
     expect(mockCenterProgramLeaderFindMany.mock.calls[0][0].where).toEqual({
       cwid: "self01",
@@ -926,8 +934,15 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
   });
 
   it("a scholar's FK roles can be vetoed and surface in the drawer candidates", async () => {
-    mockCenterFindMany.mockResolvedValue([
-      { code: "englander", name: "Englander Institute for Precision Medicine", officialName: null, leaderInterim: false },
+    mockCenterMembershipFindMany.mockResolvedValue([
+      {
+        centerCode: "englander",
+        leadershipRoleKey: "director",
+        leadershipInterim: false,
+        leadershipQualifier: null,
+        leadershipRole: { label: "Director" },
+        center: { name: "Englander Institute for Precision Medicine", officialName: null },
+      },
     ]);
     // The drawer candidate carries the synthesized title, featured + non-primary.
     const opts = await loadOverviewSourceOptions("self01");

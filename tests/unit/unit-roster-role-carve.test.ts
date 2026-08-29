@@ -259,7 +259,7 @@ beforeEach(() => {
   divisionFindMany.mockResolvedValue([]);
   divisionMembershipFindMany.mockResolvedValue([]);
   departmentFindUnique.mockResolvedValue({ code: "MED", name: "Medicine", officialName: null, compactName: null, slug: "medicine", description: null, url: null, chairCwid: null, category: "clinical" });
-  centerFindUnique.mockResolvedValue({ code: "MEYER", name: "Meyer", slug: "meyer", description: null, url: null, directorCwid: null, leaderInterim: false });
+  centerFindUnique.mockResolvedValue({ code: "MEYER", name: "Meyer", slug: "meyer", description: null, url: null, members: [] });
   centerMembershipFindMany.mockImplementation(async () =>
     SCHOLARS.map((s) => ({
       cwid: s.cwid,

@@ -244,8 +244,8 @@ type CtrRow = {
   officialName?: string | null;
   compactName?: string | null;
   centerType?: string;
-  directorCwid?: string | null;
-  leaderInterim?: boolean;
+  // #2542 — the center's director arrives as a nested membership row.
+  members?: { cwid: string; leadershipInterim: boolean }[];
   scholarCount?: number;
   sortOrder?: number;
   source?: string;
@@ -278,7 +278,9 @@ function makeDirectoryClient(opts: {
 }) {
   const dept = vi.fn(async () => opts.departments ?? []);
   const div = vi.fn(async () => opts.divisions ?? []);
-  const ctr = vi.fn(async () => opts.centers ?? []);
+  // #2542 — Prisma always returns the nested `members` array; default it so a
+  // fixture that does not care about leadership need not spell it out.
+  const ctr = vi.fn(async () => (opts.centers ?? []).map((c) => ({ members: [], ...c })));
   const core = vi.fn(async () =>
     (opts.cores ?? []).map((r) => ({ source: "reciterai-core-dictionary", leaders: [], ...r })),
   );
@@ -384,8 +386,7 @@ describe("loadAllUnitsDirectory", () => {
           slug: "cancer",
           description: "Onc.",
           centerType: "institute",
-          directorCwid: "dir9999",
-          leaderInterim: true,
+          members: [{ cwid: "dir9999", leadershipInterim: true }],
           scholarCount: 9,
           sortOrder: 3,
           source: "seed",

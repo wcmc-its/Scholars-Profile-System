@@ -25,6 +25,7 @@
  * Read-only — this module performs NO write. Node-runtime only (Prisma).
  */
 import { db } from "@/lib/db";
+import { DIRECTOR_ROLE_KEY, formatLeadershipTitle } from "@/lib/center-roles";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import { scoreFundingImportance } from "@/lib/edit/funding-importance";
 import { isChairTitleFor } from "@/lib/leadership";
@@ -1023,7 +1024,7 @@ function fkLeadershipCandidate(
 /**
  * #742 §2.5 — leadership roles recorded on the org-unit FK tables, not (or not
  * yet) in the appointment table: a department `chairCwid`, a division `chiefCwid`,
- * a center `directorCwid` (+ interim), and `CenterProgramLeader` rows. These catch
+ * a center leadership membership row (#2542; was `directorCwid` + interim), and `CenterProgramLeader` rows. These catch
  * leadership set via `field_override` or missed by the appointment-title ETL (the
  * Stewart case). Each query keys on the leader being THIS scholar, so an external
  * leader (`lib/external-leaders.ts`, a non-WCM cwid) never matches. The synthesized
@@ -1042,9 +1043,23 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
       where: { chiefCwid: cwid },
       select: { code: true, name: true },
     }),
-    db.read.center.findMany({
-      where: { directorCwid: cwid },
-      select: { code: true, name: true, officialName: true, leaderInterim: true },
+    // #2542 Phase 1 — center leadership is a membership row now. `profileTitle`
+    // gates it for the same reason `role: "leader"` gates program leaders below:
+    // not every leadership role is a title on a person.
+    db.read.centerMembership.findMany({
+      where: {
+        cwid,
+        leadershipRoleKey: { not: null },
+        leadershipRole: { roleGroup: "leadership", profileTitle: true },
+      },
+      select: {
+        centerCode: true,
+        leadershipRoleKey: true,
+        leadershipInterim: true,
+        leadershipQualifier: true,
+        leadershipRole: { select: { label: true } },
+        center: { select: { name: true, officialName: true } },
+      },
     }),
     db.read.centerProgramLeader.findMany({
       // #1570 — a `coe_liaison` row is not a leadership title; only program
@@ -1078,13 +1093,21 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
     );
   }
   for (const c of centers) {
-    const name = c.officialName ?? c.name;
+    const name = c.center?.officialName ?? c.center?.name ?? c.centerCode;
+    // The candidate id is PERSISTED in `overview_source_selection.deltas`, so a
+    // curator's dismissal of "Director, X" must keep matching. `fk:center:{code}`
+    // stays byte-identical for the director role — the only role that existed
+    // before #2542 — and only additional roles take a suffixed id.
+    const id =
+      c.leadershipRoleKey === DIRECTOR_ROLE_KEY
+        ? `fk:center:${c.centerCode}`
+        : `fk:center:${c.centerCode}:${c.leadershipRoleKey}`;
     out.push(
       fkLeadershipCandidate(
-        `fk:center:${c.code}`,
-        `${c.leaderInterim ? "Interim " : ""}Director, ${name}`,
+        id,
+        `${formatLeadershipTitle(c.leadershipRole?.label ?? "Director", c.leadershipInterim, c.leadershipQualifier)}, ${name}`,
         WCM_ORG,
-        c.leaderInterim,
+        c.leadershipInterim,
       ),
     );
   }

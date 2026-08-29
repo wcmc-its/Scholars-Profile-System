@@ -1514,11 +1514,18 @@ model Center {
   /// designated, larger, more endowed) get their own teal badge; centers get
   /// purple. Backfilled by name match in 20260508120000_add_center_type.
   centerType    String   @default("center") @map("center_type") @db.VarChar(16)
+  /// DEPRECATED by #2542 Phase 1 — superseded by a `CenterMembership` row whose
+  /// `leadershipRoleKey` is `director`. Still written by the Phase 1 backfill's
+  /// source read and left in place ONLY because CONTRIBUTING.md § "Every
+  /// migration is additive" forbids dropping a column in the same deploy as the
+  /// code that stopped reading it. No application code reads either column as
+  /// of Phase 1; the DROP ships as the separate contract migration once the
+  /// backfill is verified in prod. Do not add new readers.
   directorCwid  String?  @map("director_cwid") @db.VarChar(32)
-  /// Interim/acting qualifier for the director — renders "Interim Director".
-  /// Center-only column because the center row is manually-owned and no ETL
-  /// writes it; departments/divisions express the same qualifier as a
-  /// columnless `field_override(leaderInterim)` row instead.
+  /// DEPRECATED by #2542 Phase 1 — see `directorCwid`. Superseded by
+  /// `CenterMembership.leadershipInterim`. NOTE: departments and divisions
+  /// express the same qualifier as a columnless `field_override(leaderInterim)`
+  /// row, which is a DIFFERENT mechanism and is NOT deprecated.
   /// Added by #540 Phase 1 (ADR-005 Amendment 1 § A1.1).
   leaderInterim Boolean  @default(false) @map("leader_interim")
   scholarCount  Int      @default(0) @map("scholar_count")
@@ -1530,12 +1537,81 @@ model Center {
 
   members          CenterMembership[]
   programs         CenterProgram[]
+  roles            CenterRole[]
   fundingAwards    CancerCenterFundingAward[]
   collabCandidates CenterCollabCandidate[]
 
   @@index([slug])
   @@index([sortOrder])
   @@map("center")
+}
+
+/// Per-center role vocabulary (#2542 Phase 1). One row per (center, `key`).
+/// A center defines its own list of roles rather than inheriting a global enum,
+/// because the label is a property OF THE UNIT — the Cornell Health Policy
+/// Center publishes "Founding Center Director" and "Core Faculty Fellow", words
+/// that exist nowhere else at WCM.
+///
+/// Every center is SEEDED with the same default set at creation
+/// (`lib/center-roles.ts` `DEFAULT_CENTER_ROLES`), copied onto the center rather
+/// than resolved through a global fallback — so there is no "is this inherited
+/// or overridden" question and editing is just editing rows. The defaults are
+/// chosen so migrating the existing centers changes nothing publicly.
+///
+/// `key` is STABLE and never edited: code and reporting predicates match on it.
+/// `label` is the displayed string and is curator-editable (Phase 3's console
+/// tab). Keeping them separate is not tidiness — `CenterCollabCandidate`
+/// `isCurrentMember` is defined as a membership whose type is the literal
+/// `research`, so if renaming a label could change a key it would silently
+/// alter the NCI CCSG REMOVE-eligible population.
+///
+/// `key`/`roleGroup`/`scope` are VARCHAR with app-level closure rather than
+/// Prisma enums, matching `CenterProgramLeader.role` and `CoreLeader.role` —
+/// extensible without a future `ALTER TABLE … MODIFY ENUM`, which matters
+/// because Phase 3 lets curators mint entries.
+model CenterRole {
+  centerCode   String   @map("center_code") @db.VarChar(64)
+  /// Stable identifier. Never edited. Closed server-side to this center's own
+  /// vocabulary at write time — see `lib/center-roles.ts`.
+  key          String   @db.VarChar(32)
+  /// Displayed string. Curator-editable in Phase 3; renaming is display-only.
+  label        String   @db.VarChar(255)
+  /// `leadership` | `membership`. Drives placement — leadership renders at the
+  /// top of the unit page, membership below. Mapped to `role_group` because
+  /// GROUP is a MySQL reserved word.
+  roleGroup    String   @map("role_group") @db.VarChar(16)
+  /// `center` | `program`. Which tier the entry may be assigned at. Phase 1
+  /// seeds only `center`; Phase 2 folds `CenterProgramLeader` in as `program`.
+  scope        String   @default("center") @db.VarChar(16)
+  /// Single-holder roles refuse a second assignment (enforced server-side).
+  /// A flag, not an enum — there are exactly two states and no third is
+  /// foreseeable. CHPC holds "Associate Center Director" three times and
+  /// "Research Director" once.
+  singleHolder Boolean  @default(false) @map("single_holder")
+  /// Order within the group. This is what puts COE Liaisons after Leaders.
+  sortOrder    Int      @default(0) @map("sort_order")
+  /// Does holding this role show as a title on the holder's scholar profile?
+  /// Not every leadership role does — Phase 2's `coe_liaison` deliberately does
+  /// not (`lib/api/profile.ts`), which is the entire reason this column exists.
+  profileTitle Boolean  @default(true) @map("profile_title")
+  /// Optional long form for an abbreviated label, rendered as `<abbr>`. Today
+  /// hardcoded for COE in `lib/center-program-roles.ts`; Phase 2 moves it here
+  /// so folding COE Liaison in does not silently drop the a11y affordance.
+  expansion    String?  @db.VarChar(255)
+  /// Provenance, so a reseed cannot clobber a curator's edit — the lesson from
+  /// `FamilySuppressionOverlay.source`, which `FamilyTierDecision` lacks.
+  /// `seed` = written by the default set; `manual` = curator-owned.
+  source       String   @default("seed") @db.VarChar(32)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  center            Center             @relation(fields: [centerCode], references: [code], onDelete: Cascade)
+  membershipHolders CenterMembership[] @relation("CenterMembershipMembershipRole")
+  leadershipHolders CenterMembership[] @relation("CenterMembershipLeadershipRole")
+
+  @@id([centerCode, key])
+  @@index([centerCode, roleGroup, sortOrder])
+  @@map("center_role")
 }
 
 /// Per-center program taxonomy (#552). Empty for centers that don't use
@@ -1616,12 +1692,46 @@ enum CenterMembershipType {
 model CenterMembership {
   centerCode      String                @map("center_code") @db.VarChar(64)
   cwid            String                @db.VarChar(32)
+  /// DERIVED from `membershipRoleKey` since #2542 Phase 1 — never written
+  /// independently. `research`/`clinical` role keys derive to the matching enum
+  /// value; every other key (and a null key) derives to NULL. Kept as a real
+  /// column, and kept as the thing NCI analytics read, precisely so Cancer
+  /// Center reporting never touches the curator-editable vocabulary:
+  /// `CenterCollabCandidate.isCurrentMember` matches the literal `research`.
+  /// See `deriveMembershipType` in `lib/center-roles.ts`.
   membershipType  CenterMembershipType? @map("membership_type")
   programCode     String?               @map("program_code") @db.VarChar(16)
   startDate       DateTime?             @map("start_date") @db.Date
   endDate         DateTime?             @map("end_date") @db.Date
   source          String                @default("manual") @db.VarChar(64)
   lastRefreshedAt DateTime              @default(now()) @map("last_refreshed_at")
+
+  /// #2542 Phase 1. A member holds at most one role from each group: their
+  /// membership type, and optionally a leadership role. Both reference this
+  /// center's own `CenterRole` vocabulary.
+  ///
+  /// A NULL `membershipRoleKey` means THIS PERSON IS NOT A ROSTER MEMBER — the
+  /// row exists only to carry a leadership assignment (a director who was never
+  /// added to the roster). Every member count and the public roster filter on
+  /// `membershipRoleKey: { not: null }` for exactly this reason; the composite
+  /// `@@id([centerCode, cwid])` means leadership and membership share one row,
+  /// so there is no other way to tell the two apart.
+  membershipRoleKey   String? @map("membership_role_key") @db.VarChar(32)
+  /// Null = holds no leadership role at this center. The Phase 1 backfill sets
+  /// `director` here from the deprecated `Center.directorCwid`.
+  leadershipRoleKey   String? @map("leadership_role_key") @db.VarChar(32)
+  /// Interim/acting qualifier for the leadership role — renders "Interim
+  /// Director". Migrated from the deprecated `Center.leaderInterim`. A modifier,
+  /// deliberately not a role of its own: folding it into the vocabulary would
+  /// multiply every leadership entry by two.
+  leadershipInterim   Boolean @default(false) @map("leadership_interim")
+  /// Order among multiple holders of the SAME leadership role.
+  leadershipSortOrder Int     @default(0) @map("leadership_sort_order")
+  /// Portfolio qualifier appended to the role label — CHPC publishes "Associate
+  /// Center Director, Health policy communication". DISPLAY ONLY: never a
+  /// predicate, never matched by code, so the stable `key` still identifies the
+  /// role. Free text is acceptable here precisely because nothing reads it.
+  leadershipQualifier String? @map("leadership_qualifier") @db.VarChar(255)
 
   center  Center         @relation(fields: [centerCode], references: [code], onDelete: Cascade)
   // RESTRICT (not the spec's SET NULL): the FK is composite (centerCode,
@@ -1631,9 +1741,17 @@ model CenterMembership {
   // (with audit), then delete the program. (#552 §9 row 2 deviation.)
   program CenterProgram? @relation(fields: [centerCode, programCode], references: [centerCode, code], onDelete: NoAction, onUpdate: NoAction)
 
+  // NoAction for the same reason as `program` above: the FK is composite and
+  // `centerCode` is NOT NULL, so SET NULL is invalid in both Prisma and MySQL.
+  // Deleting a vocabulary entry that still has holders must be blocked in-app
+  // (with reassignment) rather than orphaning rows — see #2542 Phase 3.
+  membershipRole CenterRole? @relation("CenterMembershipMembershipRole", fields: [centerCode, membershipRoleKey], references: [centerCode, key], onDelete: NoAction, onUpdate: NoAction)
+  leadershipRole CenterRole? @relation("CenterMembershipLeadershipRole", fields: [centerCode, leadershipRoleKey], references: [centerCode, key], onDelete: NoAction, onUpdate: NoAction)
+
   @@id([centerCode, cwid])
   @@index([cwid])
   @@index([centerCode, programCode])
+  @@index([centerCode, leadershipRoleKey])
   @@map("center_membership")
 }
 
