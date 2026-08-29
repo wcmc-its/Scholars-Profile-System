@@ -43,7 +43,7 @@
  * — no new audit enum value (the `scripts/sql/audit-log.sql` trap in CLAUDE.md).
  */
 import { NextResponse, type NextRequest } from "next/server";
-import { MEMBER_ROLE_KEY, deriveMembershipType } from "@/lib/center-roles";
+import { MEMBER_ROLE_KEY, centerRoleSeedRows, deriveMembershipType } from "@/lib/center-roles";
 
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
@@ -84,8 +84,6 @@ const SNAPSHOT_SELECT = {
   cwid: true,
   membershipType: true,
   membershipRoleKey: true,
-  leadershipRoleKey: true,
-  leadershipInterim: true,
   programCode: true,
   startDate: true,
   endDate: true,
@@ -96,8 +94,6 @@ function snapshot(row: {
   cwid: string;
   membershipType: string | null;
   membershipRoleKey: string | null;
-  leadershipRoleKey: string | null;
-  leadershipInterim: boolean;
   programCode: string | null;
   startDate: Date | null;
   endDate: Date | null;
@@ -106,8 +102,6 @@ function snapshot(row: {
     cwid: row.cwid,
     membershipType: row.membershipType,
     membershipRoleKey: row.membershipRoleKey,
-    leadershipRoleKey: row.leadershipRoleKey,
-    leadershipInterim: row.leadershipInterim,
     programCode: row.programCode,
     startDate: row.startDate ? row.startDate.toISOString().slice(0, 10) : null,
     endDate: row.endDate ? row.endDate.toISOString().slice(0, 10) : null,
@@ -387,14 +381,10 @@ async function handleCenter(p: {
     select: SNAPSHOT_SELECT,
   });
 
-  // #2542 — a row whose `membershipRoleKey` is NULL exists ONLY to carry a
-  // leadership assignment; that person is not on the roster. "add" must promote
-  // such a row rather than report no-op, or a director who was never a member
-  // could never be added.
-  const leadershipOnly = existing !== null && existing.membershipRoleKey === null;
-  if (action === "add" && existing && !leadershipOnly) {
-    return editOk({ unitCode, cwid, action, changed: false });
-  }
+  // Leadership is a `CenterLeader` row (#2542), a separate table, so add/remove
+  // keep their original meaning here: this row IS the membership, nothing else
+  // rides on it, and removing it cannot vacate a leadership role.
+  if (action === "add" && existing) return editOk({ unitCode, cwid, action, changed: false });
   if (action === "remove" && !existing) return editOk({ unitCode, cwid, action, changed: false });
 
   // The set of columns this write applies — only fields present in the body.
@@ -417,24 +407,23 @@ async function handleCenter(p: {
       const before = existing ? snapshot(existing) : null;
       let after: Record<string, unknown> | null;
 
+      if (action !== "remove") {
+        // `membership_role_key` FKs to `center_role`, which is empty for the
+        // pre-existing centers until the Phase 1 backfill runs. Seed this
+        // center's defaults first — idempotent, never clobbers a renamed label,
+        // and removes the ordering dependency between the deploy and the
+        // backfill entirely.
+        await tx.centerRole.createMany({
+          data: centerRoleSeedRows().map((r) => ({ centerCode: unitCode, ...r })),
+          skipDuplicates: true,
+        });
+      }
+
       if (action === "remove") {
-        if (existing?.leadershipRoleKey) {
-          // #2542 — the composite `@@id([centerCode, cwid])` means leadership
-          // and membership share one row, so deleting it would silently vacate
-          // the leadership role too. Drop only the membership half and keep the
-          // assignment; vacating leadership is `/api/edit/unit`'s job.
-          const row = await tx.centerMembership.update({
-            where: { centerCode_cwid: { centerCode: unitCode, cwid } },
-            data: { membershipRoleKey: null, membershipType: null },
-            select: SNAPSHOT_SELECT,
-          });
-          after = snapshot(row);
-        } else {
-          await tx.centerMembership.delete({
-            where: { centerCode_cwid: { centerCode: unitCode, cwid } },
-          });
-          after = null;
-        }
+        await tx.centerMembership.delete({
+          where: { centerCode_cwid: { centerCode: unitCode, cwid } },
+        });
+        after = null;
       } else if (action === "set") {
         const row = await tx.centerMembership.upsert({
           where: { centerCode_cwid: { centerCode: unitCode, cwid } },
@@ -449,14 +438,6 @@ async function handleCenter(p: {
             ...applied,
           },
           update: applied,
-          select: SNAPSHOT_SELECT,
-        });
-        after = snapshot(row);
-      } else if (leadershipOnly) {
-        // add, onto a row that existed only for its leadership assignment.
-        const row = await tx.centerMembership.update({
-          where: { centerCode_cwid: { centerCode: unitCode, cwid } },
-          data: { membershipRoleKey: MEMBER_ROLE_KEY, ...applied },
           select: SNAPSHOT_SELECT,
         });
         after = snapshot(row);

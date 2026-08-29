@@ -332,7 +332,7 @@ async function createInformalCenter(params: {
           // the same transaction. A center created without it has no `director`
           // key for a leadership assignment to reference, so its leadership
           // editor would FK-error forever.
-          roles: { createMany: { data: centerRoleSeedRows(mintedCode) } },
+          roles: { createMany: { data: centerRoleSeedRows() } },
         },
         select: { code: true },
       });
@@ -641,17 +641,17 @@ async function handleUpdate(
     const r = validateUnitLeaderCwid(value);
     if (!r.ok) return editError(400, r.error, "value");
     storedValue = r.value;
-    // "" = explicit vacancy. Under #2542 that is no longer "null a column" but
-    // "drop the director assignment", which may also mean deleting a row that
-    // existed ONLY to carry it (a director who was never on the roster).
+    // "" = explicit vacancy — under #2542 that means dropping the `director`
+    // assignment. DUAL-WRITTEN to the deprecated column for one release so the
+    // pre-backfill fallback and an app-code rollback both stay correct.
     leadershipWrite = { setCwid: r.value === "" ? null : r.value };
-    updatePayload = {};
+    updatePayload = { directorCwid: r.value === "" ? null : r.value };
   } else if (fieldName === "leaderInterim") {
     const r = validateUnitLeaderInterim(value);
     if (!r.ok) return editError(400, r.error, "value");
     storedValue = r.value === "true";
     leadershipWrite = { setInterim: storedValue };
-    updatePayload = {};
+    updatePayload = { leaderInterim: storedValue };
   } else {
     // centerType — Superuser-only, allowlist already validated indirectly
     // (the field name dispatches; the value still needs the enum check).
@@ -695,70 +695,67 @@ async function handleUpdate(
           description: true,
           url: true,
           centerType: true,
+          // Dual-read fallback for the audit before-value: pre-backfill there is
+          // no `CenterLeader` row yet. Goes with the column in the contract PR.
+          directorCwid: true,
+          leaderInterim: true,
         },
       });
-      // #2542 — the current director assignment, which is what `directorCwid`
-      // and `leaderInterim` now read and write.
-      const beforeLeader = await tx.centerMembership.findFirst({
-        where: { centerCode: entityId, leadershipRoleKey: DIRECTOR_ROLE_KEY },
-        select: { cwid: true, leadershipInterim: true, membershipRoleKey: true },
-        orderBy: { leadershipSortOrder: "asc" },
+      // #2542 — the current `director` assignment. Dual-read: pre-backfill
+      // there is no CenterLeader row yet, so fall back to the column.
+      const beforeLeader = await tx.centerLeader.findFirst({
+        where: { centerCode: entityId, roleKey: DIRECTOR_ROLE_KEY },
+        select: { cwid: true, interim: true },
+        orderBy: { sortOrder: "asc" },
       });
+      const beforeDirectorCwid = beforeLeader?.cwid ?? before?.directorCwid ?? null;
+      const beforeInterim = beforeLeader?.interim ?? before?.leaderInterim ?? false;
+
       if (Object.keys(updatePayload).length > 0) {
         await tx.center.update({
           where: { code: entityId },
           data: updatePayload,
         });
       }
+      if (leadershipWrite) {
+        // The 11 pre-existing centers have no vocabulary until the Phase 1
+        // backfill runs, and `center_leader.role_key` FKs to it — so seed this
+        // center's defaults first. Idempotent (`skipDuplicates`), never
+        // clobbers a renamed label, and removes the ordering dependency between
+        // the deploy and the backfill entirely.
+        await tx.centerRole.createMany({
+          data: centerRoleSeedRows().map((r) => ({ centerCode: entityId, ...r })),
+          skipDuplicates: true,
+        });
+      }
       if (leadershipWrite && "setCwid" in leadershipWrite) {
-        // Vacate the incumbent first: strip the role, and delete the row
-        // outright when it carried nothing else (a leadership-only row).
-        // A row that is also a roster member keeps its membership.
-        if (beforeLeader && beforeLeader.cwid !== leadershipWrite.setCwid) {
-          if (beforeLeader.membershipRoleKey === null) {
-            await tx.centerMembership.delete({
-              where: { centerCode_cwid: { centerCode: entityId, cwid: beforeLeader.cwid } },
-            });
-          } else {
-            await tx.centerMembership.update({
-              where: { centerCode_cwid: { centerCode: entityId, cwid: beforeLeader.cwid } },
-              data: { leadershipRoleKey: null, leadershipInterim: false },
-            });
-          }
-        }
+        // One `director` at a time: vacate whoever holds it, then grant.
+        // `deleteMany` also covers the pre-backfill case of no row at all.
+        await tx.centerLeader.deleteMany({
+          where: { centerCode: entityId, roleKey: DIRECTOR_ROLE_KEY },
+        });
         if (leadershipWrite.setCwid !== null) {
-          // The interim qualifier rides with the POST, not with the person —
+          // The interim qualifier rides with the ROLE, not the person —
           // `Center.leaderInterim` was a separate column that survived a
           // director change, so carry it onto the new holder.
-          await tx.centerMembership.upsert({
-            where: {
-              centerCode_cwid: { centerCode: entityId, cwid: leadershipWrite.setCwid },
-            },
-            create: {
+          await tx.centerLeader.create({
+            data: {
               centerCode: entityId,
               cwid: leadershipWrite.setCwid,
-              membershipRoleKey: null,
-              membershipType: null,
-              leadershipRoleKey: DIRECTOR_ROLE_KEY,
-              leadershipInterim: beforeLeader?.leadershipInterim ?? false,
-            },
-            update: {
-              leadershipRoleKey: DIRECTOR_ROLE_KEY,
-              leadershipInterim: beforeLeader?.leadershipInterim ?? false,
+              roleKey: DIRECTOR_ROLE_KEY,
+              interim: beforeInterim,
             },
           });
         }
       } else if (leadershipWrite && "setInterim" in leadershipWrite) {
-        // No director => nothing to qualify. `unit-leader-card.tsx` always POSTs
-        // the cwid before the interim flag, so the row exists by now on a real
-        // save; the no-op case is toggling interim on a vacant center, which
-        // used to persist on the column and now simply does not stick.
-        if (beforeLeader) {
-          await tx.centerMembership.update({
-            where: { centerCode_cwid: { centerCode: entityId, cwid: beforeLeader.cwid } },
-            data: { leadershipInterim: leadershipWrite.setInterim },
-          });
-        }
+        // No director => nothing to qualify, and `updateMany` is a clean no-op.
+        // `unit-leader-card.tsx` always POSTs the cwid before the interim flag,
+        // so on a real save the row exists by now. The column dual-write above
+        // still records it either way.
+        await tx.centerLeader.updateMany({
+          where: { centerCode: entityId, roleKey: DIRECTOR_ROLE_KEY },
+          data: { interim: leadershipWrite.setInterim },
+        });
       }
       const beforeValue =
         fieldName === "name"
@@ -770,9 +767,9 @@ async function handleUpdate(
             : fieldName === "url"
               ? before?.url
               : fieldName === "directorCwid"
-                ? (beforeLeader?.cwid ?? null)
+                ? beforeDirectorCwid
                 : fieldName === "leaderInterim"
-                  ? (beforeLeader?.leadershipInterim ?? false)
+                  ? beforeInterim
                   : before?.centerType;
       await appendAuditRow(tx, {
         actorCwid: realCwid,

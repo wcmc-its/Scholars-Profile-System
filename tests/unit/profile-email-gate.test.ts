@@ -38,8 +38,9 @@ vi.mock("@/lib/db", () => ({
     department: { findMany: vi.fn(async () => []) },
     division: { findMany: vi.fn(async () => []) },
     center: { findMany: vi.fn(async () => []) },
-    // #2542 — center leadership titles now read `centerMembership`.
-    centerMembership: { findMany: vi.fn(async () => []) },
+    // #2542 — center leadership titles read `centerLeader` (with `center` as
+    // the pre-backfill dual-read fallback).
+    centerLeader: { findMany: vi.fn(async () => []) },
     centerProgramLeader: { findMany: vi.fn(async () => []) },
     $queryRawUnsafe: vi.fn(async () => []),
   },

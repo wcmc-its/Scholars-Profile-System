@@ -258,15 +258,18 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
       name: true,
       slug: true,
       description: true,
-      // #2542 Phase 1 — the director moved off `Center.directorCwid` onto the
-      // holder's membership row. Nested on the same `findMany`, so this stays
-      // one extra query for the whole list rather than one per center.
-      members: {
-        where: { leadershipRoleKey: DIRECTOR_ROLE_KEY },
+      // #2542 Phase 1 — the director moved off `Center.directorCwid` into
+      // `CenterLeader`. Nested on the same `findMany`, so this stays one extra
+      // query for the whole list rather than one per center. `directorCwid` is
+      // the dual-read fallback until the Phase 1 backfill runs; both go in the
+      // contract PR.
+      leaders: {
+        where: { roleKey: DIRECTOR_ROLE_KEY },
         select: { cwid: true },
-        orderBy: { leadershipSortOrder: "asc" },
+        orderBy: { sortOrder: "asc" },
         take: 1,
       },
+      directorCwid: true,
       // NB: `scholarCount` is deliberately NOT selected — the column is never
       // maintained for centers. Counted live below.
       sortOrder: true,
@@ -283,7 +286,7 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
   );
 
   const directorCwidOf = (c: (typeof centers)[number]): string | null =>
-    c.members[0]?.cwid ?? null;
+    c.leaders[0]?.cwid ?? c.directorCwid;
   const directorCwids = centers
     .map(directorCwidOf)
     .filter((c): c is string => c !== null);

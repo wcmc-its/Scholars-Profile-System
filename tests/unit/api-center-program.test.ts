@@ -99,7 +99,9 @@ beforeEach(() => {
     description: null,
     url: null,
     // #2542 — no director assignment.
-    members: [],
+    leaders: [],
+    directorCwid: null,
+    leaderInterim: false,
   });
   mockSuppressionFindFirst.mockResolvedValue(null); // not whole-unit-suppressed
   mockSuppressionFindMany.mockResolvedValue([]);

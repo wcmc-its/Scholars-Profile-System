@@ -1,39 +1,37 @@
--- #2542 Phase 1 — per-center role vocabulary, and the assignment columns that
--- reference it (`docs/` issue #2542 § "The model: one per-unit role
--- vocabulary, in two groups").
+-- #2542 Phase 1 — per-center role vocabulary (`center_role`), leadership
+-- assignments (`center_leader`), and the membership-role key that
+-- `center_membership.membership_type` becomes derived from.
+--
+-- Leadership is its OWN table, not two more columns on `center_membership`:
+-- a leader need not be a member (#2542 decision 7 — 9 of the Cornell Health
+-- Policy Center's 77 people hold only a leadership role), and
+-- `center_membership` is keyed `(center_code, cwid)`, so putting leadership
+-- there would file those people as members and skew every count that reads the
+-- table. See the model doc in schema.prisma.
 --
 -- EXPAND ONLY. `center.director_cwid` and `center.leader_interim` are NOT
 -- dropped here: CONTRIBUTING.md § "Every migration is additive" forbids
 -- dropping a column in the same deploy as the code that stopped reading it,
--- and migrations run BEFORE the ECS service rolls (DEPLOY-RUNBOOK.md § 5-6),
--- so the previous image would 500 the public center page for the whole
--- rollout window. The DROP ships as a separate contract migration once the
--- backfill below is verified in prod. There is no rollback (CONTRIBUTING.md).
+-- and migrations run BEFORE the ECS service rolls (DEPLOY-RUNBOOK.md § 5-6).
+-- For that same reason the app DUAL-READS (`center_leader` ?? the column) and
+-- DUAL-WRITES both during this release, so the window between the roll and the
+-- manual backfill is not an outage and an app-code rollback still works. The
+-- fallback, the dual-write and the DROP all ship in the contract PR.
 --
 -- NO DATA HERE, deliberately. `center_role.center_code` FKs to `center`, which
 -- is EMPTY when `prisma migrate deploy` runs against CI's fresh database and on
 -- the #445 prod-bootstrap path — an in-migration seed would die with MySQL 1452
 -- (the #584 regression that `tests/unit/migrations-empty-db-safe.test.ts`
--- exists to prevent). The vocabulary seed and the director backfill both live
--- in `scripts/backfills/2026-08-29-center-role-vocabulary.ts`, run manually
--- after this migration lands. Until it runs, every new column reads NULL and
--- no behaviour changes.
+-- exists to prevent). The vocabulary seed and the leadership backfill live in
+-- `scripts/backfills/2026-08-29-center-role-vocabulary.ts`.
 --
 -- `key` / `role_group` / `scope` are VARCHAR with app-level closure rather than
 -- MySQL ENUMs, matching `center_program_leader.role` and `core_leader.role` —
 -- Phase 3 lets curators mint entries, and each new value must not cost an
 -- `ALTER TABLE … MODIFY ENUM`.
---
--- Both membership FKs are NO ACTION for the same reason as the existing
--- `program` FK: the key is composite and `center_code` is NOT NULL, so SET NULL
--- would try to null `center_code` too and is invalid in Prisma and MySQL alike.
 
 -- AlterTable
-ALTER TABLE `center_membership` ADD COLUMN `leadership_interim` BOOLEAN NOT NULL DEFAULT false,
-    ADD COLUMN `leadership_qualifier` VARCHAR(255) NULL,
-    ADD COLUMN `leadership_role_key` VARCHAR(32) NULL,
-    ADD COLUMN `leadership_sort_order` INTEGER NOT NULL DEFAULT 0,
-    ADD COLUMN `membership_role_key` VARCHAR(32) NULL;
+ALTER TABLE `center_membership` ADD COLUMN `membership_role_key` VARCHAR(32) NULL;
 
 -- CreateTable
 CREATE TABLE `center_role` (
@@ -54,15 +52,31 @@ CREATE TABLE `center_role` (
     PRIMARY KEY (`center_code`, `key`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateIndex
-CREATE INDEX `center_membership_center_code_leadership_role_key_idx` ON `center_membership`(`center_code`, `leadership_role_key`);
+-- CreateTable
+CREATE TABLE `center_leader` (
+    `center_code` VARCHAR(64) NOT NULL,
+    `cwid` VARCHAR(32) NOT NULL,
+    `role_key` VARCHAR(32) NOT NULL,
+    `interim` BOOLEAN NOT NULL DEFAULT false,
+    `sort_order` INTEGER NOT NULL DEFAULT 0,
+    `qualifier` VARCHAR(255) NULL,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updated_at` DATETIME(3) NOT NULL,
+
+    INDEX `center_leader_cwid_idx`(`cwid`),
+    INDEX `center_leader_center_code_role_key_sort_order_idx`(`center_code`, `role_key`, `sort_order`),
+    PRIMARY KEY (`center_code`, `cwid`, `role_key`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- AddForeignKey
 ALTER TABLE `center_role` ADD CONSTRAINT `center_role_center_code_fkey` FOREIGN KEY (`center_code`) REFERENCES `center`(`code`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE `center_membership` ADD CONSTRAINT `center_membership_center_code_membership_role_key_fkey` FOREIGN KEY (`center_code`, `membership_role_key`) REFERENCES `center_role`(`center_code`, `key`) ON DELETE NO ACTION ON UPDATE NO ACTION;
+ALTER TABLE `center_leader` ADD CONSTRAINT `center_leader_center_code_fkey` FOREIGN KEY (`center_code`) REFERENCES `center`(`code`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE `center_membership` ADD CONSTRAINT `center_membership_center_code_leadership_role_key_fkey` FOREIGN KEY (`center_code`, `leadership_role_key`) REFERENCES `center_role`(`center_code`, `key`) ON DELETE NO ACTION ON UPDATE NO ACTION;
+ALTER TABLE `center_leader` ADD CONSTRAINT `center_leader_center_code_role_key_fkey` FOREIGN KEY (`center_code`, `role_key`) REFERENCES `center_role`(`center_code`, `key`) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE `center_membership` ADD CONSTRAINT `center_membership_center_code_membership_role_key_fkey` FOREIGN KEY (`center_code`, `membership_role_key`) REFERENCES `center_role`(`center_code`, `key`) ON DELETE NO ACTION ON UPDATE NO ACTION;
 

@@ -156,7 +156,7 @@ export async function fixtureLoadCenters(
         // #2542 Phase 1 — a fixture-loaded center needs its role vocabulary too,
         // or every leadership test on a fresh clone / CI database FK-errors.
         // Only on `create`: an existing center's vocabulary is curator-owned.
-        roles: { createMany: { data: centerRoleSeedRows(c.code) } },
+        roles: { createMany: { data: centerRoleSeedRows() } },
       },
       update: {
         name: c.name,

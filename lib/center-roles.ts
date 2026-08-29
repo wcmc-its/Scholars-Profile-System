@@ -169,13 +169,21 @@ export function formatLeadershipTitle(
 }
 
 /**
- * The seed rows for one center, shaped for a Prisma `createMany` / nested
- * `createMany` on `CenterRole`. Every path that creates a center must call this:
- * a center with no vocabulary has no `director` key for a leadership assignment
- * to reference, so its leadership editor would fail the FK forever.
+ * The seed rows for a center's default vocabulary, shaped for a NESTED
+ * `roles: { createMany: { data } }` on a `center.create` / `center.upsert`.
+ *
+ * Deliberately carries NO `centerCode`: Prisma's nested
+ * `CenterRoleCreateManyCenterInput` omits the FK scalar (the parent supplies
+ * it), and passing it throws `Unknown argument \`centerCode\`` at REQUEST time,
+ * not compile time — the rows come from a function call, so TypeScript's
+ * excess-property check never fires. For a top-level `centerRole.createMany`,
+ * spread these onto a `centerCode` yourself.
+ *
+ * Every path that creates a center must call this: a center with no vocabulary
+ * has no `director` key for a leadership assignment to reference, so its
+ * leadership editor would fail the FK forever.
  */
-export function centerRoleSeedRows(centerCode: string): {
-  centerCode: string;
+export function centerRoleSeedRows(): {
   key: string;
   label: string;
   roleGroup: CenterRoleGroup;
@@ -186,7 +194,6 @@ export function centerRoleSeedRows(centerCode: string): {
   source: string;
 }[] {
   return DEFAULT_CENTER_ROLES.map((r) => ({
-    centerCode,
     key: r.key,
     label: r.label,
     roleGroup: r.group,

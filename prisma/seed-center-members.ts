@@ -23,6 +23,7 @@
  * Run: npx tsx prisma/seed-center-members.ts
  */
 import "dotenv/config";
+import { MEMBER_ROLE_KEY } from "../lib/center-roles";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "../lib/db";
@@ -96,6 +97,9 @@ async function main() {
           centerCode: center.code,
           cwid,
           source: "file:" + file,
+          // #2542 — a file-loaded row is an ordinary roster member. Its derived
+          // `membershipType` stays null, exactly as it was before.
+          membershipRoleKey: MEMBER_ROLE_KEY,
         })),
       });
     }

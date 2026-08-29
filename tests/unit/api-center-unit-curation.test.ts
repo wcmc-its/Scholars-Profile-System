@@ -47,9 +47,12 @@ const CENTER = {
   slug: "meyer-cancer-center",
   description: "Cancer research center.",
   url: null,
-  // #2542 — `getCenterUncached` selects the director as a nested membership
-  // row (`leadershipRoleKey: "director"`, `take: 1`), not two center columns.
-  members: [{ cwid: "dir0001", leadershipInterim: false }],
+  // #2542 — `getCenterUncached` selects the director as a nested `CenterLeader`
+  // row (`roleKey: "director"`, `take: 1`). The two columns remain as the
+  // pre-backfill dual-read fallback.
+  leaders: [{ cwid: "dir0001", interim: false }],
+  directorCwid: null,
+  leaderInterim: false,
   scholarCount: 42,
 };
 
@@ -90,7 +93,7 @@ describe("getCenter — unit-curation read-merge (#540)", () => {
     defaultBaselineMocks();
     mockCenterFindUnique.mockResolvedValue({
       ...CENTER,
-      members: [{ cwid: "dir0001", leadershipInterim: true }],
+      leaders: [{ cwid: "dir0001", interim: true }],
     });
 
     const result = await getCenter("meyer-cancer-center");
@@ -105,7 +108,7 @@ describe("getCenter — unit-curation read-merge (#540)", () => {
 
   it("a center with no director assignment produces director=null", async () => {
     defaultBaselineMocks();
-    mockCenterFindUnique.mockResolvedValue({ ...CENTER, members: [] });
+    mockCenterFindUnique.mockResolvedValue({ ...CENTER, leaders: [] });
 
     const result = await getCenter("meyer-cancer-center");
     expect(result?.director).toBeNull();

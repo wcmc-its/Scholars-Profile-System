@@ -20,8 +20,8 @@
  *      - Curator edits description; success + reflectUnitChange.
  *      - slug + centerType are Superuser-only.
  *      - Slug update revalidates the old slug too (previousSlug).
- *      - directorCwid="" vacates the `director` assignment on the membership
- *        row (#2542; was "stores null on the column").
+ *      - directorCwid="" vacates the `director` assignment in `CenterLeader`
+ *        (#2542; was "stores null on the column"), dual-writing the column.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
@@ -102,10 +102,11 @@ const OWNER = { cwid: "own001", isSuperuser: false };
 const NONADMIN = { cwid: "non001", isSuperuser: false };
 const SUPERUSER = { cwid: "sup001", isSuperuser: true };
 
-const mockTxCenterMembershipFindFirst = vi.fn();
-const mockTxCenterMembershipUpsert = vi.fn();
-const mockTxCenterMembershipUpdate = vi.fn();
-const mockTxCenterMembershipDelete = vi.fn();
+const mockTxCenterLeaderFindFirst = vi.fn();
+const mockTxCenterLeaderCreate = vi.fn();
+const mockTxCenterLeaderUpdateMany = vi.fn();
+const mockTxCenterLeaderDeleteMany = vi.fn();
+const mockTxCenterRoleCreateMany = vi.fn();
 
 const fakeTx = {
   center: {
@@ -119,14 +120,16 @@ const fakeTx = {
     update: mockTxDivisionUpdate,
   },
   unitAdmin: { create: mockTxUnitAdminCreate },
-  // #2542 — center leadership writes land on `CenterMembership` now, so the
-  // transaction stub needs the delegate or every center update throws.
-  centerMembership: {
-    findFirst: mockTxCenterMembershipFindFirst,
-    upsert: mockTxCenterMembershipUpsert,
-    update: mockTxCenterMembershipUpdate,
-    delete: mockTxCenterMembershipDelete,
+  // #2542 — center leadership writes land on `CenterLeader`, preceded by a lazy
+  // `centerRole` seed, so the transaction stub needs both delegates or every
+  // center update throws.
+  centerLeader: {
+    findFirst: mockTxCenterLeaderFindFirst,
+    create: mockTxCenterLeaderCreate,
+    updateMany: mockTxCenterLeaderUpdateMany,
+    deleteMany: mockTxCenterLeaderDeleteMany,
   },
+  centerRole: { createMany: mockTxCenterRoleCreateMany },
   $executeRaw: mockExecuteRaw,
 };
 
@@ -788,64 +791,93 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
     );
   });
 
-  // #2542 Phase 1 — a vacancy is no longer "null a column". Leadership lives on
-  // the incumbent's `CenterMembership` row, which the composite
-  // `@@id([centerCode, cwid])` shares with their roster membership — so vacating
-  // must strip ONLY the leadership half, unless the row existed solely to carry
-  // it (a director who was never on the roster), in which case it goes.
-  it("directorCwid='' on a director who IS a roster member keeps the membership", async () => {
-    mockTxCenterMembershipFindFirst.mockResolvedValue({
-      cwid: "dir0001",
-      leadershipInterim: false,
-      membershipRoleKey: "research",
-    });
+  // #2542 Phase 1 — leadership is a `CenterLeader` row, not a center column.
+  // The request contract is unchanged (same two field names, same two POSTs from
+  // `unit-leader-card.tsx`), and the deprecated columns are DUAL-WRITTEN for one
+  // release so the pre-backfill fallback and an app-code rollback stay correct.
+  it("naming a director writes the CenterLeader row AND dual-writes the column", async () => {
+    mockTxCenterLeaderFindFirst.mockResolvedValue(null);
     const res = await POST(
       post({
         op: "update",
         entityType: "center",
         entityId: "MEYER",
         fieldName: "directorCwid",
-        value: "",
+        value: "new0001",
       }),
     );
     expect(res.status).toBe(200);
-    expect(mockTxCenterMembershipUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { leadershipRoleKey: null, leadershipInterim: false } }),
+    // The vocabulary is seeded first: `center_leader.role_key` FKs to it, and
+    // the pre-existing centers have none until the Phase 1 backfill runs.
+    expect(mockTxCenterRoleCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ skipDuplicates: true }),
     );
-    expect(mockTxCenterMembershipDelete).not.toHaveBeenCalled();
-    // The center row itself is not written at all any more.
-    expect(mockTxCenterUpdate).not.toHaveBeenCalled();
-  });
-
-  it("directorCwid='' on a leadership-only row deletes it", async () => {
-    mockTxCenterMembershipFindFirst.mockResolvedValue({
-      cwid: "dir0001",
-      leadershipInterim: false,
-      membershipRoleKey: null,
-    });
-    const res = await POST(
-      post({
-        op: "update",
-        entityType: "center",
-        entityId: "MEYER",
-        fieldName: "directorCwid",
-        value: "",
-      }),
-    );
-    expect(res.status).toBe(200);
-    expect(mockTxCenterMembershipDelete).toHaveBeenCalledWith(
+    expect(mockTxCenterLeaderCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { centerCode_cwid: { centerCode: "MEYER", cwid: "dir0001" } },
+        data: expect.objectContaining({
+          centerCode: "MEYER",
+          cwid: "new0001",
+          roleKey: "director",
+        }),
       }),
     );
-    expect(mockTxCenterMembershipUpdate).not.toHaveBeenCalled();
+    expect(mockTxCenterUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { directorCwid: "new0001" } }),
+    );
   });
 
-  it("naming a director carries the incumbent's interim qualifier onto them", async () => {
-    mockTxCenterMembershipFindFirst.mockResolvedValue({
-      cwid: "old0001",
-      leadershipInterim: true,
-      membershipRoleKey: "research",
+  it("directorCwid='' vacates the assignment and dual-writes null", async () => {
+    mockTxCenterLeaderFindFirst.mockResolvedValue({ cwid: "dir0001", interim: false });
+    const res = await POST(
+      post({
+        op: "update",
+        entityType: "center",
+        entityId: "MEYER",
+        fieldName: "directorCwid",
+        value: "",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxCenterLeaderDeleteMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { centerCode: "MEYER", roleKey: "director" } }),
+    );
+    expect(mockTxCenterLeaderCreate).not.toHaveBeenCalled();
+    expect(mockTxCenterUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { directorCwid: null } }),
+    );
+  });
+
+  it("carries the incumbent's interim qualifier onto a new director", async () => {
+    // `Center.leaderInterim` was a column that survived a director change, so
+    // the qualifier follows the ROLE, not the person.
+    mockTxCenterLeaderFindFirst.mockResolvedValue({ cwid: "old0001", interim: true });
+    const res = await POST(
+      post({
+        op: "update",
+        entityType: "center",
+        entityId: "MEYER",
+        fieldName: "directorCwid",
+        value: "new0001",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxCenterLeaderCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ interim: true }) }),
+    );
+  });
+
+  it("dual-reads the deprecated column for the audit before-value when no CenterLeader row exists yet", async () => {
+    // The window between the ECS roll and the manual Phase 1 backfill. Without
+    // the fallback the audit would record the previous director as null.
+    mockTxCenterLeaderFindFirst.mockResolvedValue(null);
+    mockTxCenterFindUnique.mockResolvedValue({
+      name: "Meyer",
+      slug: "meyer",
+      description: null,
+      url: null,
+      centerType: "center",
+      directorCwid: "legacy01",
+      leaderInterim: true,
     });
     const res = await POST(
       post({
@@ -857,14 +889,11 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
       }),
     );
     expect(res.status).toBe(200);
-    // `Center.leaderInterim` was a column that survived a director change, so
-    // the qualifier must follow the ROLE, not the person.
-    expect(mockTxCenterMembershipUpsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { centerCode_cwid: { centerCode: "MEYER", cwid: "new0001" } },
-        update: { leadershipRoleKey: "director", leadershipInterim: true },
-      }),
-    );
+    // `before_values` is the 6th bound value of the audit INSERT; arg 0 is the
+    // template strings (see the `auditAfterValues` helper below).
+    expect(JSON.parse(mockExecuteRaw.mock.calls[0][6] as string)).toEqual({
+      directorCwid: "legacy01",
+    });
   });
 
   it("Center not found → 400 unit_not_found", async () => {

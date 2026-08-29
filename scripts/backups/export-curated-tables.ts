@@ -88,6 +88,10 @@ const CURATED_TABLES: readonly string[] = [
   // a vocabulary that no longer exists (the dump header disables FK checks, so
   // that restore would SUCCEED and leave the keys orphaned rather than erroring).
   "center_role",
+  // #2542 — leadership assignments. Hand-curated, and the successor to
+  // `center.director_cwid`; omitting it would back up a center's roster and
+  // silently lose who leads it.
+  "center_leader",
   "division_membership",
   "unit_admin",
   // --- Methods & tools: family-visibility overlays (DB is the SOR) ---

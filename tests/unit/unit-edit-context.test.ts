@@ -449,8 +449,10 @@ describe("loadUnitEditContext — center", () => {
       url: "https://precision.weill.cornell.edu",
       slug: "precision-institute",
       centerType: "institute",
-      // #2542 — leadership is a membership row now.
-      members: [{ cwid: "dir001", leadershipInterim: true }],
+      // #2542 — leadership is a `CenterLeader` row now.
+      leaders: [{ cwid: "dir001", interim: true }],
+      directorCwid: null,
+      leaderInterim: false,
     };
     const ctx = await loadUnitEditContext(
       "center",
@@ -557,7 +559,9 @@ describe("loadUnitEditContext — center disease assignments (plan §5/§6)", ()
     url: null,
     slug: "meyer",
     centerType: "center",
-    members: [],
+    leaders: [],
+    directorCwid: null,
+    leaderInterim: false,
   };
   // A stand-in `CenterProgram` taxonomy — the gate these tests all run under
   // (bug fix, staging report 2026-08-26): `diseases` only ever populates for a
@@ -790,7 +794,9 @@ describe("loadUnitEditContext — diseaseOptions (manual-add extension)", () => 
     url: null,
     slug: "meyer",
     centerType: "center",
-    members: [],
+    leaders: [],
+    directorCwid: null,
+    leaderInterim: false,
   };
 
   it("a center WITH a CenterProgram taxonomy carries the canonical disease-code -> label list, sorted by label", async () => {

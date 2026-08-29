@@ -83,10 +83,7 @@ export async function countActiveCenterMembersByCode(
 
   const today = todayIso();
   const rows = (await client.centerMembership.findMany({
-    // #2542 — exclude leadership-only rows (NULL `membershipRoleKey`): a
-    // director who was never added to the roster is not a member, and must not
-    // be counted as one. See `lib/api/centers.ts loadActiveCenterMemberCwids`.
-    where: { centerCode: { in: centerCodes }, membershipRoleKey: { not: null } },
+    where: { centerCode: { in: centerCodes } },
     select: { centerCode: true, cwid: true, startDate: true, endDate: true },
   })) as Array<{
     centerCode: string;

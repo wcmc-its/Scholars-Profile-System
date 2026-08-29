@@ -47,7 +47,7 @@ async function main() {
         source: "manual",
         // #2542 Phase 1 — seed the role vocabulary alongside the center. Only on
         // `create`; an existing center's vocabulary is curator-owned.
-        roles: { createMany: { data: centerRoleSeedRows(c.code) } },
+        roles: { createMany: { data: centerRoleSeedRows() } },
       },
       update: {
         name: c.name,

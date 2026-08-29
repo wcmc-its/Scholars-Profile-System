@@ -46,6 +46,7 @@
  * recurring job.
  */
 import "dotenv/config";
+import { MEMBER_ROLE_KEY } from "../../lib/center-roles";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -307,6 +308,10 @@ export async function applyBackfill(
     }
 
     const data = {
+      // #2542 — `membershipType` is DERIVED from `membershipRoleKey`. Writing
+      // the enum without the key leaves the two disagreeing, which the Phase 1
+      // backfill's invariant check throws on and nothing else would notice.
+      membershipRoleKey: m.membershipType ?? MEMBER_ROLE_KEY,
       membershipType: m.membershipType,
       programCode: m.programCode,
       startDate: m.startDate ? new Date(`${m.startDate}T00:00:00Z`) : null,

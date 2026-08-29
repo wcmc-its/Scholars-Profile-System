@@ -244,8 +244,10 @@ type CtrRow = {
   officialName?: string | null;
   compactName?: string | null;
   centerType?: string;
-  // #2542 — the center's director arrives as a nested membership row.
-  members?: { cwid: string; leadershipInterim: boolean }[];
+  // #2542 — the center's director arrives as nested `CenterLeader` rows.
+  leaders?: { cwid: string; interim: boolean }[];
+  directorCwid?: string | null;
+  leaderInterim?: boolean;
   scholarCount?: number;
   sortOrder?: number;
   source?: string;
@@ -278,9 +280,17 @@ function makeDirectoryClient(opts: {
 }) {
   const dept = vi.fn(async () => opts.departments ?? []);
   const div = vi.fn(async () => opts.divisions ?? []);
-  // #2542 — Prisma always returns the nested `members` array; default it so a
-  // fixture that does not care about leadership need not spell it out.
-  const ctr = vi.fn(async () => (opts.centers ?? []).map((c) => ({ members: [], ...c })));
+  // #2542 — Prisma always returns the nested `leaders` array; default it, and
+  // the dual-read columns, so a fixture that does not care about leadership
+  // need not spell them out.
+  const ctr = vi.fn(async () =>
+    (opts.centers ?? []).map((c) => ({
+      leaders: [],
+      directorCwid: null,
+      leaderInterim: false,
+      ...c,
+    })),
+  );
   const core = vi.fn(async () =>
     (opts.cores ?? []).map((r) => ({ source: "reciterai-core-dictionary", leaders: [], ...r })),
   );
@@ -386,7 +396,7 @@ describe("loadAllUnitsDirectory", () => {
           slug: "cancer",
           description: "Onc.",
           centerType: "institute",
-          members: [{ cwid: "dir9999", leadershipInterim: true }],
+          leaders: [{ cwid: "dir9999", interim: true }],
           scholarCount: 9,
           sortOrder: 3,
           source: "seed",

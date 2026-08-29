@@ -83,12 +83,17 @@ import { POST } from "@/app/api/edit/roster/route";
 const CURATOR = { cwid: "cur001", isSuperuser: false };
 const NONADMIN = { cwid: "non001", isSuperuser: false };
 
+const mockTxCenterRoleCreateMany = vi.fn();
+
 const fakeTx = {
   centerMembership: {
     create: mockTxCenterMembershipCreate,
     delete: mockTxCenterMembershipDelete,
     upsert: mockTxCenterMembershipUpsert,
   },
+  // #2542 — a membership write seeds this center's role vocabulary first, so
+  // `membership_role_key`'s FK resolves even before the Phase 1 backfill runs.
+  centerRole: { createMany: mockTxCenterRoleCreateMany },
   divisionMembership: {
     create: mockTxDivisionMembershipCreate,
     delete: mockTxDivisionMembershipDelete,

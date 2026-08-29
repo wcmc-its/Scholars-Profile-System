@@ -91,7 +91,9 @@ describe("centers — fail-closed pass on the raw role column (#2271)", () => {
       description: null,
       url: null,
       // #2542 — no director assignment.
-      members: [],
+      leaders: [],
+      directorCwid: null,
+      leaderInterim: false,
     });
 
     const center = await getCenter("test-center-hero");

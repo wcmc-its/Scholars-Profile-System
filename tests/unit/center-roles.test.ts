@@ -81,12 +81,22 @@ describe("DEFAULT_CENTER_ROLES", () => {
     expect(DEFAULT_CENTER_ROLES.every((r) => r.scope === "center")).toBe(true);
   });
 
-  it("centerRoleSeedRows stamps the center and maps group -> roleGroup", () => {
-    const rows = centerRoleSeedRows("meyer_cancer_center");
+  it("centerRoleSeedRows maps group -> roleGroup and stamps source", () => {
+    const rows = centerRoleSeedRows();
     expect(rows).toHaveLength(DEFAULT_CENTER_ROLES.length);
-    expect(rows.every((r) => r.centerCode === "meyer_cancer_center")).toBe(true);
     expect(rows.every((r) => r.source === "seed")).toBe(true);
     expect(rows.find((r) => r.key === DIRECTOR_ROLE_KEY)?.roleGroup).toBe("leadership");
+  });
+
+  it("centerRoleSeedRows omits centerCode — a nested createMany REJECTS the FK scalar", () => {
+    // `CenterRoleCreateManyCenterInput` has no `centerCode`: the parent
+    // `center.create` supplies it. Passing it throws `Unknown argument
+    // \`centerCode\`` at REQUEST time, and TypeScript cannot catch it because the
+    // rows come from a function call, so no excess-property check fires. Every
+    // center-creation path would 500. This assertion is the only guard.
+    for (const r of centerRoleSeedRows()) {
+      expect(r).not.toHaveProperty("centerCode");
+    }
   });
 });
 
@@ -120,28 +130,27 @@ type Membership = {
   cwid: string;
   membershipRoleKey: string | null;
   membershipType: string | null;
-  leadershipRoleKey?: string | null;
 };
 
-/** An in-memory stand-in for the three delegates `runBackfill` touches. */
+type Leader = { centerCode: string; cwid: string; roleKey: string; interim?: boolean };
+
+/** An in-memory stand-in for the four delegates `runBackfill` touches. */
 function makeDb(opts: {
   centers: { code: string; directorCwid: string | null; leaderInterim: boolean }[];
   memberships: Membership[];
+  leaders?: Leader[];
   seededRoleKeys?: { centerCode: string; key: string }[];
 }) {
-  const memberships: Required<Membership>[] = opts.memberships.map((m) => ({
-    leadershipRoleKey: null,
-    ...m,
-  }));
+  const memberships = opts.memberships.map((m) => ({ ...m }));
+  const leaders: Leader[] = (opts.leaders ?? []).map((l) => ({ ...l }));
   const roles: { centerCode: string; key: string }[] = [];
-  const upserts: unknown[] = [];
 
-  const matches = (m: Membership, where: Record<string, unknown>): boolean =>
+  const matches = (row: Record<string, unknown>, where: Record<string, unknown>): boolean =>
     Object.entries(where).every(([k, v]) => {
-      if (k === "centerCode" && typeof v === "object" && v !== null) {
-        return ((v as { in: string[] }).in ?? []).includes(m.centerCode);
+      if (v !== null && typeof v === "object" && "in" in (v as object)) {
+        return ((v as { in: string[] }).in ?? []).includes(row[k] as string);
       }
-      return (m as Record<string, unknown>)[k] === v;
+      return row[k] === v;
     });
 
   const db: CenterRoleBackfillDb = {
@@ -159,9 +168,22 @@ function makeDb(opts: {
         return { count };
       }),
       findMany: vi.fn(async (args: unknown) => {
-        const w = (args as { where: { key: string; centerCode: { in: string[] } } }).where;
+        const w = (args as { where: Record<string, unknown> }).where;
         const seeded = opts.seededRoleKeys ?? roles;
-        return seeded.filter((r) => r.key === w.key && w.centerCode.in.includes(r.centerCode));
+        return seeded.filter((r) => matches(r as unknown as Record<string, unknown>, w));
+      }),
+    },
+    centerLeader: {
+      findMany: vi.fn(async (args: unknown) => {
+        const w = (args as { where: Record<string, unknown> }).where;
+        return leaders.filter((l) =>
+          matches(l as unknown as Record<string, unknown>, w),
+        ) as Leader[];
+      }),
+      create: vi.fn(async (args: unknown) => {
+        const d = (args as { data: Leader }).data;
+        leaders.push({ ...d });
+        return d;
       }),
     },
     centerMembership: {
@@ -172,33 +194,22 @@ function makeDb(opts: {
         };
         let count = 0;
         for (const m of memberships) {
-          if (matches(m, where)) {
+          if (matches(m as unknown as Record<string, unknown>, where)) {
             Object.assign(m, data);
             count += 1;
           }
         }
         return { count };
       }),
-      upsert: vi.fn(async (args: unknown) => {
-        const a = args as {
-          where: { centerCode_cwid: { centerCode: string; cwid: string } };
-          create: Required<Membership>;
-          update: Partial<Membership>;
-        };
-        upserts.push(a);
-        const { centerCode, cwid } = a.where.centerCode_cwid;
-        const found = memberships.find((m) => m.centerCode === centerCode && m.cwid === cwid);
-        if (found) Object.assign(found, a.update);
-        else memberships.push({ ...a.create });
-        return {};
-      }),
       findMany: vi.fn(async (args: unknown) => {
         const w = (args as { where?: Record<string, unknown> }).where;
-        return w ? memberships.filter((m) => matches(m, w)) : memberships;
+        return w
+          ? memberships.filter((m) => matches(m as unknown as Record<string, unknown>, w))
+          : memberships;
       }),
     },
   };
-  return { db, memberships, roles, upserts };
+  return { db, memberships, leaders, roles };
 }
 
 const CENTERS = [
@@ -221,14 +232,14 @@ const MEMBERSHIPS: Membership[] = [
 
 describe("runBackfill", () => {
   it("seeds the default vocabulary for every center", async () => {
-    const { db, roles } = makeDb({ centers: CENTERS, memberships: [...MEMBERSHIPS] });
+    const { db, roles } = makeDb({ centers: CENTERS, memberships: MEMBERSHIPS });
     const r = await runBackfill(db, { dryRun: false });
     expect(r.rolesSeeded).toBe(CENTERS.length * DEFAULT_CENTER_ROLES.length);
     expect(roles.filter((x) => x.key === DIRECTOR_ROLE_KEY)).toHaveLength(CENTERS.length);
   });
 
   it("carries research/clinical across under the same literals and files the rest as `member`", async () => {
-    const { db, memberships } = makeDb({ centers: CENTERS, memberships: [...MEMBERSHIPS] });
+    const { db, memberships } = makeDb({ centers: CENTERS, memberships: MEMBERSHIPS });
     await runBackfill(db, { dryRun: false });
     const key = (c: string, w: string) =>
       memberships.find((m) => m.centerCode === c && m.cwid === w)?.membershipRoleKey;
@@ -239,68 +250,84 @@ describe("runBackfill", () => {
   });
 
   it("never rewrites membershipType — the NCI predicate reads exactly what it read before", async () => {
-    const { db, memberships } = makeDb({ centers: CENTERS, memberships: [...MEMBERSHIPS] });
+    const { db, memberships } = makeDb({ centers: CENTERS, memberships: MEMBERSHIPS });
     await runBackfill(db, { dryRun: false });
     const before = new Map(MEMBERSHIPS.map((m) => [`${m.centerCode} ${m.cwid}`, m.membershipType]));
     for (const m of memberships) {
-      if (before.has(`${m.centerCode} ${m.cwid}`)) {
-        expect(m.membershipType).toBe(before.get(`${m.centerCode} ${m.cwid}`));
-      }
+      expect(m.membershipType).toBe(before.get(`${m.centerCode} ${m.cwid}`));
     }
   });
 
-  it("moves the director onto the existing membership row without adding anyone to a roster", async () => {
-    const { db, memberships } = makeDb({ centers: CENTERS, memberships: [...MEMBERSHIPS] });
+  it("creates a CenterLeader row per director and adds NOBODY to a roster", async () => {
+    const { db, memberships, leaders } = makeDb({ centers: CENTERS, memberships: MEMBERSHIPS });
     const r = await runBackfill(db, { dryRun: false });
-    const dir = memberships.find((m) => m.centerCode === "meyer" && m.cwid === "dir001");
-    expect(dir?.leadershipRoleKey).toBe(DIRECTOR_ROLE_KEY);
-    // Still a research member — the leadership write must not clear it.
-    expect(dir?.membershipRoleKey).toBe("research");
-    expect(r.directorsMigrated).toBe(2);
+    expect(r.leadersCreated).toBe(2);
+    expect(leaders).toEqual(
+      expect.arrayContaining([
+        { centerCode: "meyer", cwid: "dir001", roleKey: DIRECTOR_ROLE_KEY, interim: false },
+        // The prod `global_health` case: a director who is not a member. The
+        // whole point of the separate table is that this adds no membership row,
+        // so the center's roster and every count that reads it stay at zero.
+        { centerCode: "global_health", cwid: "dir002", roleKey: DIRECTOR_ROLE_KEY, interim: true },
+      ]),
+    );
+    expect(memberships).toHaveLength(MEMBERSHIPS.length);
+    expect(memberships.some((m) => m.centerCode === "global_health")).toBe(false);
   });
 
-  it("mints a LEADERSHIP-ONLY row for a director who was never on the roster, so the public roster stays empty", async () => {
-    const { db, memberships } = makeDb({ centers: CENTERS, memberships: [...MEMBERSHIPS] });
-    const r = await runBackfill(db, { dryRun: false });
-    expect(r.directorRowsMinted).toBe(1);
-    const minted = memberships.find((m) => m.centerCode === "global_health");
-    expect(minted).toMatchObject({
-      cwid: "dir002",
-      leadershipRoleKey: DIRECTOR_ROLE_KEY,
-      // NULL membership role = "not a roster member". Every member count and the
-      // public roster filter on `membershipRoleKey IS NOT NULL`, so this center's
-      // roster stays at zero rather than gaining a member it never had.
-      membershipRoleKey: null,
-      leadershipInterim: true,
-    });
-  });
-
-  it("is idempotent — a second run seeds nothing, reclassifies nothing, and does not demote the minted director", async () => {
-    const { db, memberships, roles } = makeDb({ centers: CENTERS, memberships: [...MEMBERSHIPS] });
+  it("is idempotent — a second run seeds nothing, reclassifies nothing, and creates no duplicate leader", async () => {
+    const { db, roles, leaders } = makeDb({ centers: CENTERS, memberships: MEMBERSHIPS });
     await runBackfill(db, { dryRun: false });
     const rolesAfterFirst = roles.length;
+    const leadersAfterFirst = leaders.length;
 
     const second = await runBackfill(db, { dryRun: false });
     expect(second.rolesSeeded).toBe(0);
     expect(second.membersClassified).toBe(0);
+    expect(second.leadersCreated).toBe(0);
     expect(roles).toHaveLength(rolesAfterFirst);
-    // The re-run's `member` sweep must not catch the leadership-only row.
-    expect(memberships.find((m) => m.centerCode === "global_health")?.membershipRoleKey).toBeNull();
+    expect(leaders).toHaveLength(leadersAfterFirst);
   });
 
-  it("writes nothing on --dry-run", async () => {
-    const { db, memberships, roles } = makeDb({ centers: CENTERS, memberships: [...MEMBERSHIPS] });
+  it("does NOT resurrect a director a curator has since replaced", async () => {
+    // Post-backfill, a curator names someone else. The dual-write keeps the
+    // deprecated column in sync, but even if it lagged, step 3 skips a center
+    // that already holds the role — so a re-run can never leave two holders of
+    // a `singleHolder` role.
+    const { db, leaders } = makeDb({
+      centers: [{ code: "meyer", directorCwid: "OLD001", leaderInterim: false }],
+      memberships: [],
+      leaders: [
+        { centerCode: "meyer", cwid: "new999", roleKey: DIRECTOR_ROLE_KEY, interim: false },
+      ],
+    });
+    const r = await runBackfill(db, { dryRun: false });
+    expect(r.leadersCreated).toBe(0);
+    expect(r.leadersAlreadyPresent).toBe(1);
+    expect(leaders).toHaveLength(1);
+    expect(leaders[0].cwid).toBe("new999");
+  });
+
+  it("writes nothing on --dry-run, but still REPORTS the real counts", async () => {
+    const { db, memberships, leaders, roles } = makeDb({
+      centers: CENTERS,
+      memberships: MEMBERSHIPS,
+    });
     const r = await runBackfill(db, { dryRun: true });
     expect(r.dryRun).toBe(true);
     expect(roles).toHaveLength(0);
+    expect(leaders).toHaveLength(0);
     expect(memberships.every((m) => m.membershipRoleKey === null)).toBe(true);
-    expect(memberships).toHaveLength(MEMBERSHIPS.length);
+    // The pre-flight has to show the operator the largest mutation in the run.
+    expect(r.rolesSeeded).toBe(CENTERS.length * DEFAULT_CENTER_ROLES.length);
+    expect(r.membersClassified).toBe(MEMBERSHIPS.length);
+    expect(r.leadersCreated).toBe(2);
   });
 
   it("THROWS rather than writing a dangling leadership key when a center's vocabulary is missing", async () => {
     const { db } = makeDb({
       centers: CENTERS,
-      memberships: [...MEMBERSHIPS],
+      memberships: MEMBERSHIPS,
       // `meyer` seeded, `global_health` not — the verify-all-before-write case.
       seededRoleKeys: [{ centerCode: "meyer", key: DIRECTOR_ROLE_KEY }],
     });

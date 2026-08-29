@@ -463,13 +463,17 @@ export async function loadUnitEditContext(
         url: true,
         slug: true,
         centerType: true,
-        // #2542 Phase 1 — leadership is a membership row, not a center column.
-        members: {
-          where: { leadershipRoleKey: DIRECTOR_ROLE_KEY },
-          select: { cwid: true, leadershipInterim: true },
-          orderBy: { leadershipSortOrder: "asc" },
+        // #2542 Phase 1 — leadership is a `CenterLeader` row, not a center
+        // column. The two columns stay selected as the pre-backfill dual-read
+        // fallback; both go in the contract PR.
+        leaders: {
+          where: { roleKey: DIRECTOR_ROLE_KEY },
+          select: { cwid: true, interim: true },
+          orderBy: { sortOrder: "asc" },
           take: 1,
         },
+        directorCwid: true,
+        leaderInterim: true,
       },
     });
     if (!row) return null;
@@ -481,8 +485,8 @@ export async function loadUnitEditContext(
     // "manual" regardless of the seed/import provenance on the row.
     source = "manual";
     centerType = row.centerType === "institute" ? "institute" : "center";
-    rowLeaderCwid = row.members[0]?.cwid ?? null;
-    rowLeaderInterim = row.members[0]?.leadershipInterim ?? false;
+    rowLeaderCwid = row.leaders[0]?.cwid ?? row.directorCwid;
+    rowLeaderInterim = row.leaders[0]?.interim ?? row.leaderInterim;
   }
 
   // 2. Effective role + the superuser/retired gates.

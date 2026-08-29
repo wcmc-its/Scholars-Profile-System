@@ -1,45 +1,46 @@
 /**
- * #2542 Phase 1 — seed every center's role vocabulary and migrate the two
- * deprecated leadership columns onto membership rows.
+ * #2542 Phase 1 — seed every center's role vocabulary, classify its members,
+ * and migrate the two deprecated leadership columns into `CenterLeader`.
  *
  * Runs AFTER migration `20260829143000_center_role_vocabulary`. That migration
  * is deliberately DDL-only: `center_role.center_code` FKs to `center`, which is
  * empty when `prisma migrate deploy` runs against CI's fresh database, so an
  * in-migration seed dies with MySQL 1452 (the #584 regression that
- * `tests/unit/migrations-empty-db-safe.test.ts` guards). Until this script runs,
- * every new column reads NULL and nothing changes.
+ * `tests/unit/migrations-empty-db-safe.test.ts` guards).
+ *
+ * It is NOT a deploy-ordering hazard that this is manual. The app dual-reads
+ * (`CenterLeader` ?? `Center.directorCwid`) and dual-writes both, and both write
+ * routes seed a center's vocabulary lazily before referencing it — so between
+ * the ECS roll and this script nothing breaks and nothing renders differently.
+ * This script exists to move the data once; the fallbacks go in the contract PR.
  *
  * What it does, in order:
  *   1. Seeds `DEFAULT_CENTER_ROLES` for every center (`createMany` +
  *      `skipDuplicates`, so a curator's renamed label is never clobbered).
  *   2. Classifies existing members: `membershipType` research/clinical carry
  *      over under the SAME literals; unclassified legacy rows become `member`.
- *   3. Moves `Center.directorCwid` / `Center.leaderInterim` onto that person's
- *      `CenterMembership` row as `leadershipRoleKey = "director"`, minting the
- *      row when the director was never on the roster.
+ *   3. Creates a `CenterLeader` row (`roleKey: "director"`) from
+ *      `Center.directorCwid` / `.leaderInterim`, for centers that do not
+ *      already have one.
  *   4. Asserts the derived-`membershipType` invariant, because nothing else can:
  *      a missed derivation leaves NULL, which is a legal and common value, so it
  *      would surface as a quietly shorter NCI REMOVE list rather than an error.
  *
- * Why step 2 gives unclassified rows `member` rather than NULL: a NULL
- * `membershipRoleKey` is the ONLY way to tell a leadership-only row (step 3's
- * minted director) from a real roster member, because `CenterMembership` is
- * `@@id([centerCode, cwid])` and the two share one row. Member counts and the
- * public roster filter on `membershipRoleKey IS NOT NULL`. The change is
- * invisible publicly: `member` derives to a NULL `membershipType`, and the
- * roster badge and type facet both read `membershipType`.
+ * Leadership goes to its OWN table, so this script never touches a membership
+ * row on a leader's behalf. A director who was never on the roster gets a
+ * `CenterLeader` row and no `CenterMembership` row — which is why no member
+ * count, roster, search facet or proxy-edit reach changes.
  *
  * Safety:
  *   - VERIFY-ALL-BEFORE-WRITE. Every center's `director` vocabulary row must
  *     exist before any leadership row is written; otherwise the run THROWS and
  *     writes nothing rather than leaving a dangling FK.
- *   - Idempotent. Every step is a skipDuplicates insert or a guarded updateMany,
- *     so a re-run is a no-op. Step 2 excludes rows that already carry a
- *     leadership key, so a re-run cannot turn a minted director into a member.
+ *   - Idempotent, and safe AFTER a curator has edited a director. Step 3 skips
+ *     any center that already holds a `director` assignment, so a re-run can
+ *     never resurrect a replaced director alongside the current one.
  *   - A director cwid is NOT required to resolve to a `scholar` row. That is
  *     deliberate: `directorCwid` is allowed to name a non-scholar (pre-hire
- *     pinning, and the external-leader case in `lib/external-leaders.ts`), and
- *     there is no FK from `center_membership.cwid` to `scholar`.
+ *     pinning, and the external-leader case in `lib/external-leaders.ts`).
  *
  * Flags:
  *   --dry-run   verify + report what would change; write nothing.
@@ -49,9 +50,9 @@
 import "dotenv/config";
 import { pathToFileURL } from "node:url";
 import {
-  DEFAULT_CENTER_ROLES,
   DIRECTOR_ROLE_KEY,
   MEMBER_ROLE_KEY,
+  centerRoleSeedRows,
   deriveMembershipType,
 } from "../../lib/center-roles";
 
@@ -67,10 +68,15 @@ export type CenterRoleBackfillDb = {
     createMany: (args: unknown) => Promise<{ count: number }>;
     findMany: (args: unknown) => Promise<{ centerCode: string; key: string }[]>;
   };
+  centerLeader: {
+    findMany: (args: unknown) => Promise<{ centerCode: string; cwid: string; roleKey: string }[]>;
+    create: (args: unknown) => Promise<unknown>;
+  };
   centerMembership: {
     updateMany: (args: unknown) => Promise<{ count: number }>;
-    upsert: (args: unknown) => Promise<unknown>;
-    findMany: (args: unknown) => Promise<
+    findMany: (
+      args: unknown,
+    ) => Promise<
       {
         centerCode: string;
         cwid: string;
@@ -87,8 +93,8 @@ export type BackfillResult = {
   centers: number;
   rolesSeeded: number;
   membersClassified: number;
-  directorsMigrated: number;
-  directorRowsMinted: number;
+  leadersCreated: number;
+  leadersAlreadyPresent: number;
   dryRun: boolean;
 };
 
@@ -111,54 +117,60 @@ export async function runBackfill(
   log(`Centers: ${centers.length}`);
 
   // ---- 1. Seed the default vocabulary --------------------------------------
+  const seedRows = centers.flatMap((c) =>
+    // Top-level createMany, so the FK scalar is ours to supply —
+    // `centerRoleSeedRows()` omits it for the nested-create call sites.
+    centerRoleSeedRows().map((r) => ({ centerCode: c.code, ...r })),
+  );
   let rolesSeeded = 0;
-  if (!opts.dryRun) {
-    const { count } = await db.centerRole.createMany({
-      data: centers.flatMap((c) =>
-        DEFAULT_CENTER_ROLES.map((r) => ({
-          centerCode: c.code,
-          key: r.key,
-          label: r.label,
-          roleGroup: r.group,
-          scope: r.scope,
-          singleHolder: r.singleHolder,
-          sortOrder: r.sortOrder,
-          profileTitle: r.profileTitle,
-          source: "seed",
-        })),
-      ),
-      // Never clobber a label a curator has already renamed.
-      skipDuplicates: true,
-    });
-    rolesSeeded = count;
+  if (opts.dryRun) {
+    const present = new Set(
+      (
+        await db.centerRole.findMany({
+          where: { centerCode: { in: centers.map((c) => c.code) } },
+          select: { centerCode: true, key: true },
+        })
+      ).map((r) => `${r.centerCode} ${r.key}`),
+    );
+    rolesSeeded = seedRows.filter((r) => !present.has(`${r.centerCode} ${r.key}`)).length;
   } else {
-    rolesSeeded = centers.length * DEFAULT_CENTER_ROLES.length;
+    // Never clobber a label a curator has already renamed.
+    ({ count: rolesSeeded } = await db.centerRole.createMany({
+      data: seedRows,
+      skipDuplicates: true,
+    }));
   }
   log(`${opts.dryRun ? "Would seed" : "Seeded"} ${rolesSeeded} vocabulary row(s).`);
 
   // ---- 2. Classify existing members ----------------------------------------
   // research/clinical keep their literals so `isCurrentMember` is untouched;
   // everything else becomes `member`, which derives back to a NULL enum.
+  const classify: { where: Record<string, unknown>; key: string }[] = [
+    { where: { membershipRoleKey: null, membershipType: "research" }, key: "research" },
+    { where: { membershipRoleKey: null, membershipType: "clinical" }, key: "clinical" },
+    { where: { membershipRoleKey: null, membershipType: null }, key: MEMBER_ROLE_KEY },
+  ];
   let membersClassified = 0;
-  if (!opts.dryRun) {
-    for (const type of ["research", "clinical"] as const) {
-      const { count } = await db.centerMembership.updateMany({
-        where: { membershipRoleKey: null, membershipType: type },
-        data: { membershipRoleKey: type },
+  for (const step of classify) {
+    if (opts.dryRun) {
+      // A dry run must report the real number: this is the largest mutation in
+      // the script and the operator's only pre-flight check.
+      const rows = await db.centerMembership.findMany({
+        where: step.where,
+        select: { centerCode: true, cwid: true, membershipRoleKey: true, membershipType: true },
       });
-      membersClassified += count;
+      membersClassified += rows.length;
+      continue;
     }
     const { count } = await db.centerMembership.updateMany({
-      // `leadershipRoleKey: null` keeps a re-run from demoting step 3's minted
-      // director rows into roster members.
-      where: { membershipRoleKey: null, membershipType: null, leadershipRoleKey: null },
-      data: { membershipRoleKey: MEMBER_ROLE_KEY },
+      where: step.where,
+      data: { membershipRoleKey: step.key },
     });
     membersClassified += count;
   }
   log(`${opts.dryRun ? "Would classify" : "Classified"} ${membersClassified} member row(s).`);
 
-  // ---- 3. Migrate the director ---------------------------------------------
+  // ---- 3. Migrate the director into CenterLeader ----------------------------
   const led = centers.filter((c) => c.directorCwid !== null && c.directorCwid !== "");
 
   // VERIFY-ALL-BEFORE-WRITE: every led center must already have the `director`
@@ -177,45 +189,35 @@ export async function runBackfill(
     );
   }
 
-  const existing = await db.centerMembership.findMany({
-    where: { centerCode: { in: led.map((c) => c.code) } },
-    select: { centerCode: true, cwid: true, membershipRoleKey: true, membershipType: true },
-  });
-  const isMember = new Set(existing.map((m) => `${m.centerCode} ${m.cwid}`));
+  // Skip any center that ALREADY holds a director assignment. The app is the
+  // source of truth once a row exists, so a re-run after a curator changed the
+  // director cannot resurrect the old one alongside the new.
+  const already = new Set(
+    (
+      await db.centerLeader.findMany({
+        where: { roleKey: DIRECTOR_ROLE_KEY, centerCode: { in: led.map((c) => c.code) } },
+        select: { centerCode: true, cwid: true, roleKey: true },
+      })
+    ).map((r) => r.centerCode),
+  );
 
-  let directorsMigrated = 0;
-  let directorRowsMinted = 0;
+  let leadersCreated = 0;
   for (const c of led) {
-    const cwid = c.directorCwid as string;
-    const mints = !isMember.has(`${c.code} ${cwid}`);
+    if (already.has(c.code)) continue;
     if (!opts.dryRun) {
-      await db.centerMembership.upsert({
-        where: { centerCode_cwid: { centerCode: c.code, cwid } },
-        // A minted row carries NO membership role: the director was never on
-        // the roster, and moving the column must not add them to it.
-        create: {
+      await db.centerLeader.create({
+        data: {
           centerCode: c.code,
-          cwid,
-          membershipRoleKey: null,
-          membershipType: null,
-          leadershipRoleKey: DIRECTOR_ROLE_KEY,
-          leadershipInterim: c.leaderInterim,
-          source: "center-role-backfill",
-        },
-        update: {
-          leadershipRoleKey: DIRECTOR_ROLE_KEY,
-          leadershipInterim: c.leaderInterim,
+          cwid: c.directorCwid as string,
+          roleKey: DIRECTOR_ROLE_KEY,
+          interim: c.leaderInterim,
         },
       });
     }
-    directorsMigrated += 1;
-    if (mints) {
-      directorRowsMinted += 1;
-      log(`  ${c.code}: director is not on the roster — minting a leadership-only row.`);
-    }
+    leadersCreated += 1;
   }
   log(
-    `${opts.dryRun ? "Would migrate" : "Migrated"} ${directorsMigrated} director(s); ${directorRowsMinted} row(s) minted.`,
+    `${opts.dryRun ? "Would create" : "Created"} ${leadersCreated} director assignment(s); ${already.size} already present.`,
   );
 
   // ---- 4. Invariant: membershipType agrees with membershipRoleKey ----------
@@ -236,8 +238,8 @@ export async function runBackfill(
     centers: centers.length,
     rolesSeeded,
     membersClassified,
-    directorsMigrated,
-    directorRowsMinted,
+    leadersCreated,
+    leadersAlreadyPresent: already.size,
     dryRun: opts.dryRun,
   };
 }
