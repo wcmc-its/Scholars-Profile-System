@@ -4,7 +4,7 @@
  * Centers are manually-owned (no ETL writes the `center` table); fields are
  * edited in-row, so there is no `field_override` merge here.
  *
- *  - Centers carry the interim qualifier on the director's membership row
+ *  - Centers carry the interim qualifier on the director's `CenterLeader` row
  *    (#2542; was the `leaderInterim` column) — surface it
  *    on `director.isInterim`.
  *  - edge 20 — whole-unit suppression on a center renders as 404 (null).
@@ -89,7 +89,7 @@ describe("getCenter — unit-curation read-merge (#540)", () => {
     expect(mockScholarFindUnique).not.toHaveBeenCalled();
   });
 
-  it("surfaces the membership row's leadershipInterim on director.isInterim", async () => {
+  it("surfaces the CenterLeader row's interim flag on director.isInterim", async () => {
     defaultBaselineMocks();
     mockCenterFindUnique.mockResolvedValue({
       ...CENTER,

@@ -1587,10 +1587,15 @@ model CenterRole {
   /// `center` | `program`. Which tier the entry may be assigned at. Phase 1
   /// seeds only `center`; Phase 2 folds `CenterProgramLeader` in as `program`.
   scope        String   @default("center") @db.VarChar(16)
-  /// Single-holder roles refuse a second assignment (enforced server-side).
-  /// A flag, not an enum — there are exactly two states and no third is
-  /// foreseeable. CHPC holds "Associate Center Director" three times and
-  /// "Research Director" once.
+  /// Marks a role only one person may hold. A flag, not an enum — there are
+  /// exactly two states and no third is foreseeable. CHPC holds "Associate
+  /// Center Director" three times and "Research Director" once.
+  ///
+  /// NOT YET ENFORCED. Phase 1 ships one assignable leadership role
+  /// (`director`), and `/api/edit/unit` vacates the incumbent before granting,
+  /// so the invariant holds by construction rather than by a check. The
+  /// composite PK permits two holders, so Phase 3 — which lets a curator assign
+  /// any leadership entry — must enforce this on the write path.
   singleHolder Boolean  @default(false) @map("single_holder")
   /// Order within the group. This is what puts COE Liaisons after Leaders.
   sortOrder    Int      @default(0) @map("sort_order")
@@ -1634,8 +1639,15 @@ model CenterRole {
 /// would have to learn to skip them. Here, not one of them changes.
 ///
 /// Supersedes `Center.directorCwid` + `Center.leaderInterim`, which together
-/// held exactly one unlabelled leader. Phase 2 folds `CenterProgramLeader` in
-/// here as `scope: "program"` entries.
+/// held exactly one unlabelled leader.
+///
+/// Phase 2's fold-in of `CenterProgramLeader` is NOT additive from here, despite
+/// `CenterRole.scope` already carrying a `program` value: that table is
+/// `@@id([centerCode, programCode, cwid])`, so a folded row must say WHICH
+/// program it leads. That needs a nullable `programCode` plus a composite FK to
+/// `center_program`, AND a replacement primary key — one person leading two
+/// programs of the same center under the same `roleKey` collides with the key
+/// below. Budget a real migration for it, not an ADD COLUMN.
 model CenterLeader {
   centerCode String   @map("center_code") @db.VarChar(64)
   cwid       String   @db.VarChar(32)

@@ -501,9 +501,9 @@ export type ProfilePayload = {
   division: string | null;
   /** #1266 — formatted leadership-role lines (Chair / Chief / Center Director /
    *  Program Leader), in that order; empty when the scholar holds none. Sourced
-   *  from Department.chairCwid / Division.chiefCwid / a `CenterMembership`
-   *  leadership assignment (#2542; was Center.directorCwid) / CenterProgramLeader
-   *  rows and rendered beneath `primaryTitle`. Center and
+   *  from Department.chairCwid / Division.chiefCwid / a `CenterLeader`
+   *  assignment (#2542; was Center.directorCwid) / CenterProgramLeader rows and
+   *  rendered beneath `primaryTitle`. Center and
    *  program lines are curated and sparse, so they appear only where curation
    *  exists. */
   leadershipTitles: string[];

@@ -46,7 +46,7 @@
  * recurring job.
  */
 import "dotenv/config";
-import { MEMBER_ROLE_KEY } from "../../lib/center-roles";
+import { MEMBER_ROLE_KEY, centerRoleSeedRows } from "../../lib/center-roles";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -79,6 +79,10 @@ export type MeyerBackfillDb = {
       select: Record<string, boolean>;
     }): Promise<{ cwid: string } | null>;
     upsert(args: unknown): Promise<unknown>;
+  };
+  /** #2542 — the vocabulary `membershipRoleKey` FKs to. */
+  centerRole: {
+    createMany(args: unknown): Promise<{ count: number }>;
   };
 };
 
@@ -326,6 +330,13 @@ export async function applyBackfill(
       continue;
     }
 
+    // #2542 — `membership_role_key` FKs to `center_role`; seed Meyer's
+    // vocabulary first so a re-run before the Phase 1 backfill cannot die on
+    // MySQL 1452 partway through the roster.
+    await db.centerRole.createMany({
+      data: centerRoleSeedRows().map((r) => ({ centerCode: MEYER_CENTER_CODE, ...r })),
+      skipDuplicates: true,
+    });
     await db.centerMembership.upsert({
       where: { centerCode_cwid: { centerCode: MEYER_CENTER_CODE, cwid: m.cwid } },
       create: { centerCode: MEYER_CENTER_CODE, cwid: m.cwid, source: "manual", ...data },

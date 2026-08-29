@@ -147,6 +147,7 @@ function makeDb(opts: {
 
   const matches = (row: Record<string, unknown>, where: Record<string, unknown>): boolean =>
     Object.entries(where).every(([k, v]) => {
+      if (k === "NOT") return !matches(row, v as Record<string, unknown>);
       if (v !== null && typeof v === "object" && "in" in (v as object)) {
         return ((v as { in: string[] }).in ?? []).includes(row[k] as string);
       }
@@ -334,18 +335,39 @@ describe("runBackfill", () => {
     await expect(runBackfill(db, { dryRun: false })).rejects.toThrow(/global_health/);
   });
 
+  it("REPAIRS a row whose key and enum disagree — the rolling-deploy race", async () => {
+    // During the ECS roll both images serve. A new task creates a row keyed
+    // `member`; an old task then `set`s membershipType='research' on it, writing
+    // only the enum. The row is now inconsistent, renders fine (every public
+    // reader uses the enum), and a classify that only matched a NULL key could
+    // never fix it — step 4 would then throw on every future run.
+    const { db, memberships } = makeDb({
+      centers: [{ code: "meyer", directorCwid: null, leaderInterim: false }],
+      memberships: [
+        {
+          centerCode: "meyer",
+          cwid: "m010",
+          membershipRoleKey: MEMBER_ROLE_KEY,
+          membershipType: "research",
+        },
+      ],
+    });
+    const r = await runBackfill(db, { dryRun: false });
+    expect(r.membersClassified).toBe(1);
+    expect(memberships[0].membershipRoleKey).toBe("research");
+    // ...and the enum itself is still untouched, so the NCI predicate is stable.
+    expect(memberships[0].membershipType).toBe("research");
+  });
+
   it("THROWS when a row's membershipType disagrees with its role key — the only guard on a missed derivation", async () => {
     const { db } = makeDb({
       centers: CENTERS,
       memberships: [
-        // Pre-classified by some other path, and wrong: role says clinical,
-        // the enum still says research. Silent today; this is what catches it.
-        {
-          centerCode: "meyer",
-          cwid: "m009",
-          membershipRoleKey: "clinical",
-          membershipType: "research",
-        },
+        // Drift the classify step cannot reach. Nothing else in the system would
+        // ever notice; this check is the only guard.
+        // `research` derives to the enum literal `research`, but the column
+        // says NULL — and no classify step matches it, so nothing can repair it.
+        { centerCode: "meyer", cwid: "m009", membershipRoleKey: "research", membershipType: null },
       ],
     });
     await expect(runBackfill(db, { dryRun: false })).rejects.toThrow(

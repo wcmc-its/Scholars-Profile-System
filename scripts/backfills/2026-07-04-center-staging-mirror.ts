@@ -1,10 +1,14 @@
 /**
- * #2542 Phase 1 NOTE — `Center.directorCwid` is DEPRECATED and nothing reads it
- * any more; the director is a `CenterMembership` row with
- * `leadershipRoleKey = "director"`. This script still writes the old column, so
- * a run has NO visible effect until
- * `scripts/backfills/2026-08-29-center-role-vocabulary.ts` is re-run to move the
- * value across. Retire this script, or re-run that one after it.
+ * #2542 Phase 1 NOTE — `Center.directorCwid` is DEPRECATED. The director is a
+ * `CenterLeader` row with `roleKey = "director"`, and every reader now prefers
+ * it, falling back to this column only when no such row exists.
+ *
+ * This script writes ONLY the column. Once a center has a `CenterLeader` row,
+ * a run here changes NOTHING a user can see — and re-running
+ * `scripts/backfills/2026-08-29-center-role-vocabulary.ts` will NOT rescue it,
+ * because that script deliberately skips any center that already holds a
+ * director (so a re-run cannot resurrect a replaced one). Set the director
+ * through `/edit` instead, or update this script to write `CenterLeader` too.
  *
  * Center staging-mirror backfill (2026-07-04, one-shot per DB).
  *

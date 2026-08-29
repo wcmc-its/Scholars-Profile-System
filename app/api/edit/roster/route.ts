@@ -634,10 +634,18 @@ async function handleCornellAdd(p: {
           update: { ...resolution.snapshot },
         });
       }
+      // #2542 — same lazy vocabulary seed as `handleCenter`: this is the THIRD
+      // write path that references `center_role`, and `membership_role_key` is a
+      // non-null literal here, so without it every Cornell add 500s on the FK
+      // until the Phase 1 backfill has been run by hand.
+      await tx.centerRole.createMany({
+        data: centerRoleSeedRows().map((r) => ({ centerCode: unitCode, ...r })),
+        skipDuplicates: true,
+      });
       await tx.centerMembership.create({
-        // #2542 — an added Cornell (Ithaca) member is a roster member like any
-        // other, so it carries the `member` role. Its derived `membershipType`
-        // stays null, exactly as this row's type column was before.
+        // An added Cornell (Ithaca) member is a roster member like any other, so
+        // it carries the `member` role. Its derived `membershipType` stays null,
+        // exactly as this row's type column was before.
         data: {
           centerCode: unitCode,
           cwid: finalCwid,

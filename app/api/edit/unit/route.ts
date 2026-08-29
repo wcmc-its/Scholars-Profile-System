@@ -603,7 +603,8 @@ async function handleUpdate(
   let updatePayload: Record<string, unknown>;
   let storedValue: string | boolean;
   // #2542 Phase 1 — `directorCwid` / `leaderInterim` no longer map to a center
-  // column; they move the `director` assignment on a `CenterMembership` row.
+  // column; they move the `director` assignment in `CenterLeader`, and
+  // DUAL-WRITE the deprecated columns for one release.
   // The REQUEST contract is unchanged (same two field names, same two POSTs
   // from `unit-leader-card.tsx`, same `field_override` audit action and
   // `fieldsChanged` label), so only the storage moves — which is what keeps the

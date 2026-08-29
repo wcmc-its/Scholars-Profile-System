@@ -32,9 +32,13 @@
  * count, roster, search facet or proxy-edit reach changes.
  *
  * Safety:
- *   - VERIFY-ALL-BEFORE-WRITE. Every center's `director` vocabulary row must
- *     exist before any leadership row is written; otherwise the run THROWS and
- *     writes nothing rather than leaving a dangling FK.
+ *   - VERIFY-ALL-BEFORE-WRITE for the leadership step. Every center's `director`
+ *     vocabulary row must exist before any leadership row is written; otherwise
+ *     the run THROWS rather than leaving a dangling FK, and `--dry-run` performs
+ *     the same check. NOTE: the steps are separate statements, not one
+ *     transaction, so a throw in step 3 or 4 leaves steps 1 and 2 committed.
+ *     That is safe because both are idempotent and behaviour-preserving on their
+ *     own — re-run after fixing whatever threw.
  *   - Idempotent, and safe AFTER a curator has edited a director. Step 3 skips
  *     any center that already holds a `director` assignment, so a re-run can
  *     never resurrect a replaced director alongside the current one.
@@ -74,9 +78,7 @@ export type CenterRoleBackfillDb = {
   };
   centerMembership: {
     updateMany: (args: unknown) => Promise<{ count: number }>;
-    findMany: (
-      args: unknown,
-    ) => Promise<
+    findMany: (args: unknown) => Promise<
       {
         centerCode: string;
         cwid: string;
@@ -145,9 +147,23 @@ export async function runBackfill(
   // ---- 2. Classify existing members ----------------------------------------
   // research/clinical keep their literals so `isCurrentMember` is untouched;
   // everything else becomes `member`, which derives back to a NULL enum.
+  //
+  // The research/clinical steps match on the ENUM disagreeing with the key, not
+  // merely on a null key, so they also REPAIR drift. That matters during the
+  // rolling deploy, when an old task can `set` membershipType on a row a new
+  // task already keyed — leaving a row step 4's invariant check would reject
+  // and a null-guarded classify could never fix. Both are still no-ops on a
+  // second run. The `member` step keeps the null guard: once Phase 3 lets
+  // curators mint entries, a null `membershipType` is legitimate on any key.
   const classify: { where: Record<string, unknown>; key: string }[] = [
-    { where: { membershipRoleKey: null, membershipType: "research" }, key: "research" },
-    { where: { membershipRoleKey: null, membershipType: "clinical" }, key: "clinical" },
+    {
+      where: { membershipType: "research", NOT: { membershipRoleKey: "research" } },
+      key: "research",
+    },
+    {
+      where: { membershipType: "clinical", NOT: { membershipRoleKey: "clinical" } },
+      key: "clinical",
+    },
     { where: { membershipRoleKey: null, membershipType: null }, key: MEMBER_ROLE_KEY },
   ];
   let membersClassified = 0;
@@ -180,7 +196,16 @@ export async function runBackfill(
     select: { centerCode: true, key: true },
   });
   const haveDirectorRole = new Set(seededDirectorRoles.map((r) => r.centerCode));
-  const missing = opts.dryRun ? [] : led.filter((c) => !haveDirectorRole.has(c.code));
+  if (opts.dryRun) {
+    // Step 1 wrote nothing, so credit the rows it WOULD have written — otherwise
+    // every dry run reports a dangling FK that the real run would not have.
+    for (const r of seedRows) {
+      if (r.key === DIRECTOR_ROLE_KEY) haveDirectorRole.add(r.centerCode);
+    }
+  }
+  // Checked in dry-run too — detecting a dangling-FK condition before the real
+  // run is the entire point of a pre-flight.
+  const missing = led.filter((c) => !haveDirectorRole.has(c.code));
   if (missing.length > 0) {
     throw new Error(
       `Missing '${DIRECTOR_ROLE_KEY}' vocabulary row for: ${missing

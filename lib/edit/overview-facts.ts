@@ -1024,7 +1024,7 @@ function fkLeadershipCandidate(
 /**
  * #742 §2.5 — leadership roles recorded on the org-unit FK tables, not (or not
  * yet) in the appointment table: a department `chairCwid`, a division `chiefCwid`,
- * a center leadership membership row (#2542; was `directorCwid` + interim), and `CenterProgramLeader` rows. These catch
+ * a `CenterLeader` row (#2542; was `directorCwid` + interim), and `CenterProgramLeader` rows. These catch
  * leadership set via `field_override` or missed by the appointment-title ETL (the
  * Stewart case). Each query keys on the leader being THIS scholar, so an external
  * leader (`lib/external-leaders.ts`, a non-WCM cwid) never matches. The synthesized

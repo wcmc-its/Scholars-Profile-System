@@ -23,7 +23,7 @@
  * Run: npx tsx prisma/seed-center-members.ts
  */
 import "dotenv/config";
-import { MEMBER_ROLE_KEY } from "../lib/center-roles";
+import { MEMBER_ROLE_KEY, centerRoleSeedRows } from "../lib/center-roles";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "../lib/db";
@@ -92,6 +92,13 @@ async function main() {
       where: { centerCode: center.code, source: { startsWith: "file:" } },
     });
     if (matched.length > 0) {
+      // #2542 — `membership_role_key` FKs to `center_role`. `seed-centers.ts`
+      // only seeds the vocabulary on CREATE, so a database whose centers predate
+      // this branch has none and the insert below would die with MySQL 1452.
+      await db.write.centerRole.createMany({
+        data: centerRoleSeedRows().map((r) => ({ centerCode: center.code, ...r })),
+        skipDuplicates: true,
+      });
       await db.write.centerMembership.createMany({
         data: matched.map((cwid) => ({
           centerCode: center.code,
