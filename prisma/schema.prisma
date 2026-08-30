@@ -1539,9 +1539,15 @@ model Center {
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   members          CenterMembership[]
-  leaders          CenterLeader[]
   programs         CenterProgram[]
-  roles            CenterRole[]
+  /// DEPRECATED, dropped in the follow-up contract migration. Kept for one
+  /// release because migrations run BEFORE the ECS roll, so the still-running
+  /// previous image would 500 on public center pages and scholar profiles if
+  /// these tables vanished mid-rollout. Both are EMPTY in every environment
+  /// (verified on staging 2026-08-30: 0 rows) — nothing is being migrated, only
+  /// left standing until nothing queries it.
+  legacyLeaders    CenterLeader[]
+  legacyRoles      CenterRole[]
   fundingAwards    CancerCenterFundingAward[]
   collabCandidates CenterCollabCandidate[]
 
@@ -1550,33 +1556,52 @@ model Center {
   @@map("center")
 }
 
-/// Per-center role vocabulary (#2542 Phase 1). One row per (center, `key`).
-/// A center defines its own list of roles rather than inheriting a global enum,
-/// because the label is a property OF THE UNIT — the Cornell Health Policy
-/// Center publishes "Founding Center Director" and "Core Faculty Fellow", words
-/// that exist nowhere else at WCM.
+/// The org-unit role vocabulary (#2542). ONE list per unit KIND for the whole
+/// institution — one row per (`entityType`, `key`) — not a per-unit copy.
 ///
-/// Every center is SEEDED with the same default set at creation
-/// (`lib/center-roles.ts` `DEFAULT_CENTER_ROLES`), copied onto the center rather
-/// than resolved through a global fallback — so there is no "is this inherited
-/// or overridden" question and editing is just editing rows. The defaults are
-/// chosen so migrating the existing centers changes nothing publicly.
+/// WHY NOT PER-UNIT. Phase 1 keyed this `(center_code, key)` and copied the
+/// default set onto every center at creation. That makes each unit the owner of
+/// an editable copy, so the same concept can end up with a different word at
+/// every unit, and the governance layer's job becomes policing divergence.
+/// Since a superuser / comms_steward owns this vocabulary precisely SO THAT the
+/// institution speaks with one voice, per-unit copies are a drift generator.
+/// Keyed by kind, drift is not discouraged — it is unrepresentable.
+///
+/// PER-UNIT VARIATION STILL WORKS, three ways, none of which needs a local copy:
+///   1. WHO HOLDS WHAT. A role with no holders renders no section, so a generous
+///      list costs nothing. CHPC holds `core_fellow`/`affiliate_fellow`; the
+///      other centers simply hold neither.
+///   2. `interim`, on the assignment.
+///   3. Distinct entries for distinct concepts. A portfolio ("Associate Center
+///      Director, Health policy communication") is its OWN entry rather than a
+///      free-text qualifier on the assignment — decided 2026-08-30 for
+///      simplicity, which is why `qualifier` no longer exists.
+///
+/// The Chair/Chief/Director problem falls out of this: `chair` and `director`
+/// both live in the `department` list, Medicine holds `chair`, the Library holds
+/// `director`, and the `category === "administrative"` ternary duplicated across
+/// four sites has nothing left to decide.
 ///
 /// `key` is STABLE and never edited: code and reporting predicates match on it.
-/// `label` is the displayed string and is curator-editable (Phase 3's console
-/// tab). Keeping them separate is not tidiness — `CenterCollabCandidate`
+/// `label` is the displayed string, editable by a superuser / comms_steward ONLY
+/// (never by a unit owner or curator — that is the whole point of the tier).
+/// Keeping them separate is not tidiness — `CenterCollabCandidate`
 /// `isCurrentMember` is defined as a membership whose type is the literal
 /// `research`, so if renaming a label could change a key it would silently
 /// alter the NCI CCSG REMOVE-eligible population.
 ///
-/// `key`/`roleGroup`/`scope` are VARCHAR with app-level closure rather than
-/// Prisma enums, matching `CenterProgramLeader.role` and `CoreLeader.role` —
-/// extensible without a future `ALTER TABLE … MODIFY ENUM`, which matters
-/// because Phase 3 lets curators mint entries.
-model CenterRole {
-  centerCode   String   @map("center_code") @db.VarChar(64)
-  /// Stable identifier. Never edited. Closed server-side to this center's own
-  /// vocabulary at write time — see `lib/center-roles.ts`.
+/// `entityType`/`key`/`roleGroup`/`scope` are VARCHAR with app-level closure
+/// rather than Prisma enums, matching `CenterProgramLeader.role` and
+/// `CoreLeader.role`. `entityType` deliberately does NOT reuse the `EntityType`
+/// enum: it sits in this PK and in the assignment FK, so an enum would turn
+/// every future member addition into a drop-FK/drop-PK/MODIFY/add-PK/add-FK
+/// rebuild of two tables instead of a one-line `ALTER`.
+model OrgUnitRole {
+  /// `department` | `division` | `center` | `core` | `center_program`. Matches
+  /// the `EntityType` vocabulary by value, not by type — see the docblock above.
+  entityType   String   @map("entity_type") @db.VarChar(32)
+  /// Stable identifier. Never edited. Closed server-side to this KIND's
+  /// vocabulary at write time — see `lib/org-unit-roles.ts`.
   key          String   @db.VarChar(32)
   /// Displayed string. Curator-editable in Phase 3; renaming is display-only.
   label        String   @db.VarChar(255)
@@ -1614,15 +1639,15 @@ model CenterRole {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  center            Center             @relation(fields: [centerCode], references: [code], onDelete: Cascade)
-  /// Holders of a `membership`-group entry — one per person per center.
-  membershipHolders CenterMembership[]
   /// Holders of a `leadership`-group entry — a person may hold more than one.
-  leadershipHolders CenterLeader[]
+  /// The `membership` half (`CenterMembership.membershipRoleKey`) gains its
+  /// relation in the contract release, when its FK is safe to add — see the note
+  /// on `CenterMembership`.
+  leadershipHolders OrgUnitRoleAssignment[]
 
-  @@id([centerCode, key])
-  @@index([centerCode, roleGroup, sortOrder])
-  @@map("center_role")
+  @@id([entityType, key])
+  @@index([entityType, roleGroup, sortOrder])
+  @@map("org_unit_role")
 }
 
 /// A leadership-role assignment at a center (#2542 Phase 1). The `leadership`
@@ -1641,18 +1666,24 @@ model CenterRole {
 /// Supersedes `Center.directorCwid` + `Center.leaderInterim`, which together
 /// held exactly one unlabelled leader.
 ///
-/// Phase 2's fold-in of `CenterProgramLeader` is NOT additive from here, despite
-/// `CenterRole.scope` already carrying a `program` value: that table is
-/// `@@id([centerCode, programCode, cwid])`, so a folded row must say WHICH
-/// program it leads. That needs a nullable `programCode` plus a composite FK to
-/// `center_program`, AND a replacement primary key — one person leading two
-/// programs of the same center under the same `roleKey` collides with the key
-/// below. Budget a real migration for it, not an ADD COLUMN.
-model CenterLeader {
-  centerCode String   @map("center_code") @db.VarChar(64)
+/// Folding `CenterProgramLeader` in later means giving a row a program to lead.
+/// `entityId` already carries that: a program assignment is
+/// (`center_program`, "{centerCode}:{programCode}"), so the PK below admits one
+/// person leading two programs under the same `roleKey` — the collision the
+/// Phase 1 shape could not express. Adding `center_program` to `EntityType` is
+/// still owed for the AUDIT enum; this table needs no migration for it.
+model OrgUnitRoleAssignment {
+  /// Which kind of unit. Pairs with `OrgUnitRole.entityType` in the FK below.
+  entityType String   @map("entity_type") @db.VarChar(32)
+  /// The unit's code. NO FK — polymorphic, exactly as `UnitAdmin` is, and for
+  /// the same reason: an assignment is a fact about a unit, not a child row, and
+  /// an informal unit's synthetic code is known only to the manual layer. The
+  /// two backfills that delete centers must delete assignments first; no request
+  /// path deletes a unit.
+  entityId   String   @map("entity_id") @db.VarChar(64)
   cwid       String   @db.VarChar(32)
-  /// The `CenterRole` this assignment confers. Closed server-side to entries of
-  /// THIS center's own vocabulary whose `roleGroup` is `leadership`.
+  /// The `OrgUnitRole` this assignment confers. Closed by the FK below to an
+  /// entry of THIS KIND's vocabulary; `roleGroup` is checked in app code.
   roleKey    String   @map("role_key") @db.VarChar(32)
   /// Interim/acting qualifier — renders "Interim Director". A modifier, not a
   /// role of its own: folding it into the vocabulary would double every entry.
@@ -1660,28 +1691,27 @@ model CenterLeader {
   /// Order among multiple holders of the SAME role, as Meyer already orders its
   /// program leaders (`CenterProgramLeader.sortOrder`).
   sortOrder  Int      @default(0) @map("sort_order")
-  /// Portfolio qualifier appended to the label — CHPC publishes "Associate
-  /// Center Director, Health policy communication". DISPLAY ONLY: never a
-  /// predicate, never matched by code, so the stable `roleKey` still identifies
-  /// the role. Free text is safe here precisely because nothing reads it.
-  qualifier  String?  @db.VarChar(255)
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
-  center Center     @relation(fields: [centerCode], references: [code], onDelete: Cascade)
-  // NoAction for the same reason as `CenterMembership.program`: the key is
-  // composite and `centerCode` is NOT NULL, so SET NULL would try to null
-  // `centerCode` too and is invalid in Prisma and MySQL alike. Deleting a
-  // vocabulary entry that still has holders is blocked in-app (#2542 Phase 3).
-  role   CenterRole @relation(fields: [centerCode, roleKey], references: [centerCode, key], onDelete: NoAction, onUpdate: NoAction)
+  // NoAction because `entityType` is NOT NULL and part of a composite key, so
+  // SET NULL is invalid in Prisma and MySQL alike. Deleting a vocabulary entry
+  // that still has holders is blocked in-app.
+  //
+  // There is no `qualifier` column. A portfolio ("Associate Center Director,
+  // Health policy communication") is its own vocabulary ENTRY, decided
+  // 2026-08-30: it removes a free-text field from the write path and a
+  // formatting branch from every read, at the cost of a few more rows in a list
+  // only a superuser can edit.
+  role OrgUnitRole @relation(fields: [entityType, roleKey], references: [entityType, key], onDelete: NoAction, onUpdate: NoAction)
 
   // `roleKey` is part of the identity: a person may hold two leadership roles at
-  // one center. Contrast `CenterMembership`, where a person has ONE membership
+  // one unit. Contrast `CenterMembership`, where a person has ONE membership
   // role and (center, cwid) is the whole key.
-  @@id([centerCode, cwid, roleKey])
+  @@id([entityType, entityId, cwid, roleKey])
   @@index([cwid])
-  @@index([centerCode, roleKey, sortOrder])
-  @@map("center_leader")
+  @@index([entityType, entityId, roleKey, sortOrder])
+  @@map("org_unit_role_assignment")
 }
 
 /// Per-center program taxonomy (#552). Empty for centers that don't use
@@ -1785,6 +1815,13 @@ model CenterMembership {
   /// member, so keeping the two apart means nothing that counts center members
   /// has to know about leadership at all.
   membershipRoleKey String? @map("membership_role_key") @db.VarChar(32)
+  /// Always `"center"`. Exists only so the composite FK to `OrgUnitRole` — whose
+  /// key became (`entityType`, `key`) when the vocabulary moved from per-unit to
+  /// per-kind — has a column to reference: MySQL cannot point a foreign key at a
+  /// literal. Redundant on a table that is centers by definition, and kept
+  /// anyway because that FK is what enforces, IN THE DATABASE, that a curator
+  /// can only ever assign a role a superuser put on the list.
+  roleEntityType    String  @default("center") @map("role_entity_type") @db.VarChar(32)
 
   center  Center         @relation(fields: [centerCode], references: [code], onDelete: Cascade)
   // RESTRICT (not the spec's SET NULL): the FK is composite (centerCode,
@@ -1798,7 +1835,12 @@ model CenterMembership {
   // `centerCode` is NOT NULL, so SET NULL is invalid in both Prisma and MySQL.
   // Deleting a vocabulary entry that still has holders must be blocked in-app
   // (with reassignment) rather than orphaning rows — see #2542 Phase 3.
-  membershipRole CenterRole? @relation(fields: [centerCode, membershipRoleKey], references: [centerCode, key], onDelete: NoAction, onUpdate: NoAction)
+  // No relation to `OrgUnitRole` YET. `role_entity_type` is added in this
+  // release so the composite FK has a column to point at, but the FK ITSELF
+  // lands in the follow-up contract migration — added here it would require
+  // `org_unit_role` to be seeded before the ECS roll finishes, and migrations
+  // run BEFORE the roll. Until then closure is app-level (`isCenterMembershipType`
+  // plus `deriveMembershipType`'s allowlist), which is what shipped in Phase 1.
 
   @@id([centerCode, cwid])
   @@index([cwid])
@@ -3629,4 +3671,54 @@ model SponsorMatchSubmission {
   @@index([submittedBy])
   @@index([descriptionHash])
   @@map("sponsor_match_submission")
+}
+
+/// DEPRECATED (#2542) — superseded by `OrgUnitRole`, which keys the vocabulary
+/// by unit KIND instead of by unit so the same concept cannot acquire a
+/// different word at every unit. EMPTY in every environment (staging verified
+/// 2026-08-30: 0 rows); nothing was migrated out of it because nothing was ever
+/// in it. Retained for exactly one release so the previous image keeps working
+/// through the rollout window, then dropped by the contract migration. Do not
+/// read or write this model.
+model CenterRole {
+  centerCode   String   @map("center_code") @db.VarChar(64)
+  key          String   @db.VarChar(32)
+  label        String   @db.VarChar(255)
+  roleGroup    String   @map("role_group") @db.VarChar(16)
+  scope        String   @default("center") @db.VarChar(16)
+  singleHolder Boolean  @default(false) @map("single_holder")
+  sortOrder    Int      @default(0) @map("sort_order")
+  profileTitle Boolean  @default(true) @map("profile_title")
+  expansion    String?  @db.VarChar(255)
+  source       String   @default("seed") @db.VarChar(32)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  center            Center         @relation(fields: [centerCode], references: [code], onDelete: Cascade)
+  leadershipHolders CenterLeader[]
+
+  @@id([centerCode, key])
+  @@index([centerCode, roleGroup, sortOrder])
+  @@map("center_role")
+}
+
+/// DEPRECATED (#2542) — superseded by `OrgUnitRoleAssignment`. See `CenterRole`
+/// above for why this survives one release. EMPTY in every environment.
+model CenterLeader {
+  centerCode String   @map("center_code") @db.VarChar(64)
+  cwid       String   @db.VarChar(32)
+  roleKey    String   @map("role_key") @db.VarChar(32)
+  interim    Boolean  @default(false)
+  sortOrder  Int      @default(0) @map("sort_order")
+  qualifier  String?  @db.VarChar(255)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  center Center     @relation(fields: [centerCode], references: [code], onDelete: Cascade)
+  role   CenterRole @relation(fields: [centerCode, roleKey], references: [centerCode, key], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([centerCode, cwid, roleKey])
+  @@index([cwid])
+  @@index([centerCode, roleKey, sortOrder])
+  @@map("center_leader")
 }
