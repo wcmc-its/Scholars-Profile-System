@@ -161,6 +161,8 @@ export type ReportsDirectoryClient = Pick<
   | "centerProgram"
   | "centerCollabCandidate"
   | "cancerCenterFundingAward"
+
+  | "orgUnitRoleAssignment"
 >;
 
 /** One unit in scope for the Reports index/nav. A `center` must carry a

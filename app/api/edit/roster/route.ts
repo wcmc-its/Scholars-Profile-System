@@ -43,7 +43,12 @@
  * — no new audit enum value (the `scripts/sql/audit-log.sql` trap in CLAUDE.md).
  */
 import { NextResponse, type NextRequest } from "next/server";
-import { MEMBER_ROLE_KEY, centerRoleSeedRows, deriveMembershipType } from "@/lib/center-roles";
+import {
+  CENTER_ENTITY_TYPE,
+  MEMBER_ROLE_KEY,
+  deriveMembershipType,
+  orgUnitRoleSeedRows,
+} from "@/lib/org-unit-roles";
 
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
@@ -413,8 +418,8 @@ async function handleCenter(p: {
         // center's defaults first — idempotent, never clobbers a renamed label,
         // and removes the ordering dependency between the deploy and the
         // backfill entirely.
-        await tx.centerRole.createMany({
-          data: centerRoleSeedRows().map((r) => ({ centerCode: unitCode, ...r })),
+        await tx.orgUnitRole.createMany({
+          data: orgUnitRoleSeedRows(CENTER_ENTITY_TYPE),
           skipDuplicates: true,
         });
       }
@@ -638,8 +643,8 @@ async function handleCornellAdd(p: {
       // write path that references `center_role`, and `membership_role_key` is a
       // non-null literal here, so without it every Cornell add 500s on the FK
       // until the Phase 1 backfill has been run by hand.
-      await tx.centerRole.createMany({
-        data: centerRoleSeedRows().map((r) => ({ centerCode: unitCode, ...r })),
+      await tx.orgUnitRole.createMany({
+        data: orgUnitRoleSeedRows(CENTER_ENTITY_TYPE),
         skipDuplicates: true,
       });
       await tx.centerMembership.create({

@@ -20,6 +20,7 @@ const {
   mockCenterMembershipFindMany,
   mockSuppressionFindFirst,
   mockFieldOverrideFindMany,
+  mockAssignmentFindFirst,
 } = vi.hoisted(() => ({
   mockCenterFindUnique: vi.fn(),
   mockScholarFindUnique: vi.fn(),
@@ -27,11 +28,15 @@ const {
   mockCenterMembershipFindMany: vi.fn(),
   mockSuppressionFindFirst: vi.fn(),
   mockFieldOverrideFindMany: vi.fn(),
+  mockAssignmentFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
     center: { findUnique: mockCenterFindUnique },
+    // #2542 — leadership is an `OrgUnitRoleAssignment` row fetched with its own
+    // query; it used to be a nested `leaders` relation on `center`.
+    orgUnitRoleAssignment: { findFirst: mockAssignmentFindFirst },
     scholar: { findUnique: mockScholarFindUnique, findMany: mockScholarFindMany },
     centerMembership: { findMany: mockCenterMembershipFindMany },
     suppression: { findFirst: mockSuppressionFindFirst },
@@ -47,11 +52,10 @@ const CENTER = {
   slug: "meyer-cancer-center",
   description: "Cancer research center.",
   url: null,
-  // #2542 — `getCenterUncached` selects the director as a nested `CenterLeader`
-  // row (`roleKey: "director"`, `take: 1`). The two columns remain as the
-  // pre-backfill dual-read fallback.
-  leaders: [{ cwid: "dir0001", interim: false }],
-  directorCwid: null,
+  // #2542 — `getCenterUncached` reads the director from an
+  // `OrgUnitRoleAssignment` row. These two columns remain as the pre-backfill
+  // dual-read fallback, which is what every environment is on today.
+  directorCwid: "dir0001",
   leaderInterim: false,
   scholarCount: 42,
 };
@@ -73,6 +77,9 @@ function defaultBaselineMocks() {
   mockScholarFindMany.mockResolvedValue([]);
   mockSuppressionFindFirst.mockResolvedValue(null);
   mockFieldOverrideFindMany.mockResolvedValue([]);
+  // No assignment row by default: reads fall through to the legacy column, which
+  // is exactly the pre-backfill state in every environment today.
+  mockAssignmentFindFirst.mockResolvedValue(null);
 }
 
 describe("getCenter — unit-curation read-merge (#540)", () => {
@@ -89,12 +96,9 @@ describe("getCenter — unit-curation read-merge (#540)", () => {
     expect(mockScholarFindUnique).not.toHaveBeenCalled();
   });
 
-  it("surfaces the CenterLeader row's interim flag on director.isInterim", async () => {
+  it("surfaces the assignment row's interim flag on director.isInterim", async () => {
     defaultBaselineMocks();
-    mockCenterFindUnique.mockResolvedValue({
-      ...CENTER,
-      leaders: [{ cwid: "dir0001", interim: true }],
-    });
+    mockAssignmentFindFirst.mockResolvedValue({ cwid: "dir0001", interim: true });
 
     const result = await getCenter("meyer-cancer-center");
     expect(result?.director?.isInterim).toBe(true);
@@ -108,7 +112,7 @@ describe("getCenter — unit-curation read-merge (#540)", () => {
 
   it("a center with no director assignment produces director=null", async () => {
     defaultBaselineMocks();
-    mockCenterFindUnique.mockResolvedValue({ ...CENTER, leaders: [] });
+    mockCenterFindUnique.mockResolvedValue({ ...CENTER, directorCwid: null });
 
     const result = await getCenter("meyer-cancer-center");
     expect(result?.director).toBeNull();

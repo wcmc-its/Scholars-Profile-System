@@ -25,7 +25,7 @@
  * Read-only — this module performs NO write. Node-runtime only (Prisma).
  */
 import { db } from "@/lib/db";
-import { DIRECTOR_ROLE_KEY, formatLeadershipTitle } from "@/lib/center-roles";
+import { CENTER_ENTITY_TYPE, DIRECTOR_ROLE_KEY, formatLeadershipTitle } from "@/lib/org-unit-roles";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import { scoreFundingImportance } from "@/lib/edit/funding-importance";
 import { isChairTitleFor } from "@/lib/leadership";
@@ -1043,18 +1043,22 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
       where: { chiefCwid: cwid },
       select: { code: true, name: true },
     }),
-    // #2542 Phase 1 — center leadership is a `CenterLeader` row now.
+    // #2542 — center leadership is an `OrgUnitRoleAssignment` row.
     // `profileTitle` gates it for the same reason `role: "leader"` gates program
-    // leaders below: not every leadership role is a title on a person.
-    db.read.centerLeader.findMany({
-      where: { cwid, role: { roleGroup: "leadership", profileTitle: true } },
+    // leaders below: not every leadership role is a title on a person. The
+    // center's NAME is resolved separately — the assignment is polymorphic on
+    // (entityType, entityId) with no FK to `center`.
+    db.read.orgUnitRoleAssignment.findMany({
+      where: {
+        cwid,
+        entityType: CENTER_ENTITY_TYPE,
+        role: { roleGroup: "leadership", profileTitle: true },
+      },
       select: {
-        centerCode: true,
+        entityId: true,
         roleKey: true,
         interim: true,
-        qualifier: true,
         role: { select: { label: true } },
-        center: { select: { name: true, officialName: true } },
       },
     }),
     // Dual-read fallback for the pre-backfill window; dropped in the contract PR.
@@ -1075,6 +1079,17 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
     }),
   ]);
 
+  // One batched name lookup for the centers the assignments point at.
+  const centerNameRows = centers.length
+    ? await db.read.center.findMany({
+        where: { code: { in: centers.map((c) => c.entityId) } },
+        select: { code: true, name: true, officialName: true },
+      })
+    : [];
+  const centerNameById = new Map(
+    centerNameRows.map((c) => [c.code, c.officialName ?? c.name]),
+  );
+
   const out: FkLeadershipCandidate[] = [];
   for (const d of departments) {
     const name = d.officialName ?? d.name;
@@ -1094,19 +1109,24 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
     );
   }
   for (const c of centers) {
-    const name = c.center.officialName ?? c.center.name;
+    const name = centerNameById.get(c.entityId);
+    // A row whose center vanished emits no candidate rather than a half-rendered
+    // one — the assignment carries no FK to `center`.
+    if (name === undefined) continue;
     // The candidate id is PERSISTED in `overview_source_selection.deltas`, so a
     // curator's dismissal of "Director, X" must keep matching. `fk:center:{code}`
     // stays byte-identical for the director role — the only role that existed
-    // before #2542 — and only additional roles take a suffixed id.
+    // before #2542 — and only additional roles take a suffixed id. Re-keying the
+    // vocabulary by unit kind does not touch either: both interpolate the
+    // ASSIGNMENT's own `entity_id` and `role_key`, never the vocabulary's PK.
     const id =
       c.roleKey === DIRECTOR_ROLE_KEY
-        ? `fk:center:${c.centerCode}`
-        : `fk:center:${c.centerCode}:${c.roleKey}`;
+        ? `fk:center:${c.entityId}`
+        : `fk:center:${c.entityId}:${c.roleKey}`;
     out.push(
       fkLeadershipCandidate(
         id,
-        `${formatLeadershipTitle(c.role.label, c.interim, c.qualifier)}, ${name}`,
+        `${formatLeadershipTitle(c.role.label, c.interim)}, ${name}`,
         WCM_ORG,
         c.interim,
       ),
@@ -1115,7 +1135,7 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
   // Dual-read: only centers `CenterLeader` does not already cover, so the two
   // sources never emit two candidates with the same `fk:center:` id.
   for (const c of legacyCenters) {
-    if (centers.some((x) => x.centerCode === c.code)) continue;
+    if (centers.some((x) => x.entityId === c.code)) continue;
     const name = c.officialName ?? c.name;
     out.push(
       fkLeadershipCandidate(

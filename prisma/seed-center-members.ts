@@ -23,7 +23,7 @@
  * Run: npx tsx prisma/seed-center-members.ts
  */
 import "dotenv/config";
-import { MEMBER_ROLE_KEY, centerRoleSeedRows } from "../lib/center-roles";
+import { CENTER_ENTITY_TYPE, MEMBER_ROLE_KEY, orgUnitRoleSeedRows } from "../lib/org-unit-roles";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "../lib/db";
@@ -39,6 +39,15 @@ function parseCwids(content: string): string[] {
 }
 
 async function main() {
+  // #2542 — the role vocabulary is ONE list per unit kind for the whole
+  // institution, not a per-unit copy, so it is seeded once here rather than
+  // nested on each center. `skipDuplicates` makes it idempotent and means a
+  // re-run can never clobber a label a steward has edited.
+  await db.write.orgUnitRole.createMany({
+    data: orgUnitRoleSeedRows(CENTER_ENTITY_TYPE),
+    skipDuplicates: true,
+  });
+
   let entries: string[] = [];
   try {
     entries = await readdir(MEMBERS_DIR);
@@ -92,13 +101,8 @@ async function main() {
       where: { centerCode: center.code, source: { startsWith: "file:" } },
     });
     if (matched.length > 0) {
-      // #2542 — `membership_role_key` FKs to `center_role`. `seed-centers.ts`
-      // only seeds the vocabulary on CREATE, so a database whose centers predate
-      // this branch has none and the insert below would die with MySQL 1452.
-      await db.write.centerRole.createMany({
-        data: centerRoleSeedRows().map((r) => ({ centerCode: center.code, ...r })),
-        skipDuplicates: true,
-      });
+      // The vocabulary is seeded once at the top of `main()` — one list per unit
+      // kind, so there is nothing per-center to seed here any more.
       await db.write.centerMembership.createMany({
         data: matched.map((cwid) => ({
           centerCode: center.code,

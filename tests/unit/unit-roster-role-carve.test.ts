@@ -158,6 +158,15 @@ vi.mock("@/lib/db", () => ({
     division: { findFirst: divisionFindFirst, findMany: divisionFindMany },
     divisionMembership: { findMany: divisionMembershipFindMany },
     center: { findUnique: centerFindUnique },
+    // #2542 — leadership is an `OrgUnitRoleAssignment` row fetched with its own
+    // query; it used to be a nested `leaders` relation on `center`.
+    orgUnitRoleAssignment: {
+      findFirst: vi.fn(async () => null),
+      findMany: vi.fn(async () => []),
+      create: vi.fn(async () => ({})),
+      deleteMany: vi.fn(async () => ({ count: 0 })),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
     centerMembership: { findMany: centerMembershipFindMany },
     centerProgram: { findMany: centerProgramFindMany },
     department: { findUnique: departmentFindUnique },

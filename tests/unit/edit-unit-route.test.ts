@@ -123,13 +123,13 @@ const fakeTx = {
   // #2542 — center leadership writes land on `CenterLeader`, preceded by a lazy
   // `centerRole` seed, so the transaction stub needs both delegates or every
   // center update throws.
-  centerLeader: {
+  orgUnitRoleAssignment: {
     findFirst: mockTxCenterLeaderFindFirst,
     create: mockTxCenterLeaderCreate,
     updateMany: mockTxCenterLeaderUpdateMany,
     deleteMany: mockTxCenterLeaderDeleteMany,
   },
-  centerRole: { createMany: mockTxCenterRoleCreateMany },
+  orgUnitRole: { createMany: mockTxCenterRoleCreateMany },
   $executeRaw: mockExecuteRaw,
 };
 
@@ -795,7 +795,7 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
   // The request contract is unchanged (same two field names, same two POSTs from
   // `unit-leader-card.tsx`), and the deprecated columns are DUAL-WRITTEN for one
   // release so the pre-backfill fallback and an app-code rollback stay correct.
-  it("naming a director writes the CenterLeader row AND dual-writes the column", async () => {
+  it("naming a director writes the assignment row AND dual-writes the column", async () => {
     mockTxCenterLeaderFindFirst.mockResolvedValue(null);
     const res = await POST(
       post({
@@ -807,15 +807,16 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
       }),
     );
     expect(res.status).toBe(200);
-    // The vocabulary is seeded first: `center_leader.role_key` FKs to it, and
-    // the pre-existing centers have none until the Phase 1 backfill runs.
+    // The vocabulary is seeded first: `org_unit_role_assignment.role_key` FKs to
+    // it, and it is empty until the backfill runs.
     expect(mockTxCenterRoleCreateMany).toHaveBeenCalledWith(
       expect.objectContaining({ skipDuplicates: true }),
     );
     expect(mockTxCenterLeaderCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          centerCode: "MEYER",
+          entityType: "center",
+          entityId: "MEYER",
           cwid: "new0001",
           roleKey: "director",
         }),
@@ -839,7 +840,9 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
     );
     expect(res.status).toBe(200);
     expect(mockTxCenterLeaderDeleteMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { centerCode: "MEYER", roleKey: "director" } }),
+      expect.objectContaining({
+        where: { entityType: "center", entityId: "MEYER", roleKey: "director" },
+      }),
     );
     expect(mockTxCenterLeaderCreate).not.toHaveBeenCalled();
     expect(mockTxCenterUpdate).toHaveBeenCalledWith(

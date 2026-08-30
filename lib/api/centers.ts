@@ -28,7 +28,7 @@ import { formatRoleCategory } from "@/lib/role-display";
 import { groupToRawValues, type RoleGroupLabel } from "@/lib/role-groups";
 import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { extractLastNameSort } from "@/lib/name-sort";
-import { DIRECTOR_ROLE_KEY } from "@/lib/center-roles";
+import { CENTER_ENTITY_TYPE, DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
 import type {
   DepartmentFacultyHit,
   DepartmentTopicArea,
@@ -344,7 +344,6 @@ type CenterRow = {
   slug: string;
   description: string | null;
   url: string | null;
-  leaders: { cwid: string; interim: boolean }[];
   directorCwid: string | null;
   leaderInterim: boolean;
 };
@@ -358,23 +357,9 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
       slug: true,
       description: true,
       url: true,
-      // #2542 Phase 1 — leadership moved off `Center.directorCwid` into
-      // `CenterLeader`. `take: 1` because `director` is single-holder in the
-      // seeded vocabulary and `CenterDetail.director` is one object.
-      // ponytail: renders one director, as the column did. A center with
-      // co-directors needs `CenterDetail.director` widened to a list and
-      // `center-page.tsx` to render the leadership group in `sortOrder` — that
-      // is the Phase 1 public-render step, deliberately not folded into the
-      // migration so this change is provably zero-visible-change.
-      leaders: {
-        where: { roleKey: DIRECTOR_ROLE_KEY },
-        select: { cwid: true, interim: true },
-        orderBy: { sortOrder: "asc" },
-        take: 1,
-      },
       // Dual-read fallback for the window between the ECS roll and the manual
-      // Phase 1 backfill, when no `CenterLeader` row exists yet. Removed with
-      // the column in the contract PR.
+      // backfill, when no assignment row exists yet. Removed with the column in
+      // the contract PR.
       directorCwid: true,
       leaderInterim: true,
     },
@@ -385,9 +370,26 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
   // their fields in-row, so no `field_override` merge happens here.
   if (await isUnitSuppressed("center", center.code, prisma)) return null;
 
+  // #2542 — leadership is an `OrgUnitRoleAssignment` row. A separate query
+  // rather than a nested one: the assignment is polymorphic on
+  // (entityType, entityId) with no FK to `center`, the same shape as
+  // `unit_admin` and for the same reason. `take: 1` because `director` is
+  // single-holder in the seeded vocabulary and `CenterDetail.director` is one
+  // object.
+  // ponytail: renders one director, as the column did. A center with
+  // co-directors needs `CenterDetail.director` widened to a list and
+  // `center-page.tsx` to render the leadership group in `sortOrder` — that is
+  // the public-render step, deliberately not folded in here so this change is
+  // provably zero-visible-change.
+  const assignment = await prisma.orgUnitRoleAssignment.findFirst({
+    where: { entityType: CENTER_ENTITY_TYPE, entityId: center.code, roleKey: DIRECTOR_ROLE_KEY },
+    select: { cwid: true, interim: true },
+    orderBy: { sortOrder: "asc" },
+  });
+
   let director: CenterDetail["director"] = null;
-  const leadership = center.leaders[0]
-    ? { cwid: center.leaders[0].cwid, interim: center.leaders[0].interim }
+  const leadership = assignment
+    ? { cwid: assignment.cwid, interim: assignment.interim }
     : center.directorCwid
       ? { cwid: center.directorCwid, interim: center.leaderInterim }
       : null;

@@ -1,6 +1,6 @@
 /**
- * #2542 Phase 1 — the per-center role vocabulary, its derivation, and the
- * backfill that moves the two deprecated center columns onto membership rows.
+ * #2542 — the org-unit role vocabulary, its derivation, and the backfill that
+ * moves the two deprecated center columns onto assignment rows.
  *
  * Why this file exists: `CenterMembership.membershipType` becomes DERIVED, and a
  * derivation that silently no-ops is invisible. NULL is a legal, common value on
@@ -11,13 +11,13 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import {
-  DEFAULT_CENTER_ROLES,
+  DEFAULT_ORG_UNIT_ROLES,
   DIRECTOR_ROLE_KEY,
   MEMBER_ROLE_KEY,
-  centerRoleSeedRows,
+  orgUnitRoleSeedRows,
   deriveMembershipType,
   formatLeadershipTitle,
-} from "@/lib/center-roles";
+} from "@/lib/org-unit-roles";
 import {
   runBackfill,
   type CenterRoleBackfillDb,
@@ -51,14 +51,31 @@ describe("deriveMembershipType", () => {
   });
 });
 
-describe("DEFAULT_CENTER_ROLES", () => {
-  it("keys are unique within the vocabulary", () => {
-    const keys = DEFAULT_CENTER_ROLES.map((r) => r.key);
-    expect(new Set(keys).size).toBe(keys.length);
+describe("DEFAULT_ORG_UNIT_ROLES", () => {
+  const centerRoles = DEFAULT_ORG_UNIT_ROLES.center;
+
+  it("keys are unique within each kind's vocabulary", () => {
+    for (const [kind, roles] of Object.entries(DEFAULT_ORG_UNIT_ROLES)) {
+      const keys = roles.map((r) => r.key);
+      expect(new Set(keys).size, `duplicate key in the ${kind} vocabulary`).toBe(keys.length);
+    }
+  });
+
+  it("is keyed BY KIND, not by unit — this is what makes per-unit drift unrepresentable", () => {
+    // A per-unit copy is a drift generator: the same concept can acquire a
+    // different word at every unit, and the governance layer's job becomes
+    // policing divergence. There is one list per kind and no unit code anywhere
+    // in the seed, so two units CANNOT disagree about what a role is called.
+    for (const rows of Object.values(DEFAULT_ORG_UNIT_ROLES)) {
+      for (const r of rows) {
+        expect(r).not.toHaveProperty("centerCode");
+        expect(r).not.toHaveProperty("entityId");
+      }
+    }
   });
 
   it("seeds the migration targets: `director` for Center.directorCwid, and the two membershipType literals", () => {
-    const byKey = new Map(DEFAULT_CENTER_ROLES.map((r) => [r.key, r]));
+    const byKey = new Map(centerRoles.map((r) => [r.key, r]));
     expect(byKey.get(DIRECTOR_ROLE_KEY)).toMatchObject({
       group: "leadership",
       singleHolder: true,
@@ -72,30 +89,47 @@ describe("DEFAULT_CENTER_ROLES", () => {
   });
 
   it("membership roles are never profile titles — being a member is not a title", () => {
-    for (const r of DEFAULT_CENTER_ROLES.filter((x) => x.group === "membership")) {
+    for (const r of centerRoles.filter((x) => x.group === "membership")) {
       expect(r.profileTitle).toBe(false);
     }
   });
 
-  it("Phase 1 seeds center-scope entries only; `program` scope is Phase 2's fold-in", () => {
-    expect(DEFAULT_CENTER_ROLES.every((r) => r.scope === "center")).toBe(true);
+  it("seeds unit-scope entries only; `program` scope arrives with the CenterProgramLeader fold-in", () => {
+    expect(centerRoles.every((r) => r.scope === "unit")).toBe(true);
   });
 
-  it("centerRoleSeedRows maps group -> roleGroup and stamps source", () => {
-    const rows = centerRoleSeedRows();
-    expect(rows).toHaveLength(DEFAULT_CENTER_ROLES.length);
+  it("seeds only the `center` kind — a role no code reads would be dead data", () => {
+    // The other kinds are declared so adding one is DATA rather than a refactor.
+    // They stay empty until the phase that repoints the hardcoded leader nouns.
+    for (const kind of ["department", "division", "core", "center_program"] as const) {
+      expect(DEFAULT_ORG_UNIT_ROLES[kind]).toEqual([]);
+    }
+  });
+
+  it("orgUnitRoleSeedRows maps group -> roleGroup, stamps source, and carries its own entityType", () => {
+    const rows = orgUnitRoleSeedRows("center");
+    expect(rows).toHaveLength(centerRoles.length);
     expect(rows.every((r) => r.source === "seed")).toBe(true);
+    expect(rows.every((r) => r.entityType === "center")).toBe(true);
     expect(rows.find((r) => r.key === DIRECTOR_ROLE_KEY)?.roleGroup).toBe("leadership");
   });
 
-  it("centerRoleSeedRows omits centerCode — a nested createMany REJECTS the FK scalar", () => {
-    // `CenterRoleCreateManyCenterInput` has no `centerCode`: the parent
-    // `center.create` supplies it. Passing it throws `Unknown argument
-    // \`centerCode\`` at REQUEST time, and TypeScript cannot catch it because the
-    // rows come from a function call, so no excess-property check fires. Every
-    // center-creation path would 500. This assertion is the only guard.
-    for (const r of centerRoleSeedRows()) {
-      expect(r).not.toHaveProperty("centerCode");
+  it("orgUnitRoleSeedRows returns [] for a kind with no vocabulary yet", () => {
+    expect(orgUnitRoleSeedRows("department")).toEqual([]);
+  });
+
+  it("the EMITTED rows carry no unit identifier — the anti-drift invariant, at the boundary", () => {
+    // Asserting this on DEFAULT_ORG_UNIT_ROLES alone is not enough: the rows
+    // that reach `createMany` come out of this function, so a unit key added
+    // here would restore per-unit copies while the constant still looked clean.
+    // A mutation that put `centerCode` back survived until this test existed.
+    for (const row of orgUnitRoleSeedRows("center")) {
+      for (const field of ["centerCode", "center_code", "entityId", "entity_id", "unitCode"]) {
+        expect(row, `seed row must not carry ${field} — that is a per-unit copy`).not.toHaveProperty(
+          field,
+        );
+      }
+      expect(Object.keys(row).filter((k) => /code$/i.test(k))).toEqual([]);
     }
   });
 });
@@ -109,15 +143,14 @@ describe("formatLeadershipTitle", () => {
     expect(formatLeadershipTitle("Director", true)).toBe("Interim Director");
   });
 
-  it("appends the portfolio qualifier CHPC publishes", () => {
+  it("takes NO qualifier — a portfolio is its own vocabulary entry, not free text", () => {
+    // CHPC publishes "Associate Center Director, Health policy communication".
+    // That is an ENTRY in the shared list, so its whole label renders verbatim
+    // and no free-text field exists on the assignment to be concatenated here.
     expect(
-      formatLeadershipTitle("Associate Center Director", false, "Health policy communication"),
+      formatLeadershipTitle("Associate Center Director, Health policy communication", false),
     ).toBe("Associate Center Director, Health policy communication");
-  });
-
-  it("ignores a blank or whitespace-only qualifier", () => {
-    expect(formatLeadershipTitle("Research Director", false, "   ")).toBe("Research Director");
-    expect(formatLeadershipTitle("Research Director", false, null)).toBe("Research Director");
+    expect(formatLeadershipTitle).toHaveLength(2);
   });
 });
 
@@ -132,18 +165,18 @@ type Membership = {
   membershipType: string | null;
 };
 
-type Leader = { centerCode: string; cwid: string; roleKey: string; interim?: boolean };
+type Leader = { entityType: string; entityId: string; cwid: string; roleKey: string; interim?: boolean };
 
 /** An in-memory stand-in for the four delegates `runBackfill` touches. */
 function makeDb(opts: {
   centers: { code: string; directorCwid: string | null; leaderInterim: boolean }[];
   memberships: Membership[];
   leaders?: Leader[];
-  seededRoleKeys?: { centerCode: string; key: string }[];
+  seededRoleKeys?: { entityType: string; key: string }[];
 }) {
   const memberships = opts.memberships.map((m) => ({ ...m }));
   const leaders: Leader[] = (opts.leaders ?? []).map((l) => ({ ...l }));
-  const roles: { centerCode: string; key: string }[] = [];
+  const roles: { entityType: string; key: string }[] = [];
 
   const matches = (row: Record<string, unknown>, where: Record<string, unknown>): boolean =>
     Object.entries(where).every(([k, v]) => {
@@ -156,13 +189,13 @@ function makeDb(opts: {
 
   const db: CenterRoleBackfillDb = {
     center: { findMany: vi.fn(async () => opts.centers) },
-    centerRole: {
+    orgUnitRole: {
       createMany: vi.fn(async (args: unknown) => {
-        const rows = (args as { data: { centerCode: string; key: string }[] }).data;
+        const rows = (args as { data: { entityType: string; key: string }[] }).data;
         let count = 0;
         for (const r of rows) {
-          if (!roles.some((x) => x.centerCode === r.centerCode && x.key === r.key)) {
-            roles.push({ centerCode: r.centerCode, key: r.key });
+          if (!roles.some((x) => x.entityType === r.entityType && x.key === r.key)) {
+            roles.push({ entityType: r.entityType, key: r.key });
             count += 1;
           }
         }
@@ -174,7 +207,7 @@ function makeDb(opts: {
         return seeded.filter((r) => matches(r as unknown as Record<string, unknown>, w));
       }),
     },
-    centerLeader: {
+    orgUnitRoleAssignment: {
       findMany: vi.fn(async (args: unknown) => {
         const w = (args as { where: Record<string, unknown> }).where;
         return leaders.filter((l) =>
@@ -232,11 +265,14 @@ const MEMBERSHIPS: Membership[] = [
 ];
 
 describe("runBackfill", () => {
-  it("seeds the default vocabulary for every center", async () => {
+  it("seeds ONE shared vocabulary, not one copy per center", async () => {
     const { db, roles } = makeDb({ centers: CENTERS, memberships: MEMBERSHIPS });
     const r = await runBackfill(db, { dryRun: false });
-    expect(r.rolesSeeded).toBe(CENTERS.length * DEFAULT_CENTER_ROLES.length);
-    expect(roles.filter((x) => x.key === DIRECTOR_ROLE_KEY)).toHaveLength(CENTERS.length);
+    // The count is the size of the kind's list — NOT centers x list. If this
+    // ever multiplies by center count again, the per-unit copy is back and with
+    // it the ability for two centers to disagree about what a role is called.
+    expect(r.rolesSeeded).toBe(DEFAULT_ORG_UNIT_ROLES.center.length);
+    expect(roles.filter((x) => x.key === DIRECTOR_ROLE_KEY)).toHaveLength(1);
   });
 
   it("carries research/clinical across under the same literals and files the rest as `member`", async () => {
@@ -259,17 +295,29 @@ describe("runBackfill", () => {
     }
   });
 
-  it("creates a CenterLeader row per director and adds NOBODY to a roster", async () => {
+  it("creates an assignment row per director and adds NOBODY to a roster", async () => {
     const { db, memberships, leaders } = makeDb({ centers: CENTERS, memberships: MEMBERSHIPS });
     const r = await runBackfill(db, { dryRun: false });
     expect(r.leadersCreated).toBe(2);
     expect(leaders).toEqual(
       expect.arrayContaining([
-        { centerCode: "meyer", cwid: "dir001", roleKey: DIRECTOR_ROLE_KEY, interim: false },
+        {
+          entityType: "center",
+          entityId: "meyer",
+          cwid: "dir001",
+          roleKey: DIRECTOR_ROLE_KEY,
+          interim: false,
+        },
         // The prod `global_health` case: a director who is not a member. The
         // whole point of the separate table is that this adds no membership row,
         // so the center's roster and every count that reads it stay at zero.
-        { centerCode: "global_health", cwid: "dir002", roleKey: DIRECTOR_ROLE_KEY, interim: true },
+        {
+          entityType: "center",
+          entityId: "global_health",
+          cwid: "dir002",
+          roleKey: DIRECTOR_ROLE_KEY,
+          interim: true,
+        },
       ]),
     );
     expect(memberships).toHaveLength(MEMBERSHIPS.length);
@@ -299,7 +347,13 @@ describe("runBackfill", () => {
       centers: [{ code: "meyer", directorCwid: "OLD001", leaderInterim: false }],
       memberships: [],
       leaders: [
-        { centerCode: "meyer", cwid: "new999", roleKey: DIRECTOR_ROLE_KEY, interim: false },
+        {
+          entityType: "center",
+          entityId: "meyer",
+          cwid: "new999",
+          roleKey: DIRECTOR_ROLE_KEY,
+          interim: false,
+        },
       ],
     });
     const r = await runBackfill(db, { dryRun: false });
@@ -320,19 +374,24 @@ describe("runBackfill", () => {
     expect(leaders).toHaveLength(0);
     expect(memberships.every((m) => m.membershipRoleKey === null)).toBe(true);
     // The pre-flight has to show the operator the largest mutation in the run.
-    expect(r.rolesSeeded).toBe(CENTERS.length * DEFAULT_CENTER_ROLES.length);
+    expect(r.rolesSeeded).toBe(DEFAULT_ORG_UNIT_ROLES.center.length);
     expect(r.membersClassified).toBe(MEMBERSHIPS.length);
     expect(r.leadersCreated).toBe(2);
   });
 
-  it("THROWS rather than writing a dangling leadership key when a center's vocabulary is missing", async () => {
+  it("THROWS rather than writing a dangling leadership key when the kind's vocabulary is missing", async () => {
+    // Verify-all-before-write. With ONE shared list the check collapses from
+    // per-center to per-kind: either every center can be assigned a director or
+    // none can, so an empty vocabulary must stop the run rather than write
+    // assignments whose FK cannot resolve.
     const { db } = makeDb({
       centers: CENTERS,
       memberships: MEMBERSHIPS,
-      // `meyer` seeded, `global_health` not — the verify-all-before-write case.
-      seededRoleKeys: [{ centerCode: "meyer", key: DIRECTOR_ROLE_KEY }],
+      seededRoleKeys: [],
     });
-    await expect(runBackfill(db, { dryRun: false })).rejects.toThrow(/global_health/);
+    await expect(runBackfill(db, { dryRun: false })).rejects.toThrow(
+      /Missing 'director' vocabulary row/,
+    );
   });
 
   it("REPAIRS a row whose key and enum disagree — the rolling-deploy race", async () => {

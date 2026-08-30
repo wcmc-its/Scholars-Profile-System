@@ -85,6 +85,8 @@ type Opts = {
     scoreAtDecision: number | null;
     confidenceAtDecision: string | null;
   }>;
+  /** #2542 — the center's director assignment, from its own query. */
+  leaderAssignment?: { cwid: string; interim: boolean } | null;
 };
 
 function fakeClient(o: Opts) {
@@ -99,6 +101,12 @@ function fakeClient(o: Opts) {
       findMany: vi.fn().mockResolvedValue(o.siblings ?? []),
     },
     center: { findUnique: vi.fn().mockResolvedValue(o.center ?? null) },
+    // #2542 — leadership is an `OrgUnitRoleAssignment` row fetched with its own
+    // query; it used to be a nested `leaders` relation on `center`.
+    orgUnitRoleAssignment: {
+      findFirst: vi.fn(async () => o.leaderAssignment ?? null),
+      findMany: vi.fn(async () => []),
+    },
     unitAdmin: { findMany: unitAdminFindMany },
     fieldOverride: { findMany: vi.fn().mockResolvedValue(o.overrides ?? []) },
     suppression: { findFirst: vi.fn().mockResolvedValue(o.suppression ?? null) },
@@ -449,11 +457,10 @@ describe("loadUnitEditContext — center", () => {
       url: "https://precision.weill.cornell.edu",
       slug: "precision-institute",
       centerType: "institute",
-      // #2542 — leadership is a `CenterLeader` row now.
-      leaders: [{ cwid: "dir001", interim: true }],
       directorCwid: null,
       leaderInterim: false,
     };
+    // #2542 — leadership is an `OrgUnitRoleAssignment` row from its own query.
     const ctx = await loadUnitEditContext(
       "center",
       "man-abc12345",
@@ -461,6 +468,7 @@ describe("loadUnitEditContext — center", () => {
       asClient(
         fakeClient({
           center,
+          leaderAssignment: { cwid: "dir001", interim: true },
           centerMembers: [
             {
               cwid: "mem9",

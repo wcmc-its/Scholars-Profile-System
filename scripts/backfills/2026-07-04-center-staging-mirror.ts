@@ -42,7 +42,7 @@
  *   npx tsx scripts/backfills/2026-07-04-center-staging-mirror.ts [--dry-run]
  */
 import "dotenv/config";
-import { centerRoleSeedRows } from "../../lib/center-roles";
+import { CENTER_ENTITY_TYPE, orgUnitRoleSeedRows } from "../../lib/org-unit-roles";
 import { pathToFileURL } from "node:url";
 import { db } from "../../lib/db";
 
@@ -148,7 +148,7 @@ async function run(dryRun: boolean) {
         // #2542 — a center created here needs its role vocabulary, or its
         // leadership editor has no `director` key to reference. Only on create;
         // an existing center's vocabulary is curator-owned.
-        create: { code: c.code, ...data, roles: { createMany: { data: centerRoleSeedRows() } } },
+        create: { code: c.code, ...data },
         update: data,
       });
     }
