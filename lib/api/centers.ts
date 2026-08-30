@@ -28,6 +28,7 @@ import { formatRoleCategory } from "@/lib/role-display";
 import { groupToRawValues, type RoleGroupLabel } from "@/lib/role-groups";
 import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { extractLastNameSort } from "@/lib/name-sort";
+import { DIRECTOR_ROLE_KEY } from "@/lib/center-roles";
 import type {
   DepartmentFacultyHit,
   DepartmentTopicArea,
@@ -214,9 +215,12 @@ export type CenterDetail = {
     primaryTitle: string | null;
     slug: string;
     identityImageEndpoint: string;
-    /** Interim/acting qualifier — the in-row `Center.leaderInterim` column
-     *  (centers edit fields in-row; no `field_override` merge). #540 / ADR-005
-     *  Amendment 1 § A1.1. */
+    /** Interim/acting qualifier — `CenterLeader.interim` since #2542 Phase 1
+     *  (was the in-row `Center.leaderInterim` column, still dual-read during
+     *  this release). #540 / ADR-005 Amendment 1 § A1.1.
+     *  NOTE: computed and shipped in the RSC payload but NOT rendered — 
+     *  `center-page.tsx` hardcodes `role="Director"` and `LeaderCard`'s prop
+     *  type has no interim field. Pre-existing (#2542 recon), not a regression. */
     isInterim: boolean;
   } | null;
   scholarCount: number;
@@ -340,6 +344,7 @@ type CenterRow = {
   slug: string;
   description: string | null;
   url: string | null;
+  leaders: { cwid: string; interim: boolean }[];
   directorCwid: string | null;
   leaderInterim: boolean;
 };
@@ -353,6 +358,23 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
       slug: true,
       description: true,
       url: true,
+      // #2542 Phase 1 — leadership moved off `Center.directorCwid` into
+      // `CenterLeader`. `take: 1` because `director` is single-holder in the
+      // seeded vocabulary and `CenterDetail.director` is one object.
+      // ponytail: renders one director, as the column did. A center with
+      // co-directors needs `CenterDetail.director` widened to a list and
+      // `center-page.tsx` to render the leadership group in `sortOrder` — that
+      // is the Phase 1 public-render step, deliberately not folded into the
+      // migration so this change is provably zero-visible-change.
+      leaders: {
+        where: { roleKey: DIRECTOR_ROLE_KEY },
+        select: { cwid: true, interim: true },
+        orderBy: { sortOrder: "asc" },
+        take: 1,
+      },
+      // Dual-read fallback for the window between the ECS roll and the manual
+      // Phase 1 backfill, when no `CenterLeader` row exists yet. Removed with
+      // the column in the contract PR.
       directorCwid: true,
       leaderInterim: true,
     },
@@ -364,9 +386,14 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
   if (await isUnitSuppressed("center", center.code, prisma)) return null;
 
   let director: CenterDetail["director"] = null;
-  if (center.directorCwid) {
+  const leadership = center.leaders[0]
+    ? { cwid: center.leaders[0].cwid, interim: center.leaders[0].interim }
+    : center.directorCwid
+      ? { cwid: center.directorCwid, interim: center.leaderInterim }
+      : null;
+  if (leadership) {
     const d = await prisma.scholar.findUnique({
-      where: { cwid: center.directorCwid },
+      where: { cwid: leadership.cwid },
       select: { cwid: true, preferredName: true, primaryTitle: true, slug: true },
     });
     if (d) {
@@ -376,7 +403,7 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
         primaryTitle: d.primaryTitle,
         slug: d.slug,
         identityImageEndpoint: identityImageEndpoint(d.cwid),
-        isInterim: center.leaderInterim,
+        isInterim: leadership.interim,
       };
     }
   }

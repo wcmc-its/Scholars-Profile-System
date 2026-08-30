@@ -18,6 +18,7 @@
 import "dotenv/config";
 import { db } from "../lib/db";
 import { CENTERS, CENTER_PROGRAMS } from "./center-seed-data";
+import { centerRoleSeedRows } from "../lib/center-roles";
 
 async function main() {
   const force = process.argv.slice(2).includes("--force");
@@ -44,6 +45,9 @@ async function main() {
         sortOrder: c.sortOrder,
         centerType: c.centerType,
         source: "manual",
+        // #2542 Phase 1 — seed the role vocabulary alongside the center. Only on
+        // `create`; an existing center's vocabulary is curator-owned.
+        roles: { createMany: { data: centerRoleSeedRows() } },
       },
       update: {
         name: c.name,

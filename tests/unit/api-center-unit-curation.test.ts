@@ -4,7 +4,8 @@
  * Centers are manually-owned (no ETL writes the `center` table); fields are
  * edited in-row, so there is no `field_override` merge here.
  *
- *  - Centers carry `leaderInterim` as a real column (Phase 1) — surface it
+ *  - Centers carry the interim qualifier on the director's `CenterLeader` row
+ *    (#2542; was the `leaderInterim` column) — surface it
  *    on `director.isInterim`.
  *  - edge 20 — whole-unit suppression on a center renders as 404 (null).
  *  - `loadUnitFieldOverrides("center", ...)` is short-circuited; this file
@@ -46,7 +47,11 @@ const CENTER = {
   slug: "meyer-cancer-center",
   description: "Cancer research center.",
   url: null,
-  directorCwid: "dir0001",
+  // #2542 — `getCenterUncached` selects the director as a nested `CenterLeader`
+  // row (`roleKey: "director"`, `take: 1`). The two columns remain as the
+  // pre-backfill dual-read fallback.
+  leaders: [{ cwid: "dir0001", interim: false }],
+  directorCwid: null,
   leaderInterim: false,
   scholarCount: 42,
 };
@@ -84,9 +89,12 @@ describe("getCenter — unit-curation read-merge (#540)", () => {
     expect(mockScholarFindUnique).not.toHaveBeenCalled();
   });
 
-  it("surfaces the in-row leaderInterim column on director.isInterim", async () => {
+  it("surfaces the CenterLeader row's interim flag on director.isInterim", async () => {
     defaultBaselineMocks();
-    mockCenterFindUnique.mockResolvedValue({ ...CENTER, leaderInterim: true });
+    mockCenterFindUnique.mockResolvedValue({
+      ...CENTER,
+      leaders: [{ cwid: "dir0001", interim: true }],
+    });
 
     const result = await getCenter("meyer-cancer-center");
     expect(result?.director?.isInterim).toBe(true);
@@ -98,9 +106,9 @@ describe("getCenter — unit-curation read-merge (#540)", () => {
     expect(result?.director?.isInterim).toBe(false);
   });
 
-  it("a center with no directorCwid produces director=null", async () => {
+  it("a center with no director assignment produces director=null", async () => {
     defaultBaselineMocks();
-    mockCenterFindUnique.mockResolvedValue({ ...CENTER, directorCwid: null });
+    mockCenterFindUnique.mockResolvedValue({ ...CENTER, leaders: [] });
 
     const result = await getCenter("meyer-cancer-center");
     expect(result?.director).toBeNull();

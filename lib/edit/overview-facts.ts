@@ -25,6 +25,7 @@
  * Read-only — this module performs NO write. Node-runtime only (Prisma).
  */
 import { db } from "@/lib/db";
+import { DIRECTOR_ROLE_KEY, formatLeadershipTitle } from "@/lib/center-roles";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import { scoreFundingImportance } from "@/lib/edit/funding-importance";
 import { isChairTitleFor } from "@/lib/leadership";
@@ -1023,7 +1024,7 @@ function fkLeadershipCandidate(
 /**
  * #742 §2.5 — leadership roles recorded on the org-unit FK tables, not (or not
  * yet) in the appointment table: a department `chairCwid`, a division `chiefCwid`,
- * a center `directorCwid` (+ interim), and `CenterProgramLeader` rows. These catch
+ * a `CenterLeader` row (#2542; was `directorCwid` + interim), and `CenterProgramLeader` rows. These catch
  * leadership set via `field_override` or missed by the appointment-title ETL (the
  * Stewart case). Each query keys on the leader being THIS scholar, so an external
  * leader (`lib/external-leaders.ts`, a non-WCM cwid) never matches. The synthesized
@@ -1033,7 +1034,7 @@ function fkLeadershipCandidate(
  * `CenterProgram.leaderCwid` column), so a co-led program surfaces every leader.
  */
 async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCandidate[]> {
-  const [departments, divisions, centers, programLeaders] = await Promise.all([
+  const [departments, divisions, centers, legacyCenters, programLeaders] = await Promise.all([
     db.read.department.findMany({
       where: { chairCwid: cwid },
       select: { code: true, name: true, officialName: true },
@@ -1042,6 +1043,21 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
       where: { chiefCwid: cwid },
       select: { code: true, name: true },
     }),
+    // #2542 Phase 1 — center leadership is a `CenterLeader` row now.
+    // `profileTitle` gates it for the same reason `role: "leader"` gates program
+    // leaders below: not every leadership role is a title on a person.
+    db.read.centerLeader.findMany({
+      where: { cwid, role: { roleGroup: "leadership", profileTitle: true } },
+      select: {
+        centerCode: true,
+        roleKey: true,
+        interim: true,
+        qualifier: true,
+        role: { select: { label: true } },
+        center: { select: { name: true, officialName: true } },
+      },
+    }),
+    // Dual-read fallback for the pre-backfill window; dropped in the contract PR.
     db.read.center.findMany({
       where: { directorCwid: cwid },
       select: { code: true, name: true, officialName: true, leaderInterim: true },
@@ -1078,6 +1094,28 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
     );
   }
   for (const c of centers) {
+    const name = c.center.officialName ?? c.center.name;
+    // The candidate id is PERSISTED in `overview_source_selection.deltas`, so a
+    // curator's dismissal of "Director, X" must keep matching. `fk:center:{code}`
+    // stays byte-identical for the director role — the only role that existed
+    // before #2542 — and only additional roles take a suffixed id.
+    const id =
+      c.roleKey === DIRECTOR_ROLE_KEY
+        ? `fk:center:${c.centerCode}`
+        : `fk:center:${c.centerCode}:${c.roleKey}`;
+    out.push(
+      fkLeadershipCandidate(
+        id,
+        `${formatLeadershipTitle(c.role.label, c.interim, c.qualifier)}, ${name}`,
+        WCM_ORG,
+        c.interim,
+      ),
+    );
+  }
+  // Dual-read: only centers `CenterLeader` does not already cover, so the two
+  // sources never emit two candidates with the same `fk:center:` id.
+  for (const c of legacyCenters) {
+    if (centers.some((x) => x.centerCode === c.code)) continue;
     const name = c.officialName ?? c.name;
     out.push(
       fkLeadershipCandidate(

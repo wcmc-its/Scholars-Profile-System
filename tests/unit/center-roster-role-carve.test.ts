@@ -90,6 +90,8 @@ describe("centers — fail-closed pass on the raw role column (#2271)", () => {
       slug: "test-center-hero",
       description: null,
       url: null,
+      // #2542 — no director assignment.
+      leaders: [],
       directorCwid: null,
       leaderInterim: false,
     });

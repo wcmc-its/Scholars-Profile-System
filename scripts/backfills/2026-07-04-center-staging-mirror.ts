@@ -1,4 +1,15 @@
 /**
+ * #2542 Phase 1 NOTE — `Center.directorCwid` is DEPRECATED. The director is a
+ * `CenterLeader` row with `roleKey = "director"`, and every reader now prefers
+ * it, falling back to this column only when no such row exists.
+ *
+ * This script writes ONLY the column. Once a center has a `CenterLeader` row,
+ * a run here changes NOTHING a user can see — and re-running
+ * `scripts/backfills/2026-08-29-center-role-vocabulary.ts` will NOT rescue it,
+ * because that script deliberately skips any center that already holds a
+ * director (so a re-run cannot resurrect a replaced one). Set the director
+ * through `/edit` instead, or update this script to write `CenterLeader` too.
+ *
  * Center staging-mirror backfill (2026-07-04, one-shot per DB).
  *
  * Reconciles the prod `center` set to staging (the curated source of truth) —
@@ -31,6 +42,7 @@
  *   npx tsx scripts/backfills/2026-07-04-center-staging-mirror.ts [--dry-run]
  */
 import "dotenv/config";
+import { centerRoleSeedRows } from "../../lib/center-roles";
 import { pathToFileURL } from "node:url";
 import { db } from "../../lib/db";
 
@@ -133,7 +145,10 @@ async function run(dryRun: boolean) {
       };
       await db.write.center.upsert({
         where: { code: c.code },
-        create: { code: c.code, ...data },
+        // #2542 — a center created here needs its role vocabulary, or its
+        // leadership editor has no `director` key to reference. Only on create;
+        // an existing center's vocabulary is curator-owned.
+        create: { code: c.code, ...data, roles: { createMany: { data: centerRoleSeedRows() } } },
         update: data,
       });
     }

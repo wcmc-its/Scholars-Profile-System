@@ -26,6 +26,9 @@
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { countActiveCenterMembersByCode } from "@/lib/api/center-member-count";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
+// Type-and-const only, and `lib/center-roles.ts` is import-free — this module
+// reaches the client bundle, so nothing here may pull in `@/lib/db`.
+import { DIRECTOR_ROLE_KEY } from "@/lib/center-roles";
 import { compactUnitName, officialUnitName } from "@/lib/org-unit-names";
 
 /** The four org-unit `EntityType`s a `unit_admin` grant can target. */
@@ -292,7 +295,13 @@ export type UnitDirectoryEntry = {
 /** The narrow Prisma surface `loadAllUnitsDirectory` reads — `db.read` satisfies it. */
 export type AllUnitsDirectoryClient = Pick<
   PrismaClient,
-  "department" | "division" | "center" | "core" | "suppression" | "scholar" | "centerMembership"
+  | "department"
+  | "division"
+  | "center"
+  | "core"
+  | "suppression"
+  | "scholar"
+  | "centerMembership"
 >;
 
 /**
@@ -330,9 +339,10 @@ export type AllUnitsDirectoryClient = Pick<
  * divisions carry their leader/interim qualifier in a per-unit `field_override`
  * row, which this directory deliberately does NOT read (that path is N queries).
  * So a PENDING dept/div leader override or interim flag won't show here — only
- * the row column (chairCwid/chiefCwid/directorCwid) is read. Acceptable for a
- * low-stakes, read-only audit view; centers (leader + interim in-row) are
- * faithful. Cores skip the external-leader overlay entirely — that config is
+ * the row column (chairCwid/chiefCwid) is read. Acceptable for a low-stakes,
+ * read-only audit view; centers are faithful — their leader and interim come
+ * from the center's own `CenterLeader` rows (#2542), nested on the same
+ * findMany, so the query count stays O(1) in unit count. Cores skip the external-leader overlay entirely — that config is
  * keyed by dept/center unit code and a core never participates in it.
  *
  * Retired rows are hidden unless `opts.includeRetired` — the page passes
@@ -380,6 +390,17 @@ export async function loadAllUnitsDirectory(
         officialName: true,
         compactName: true,
         centerType: true,
+        // #2542 Phase 1 — the director moved into `CenterLeader`. A nested
+        // select on the existing findMany, so this stays O(1) in unit count and
+        // adds no value import (this file reaches the CLIENT bundle via
+        // `components/edit/home-panel.tsx` — see the header note).
+        // The two columns remain as the pre-backfill dual-read fallback.
+        leaders: {
+          where: { roleKey: DIRECTOR_ROLE_KEY },
+          select: { cwid: true, interim: true },
+          orderBy: { sortOrder: "asc" },
+          take: 1,
+        },
         directorCwid: true,
         leaderInterim: true,
         // NB: `scholarCount` is deliberately NOT selected — the column is never
@@ -424,7 +445,7 @@ export async function loadAllUnitsDirectory(
   const leaderCwids = [
     ...deptRows.map((r) => r.chairCwid),
     ...divRows.map((r) => r.chiefCwid),
-    ...ctrRows.map((r) => r.directorCwid),
+    ...ctrRows.map((r) => r.leaders[0]?.cwid ?? r.directorCwid),
     ...coreRows.map((r) => r.leaders[0]?.cwid ?? null),
   ].filter((c): c is string => !!c && c.length > 0);
   const uniqueLeaders = [...new Set(leaderCwids)];
@@ -509,9 +530,9 @@ export async function loadAllUnitsDirectory(
         kindLabel: unitKindLabel("center"),
         category: null,
         centerType: r.centerType === "institute" ? "institute" : "center",
-        leaderCwid: r.directorCwid,
-        leaderName: resolveLeader(r.code, r.directorCwid),
-        leaderInterim: r.leaderInterim,
+        leaderCwid: r.leaders[0]?.cwid ?? r.directorCwid,
+        leaderName: resolveLeader(r.code, r.leaders[0]?.cwid ?? r.directorCwid),
+        leaderInterim: r.leaders[0]?.interim ?? r.leaderInterim,
         scholarCount: centerCounts.get(r.code) ?? 0,
         source: r.source,
         // Centers are NOT modeled with a parent-dept FK — always null.

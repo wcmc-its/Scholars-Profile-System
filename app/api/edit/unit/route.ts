@@ -33,6 +33,7 @@
  * reflection: `reflectUnitChange` on the unit page + `/browse`.
  */
 import { type NextRequest, type NextResponse } from "next/server";
+import { DIRECTOR_ROLE_KEY, centerRoleSeedRows } from "@/lib/center-roles";
 
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
@@ -327,6 +328,11 @@ async function createInformalCenter(params: {
           slug,
           centerType: centerTypeValue,
           source: "manual",
+          // #2542 Phase 1 — seed the default role vocabulary with the center, in
+          // the same transaction. A center created without it has no `director`
+          // key for a leadership assignment to reference, so its leadership
+          // editor would FK-error forever.
+          roles: { createMany: { data: centerRoleSeedRows() } },
         },
         select: { code: true },
       });
@@ -596,6 +602,14 @@ async function handleUpdate(
   }
   let updatePayload: Record<string, unknown>;
   let storedValue: string | boolean;
+  // #2542 Phase 1 — `directorCwid` / `leaderInterim` no longer map to a center
+  // column; they move the `director` assignment in `CenterLeader`, and
+  // DUAL-WRITE the deprecated columns for one release.
+  // The REQUEST contract is unchanged (same two field names, same two POSTs
+  // from `unit-leader-card.tsx`, same `field_override` audit action and
+  // `fieldsChanged` label), so only the storage moves — which is what keeps the
+  // pre-#2542 center curation history queryable by the same key.
+  let leadershipWrite: { setCwid: string | null } | { setInterim: boolean } | null = null;
   if (fieldName === "name") {
     const r = validateUnitName(value);
     if (!r.ok) return editError(400, r.error, "value");
@@ -628,13 +642,16 @@ async function handleUpdate(
     const r = validateUnitLeaderCwid(value);
     if (!r.ok) return editError(400, r.error, "value");
     storedValue = r.value;
-    // "" = explicit vacancy → null on the column (centers don't have a
-    // three-state read-merge — the column is the only source).
+    // "" = explicit vacancy — under #2542 that means dropping the `director`
+    // assignment. DUAL-WRITTEN to the deprecated column for one release so the
+    // pre-backfill fallback and an app-code rollback both stay correct.
+    leadershipWrite = { setCwid: r.value === "" ? null : r.value };
     updatePayload = { directorCwid: r.value === "" ? null : r.value };
   } else if (fieldName === "leaderInterim") {
     const r = validateUnitLeaderInterim(value);
     if (!r.ok) return editError(400, r.error, "value");
     storedValue = r.value === "true";
+    leadershipWrite = { setInterim: storedValue };
     updatePayload = { leaderInterim: storedValue };
   } else {
     // centerType — Superuser-only, allowlist already validated indirectly
@@ -678,15 +695,69 @@ async function handleUpdate(
           slug: true,
           description: true,
           url: true,
+          centerType: true,
+          // Dual-read fallback for the audit before-value: pre-backfill there is
+          // no `CenterLeader` row yet. Goes with the column in the contract PR.
           directorCwid: true,
           leaderInterim: true,
-          centerType: true,
         },
       });
-      await tx.center.update({
-        where: { code: entityId },
-        data: updatePayload,
+      // #2542 — the current `director` assignment. Dual-read: pre-backfill
+      // there is no CenterLeader row yet, so fall back to the column.
+      const beforeLeader = await tx.centerLeader.findFirst({
+        where: { centerCode: entityId, roleKey: DIRECTOR_ROLE_KEY },
+        select: { cwid: true, interim: true },
+        orderBy: { sortOrder: "asc" },
       });
+      const beforeDirectorCwid = beforeLeader?.cwid ?? before?.directorCwid ?? null;
+      const beforeInterim = beforeLeader?.interim ?? before?.leaderInterim ?? false;
+
+      if (Object.keys(updatePayload).length > 0) {
+        await tx.center.update({
+          where: { code: entityId },
+          data: updatePayload,
+        });
+      }
+      if (leadershipWrite) {
+        // The 11 pre-existing centers have no vocabulary until the Phase 1
+        // backfill runs, and `center_leader.role_key` FKs to it — so seed this
+        // center's defaults first. Idempotent (`skipDuplicates`), never
+        // clobbers a renamed label, and removes the ordering dependency between
+        // the deploy and the backfill entirely.
+        await tx.centerRole.createMany({
+          data: centerRoleSeedRows().map((r) => ({ centerCode: entityId, ...r })),
+          skipDuplicates: true,
+        });
+      }
+      if (leadershipWrite && "setCwid" in leadershipWrite) {
+        // One `director` at a time: vacate whoever holds it, then grant.
+        // `deleteMany` also covers the pre-backfill case of no row at all.
+        await tx.centerLeader.deleteMany({
+          where: { centerCode: entityId, roleKey: DIRECTOR_ROLE_KEY },
+        });
+        if (leadershipWrite.setCwid !== null) {
+          // The interim qualifier rides with the ROLE, not the person —
+          // `Center.leaderInterim` was a separate column that survived a
+          // director change, so carry it onto the new holder.
+          await tx.centerLeader.create({
+            data: {
+              centerCode: entityId,
+              cwid: leadershipWrite.setCwid,
+              roleKey: DIRECTOR_ROLE_KEY,
+              interim: beforeInterim,
+            },
+          });
+        }
+      } else if (leadershipWrite && "setInterim" in leadershipWrite) {
+        // No director => nothing to qualify, and `updateMany` is a clean no-op.
+        // `unit-leader-card.tsx` always POSTs the cwid before the interim flag,
+        // so on a real save the row exists by now. The column dual-write above
+        // still records it either way.
+        await tx.centerLeader.updateMany({
+          where: { centerCode: entityId, roleKey: DIRECTOR_ROLE_KEY },
+          data: { interim: leadershipWrite.setInterim },
+        });
+      }
       const beforeValue =
         fieldName === "name"
           ? before?.name
@@ -697,9 +768,9 @@ async function handleUpdate(
             : fieldName === "url"
               ? before?.url
               : fieldName === "directorCwid"
-                ? before?.directorCwid
+                ? beforeDirectorCwid
                 : fieldName === "leaderInterim"
-                  ? before?.leaderInterim
+                  ? beforeInterim
                   : before?.centerType;
       await appendAuditRow(tx, {
         actorCwid: realCwid,

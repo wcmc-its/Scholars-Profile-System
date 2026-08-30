@@ -1,4 +1,15 @@
 /**
+ * #2542 Phase 1 NOTE — `Center.directorCwid` is DEPRECATED. The director is a
+ * `CenterLeader` row with `roleKey = "director"`, and every reader now prefers
+ * it, falling back to this column only when no such row exists.
+ *
+ * This script writes ONLY the column. Once a center has a `CenterLeader` row,
+ * a run here changes NOTHING a user can see — and re-running
+ * `scripts/backfills/2026-08-29-center-role-vocabulary.ts` will NOT rescue it,
+ * because that script deliberately skips any center that already holds a
+ * director (so a re-run cannot resurrect a replaced one). Set the director
+ * through `/edit` instead, or update this script to write `CenterLeader` too.
+ *
  * Org-unit comms update backfill (2026-06-12, one-shot per DB).
  *
  * Applies the Head of Communications' department / center / institute changes to
@@ -37,6 +48,7 @@
  * Run: npx tsx scripts/backfills/2026-06-12-org-unit-comms-update.ts [--dry-run]
  */
 import "dotenv/config";
+import { centerRoleSeedRows } from "../../lib/center-roles";
 import { pathToFileURL } from "node:url";
 import { db, disconnect } from "../../lib/db";
 import { DEPARTMENT_NAMES } from "../../lib/department-names";
@@ -151,6 +163,8 @@ async function run(dryRun: boolean) {
           centerType: seed.centerType,
           directorCwid,
           source: "manual",
+          // #2542 — seed the role vocabulary with the center; only on create.
+          roles: { createMany: { data: centerRoleSeedRows() } },
         },
         update: {
           name: seed.name,

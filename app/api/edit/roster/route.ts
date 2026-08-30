@@ -43,6 +43,7 @@
  * — no new audit enum value (the `scripts/sql/audit-log.sql` trap in CLAUDE.md).
  */
 import { NextResponse, type NextRequest } from "next/server";
+import { MEMBER_ROLE_KEY, centerRoleSeedRows, deriveMembershipType } from "@/lib/center-roles";
 
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
@@ -76,10 +77,23 @@ type ExtendedFields = {
   endDate: { present: boolean; value: Date | null };
 };
 
+/** The columns `snapshot` projects. Kept as one constant so the three `select:`
+ *  blocks below cannot drift from it — a column present on the model but absent
+ *  here is silently missing from every audit `before`/`after` (#2542). */
+const SNAPSHOT_SELECT = {
+  cwid: true,
+  membershipType: true,
+  membershipRoleKey: true,
+  programCode: true,
+  startDate: true,
+  endDate: true,
+} as const;
+
 /** Snapshot a CenterMembership row for the audit `before`/`after` (#552 §5). */
 function snapshot(row: {
   cwid: string;
   membershipType: string | null;
+  membershipRoleKey: string | null;
   programCode: string | null;
   startDate: Date | null;
   endDate: Date | null;
@@ -87,6 +101,7 @@ function snapshot(row: {
   return {
     cwid: row.cwid,
     membershipType: row.membershipType,
+    membershipRoleKey: row.membershipRoleKey,
     programCode: row.programCode,
     startDate: row.startDate ? row.startDate.toISOString().slice(0, 10) : null,
     endDate: row.endDate ? row.endDate.toISOString().slice(0, 10) : null,
@@ -363,21 +378,26 @@ async function handleCenter(p: {
 
   const existing = await db.read.centerMembership.findUnique({
     where: { centerCode_cwid: { centerCode: unitCode, cwid } },
-    select: {
-      cwid: true,
-      membershipType: true,
-      programCode: true,
-      startDate: true,
-      endDate: true,
-    },
+    select: SNAPSHOT_SELECT,
   });
 
+  // Leadership is a `CenterLeader` row (#2542), a separate table, so add/remove
+  // keep their original meaning here: this row IS the membership, nothing else
+  // rides on it, and removing it cannot vacate a leadership role.
   if (action === "add" && existing) return editOk({ unitCode, cwid, action, changed: false });
   if (action === "remove" && !existing) return editOk({ unitCode, cwid, action, changed: false });
 
   // The set of columns this write applies — only fields present in the body.
   const applied: Record<string, unknown> = {};
-  if (ext.membershipType.present) applied.membershipType = ext.membershipType.value;
+  if (ext.membershipType.present) {
+    // #2542 — the roster editor still posts `membershipType`; the role key is
+    // the stored fact and the enum is DERIVED from it, never written
+    // independently. `null` ("unclassified") becomes the `member` role, which
+    // derives straight back to a null enum — so the public badge and the type
+    // facet, which both read `membershipType`, are unchanged.
+    applied.membershipRoleKey = ext.membershipType.value ?? MEMBER_ROLE_KEY;
+    applied.membershipType = deriveMembershipType(ext.membershipType.value);
+  }
   if (ext.programCode.present) applied.programCode = ext.programCode.value;
   if (ext.startDate.present) applied.startDate = ext.startDate.value;
   if (ext.endDate.present) applied.endDate = ext.endDate.value;
@@ -387,6 +407,18 @@ async function handleCenter(p: {
       const before = existing ? snapshot(existing) : null;
       let after: Record<string, unknown> | null;
 
+      if (action !== "remove") {
+        // `membership_role_key` FKs to `center_role`, which is empty for the
+        // pre-existing centers until the Phase 1 backfill runs. Seed this
+        // center's defaults first — idempotent, never clobbers a renamed label,
+        // and removes the ordering dependency between the deploy and the
+        // backfill entirely.
+        await tx.centerRole.createMany({
+          data: centerRoleSeedRows().map((r) => ({ centerCode: unitCode, ...r })),
+          skipDuplicates: true,
+        });
+      }
+
       if (action === "remove") {
         await tx.centerMembership.delete({
           where: { centerCode_cwid: { centerCode: unitCode, cwid } },
@@ -395,28 +427,31 @@ async function handleCenter(p: {
       } else if (action === "set") {
         const row = await tx.centerMembership.upsert({
           where: { centerCode_cwid: { centerCode: unitCode, cwid } },
-          create: { centerCode: unitCode, cwid, source: "manual-ui", ...applied },
-          update: applied,
-          select: {
-            cwid: true,
-            membershipType: true,
-            programCode: true,
-            startDate: true,
-            endDate: true,
+          // A row created by the roster editor IS a roster member, so it gets a
+          // membership role even when the body carried no `membershipType`
+          // (`applied` overrides this when it did).
+          create: {
+            centerCode: unitCode,
+            cwid,
+            source: "manual-ui",
+            membershipRoleKey: MEMBER_ROLE_KEY,
+            ...applied,
           },
+          update: applied,
+          select: SNAPSHOT_SELECT,
         });
         after = snapshot(row);
       } else {
         // add (row does not exist — guarded above)
         const row = await tx.centerMembership.create({
-          data: { centerCode: unitCode, cwid, source: "manual-ui", ...applied },
-          select: {
-            cwid: true,
-            membershipType: true,
-            programCode: true,
-            startDate: true,
-            endDate: true,
+          data: {
+            centerCode: unitCode,
+            cwid,
+            source: "manual-ui",
+            membershipRoleKey: MEMBER_ROLE_KEY,
+            ...applied,
           },
+          select: SNAPSHOT_SELECT,
         });
         after = snapshot(row);
       }
@@ -599,8 +634,24 @@ async function handleCornellAdd(p: {
           update: { ...resolution.snapshot },
         });
       }
+      // #2542 — same lazy vocabulary seed as `handleCenter`: this is the THIRD
+      // write path that references `center_role`, and `membership_role_key` is a
+      // non-null literal here, so without it every Cornell add 500s on the FK
+      // until the Phase 1 backfill has been run by hand.
+      await tx.centerRole.createMany({
+        data: centerRoleSeedRows().map((r) => ({ centerCode: unitCode, ...r })),
+        skipDuplicates: true,
+      });
       await tx.centerMembership.create({
-        data: { centerCode: unitCode, cwid: finalCwid, source: membershipSource },
+        // An added Cornell (Ithaca) member is a roster member like any other, so
+        // it carries the `member` role. Its derived `membershipType` stays null,
+        // exactly as this row's type column was before.
+        data: {
+          centerCode: unitCode,
+          cwid: finalCwid,
+          source: membershipSource,
+          membershipRoleKey: MEMBER_ROLE_KEY,
+        },
       });
       await appendAuditRow(tx, {
         actorCwid: realCwid,

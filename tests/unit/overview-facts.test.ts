@@ -22,6 +22,7 @@ const {
   mockAppointmentFindMany,
   mockDepartmentFindMany,
   mockDivisionFindMany,
+  mockCenterLeaderFindMany,
   mockCenterFindMany,
   mockCenterProgramLeaderFindMany,
   mockFieldOverrideFindFirst,
@@ -39,6 +40,7 @@ const {
   mockAppointmentFindMany: vi.fn(),
   mockDepartmentFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
+  mockCenterLeaderFindMany: vi.fn(),
   mockCenterFindMany: vi.fn(),
   mockCenterProgramLeaderFindMany: vi.fn(),
   mockFieldOverrideFindFirst: vi.fn(),
@@ -63,6 +65,7 @@ vi.mock("@/lib/db", () => ({
       // #742 §2.5 — org-unit leadership-FK title augmentation.
       department: { findMany: mockDepartmentFindMany },
       division: { findMany: mockDivisionFindMany },
+      centerLeader: { findMany: mockCenterLeaderFindMany },
       center: { findMany: mockCenterFindMany },
       centerProgramLeader: { findMany: mockCenterProgramLeaderFindMany },
       // #1997 — the scholar's `hideEducationYears` section-visibility override.
@@ -206,6 +209,7 @@ beforeEach(() => {
   mockAppointmentFindMany.mockResolvedValue([]);
   mockDepartmentFindMany.mockResolvedValue([]);
   mockDivisionFindMany.mockResolvedValue([]);
+  mockCenterLeaderFindMany.mockResolvedValue([]);
   mockCenterFindMany.mockResolvedValue([]);
   mockCenterProgramLeaderFindMany.mockResolvedValue([]);
   mockFieldOverrideFindFirst.mockResolvedValue(null);
@@ -866,12 +870,17 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
   });
 
   it("uses the curated official name and surfaces an interim center director", async () => {
-    mockCenterFindMany.mockResolvedValue([
+    mockCenterLeaderFindMany.mockResolvedValue([
       {
-        code: "meyer",
-        name: "Meyer Cancer Center",
-        officialName: "Sandra and Edward Meyer Cancer Center",
-        leaderInterim: true,
+        centerCode: "meyer",
+        roleKey: "director",
+        interim: true,
+        qualifier: null,
+        role: { label: "Director" },
+        center: {
+          name: "Meyer Cancer Center",
+          officialName: "Sandra and Edward Meyer Cancer Center",
+        },
       },
     ]);
     const facts = await assembleOverviewFacts("self01");
@@ -917,6 +926,13 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
     await assembleOverviewFacts("self01");
     expect(mockDepartmentFindMany.mock.calls[0][0].where).toEqual({ chairCwid: "self01" });
     expect(mockDivisionFindMany.mock.calls[0][0].where).toEqual({ chiefCwid: "self01" });
+    // #2542 — center leadership moved into `CenterLeader`; `profileTitle` is
+    // what keeps a non-title leadership role (Phase 2's coe_liaison) out.
+    expect(mockCenterLeaderFindMany.mock.calls[0][0].where).toEqual({
+      cwid: "self01",
+      role: { roleGroup: "leadership", profileTitle: true },
+    });
+    // ...and the dual-read fallback still scopes to this scholar.
     expect(mockCenterFindMany.mock.calls[0][0].where).toEqual({ directorCwid: "self01" });
     // #1570 — scoped to program LEADS only; a coe_liaison row is not a title.
     expect(mockCenterProgramLeaderFindMany.mock.calls[0][0].where).toEqual({
@@ -926,8 +942,15 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
   });
 
   it("a scholar's FK roles can be vetoed and surface in the drawer candidates", async () => {
-    mockCenterFindMany.mockResolvedValue([
-      { code: "englander", name: "Englander Institute for Precision Medicine", officialName: null, leaderInterim: false },
+    mockCenterLeaderFindMany.mockResolvedValue([
+      {
+        centerCode: "englander",
+        roleKey: "director",
+        interim: false,
+        qualifier: null,
+        role: { label: "Director" },
+        center: { name: "Englander Institute for Precision Medicine", officialName: null },
+      },
     ]);
     // The drawer candidate carries the synthesized title, featured + non-primary.
     const opts = await loadOverviewSourceOptions("self01");

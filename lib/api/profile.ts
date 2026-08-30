@@ -8,6 +8,7 @@
  */
 import { cache } from "react";
 import { prisma } from "@/lib/db";
+import { formatLeadershipTitle } from "@/lib/center-roles";
 import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import {
   getEffectiveOverview,
@@ -500,8 +501,9 @@ export type ProfilePayload = {
   division: string | null;
   /** #1266 — formatted leadership-role lines (Chair / Chief / Center Director /
    *  Program Leader), in that order; empty when the scholar holds none. Sourced
-   *  from Department.chairCwid / Division.chiefCwid / Center.directorCwid +
-   *  CenterProgramLeader rows and rendered beneath `primaryTitle`. Center and
+   *  from Department.chairCwid / Division.chiefCwid / a `CenterLeader`
+   *  assignment (#2542; was Center.directorCwid) / CenterProgramLeader rows and
+   *  rendered beneath `primaryTitle`. Center and
    *  program lines are curated and sparse, so they appear only where curation
    *  exists. */
   leadershipTitles: string[];
@@ -1169,9 +1171,31 @@ export const getScholarFullProfileBySlug = cache(
           where: { chiefCwid: scholar.cwid },
           select: { name: true },
         }),
+        // #2542 Phase 1 — center leadership is a `CenterLeader` row now, not
+        // `Center.directorCwid`. `profileTitle` is what decides whether holding
+        // a role shows as a title here: Phase 2 folds in `coe_liaison`, which
+        // deliberately does NOT (see the `CenterProgramLeader` query below).
+        prisma.centerLeader.findMany({
+          where: {
+            cwid: scholar.cwid,
+            role: { roleGroup: "leadership", profileTitle: true },
+          },
+          select: {
+            centerCode: true,
+            interim: true,
+            qualifier: true,
+            sortOrder: true,
+            role: { select: { label: true } },
+            center: { select: { name: true, officialName: true } },
+          },
+          orderBy: [{ sortOrder: "asc" }, { centerCode: "asc" }],
+        }),
+        // Dual-read fallback: pre-backfill there are no `CenterLeader` rows, so
+        // a director would silently lose their title line for the window between
+        // the ECS roll and the backfill. Dropped in the contract PR.
         prisma.center.findMany({
           where: { directorCwid: scholar.cwid },
-          select: { name: true, officialName: true, leaderInterim: true },
+          select: { code: true, name: true, officialName: true, leaderInterim: true },
         }),
         prisma.centerProgramLeader.findMany({
           // #1570 — only program LEADS produce a "Leader, {program}" title line;
@@ -1187,13 +1211,23 @@ export const getScholarFullProfileBySlug = cache(
             },
           },
         }),
-      ]).then(([chairDepts, chiefDivs, dirCenters, progLeads]) => [
+      ]).then(([chairDepts, chiefDivs, dirCenters, legacyDirCenters, progLeads]) => [
         ...chairDepts.map((d) => `Chair, ${d.officialName ?? d.name}`),
         ...chiefDivs.map((d) => `Chief, ${d.name}`),
         ...dirCenters.map(
           (c) =>
-            `${c.leaderInterim ? "Interim Director" : "Director"}, ${c.officialName ?? c.name}`,
+            `${formatLeadershipTitle(c.role.label, c.interim, c.qualifier)}, ${
+              c.center.officialName ?? c.center.name
+            }`,
         ),
+        // Only centers the new table does not already cover, so the two sources
+        // never double-count a director during the dual-read window.
+        ...legacyDirCenters
+          .filter((c) => !dirCenters.some((d) => d.centerCode === c.code))
+          .map(
+            (c) =>
+              `${c.leaderInterim ? "Interim Director" : "Director"}, ${c.officialName ?? c.name}`,
+          ),
         ...progLeads.map(
           (l) =>
             `${l.interim ? "Interim Leader" : "Leader"}, ${l.program.label} (${l.program.center.officialName ?? l.program.center.name})`,

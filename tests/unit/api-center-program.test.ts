@@ -98,6 +98,8 @@ beforeEach(() => {
     slug: "meyer-cancer-center",
     description: null,
     url: null,
+    // #2542 — no director assignment.
+    leaders: [],
     directorCwid: null,
     leaderInterim: false,
   });

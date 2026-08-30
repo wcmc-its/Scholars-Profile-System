@@ -125,6 +125,10 @@ describe("center render union — flag ON", () => {
       slug: "test-center-union-on",
       description: null,
       url: null,
+      // #2542 — the director is a `CenterLeader` row with roleKey 'director';
+      // an empty array is "no director", and the columns are the dual-read
+      // fallback, also empty here.
+      leaders: [],
       directorCwid: null,
       leaderInterim: false,
     });
@@ -150,6 +154,10 @@ describe("center render union — flag ON", () => {
       slug: "test-center-union-on-hero",
       description: null,
       url: null,
+      // #2542 — the director is a `CenterLeader` row with roleKey 'director';
+      // an empty array is "no director", and the columns are the dual-read
+      // fallback, also empty here.
+      leaders: [],
       directorCwid: null,
       leaderInterim: false,
     });
@@ -169,6 +177,10 @@ describe("center render union — flag OFF", () => {
       slug: "test-center-union-off",
       description: null,
       url: null,
+      // #2542 — the director is a `CenterLeader` row with roleKey 'director';
+      // an empty array is "no director", and the columns are the dual-read
+      // fallback, also empty here.
+      leaders: [],
       directorCwid: null,
       leaderInterim: false,
     });
@@ -189,6 +201,10 @@ describe("center render union — flag OFF", () => {
       slug: "test-center-union-off-hero",
       description: null,
       url: null,
+      // #2542 — the director is a `CenterLeader` row with roleKey 'director';
+      // an empty array is "no director", and the columns are the dual-read
+      // fallback, also empty here.
+      leaders: [],
       directorCwid: null,
       leaderInterim: false,
     });

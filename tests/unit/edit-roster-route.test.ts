@@ -83,12 +83,17 @@ import { POST } from "@/app/api/edit/roster/route";
 const CURATOR = { cwid: "cur001", isSuperuser: false };
 const NONADMIN = { cwid: "non001", isSuperuser: false };
 
+const mockTxCenterRoleCreateMany = vi.fn();
+
 const fakeTx = {
   centerMembership: {
     create: mockTxCenterMembershipCreate,
     delete: mockTxCenterMembershipDelete,
     upsert: mockTxCenterMembershipUpsert,
   },
+  // #2542 — a membership write seeds this center's role vocabulary first, so
+  // `membership_role_key`'s FK resolves even before the Phase 1 backfill runs.
+  centerRole: { createMany: mockTxCenterRoleCreateMany },
   divisionMembership: {
     create: mockTxDivisionMembershipCreate,
     delete: mockTxDivisionMembershipDelete,
@@ -149,7 +154,16 @@ describe("/api/edit/roster — center", () => {
     expect(await res.json()).toMatchObject({ ok: true, changed: true });
     expect(mockTxCenterMembershipCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { centerCode: "MEYER", cwid: "fac001", source: "manual-ui" },
+        // #2542 — a row the roster editor creates IS a roster member, so it
+        // carries the `member` role even with no `membershipType` in the body.
+        // A NULL `membershipRoleKey` would mean "leadership only, not on the
+        // roster" and would hide them from every member count.
+        data: {
+          centerCode: "MEYER",
+          cwid: "fac001",
+          source: "manual-ui",
+          membershipRoleKey: "member",
+        },
       }),
     );
     expect(mockReflectUnitChange).toHaveBeenCalledWith(
@@ -303,7 +317,10 @@ describe("/api/edit/roster — #552 set action + extended fields", () => {
     );
     expect(res.status).toBe(200);
     const call = mockTxCenterMembershipUpsert.mock.calls[0][0];
-    expect(call.update).toEqual({ membershipType: null });
+    // #2542 — `membershipType` is DERIVED. Clearing it means "unclassified",
+    // which is the `member` role, and `member` derives straight back to a null
+    // enum — so the public badge and type facet see exactly what they saw before.
+    expect(call.update).toEqual({ membershipRoleKey: "member", membershipType: null });
   });
 
   it("programCode on a center with no taxonomy → 400 no_taxonomy", async () => {

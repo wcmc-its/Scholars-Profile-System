@@ -37,6 +37,9 @@ const CHANGE_LABEL: Record<CenterAuditEntry["changeKind"], string> = {
 
 const FIELD_LABEL: Record<RosterFieldChange["field"], string> = {
   type: "Type",
+  // #2542 — `role` is the stored membership role key that `type` is derived
+  // from; the two move together on an ordinary roster edit, so both render.
+  role: "Role",
   program: "Program",
   start: "Start",
   end: "End",

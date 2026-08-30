@@ -448,9 +448,11 @@ describe("loadUnitEditContext — center", () => {
       description: "Institute blurb",
       url: "https://precision.weill.cornell.edu",
       slug: "precision-institute",
-      directorCwid: "dir001",
       centerType: "institute",
-      leaderInterim: true,
+      // #2542 — leadership is a `CenterLeader` row now.
+      leaders: [{ cwid: "dir001", interim: true }],
+      directorCwid: null,
+      leaderInterim: false,
     };
     const ctx = await loadUnitEditContext(
       "center",
@@ -556,8 +558,9 @@ describe("loadUnitEditContext — center disease assignments (plan §5/§6)", ()
     description: null,
     url: null,
     slug: "meyer",
-    directorCwid: null,
     centerType: "center",
+    leaders: [],
+    directorCwid: null,
     leaderInterim: false,
   };
   // A stand-in `CenterProgram` taxonomy — the gate these tests all run under
@@ -790,8 +793,9 @@ describe("loadUnitEditContext — diseaseOptions (manual-add extension)", () => 
     description: null,
     url: null,
     slug: "meyer",
-    directorCwid: null,
     centerType: "center",
+    leaders: [],
+    directorCwid: null,
     leaderInterim: false,
   };
 
