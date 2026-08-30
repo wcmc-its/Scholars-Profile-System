@@ -178,11 +178,20 @@ function makeDb(opts: {
   const leaders: Leader[] = (opts.leaders ?? []).map((l) => ({ ...l }));
   const roles: { entityType: string; key: string }[] = [];
 
+  // SQL semantics, NOT JS. A NULL column satisfies neither `= v` nor `<> v`, so
+  // `not` must exclude nulls. Getting this wrong is what let the classify step
+  // ship with a `NOT: { membershipRoleKey: k }` clause that passed here — JS
+  // says `null !== "research"` — while matching 0 of 342 rows in MySQL.
+  // `NOT` is deliberately unsupported: reintroducing it should fail loudly here
+  // rather than pass on JS negation.
   const matches = (row: Record<string, unknown>, where: Record<string, unknown>): boolean =>
     Object.entries(where).every(([k, v]) => {
-      if (k === "NOT") return !matches(row, v as Record<string, unknown>);
+      if (k === "OR") return (v as Record<string, unknown>[]).some((c) => matches(row, c));
       if (v !== null && typeof v === "object" && "in" in (v as object)) {
         return ((v as { in: string[] }).in ?? []).includes(row[k] as string);
+      }
+      if (v !== null && typeof v === "object" && "not" in (v as object)) {
+        return row[k] != null && row[k] !== (v as { not: unknown }).not;
       }
       return row[k] === v;
     });
@@ -416,6 +425,31 @@ describe("runBackfill", () => {
     expect(memberships[0].membershipRoleKey).toBe("research");
     // ...and the enum itself is still untouched, so the NCI predicate is stable.
     expect(memberships[0].membershipType).toBe("research");
+  });
+
+  it("classifies a research/clinical row whose key is still NULL — the pre-backfill shape of EVERY row", async () => {
+    // The regression that made this test file necessary. `NOT: { membershipRoleKey:
+    // "research" }` reads as "key is not research" but compiles to `NOT (key =
+    // "research")`, and SQL gives NULL for a NULL key — never TRUE. On staging it
+    // matched 0 of 342 rows: step 2 classified only the null/null rows, then step
+    // 4 threw on the 342 it had skipped, AFTER steps 1-3 had committed.
+    const { db, memberships } = makeDb({
+      centers: [{ code: "meyer", directorCwid: null, leaderInterim: false }],
+      memberships: [
+        { centerCode: "meyer", cwid: "m101", membershipRoleKey: null, membershipType: "research" },
+        { centerCode: "meyer", cwid: "m102", membershipRoleKey: null, membershipType: "clinical" },
+        { centerCode: "meyer", cwid: "m103", membershipRoleKey: null, membershipType: null },
+      ],
+    });
+    const r = await runBackfill(db, { dryRun: false });
+    expect(r.membersClassified).toBe(3);
+    expect(memberships.map((m) => m.membershipRoleKey)).toEqual([
+      "research",
+      "clinical",
+      MEMBER_ROLE_KEY,
+    ]);
+    // The enum is never rewritten, so the NCI `isCurrentMember` population holds.
+    expect(memberships.map((m) => m.membershipType)).toEqual(["research", "clinical", null]);
   });
 
   it("THROWS when a row's membershipType disagrees with its role key — the only guard on a missed derivation", async () => {

@@ -154,15 +154,21 @@ export async function runBackfill(
   // and a null-guarded classify could never fix. Both are still no-ops on a
   // second run. The `member` step keeps the null guard: once Phase 3 lets
   // curators mint entries, a null `membershipType` is legitimate on any key.
+  //
+  // "Disagreeing with the key" needs the null arm SPELLED OUT. Both `NOT: { k:
+  // v }` and `k: { not: v }` compile to a `<>` comparison, and in SQL a NULL
+  // column satisfies neither `= v` nor `<> v` — so the original `NOT` form
+  // matched 0 of the 342 research/clinical rows on staging, every one of which
+  // holds a NULL key before the backfill runs. Step 2 then classified only the
+  // null/null rows and step 4 threw on the 342 it had skipped, after steps 1-3
+  // had already committed. Verified against staging 2026-08-30:
+  // `NOT` form 0, `{ not: }` form 0, this form 292 research / 50 clinical.
+  const unkeyed = (key: string) => ({
+    OR: [{ membershipRoleKey: null }, { membershipRoleKey: { not: key } }],
+  });
   const classify: { where: Record<string, unknown>; key: string }[] = [
-    {
-      where: { membershipType: "research", NOT: { membershipRoleKey: "research" } },
-      key: "research",
-    },
-    {
-      where: { membershipType: "clinical", NOT: { membershipRoleKey: "clinical" } },
-      key: "clinical",
-    },
+    { where: { membershipType: "research", ...unkeyed("research") }, key: "research" },
+    { where: { membershipType: "clinical", ...unkeyed("clinical") }, key: "clinical" },
     { where: { membershipRoleKey: null, membershipType: null }, key: MEMBER_ROLE_KEY },
   ];
   let membersClassified = 0;
