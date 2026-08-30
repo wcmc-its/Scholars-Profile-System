@@ -46,7 +46,7 @@ function makeDb(rosterCwids: string[] = []): { db: MeyerBackfillDb; upsertArgs: 
     // #2542 — the backfill seeds Meyer's role vocabulary before writing a
     // `membershipRoleKey`, so `membership_role_key`'s FK resolves even on a
     // database where the Phase 1 vocabulary backfill has not run yet.
-    centerRole: { createMany: vi.fn(async () => ({ count: 0 })) },
+    orgUnitRole: { createMany: vi.fn(async () => ({ count: 0 })) },
     centerMembership: {
       findUnique: vi.fn(async (args) => {
         const cwid = args.where.centerCode_cwid.cwid;

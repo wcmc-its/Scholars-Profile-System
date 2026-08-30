@@ -21,7 +21,7 @@
  * All callers are Server Components / ISR pages. Public-data only — no auth.
  */
 import { prisma } from "@/lib/db";
-import { DIRECTOR_ROLE_KEY } from "@/lib/center-roles";
+import { CENTER_ENTITY_TYPE, DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
 import { countActiveCenterMembersByCode } from "@/lib/api/center-member-count";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
@@ -258,17 +258,8 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
       name: true,
       slug: true,
       description: true,
-      // #2542 Phase 1 — the director moved off `Center.directorCwid` into
-      // `CenterLeader`. Nested on the same `findMany`, so this stays one extra
-      // query for the whole list rather than one per center. `directorCwid` is
-      // the dual-read fallback until the Phase 1 backfill runs; both go in the
-      // contract PR.
-      leaders: {
-        where: { roleKey: DIRECTOR_ROLE_KEY },
-        select: { cwid: true },
-        orderBy: { sortOrder: "asc" },
-        take: 1,
-      },
+      // `directorCwid` is the dual-read fallback until the backfill runs; it
+      // goes in the contract PR. The assignment rows are fetched below.
       directorCwid: true,
       // NB: `scholarCount` is deliberately NOT selected — the column is never
       // maintained for centers. Counted live below.
@@ -285,8 +276,27 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
     { publicOnly: true },
   );
 
+  // #2542 — the director is an `OrgUnitRoleAssignment` row. ONE batched query
+  // for the whole list rather than one per center: the assignment is
+  // polymorphic on (entityType, entityId) with no FK to `center`, so it cannot
+  // be nested on the `findMany` above. Ordered by `sortOrder` so the first row
+  // seen per center wins, matching the old `take: 1`.
+  const assignments = await prisma.orgUnitRoleAssignment.findMany({
+    where: {
+      entityType: CENTER_ENTITY_TYPE,
+      entityId: { in: centers.map((c) => c.code) },
+      roleKey: DIRECTOR_ROLE_KEY,
+    },
+    select: { entityId: true, cwid: true },
+    orderBy: { sortOrder: "asc" },
+  });
+  const assignedDirector = new Map<string, string>();
+  for (const a of assignments) {
+    if (!assignedDirector.has(a.entityId)) assignedDirector.set(a.entityId, a.cwid);
+  }
+
   const directorCwidOf = (c: (typeof centers)[number]): string | null =>
-    c.leaders[0]?.cwid ?? c.directorCwid;
+    assignedDirector.get(c.code) ?? c.directorCwid;
   const directorCwids = centers
     .map(directorCwidOf)
     .filter((c): c is string => c !== null);

@@ -28,7 +28,7 @@ import { countActiveCenterMembersByCode } from "@/lib/api/center-member-count";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 // Type-and-const only, and `lib/center-roles.ts` is import-free — this module
 // reaches the client bundle, so nothing here may pull in `@/lib/db`.
-import { DIRECTOR_ROLE_KEY } from "@/lib/center-roles";
+import { CENTER_ENTITY_TYPE, DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
 import { compactUnitName, officialUnitName } from "@/lib/org-unit-names";
 
 /** The four org-unit `EntityType`s a `unit_admin` grant can target. */
@@ -302,6 +302,7 @@ export type AllUnitsDirectoryClient = Pick<
   | "suppression"
   | "scholar"
   | "centerMembership"
+  | "orgUnitRoleAssignment"
 >;
 
 /**
@@ -353,7 +354,7 @@ export async function loadAllUnitsDirectory(
   db: AllUnitsDirectoryClient,
   opts?: { includeRetired?: boolean },
 ): Promise<UnitDirectoryEntry[]> {
-  const [deptRows, divRows, ctrRows, coreRows, suppressions] = await Promise.all([
+  const [deptRows, divRows, ctrRows, coreRows, suppressions, ctrAssignments] = await Promise.all([
     db.department.findMany({
       select: {
         code: true,
@@ -390,17 +391,8 @@ export async function loadAllUnitsDirectory(
         officialName: true,
         compactName: true,
         centerType: true,
-        // #2542 Phase 1 — the director moved into `CenterLeader`. A nested
-        // select on the existing findMany, so this stays O(1) in unit count and
-        // adds no value import (this file reaches the CLIENT bundle via
-        // `components/edit/home-panel.tsx` — see the header note).
-        // The two columns remain as the pre-backfill dual-read fallback.
-        leaders: {
-          where: { roleKey: DIRECTOR_ROLE_KEY },
-          select: { cwid: true, interim: true },
-          orderBy: { sortOrder: "asc" },
-          take: 1,
-        },
+        // The two columns remain as the pre-backfill dual-read fallback; the
+        // assignment rows come from a sibling query in this same `Promise.all`.
         directorCwid: true,
         leaderInterim: true,
         // NB: `scholarCount` is deliberately NOT selected — the column is never
@@ -429,7 +421,26 @@ export async function loadAllUnitsDirectory(
       },
       select: { entityType: true, entityId: true },
     }),
+    // #2542 — the director is an `OrgUnitRoleAssignment` row. A sibling query
+    // rather than a nested select, because the assignment is polymorphic on
+    // (entityType, entityId) with no FK to `center`. Unfiltered by code: this
+    // table holds at most one row per center per leadership role, so fetching
+    // all of them is smaller than the `in` list would be, and it keeps the whole
+    // thing O(1) in unit count. Adds no value import — this file reaches the
+    // CLIENT bundle via `components/edit/home-panel.tsx`, see the header note.
+    db.orgUnitRoleAssignment.findMany({
+      where: { entityType: CENTER_ENTITY_TYPE, roleKey: DIRECTOR_ROLE_KEY },
+      select: { entityId: true, cwid: true, interim: true },
+      orderBy: { sortOrder: "asc" },
+    }),
   ]);
+
+  // First row per center wins, matching the old nested `take: 1`.
+  const ctrDirector = new Map<string, { cwid: string; interim: boolean }>();
+  for (const a of ctrAssignments) {
+    if (!ctrDirector.has(a.entityId)) ctrDirector.set(a.entityId, { cwid: a.cwid, interim: a.interim });
+  }
+
 
   // One Set of `${kind}:${code}` for the retired flag — no per-unit lookup.
   const retiredSet = new Set(suppressions.map((s) => `${s.entityType}:${s.entityId}`));
@@ -445,7 +456,7 @@ export async function loadAllUnitsDirectory(
   const leaderCwids = [
     ...deptRows.map((r) => r.chairCwid),
     ...divRows.map((r) => r.chiefCwid),
-    ...ctrRows.map((r) => r.leaders[0]?.cwid ?? r.directorCwid),
+    ...ctrRows.map((r) => ctrDirector.get(r.code)?.cwid ?? r.directorCwid),
     ...coreRows.map((r) => r.leaders[0]?.cwid ?? null),
   ].filter((c): c is string => !!c && c.length > 0);
   const uniqueLeaders = [...new Set(leaderCwids)];
@@ -530,9 +541,9 @@ export async function loadAllUnitsDirectory(
         kindLabel: unitKindLabel("center"),
         category: null,
         centerType: r.centerType === "institute" ? "institute" : "center",
-        leaderCwid: r.leaders[0]?.cwid ?? r.directorCwid,
-        leaderName: resolveLeader(r.code, r.leaders[0]?.cwid ?? r.directorCwid),
-        leaderInterim: r.leaders[0]?.interim ?? r.leaderInterim,
+        leaderCwid: ctrDirector.get(r.code)?.cwid ?? r.directorCwid,
+        leaderName: resolveLeader(r.code, ctrDirector.get(r.code)?.cwid ?? r.directorCwid),
+        leaderInterim: ctrDirector.get(r.code)?.interim ?? r.leaderInterim,
         scholarCount: centerCounts.get(r.code) ?? 0,
         source: r.source,
         // Centers are NOT modeled with a parent-dept FK — always null.

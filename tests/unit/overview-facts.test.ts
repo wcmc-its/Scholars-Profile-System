@@ -65,7 +65,7 @@ vi.mock("@/lib/db", () => ({
       // #742 §2.5 — org-unit leadership-FK title augmentation.
       department: { findMany: mockDepartmentFindMany },
       division: { findMany: mockDivisionFindMany },
-      centerLeader: { findMany: mockCenterLeaderFindMany },
+      orgUnitRoleAssignment: { findMany: mockCenterLeaderFindMany },
       center: { findMany: mockCenterFindMany },
       centerProgramLeader: { findMany: mockCenterProgramLeaderFindMany },
       // #1997 — the scholar's `hideEducationYears` section-visibility override.
@@ -872,15 +872,19 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
   it("uses the curated official name and surfaces an interim center director", async () => {
     mockCenterLeaderFindMany.mockResolvedValue([
       {
-        centerCode: "meyer",
+        entityId: "meyer",
         roleKey: "director",
         interim: true,
-        qualifier: null,
         role: { label: "Director" },
-        center: {
-          name: "Meyer Cancer Center",
-          officialName: "Sandra and Edward Meyer Cancer Center",
-        },
+      },
+    ]);
+    // The center NAME comes from its own lookup now — the assignment carries no
+    // FK to `center`, so nothing can be nested on it.
+    mockCenterFindMany.mockResolvedValue([
+      {
+        code: "meyer",
+        name: "Meyer Cancer Center",
+        officialName: "Sandra and Edward Meyer Cancer Center",
       },
     ]);
     const facts = await assembleOverviewFacts("self01");
@@ -926,10 +930,13 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
     await assembleOverviewFacts("self01");
     expect(mockDepartmentFindMany.mock.calls[0][0].where).toEqual({ chairCwid: "self01" });
     expect(mockDivisionFindMany.mock.calls[0][0].where).toEqual({ chiefCwid: "self01" });
-    // #2542 — center leadership moved into `CenterLeader`; `profileTitle` is
-    // what keeps a non-title leadership role (Phase 2's coe_liaison) out.
+    // #2542 — center leadership is an `OrgUnitRoleAssignment` row. The query is
+    // scoped to the KIND as well as the scholar, because one shared vocabulary
+    // now spans every unit kind; `profileTitle` is what keeps a non-title
+    // leadership role (the coe_liaison fold-in) out.
     expect(mockCenterLeaderFindMany.mock.calls[0][0].where).toEqual({
       cwid: "self01",
+      entityType: "center",
       role: { roleGroup: "leadership", profileTitle: true },
     });
     // ...and the dual-read fallback still scopes to this scholar.
@@ -944,13 +951,14 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
   it("a scholar's FK roles can be vetoed and surface in the drawer candidates", async () => {
     mockCenterLeaderFindMany.mockResolvedValue([
       {
-        centerCode: "englander",
+        entityId: "englander",
         roleKey: "director",
         interim: false,
-        qualifier: null,
         role: { label: "Director" },
-        center: { name: "Englander Institute for Precision Medicine", officialName: null },
       },
+    ]);
+    mockCenterFindMany.mockResolvedValue([
+      { code: "englander", name: "Englander Institute for Precision Medicine", officialName: null },
     ]);
     // The drawer candidate carries the synthesized title, featured + non-primary.
     const opts = await loadOverviewSourceOptions("self01");

@@ -18,9 +18,18 @@
 import "dotenv/config";
 import { db } from "../lib/db";
 import { CENTERS, CENTER_PROGRAMS } from "./center-seed-data";
-import { centerRoleSeedRows } from "../lib/center-roles";
+import { CENTER_ENTITY_TYPE, orgUnitRoleSeedRows } from "../lib/org-unit-roles";
 
 async function main() {
+  // #2542 — the role vocabulary is ONE list per unit kind for the whole
+  // institution, not a per-unit copy, so it is seeded once here rather than
+  // nested on each center. `skipDuplicates` makes it idempotent and means a
+  // re-run can never clobber a label a steward has edited.
+  await db.write.orgUnitRole.createMany({
+    data: orgUnitRoleSeedRows(CENTER_ENTITY_TYPE),
+    skipDuplicates: true,
+  });
+
   const force = process.argv.slice(2).includes("--force");
   if (!force) {
     console.log(
@@ -47,7 +56,6 @@ async function main() {
         source: "manual",
         // #2542 Phase 1 — seed the role vocabulary alongside the center. Only on
         // `create`; an existing center's vocabulary is curator-owned.
-        roles: { createMany: { data: centerRoleSeedRows() } },
       },
       update: {
         name: c.name,

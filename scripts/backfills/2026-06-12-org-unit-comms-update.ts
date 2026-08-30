@@ -48,7 +48,7 @@
  * Run: npx tsx scripts/backfills/2026-06-12-org-unit-comms-update.ts [--dry-run]
  */
 import "dotenv/config";
-import { centerRoleSeedRows } from "../../lib/center-roles";
+import { CENTER_ENTITY_TYPE, orgUnitRoleSeedRows } from "../../lib/org-unit-roles";
 import { pathToFileURL } from "node:url";
 import { db, disconnect } from "../../lib/db";
 import { DEPARTMENT_NAMES } from "../../lib/department-names";
@@ -164,7 +164,6 @@ async function run(dryRun: boolean) {
           directorCwid,
           source: "manual",
           // #2542 — seed the role vocabulary with the center; only on create.
-          roles: { createMany: { data: centerRoleSeedRows() } },
         },
         update: {
           name: seed.name,

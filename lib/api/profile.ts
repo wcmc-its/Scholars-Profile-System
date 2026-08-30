@@ -8,7 +8,7 @@
  */
 import { cache } from "react";
 import { prisma } from "@/lib/db";
-import { formatLeadershipTitle } from "@/lib/center-roles";
+import { CENTER_ENTITY_TYPE, formatLeadershipTitle } from "@/lib/org-unit-roles";
 import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import {
   getEffectiveOverview,
@@ -1171,26 +1171,27 @@ export const getScholarFullProfileBySlug = cache(
           where: { chiefCwid: scholar.cwid },
           select: { name: true },
         }),
-        // #2542 Phase 1 — center leadership is a `CenterLeader` row now, not
+        // #2542 — center leadership is an `OrgUnitRoleAssignment` row, not
         // `Center.directorCwid`. `profileTitle` is what decides whether holding
-        // a role shows as a title here: Phase 2 folds in `coe_liaison`, which
+        // a role shows as a title here: folding in `coe_liaison` later
         // deliberately does NOT (see the `CenterProgramLeader` query below).
-        prisma.centerLeader.findMany({
+        // The center's NAME is resolved separately — the assignment is
+        // polymorphic on (entityType, entityId) with no FK to `center`.
+        prisma.orgUnitRoleAssignment.findMany({
           where: {
             cwid: scholar.cwid,
+            entityType: CENTER_ENTITY_TYPE,
             role: { roleGroup: "leadership", profileTitle: true },
           },
           select: {
-            centerCode: true,
+            entityId: true,
             interim: true,
-            qualifier: true,
             sortOrder: true,
             role: { select: { label: true } },
-            center: { select: { name: true, officialName: true } },
           },
-          orderBy: [{ sortOrder: "asc" }, { centerCode: "asc" }],
+          orderBy: [{ sortOrder: "asc" }, { entityId: "asc" }],
         }),
-        // Dual-read fallback: pre-backfill there are no `CenterLeader` rows, so
+        // Dual-read fallback: pre-backfill there are no assignment rows, so
         // a director would silently lose their title line for the window between
         // the ECS roll and the backfill. Dropped in the contract PR.
         prisma.center.findMany({
@@ -1211,19 +1212,32 @@ export const getScholarFullProfileBySlug = cache(
             },
           },
         }),
-      ]).then(([chairDepts, chiefDivs, dirCenters, legacyDirCenters, progLeads]) => [
+      ]).then(async ([chairDepts, chiefDivs, dirCenters, legacyDirCenters, progLeads]) => {
+        // One batched name lookup for the centers the assignments point at.
+        const dirCenterRows = dirCenters.length
+          ? await prisma.center.findMany({
+              where: { code: { in: dirCenters.map((c) => c.entityId) } },
+              select: { code: true, name: true, officialName: true },
+            })
+          : [];
+        const dirCenterName = new Map(
+          dirCenterRows.map((c) => [c.code, c.officialName ?? c.name]),
+        );
+        return [
         ...chairDepts.map((d) => `Chair, ${d.officialName ?? d.name}`),
         ...chiefDivs.map((d) => `Chief, ${d.name}`),
-        ...dirCenters.map(
-          (c) =>
-            `${formatLeadershipTitle(c.role.label, c.interim, c.qualifier)}, ${
-              c.center.officialName ?? c.center.name
-            }`,
-        ),
+        // A row whose center vanished contributes no title line rather than a
+        // half-rendered one.
+        ...dirCenters.flatMap((c) => {
+          const unitName = dirCenterName.get(c.entityId);
+          return unitName
+            ? [`${formatLeadershipTitle(c.role.label, c.interim)}, ${unitName}`]
+            : [];
+        }),
         // Only centers the new table does not already cover, so the two sources
         // never double-count a director during the dual-read window.
         ...legacyDirCenters
-          .filter((c) => !dirCenters.some((d) => d.centerCode === c.code))
+          .filter((c) => !dirCenters.some((d) => d.entityId === c.code))
           .map(
             (c) =>
               `${c.leaderInterim ? "Interim Director" : "Director"}, ${c.officialName ?? c.name}`,
@@ -1232,7 +1246,8 @@ export const getScholarFullProfileBySlug = cache(
           (l) =>
             `${l.interim ? "Interim Leader" : "Leader"}, ${l.program.label} (${l.program.center.officialName ?? l.program.center.name})`,
         ),
-      ]),
+        ];
+      }),
       // section-visibility-spec — the per-scholar section-hide overrides. Only
       // rows set to "true" (hidden) are read; a "false" row (or none) is "shown".
       // Filters the payload below so a hidden section's data never ships.

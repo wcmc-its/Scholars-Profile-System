@@ -33,7 +33,7 @@
  * reflection: `reflectUnitChange` on the unit page + `/browse`.
  */
 import { type NextRequest, type NextResponse } from "next/server";
-import { DIRECTOR_ROLE_KEY, centerRoleSeedRows } from "@/lib/center-roles";
+import { CENTER_ENTITY_TYPE, DIRECTOR_ROLE_KEY, orgUnitRoleSeedRows } from "@/lib/org-unit-roles";
 
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
@@ -332,7 +332,6 @@ async function createInformalCenter(params: {
           // the same transaction. A center created without it has no `director`
           // key for a leadership assignment to reference, so its leadership
           // editor would FK-error forever.
-          roles: { createMany: { data: centerRoleSeedRows() } },
         },
         select: { code: true },
       });
@@ -704,8 +703,8 @@ async function handleUpdate(
       });
       // #2542 — the current `director` assignment. Dual-read: pre-backfill
       // there is no CenterLeader row yet, so fall back to the column.
-      const beforeLeader = await tx.centerLeader.findFirst({
-        where: { centerCode: entityId, roleKey: DIRECTOR_ROLE_KEY },
+      const beforeLeader = await tx.orgUnitRoleAssignment.findFirst({
+        where: { entityType: CENTER_ENTITY_TYPE, entityId, roleKey: DIRECTOR_ROLE_KEY },
         select: { cwid: true, interim: true },
         orderBy: { sortOrder: "asc" },
       });
@@ -724,24 +723,25 @@ async function handleUpdate(
         // center's defaults first. Idempotent (`skipDuplicates`), never
         // clobbers a renamed label, and removes the ordering dependency between
         // the deploy and the backfill entirely.
-        await tx.centerRole.createMany({
-          data: centerRoleSeedRows().map((r) => ({ centerCode: entityId, ...r })),
+        await tx.orgUnitRole.createMany({
+          data: orgUnitRoleSeedRows(CENTER_ENTITY_TYPE),
           skipDuplicates: true,
         });
       }
       if (leadershipWrite && "setCwid" in leadershipWrite) {
         // One `director` at a time: vacate whoever holds it, then grant.
         // `deleteMany` also covers the pre-backfill case of no row at all.
-        await tx.centerLeader.deleteMany({
-          where: { centerCode: entityId, roleKey: DIRECTOR_ROLE_KEY },
+        await tx.orgUnitRoleAssignment.deleteMany({
+          where: { entityType: CENTER_ENTITY_TYPE, entityId, roleKey: DIRECTOR_ROLE_KEY },
         });
         if (leadershipWrite.setCwid !== null) {
           // The interim qualifier rides with the ROLE, not the person —
           // `Center.leaderInterim` was a separate column that survived a
           // director change, so carry it onto the new holder.
-          await tx.centerLeader.create({
+          await tx.orgUnitRoleAssignment.create({
             data: {
-              centerCode: entityId,
+              entityType: CENTER_ENTITY_TYPE,
+              entityId,
               cwid: leadershipWrite.setCwid,
               roleKey: DIRECTOR_ROLE_KEY,
               interim: beforeInterim,
@@ -753,8 +753,8 @@ async function handleUpdate(
         // `unit-leader-card.tsx` always POSTs the cwid before the interim flag,
         // so on a real save the row exists by now. The column dual-write above
         // still records it either way.
-        await tx.centerLeader.updateMany({
-          where: { centerCode: entityId, roleKey: DIRECTOR_ROLE_KEY },
+        await tx.orgUnitRoleAssignment.updateMany({
+          where: { entityType: CENTER_ENTITY_TYPE, entityId, roleKey: DIRECTOR_ROLE_KEY },
           data: { interim: leadershipWrite.setInterim },
         });
       }

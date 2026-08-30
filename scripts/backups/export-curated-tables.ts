@@ -73,7 +73,7 @@ import { db } from "../../lib/db";
 // readability (FK checks are disabled in the dump header, so any order loads).
 // To add/remove a table, edit this one list.
 // ---------------------------------------------------------------------------
-const CURATED_TABLES: readonly string[] = [
+export const CURATED_TABLES: readonly string[] = [
   // --- Org units: structure, names, membership, admins ---
   "department",
   "division",
@@ -83,15 +83,16 @@ const CURATED_TABLES: readonly string[] = [
   // (research/clinical) is a Prisma ENUM realized as the `membership_type`
   // column on `center_membership`, so that data is already captured below.
   "center_membership",
-  // #2542 — the per-center role vocabulary. `center_membership`'s role keys FK
-  // to it, so dumping the memberships without it would restore rows pointing at
-  // a vocabulary that no longer exists (the dump header disables FK checks, so
-  // that restore would SUCCEED and leave the keys orphaned rather than erroring).
-  "center_role",
+  // #2542 — the org-unit role vocabulary, one list per unit kind.
+  // `center_membership`'s role keys reference it, so dumping the memberships
+  // without it would restore rows pointing at a vocabulary that no longer exists
+  // (the dump header disables FK checks, so that restore would SUCCEED and leave
+  // the keys orphaned rather than erroring).
+  "org_unit_role",
   // #2542 — leadership assignments. Hand-curated, and the successor to
   // `center.director_cwid`; omitting it would back up a center's roster and
   // silently lose who leads it.
-  "center_leader",
+  "org_unit_role_assignment",
   "division_membership",
   "unit_admin",
   // --- Methods & tools: family-visibility overlays (DB is the SOR) ---

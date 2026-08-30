@@ -54,11 +54,12 @@
 import "dotenv/config";
 import { pathToFileURL } from "node:url";
 import {
+  CENTER_ENTITY_TYPE,
   DIRECTOR_ROLE_KEY,
   MEMBER_ROLE_KEY,
-  centerRoleSeedRows,
   deriveMembershipType,
-} from "../../lib/center-roles";
+  orgUnitRoleSeedRows,
+} from "../../lib/org-unit-roles";
 
 /** Structural slice of the Prisma client this backfill needs, so the unit test
  *  never loads the real one. */
@@ -68,12 +69,12 @@ export type CenterRoleBackfillDb = {
       args: unknown,
     ) => Promise<{ code: string; directorCwid: string | null; leaderInterim: boolean }[]>;
   };
-  centerRole: {
+  orgUnitRole: {
     createMany: (args: unknown) => Promise<{ count: number }>;
-    findMany: (args: unknown) => Promise<{ centerCode: string; key: string }[]>;
+    findMany: (args: unknown) => Promise<{ entityType: string; key: string }[]>;
   };
-  centerLeader: {
-    findMany: (args: unknown) => Promise<{ centerCode: string; cwid: string; roleKey: string }[]>;
+  orgUnitRoleAssignment: {
+    findMany: (args: unknown) => Promise<{ entityId: string; cwid: string; roleKey: string }[]>;
     create: (args: unknown) => Promise<unknown>;
   };
   centerMembership: {
@@ -119,25 +120,23 @@ export async function runBackfill(
   log(`Centers: ${centers.length}`);
 
   // ---- 1. Seed the default vocabulary --------------------------------------
-  const seedRows = centers.flatMap((c) =>
-    // Top-level createMany, so the FK scalar is ours to supply —
-    // `centerRoleSeedRows()` omits it for the nested-create call sites.
-    centerRoleSeedRows().map((r) => ({ centerCode: c.code, ...r })),
-  );
+  // ONE list for the whole `center` kind, not a copy per center: re-keying the
+  // vocabulary by kind is what makes divergence between units unrepresentable.
+  const seedRows = orgUnitRoleSeedRows(CENTER_ENTITY_TYPE);
   let rolesSeeded = 0;
   if (opts.dryRun) {
     const present = new Set(
       (
-        await db.centerRole.findMany({
-          where: { centerCode: { in: centers.map((c) => c.code) } },
-          select: { centerCode: true, key: true },
+        await db.orgUnitRole.findMany({
+          where: { entityType: CENTER_ENTITY_TYPE },
+          select: { entityType: true, key: true },
         })
-      ).map((r) => `${r.centerCode} ${r.key}`),
+      ).map((r) => `${r.entityType} ${r.key}`),
     );
-    rolesSeeded = seedRows.filter((r) => !present.has(`${r.centerCode} ${r.key}`)).length;
+    rolesSeeded = seedRows.filter((r) => !present.has(`${r.entityType} ${r.key}`)).length;
   } else {
-    // Never clobber a label a curator has already renamed.
-    ({ count: rolesSeeded } = await db.centerRole.createMany({
+    // Never clobber a label a steward has already renamed.
+    ({ count: rolesSeeded } = await db.orgUnitRole.createMany({
       data: seedRows,
       skipDuplicates: true,
     }));
@@ -191,26 +190,22 @@ export async function runBackfill(
 
   // VERIFY-ALL-BEFORE-WRITE: every led center must already have the `director`
   // vocabulary row, or the leadership FK would dangle.
-  const seededDirectorRoles = await db.centerRole.findMany({
-    where: { key: DIRECTOR_ROLE_KEY, centerCode: { in: led.map((c) => c.code) } },
-    select: { centerCode: true, key: true },
+  const seededDirectorRoles = await db.orgUnitRole.findMany({
+    where: { key: DIRECTOR_ROLE_KEY, entityType: CENTER_ENTITY_TYPE },
+    select: { entityType: true, key: true },
   });
-  const haveDirectorRole = new Set(seededDirectorRoles.map((r) => r.centerCode));
+  let haveDirectorRole = seededDirectorRoles.length > 0;
   if (opts.dryRun) {
-    // Step 1 wrote nothing, so credit the rows it WOULD have written — otherwise
+    // Step 1 wrote nothing, so credit the row it WOULD have written — otherwise
     // every dry run reports a dangling FK that the real run would not have.
-    for (const r of seedRows) {
-      if (r.key === DIRECTOR_ROLE_KEY) haveDirectorRole.add(r.centerCode);
-    }
+    haveDirectorRole ||= seedRows.some((r) => r.key === DIRECTOR_ROLE_KEY);
   }
   // Checked in dry-run too — detecting a dangling-FK condition before the real
-  // run is the entire point of a pre-flight.
-  const missing = led.filter((c) => !haveDirectorRole.has(c.code));
-  if (missing.length > 0) {
+  // run is the entire point of a pre-flight. One check now, not one per center:
+  // the vocabulary is shared, so either every center can be assigned or none can.
+  if (led.length > 0 && !haveDirectorRole) {
     throw new Error(
-      `Missing '${DIRECTOR_ROLE_KEY}' vocabulary row for: ${missing
-        .map((c) => c.code)
-        .join(", ")} — refusing to write a dangling leadership key.`,
+      `Missing '${DIRECTOR_ROLE_KEY}' vocabulary row for entityType '${CENTER_ENTITY_TYPE}' — refusing to write a dangling leadership key.`,
     );
   }
 
@@ -219,20 +214,25 @@ export async function runBackfill(
   // director cannot resurrect the old one alongside the new.
   const already = new Set(
     (
-      await db.centerLeader.findMany({
-        where: { roleKey: DIRECTOR_ROLE_KEY, centerCode: { in: led.map((c) => c.code) } },
-        select: { centerCode: true, cwid: true, roleKey: true },
+      await db.orgUnitRoleAssignment.findMany({
+        where: {
+          roleKey: DIRECTOR_ROLE_KEY,
+          entityType: CENTER_ENTITY_TYPE,
+          entityId: { in: led.map((c) => c.code) },
+        },
+        select: { entityId: true, cwid: true, roleKey: true },
       })
-    ).map((r) => r.centerCode),
+    ).map((r) => r.entityId),
   );
 
   let leadersCreated = 0;
   for (const c of led) {
     if (already.has(c.code)) continue;
     if (!opts.dryRun) {
-      await db.centerLeader.create({
+      await db.orgUnitRoleAssignment.create({
         data: {
-          centerCode: c.code,
+          entityType: CENTER_ENTITY_TYPE,
+          entityId: c.code,
           cwid: c.directorCwid as string,
           roleKey: DIRECTOR_ROLE_KEY,
           interim: c.leaderInterim,

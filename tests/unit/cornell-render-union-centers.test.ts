@@ -26,6 +26,15 @@ const {
 vi.mock("@/lib/db", () => ({
   prisma: {
     center: { findUnique: centerFindUnique },
+    // #2542 — leadership is an `OrgUnitRoleAssignment` row fetched with its own
+    // query; it used to be a nested `leaders` relation on `center`.
+    orgUnitRoleAssignment: {
+      findFirst: vi.fn(async () => null),
+      findMany: vi.fn(async () => []),
+      create: vi.fn(async () => ({})),
+      deleteMany: vi.fn(async () => ({ count: 0 })),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
     scholar: { findMany: scholarFindMany, findUnique: vi.fn(async () => null) },
     centerMembership: { findMany: membershipFindMany },
     centerProgram: { findMany: vi.fn(async () => []) },

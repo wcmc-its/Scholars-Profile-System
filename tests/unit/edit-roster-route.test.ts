@@ -93,7 +93,7 @@ const fakeTx = {
   },
   // #2542 — a membership write seeds this center's role vocabulary first, so
   // `membership_role_key`'s FK resolves even before the Phase 1 backfill runs.
-  centerRole: { createMany: mockTxCenterRoleCreateMany },
+  orgUnitRole: { createMany: mockTxCenterRoleCreateMany },
   divisionMembership: {
     create: mockTxDivisionMembershipCreate,
     delete: mockTxDivisionMembershipDelete,

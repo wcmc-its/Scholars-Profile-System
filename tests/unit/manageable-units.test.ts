@@ -55,6 +55,15 @@ function makeClient(opts: {
       department: { findMany: dept },
       division: { findMany: div },
       center: { findMany: ctr },
+      // #2542 — leadership is an `OrgUnitRoleAssignment` row fetched with its own
+      // query; it used to be a nested `leaders` relation on `center`.
+      orgUnitRoleAssignment: {
+        findFirst: vi.fn(async () => null),
+        findMany: vi.fn(async () => []),
+        create: vi.fn(async () => ({})),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
       core: { findMany: core },
     } as never,
     spies: { grants, dept, div, ctr, core },
@@ -244,14 +253,15 @@ type CtrRow = {
   officialName?: string | null;
   compactName?: string | null;
   centerType?: string;
-  // #2542 — the center's director arrives as nested `CenterLeader` rows.
-  leaders?: { cwid: string; interim: boolean }[];
+  // #2542 — the director arrives as an `OrgUnitRoleAssignment` row from a
+  // sibling query, no longer a nested relation on `center`.
   directorCwid?: string | null;
   leaderInterim?: boolean;
   scholarCount?: number;
   sortOrder?: number;
   source?: string;
 };
+type LeaderAssignment = { entityId: string; cwid: string; interim: boolean };
 type Suppr = { entityType: string; entityId: string };
 type ScholarRow = { cwid: string; preferredName: string };
 type MembershipRow = {
@@ -277,15 +287,16 @@ function makeDirectoryClient(opts: {
   scholars?: ScholarRow[];
   /** Center roster rows — centers count live off these, never off the row. */
   memberships?: MembershipRow[];
+  /** #2542 — director assignments, fetched as a sibling query. */
+  leaderAssignments?: LeaderAssignment[];
 }) {
   const dept = vi.fn(async () => opts.departments ?? []);
   const div = vi.fn(async () => opts.divisions ?? []);
-  // #2542 — Prisma always returns the nested `leaders` array; default it, and
+  // Default the dual-read columns so callers
   // the dual-read columns, so a fixture that does not care about leadership
   // need not spell them out.
   const ctr = vi.fn(async () =>
     (opts.centers ?? []).map((c) => ({
-      leaders: [],
       directorCwid: null,
       leaderInterim: false,
       ...c,
@@ -307,6 +318,9 @@ function makeDirectoryClient(opts: {
         .map((m) => ({ startDate: null, endDate: null, ...m }));
     },
   );
+  // No assignment rows by default: the directory falls through to the legacy
+  // column, which is the pre-backfill state in every environment today.
+  const orgUnitRoleAssignment = vi.fn(async () => opts.leaderAssignments ?? []);
   return {
     client: {
       department: { findMany: dept },
@@ -316,8 +330,10 @@ function makeDirectoryClient(opts: {
       suppression: { findMany: suppression },
       scholar: { findMany: scholar },
       centerMembership: { findMany: centerMembership },
+      // #2542 — the director is an assignment row, fetched as a sibling query.
+      orgUnitRoleAssignment: { findMany: orgUnitRoleAssignment },
     } as never,
-    spies: { dept, div, ctr, core, suppression, scholar, centerMembership },
+    spies: { dept, div, ctr, core, suppression, scholar, centerMembership, orgUnitRoleAssignment },
   };
 }
 
@@ -396,13 +412,13 @@ describe("loadAllUnitsDirectory", () => {
           slug: "cancer",
           description: "Onc.",
           centerType: "institute",
-          leaders: [{ cwid: "dir9999", interim: true }],
           scholarCount: 9,
           sortOrder: 3,
           source: "seed",
         },
       ],
       scholars: [{ cwid: "dir9999", preferredName: "Acting Director" }],
+      leaderAssignments: [{ entityId: "man-onc", cwid: "dir9999", interim: true }],
     });
     const r = await loadAllUnitsDirectory(client);
     const ctr = r.find((u) => u.code === "man-onc")!;
