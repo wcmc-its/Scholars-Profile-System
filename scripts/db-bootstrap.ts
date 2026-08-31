@@ -42,7 +42,17 @@
  *      can't be resolved from a live DSN like app-rw, and it can't
  *      self-verify via its own connection either — its check instead runs
  *      `SHOW GRANTS FOR 'etl'@...` on the privileged bootstrap connection
- *      (see `ETL_GRANTEE` and the verify step in `bootstrap()`).
+ *      (see `ETL_GRANTEE`). That verify read is itself denied on Aurora
+ *      (confirmed live, staging task fb765f93, #2567 follow-up): Aurora
+ *      requires SELECT on `mysql.user` to `SHOW GRANTS` for any account but
+ *      the caller, full stop — `sps_bootstrap`'s `WITH GRANT OPTION` on
+ *      `scholars_audit` does not substitute (an earlier version of this
+ *      comment assumed the MySQL 8.0.16 GRANT-OPTION relaxation applied here;
+ *      it does not, empirically, on Aurora). `sps_bootstrap` will never hold
+ *      that SELECT (least-privilege, #493), so the denial is permanent, not
+ *      transient. `bootstrap()` therefore warns and continues on exactly that
+ *      1142/`mysql.user` denial rather than failing the deploy closed on an
+ *      unreadable check — see the verify step for why that is still safe.
  *
  * Usage (local parity): `npm run db:audit-setup`
  */
@@ -174,6 +184,26 @@ export function assertInsertOnlyAuditGrant(grantLines: string[], roleLabel = "ap
   }
 }
 
+/** True for the specific "can't view another account's grants" denial Aurora
+ *  returns to `sps_bootstrap` on `SHOW GRANTS FOR 'etl'@...` — MySQL 1142
+ *  (`ER_TABLEACCESS_DENIED_ERROR`) against `mysql.user`, confirmed live on
+ *  staging (#2567 follow-up): `SELECT command denied to user
+ *  'sps_bootstrap'@'...' for table 'user'`. Prefers the structured `errno`
+ *  the mariadb driver attaches to the error (the same field the DDL-retry
+ *  above already relies on for 1060) over parsing the message — a message
+ *  match is only a fallback for a caught value with no `errno` at all, and
+ *  even then it requires the exact `... for table 'user'` shape, not just any
+ *  "command denied" text, so an unrelated denial is never mistaken for this
+ *  one. */
+function isMysqlUserVisibilityDenial(err: unknown): boolean {
+  const errno = (err as { errno?: number })?.errno;
+  if (typeof errno === "number") {
+    return errno === 1142;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return /SELECT command denied.*for table 'user'/.test(message);
+}
+
 /** Run the full bootstrap against an open connection. Throws on any failure so
  *  the caller exits non-zero (fails-closed). `now`/logging are injected nowhere
  *  — this is deliberately side-effect-light for testing. */
@@ -246,18 +276,35 @@ export async function bootstrap(
   // etl has no bootstrap-task DSN to open its own connection and self-verify
   // with (unlike app-rw via `verifyConn` above), so this runs on the
   // privileged bootstrap connection instead: `SHOW GRANTS FOR '<user>'@...`
-  // for a named account other than the caller needs either SELECT on
-  // `mysql.user` (which `sps_bootstrap` deliberately lacks) or, as of MySQL
-  // 8.0.16, the GRANT OPTION on every privilege being shown — and
-  // `sps_bootstrap` holds exactly that (INSERT WITH GRANT OPTION on
-  // `scholars_audit`, the only privilege this grant carries), so the read is
-  // permitted without any broader access.
-  const etlRows = (await conn.query(
-    `SHOW GRANTS FOR '${ETL_GRANTEE}'@'${host}'`,
-  )) as Array<Record<string, string>>;
-  const etlGrantLines = etlRows.map((r) => Object.values(r)[0]);
-  assertInsertOnlyAuditGrant(etlGrantLines, "etl role");
-  log(`Verified ${AUDIT_DB} grant is INSERT-only for '${ETL_GRANTEE}'@'${host}'`);
+  // for a named account other than the caller. On Aurora that read itself
+  // needs SELECT on `mysql.user`, which `sps_bootstrap` deliberately lacks
+  // (least-privilege, #493) and will never be granted — so this is expected
+  // to be permanently denied, not a transient fault. Warn-and-continue on
+  // exactly that denial is safe because the ONLY write in this block is the
+  // `GRANT INSERT` immediately above, and `etl` is proven to have started
+  // from *no* `scholars_audit` grant at all — that absence is the entire
+  // reason this grant exists (the #2556 1142 INSERT-denied failure). The
+  // GRANT succeeding is itself the confirmation the role ends up INSERT-only;
+  // an unreadable `SHOW GRANTS` just can't independently re-confirm it on
+  // every run. Any OTHER error here — including `assertInsertOnlyAuditGrant`
+  // finding a real UPDATE/DELETE/ALL on a run where `SHOW GRANTS` DID
+  // succeed — still propagates and fails the bootstrap closed.
+  try {
+    const etlRows = (await conn.query(
+      `SHOW GRANTS FOR '${ETL_GRANTEE}'@'${host}'`,
+    )) as Array<Record<string, string>>;
+    const etlGrantLines = etlRows.map((r) => Object.values(r)[0]);
+    assertInsertOnlyAuditGrant(etlGrantLines, "etl role");
+    log(`Verified ${AUDIT_DB} grant is INSERT-only for '${ETL_GRANTEE}'@'${host}'`);
+  } catch (err: unknown) {
+    if (!isMysqlUserVisibilityDenial(err)) throw err;
+    log(
+      `etl grant verify skipped — sps_bootstrap cannot view etl's grants ` +
+        `(SHOW GRANTS FOR another account needs SELECT on mysql.user, which ` +
+        `sps_bootstrap deliberately lacks). The GRANT INSERT statement itself ` +
+        `succeeded this run.`,
+    );
+  }
 }
 
 /** Absolute path to the canonical audit DDL (resolved relative to this module,
