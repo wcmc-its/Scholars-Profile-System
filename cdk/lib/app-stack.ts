@@ -4,6 +4,7 @@ import {
   CfnOutput,
   Duration,
   Fn,
+  Lazy,
   RemovalPolicy,
   SecretValue,
   Stack,
@@ -1109,6 +1110,42 @@ export class AppStack extends Stack {
     });
 
     // ------------------------------------------------------------------
+    // Service-health section (/edit/usage) -- read-only CloudWatch grant.
+    //
+    // lib/api/service-health.ts reads the public ALB's AWS/ApplicationELB
+    // metrics (RequestCount / HTTPCode_ELB_5XX_Count / HTTPCode_Target_5XX_Count)
+    // for the uptime tile + monthly trend, and the `sps-app-unavailable-${env}`
+    // composite alarm's state-transition history for the alarm-firings tile.
+    // Both env-var identifiers are wired above (SPS_PUBLIC_ALB_FULL_NAME /
+    // SPS_APP_UNAVAILABLE_ALARM); this is the matching IAM grant. Read-only,
+    // two actions, both scoped to `*` -- neither can be scoped tighter:
+    //   - cloudwatch:GetMetricData grants NO resource-level permissions at all
+    //     (confirmed against the CloudWatch IAM action reference) -- every
+    //     caller of this action uses `*`.
+    //   - cloudwatch:DescribeAlarmHistory DOES support scoping to an
+    //     `arn:aws:cloudwatch:region:account:alarm:name` resource for a metric
+    //     alarm, but `sps-app-unavailable-${env}` is a COMPOSITE alarm, and AWS
+    //     documents that composite-alarm history is only returned when the
+    //     caller's DescribeAlarmHistory permission has the `*` resource scope --
+    //     a narrower ARN-scoped grant silently omits composite alarms from the
+    //     response. Scoping this to the one alarm ARN would look tighter and
+    //     break the alarm-firings tile.
+    // No cloudwatch:DescribeAlarms -- the loader never calls it (alarm STATE is
+    // not read, only history).
+    // ------------------------------------------------------------------
+    new iam.Policy(this, "TaskRoleCloudWatchReadPolicy", {
+      policyName: `sps-task-${env}-cloudwatch-read`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["cloudwatch:GetMetricData", "cloudwatch:DescribeAlarmHistory"],
+          resources: ["*"],
+        }),
+      ],
+    });
+
+    // ------------------------------------------------------------------
     // Internal ALB security group.
     //
     // The public ALB's SG (albSecurityGroup) is owned by NetworkStack;
@@ -1840,6 +1877,20 @@ export class AppStack extends Stack {
         SPS_USAGE_WORKGROUP: `sps-usage-app-${env}`,
         SPS_USAGE_DATABASE: `sps_usage_${env}`,
         SPS_USAGE_REGION: this.region,
+        // Service-health section (/edit/usage) -- lib/api/service-health.ts reads
+        // these two identifiers at runtime (never baked into the image) to query
+        // CloudWatch directly: the public ALB's dimension name for the
+        // AWS/ApplicationELB RequestCount/5XX metrics, and the composite alarm
+        // this env pages on for the alarm-firings tile (built in
+        // ObservabilityStack as `sps-app-unavailable-${env}` -- see
+        // observability-stack.ts AppUnavailableAlarm; composed here from the same
+        // literal template rather than a cross-stack ref, since this stack has no
+        // other dependency on ObservabilityStack). `Lazy.string` because
+        // `this.publicAlb` is not constructed until further down this file --
+        // CDK resolves the token once the whole tree is built, at synth time.
+        // The matching read-only grant is TaskRoleCloudWatchReadPolicy below.
+        SPS_PUBLIC_ALB_FULL_NAME: Lazy.string({ produce: () => this.publicAlb.loadBalancerFullName }),
+        SPS_APP_UNAVAILABLE_ALARM: `sps-app-unavailable-${env}`,
         // #760 -- launch-period "Beta" pill beside the Scholars wordmark.
         // DEFAULT ON: the header reads `=== "off"` (isBetaBadgeEnabled), so the
         // badge shows in both envs while we're in beta. Wired here explicitly so
