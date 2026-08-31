@@ -343,10 +343,9 @@ function TypeBadge({ category }: { category: DepartmentCategory }) {
 
 function HeadLine({ dept }: { dept: BrowseDepartment }) {
   if (!dept.chairName) return null;
-  const label = dept.category === "administrative" ? "Director" : "Chair";
   return (
     <div className="mt-0.5 text-xs text-muted-foreground">
-      <span className="font-medium text-foreground/70">{label}:</span>{" "}
+      <span className="font-medium text-foreground/70">{dept.chairLabel ?? "Chair"}:</span>{" "}
       {dept.chairName}
     </div>
   );

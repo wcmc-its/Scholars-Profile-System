@@ -862,10 +862,40 @@ describe("assembleOverviewFacts — explicit pub snapshot + title/education delt
 // appointment + primary titles.
 describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
   it("surfaces a department chair recorded only on Department.chairCwid", async () => {
-    mockDepartmentFindMany.mockResolvedValue([{ code: "MED", name: "Medicine", officialName: null }]);
+    mockDepartmentFindMany.mockResolvedValue([
+      { code: "MED", name: "Medicine", officialName: null, category: "clinical" },
+    ]);
     const facts = await assembleOverviewFacts("self01");
     expect(facts?.titles).toEqual([
       { title: "Chair, Department of Medicine", organization: "Weill Cornell Medicine" },
+    ]);
+  });
+
+  // #58 / #2542 Phase D — an administrative department (e.g. the Library) is
+  // led by a DIRECTOR, not a Chair.
+  it("labels an administrative department's leader 'Director', not 'Chair'", async () => {
+    mockDepartmentFindMany.mockResolvedValue([
+      { code: "LIB", name: "Library", officialName: null, category: "administrative" },
+    ]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.titles).toEqual([
+      { title: "Director, Department of Library", organization: "Weill Cornell Medicine" },
+    ]);
+  });
+
+  // The synthesized "Director, Department of X" candidate must not be
+  // dropped by the CHAIR-specific `isChairTitleFor` dedup — that predicate
+  // only recognizes "Chair of {dept}" appointment titles, a pattern a
+  // Director's real appointment title never matches.
+  it("does not dedup a Director candidate against a 'Director of X' appointment (isChairTitleFor is chair-only)", async () => {
+    mockAppointmentFindMany.mockResolvedValue([apptRow("a1", "Director of the Library")]);
+    mockDepartmentFindMany.mockResolvedValue([
+      { code: "LIB", name: "Library", officialName: null, category: "administrative" },
+    ]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.titles.map((t) => t.title)).toEqual([
+      "Director of the Library",
+      "Director, Department of Library",
     ]);
   });
 

@@ -25,7 +25,13 @@
  * Read-only — this module performs NO write. Node-runtime only (Prisma).
  */
 import { db } from "@/lib/db";
-import { CENTER_ENTITY_TYPE, DIRECTOR_ROLE_KEY, formatLeadershipTitle } from "@/lib/org-unit-roles";
+import {
+  CENTER_ENTITY_TYPE,
+  DIRECTOR_ROLE_KEY,
+  formatLeadershipTitle,
+  departmentLeaderRoleKey,
+  DEPARTMENT_DIRECTOR_ROLE_KEY,
+} from "@/lib/org-unit-roles";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import { scoreFundingImportance } from "@/lib/edit/funding-importance";
 import { isChairTitleFor } from "@/lib/leadership";
@@ -1037,7 +1043,9 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
   const [departments, divisions, centers, legacyCenters, programLeaders] = await Promise.all([
     db.read.department.findMany({
       where: { chairCwid: cwid },
-      select: { code: true, name: true, officialName: true },
+      // `category` drives Chair vs. Director (#58 / #2542 Phase D) — see the
+      // `departmentLeaderRoleKey` call in the loop below.
+      select: { code: true, name: true, officialName: true, category: true },
     }),
     db.read.division.findMany({
       where: { chiefCwid: cwid },
@@ -1093,13 +1101,21 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
   const out: FkLeadershipCandidate[] = [];
   for (const d of departments) {
     const name = d.officialName ?? d.name;
+    // #58 / #2542 Phase D — an administrative department's leader is a
+    // DIRECTOR, not a Chair; `departmentLeaderRoleKey` is the single place
+    // that decides which from `category`. `isDeptChair` gates the
+    // role-aware `isChairTitleFor` dedup below, which matches "Chair of
+    // {dept}" appointment titles only — it must not fire for a Director,
+    // whose real appointment title is "Director of {dept}", a different
+    // pattern that predicate does not recognize.
+    const isDirector = departmentLeaderRoleKey(d.category) === DEPARTMENT_DIRECTOR_ROLE_KEY;
     out.push(
       fkLeadershipCandidate(
         `fk:dept:${d.code}`,
-        `Chair, ${withUnitNoun("Department of", name)}`,
+        `${isDirector ? "Director" : "Chair"}, ${withUnitNoun("Department of", name)}`,
         WCM_ORG,
         false,
-        { isDeptChair: true, unitName: name },
+        { isDeptChair: !isDirector, unitName: name },
       ),
     );
   }

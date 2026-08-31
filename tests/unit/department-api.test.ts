@@ -34,6 +34,8 @@ const {
   mockLoadOverlayGate,
   mockChipsEnabled,
   mockFacetEnabled,
+  mockOrgUnitRoleFindUnique,
+  mockOrgUnitRoleAssignmentFindFirst,
 } = vi.hoisted(() => ({
   mockDepartmentFindUnique: vi.fn(),
   mockScholarFindUnique: vi.fn(),
@@ -58,6 +60,8 @@ const {
   mockLoadOverlayGate: vi.fn(),
   mockChipsEnabled: vi.fn(),
   mockFacetEnabled: vi.fn(),
+  mockOrgUnitRoleFindUnique: vi.fn(),
+  mockOrgUnitRoleAssignmentFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -94,6 +98,8 @@ vi.mock("@/lib/db", () => ({
       findFirst: mockSuppressionFindFirst,
       findMany: mockSuppressionFindMany,
     },
+    orgUnitRole: { findUnique: mockOrgUnitRoleFindUnique },
+    orgUnitRoleAssignment: { findFirst: mockOrgUnitRoleAssignmentFindFirst },
   },
 }));
 // #974 — the roster chips loader (Phase 1) + facet aggregation (Phase 2) read the
@@ -186,6 +192,11 @@ function mockDefaultDeptSetup() {
     Array.from({ length: 25 }, (_, i) => grantRow(i)),
   );
   mockSuppressionFindMany.mockResolvedValue([]);
+  // #2542 Phase D — no vocabulary row / no assignment row by default, so
+  // `resolveUnitLeader` falls through to the legacy `chairCwid` column,
+  // matching the pre-repoint behavior these tests were written against.
+  mockOrgUnitRoleFindUnique.mockResolvedValue(null);
+  mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue(null);
 }
 
 /** One active grant row shaped like `UNIT_GRANT_SELECT`. `i` gives it its own
@@ -253,6 +264,8 @@ describe("getDepartment", () => {
     mockFieldOverrideFindMany.mockResolvedValue([]);
     mockSuppressionFindFirst.mockResolvedValue(null);
     mockSuppressionFindMany.mockResolvedValue([]);
+    mockOrgUnitRoleFindUnique.mockResolvedValue(null);
+    mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue(null);
 
     const result = await getDepartment("medicine");
     expect(result).not.toBeNull();

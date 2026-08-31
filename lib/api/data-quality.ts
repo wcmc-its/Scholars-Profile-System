@@ -32,6 +32,7 @@
 import { toCsv } from "@/lib/csv";
 import { PI_ROLES } from "@/lib/funding-roles";
 import { formatRoleCategory } from "@/lib/role-display";
+import { departmentLeaderRoleKey, DEPARTMENT_DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
 import type { EditRosterUnitFilter } from "@/lib/api/edit-roster";
 import { buildScholarNameClauses } from "@/lib/api/scholar-name-search";
 import type { DataQualityScope } from "@/lib/edit/data-quality";
@@ -122,10 +123,19 @@ function deaneryLabel(title: string): string | null {
  * Classify a scholar's leadership tier + display label from their title + the
  * chair/chief FK flags. THE Dean (tier 0) sorts above the active deanery (tier 1),
  * which sorts above FK chairs/chiefs (tier 2), which sort above everyone (tier 3).
+ *
+ * `chairLabel` is pre-resolved by the caller, not a plain "is this cwid a
+ * department chair" boolean: an administrative department's leader is a
+ * DIRECTOR, not a Chair (#58 / #2542 Phase D — `departmentLeaderRoleKey`,
+ * `lib/org-unit-roles.ts`), and `Department.chairCwid` set-membership alone
+ * cannot tell the two apart. `null` means "not a department leader at all";
+ * a non-null string is "Chair" or "Director" (whichever the caller resolved).
+ * `isChief` stays a boolean — divisions have no category ternary, so there is
+ * only one possible label for them.
  */
 export function classifyLeadership(
   title: string | null,
-  isChair: boolean,
+  chairLabel: string | null,
   isChief: boolean,
 ): { tier: number; label: string | null } {
   const t = (title ?? "").trim();
@@ -136,7 +146,7 @@ export function classifyLeadership(
     const label = deaneryLabel(t);
     if (label) return { tier: LEADERSHIP_TIER.deanery, label };
   }
-  if (isChair) return { tier: LEADERSHIP_TIER.chairChief, label: "Chair" };
+  if (chairLabel) return { tier: LEADERSHIP_TIER.chairChief, label: chairLabel };
   if (isChief) return { tier: LEADERSHIP_TIER.chairChief, label: "Chief" };
   return { tier: LEADERSHIP_TIER.none, label: null };
 }
@@ -447,7 +457,9 @@ async function computeDataQualityEntries(
           division: { select: { name: true } },
         },
       }),
-      client.department.findMany({ select: { chairCwid: true } }),
+      // `category` drives Chair vs. Director (#58 / #2542 Phase D) — see the
+      // `chairLabelByCwid` build below.
+      client.department.findMany({ select: { chairCwid: true, category: true } }),
       client.division.findMany({ select: { chiefCwid: true } }),
       client.grant.groupBy({
         by: ["cwid"],
@@ -474,7 +486,18 @@ async function computeDataQualityEntries(
       client.overviewProvenance.findMany({ select: { cwid: true, updatedAt: true } }),
     ]);
 
-  const chairs = new Set(chairRows.map((r) => r.chairCwid).filter((c): c is string => !!c));
+  // "Chair" for clinical/mixed/basic departments, "Director" for
+  // administrative ones (#58 / #2542 Phase D) — a plain membership Set can't
+  // carry that distinction, so this is a label map instead. A cwid chairing
+  // more than one department (unusual) keeps the LAST department's label;
+  // no ordering is defined or needed for that edge case today.
+  const chairLabelByCwid = new Map<string, string>();
+  for (const r of chairRows) {
+    if (!r.chairCwid) continue;
+    const label =
+      departmentLeaderRoleKey(r.category) === DEPARTMENT_DIRECTOR_ROLE_KEY ? "Director" : "Chair";
+    chairLabelByCwid.set(r.chairCwid, label);
+  }
   const chiefs = new Set(chiefRows.map((r) => r.chiefCwid).filter((c): c is string => !!c));
   const piCount = new Map(piRows.map((r) => [r.cwid, r._count._all]));
   const nihPiCount = new Map(nihPiRows.map((r) => [r.cwid, r._count._all]));
@@ -492,7 +515,8 @@ async function computeDataQualityEntries(
   const now = Date.now();
 
   let entries: DataQualityEntry[] = candidates.map((s) => {
-    const isChair = chairs.has(s.cwid);
+    const chairLabel = chairLabelByCwid.get(s.cwid) ?? null;
+    const isChair = chairLabel !== null;
     const isChief = chiefs.has(s.cwid);
     const pi = piCount.get(s.cwid) ?? 0;
     const nihPi = nihPiCount.get(s.cwid) ?? 0;
@@ -504,7 +528,7 @@ async function computeDataQualityEntries(
       W_NIH_PI * Math.log1p(nihPi) +
       (s.roleCategory === "full_time_faculty" ? W_FACULTY : 0);
 
-    const { tier, label } = classifyLeadership(s.primaryTitle ?? null, isChair, isChief);
+    const { tier, label } = classifyLeadership(s.primaryTitle ?? null, chairLabel, isChief);
 
     const headshot: HeadshotState =
       s.hasHeadshot === true ? "present" : s.hasHeadshot === false ? "missing" : "unknown";
