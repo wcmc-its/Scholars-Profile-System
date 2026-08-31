@@ -65,6 +65,7 @@ const NO_TABS: ConsoleTabState = {
   cores: false,
   matcha: false,
   grantMatcha: false,
+  roleVocabulary: false,
 };
 
 function tabs(overrides: Partial<ConsoleTabState>): ConsoleTabState {

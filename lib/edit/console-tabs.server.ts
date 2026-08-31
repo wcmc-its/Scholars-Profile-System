@@ -45,6 +45,7 @@ import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 import { isMatchaEnabled } from "@/lib/api/matcha";
 import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
+import { isOrgUnitRoleConsoleTabVisible } from "@/lib/edit/org-unit-role-flags";
 
 // ---------------------------------------------------------------------------
 // Tab ids — one per `AdminSubnavActive` entry in `admin-subnav.tsx`, minus
@@ -69,6 +70,7 @@ export const CONSOLE_TAB_IDS = [
   "cores",
   "matcha",
   "grantMatcha",
+  "roleVocabulary",
 ] as const;
 
 export type ConsoleTabId = (typeof CONSOLE_TAB_IDS)[number];
@@ -171,6 +173,11 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
   // (`app/edit/grant-matcha/page.tsx`). Same audience as `matcha`.
   grantMatcha: (s) =>
     (s.isSuperuser || s.isDeveloper === true) && isMatchaEnabled() && isGrantMatchaEnabled(),
+
+  // #2542 Phase 3 — the `OrgUnitRole` vocabulary editor. Delegates entirely to
+  // the bundled `isXTabVisible` (flag + role together), per the convention
+  // above: nothing here re-reads `ORG_UNIT_ROLE_CONSOLE` on its own.
+  roleVocabulary: (s) => isOrgUnitRoleConsoleTabVisible(s),
 };
 
 // ---------------------------------------------------------------------------

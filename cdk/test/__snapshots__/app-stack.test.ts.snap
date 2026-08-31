@@ -466,6 +466,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ORG_UNIT_ROLE_CONSOLE",
+                "Value": "off",
+              },
+              {
                 "Name": "CLINICAL_TRIALS_SECTION",
                 "Value": "on",
               },
@@ -4881,6 +4885,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "CENTER_COLLABORATION_GRANT_AXIS",
+                "Value": "on",
+              },
+              {
+                "Name": "ORG_UNIT_ROLE_CONSOLE",
                 "Value": "on",
               },
               {

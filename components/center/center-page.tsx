@@ -145,7 +145,19 @@ export async function CenterPage({
           </p>
         )}
 
-        {detail.director && <LeaderCard leader={detail.director} role="Director" />}
+        {/* #2542 Phase B — every leadership-group, profileTitle-eligible role
+            holder (director, co-directors, associate directors, …), in
+            vocabulary order. The noun comes from `leader.roleLabel`; the
+            "Interim" modifier from `leader.isInterim` — nothing is hardcoded
+            to "Director". */}
+        {detail.leadership.map((leader) => (
+          <LeaderCard
+            key={`${leader.cwid}-${leader.roleLabel}`}
+            leader={leader}
+            role={leader.roleLabel}
+            interim={leader.isInterim}
+          />
+        ))}
 
         {topResearchAreas.length > 0 && (
           <div className="mt-6">

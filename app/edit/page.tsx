@@ -345,6 +345,7 @@ export default async function EditSelfPage({
             pendingHonors={pendingHonors}
             administratorsTab={tabs.administrators ? 0 : null}
             methodsTab={tabs.methods ? 0 : null}
+            roleVocabularyTab={tabs.roleVocabulary ? 0 : null}
             dataSharingTab={tabs.dataSharing ? 0 : null}
             reportsTab={tabs.reports}
             newsTab={tabs.news}

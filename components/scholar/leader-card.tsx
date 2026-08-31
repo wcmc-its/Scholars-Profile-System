@@ -9,6 +9,7 @@
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { AbbrTooltip } from "@/components/ui/abbr-tooltip";
 import { COE_ABBR, COE_EXPANSION } from "@/lib/center-program-roles";
+import { formatLeadershipTitle } from "@/lib/org-unit-roles";
 import { profilePath } from "@/lib/profile-url";
 
 export type LeaderRole =
@@ -21,7 +22,11 @@ export type LeaderRole =
   | "Interim Leader"
   // #1570 — Community Outreach & Engagement liaison for a Meyer Cancer Center
   // program (rendered as a separate card after the Leaders).
-  | "COE Liaison";
+  | "COE Liaison"
+  // #2542 Phase B — center-vocabulary labels ("Co-Director", "Associate
+  // Director", …) are curator-editable data, not a closed set. The literals
+  // above stay for autocomplete/docs; any string is accepted.
+  | (string & {});
 
 export type Leader = {
   cwid: string;
@@ -36,10 +41,18 @@ export type Leader = {
 export function LeaderCard({
   leader,
   role,
+  interim = false,
 }: {
   leader: Leader;
   role: LeaderRole;
+  /** #2542 Phase B — interim/acting qualifier. Opt-in: omitted (or false) by
+   *  every pre-existing caller, whose `role` already carries any modifier it
+   *  wants verbatim. When true, composes `role` through `formatLeadershipTitle`
+   *  ("Director" -> "Interim Director") instead of requiring every call site
+   *  to pre-format the string. */
+  interim?: boolean;
 }) {
+  const displayRole = role === "COE Liaison" ? role : formatLeadershipTitle(role, interim);
   return (
     <div className="mt-6 flex max-w-[460px] items-center gap-[14px] rounded-md border border-border bg-background px-4 py-[14px]">
       <HeadshotAvatar
@@ -58,7 +71,7 @@ export function LeaderCard({
               {" Liaison"}
             </>
           ) : (
-            role
+            displayRole
           )}
         </div>
         {leader.slug ? (

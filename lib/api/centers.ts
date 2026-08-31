@@ -202,6 +202,23 @@ export async function getScholarCenterAffiliations(
     .map(({ sortOrder: _sortOrder, ...rest }) => rest);
 }
 
+/** One holder of one leadership entry on a center (#2542 Phase B). */
+export type CenterLeader = {
+  cwid: string;
+  preferredName: string;
+  primaryTitle: string | null;
+  slug: string;
+  identityImageEndpoint: string;
+  /** The vocabulary entry's display label — `OrgUnitRole.label` — e.g.
+   *  "Director", "Co-Director", "Associate Director". The noun `center-page.tsx`
+   *  renders via `formatLeadershipTitle`; never hardcoded. */
+  roleLabel: string;
+  /** Interim/acting qualifier — `OrgUnitRoleAssignment.interim` since #2542
+   *  Phase 1 (was the in-row `Center.leaderInterim` column, still dual-read
+   *  during this release). #540 / ADR-005 Amendment 1 § A1.1. */
+  isInterim: boolean;
+};
+
 export type CenterDetail = {
   code: string;
   name: string;
@@ -209,20 +226,14 @@ export type CenterDetail = {
   description: string | null;
   /** #1021 — curated outbound website URL, or null. Rendered beside the name. */
   url: string | null;
-  director: {
-    cwid: string;
-    preferredName: string;
-    primaryTitle: string | null;
-    slug: string;
-    identityImageEndpoint: string;
-    /** Interim/acting qualifier — `CenterLeader.interim` since #2542 Phase 1
-     *  (was the in-row `Center.leaderInterim` column, still dual-read during
-     *  this release). #540 / ADR-005 Amendment 1 § A1.1.
-     *  NOTE: computed and shipped in the RSC payload but NOT rendered — 
-     *  `center-page.tsx` hardcodes `role="Director"` and `LeaderCard`'s prop
-     *  type has no interim field. Pre-existing (#2542 recon), not a regression. */
-    isInterim: boolean;
-  } | null;
+  /**
+   * #2542 Phase B — the center's leadership group: every `leadership`-group,
+   * `profileTitle`-eligible role holder (director, co-directors, associate
+   * directors, …), ordered by the vocabulary's `sortOrder` then the
+   * assignment's own `sortOrder` then `cwid` as a stable tiebreak. `[]` for a
+   * center with no curated leadership.
+   */
+  leadership: CenterLeader[];
   scholarCount: number;
 };
 
@@ -370,44 +381,90 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
   // their fields in-row, so no `field_override` merge happens here.
   if (await isUnitSuppressed("center", center.code, prisma)) return null;
 
-  // #2542 — leadership is an `OrgUnitRoleAssignment` row. A separate query
-  // rather than a nested one: the assignment is polymorphic on
-  // (entityType, entityId) with no FK to `center`, the same shape as
-  // `unit_admin` and for the same reason. `take: 1` because `director` is
-  // single-holder in the seeded vocabulary and `CenterDetail.director` is one
-  // object.
-  // ponytail: renders one director, as the column did. A center with
-  // co-directors needs `CenterDetail.director` widened to a list and
-  // `center-page.tsx` to render the leadership group in `sortOrder` — that is
-  // the public-render step, deliberately not folded in here so this change is
-  // provably zero-visible-change.
-  const assignment = await prisma.orgUnitRoleAssignment.findFirst({
-    where: { entityType: CENTER_ENTITY_TYPE, entityId: center.code, roleKey: DIRECTOR_ROLE_KEY },
-    select: { cwid: true, interim: true },
-    orderBy: { sortOrder: "asc" },
+  // #2542 Phase B — leadership is a LIST: every `leadership`-group,
+  // `profileTitle`-eligible `OrgUnitRoleAssignment` row for this center,
+  // joined to its vocabulary entry in ONE query (not one per role). Same
+  // `role: { roleGroup: "leadership", profileTitle: true }` filter
+  // `lib/api/profile.ts` uses for the scholar-profile title line, so the two
+  // surfaces agree on who counts as a leader. A separate query rather than a
+  // nested one: the assignment is polymorphic on (entityType, entityId) with
+  // no FK to `center`, the same shape as `unit_admin` and for the same reason.
+  // Ordered by the vocabulary's own `sortOrder` (director before co-director
+  // before associate director), then the assignment's `sortOrder` (order
+  // among multiple holders of the SAME role, e.g. co-directors), then `cwid`
+  // as a final stable tiebreak.
+  const assignments = await prisma.orgUnitRoleAssignment.findMany({
+    where: {
+      entityType: CENTER_ENTITY_TYPE,
+      entityId: center.code,
+      role: { roleGroup: "leadership", profileTitle: true },
+    },
+    select: {
+      cwid: true,
+      roleKey: true,
+      interim: true,
+      role: { select: { label: true } },
+    },
+    orderBy: [{ role: { sortOrder: "asc" } }, { sortOrder: "asc" }, { cwid: "asc" }],
   });
 
-  let director: CenterDetail["director"] = null;
-  const leadership = assignment
-    ? { cwid: assignment.cwid, interim: assignment.interim }
-    : center.directorCwid
-      ? { cwid: center.directorCwid, interim: center.leaderInterim }
-      : null;
-  if (leadership) {
-    const d = await prisma.scholar.findUnique({
-      where: { cwid: leadership.cwid },
+  type LeadershipSource = { cwid: string; roleKey: string; roleLabel: string; interim: boolean };
+  let sources: LeadershipSource[];
+  if (assignments.length > 0) {
+    sources = assignments.map((a) => ({
+      cwid: a.cwid,
+      roleKey: a.roleKey,
+      roleLabel: a.role.label,
+      interim: a.interim,
+    }));
+  } else if (center.directorCwid) {
+    // Dual-read fallback for the window between the ECS roll and the manual
+    // backfill, when no assignment row exists yet. Removed with the column in
+    // the contract PR. The legacy column could only ever express one
+    // director, so this synthesizes a one-item source list — never a second
+    // leadership entry. The label still comes from the vocabulary (not a
+    // literal "Director") so a curator rename is honored even pre-backfill.
+    const directorRole = await prisma.orgUnitRole.findUnique({
+      where: { entityType_key: { entityType: CENTER_ENTITY_TYPE, key: DIRECTOR_ROLE_KEY } },
+      select: { label: true },
+    });
+    sources = [
+      {
+        cwid: center.directorCwid,
+        roleKey: DIRECTOR_ROLE_KEY,
+        roleLabel: directorRole?.label ?? "Director",
+        interim: center.leaderInterim,
+      },
+    ];
+  } else {
+    sources = [];
+  }
+
+  let leadership: CenterLeader[] = [];
+  if (sources.length > 0) {
+    const scholars = await prisma.scholar.findMany({
+      where: { cwid: { in: sources.map((s) => s.cwid) } },
       select: { cwid: true, preferredName: true, primaryTitle: true, slug: true },
     });
-    if (d) {
-      director = {
-        cwid: d.cwid,
-        preferredName: d.preferredName,
-        primaryTitle: d.primaryTitle,
-        slug: d.slug,
-        identityImageEndpoint: identityImageEndpoint(d.cwid),
-        isInterim: leadership.interim,
-      };
-    }
+    const byCwid = new Map(scholars.map((s) => [s.cwid, s]));
+    // A source whose scholar row is missing contributes no card, matching the
+    // old single-director behavior (`if (d)` below the point lookup).
+    leadership = sources.flatMap((s) => {
+      const d = byCwid.get(s.cwid);
+      return d
+        ? [
+            {
+              cwid: d.cwid,
+              preferredName: d.preferredName,
+              primaryTitle: d.primaryTitle,
+              slug: d.slug,
+              identityImageEndpoint: identityImageEndpoint(d.cwid),
+              roleLabel: s.roleLabel,
+              isInterim: s.interim,
+            },
+          ]
+        : [];
+    });
   }
 
   // #552 Phase 4 — the header/tab "scholars" count reflects the active roster
@@ -457,7 +514,7 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
     slug: center.slug,
     description: center.description,
     url: center.url,
-    director,
+    leadership,
     scholarCount,
   };
 }

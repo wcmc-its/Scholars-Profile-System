@@ -1,0 +1,697 @@
+/**
+ * OrgUnitRoleRoster — the body of `/edit/roles` (#2542 Phase 3).
+ *
+ * `OrgUnitRole` is a REAL table (unlike the Method-Family roster's derived-tier
+ * overlay over an ETL-owned base): every row here is a live vocabulary entry,
+ * so there is no two-table dance and no bolt-on decision type to reconcile —
+ * a save is one `PATCH`/`POST` to `/api/edit/roles`, full stop.
+ *
+ * Grouped by entity type, then by role group (leadership above membership —
+ * the same order the unit page itself renders in), ordered by `sortOrder`
+ * within each group (the server pre-sorts; this only partitions that order,
+ * it never re-sorts).
+ *
+ * EDITABLE: `label` (inline text, confirm-on-save — the rename affects every
+ * current holder's displayed role, so the confirmation states the live
+ * `holderCount`), `sortOrder`, and `profileTitle` (both save immediately, no
+ * confirm). READ-ONLY: `key`, `entityType`, `roleGroup`, `scope`,
+ * `singleHolder`, `source`, `holderCount`. There is no delete affordance —
+ * the route has no DELETE handler (see its module doc comment) and this
+ * component must not invent one.
+ *
+ * PER-ROW busy state (a `Set` of row keys, not the single global `busyKey`
+ * `MethodFamiliesRoster` uses): two different rows save fully independently,
+ * and a click on row B while row A's write is in flight is never dropped.
+ * All three editable fields on a given row share that row's busy flag — a
+ * label rename and a sort-order edit on the SAME row are serialized, but nothing
+ * outside that row is.
+ */
+"use client";
+
+import * as React from "react";
+import { Loader2, Plus } from "lucide-react";
+
+import { ConfirmDialog } from "@/components/edit/confirm-dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
+import {
+  DEFAULT_ORG_UNIT_ROLES,
+  type OrgUnitRoleEntityType,
+  type OrgUnitRoleGroup,
+  type OrgUnitRoleScope,
+} from "@/lib/org-unit-roles";
+import type { OrgUnitRoleRosterRow } from "@/lib/api/org-unit-roles-admin";
+
+/** Display order + label for each unit kind. Fixed (not derived from whatever
+ *  order rows happen to arrive in) so the page reads the same every load. */
+const ENTITY_TYPE_ORDER: readonly OrgUnitRoleEntityType[] = [
+  "department",
+  "division",
+  "center",
+  "core",
+  "center_program",
+];
+
+const ENTITY_TYPE_LABEL: Record<OrgUnitRoleEntityType, string> = {
+  department: "Department",
+  division: "Division",
+  center: "Center",
+  core: "Core",
+  center_program: "Center program",
+};
+
+/** Leadership renders above membership, mirroring the unit page itself
+ *  (`lib/org-unit-roles.ts`'s `OrgUnitRoleGroup` doc comment). */
+const ROLE_GROUP_ORDER: readonly OrgUnitRoleGroup[] = ["leadership", "membership"];
+
+const ROLE_GROUP_LABEL: Record<OrgUnitRoleGroup, string> = {
+  leadership: "Leadership",
+  membership: "Membership",
+};
+
+/** The known entity-type literals for the "Add role" select — sourced from
+ *  the same seed table the API route validates against, not a second
+ *  hardcoded list that could drift from it. */
+const ENTITY_TYPE_OPTIONS = Object.keys(DEFAULT_ORG_UNIT_ROLES) as OrgUnitRoleEntityType[];
+
+/** `"{entityType}:{key}"` — stable per-row identity; matches the PATCH/POST
+ *  routes' own `(entityType, key)` composite key. */
+function rowKey(r: Pick<OrgUnitRoleRosterRow, "entityType" | "key">): string {
+  return `${r.entityType}:${r.key}`;
+}
+
+/** Simple regular pluralization — every entity-type noun here takes a plain
+ *  "s" ("centers", "departments", "center programs"). */
+function pluralNoun(entityType: OrgUnitRoleEntityType): string {
+  return `${ENTITY_TYPE_LABEL[entityType].toLowerCase()}s`;
+}
+
+/** Map a PATCH-route error code to a steward-facing message. */
+function mapPatchError(code: string): string {
+  switch (code) {
+    case "not_comms_steward":
+      return "You don't have permission to manage the role vocabulary.";
+    case "not_found":
+      return "This role no longer exists — reload the page.";
+    case "invalid_label":
+      return "Label is required (255 characters or fewer).";
+    case "invalid_sort_order":
+      return "Sort order must be a whole number from 0 to 9999.";
+    default:
+      return "Something went wrong — please try again.";
+  }
+}
+
+/** Map a POST-route (create) error code to a steward-facing message. */
+function mapCreateError(code: string): string {
+  switch (code) {
+    case "not_comms_steward":
+      return "You don't have permission to manage the role vocabulary.";
+    case "invalid_entity_type":
+      return "Choose a unit kind.";
+    case "invalid_key":
+      return "Key must be lowercase letters, numbers, and underscores, starting with a letter (32 characters or fewer).";
+    case "invalid_label":
+      return "Label is required (255 characters or fewer).";
+    case "invalid_role_group":
+      return "Choose leadership or membership.";
+    case "invalid_scope":
+      return "Choose unit or program scope.";
+    case "invalid_sort_order":
+      return "Sort order must be a whole number from 0 to 9999.";
+    case "key_collision":
+      return "That key is already used for this unit kind — choose a different one.";
+    default:
+      return "Something went wrong — please try again.";
+  }
+}
+
+export type OrgUnitRoleRosterProps = {
+  /** The full roster, server-ordered by (entityType, roleGroup, sortOrder, key). */
+  roles: ReadonlyArray<OrgUnitRoleRosterRow>;
+};
+
+export function OrgUnitRoleRoster({ roles }: OrgUnitRoleRosterProps) {
+  const [rows, setRows] = React.useState<OrgUnitRoleRosterRow[]>(() => roles.map((r) => ({ ...r })));
+  // Per-row busy set — NOT a single shared key. Two different rows write
+  // fully independently; see the module doc comment.
+  const [busyKeys, setBusyKeys] = React.useState<ReadonlySet<string>>(() => new Set());
+  // Per-row error text, so one row's failed save never clobbers another's.
+  const [rowErrors, setRowErrors] = React.useState<Record<string, string | null>>({});
+  // The in-progress label edit per row, keyed by rowKey — lets typing happen
+  // without saving on every keystroke; committed (with confirmation) on blur.
+  const [labelDrafts, setLabelDrafts] = React.useState<Record<string, string>>({});
+  const [pendingRename, setPendingRename] = React.useState<{
+    row: OrgUnitRoleRosterRow;
+    newLabel: string;
+  } | null>(null);
+  const [addOpen, setAddOpen] = React.useState(false);
+
+  function setBusy(key: string, busy: boolean) {
+    setBusyKeys((prev) => {
+      const next = new Set(prev);
+      if (busy) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }
+
+  function setRowError(key: string, message: string | null) {
+    setRowErrors((prev) => ({ ...prev, [key]: message }));
+  }
+
+  /** PATCH one field set on one row. Optimistic: applies `patch` immediately,
+   *  rolls back on failure. Returns whether the write succeeded. */
+  async function savePatch(
+    row: OrgUnitRoleRosterRow,
+    patch: Partial<Pick<OrgUnitRoleRosterRow, "label" | "sortOrder" | "profileTitle">>,
+  ): Promise<boolean> {
+    const key = rowKey(row);
+    if (busyKeys.has(key)) return false;
+    const prevValues = {
+      label: row.label,
+      sortOrder: row.sortOrder,
+      profileTitle: row.profileTitle,
+    };
+    setBusy(key, true);
+    setRowError(key, null);
+    setRows((prev) => prev.map((r) => (rowKey(r) === key ? { ...r, ...patch } : r)));
+    try {
+      const res = await fetch("/api/edit/roles", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entityType: row.entityType, key: row.key, ...patch }),
+      });
+      const data = (await res.json()) as { ok: boolean; error?: string };
+      if (!res.ok || data.ok !== true) {
+        setRows((prev) => prev.map((r) => (rowKey(r) === key ? { ...r, ...prevValues } : r)));
+        if ("label" in patch) setLabelDrafts((prev) => ({ ...prev, [key]: prevValues.label }));
+        setRowError(key, mapPatchError(data.error ?? ""));
+        return false;
+      }
+      return true;
+    } catch {
+      setRows((prev) => prev.map((r) => (rowKey(r) === key ? { ...r, ...prevValues } : r)));
+      if ("label" in patch) setLabelDrafts((prev) => ({ ...prev, [key]: prevValues.label }));
+      setRowError(key, "Something went wrong — please try again.");
+      return false;
+    } finally {
+      setBusy(key, false);
+    }
+  }
+
+  /** Label input blur — opens the confirm dialog only when the trimmed draft
+   *  actually differs from the saved label; a no-op edit (blank, or reverted
+   *  back to the original) just snaps the draft back, no dialog, no PATCH. */
+  function handleLabelBlur(row: OrgUnitRoleRosterRow) {
+    const key = rowKey(row);
+    const draft = (labelDrafts[key] ?? row.label).trim();
+    if (draft.length === 0 || draft === row.label) {
+      setLabelDrafts((prev) => ({ ...prev, [key]: row.label }));
+      return;
+    }
+    setPendingRename({ row, newLabel: draft });
+  }
+
+  async function confirmRename() {
+    if (!pendingRename) return;
+    const { row, newLabel } = pendingRename;
+    await savePatch(row, { label: newLabel });
+    setPendingRename(null);
+  }
+
+  const grouped = React.useMemo(() => {
+    const byEntity = new Map<OrgUnitRoleEntityType, Map<OrgUnitRoleGroup, OrgUnitRoleRosterRow[]>>();
+    for (const row of rows) {
+      const entityType = row.entityType as OrgUnitRoleEntityType;
+      const roleGroup = row.roleGroup as OrgUnitRoleGroup;
+      if (!byEntity.has(entityType)) byEntity.set(entityType, new Map());
+      const byGroup = byEntity.get(entityType)!;
+      if (!byGroup.has(roleGroup)) byGroup.set(roleGroup, []);
+      byGroup.get(roleGroup)!.push(row);
+    }
+    return byEntity;
+  }, [rows]);
+
+  return (
+    <div className="flex flex-col gap-6" data-slot="org-unit-role-roster">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-muted-foreground text-sm">
+          {rows.length} role{rows.length === 1 ? "" : "s"} across {grouped.size} unit kind
+          {grouped.size === 1 ? "" : "s"}.
+        </p>
+        <Button
+          type="button"
+          variant="apollo"
+          size="sm"
+          onClick={() => setAddOpen(true)}
+          data-testid="roles-add-trigger"
+        >
+          <Plus className="size-4" />
+          Add role
+        </Button>
+      </div>
+
+      {ENTITY_TYPE_ORDER.filter((entityType) => grouped.has(entityType)).map((entityType) => {
+        const byGroup = grouped.get(entityType)!;
+        return (
+          <section key={entityType} data-slot="role-entity-section" data-testid={`roles-section-${entityType}`}>
+            <h2 className="mb-2 text-base font-semibold">{ENTITY_TYPE_LABEL[entityType]}</h2>
+            <div className="flex flex-col gap-4">
+              {ROLE_GROUP_ORDER.filter((g) => byGroup.has(g)).map((roleGroup) => (
+                <RoleGroupTable
+                  key={roleGroup}
+                  roleGroup={roleGroup}
+                  rows={byGroup.get(roleGroup)!}
+                  busyKeys={busyKeys}
+                  rowErrors={rowErrors}
+                  labelDrafts={labelDrafts}
+                  onLabelChange={(row, value) =>
+                    setLabelDrafts((prev) => ({ ...prev, [rowKey(row)]: value }))
+                  }
+                  onLabelBlur={handleLabelBlur}
+                  onSortOrderCommit={(row, value) => savePatch(row, { sortOrder: value })}
+                  onProfileTitleChange={(row, value) => savePatch(row, { profileTitle: value })}
+                />
+              ))}
+            </div>
+          </section>
+        );
+      })}
+
+      {rows.length === 0 && (
+        <p className="text-muted-foreground text-sm" data-testid="roles-empty">
+          No role-vocabulary entries yet.
+        </p>
+      )}
+
+      <ConfirmDialog
+        open={pendingRename !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            if (pendingRename) {
+              setLabelDrafts((prev) => ({
+                ...prev,
+                [rowKey(pendingRename.row)]: pendingRename.row.label,
+              }));
+            }
+            setPendingRename(null);
+          }
+        }}
+        title={pendingRename ? `Rename "${pendingRename.row.label}" to "${pendingRename.newLabel}"?` : ""}
+        description={
+          pendingRename
+            ? `This changes the label shown for ${pendingRename.row.holderCount} ${pluralNoun(
+                pendingRename.row.entityType as OrgUnitRoleEntityType,
+              )}.`
+            : ""
+        }
+        reasonMode="none"
+        confirmLabel="Rename"
+        confirmVariant="default"
+        onConfirm={confirmRename}
+      />
+
+      <AddRoleDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        existingKeys={new Set(rows.map(rowKey))}
+        onCreated={(row) => setRows((prev) => [...prev, row])}
+      />
+    </div>
+  );
+}
+
+function RoleGroupTable({
+  roleGroup,
+  rows,
+  busyKeys,
+  rowErrors,
+  labelDrafts,
+  onLabelChange,
+  onLabelBlur,
+  onSortOrderCommit,
+  onProfileTitleChange,
+}: {
+  roleGroup: OrgUnitRoleGroup;
+  rows: OrgUnitRoleRosterRow[];
+  busyKeys: ReadonlySet<string>;
+  rowErrors: Record<string, string | null>;
+  labelDrafts: Record<string, string>;
+  onLabelChange: (row: OrgUnitRoleRosterRow, value: string) => void;
+  onLabelBlur: (row: OrgUnitRoleRosterRow) => void;
+  onSortOrderCommit: (row: OrgUnitRoleRosterRow, value: number) => void;
+  onProfileTitleChange: (row: OrgUnitRoleRosterRow, value: boolean) => void;
+}) {
+  return (
+    <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-md border">
+      <table className="w-full text-sm" data-testid={`roles-table-${roleGroup}`}>
+        <thead>
+          <tr className="text-muted-foreground border-apollo-border bg-apollo-surface-2 border-b text-left">
+            <th className="px-4 py-2.5 font-medium">{ROLE_GROUP_LABEL[roleGroup]}</th>
+            <th className="px-4 py-2.5 font-medium">Key</th>
+            <th className="px-4 py-2.5 font-medium">Scope</th>
+            <th className="px-4 py-2.5 text-center font-medium">Single holder</th>
+            <th className="px-4 py-2.5 font-medium whitespace-nowrap">Sort order</th>
+            <th className="px-4 py-2.5 text-center font-medium">Profile title</th>
+            <th className="px-4 py-2.5 text-right font-medium">Holders</th>
+            <th className="px-4 py-2.5 font-medium">Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const key = rowKey(row);
+            const busy = busyKeys.has(key);
+            const error = rowErrors[key];
+            return (
+              <React.Fragment key={key}>
+                <tr
+                  className="border-apollo-border border-b align-middle last:border-b-0"
+                  data-testid={`roles-row-${key}`}
+                >
+                  <td className="px-4 py-2.5">
+                    <Input
+                      value={labelDrafts[key] ?? row.label}
+                      onChange={(e) => onLabelChange(row, e.target.value)}
+                      onBlur={() => onLabelBlur(row)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      }}
+                      disabled={busy}
+                      className="h-8 min-w-[10rem]"
+                      aria-label={`Label for ${row.key}`}
+                      data-testid={`roles-label-${key}`}
+                    />
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className="text-muted-foreground font-mono text-xs">{row.key}</span>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className="text-muted-foreground text-xs">{row.scope}</span>
+                  </td>
+                  <td className="px-4 py-2.5 text-center">
+                    <span className="text-muted-foreground text-xs">{row.singleHolder ? "Yes" : "No"}</span>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={9999}
+                      step={1}
+                      defaultValue={row.sortOrder}
+                      key={`${key}-${row.sortOrder}`}
+                      disabled={busy}
+                      onBlur={(e) => {
+                        const parsed = Number(e.target.value);
+                        if (Number.isInteger(parsed) && parsed >= 0 && parsed !== row.sortOrder) {
+                          onSortOrderCommit(row, parsed);
+                        } else if (!Number.isInteger(parsed) || parsed < 0) {
+                          e.target.value = String(row.sortOrder);
+                        }
+                      }}
+                      className="h-8 w-20"
+                      aria-label={`Sort order for ${row.key}`}
+                      data-testid={`roles-sort-order-${key}`}
+                    />
+                  </td>
+                  <td className="px-4 py-2.5 text-center">
+                    <Switch
+                      checked={row.profileTitle}
+                      disabled={busy}
+                      onCheckedChange={(checked) => onProfileTitleChange(row, checked)}
+                      aria-label={`Profile title for ${row.key}`}
+                      data-testid={`roles-profile-title-${key}`}
+                    />
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{row.holderCount}</td>
+                  <td className="px-4 py-2.5">
+                    <Badge variant={row.source === "manual" ? "default" : "outline"} className="text-xs">
+                      {row.source}
+                    </Badge>
+                  </td>
+                </tr>
+                {(busy || error) && (
+                  <tr className="border-apollo-border border-b last:border-b-0">
+                    <td colSpan={8} className="px-4 pb-2">
+                      {busy && (
+                        <span
+                          className="text-muted-foreground inline-flex items-center gap-1.5 text-xs"
+                          data-testid={`roles-busy-${key}`}
+                        >
+                          <Loader2 className="size-3 animate-spin" aria-hidden />
+                          Saving…
+                        </span>
+                      )}
+                      {error && (
+                        <p className="text-destructive text-xs" data-testid={`roles-row-error-${key}`}>
+                          {error}
+                        </p>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function AddRoleDialog({
+  open,
+  onOpenChange,
+  existingKeys,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  existingKeys: ReadonlySet<string>;
+  onCreated: (row: OrgUnitRoleRosterRow) => void;
+}) {
+  const [entityType, setEntityType] = React.useState<OrgUnitRoleEntityType>(ENTITY_TYPE_OPTIONS[0]);
+  const [key, setKey] = React.useState("");
+  const [label, setLabel] = React.useState("");
+  const [roleGroup, setRoleGroup] = React.useState<OrgUnitRoleGroup>("leadership");
+  const [scope, setScope] = React.useState<OrgUnitRoleScope>("unit");
+  const [sortOrder, setSortOrder] = React.useState("100");
+  const [singleHolder, setSingleHolder] = React.useState(false);
+  const [profileTitle, setProfileTitle] = React.useState(true);
+  const [sending, setSending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (open) {
+      setEntityType(ENTITY_TYPE_OPTIONS[0]);
+      setKey("");
+      setLabel("");
+      setRoleGroup("leadership");
+      setScope("unit");
+      setSortOrder("100");
+      setSingleHolder(false);
+      setProfileTitle(true);
+      setSending(false);
+      setError(null);
+    }
+  }, [open]);
+
+  const trimmedKey = key.trim();
+  const trimmedLabel = label.trim();
+  const parsedSortOrder = Number(sortOrder);
+  const sortOrderValid = Number.isInteger(parsedSortOrder) && parsedSortOrder >= 0 && parsedSortOrder <= 9999;
+  const wouldCollide = existingKeys.has(`${entityType}:${trimmedKey}`);
+  const canSubmit =
+    !sending && trimmedKey.length > 0 && trimmedLabel.length > 0 && sortOrderValid && !wouldCollide;
+
+  async function handleSubmit() {
+    if (!canSubmit) return;
+    setSending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/edit/roles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entityType,
+          key: trimmedKey,
+          label: trimmedLabel,
+          roleGroup,
+          scope,
+          sortOrder: parsedSortOrder,
+          singleHolder,
+          profileTitle,
+        }),
+      });
+      const data = (await res.json()) as OrgUnitRoleRosterRow & { ok: boolean; error?: string };
+      if (!res.ok || data.ok !== true) {
+        setError(mapCreateError(data.error ?? ""));
+        return;
+      }
+      onCreated({
+        key: data.key,
+        entityType: data.entityType,
+        label: data.label,
+        roleGroup: data.roleGroup,
+        scope: data.scope,
+        singleHolder: data.singleHolder,
+        sortOrder: data.sortOrder,
+        profileTitle: data.profileTitle,
+        source: data.source,
+        holderCount: 0,
+      });
+      onOpenChange(false);
+    } catch {
+      setError("Something went wrong — please try again.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent data-testid="roles-add-dialog">
+        <DialogHeader className="gap-1 text-left">
+          <DialogTitle>Add role</DialogTitle>
+          <DialogDescription>
+            Create a new leadership or membership role for a unit kind. The key cannot be changed
+            after creation.
+          </DialogDescription>
+        </DialogHeader>
+
+        {error && (
+          <Alert variant="destructive" data-testid="roles-add-error">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <div className="grid grid-cols-2 gap-4">
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="font-medium">Unit kind</span>
+            <select
+              className="border-apollo-border-strong bg-background h-9 rounded-md border px-3 text-sm"
+              value={entityType}
+              onChange={(e) => setEntityType(e.target.value as OrgUnitRoleEntityType)}
+              data-testid="roles-add-entity-type"
+            >
+              {ENTITY_TYPE_OPTIONS.map((et) => (
+                <option key={et} value={et}>
+                  {ENTITY_TYPE_LABEL[et]}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="font-medium">Key</span>
+            <Input
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              placeholder="e.g. deputy_director"
+              data-testid="roles-add-key"
+            />
+          </label>
+
+          <label className="col-span-2 flex flex-col gap-1.5 text-sm">
+            <span className="font-medium">Label</span>
+            <Input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="e.g. Deputy Director"
+              data-testid="roles-add-label"
+            />
+          </label>
+
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="font-medium">Role group</span>
+            <select
+              className="border-apollo-border-strong bg-background h-9 rounded-md border px-3 text-sm"
+              value={roleGroup}
+              onChange={(e) => setRoleGroup(e.target.value as OrgUnitRoleGroup)}
+              data-testid="roles-add-role-group"
+            >
+              <option value="leadership">Leadership</option>
+              <option value="membership">Membership</option>
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="font-medium">Scope</span>
+            <select
+              className="border-apollo-border-strong bg-background h-9 rounded-md border px-3 text-sm"
+              value={scope}
+              onChange={(e) => setScope(e.target.value as OrgUnitRoleScope)}
+              data-testid="roles-add-scope"
+            >
+              <option value="unit">Unit</option>
+              <option value="program">Program</option>
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="font-medium">Sort order</span>
+            <Input
+              type="number"
+              min={0}
+              max={9999}
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value)}
+              data-testid="roles-add-sort-order"
+            />
+          </label>
+
+          <label className="flex items-center gap-2 text-sm">
+            <Switch
+              checked={singleHolder}
+              onCheckedChange={setSingleHolder}
+              data-testid="roles-add-single-holder"
+            />
+            <span className={cn("font-medium")}>Single holder</span>
+          </label>
+
+          <label className="flex items-center gap-2 text-sm">
+            <Switch
+              checked={profileTitle}
+              onCheckedChange={setProfileTitle}
+              data-testid="roles-add-profile-title"
+            />
+            <span className="font-medium">Shows as profile title</span>
+          </label>
+        </div>
+
+        {wouldCollide && (
+          <p className="text-destructive text-xs" data-testid="roles-add-collision-hint">
+            That key already exists for this unit kind.
+          </p>
+        )}
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="apollo"
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            data-testid="roles-add-submit"
+          >
+            {sending ? "Adding…" : "Add role"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

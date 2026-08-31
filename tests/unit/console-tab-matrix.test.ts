@@ -33,6 +33,7 @@ const ALL_FLAGS_ON: Record<string, string> = {
   CORE_PAGES: "on",
   MATCHA: "on",
   GRANT_MATCHA: "on",
+  ORG_UNIT_ROLE_CONSOLE: "on",
 };
 
 afterEach(() => {
