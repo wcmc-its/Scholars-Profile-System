@@ -152,4 +152,22 @@ describe("the grant-suppression call site is wired into the RePORTER ETL", () =>
   it("the recency default-hide reflects what it mints (#2284)", () => {
     expect(REPORTER).toContain("await reflectGrantSuppressions(minted)");
   });
+
+  it("the v2 auto-lock write appends a B03 audit row, inside the same transaction", () => {
+    const autolockStart = REPORTER.indexOf('action.kind === "autolock-confirm"');
+    const autoLockedIncrement = REPORTER.indexOf("autoLocked++", autolockStart);
+    expect(autolockStart).toBeGreaterThan(-1);
+    expect(autoLockedIncrement).toBeGreaterThan(autolockStart);
+    const autolockBlock = REPORTER.slice(autolockStart, autoLockedIncrement);
+    // The audit call must be inside the SAME $transaction(async (tx) => {...})
+    // as the person_nih_profile + reporterProfileCandidate writes, not a
+    // separate call after it commits — appendAuditRow's atomicity contract.
+    const txStart = autolockBlock.indexOf("$transaction(async (tx)");
+    expect(txStart).toBeGreaterThan(-1);
+    const txBlock = autolockBlock.slice(txStart);
+    expect(txBlock).toContain("appendAuditRow(tx,");
+    expect(txBlock).toContain('action: "reporter_profile_confirm"');
+    expect(txBlock).toContain('actorCwid: "system-autolock"');
+    expect(txBlock).toContain('targetEntityType: "reporter_profile_candidate"');
+  });
 });

@@ -28,6 +28,7 @@ import { db, disconnect } from "../../lib/db";
 import { assertPruneVolume } from "../../lib/etl-guard";
 import { withEtlRun } from "@/lib/etl-run";
 import type { Prisma } from "@/lib/generated/prisma/client";
+import { appendAuditRow } from "@/lib/edit/audit";
 import {
   dedupeAgainstInfoEd,
   rankByPmidOverlap,
@@ -105,11 +106,16 @@ function chunks<T>(arr: T[], size: number): T[][] {
 
 /**
  * v2 branch (spec §4): resolve the non-`person_nih_profile` active cohort by
- * name → candidate profile_ids → PMID overlap, then auto-lock (K≥3) or propose
- * (K=2) the winner. Auto-locks write a `person_nih_profile` row whose grants the
- * v1 path below materializes in the *same* run; K=2 lands a pending
- * `ReporterProfileCandidate` for the /edit confirm card (no grants until a human
- * confirms). Runs before the v1 fetch so same-run materialization works.
+ * name → candidate profile_ids → PMID overlap, then auto-lock a separated K≥2
+ * winner. Auto-locks write a `person_nih_profile` row whose grants the v1 path
+ * below materializes in the *same* run, plus a B03 audit row (system actor
+ * "system-autolock", action `reporter_profile_confirm`) in the same
+ * transaction — this write has no human session, so it can't go through the
+ * `/edit` confirm route's audited path. An unseparated/ambiguous result instead
+ * lands a pending `ReporterProfileCandidate` for the /edit confirm card (no
+ * grants until a human confirms) — see the K_AUTOLOCK/K_SUGGEST note in
+ * `lib/edit/reporter-grants.ts` for why that pending branch rarely fires now.
+ * Runs before the v1 fetch so same-run materialization works.
  *
  * Idempotency (§4.6): terminal (rejected/revoked) candidates are never
  * resurrected, human/system `confirmed` rows are never overwritten by a re-run,
@@ -207,7 +213,8 @@ async function runReporterMatchV2(): Promise<void> {
     const outcome = decideWriteOutcome(match);
     if (outcome.kind === "none") continue;
 
-    const action = reconcileWithExisting(outcome, statusByProfile.get(outcome.profileId));
+    const priorStatus = statusByProfile.get(outcome.profileId);
+    const action = reconcileWithExisting(outcome, priorStatus);
     if (action.kind === "skip") continue;
 
     // Card detail for the chosen candidate: real grant titles/orgs/years.
@@ -267,7 +274,7 @@ async function runReporterMatchV2(): Promise<void> {
           },
           update: { resolutionSource: PMID_OVERLAP_AUTO, lastVerified: now },
         });
-        await tx.reporterProfileCandidate.upsert({
+        const candidateRow = await tx.reporterProfileCandidate.upsert({
           where: {
             cwid_externalProfileId: { cwid: scholar.cwid, externalProfileId: outcome.profileId },
           },
@@ -295,6 +302,24 @@ async function runReporterMatchV2(): Promise<void> {
             reviewedAt: now,
             lastSeenAt: now,
           },
+        });
+        // B03 audit row for the system auto-lock (previously unaudited — there
+        // is no human session here, so this can't go through the /edit confirm
+        // route's `appendAuditRow` call; reuses the same `reporter_profile_confirm`
+        // action rather than a new enum value, actor stamped as "system-autolock"
+        // to match `reviewedBy` above). Written in the SAME transaction as the
+        // two upserts, per appendAuditRow's atomic-with-the-write contract.
+        await appendAuditRow(tx, {
+          actorCwid: "system-autolock",
+          impersonatedCwid: null,
+          targetEntityType: "reporter_profile_candidate",
+          targetEntityId: candidateRow.id,
+          action: "reporter_profile_confirm",
+          fieldsChanged: ["status"],
+          beforeValues: priorStatus ? { status: priorStatus } : null,
+          afterValues: { status: "confirmed", nihProfileId: outcome.profileId },
+          ts: now,
+          requestId: null,
         });
       });
       autoLocked++;

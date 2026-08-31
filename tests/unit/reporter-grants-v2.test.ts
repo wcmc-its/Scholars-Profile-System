@@ -15,7 +15,7 @@ import {
 } from "@/etl/reporter-grants/v2";
 import type { ReporterProject, ReporterPI } from "@/etl/nih-profile/fetcher";
 import type { GroupedProject } from "@/etl/reporter-grants/transform";
-import type { MatchResult, RankedCandidate } from "@/lib/edit/reporter-grants";
+import { rankByPmidOverlap, type Candidate, type MatchResult, type RankedCandidate } from "@/lib/edit/reporter-grants";
 
 // These tests cover the unit-testable rows of spec §11 that need no network:
 // candidate grouping by profile_id, the cohort filter, write-outcome decisioning
@@ -162,12 +162,20 @@ const matchResult = (over: Partial<MatchResult>): MatchResult => ({
 });
 
 describe("decideWriteOutcome (spec §11 #3/#4/#5 — autoLock vs pending vs none)", () => {
-  it("auto-locks when rankByPmidOverlap returns an autoLock (#5, K≥3)", () => {
+  it("auto-locks when rankByPmidOverlap returns an autoLock (#5, K≥2)", () => {
     const out = decideWriteOutcome(matchResult({ autoLock: 100, ranked: [ranked(100, 4)] }));
     expect(out).toEqual({ kind: "autolock", profileId: 100 });
   });
 
-  it("proposes the top suggestion when there is no auto-lock (#4, K=2)", () => {
+  // decideWriteOutcome's own contract still supports a suggestions-only result
+  // (kept for a future K_SUGGEST < K_AUTOLOCK split — see the comment on
+  // decideWriteOutcome), even though a real rankByPmidOverlap call can no
+  // longer produce one now that K_AUTOLOCK == K_SUGGEST (2): whenever the top
+  // candidate clears K_SUGGEST + separation, it also clears K_AUTOLOCK, so
+  // `autoLock` is already set. This test drives decideWriteOutcome directly
+  // with a hand-built MatchResult to pin that (still-reachable-in-principle)
+  // branch of ITS OWN logic.
+  it("proposes the top suggestion when there is no auto-lock, given a stubbed MatchResult (#4)", () => {
     const out = decideWriteOutcome(
       matchResult({ autoLock: null, suggestions: [ranked(100, 2)], ranked: [ranked(100, 2), ranked(200, 0)] }),
     );
@@ -177,6 +185,37 @@ describe("decideWriteOutcome (spec §11 #3/#4/#5 — autoLock vs pending vs none
   it("proposes nothing on an ambiguous result — no autoLock, no suggestions (#3)", () => {
     const out = decideWriteOutcome(matchResult({ autoLock: null, suggestions: [] }));
     expect(out).toEqual({ kind: "none" });
+  });
+});
+
+const cand = (profileId: number, pmids: number[]): Candidate => ({
+  profileId,
+  fullName: `pid${profileId}`,
+  orgs: [],
+  grantPmids: new Set(pmids),
+});
+
+describe("rankByPmidOverlap → decideWriteOutcome, end-to-end at K=2 (the actual ETL wiring)", () => {
+  const me = new Set([1, 2, 3, 4, 5]);
+
+  it("a clearly-separated overlap=2 winner auto-locks (was pending under K_AUTOLOCK=3)", () => {
+    const match = rankByPmidOverlap(me, [
+      cand(100, [1, 2]), // overlap 2
+      cand(200, [9, 8, 7]), // overlap 0, different person
+    ]);
+    expect(decideWriteOutcome(match)).toEqual({ kind: "autolock", profileId: 100 });
+  });
+
+  it("an overlap=2 winner WITHOUT separation (a tie) resolves to none, not pending", () => {
+    // The only way for a top overlap of 2 to fail the separation guard is a
+    // tie with the runner-up (beatsRunnerUp uses one threshold for every
+    // candidate) — so this is genuinely ambiguous, and decideWriteOutcome
+    // correctly abstains rather than guessing between the two.
+    const match = rankByPmidOverlap(me, [
+      cand(100, [1, 2]), // overlap 2
+      cand(200, [3, 4]), // overlap 2
+    ]);
+    expect(decideWriteOutcome(match)).toEqual({ kind: "none" });
   });
 });
 
