@@ -95,13 +95,13 @@ function rowKey(r: Pick<OrgUnitRoleRosterRow, "entityType" | "key">): string {
 /** Singularize/pluralize the unit noun for a count — every entity-type noun
  *  here takes a plain "s" ("centers", "departments", "center programs"), so a
  *  count of 1 must NOT append it ("1 center", not "1 centers"). */
-function unitNoun(entityType: OrgUnitRoleEntityType, count: number): string {
+export function unitNoun(entityType: OrgUnitRoleEntityType, count: number): string {
   const singular = ENTITY_TYPE_LABEL[entityType].toLowerCase();
   return count === 1 ? singular : `${singular}s`;
 }
 
 /** Singularize/pluralize "holder" for a count. */
-function holderNoun(count: number): string {
+export function holderNoun(count: number): string {
   return count === 1 ? "holder" : "holders";
 }
 
@@ -111,7 +111,7 @@ function holderNoun(count: number): string {
  *  change, and "400 centers" (the holder count with a unit noun) is simply
  *  false. See `lib/api/org-unit-roles-admin.ts`'s docblock for what each
  *  count means. */
-function renameBlastRadiusText(
+export function renameBlastRadiusText(
   row: Pick<OrgUnitRoleRosterRow, "entityType" | "holderCount" | "unitCount">,
 ): string {
   const entityType = row.entityType as OrgUnitRoleEntityType;
@@ -119,10 +119,12 @@ function renameBlastRadiusText(
     return "Nothing currently holds this role — the rename has no effect on any profile.";
   }
   if (row.holderCount === row.unitCount) {
-    // Every holding unit has exactly one holder (the common `singleHolder`
-    // shape) — the two grains are the same number; stating both would read
-    // as a bug ("1 holder across 1 center"), so state it once.
-    return `This changes the label shown for ${row.holderCount} ${holderNoun(row.holderCount)}.`;
+    // Every holding unit has exactly one holder — the two grains are the same
+    // number, and stating both would read as a bug ("1 holder across 1
+    // center"). State it once, in UNITS: this is the `singleHolder` shape, so
+    // it is the `director` case, the likeliest rename of all, and "how many
+    // units does this affect" is the question the confirm exists to answer.
+    return `This changes the label shown for ${row.unitCount} ${unitNoun(entityType, row.unitCount)}.`;
   }
   return `This changes the label shown for ${row.holderCount} ${holderNoun(row.holderCount)} across ${row.unitCount} ${unitNoun(entityType, row.unitCount)}.`;
 }
@@ -226,7 +228,9 @@ export function OrgUnitRoleRoster({ roles }: OrgUnitRoleRosterProps) {
     };
     setBusy(key, true);
     setRowError(key, null);
-    setRows((prev) => prev.map((r) => (rowKey(r) === key ? { ...r, ...patch } : r)));
+    // Re-sorted, not just mapped: a `sortOrder` edit must move the row now,
+    // and `AddRoleDialog`'s insert scans this array assuming it is sorted.
+    setRows((prev) => prev.map((r) => (rowKey(r) === key ? { ...r, ...patch } : r)).sort(compareRosterRows));
     try {
       const res = await fetch("/api/edit/roles", {
         method: "PATCH",
@@ -235,14 +239,14 @@ export function OrgUnitRoleRoster({ roles }: OrgUnitRoleRosterProps) {
       });
       const data = (await res.json()) as { ok: boolean; error?: string };
       if (!res.ok || data.ok !== true) {
-        setRows((prev) => prev.map((r) => (rowKey(r) === key ? { ...r, ...prevValues } : r)));
+        setRows((prev) => prev.map((r) => (rowKey(r) === key ? { ...r, ...prevValues } : r)).sort(compareRosterRows));
         if ("label" in patch) setLabelDrafts((prev) => ({ ...prev, [key]: prevValues.label }));
         setRowError(key, mapPatchError(data.error ?? ""));
         return false;
       }
       return true;
     } catch {
-      setRows((prev) => prev.map((r) => (rowKey(r) === key ? { ...r, ...prevValues } : r)));
+      setRows((prev) => prev.map((r) => (rowKey(r) === key ? { ...r, ...prevValues } : r)).sort(compareRosterRows));
       if ("label" in patch) setLabelDrafts((prev) => ({ ...prev, [key]: prevValues.label }));
       setRowError(key, "Something went wrong — please try again.");
       return false;

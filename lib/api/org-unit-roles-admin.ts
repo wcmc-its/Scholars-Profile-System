@@ -29,6 +29,17 @@
  * `unitCount` are both derived from those same two result sets, so this is
  * still exactly two round trips.
  *
+ * `unitCount` UNIONS TWO COLUMNS THAT NOTHING FORCES TO AGREE. It dedupes
+ * `OrgUnitRoleAssignment.entityId` against `CenterMembership.centerCode`, and
+ * that is sound today only because every writer of a center assignment stores
+ * `Center.code` verbatim (the #2542 backfill and `app/api/edit/unit/route.ts`),
+ * while `centerCode` is FK'd to `Center.code`. But `entityId` is POLYMORPHIC
+ * with no FK of its own, and `CenterMembership.roleEntityType` has no writer at
+ * all — it only ever holds its `"center"` default. A future writer that stores
+ * some other identifier in `entityId`, or sets a non-center `roleEntityType`,
+ * would make the same unit look like two and silently inflate `unitCount`.
+ * If you add such a writer, normalize here first.
+ *
  * DB-CALLER-INJECTED ON PURPOSE. `buildRoleRoster` takes the Prisma client as
  * an explicit parameter rather than defaulting it from `lib/db.ts` (contrast
  * `buildFamilyRoster`'s `db: PrismaRead = prisma`): a default-arg alias to the
