@@ -50,6 +50,7 @@ import {
   orgUnitRoleSeedRows,
 } from "@/lib/org-unit-roles";
 
+import { isRoleAllowedAtUnit } from "@/lib/api/org-unit-role-scope";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import {
@@ -73,6 +74,15 @@ import type { EditSession } from "@/lib/auth/superuser";
 import { fetchCornellPersonByNetid } from "@/lib/sources/cornell-ldap";
 
 const PATH = "/api/edit/roster";
+
+/**
+ * `ext.membershipType.value` (or `handleCornellAdd`'s hardcoded default) names
+ * a `center` role that declares an explicit `OrgUnitRoleScope` allowlist
+ * (#2557 Phase E) and `unitCode` is not on it. Thrown INSIDE the write
+ * transaction, before any mutation, so the whole write rolls back cleanly —
+ * same pattern as `AssignmentNotFound` in the disease-assignments route.
+ */
+class RoleNotAllowedAtUnit extends Error {}
 
 /** The extended CenterMembership fields, with per-field "present in body" flags. */
 type ExtendedFields = {
@@ -407,8 +417,49 @@ async function handleCenter(p: {
   if (ext.startDate.present) applied.startDate = ext.startDate.value;
   if (ext.endDate.present) applied.endDate = ext.endDate.value;
 
+  // A `set` upserts: if no row exists yet this write CREATES one, and the
+  // create branch always stamps a `membershipRoleKey` (the explicit one from
+  // `applied` when the body carried `membershipType`, `MEMBER_ROLE_KEY`
+  // otherwise) — same as `add`, which is a create by construction (the
+  // `action === "add" && existing` guard above already ruled out the update
+  // case). Known here, before the transaction, from the `existing` read above.
+  const willCreateMembership = action === "add" || (action === "set" && !existing);
+  // The role key this write is ABOUT to stamp, or `null` when this write
+  // touches no `membershipRoleKey` at all (a `set` on an existing row whose
+  // body carries no `membershipType` — the upsert's `update: applied` never
+  // includes the key, so the existing role stands untouched; gating that
+  // would block a body that never asked to change the role).
+  const roleKeyBeingWritten: string | null = ext.membershipType.present
+    ? (applied.membershipRoleKey as string)
+    : willCreateMembership
+      ? MEMBER_ROLE_KEY
+      : null;
+
   try {
     await db.write.$transaction(async (tx) => {
+      // #2557 Phase E — reject BEFORE any write when `roleKeyBeingWritten` has
+      // an explicit `OrgUnitRoleScope` allowlist and `unitCode` isn't on it.
+      // Covers both an explicit `membershipType` in the body AND a `set`/`add`
+      // that defaults a NEW row to `MEMBER_ROLE_KEY` — `member` has no scope
+      // rows today so this is a no-op in practice, but a future scope row on
+      // `member` must be enforced here exactly like `handleCornellAdd`'s
+      // hardcoded `member` write. `remove` never applies `applied`, so it's
+      // excluded, and a `set` that changes no role key at all skips the check
+      // (`roleKeyBeingWritten` is `null` — see above; existing holders keep
+      // rendering, guard rail 1). One check per write path: this replaces,
+      // not adds to, the narrower `membershipType.present`-only check this
+      // slice originally shipped with. Runs first, ahead of the vocab seed
+      // below, so a rejection can never leave a partial write.
+      if (action !== "remove" && roleKeyBeingWritten) {
+        const allowed = await isRoleAllowedAtUnit({
+          entityType: CENTER_ENTITY_TYPE,
+          roleKey: roleKeyBeingWritten,
+          entityId: unitCode,
+          client: tx,
+        });
+        if (!allowed) throw new RoleNotAllowedAtUnit();
+      }
+
       const before = existing ? snapshot(existing) : null;
       let after: Record<string, unknown> | null;
 
@@ -475,6 +526,9 @@ async function handleCenter(p: {
       });
     });
   } catch (err) {
+    if (err instanceof RoleNotAllowedAtUnit) {
+      return editError(400, "role_not_allowed_at_unit", "membershipType");
+    }
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
   }
@@ -632,6 +686,20 @@ async function handleCornellAdd(p: {
 
   try {
     await db.write.$transaction(async (tx) => {
+      // #2557 Phase E — same gate as `handleCenter`, before any write. This
+      // path always writes the hardcoded `MEMBER_ROLE_KEY` below (never a
+      // body-supplied role — Cornell adds have no `membershipType` field), and
+      // `member` has no `OrgUnitRoleScope` rows today, so this is a no-op in
+      // practice. Kept generic rather than assuming `member` can never be
+      // scoped, so this path stays correct if that ever changes.
+      const allowed = await isRoleAllowedAtUnit({
+        entityType: CENTER_ENTITY_TYPE,
+        roleKey: MEMBER_ROLE_KEY,
+        entityId: unitCode,
+        client: tx,
+      });
+      if (!allowed) throw new RoleNotAllowedAtUnit();
+
       if (resolution.kind === "external") {
         await tx.externalMember.upsert({
           where: { cuid: resolution.cuid },
@@ -672,6 +740,9 @@ async function handleCornellAdd(p: {
       });
     });
   } catch (err) {
+    if (err instanceof RoleNotAllowedAtUnit) {
+      return editError(400, "role_not_allowed_at_unit", "membershipType");
+    }
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
   }

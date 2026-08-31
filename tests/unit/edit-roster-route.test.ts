@@ -84,6 +84,10 @@ const CURATOR = { cwid: "cur001", isSuperuser: false };
 const NONADMIN = { cwid: "non001", isSuperuser: false };
 
 const mockTxCenterRoleCreateMany = vi.fn();
+// #2557 Phase E — the gate's read, inside the same tx. Defaults to `[]`
+// (unrestricted) in `beforeEach` below, matching the real empty-table
+// behavior every existing test here implicitly relies on.
+const mockTxOrgUnitRoleScopeFindMany = vi.fn();
 
 const fakeTx = {
   centerMembership: {
@@ -94,6 +98,9 @@ const fakeTx = {
   // #2542 — a membership write seeds this center's role vocabulary first, so
   // `membership_role_key`'s FK resolves even before the Phase 1 backfill runs.
   orgUnitRole: { createMany: mockTxCenterRoleCreateMany },
+  // #2557 Phase E — `handleCenter`'s allowlist gate reads this before any
+  // write.
+  orgUnitRoleScope: { findMany: mockTxOrgUnitRoleScopeFindMany },
   divisionMembership: {
     create: mockTxDivisionMembershipCreate,
     delete: mockTxDivisionMembershipDelete,
@@ -140,6 +147,7 @@ beforeEach(() => {
   mockTxCenterMembershipCreate.mockResolvedValue(BLANK_ROW);
   mockTxCenterMembershipUpsert.mockResolvedValue(BLANK_ROW);
   mockTxCenterMembershipDelete.mockResolvedValue(BLANK_ROW);
+  mockTxOrgUnitRoleScopeFindMany.mockResolvedValue([]);
   mockUnitAdminFindMany.mockResolvedValue([
     { entityType: "center", entityId: "MEYER", role: "curator" },
   ]);

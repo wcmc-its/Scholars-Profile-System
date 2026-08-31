@@ -1644,6 +1644,9 @@ model OrgUnitRole {
   /// relation in the contract release, when its FK is safe to add — see the note
   /// on `CenterMembership`.
   leadershipHolders OrgUnitRoleAssignment[]
+  /// This entry's unit allowlist (#2557 Phase E). Zero rows means unrestricted
+  /// — see `OrgUnitRoleScope`'s docblock.
+  scopeRows         OrgUnitRoleScope[]
 
   @@id([entityType, key])
   @@index([entityType, roleGroup, sortOrder])
@@ -1712,6 +1715,86 @@ model OrgUnitRoleAssignment {
   @@index([cwid])
   @@index([entityType, entityId, roleKey, sortOrder])
   @@map("org_unit_role_assignment")
+}
+
+/// A vocabulary entry's unit allowlist (#2557 Phase E). `research` and
+/// `clinical` are NCI CCSG vocabulary seeded into the SHARED `center`
+/// vocabulary so all 11 centers COULD use them, but only Meyer does — 298
+/// `research` rows, 54 `clinical`, all at `meyer_cancer_center` (measured prod
+/// 2026-08-31). Nothing enforced that scoping; this table is what does.
+///
+/// SEMANTICS — read this before touching either enforcement point:
+///   - ZERO rows for a (`entityType`, `roleKey`) pair means UNRESTRICTED: the
+///     role is assignable at any unit of that kind, exactly as it behaves
+///     today with no scope table at all.
+///   - ONE OR MORE rows means the role is allowed ONLY at the listed
+///     `entityId`s, and denied everywhere else.
+///
+/// This is DELIBERATELY NOT a global default-deny. A default-deny model would
+/// require a row to exist before ANY unit could assign ANY role, which means a
+/// newly created unit renders no leader until someone remembers to mint its
+/// rows — a known-broken pattern already true of `unit_admin` today: creating
+/// a center mints no `unit_admin` row, so a model requiring scope rows to
+/// pre-exist would inherit that same fail-closed hazard onto every leadership
+/// and membership role, not just the two NCI ones this table exists for. Keeping
+/// an empty table permissive means a unit can never be born unable to render a
+/// leader — only a role that OPTS IN to restriction, by gaining a row, can ever
+/// be denied anywhere. Full rationale: issue #2557.
+///
+/// A per-(unit, role) ALLOW table — the strictest reading — was rejected for
+/// the same reason: ~133 seed rows across every center, department, division
+/// and core, and every newly created unit renders no leader until its rows are
+/// minted by hand. See issue #2557.
+///
+/// A `Json?` array column on `OrgUnitRole` was also rejected: `Prisma.JsonNull`
+/// stores a JSON scalar null that PASSES `IS NOT NULL` and reports
+/// `JSON_LENGTH` = 1 — the same trap already known to produce a false
+/// "populated" reading on a nullable JSON column when the value used
+/// `Prisma.JsonNull` instead of a true SQL `NULL`. A three-column table has
+/// no such null-vs-empty ambiguity and joins cleanly.
+///
+/// Seed content on day one is two rows: (`center`, `research`,
+/// `meyer_cancer_center`) and (`center`, `clinical`, `meyer_cancer_center`) —
+/// written by a script, never by this migration (no data in a migration; see
+/// `tests/unit/migrations-empty-db-safe.test.ts`).
+///
+/// NO FK on `entityId` — polymorphic, same reason `OrgUnitRoleAssignment`
+/// gives: a scope row is a fact about a unit, not a child row, and an informal
+/// unit's synthetic code is known only to the manual layer.
+///
+/// THIS SLICE ADDS THE TABLE, A READ HELPER, AND WIRES IT INTO THE CENTER
+/// MEMBERSHIP WRITE PATH (#2557). `isRoleAllowedAtUnit` (`lib/api/org-unit-role-
+/// scope.ts`) is called from `app/api/edit/roster/route.ts`, in both
+/// `handleCenter` (an explicit `membershipType` in the body, and a `set`/`add`
+/// that defaults a new row to `member`) and `handleCornellAdd`'s hardcoded
+/// `member` write — every path that stamps a `membershipRoleKey` on a NEW or
+/// changed membership passes through the gate. Still NOT done: there is no
+/// steward UI for editing `OrgUnitRoleScope` rows (today's two Meyer rows are
+/// seeded by a script). A leadership assignment write path DOES already exist
+/// — `app/api/edit/unit/route.ts`'s director set/clear, which writes
+/// `OrgUnitRoleAssignment` rows with a hardcoded `DIRECTOR_ROLE_KEY` — and it
+/// is NOT gated by this table; the still-unbuilt Phase C leadership picker is
+/// a separate, future UI, not a precondition for that write path to exist.
+/// There is no practical hole today because `director` carries no
+/// `OrgUnitRoleScope` rows (unrestricted, like every role with none), but a
+/// future scope row on a leadership role would not be enforced until this
+/// write path is gated too.
+model OrgUnitRoleScope {
+  /// Pairs with `OrgUnitRole.entityType` in the FK below.
+  entityType String   @map("entity_type") @db.VarChar(32)
+  /// Pairs with `OrgUnitRole.key` in the FK below.
+  roleKey    String   @map("role_key") @db.VarChar(32)
+  /// The unit CODE this role is permitted at (e.g. `Center.code`). NO FK — see
+  /// the docblock above.
+  entityId   String   @map("entity_id") @db.VarChar(64)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // NoAction, mirroring `OrgUnitRoleAssignment`: `entityType` is NOT NULL and
+  // part of a composite key, so SET NULL is invalid in Prisma and MySQL alike.
+  role OrgUnitRole @relation(fields: [entityType, roleKey], references: [entityType, key], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([entityType, roleKey, entityId])
+  @@map("org_unit_role_scope")
 }
 
 /// Per-center program taxonomy (#552). Empty for centers that don't use

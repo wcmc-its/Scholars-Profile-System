@@ -93,6 +93,11 @@ export const CURATED_TABLES: readonly string[] = [
   // `center.director_cwid`; omitting it would back up a center's roster and
   // silently lose who leads it.
   "org_unit_role_assignment",
+  // #2557 Phase E — a role's unit allowlist. Small and hand-curated (two rows
+  // on day one, both Meyer); omitting it would back up the vocabulary and the
+  // memberships it governs while silently losing which units a restricted
+  // role is scoped to.
+  "org_unit_role_scope",
   "division_membership",
   "unit_admin",
   // --- Methods & tools: family-visibility overlays (DB is the SOR) ---
