@@ -79,7 +79,10 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- target, and the unit `code` for a department/division/center target; a
   -- per-author publication suppression carries the contributor CWID in the
   -- JSON payload.
-  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role') NOT NULL,
+  -- #2558 -- 'center_program' reserved for the future contract PR that
+  -- migrates /api/edit/center-program off CenterProgramLeader; no write path
+  -- emits it yet. Appended LAST to preserve existing ENUM ordinals.
+  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role','center_program') NOT NULL,
   `target_entity_id`   VARCHAR(64)  NOT NULL,
 
   -- WHICH -- the action discriminator (#354). `field_override` is a scalar-field
@@ -372,9 +375,16 @@ ALTER TABLE `scholars_audit`.`manual_edit_audit`
 --                    created or edited on the steward-owned role-vocabulary
 --                    editor; target_entity_id is the `entityType:key` pair).
 --                    Appended LAST to preserve existing ENUM ordinals.
+--   #2558 Phase 1:  + center_program  (reserved for the future contract PR
+--                    that migrates /api/edit/center-program off
+--                    CenterProgramLeader onto OrgUnitRoleAssignment directly;
+--                    target_entity_id would be the `"{centerCode}:{programCode}"`
+--                    pair). No write path emits this value yet — see
+--                    `lib/edit/audit.ts`'s `AuditEntityType` union. Appended
+--                    LAST to preserve existing ENUM ordinals.
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `target_entity_type`
-    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role')
+    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission','profile_appointment','honor','news_mention','biosketch_generation','cancer_funding_award','dataset_deposit','opportunity','org_unit_role','center_program')
     NOT NULL;
 
 -- #637 (View-as impersonation): the `impersonated_cwid` attribution column for
