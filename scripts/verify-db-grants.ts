@@ -49,7 +49,7 @@ import { parseDsn, type SqlConn } from "./db-bootstrap";
 
 /** A managed DB role this verify knows how to check. The labels match how
  *  ADR-009 / `access-control-rbac.md` name the roles, for traceability. */
-export type RoleName = "app-ro" | "app-rw" | "sps_migrate" | "sps_bootstrap";
+export type RoleName = "app-ro" | "app-rw" | "sps_migrate" | "sps_bootstrap" | "etl";
 
 /** Per-role config: the env var holding that role's DSN, and the golden grant
  *  list (expressed as ordinary GRANT statements -- canonicalized identically to
@@ -107,6 +107,20 @@ export const ROLES: Record<RoleName, { dsnEnv: string; golden: string[] }> = {
     golden: [
       "GRANT CREATE, ALTER, INSERT ON `scholars_audit`.* TO `sps_bootstrap`@`%` WITH GRANT OPTION",
     ],
+  },
+  // #2556: the nightly ETL auto-confirms K=2 separated reporter matches and
+  // writes the same B03 audit row an interactive Hide/Show does
+  // (`etl/reporter-grants/*`), so `etl` now needs the identical append-only
+  // INSERT grant `scripts/db-bootstrap.ts` issues it (`ETL_GRANTEE`). Golden
+  // is scoped to `scholars_audit` only, like `sps_bootstrap` above -- `etl`'s
+  // broader `scholars.*` privileges are provisioned outside this bootstrap
+  // path and are out of scope for this golden list. Not in `requiredRoles()`'s
+  // default set below: there is no `ETL_DSN` wired into any deploy-pipeline
+  // task today, so this entry exists to check with `VERIFY_ROLES=...,etl` once
+  // one is, not to run unattended.
+  etl: {
+    dsnEnv: "ETL_DSN",
+    golden: ["GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `etl`@`%`"],
   },
 };
 
