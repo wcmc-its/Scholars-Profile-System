@@ -40,6 +40,7 @@ export type AdminSubnavActive =
   | "slugs"
   | "administrators"
   | "methods"
+  | "role-vocabulary"
   | "coi"
   | "data-sharing"
   | "activity"
@@ -97,6 +98,7 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   slugs: "registries",
   administrators: "registries",
   methods: "registries",
+  "role-vocabulary": "registries",
   /** Read-only dashboards; no writes. */
   coi: "insights",
   "data-sharing": "insights",
@@ -132,6 +134,7 @@ export function AdminSubnav({
   pendingHonors,
   administratorsTab,
   methodsTab,
+  roleVocabularyTab,
   dataSharingTab,
   superuserSurfaces = true,
   profilesTab = false,
@@ -166,6 +169,12 @@ export function AdminSubnav({
    *  is flag-gated + role-gated (`isMethodsTabVisible`). A number shows it
    *  (passed `0` — no badge), mirroring `administratorsTab`. */
   methodsTab?: number | null;
+  /** `null`/omitted hides the "Role vocabulary" tab — the #2542 Phase 3
+   *  `OrgUnitRole` editor, flag- + role-gated
+   *  (`isOrgUnitRoleConsoleTabVisible`: superuser or comms_steward, and
+   *  `ORG_UNIT_ROLE_CONSOLE` on). A number shows it (passed `0` — no badge),
+   *  mirroring `methodsTab`. */
+  roleVocabularyTab?: number | null;
   /** `null`/omitted hides the "Data sharing" tab — the S-Index Phase 1 dashboard
    *  is flag- + role-gated (`isDataSharingDashboardTabVisible`; superuser,
    *  comms_steward, or data_sharing_viewer, no unit-scoped variant — unlike
@@ -279,6 +288,15 @@ export function AdminSubnav({
         id: "methods",
         href: "/edit/methods",
         label: "Method families",
+      },
+      // #2542 Phase 3 — same gate shape as `methods` above (a governance
+      // surface of the same family): count-vs-null alone, no `superuserSurfaces`
+      // AND, so a non-superuser comms_steward keeps the tab.
+      {
+        show: roleVocabularyTab !== null && roleVocabularyTab !== undefined,
+        id: "role-vocabulary",
+        href: "/edit/roles",
+        label: "Role vocabulary",
       },
       // A dedicated tab, not an Insights peer (Reports IA redesign, 2026-08-14 —
       // reverses the 2026-08-12 "/edit/units only" decision). Declared here, right

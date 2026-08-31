@@ -188,7 +188,20 @@ export type AuditAction =
    *  touched field(s) `source: "human"` — a later cycle re-import must never
    *  overwrite them. Requires the `scholars_audit` action ENUM be extended —
    *  see `scripts/sql/audit-log.sql`. */
-  | "cancer_funding_override";
+  | "cancer_funding_override"
+  /** a superuser/comms-steward created a new `OrgUnitRole` vocabulary entry
+   *  via the steward-owned role-vocabulary editor (#2542 Phase 3);
+   *  `targetEntityType='org_unit_role'`, `targetEntityId` is the
+   *  `entityType:key` pair; `afterValues` carries the created row. Requires the
+   *  `scholars_audit` action ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "role_vocabulary_create"
+  /** a superuser/comms-steward edited an existing `OrgUnitRole` entry's
+   *  `label` / `sortOrder` / `profileTitle` (#2542 Phase 3) — never `key`,
+   *  which NCI reporting predicates match on. `targetEntityType=
+   *  'org_unit_role'`, `targetEntityId` is the `entityType:key` pair;
+   *  before/after carry whichever of the three fields changed. Requires the
+   *  `scholars_audit` action ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "role_vocabulary_update";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -252,7 +265,11 @@ export type AuditEntityType =
    *  Reuses `suppression_create` / `suppression_revoke` (the `dataset_deposit`
    *  precedent) — no new action value. Requires the `scholars_audit`
    *  target_entity_type ENUM be extended — see `scripts/sql/audit-log.sql`. */
-  | "opportunity";
+  | "opportunity"
+  /** an `OrgUnitRole` vocabulary entry created or edited on the steward-owned
+   *  role-vocabulary editor (#2542 Phase 3); `targetEntityId` is the
+   *  `entityType:key` pair. */
+  | "org_unit_role";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

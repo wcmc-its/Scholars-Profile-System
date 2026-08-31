@@ -1436,6 +1436,13 @@ export class AppStack extends Stack {
         // (CENTER_COLLABORATION_NETWORK) is already prod-on; inert unless a center
         // has a CenterProgram taxonomy (Meyer today).
         CENTER_COLLABORATION_GRANT_AXIS: "on",
+        // ORG_UNIT_ROLE_CONSOLE (#2542 Phase 3) — the steward-owned `OrgUnitRole`
+        // vocabulary console (`/edit/roles`, `lib/edit/org-unit-role-flags.ts`).
+        // Read via isOrgUnitRoleConsoleEnabled() (=== "on"); when off the route
+        // and its /api/edit/roles endpoints 404 and the admin sub-nav tab stays
+        // hidden — ships dark. App-only, no reindex, no migration.
+        // STAGING-FIRST: on in staging to soak, off in prod until sign-off.
+        ORG_UNIT_ROLE_CONSOLE: env === "staging" ? "on" : "off",
         // CLINICAL_TRIALS_SECTION — the profile "Clinical trials" section
         // (#clinical-trials). Dark on prod; staging-on for soak. The profile
         // payload returns [] when off, so this is safe to leave off even after

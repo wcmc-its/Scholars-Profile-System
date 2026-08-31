@@ -49,6 +49,7 @@ export const ALL_TABS: ConsoleTabId[] = [
   "cores",
   "matcha",
   "grantMatcha",
+  "roleVocabulary",
 ];
 
 // --- the matrix --------------------------------------------------------
@@ -84,10 +85,20 @@ export const INTENDED_MATRIX: MatrixRow[] = [
     name: "comms_steward",
     session: sess({ isCommsSteward: true }),
     grants: grants(),
-    expect: ["profiles", "units", "news", "methods", "reports", "dataSharing", "cores"],
+    expect: [
+      "profiles",
+      "units",
+      "news",
+      "methods",
+      "reports",
+      "dataSharing",
+      "cores",
+      "roleVocabulary",
+    ],
     pins:
       "Gap 2 — news via isNewsQueueTabVisible, never via a profilesTab piggyback; " +
-      "cores per the 2026-08-26 policy widening (decision #6, full curator-parity on cores)",
+      "cores per the 2026-08-26 policy widening (decision #6, full curator-parity on cores); " +
+      "roleVocabulary per isOrgUnitRoleConsoleTabVisible (#2542) — superuser-or-steward gate",
   },
   {
     name: "pure honors_curator",
@@ -159,6 +170,7 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "administrators",
       "usage",
       "cores",
+      "roleVocabulary",
     ],
     pins: "Gap 4b — a comms_steward loses Units on /edit/administrators (unitsTab={session.isSuperuser})",
   },
