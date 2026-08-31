@@ -15,9 +15,10 @@
  *     Path B (the manager-graph chief detection). A non-empty value writes
  *     that CWID; the empty string is the curator's explicit "no leader" and
  *     writes `null` (and crucially does NOT re-engage auto-detection — that
- *     is the whole point of the override). Path C (`data/division-chiefs.txt`)
- *     stays as a fallback for divisions until the Phase 9 backfill copies
- *     its entries into `field_override` rows.
+ *     is the whole point of the override). ADR-002 Path C (the
+ *     `data/division-chiefs.txt` override file) is retired (#2560) — the
+ *     Phase 9 backfill found no file content to migrate (never tracked),
+ *     and this precedence consult is its sole successor for divisions.
  *
  *   - `leaderInterim` has no ETL column to consult — it is a synthesized
  *     read-merge property at `lib/api/manual-layer.ts:mergeUnitFields`. The
@@ -144,8 +145,9 @@ export type ETLLeaderVerdict =
  *   `lib/api/manual-layer.ts:mergeUnitFields`).
  *
  * - No override row -> `{ applied: false }`. The caller falls through to
- *   ADR-002 Path A (dept chair regex) / Path B (div chief detection) /
- *   Path C (`data/division-chiefs.txt`).
+ *   ADR-002 Path A (dept chair regex) / Path B (div chief detection).
+ *   Path C (`data/division-chiefs.txt`) is retired (#2560) and no longer
+ *   part of that fallback chain.
  *
  * The override CWID is written verbatim; the ETL does NOT cross-check it
  * against the scholar table. Override authority comes from the write path

@@ -2,8 +2,9 @@
  * Issue #532 — `buildPeopleDoc` leadership signal.
  *
  * `Department.chairCwid` / `Division.chiefCwid` already carry override-applied
- * leadership values from the ED ETL (ADR-002 Path B prediction + Path C manual
- * overrides). These tests assert the indexer surfaces them onto the people doc
+ * leadership values from the ED ETL (ADR-002 Path B prediction + the
+ * `field_override(leaderCwid)` precedence consult, #2560). These tests assert
+ * the indexer surfaces them onto the people doc
  * correctly: lowercased names, OMIT-on-empty for non-leaders, and both
  * fields populated when a scholar is both a chair and a chief.
  */
