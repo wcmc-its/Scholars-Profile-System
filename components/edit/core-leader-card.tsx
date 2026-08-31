@@ -16,6 +16,26 @@
  *
  * Authz is enforced server-side (Owner/Curator/Superuser of the core); this
  * card is only ever rendered for an actor who already passed that gate.
+ *
+ * #2559 — role field shows the CURRENT `OrgUnitRole` (entityType `core`)
+ * label, not the raw stored string. `roleLabels` (key → label, `{}` by
+ * default) is fetched server-side by the parent page and passed down as a
+ * plain prop — this stays a Client Component and must not import `@/lib/db`
+ * or anything that constructs a `PrismaClient` at module scope (see
+ * `lib/org-unit-roles.ts`'s docblock on why that import graph is
+ * dependency-free; `DIRECTOR_ROLE_KEY` below is safe to pull in for the same
+ * reason). `resolveCoreLeaderRoleLabel` falls back to the raw stored value
+ * when it doesn't match a vocabulary key — staging holds at least one
+ * `CoreLeader.role = "Chief"` row (a label typed where a key belongs, from
+ * before this vocabulary existed), and that free-text edit affordance is
+ * staying, so an unrecognized value is an expected input, not a corrupt one.
+ * Falling back to the raw text (rather than blanking or throwing) is what
+ * makes that row degrade instead of break, and it's *also* the mechanism
+ * that keeps a rename safe: the Input's commit-on-blur compares the typed
+ * text against this same resolved label (not the raw key), so opening a
+ * field and blurring it without typing never overwrites a stable key
+ * ("director") with the current display label ("Director") — see
+ * `commitRole`.
  */
 "use client";
 
@@ -31,11 +51,29 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
 
-/** `CoreLeader.role`'s schema default. */
-const DEFAULT_ROLE = "director";
+/** `CoreLeader.role`'s value for a newly added leader — the stable
+ *  vocabulary KEY (`lib/org-unit-roles.ts`'s `core` seed), not a label. */
+const DEFAULT_ROLE = DIRECTOR_ROLE_KEY;
 /** Matches `CoreLeader.role`'s column width (`@db.VarChar(32)`). */
 const ROLE_MAX_CHARS = 32;
+
+/**
+ * Resolve a stored `CoreLeader.role` value to what a steward currently sees
+ * in `/edit/roles` for that key, via the `entityType: "core"` slice of
+ * `OrgUnitRole` (key → label). Falls back to the raw value verbatim when it
+ * isn't a recognized key — covers both a legacy label-shaped value (e.g.
+ * `"Chief"`) and free text a curator typed after this vocabulary existed;
+ * neither should crash or blank the field, and both are just as valid a
+ * display string as any vocabulary label.
+ */
+export function resolveCoreLeaderRoleLabel(
+  role: string,
+  roleLabels: Readonly<Record<string, string>>,
+): string {
+  return roleLabels[role] ?? role;
+}
 
 export type CoreLeaderState = {
   cwid: string;
@@ -49,13 +87,17 @@ export type CoreLeaderState = {
 export type CoreLeaderCardProps = {
   coreId: string;
   leaders: ReadonlyArray<CoreLeaderState>;
+  /** `entityType: "core"` slice of `OrgUnitRole`, key → label. Optional —
+   *  defaults to `{}`, under which every role falls back to its raw stored
+   *  text (see `resolveCoreLeaderRoleLabel`). */
+  roleLabels?: Readonly<Record<string, string>>;
 };
 
 function sortLeaders(rows: ReadonlyArray<CoreLeaderState>): CoreLeaderState[] {
   return [...rows].sort((a, b) => a.sortOrder - b.sortOrder || a.cwid.localeCompare(b.cwid));
 }
 
-export function CoreLeaderCard({ coreId, leaders }: CoreLeaderCardProps) {
+export function CoreLeaderCard({ coreId, leaders, roleLabels = {} }: CoreLeaderCardProps) {
   const [rows, setRows] = React.useState<CoreLeaderState[]>(() => sortLeaders(leaders));
   const [adding, setAdding] = React.useState<DirectoryValue | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -143,7 +185,11 @@ export function CoreLeaderCard({ coreId, leaders }: CoreLeaderCardProps) {
       delete next[cwid];
       return next;
     });
-    if (trimmed === current.role) return; // unchanged — no POST
+    // Compare against what was actually DISPLAYED (the resolved vocabulary
+    // label, not the raw stored key) — a field that was opened and blurred
+    // untouched must never overwrite a stable key like "director" with its
+    // current label "Director".
+    if (trimmed === resolveCoreLeaderRoleLabel(current.role, roleLabels)) return; // unchanged — no POST
     if (trimmed.length === 0 || trimmed.length > ROLE_MAX_CHARS) {
       setError(`Role must be 1–${ROLE_MAX_CHARS} characters.`);
       return;
@@ -207,7 +253,7 @@ export function CoreLeaderCard({ coreId, leaders }: CoreLeaderCardProps) {
                   <span className="sr-only">{`Role for ${r.name ?? r.cwid}`}</span>
                   <Input
                     className="h-8 w-32 text-xs"
-                    value={roleDrafts[r.cwid] ?? r.role}
+                    value={roleDrafts[r.cwid] ?? resolveCoreLeaderRoleLabel(r.role, roleLabels)}
                     disabled={busy}
                     onChange={(e) =>
                       setRoleDrafts((prev) => ({ ...prev, [r.cwid]: e.target.value }))

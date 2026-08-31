@@ -9,6 +9,11 @@
  *  - editing the role text field commits on blur (set_leader), and only
  *    when the value actually changed;
  *  - reorder buttons swap sortOrder and are disabled at the list boundaries.
+ *  - #2559 — the role field shows the CURRENT `OrgUnitRole` label for a
+ *    recognized key, tracks a steward rename, degrades to the raw stored
+ *    text for an unrecognized value (e.g. a legacy `"Chief"` row), and never
+ *    turns an untouched blur into a write that overwrites a stable key with
+ *    its display label.
  *
  * The directory typeahead is stubbed (its own tests cover it); fetch is mocked.
  */
@@ -33,7 +38,11 @@ vi.mock("@/components/edit/directory-people-typeahead", () => ({
   ),
 }));
 
-import { CoreLeaderCard, type CoreLeaderState } from "@/components/edit/core-leader-card";
+import {
+  CoreLeaderCard,
+  resolveCoreLeaderRoleLabel,
+  type CoreLeaderState,
+} from "@/components/edit/core-leader-card";
 
 const LEADERS: CoreLeaderState[] = [
   { cwid: "lead001", name: "Dana One", title: "Professor", role: "director", interim: false, sortOrder: 0 },
@@ -153,6 +162,76 @@ describe("CoreLeaderCard", () => {
       action: "set_leader",
       cwid: "lead002",
       sortOrder: 0,
+    });
+  });
+
+  describe("#2559 role vocabulary", () => {
+    it("resolveCoreLeaderRoleLabel returns the vocabulary label for a recognized key", () => {
+      expect(resolveCoreLeaderRoleLabel("director", { director: "Director" })).toBe("Director");
+    });
+
+    it("resolveCoreLeaderRoleLabel falls back to the raw value for an unrecognized key", () => {
+      expect(resolveCoreLeaderRoleLabel("Chief", { director: "Director" })).toBe("Chief");
+      expect(resolveCoreLeaderRoleLabel("director", {})).toBe("director");
+    });
+
+    it("renders the current vocabulary label, not the raw stored key", () => {
+      global.fetch = okFetch() as unknown as typeof fetch;
+      render(
+        <CoreLeaderCard coreId="2" leaders={LEADERS} roleLabels={{ director: "Director" }} />,
+      );
+      expect((screen.getByTestId("core-leader-role-lead001") as HTMLInputElement).value).toBe(
+        "Director",
+      );
+    });
+
+    it("reflects a steward rename on re-render", () => {
+      global.fetch = okFetch() as unknown as typeof fetch;
+      const { rerender } = render(
+        <CoreLeaderCard coreId="2" leaders={LEADERS} roleLabels={{ director: "Director" }} />,
+      );
+      expect((screen.getByTestId("core-leader-role-lead001") as HTMLInputElement).value).toBe(
+        "Director",
+      );
+      rerender(
+        <CoreLeaderCard
+          coreId="2"
+          leaders={LEADERS}
+          roleLabels={{ director: "Executive Director" }}
+        />,
+      );
+      expect((screen.getByTestId("core-leader-role-lead001") as HTMLInputElement).value).toBe(
+        "Executive Director",
+      );
+    });
+
+    it("degrades to the raw stored text for an unrecognized role (e.g. a legacy 'Chief' row) without crashing or blanking", () => {
+      global.fetch = okFetch() as unknown as typeof fetch;
+      const legacyLeaders: CoreLeaderState[] = [
+        { cwid: "lead003", name: "Dana Three", title: null, role: "Chief", interim: false, sortOrder: 0 },
+      ];
+      render(
+        <CoreLeaderCard coreId="2" leaders={legacyLeaders} roleLabels={{ director: "Director" }} />,
+      );
+      expect((screen.getByTestId("core-leader-role-lead003") as HTMLInputElement).value).toBe(
+        "Chief",
+      );
+    });
+
+    it("blurring an untouched field never overwrites the stored key with its display label", () => {
+      const fetchMock = okFetch();
+      global.fetch = fetchMock as unknown as typeof fetch;
+      render(
+        <CoreLeaderCard coreId="2" leaders={LEADERS} roleLabels={{ director: "Director" }} />,
+      );
+      const input = screen.getByTestId("core-leader-role-lead001") as HTMLInputElement;
+      expect(input.value).toBe("Director");
+      // The user types the SAME text already displayed (e.g. clicks in, clicks
+      // out) — this must not be read as an edit and must not POST "Director"
+      // over the stable stored key "director".
+      fireEvent.change(input, { target: { value: "Director" } });
+      fireEvent.blur(input);
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 });
