@@ -231,4 +231,69 @@ describe("resolveUnitLeader — field_override present (the regression test that
     });
     expect(result?.interim).toBe(false);
   });
+  // The two prod interim cases are NOT the same shape. Systems and Computational
+  // Biomedicine carries BOTH a leaderCwid and a leaderInterim override, so it resolves
+  // through the override branch above. Hematology and Medical Oncology carries
+  // leaderInterim with NO leaderCwid override, so it resolves through the ASSIGNMENT
+  // branch with the interim flag layered on separately -- and as of 2026-08-31 that is
+  // the only live instance of this shape in either environment. Every other interim test
+  // in this file passes a leaderCwid alongside, so without these three the whole branch
+  // is uncovered: moving `interimOverride` inside the override branch would keep the
+  // suite green and silently drop "Interim" from that division.
+  it("a leaderInterim override with NO leaderCwid override still applies over an assignment row", async () => {
+    const client = makeClient({
+      roles: [{ entityType: "division", key: "chief", label: "Chief" }],
+      assignments: [
+        { entityType: "division", entityId: "DIV-1", roleKey: "chief", cwid: "assigned", interim: false },
+      ],
+    });
+    const result = await resolveUnitLeader({
+      entityType: "division",
+      entityId: "DIV-1",
+      roleKey: "chief",
+      legacyLeaderCwid: "stale-column",
+      overrides: { leaderInterim: "true" },
+      fallbackLabel: "Chief",
+      client,
+    });
+    // The cwid still comes from the assignment -- the override is about the FIELD, not
+    // about which store produced the holder.
+    expect(result).toMatchObject({ cwid: "assigned", interim: true, source: "assignment" });
+  });
+
+  it("a leaderInterim override with NO leaderCwid override still applies over the legacy column", async () => {
+    const client = makeClient({ roles: [{ entityType: "department", key: "chair", label: "Chair" }] });
+    const result = await resolveUnitLeader({
+      entityType: "department",
+      entityId: "DEPT-X",
+      roleKey: "chair",
+      legacyLeaderCwid: "from-column",
+      overrides: { leaderInterim: "true" },
+      fallbackLabel: "Chair",
+      client,
+    });
+    expect(result).toMatchObject({ cwid: "from-column", interim: true, source: "column" });
+  });
+
+  it("`leaderInterim: \"false\"` overrides an assignment row that says interim -- not merely truthy-OR", async () => {
+    const client = makeClient({
+      roles: [{ entityType: "division", key: "chief", label: "Chief" }],
+      assignments: [
+        { entityType: "division", entityId: "DIV-2", roleKey: "chief", cwid: "assigned", interim: true },
+      ],
+    });
+    const result = await resolveUnitLeader({
+      entityType: "division",
+      entityId: "DIV-2",
+      roleKey: "chief",
+      legacyLeaderCwid: null,
+      overrides: { leaderInterim: "false" },
+      fallbackLabel: "Chief",
+      client,
+    });
+    // `interimOverride ?? assignment.interim`. Written as `||` this returns true and the
+    // curator's explicit "not interim" is silently discarded -- which the two tests above
+    // would NOT catch.
+    expect(result?.interim).toBe(false);
+  });
 });
