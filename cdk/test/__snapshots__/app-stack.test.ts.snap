@@ -642,6 +642,19 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "us-east-1",
               },
               {
+                "Name": "SPS_PUBLIC_ALB_FULL_NAME",
+                "Value": {
+                  "Fn::GetAtt": [
+                    "PublicAlb84330974",
+                    "LoadBalancerFullName",
+                  ],
+                },
+              },
+              {
+                "Name": "SPS_APP_UNAVAILABLE_ALARM",
+                "Value": "sps-app-unavailable-prod",
+              },
+              {
                 "Name": "SHOW_BETA_BADGE",
                 "Value": "on",
               },
@@ -4007,6 +4020,30 @@ service:
       },
       "Type": "AWS::IAM::Policy",
     },
+    "TaskRoleCloudWatchReadPolicy431A64E8": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "cloudwatch:GetMetricData",
+                "cloudwatch:DescribeAlarmHistory",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-prod-cloudwatch-read",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "TaskRoleCoreClaimWritebackPolicyE86AA84B": {
       "Properties": {
         "PolicyDocument": {
@@ -5062,6 +5099,19 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SPS_USAGE_REGION",
                 "Value": "us-east-1",
+              },
+              {
+                "Name": "SPS_PUBLIC_ALB_FULL_NAME",
+                "Value": {
+                  "Fn::GetAtt": [
+                    "PublicAlb84330974",
+                    "LoadBalancerFullName",
+                  ],
+                },
+              },
+              {
+                "Name": "SPS_APP_UNAVAILABLE_ALARM",
+                "Value": "sps-app-unavailable-staging",
               },
               {
                 "Name": "SHOW_BETA_BADGE",
@@ -8421,6 +8471,30 @@ service:
           "Version": "2012-10-17",
         },
         "PolicyName": "sps-task-staging-cloudfront",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "TaskRoleCloudWatchReadPolicy431A64E8": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "cloudwatch:GetMetricData",
+                "cloudwatch:DescribeAlarmHistory",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-staging-cloudwatch-read",
         "Roles": [
           {
             "Ref": "TaskRole30FC0FBB",
