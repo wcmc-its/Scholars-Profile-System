@@ -101,7 +101,7 @@ export default async function EditCorePage({
   // `EffectiveUnitRole` it expects, so this is the same check
   // `unit-edit-context.ts`'s local now also delegates to.
   const canManageAccess = canManageAccessPredicate(session, coreRole).ok;
-  const [core, leaderRows, accessRows, queue, consoleTabs] = await Promise.all([
+  const [core, leaderRows, coreRoleRows, accessRows, queue, consoleTabs] = await Promise.all([
     db.read.core.findUnique({
       where: { id: coreId },
       select: { name: true, description: true, url: true, visible: true },
@@ -110,6 +110,13 @@ export default async function EditCorePage({
       where: { coreId },
       orderBy: [{ sortOrder: "asc" }, { cwid: "asc" }],
       select: { cwid: true, role: true, interim: true, sortOrder: true },
+    }),
+    // #2559 — the `core` slice of the role vocabulary, so `CoreLeaderCard`
+    // (a Client Component) can resolve each leader's stored key to its
+    // CURRENT label without importing `@/lib/db` itself.
+    db.read.orgUnitRole.findMany({
+      where: { entityType: "core" },
+      select: { key: true, label: true },
     }),
     canManageAccess
       ? db.read.unitAdmin.findMany({
@@ -140,6 +147,8 @@ export default async function EditCorePage({
       })
     : [];
   const nameMap = new Map(scholars.map((s) => [s.cwid, { name: s.preferredName, title: s.primaryTitle }]));
+
+  const roleLabels = Object.fromEntries(coreRoleRows.map((r) => [r.key, r.label]));
 
   const leaders: CoreLeaderState[] = leaderRows.map((l) => ({
     cwid: l.cwid,
@@ -218,7 +227,9 @@ export default async function EditCorePage({
           visible={core.visible}
         />
       )}
-      {active === "leadership" && <CoreLeaderCard coreId={coreId} leaders={leaders} />}
+      {active === "leadership" && (
+        <CoreLeaderCard coreId={coreId} leaders={leaders} roleLabels={roleLabels} />
+      )}
       {active === "access" && canManageAccess && (
         <UnitAccessCard
           entityType="core"
