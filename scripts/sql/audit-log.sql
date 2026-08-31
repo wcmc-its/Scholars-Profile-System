@@ -399,6 +399,18 @@ ALTER TABLE `scholars_audit`.`manual_edit_audit`
 --   GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO '<app_user>'@'<host>';
 --   -- and explicitly NOTHING else: no UPDATE, no DELETE, no DROP, no ALTER.
 --
+-- WRITER (etl, #2556). The nightly ETL auto-confirms K=2 separated reporter
+-- matches and writes the same B03 audit row an interactive Hide/Show does
+-- (etl/reporter-grants/*, appendAuditRow), so the `etl` MySQL user needs this
+-- identical append-only grant. Unlike the app-role grant above, this one IS
+-- applied automatically -- `scripts/db-bootstrap.ts` issues and verifies it on
+-- every deploy, using the literal username `etl` (there is no ETL_DSN on the
+-- bootstrap task to resolve it from live, unlike APP_RW_DSN). No DBA step
+-- needed. Shown here only for reference; the equivalent manual statement:
+--
+--   GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO 'etl'@'<host>';
+--   -- and explicitly NOTHING else: no UPDATE, no DELETE, no DROP, no ALTER.
+--
 -- READER (#917). The /edit history pages read this table through the read-only `app_ro` role,
 -- which therefore needs SELECT here (it has none otherwise -- least-privilege; the writer has
 -- INSERT only). That grant is NOT run by this script: it is issued by the master seeder custom

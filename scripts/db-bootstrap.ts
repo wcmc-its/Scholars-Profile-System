@@ -33,6 +33,16 @@
  *   3. Verify with `SHOW GRANTS` that the app role's `scholars_audit` privileges
  *      are INSERT-only — the #102 acceptance criterion. Any UPDATE/DELETE/ALL is
  *      a hard failure.
+ *   4. Do the same INSERT-only grant + verify for the `etl` role (#2556): the
+ *      nightly ETL now writes the same B03 audit row for an auto-confirmed
+ *      K=2 match (`etl/reporter-grants/*`), and the first staging run of that
+ *      code died with MySQL 1142 (`INSERT command denied to user 'etl'@...'
+ *      for table 'manual_edit_audit'`) — `etl` never had the grant. There is
+ *      no `ETL_DSN` on this task (only BOOTSTRAP_DSN/APP_RW_DSN), so `etl`
+ *      can't be resolved from a live DSN like app-rw, and it can't
+ *      self-verify via its own connection either — its check instead runs
+ *      `SHOW GRANTS FOR 'etl'@...` on the privileged bootstrap connection
+ *      (see `ETL_GRANTEE` and the verify step in `bootstrap()`).
  *
  * Usage (local parity): `npm run db:audit-setup`
  */
@@ -75,20 +85,38 @@ export function parseDsn(dsn: string): {
   };
 }
 
-/** The application grantee username, taken from the live app-rw DSN. Validated
- *  to a conservative identifier charset because a username cannot be a bound
- *  parameter in a `GRANT` (it is an identifier, not a value) — so it is the one
- *  interpolated token and must be injection-safe. A username outside this set is
- *  a hard failure rather than a risky interpolation. */
-export function granteeFromAppRwDsn(appRwDsn: string): string {
-  const user = decodeURIComponent(new URL(appRwDsn).username);
+/** Validate `user` against a conservative identifier charset before it is
+ *  interpolated into GRANT SQL — a username cannot be a bound parameter (it's
+ *  an identifier, not a value), so every grantee, wherever it comes from, must
+ *  pass this same injection guard. Shared by the app-rw grantee (resolved from
+ *  a live DSN, below) and the `etl` grantee (a literal constant — see
+ *  `ETL_GRANTEE`), so a bad username is a hard failure for either, not a risky
+ *  interpolation. */
+export function assertSimpleIdentifier(user: string): string {
   if (!/^[A-Za-z0-9_]+$/.test(user)) {
     throw new Error(
-      `app-rw username ${JSON.stringify(user)} is not a simple identifier; refusing to interpolate it into a GRANT`,
+      `username ${JSON.stringify(user)} is not a simple identifier; refusing to interpolate it into a GRANT`,
     );
   }
   return user;
 }
+
+/** The application grantee username, taken from the live app-rw DSN. See
+ *  `assertSimpleIdentifier` for why it's validated before use. */
+export function granteeFromAppRwDsn(appRwDsn: string): string {
+  const user = decodeURIComponent(new URL(appRwDsn).username);
+  return assertSimpleIdentifier(user);
+}
+
+/** The `etl` MySQL username, for the #2556 audit-INSERT grant. This is a
+ *  literal, not resolved from a DSN like `granteeFromAppRwDsn` above: the
+ *  bootstrap task's env carries only `BOOTSTRAP_DSN` and `APP_RW_DSN`, no
+ *  `ETL_DSN`. The literal is safe to pin because the `etl` username is stable
+ *  across environments (confirmed live in the #2556 staging 1142 failure:
+ *  `INSERT command denied to user 'etl'@'...' for table
+ *  'manual_edit_audit'`) — same identifier guard as the app-rw grantee before
+ *  it's interpolated into GRANT SQL. */
+export const ETL_GRANTEE = assertSimpleIdentifier("etl");
 
 /** Executable statements from `audit-log.sql`: strip block + line comments (so
  *  the commented GRANT template never runs), split on `;`, drop the empties.
@@ -120,11 +148,12 @@ export function buildGrantSql(grantee: string, host = "%"): string {
   return `GRANT INSERT ON \`${AUDIT_DB}\`.\`${AUDIT_TABLE}\` TO '${grantee}'@'${validateHost(host)}'`;
 }
 
-/** Assert the app role's privileges ON `scholars_audit` are INSERT-only (#102).
+/** Assert a role's privileges ON `scholars_audit` are INSERT-only (#102).
  *  Matches the backtick-quoted db name so `scholars` (a prefix) never matches
  *  `scholars_audit`. Returns nothing on success; throws on a forbidden grant or
- *  a missing INSERT. */
-export function assertInsertOnlyAuditGrant(grantLines: string[]): void {
+ *  a missing INSERT. `roleLabel` names the role in the thrown message only
+ *  (shared verbatim by the app-rw and etl checks — #2556). */
+export function assertInsertOnlyAuditGrant(grantLines: string[], roleLabel = "app role"): void {
   const auditLines = grantLines.filter((l) => l.includes(`\`${AUDIT_DB}\``));
   const privsOf = (line: string): string =>
     (line.match(/GRANT\s+(.*?)\s+ON\s/i)?.[1] ?? "").toUpperCase();
@@ -133,14 +162,14 @@ export function assertInsertOnlyAuditGrant(grantLines: string[]): void {
     const privs = privsOf(line);
     if (/\b(UPDATE|DELETE|ALL PRIVILEGES|DROP|ALTER)\b/.test(privs)) {
       throw new Error(
-        `app role holds a forbidden privilege on ${AUDIT_DB} (audit log must be INSERT-only, #102): ${line}`,
+        `${roleLabel} holds a forbidden privilege on ${AUDIT_DB} (audit log must be INSERT-only, #102): ${line}`,
       );
     }
   }
   const hasInsert = auditLines.some((l) => /\bINSERT\b/.test(privsOf(l)));
   if (!hasInsert) {
     throw new Error(
-      `app role has no INSERT grant on ${AUDIT_DB}.${AUDIT_TABLE} after bootstrap — grant did not take`,
+      `${roleLabel} has no INSERT grant on ${AUDIT_DB}.${AUDIT_TABLE} after bootstrap — grant did not take`,
     );
   }
 }
@@ -206,6 +235,29 @@ export async function bootstrap(
   const grantLines = rows.map((r) => Object.values(r)[0]);
   assertInsertOnlyAuditGrant(grantLines);
   log(`Verified ${AUDIT_DB} grant is INSERT-only for '${opts.grantee}'@'${host}'`);
+
+  // #2556: the same append-only grant, for the `etl` role's autolock audit
+  // write. `GRANT` is idempotent (safe to re-issue on every deploy, same as
+  // the app-role grant above).
+  const etlGrantSql = buildGrantSql(ETL_GRANTEE, host);
+  log(`Granting INSERT on ${AUDIT_DB}.${AUDIT_TABLE} to '${ETL_GRANTEE}'@'${host}'`);
+  await conn.query(etlGrantSql);
+
+  // etl has no bootstrap-task DSN to open its own connection and self-verify
+  // with (unlike app-rw via `verifyConn` above), so this runs on the
+  // privileged bootstrap connection instead: `SHOW GRANTS FOR '<user>'@...`
+  // for a named account other than the caller needs either SELECT on
+  // `mysql.user` (which `sps_bootstrap` deliberately lacks) or, as of MySQL
+  // 8.0.16, the GRANT OPTION on every privilege being shown — and
+  // `sps_bootstrap` holds exactly that (INSERT WITH GRANT OPTION on
+  // `scholars_audit`, the only privilege this grant carries), so the read is
+  // permitted without any broader access.
+  const etlRows = (await conn.query(
+    `SHOW GRANTS FOR '${ETL_GRANTEE}'@'${host}'`,
+  )) as Array<Record<string, string>>;
+  const etlGrantLines = etlRows.map((r) => Object.values(r)[0]);
+  assertInsertOnlyAuditGrant(etlGrantLines, "etl role");
+  log(`Verified ${AUDIT_DB} grant is INSERT-only for '${ETL_GRANTEE}'@'${host}'`);
 }
 
 /** Absolute path to the canonical audit DDL (resolved relative to this module,
