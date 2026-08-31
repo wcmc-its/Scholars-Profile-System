@@ -8,7 +8,14 @@
  */
 import { cache } from "react";
 import { prisma } from "@/lib/db";
-import { CENTER_ENTITY_TYPE, formatLeadershipTitle } from "@/lib/org-unit-roles";
+import {
+  CENTER_ENTITY_TYPE,
+  formatLeadershipTitle,
+  departmentLeaderRoleKey,
+  DEPARTMENT_CHAIR_ROLE_KEY,
+  DEPARTMENT_DIRECTOR_ROLE_KEY,
+  DIVISION_CHIEF_ROLE_KEY,
+} from "@/lib/org-unit-roles";
 import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import {
   getEffectiveOverview,
@@ -1165,11 +1172,45 @@ export const getScholarFullProfileBySlug = cache(
       Promise.all([
         prisma.department.findMany({
           where: { chairCwid: scholar.cwid },
-          select: { name: true, officialName: true },
+          select: { code: true, name: true, officialName: true, category: true },
+        }),
+        // #2542 Phase D — department leadership is an `OrgUnitRoleAssignment`
+        // row once the ETL dual-write (`etl/ed/index.ts`) + a backfill have
+        // synced it. Same shape as the center block below: `profileTitle`
+        // gates whether holding the role is a title at all, and the legacy
+        // `chairCwid` reverse lookup above is the pre-sync fallback.
+        prisma.orgUnitRoleAssignment.findMany({
+          where: {
+            cwid: scholar.cwid,
+            entityType: "department",
+            role: { roleGroup: "leadership", profileTitle: true },
+          },
+          select: {
+            entityId: true,
+            interim: true,
+            sortOrder: true,
+            role: { select: { label: true } },
+          },
+          orderBy: [{ sortOrder: "asc" }, { entityId: "asc" }],
         }),
         prisma.division.findMany({
           where: { chiefCwid: scholar.cwid },
-          select: { name: true },
+          select: { code: true, name: true },
+        }),
+        // Same Phase D dual-read shape for divisions.
+        prisma.orgUnitRoleAssignment.findMany({
+          where: {
+            cwid: scholar.cwid,
+            entityType: "division",
+            role: { roleGroup: "leadership", profileTitle: true },
+          },
+          select: {
+            entityId: true,
+            interim: true,
+            sortOrder: true,
+            role: { select: { label: true } },
+          },
+          orderBy: [{ sortOrder: "asc" }, { entityId: "asc" }],
         }),
         // #2542 — center leadership is an `OrgUnitRoleAssignment` row, not
         // `Center.directorCwid`. `profileTitle` is what decides whether holding
@@ -1212,7 +1253,16 @@ export const getScholarFullProfileBySlug = cache(
             },
           },
         }),
-      ]).then(async ([chairDepts, chiefDivs, dirCenters, legacyDirCenters, progLeads]) => {
+      ]).then(
+        async ([
+          chairDepts,
+          deptAssignments,
+          chiefDivs,
+          divAssignments,
+          dirCenters,
+          legacyDirCenters,
+          progLeads,
+        ]) => {
         // One batched name lookup for the centers the assignments point at.
         const dirCenterRows = dirCenters.length
           ? await prisma.center.findMany({
@@ -1223,9 +1273,91 @@ export const getScholarFullProfileBySlug = cache(
         const dirCenterName = new Map(
           dirCenterRows.map((c) => [c.code, c.officialName ?? c.name]),
         );
+        // Same batched-name-lookup shape for the departments/divisions the
+        // Phase D assignments point at — the assignment carries no FK to
+        // either table, only the unit's code.
+        const [deptAssignmentRows, divAssignmentRows, deptRoleRows, divRole] = await Promise.all([
+          deptAssignments.length
+            ? prisma.department.findMany({
+                where: { code: { in: deptAssignments.map((a) => a.entityId) } },
+                select: { code: true, name: true, officialName: true },
+              })
+            : Promise.resolve([]),
+          divAssignments.length
+            ? prisma.division.findMany({
+                where: { code: { in: divAssignments.map((a) => a.entityId) } },
+                select: { code: true, name: true },
+              })
+            : Promise.resolve([]),
+          // The department vocabulary's Chair/Director label + `profileTitle`,
+          // for the LEGACY `chairCwid` fallback below — mirroring
+          // `resolveUnitLeader`'s "the label comes from the vocabulary in
+          // every branch, even the legacy-column one" rule
+          // (`lib/api/unit-leader.ts`). Fixed 2-row lookup, so it's cheap to
+          // always issue rather than gate on `chairDepts.length`.
+          prisma.orgUnitRole.findMany({
+            where: {
+              entityType: "department",
+              key: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+            },
+            select: { key: true, label: true, profileTitle: true },
+          }),
+          prisma.orgUnitRole.findUnique({
+            where: { entityType_key: { entityType: "division", key: DIVISION_CHIEF_ROLE_KEY } },
+            select: { label: true, profileTitle: true },
+          }),
+        ]);
+        const deptAssignmentName = new Map(
+          deptAssignmentRows.map((d) => [d.code, d.officialName ?? d.name]),
+        );
+        const divAssignmentName = new Map(divAssignmentRows.map((d) => [d.code, d.name]));
+        const deptRoleByKey = new Map(deptRoleRows.map((r) => [r.key, r]));
+        // Falls back to the seed defaults (`DEFAULT_ORG_UNIT_ROLES`) only when
+        // the vocabulary row itself is missing — e.g. before it has been seeded.
+        const chairRole = deptRoleByKey.get(DEPARTMENT_CHAIR_ROLE_KEY) ?? {
+          label: "Chair",
+          profileTitle: true,
+        };
+        const directorRole = deptRoleByKey.get(DEPARTMENT_DIRECTOR_ROLE_KEY) ?? {
+          label: "Director",
+          profileTitle: true,
+        };
+        const chiefRole = divRole ?? { label: "Chief", profileTitle: true };
         return [
-        ...chairDepts.map((d) => `Chair, ${d.officialName ?? d.name}`),
-        ...chiefDivs.map((d) => `Chief, ${d.name}`),
+        // Departments already covered by a Phase D assignment row.
+        ...deptAssignments.flatMap((a) => {
+          const unitName = deptAssignmentName.get(a.entityId);
+          return unitName
+            ? [`${formatLeadershipTitle(a.role.label, a.interim)}, ${unitName}`]
+            : [];
+        }),
+        // Legacy `chairCwid` fallback — only departments the assignment table
+        // does not already cover, so the two sources never double-count during
+        // the dual-read window. `departmentLeaderRoleKey` (#2542 Phase D) picks
+        // Chair vs. Director from the department's `category` — an
+        // administrative department's Director must not render as "Chair".
+        ...chairDepts
+          .filter((d) => !deptAssignments.some((a) => a.entityId === d.code))
+          .flatMap((d) => {
+            const role =
+              departmentLeaderRoleKey(d.category) === DEPARTMENT_DIRECTOR_ROLE_KEY
+                ? directorRole
+                : chairRole;
+            // A role with `profileTitle: false` must not render as a profile
+            // title — that column exists precisely for this.
+            return role.profileTitle ? [`${role.label}, ${d.officialName ?? d.name}`] : [];
+          }),
+        // Divisions already covered by a Phase D assignment row.
+        ...divAssignments.flatMap((a) => {
+          const unitName = divAssignmentName.get(a.entityId);
+          return unitName
+            ? [`${formatLeadershipTitle(a.role.label, a.interim)}, ${unitName}`]
+            : [];
+        }),
+        // Legacy `chiefCwid` fallback — same coverage-dedup as departments.
+        ...chiefDivs
+          .filter((d) => !divAssignments.some((a) => a.entityId === d.code))
+          .flatMap((d) => (chiefRole.profileTitle ? [`${chiefRole.label}, ${d.name}`] : [])),
         // A row whose center vanished contributes no title line rather than a
         // half-rendered one.
         ...dirCenters.flatMap((c) => {

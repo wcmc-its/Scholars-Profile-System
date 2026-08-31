@@ -126,7 +126,13 @@ export async function DivisionPage({
           </p>
         )}
 
-        {detail.chief && <LeaderCard leader={detail.chief} role="Chief" />}
+        {detail.chief && (
+          <LeaderCard
+            leader={detail.chief}
+            role={detail.chief.role}
+            interim={detail.chief.isInterim}
+          />
+        )}
 
         {detail.topResearchAreas.length > 0 && (
           <div className="mt-6">

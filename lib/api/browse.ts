@@ -21,7 +21,13 @@
  * All callers are Server Components / ISR pages. Public-data only — no auth.
  */
 import { prisma } from "@/lib/db";
-import { CENTER_ENTITY_TYPE, DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
+import {
+  CENTER_ENTITY_TYPE,
+  DIRECTOR_ROLE_KEY,
+  DEPARTMENT_CHAIR_ROLE_KEY,
+  DEPARTMENT_DIRECTOR_ROLE_KEY,
+  departmentLeaderRoleKey,
+} from "@/lib/org-unit-roles";
 import { countActiveCenterMembersByCode } from "@/lib/api/center-member-count";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
@@ -52,6 +58,9 @@ export type BrowseDepartment = {
   scholarCount: number;
   chairName: string | null;
   chairSlug: string | null;
+  /** "Chair" or "Director" (or a steward-renamed label), vocabulary-resolved.
+   *  Null exactly when `chairName` is null. */
+  chairLabel: string | null;
   divisions: BrowseDepartmentDivisionChip[];
   topResearchAreas: BrowseDepartmentTopicChip[];
 };
@@ -135,8 +144,40 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
   })) as DeptRow[];
 
   // --- Chairs ---
+  // #2542 Phase D — chair/director is an `OrgUnitRoleAssignment` row once the
+  // backfill runs; batched dual-read fallback to `chairCwid` mirrors
+  // `getCentersList`'s `directorCwidOf` below. NOTE: unlike `departments.ts`
+  // (the department PAGE), this list does NOT merge `field_override` —
+  // it never has (pre-existing; out of scope for this repoint) — so a
+  // curator's `leaderCwid` override is reflected on the department's own
+  // page but not yet on this browse card.
+  const roleRows = await prisma.orgUnitRole.findMany({
+    where: {
+      entityType: "department",
+      key: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+    },
+    select: { key: true, label: true },
+  });
+  const roleLabelByKey = new Map(roleRows.map((r) => [r.key, r.label]));
+
+  const assignments = await prisma.orgUnitRoleAssignment.findMany({
+    where: {
+      entityType: "department",
+      entityId: { in: depts.map((d) => d.code) },
+      roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+    },
+    select: { entityId: true, cwid: true },
+    orderBy: { sortOrder: "asc" },
+  });
+  const assignedChair = new Map<string, string>();
+  for (const a of assignments) {
+    if (!assignedChair.has(a.entityId)) assignedChair.set(a.entityId, a.cwid);
+  }
+  const chairCwidOf = (d: DeptRow): string | null =>
+    assignedChair.get(d.code) ?? d.chairCwid;
+
   const chairCwids = depts
-    .map((d) => d.chairCwid)
+    .map(chairCwidOf)
     .filter((c): c is string => c !== null);
   const chairs: ChairRow[] =
     chairCwids.length > 0
@@ -216,6 +257,7 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
 
   return depts.map<BrowseDepartment>((d) => {
     const cat = (d.category as DepartmentCategory) ?? "clinical";
+    const chairCwid = chairCwidOf(d);
     return {
       code: d.code,
       name: d.name,
@@ -224,7 +266,7 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
       slug: d.slug,
       category: cat,
       scholarCount: d.scholarCount,
-      chairName: d.chairCwid
+      chairName: chairCwid
         ? // External leader (not a WCM scholar, e.g. Joel Stein / Rehab Med):
           // the scholar lookup misses, so fall back to the curated name so the
           // chair still shows on browse. Rendered as plain text (no link), so
@@ -232,13 +274,17 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
           // fallback on the external leader's cwid MATCHING the current chairCwid
           // (mirroring departments.ts), so a stale EXTERNAL_LEADERS entry can't
           // surface the wrong name if the chair changes to another unresolved cwid.
-          (chairMap.get(d.chairCwid)?.preferredName ??
-          (EXTERNAL_LEADERS[d.code]?.cwid === d.chairCwid
+          (chairMap.get(chairCwid)?.preferredName ??
+          (EXTERNAL_LEADERS[d.code]?.cwid === chairCwid
             ? (EXTERNAL_LEADERS[d.code]?.name ?? null)
             : null))
         : null,
-      chairSlug: d.chairCwid
-        ? (chairMap.get(d.chairCwid)?.slug ?? null)
+      chairSlug: chairCwid
+        ? (chairMap.get(chairCwid)?.slug ?? null)
+        : null,
+      chairLabel: chairCwid
+        ? (roleLabelByKey.get(departmentLeaderRoleKey(cat)) ??
+          (cat === "administrative" ? "Director" : "Chair"))
         : null,
       // Administrative cards are lean: no division chips, no topic chips.
       divisions: cat === "administrative" ? [] : (divsByDept.get(d.code) ?? []),

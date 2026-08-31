@@ -37,6 +37,8 @@ const {
   mockPublicationCount,
   mockQueryRawUnsafe,
   mockFieldOverrideFindMany,
+  mockOrgUnitRoleFindUnique,
+  mockOrgUnitRoleAssignmentFindFirst,
 } = vi.hoisted(() => ({
   mockGrantFindMany: vi.fn(),
   mockScholarFindMany: vi.fn(),
@@ -56,6 +58,8 @@ const {
   mockPublicationCount: vi.fn(),
   mockQueryRawUnsafe: vi.fn(),
   mockFieldOverrideFindMany: vi.fn(),
+  mockOrgUnitRoleFindUnique: vi.fn(),
+  mockOrgUnitRoleAssignmentFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -82,6 +86,8 @@ vi.mock("@/lib/db", () => ({
     publicationAuthor: { findMany: mockPublicationAuthorFindMany },
     publication: { count: mockPublicationCount },
     fieldOverride: { findMany: mockFieldOverrideFindMany },
+    orgUnitRole: { findUnique: mockOrgUnitRoleFindUnique },
+    orgUnitRoleAssignment: { findFirst: mockOrgUnitRoleAssignmentFindFirst },
     $queryRawUnsafe: mockQueryRawUnsafe,
   },
 }));

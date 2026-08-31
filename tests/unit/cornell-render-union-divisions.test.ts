@@ -27,6 +27,8 @@ const {
   divisionMembershipCount,
   externalMemberFindMany,
   isCornellDirectoryMembersEnabledMock,
+  orgUnitRoleFindUnique,
+  orgUnitRoleAssignmentFindFirst,
 } = vi.hoisted(() => ({
   divisionFindFirst: vi.fn(),
   divisionFindMany: vi.fn(async () => []),
@@ -45,6 +47,8 @@ const {
   divisionMembershipCount: vi.fn(async () => 0),
   externalMemberFindMany: vi.fn(),
   isCornellDirectoryMembersEnabledMock: vi.fn(() => false),
+  orgUnitRoleFindUnique: vi.fn(async () => null),
+  orgUnitRoleAssignmentFindFirst: vi.fn(async () => null),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -65,6 +69,8 @@ vi.mock("@/lib/db", () => ({
     externalMember: { findMany: externalMemberFindMany },
     suppression: { findMany: suppressionFindMany, findFirst: suppressionFindFirst },
     fieldOverride: { findMany: fieldOverrideFindMany },
+    orgUnitRole: { findUnique: orgUnitRoleFindUnique },
+    orgUnitRoleAssignment: { findFirst: orgUnitRoleAssignmentFindFirst },
     $queryRawUnsafe: queryRawUnsafeMock,
   },
 }));

@@ -39,7 +39,14 @@ import { deriveSlug, nextAvailableSlug, reconcileScholarSlug } from "@/lib/slug"
 import { classifyByExternalId } from "@/lib/etl/reconcile";
 import { appointmentContentKey } from "@/lib/etl/content-keys";
 import { looksLikeArtifactAppointment, PRE_START_ACADEMIC_TITLE } from "@/lib/appointment-artifacts";
-import { Prisma } from "@/lib/generated/prisma/client";
+import { Prisma, type PrismaClient } from "@/lib/generated/prisma/client";
+import {
+  DEPARTMENT_CHAIR_ROLE_KEY,
+  DEPARTMENT_DIRECTOR_ROLE_KEY,
+  DIVISION_CHIEF_ROLE_KEY,
+  departmentLeaderRoleKey,
+  orgUnitRoleSeedRows,
+} from "@/lib/org-unit-roles";
 import {
   collapseEmployeeRecordsByCwid,
   type EdFacultyAppointment,
@@ -140,6 +147,64 @@ export function guardActiveLeaderCwid(
   if (!candidateCwid) return null;
   if (!guardApplied) return candidateCwid;
   return activeByCwid.get(candidateCwid.toLowerCase()) === true ? candidateCwid : null;
+}
+
+/** The Prisma surface `writeUnitLeaderAssignment` needs — base client or interactive tx. */
+type UnitLeaderAssignmentWriteClient = Pick<PrismaClient, "orgUnitRole" | "orgUnitRoleAssignment">;
+
+/**
+ * #2542 Phase D dual-write — mirror one department/division leader write onto
+ * `OrgUnitRoleAssignment` from the SAME already-resolved cwid that the caller
+ * just wrote to `chairCwid` / `chiefCwid`. Override precedence needs no
+ * separate handling here: `resolveUnitLeaderForETL` resolves the value
+ * upstream (override, detection, or explicit vacancy) before any call site
+ * runs, so both stores always receive the identical resolved value.
+ *
+ * Seeds the kind's vocabulary first (`skipDuplicates`), exactly as the three
+ * app write paths do (`app/api/edit/unit/route.ts:726-729`) — a unit
+ * predating the backfill has no vocabulary row yet, and the assignment's FK
+ * throws MySQL 1452 without it.
+ *
+ * `cwid: null` (an explicit vacancy, or no candidate detected this run)
+ * DELETES the row rather than leaving a stale holder behind — a vacancy that
+ * still renders the prior leader is exactly the silent-divergence failure
+ * this phase exists to prevent.
+ *
+ * `otherRoleKey` is department-only: it names the sibling leadership key
+ * (`chair` <-> `director`) so a `category` flip between runs removes the
+ * STALE key's row instead of leaving a department holding both. Divisions
+ * have no sibling key and omit it.
+ *
+ * Exported for unit tests (tests/unit/etl-ed-unit-leader-assignment.test.ts).
+ */
+export async function writeUnitLeaderAssignment(
+  client: UnitLeaderAssignmentWriteClient,
+  params: {
+    entityType: "department" | "division";
+    entityId: string;
+    roleKey: string;
+    otherRoleKey?: string;
+    cwid: string | null;
+  },
+): Promise<void> {
+  const { entityType, entityId, roleKey, otherRoleKey, cwid } = params;
+  await client.orgUnitRole.createMany({
+    data: orgUnitRoleSeedRows(entityType),
+    skipDuplicates: true,
+  });
+  if (otherRoleKey) {
+    await client.orgUnitRoleAssignment.deleteMany({
+      where: { entityType, entityId, roleKey: otherRoleKey },
+    });
+  }
+  await client.orgUnitRoleAssignment.deleteMany({
+    where: { entityType, entityId, roleKey },
+  });
+  if (cwid !== null) {
+    await client.orgUnitRoleAssignment.create({
+      data: { entityType, entityId, cwid, roleKey },
+    });
+  }
 }
 
 /**
@@ -1291,9 +1356,30 @@ async function main() {
     // resolves overrides (written immediately — a curator pin is authoritative,
     // not ED-sourced) and collects the title-matched candidates; pass 2 guards
     // the candidates against `weillCornellEduActiveMember` and writes.
-    const chairCandidates: Array<{ deptCode: string; cwid: string; title: string }> = [];
+    const chairCandidates: Array<{
+      deptCode: string;
+      cwid: string;
+      title: string;
+      roleKey: string;
+      otherRoleKey: string;
+    }> = [];
     const chairDeptsToClear: string[] = [];
     for (const dept of seenDepts.values()) {
+      // Look up category so we know whether to match "Chair of X" or
+      // "Director of X". Falls back to "clinical" for depts the seed file
+      // doesn't know about; same default the upsert step uses. Moved ahead
+      // of the override check below (#2542 Phase D) — the dual-write needs
+      // the chair/director role key on BOTH branches, not just detection.
+      const persisted = await db.write.department.findUnique({
+        where: { code: dept.code },
+        select: { category: true },
+      });
+      const category = persisted?.category ?? "clinical";
+      const roleKey = departmentLeaderRoleKey(category);
+      const otherRoleKey =
+        roleKey === DEPARTMENT_CHAIR_ROLE_KEY
+          ? DEPARTMENT_DIRECTOR_ROLE_KEY
+          : DEPARTMENT_CHAIR_ROLE_KEY;
       // #540 — a `field_override(department, code, 'leaderCwid')` row wins
       // outright. Non-empty value writes the curated CWID; `""` writes null
       // (explicit vacancy — three-state, do NOT fall through to regex).
@@ -1306,19 +1392,24 @@ async function main() {
           where: { code: dept.code },
           data: { chairCwid: leaderOverride.cwid },
         });
+        // #2542 Phase D — dual-write from the SAME resolved value.
+        await writeUnitLeaderAssignment(db.write, {
+          entityType: "department",
+          entityId: dept.code,
+          roleKey,
+          otherRoleKey,
+          cwid: leaderOverride.cwid,
+        });
         deptLeaderOverridesApplied += 1;
         if (leaderOverride.cwid) chairAssignments += 1;
         continue;
       }
-      // Look up category so we know whether to match "Chair of X" or
-      // "Director of X". Falls back to "clinical" for depts the seed file
-      // doesn't know about; same default the upsert step uses.
-      const persisted = await db.write.department.findUnique({
-        where: { code: dept.code },
-        select: { category: true },
-      });
-      const category = persisted?.category ?? "clinical";
-      const leaderWord = category === "administrative" ? "Director" : "Chair";
+      // #2542 Phase D — repointed onto `departmentLeaderRoleKey`'s `roleKey`
+      // (computed above) rather than re-deriving chair-vs-director from
+      // `category` a second time here. The display word is the capitalized
+      // vocabulary key — `DEPARTMENT_CHAIR_ROLE_KEY`/`DEPARTMENT_DIRECTOR_ROLE_KEY`
+      // are literally the lowercase English words "chair"/"director".
+      const leaderWord = roleKey === DEPARTMENT_DIRECTOR_ROLE_KEY ? "Director" : "Chair";
       const expected = `${leaderWord} of ${dept.name}`;
       const exclusions: { title: { contains: string } }[] = [];
       if (leaderWord === "Chair") {
@@ -1357,7 +1448,13 @@ async function main() {
         select: { cwid: true, title: true },
       });
       if (candidate) {
-        chairCandidates.push({ deptCode: dept.code, cwid: candidate.cwid, title: candidate.title });
+        chairCandidates.push({
+          deptCode: dept.code,
+          cwid: candidate.cwid,
+          title: candidate.title,
+          roleKey,
+          otherRoleKey,
+        });
       } else {
         // Always clear stale assignments — if no candidate matches this run the
         // dept gets chair_cwid=null instead of keeping a prior run's scholar.
@@ -1397,6 +1494,16 @@ async function main() {
         where: { code: c.deptCode },
         data: { chairCwid: cwidToWrite },
       });
+      // #2542 Phase D — dual-write from the SAME guarded value (a guard drop
+      // writes null here too, deleting the assignment exactly as the column
+      // self-clears).
+      await writeUnitLeaderAssignment(db.write, {
+        entityType: "department",
+        entityId: c.deptCode,
+        roleKey: c.roleKey,
+        otherRoleKey: c.otherRoleKey,
+        cwid: cwidToWrite,
+      });
       if (cwidToWrite) {
         chairTitleVariants.add(c.title);
         chairAssignments += 1;
@@ -1408,6 +1515,17 @@ async function main() {
       await db.write.department.update({
         where: { code: deptCode },
         data: { chairCwid: null },
+      });
+      // #2542 Phase D — no candidate this run: delete BOTH leadership keys'
+      // assignment rows. Category at clear time isn't tracked through this
+      // array, and deleting a role the dept never held is a no-op, so
+      // clearing both is simpler than re-deriving which one applied.
+      await writeUnitLeaderAssignment(db.write, {
+        entityType: "department",
+        entityId: deptCode,
+        roleKey: DEPARTMENT_CHAIR_ROLE_KEY,
+        otherRoleKey: DEPARTMENT_DIRECTOR_ROLE_KEY,
+        cwid: null,
       });
     }
     console.log(
@@ -1453,6 +1571,15 @@ async function main() {
       await db.write.department.update({
         where: { code },
         data: { chairCwid: cwid },
+      });
+      // #2542 Phase D — dual-write. Guarded above to `dept.category ===
+      // "administrative"`, so the role key is always director here.
+      await writeUnitLeaderAssignment(db.write, {
+        entityType: "department",
+        entityId: code,
+        roleKey: DEPARTMENT_DIRECTOR_ROLE_KEY,
+        otherRoleKey: DEPARTMENT_CHAIR_ROLE_KEY,
+        cwid,
       });
       adminOverridesApplied += 1;
     }
@@ -1774,6 +1901,13 @@ async function main() {
             where: { code: div.code },
             data: { chiefCwid: leaderOverride.cwid },
           });
+          // #2542 Phase D — dual-write from the SAME resolved value.
+          await writeUnitLeaderAssignment(db.write, {
+            entityType: "division",
+            entityId: div.code,
+            roleKey: DIVISION_CHIEF_ROLE_KEY,
+            cwid: leaderOverride.cwid,
+          });
           divLeaderOverridesApplied += 1;
           if (leaderOverride.cwid) chiefAssignments += 1;
           continue;
@@ -1828,6 +1962,13 @@ async function main() {
           where: { code: c.divCode },
           data: { chiefCwid: cwidToWrite },
         });
+        // #2542 Phase D — dual-write from the SAME guarded value.
+        await writeUnitLeaderAssignment(db.write, {
+          entityType: "division",
+          entityId: c.divCode,
+          roleKey: DIVISION_CHIEF_ROLE_KEY,
+          cwid: cwidToWrite,
+        });
         if (cwidToWrite) chiefAssignments += 1;
         else chiefGuardDropped += 1;
       }
@@ -1835,6 +1976,14 @@ async function main() {
         await db.write.division.update({
           where: { code: divCode },
           data: { chiefCwid: null },
+        });
+        // #2542 Phase D — no candidate this run: delete the assignment row
+        // so a vacancy does not keep rendering the prior chief.
+        await writeUnitLeaderAssignment(db.write, {
+          entityType: "division",
+          entityId: divCode,
+          roleKey: DIVISION_CHIEF_ROLE_KEY,
+          cwid: null,
         });
       }
       console.log(
@@ -1869,6 +2018,12 @@ async function main() {
       // silently stopped clearing stale chiefs and applying leader overrides.
       if (chiefDetectionDisabled && employeeFetchSucceeded && employeeRecords.length > 0) {
         await db.write.division.updateMany({ data: { chiefCwid: null } });
+        // #2542 Phase D — mirror the unconditional column clear: delete
+        // every division's chief assignment row before the override pass
+        // below re-applies any curator pins.
+        await db.write.orgUnitRoleAssignment.deleteMany({
+          where: { entityType: "division", roleKey: DIVISION_CHIEF_ROLE_KEY },
+        });
         for (const div of divisionsForChief) {
           const leaderOverride = resolveUnitLeaderForETL(
             div.code,
@@ -1878,6 +2033,14 @@ async function main() {
           await db.write.division.update({
             where: { code: div.code },
             data: { chiefCwid: leaderOverride.cwid },
+          });
+          // #2542 Phase D — dual-write. The bulk clear above already deleted
+          // every row, so a null override cwid is a correct create-skip.
+          await writeUnitLeaderAssignment(db.write, {
+            entityType: "division",
+            entityId: div.code,
+            roleKey: DIVISION_CHIEF_ROLE_KEY,
+            cwid: leaderOverride.cwid,
           });
           divLeaderOverridesApplied += 1;
         }
@@ -1956,6 +2119,13 @@ async function main() {
         await db.write.division.update({
           where: { code: row.divCode },
           data: { chiefCwid: row.cwid },
+        });
+        // #2542 Phase D — dual-write from the SAME Path-C resolved value.
+        await writeUnitLeaderAssignment(db.write, {
+          entityType: "division",
+          entityId: row.divCode,
+          roleKey: DIVISION_CHIEF_ROLE_KEY,
+          cwid: row.cwid,
         });
         overrideApplied += 1;
       }

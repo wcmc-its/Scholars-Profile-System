@@ -33,6 +33,11 @@ function scholarRow(over: Record<string, unknown> = {}) {
 function fakeClient(opts: {
   scholars?: unknown[];
   chairs?: string[];
+  /** Same shape as the real `department.findMany({ chairCwid, category })`
+   *  select — use this instead of `chairs` when a test needs to exercise the
+   *  Chair-vs-Director split (#58 / #2542 Phase D). Takes precedence over
+   *  `chairs` when both are given. */
+  chairDepartments?: Array<{ chairCwid: string; category: string }>;
   chiefs?: string[];
   pi?: Array<{ cwid: string; n: number }>;
   nihPi?: Array<{ cwid: string; n: number }>;
@@ -61,7 +66,10 @@ function fakeClient(opts: {
   const client = {
     scholar: { findMany: scholarFindMany },
     department: {
-      findMany: vi.fn().mockResolvedValue((opts.chairs ?? []).map((c) => ({ chairCwid: c }))),
+      findMany: vi.fn().mockResolvedValue(
+        opts.chairDepartments ??
+          (opts.chairs ?? []).map((c) => ({ chairCwid: c, category: "clinical" })),
+      ),
     },
     division: {
       findMany: vi.fn().mockResolvedValue((opts.chiefs ?? []).map((c) => ({ chiefCwid: c }))),
@@ -175,6 +183,35 @@ describe("loadDataQualityRoster — leadership + COI + prominence", () => {
     });
     expect(byCwid.fac1.editHref).toBe("/edit/scholar/fac1");
   });
+
+  // #58 / #2542 Phase D — an administrative department (e.g. the Library) is
+  // led by a DIRECTOR, not a Chair. Before this fix, `chairs` was a plain
+  // `Set<string>` keyed only by `Department.chairCwid` membership, so this
+  // scholar's `leadership` label read "Chair" regardless of category.
+  it("labels an administrative department's leader 'Director', not 'Chair'", async () => {
+    const { client } = fakeClient({
+      scholars: [
+        scholarRow({ cwid: "dir1", preferredName: "Dee Director", department: { name: "Library" } }),
+      ],
+      chairDepartments: [{ chairCwid: "dir1", category: "administrative" }],
+    });
+    const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
+    expect(entries[0]).toMatchObject({ isChair: true, leadership: "Director", leadershipTier: 2 });
+  });
+
+  // The three non-administrative categories all read "Chair" — only
+  // `administrative` maps to Director (`departmentLeaderRoleKey`).
+  it.each(["clinical", "mixed", "basic"])(
+    "labels a '%s' department's leader 'Chair'",
+    async (category) => {
+      const { client } = fakeClient({
+        scholars: [scholarRow({ cwid: "ch1", preferredName: "Cee Chair" })],
+        chairDepartments: [{ chairCwid: "ch1", category }],
+      });
+      const { entries } = await loadDataQualityRoster({ scope: { all: true } }, asClient(client));
+      expect(entries[0]).toMatchObject({ isChair: true, leadership: "Chair", leadershipTier: 2 });
+    },
+  );
 
   it("sorts by prominence desc (chair/chief + PI/NIH + faculty all feed in)", async () => {
     const { client } = setup();
@@ -395,18 +432,29 @@ describe("classifyLeadership — title heuristic (#1)", () => {
     [null, 3, null],
   ];
   it.each(cases)("%s → tier %i / %s", (title, tier, label) => {
-    expect(classifyLeadership(title, false, false)).toEqual({ tier, label });
+    expect(classifyLeadership(title, null, false)).toEqual({ tier, label });
   });
 
   it("a non-leader title falls back to the FK chair/chief tier", () => {
-    expect(classifyLeadership("Professor", true, false)).toEqual({ tier: 2, label: "Chair" });
-    expect(classifyLeadership("Professor", false, true)).toEqual({ tier: 2, label: "Chief" });
+    expect(classifyLeadership("Professor", "Chair", false)).toEqual({ tier: 2, label: "Chair" });
+    expect(classifyLeadership("Professor", null, true)).toEqual({ tier: 2, label: "Chief" });
   });
 
   it("an active dean title outranks a chair FK (dean office beats chair)", () => {
-    expect(classifyLeadership("Associate Dean", true, false)).toEqual({
+    expect(classifyLeadership("Associate Dean", "Chair", false)).toEqual({
       tier: 1,
       label: "Associate Dean",
+    });
+  });
+
+  // #58 / #2542 Phase D — an administrative department's leader is a
+  // DIRECTOR, not a Chair. `classifyLeadership` itself is category-agnostic
+  // (it trusts whatever label the caller resolved); this just confirms the
+  // resolved label passes through as the tier-2 display label unchanged.
+  it("passes through a pre-resolved 'Director' label for an administrative department", () => {
+    expect(classifyLeadership("Professor", "Director", false)).toEqual({
+      tier: 2,
+      label: "Director",
     });
   });
 });

@@ -16,6 +16,8 @@ const {
   mockCoreFindMany,
   mockTopicFindMany,
   mockQueryRawUnsafe,
+  mockOrgUnitRoleFindMany,
+  mockOrgUnitRoleAssignmentFindMany,
 } = vi.hoisted(() => ({
   mockDepartmentFindMany: vi.fn(),
   mockScholarFindMany: vi.fn(),
@@ -24,6 +26,8 @@ const {
   mockCoreFindMany: vi.fn(),
   mockTopicFindMany: vi.fn(),
   mockQueryRawUnsafe: vi.fn(),
+  mockOrgUnitRoleFindMany: vi.fn(),
+  mockOrgUnitRoleAssignmentFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -34,6 +38,8 @@ vi.mock("@/lib/db", () => ({
     center: { findMany: mockCenterFindMany },
     core: { findMany: mockCoreFindMany },
     topic: { findMany: mockTopicFindMany },
+    orgUnitRole: { findMany: mockOrgUnitRoleFindMany },
+    orgUnitRoleAssignment: { findMany: mockOrgUnitRoleAssignmentFindMany },
     $queryRawUnsafe: mockQueryRawUnsafe,
   },
 }));
@@ -54,6 +60,8 @@ describe("getDepartmentsList", () => {
     mockCoreFindMany.mockReset().mockResolvedValue([]);
     mockTopicFindMany.mockReset().mockResolvedValue([]);
     mockQueryRawUnsafe.mockReset().mockResolvedValue([]);
+    mockOrgUnitRoleFindMany.mockReset().mockResolvedValue([]);
+    mockOrgUnitRoleAssignmentFindMany.mockReset().mockResolvedValue([]);
   });
 
   it("returns empty array when no departments", async () => {
@@ -101,6 +109,74 @@ describe("getDepartmentsList", () => {
     expect(result[0].chairSlug).toBeNull();
   });
 
+  // #2542 Phase D — MUST DO #6/#3: the browse card gets the same
+  // assignment-then-column dual-read `getCentersList` already has, plus a
+  // vocabulary-resolved `chairLabel` so `departments-grid.tsx` no longer
+  // re-derives "Chair"/"Director" from `category` itself.
+  it("chairLabel defaults to 'Chair' for a non-administrative dept with no vocabulary row seeded yet", async () => {
+    mockDepartmentFindMany.mockResolvedValue([
+      { code: "MED", name: "Medicine", slug: "medicine", category: "clinical", scholarCount: 312, chairCwid: "abc1234" },
+    ]);
+    mockScholarFindMany.mockResolvedValue([
+      { cwid: "abc1234", preferredName: "Jane Smith", slug: "jane-smith" },
+    ]);
+    const result = await getDepartmentsList();
+    expect(result[0].chairLabel).toBe("Chair");
+  });
+
+  it("chairLabel defaults to 'Director' for an administrative dept with no vocabulary row seeded yet", async () => {
+    mockDepartmentFindMany.mockResolvedValue([
+      { code: "LIB", name: "Library", slug: "library", category: "administrative", scholarCount: 5, chairCwid: "dir1234" },
+    ]);
+    mockScholarFindMany.mockResolvedValue([
+      { cwid: "dir1234", preferredName: "Dir Person", slug: "dir-person" },
+    ]);
+    const result = await getDepartmentsList();
+    expect(result[0].chairLabel).toBe("Director");
+  });
+
+  it("chairLabel is null exactly when chairName is null", async () => {
+    mockDepartmentFindMany.mockResolvedValue([
+      { code: "PED", name: "Pediatrics", slug: "pediatrics", category: "clinical", scholarCount: 80, chairCwid: null },
+    ]);
+    mockScholarFindMany.mockResolvedValue([]);
+    const result = await getDepartmentsList();
+    expect(result[0].chairLabel).toBeNull();
+  });
+
+  it("uses the vocabulary label over the category default when a steward has renamed the role", async () => {
+    mockOrgUnitRoleFindMany.mockResolvedValue([
+      { key: "chair", label: "Chairperson" },
+    ]);
+    mockDepartmentFindMany.mockResolvedValue([
+      { code: "MED", name: "Medicine", slug: "medicine", category: "clinical", scholarCount: 312, chairCwid: "abc1234" },
+    ]);
+    mockScholarFindMany.mockResolvedValue([
+      { cwid: "abc1234", preferredName: "Jane Smith", slug: "jane-smith" },
+    ]);
+    const result = await getDepartmentsList();
+    expect(result[0].chairLabel).toBe("Chairperson");
+  });
+
+  it("an OrgUnitRoleAssignment row wins over the legacy chairCwid column (dual-read)", async () => {
+    mockDepartmentFindMany.mockResolvedValue([
+      { code: "MED", name: "Medicine", slug: "medicine", category: "clinical", scholarCount: 312, chairCwid: "stale-column" },
+    ]);
+    mockOrgUnitRoleAssignmentFindMany.mockResolvedValue([
+      { entityId: "MED", cwid: "assigned001" },
+    ]);
+    mockScholarFindMany.mockResolvedValue([
+      { cwid: "assigned001", preferredName: "Assignment Chair", slug: "assignment-chair" },
+      { cwid: "stale-column", preferredName: "Stale Chair", slug: "stale-chair" },
+    ]);
+    const result = await getDepartmentsList();
+    expect(result[0].chairName).toBe("Assignment Chair");
+    // The scholar batch-fetch was scoped to the ASSIGNED cwid, not the column.
+    expect(mockScholarFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { cwid: { in: ["assigned001"] } } }),
+    );
+  });
+
   it("returns chairName: null when chairCwid is null (absence-as-default)", async () => {
     mockDepartmentFindMany.mockResolvedValue([
       { code: "PED", name: "Pediatrics", slug: "pediatrics", scholarCount: 80, chairCwid: null },
@@ -130,6 +206,8 @@ describe("getAZBuckets", () => {
     mockCoreFindMany.mockReset().mockResolvedValue([]);
     mockTopicFindMany.mockReset().mockResolvedValue([]);
     mockQueryRawUnsafe.mockReset().mockResolvedValue([]);
+    mockOrgUnitRoleFindMany.mockReset().mockResolvedValue([]);
+    mockOrgUnitRoleAssignmentFindMany.mockReset().mockResolvedValue([]);
   });
 
   it("groups scholars by last-name initial (last token of preferredName)", async () => {
@@ -221,6 +299,8 @@ describe("getBrowseData", () => {
     mockCoreFindMany.mockReset().mockResolvedValue([]);
     mockTopicFindMany.mockReset().mockResolvedValue([]);
     mockQueryRawUnsafe.mockReset().mockResolvedValue([]);
+    mockOrgUnitRoleFindMany.mockReset().mockResolvedValue([]);
+    mockOrgUnitRoleAssignmentFindMany.mockReset().mockResolvedValue([]);
   });
   afterEach(() => vi.unstubAllEnvs());
 

@@ -25,6 +25,8 @@ import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
 import { publicRoleWhere } from "@/lib/eligibility";
 import type { LeaderRole } from "@/components/scholar/leader-card";
+import { departmentLeaderRoleKey, DEPARTMENT_DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
+import { resolveUnitLeader } from "@/lib/api/unit-leader";
 import {
   isUnitSuppressed,
   loadUnitFieldOverrides,
@@ -113,9 +115,13 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
   // #540 — a retired (whole-unit-suppressed) department is a 404.
   if (await isUnitSuppressed("department", dept.code, prisma)) return null;
 
-  // #540 — field-override merge. `description`, `leaderCwid`, `leaderInterim`
-  // override the ETL columns at read time (ADR-005 Amendment 1 § A1.1).
-  // `slug` is consumed by `etl/ed`, not merged here.
+  // #540 — field-override merge. `description`, `url` override the ETL
+  // columns at read time (ADR-005 Amendment 1 § A1.1). `slug` is consumed by
+  // `etl/ed`, not merged here. `leaderCwid`/`leaderInterim` are NOT merged
+  // into this object any more — `resolveUnitLeader` below reads `overrides`
+  // directly so it can apply override-over-assignment-over-column precedence
+  // (Phase D, `lib/api/unit-leader.ts`) rather than the override-or-column
+  // precedence `mergeUnitFields` gives every other field.
   const overrides = await loadUnitFieldOverrides("department", dept.code, prisma);
   const merged = mergeUnitFields(
     { description: dept.description, url: dept.url, leaderCwid: dept.chairCwid },
@@ -124,26 +130,34 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
 
   // --- Leader (Chair for non-admin depts, Director for admin depts) ---
   // Issue #58 — administrative departments (Library) are led by a Director,
-  // not a Chair. Derive the role from category at read time so we don't need
-  // a Department.leaderRole column; the appointment-title query also widens
-  // to "Director" when the category is administrative.
-  const leaderRole: LeaderRole =
-    dept.category === "administrative" ? "Director" : "Chair";
+  // not a Chair. `departmentLeaderRoleKey` is the single place that derives
+  // the role KEY from `category`; the display LABEL comes from the vocabulary
+  // (`OrgUnitRole.label`) via `resolveUnitLeader`, so a steward rename shows
+  // up here without a code change (#2542 Phase D).
+  const roleKey = departmentLeaderRoleKey(dept.category);
+  const resolvedLeader = await resolveUnitLeader({
+    entityType: "department",
+    entityId: dept.code,
+    roleKey,
+    legacyLeaderCwid: dept.chairCwid,
+    overrides,
+    fallbackLabel: roleKey === DEPARTMENT_DIRECTOR_ROLE_KEY ? "Director" : "Chair",
+    client: prisma,
+  });
   let chair: DepartmentChair | null = null;
-  // Three-state leader (#540 SPEC § 1): null = no row → fall through; "" =
-  // explicit vacancy (curator's "no chair") → no card, do NOT auto-detect;
-  // non-empty string = use the CWID.
-  if (merged.leaderCwid && merged.leaderCwid !== "") {
+  if (resolvedLeader) {
+    const leaderRole: LeaderRole = resolvedLeader.roleLabel;
     const chairScholar = await prisma.scholar.findUnique({
-      where: { cwid: merged.leaderCwid },
+      where: { cwid: resolvedLeader.cwid },
       select: { cwid: true, preferredName: true, slug: true, primaryTitle: true },
     });
     if (chairScholar) {
       // Find the leader's most-recent active appointment with a title starting
       // "Chair" / "Chairman" / "Professor and Chair", or "Director" when the
-      // dept is administrative (issue #58).
+      // ROLE KEY (not the — possibly renamed — display label) is the
+      // administrative-department director.
       const titleStartsWith =
-        leaderRole === "Director"
+        roleKey === DEPARTMENT_DIRECTOR_ROLE_KEY
           ? [{ title: { startsWith: "Director" } }]
           : [
               { title: { startsWith: "Chair" } },
@@ -151,7 +165,7 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
             ];
       const chairAppt = await prisma.appointment.findFirst({
         where: {
-          cwid: merged.leaderCwid,
+          cwid: resolvedLeader.cwid,
           endDate: null,
           OR: titleStartsWith,
         },
@@ -166,7 +180,7 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
         primaryTitle: chairScholar.primaryTitle ?? null,
         identityImageEndpoint: identityImageEndpoint(chairScholar.cwid),
         role: leaderRole,
-        isInterim: merged.leaderInterim,
+        isInterim: resolvedLeader.interim,
       };
     } else {
       // External-leader hack (lib/external-leaders.ts): a leader CWID that is
@@ -174,7 +188,7 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
       // for Rehabilitation Medicine) renders as a non-linked name + Directory
       // photo. The CWID still drives the photo via identityImageEndpoint.
       const external = EXTERNAL_LEADERS[dept.code];
-      if (external && external.cwid === merged.leaderCwid) {
+      if (external && external.cwid === resolvedLeader.cwid) {
         chair = {
           cwid: external.cwid,
           preferredName: external.name,
@@ -183,7 +197,7 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
           primaryTitle: external.primaryTitle,
           identityImageEndpoint: identityImageEndpoint(external.cwid),
           role: leaderRole,
-          isInterim: merged.leaderInterim,
+          isInterim: resolvedLeader.interim,
         };
       }
     }

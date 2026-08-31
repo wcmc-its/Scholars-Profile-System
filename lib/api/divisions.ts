@@ -28,8 +28,11 @@ import type {
   GrantSort,
 } from "@/lib/api/dept-lists";
 import type { AuthorChip } from "@/components/publication/author-chip-row";
+import type { LeaderRole } from "@/components/scholar/leader-card";
 import { formatRoleCategory } from "@/lib/role-display";
 import { publicRoleWhere } from "@/lib/eligibility";
+import { DIVISION_CHIEF_ROLE_KEY } from "@/lib/org-unit-roles";
+import { resolveUnitLeader } from "@/lib/api/unit-leader";
 import {
   isAuthorHidden,
   isUnitSuppressed,
@@ -131,6 +134,10 @@ export type DivisionChief = {
   chiefTitle: string;
   primaryTitle: string | null;
   identityImageEndpoint: string;
+  /** Display label for the leader card — vocabulary-resolved (#2542 Phase D),
+   *  so a steward rename of "Chief" shows up without a code change. Defaults
+   *  to "Chief". */
+  role: LeaderRole;
   /** Interim/acting qualifier — `field_override(leaderInterim)` (#540 / ADR-005
    *  Amendment 1 § A1.1). Renders "Interim Chief"; default false. */
   isInterim: boolean;
@@ -179,9 +186,11 @@ async function getDivisionUncached(
   // #540 — a retired (whole-unit-suppressed) division is a 404.
   if (await isUnitSuppressed("division", division.code, prisma)) return null;
 
-  // #540 — field-override merge over `description`, `leaderCwid`,
-  // `leaderInterim` (ADR-005 Amendment 1 § A1.1). `slug` is consumed by
-  // `etl/ed`, not merged here.
+  // #540 — field-override merge over `description`, `url` (ADR-005 Amendment 1
+  // § A1.1). `slug` is consumed by `etl/ed`, not merged here.
+  // `leaderCwid`/`leaderInterim` are NOT merged into this object any more —
+  // `resolveUnitLeader` below reads `overrides` directly, same rationale as
+  // `lib/api/departments.ts` (#2542 Phase D).
   const overrides = await loadUnitFieldOverrides("division", division.code, prisma);
   const merged = mergeUnitFields(
     { description: division.description, url: division.url, leaderCwid: division.chiefCwid },
@@ -189,17 +198,28 @@ async function getDivisionUncached(
   );
 
   // Chief — three-state (#540 SPEC § 1): null = no row, "" = explicit vacancy,
-  // non-empty = the curated CWID.
+  // non-empty = the curated CWID. The label comes from the vocabulary
+  // (`OrgUnitRole.label`), falling back to "Chief" only if that row is
+  // missing — see `resolveUnitLeader`.
   let chief: DivisionChief | null = null;
-  if (merged.leaderCwid && merged.leaderCwid !== "") {
+  const resolvedLeader = await resolveUnitLeader({
+    entityType: "division",
+    entityId: division.code,
+    roleKey: DIVISION_CHIEF_ROLE_KEY,
+    legacyLeaderCwid: division.chiefCwid,
+    overrides,
+    fallbackLabel: "Chief",
+    client: prisma,
+  });
+  if (resolvedLeader) {
     const chiefScholar = await prisma.scholar.findUnique({
-      where: { cwid: merged.leaderCwid },
+      where: { cwid: resolvedLeader.cwid },
       select: { cwid: true, preferredName: true, slug: true, primaryTitle: true },
     });
     if (chiefScholar) {
       const chiefAppt = await prisma.appointment.findFirst({
         where: {
-          cwid: merged.leaderCwid,
+          cwid: resolvedLeader.cwid,
           endDate: null,
           OR: [
             { title: { startsWith: "Chief" } },
@@ -213,10 +233,11 @@ async function getDivisionUncached(
         cwid: chiefScholar.cwid,
         preferredName: chiefScholar.preferredName,
         slug: chiefScholar.slug,
-        chiefTitle: chiefAppt?.title ?? "Chief",
+        chiefTitle: chiefAppt?.title ?? resolvedLeader.roleLabel,
         primaryTitle: chiefScholar.primaryTitle,
         identityImageEndpoint: identityImageEndpoint(chiefScholar.cwid),
-        isInterim: merged.leaderInterim,
+        role: resolvedLeader.roleLabel,
+        isInterim: resolvedLeader.interim,
       };
     }
   }

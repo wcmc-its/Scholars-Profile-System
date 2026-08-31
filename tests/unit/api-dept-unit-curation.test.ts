@@ -30,6 +30,8 @@ const {
   mockFieldOverrideFindMany,
   mockSuppressionFindFirst,
   mockSuppressionFindMany,
+  mockOrgUnitRoleFindUnique,
+  mockOrgUnitRoleAssignmentFindFirst,
 } = vi.hoisted(() => ({
   mockDepartmentFindUnique: vi.fn(),
   mockScholarFindUnique: vi.fn(),
@@ -46,6 +48,8 @@ const {
   mockFieldOverrideFindMany: vi.fn(),
   mockSuppressionFindFirst: vi.fn(),
   mockSuppressionFindMany: vi.fn(),
+  mockOrgUnitRoleFindUnique: vi.fn(),
+  mockOrgUnitRoleAssignmentFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -70,6 +74,8 @@ vi.mock("@/lib/db", () => ({
       findFirst: mockSuppressionFindFirst,
       findMany: mockSuppressionFindMany,
     },
+    orgUnitRole: { findUnique: mockOrgUnitRoleFindUnique },
+    orgUnitRoleAssignment: { findFirst: mockOrgUnitRoleAssignmentFindFirst },
   },
 }));
 
@@ -109,6 +115,11 @@ function defaultBaselineMocks() {
   mockFieldOverrideFindMany.mockResolvedValue([]);
   mockSuppressionFindFirst.mockResolvedValue(null);
   mockSuppressionFindMany.mockResolvedValue([]);
+  // #2542 Phase D — no vocabulary row / no assignment row by default, so
+  // `resolveUnitLeader` falls through to the legacy `chairCwid` column,
+  // matching the pre-repoint behavior these tests were written against.
+  mockOrgUnitRoleFindUnique.mockResolvedValue(null);
+  mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue(null);
 }
 
 describe("getDepartment — unit-curation read-merge (#540)", () => {
@@ -194,6 +205,74 @@ describe("getDepartment — unit-curation read-merge (#540)", () => {
     defaultBaselineMocks();
     const result = await getDepartment("medicine");
     expect(result?.chair?.isInterim).toBe(false);
+  });
+
+  // #2542 Phase D — the render-layer repoint. Before this, `chair.role` came
+  // straight from `dept.category === "administrative" ? "Director" : "Chair"`;
+  // now it comes from `OrgUnitRole.label`, so a steward rename via /edit/roles
+  // must show up here without a code change.
+  it("resolves chair.role from the vocabulary label, not the hardcoded category ternary", async () => {
+    defaultBaselineMocks();
+    mockOrgUnitRoleFindUnique.mockResolvedValue({ label: "Chairperson" });
+
+    const result = await getDepartment("medicine");
+    expect(result?.chair?.role).toBe("Chairperson");
+    expect(mockOrgUnitRoleFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { entityType_key: { entityType: "department", key: "chair" } },
+      }),
+    );
+  });
+
+  it("falls back to 'Chair' when no vocabulary row exists yet (pre-seed behavior)", async () => {
+    defaultBaselineMocks();
+    const result = await getDepartment("medicine");
+    expect(result?.chair?.role).toBe("Chair");
+  });
+
+  // #2542 Phase D — the full override > assignment > column precedence, now
+  // that departments dual-read `OrgUnitRoleAssignment`. This is the case
+  // `tests/unit/unit-leader.test.ts` proves at the unit level for
+  // `resolveUnitLeader`; this test proves the wiring at the `getDepartment`
+  // integration level — an override must beat a REAL, already-present
+  // assignment row, not just the legacy column.
+  it("leaderCwid override wins over an existing OrgUnitRoleAssignment row, which is never even queried", async () => {
+    defaultBaselineMocks();
+    mockFieldOverrideFindMany.mockResolvedValue([
+      { fieldName: "leaderCwid", value: "ovr0001" },
+    ]);
+    mockScholarFindUnique.mockResolvedValue({
+      cwid: "ovr0001",
+      preferredName: "Curator-Set Chair",
+      slug: "curator-set-chair",
+      primaryTitle: "Professor of Medicine",
+    });
+
+    const result = await getDepartment("medicine");
+    expect(result?.chair?.cwid).toBe("ovr0001");
+    // The override short-circuits before the assignment table is even hit.
+    expect(mockOrgUnitRoleAssignmentFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("with no override, an OrgUnitRoleAssignment row wins over the legacy chairCwid column", async () => {
+    defaultBaselineMocks();
+    mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue({
+      cwid: "assign001",
+      interim: true,
+      role: { label: "Chair" },
+    });
+    mockScholarFindUnique.mockResolvedValue({
+      cwid: "assign001",
+      preferredName: "Assignment-Table Chair",
+      slug: "assignment-table-chair",
+      primaryTitle: "Professor of Medicine",
+    });
+
+    const result = await getDepartment("medicine");
+    // The scholar lookup went to the ASSIGNMENT's cwid, not DEPT.chairCwid
+    // ("etl0001" from the fixture).
+    expect(result?.chair?.cwid).toBe("assign001");
+    expect(result?.chair?.isInterim).toBe(true);
   });
 
   it("the suppression check runs against entityType='department' + dept.code", async () => {

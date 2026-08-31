@@ -52,6 +52,32 @@ export const CENTER_ENTITY_TYPE = "center" satisfies OrgUnitRoleEntityType;
 export const DIRECTOR_ROLE_KEY = "director";
 
 /**
+ * Stable key of the department leadership role for every non-administrative
+ * `category` (`clinical` | `mixed` | `basic`). Same literal a curator would
+ * expect to see today; seeded so `departmentLeaderRoleKey` below has
+ * something to return instead of the three ternary sites each deciding it
+ * independently. `as const` so that function can return the literal union
+ * `"chair" | "director"` rather than a widened `string`.
+ */
+export const DEPARTMENT_CHAIR_ROLE_KEY = "chair" as const;
+
+/**
+ * Stable key of the department leadership role for `category ===
+ * "administrative"` departments (e.g. the Library). Coincidentally the SAME
+ * literal as `DIRECTOR_ROLE_KEY` above — the two are unrelated: this one is
+ * scoped to `entityType: "department"` in the vocabulary's composite PK, so
+ * the collision is harmless and not an alias.
+ */
+export const DEPARTMENT_DIRECTOR_ROLE_KEY = "director" as const;
+
+/**
+ * Stable key of the division leadership role. Divisions have exactly one
+ * leadership key — no category ternary exists for them — so this is a plain
+ * constant rather than a function.
+ */
+export const DIVISION_CHIEF_ROLE_KEY = "chief";
+
+/**
  * Stable key of the seeded membership role that an unclassified legacy row
  * migrates to. Deriving NULL from it (see `deriveMembershipType`) is what keeps
  * the migration invisible: the public roster's badge and type facet both read
@@ -73,17 +99,63 @@ export type OrgUnitRoleSeed = {
 /**
  * The default vocabulary per unit kind.
  *
- * Only `center` is populated. The other kinds are declared so that adding one is
- * DATA rather than a refactor — but seeding a `chair` row nothing reads would be
- * dead data, so they stay empty until the phase that repoints the hardcoded
- * leader nouns onto this table. When that lands, `department` gets BOTH `chair`
- * and `director` (Medicine holds one, the Library the other) and the
- * `category === "administrative"` ternary duplicated across four sites has
- * nothing left to decide.
+ * `center`, `department`, `division` and `core` are populated. `center_program`
+ * stays empty — folding `CenterProgramLeader` in is a later phase — and an
+ * empty list there is genuinely dead data rather than a hedge, per the
+ * comment on that phase in `OrgUnitRole.scope`.
+ *
+ * `department` seeds BOTH `chair` and `director` (Medicine holds one, the
+ * Library the other); `departmentLeaderRoleKey` below is the single place
+ * that decides which one a given department gets. Previously this comment
+ * claimed the `category === "administrative" ? "Director" : "Chair"` ternary
+ * was "duplicated across four sites" — that count was WRONG. Scoped to just
+ * the ternary-plus-hardcoded-"Chief"-literal universe, there are exactly
+ * THREE ternary sites (`lib/api/departments.ts`,
+ * `components/browse/departments-grid.tsx`, and — a different deploy path,
+ * since ETL code ships on ECR push rather than `cdk deploy` —
+ * `etl/ed/index.ts`), plus ONE hardcoded literal with no ternary at all
+ * (`components/division/division-page.tsx`, `role="Chief"`). Four call sites
+ * in THAT universe, only three of which are a ternary — a narrower count
+ * than the full repoint list just below, which also covers sites that
+ * hardcoded a leader noun some other way, with no ternary in sight.
+ * `division` seeds only `chief` — divisions have no administrative carve-out.
+ * `core` seeds only `director`, with `singleHolder: false` — see the comment
+ * on that entry below for why, it is not a copy-paste of the department rule.
+ *
+ * Seeding these rows here is not, by itself, what changes what any page
+ * renders — `orgUnitRoleSeedRows` only makes the vocabulary exist. This same
+ * phase does the repointing too, at more call sites than the four above:
+ * those four had the ternary or the "Chief" literal; several more just
+ * hardcoded a leader noun unconditionally, no ternary to spot.
+ * Ternary/literal sites repointed: `lib/api/departments.ts` and
+ * `divisions.ts` resolve the leader via `resolveUnitLeader`
+ * (`lib/api/unit-leader.ts`) instead of reading `chairCwid` / `chiefCwid`
+ * directly; `components/browse/departments-grid.tsx` now reads the
+ * `chairLabel` field off its data source instead of its own ternary;
+ * `etl/ed/index.ts` dual-writes an `OrgUnitRoleAssignment` row
+ * (`writeUnitLeaderAssignment`) alongside every legacy-column write it
+ * already made; and the division page renders `detail.chief.role` in place
+ * of the hardcoded "Chief" literal. Unconditional-noun sites repointed, none
+ * of which had a ternary: `lib/api/data-quality.ts` (`classifyLeadership`'s
+ * label parameter, plus the `chairLabelByCwid` build that feeds it, both via
+ * `departmentLeaderRoleKey` — previously an unconditional `"Chair"`);
+ * `lib/api/profile.ts` (the leadership-title line, previously an
+ * unconditional `` `Chair, ${dept}` ``); `lib/edit/overview-facts.ts` (the FK
+ * leadership candidate, previously the same unconditional string); and
+ * `lib/api/browse.ts` (adds the `chairLabel` field the browse grid above now
+ * reads, vocabulary-resolved). What this phase does NOT do: backfill
+ * `OrgUnitRoleAssignment` rows for units that already have a leader today —
+ * that is `scripts/backfills/2026-08-31-dept-div-role-vocabulary.ts`, a
+ * separate run against a given environment with its own rollout-ordering
+ * constraint (see that script's docblock), not something seeding or the
+ * repointed call sites do on their own.
  *
  * The center set is MIGRATION-PRESERVING, not aspirational:
- *   - `director` is the migration target for `Center.directorCwid`, and matches
- *     the string `components/center/center-page.tsx` hardcodes for every center.
+ *   - `director` is the migration target for `Center.directorCwid`. As of
+ *     Phase B, `components/center/center-page.tsx:148-153` hardcodes nothing
+ *     — it renders `leader.roleLabel` for every leadership-group,
+ *     profileTitle-eligible role holder, in vocabulary order, so this entry's
+ *     `label` is what actually reaches the page.
  *   - `research` / `clinical` seed under the SAME literals as the
  *     `CenterMembershipType` enum, so `CenterCollabCandidate.isCurrentMember`
  *     (which matches the literal `research`) reports the same NCI CCSG
@@ -160,11 +232,80 @@ export const DEFAULT_ORG_UNIT_ROLES: Readonly<
       profileTitle: false,
     },
   ],
-  department: [],
-  division: [],
-  core: [],
+  department: [
+    {
+      key: DEPARTMENT_CHAIR_ROLE_KEY,
+      label: "Chair",
+      group: "leadership",
+      scope: "unit",
+      singleHolder: true,
+      sortOrder: 10,
+      profileTitle: true,
+    },
+    {
+      key: DEPARTMENT_DIRECTOR_ROLE_KEY,
+      label: "Director",
+      group: "leadership",
+      scope: "unit",
+      singleHolder: true,
+      sortOrder: 20,
+      profileTitle: true,
+    },
+  ],
+  division: [
+    {
+      key: DIVISION_CHIEF_ROLE_KEY,
+      label: "Chief",
+      group: "leadership",
+      scope: "unit",
+      singleHolder: true,
+      sortOrder: 10,
+      profileTitle: true,
+    },
+  ],
+  core: [
+    {
+      key: DIRECTOR_ROLE_KEY,
+      label: "Director",
+      group: "leadership",
+      scope: "unit",
+      // singleHolder is FALSE here on purpose, unlike department/division/
+      // center's director-shaped roles. `CoreLeader`'s own docblock
+      // (prisma/schema.prisma) says it plainly: "a core may be co-led" —
+      // `CoreLeader` is a 0..N table for exactly that reason, matching
+      // `CenterProgramLeader`. Seeding `singleHolder: true` here would assert
+      // an invariant the source-of-truth model already contradicts.
+      singleHolder: false,
+      sortOrder: 10,
+      profileTitle: true,
+    },
+  ],
   center_program: [],
 };
+
+/**
+ * The department leadership role key for a given `Department.category`.
+ *
+ * The single place that decides Chair vs. Director, so the three call sites
+ * that used to each own a copy of the `category === "administrative" ?
+ * "Director" : "Chair"` ternary (`lib/api/departments.ts`,
+ * `components/browse/departments-grid.tsx`, `etl/ed/index.ts`) can import
+ * this instead of re-deciding it. `director` only for `administrative`;
+ * `clinical`, `mixed` and `basic` all return `chair` — matching the four live
+ * `category` values confirmed against prod.
+ *
+ * Takes `category: string`, not the narrower `DepartmentCategory` union type,
+ * because the column itself is an unconstrained VARCHAR
+ * (`Department.category`) and a row with a category this function has never
+ * seen must still resolve to something rather than throw — it resolves to
+ * `chair`, the same default `etl/ed/index.ts` already falls back to for an
+ * unrecognized category.
+ */
+export function departmentLeaderRoleKey(
+  category: string,
+): typeof DEPARTMENT_CHAIR_ROLE_KEY | typeof DEPARTMENT_DIRECTOR_ROLE_KEY {
+  return category === "administrative" ? DEPARTMENT_DIRECTOR_ROLE_KEY : DEPARTMENT_CHAIR_ROLE_KEY;
+}
 
 /**
  * `CenterMembership.membershipType` is DERIVED from `membershipRoleKey` and
