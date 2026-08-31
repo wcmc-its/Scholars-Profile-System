@@ -310,8 +310,8 @@ export function resolveFundingTabMsm(): boolean {
  * (and, in future, the chief of a queried division) above other dept members.
  * The signal source is `leadership.chairOf` / `leadership.chiefOf` on the
  * scholars-people doc, populated from `Department.chairCwid` /
- * `Division.chiefCwid` (which already reflect ADR-002 prediction + Path C
- * manual overrides).
+ * `Division.chiefCwid` (which already reflect ADR-002 prediction + the
+ * `field_override(leaderCwid)` precedence consult, #2560).
  *
  * Default `on` — confirmed against the local §3.2 eval (2026-05-28) on a
  * reindexed cluster: the boost promotes the actual chair to rank-1 on

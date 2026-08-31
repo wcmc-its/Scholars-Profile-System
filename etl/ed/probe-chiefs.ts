@@ -121,9 +121,13 @@ async function main() {
   if (ratio >= 0.8) {
     console.log("  → Path B viable. Ship manager-graph detection.");
   } else if (yes >= no) {
-    console.log("  → Path B borderline. Run with a larger sample or rely on Path C overrides.");
+    console.log(
+      "  → Path B borderline. Run with a larger sample, or rely on curated field_override(leaderCwid) rows.",
+    );
   } else {
-    console.log("  → Path B not viable. Rely on Path C overrides only (set SCHOLARS_DISABLE_CHIEF_DETECTION=true).");
+    console.log(
+      "  → Path B not viable. Rely on curated field_override(leaderCwid) rows only (set SCHOLARS_DISABLE_CHIEF_DETECTION=true).",
+    );
   }
 
   await disconnect();

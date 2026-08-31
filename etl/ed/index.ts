@@ -20,9 +20,6 @@
  *
  * Usage: `npm run etl:ed`
  */
-import { promises as fs } from "node:fs";
-import path from "node:path";
-
 import { db } from "../../lib/db";
 import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { detectDivisionChief, type ChiefVerdict } from "./chief-detection";
@@ -766,8 +763,9 @@ async function main() {
     //   - postdoc mentor lookup (issue #5)
     //   - division-chief detection (issue #16, Path B)
     // Best-effort: a fetch failure should not abort the whole ETL — chief
-    // detection and the manual override pass still run, the former just
-    // skips Path B and the override file fills in.
+    // detection still runs (it just skips Path B with an empty employee
+    // map), and the `field_override(leaderCwid)` precedence consult still
+    // applies regardless (#2560).
     console.log("Fetching active employee SOR records from ou=employees SOR...");
     let employeeRecords: Awaited<ReturnType<typeof fetchActiveEmployeeRecords>> = [];
     // Tracked separately from `employeeRecords.length` so a swallowed fetch
@@ -1853,7 +1851,9 @@ async function main() {
     //
     // Disable with SCHOLARS_DISABLE_CHIEF_DETECTION=true if the probe
     // (etl/ed/probe-chiefs.ts) shows manager-graph is too noisy at WCM.
-    // Path C (override file) still runs after, so manual entries always win.
+    // The `field_override` precedence consult below still runs in both the
+    // if- and else-branches, so manual entries always win regardless (the
+    // old file-based Path C escape hatch it superseded is retired, #2560).
     const chiefDetectionDisabled =
       process.env.SCHOLARS_DISABLE_CHIEF_DETECTION === "true";
 
@@ -1890,7 +1890,7 @@ async function main() {
       const chiefDivsToClear: string[] = [];
       for (const div of divisionsForChief) {
         // #540 — a `field_override(division, code, 'leaderCwid')` row wins
-        // over Path B and Path C both. Non-empty -> that CWID; "" ->
+        // over Path B auto-detection. Non-empty -> that CWID; "" ->
         // null (explicit vacancy, no fallback).
         const leaderOverride = resolveUnitLeaderForETL(
           div.code,
@@ -1923,8 +1923,10 @@ async function main() {
         });
         chiefVerdictTally[result.verdict] += 1;
         // Threshold gate: only HIGH and MEDIUM auto-write the pick.
-        // LOW/NONE/GAP all clear to null — the override file (Path C) is
-        // the escape hatch for divisions Path B can't decide on.
+        // LOW/NONE/GAP all clear to null — a curated `field_override`
+        // (via /edit) is the escape hatch for divisions Path B can't
+        // decide on. (The old file-based Path C escape hatch is retired,
+        // #2560.)
         if (result.valueToWrite) {
           chiefCandidates.push({ divCode: div.code, cwid: result.valueToWrite });
         } else {
@@ -2051,88 +2053,6 @@ async function main() {
           );
         }
       }
-    }
-
-    // Phase 4 — D-04 division chief manual overrides (Path C, always-on).
-    //
-    // Reads data/division-chiefs.txt (TSV: divCode<TAB>cwid<TAB>notes) and
-    // upserts Division.chiefCwid. A cwid of `-` clears the slot (vacancy).
-    // Overrides always win over Path B — they're the escape hatch for
-    // co-chiefs, vacancies, acting/interim cases, and any ambiguity Path B
-    // can't resolve.
-    const overridePath = path.resolve("data/division-chiefs.txt");
-    const overrideRows: Array<{ divCode: string; cwid: string | null; note: string }> = [];
-    try {
-      const content = await fs.readFile(overridePath, "utf8");
-      for (const rawLine of content.split("\n")) {
-        const line = rawLine.replace(/\r$/, "");
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#")) continue;
-        const parts = line.split("\t");
-        const divCode = parts[0]?.trim();
-        const cwidRaw = parts[1]?.trim();
-        if (!divCode || !cwidRaw) continue;
-        const cwid =
-          cwidRaw === "-" ? null : cwidRaw.toLowerCase();
-        const note = parts.slice(2).join("\t").trim();
-        overrideRows.push({ divCode, cwid, note });
-      }
-    } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      if (e.code !== "ENOENT") throw err;
-    }
-
-    if (overrideRows.length > 0) {
-      const knownDivCodes = new Set(divisionsForChief.map((d) => d.code));
-      const knownScholarCwids = new Set(
-        (await db.write.scholar.findMany({ select: { cwid: true } })).map(
-          (s) => s.cwid,
-        ),
-      );
-      let overrideApplied = 0;
-      let overrideSkipped = 0;
-      for (const row of overrideRows) {
-        if (!knownDivCodes.has(row.divCode)) {
-          console.warn(
-            `[ED] division-chiefs override skipped — division ${row.divCode} not found`,
-          );
-          overrideSkipped += 1;
-          continue;
-        }
-        // #540 — `field_override(division, code, 'leaderCwid')` is the
-        // structured successor to this file. When a row exists for this
-        // division, the override-consult above has already written the
-        // authoritative value; Path C must not stomp it (the explicit
-        // "" vacancy case in particular). Phase 9 will backfill this
-        // file's contents into `field_override` rows and retire Path C.
-        if (unitOverrides.divLeaders.has(row.divCode)) {
-          overrideSkipped += 1;
-          continue;
-        }
-        if (row.cwid && !knownScholarCwids.has(row.cwid)) {
-          console.warn(
-            `[ED] division-chiefs override skipped — cwid '${row.cwid}' not in scholar table (div ${row.divCode})`,
-          );
-          overrideSkipped += 1;
-          continue;
-        }
-        await db.write.division.update({
-          where: { code: row.divCode },
-          data: { chiefCwid: row.cwid },
-        });
-        // #2542 Phase D — dual-write from the SAME Path-C resolved value.
-        await writeUnitLeaderAssignment(db.write, {
-          entityType: "division",
-          entityId: row.divCode,
-          roleKey: DIVISION_CHIEF_ROLE_KEY,
-          cwid: row.cwid,
-        });
-        overrideApplied += 1;
-      }
-      console.log(
-        `[ED] Path C: applied ${overrideApplied}/${overrideRows.length} division-chiefs overrides ` +
-          `(${overrideSkipped} skipped)`,
-      );
     }
 
     // Phase 3 — scholarCount refresh.

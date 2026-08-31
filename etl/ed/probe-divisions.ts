@@ -5,7 +5,8 @@
  * (without re-running the ETL) and rank them by signal strength. Output is a
  * per-division verdict so a human can decide:
  *   - which auto-detected chiefs to trust
- *   - which divisions need a manual entry in data/division-chiefs.txt
+ *   - which divisions need a curated `field_override(division, code,
+ *     'leaderCwid')` row (via /edit) to pin or clear the chief
  *
  * Why in-memory: the live `Department.chairCwid` column may be stale (e.g.
  * Medicine's chair didn't match the old regex), so the probe applies the

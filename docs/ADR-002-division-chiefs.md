@@ -1,10 +1,10 @@
 # docs/ADR-002 — Populating `Division.chiefCwid`
 
-**Status:** Accepted
+**Status:** Accepted. Path A (chair detection) and Path B (manager-graph detection) remain live and unchanged. Path C (the manual override file) is retired: its ETL read/write branch was deleted under [issue #2560](https://github.com/wcmc-its/Scholars-Profile-System/issues/2560) — it never executed in any deployed run (`data/division-chiefs.txt` was never tracked in git), so no `Division.chiefCwid` value was ever set by it.
 **Date:** 2026-05-07
 **Authors:** Scholars Profile System development team
 **Supersedes:** —
-**Superseded by:** —
+**Superseded by:** [unit-curation-spec.md](./unit-curation-spec.md) — Path C only, per [#2560](https://github.com/wcmc-its/Scholars-Profile-System/issues/2560). Paths A/B are unaffected and this ADR otherwise stands.
 **Tracks:** [issue #16](https://github.com/wcmc-its/Scholars-Profile-System/issues/16)
 
 ---
@@ -50,9 +50,15 @@ Combine three mechanisms, ordered by precedence:
    → primary-in-division count → earliest start date. Gated by a
    confidence threshold (see below).
 
-3. **Path C — manual override file (always-on).** `data/division-chiefs.txt`
-   carries hand-curated overrides. Always wins over Path B. A `-` in the
-   CWID column clears the slot (vacancies, interim).
+3. **Path C — manual override file. Retired, [#2560](https://github.com/wcmc-its/Scholars-Profile-System/issues/2560).**
+   `data/division-chiefs.txt` was meant to carry hand-curated overrides
+   that always won over Path B, with a `-` in the CWID column clearing the
+   slot (vacancies, interim) — but the file was never tracked in git and
+   `.gitignore` excludes it, so it never existed in any deployed image and
+   this mechanism never wrote a `Division.chiefCwid` value. Its successor,
+   the `field_override(division, code, 'leaderCwid')` precedence consult
+   (see [unit-curation-spec.md](./unit-curation-spec.md)), now fills that
+   role and the dead code was deleted.
 
 ### Confidence verdict scale (Path B)
 
@@ -67,9 +73,13 @@ the production ETL and the read-only probe. Verdicts:
 | `NONE` | Members exist but none report to the parent chair | Clear to `null` |
 | `GAP` | No parent chair detected, or no division members in SOR | Clear to `null` |
 
-The override file (Path C) runs **after** Path B and overwrites the result
-unconditionally — so a manual entry always wins over an auto-decision, and
-LOW/NONE/GAP rows stay `null` only until a human curates them.
+The override file (Path C) was meant to run **after** Path B and overwrite
+the result unconditionally, so a manual entry always won over an
+auto-decision — but the file never existed in a deployed run, so it never
+overwrote anything (see Path C entry above). LOW/NONE/GAP rows now stay
+`null` until curated through the `field_override` precedence consult
+(`/edit`, see [unit-curation-spec.md](./unit-curation-spec.md)), Path C's
+functional successor.
 
 ### Why a confidence threshold
 
@@ -105,7 +115,10 @@ for the long tail Path B can't decide.
 ### Negative / accepted
 
 - Path B is wrong for Surgery (and similar depts where chiefs don't report
-  to the chair). Mitigated by Path C overrides.
+  to the chair). Path C was intended to mitigate this via a manual override
+  file, but the file never existed in a deployed run (see Path C entry
+  above); mitigation now happens through the `field_override` precedence
+  consult instead.
 - Some chiefs' SOR appointment rows don't carry a level2 org-unit, so their
   divisions don't exist in the DB at all and overrides cannot attach. As
   of this ADR, this affects Colorectal Surgery (Fichera), Child Neurology
@@ -120,19 +133,24 @@ for the long tail Path B can't decide.
 
 ### Adding or correcting an override
 
-Edit `data/division-chiefs.txt`:
+**Retired ([#2560](https://github.com/wcmc-its/Scholars-Profile-System/issues/2560)).**
+The `data/division-chiefs.txt` file described below was never a working
+mechanism in any deployed environment (see Path C entry under Decision).
+To pin or clear a division chief today, set a
+`field_override(division, code, 'leaderCwid')` row — through the
+`/edit` org-unit curation UI, or directly — per
+[unit-curation-spec.md](./unit-curation-spec.md). The historical file
+format is preserved below for the record:
 
 ```
 {division_code}<TAB>{cwid_or_dash}<TAB>{optional_notes}
 ```
 
-- Lines starting with `#` and blank lines are ignored.
-- Use `-` in the CWID column to explicitly null out a chief (vacancy /
+- Lines starting with `#` and blank lines were ignored.
+- `-` in the CWID column would explicitly null out a chief (vacancy /
   interim).
-- Validation runs at ETL time: rows pointing at a missing division code
-  or unknown CWID are skipped with a warning, not failure.
-
-The next `npm run etl:ed` picks it up automatically.
+- Validation ran at ETL time: rows pointing at a missing division code
+  or unknown CWID were skipped with a warning, not failure.
 
 ### Inspecting current state
 
@@ -160,8 +178,10 @@ If a future probe shows manager-graph has gone systemically noisy, set:
 SCHOLARS_DISABLE_CHIEF_DETECTION=true
 ```
 
-in the ETL environment. Path C still runs, so the override file remains
-authoritative. ETL log lines confirm the skip.
+in the ETL environment. The `field_override` precedence consult still runs
+regardless (Path C's successor, [#2560](https://github.com/wcmc-its/Scholars-Profile-System/issues/2560)),
+so a curated override remains authoritative even with Path B disabled. ETL
+log lines confirm the skip.
 
 ## Implementation
 
@@ -169,10 +189,10 @@ authoritative. ETL log lines confirm the skip.
 |---|---|
 | `lib/sources/ldap.ts` | `fetchActiveEmployeeRecords()`, `parseManagerCwid()`, `collapseEmployeeRecordsByCwid()` — pull and normalize the employee SOR. |
 | `etl/ed/chief-detection.ts` | `detectDivisionChief()` and `isChairTitleFor()` — shared verdict + chair regex used by ETL and probe. |
-| `etl/ed/index.ts` | Path A regex fix (chair detection block), Path B detection loop with verdict gate, Path C override loader. |
+| `etl/ed/index.ts` | Path A regex fix (chair detection block), Path B detection loop with verdict gate. Path C's override loader was removed here, [#2560](https://github.com/wcmc-its/Scholars-Profile-System/issues/2560). |
 | `etl/ed/probe-divisions.ts` | Read-only per-division report (uses shared helper). |
 | `etl/ed/probe-chiefs.ts` | Read-only per-CWID viability probe. |
-| `data/division-chiefs.txt` | Override file (TSV). |
+| `data/division-chiefs.txt` | Path C override file (TSV). Never tracked in git; retired, [#2560](https://github.com/wcmc-its/Scholars-Profile-System/issues/2560). |
 
 ## Future work
 

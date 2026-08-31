@@ -852,12 +852,14 @@ export function buildPublicationDoc(
  *     `centerCodesByCwid` preload is dropped.
  *   - **`chairedDepartments`** (issue #532) — `Department` rows where
  *     `chairCwid = s.cwid`. The DB column already reflects ADR-002 chair
- *     detection AND the Path C manual override, so reading it here surfaces
- *     the authoritative chair set with no new ingestion. Usually 0 rows;
- *     occasionally 1; rarely >1 (cross-dept chairs do exist at WCM).
+ *     detection AND the `field_override(leaderCwid)` precedence consult
+ *     (#2560), so reading it here surfaces the authoritative chair set with
+ *     no new ingestion. Usually 0 rows; occasionally 1; rarely >1 (cross-dept
+ *     chairs do exist at WCM).
  *   - **`chieffedDivisions`** (issue #532) — same shape for
- *     `Division.chiefCwid`. ADR-002 Path B (`detectDivisionChief`) + Path C
- *     overrides have already settled the value the column carries.
+ *     `Division.chiefCwid`. ADR-002 Path B (`detectDivisionChief`) + the
+ *     `field_override(leaderCwid)` consult have already settled the value
+ *     the column carries.
  *
  * Returns `null` when the scholar is not indexable (forward-compat: with
  * current callers the scholar row is always `PEOPLE_INDEX_WHERE`-filtered,
@@ -1444,11 +1446,12 @@ export async function buildPeopleDoc(
 
   // Issue #532 — leadership sidecar queries. `Department.chairCwid` and
   // `Division.chiefCwid` are populated by the ED ETL with override-applied
-  // values (ADR-002 Path B prediction + Path C `data/division-chiefs.txt`
-  // manual overrides), so reading them here yields the authoritative chair /
-  // chief set. Both queries are point lookups on indexed columns; the
-  // expected row count for any one scholar is 0 (almost all), 1 (chairs /
-  // chiefs), or rarely >1 (cross-dept appointments). Stored lowercased
+  // values (ADR-002 Path B prediction + the `field_override(leaderCwid)`
+  // precedence consult, #2560), so reading them here yields the
+  // authoritative chair / chief set. Both queries are point lookups on
+  // indexed columns; the expected row count for any one scholar is 0
+  // (almost all), 1 (chairs / chiefs), or rarely >1 (cross-dept
+  // appointments). Stored lowercased
   // because the dept-template's `function_score` term filter is matched
   // against `query.trim().toLowerCase()` and the classifier's
   // `knownDepartments` set is itself lowercased.
