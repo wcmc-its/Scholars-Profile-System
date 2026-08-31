@@ -3,22 +3,31 @@
  * steward-owned editor for `OrgUnitRole`.
  *
  * One roster row per `OrgUnitRole` entry, ordered by (entityType, roleGroup,
- * sortOrder, key) — the same grouping the unit page itself renders in — with a
- * `holderCount`: how many assignments currently reference that (entityType,
- * key). The confirm-on-rename dialog reports this as "this rename affects N
- * units", so it must be a real count, not a placeholder.
+ * sortOrder, key) — the same grouping the unit page itself renders in — with
+ * TWO live counts, deliberately kept apart because they answer different
+ * questions and only coincide for a `singleHolder` role:
+ *   - `holderCount`: how many PEOPLE currently hold this role — assignment
+ *     rows plus membership rows referencing that (entityType, key).
+ *   - `unitCount`: how many DISTINCT units (by entity id / center code) have
+ *     at least one holder of that role. A role held by 400 people across 3
+ *     centers has `holderCount: 400, unitCount: 3` — neither number alone is
+ *     the "blast radius" of a rename; the confirm dialog states both.
  *
  * TWO holder sources, neither of which is a single Prisma relation on
  * `OrgUnitRole` today:
  *   - `OrgUnitRoleAssignment` (the `leadershipHolders` relation) — the
- *     leadership half.
- *   - `CenterMembership.membershipRoleKey` — the membership half. This has NO
+ *     leadership half, one row per (entityType, entityId, roleKey, cwid).
+ *   - `CenterMembership.membershipRoleKey` — the membership half, one row per
+ *     (centerCode, roleEntityType, membershipRoleKey, cwid). This has NO
  *     Prisma relation yet (`prisma/schema.prisma`, `CenterMembership`: "No
  *     relation to OrgUnitRole YET" — the FK lands in a follow-up contract
  *     migration), so it is read directly off the column pair
  *     (`roleEntityType`, `membershipRoleKey`) rather than via `include`.
- * Both are read as a single grouped query (`groupBy`) rather than N+1 per-row
- * lookups.
+ * Both are read as a single grouped query each (`groupBy`, widened to include
+ * the unit-identifying column — `entityId` / `centerCode` — alongside the
+ * role columns) rather than N+1 per-row lookups; `holderCount` and
+ * `unitCount` are both derived from those same two result sets, so this is
+ * still exactly two round trips.
  *
  * DB-CALLER-INJECTED ON PURPOSE. `buildRoleRoster` takes the Prisma client as
  * an explicit parameter rather than defaulting it from `lib/db.ts` (contrast
@@ -48,8 +57,14 @@ export interface OrgUnitRoleRosterRow {
   profileTitle: boolean;
   source: string;
   /** Assignments (leadership) + memberships (membership) currently keyed to
-   *  this (entityType, key) — see the module docblock for the two sources. */
+   *  this (entityType, key) — a count of PEOPLE. See the module docblock. */
   holderCount: number;
+  /** Distinct units (by entity id / center code) with at least one holder of
+   *  this (entityType, key). A count of UNITS, not people — see the module
+   *  docblock. Always `<= holderCount`, equal to it exactly when every
+   *  holding unit has exactly one holder (the common case for a
+   *  `singleHolder` role). */
+  unitCount: number;
 }
 
 /** `"{entityType}:{key}"` — the join key between the vocabulary rows and the
@@ -76,38 +91,57 @@ export async function buildRoleRoster(
       ],
     }),
     db.orgUnitRoleAssignment.groupBy({
-      by: ["entityType", "roleKey"],
+      by: ["entityType", "roleKey", "entityId"],
       _count: { _all: true },
     }),
     db.centerMembership.groupBy({
-      by: ["roleEntityType", "membershipRoleKey"],
+      by: ["roleEntityType", "membershipRoleKey", "centerCode"],
       _count: { _all: true },
     }),
   ]);
 
   const holderCounts = new Map<string, number>();
+  // Distinct holding units per role key — a `Set` per key, sized at the end.
+  const unitsByKey = new Map<string, Set<string>>();
+
+  function addHolders(k: string, count: number, unitId: string): void {
+    holderCounts.set(k, (holderCounts.get(k) ?? 0) + count);
+    let units = unitsByKey.get(k);
+    if (!units) {
+      units = new Set();
+      unitsByKey.set(k, units);
+    }
+    units.add(unitId);
+  }
+
   for (const row of leadershipCounts) {
-    const k = rosterKey(row.entityType, row.roleKey);
-    holderCounts.set(k, (holderCounts.get(k) ?? 0) + row._count._all);
+    addHolders(rosterKey(row.entityType, row.roleKey), row._count._all, row.entityId);
   }
   for (const row of membershipCounts) {
     // A pre-backfill row (or one with no membership role at all) groups under
     // a null `membershipRoleKey` — it references no vocabulary entry, so skip it.
     if (row.membershipRoleKey === null) continue;
-    const k = rosterKey(row.roleEntityType, row.membershipRoleKey);
-    holderCounts.set(k, (holderCounts.get(k) ?? 0) + row._count._all);
+    addHolders(
+      rosterKey(row.roleEntityType, row.membershipRoleKey),
+      row._count._all,
+      row.centerCode,
+    );
   }
 
-  return roles.map((role) => ({
-    key: role.key,
-    entityType: role.entityType,
-    label: role.label,
-    roleGroup: role.roleGroup,
-    scope: role.scope,
-    singleHolder: role.singleHolder,
-    sortOrder: role.sortOrder,
-    profileTitle: role.profileTitle,
-    source: role.source,
-    holderCount: holderCounts.get(rosterKey(role.entityType, role.key)) ?? 0,
-  }));
+  return roles.map((role) => {
+    const k = rosterKey(role.entityType, role.key);
+    return {
+      key: role.key,
+      entityType: role.entityType,
+      label: role.label,
+      roleGroup: role.roleGroup,
+      scope: role.scope,
+      singleHolder: role.singleHolder,
+      sortOrder: role.sortOrder,
+      profileTitle: role.profileTitle,
+      source: role.source,
+      holderCount: holderCounts.get(k) ?? 0,
+      unitCount: unitsByKey.get(k)?.size ?? 0,
+    };
+  });
 }

@@ -22,10 +22,16 @@ type RoleRow = {
   source: string;
 };
 
-type AssignmentGroup = { entityType: string; roleKey: string; _count: { _all: number } };
+type AssignmentGroup = {
+  entityType: string;
+  roleKey: string;
+  entityId: string;
+  _count: { _all: number };
+};
 type MembershipGroup = {
   roleEntityType: string;
   membershipRoleKey: string | null;
+  centerCode: string;
   _count: { _all: number };
 };
 
@@ -93,7 +99,9 @@ describe("buildRoleRoster", () => {
     const rows = await buildRoleRoster(
       makeDb({
         roles: [role("center", "director", "leadership", 10)],
-        leadershipCounts: [{ entityType: "center", roleKey: "director", _count: { _all: 3 } }],
+        leadershipCounts: [
+          { entityType: "center", roleKey: "director", entityId: "ctr-1", _count: { _all: 3 } },
+        ],
       }),
     );
     expect(rows[0].holderCount).toBe(3);
@@ -104,7 +112,12 @@ describe("buildRoleRoster", () => {
       makeDb({
         roles: [role("center", "research", "membership", 20)],
         membershipCounts: [
-          { roleEntityType: "center", membershipRoleKey: "research", _count: { _all: 42 } },
+          {
+            roleEntityType: "center",
+            membershipRoleKey: "research",
+            centerCode: "ctr-1",
+            _count: { _all: 42 },
+          },
         ],
       }),
     );
@@ -115,11 +128,18 @@ describe("buildRoleRoster", () => {
     const rows = await buildRoleRoster(
       makeDb({
         roles: [role("center", "director", "leadership", 10)],
-        leadershipCounts: [{ entityType: "center", roleKey: "director", _count: { _all: 1 } }],
+        leadershipCounts: [
+          { entityType: "center", roleKey: "director", entityId: "ctr-1", _count: { _all: 1 } },
+        ],
         // Not realistic for `director` specifically, but exercises the sum —
         // the two sources are independent counts keyed the same way.
         membershipCounts: [
-          { roleEntityType: "center", membershipRoleKey: "director", _count: { _all: 2 } },
+          {
+            roleEntityType: "center",
+            membershipRoleKey: "director",
+            centerCode: "ctr-1",
+            _count: { _all: 2 },
+          },
         ],
       }),
     );
@@ -138,7 +158,12 @@ describe("buildRoleRoster", () => {
       makeDb({
         roles: [role("center", "member", "membership", 10)],
         membershipCounts: [
-          { roleEntityType: "center", membershipRoleKey: null, _count: { _all: 7 } },
+          {
+            roleEntityType: "center",
+            membershipRoleKey: null,
+            centerCode: "ctr-1",
+            _count: { _all: 7 },
+          },
         ],
       }),
     );
@@ -152,7 +177,9 @@ describe("buildRoleRoster", () => {
           role("center", "director", "leadership", 10),
           role("department", "director", "leadership", 10),
         ],
-        leadershipCounts: [{ entityType: "center", roleKey: "director", _count: { _all: 5 } }],
+        leadershipCounts: [
+          { entityType: "center", roleKey: "director", entityId: "ctr-1", _count: { _all: 5 } },
+        ],
       }),
     );
     const center = rows.find((r) => r.entityType === "center")!;
@@ -186,6 +213,114 @@ describe("buildRoleRoster", () => {
       profileTitle: true,
       source: "manual",
       holderCount: 0,
+      unitCount: 0,
     });
+  });
+
+  // --- unitCount: the distinct-unit grain the confirm dialog needs alongside
+  // holderCount, so "400 people across 3 centers" doesn't collapse into the
+  // false "400 centers". Against the OLD single-count logic (no `unitCount`
+  // field at all, `holderCount` unchanged) every `unitCount` assertion below
+  // fails outright (`undefined` !== the expected number) — that is the
+  // mutation proof: reverting the groupBy widening and the `unitsByKey`
+  // tracking in `buildRoleRoster` breaks every one of these.
+
+  it("a membership role spanning several units: holderCount sums people, unitCount counts distinct units (400-across-3 shape)", async () => {
+    const rows = await buildRoleRoster(
+      makeDb({
+        roles: [role("center", "member", "membership", 10)],
+        membershipCounts: [
+          {
+            roleEntityType: "center",
+            membershipRoleKey: "member",
+            centerCode: "ctr-1",
+            _count: { _all: 250 },
+          },
+          {
+            roleEntityType: "center",
+            membershipRoleKey: "member",
+            centerCode: "ctr-2",
+            _count: { _all: 100 },
+          },
+          {
+            roleEntityType: "center",
+            membershipRoleKey: "member",
+            centerCode: "ctr-3",
+            _count: { _all: 50 },
+          },
+        ],
+      }),
+    );
+    expect(rows[0].holderCount).toBe(400);
+    expect(rows[0].unitCount).toBe(3);
+  });
+
+  it("a single-holder leadership role at one unit: holderCount and unitCount coincide at 1", async () => {
+    const rows = await buildRoleRoster(
+      makeDb({
+        roles: [role("center", "director", "leadership", 10)],
+        leadershipCounts: [
+          { entityType: "center", roleKey: "director", entityId: "ctr-1", _count: { _all: 1 } },
+        ],
+      }),
+    );
+    expect(rows[0].holderCount).toBe(1);
+    expect(rows[0].unitCount).toBe(1);
+  });
+
+  it("a role held by several people at the SAME single unit: unitCount is 1 while holderCount is not", async () => {
+    const rows = await buildRoleRoster(
+      makeDb({
+        roles: [role("center", "co_director", "leadership", 20)],
+        leadershipCounts: [
+          { entityType: "center", roleKey: "co_director", entityId: "ctr-1", _count: { _all: 5 } },
+        ],
+      }),
+    );
+    expect(rows[0].holderCount).toBe(5);
+    expect(rows[0].unitCount).toBe(1);
+  });
+
+  it("a role with zero holders reports unitCount 0, not undefined", async () => {
+    const rows = await buildRoleRoster(
+      makeDb({ roles: [role("center", "associate_director", "leadership", 30)] }),
+    );
+    expect(rows[0].unitCount).toBe(0);
+  });
+
+  it("counts a unit only once across multiple groupBy buckets for the same (entityType, role, unit) — leadership side", async () => {
+    // Two different cwids at the same center still occupy one unit.
+    const rows = await buildRoleRoster(
+      makeDb({
+        roles: [role("center", "co_director", "leadership", 20)],
+        leadershipCounts: [
+          { entityType: "center", roleKey: "co_director", entityId: "ctr-1", _count: { _all: 1 } },
+          { entityType: "center", roleKey: "co_director", entityId: "ctr-1", _count: { _all: 1 } },
+        ],
+      }),
+    );
+    expect(rows[0].holderCount).toBe(2);
+    expect(rows[0].unitCount).toBe(1);
+  });
+
+  it("unions distinct units across BOTH sources for a role that appears in each", async () => {
+    const rows = await buildRoleRoster(
+      makeDb({
+        roles: [role("center", "director", "leadership", 10)],
+        leadershipCounts: [
+          { entityType: "center", roleKey: "director", entityId: "ctr-1", _count: { _all: 1 } },
+        ],
+        membershipCounts: [
+          {
+            roleEntityType: "center",
+            membershipRoleKey: "director",
+            centerCode: "ctr-2",
+            _count: { _all: 1 },
+          },
+        ],
+      }),
+    );
+    expect(rows[0].holderCount).toBe(2);
+    expect(rows[0].unitCount).toBe(2);
   });
 });

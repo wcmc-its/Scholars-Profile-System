@@ -92,10 +92,49 @@ function rowKey(r: Pick<OrgUnitRoleRosterRow, "entityType" | "key">): string {
   return `${r.entityType}:${r.key}`;
 }
 
-/** Simple regular pluralization — every entity-type noun here takes a plain
- *  "s" ("centers", "departments", "center programs"). */
-function pluralNoun(entityType: OrgUnitRoleEntityType): string {
-  return `${ENTITY_TYPE_LABEL[entityType].toLowerCase()}s`;
+/** Singularize/pluralize the unit noun for a count — every entity-type noun
+ *  here takes a plain "s" ("centers", "departments", "center programs"), so a
+ *  count of 1 must NOT append it ("1 center", not "1 centers"). */
+function unitNoun(entityType: OrgUnitRoleEntityType, count: number): string {
+  const singular = ENTITY_TYPE_LABEL[entityType].toLowerCase();
+  return count === 1 ? singular : `${singular}s`;
+}
+
+/** Singularize/pluralize "holder" for a count. */
+function holderNoun(count: number): string {
+  return count === 1 ? "holder" : "holders";
+}
+
+/** The confirm-on-rename dialog's blast-radius sentence. Reports BOTH grains
+ *  — people (`holderCount`) and distinct units (`unitCount`) — since neither
+ *  alone is truthful: "3 centers" understates that 400 people's badges
+ *  change, and "400 centers" (the holder count with a unit noun) is simply
+ *  false. See `lib/api/org-unit-roles-admin.ts`'s docblock for what each
+ *  count means. */
+function renameBlastRadiusText(
+  row: Pick<OrgUnitRoleRosterRow, "entityType" | "holderCount" | "unitCount">,
+): string {
+  const entityType = row.entityType as OrgUnitRoleEntityType;
+  if (row.holderCount === 0) {
+    return "Nothing currently holds this role — the rename has no effect on any profile.";
+  }
+  if (row.holderCount === row.unitCount) {
+    // Every holding unit has exactly one holder (the common `singleHolder`
+    // shape) — the two grains are the same number; stating both would read
+    // as a bug ("1 holder across 1 center"), so state it once.
+    return `This changes the label shown for ${row.holderCount} ${holderNoun(row.holderCount)}.`;
+  }
+  return `This changes the label shown for ${row.holderCount} ${holderNoun(row.holderCount)} across ${row.unitCount} ${unitNoun(entityType, row.unitCount)}.`;
+}
+
+/** Sort order matching the server's roster query: (entityType, roleGroup,
+ *  sortOrder, key). Used only to insert a freshly created role into `rows`
+ *  at the position a reload would place it, instead of at the array's end. */
+function compareRosterRows(a: OrgUnitRoleRosterRow, b: OrgUnitRoleRosterRow): number {
+  if (a.entityType !== b.entityType) return a.entityType.localeCompare(b.entityType);
+  if (a.roleGroup !== b.roleGroup) return a.roleGroup.localeCompare(b.roleGroup);
+  if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+  return a.key.localeCompare(b.key);
 }
 
 /** Map a PATCH-route error code to a steward-facing message. */
@@ -311,13 +350,7 @@ export function OrgUnitRoleRoster({ roles }: OrgUnitRoleRosterProps) {
           }
         }}
         title={pendingRename ? `Rename "${pendingRename.row.label}" to "${pendingRename.newLabel}"?` : ""}
-        description={
-          pendingRename
-            ? `This changes the label shown for ${pendingRename.row.holderCount} ${pluralNoun(
-                pendingRename.row.entityType as OrgUnitRoleEntityType,
-              )}.`
-            : ""
-        }
+        description={pendingRename ? renameBlastRadiusText(pendingRename.row) : ""}
         reasonMode="none"
         confirmLabel="Rename"
         confirmVariant="default"
@@ -328,7 +361,12 @@ export function OrgUnitRoleRoster({ roles }: OrgUnitRoleRosterProps) {
         open={addOpen}
         onOpenChange={setAddOpen}
         existingKeys={new Set(rows.map(rowKey))}
-        onCreated={(row) => setRows((prev) => [...prev, row])}
+        onCreated={(row) =>
+          setRows((prev) => {
+            const idx = prev.findIndex((r) => compareRosterRows(row, r) < 0);
+            return idx === -1 ? [...prev, row] : [...prev.slice(0, idx), row, ...prev.slice(idx)];
+          })
+        }
       />
     </div>
   );
@@ -551,6 +589,7 @@ function AddRoleDialog({
         profileTitle: data.profileTitle,
         source: data.source,
         holderCount: 0,
+        unitCount: 0,
       });
       onOpenChange(false);
     } catch {
