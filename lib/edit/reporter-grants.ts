@@ -25,9 +25,21 @@
 import { coreProjectNum } from "@/lib/award-number";
 
 // Matcher thresholds (spec §5). Constants, not config — surface only if a real
-// false-match appears. Validated: precision 100% at every K in [1,5].
-export const K_AUTOLOCK = 3; // silent auto-lock floor (recall ~62%)
-export const K_SUGGEST = 2; // show as ranked human-confirm suggestion (recall ~70%)
+// false-match appears. Validated: precision 100% at every K in [1,5] (N=50
+// calibration, 0 false positives at every K, runner-ups contested 0/50) — see
+// docs/reporter-grants-matcher-spec.md:104-118. K_AUTOLOCK was lowered from 3
+// to 2 on that evidence; separation + the terminal-degree namesake guard are
+// unchanged, and revoke remains the correction path (works on auto-locks too).
+//
+// K_AUTOLOCK now equals K_SUGGEST, which collapses the human-confirm tier: a
+// winner can only clear K_SUGGEST by also clearing K_AUTOLOCK (the two floors
+// are the same number), so `suggestions` is only ever non-empty when `autoLock`
+// is already set — a real run of `rankByPmidOverlap` never returns a non-null
+// `suggestions` list with `autoLock: null`. The suggestion/pending machinery
+// (K_SUGGEST, `suggestions`) is kept for API shape and defensive completeness,
+// not because it currently fires.
+export const K_AUTOLOCK = 2; // silent auto-lock floor (recall ~70%)
+export const K_SUGGEST = 2; // effectively superseded by K_AUTOLOCK — see note above
 export const SEPARATION = 2; // winner must beat the runner-up by this factor
 
 /** A RePORTER project (one fiscal year of one award). */
@@ -65,7 +77,9 @@ export interface RankedCandidate {
 export interface MatchResult {
   /** profile_id confident enough to lock without review, else null. */
   autoLock: number | null;
-  /** candidates worth showing for human confirmation (overlap ≥ K_SUGGEST). */
+  /** candidates worth showing for human confirmation (overlap ≥ K_SUGGEST and
+   *  separated). Since K_SUGGEST == K_AUTOLOCK, non-empty only when `autoLock`
+   *  is also set — see the constants' comment above. */
   suggestions: RankedCandidate[];
   /** full ranked list, as evidence. */
   ranked: RankedCandidate[];

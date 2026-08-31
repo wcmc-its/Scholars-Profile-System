@@ -8,7 +8,7 @@ v1 only materializes RePORTER grants for scholars **already in `person_nih_profi
 
 ## 2. Scope / non-goals
 
-**In:** the non-`person_nih_profile` active cohort; auto-lock (K≥3) materialization; a K=2 "Is this you?" confirm card in `/edit`; structured reject reason feeding matcher QA. **Behind a flag**, staging-first.
+**In:** the non-`person_nih_profile` active cohort; auto-lock (K≥2) materialization; a K=2 "Is this you?" confirm card in `/edit`; structured reject reason feeding matcher QA. **Behind a flag**, staging-first.
 
 **Out (non-goals):** changing v1's profile-id path; non-NIH grants; surfacing any numeric overlap score to users (projection-starved, per [[project_topic_score_is_internal]] + the COI-gap governance); altering rollup exclusion (RePORTER rows already excluded — unchanged). No org-aware "prior institution" label (separate deferred follow-up).
 
@@ -22,9 +22,10 @@ ETL (nightly, flag-gated):
                  → group by profile_id
                  → per candidate: coreNums → fetchPublicationsByCoreNums → grantPmids  (§4.3, NEW)
     result = rankByPmidOverlap(trustedPmids, candidates) (§4.4)
-      K≥3 + separation → AUTO-LOCK  → person_nih_profile + ReporterProfileCandidate(status=confirmed, by=system-autolock)
-      K=2  + separation → PENDING   → ReporterProfileCandidate(status=pending)   ← surfaces in /edit
-      else              → none      (no proposal; recall miss, acceptable)
+      K≥2 + separation → AUTO-LOCK  → person_nih_profile + ReporterProfileCandidate(status=confirmed, by=system-autolock) + B03 audit row
+      else              → none      (ambiguous / recall miss, acceptable)
+      (PENDING → ReporterProfileCandidate(status=pending), surfaces in /edit — the write path still exists
+       but is currently unreachable from a real match now that K_AUTOLOCK==K_SUGGEST; see §4.4)
   → grants for any new person_nih_profile row materialize via the v1 path (same or next run)
 
 /edit "Is this you?" card (flag-gated, genuine-self or superuser):
@@ -47,11 +48,13 @@ Trusted PMIDs: `publicationAuthor.findMany({ where: { cwid, isConfirmed: true },
 `fetchPublicationsByCoreProjectNums(coreNums: string[]) → { coreproject, pmid, applId }[]` hitting RePORTER `POST /v2/publications/search` (public; the endpoint the v1 spec already probed). Per candidate: collect its `core_project_num`s from §4.2, fetch, union the PMIDs → `Candidate.grantPmids: Set<number>`. Batch core-nums per request; same `sleepBetweenRequests` throttle as the v1 fetcher. (This is the ONLY net-new external call; everything else is wiring.)
 
 ### 4.4 Matching
-`rankByPmidOverlap(trustedPmids, candidates) → { autoLock, suggestions, ranked }` (existing, tested). Thresholds (existing consts): `K_AUTOLOCK=3`, `K_SUGGEST=2`, `SEPARATION=2` (winner must beat runner-up ≥2×). No tie → no proposal.
+`rankByPmidOverlap(trustedPmids, candidates) → { autoLock, suggestions, ranked }` (existing, tested). Thresholds (existing consts): `K_AUTOLOCK=2`, `K_SUGGEST=2`, `SEPARATION=2` (winner must beat runner-up ≥2×). No tie → no proposal.
+
+`K_AUTOLOCK` was lowered from 3 to 2 on the N=50 calibration evidence in `docs/reporter-grants-matcher-spec.md:104-118`: 0 false positives at every K from 1–5, and a runner-up candidate never contested a winner in any of the 50 cases. `SEPARATION` and the terminal-degree namesake guard are unchanged, and revoke remains the correction path (it works on auto-locks too). One consequence: `K_AUTOLOCK` now equals `K_SUGGEST`, so a winner can only clear `K_SUGGEST` by also clearing `K_AUTOLOCK` — `suggestions` is never non-empty while `autoLock` is null, and the **suggestion/pending outcome below is currently unreachable from a real match**. It stays wired (in the constants, in `decideWriteOutcome`, in the `/edit` card) for API shape and in case a future `K_SUGGEST < K_AUTOLOCK` split is reintroduced.
 
 ### 4.5 Outcomes → writes
-- **autoLock ≠ null:** upsert `person_nih_profile` (`resolutionSource="pmid-overlap-auto"`) + upsert `ReporterProfileCandidate` (`status="confirmed"`, `reviewedBy="system-autolock"`, `reviewedAt=now`). Grants flow via v1 path.
-- **suggestion (K=2, no autoLock):** upsert `ReporterProfileCandidate` (`status="pending"`). **No `person_nih_profile` write, no grant materialization** until a human confirms.
+- **autoLock ≠ null:** upsert `person_nih_profile` (`resolutionSource="pmid-overlap-auto"`) + upsert `ReporterProfileCandidate` (`status="confirmed"`, `reviewedBy="system-autolock"`, `reviewedAt=now`) + append a B03 audit row (`action="reporter_profile_confirm"`, `actorCwid="system-autolock"`), all in one transaction — previously this write was unaudited, unlike the human `/confirm` route. Grants flow via v1 path.
+- **suggestion (no autoLock; see §4.4 — not currently reachable):** upsert `ReporterProfileCandidate` (`status="pending"`). **No `person_nih_profile` write, no grant materialization** until a human confirms.
 - **none:** nothing.
 
 ### 4.6 Idempotency / re-run
@@ -108,7 +111,7 @@ Confirm writes **only** `person_nih_profile`; the Grant rows appear on the **nex
 
 ## 9. Flag + rollout
 
-Single flag `REPORTER_MATCH_V2` (wire in `cdk app-stack.ts` per-env **and** `.env.local`, per [[feedback_flag_parity_local_vs_deployed]]; regenerate the app-stack snapshot per [[feedback_cdk_appstack_snapshot_regen]]). Gates: the ETL v2 branch, the `/edit` card, and context loading. **Rollout lever (open decision §14-A):** whether K≥3 **auto-lock** is live at first prod flip, or initially demoted to `pending` (everything human-confirmed) until prod confidence. Staging-on / prod-off at merge.
+Single flag `REPORTER_MATCH_V2` (wire in `cdk app-stack.ts` per-env **and** `.env.local`, per [[feedback_flag_parity_local_vs_deployed]]; regenerate the app-stack snapshot per [[feedback_cdk_appstack_snapshot_regen]]). Gates: the ETL v2 branch, the `/edit` card, and context loading. **Rollout lever (open decision §14-A):** whether K≥2 **auto-lock** is live at first prod flip, or initially demoted to `pending` (everything human-confirmed) until prod confidence. Staging-on / prod-off at merge.
 
 ## 10. Rollups — unchanged
 
@@ -120,9 +123,9 @@ Materialized rows are `source='RePORTER'` → already excluded by the ~10 `sourc
 |---|------|----------|
 | 1 | Scholar 0 trusted PMIDs | skipped, no candidate row |
 | 2 | Name search 0 candidates (e.g. `van Besien`) | no proposal (recall miss, logged) |
-| 3 | 2 candidates, no 2× separation | no autoLock, no suggestion (ambiguous → skip) |
-| 4 | K=2 winner | `pending` row; **no** person_nih_profile, **no** grants |
-| 5 | K≥3 winner | auto-lock; person_nih_profile + grants; revocable in history |
+| 3 | 2 candidates, no 2× separation (incl. a tie at K=2) | no autoLock, no suggestion (ambiguous → skip) |
+| 4 | `decideWriteOutcome` given a suggestion with no autoLock (API-shape case; not reachable from a real match since K_AUTOLOCK==K_SUGGEST — see §4.4) | `pending` row; **no** person_nih_profile, **no** grants |
+| 5 | K≥2 winner, separated | auto-lock; person_nih_profile + grants + B03 audit row; revocable in history |
 | 6 | Confirm pending | person_nih_profile upsert; grants next run; row→confirmed |
 | 7 | Reject pending | row→rejected+reason; not re-proposed on re-run |
 | 8 | Revoke confirmed | person_nih_profile row deleted; grants reconciled out; row→revoked |
@@ -130,7 +133,7 @@ Materialized rows are `source='RePORTER'` → already excluded by the ~10 `sourc
 | 10 | Scholar already in person_nih_profile (v1) | not in v2 cohort |
 | 11 | Impersonating superuser hits confirm | 403 not_self |
 | 12 | Soft-deleted scholar | excluded from cohort + card |
-| 13 | Same person, 2 profile_ids both K≥3 | both auto-lock (multi-profile_id is valid, like v1 union) |
+| 13 | Same person, 2 profile_ids both K≥2, separated | both auto-lock (multi-profile_id is valid, like v1 union) |
 | 14 | Flag off | ETL v2 branch skipped; card absent; 0 candidate rows |
 
 ## 12. Audit SQL
@@ -160,7 +163,7 @@ SELECT g.cwid, COUNT(*) FROM grant g
 
 ## 14. Decisions (RESOLVED 2026-06-26)
 
-- **A. Auto-lock — ON.** K≥3 auto-locks, but **always recorded as a revocable `confirmed` row** (`reviewedBy="system-autolock"`), with the §9 rollout lever to demote to all-`pending` if prod ever surfaces a wrong lock.
+- **A. Auto-lock — ON.** K≥2 auto-locks, but **always recorded as a revocable `confirmed` row** (`reviewedBy="system-autolock"`) with its own B03 audit row, with the §9 rollout lever to demote to all-`pending` if prod ever surfaces a wrong lock.
 - **B. Reject reason — enum only.** `not_me` / `name_only` / `cant_tell`. **No free-text "why"** (no `note` field) for now.
 - **C. Confirmed history — show auto-locks** (labeled "matched automatically"), self-revocable.
 ```
