@@ -8,7 +8,7 @@
  *   - add a leader (directory pick → `add_leader`),
  *   - remove a leader (`remove_leader`),
  *   - edit a leader's role text (`set_leader` with `role`, committed on blur —
- *     `CoreLeader.role` is an open string, not `CenterProgramLeader.role`'s
+ *     `CoreLeader.role` is an open string, not the center-program editor's
  *     closed `leader`/`coe_liaison` vocabulary, so this is a text input, not
  *     a `<select>`),
  *   - toggle a leader's interim flag (`set_leader` with `interim`),

@@ -509,11 +509,11 @@ export type ProfilePayload = {
   division: string | null;
   /** #1266 — formatted leadership-role lines (Chair / Chief / Center Director /
    *  Program Leader), in that order; empty when the scholar holds none. Sourced
-   *  from Department.chairCwid / Division.chiefCwid / a `CenterLeader`
-   *  assignment (#2542; was Center.directorCwid) / CenterProgramLeader rows and
-   *  rendered beneath `primaryTitle`. Center and
-   *  program lines are curated and sparse, so they appear only where curation
-   *  exists. */
+   *  from Department.chairCwid / Division.chiefCwid / an `OrgUnitRoleAssignment`
+   *  row (#2542; was Center.directorCwid) / a `center_program`
+   *  `OrgUnitRoleAssignment` row (#2558; was a retired per-program leader
+   *  table) and rendered beneath `primaryTitle`. Center and program lines are
+   *  curated and sparse, so they appear only where curation exists. */
   leadershipTitles: string[];
   email: string | null;
   /** email-visibility-spec § Cache-safety. True when PROFILE_EMAIL_RELEASE_GATE
@@ -1165,11 +1165,9 @@ export const getScholarFullProfileBySlug = cache(
       // #1266 — leadership-role title lines (Chair / Chief / Center Director /
       // Program Leader), rendered beneath the academic rank. Point lookups on the
       // already-populated FK columns; each returns 0-1 rows for almost every
-      // scholar. Chair/Chief come from the ED ETL (populated); Center director and
-      // CenterProgramLeader are curated and sparse, so those lines appear only
-      // where curation exists — an empty array renders nothing.
-      // ponytail: centerProgramLeader.cwid is unindexed but the table is tiny; add
-      // @@index([cwid]) only if profile-load latency ever flags it.
+      // scholar. Chair/Chief come from the ED ETL (populated); center director and
+      // program-leader assignments are curated and sparse, so those lines appear
+      // only where curation exists — an empty array renders nothing.
       Promise.all([
         prisma.department.findMany({
           where: { chairCwid: scholar.cwid },
@@ -1215,10 +1213,10 @@ export const getScholarFullProfileBySlug = cache(
         }),
         // #2542 — center leadership is an `OrgUnitRoleAssignment` row, not
         // `Center.directorCwid`. `profileTitle` is what decides whether holding
-        // a role shows as a title here: folding in `coe_liaison` later
-        // deliberately does NOT (see the `CenterProgramLeader` query below).
-        // The center's NAME is resolved separately — the assignment is
-        // polymorphic on (entityType, entityId) with no FK to `center`.
+        // a role shows as a title here: the `center_program` `coe_liaison`
+        // entry below deliberately seeds `profileTitle: false`, so it never
+        // surfaces. The center's NAME is resolved separately — the assignment
+        // is polymorphic on (entityType, entityId) with no FK to `center`.
         prisma.orgUnitRoleAssignment.findMany({
           where: {
             cwid: scholar.cwid,
@@ -1240,13 +1238,15 @@ export const getScholarFullProfileBySlug = cache(
           where: { directorCwid: scholar.cwid },
           select: { code: true, name: true, officialName: true, leaderInterim: true },
         }),
-        // #2558 Phase 1 — program leadership is an `OrgUnitRoleAssignment` row
-        // too, `entityType: "center_program"`, `entityId`
+        // #2558 — program leadership is an `OrgUnitRoleAssignment` row too,
+        // `entityType: "center_program"`, `entityId`
         // `"{centerCode}:{programCode}"`. `profileTitle` gates it exactly as
         // it does above: `coe_liaison` seeds `profileTitle: false`, so this
-        // query — like the legacy one below — only ever surfaces `leader`
-        // rows. The assignment carries no FK to `CenterProgram`, so the
-        // program's label and center name are resolved separately, below.
+        // query only ever surfaces `leader` rows. The assignment carries no FK
+        // to `CenterProgram`, so the program's label and center name are
+        // resolved separately, below. Contract PR — the retired per-program
+        // leader table's dual-read fallback is gone; this is the only source
+        // now.
         prisma.orgUnitRoleAssignment.findMany({
           where: {
             cwid: scholar.cwid,
@@ -1261,25 +1261,6 @@ export const getScholarFullProfileBySlug = cache(
           },
           orderBy: [{ sortOrder: "asc" }, { entityId: "asc" }],
         }),
-        // Dual-read fallback: only programs the assignment table above does
-        // not already cover reach the payload — see the dedup below. Dropped
-        // in the contract PR alongside `CenterProgramLeader` itself.
-        prisma.centerProgramLeader.findMany({
-          // #1570 — only program LEADS produce a "Leader, {program}" title line;
-          // a `coe_liaison` row is NOT a leadership title and is excluded here.
-          where: { cwid: scholar.cwid, role: "leader" },
-          select: {
-            centerCode: true,
-            programCode: true,
-            interim: true,
-            program: {
-              select: {
-                label: true,
-                center: { select: { name: true, officialName: true } },
-              },
-            },
-          },
-        }),
       ]).then(
         async ([
           chairDepts,
@@ -1289,7 +1270,6 @@ export const getScholarFullProfileBySlug = cache(
           dirCenters,
           legacyDirCenters,
           progAssignments,
-          progLeads,
         ]) => {
         // One batched name lookup for the centers the assignments point at.
         const dirCenterRows = dirCenters.length
@@ -1428,26 +1408,15 @@ export const getScholarFullProfileBySlug = cache(
             (c) =>
               `${c.leaderInterim ? "Interim Director" : "Director"}, ${c.officialName ?? c.name}`,
           ),
-        // #2558 Phase 1 — programs already covered by an assignment row. The
-        // label comes from the vocabulary (seeded "Leader"), matching every
-        // other assignment branch above.
+        // #2558 — programs covered by an assignment row. The label comes from
+        // the vocabulary (seeded "Leader"), matching every other assignment
+        // branch above. Contract PR — this is the only source now.
         ...progAssignments.flatMap((a) => {
           const info = progAssignmentInfo.get(a.entityId);
           return info
             ? [`${formatLeadershipTitle(a.role.label, a.interim)}, ${info.label} (${info.centerName})`]
             : [];
         }),
-        // Legacy `CenterProgramLeader` fallback — only programs the assignment
-        // table above does not already cover, so the two sources never
-        // double-count a leader during the dual-read window.
-        ...progLeads
-          .filter(
-            (l) => !progAssignments.some((a) => a.entityId === `${l.centerCode}:${l.programCode}`),
-          )
-          .map(
-            (l) =>
-              `${l.interim ? "Interim Leader" : "Leader"}, ${l.program.label} (${l.program.center.officialName ?? l.program.center.name})`,
-          ),
         ];
       }),
       // section-visibility-spec — the per-scholar section-hide overrides. Only

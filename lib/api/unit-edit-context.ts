@@ -61,7 +61,7 @@
  * `programs`.
  */
 import { readFileSync } from "node:fs";
-import { CENTER_ENTITY_TYPE, DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
+import { CENTER_ENTITY_TYPE, CENTER_PROGRAM_ENTITY_TYPE, DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
 import path from "node:path";
 
 import {
@@ -581,9 +581,20 @@ export async function loadUnitEditContext(
     label: string;
     sortOrder: number;
     description: string | null;
-    leaders: Array<{ cwid: string; interim: boolean; role: string; sortOrder: number }>;
   };
   let programRowsRaw: ProgramRowRaw[] | null = null;
+  // #2558 — program leadership is an `OrgUnitRoleAssignment` row
+  // (`entityType: "center_program"`, `entityId: "{centerCode}:{programCode}"`),
+  // not a nested `CenterProgram.leaders` relation (the retired per-program
+  // leader table this migrates off of). Grouped by `entityId` below, after
+  // `programRowsRaw` is known.
+  let programAssignments: Array<{
+    entityId: string;
+    cwid: string;
+    interim: boolean;
+    roleKey: string;
+    sortOrder: number;
+  }> = [];
   if (hasRoster) {
     if (unitType === "center") {
       rosterRows = await client.centerMembership.findMany({
@@ -600,18 +611,19 @@ export async function loadUnitEditContext(
       });
       programRowsRaw = await client.centerProgram.findMany({
         where: { centerCode: code },
-        select: {
-          code: true,
-          label: true,
-          sortOrder: true,
-          description: true,
-          leaders: {
-            select: { cwid: true, interim: true, role: true, sortOrder: true },
-            orderBy: [{ sortOrder: "asc" }, { cwid: "asc" }],
-          },
-        },
+        select: { code: true, label: true, sortOrder: true, description: true },
         orderBy: [{ sortOrder: "asc" }, { label: "asc" }],
       });
+      if (programRowsRaw.length > 0) {
+        programAssignments = await client.orgUnitRoleAssignment.findMany({
+          where: {
+            entityType: CENTER_PROGRAM_ENTITY_TYPE,
+            entityId: { in: programRowsRaw.map((p) => `${code}:${p.code}`) },
+          },
+          select: { entityId: true, cwid: true, interim: true, roleKey: true, sortOrder: true },
+          orderBy: [{ sortOrder: "asc" }, { cwid: "asc" }],
+        });
+      }
     } else {
       const rows = await client.divisionMembership.findMany({
         where: { divisionCode: code },
@@ -763,7 +775,7 @@ export async function loadUnitEditContext(
       ...accessRows.map((r) => r.cwid),
       ...rosterRows.map((r) => r.cwid),
       // #1117 — program-leader cwids, so the program editor shows names.
-      ...(programRowsRaw ?? []).flatMap((p) => p.leaders.map((l) => l.cwid)),
+      ...programAssignments.map((a) => a.cwid),
     ],
     client,
   );
@@ -803,21 +815,31 @@ export async function loadUnitEditContext(
   // #1117 — resolve each program's leader cwids to display names for the editor.
   // A leader cwid that isn't a WCM scholar (external leader) stays name/title
   // null; the card re-resolves it client-side like the access/roster cards do.
+  // #2558 — leaders come from `programAssignments` (an `OrgUnitRoleAssignment`
+  // row per leader), grouped here by the program's `entityId`
+  // (`"{centerCode}:{programCode}"`).
+  const assignmentsByProgram = new Map<string, typeof programAssignments>();
+  for (const a of programAssignments) {
+    const list = assignmentsByProgram.get(a.entityId);
+    if (list) list.push(a);
+    else assignmentsByProgram.set(a.entityId, [a]);
+  }
   const programs = programRowsRaw
     ? programRowsRaw.map((p) => ({
         code: p.code,
         label: p.label,
         sortOrder: p.sortOrder,
         description: p.description,
-        leaders: p.leaders.map((l) => ({
-          cwid: l.cwid,
-          name: nameMap.get(l.cwid)?.name ?? null,
-          title: nameMap.get(l.cwid)?.title ?? null,
-          interim: l.interim,
-          // `role` is a VarChar, not an enum — narrow it the same way the public
-          // program page does (`lib/api/centers.ts`): anything unrecognized is a leader.
-          role: l.role === "coe_liaison" ? ("coe_liaison" as const) : ("leader" as const),
-          sortOrder: l.sortOrder,
+        leaders: (assignmentsByProgram.get(`${code}:${p.code}`) ?? []).map((a) => ({
+          cwid: a.cwid,
+          name: nameMap.get(a.cwid)?.name ?? null,
+          title: nameMap.get(a.cwid)?.title ?? null,
+          interim: a.interim,
+          // `roleKey` is a VarChar, not an enum — narrow it the same way the
+          // public program page does (`lib/api/centers.ts`): anything
+          // unrecognized is a leader.
+          role: a.roleKey === "coe_liaison" ? ("coe_liaison" as const) : ("leader" as const),
+          sortOrder: a.sortOrder,
         })),
       }))
     : null;

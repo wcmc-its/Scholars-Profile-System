@@ -1,0 +1,42 @@
+-- #2558 contract PR — drop the retired `center_program_leader` table.
+--
+-- ============================================================================
+-- DATA-LOSS HAZARD — DO NOT DEPLOY UNTIL THE #2558 PHASE 1 BACKFILL HAS RUN IN
+-- THIS ENVIRONMENT.
+--
+-- `scripts/backfills/2026-08-31-center-program-leader-vocab.ts` (now deleted —
+-- it was a one-shot, already executed where it needed to run) copied every
+-- `center_program_leader` row into `org_unit_role_assignment`
+-- (`entity_type='center_program'`). This migration DROPS the source table
+-- outright, with no reversible rollback: a leader row backfilled nowhere is
+-- gone the moment this runs.
+--
+-- Verified at authoring time (2026-08-31):
+--   - staging: backfill RAN — 2 vocabulary rows (`leader`, `coe_liaison`),
+--     7 `leader` + 4 `coe_liaison` assignments over 4 Meyer Cancer Center
+--     programs. Safe to deploy.
+--   - prod: backfill scheduled the same night this migration was authored, not
+--     yet confirmed run. DO NOT deploy this migration to prod until that
+--     backfill's completion is verified (row counts matching the equivalent of
+--     the staging figures above) — see the PR this migration ships in for the
+--     merge gate.
+--
+-- Every reader/writer of `center_program_leader` was migrated onto
+-- `org_unit_role_assignment` in this same PR (the public program page, the
+-- `/api/edit/center-program` write path, `lib/api/profile.ts`,
+-- `lib/edit/overview-facts.ts`, the `/edit/center/[code]` program editor) —
+-- nothing in the application reads or writes this table by the time this
+-- migration runs.
+--
+-- The table's only foreign key (`center_program_leader_center_code_program_
+-- code_fkey`, from the `20260618160000_center_program_leaders` migration) is
+-- dropped along with the table — InnoDB does not require a separate `DROP
+-- FOREIGN KEY` first when the whole table is going away.
+--
+-- Hand-written. `prisma migrate diff` is unusable in this repo: it emits ~44
+-- unrelated `MODIFY ... JSON` statements on an UNMODIFIED master checkout —
+-- see `prisma/migrations/20260831160000_org_unit_role_scope/migration.sql`
+-- for the same note against the same Prisma version.
+-- ============================================================================
+
+DROP TABLE `center_program_leader`;

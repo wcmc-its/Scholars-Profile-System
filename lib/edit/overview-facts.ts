@@ -1031,17 +1031,22 @@ function fkLeadershipCandidate(
 /**
  * #742 §2.5 — leadership roles recorded on the org-unit FK tables, not (or not
  * yet) in the appointment table: a department `chairCwid`, a division `chiefCwid`,
- * a `CenterLeader` row (#2542; was `directorCwid` + interim), and `CenterProgramLeader` rows. These catch
- * leadership set via `field_override` or missed by the appointment-title ETL (the
- * Stewart case). Each query keys on the leader being THIS scholar, so an external
- * leader (`lib/external-leaders.ts`, a non-WCM cwid) never matches. The synthesized
- * titles are deduped against the appointment titles + primary title by the caller.
+ * an `OrgUnitRoleAssignment` row (#2542; was `directorCwid` + interim), and a
+ * `center_program` `OrgUnitRoleAssignment` row (#2558; was a retired
+ * per-program leader table). These catch leadership set via `field_override`
+ * or missed by the appointment-title ETL (the Stewart case). Each query keys
+ * on the leader being THIS scholar, so an external leader
+ * (`lib/external-leaders.ts`, a non-WCM cwid) never matches. The synthesized
+ * titles are deduped against the appointment titles + primary title by the
+ * caller.
  *
- * NOTE: program leaders live in `CenterProgramLeader` (#1117 replaced the single
- * `CenterProgram.leaderCwid` column), so a co-led program surfaces every leader.
+ * NOTE: program leaders live in `OrgUnitRoleAssignment` (#1117 replaced the
+ * single `CenterProgram.leaderCwid` column with a 0..N table, #2558 migrated
+ * that table onto the shared assignment table), so a co-led program surfaces
+ * every leader.
  */
 async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCandidate[]> {
-  const [departments, divisions, centers, legacyCenters, programAssignments, programLeaders] =
+  const [departments, divisions, centers, legacyCenters, programAssignments] =
     await Promise.all([
     db.read.department.findMany({
       where: { chairCwid: cwid },
@@ -1076,13 +1081,14 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
       where: { directorCwid: cwid },
       select: { code: true, name: true, officialName: true, leaderInterim: true },
     }),
-    // #2558 Phase 1 — program leadership is an `OrgUnitRoleAssignment` row
-    // too (`entityType: "center_program"`, `entityId`
+    // #2558 — program leadership is an `OrgUnitRoleAssignment` row too
+    // (`entityType: "center_program"`, `entityId`
     // `"{centerCode}:{programCode}"`). `profileTitle` gates it the same way
-    // `role: "leader"` gates the legacy query below — `coe_liaison` seeds
-    // `profileTitle: false`, so this only ever surfaces `leader` rows. No FK
-    // to `CenterProgram`, so the program's label/center name are resolved
-    // separately, below.
+    // it does above — `coe_liaison` seeds `profileTitle: false`, so this only
+    // ever surfaces `leader` rows. No FK to `CenterProgram`, so the program's
+    // label/center name are resolved separately, below. Contract PR — the
+    // retired per-program leader table's dual-read fallback is gone; this is
+    // the only source now.
     db.read.orgUnitRoleAssignment.findMany({
       where: {
         cwid,
@@ -1093,20 +1099,6 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
         entityId: true,
         interim: true,
         role: { select: { label: true } },
-      },
-    }),
-    // Dual-read fallback: only programs the assignment query above does not
-    // already cover reach the candidate list — see the dedup below. Dropped
-    // in the contract PR alongside `CenterProgramLeader` itself.
-    db.read.centerProgramLeader.findMany({
-      // #1570 — a `coe_liaison` row is not a leadership title; only program
-      // LEADS synthesize a "Leader, {program}" candidate here.
-      where: { cwid, role: "leader" },
-      select: {
-        centerCode: true,
-        programCode: true,
-        interim: true,
-        program: { select: { label: true, center: { select: { name: true, officialName: true } } } },
       },
     }),
   ]);
@@ -1229,21 +1221,6 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
         `${formatLeadershipTitle(a.role.label, a.interim)}, ${asProgramName(info.label)}`,
         info.centerName,
         a.interim,
-      ),
-    );
-  }
-  // Dual-read: only programs the assignment loop above does not already
-  // cover, so the two sources never emit two candidates with the same
-  // `fk:program:` id.
-  for (const p of programLeaders) {
-    if (programAssignments.some((a) => a.entityId === `${p.centerCode}:${p.programCode}`)) continue;
-    const centerName = p.program.center.officialName ?? p.program.center.name;
-    out.push(
-      fkLeadershipCandidate(
-        `fk:program:${p.centerCode}:${p.programCode}`,
-        `${p.interim ? "Interim " : ""}Leader, ${asProgramName(p.program.label)}`,
-        centerName,
-        p.interim,
       ),
     );
   }

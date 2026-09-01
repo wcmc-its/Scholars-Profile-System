@@ -28,7 +28,12 @@ import { formatRoleCategory } from "@/lib/role-display";
 import { groupToRawValues, type RoleGroupLabel } from "@/lib/role-groups";
 import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
 import { extractLastNameSort } from "@/lib/name-sort";
-import { CENTER_ENTITY_TYPE, DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
+import {
+  CENTER_ENTITY_TYPE,
+  CENTER_PROGRAM_ENTITY_TYPE,
+  DIRECTOR_ROLE_KEY,
+  formatLeadershipTitle,
+} from "@/lib/org-unit-roles";
 import type {
   DepartmentFacultyHit,
   DepartmentTopicArea,
@@ -997,8 +1002,20 @@ export type ProgramLeader = {
   /** Interim/acting qualifier — renders "Interim Leader". */
   isInterim: boolean;
   /** #1570 — "leader" (a program lead) or "coe_liaison" (rendered as a separate
-   *  "COE Liaison" card AFTER the leaders). */
+   *  "COE Liaison" card AFTER the leaders). Mirrors `OrgUnitRoleAssignment.roleKey`. */
   role: "leader" | "coe_liaison";
+  /** #2558 — the vocabulary entry's display label (`OrgUnitRole.label`),
+   *  formatted with the Interim qualifier via `formatLeadershipTitle` — except
+   *  a role carrying an `expansion` (today only `coe_liaison`), which never
+   *  gets it: a COE Liaison has never rendered "Interim" (#1570), regardless
+   *  of the assignment's own `interim` value. Passed to `LeaderCard` as `role`;
+   *  never hardcoded here. */
+  roleLabel: string;
+  /** #2558 — the vocabulary entry's `OrgUnitRole.expansion`, e.g. "Community
+   *  Outreach & Engagement" for "COE Liaison" — null for a role with no long
+   *  form. Passed to `LeaderCard` to render the `<abbr>` a11y affordance,
+   *  sourced from the vocabulary rather than a hardcoded constant. */
+  expansion: string | null;
 };
 
 /** #1105 — a dedicated per-program page detail. */
@@ -1017,14 +1034,15 @@ export type CenterProgramDetail = {
  * #1105/#1117 — assemble the dedicated page for a single center program, modeled
  * on `getDivision`. Resolves the center by slug, the program by code (the `ZY`
  * "Non-aligned Clinical" catch-all and any other excluded code are NOT pages →
- * null), the program's leaders (#1117 — 0..N `CenterProgramLeader` rows, each
- * `cwid` → WCM scholar, else the `lib/external-leaders.ts` fallback keyed
- * `<centerCode>:<programCode>`; unresolvable cwids are dropped), and
- * the program's ACTIVE members (reusing the §3.3 `getCenterMembers` grouping,
- * filtered to this program). Returns null when the center/program doesn't exist,
- * the center is whole-unit-suppressed (#540, via `getCenter`), or the code is
- * excluded. The route additionally gates the whole surface behind
- * `CENTER_PROGRAM_PAGES`.
+ * null), the program's leaders (#1117 — 0..N `OrgUnitRoleAssignment` rows,
+ * `entityType: "center_program"`, #2558 migrated off the retired per-program
+ * leader table — each `cwid` → WCM scholar, else the
+ * `lib/external-leaders.ts` fallback keyed `<centerCode>:<programCode>`;
+ * unresolvable cwids are dropped), and the program's ACTIVE members (reusing
+ * the §3.3 `getCenterMembers` grouping, filtered to this program). Returns null
+ * when the center/program doesn't exist, the center is whole-unit-suppressed
+ * (#540, via `getCenter`), or the code is excluded. The route additionally
+ * gates the whole surface behind `CENTER_PROGRAM_PAGES`.
  *
  * Membership is sourced DIRECTLY from Prisma (via `getCenterMembers`), NEVER
  * from the search index — per #1074/#1076 no `centerProgram:` key exists there.
@@ -1041,42 +1059,51 @@ export async function getCenterProgram(
 
   const program = await prisma.centerProgram.findUnique({
     where: { centerCode_code: { centerCode: center.code, code } },
-    select: {
-      code: true,
-      label: true,
-      description: true,
-      leaders: {
-        orderBy: [{ sortOrder: "asc" }, { cwid: "asc" }],
-        select: { cwid: true, interim: true, role: true },
-      },
-    },
+    select: { code: true, label: true, description: true },
   });
   if (!program) return null;
 
-  // Leaders (#1117) + COE liaisons (#1570) — 0..N rows in display order. Each
-  // `cwid` resolves to a WCM scholar (profile-linked) or the external-leader
-  // fallback keyed `<centerCode>:<programCode>` (used only when that entry names
-  // THIS cwid). A cwid that resolves to neither is dropped — never fabricate a
-  // name. Leaders render first, then COE liaisons; within each group the join's
-  // `sortOrder` (then cwid) order is preserved. We order by an explicit
-  // role RANK (leader=0, coe_liaison=1), NOT alphabetically by the role string
-  // ("coe_liaison" sorts BEFORE "leader" lexically — the wrong order).
+  // Leaders (#1117) + COE liaisons (#1570) — 0..N `OrgUnitRoleAssignment` rows
+  // in display order, joined to the vocabulary in ONE query (mirrors
+  // `getCenterUncached`'s `CenterLeader` query above): label, sortOrder, and
+  // the COE `expansion` all come from `OrgUnitRole`, never hardcoded. Ordered
+  // by the vocabulary's own `sortOrder` (leader=10 before coe_liaison=20, NOT
+  // alphabetically — "coe_liaison" sorts BEFORE "leader" lexically), then the
+  // assignment's own `sortOrder` (order among co-leaders), then `cwid` as a
+  // stable tiebreak. The assignment carries no FK to `CenterProgram` — it is
+  // polymorphic on (entityType, entityId), same shape as `unit_admin`.
+  const entityId = `${center.code}:${code}`;
+  const assignments = await prisma.orgUnitRoleAssignment.findMany({
+    where: { entityType: CENTER_PROGRAM_ENTITY_TYPE, entityId },
+    select: {
+      cwid: true,
+      interim: true,
+      roleKey: true,
+      sortOrder: true,
+      role: { select: { label: true, expansion: true } },
+    },
+    orderBy: [{ role: { sortOrder: "asc" } }, { sortOrder: "asc" }, { cwid: "asc" }],
+  });
+
+  // Each `cwid` resolves to a WCM scholar (profile-linked) or the
+  // external-leader fallback keyed `<centerCode>:<programCode>` (used only when
+  // that entry names THIS cwid). A cwid that resolves to neither is dropped —
+  // never fabricate a name.
   let leaders: ProgramLeader[] = [];
-  if (program.leaders.length > 0) {
+  if (assignments.length > 0) {
     const scholars = await prisma.scholar.findMany({
-      where: { cwid: { in: program.leaders.map((l) => l.cwid) } },
+      where: { cwid: { in: assignments.map((a) => a.cwid) } },
       select: { cwid: true, preferredName: true, slug: true, primaryTitle: true },
     });
     const scholarByCwid = new Map(scholars.map((s) => [s.cwid, s]));
     const ext = EXTERNAL_LEADERS[`${center.code}:${code}`];
-    const roleRank = (role: string): number => (role === "coe_liaison" ? 1 : 0);
-    // Stable sort: leaders (rank 0) before liaisons (rank 1); the join already
-    // ordered by sortOrder,cwid so the within-group order is preserved.
-    const orderedRows = [...program.leaders].sort(
-      (a, b) => roleRank(a.role) - roleRank(b.role),
-    );
-    leaders = orderedRows.flatMap((row): ProgramLeader[] => {
-      const role: "leader" | "coe_liaison" = row.role === "coe_liaison" ? "coe_liaison" : "leader";
+    leaders = assignments.flatMap((row): ProgramLeader[] => {
+      const role: "leader" | "coe_liaison" = row.roleKey === "coe_liaison" ? "coe_liaison" : "leader";
+      // A role carrying an `expansion` (today only `coe_liaison`) never gets
+      // the Interim prefix — #1570, unchanged by this migration.
+      const roleLabel = row.role.expansion
+        ? row.role.label
+        : formatLeadershipTitle(row.role.label, row.interim);
       const scholar = scholarByCwid.get(row.cwid);
       if (scholar) {
         return [
@@ -1088,6 +1115,8 @@ export async function getCenterProgram(
             identityImageEndpoint: identityImageEndpoint(scholar.cwid),
             isInterim: row.interim,
             role,
+            roleLabel,
+            expansion: row.role.expansion,
           },
         ];
       }
@@ -1101,6 +1130,8 @@ export async function getCenterProgram(
             identityImageEndpoint: identityImageEndpoint(ext.cwid),
             isInterim: row.interim,
             role,
+            roleLabel,
+            expansion: row.role.expansion,
           },
         ];
       }

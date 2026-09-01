@@ -97,7 +97,7 @@ describe("DEFAULT_ORG_UNIT_ROLES", () => {
     }
   });
 
-  it("seeds unit-scope entries only; `program` scope arrives with the CenterProgramLeader fold-in", () => {
+  it("seeds unit-scope entries only; `program` scope arrives with the center_program vocabulary (#2558)", () => {
     expect(centerRoles.every((r) => r.scope === "unit")).toBe(true);
   });
 
@@ -113,7 +113,7 @@ describe("DEFAULT_ORG_UNIT_ROLES", () => {
     }
   });
 
-  // #2558 Phase 1 — folding CenterProgramLeader into the vocabulary.
+  // #2558 — the center_program vocabulary.
   it("center_program seeds leader (profileTitle true) and coe_liaison (profileTitle false, with expansion)", () => {
     expect(DEFAULT_ORG_UNIT_ROLES.center_program).toEqual([
       {

@@ -1,5 +1,10 @@
 /**
- * #1117 — /api/edit/center-program (program leaders + description editor).
+ * #1117 / #2558 — /api/edit/center-program (program leaders + description editor).
+ *
+ * #2558 contract PR: the route writes `OrgUnitRoleAssignment` rows
+ * (`entityType: "center_program"`, `entityId: "{centerCode}:{programCode}"`)
+ * instead of the retired per-program leader table, and audits against
+ * `targetEntityType: "center_program"` instead of `"center"`.
  *
  *  - Curator adds / removes / reorders a leader and edits the description.
  *  - add_leader on an existing leader → 200 no-op (no DB write).
@@ -9,7 +14,8 @@
  *  - unknown program for the center → 400 invalid_program_code.
  *  - non-admin → 403 not_curator (authz parity with the roster editor).
  *  - invalid cwid / action → 400.
- *  - every mutation writes a B03 audit row (roster_change | field_override).
+ *  - every mutation writes a B03 audit row (roster_change | field_override)
+ *    against `targetEntityType: "center_program"`.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
@@ -21,10 +27,11 @@ const {
   mockCenterFindUnique,
   mockUnitAdminFindMany,
   mockCenterProgramFindUnique,
-  mockCenterProgramLeaderFindUnique,
-  mockTxLeaderCreate,
-  mockTxLeaderDelete,
-  mockTxLeaderUpdate,
+  mockAssignmentFindFirst,
+  mockTxRoleCreateMany,
+  mockTxAssignmentCreate,
+  mockTxAssignmentDelete,
+  mockTxAssignmentUpdate,
   mockTxProgramUpdate,
   mockReflectUnitChange,
 } = vi.hoisted(() => ({
@@ -34,10 +41,11 @@ const {
   mockCenterFindUnique: vi.fn(),
   mockUnitAdminFindMany: vi.fn(),
   mockCenterProgramFindUnique: vi.fn(),
-  mockCenterProgramLeaderFindUnique: vi.fn(),
-  mockTxLeaderCreate: vi.fn(),
-  mockTxLeaderDelete: vi.fn(),
-  mockTxLeaderUpdate: vi.fn(),
+  mockAssignmentFindFirst: vi.fn(),
+  mockTxRoleCreateMany: vi.fn(),
+  mockTxAssignmentCreate: vi.fn(),
+  mockTxAssignmentDelete: vi.fn(),
+  mockTxAssignmentUpdate: vi.fn(),
   mockTxProgramUpdate: vi.fn(),
   mockReflectUnitChange: vi.fn(),
 }));
@@ -59,7 +67,7 @@ vi.mock("@/lib/db", () => ({
       center: { findUnique: mockCenterFindUnique },
       unitAdmin: { findMany: mockUnitAdminFindMany },
       centerProgram: { findUnique: mockCenterProgramFindUnique },
-      centerProgramLeader: { findUnique: mockCenterProgramLeaderFindUnique },
+      orgUnitRoleAssignment: { findFirst: mockAssignmentFindFirst },
     },
     write: { $transaction: mockTransaction },
   },
@@ -72,10 +80,11 @@ const CURATOR = { cwid: "cur001", isSuperuser: false };
 const NONADMIN = { cwid: "non001", isSuperuser: false };
 
 const fakeTx = {
-  centerProgramLeader: {
-    create: mockTxLeaderCreate,
-    delete: mockTxLeaderDelete,
-    update: mockTxLeaderUpdate,
+  orgUnitRole: { createMany: mockTxRoleCreateMany },
+  orgUnitRoleAssignment: {
+    create: mockTxAssignmentCreate,
+    delete: mockTxAssignmentDelete,
+    update: mockTxAssignmentUpdate,
   },
   centerProgram: { update: mockTxProgramUpdate },
   $executeRaw: mockExecuteRaw,
@@ -90,6 +99,7 @@ function post(body: unknown): NextRequest {
 }
 
 const BASE = { centerCode: "meyer_cancer_center", programCode: "CB" };
+const ENTITY_ID = "meyer_cancer_center:CB";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -103,20 +113,21 @@ beforeEach(() => {
     { entityType: "center", entityId: "meyer_cancer_center", role: "curator" },
   ]);
   mockCenterProgramFindUnique.mockResolvedValue({ code: "CB", description: "Old blurb." });
-  mockCenterProgramLeaderFindUnique.mockResolvedValue(null);
-  mockTxLeaderCreate.mockResolvedValue({
+  mockAssignmentFindFirst.mockResolvedValue(null);
+  mockTxRoleCreateMany.mockResolvedValue({ count: 0 });
+  mockTxAssignmentCreate.mockResolvedValue({
     cwid: "lead001",
     interim: false,
-    role: "leader",
+    roleKey: "leader",
     sortOrder: 0,
   });
-  mockTxLeaderUpdate.mockResolvedValue({
+  mockTxAssignmentUpdate.mockResolvedValue({
     cwid: "lead001",
     interim: true,
-    role: "leader",
+    roleKey: "leader",
     sortOrder: 0,
   });
-  mockTxLeaderDelete.mockResolvedValue({ cwid: "lead001" });
+  mockTxAssignmentDelete.mockResolvedValue({ cwid: "lead001" });
   mockTxProgramUpdate.mockResolvedValue({ code: "CB" });
 });
 
@@ -127,19 +138,28 @@ describe("/api/edit/center-program — leaders", () => {
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, changed: true });
-    expect(mockTxLeaderCreate).toHaveBeenCalledWith(
+    // Seeds the vocabulary first (idempotent — mirrors the director write path).
+    expect(mockTxRoleCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ skipDuplicates: true }),
+    );
+    expect(mockTxAssignmentCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
-          centerCode: "meyer_cancer_center",
-          programCode: "CB",
+          entityType: "center_program",
+          entityId: ENTITY_ID,
           cwid: "lead001",
+          roleKey: "leader", // written explicitly, not left to a column default
           interim: false,
-          role: "leader", // written explicitly, not left to the column default
           sortOrder: 0,
         },
       }),
     );
     expect(mockExecuteRaw).toHaveBeenCalledTimes(1); // the audit INSERT
+    // Audits against the program, not the center (#2558).
+    const auditCall = mockExecuteRaw.mock.calls[0] as unknown[];
+    expect(auditCall[2]).toBe("center_program"); // target_entity_type
+    expect(auditCall[3]).toBe(ENTITY_ID); // target_entity_id
+    expect(auditCall[4]).toBe("roster_change"); // action — an EXISTING value
     // Purges the center page AND the program's own ISR page (#1117).
     expect(mockReflectUnitChange).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -151,7 +171,12 @@ describe("/api/edit/center-program — leaders", () => {
   });
 
   it("add_leader on an existing leader → 200 no-op (no write)", async () => {
-    mockCenterProgramLeaderFindUnique.mockResolvedValue({ cwid: "lead001", interim: false, sortOrder: 0 });
+    mockAssignmentFindFirst.mockResolvedValue({
+      cwid: "lead001",
+      interim: false,
+      roleKey: "leader",
+      sortOrder: 0,
+    });
     const res = await POST(post({ ...BASE, action: "add_leader", cwid: "lead001" }));
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, changed: false });
@@ -166,21 +191,43 @@ describe("/api/edit/center-program — leaders", () => {
   });
 
   it("remove_leader of an existing leader → 200, deletes + audit", async () => {
-    mockCenterProgramLeaderFindUnique.mockResolvedValue({ cwid: "lead001", interim: false, sortOrder: 0 });
+    mockAssignmentFindFirst.mockResolvedValue({
+      cwid: "lead001",
+      interim: false,
+      roleKey: "leader",
+      sortOrder: 0,
+    });
     const res = await POST(post({ ...BASE, action: "remove_leader", cwid: "lead001" }));
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, changed: true });
-    expect(mockTxLeaderDelete).toHaveBeenCalled();
+    expect(mockTxAssignmentDelete).toHaveBeenCalledWith({
+      where: {
+        entityType_entityId_cwid_roleKey: {
+          entityType: "center_program",
+          entityId: ENTITY_ID,
+          cwid: "lead001",
+          roleKey: "leader",
+        },
+      },
+    });
     expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
   });
 
   it("set_leader toggles interim on an existing leader → 200, updates", async () => {
-    mockCenterProgramLeaderFindUnique.mockResolvedValue({ cwid: "lead001", interim: false, sortOrder: 0 });
+    mockAssignmentFindFirst.mockResolvedValue({
+      cwid: "lead001",
+      interim: false,
+      roleKey: "leader",
+      sortOrder: 0,
+    });
     const res = await POST(post({ ...BASE, action: "set_leader", cwid: "lead001", interim: true }));
     expect(res.status).toBe(200);
-    expect(mockTxLeaderUpdate).toHaveBeenCalledWith(
+    expect(mockTxAssignmentUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ data: { interim: true } }),
     );
+    // Same-role update never moves the row — no delete/create pair.
+    expect(mockTxAssignmentDelete).not.toHaveBeenCalled();
+    expect(mockTxAssignmentCreate).not.toHaveBeenCalled();
   });
 
   it("set_leader on an absent leader → 400 leader_not_found", async () => {
@@ -196,50 +243,75 @@ describe("/api/edit/center-program — leaders", () => {
       post({ ...BASE, action: "add_leader", cwid: "liai001", role: "coe_liaison", sortOrder: 0 }),
     );
     expect(res.status).toBe(200);
-    expect(mockTxLeaderCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ role: "coe_liaison" }) }),
+    expect(mockTxAssignmentCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ roleKey: "coe_liaison" }) }),
     );
   });
 
-  it("set_leader changes an existing leader's role", async () => {
-    mockCenterProgramLeaderFindUnique.mockResolvedValue({
+  it("set_leader changes an existing leader's role — moves the assignment (delete + create)", async () => {
+    // `roleKey` is part of the assignment's composite id, so a role change
+    // cannot be a plain UPDATE; it must delete the old (…, "leader") row and
+    // create a new (…, "coe_liaison") one, carrying interim/sortOrder across.
+    mockAssignmentFindFirst.mockResolvedValue({
       cwid: "lead001",
-      interim: false,
-      role: "leader",
-      sortOrder: 0,
+      interim: true,
+      roleKey: "leader",
+      sortOrder: 3,
     });
     const res = await POST(
       post({ ...BASE, action: "set_leader", cwid: "lead001", role: "coe_liaison" }),
     );
     expect(res.status).toBe(200);
-    expect(mockTxLeaderUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { role: "coe_liaison" } }),
+    expect(mockTxAssignmentDelete).toHaveBeenCalledWith({
+      where: {
+        entityType_entityId_cwid_roleKey: {
+          entityType: "center_program",
+          entityId: ENTITY_ID,
+          cwid: "lead001",
+          roleKey: "leader",
+        },
+      },
+    });
+    expect(mockTxAssignmentCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          entityType: "center_program",
+          entityId: ENTITY_ID,
+          cwid: "lead001",
+          roleKey: "coe_liaison",
+          // Carried across from the existing row — this request didn't set them.
+          interim: true,
+          sortOrder: 3,
+        },
+      }),
     );
+    expect(mockTxAssignmentUpdate).not.toHaveBeenCalled();
   });
 
   it("set_leader without `role` leaves an existing liaison's role untouched", async () => {
     // The partial-update footgun: toggling interim (or reordering) on a COE liaison
     // must not silently demote them back to `leader`.
-    mockCenterProgramLeaderFindUnique.mockResolvedValue({
+    mockAssignmentFindFirst.mockResolvedValue({
       cwid: "liai001",
       interim: false,
-      role: "coe_liaison",
+      roleKey: "coe_liaison",
       sortOrder: 0,
     });
     const res = await POST(post({ ...BASE, action: "set_leader", cwid: "liai001", interim: true }));
     expect(res.status).toBe(200);
-    expect(mockTxLeaderUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { interim: true } }), // no `role` key
+    expect(mockTxAssignmentUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { interim: true } }), // no `sortOrder` key
     );
-    const data = mockTxLeaderUpdate.mock.calls[0][0].data as Record<string, unknown>;
-    expect("role" in data).toBe(false);
+    const data = mockTxAssignmentUpdate.mock.calls[0][0].data as Record<string, unknown>;
+    expect("sortOrder" in data).toBe(false);
+    expect(mockTxAssignmentDelete).not.toHaveBeenCalled();
   });
 
   it("an unknown role → 400 invalid_value (no write)", async () => {
-    mockCenterProgramLeaderFindUnique.mockResolvedValue({
+    mockAssignmentFindFirst.mockResolvedValue({
       cwid: "lead001",
       interim: false,
-      role: "leader",
+      roleKey: "leader",
       sortOrder: 0,
     });
     const res = await POST(
@@ -260,6 +332,10 @@ describe("/api/edit/center-program — description", () => {
       expect.objectContaining({ data: { description: "New blurb." } }),
     );
     expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+    const auditCall = mockExecuteRaw.mock.calls[0] as unknown[];
+    expect(auditCall[2]).toBe("center_program"); // target_entity_type
+    expect(auditCall[3]).toBe(ENTITY_ID); // target_entity_id
+    expect(auditCall[4]).toBe("field_override"); // action — an EXISTING value
     // Must purge the program's ISR page too — description renders there (#1117).
     expect(mockReflectUnitChange).toHaveBeenCalledWith(
       expect.objectContaining({ unitKind: "center", unitSlug: "meyer-cancer-center", programCode: "CB" }),

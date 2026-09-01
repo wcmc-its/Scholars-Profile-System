@@ -200,8 +200,8 @@ export function isMethodFamilySynonymsEnabled(): boolean {
  * program's leaders (one LeaderCard each — a program may be co-led, #1117) + a
  * prose description. When off, the route `notFound()`s and the center page's
  * program section headers stay plain text (no links). Standalone (NOT gated on
- * the methods lens) and default OFF, so the surface ships dark — the
- * `CenterProgramLeader` rows + `CenterProgram.description` are curated
+ * the methods lens) and default OFF, so the surface ships dark — the program's
+ * `OrgUnitRoleAssignment` leader rows + `CenterProgram.description` are curated
  * independently (via `/edit/center/[code]` → Programs). Wire in BOTH `.env.local`
  * AND the per-env `environment:` block in cdk/lib/app-stack.ts per the
  * flag-parity rule.

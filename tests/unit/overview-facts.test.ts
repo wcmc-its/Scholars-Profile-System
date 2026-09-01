@@ -24,7 +24,6 @@ const {
   mockDivisionFindMany,
   mockCenterLeaderFindMany,
   mockCenterFindMany,
-  mockCenterProgramLeaderFindMany,
   mockProgramAssignmentFindMany,
   mockCenterProgramFindMany,
   mockFieldOverrideFindFirst,
@@ -44,13 +43,12 @@ const {
   mockDivisionFindMany: vi.fn(),
   mockCenterLeaderFindMany: vi.fn(),
   mockCenterFindMany: vi.fn(),
-  mockCenterProgramLeaderFindMany: vi.fn(),
-  // #2558 Phase 1 — a SEPARATE mock from `mockCenterLeaderFindMany`, even
-  // though both back `orgUnitRoleAssignment.findMany` calls: the real query is
-  // scoped by `entityType` at the DB level ("center" vs "center_program"), and
-  // a single undifferentiated mock would leak one kind's fixture rows into the
-  // other's call, producing an `entityId` with no ":" to split. The dispatcher
-  // below routes by `where.entityType`.
+  // #2558 — a SEPARATE mock from `mockCenterLeaderFindMany`, even though both
+  // back `orgUnitRoleAssignment.findMany` calls: the real query is scoped by
+  // `entityType` at the DB level ("center" vs "center_program"), and a single
+  // undifferentiated mock would leak one kind's fixture rows into the other's
+  // call, producing an `entityId` with no ":" to split. The dispatcher below
+  // routes by `where.entityType`.
   mockProgramAssignmentFindMany: vi.fn(),
   mockCenterProgramFindMany: vi.fn(),
   mockFieldOverrideFindFirst: vi.fn(),
@@ -75,9 +73,9 @@ vi.mock("@/lib/db", () => ({
       // #742 §2.5 — org-unit leadership-FK title augmentation.
       department: { findMany: mockDepartmentFindMany },
       division: { findMany: mockDivisionFindMany },
-      // #2558 Phase 1 — dispatches by `where.entityType`: "center_program"
-      // goes to its own mock, everything else (today, only "center") keeps
-      // going to `mockCenterLeaderFindMany` unchanged.
+      // #2558 — dispatches by `where.entityType`: "center_program" goes to its
+      // own mock, everything else (today, only "center") keeps going to
+      // `mockCenterLeaderFindMany` unchanged.
       orgUnitRoleAssignment: {
         findMany: (args: { where?: { entityType?: string } }) =>
           args?.where?.entityType === "center_program"
@@ -85,7 +83,6 @@ vi.mock("@/lib/db", () => ({
             : mockCenterLeaderFindMany(args),
       },
       center: { findMany: mockCenterFindMany },
-      centerProgramLeader: { findMany: mockCenterProgramLeaderFindMany },
       centerProgram: { findMany: mockCenterProgramFindMany },
       // #1997 — the scholar's `hideEducationYears` section-visibility override.
       fieldOverride: { findFirst: mockFieldOverrideFindFirst },
@@ -230,7 +227,6 @@ beforeEach(() => {
   mockDivisionFindMany.mockResolvedValue([]);
   mockCenterLeaderFindMany.mockResolvedValue([]);
   mockCenterFindMany.mockResolvedValue([]);
-  mockCenterProgramLeaderFindMany.mockResolvedValue([]);
   mockProgramAssignmentFindMany.mockResolvedValue([]);
   mockCenterProgramFindMany.mockResolvedValue([]);
   mockFieldOverrideFindFirst.mockResolvedValue(null);
@@ -947,33 +943,7 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
     ]);
   });
 
-  it("surfaces a center program leader as 'Leader, <program> Program'", async () => {
-    mockCenterProgramLeaderFindMany.mockResolvedValue([
-      {
-        centerCode: "meyer",
-        programCode: "CB",
-        interim: false,
-        program: { label: "Cancer Biology", center: { name: "Meyer Cancer Center", officialName: null } },
-      },
-    ]);
-    const facts = await assembleOverviewFacts("self01");
-    expect(facts?.titles).toEqual([
-      { title: "Leader, Cancer Biology Program", organization: "Meyer Cancer Center" },
-    ]);
-  });
-
-  // #2558 Phase 1 — the `OrgUnitRoleAssignment` dual-read for center_program.
-  it("an OrgUnitRoleAssignment-covered program wins over the legacy CenterProgramLeader row, with the vocabulary label + interim", async () => {
-    // Legacy table still has a row for the SAME program — the assignment must
-    // suppress it, not double-render.
-    mockCenterProgramLeaderFindMany.mockResolvedValue([
-      {
-        centerCode: "meyer",
-        programCode: "CB",
-        interim: false,
-        program: { label: "Cancer Biology", center: { name: "Meyer Cancer Center", officialName: null } },
-      },
-    ]);
+  it("surfaces a center program leader as 'Leader, <program> Program', with the vocabulary label + interim (#2558)", async () => {
     mockProgramAssignmentFindMany.mockResolvedValue([
       {
         entityId: "meyer:CB",
@@ -1043,10 +1013,13 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
     });
     // ...and the dual-read fallback still scopes to this scholar.
     expect(mockCenterFindMany.mock.calls[0][0].where).toEqual({ directorCwid: "self01" });
-    // #1570 — scoped to program LEADS only; a coe_liaison row is not a title.
-    expect(mockCenterProgramLeaderFindMany.mock.calls[0][0].where).toEqual({
+    // #2558 — the center_program assignment query, `profileTitle`-gated the
+    // same way — see the dedicated "scopes the center_program assignment
+    // query" test above.
+    expect(mockProgramAssignmentFindMany.mock.calls[0][0].where).toEqual({
       cwid: "self01",
-      role: "leader",
+      entityType: "center_program",
+      role: { roleGroup: "leadership", profileTitle: true },
     });
   });
 

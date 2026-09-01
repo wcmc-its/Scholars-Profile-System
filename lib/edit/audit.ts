@@ -270,16 +270,11 @@ export type AuditEntityType =
    *  role-vocabulary editor (#2542 Phase 3); `targetEntityId` is the
    *  `entityType:key` pair. */
   | "org_unit_role"
-  /** a Meyer Cancer Center program leadership target — reserved for the
-   *  contract PR (#2558) that migrates `/api/edit/center-program` off
-   *  `CenterProgramLeader` and onto `OrgUnitRoleAssignment` directly;
-   *  `targetEntityId` would be the `"{centerCode}:{programCode}"` pair. No
-   *  write path emits this value yet — today's `roster_change` /
-   *  `field_override` rows for a program edit still target
-   *  `targetEntityType: "center"` (see `app/api/edit/center-program/route.ts`).
-   *  Added now so the AUDIT enum already has the value waiting, per
-   *  `OrgUnitRoleAssignment`'s own docblock (`prisma/schema.prisma`) —
-   *  requires the `scholars_audit` target_entity_type ENUM be extended, see
+  /** a Meyer Cancer Center program leadership/description target (#2558) —
+   *  `/api/edit/center-program` writes `OrgUnitRoleAssignment` rows
+   *  (`entityType: "center_program"`) and in-row `CenterProgram.description`
+   *  updates; `targetEntityId` is the `"{centerCode}:{programCode}"` pair.
+   *  Requires the `scholars_audit` target_entity_type ENUM be extended, see
    *  `scripts/sql/audit-log.sql`. */
   | "center_program";
 

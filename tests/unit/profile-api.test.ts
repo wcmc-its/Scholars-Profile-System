@@ -67,12 +67,14 @@ vi.mock("@/lib/db", () => ({
     department: { findMany: vi.fn(async () => []) },
     division: { findMany: vi.fn(async () => []) },
     center: { findMany: vi.fn(async () => []) },
-    // #2558 Phase 1 — batched (label, center name) lookup for programs an
+    // #2558 — batched (label, center name) lookup for programs an
     // `orgUnitRoleAssignment` (entityType center_program) row points at.
     centerProgram: { findMany: vi.fn(async () => []) },
-    // #2542 — center/department/division leadership titles all read
-    // `orgUnitRoleAssignment` (with the legacy column as the pre-backfill /
-    // pre-sync dual-read fallback, #2542 Phase D for department/division).
+    // #2542 — department/division leadership titles read `orgUnitRoleAssignment`
+    // (with the legacy column as the pre-backfill / pre-sync dual-read
+    // fallback, #2542 Phase D). #2558 — center-program leadership titles read
+    // `orgUnitRoleAssignment` too (entityType `center_program`); no legacy
+    // fallback — the retired per-program leader table is gone.
     orgUnitRoleAssignment: { findMany: vi.fn(async () => []) },
     // #2542 Phase D — department Chair/Director + division Chief labels
     // resolve from the vocabulary; `null`/`[]` defaults exercise the
@@ -81,7 +83,6 @@ vi.mock("@/lib/db", () => ({
       findMany: vi.fn(async () => []),
       findUnique: vi.fn(async () => null),
     },
-    centerProgramLeader: { findMany: vi.fn(async () => []) },
     $queryRawUnsafe: vi.fn(async () => []),
   },
 }));
@@ -94,7 +95,6 @@ type LeadershipMockClient = {
   division: { findMany: Mock };
   center: { findMany: Mock };
   centerProgram: { findMany: Mock };
-  centerProgramLeader: { findMany: Mock };
   orgUnitRoleAssignment: { findMany: Mock };
   orgUnitRole: { findMany: Mock; findUnique: Mock };
 };
@@ -105,7 +105,6 @@ async function loadLeadershipMocks(): Promise<LeadershipMockClient> {
   prisma.division.findMany.mockReset().mockResolvedValue([]);
   prisma.center.findMany.mockReset().mockResolvedValue([]);
   prisma.centerProgram.findMany.mockReset().mockResolvedValue([]);
-  prisma.centerProgramLeader.findMany.mockReset().mockResolvedValue([]);
   prisma.orgUnitRoleAssignment.findMany.mockReset().mockResolvedValue([]);
   prisma.orgUnitRole.findMany.mockReset().mockResolvedValue([]);
   prisma.orgUnitRole.findUnique.mockReset().mockResolvedValue(null);
@@ -254,12 +253,11 @@ describe("profile serializer — department/division leadership titles (#58 / #2
   });
 });
 
-// #2558 Phase 1 — folding `CenterProgramLeader` into the org-unit role
-// vocabulary. Mirrors the department/division describe block above:
-// `orgUnitRoleAssignment` (entityType `center_program`) is preferred, falling
-// back to the legacy `CenterProgramLeader` table for programs not yet
-// backfilled.
-describe("profile serializer — center program leadership titles (#2558 Phase 1)", () => {
+// #2558 — the retired per-program leader table folded into the org-unit role
+// vocabulary. Mirrors the department/division describe block above, minus the
+// dual-read fallback: the contract PR migrated the read onto
+// `orgUnitRoleAssignment` (entityType `center_program`) exclusively.
+describe("profile serializer — center program leadership titles (#2558)", () => {
   beforeEach(loadLeadershipMocks);
 
   async function leadershipTitles(): Promise<string[]> {
@@ -271,37 +269,8 @@ describe("profile serializer — center program leadership titles (#2558 Phase 1
     return payload?.leadershipTitles ?? [];
   }
 
-  it("labels a program leader 'Leader' via the legacy CenterProgramLeader fallback", async () => {
+  it("labels a program leader 'Leader, <program> (<center>)', with interim, from the assignment + vocabulary", async () => {
     const prisma = await loadLeadershipMocks();
-    prisma.centerProgramLeader.findMany.mockResolvedValue([
-      {
-        centerCode: "meyer_cancer_center",
-        programCode: "CB",
-        interim: false,
-        program: {
-          label: "Cancer Biology",
-          center: { name: "Meyer Cancer Center", officialName: null },
-        },
-      },
-    ]);
-    expect(await leadershipTitles()).toEqual(["Leader, Cancer Biology (Meyer Cancer Center)"]);
-  });
-
-  it("an OrgUnitRoleAssignment-covered program wins over the legacy row, with the vocabulary label + interim", async () => {
-    const prisma = await loadLeadershipMocks();
-    // Legacy table still has a row for the SAME program — the assignment must
-    // suppress it, not double-render.
-    prisma.centerProgramLeader.findMany.mockResolvedValue([
-      {
-        centerCode: "meyer_cancer_center",
-        programCode: "CB",
-        interim: false,
-        program: {
-          label: "Cancer Biology",
-          center: { name: "Meyer Cancer Center", officialName: null },
-        },
-      },
-    ]);
     prisma.centerProgram.findMany.mockResolvedValue([
       {
         centerCode: "meyer_cancer_center",

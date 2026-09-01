@@ -8,7 +8,6 @@
  */
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { AbbrTooltip } from "@/components/ui/abbr-tooltip";
-import { COE_ABBR, COE_EXPANSION } from "@/lib/center-program-roles";
 import { formatLeadershipTitle } from "@/lib/org-unit-roles";
 import { profilePath } from "@/lib/profile-url";
 
@@ -42,6 +41,7 @@ export function LeaderCard({
   leader,
   role,
   interim = false,
+  expansion = null,
 }: {
   leader: Leader;
   role: LeaderRole;
@@ -49,10 +49,20 @@ export function LeaderCard({
    *  every pre-existing caller, whose `role` already carries any modifier it
    *  wants verbatim. When true, composes `role` through `formatLeadershipTitle`
    *  ("Director" -> "Interim Director") instead of requiring every call site
-   *  to pre-format the string. */
+   *  to pre-format the string. Ignored when `expansion` is set — see below. */
   interim?: boolean;
+  /** #2558 — long form for `role`'s abbreviated leading word (e.g. "Community
+   *  Outreach & Engagement" for "COE Liaison"), sourced from the vocabulary's
+   *  `OrgUnitRole.expansion` column rather than a hardcoded constant (#1570's
+   *  original "COE" affordance). When present, the leading word of `role`
+   *  renders as an `<abbr>` tooltip and `interim` is ignored — a role that
+   *  needs its abbreviation spelled out has never carried an Interim qualifier
+   *  (the caller bakes it into `role` instead, if it should apply). */
+  expansion?: string | null;
 }) {
-  const displayRole = role === "COE Liaison" ? role : formatLeadershipTitle(role, interim);
+  const displayRole = expansion ? role : formatLeadershipTitle(role, interim);
+  const abbrWord = expansion ? (role.split(" ")[0] ?? role) : "";
+  const abbrRest = expansion ? role.slice(abbrWord.length) : "";
   return (
     <div className="mt-6 flex max-w-[460px] items-center gap-[14px] rounded-md border border-border bg-background px-4 py-[14px]">
       <HeadshotAvatar
@@ -64,11 +74,12 @@ export function LeaderCard({
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="mb-[3px] text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
           {/* #1570 — "COE" is the one eyebrow that isn't self-evident; expand it on
-              hover/focus. Every other role renders as plain text, unchanged. */}
-          {role === "COE Liaison" ? (
+              hover/focus (#2558 — sourced from `expansion`, not a hardcoded
+              constant). Every other role renders as plain text, unchanged. */}
+          {expansion ? (
             <>
-              <AbbrTooltip short={COE_ABBR} expand={COE_EXPANSION} />
-              {" Liaison"}
+              <AbbrTooltip short={abbrWord} expand={expansion} />
+              {abbrRest}
             </>
           ) : (
             displayRole

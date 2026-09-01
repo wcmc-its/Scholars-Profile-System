@@ -147,7 +147,6 @@ vi.mock("@/lib/db", () => ({
     orgUnitRoleAssignment: { findMany: vi.fn(async () => []) },
     // #2542 Phase D — department/division leadership label vocabulary lookup.
     orgUnitRole: { findMany: vi.fn(async () => []), findUnique: vi.fn(async () => null) },
-    centerProgramLeader: { findMany: vi.fn(async () => []) },
     $queryRawUnsafe: vi.fn(async () => []),
   },
 }));

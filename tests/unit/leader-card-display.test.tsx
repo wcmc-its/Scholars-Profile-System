@@ -36,8 +36,12 @@ describe("LeaderCard (display)", () => {
     expect(screen.getByText("Chair")).toBeTruthy();
   });
 
-  it("expands COE on the liaison eyebrow, without changing the visible label", () => {
-    const { container } = render(<LeaderCard leader={base} role="COE Liaison" />);
+  it("expands COE on the liaison eyebrow (via the expansion prop), without changing the visible label", () => {
+    // #2558 — the expansion is a prop now, sourced from the vocabulary by the
+    // caller (`getCenterProgram`), not a constant `LeaderCard` imports itself.
+    const { container } = render(
+      <LeaderCard leader={base} role="COE Liaison" expansion={COE_EXPANSION} />,
+    );
     const abbr = container.querySelector("abbr");
     expect(abbr).not.toBeNull();
     expect(abbr!.textContent).toBe("COE");
@@ -47,9 +51,17 @@ describe("LeaderCard (display)", () => {
     expect(container.textContent).toContain("COE Liaison");
   });
 
-  it("does not wrap a non-COE role in an abbr", () => {
+  it("does not wrap a role in an abbr when no expansion is given", () => {
     const { container } = render(<LeaderCard leader={base} role="Interim Leader" />);
     expect(container.querySelector("abbr")).toBeNull();
     expect(screen.getByText("Interim Leader")).toBeTruthy();
+  });
+
+  it("does not wrap 'COE Liaison' in an abbr when no expansion is given", () => {
+    // Passing the literal role string is no longer sufficient by itself —
+    // without `expansion`, the caller gets plain text, matching every other role.
+    const { container } = render(<LeaderCard leader={base} role="COE Liaison" />);
+    expect(container.querySelector("abbr")).toBeNull();
+    expect(screen.getByText("COE Liaison")).toBeTruthy();
   });
 });
