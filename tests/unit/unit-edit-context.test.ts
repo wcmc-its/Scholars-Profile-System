@@ -608,6 +608,7 @@ describe("loadUnitEditContext — manual division roster", () => {
         title: null,
         source: "manual-ui",
         membershipType: null,
+        membershipRoleKey: null,
         programCode: null,
         startDate: null,
         endDate: null,

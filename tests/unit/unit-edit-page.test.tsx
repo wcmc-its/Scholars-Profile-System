@@ -98,6 +98,7 @@ function ctx(over: {
     roster: over.roster ?? null,
     programs: over.programs ?? (unitType === "center" ? [] : null),
     centerLeadership: over.centerLeadership ?? (unitType === "center" ? [] : null),
+    centerMembershipRoles: unitType === "center" ? [] : null,
     siblingDivisions: over.siblings ?? null,
     diseaseOptions: unitType === "center" ? [] : null,
     actorRole: over.actorRole ?? "curator",

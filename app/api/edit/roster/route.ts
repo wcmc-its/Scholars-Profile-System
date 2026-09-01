@@ -84,9 +84,20 @@ const PATH = "/api/edit/roster";
  */
 class RoleNotAllowedAtUnit extends Error {}
 
+/** `membershipRoleKey` names a center vocabulary row that either doesn't
+ *  exist or isn't `roleGroup: "membership"`. Thrown inside the write
+ *  transaction, same rollback pattern as `RoleNotAllowedAtUnit`. */
+class InvalidMembershipRoleKey extends Error {}
+
+/** A vocabulary key: lowercase, digits, underscore, starting with a letter. */
+const MEMBERSHIP_ROLE_KEY_PATTERN = /^[a-z][a-z0-9_]{0,31}$/;
+
 /** The extended CenterMembership fields, with per-field "present in body" flags. */
 type ExtendedFields = {
   membershipType: { present: boolean; value: "research" | "clinical" | null };
+  /** Vocabulary-driven replacement for `membershipType` (CHPC fellow roles) —
+   *  mutually exclusive with it, enforced below. */
+  membershipRoleKey: { present: boolean; value: string | null };
   programCode: { present: boolean; value: string | null };
   startDate: { present: boolean; value: Date | null };
   endDate: { present: boolean; value: Date | null };
@@ -170,12 +181,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // --- parse the extended fields (center-only; validated below) ---
   const ext: ExtendedFields = {
     membershipType: { present: "membershipType" in body, value: null },
+    membershipRoleKey: { present: "membershipRoleKey" in body, value: null },
     programCode: { present: "programCode" in body, value: null },
     startDate: { present: "startDate" in body, value: null },
     endDate: { present: "endDate" in body, value: null },
   };
   const anyExtended =
     ext.membershipType.present ||
+    ext.membershipRoleKey.present ||
     ext.programCode.present ||
     ext.startDate.present ||
     ext.endDate.present;
@@ -185,12 +198,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(400, "roster_field_center_only", "unitType");
   }
 
+  // Unambiguous: a body naming both the legacy field and its vocabulary
+  // replacement has no defined precedence.
+  if (ext.membershipType.present && ext.membershipRoleKey.present) {
+    return editError(400, "invalid_membership_role_key", "membershipRoleKey");
+  }
+
   if (ext.membershipType.present) {
     const v = body.membershipType;
     if (v !== null && (typeof v !== "string" || !isCenterMembershipType(v))) {
       return editError(400, "invalid_membership_type", "membershipType");
     }
     ext.membershipType.value = (v as "research" | "clinical" | null) ?? null;
+  }
+  if (ext.membershipRoleKey.present) {
+    const v = body.membershipRoleKey;
+    if (v !== null && (typeof v !== "string" || !MEMBERSHIP_ROLE_KEY_PATTERN.test(v))) {
+      return editError(400, "invalid_membership_role_key", "membershipRoleKey");
+    }
+    ext.membershipRoleKey.value = (v as string | null) ?? null;
   }
   if (ext.programCode.present) {
     const v = body.programCode;
@@ -404,7 +430,12 @@ async function handleCenter(p: {
 
   // The set of columns this write applies — only fields present in the body.
   const applied: Record<string, unknown> = {};
-  if (ext.membershipType.present) {
+  if (ext.membershipRoleKey.present) {
+    // CHPC fellow roles — the vocabulary key IS the stored fact; `null`
+    // ("unclassified") becomes `member`, same convention as the legacy path.
+    applied.membershipRoleKey = ext.membershipRoleKey.value ?? MEMBER_ROLE_KEY;
+    applied.membershipType = deriveMembershipType(applied.membershipRoleKey as string);
+  } else if (ext.membershipType.present) {
     // #2542 — the roster editor still posts `membershipType`; the role key is
     // the stored fact and the enum is DERIVED from it, never written
     // independently. `null` ("unclassified") becomes the `member` role, which
@@ -429,11 +460,12 @@ async function handleCenter(p: {
   // body carries no `membershipType` — the upsert's `update: applied` never
   // includes the key, so the existing role stands untouched; gating that
   // would block a body that never asked to change the role).
-  const roleKeyBeingWritten: string | null = ext.membershipType.present
-    ? (applied.membershipRoleKey as string)
-    : willCreateMembership
-      ? MEMBER_ROLE_KEY
-      : null;
+  const roleKeyBeingWritten: string | null =
+    ext.membershipRoleKey.present || ext.membershipType.present
+      ? (applied.membershipRoleKey as string)
+      : willCreateMembership
+        ? MEMBER_ROLE_KEY
+        : null;
 
   try {
     await db.write.$transaction(async (tx) => {
@@ -473,6 +505,21 @@ async function handleCenter(p: {
           data: orgUnitRoleSeedRows(CENTER_ENTITY_TYPE),
           skipDuplicates: true,
         });
+      }
+
+      // A body-supplied `membershipRoleKey` must name a real MEMBERSHIP-group
+      // vocabulary entry — a leadership key exists but is not a roster role.
+      // Not applied to the legacy `membershipType` path (#2542 contract).
+      if (action !== "remove" && ext.membershipRoleKey.present) {
+        const roleRow = await tx.orgUnitRole.findUnique({
+          where: {
+            entityType_key: { entityType: CENTER_ENTITY_TYPE, key: applied.membershipRoleKey as string },
+          },
+          select: { roleGroup: true },
+        });
+        if (!roleRow || roleRow.roleGroup !== "membership") {
+          throw new InvalidMembershipRoleKey();
+        }
       }
 
       if (action === "remove") {
@@ -528,6 +575,9 @@ async function handleCenter(p: {
   } catch (err) {
     if (err instanceof RoleNotAllowedAtUnit) {
       return editError(400, "role_not_allowed_at_unit", "membershipType");
+    }
+    if (err instanceof InvalidMembershipRoleKey) {
+      return editError(400, "invalid_membership_role_key", "membershipRoleKey");
     }
     logEditFailure(PATH, err);
     return editError(500, "write_failed");

@@ -368,6 +368,31 @@ describe("/api/edit/roster — handleCenter allowlist gate (#2557 T2)", () => {
       }),
     );
   });
+
+  it("research via membershipRoleKey at a unit NOT on its allowlist is REJECTED — 400, no write", async () => {
+    // The gate is keyed off `roleKeyBeingWritten`, not off which body field
+    // named it — the vocabulary-key path must be covered exactly like the
+    // legacy `membershipType` path above.
+    mockCenterFindUnique.mockResolvedValue({ code: "other_center", slug: "other" });
+    mockTxOrgUnitRoleScopeFindMany.mockImplementation(
+      async ({ where }: { where: { entityType: string; roleKey: string } }) =>
+        where.roleKey === "research" ? [{ entityId: "meyer_cancer_center" }] : [],
+    );
+
+    const res = await POST(
+      post({
+        unitType: "center",
+        unitCode: "other_center",
+        cwid: "fac001",
+        action: "set",
+        membershipRoleKey: "research",
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "role_not_allowed_at_unit" });
+    expect(mockTxCenterMembershipUpsert).not.toHaveBeenCalled();
+  });
 });
 
 describe("/api/edit/roster — Cornell (Ithaca) add, center branch (#2557 T2 defense-in-depth)", () => {
