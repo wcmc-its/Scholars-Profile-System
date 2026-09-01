@@ -330,7 +330,7 @@ export async function applyBackfill(
       continue;
     }
 
-    // #2542 — `membership_role_key` FKs to `center_role`; seed Meyer's
+    // #2542 — `membership_role_key` FKs to `org_unit_role`; seed Meyer's
     // vocabulary first so a re-run before the Phase 1 backfill cannot die on
     // MySQL 1452 partway through the roster.
     await db.orgUnitRole.createMany({

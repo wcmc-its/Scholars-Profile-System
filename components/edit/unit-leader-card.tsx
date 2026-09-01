@@ -13,8 +13,8 @@
  * **Two write paths.** Dept/div POST `/api/edit/field` (`field_override` rows on
  * `leaderCwid` / `leaderInterim`). A **center** POSTs the SAME two field names
  * to `/api/edit/unit` op:"update" — but since #2542 Phase 1 those no longer map
- * to center columns: the server moves the `director` assignment on a
- * `CenterLeader` row. The request contract here is unchanged. A center is
+ * to center columns: the server moves the `director` assignment on an
+ * `OrgUnitRoleAssignment` row. The request contract here is unchanged. A center is
  * always `source:"manual"`, so there is no ETL "detect" state and no
  * `field_override`: the leader is either a curated person or vacant
  * (`directorCwid:""` → drop the assignment). `canClear` is false for a center.

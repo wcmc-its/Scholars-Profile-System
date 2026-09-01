@@ -1533,14 +1533,6 @@ model Center {
 
   members          CenterMembership[]
   programs         CenterProgram[]
-  /// DEPRECATED, dropped in the follow-up contract migration. Kept for one
-  /// release because migrations run BEFORE the ECS roll, so the still-running
-  /// previous image would 500 on public center pages and scholar profiles if
-  /// these tables vanished mid-rollout. Both are EMPTY in every environment
-  /// (verified on staging 2026-08-30: 0 rows) — nothing is being migrated, only
-  /// left standing until nothing queries it.
-  legacyLeaders    CenterLeader[]
-  legacyRoles      CenterRole[]
   fundingAwards    CancerCenterFundingAward[]
   collabCandidates CenterCollabCandidate[]
 
@@ -1633,13 +1625,14 @@ model OrgUnitRole {
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   /// Holders of a `leadership`-group entry — a person may hold more than one.
-  /// The `membership` half (`CenterMembership.membershipRoleKey`) gains its
-  /// relation in the contract release, when its FK is safe to add — see the note
-  /// on `CenterMembership`.
   leadershipHolders OrgUnitRoleAssignment[]
   /// This entry's unit allowlist (#2557 Phase E). Zero rows means unrestricted
   /// — see `OrgUnitRoleScope`'s docblock.
   scopeRows         OrgUnitRoleScope[]
+  /// The `membership` half (`CenterMembership.membershipRoleKey`) — #2542
+  /// contract B, once the backfill made the FK safe to add. See the note on
+  /// `CenterMembership.roleVocabulary`.
+  centerMemberships CenterMembership[]
 
   @@id([entityType, key])
   @@index([entityType, roleGroup, sortOrder])
@@ -1862,9 +1855,9 @@ model CenterMembership {
   /// predates the Phase 1 backfill; the backfill files every existing row as
   /// `research` / `clinical` / `member`.
   ///
-  /// Leadership is NOT here — it is a `CenterLeader` row. A leader need not be a
-  /// member, so keeping the two apart means nothing that counts center members
-  /// has to know about leadership at all.
+  /// Leadership is NOT here — it is an `OrgUnitRoleAssignment` row. A leader
+  /// need not be a member, so keeping the two apart means nothing that counts
+  /// center members has to know about leadership at all.
   membershipRoleKey String? @map("membership_role_key") @db.VarChar(32)
   /// Always `"center"`. Exists only so the composite FK to `OrgUnitRole` — whose
   /// key became (`entityType`, `key`) when the vocabulary moved from per-unit to
@@ -1886,12 +1879,9 @@ model CenterMembership {
   // `centerCode` is NOT NULL, so SET NULL is invalid in both Prisma and MySQL.
   // Deleting a vocabulary entry that still has holders must be blocked in-app
   // (with reassignment) rather than orphaning rows — see #2542 Phase 3.
-  // No relation to `OrgUnitRole` YET. `role_entity_type` is added in this
-  // release so the composite FK has a column to point at, but the FK ITSELF
-  // lands in the follow-up contract migration — added here it would require
-  // `org_unit_role` to be seeded before the ECS roll finishes, and migrations
-  // run BEFORE the roll. Until then closure is app-level (`isCenterMembershipType`
-  // plus `deriveMembershipType`'s allowlist), which is what shipped in Phase 1.
+  // #2542 contract B — closure IN THE DATABASE at last: a curator can only
+  // ever stamp a role key a superuser put on the shared vocabulary.
+  roleVocabulary OrgUnitRole? @relation(fields: [roleEntityType, membershipRoleKey], references: [entityType, key], onDelete: NoAction, onUpdate: NoAction)
 
   @@id([centerCode, cwid])
   @@index([cwid])
@@ -3724,52 +3714,3 @@ model SponsorMatchSubmission {
   @@map("sponsor_match_submission")
 }
 
-/// DEPRECATED (#2542) — superseded by `OrgUnitRole`, which keys the vocabulary
-/// by unit KIND instead of by unit so the same concept cannot acquire a
-/// different word at every unit. EMPTY in every environment (staging verified
-/// 2026-08-30: 0 rows); nothing was migrated out of it because nothing was ever
-/// in it. Retained for exactly one release so the previous image keeps working
-/// through the rollout window, then dropped by the contract migration. Do not
-/// read or write this model.
-model CenterRole {
-  centerCode   String   @map("center_code") @db.VarChar(64)
-  key          String   @db.VarChar(32)
-  label        String   @db.VarChar(255)
-  roleGroup    String   @map("role_group") @db.VarChar(16)
-  scope        String   @default("center") @db.VarChar(16)
-  singleHolder Boolean  @default(false) @map("single_holder")
-  sortOrder    Int      @default(0) @map("sort_order")
-  profileTitle Boolean  @default(true) @map("profile_title")
-  expansion    String?  @db.VarChar(255)
-  source       String   @default("seed") @db.VarChar(32)
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
-
-  center            Center         @relation(fields: [centerCode], references: [code], onDelete: Cascade)
-  leadershipHolders CenterLeader[]
-
-  @@id([centerCode, key])
-  @@index([centerCode, roleGroup, sortOrder])
-  @@map("center_role")
-}
-
-/// DEPRECATED (#2542) — superseded by `OrgUnitRoleAssignment`. See `CenterRole`
-/// above for why this survives one release. EMPTY in every environment.
-model CenterLeader {
-  centerCode String   @map("center_code") @db.VarChar(64)
-  cwid       String   @db.VarChar(32)
-  roleKey    String   @map("role_key") @db.VarChar(32)
-  interim    Boolean  @default(false)
-  sortOrder  Int      @default(0) @map("sort_order")
-  qualifier  String?  @db.VarChar(255)
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
-
-  center Center     @relation(fields: [centerCode], references: [code], onDelete: Cascade)
-  role   CenterRole @relation(fields: [centerCode, roleKey], references: [centerCode, key], onDelete: NoAction, onUpdate: NoAction)
-
-  @@id([centerCode, cwid, roleKey])
-  @@index([cwid])
-  @@index([centerCode, roleKey, sortOrder])
-  @@map("center_leader")
-}

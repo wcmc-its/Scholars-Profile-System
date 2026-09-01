@@ -121,9 +121,9 @@ const fakeTx = {
     update: mockTxDivisionUpdate,
   },
   unitAdmin: { create: mockTxUnitAdminCreate },
-  // #2542 — center leadership writes land on `CenterLeader`, preceded by a lazy
-  // `centerRole` seed, so the transaction stub needs both delegates or every
-  // center update throws.
+  // #2542 — center leadership writes land on `OrgUnitRoleAssignment`, preceded
+  // by a lazy `OrgUnitRole` seed, so the transaction stub needs both delegates
+  // or every center update throws.
   orgUnitRoleAssignment: {
     findFirst: mockTxCenterLeaderFindFirst,
     create: mockTxCenterLeaderCreate,
