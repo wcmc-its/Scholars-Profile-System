@@ -716,10 +716,10 @@ async function handleUpdate(
       }
       if (leadershipWrite) {
         // The 11 pre-existing centers have no vocabulary until the Phase 1
-        // backfill runs, and `center_leader.role_key` FKs to it — so seed this
-        // center's defaults first. Idempotent (`skipDuplicates`), never
-        // clobbers a renamed label, and removes the ordering dependency between
-        // the deploy and the backfill entirely.
+        // backfill runs, and `org_unit_role_assignment.role_key` FKs to it —
+        // so seed this center's defaults first. Idempotent (`skipDuplicates`),
+        // never clobbers a renamed label, and removes the ordering dependency
+        // between the deploy and the backfill entirely.
         await tx.orgUnitRole.createMany({
           data: orgUnitRoleSeedRows(CENTER_ENTITY_TYPE),
           skipDuplicates: true,

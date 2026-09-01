@@ -396,9 +396,9 @@ async function handleCenter(p: {
     select: SNAPSHOT_SELECT,
   });
 
-  // Leadership is a `CenterLeader` row (#2542), a separate table, so add/remove
-  // keep their original meaning here: this row IS the membership, nothing else
-  // rides on it, and removing it cannot vacate a leadership role.
+  // Leadership is an `OrgUnitRoleAssignment` row (#2542), a separate table, so
+  // add/remove keep their original meaning here: this row IS the membership,
+  // nothing else rides on it, and removing it cannot vacate a leadership role.
   if (action === "add" && existing) return editOk({ unitCode, cwid, action, changed: false });
   if (action === "remove" && !existing) return editOk({ unitCode, cwid, action, changed: false });
 
@@ -464,7 +464,7 @@ async function handleCenter(p: {
       let after: Record<string, unknown> | null;
 
       if (action !== "remove") {
-        // `membership_role_key` FKs to `center_role`, which is empty for the
+        // `membership_role_key` FKs to `org_unit_role`, which is empty for the
         // pre-existing centers until the Phase 1 backfill runs. Seed this
         // center's defaults first — idempotent, never clobbers a renamed label,
         // and removes the ordering dependency between the deploy and the
@@ -708,9 +708,9 @@ async function handleCornellAdd(p: {
         });
       }
       // #2542 — same lazy vocabulary seed as `handleCenter`: this is the THIRD
-      // write path that references `center_role`, and `membership_role_key` is a
-      // non-null literal here, so without it every Cornell add 500s on the FK
-      // until the Phase 1 backfill has been run by hand.
+      // write path that references `org_unit_role`, and `membership_role_key`
+      // is a non-null literal here, so without it every Cornell add 500s on
+      // the FK until the Phase 1 backfill has been run by hand.
       await tx.orgUnitRole.createMany({
         data: orgUnitRoleSeedRows(CENTER_ENTITY_TYPE),
         skipDuplicates: true,

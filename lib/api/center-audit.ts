@@ -181,8 +181,9 @@ export function deriveChange(
     };
     cmp("type", "membershipType");
     // #2542 — without this a membership-role change renders as a `modify` with
-    // an EMPTY diff: a change that says nothing. (Leadership is a `CenterLeader`
-    // row, audited through /api/edit/unit's `field_override`, not here.)
+    // an EMPTY diff: a change that says nothing. (Leadership is an
+    // `OrgUnitRoleAssignment` row, audited through /api/edit/unit's
+    // `field_override`, not here.)
     cmp("role", "membershipRoleKey");
     cmp("program", "programCode");
     cmp("start", "startDate");
