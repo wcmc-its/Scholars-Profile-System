@@ -170,8 +170,6 @@ beforeEach(() => {
     slug: "old-slug",
     description: "old",
     url: null,
-    directorCwid: null,
-    leaderInterim: false,
     centerType: "center",
   });
   mockTxCenterUpdate.mockResolvedValue({});
@@ -866,9 +864,9 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
     );
   });
 
-  it("dual-reads the deprecated column for the audit before-value when no CenterLeader row exists yet", async () => {
-    // The window between the ECS roll and the manual Phase 1 backfill. Without
-    // the fallback the audit would record the previous director as null.
+  it("records a null audit before-value when no director OrgUnitRoleAssignment row exists", async () => {
+    // #2542 contract A — OrgUnitRoleAssignment is the sole director store;
+    // the pre-backfill dual-read fallback to the (now-retired) column is gone.
     mockTxCenterLeaderFindFirst.mockResolvedValue(null);
     mockTxCenterFindUnique.mockResolvedValue({
       name: "Meyer",
@@ -876,8 +874,6 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
       description: null,
       url: null,
       centerType: "center",
-      directorCwid: "legacy01",
-      leaderInterim: true,
     });
     const res = await POST(
       post({
@@ -892,7 +888,7 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
     // `before_values` is the 6th bound value of the audit INSERT; arg 0 is the
     // template strings (see the `auditAfterValues` helper below).
     expect(JSON.parse(mockExecuteRaw.mock.calls[0][6] as string)).toEqual({
-      directorCwid: "legacy01",
+      directorCwid: null,
     });
   });
 
