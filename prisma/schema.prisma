@@ -1591,7 +1591,7 @@ model Center {
 /// alter the NCI CCSG REMOVE-eligible population.
 ///
 /// `entityType`/`key`/`roleGroup`/`scope` are VARCHAR with app-level closure
-/// rather than Prisma enums, matching `CenterProgramLeader.role` and
+/// rather than Prisma enums, matching `OrgUnitRoleAssignment.roleKey` and
 /// `CoreLeader.role`. `entityType` deliberately does NOT reuse the `EntityType`
 /// enum: it sits in this PK and in the assignment FK, so an enum would turn
 /// every future member addition into a drop-FK/drop-PK/MODIFY/add-PK/add-FK
@@ -1609,8 +1609,8 @@ model OrgUnitRole {
   /// top of the unit page, membership below. Mapped to `role_group` because
   /// GROUP is a MySQL reserved word.
   roleGroup    String   @map("role_group") @db.VarChar(16)
-  /// `center` | `program`. Which tier the entry may be assigned at. Phase 1
-  /// seeds only `center`; Phase 2 folds `CenterProgramLeader` in as `program`.
+  /// `center` | `program`. Which tier the entry may be assigned at. `#2542`
+  /// seeds `center`; `#2558` seeds `program` for the `center_program` kind.
   scope        String   @default("center") @db.VarChar(16)
   /// Marks a role only one person may hold. A flag, not an enum — there are
   /// exactly two states and no third is foreseeable. CHPC holds "Associate
@@ -1669,12 +1669,12 @@ model OrgUnitRole {
 /// Supersedes `Center.directorCwid` + `Center.leaderInterim`, which together
 /// held exactly one unlabelled leader.
 ///
-/// Folding `CenterProgramLeader` in later means giving a row a program to lead.
-/// `entityId` already carries that: a program assignment is
-/// (`center_program`, "{centerCode}:{programCode}"), so the PK below admits one
-/// person leading two programs under the same `roleKey` — the collision the
-/// Phase 1 shape could not express. Adding `center_program` to `EntityType` is
-/// still owed for the AUDIT enum; this table needs no migration for it.
+/// A program assignment (#2558, folded in from the retired per-program leader
+/// table) is (`center_program`, "{centerCode}:{programCode}") — `entityId`
+/// already carried that shape, so the PK below admits one person leading two
+/// programs under the same `roleKey`, a collision the retired table's PK
+/// could not express. `center_program` is also an `AuditEntityType` value
+/// (`lib/edit/audit.ts`); this table needed no migration for it.
 model OrgUnitRoleAssignment {
   /// Which kind of unit. Pairs with `OrgUnitRole.entityType` in the FK below.
   entityType String   @map("entity_type") @db.VarChar(32)
@@ -1691,8 +1691,8 @@ model OrgUnitRoleAssignment {
   /// Interim/acting qualifier — renders "Interim Director". A modifier, not a
   /// role of its own: folding it into the vocabulary would double every entry.
   interim    Boolean  @default(false)
-  /// Order among multiple holders of the SAME role, as Meyer already orders its
-  /// program leaders (`CenterProgramLeader.sortOrder`).
+  /// Order among multiple holders of the SAME role — how Meyer orders its
+  /// co-led program leaders (#2558).
   sortOrder  Int      @default(0) @map("sort_order")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
@@ -1810,45 +1810,19 @@ model CenterProgram {
   sortOrder   Int     @default(0) @map("sort_order")
   /// #1105/#1117 — per-program page fields. A program's dedicated page
   /// (`/centers/[slug]/programs/[code]`, flag `CENTER_PROGRAM_PAGES`) renders a
-  /// prose `description` and its leaders (the `CenterProgramLeader` children — a
-  /// program may be co-led, #1117). `description` is manually owned (no ETL
-  /// writes it) and null by default, so the feature ships dark.
+  /// prose `description` and its leaders (0..N `OrgUnitRoleAssignment` rows,
+  /// `entityType: "center_program"`, `entityId: "{centerCode}:{code}"` — #2558
+  /// migrated these off the retired per-program leader table; a program may
+  /// be co-led, #1117). `description` is manually owned (no ETL writes it) and
+  /// null by default, so the feature ships dark.
   description String? @map("description") @db.Text
 
   center             Center                          @relation(fields: [centerCode], references: [code], onDelete: Cascade)
   members            CenterMembership[]
-  /// #1117 — the program's leaders (0..N). Replaces the single
-  /// `leaderCwid`/`leaderInterim` columns (#1105), which could carry only one.
-  leaders            CenterProgramLeader[]
   fundingAllocations CancerCenterProgramAllocation[]
 
   @@id([centerCode, code])
   @@map("center_program")
-}
-
-/// #1117 — a center program's leader. A Meyer Cancer Center program is often
-/// co-led, so leaders are rows here (0..N) rather than a single
-/// `CenterProgram.leaderCwid` column. Each `cwid` resolves to a WCM scholar
-/// (profile-linked) or the external-leader fallback (`lib/external-leaders.ts`);
-/// `interim` renders the "Interim Leader" qualifier; `sortOrder` is the display
-/// order. Manually owned (no ETL writes these), so the feature ships dark behind
-/// `CENTER_PROGRAM_PAGES`.
-model CenterProgramLeader {
-  centerCode  String  @map("center_code") @db.VarChar(64)
-  programCode String  @map("program_code") @db.VarChar(16)
-  cwid        String  @db.VarChar(32)
-  interim     Boolean @default(false)
-  /// #1570 — role within the program: "leader" (a program lead, the default) or
-  /// "coe_liaison" (the Community Outreach & Engagement liaison, rendered as a
-  /// separate "COE Liaison" card AFTER the leaders). Kept as a String (not a
-  /// Prisma enum) so the additive column is a plain default-backfilled VARCHAR.
-  role        String  @default("leader") @map("role") @db.VarChar(32)
-  sortOrder   Int     @default(0) @map("sort_order")
-
-  program CenterProgram @relation(fields: [centerCode, programCode], references: [centerCode, code], onDelete: Cascade)
-
-  @@id([centerCode, programCode, cwid])
-  @@map("center_program_leader")
 }
 
 /// Research vs clinical membership flavor — a Cancer-Center concept (#552). Set
@@ -2412,12 +2386,12 @@ model Core {
   @@map("core")
 }
 
-/// Cores-as-org-units P1 (core-as-org-unit-plan.md) — a core's leader(s).
-/// Mirrors `CenterProgramLeader`'s shape: a core may be co-led, so leaders
-/// are rows here (0..N) rather than a single scalar column, matching the
-/// only other multi-person leadership table in the schema. `role` is an open
-/// string (not a Prisma enum), same pattern as `CenterProgramLeader.role`'s
-/// "leader"/"coe_liaison" — extensible without a future migration.
+/// Cores-as-org-units P1 (core-as-org-unit-plan.md) — a core's leader(s). A
+/// core may be co-led, so leaders are rows here (0..N) rather than a single
+/// scalar column — the same shape a program's `center_program`
+/// `OrgUnitRoleAssignment` rows use (#2558). `role` is an open string (not a
+/// Prisma enum), same pattern as that vocabulary's "leader"/"coe_liaison"
+/// `roleKey` — extensible without a future migration.
 model CoreLeader {
   coreId    String  @map("core_id") @db.VarChar(32)
   cwid      String  @db.VarChar(32)

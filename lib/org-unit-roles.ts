@@ -32,7 +32,7 @@ export type OrgUnitRoleGroup = "leadership" | "membership";
 
 /**
  * Which tier an entry may be assigned at. `unit` is the unit itself; `program`
- * is the sub-tier that folding `CenterProgramLeader` in will use.
+ * is the sub-tier the `center_program` vocabulary (#2558) uses.
  */
 export type OrgUnitRoleScope = "unit" | "program";
 
@@ -85,18 +85,18 @@ export const DIVISION_CHIEF_ROLE_KEY = "chief";
  */
 export const MEMBER_ROLE_KEY = "member";
 
-/** The kind whose vocabulary #2558 Phase 1 seeds (folding `CenterProgramLeader`
- *  in). Named the same way `CENTER_ENTITY_TYPE` is, for the same reason: a
- *  `satisfies OrgUnitRoleEntityType` constant a backfill/dual-read call site
- *  can import instead of retyping the string literal. */
+/** The kind whose vocabulary the #2558 program-leadership fold-in seeds. Named
+ *  the same way `CENTER_ENTITY_TYPE` is, for the same reason: a `satisfies
+ *  OrgUnitRoleEntityType` constant a read/write call site can import instead
+ *  of retyping the string literal. */
 export const CENTER_PROGRAM_ENTITY_TYPE = "center_program" satisfies OrgUnitRoleEntityType;
 
-/** Stable key of the seeded leadership role that a `CenterProgramLeader.role
- *  === "leader"` row migrates to (#2558). */
+/** Stable key of the seeded leadership role a program's `"leader"`
+ *  `OrgUnitRoleAssignment.roleKey` uses (#2558). */
 export const PROGRAM_LEADER_ROLE_KEY = "leader";
 
-/** Stable key of the seeded leadership role that a `CenterProgramLeader.role
- *  === "coe_liaison"` row migrates to (#2558). Seeded with `profileTitle:
+/** Stable key of the seeded leadership role a program's `"coe_liaison"`
+ *  `OrgUnitRoleAssignment.roleKey` uses (#2558). Seeded with `profileTitle:
  *  false` — see the entry's own comment below for why. */
 export const COE_LIAISON_ROLE_KEY = "coe_liaison";
 
@@ -130,23 +130,20 @@ export type OrgUnitRoleSeed = {
  * The default vocabulary per unit kind.
  *
  * `center`, `department`, `division` and `core` are populated. `center_program`
- * is populated too, as of #2558 Phase 1: `leader` and `coe_liaison`, folding
- * `CenterProgramLeader` in. `coe_liaison` seeds `profileTitle: false` — a
- * program's Community Outreach & Engagement liaison has never been a title
- * line on a scholar profile (`lib/api/profile.ts`'s `progLeads` query has
- * always excluded it, filtering `role: "leader"` only) — and carries the
- * `expansion` this file now owns (see `COE_EXPANSION` above). Both entries are
- * `scope: "program"`, the sub-tier `OrgUnitRoleAssignment.entityId` expresses
- * as `"{centerCode}:{programCode}"` (see that model's docblock).
+ * is populated too: `leader` and `coe_liaison`. `coe_liaison` seeds
+ * `profileTitle: false` — a program's Community Outreach & Engagement liaison
+ * has never been a title line on a scholar profile (`lib/api/profile.ts`'s
+ * program-leadership query has always excluded it, filtering `role: "leader"`
+ * only) — and carries the `expansion` this file owns (see `COE_EXPANSION`
+ * above). Both entries are `scope: "program"`, the sub-tier
+ * `OrgUnitRoleAssignment.entityId` expresses as `"{centerCode}:{programCode}"`
+ * (see that model's docblock).
  *
- * Seeding the vocabulary here does not, by itself, move any reader off
- * `CenterProgramLeader` — `lib/api/profile.ts` and `lib/edit/overview-facts.ts`
- * dual-read an `OrgUnitRoleAssignment` row first, falling back to the legacy
- * table, mirroring Phase D's department/division shape. The public program
- * page (`lib/api/centers.ts`'s `getCenterProgram`) and the editor
- * (`app/api/edit/center-program/route.ts`) still read/write
- * `CenterProgramLeader` directly — migrating those, and dropping the table,
- * is the contract PR this phase sets up but does not ship.
+ * #2558 folded the (now-dropped) per-program leader table into this
+ * vocabulary: `lib/api/profile.ts`, `lib/edit/overview-facts.ts`, the public
+ * program page (`lib/api/centers.ts`'s `getCenterProgram`), and the editor
+ * (`app/api/edit/center-program/route.ts`) all read/write `OrgUnitRoleAssignment`
+ * directly now — no other table backs a program leader.
  *
  * `department` seeds BOTH `chair` and `director` (Medicine holds one, the
  * Library the other); `departmentLeaderRoleKey` below is the single place
@@ -316,9 +313,10 @@ export const DEFAULT_ORG_UNIT_ROLES: Readonly<
       // singleHolder is FALSE here on purpose, unlike department/division/
       // center's director-shaped roles. `CoreLeader`'s own docblock
       // (prisma/schema.prisma) says it plainly: "a core may be co-led" —
-      // `CoreLeader` is a 0..N table for exactly that reason, matching
-      // `CenterProgramLeader`. Seeding `singleHolder: true` here would assert
-      // an invariant the source-of-truth model already contradicts.
+      // `CoreLeader` is a 0..N table for exactly that reason, matching a
+      // program's `leader` assignments below. Seeding `singleHolder: true`
+      // here would assert an invariant the source-of-truth model already
+      // contradicts.
       singleHolder: false,
       sortOrder: 10,
       profileTitle: true,
@@ -330,8 +328,9 @@ export const DEFAULT_ORG_UNIT_ROLES: Readonly<
       label: "Leader",
       group: "leadership",
       scope: "program",
-      // A program may be co-led (#1117) — `CenterProgramLeader` is a 0..N
-      // table for exactly that reason, matching `core`'s `director`.
+      // A program may be co-led (#1117) — its leaders are 0..N
+      // `OrgUnitRoleAssignment` rows for exactly that reason, matching
+      // `core`'s `director`.
       singleHolder: false,
       sortOrder: 10,
       profileTitle: true,
