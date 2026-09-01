@@ -25,7 +25,11 @@ vi.mock("@/lib/profile/methods-lens-flags", () => ({
   isCenterProgramPagesEnabled: mockFlag,
 }));
 vi.mock("@/components/scholar/leader-card", () => ({
-  LeaderCard: ({ role }: { role: string }) => <div data-testid="leader-card">{role}</div>,
+  LeaderCard: ({ role, expansion }: { role: string; expansion?: string | null }) => (
+    <div data-testid="leader-card" data-expansion={expansion ?? ""}>
+      {role}
+    </div>
+  ),
 }));
 // #1105 — the roster is delegated to the center's facet client (reused with
 // `singleProgram`); mock it and assert composition. Its internals (facets,
@@ -70,6 +74,10 @@ const DETAIL = {
       identityImageEndpoint: "/img",
       isInterim: false,
       role: "leader" as const,
+      // #2558 — the loader (`getCenterProgram`) already formats the label +
+      // resolves the vocabulary expansion; the page renders both verbatim.
+      roleLabel: "Leader",
+      expansion: null as string | null,
     },
   ],
   members: [
@@ -120,10 +128,10 @@ describe("CenterProgramPage (#1105)", () => {
     expect(screen.queryByTestId("members-client")).toBeNull();
   });
 
-  it("labels the leader as Interim Leader when isInterim", async () => {
+  it("renders the leader's roleLabel verbatim — already Interim-formatted by the loader (#2558)", async () => {
     mockGetCenterProgram.mockResolvedValueOnce({
       ...DETAIL,
-      leaders: [{ ...DETAIL.leaders[0], isInterim: true }],
+      leaders: [{ ...DETAIL.leaders[0], isInterim: true, roleLabel: "Interim Leader" }],
     });
     const ui = await CenterProgramPage({ centerSlug: "meyer-cancer-center", code: "CB" });
     render(ui);
@@ -134,8 +142,8 @@ describe("CenterProgramPage (#1105)", () => {
     mockGetCenterProgram.mockResolvedValueOnce({
       ...DETAIL,
       leaders: [
-        { ...DETAIL.leaders[0], cwid: "lead001", isInterim: false },
-        { ...DETAIL.leaders[0], cwid: "lead002", isInterim: true },
+        { ...DETAIL.leaders[0], cwid: "lead001", isInterim: false, roleLabel: "Leader" },
+        { ...DETAIL.leaders[0], cwid: "lead002", isInterim: true, roleLabel: "Interim Leader" },
       ],
     });
     const ui = await CenterProgramPage({ centerSlug: "meyer-cancer-center", code: "CB" });
@@ -151,7 +159,7 @@ describe("CenterProgramPage (#1105)", () => {
     expect(screen.queryByTestId("leader-card")).toBeNull();
   });
 
-  it("labels a coe_liaison row 'COE Liaison', rendered AFTER the Leaders (#1570)", async () => {
+  it("labels a coe_liaison row 'COE Liaison', rendered AFTER the Leaders, with the vocabulary expansion (#1570 / #2558)", async () => {
     mockGetCenterProgram.mockResolvedValueOnce({
       ...DETAIL,
       // loader already orders leaders before liaisons; the page renders in order.
@@ -162,6 +170,8 @@ describe("CenterProgramPage (#1105)", () => {
           cwid: "liaison01",
           preferredName: "Irina Liaison",
           role: "coe_liaison" as const,
+          roleLabel: "COE Liaison",
+          expansion: "Community Outreach & Engagement",
         },
       ],
     });
@@ -170,5 +180,9 @@ describe("CenterProgramPage (#1105)", () => {
     const cards = screen.getAllByTestId("leader-card");
     // "Leader" first, "COE Liaison" last — distinct from the LEADER label.
     expect(cards.map((c) => c.textContent)).toEqual(["Leader", "COE Liaison"]);
+    // The expansion — sourced from the vocabulary, not a hardcoded constant —
+    // reaches `LeaderCard` as a prop.
+    expect(cards[0].getAttribute("data-expansion")).toBe("");
+    expect(cards[1].getAttribute("data-expansion")).toBe("Community Outreach & Engagement");
   });
 });

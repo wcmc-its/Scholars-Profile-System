@@ -52,7 +52,17 @@ type Opts = {
     label: string;
     sortOrder: number;
     description: string | null;
-    leaders: Array<{ cwid: string; interim: boolean; role?: string; sortOrder: number }>;
+  }>;
+  /** #2558 — a program's leaders, now `OrgUnitRoleAssignment` rows
+   *  (`entityType: "center_program"`, `entityId: "{centerCode}:{programCode}"`),
+   *  not a nested `CenterProgram.leaders` relation (the retired per-program
+   *  leader table this migrated off of). */
+  programAssignments?: Array<{
+    entityId: string;
+    cwid: string;
+    interim: boolean;
+    roleKey?: string;
+    sortOrder: number;
   }>;
   divisionMembers?: Array<{ cwid: string; source: string }>;
   diseaseAssignments?: Array<{
@@ -101,11 +111,16 @@ function fakeClient(o: Opts) {
       findMany: vi.fn().mockResolvedValue(o.siblings ?? []),
     },
     center: { findUnique: vi.fn().mockResolvedValue(o.center ?? null) },
-    // #2542 — leadership is an `OrgUnitRoleAssignment` row fetched with its own
-    // query; it used to be a nested `leaders` relation on `center`.
+    // #2542 / #2558 — leadership is an `OrgUnitRoleAssignment` row fetched with
+    // its own query; it used to be a nested `leaders` relation on `center` /
+    // `centerProgram`. `findMany` dispatches by `where.entityType`: the
+    // director query (`findFirst`) is separate, so `findMany` here only ever
+    // serves the `center_program` program-leadership query.
     orgUnitRoleAssignment: {
       findFirst: vi.fn(async () => o.leaderAssignment ?? null),
-      findMany: vi.fn(async () => []),
+      findMany: vi.fn(async (args?: { where?: { entityType?: string } }) =>
+        args?.where?.entityType === "center_program" ? (o.programAssignments ?? []) : [],
+      ),
     },
     unitAdmin: { findMany: unitAdminFindMany },
     fieldOverride: { findMany: vi.fn().mockResolvedValue(o.overrides ?? []) },
@@ -480,20 +495,22 @@ describe("loadUnitEditContext — center", () => {
             },
           ],
           // Provided in DB-sorted order (the mock doesn't apply orderBy). #1117 —
-          // each program carries its description + leader join rows.
+          // each program carries its description; leaders are a separate
+          // `OrgUnitRoleAssignment` query (#2558), grouped by `entityId` below.
           centerPrograms: [
+            { code: "CB", label: "Cancer Biology", sortOrder: 10, description: "Cancer biology." },
+            { code: "CT", label: "Cancer Therapeutics", sortOrder: 40, description: null },
+          ],
+          // #1570 — an explicit liaison, plus a pre-#1570 row with no `roleKey`.
+          programAssignments: [
+            { entityId: "man-abc12345:CB", cwid: "dir001", interim: false, sortOrder: 0 },
             {
-              code: "CB",
-              label: "Cancer Biology",
-              sortOrder: 10,
-              description: "Cancer biology.",
-              leaders: [
-                // #1570 — an explicit liaison, plus a pre-#1570 row with no `role`.
-                { cwid: "dir001", interim: false, sortOrder: 0 },
-                { cwid: "liai001", interim: false, role: "coe_liaison", sortOrder: 0 },
-              ],
+              entityId: "man-abc12345:CB",
+              cwid: "liai001",
+              interim: false,
+              roleKey: "coe_liaison",
+              sortOrder: 0,
             },
-            { code: "CT", label: "Cancer Therapeutics", sortOrder: 40, description: null, leaders: [] },
           ],
           scholars: [
             { cwid: "dir001", preferredName: "Dr Director", primaryTitle: "MD" },
@@ -527,8 +544,9 @@ describe("loadUnitEditContext — center", () => {
       },
     ]);
     // #552/#1117 — the program taxonomy rides along (sorted by sortOrder) with
-    // each program's description + resolved leaders. #1570 — each leader carries
-    // its `role`; a row written before #1570 (no `role`) narrows to "leader".
+    // each program's description + resolved leaders (#2558 — grouped from the
+    // `OrgUnitRoleAssignment` query by `entityId`). #1570 — each leader carries
+    // its `role`; a row with no `roleKey` narrows to "leader".
     expect(ctx!.programs).toEqual([
       {
         code: "CB",
@@ -575,7 +593,7 @@ describe("loadUnitEditContext — center disease assignments (plan §5/§6)", ()
   // (bug fix, staging report 2026-08-26): `diseases` only ever populates for a
   // center that has one, see the dedicated describe block below.
   const PROGRAMS: NonNullable<Opts["centerPrograms"]> = [
-    { code: "BR", label: "Breast", sortOrder: 1, description: null, leaders: [] },
+    { code: "BR", label: "Breast", sortOrder: 1, description: null },
   ];
   const assignment = (over: Partial<NonNullable<Opts["diseaseAssignments"]>[number]> = {}) => ({
     cwid: "mem1",
@@ -815,7 +833,7 @@ describe("loadUnitEditContext — diseaseOptions (manual-add extension)", () => 
       asClient(
         fakeClient({
           center,
-          centerPrograms: [{ code: "BR", label: "Breast", sortOrder: 1, description: null, leaders: [] }],
+          centerPrograms: [{ code: "BR", label: "Breast", sortOrder: 1, description: null }],
         }),
       ),
     );

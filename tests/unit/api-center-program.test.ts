@@ -1,13 +1,16 @@
 /**
- * #1105 — `getCenterProgram` loader: dedicated per-program page data.
+ * #1105 / #2558 — `getCenterProgram` loader: dedicated per-program page data.
  *
  *  - resolves center (by slug) + program (by code), active members only;
  *  - ZY (and any excluded code) → null (never a page);
  *  - unknown center / unknown program → null;
- *  - leaders resolution (#1117 — 0..N): each `CenterProgramLeader` cwid → WCM
- *    scholar (profile-linked); else the external-leaders fallback keyed
- *    `<centerCode>:<programCode>` (slug null) when it names that cwid; an
- *    unresolvable cwid is dropped.
+ *  - leaders resolution (#1117 — 0..N): each `OrgUnitRoleAssignment` cwid
+ *    (`entityType: "center_program"`, #2558 — migrated off the retired
+ *    per-program leader table) → WCM scholar (profile-linked); else the
+ *    external-leaders fallback keyed `<centerCode>:<programCode>` (slug null)
+ *    when it names that cwid; an unresolvable cwid is dropped;
+ *  - `roleLabel` / `expansion` come from the joined `OrgUnitRole` vocabulary
+ *    row, not a hardcoded ternary.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -21,6 +24,7 @@ const {
   mockScholarCount,
   mockCenterProgramFindUnique,
   mockCenterProgramFindMany,
+  mockAssignmentFindMany,
   mockPublicationTopicGroupBy,
   mockGrantFindMany,
 } = vi.hoisted(() => ({
@@ -33,6 +37,7 @@ const {
   mockScholarCount: vi.fn(),
   mockCenterProgramFindUnique: vi.fn(),
   mockCenterProgramFindMany: vi.fn(),
+  mockAssignmentFindMany: vi.fn(),
   mockPublicationTopicGroupBy: vi.fn(),
   mockGrantFindMany: vi.fn(),
 }));
@@ -40,15 +45,10 @@ const {
 vi.mock("@/lib/db", () => ({
   prisma: {
     center: { findUnique: mockCenterFindUnique },
-    // #2542 — leadership is an `OrgUnitRoleAssignment` row fetched with its own
-    // query; it used to be a nested `leaders` relation on `center`.
-    orgUnitRoleAssignment: {
-      findFirst: vi.fn(async () => null),
-      findMany: vi.fn(async () => []),
-      create: vi.fn(async () => ({})),
-      deleteMany: vi.fn(async () => ({ count: 0 })),
-      updateMany: vi.fn(async () => ({ count: 0 })),
-    },
+    // #2542 / #2558 — leadership is an `OrgUnitRoleAssignment` row fetched with
+    // its own query; it used to be a nested `leaders` relation on `center` /
+    // `centerProgram`.
+    orgUnitRoleAssignment: { findMany: mockAssignmentFindMany },
     suppression: { findFirst: mockSuppressionFindFirst, findMany: mockSuppressionFindMany },
     centerMembership: { findMany: mockCenterMembershipFindMany },
     scholar: {
@@ -96,10 +96,41 @@ function routeScholarFindMany(args?: { where?: { cwid?: { in?: string[] } } }) {
   );
 }
 
+/** Shapes an `orgUnitRoleAssignment.findMany` row the way the join select does. */
+function assignmentRow(
+  cwid: string,
+  roleKey: "leader" | "coe_liaison",
+  opts: { interim?: boolean; sortOrder?: number } = {},
+) {
+  return {
+    cwid,
+    interim: opts.interim ?? false,
+    roleKey,
+    sortOrder: opts.sortOrder ?? 0,
+    role:
+      roleKey === "coe_liaison"
+        ? { label: "COE Liaison", expansion: "Community Outreach & Engagement" }
+        : { label: "Leader", expansion: null },
+  };
+}
+
 const ACTIVE = { startDate: null, endDate: null };
+
+// `orgUnitRoleAssignment.findMany` backs BOTH `getCenter`'s center-leadership
+// query (`entityType: "center"`, always empty in this fixture set — no test
+// here exercises center directors) and `getCenterProgram`'s own
+// program-leadership query (`entityType: "center_program"`). Route by
+// `where.entityType` rather than call order, since `getCenterProgram` calls
+// `getCenter` first internally.
+let programAssignments: ReturnType<typeof assignmentRow>[] = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
+  programAssignments = [];
+  mockAssignmentFindMany.mockImplementation(
+    (args?: { where?: { entityType?: string } }) =>
+      Promise.resolve(args?.where?.entityType === "center_program" ? programAssignments : []),
+  );
   // getCenter()
   mockCenterFindUnique.mockResolvedValue({
     code: "MEYER",
@@ -107,8 +138,6 @@ beforeEach(() => {
     slug: "meyer-cancer-center",
     description: null,
     url: null,
-    // #2542 — no director assignment.
-    leaders: [],
     directorCwid: null,
     leaderInterim: false,
   });
@@ -132,12 +161,11 @@ beforeEach(() => {
   );
   mockPublicationTopicGroupBy.mockResolvedValue([]);
   mockGrantFindMany.mockResolvedValue([]);
-  // program row (#1117 — leaders are a relation, empty by default)
+  // program row — leaders resolve via a separate `orgUnitRoleAssignment` query now.
   mockCenterProgramFindUnique.mockResolvedValue({
     code: "CB",
     label: "Cancer Biology",
     description: "Studies the biology of cancer.",
-    leaders: [],
   });
   mockScholarFindUnique.mockResolvedValue(null);
 });
@@ -164,6 +192,15 @@ describe("getCenterProgram (#1105)", () => {
     expect(detail!.scholarCount).toBe(1);
   });
 
+  it("queries the assignment table scoped to this program's entityId", async () => {
+    await getCenterProgram("meyer-cancer-center", "CB");
+    expect(mockAssignmentFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { entityType: "center_program", entityId: "MEYER:CB" },
+      }),
+    );
+  });
+
   it("returns null for the excluded ZY catch-all program (no DB hit)", async () => {
     const detail = await getCenterProgram("meyer-cancer-center", "ZY");
     expect(detail).toBeNull();
@@ -182,16 +219,11 @@ describe("getCenterProgram (#1105)", () => {
     expect(detail).toBeNull();
   });
 
-  it("resolves co-leaders from the join rows (WCM scholars, profile-linked, in order)", async () => {
-    mockCenterProgramFindUnique.mockResolvedValueOnce({
-      code: "CB",
-      label: "Cancer Biology",
-      description: null,
-      leaders: [
-        { cwid: "lead001", interim: true, role: "leader" },
-        { cwid: "lead002", interim: false, role: "leader" },
-      ],
-    });
+  it("resolves co-leaders from the join rows (WCM scholars, profile-linked, in order), with the vocabulary roleLabel", async () => {
+    programAssignments = [
+      assignmentRow("lead001", "leader", { interim: true }),
+      assignmentRow("lead002", "leader", { interim: false }),
+    ];
     const detail = await getCenterProgram("meyer-cancer-center", "CB");
     // routeScholarFindMany resolves each requested cwid (preferredName = CWID upper).
     expect(detail!.leaders).toEqual([
@@ -203,6 +235,8 @@ describe("getCenterProgram (#1105)", () => {
         identityImageEndpoint: expect.any(String),
         isInterim: true,
         role: "leader",
+        roleLabel: "Interim Leader",
+        expansion: null,
       },
       {
         cwid: "lead002",
@@ -212,39 +246,31 @@ describe("getCenterProgram (#1105)", () => {
         identityImageEndpoint: expect.any(String),
         isInterim: false,
         role: "leader",
+        roleLabel: "Leader",
+        expansion: null,
       },
     ]);
   });
 
-  it("orders Leaders before COE liaisons and surfaces the role (#1570)", async () => {
-    // The join returns them interleaved (both sortOrder 0); the loader must place
-    // the coe_liaison AFTER the leader regardless of the row order it receives,
-    // and NOT rely on alphabetical role ordering (coe_liaison < leader lexically).
-    mockCenterProgramFindUnique.mockResolvedValueOnce({
-      code: "CB",
-      label: "Cancer Biology",
-      description: null,
-      leaders: [
-        { cwid: "liaison01", interim: false, role: "coe_liaison" },
-        { cwid: "lead001", interim: false, role: "leader" },
-      ],
-    });
+  it("orders Leaders before COE liaisons (via the query's own orderBy) and surfaces the role + vocabulary expansion (#1570)", async () => {
+    // The query is already ordered leader-before-liaison (role.sortOrder asc);
+    // this fixture hands the rows back in that order, mirroring what the real
+    // `orderBy: [{ role: { sortOrder: "asc" } }, …]` produces.
+    programAssignments = [
+      assignmentRow("lead001", "leader"),
+      assignmentRow("liaison01", "coe_liaison"),
+    ];
     const detail = await getCenterProgram("meyer-cancer-center", "CB");
-    expect(detail!.leaders.map((l) => [l.cwid, l.role])).toEqual([
-      ["lead001", "leader"],
-      ["liaison01", "coe_liaison"],
+    expect(detail!.leaders.map((l) => [l.cwid, l.role, l.roleLabel, l.expansion])).toEqual([
+      ["lead001", "leader", "Leader", null],
+      ["liaison01", "coe_liaison", "COE Liaison", "Community Outreach & Engagement"],
     ]);
   });
 
-  it("defaults a role-less join row to 'leader' (pre-#1570 rows)", async () => {
-    mockCenterProgramFindUnique.mockResolvedValueOnce({
-      code: "CB",
-      label: "Cancer Biology",
-      description: null,
-      leaders: [{ cwid: "lead001", interim: false }],
-    });
+  it("never applies the Interim prefix to a COE liaison, even when interim is true", async () => {
+    programAssignments = [assignmentRow("liaison01", "coe_liaison", { interim: true })];
     const detail = await getCenterProgram("meyer-cancer-center", "CB");
-    expect(detail!.leaders[0].role).toBe("leader");
+    expect(detail!.leaders[0].roleLabel).toBe("COE Liaison");
   });
 
   it("falls back to the external leader (slug null) for a cwid with no scholar row", async () => {
@@ -252,8 +278,8 @@ describe("getCenterProgram (#1105)", () => {
       code: "CPC",
       label: "Cancer Prevention & Control",
       description: null,
-      leaders: [{ cwid: "ext1234", interim: false }],
     });
+    programAssignments = [assignmentRow("ext1234", "leader")];
     // ext1234 is not a scholar — drop it from EVERY resolver call so the fallback
     // fires (full impl, not `…Once`, so call ordering can't matter).
     mockScholarFindMany.mockImplementation((args?: { where?: { cwid?: { in?: string[] } } }) =>
@@ -269,12 +295,7 @@ describe("getCenterProgram (#1105)", () => {
   });
 
   it("drops a leader cwid that resolves to neither a scholar nor the external fallback", async () => {
-    mockCenterProgramFindUnique.mockResolvedValueOnce({
-      code: "CB",
-      label: "Cancer Biology",
-      description: null,
-      leaders: [{ cwid: "ghost", interim: false }],
-    });
+    programAssignments = [assignmentRow("ghost", "leader")];
     mockScholarFindMany.mockImplementation((args?: { where?: { cwid?: { in?: string[] } } }) =>
       routeScholarFindMany({
         where: { cwid: { in: (args?.where?.cwid?.in ?? []).filter((c) => c !== "ghost") } },
