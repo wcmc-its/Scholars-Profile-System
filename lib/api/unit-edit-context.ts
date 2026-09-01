@@ -71,6 +71,7 @@ import {
 } from "@/lib/org-unit-roles";
 import path from "node:path";
 
+import { isRoleAllowedAtUnit } from "@/lib/api/org-unit-role-scope";
 import {
   loadUnitFieldOverrides,
   mergeUnitFields,
@@ -193,6 +194,28 @@ export type UnitEditContext = {
       sortOrder: number;
     }>;
   }> | null;
+  /** #2542 Phase C — the center's LEADERSHIP-group `OrgUnitRole` vocabulary,
+   *  ordered by `sortOrder`, each with its current holders. Present (possibly
+   *  `[]`) for a center; `null` for a department/division (they keep the
+   *  single-role `unit.leader` override instead — see that field). Already
+   *  filtered to roles this center may assign (`isRoleAllowedAtUnit`, #2557
+   *  Phase E) — a role with an explicit allowlist that excludes this center
+   *  is not offered at all, the same server-side gate the roster editor
+   *  already enforces for membership roles. `OrgUnitRole` is one vocabulary
+   *  per KIND for the whole institution (its own docblock), not per-unit —
+   *  only the holders and the allowlist outcome vary per center. */
+  centerLeadership: ReadonlyArray<{
+    key: string;
+    label: string;
+    singleHolder: boolean;
+    sortOrder: number;
+    holders: ReadonlyArray<{
+      cwid: string;
+      name: string | null;
+      title: string | null;
+      interim: boolean;
+    }>;
+  }> | null;
   /** Present on a department only — its child divisions for the sub-rail. */
   siblingDivisions: ReadonlyArray<{
     code: string;
@@ -231,6 +254,8 @@ export type UnitEditContextClient = Pick<
   | "cancerCenterDiseaseAssignment"
   | "cancerCenterDiseaseDecision"
   | "orgUnitRoleAssignment"
+  | "orgUnitRole"
+  | "orgUnitRoleScope"
 >;
 
 /**
@@ -250,7 +275,7 @@ export type UnitEditContextClient = Pick<
  *   - NOT in the map at all     → no Scholar row has ever existed for this cwid
  *     (a manually-added membership that never matched anyone)
  */
-async function resolveScholarNames(
+export async function resolveScholarNames(
   cwids: ReadonlyArray<string>,
   client: UnitEditContextClient,
 ): Promise<Map<string, { name: string; title: string | null; departed: boolean }>> {
@@ -668,6 +693,51 @@ export async function loadUnitEditContext(
     }
   }
 
+  // 4c. Center leadership vocabulary + holders (#2542 Phase C). `OrgUnitRole`
+  // is ONE vocabulary per KIND for the whole institution (its own
+  // docblock), not per-unit, so this reads the same LEADERSHIP-group `center`
+  // rows every center reads — only the holders and the `isRoleAllowedAtUnit`
+  // outcome vary per center. A role with an explicit `OrgUnitRoleScope`
+  // allowlist that excludes THIS center is dropped entirely (#2557 Phase E),
+  // matching the roster editor's server-side gate for membership roles.
+  type CenterLeadershipRoleRaw = {
+    key: string;
+    label: string;
+    singleHolder: boolean;
+    sortOrder: number;
+  };
+  let centerLeadershipRolesRaw: CenterLeadershipRoleRaw[] | null = null;
+  let centerLeadershipAssignments: Array<{ cwid: string; interim: boolean; roleKey: string }> = [];
+  if (unitType === "center") {
+    const roleRows = await client.orgUnitRole.findMany({
+      where: { entityType: CENTER_ENTITY_TYPE, roleGroup: "leadership" },
+      select: { key: true, label: true, singleHolder: true, sortOrder: true },
+      orderBy: { sortOrder: "asc" },
+    });
+    const allowedFlags = await Promise.all(
+      roleRows.map((r) =>
+        isRoleAllowedAtUnit({
+          entityType: CENTER_ENTITY_TYPE,
+          roleKey: r.key,
+          entityId: code,
+          client,
+        }),
+      ),
+    );
+    centerLeadershipRolesRaw = roleRows.filter((_, i) => allowedFlags[i]);
+    if (centerLeadershipRolesRaw.length > 0) {
+      centerLeadershipAssignments = await client.orgUnitRoleAssignment.findMany({
+        where: {
+          entityType: CENTER_ENTITY_TYPE,
+          entityId: code,
+          roleKey: { in: centerLeadershipRolesRaw.map((r) => r.key) },
+        },
+        select: { cwid: true, interim: true, roleKey: true },
+        orderBy: [{ roleKey: "asc" }, { cwid: "asc" }],
+      });
+    }
+  }
+
   // 4b. Disease-expertise rows (plan §5/§6) — center only, keyed off the
   // roster cwids just loaded above. `CancerCenterDiseaseAssignment` /
   // `CancerCenterDiseaseDecision` carry no center column of their own (a
@@ -802,6 +872,9 @@ export async function loadUnitEditContext(
       ...rosterRows.map((r) => r.cwid),
       // #1117 — program-leader cwids, so the program editor shows names.
       ...programAssignments.map((a) => a.cwid),
+      // #2542 Phase C — center leadership holder cwids, so the leadership
+      // editor shows names.
+      ...centerLeadershipAssignments.map((a) => a.cwid),
     ],
     client,
   );
@@ -866,6 +939,29 @@ export async function loadUnitEditContext(
           // unrecognized is a leader.
           role: a.roleKey === "coe_liaison" ? ("coe_liaison" as const) : ("leader" as const),
           sortOrder: a.sortOrder,
+        })),
+      }))
+    : null;
+
+  // #2542 Phase C — group the center leadership holders by role, then
+  // resolve names, matching the program-leadership shape just above.
+  const centerLeadershipByRole = new Map<string, typeof centerLeadershipAssignments>();
+  for (const a of centerLeadershipAssignments) {
+    const list = centerLeadershipByRole.get(a.roleKey);
+    if (list) list.push(a);
+    else centerLeadershipByRole.set(a.roleKey, [a]);
+  }
+  const centerLeadership = centerLeadershipRolesRaw
+    ? centerLeadershipRolesRaw.map((r) => ({
+        key: r.key,
+        label: r.label,
+        singleHolder: r.singleHolder,
+        sortOrder: r.sortOrder,
+        holders: (centerLeadershipByRole.get(r.key) ?? []).map((a) => ({
+          cwid: a.cwid,
+          name: nameMap.get(a.cwid)?.name ?? null,
+          title: nameMap.get(a.cwid)?.title ?? null,
+          interim: a.interim,
         })),
       }))
     : null;
@@ -937,6 +1033,7 @@ export async function loadUnitEditContext(
     access,
     roster,
     programs,
+    centerLeadership,
     siblingDivisions,
     diseaseOptions,
     actorRole,

@@ -1601,11 +1601,14 @@ model OrgUnitRole {
   /// exactly two states and no third is foreseeable. CHPC holds "Associate
   /// Center Director" three times and "Research Director" once.
   ///
-  /// NOT YET ENFORCED. Phase 1 ships one assignable leadership role
-  /// (`director`), and `/api/edit/unit` vacates the incumbent before granting,
-  /// so the invariant holds by construction rather than by a check. The
-  /// composite PK permits two holders, so Phase 3 — which lets a curator assign
-  /// any leadership entry — must enforce this on the write path.
+  /// ENFORCED as of #2542 Phase C: `POST /api/edit/center-leadership` counts
+  /// existing holders for (entityType, entityId, roleKey) before an `add` and
+  /// refuses (409) a second holder of a `singleHolder` role unless the request
+  /// is an explicit replace (vacate the incumbent, then grant, same
+  /// transaction). Before Phase C only `director` was assignable at all, and
+  /// `/api/edit/unit` held the single-holder invariant by construction (an
+  /// unconditional vacate-then-grant) rather than by checking this column —
+  /// Phase C is what made the column load-bearing.
   singleHolder Boolean  @default(false) @map("single_holder")
   /// Order within the group. This is what puts COE Liaisons after Leaders.
   sortOrder    Int      @default(0) @map("sort_order")

@@ -36,6 +36,9 @@ vi.mock("@/components/edit/unit-url-card", () => ({
 vi.mock("@/components/edit/unit-leader-card", () => ({
   UnitLeaderCard: () => <div data-testid="panel-leader" />,
 }));
+vi.mock("@/components/edit/center-leadership-card", () => ({
+  CenterLeadershipCard: () => <div data-testid="panel-center-leadership" />,
+}));
 vi.mock("@/components/edit/unit-access-card", () => ({
   UnitAccessCard: () => <div data-testid="panel-access" />,
 }));
@@ -70,6 +73,7 @@ function ctx(over: {
   suppression?: UnitEditContext["unit"]["suppression"];
   programs?: UnitEditContext["programs"];
   roster?: UnitEditContext["roster"];
+  centerLeadership?: UnitEditContext["centerLeadership"];
 }): UnitEditContext {
   const unitType = over.unitType ?? "department";
   return {
@@ -93,6 +97,7 @@ function ctx(over: {
     access: over.access ?? null,
     roster: over.roster ?? null,
     programs: over.programs ?? (unitType === "center" ? [] : null),
+    centerLeadership: over.centerLeadership ?? (unitType === "center" ? [] : null),
     siblingDivisions: over.siblings ?? null,
     diseaseOptions: unitType === "center" ? [] : null,
     actorRole: over.actorRole ?? "curator",
@@ -289,9 +294,22 @@ describe("UnitEditPage — active panel selection", () => {
     expect(screen.getByTestId("panel-url")).toBeTruthy();
   });
 
-  it("honors ?attr=leader", () => {
+  it("honors ?attr=leader — a department renders the override card", () => {
     render(<UnitEditPage ctx={ctx({})} attr="leader" />);
     expect(screen.getByTestId("panel-leader")).toBeTruthy();
+  });
+
+  // #2542 Phase C — a center's "leader" rail item renders the vocabulary-
+  // driven picker instead of the dept/div override card.
+  it("a center's ?attr=leader renders the vocabulary-driven leadership card, not UnitLeaderCard", () => {
+    render(
+      <UnitEditPage
+        ctx={ctx({ unitType: "center", actorRole: "curator" })}
+        attr="leader"
+      />,
+    );
+    expect(screen.getByTestId("panel-center-leadership")).toBeTruthy();
+    expect(screen.queryByTestId("panel-leader")).toBeNull();
   });
 
   it("a Superuser deep-linking ?attr=slug sees the slug card", () => {

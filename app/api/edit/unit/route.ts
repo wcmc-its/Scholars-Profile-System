@@ -26,14 +26,17 @@
  *
  *  - **`op: "update"`** — update a `Center` in-row (centers do NOT use
  *    `field_override`; they edit in place). Field-level authz: `description`
- *    / `url` (#1021) / `directorCwid` / `leaderInterim` are Curator/Owner-
- *    editable; `slug` and `centerType` are Superuser-only (SPEC § Authorization).
+ *    / `url` (#1021) are Curator/Owner-editable; `slug` and `centerType` are
+ *    Superuser-only (SPEC § Authorization). Leadership (`directorCwid` /
+ *    `leaderInterim`) moved OFF this route in #2542 Phase C — the vocabulary-
+ *    driven `POST /api/edit/center-leadership` now covers `director` (and
+ *    every other leadership role) generically; `unit-leader-card.tsx`'s
+ *    center branch and this route's leadership write both retired with it.
  *
  * Every write is one MySQL transaction with the B03 audit row. Post-commit
  * reflection: `reflectUnitChange` on the unit page + `/browse`.
  */
 import { type NextRequest, type NextResponse } from "next/server";
-import { CENTER_ENTITY_TYPE, DIRECTOR_ROLE_KEY, orgUnitRoleSeedRows } from "@/lib/org-unit-roles";
 
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
@@ -54,8 +57,6 @@ import {
   validateLdapCode,
   validateSlugFormat,
   validateUnitDescription,
-  validateUnitLeaderCwid,
-  validateUnitLeaderInterim,
   validateUnitName,
   validateUnitUrl,
 } from "@/lib/edit/validators";
@@ -73,8 +74,6 @@ const CENTER_UPDATE_FIELDS = [
   "description",
   "url",
   "slug",
-  "directorCwid",
-  "leaderInterim",
   "centerType",
 ] as const;
 type CenterUpdateField = (typeof CENTER_UPDATE_FIELDS)[number];
@@ -601,15 +600,6 @@ async function handleUpdate(
   }
   let updatePayload: Record<string, unknown>;
   let storedValue: string | boolean;
-  // #2542 contract A — `directorCwid` / `leaderInterim` no longer map to a
-  // center column; they move the `director` assignment in
-  // `OrgUnitRoleAssignment`, the sole store (the column dual-write retired
-  // with this ticket).
-  // The REQUEST contract is unchanged (same two field names, same two POSTs
-  // from `unit-leader-card.tsx`, same `field_override` audit action and
-  // `fieldsChanged` label), so only the storage moves — which is what keeps the
-  // pre-#2542 center curation history queryable by the same key.
-  let leadershipWrite: { setCwid: string | null } | { setInterim: boolean } | null = null;
   if (fieldName === "name") {
     const r = validateUnitName(value);
     if (!r.ok) return editError(400, r.error, "value");
@@ -638,21 +628,6 @@ async function handleUpdate(
     if (!conflict.ok) return editError(400, conflict.error, "value");
     storedValue = r.value;
     updatePayload = { slug: r.value };
-  } else if (fieldName === "directorCwid") {
-    const r = validateUnitLeaderCwid(value);
-    if (!r.ok) return editError(400, r.error, "value");
-    storedValue = r.value;
-    // "" = explicit vacancy — under #2542 that means dropping the `director`
-    // assignment. `OrgUnitRoleAssignment` is the sole store as of contract A;
-    // the `directorCwid` column dual-write retired with this ticket.
-    leadershipWrite = { setCwid: r.value === "" ? null : r.value };
-    updatePayload = {};
-  } else if (fieldName === "leaderInterim") {
-    const r = validateUnitLeaderInterim(value);
-    if (!r.ok) return editError(400, r.error, "value");
-    storedValue = r.value === "true";
-    leadershipWrite = { setInterim: storedValue };
-    updatePayload = {};
   } else {
     // centerType — Superuser-only, allowlist already validated indirectly
     // (the field name dispatches; the value still needs the enum check).
@@ -698,15 +673,6 @@ async function handleUpdate(
           centerType: true,
         },
       });
-      // #2542 contract A — OrgUnitRoleAssignment is the sole director store;
-      // the `director_cwid`/`leader_interim` columns are retired.
-      const beforeLeader = await tx.orgUnitRoleAssignment.findFirst({
-        where: { entityType: CENTER_ENTITY_TYPE, entityId, roleKey: DIRECTOR_ROLE_KEY },
-        select: { cwid: true, interim: true },
-        orderBy: { sortOrder: "asc" },
-      });
-      const beforeDirectorCwid = beforeLeader?.cwid ?? null;
-      const beforeInterim = beforeLeader?.interim ?? false;
 
       if (Object.keys(updatePayload).length > 0) {
         await tx.center.update({
@@ -714,60 +680,16 @@ async function handleUpdate(
           data: updatePayload,
         });
       }
-      if (leadershipWrite) {
-        // The 11 pre-existing centers have no vocabulary until the Phase 1
-        // backfill runs, and `org_unit_role_assignment.role_key` FKs to it —
-        // so seed this center's defaults first. Idempotent (`skipDuplicates`),
-        // never clobbers a renamed label, and removes the ordering dependency
-        // between the deploy and the backfill entirely.
-        await tx.orgUnitRole.createMany({
-          data: orgUnitRoleSeedRows(CENTER_ENTITY_TYPE),
-          skipDuplicates: true,
-        });
-      }
-      if (leadershipWrite && "setCwid" in leadershipWrite) {
-        // One `director` at a time: vacate whoever holds it, then grant.
-        // `deleteMany` also covers the pre-backfill case of no row at all.
-        await tx.orgUnitRoleAssignment.deleteMany({
-          where: { entityType: CENTER_ENTITY_TYPE, entityId, roleKey: DIRECTOR_ROLE_KEY },
-        });
-        if (leadershipWrite.setCwid !== null) {
-          // The interim qualifier rides with the ROLE, not the person —
-          // `Center.leaderInterim` was a separate column that survived a
-          // director change, so carry it onto the new holder.
-          await tx.orgUnitRoleAssignment.create({
-            data: {
-              entityType: CENTER_ENTITY_TYPE,
-              entityId,
-              cwid: leadershipWrite.setCwid,
-              roleKey: DIRECTOR_ROLE_KEY,
-              interim: beforeInterim,
-            },
-          });
-        }
-      } else if (leadershipWrite && "setInterim" in leadershipWrite) {
-        // No director => nothing to qualify, and `updateMany` is a clean no-op.
-        // `unit-leader-card.tsx` always POSTs the cwid before the interim flag,
-        // so on a real save the row exists by now.
-        await tx.orgUnitRoleAssignment.updateMany({
-          where: { entityType: CENTER_ENTITY_TYPE, entityId, roleKey: DIRECTOR_ROLE_KEY },
-          data: { interim: leadershipWrite.setInterim },
-        });
-      }
       const beforeValue =
         fieldName === "name"
           ? before?.name
           : fieldName === "slug"
-          ? before?.slug
-          : fieldName === "description"
-            ? before?.description
-            : fieldName === "url"
-              ? before?.url
-              : fieldName === "directorCwid"
-                ? beforeDirectorCwid
-                : fieldName === "leaderInterim"
-                  ? beforeInterim
-                  : before?.centerType;
+            ? before?.slug
+            : fieldName === "description"
+              ? before?.description
+              : fieldName === "url"
+                ? before?.url
+                : before?.centerType;
       await appendAuditRow(tx, {
         actorCwid: realCwid,
         impersonatedCwid,
