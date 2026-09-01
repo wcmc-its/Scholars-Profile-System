@@ -261,9 +261,10 @@ describe("buildPeopleDoc — suppression integration (C4)", () => {
           ),
       },
       // Issue #532 — leadership sidecar queries; the suppression tests don't
-      // care about the leadership signal, so both return empty.
+      // care about the leadership signal, so all return empty.
       department: { findMany: vi.fn().mockResolvedValue([]) },
       division: { findMany: vi.fn().mockResolvedValue([]) },
+      orgUnitRoleAssignment: { findMany: vi.fn().mockResolvedValue([]) },
     } as unknown as Parameters<typeof buildPeopleDoc>[1];
   }
 

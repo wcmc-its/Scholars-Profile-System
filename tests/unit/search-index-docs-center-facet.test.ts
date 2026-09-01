@@ -37,6 +37,7 @@ function mockClient(centerRows: ReadonlyArray<CenterRow>): ClientArg {
     publicationAuthor: { findMany: vi.fn().mockResolvedValue([]) },
     department: { findMany: vi.fn().mockResolvedValue([]) },
     division: { findMany: vi.fn().mockResolvedValue([]) },
+    orgUnitRoleAssignment: { findMany: vi.fn().mockResolvedValue([]) },
   } as unknown as ClientArg;
 }
 

@@ -55,6 +55,11 @@ import { isCenterMembershipActive } from "@/lib/api/centers";
 import { isTrainingOnlyGrant } from "@/lib/grants/training-exclusions";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import { publicRoleWhere } from "@/lib/eligibility";
+import {
+  DEPARTMENT_CHAIR_ROLE_KEY,
+  DEPARTMENT_DIRECTOR_ROLE_KEY,
+  DIVISION_CHIEF_ROLE_KEY,
+} from "@/lib/org-unit-roles";
 
 // ---------------------------------------------------------------------------
 // Authorship weights — publications-doc index-time term repetition.
@@ -850,16 +855,18 @@ export function buildPublicationDoc(
  *     accepts N per-scholar queries here in exchange for the fast-path
  *     getting the one-cwid variant naturally; the prior whole-table
  *     `centerCodesByCwid` preload is dropped.
- *   - **`chairedDepartments`** (issue #532) — `Department` rows where
- *     `chairCwid = s.cwid`. The DB column already reflects ADR-002 chair
- *     detection AND the `field_override(leaderCwid)` precedence consult
- *     (#2560), so reading it here surfaces the authoritative chair set with
- *     no new ingestion. Usually 0 rows; occasionally 1; rarely >1 (cross-dept
- *     chairs do exist at WCM).
+ *   - **`chairedDepartments`** (issue #532) — `OrgUnitRoleAssignment` rows
+ *     for `cwid = s.cwid`, `entityType: "department"` (#2542 contract A —
+ *     `Department.chairCwid` no longer exists). The assignment is written
+ *     by the ED ETL immediately after its ADR-002 chair-detection +
+ *     `field_override(leaderCwid)` precedence consult (#2560), so reading it
+ *     here surfaces the same authoritative chair set the retired column did.
+ *     Usually 0 rows; occasionally 1; rarely >1 (cross-dept chairs do exist
+ *     at WCM).
  *   - **`chieffedDivisions`** (issue #532) — same shape for
- *     `Division.chiefCwid`. ADR-002 Path B (`detectDivisionChief`) + the
+ *     `entityType: "division"`. ADR-002 Path B (`detectDivisionChief`) + the
  *     `field_override(leaderCwid)` consult have already settled the value
- *     the column carries.
+ *     the assignment row carries.
  *
  * Returns `null` when the scholar is not indexable (forward-compat: with
  * current callers the scholar row is always `PEOPLE_INDEX_WHERE`-filtered,
@@ -878,6 +885,7 @@ export async function buildPeopleDoc(
     | "department"
     | "division"
     | "scholarFamily"
+    | "orgUnitRoleAssignment"
   >,
   sup: PublicationSuppressions,
   // Issue #824 §4c — OPTIONAL public method-family overlay gate. When provided
@@ -1444,26 +1452,45 @@ export async function buildPeopleDoc(
   }
   void divisionName; // retained for potential future enrichment
 
-  // Issue #532 — leadership sidecar queries. `Department.chairCwid` and
-  // `Division.chiefCwid` are populated by the ED ETL with override-applied
-  // values (ADR-002 Path B prediction + the `field_override(leaderCwid)`
-  // precedence consult, #2560), so reading them here yields the
-  // authoritative chair / chief set. Both queries are point lookups on
-  // indexed columns; the expected row count for any one scholar is 0
-  // (almost all), 1 (chairs / chiefs), or rarely >1 (cross-dept
-  // appointments). Stored lowercased
-  // because the dept-template's `function_score` term filter is matched
-  // against `query.trim().toLowerCase()` and the classifier's
-  // `knownDepartments` set is itself lowercased.
+  // Issue #532 — leadership sidecar queries. #2542 contract A: sole source is
+  // `OrgUnitRoleAssignment`, which the ED ETL writes immediately after every
+  // `Department.chairCwid` / `Division.chiefCwid` write (ADR-002 Path B
+  // prediction + the `field_override(leaderCwid)` precedence consult,
+  // #2560) — so this yields the same authoritative chair / chief set the
+  // now-retired columns did. The assignment carries no FK to `department` /
+  // `division` (polymorphic on `entityId`), so the unit name is a second
+  // batched lookup. The expected row count for any one scholar is 0 (almost
+  // all), 1 (chairs / chiefs), or rarely >1 (cross-dept appointments).
+  // Stored lowercased because the dept-template's `function_score` term
+  // filter is matched against `query.trim().toLowerCase()` and the
+  // classifier's `knownDepartments` set is itself lowercased.
+  const [chairAssignments, chiefAssignments] = await Promise.all([
+    client.orgUnitRoleAssignment.findMany({
+      where: {
+        cwid: s.cwid,
+        entityType: "department",
+        roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+      },
+      select: { entityId: true },
+    }),
+    client.orgUnitRoleAssignment.findMany({
+      where: { cwid: s.cwid, entityType: "division", roleKey: DIVISION_CHIEF_ROLE_KEY },
+      select: { entityId: true },
+    }),
+  ]);
   const [chairedDepartments, chieffedDivisions] = await Promise.all([
-    client.department.findMany({
-      where: { chairCwid: s.cwid },
-      select: { name: true },
-    }),
-    client.division.findMany({
-      where: { chiefCwid: s.cwid },
-      select: { name: true },
-    }),
+    chairAssignments.length
+      ? client.department.findMany({
+          where: { code: { in: chairAssignments.map((a) => a.entityId) } },
+          select: { name: true },
+        })
+      : Promise.resolve([]),
+    chiefAssignments.length
+      ? client.division.findMany({
+          where: { code: { in: chiefAssignments.map((a) => a.entityId) } },
+          select: { name: true },
+        })
+      : Promise.resolve([]),
   ]);
   const chairOf = chairedDepartments.map((d) => d.name.toLowerCase());
   const chiefOf = chieffedDivisions.map((d) => d.name.toLowerCase());

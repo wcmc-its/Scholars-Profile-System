@@ -24,12 +24,15 @@ function mockClient(opts: {
 } = {}): ClientArg {
   // `division.findMany` is consumed by both the Phase 8 manual-roster sidecar
   // (where.code.in + source='manual') and the issue #532 chief-leadership
-  // sidecar (where.chiefCwid). Discriminate by where shape so each consumer
-  // gets the row schema it expects (`code`/`deptCode` vs `name`).
+  // sidecar's batched name lookup (also where.code.in, but only ever issued
+  // when `orgUnitRoleAssignment.findMany` returned a chief assignment — which
+  // this fixture's `orgUnitRoleAssignment` mock never does, so the two never
+  // collide in these tests). No chiefCwid-shaped call exists any more
+  // (#2542 contract A — `Division.chiefCwid` no longer exists as a read
+  // source).
   const divisionFindMany = vi.fn().mockImplementation((args?: {
-    where?: { chiefCwid?: string; code?: { in?: string[] } };
+    where?: { code?: { in?: string[] } };
   }) => {
-    if (args?.where?.chiefCwid !== undefined) return Promise.resolve([]);
     if (args?.where?.code?.in) return Promise.resolve(opts.manualDivisions ?? []);
     return Promise.resolve([]);
   });
@@ -41,6 +44,9 @@ function mockClient(opts: {
     publicationAuthor: { findMany: vi.fn().mockResolvedValue([]) },
     department: { findMany: vi.fn().mockResolvedValue([]) },
     division: { findMany: divisionFindMany },
+    // #2542 contract A — the issue #532 leadership sidecar's sole source; no
+    // scholar in this file is a chair/chief, so both entity types are empty.
+    orgUnitRoleAssignment: { findMany: vi.fn().mockResolvedValue([]) },
   } as unknown as ClientArg;
 }
 

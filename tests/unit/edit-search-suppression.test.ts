@@ -26,6 +26,7 @@ const hoisted = vi.hoisted(() => ({
   mockSuppressionUpdate: vi.fn(),
   mockDepartmentFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
+  mockOrgUnitRoleAssignmentFindMany: vi.fn(),
   mockScholarFamilyFindMany: vi.fn(),
   mockMeshDescriptorFindMany: vi.fn(),
   mockFieldOverrideFindMany: vi.fn(),
@@ -47,10 +48,13 @@ vi.mock("@/lib/db", () => ({
       // then refetches the affected project's surviving rows.
       grant: { findMany: hoisted.mockGrantFindMany },
       suppression: { findMany: hoisted.mockSuppressionFindMany },
-      // Issue #532 — leadership sidecar queries; this suite doesn't exercise
-      // leadership content, so both default to empty.
+      // Issue #532 — leadership sidecar queries. #2542 contract A — sole
+      // source is `orgUnitRoleAssignment`; `department`/`division` now serve
+      // only its batched name lookup. This suite doesn't exercise leadership
+      // content, so all default to empty.
       department: { findMany: hoisted.mockDepartmentFindMany },
       division: { findMany: hoisted.mockDivisionFindMany },
+      orgUnitRoleAssignment: { findMany: hoisted.mockOrgUnitRoleAssignmentFindMany },
       // #824 §4c — `buildPeopleDoc` issues a `scholarFamily` sidecar for the
       // public method-family rollup when a gate is passed (the reconciler now
       // passes one). This suite doesn't exercise method families; the default
@@ -176,6 +180,7 @@ beforeEach(() => {
   hoisted.mockDivisionMembershipFindMany.mockResolvedValue([]);
   hoisted.mockDepartmentFindMany.mockResolvedValue([]);
   hoisted.mockDivisionFindMany.mockResolvedValue([]);
+  hoisted.mockOrgUnitRoleAssignmentFindMany.mockResolvedValue([]);
   hoisted.mockScholarFamilyFindMany.mockResolvedValue([]);
   hoisted.mockMeshDescriptorFindMany.mockResolvedValue([]);
   hoisted.mockFieldOverrideFindMany.mockResolvedValue([]);
