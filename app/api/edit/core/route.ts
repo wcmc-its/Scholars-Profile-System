@@ -23,7 +23,8 @@
  *     (`cwid`, optional `role` / `interim` / `sortOrder`, each only mutated
  *     when present in the body) — mirrors `/api/edit/center-program`'s leader
  *     actions. `role` is an open string (`CoreLeader.role`, schema default
- *     `"director"`), not a closed enum like `CenterProgramLeader.role`.
+ *     `"director"`), not a closed vocabulary like the center-program editor's
+ *     `leader`/`coe_liaison` roleKey.
  *
  * Authz: Owner / Curator of the core, Superuser, or comms_steward —
  * `getCoreOwnerRole` + `authorizeCoreClaim`, the SAME check `/edit/core/[coreId]`
@@ -72,8 +73,8 @@ function isCoreAction(value: string): value is CoreAction {
 
 const MAX_SORT_ORDER = 9_999; // mirrors /api/edit/center-program's cap
 /** `CoreLeader.role` is an open string (schema default "director"), not a
- *  closed enum — mirrors `CenterProgramLeader.role`'s shape minus the fixed
- *  vocabulary. Bounded to the column width (`@db.VarChar(32)`). */
+ *  closed vocabulary like the center-program editor's `leader`/`coe_liaison`
+ *  roleKey. Bounded to the column width (`@db.VarChar(32)`). */
 const ROLE_MAX_CHARS = 32;
 
 function validateLeaderRole(input: unknown): { ok: true; value: string } | { ok: false } {
