@@ -50,7 +50,8 @@ const EXCLUDED_PROGRAM_CODES = new Set(["ZY"]);
 
 const DESCRIPTION_MAX_CHARS = 4000;
 
-/** #1570 — mirrors `CenterProgramLeader.role`. Leaders render before liaisons. */
+/** #1570 — mirrors `OrgUnitRoleAssignment.roleKey` for the `center_program`
+ *  vocabulary. Leaders render before liaisons. */
 type LeaderRole = "leader" | "coe_liaison";
 
 const ROLE_OPTIONS: ReadonlyArray<{ value: LeaderRole; label: string }> = [
