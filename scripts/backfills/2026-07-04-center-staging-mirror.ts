@@ -20,7 +20,8 @@
  *   removed from the canonical seed (`prisma/center-seed-data.ts`) and already
  *   dropped on staging; prod is stale. Hard-delete cascades their memberships
  *   (verified: 0 and 2 respectively). Mirrors the "hard-delete removed centers"
- *   step in 2026-06-12-org-unit-comms-update.ts.
+ *   step this same backfill lineage used in 2026-06-12-org-unit-comms-update.ts,
+ *   a one-shot script that was executed and removed in contract A.
  *
  * OUT OF SCOPE (separate workstream): the Meyer Cancer Center program/membership
  * setup (5 programs + ~342 classified memberships) is staging-only on prod and

@@ -204,6 +204,37 @@ export async function writeUnitLeaderAssignment(
   }
 }
 
+/** The Prisma surface `loadDeptLeaderMap` needs — base client or interactive tx. */
+type DeptLeaderMapReadClient = Pick<PrismaClient, "orgUnitRoleAssignment">;
+
+/**
+ * #2542 contract A — D-04 manager-graph chief detection's anchor:
+ * department code -> its leader's CWID. A department holds exactly one of
+ * the CHAIR/DIRECTOR keys (enforced by `writeUnitLeaderAssignment`'s
+ * `otherRoleKey` swap), so reading both keys here is exactly what the
+ * retired `department.chairCwid` column carried for EVERY department —
+ * including an administrative department, whose leader is stored under the
+ * DIRECTOR key, not CHAIR. Querying CHAIR alone silently drops those
+ * departments' leaders, clearing every division chief beneath them to GAP.
+ *
+ * Exported for unit tests (tests/unit/etl-ed-unit-leader-assignment.test.ts).
+ */
+export async function loadDeptLeaderMap(
+  client: DeptLeaderMapReadClient,
+): Promise<Map<string, string>> {
+  const deptChairs = new Map<string, string>();
+  for (const a of await client.orgUnitRoleAssignment.findMany({
+    where: {
+      entityType: "department",
+      roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+    },
+    select: { entityId: true, cwid: true },
+  })) {
+    deptChairs.set(a.entityId, a.cwid);
+  }
+  return deptChairs;
+}
+
 /**
  * Whether the historical (ED-HISTORICAL, faculty:expired) appointment
  * reconcile should run for this pass. Mirrors the NYP affiliate guard
@@ -1863,16 +1894,7 @@ async function main() {
     const divisionsForChief = await db.write.division.findMany({
       select: { code: true, deptCode: true },
     });
-    // #2542 contract A — `OrgUnitRoleAssignment` is the sole chair store; the
-    // manager-graph disambiguator below only ever consults the CHAIR key
-    // (never DIRECTOR), matching the pre-contract `department.chairCwid` read.
-    const deptChairs = new Map<string, string | null>();
-    for (const a of await db.write.orgUnitRoleAssignment.findMany({
-      where: { entityType: "department", roleKey: DEPARTMENT_CHAIR_ROLE_KEY },
-      select: { entityId: true, cwid: true },
-    })) {
-      deptChairs.set(a.entityId, a.cwid);
-    }
+    const deptChairs = await loadDeptLeaderMap(db.write);
 
     const chiefVerdictTally: Record<ChiefVerdict, number> = {
       HIGH: 0, MEDIUM: 0, LOW: 0, NONE: 0, GAP: 0,
