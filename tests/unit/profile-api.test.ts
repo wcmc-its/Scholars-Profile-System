@@ -70,15 +70,12 @@ vi.mock("@/lib/db", () => ({
     // #2558 — batched (label, center name) lookup for programs an
     // `orgUnitRoleAssignment` (entityType center_program) row points at.
     centerProgram: { findMany: vi.fn(async () => []) },
-    // #2542 — department/division leadership titles read `orgUnitRoleAssignment`
-    // (with the legacy column as the pre-backfill / pre-sync dual-read
-    // fallback, #2542 Phase D). #2558 — center-program leadership titles read
-    // `orgUnitRoleAssignment` too (entityType `center_program`); no legacy
-    // fallback — the retired per-program leader table is gone.
+    // #2542 contract A — department/division/center leadership titles read
+    // `orgUnitRoleAssignment` exclusively (`Department.chairCwid` /
+    // `Division.chiefCwid` / `Center.directorCwid` / `Center.leaderInterim` no
+    // longer exist as read sources). #2558 — center-program leadership titles
+    // read `orgUnitRoleAssignment` too (entityType `center_program`).
     orgUnitRoleAssignment: { findMany: vi.fn(async () => []) },
-    // #2542 Phase D — department Chair/Director + division Chief labels
-    // resolve from the vocabulary; `null`/`[]` defaults exercise the
-    // "vocabulary row missing" fallback path.
     orgUnitRole: {
       findMany: vi.fn(async () => []),
       findUnique: vi.fn(async () => null),
@@ -168,13 +165,12 @@ describe("profile serializer", () => {
   });
 });
 
-// #58 / #2542 Phase D — `profile.ts`'s own leadership-title lines
-// (`payload.leadershipTitles`) must not repeat the "Chair, {dept}" /
-// "Chief, {div}" mislabel: an administrative department's leader is a
-// Director, and the display label comes from the vocabulary (falling back to
-// the seed default only when the vocabulary row is missing), matching the
-// established center dual-read shape.
-describe("profile serializer — department/division leadership titles (#58 / #2542 Phase D)", () => {
+// #58 / #2542 contract A — `profile.ts`'s own leadership-title lines
+// (`payload.leadershipTitles`) render straight from the assignment's own
+// vocabulary-joined `role.label` (department chair vs. director, division
+// chief) — no `Department.chairCwid` / `Division.chiefCwid` column, and no
+// category ternary, exist as a source any more.
+describe("profile serializer — department/division leadership titles (#58 / #2542 contract A)", () => {
   beforeEach(loadLeadershipMocks);
 
   async function leadershipTitles(): Promise<string[]> {
@@ -186,54 +182,65 @@ describe("profile serializer — department/division leadership titles (#58 / #2
     return payload?.leadershipTitles ?? [];
   }
 
-  it("labels a clinical/mixed/basic department's leader 'Chair' via the legacy chairCwid fallback", async () => {
+  it("labels a clinical/mixed/basic department's leader 'Chair' from its OrgUnitRoleAssignment", async () => {
     const prisma = await loadLeadershipMocks();
+    prisma.orgUnitRoleAssignment.findMany.mockImplementation(
+      async (args: { where: { entityType: string } }) => {
+        if (args.where.entityType !== "department") return [];
+        return [{ entityId: "MED", interim: false, sortOrder: 0, role: { label: "Chair" } }];
+      },
+    );
     prisma.department.findMany.mockResolvedValue([
-      { code: "MED", name: "Medicine", officialName: null, category: "clinical" },
+      { code: "MED", name: "Medicine", officialName: null },
     ]);
     expect(await leadershipTitles()).toEqual(["Chair, Medicine"]);
   });
 
   it("labels an administrative department's leader 'Director', not 'Chair'", async () => {
     const prisma = await loadLeadershipMocks();
+    prisma.orgUnitRoleAssignment.findMany.mockImplementation(
+      async (args: { where: { entityType: string } }) => {
+        if (args.where.entityType !== "department") return [];
+        return [{ entityId: "LIB", interim: false, sortOrder: 0, role: { label: "Director" } }];
+      },
+    );
     prisma.department.findMany.mockResolvedValue([
-      { code: "LIB", name: "Library", officialName: null, category: "administrative" },
+      { code: "LIB", name: "Library", officialName: null },
     ]);
     expect(await leadershipTitles()).toEqual(["Director, Library"]);
   });
 
-  it("labels a division's leader 'Chief' via the legacy chiefCwid fallback", async () => {
+  it("labels a division's leader 'Chief' from its OrgUnitRoleAssignment", async () => {
     const prisma = await loadLeadershipMocks();
+    prisma.orgUnitRoleAssignment.findMany.mockImplementation(
+      async (args: { where: { entityType: string } }) => {
+        if (args.where.entityType !== "division") return [];
+        return [{ entityId: "HEME", interim: false, sortOrder: 0, role: { label: "Chief" } }];
+      },
+    );
     prisma.division.findMany.mockResolvedValue([{ code: "HEME", name: "Hematology" }]);
     expect(await leadershipTitles()).toEqual(["Chief, Hematology"]);
   });
 
-  it("does not render a role whose vocabulary row has profileTitle: false", async () => {
+  it("a row whose department/division vanished contributes no title line", async () => {
     const prisma = await loadLeadershipMocks();
-    prisma.department.findMany.mockResolvedValue([
-      { code: "MED", name: "Medicine", officialName: null, category: "clinical" },
-    ]);
-    prisma.orgUnitRole.findMany.mockResolvedValue([
-      { key: "chair", label: "Chair", profileTitle: false },
-    ]);
-    expect(await leadershipTitles()).toEqual([]);
-  });
-
-  it("an OrgUnitRoleAssignment-covered department wins over the legacy column, with the vocabulary label + interim", async () => {
-    const prisma = await loadLeadershipMocks();
-    // Legacy column still has a row for the SAME department code — the
-    // assignment must suppress it, not double-render.
-    prisma.department.findMany.mockImplementation(
-      async (args: { where?: { chairCwid?: string; code?: { in?: string[] } } }) => {
-        if (args.where?.chairCwid) {
-          return [{ code: "MED", name: "Medicine", officialName: null, category: "clinical" }];
-        }
-        if (args.where?.code?.in) {
-          return [{ code: "MED", name: "Medicine", officialName: "Department of Medicine" }];
+    prisma.orgUnitRoleAssignment.findMany.mockImplementation(
+      async (args: { where: { entityType: string } }) => {
+        if (args.where.entityType === "department") {
+          return [{ entityId: "GONE", interim: false, sortOrder: 0, role: { label: "Chair" } }];
         }
         return [];
       },
     );
+    prisma.department.findMany.mockResolvedValue([]); // the department vanished
+    expect(await leadershipTitles()).toEqual([]);
+  });
+
+  it("renders the assignment's own vocabulary label + interim, whatever the label", async () => {
+    const prisma = await loadLeadershipMocks();
+    prisma.department.findMany.mockResolvedValue([
+      { code: "MED", name: "Medicine", officialName: "Department of Medicine" },
+    ]);
     prisma.orgUnitRoleAssignment.findMany.mockImplementation(
       async (args: { where: { entityType: string } }) => {
         if (args.where.entityType !== "department") return [];
@@ -250,6 +257,31 @@ describe("profile serializer — department/division leadership titles (#58 / #2
       },
     );
     expect(await leadershipTitles()).toEqual(["Interim Chair Emeritus, Department of Medicine"]);
+  });
+
+  it("scopes the department + division assignment queries to the scholar, gated by profileTitle", async () => {
+    const prisma = await loadLeadershipMocks();
+    await leadershipTitles();
+    const deptCall = prisma.orgUnitRoleAssignment.findMany.mock.calls.find(
+      (c: unknown[]) => (c[0] as { where: { entityType: string } }).where.entityType === "department",
+    );
+    expect(deptCall?.[0]).toMatchObject({
+      where: {
+        cwid: expect.any(String),
+        entityType: "department",
+        role: { roleGroup: "leadership", profileTitle: true },
+      },
+    });
+    const divCall = prisma.orgUnitRoleAssignment.findMany.mock.calls.find(
+      (c: unknown[]) => (c[0] as { where: { entityType: string } }).where.entityType === "division",
+    );
+    expect(divCall?.[0]).toMatchObject({
+      where: {
+        cwid: expect.any(String),
+        entityType: "division",
+        role: { roleGroup: "leadership", profileTitle: true },
+      },
+    });
   });
 });
 
