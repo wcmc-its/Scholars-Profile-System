@@ -41,9 +41,13 @@
  * `router.refresh()`, and `unit-create-form` deliberately no longer pushes at
  * all — it renders a success panel with a real link instead. If you add a form
  * under this guard that MUST navigate on save, do not simply call
- * `router.push` — you will hit this. Route the navigation through the
- * `pendingPushRef` mechanism (as the confirmed-href path does), or land the
- * user with a real link rather than a programmatic push.
+ * `router.push`. Pass a `ref` to `UnsavedChangesGuard` and, after the save
+ * commits, call `guardRef.current?.navigateAfterSave(href)` instead of
+ * `router.push(href)` directly — it pops the sentinel (if armed) and pushes
+ * from the resulting popstate via a listener that outlives the effect
+ * cleanup. It is safe to call before, in the same commit as, or after
+ * clearing `dirty` / unmounting the guard, and repeated calls coalesce (the
+ * last href wins) rather than issuing overlapping pops.
  */
 "use client";
 
@@ -62,7 +66,18 @@ const SENTINEL_KEY = "__sps_unsaved_guard__";
 
 type PendingTarget = { kind: "href"; href: string } | { kind: "back" };
 
-export function UnsavedChangesGuard({ dirty }: { dirty: boolean }) {
+/** Imperative handle for a consumer that must navigate right after a save. */
+export type UnsavedChangesGuardHandle = {
+  navigateAfterSave: (href: string) => void;
+};
+
+export function UnsavedChangesGuard({
+  dirty,
+  ref,
+}: {
+  dirty: boolean;
+  ref?: React.Ref<UnsavedChangesGuardHandle>;
+}) {
   const router = useRouter();
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const pendingRef = React.useRef<PendingTarget | null>(null);
@@ -79,6 +94,72 @@ export function UnsavedChangesGuard({ dirty }: { dirty: boolean }) {
   // arm time — never calls a stale router.
   const routerRef = React.useRef(router);
   routerRef.current = router;
+  // Set while a pop WE issued (disarm cleanup or `navigateAfterSave`) is
+  // outstanding — issued, popstate not yet observed. Since the state update
+  // from `history.back()` is not guaranteed to be visible synchronously,
+  // anything that would issue our own pop must check this first and skip (or
+  // queue) instead of firing a second, unwanted `history.back()` (#2546).
+  const popInFlightRef = React.useRef(false);
+  // Href to push once the in-flight pop lands. Last call wins — a repeated
+  // `navigateAfterSave` while a pop is already outstanding just overwrites it
+  // rather than issuing a second pop.
+  const afterPopRef = React.useRef<string | null>(null);
+  // The exact popstate Event our own pop produced. A disarm-then-re-arm before
+  // that pop lands registers a NEW route-3 handler (H2) alongside our one-shot
+  // (L1) on the same popstate; listener order is registration order, so L1
+  // (registered first, by the disarm) would run before H2 and clear
+  // `bypassRef` before H2 ever sees it — H2 would then misread our own pop as
+  // a user Back press. Comparing the event object itself is order-independent:
+  // both listeners receive the identical Event for one dispatch (#2546).
+  const ownPopEventRef = React.useRef<Event | null>(null);
+
+  // Pop our own sentinel exactly once, however that pop was triggered (disarm
+  // cleanup or `navigateAfterSave`). The resulting popstate is awaited via a
+  // one-shot *window* listener — independent of the route-3 effect, whose own
+  // handler (and cleanup) may already have run by the time it arrives — and
+  // clears both `popInFlightRef` and `bypassRef` before performing any queued
+  // push, so a later re-arm's route-3 handler never inherits a stale bypass.
+  const popSentinel = React.useCallback(() => {
+    popInFlightRef.current = true;
+    bypassRef.current = true;
+    window.addEventListener(
+      "popstate",
+      (e) => {
+        ownPopEventRef.current = e;
+        popInFlightRef.current = false;
+        bypassRef.current = false;
+        const href = afterPopRef.current;
+        afterPopRef.current = null;
+        if (href !== null) routerRef.current.push(href);
+      },
+      { once: true },
+    );
+    window.history.back();
+  }, []);
+
+  // Navigate after a save without racing the disarm cleanup's own pop (#2546).
+  const navigateAfterSave = React.useCallback(
+    (href: string) => {
+      if (typeof window === "undefined") return;
+      if (popInFlightRef.current) {
+        // A pop (ours) is already outstanding — queue behind it instead of
+        // issuing a second `history.back()`.
+        afterPopRef.current = href;
+        return;
+      }
+      const sentinelArmed =
+        (window.history.state as Record<string, unknown> | null)?.[SENTINEL_KEY] === true;
+      if (!sentinelArmed) {
+        routerRef.current.push(href);
+        return;
+      }
+      afterPopRef.current = href;
+      popSentinel();
+    },
+    [popSentinel],
+  );
+
+  React.useImperativeHandle(ref, () => ({ navigateAfterSave }), [navigateAfterSave]);
 
   // (1) beforeunload — reload / tab close / cross-origin nav (stays native).
   React.useEffect(() => {
@@ -124,10 +205,10 @@ export function UnsavedChangesGuard({ dirty }: { dirty: boolean }) {
     // Push a sentinel so a Back press pops onto it instead of off the page.
     window.history.pushState({ [SENTINEL_KEY]: true }, "");
 
-    function handler() {
-      if (bypassRef.current) {
+    function handler(e: PopStateEvent) {
+      if (bypassRef.current || e === ownPopEventRef.current) {
         // A popstate we initiated (confirmed back-nav / confirmed href pop /
-        // disarm cleanup); let it pass without re-trapping.
+        // disarm cleanup / navigateAfterSave); let it pass without re-trapping.
         bypassRef.current = false;
         // If this pop was the sentinel-removal for a confirmed href navigation,
         // the stack is now [...prev, editPage]; push the destination once so the
@@ -151,13 +232,17 @@ export function UnsavedChangesGuard({ dirty }: { dirty: boolean }) {
       window.removeEventListener("popstate", handler);
       // On disarm (dirty cleared or unmount), pop our sentinel so we don't leave
       // a phantom entry behind. Guard with the marker so we only pop our own.
+      // Skip it while a pop we issued is already in flight (#2546) — otherwise
+      // this would issue a second, unwanted `history.back()`. Routing through
+      // `popSentinel()` (rather than a bare `history.back()`) also means this
+      // disarm pop clears `bypassRef` once it lands, so it never dangles for a
+      // later re-arm's route-3 handler to misread as its own bypassed pop.
       const state = window.history.state as Record<string, unknown> | null;
-      if (state && state[SENTINEL_KEY] === true) {
-        bypassRef.current = true;
-        window.history.back();
+      if (state && state[SENTINEL_KEY] === true && !popInFlightRef.current) {
+        popSentinel();
       }
     };
-  }, [dirty]);
+  }, [dirty, popSentinel]);
 
   function handleConfirm() {
     const pending = pendingRef.current;
