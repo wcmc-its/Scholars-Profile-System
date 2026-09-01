@@ -601,9 +601,10 @@ async function handleUpdate(
   }
   let updatePayload: Record<string, unknown>;
   let storedValue: string | boolean;
-  // #2542 Phase 1 — `directorCwid` / `leaderInterim` no longer map to a center
-  // column; they move the `director` assignment in `CenterLeader`, and
-  // DUAL-WRITE the deprecated columns for one release.
+  // #2542 contract A — `directorCwid` / `leaderInterim` no longer map to a
+  // center column; they move the `director` assignment in
+  // `OrgUnitRoleAssignment`, the sole store (the column dual-write retired
+  // with this ticket).
   // The REQUEST contract is unchanged (same two field names, same two POSTs
   // from `unit-leader-card.tsx`, same `field_override` audit action and
   // `fieldsChanged` label), so only the storage moves — which is what keeps the
@@ -642,16 +643,16 @@ async function handleUpdate(
     if (!r.ok) return editError(400, r.error, "value");
     storedValue = r.value;
     // "" = explicit vacancy — under #2542 that means dropping the `director`
-    // assignment. DUAL-WRITTEN to the deprecated column for one release so the
-    // pre-backfill fallback and an app-code rollback both stay correct.
+    // assignment. `OrgUnitRoleAssignment` is the sole store as of contract A;
+    // the `directorCwid` column dual-write retired with this ticket.
     leadershipWrite = { setCwid: r.value === "" ? null : r.value };
-    updatePayload = { directorCwid: r.value === "" ? null : r.value };
+    updatePayload = {};
   } else if (fieldName === "leaderInterim") {
     const r = validateUnitLeaderInterim(value);
     if (!r.ok) return editError(400, r.error, "value");
     storedValue = r.value === "true";
     leadershipWrite = { setInterim: storedValue };
-    updatePayload = { leaderInterim: storedValue };
+    updatePayload = {};
   } else {
     // centerType — Superuser-only, allowlist already validated indirectly
     // (the field name dispatches; the value still needs the enum check).
@@ -751,8 +752,7 @@ async function handleUpdate(
       } else if (leadershipWrite && "setInterim" in leadershipWrite) {
         // No director => nothing to qualify, and `updateMany` is a clean no-op.
         // `unit-leader-card.tsx` always POSTs the cwid before the interim flag,
-        // so on a real save the row exists by now. The column dual-write above
-        // still records it either way.
+        // so on a real save the row exists by now.
         await tx.orgUnitRoleAssignment.updateMany({
           where: { entityType: CENTER_ENTITY_TYPE, entityId, roleKey: DIRECTOR_ROLE_KEY },
           data: { interim: leadershipWrite.setInterim },

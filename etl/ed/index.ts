@@ -150,12 +150,12 @@ export function guardActiveLeaderCwid(
 type UnitLeaderAssignmentWriteClient = Pick<PrismaClient, "orgUnitRole" | "orgUnitRoleAssignment">;
 
 /**
- * #2542 Phase D dual-write — mirror one department/division leader write onto
- * `OrgUnitRoleAssignment` from the SAME already-resolved cwid that the caller
- * just wrote to `chairCwid` / `chiefCwid`. Override precedence needs no
- * separate handling here: `resolveUnitLeaderForETL` resolves the value
- * upstream (override, detection, or explicit vacancy) before any call site
- * runs, so both stores always receive the identical resolved value.
+ * #2542 contract A — write one department/division leader onto
+ * `OrgUnitRoleAssignment`, the sole leader store (the `chairCwid` /
+ * `chiefCwid` column dual-write retired with this ticket). Override
+ * precedence needs no separate handling here: `resolveUnitLeaderForETL`
+ * resolves the value upstream (override, detection, or explicit vacancy)
+ * before any call site runs.
  *
  * Seeds the kind's vocabulary first (`skipDuplicates`), exactly as the three
  * app write paths do (`app/api/edit/unit/route.ts:726-729`) — a unit
@@ -1386,11 +1386,8 @@ async function main() {
         unitOverrides.deptLeaders,
       );
       if (leaderOverride.applied) {
-        await db.write.department.update({
-          where: { code: dept.code },
-          data: { chairCwid: leaderOverride.cwid },
-        });
-        // #2542 Phase D — dual-write from the SAME resolved value.
+        // #2542 contract A — `OrgUnitRoleAssignment` is now the sole leader
+        // store; the `chairCwid` column write retired with the dual-write.
         await writeUnitLeaderAssignment(db.write, {
           entityType: "department",
           entityId: dept.code,
@@ -1488,13 +1485,8 @@ async function main() {
     }
     for (const c of chairCandidates) {
       const cwidToWrite = guardActiveLeaderCwid(c.cwid, chairActive, chairGuardApplied);
-      await db.write.department.update({
-        where: { code: c.deptCode },
-        data: { chairCwid: cwidToWrite },
-      });
-      // #2542 Phase D — dual-write from the SAME guarded value (a guard drop
-      // writes null here too, deleting the assignment exactly as the column
-      // self-clears).
+      // #2542 contract A — a guard drop writes null here, deleting the
+      // assignment (writeUnitLeaderAssignment's own vacancy handling).
       await writeUnitLeaderAssignment(db.write, {
         entityType: "department",
         entityId: c.deptCode,
@@ -1510,11 +1502,7 @@ async function main() {
       }
     }
     for (const deptCode of chairDeptsToClear) {
-      await db.write.department.update({
-        where: { code: deptCode },
-        data: { chairCwid: null },
-      });
-      // #2542 Phase D — no candidate this run: delete BOTH leadership keys'
+      // #2542 contract A — no candidate this run: delete BOTH leadership keys'
       // assignment rows. Category at clear time isn't tracked through this
       // array, and deleting a role the dept never held is a no-op, so
       // clearing both is simpler than re-deriving which one applied.
@@ -1566,12 +1554,8 @@ async function main() {
         );
         continue;
       }
-      await db.write.department.update({
-        where: { code },
-        data: { chairCwid: cwid },
-      });
-      // #2542 Phase D — dual-write. Guarded above to `dept.category ===
-      // "administrative"`, so the role key is always director here.
+      // #2542 contract A — guarded above to `dept.category === "administrative"`,
+      // so the role key is always director here.
       await writeUnitLeaderAssignment(db.write, {
         entityType: "department",
         entityId: code,
@@ -1897,11 +1881,8 @@ async function main() {
           unitOverrides.divLeaders,
         );
         if (leaderOverride.applied) {
-          await db.write.division.update({
-            where: { code: div.code },
-            data: { chiefCwid: leaderOverride.cwid },
-          });
-          // #2542 Phase D — dual-write from the SAME resolved value.
+          // #2542 contract A — `OrgUnitRoleAssignment` is now the sole leader
+          // store; the `chiefCwid` column write retired with the dual-write.
           await writeUnitLeaderAssignment(db.write, {
             entityType: "division",
             entityId: div.code,
@@ -1960,11 +1941,8 @@ async function main() {
       }
       for (const c of chiefCandidates) {
         const cwidToWrite = guardActiveLeaderCwid(c.cwid, chiefActive, chiefGuardApplied);
-        await db.write.division.update({
-          where: { code: c.divCode },
-          data: { chiefCwid: cwidToWrite },
-        });
-        // #2542 Phase D — dual-write from the SAME guarded value.
+        // #2542 contract A — a guard drop writes null here, deleting the
+        // assignment (writeUnitLeaderAssignment's own vacancy handling).
         await writeUnitLeaderAssignment(db.write, {
           entityType: "division",
           entityId: c.divCode,
@@ -1975,11 +1953,7 @@ async function main() {
         else chiefGuardDropped += 1;
       }
       for (const divCode of chiefDivsToClear) {
-        await db.write.division.update({
-          where: { code: divCode },
-          data: { chiefCwid: null },
-        });
-        // #2542 Phase D — no candidate this run: delete the assignment row
+        // #2542 contract A — no candidate this run: delete the assignment row
         // so a vacancy does not keep rendering the prior chief.
         await writeUnitLeaderAssignment(db.write, {
           entityType: "division",
@@ -2019,10 +1993,8 @@ async function main() {
       // present would have taken the Path B `if`), so disabling chief detection
       // silently stopped clearing stale chiefs and applying leader overrides.
       if (chiefDetectionDisabled && employeeFetchSucceeded && employeeRecords.length > 0) {
-        await db.write.division.updateMany({ data: { chiefCwid: null } });
-        // #2542 Phase D — mirror the unconditional column clear: delete
-        // every division's chief assignment row before the override pass
-        // below re-applies any curator pins.
+        // #2542 contract A — delete every division's chief assignment row
+        // before the override pass below re-applies any curator pins.
         await db.write.orgUnitRoleAssignment.deleteMany({
           where: { entityType: "division", roleKey: DIVISION_CHIEF_ROLE_KEY },
         });
@@ -2032,12 +2004,8 @@ async function main() {
             unitOverrides.divLeaders,
           );
           if (!leaderOverride.applied) continue;
-          await db.write.division.update({
-            where: { code: div.code },
-            data: { chiefCwid: leaderOverride.cwid },
-          });
-          // #2542 Phase D — dual-write. The bulk clear above already deleted
-          // every row, so a null override cwid is a correct create-skip.
+          // #2542 contract A — the bulk clear above already deleted every
+          // row, so a null override cwid is a correct create-skip.
           await writeUnitLeaderAssignment(db.write, {
             entityType: "division",
             entityId: div.code,
