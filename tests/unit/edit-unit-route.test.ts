@@ -20,9 +20,8 @@
  *      - Curator edits description; success + reflectUnitChange.
  *      - slug + centerType are Superuser-only.
  *      - Slug update revalidates the old slug too (previousSlug).
- *      - directorCwid="" vacates the `director` assignment in
- *        `OrgUnitRoleAssignment` (#2542 contract A; the deprecated column
- *        write retired with this ticket).
+ *      - Leadership (`directorCwid` / `leaderInterim`) moved OFF this route
+ *        in #2542 Phase C — see `center-leadership-route.test.ts`.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
@@ -103,12 +102,6 @@ const OWNER = { cwid: "own001", isSuperuser: false };
 const NONADMIN = { cwid: "non001", isSuperuser: false };
 const SUPERUSER = { cwid: "sup001", isSuperuser: true };
 
-const mockTxCenterLeaderFindFirst = vi.fn();
-const mockTxCenterLeaderCreate = vi.fn();
-const mockTxCenterLeaderUpdateMany = vi.fn();
-const mockTxCenterLeaderDeleteMany = vi.fn();
-const mockTxCenterRoleCreateMany = vi.fn();
-
 const fakeTx = {
   center: {
     create: mockTxCenterCreate,
@@ -121,16 +114,6 @@ const fakeTx = {
     update: mockTxDivisionUpdate,
   },
   unitAdmin: { create: mockTxUnitAdminCreate },
-  // #2542 — center leadership writes land on `CenterLeader`, preceded by a lazy
-  // `centerRole` seed, so the transaction stub needs both delegates or every
-  // center update throws.
-  orgUnitRoleAssignment: {
-    findFirst: mockTxCenterLeaderFindFirst,
-    create: mockTxCenterLeaderCreate,
-    updateMany: mockTxCenterLeaderUpdateMany,
-    deleteMany: mockTxCenterLeaderDeleteMany,
-  },
-  orgUnitRole: { createMany: mockTxCenterRoleCreateMany },
   $executeRaw: mockExecuteRaw,
 };
 
@@ -790,13 +773,10 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
     );
   });
 
-  // #2542 contract A — leadership is an `OrgUnitRoleAssignment` row, the sole
-  // store; the deprecated `Center.directorCwid` column write retired with
-  // this ticket. The request contract is unchanged (same two field names,
-  // same two POSTs from `unit-leader-card.tsx`).
-  it("naming a director writes the assignment row and does not touch the center row", async () => {
-    mockTxCenterLeaderFindFirst.mockResolvedValue(null);
-    const res = await POST(
+  // #2542 Phase C — leadership moved to POST /api/edit/center-leadership;
+  // this route no longer recognizes either field name.
+  it("directorCwid and leaderInterim are no longer valid fields on this route", async () => {
+    const cwid = await POST(
       post({
         op: "update",
         entityType: "center",
@@ -805,91 +785,21 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
         value: "new0001",
       }),
     );
-    expect(res.status).toBe(200);
-    // The vocabulary is seeded first: `org_unit_role_assignment.role_key` FKs to
-    // it, and it is empty until the backfill runs.
-    expect(mockTxCenterRoleCreateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ skipDuplicates: true }),
-    );
-    expect(mockTxCenterLeaderCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          entityType: "center",
-          entityId: "MEYER",
-          cwid: "new0001",
-          roleKey: "director",
-        }),
+    expect(cwid.status).toBe(400);
+    expect(await cwid.json()).toMatchObject({ ok: false, error: "invalid_field" });
+
+    const interim = await POST(
+      post({
+        op: "update",
+        entityType: "center",
+        entityId: "MEYER",
+        fieldName: "leaderInterim",
+        value: "true",
       }),
     );
+    expect(interim.status).toBe(400);
+    expect(await interim.json()).toMatchObject({ ok: false, error: "invalid_field" });
     expect(mockTxCenterUpdate).not.toHaveBeenCalled();
-  });
-
-  it("directorCwid='' vacates the assignment and does not touch the center row", async () => {
-    mockTxCenterLeaderFindFirst.mockResolvedValue({ cwid: "dir0001", interim: false });
-    const res = await POST(
-      post({
-        op: "update",
-        entityType: "center",
-        entityId: "MEYER",
-        fieldName: "directorCwid",
-        value: "",
-      }),
-    );
-    expect(res.status).toBe(200);
-    expect(mockTxCenterLeaderDeleteMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { entityType: "center", entityId: "MEYER", roleKey: "director" },
-      }),
-    );
-    expect(mockTxCenterLeaderCreate).not.toHaveBeenCalled();
-    expect(mockTxCenterUpdate).not.toHaveBeenCalled();
-  });
-
-  it("carries the incumbent's interim qualifier onto a new director", async () => {
-    // `Center.leaderInterim` was a column that survived a director change, so
-    // the qualifier follows the ROLE, not the person.
-    mockTxCenterLeaderFindFirst.mockResolvedValue({ cwid: "old0001", interim: true });
-    const res = await POST(
-      post({
-        op: "update",
-        entityType: "center",
-        entityId: "MEYER",
-        fieldName: "directorCwid",
-        value: "new0001",
-      }),
-    );
-    expect(res.status).toBe(200);
-    expect(mockTxCenterLeaderCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ interim: true }) }),
-    );
-  });
-
-  it("records a null audit before-value when no director OrgUnitRoleAssignment row exists", async () => {
-    // #2542 contract A — OrgUnitRoleAssignment is the sole director store;
-    // the pre-backfill dual-read fallback to the (now-retired) column is gone.
-    mockTxCenterLeaderFindFirst.mockResolvedValue(null);
-    mockTxCenterFindUnique.mockResolvedValue({
-      name: "Meyer",
-      slug: "meyer",
-      description: null,
-      url: null,
-      centerType: "center",
-    });
-    const res = await POST(
-      post({
-        op: "update",
-        entityType: "center",
-        entityId: "MEYER",
-        fieldName: "directorCwid",
-        value: "new0001",
-      }),
-    );
-    expect(res.status).toBe(200);
-    // `before_values` is the 6th bound value of the audit INSERT; arg 0 is the
-    // template strings (see the `auditAfterValues` helper below).
-    expect(JSON.parse(mockExecuteRaw.mock.calls[0][6] as string)).toEqual({
-      directorCwid: null,
-    });
   });
 
   it("Center not found → 400 unit_not_found", async () => {

@@ -21,6 +21,7 @@
  * restore it). The `retire` panel renders normally so they can Restore; every
  * other panel shows a "Retired — restore to edit" notice instead of its editor.
  */
+import { CenterLeadershipCard } from "@/components/edit/center-leadership-card";
 import { CenterProgramCard } from "@/components/edit/center-program-card";
 import { CenterRosterCard } from "@/components/edit/center-roster-card";
 import { CenterTypeCard } from "@/components/edit/center-type-card";
@@ -238,12 +239,20 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
         />
       );
     case "leader":
+      // #2542 Phase C — a center's leadership is manually-owned and
+      // vocabulary-driven (three roles, not one), so it gets the generic
+      // picker instead of the dept/div override card.
+      if (ctx.unit.unitType === "center") {
+        return (
+          <CenterLeadershipCard centerCode={ctx.unit.code} roles={ctx.centerLeadership ?? []} />
+        );
+      }
       return (
         <UnitLeaderCard
           entityType={ctx.unit.unitType}
           entityId={ctx.unit.code}
           leader={ctx.unit.leader}
-          canClear={ctx.unit.unitType !== "center"}
+          canClear
           hasOverride={
             ctx.unit.overriddenFields.includes("leaderCwid") ||
             ctx.unit.overriddenFields.includes("leaderInterim")

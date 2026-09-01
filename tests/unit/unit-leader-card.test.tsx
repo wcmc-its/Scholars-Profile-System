@@ -63,8 +63,6 @@ describe("UnitLeaderCard", () => {
     expect(screen.getByText("Interim chair")).toBeTruthy();
     rerender(<UnitLeaderCard {...base} entityType="division" leader={detect} />);
     expect(screen.getByText("Interim chief")).toBeTruthy();
-    rerender(<UnitLeaderCard {...base} entityType="center" canClear={false} leader={detect} />);
-    expect(screen.getByText("Interim director")).toBeTruthy();
   });
 
   it("starts pristine in detect mode (Save disabled, shows the detection hint)", () => {
@@ -133,54 +131,5 @@ describe("UnitLeaderCard", () => {
     expect(fields).toContain("leaderCwid");
     expect(fields).toContain("leaderInterim");
     expect(fetchMock.mock.calls.every((c) => bodyOf(c).op === "clear")).toBe(true);
-  });
-});
-
-describe("UnitLeaderCard — center arm", () => {
-  const centerBase = {
-    entityType: "center" as const,
-    entityId: "man-x",
-    canClear: false,
-    hasOverride: false,
-  };
-
-  it("a center with no director starts vacant (no detect hint, no Clear button)", () => {
-    render(<UnitLeaderCard {...centerBase} leader={detect} />);
-    expect(screen.queryByText(/using directory detection/i)).toBeNull();
-    expect(screen.getByTestId("unit-leader-vacant-pill").textContent).toMatch(/no director set/i);
-    expect(screen.queryByTestId("unit-leader-clear")).toBeNull();
-  });
-
-  it("picking a director Saves directorCwid via /api/edit/unit op:update", async () => {
-    const fetchMock = stubOk();
-    render(<UnitLeaderCard {...centerBase} leader={detect} />);
-    fireEvent.click(screen.getByTestId("typeahead-pick"));
-    fireEvent.click(screen.getByTestId("unit-leader-save"));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/edit/unit");
-    expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({
-      op: "update",
-      entityType: "center",
-      fieldName: "directorCwid",
-      value: "pick9",
-    });
-  });
-
-  it("clearing a curated director Saves directorCwid:'' (vacant) via /api/edit/unit", async () => {
-    const fetchMock = stubOk();
-    render(
-      <UnitLeaderCard
-        {...centerBase}
-        leader={{ cwid: "dir1", explicitVacancy: false, interim: false, name: "Dir One", title: "MD" }}
-      />,
-    );
-    fireEvent.click(screen.getByTestId("typeahead-clear"));
-    fireEvent.click(screen.getByTestId("unit-leader-save"));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({
-      op: "update",
-      fieldName: "directorCwid",
-      value: "",
-    });
   });
 });

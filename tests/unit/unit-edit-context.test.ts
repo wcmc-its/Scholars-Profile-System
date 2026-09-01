@@ -97,6 +97,17 @@ type Opts = {
   }>;
   /** #2542 — the center's director assignment, from its own query. */
   leaderAssignment?: { cwid: string; interim: boolean } | null;
+  /** #2542 Phase C — the center's LEADERSHIP-group `OrgUnitRole` vocabulary
+   *  rows (`orgUnitRole.findMany`), pre-sorted (the mock doesn't apply
+   *  `orderBy`, same convention as `centerPrograms` above). */
+  leadershipRoles?: Array<{ key: string; label: string; singleHolder: boolean; sortOrder: number }>;
+  /** #2542 Phase C — the center's leadership holders (`orgUnitRoleAssignment`
+   *  rows with `entityType: "center"`, dispatched by `findMany` below). */
+  leadershipAssignments?: Array<{ cwid: string; interim: boolean; roleKey: string }>;
+  /** #2557 Phase E — `OrgUnitRoleScope` allowlist rows, filtered per-call by
+   *  `roleKey` the same way the real `isRoleAllowedAtUnit` reads them; empty
+   *  (the default) means every role is unrestricted. */
+  leadershipScopeRows?: Array<{ roleKey: string; entityId: string }>;
 };
 
 function fakeClient(o: Opts) {
@@ -119,7 +130,19 @@ function fakeClient(o: Opts) {
     orgUnitRoleAssignment: {
       findFirst: vi.fn(async () => o.leaderAssignment ?? null),
       findMany: vi.fn(async (args?: { where?: { entityType?: string } }) =>
-        args?.where?.entityType === "center_program" ? (o.programAssignments ?? []) : [],
+        args?.where?.entityType === "center_program"
+          ? (o.programAssignments ?? [])
+          : args?.where?.entityType === "center"
+            ? (o.leadershipAssignments ?? [])
+            : [],
+      ),
+    },
+    // #2542 Phase C — the leadership vocabulary + its per-role scope
+    // allowlist (#2557 Phase E), read by the leadership-card loader.
+    orgUnitRole: { findMany: vi.fn(async () => o.leadershipRoles ?? []) },
+    orgUnitRoleScope: {
+      findMany: vi.fn(async (args: { where: { roleKey: string } }) =>
+        (o.leadershipScopeRows ?? []).filter((r) => r.roleKey === args.where.roleKey),
       ),
     },
     unitAdmin: { findMany: unitAdminFindMany },
@@ -607,6 +630,85 @@ describe("loadUnitEditContext — center", () => {
         ],
       },
       { code: "CT", label: "Cancer Therapeutics", sortOrder: 40, description: null, leaders: [] },
+    ]);
+  });
+
+  it("returns null for department/division and [] by default for a center", async () => {
+    const dept = await loadUnitEditContext(
+      "department",
+      "N1280",
+      SUPERUSER,
+      asClient(fakeClient({ department: DEPT })),
+    );
+    expect(dept!.centerLeadership).toBeNull();
+
+    const center = await loadUnitEditContext(
+      "center",
+      "man-x",
+      SUPERUSER,
+      asClient(fakeClient({ center: { code: "man-x", name: "X", description: null, url: null, slug: "x", centerType: "center" } })),
+    );
+    expect(center!.centerLeadership).toEqual([]);
+  });
+
+  // #2542 Phase C — one section per LEADERSHIP-group vocabulary entry,
+  // holders grouped by role and name-resolved, `singleHolder` passed
+  // through, and a role with an `OrgUnitRoleScope` allowlist that excludes
+  // THIS center dropped entirely (#2557 Phase E).
+  it("loads the leadership vocabulary with grouped holders, dropping a scoped-out role", async () => {
+    const ctx = await loadUnitEditContext(
+      "center",
+      "meyer",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          center: {
+            code: "meyer",
+            name: "Meyer Cancer Center",
+            description: null,
+            url: null,
+            slug: "meyer",
+            centerType: "center",
+          },
+          leadershipRoles: [
+            { key: "director", label: "Director", singleHolder: true, sortOrder: 10 },
+            { key: "co_director", label: "Co-Director", singleHolder: false, sortOrder: 20 },
+            // Scoped to a DIFFERENT center — must be dropped from the result.
+            { key: "associate_director", label: "Associate Director", singleHolder: false, sortOrder: 30 },
+          ],
+          leadershipScopeRows: [{ roleKey: "associate_director", entityId: "other_center" }],
+          leadershipAssignments: [
+            { cwid: "dir001", interim: true, roleKey: "director" },
+            { cwid: "cod001", interim: false, roleKey: "co_director" },
+            { cwid: "cod002", interim: false, roleKey: "co_director" },
+          ],
+          scholars: [
+            { cwid: "dir001", preferredName: "Dr Director", primaryTitle: "MD" },
+            { cwid: "cod001", preferredName: "Dr Co One", primaryTitle: "PhD" },
+            // cod002 has no Scholar row — falls back to the raw cwid.
+          ],
+        }),
+      ),
+    );
+    expect(ctx!.centerLeadership).toEqual([
+      {
+        key: "director",
+        label: "Director",
+        singleHolder: true,
+        sortOrder: 10,
+        holders: [{ cwid: "dir001", name: "Dr Director", title: "MD", interim: true }],
+      },
+      {
+        key: "co_director",
+        label: "Co-Director",
+        singleHolder: false,
+        sortOrder: 20,
+        holders: [
+          { cwid: "cod001", name: "Dr Co One", title: "PhD", interim: false },
+          { cwid: "cod002", name: null, title: null, interim: false },
+        ],
+      },
+      // `associate_director` is scoped to a different center — absent here.
     ]);
   });
 });

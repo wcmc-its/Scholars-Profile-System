@@ -27,13 +27,12 @@
  * row to `member`) and `handleCornellAdd`'s hardcoded `member` write. Existing
  * holders are never affected: this only ever gates a NEW or changed
  * assignment, and callers must not use it to retroactively hide or remove one.
- * Still not wired to this gate: the director assignment write path in
- * `app/api/edit/unit/route.ts` (writes `OrgUnitRoleAssignment` rows with a
- * hardcoded `DIRECTOR_ROLE_KEY`) — that write path exists today and is not
- * gated by this helper; `director` carries no scope rows so there is no
- * practical hole yet, but a future scope row on a leadership role would not
- * be enforced until that path calls this helper too. There is also no
- * steward UI for editing `OrgUnitRoleScope` rows themselves.
+ * #2542 Phase C closes the leadership gap this docblock used to describe: the
+ * old director-only write path in `app/api/edit/unit/route.ts` (a hardcoded
+ * `DIRECTOR_ROLE_KEY`, never gated by this helper) retired in favor of
+ * `POST /api/edit/center-leadership`, which calls this helper for every
+ * leadership role, not just `director`. There is still no steward UI for
+ * editing `OrgUnitRoleScope` rows themselves.
  *
  * DB-CALLER-INJECTED ON PURPOSE, no default arg aliasing the live client —
  * mirrors `buildRoleRoster` in `lib/api/org-unit-roles-admin.ts` — so a test
