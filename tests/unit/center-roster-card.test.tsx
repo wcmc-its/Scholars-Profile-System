@@ -105,16 +105,21 @@ function bodyOf(call: unknown[]): Record<string, unknown> {
 
 const base = { unitCode: "meyer_cancer_center", today: TODAY };
 
+const MEMBERSHIP_ROLES = [
+  { key: "core_faculty", label: "Core Faculty Fellow", sortOrder: 10 },
+  { key: "affiliate_faculty", label: "Affiliate Faculty Fellow", sortOrder: 20 },
+];
+
 describe("CenterRosterCard — columns", () => {
-  it("shows Type + Program columns when the center has a program taxonomy", () => {
+  it("shows Role + Program columns when the center has a program taxonomy", () => {
     render(<CenterRosterCard {...base} members={[member({})]} programs={PROGRAMS} />);
     expect(screen.getByTestId("roster-type-m1")).toBeTruthy();
     expect(screen.getByTestId("roster-program-m1")).toBeTruthy();
   });
 
-  it("hides Type + Program for a center with no programs (the Cancer-Center-only gate)", () => {
+  it("hides Program for a center with no programs, but Role always shows (the Cancer-Center-only gate)", () => {
     render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
-    expect(screen.queryByTestId("roster-type-m1")).toBeNull();
+    expect(screen.getByTestId("roster-type-m1")).toBeTruthy();
     expect(screen.queryByTestId("roster-program-m1")).toBeNull();
     // dates (folded under Member with no Program column) + status still present
     expect(screen.getByTestId("roster-dates-trigger-m1")).toBeTruthy();
@@ -124,6 +129,46 @@ describe("CenterRosterCard — columns", () => {
   it("empty roster shows the empty state", () => {
     render(<CenterRosterCard {...base} members={[]} programs={PROGRAMS} />);
     expect(screen.getByTestId("center-roster-empty")).toBeTruthy();
+  });
+});
+
+describe("CenterRosterCard — Role column vocabulary (CHPC fellow roles)", () => {
+  it("renders the role select with vocabulary labels even with no programs", () => {
+    render(
+      <CenterRosterCard {...base} members={[member({})]} programs={[]} membershipRoles={MEMBERSHIP_ROLES} />,
+    );
+    const select = screen.getByTestId("roster-type-m1") as HTMLSelectElement;
+    const labels = Array.from(select.options).map((o) => o.textContent);
+    expect(labels).toEqual(["Member", "Core Faculty Fellow", "Affiliate Faculty Fellow"]);
+  });
+
+  it("renders a Member option even when the vocabulary is empty", () => {
+    render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
+    const select = screen.getByTestId("roster-type-m1") as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(["member"]);
+  });
+
+  it("changing the role POSTs set with membershipRoleKey only (not membershipType)", async () => {
+    const fetchMock = stubOk();
+    render(
+      <CenterRosterCard
+        {...base}
+        members={[member({})]}
+        programs={[]}
+        membershipRoles={MEMBERSHIP_ROLES}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("roster-type-m1"), { target: { value: "core_faculty" } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = bodyOf(fetchMock.mock.calls[0]);
+    expect(body).toMatchObject({
+      unitType: "center",
+      unitCode: "meyer_cancer_center",
+      cwid: "m1",
+      action: "set",
+      membershipRoleKey: "core_faculty",
+    });
+    expect(body).not.toHaveProperty("membershipType");
   });
 });
 
@@ -181,19 +226,8 @@ describe("CenterRosterCard — the three mutually-exclusive filters", () => {
 });
 
 describe("CenterRosterCard — inline edits", () => {
-  it("changing Type POSTs set with membershipType", async () => {
-    const fetchMock = stubOk();
-    render(<CenterRosterCard {...base} members={[member({})]} programs={PROGRAMS} />);
-    fireEvent.change(screen.getByTestId("roster-type-m1"), { target: { value: "research" } });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({
-      unitType: "center",
-      unitCode: "meyer_cancer_center",
-      cwid: "m1",
-      action: "set",
-      membershipType: "research",
-    });
-  });
+  // Role's own inline-edit contract (membershipRoleKey, not membershipType) is
+  // covered by "CenterRosterCard — Role column vocabulary" above.
 
   it("changing Program POSTs set with programCode", async () => {
     const fetchMock = stubOk();

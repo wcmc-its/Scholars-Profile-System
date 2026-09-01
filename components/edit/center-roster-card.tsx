@@ -1,13 +1,14 @@
 /**
  * CenterRosterCard — the rich center roster table (#552 §6.1; the deferred
- * #540 PR-7b-roster). Columns: Member | [Type | Program] | [Diseases] |
+ * #540 PR-7b-roster). Columns: Member | Role | [Program] | [Diseases] |
  * Status. Start/End and Remove are NOT their own columns — see "Dates" below.
  *
- * Type + Program are surfaced **only when the center has a program taxonomy**
- * (`programs.length > 0`) — the data-driven "Cancer-Center-only" gate. Every
- * other center shows just Member / Status. Start/End still drive the derived
- * Active / Pending / Inactive status (the #552 §3.3 active filter, inclusive
- * boundaries, nulls open).
+ * Role renders for every center, from the MEMBERSHIP-group `OrgUnitRole`
+ * vocabulary (`membershipRoles` prop, CHPC's Core/Affiliate Faculty Fellow
+ * roles included). Program is surfaced **only when the center has a program
+ * taxonomy** (`programs.length > 0`) — the data-driven "Cancer-Center-only"
+ * gate. Start/End still drive the derived Active / Pending / Inactive status
+ * (the #552 §3.3 active filter, inclusive boundaries, nulls open).
  *
  * Dates: a compact "Start → End" range (`MemberDateRange`) sits under the
  * Program name (or under the Member name/title when the center has no
@@ -85,12 +86,17 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { DiseaseCodeOption, RosterDiseaseRow } from "@/lib/api/unit-edit-context";
+import { MEMBER_ROLE_KEY, deriveMembershipType } from "@/lib/org-unit-roles";
 
 export type RosterMember = {
   cwid: string;
   name: string;
   title: string | null;
   membershipType: "research" | "clinical" | null;
+  /** #2542 vocabulary key backing `membershipType` — the CHPC fellow-roles
+   *  select reads/writes this instead. Absent (pre-vocabulary fixtures) ⇒
+   *  `"member"`. */
+  membershipRoleKey?: string | null;
   programCode: string | null;
   startDate: string | null;
   endDate: string | null;
@@ -113,10 +119,17 @@ export type RosterMember = {
 
 export type CenterProgramOption = { code: string; label: string; sortOrder: number };
 
+export type CenterMembershipRoleOption = { key: string; label: string; sortOrder: number };
+
 export type CenterRosterCardProps = {
   unitCode: string;
   members: ReadonlyArray<RosterMember>;
   programs: ReadonlyArray<CenterProgramOption>;
+  /** The center's MEMBERSHIP-group vocabulary (`ctx.centerMembershipRoles`) —
+   *  CHPC's Core/Affiliate Faculty Fellow roles etc. Defaults to `[]`; a
+   *  `"member"` option is always shown even when this list lacks one (an
+   *  unseeded center's vocabulary). */
+  membershipRoles?: ReadonlyArray<CenterMembershipRoleOption>;
   /** Injectable for tests; defaults to today (YYYY-MM-DD). */
   today?: string;
   /** #1102 — when true, render the "Export CSV" roster-download affordance
@@ -707,6 +720,7 @@ export function CenterRosterCard({
   unitCode,
   members: initial,
   programs,
+  membershipRoles = [],
   today,
   exportEnabled = false,
   diseaseOptions = [],
@@ -714,6 +728,13 @@ export function CenterRosterCard({
 }: CenterRosterCardProps) {
   const now = today ?? todayIso();
   const hasPrograms = programs.length > 0;
+  // Always at least a "Member" option — an unseeded center's vocabulary is `[]`.
+  const roleOptions = React.useMemo(() => {
+    const sorted = [...membershipRoles].sort((a, b) => a.sortOrder - b.sortOrder);
+    return sorted.some((r) => r.key === MEMBER_ROLE_KEY)
+      ? sorted
+      : [{ key: MEMBER_ROLE_KEY, label: "Member", sortOrder: 0 }, ...sorted];
+  }, [membershipRoles]);
 
   const [members, setMembers] = React.useState<RosterMember[]>(() => [...initial]);
   // #2519 — which directory the add typeahead searches. Only reachable when
@@ -795,8 +816,12 @@ export function CenterRosterCard({
    *  and revert (e.g. setting Start then End in quick succession). */
   const writeQueue = React.useRef<Map<string, Promise<unknown>>>(new Map());
 
-  /** Inline one-field set; optimistic with revert on failure, serialized per row. */
-  async function patch(cwid: string, field: Partial<RosterMember>) {
+  /** Inline one-field set; optimistic with revert on failure, serialized per
+   *  row. `postBody` overrides what's sent to the server when it must differ
+   *  from the local optimistic patch (the role select sets `membershipType`
+   *  locally too, via `deriveMembershipType`, but the wire contract is
+   *  `membershipRoleKey` alone). */
+  async function patch(cwid: string, field: Partial<RosterMember>, postBody?: Record<string, unknown>) {
     setError(null);
     const prev = members.find((m) => m.cwid === cwid);
     if (!prev) return;
@@ -806,7 +831,7 @@ export function CenterRosterCard({
     const run = prior
       .catch(() => {})
       .then(async () => {
-        const ok = await post({ cwid, action: "set", ...field });
+        const ok = await post({ cwid, action: "set", ...(postBody ?? field) });
         if (!ok) setMembers((ms) => ms.map((m) => (m.cwid === cwid ? prev : m)));
       });
     writeQueue.current.set(cwid, run);
@@ -940,6 +965,7 @@ export function CenterRosterCard({
       name: picked.name,
       title: picked.title,
       membershipType: null,
+      membershipRoleKey: MEMBER_ROLE_KEY,
       programCode: null,
       startDate: null,
       endDate: null,
@@ -1049,9 +1075,9 @@ export function CenterRosterCard({
   // "all" hides nothing now. These are the people who left WCM while their
   // membership stayed open, which is the only state here needing a curator.
   const needsCloseOut = members.filter(needsCloseOutOf).length;
-  // Member + [Type, Program] + [Diseases] + Status — Start/End are no longer
+  // Member + Role + [Program] + [Diseases] + Status — Start/End are no longer
   // their own columns (folded into Program/Member, see `MemberDateRange`).
-  const colCount = (hasPrograms ? 4 : 2) + (hasDiseases ? 1 : 0);
+  const colCount = 3 + (hasPrograms ? 1 : 0) + (hasDiseases ? 1 : 0);
 
   return (
     <EditPanel
@@ -1303,7 +1329,7 @@ export function CenterRosterCard({
             <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
               <tr className="border-apollo-border border-b">
                 <th className="px-3 py-2 font-medium">Member</th>
-                {hasPrograms && <th className="px-3 py-2 font-medium">Type</th>}
+                <th className="px-3 py-2 font-medium">Role</th>
                 {hasPrograms && <th className="px-3 py-2 font-medium">Program</th>}
                 {hasDiseases && <th className="px-3 py-2 font-medium">Diseases</th>}
                 <th className="px-3 py-2 font-medium">Status</th>
@@ -1420,24 +1446,27 @@ export function CenterRosterCard({
                             folds under Member instead, so it's never dropped. */}
                         {!hasPrograms && dateAndRemove}
                       </td>
-                      {hasPrograms && (
-                        <td className="px-3 py-2">
-                          <select
-                            className="border-apollo-border-strong h-8 rounded-md border bg-apollo-surface px-2 text-sm"
-                            value={m.membershipType ?? ""}
-                            onChange={(e) =>
-                              patch(m.cwid, {
-                                membershipType: (e.target.value || null) as RosterMember["membershipType"],
-                              })
-                            }
-                            data-testid={`roster-type-${m.cwid}`}
-                          >
-                            <option value="">—</option>
-                            <option value="research">Research</option>
-                            <option value="clinical">Clinical</option>
-                          </select>
-                        </td>
-                      )}
+                      <td className="px-3 py-2">
+                        <select
+                          className="border-apollo-border-strong h-8 rounded-md border bg-apollo-surface px-2 text-sm"
+                          value={m.membershipRoleKey ?? MEMBER_ROLE_KEY}
+                          onChange={(e) => {
+                            const roleKey = e.target.value;
+                            patch(
+                              m.cwid,
+                              { membershipRoleKey: roleKey, membershipType: deriveMembershipType(roleKey) },
+                              { membershipRoleKey: roleKey },
+                            );
+                          }}
+                          data-testid={`roster-type-${m.cwid}`}
+                        >
+                          {roleOptions.map((r) => (
+                            <option key={r.key} value={r.key}>
+                              {r.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
                       {hasPrograms && (
                         <td className="px-3 py-2">
                           <select

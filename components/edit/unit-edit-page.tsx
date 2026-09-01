@@ -277,6 +277,7 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
             unitCode={ctx.unit.code}
             members={ctx.roster ?? []}
             programs={ctx.programs ?? []}
+            membershipRoles={ctx.centerMembershipRoles ?? []}
             exportEnabled={isUnitRosterExportEnabled()}
             // The canonical disease-code list for "+ Add a disease" — was
             // already computed by `loadUnitEditContext` for the API route's

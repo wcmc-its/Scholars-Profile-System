@@ -26,6 +26,7 @@ const {
   mockTxCenterMembershipCreate,
   mockTxCenterMembershipDelete,
   mockTxCenterMembershipUpsert,
+  mockTxOrgUnitRoleFindUnique,
   mockTxDivisionMembershipCreate,
   mockTxDivisionMembershipDelete,
   mockReflectUnitChange,
@@ -42,6 +43,7 @@ const {
   mockTxCenterMembershipCreate: vi.fn(),
   mockTxCenterMembershipDelete: vi.fn(),
   mockTxCenterMembershipUpsert: vi.fn(),
+  mockTxOrgUnitRoleFindUnique: vi.fn(),
   mockTxDivisionMembershipCreate: vi.fn(),
   mockTxDivisionMembershipDelete: vi.fn(),
   mockReflectUnitChange: vi.fn(),
@@ -97,7 +99,8 @@ const fakeTx = {
   },
   // #2542 — a membership write seeds this center's role vocabulary first, so
   // `membership_role_key`'s FK resolves even before the Phase 1 backfill runs.
-  orgUnitRole: { createMany: mockTxCenterRoleCreateMany },
+  // `findUnique` backs the new `membershipRoleKey` vocabulary-group check.
+  orgUnitRole: { createMany: mockTxCenterRoleCreateMany, findUnique: mockTxOrgUnitRoleFindUnique },
   // #2557 Phase E — `handleCenter`'s allowlist gate reads this before any
   // write.
   orgUnitRoleScope: { findMany: mockTxOrgUnitRoleScopeFindMany },
@@ -148,6 +151,10 @@ beforeEach(() => {
   mockTxCenterMembershipUpsert.mockResolvedValue(BLANK_ROW);
   mockTxCenterMembershipDelete.mockResolvedValue(BLANK_ROW);
   mockTxOrgUnitRoleScopeFindMany.mockResolvedValue([]);
+  // Default: any `membershipRoleKey` the tests exercise resolves as a real
+  // MEMBERSHIP-group vocabulary row. Individual tests override this to
+  // exercise the unknown-key / wrong-group rejections.
+  mockTxOrgUnitRoleFindUnique.mockResolvedValue({ roleGroup: "membership" });
   mockUnitAdminFindMany.mockResolvedValue([
     { entityType: "center", entityId: "MEYER", role: "curator" },
   ]);
@@ -402,5 +409,101 @@ describe("/api/edit/roster — #552 set action + extended fields", () => {
     expect(mockTxDivisionMembershipCreate).toHaveBeenCalledWith(
       expect.objectContaining({ data: { divisionCode: "CARDIO", cwid: "fac001", source: "manual-ui" } }),
     );
+  });
+});
+
+describe("/api/edit/roster — membershipRoleKey (CHPC fellow roles)", () => {
+  it("set with a real membership-group key upserts membershipRoleKey + derived membershipType", async () => {
+    mockTxOrgUnitRoleFindUnique.mockResolvedValue({ roleGroup: "membership" });
+    const res = await POST(
+      post({
+        unitType: "center",
+        unitCode: "MEYER",
+        cwid: "fac001",
+        action: "set",
+        membershipRoleKey: "core_faculty",
+      }),
+    );
+    expect(res.status).toBe(200);
+    const call = mockTxCenterMembershipUpsert.mock.calls[0][0];
+    expect(call.update).toEqual({ membershipRoleKey: "core_faculty", membershipType: null });
+    expect(mockTxOrgUnitRoleFindUnique).toHaveBeenCalledWith({
+      where: { entityType_key: { entityType: "center", key: "core_faculty" } },
+      select: { roleGroup: true },
+    });
+  });
+
+  it("membershipRoleKey null normalizes to 'member'", async () => {
+    const res = await POST(
+      post({ unitType: "center", unitCode: "MEYER", cwid: "fac001", action: "set", membershipRoleKey: null }),
+    );
+    expect(res.status).toBe(200);
+    const call = mockTxCenterMembershipUpsert.mock.calls[0][0];
+    expect(call.update).toEqual({ membershipRoleKey: "member", membershipType: null });
+  });
+
+  it("an unknown membershipRoleKey → 400 invalid_membership_role_key, no write", async () => {
+    mockTxOrgUnitRoleFindUnique.mockResolvedValue(null);
+    const res = await POST(
+      post({
+        unitType: "center",
+        unitCode: "MEYER",
+        cwid: "fac001",
+        action: "set",
+        membershipRoleKey: "not_a_real_role",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_membership_role_key" });
+    expect(mockTxCenterMembershipUpsert).not.toHaveBeenCalled();
+  });
+
+  it("a LEADERSHIP-group key → 400 invalid_membership_role_key (not offered as a roster role)", async () => {
+    mockTxOrgUnitRoleFindUnique.mockResolvedValue({ roleGroup: "leadership" });
+    const res = await POST(
+      post({
+        unitType: "center",
+        unitCode: "MEYER",
+        cwid: "fac001",
+        action: "set",
+        membershipRoleKey: "director",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_membership_role_key" });
+    expect(mockTxCenterMembershipUpsert).not.toHaveBeenCalled();
+  });
+
+  it("both membershipType and membershipRoleKey present → 400, no transaction", async () => {
+    const res = await POST(
+      post({
+        unitType: "center",
+        unitCode: "MEYER",
+        cwid: "fac001",
+        action: "set",
+        membershipType: "research",
+        membershipRoleKey: "core_faculty",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_membership_role_key" });
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("membershipRoleKey on a division → 400 roster_field_center_only", async () => {
+    mockUnitAdminFindMany.mockResolvedValue([
+      { entityType: "division", entityId: "CARDIO", role: "curator" },
+    ]);
+    const res = await POST(
+      post({
+        unitType: "division",
+        unitCode: "CARDIO",
+        cwid: "fac001",
+        action: "set",
+        membershipRoleKey: "core_faculty",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "roster_field_center_only" });
   });
 });

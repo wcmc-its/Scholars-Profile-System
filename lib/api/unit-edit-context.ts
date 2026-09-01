@@ -160,6 +160,10 @@ export type UnitEditContext = {
     title: string | null;
     source: string;
     membershipType: "research" | "clinical" | null;
+    /** #2542 vocabulary key backing `membershipType` — `null` for a division
+     *  row. Optional so existing fixtures/callers that predate this field
+     *  still type-check (same convention as `diseases` below). */
+    membershipRoleKey?: string | null;
     programCode: string | null;
     startDate: string | null;
     endDate: string | null;
@@ -220,6 +224,15 @@ export type UnitEditContext = {
       title: string | null;
       interim: boolean;
     }>;
+  }> | null;
+  /** The center's MEMBERSHIP-group `OrgUnitRole` vocabulary (CHPC fellow
+   *  roles etc.), same shape/filtering as `centerLeadership` above minus
+   *  holders — the roster card renders holders itself, per-row. `null` for a
+   *  department/division. */
+  centerMembershipRoles: ReadonlyArray<{
+    key: string;
+    label: string;
+    sortOrder: number;
   }> | null;
   /** Present on a department only — its child divisions for the sub-rail. */
   siblingDivisions: ReadonlyArray<{
@@ -630,6 +643,8 @@ export async function loadUnitEditContext(
     cwid: string;
     source: string;
     membershipType: "research" | "clinical" | null;
+    /** #2542 vocabulary key backing `membershipType` — `null` for a division row. */
+    membershipRoleKey: string | null;
     programCode: string | null;
     startDate: Date | null;
     endDate: Date | null;
@@ -664,6 +679,7 @@ export async function loadUnitEditContext(
           cwid: true,
           source: true,
           membershipType: true,
+          membershipRoleKey: true,
           programCode: true,
           startDate: true,
           endDate: true,
@@ -696,6 +712,7 @@ export async function loadUnitEditContext(
         cwid: r.cwid,
         source: r.source,
         membershipType: null,
+        membershipRoleKey: null,
         programCode: null,
         startDate: null,
         endDate: null,
@@ -746,6 +763,30 @@ export async function loadUnitEditContext(
         orderBy: [{ roleKey: "asc" }, { cwid: "asc" }],
       });
     }
+  }
+
+  // 4c-2. Center membership vocabulary (CHPC fellow roles) — same shape/
+  // filtering as the leadership block above; holders ride the roster rows
+  // already loaded, so no assignment query is needed here.
+  type CenterMembershipRoleRaw = { key: string; label: string; sortOrder: number };
+  let centerMembershipRoles: CenterMembershipRoleRaw[] | null = null;
+  if (unitType === "center") {
+    const membershipRoleRows = await client.orgUnitRole.findMany({
+      where: { entityType: CENTER_ENTITY_TYPE, roleGroup: "membership" },
+      select: { key: true, label: true, sortOrder: true },
+      orderBy: { sortOrder: "asc" },
+    });
+    const membershipAllowedFlags = await Promise.all(
+      membershipRoleRows.map((r) =>
+        isRoleAllowedAtUnit({
+          entityType: CENTER_ENTITY_TYPE,
+          roleKey: r.key,
+          entityId: code,
+          client,
+        }),
+      ),
+    );
+    centerMembershipRoles = membershipRoleRows.filter((_, i) => membershipAllowedFlags[i]);
   }
 
   // 4b. Disease-expertise rows (plan §5/§6) — center only, keyed off the
@@ -931,6 +972,7 @@ export async function loadUnitEditContext(
           title: external ? external.title : (resolved?.title ?? null),
           source: r.source,
           membershipType: r.membershipType,
+          membershipRoleKey: r.membershipRoleKey,
           programCode: r.programCode,
           startDate: r.startDate ? r.startDate.toISOString().slice(0, 10) : null,
           endDate: r.endDate ? r.endDate.toISOString().slice(0, 10) : null,
@@ -1063,6 +1105,7 @@ export async function loadUnitEditContext(
     roster,
     programs,
     centerLeadership,
+    centerMembershipRoles,
     siblingDivisions,
     diseaseOptions,
     actorRole,
