@@ -29,6 +29,7 @@ import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { CWID_PATTERN } from "@/lib/cwid";
 import { containsProfanity } from "@/lib/edit/profanity";
 import { isChairTitleFor } from "@/lib/leadership";
+import { DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
 import { isNameBasedSlug, RESERVED_SLUGS } from "@/lib/slug";
 import { stripOverviewTailArtifacts } from "@/lib/text/overview-artifacts";
 import { repairEncoding } from "@/lib/text/repair-encoding";
@@ -587,23 +588,34 @@ export async function findSuppressibleEntityOwner(
 }
 
 /** The Prisma surface the chair-appointment guard needs. */
-type ChairLookupClient = Pick<PrismaClient, "department">;
+type ChairLookupClient = Pick<PrismaClient, "department" | "orgUnitRoleAssignment">;
 
 /**
  * True when this appointment confers a *current* department chair role — its
- * owner is some `Department.chairCwid` AND the title matches that department's
- * chair phrase (`isChairTitleFor`, the same predicate the ETL uses to populate
- * `chairCwid`). The suppress endpoint refuses to hide such an appointment
- * (409, #160 D-leader) so the profile can't contradict the column-driven
- * leader card. Other appointments of a chair stay suppressible.
+ * owner holds the department's `chair`/`director` `OrgUnitRoleAssignment` AND
+ * the title matches that department's chair phrase (`isChairTitleFor`, the
+ * same predicate the ETL uses to write the assignment (#2542 contract A —
+ * was `Department.chairCwid`)). The suppress endpoint refuses to hide such an
+ * appointment (409, #160 D-leader) so the profile can't contradict the
+ * assignment-driven leader card. Other appointments of a chair stay
+ * suppressible.
  */
 export async function isChairAppointment(
   ownerCwid: string,
   title: string,
   client: ChairLookupClient,
 ): Promise<boolean> {
-  const dept = await client.department.findFirst({
-    where: { chairCwid: ownerCwid },
+  const assignment = await client.orgUnitRoleAssignment.findFirst({
+    where: {
+      cwid: ownerCwid,
+      entityType: "department",
+      roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+    },
+    select: { entityId: true },
+  });
+  if (!assignment) return false;
+  const dept = await client.department.findUnique({
+    where: { code: assignment.entityId },
     select: { name: true },
   });
   if (!dept) return false;

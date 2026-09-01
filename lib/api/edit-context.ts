@@ -40,6 +40,7 @@ import { MAX_SELECTED_HIGHLIGHTS, SECTION_VISIBILITY_FIELDS } from "@/lib/edit/v
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { isFundingActive } from "@/lib/funding-active";
 import { isChairTitleFor } from "@/lib/leadership";
+import { DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
 import { formatProgramLabel } from "@/lib/mentoring-labels";
 import { isRejectReason } from "@/lib/edit/reject-reason";
 import type { FeedbackReason } from "@/lib/coi-gap/feedback";
@@ -67,6 +68,7 @@ type EditContextReadClient = Pick<
   | "scholarTechnology"
   | "newsMention"
   | "personDatasetDeposit"
+  | "orgUnitRoleAssignment"
 >;
 
 export type EditContextScholar = {
@@ -951,13 +953,27 @@ export async function loadEditContext(
     // Chair lock — a current chair appointment is not hideable (the route refuses
     // it 409 before authz, for the chair AND a superuser). Mirror that exact
     // predicate: the dept the scholar chairs (0–1 rows) + a per-appointment title
-    // match (`isChairTitleFor`) — NOT a bare `chairCwid` existence check, which
+    // match (`isChairTitleFor`) — NOT a bare assignment-existence check, which
     // would over-lock the chair's other (suppressible) appointments. Keep in
-    // lockstep with `validators.isChairAppointment`.
-    client.department.findFirst({
-      where: { chairCwid: cwid },
-      select: { name: true },
-    }),
+    // lockstep with `validators.isChairAppointment` (#2542 contract A — was a
+    // `Department.chairCwid` lookup).
+    client.orgUnitRoleAssignment
+      .findFirst({
+        where: {
+          cwid,
+          entityType: "department",
+          roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+        },
+        select: { entityId: true },
+      })
+      .then((assignment) =>
+        assignment
+          ? client.department.findUnique({
+              where: { code: assignment.entityId },
+              select: { name: true },
+            })
+          : null,
+      ),
     // #836 — widen the `publication` select with the ranking fields
     // (publicationType / dateAddedToEntrez / impactScore / per-scholar score)
     // only when the Highlights editor is requested.
