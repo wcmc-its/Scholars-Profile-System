@@ -230,7 +230,6 @@ type DeptRow = {
   officialName?: string | null;
   compactName?: string | null;
   category?: string;
-  chairCwid?: string | null;
   scholarCount?: number;
   source?: string;
 };
@@ -239,7 +238,6 @@ type DivRow = {
   name: string;
   slug?: string;
   description?: string | null;
-  chiefCwid?: string | null;
   scholarCount?: number;
   source?: string;
   deptCode?: string;
@@ -253,15 +251,19 @@ type CtrRow = {
   officialName?: string | null;
   compactName?: string | null;
   centerType?: string;
-  // #2542 — the director arrives as an `OrgUnitRoleAssignment` row from a
-  // sibling query, no longer a nested relation on `center`.
-  directorCwid?: string | null;
-  leaderInterim?: boolean;
   scholarCount?: number;
   sortOrder?: number;
   source?: string;
 };
-type LeaderAssignment = { entityId: string; cwid: string; interim: boolean };
+// #2542 contract A — chair/chief/director all arrive as `OrgUnitRoleAssignment`
+// rows from sibling queries keyed by `entityType`; none of the four legacy
+// columns exist as a read source any more.
+type LeaderAssignment = {
+  entityType: "department" | "division" | "center";
+  entityId: string;
+  cwid: string;
+  interim: boolean;
+};
 type Suppr = { entityType: string; entityId: string };
 type ScholarRow = { cwid: string; preferredName: string };
 type MembershipRow = {
@@ -287,21 +289,13 @@ function makeDirectoryClient(opts: {
   scholars?: ScholarRow[];
   /** Center roster rows — centers count live off these, never off the row. */
   memberships?: MembershipRow[];
-  /** #2542 — director assignments, fetched as a sibling query. */
+  /** #2542 contract A — chair/chief/director assignments, fetched as three
+   *  sibling queries (one per `entityType`). */
   leaderAssignments?: LeaderAssignment[];
 }) {
   const dept = vi.fn(async () => opts.departments ?? []);
   const div = vi.fn(async () => opts.divisions ?? []);
-  // Default the dual-read columns so callers
-  // the dual-read columns, so a fixture that does not care about leadership
-  // need not spell them out.
-  const ctr = vi.fn(async () =>
-    (opts.centers ?? []).map((c) => ({
-      directorCwid: null,
-      leaderInterim: false,
-      ...c,
-    })),
-  );
+  const ctr = vi.fn(async () => opts.centers ?? []);
   const core = vi.fn(async () =>
     (opts.cores ?? []).map((r) => ({ source: "reciterai-core-dictionary", leaders: [], ...r })),
   );
@@ -318,9 +312,14 @@ function makeDirectoryClient(opts: {
         .map((m) => ({ startDate: null, endDate: null, ...m }));
     },
   );
-  // No assignment rows by default: the directory falls through to the legacy
-  // column, which is the pre-backfill state in every environment today.
-  const orgUnitRoleAssignment = vi.fn(async () => opts.leaderAssignments ?? []);
+  // Dispatches by `where.entityType` — the loader issues three sibling
+  // queries (department/division/center), one per leadership kind. No
+  // assignment rows by default, so a fixture that does not care about
+  // leadership need not spell any out.
+  const orgUnitRoleAssignment = vi.fn(async (args?: { where?: { entityType?: string } }) => {
+    const entityType = args?.where?.entityType;
+    return (opts.leaderAssignments ?? []).filter((a) => a.entityType === entityType);
+  });
   return {
     client: {
       department: { findMany: dept },
@@ -349,12 +348,14 @@ describe("loadAllUnitsDirectory", () => {
           officialName: "Samuel J. Wood Library",
           compactName: "Library",
           category: "administrative",
-          chairCwid: "abc1234",
           scholarCount: 5,
           source: "ED",
         },
       ],
       scholars: [{ cwid: "abc1234", preferredName: "Jane Chair" }],
+      leaderAssignments: [
+        { entityType: "department", entityId: "N1280", cwid: "abc1234", interim: false },
+      ],
     });
     const r = await loadAllUnitsDirectory(client);
     expect(r).toHaveLength(1);
@@ -384,7 +385,6 @@ describe("loadAllUnitsDirectory", () => {
           name: "Cardiology",
           slug: "cardiology",
           description: null,
-          chiefCwid: null,
           scholarCount: 2,
           source: "ED",
           deptCode: "N1280",
@@ -418,7 +418,9 @@ describe("loadAllUnitsDirectory", () => {
         },
       ],
       scholars: [{ cwid: "dir9999", preferredName: "Acting Director" }],
-      leaderAssignments: [{ entityId: "man-onc", cwid: "dir9999", interim: true }],
+      leaderAssignments: [
+        { entityType: "center", entityId: "man-onc", cwid: "dir9999", interim: true },
+      ],
     });
     const r = await loadAllUnitsDirectory(client);
     const ctr = r.find((u) => u.code === "man-onc")!;
@@ -432,7 +434,10 @@ describe("loadAllUnitsDirectory", () => {
 
   it("leaderName is null (not the bare cwid) when the leader isn't a scholar — gap signal", async () => {
     const { client } = makeDirectoryClient({
-      departments: [{ code: "N9", name: "Orphan Dept", chairCwid: "ghost1", scholarCount: 0 }],
+      departments: [{ code: "N9", name: "Orphan Dept", scholarCount: 0 }],
+      leaderAssignments: [
+        { entityType: "department", entityId: "N9", cwid: "ghost1", interim: false },
+      ],
       // no matching scholar row for ghost1
     });
     const r = await loadAllUnitsDirectory(client);
@@ -443,8 +448,9 @@ describe("loadAllUnitsDirectory", () => {
   it("external-leader overlay (keyed by unit code) wins with no scholar row", async () => {
     const { client } = makeDirectoryClient({
       // N1540 is Joel Stein in EXTERNAL_LEADERS; jos7021 has no scholar row.
-      departments: [
-        { code: "N1540", name: "Rehabilitation Medicine", chairCwid: "jos7021", scholarCount: 1 },
+      departments: [{ code: "N1540", name: "Rehabilitation Medicine", scholarCount: 1 }],
+      leaderAssignments: [
+        { entityType: "department", entityId: "N1540", cwid: "jos7021", interim: false },
       ],
     });
     const r = await loadAllUnitsDirectory(client);
@@ -591,5 +597,32 @@ describe("loadAllUnitsDirectory", () => {
     });
     const r = await loadAllUnitsDirectory(client);
     expect(r[0].scholarCount).toBe(0);
+  });
+
+  // #2542 contract A — dept/div leaderInterim now comes from the assignment
+  // row's own `interim` flag (there is no column any more). Previously this
+  // was hardcoded `false` for both kinds.
+  it("a department/division assignment's interim flag carries through", async () => {
+    const { client } = makeDirectoryClient({
+      departments: [{ code: "N1280", name: "Medicine", scholarCount: 0 }],
+      divisions: [{ code: "D-CARD", name: "Cardiology", scholarCount: 0 }],
+      scholars: [
+        { cwid: "chr001", preferredName: "Dana Chair" },
+        { cwid: "chf001", preferredName: "Chris Chief" },
+      ],
+      leaderAssignments: [
+        { entityType: "department", entityId: "N1280", cwid: "chr001", interim: true },
+        { entityType: "division", entityId: "D-CARD", cwid: "chf001", interim: false },
+      ],
+    });
+    const r = await loadAllUnitsDirectory(client);
+    expect(r.find((u) => u.code === "N1280")).toMatchObject({
+      leaderCwid: "chr001",
+      leaderInterim: true,
+    });
+    expect(r.find((u) => u.code === "D-CARD")).toMatchObject({
+      leaderCwid: "chf001",
+      leaderInterim: false,
+    });
   });
 });
