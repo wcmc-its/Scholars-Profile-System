@@ -1416,7 +1416,12 @@ model MeshCuratedAlias {
 
 /// WCM department from ED LDAP `weillCornellEduOrgUnit` level1.
 /// `code` is the stable org-unit code from LDAP — joined on, never display names.
-/// `chairCwid` is identified from appointment.title LIKE 'Chairman%' (D-03).
+/// Leadership (chair) lives solely in `OrgUnitRoleAssignment` (entityType
+/// "department"), written by the ED ETL from appointment.title LIKE 'Chairman%'
+/// (D-03); the `field_override(leaderCwid/leaderInterim)` curation layer wins
+/// on read (lib/api/unit-leader.ts). #2542 contract A retired this model's
+/// `chair_cwid` field; the DB column stays until PR-B's drop migration
+/// (three-deploy rule).
 /// `slug` is derived via deriveSlug() from `name`. ETL upsert refreshes scholarCount.
 model Department {
   code         String   @id @db.VarChar(64)
@@ -1443,7 +1448,6 @@ model Department {
   /// renders as "Basic & Clinical") lives at the UI layer.
   /// Allowed values: "clinical" | "basic" | "mixed" | "administrative".
   category     String   @default("clinical") @map("category") @db.VarChar(32)
-  chairCwid    String?  @map("chair_cwid") @db.VarChar(32)
   scholarCount Int      @default(0) @map("scholar_count")
   source       String   @default("ED") @db.VarChar(32)
   refreshedAt  DateTime @default(now()) @map("refreshed_at")
@@ -1472,7 +1476,6 @@ model Division {
   /// https-only, ≤ 512 chars, edited via the `field_override(url)` row and
   /// merged at read time; null = nothing rendered beside the division NAME.
   url          String?    @db.VarChar(512)
-  chiefCwid    String?    @map("chief_cwid") @db.VarChar(32)
   scholarCount Int        @default(0) @map("scholar_count")
   source       String     @default("ED") @db.VarChar(32)
   refreshedAt  DateTime   @default(now()) @map("refreshed_at")
@@ -1514,23 +1517,13 @@ model Center {
   /// designated, larger, more endowed) get their own teal badge; centers get
   /// purple. Backfilled by name match in 20260508120000_add_center_type.
   centerType    String   @default("center") @map("center_type") @db.VarChar(16)
-  /// DEPRECATED by #2542 Phase 1 — superseded by a `CenterLeader` row whose
-  /// `roleKey` is `director`.
-  ///
-  /// Still DUAL-WRITTEN and DUAL-READ for one release, which is the middle step
-  /// CONTRIBUTING.md § "Every migration is additive" requires: migrations run
-  /// BEFORE the ECS service rolls, and the Phase 1 backfill is a manual script,
-  /// so between the roll and the backfill there are no `CenterLeader` rows yet.
-  /// Readers coalesce `CenterLeader ?? this column`; the write path writes both.
-  /// That also keeps an app-code rollback to the previous image working.
-  /// The fallback, the dual-write and the column all go in the contract PR.
-  directorCwid  String?  @map("director_cwid") @db.VarChar(32)
-  /// DEPRECATED by #2542 Phase 1 — see `directorCwid`. Superseded by
-  /// `CenterLeader.interim`. NOTE: departments and divisions
-  /// express the same qualifier as a columnless `field_override(leaderInterim)`
-  /// row, which is a DIFFERENT mechanism and is NOT deprecated.
-  /// Added by #540 Phase 1 (ADR-005 Amendment 1 § A1.1).
-  leaderInterim Boolean  @default(false) @map("leader_interim")
+  /// Leadership (director) lives solely in `OrgUnitRoleAssignment` (entityType
+  /// "center"), `interim` included — #2542 contract A retired this model's
+  /// `director_cwid`/`leader_interim` fields and every reader/writer of them.
+  /// NOTE: departments and divisions express the same interim qualifier via
+  /// the columnless `field_override(leaderInterim)` curation layer, a
+  /// DIFFERENT mechanism that is NOT deprecated. The DB columns here stay
+  /// until PR-B's drop migration (three-deploy rule).
   scholarCount  Int      @default(0) @map("scholar_count")
   sortOrder     Int      @default(0) @map("sort_order")
   source        String   @default("seed") @db.VarChar(32)
@@ -1667,7 +1660,8 @@ model OrgUnitRole {
 /// would have to learn to skip them. Here, not one of them changes.
 ///
 /// Supersedes `Center.directorCwid` + `Center.leaderInterim`, which together
-/// held exactly one unlabelled leader.
+/// held exactly one unlabelled leader; #2542 contract A retired both fields
+/// from this schema (DB columns stay until PR-B's drop migration).
 ///
 /// A program assignment (#2558, folded in from the retired per-program leader
 /// table) is (`center_program`, "{centerCode}:{programCode}") — `entityId`
