@@ -139,8 +139,13 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- comms-steward created or edited an `OrgUnitRole` vocabulary entry on the
   -- steward-owned role-vocabulary editor; `target_entity_type=
   -- 'org_unit_role'`, `target_entity_id` the `entityType:key` pair) --
-  -- appended LAST after `disease_assignment_decision`.
-  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress','honor_create','honor_update','honor_delete','news_mention_update','biosketch_generation_delete','cancer_funding_override','disease_assignment_decision','role_vocabulary_create','role_vocabulary_update') NOT NULL,
+  -- appended LAST after `disease_assignment_decision`. The role-vocabulary
+  -- editor's delete follow-up then adds `role_vocabulary_delete` (a
+  -- superuser/comms-steward deleted a `manual`, zero-holder `OrgUnitRole`
+  -- entry; same `target_entity_type`/`target_entity_id` shape as the other
+  -- two `role_vocabulary_*` actions) -- appended LAST after
+  -- `role_vocabulary_update`.
+  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress','honor_create','honor_update','honor_delete','news_mention_update','biosketch_generation_delete','cancer_funding_override','disease_assignment_decision','role_vocabulary_create','role_vocabulary_update','role_vocabulary_delete') NOT NULL,
 
   -- THE CHANGE.
   --   fields_changed -- JSON array of field names for a `field_override`
@@ -311,9 +316,15 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --                         machine-run and NOT audited — same posture as every
 --                         ETL ingest. Appended LAST to preserve existing ENUM
 --                         ordinals.
+--   Role vocabulary delete (app/api/edit/roles/route.ts DELETE): +
+--                         role_vocabulary_delete  (a superuser/comms-steward
+--                         deleted a `manual`, zero-holder `OrgUnitRole` entry;
+--                         same target_entity_type/target_entity_id shape as
+--                         role_vocabulary_create/role_vocabulary_update).
+--                         Appended LAST to preserve existing ENUM ordinals.
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `action`
-    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress','honor_create','honor_update','honor_delete','news_mention_update','biosketch_generation_delete','cancer_funding_override','disease_assignment_decision','role_vocabulary_create','role_vocabulary_update')
+    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress','honor_create','honor_update','honor_delete','news_mention_update','biosketch_generation_delete','cancer_funding_override','disease_assignment_decision','role_vocabulary_create','role_vocabulary_update','role_vocabulary_delete')
     NOT NULL;
 
 -- target_entity_type history:

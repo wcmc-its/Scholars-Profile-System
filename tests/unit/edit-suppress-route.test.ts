@@ -15,7 +15,8 @@ const {
   mockGrantFindUnique,
   mockEducationFindUnique,
   mockAppointmentFindUnique,
-  mockDepartmentFindFirst,
+  mockDepartmentFindUnique,
+  mockOrgUnitRoleAssignmentFindFirst,
   // Amendment 4 — the unit-admin resolver reads these on the non-self per-author
   // publication-hide path before denying.
   mockScholarFindUnique,
@@ -36,7 +37,8 @@ const {
   mockGrantFindUnique: vi.fn(),
   mockEducationFindUnique: vi.fn(),
   mockAppointmentFindUnique: vi.fn(),
-  mockDepartmentFindFirst: vi.fn(),
+  mockDepartmentFindUnique: vi.fn(),
+  mockOrgUnitRoleAssignmentFindFirst: vi.fn(),
   mockScholarFindUnique: vi.fn(),
   mockDivisionMembershipFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
@@ -66,7 +68,12 @@ vi.mock("@/lib/db", () => ({
       grant: { findUnique: mockGrantFindUnique },
       education: { findUnique: mockEducationFindUnique },
       appointment: { findUnique: mockAppointmentFindUnique },
-      department: { findFirst: mockDepartmentFindFirst },
+      // #2542 contract A — `isChairAppointment` resolves the department's
+      // chair/director `OrgUnitRoleAssignment` row first, then the
+      // department's name via `findUnique` keyed on the assignment's
+      // `entityId` (`Department.chairCwid` no longer exists).
+      department: { findUnique: mockDepartmentFindUnique },
+      orgUnitRoleAssignment: { findFirst: mockOrgUnitRoleAssignmentFindFirst },
       // #779 — a per-author publication hide by a non-self actor now probes for
       // a proxy grant before denying; no grant in these tests ⇒ null ⇒ unchanged.
       scholarProxy: { findUnique: async () => null },
@@ -124,7 +131,8 @@ beforeEach(() => {
   mockGrantFindUnique.mockResolvedValue({ cwid: "self01" });
   mockEducationFindUnique.mockResolvedValue({ cwid: "self01" });
   mockAppointmentFindUnique.mockResolvedValue({ cwid: "self01", title: "Professor of Medicine" });
-  mockDepartmentFindFirst.mockResolvedValue(null);
+  mockDepartmentFindUnique.mockResolvedValue(null);
+  mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue(null);
   // Amendment 4 — default: no unit-admin access (resolver short-circuits on a
   // missing scholar row, so a non-self per-author hide still denies with 403).
   mockScholarFindUnique.mockResolvedValue(null);
@@ -272,7 +280,8 @@ describe("POST /api/edit/suppress", () => {
 
   it("refuses to suppress a chair appointment with 409 (D-leader), even for the chair themselves", async () => {
     mockAppointmentFindUnique.mockResolvedValue({ cwid: "self01", title: "Chair of Medicine" });
-    mockDepartmentFindFirst.mockResolvedValue({ name: "Medicine" });
+    mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue({ entityId: "MED" });
+    mockDepartmentFindUnique.mockResolvedValue({ name: "Medicine" });
     const res = await POST(post({ entityType: "appointment", entityId: "APPT-CHAIR" }));
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: "leadership_appointment_not_suppressible" });
@@ -282,7 +291,8 @@ describe("POST /api/edit/suppress", () => {
   it("refuses a chair appointment takedown even for a superuser (guard precedes authz)", async () => {
     mockGetEditSession.mockResolvedValue(ADMIN);
     mockAppointmentFindUnique.mockResolvedValue({ cwid: "other9", title: "Chair of Medicine" });
-    mockDepartmentFindFirst.mockResolvedValue({ name: "Medicine" });
+    mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue({ entityId: "MED" });
+    mockDepartmentFindUnique.mockResolvedValue({ name: "Medicine" });
     const res = await POST(post({ entityType: "appointment", entityId: "APPT-CHAIR", reason: "x" }));
     expect(res.status).toBe(409);
   });

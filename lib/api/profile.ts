@@ -12,10 +12,6 @@ import {
   CENTER_ENTITY_TYPE,
   CENTER_PROGRAM_ENTITY_TYPE,
   formatLeadershipTitle,
-  departmentLeaderRoleKey,
-  DEPARTMENT_CHAIR_ROLE_KEY,
-  DEPARTMENT_DIRECTOR_ROLE_KEY,
-  DIVISION_CHIEF_ROLE_KEY,
 } from "@/lib/org-unit-roles";
 import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import {
@@ -509,11 +505,11 @@ export type ProfilePayload = {
   division: string | null;
   /** #1266 — formatted leadership-role lines (Chair / Chief / Center Director /
    *  Program Leader), in that order; empty when the scholar holds none. Sourced
-   *  from Department.chairCwid / Division.chiefCwid / an `OrgUnitRoleAssignment`
-   *  row (#2542; was Center.directorCwid) / a `center_program`
-   *  `OrgUnitRoleAssignment` row (#2558; was a retired per-program leader
-   *  table) and rendered beneath `primaryTitle`. Center and program lines are
-   *  curated and sparse, so they appear only where curation exists. */
+   *  entirely from `OrgUnitRoleAssignment` rows (#2542 contract A retired the
+   *  `Department.chairCwid` / `Division.chiefCwid` / `Center.directorCwid`
+   *  fallbacks; #2558 retired a per-program leader table the same way) and
+   *  rendered beneath `primaryTitle`. Center and program lines are curated
+   *  and sparse, so they appear only where curation exists. */
   leadershipTitles: string[];
   email: string | null;
   /** email-visibility-spec § Cache-safety. True when PROFILE_EMAIL_RELEASE_GATE
@@ -1163,21 +1159,16 @@ export const getScholarFullProfileBySlug = cache(
         ? getScholarCenterAffiliations(scholar.cwid)
         : Promise.resolve([] as ScholarCenterAffiliation[]),
       // #1266 — leadership-role title lines (Chair / Chief / Center Director /
-      // Program Leader), rendered beneath the academic rank. Point lookups on the
-      // already-populated FK columns; each returns 0-1 rows for almost every
-      // scholar. Chair/Chief come from the ED ETL (populated); center director and
-      // program-leader assignments are curated and sparse, so those lines appear
-      // only where curation exists — an empty array renders nothing.
+      // Program Leader), rendered beneath the academic rank. Each query below
+      // returns 0-1 rows for almost every scholar. Department/division
+      // leadership is ETL-synced nightly (`etl/ed/index.ts`'s
+      // `writeUnitLeaderAssignment`); center director and program-leader
+      // assignments are curated and sparse, so those lines appear only where
+      // curation exists — an empty array renders nothing.
       Promise.all([
-        prisma.department.findMany({
-          where: { chairCwid: scholar.cwid },
-          select: { code: true, name: true, officialName: true, category: true },
-        }),
-        // #2542 Phase D — department leadership is an `OrgUnitRoleAssignment`
-        // row once the ETL dual-write (`etl/ed/index.ts`) + a backfill have
-        // synced it. Same shape as the center block below: `profileTitle`
-        // gates whether holding the role is a title at all, and the legacy
-        // `chairCwid` reverse lookup above is the pre-sync fallback.
+        // #2542 contract A — department leadership is an `OrgUnitRoleAssignment`
+        // row only; `Department.chairCwid` no longer exists as a read source.
+        // `profileTitle` gates whether holding the role is a title at all.
         prisma.orgUnitRoleAssignment.findMany({
           where: {
             cwid: scholar.cwid,
@@ -1192,11 +1183,8 @@ export const getScholarFullProfileBySlug = cache(
           },
           orderBy: [{ sortOrder: "asc" }, { entityId: "asc" }],
         }),
-        prisma.division.findMany({
-          where: { chiefCwid: scholar.cwid },
-          select: { code: true, name: true },
-        }),
-        // Same Phase D dual-read shape for divisions.
+        // Same shape for divisions — `Division.chiefCwid` no longer exists as
+        // a read source.
         prisma.orgUnitRoleAssignment.findMany({
           where: {
             cwid: scholar.cwid,
@@ -1231,13 +1219,6 @@ export const getScholarFullProfileBySlug = cache(
           },
           orderBy: [{ sortOrder: "asc" }, { entityId: "asc" }],
         }),
-        // Dual-read fallback: pre-backfill there are no assignment rows, so
-        // a director would silently lose their title line for the window between
-        // the ECS roll and the backfill. Dropped in the contract PR.
-        prisma.center.findMany({
-          where: { directorCwid: scholar.cwid },
-          select: { code: true, name: true, officialName: true, leaderInterim: true },
-        }),
         // #2558 — program leadership is an `OrgUnitRoleAssignment` row too,
         // `entityType: "center_program"`, `entityId`
         // `"{centerCode}:{programCode}"`. `profileTitle` gates it exactly as
@@ -1261,16 +1242,7 @@ export const getScholarFullProfileBySlug = cache(
           },
           orderBy: [{ sortOrder: "asc" }, { entityId: "asc" }],
         }),
-      ]).then(
-        async ([
-          chairDepts,
-          deptAssignments,
-          chiefDivs,
-          divAssignments,
-          dirCenters,
-          legacyDirCenters,
-          progAssignments,
-        ]) => {
+      ]).then(async ([deptAssignments, divAssignments, dirCenters, progAssignments]) => {
         // One batched name lookup for the centers the assignments point at.
         const dirCenterRows = dirCenters.length
           ? await prisma.center.findMany({
@@ -1282,9 +1254,9 @@ export const getScholarFullProfileBySlug = cache(
           dirCenterRows.map((c) => [c.code, c.officialName ?? c.name]),
         );
         // Same batched-name-lookup shape for the departments/divisions the
-        // Phase D assignments point at — the assignment carries no FK to
-        // either table, only the unit's code.
-        const [deptAssignmentRows, divAssignmentRows, deptRoleRows, divRole] = await Promise.all([
+        // assignments point at — the assignment carries no FK to either
+        // table, only the unit's code.
+        const [deptAssignmentRows, divAssignmentRows] = await Promise.all([
           deptAssignments.length
             ? prisma.department.findMany({
                 where: { code: { in: deptAssignments.map((a) => a.entityId) } },
@@ -1297,23 +1269,6 @@ export const getScholarFullProfileBySlug = cache(
                 select: { code: true, name: true },
               })
             : Promise.resolve([]),
-          // The department vocabulary's Chair/Director label + `profileTitle`,
-          // for the LEGACY `chairCwid` fallback below — mirroring
-          // `resolveUnitLeader`'s "the label comes from the vocabulary in
-          // every branch, even the legacy-column one" rule
-          // (`lib/api/unit-leader.ts`). Fixed 2-row lookup, so it's cheap to
-          // always issue rather than gate on `chairDepts.length`.
-          prisma.orgUnitRole.findMany({
-            where: {
-              entityType: "department",
-              key: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
-            },
-            select: { key: true, label: true, profileTitle: true },
-          }),
-          prisma.orgUnitRole.findUnique({
-            where: { entityType_key: { entityType: "division", key: DIVISION_CHIEF_ROLE_KEY } },
-            select: { label: true, profileTitle: true },
-          }),
         ]);
         const deptAssignmentName = new Map(
           deptAssignmentRows.map((d) => [d.code, d.officialName ?? d.name]),
@@ -1345,78 +1300,38 @@ export const getScholarFullProfileBySlug = cache(
             });
           }
         }
-        const deptRoleByKey = new Map(deptRoleRows.map((r) => [r.key, r]));
-        // Falls back to the seed defaults (`DEFAULT_ORG_UNIT_ROLES`) only when
-        // the vocabulary row itself is missing — e.g. before it has been seeded.
-        const chairRole = deptRoleByKey.get(DEPARTMENT_CHAIR_ROLE_KEY) ?? {
-          label: "Chair",
-          profileTitle: true,
-        };
-        const directorRole = deptRoleByKey.get(DEPARTMENT_DIRECTOR_ROLE_KEY) ?? {
-          label: "Director",
-          profileTitle: true,
-        };
-        const chiefRole = divRole ?? { label: "Chief", profileTitle: true };
         return [
-        // Departments already covered by a Phase D assignment row.
-        ...deptAssignments.flatMap((a) => {
-          const unitName = deptAssignmentName.get(a.entityId);
-          return unitName
-            ? [`${formatLeadershipTitle(a.role.label, a.interim)}, ${unitName}`]
-            : [];
-        }),
-        // Legacy `chairCwid` fallback — only departments the assignment table
-        // does not already cover, so the two sources never double-count during
-        // the dual-read window. `departmentLeaderRoleKey` (#2542 Phase D) picks
-        // Chair vs. Director from the department's `category` — an
-        // administrative department's Director must not render as "Chair".
-        ...chairDepts
-          .filter((d) => !deptAssignments.some((a) => a.entityId === d.code))
-          .flatMap((d) => {
-            const role =
-              departmentLeaderRoleKey(d.category) === DEPARTMENT_DIRECTOR_ROLE_KEY
-                ? directorRole
-                : chairRole;
-            // A role with `profileTitle: false` must not render as a profile
-            // title — that column exists precisely for this.
-            return role.profileTitle ? [`${role.label}, ${d.officialName ?? d.name}`] : [];
+          // Departments — sole source is the assignment table (#2542 contract A).
+          ...deptAssignments.flatMap((a) => {
+            const unitName = deptAssignmentName.get(a.entityId);
+            return unitName
+              ? [`${formatLeadershipTitle(a.role.label, a.interim)}, ${unitName}`]
+              : [];
           }),
-        // Divisions already covered by a Phase D assignment row.
-        ...divAssignments.flatMap((a) => {
-          const unitName = divAssignmentName.get(a.entityId);
-          return unitName
-            ? [`${formatLeadershipTitle(a.role.label, a.interim)}, ${unitName}`]
-            : [];
-        }),
-        // Legacy `chiefCwid` fallback — same coverage-dedup as departments.
-        ...chiefDivs
-          .filter((d) => !divAssignments.some((a) => a.entityId === d.code))
-          .flatMap((d) => (chiefRole.profileTitle ? [`${chiefRole.label}, ${d.name}`] : [])),
-        // A row whose center vanished contributes no title line rather than a
-        // half-rendered one.
-        ...dirCenters.flatMap((c) => {
-          const unitName = dirCenterName.get(c.entityId);
-          return unitName
-            ? [`${formatLeadershipTitle(c.role.label, c.interim)}, ${unitName}`]
-            : [];
-        }),
-        // Only centers the new table does not already cover, so the two sources
-        // never double-count a director during the dual-read window.
-        ...legacyDirCenters
-          .filter((c) => !dirCenters.some((d) => d.entityId === c.code))
-          .map(
-            (c) =>
-              `${c.leaderInterim ? "Interim Director" : "Director"}, ${c.officialName ?? c.name}`,
-          ),
-        // #2558 — programs covered by an assignment row. The label comes from
-        // the vocabulary (seeded "Leader"), matching every other assignment
-        // branch above. Contract PR — this is the only source now.
-        ...progAssignments.flatMap((a) => {
-          const info = progAssignmentInfo.get(a.entityId);
-          return info
-            ? [`${formatLeadershipTitle(a.role.label, a.interim)}, ${info.label} (${info.centerName})`]
-            : [];
-        }),
+          // Divisions — sole source is the assignment table.
+          ...divAssignments.flatMap((a) => {
+            const unitName = divAssignmentName.get(a.entityId);
+            return unitName
+              ? [`${formatLeadershipTitle(a.role.label, a.interim)}, ${unitName}`]
+              : [];
+          }),
+          // A row whose center vanished contributes no title line rather than a
+          // half-rendered one.
+          ...dirCenters.flatMap((c) => {
+            const unitName = dirCenterName.get(c.entityId);
+            return unitName
+              ? [`${formatLeadershipTitle(c.role.label, c.interim)}, ${unitName}`]
+              : [];
+          }),
+          // #2558 — programs covered by an assignment row. The label comes from
+          // the vocabulary (seeded "Leader"), matching every other assignment
+          // branch above.
+          ...progAssignments.flatMap((a) => {
+            const info = progAssignmentInfo.get(a.entityId);
+            return info
+              ? [`${formatLeadershipTitle(a.role.label, a.interim)}, ${info.label} (${info.centerName})`]
+              : [];
+          }),
         ];
       }),
       // section-visibility-spec — the per-scholar section-hide overrides. Only

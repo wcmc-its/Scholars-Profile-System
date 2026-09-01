@@ -26,6 +26,7 @@ import {
   fetchActiveFacultyAppointments,
   openLdap,
 } from "../../lib/sources/ldap";
+import { DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY } from "../../lib/org-unit-roles";
 
 async function main() {
   const cwids = process.argv
@@ -83,7 +84,16 @@ async function main() {
       if (div) {
         parentDeptCode = div.deptCode;
         parentDeptName = div.department.name;
-        chairCwid = div.department.chairCwid;
+        // #2542 contract A — `OrgUnitRoleAssignment` is the sole leader store.
+        const chairAssignment = await prisma.orgUnitRoleAssignment.findFirst({
+          where: {
+            entityType: "department",
+            entityId: div.deptCode,
+            roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+          },
+          select: { cwid: true },
+        });
+        chairCwid = chairAssignment?.cwid ?? null;
       }
     }
 

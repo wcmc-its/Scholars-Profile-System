@@ -158,7 +158,7 @@ in **§10**.
 | [`cdk/lib/etl-stack.ts`](../cdk/lib/etl-stack.ts) | **Source of truth for the ETL cadence** — the `nightlySteps` / `weeklySteps` / `annualSteps` arrays + EventBridge crons. The cadence prose in `dependency-outage-matrix.md`, `PRODUCTION_ADDENDUM.md § State machines`, and `architecture-overview.md` must be reconciled against this file whenever the schedule changes. |
 | [`data-dictionary.md`](./data-dictionary.md) | The public data model: every table grouped by domain, with its source of record and what its fields mean. |
 | [`ADR-001`](./ADR-001-runtime-dal-vs-etl-transform.md) | The runtime/ETL relationship — the backbone of how data lands and is read. |
-| [`ADR-002`](./ADR-002-division-chiefs.md) | How `Division.chiefCwid` is populated. |
+| [`ADR-002`](./ADR-002-division-chiefs.md) | How the division chief is detected (the storage target moved off `Division.chiefCwid` to `OrgUnitRoleAssignment` under #2542 contract A; see the note atop the ADR). |
 | [`ADR-003`](./ADR-003-center-membership.md) | How `CenterMembership` was populated (historical record; methodology shipped under #12). || [`data-population-runbook.md`](./data-population-runbook.md) | The operational procedure to load/refresh that data and the search index. || [`scholar-tools-taxonomy.md`](./scholar-tools-taxonomy.md) | Where the **Methods & tools** (method-family) taxonomy comes from — the ReciterAI A2 artifact on S3 (**not** DynamoDB; the legacy `reciterai` `TOOL#` rows are per-PMID activity, not the canonical registry), the published `tools[]`/`families[]` schema, the `etl:scholar-tool` loader + reversible `SCHOLAR_TOOL_SOURCE` (ddb→s3) switch (#794), the `scholar_tool` field mapping, and the offline consolidation-export script. |
 | [`coi-pubmed-suggestion-approach.md`](./coi-pubmed-suggestion-approach.md) | Where the "From your publications" COI suggestions come from — the nightly `etl:coi-gap` source, the extract→attribute→diff→tier pipeline, and **the 2026 hardening**: why the rendered surface is **`High` tier only** (#909; Medium is ~92% co-author leakage), the count chip (#910), junk-word suppression and why two-word person-name suppression was rejected as unsafe (#907), the production-scale distribution (585 scholars with ≥1 High, ~3.5k relationships), worked cases (Drilon vs Tamimi), governance, and the next lever (the `A.Ashworth`/`C Lehman` initial-surname co-author leak that still escapes #903). |
 | [`pops-clinical-search-spec.md`](./pops-clinical-search-spec.md) | Where board certifications, clinical specialties, and clinical expertise come from — the weekly POPS ETL job and its `pops_*` columns — and why a People search says "Board certified in Cardiology": the `function_score` clinical weight and the count-gated precedence against a tagged-publication match. |
@@ -176,7 +176,7 @@ ADRs capture decisions and their rationale; reach for these when a colleague ask
 | ADR | Decision |
 |---|---|
 | [`ADR-001`](./ADR-001-runtime-dal-vs-etl-transform.md) | Runtime data-access layer = ETL transform |
-| [`ADR-002`](./ADR-002-division-chiefs.md) | Populating `Division.chiefCwid` |
+| [`ADR-002`](./ADR-002-division-chiefs.md) | Detecting the division chief (storage superseded by `OrgUnitRoleAssignment`, #2542 contract A) |
 | [`ADR-003`](./ADR-003-center-membership.md) | Populating `CenterMembership` (historical) |
 | [`ADR-004`](./ADR-004-deploy-strategy.md) | Deploy strategy: ECS rolling |
 | [`ADR-005`](./ADR-005-manual-override-layer.md) | Manual-override layer |

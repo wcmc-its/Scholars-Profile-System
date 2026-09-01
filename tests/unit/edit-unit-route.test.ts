@@ -20,8 +20,9 @@
  *      - Curator edits description; success + reflectUnitChange.
  *      - slug + centerType are Superuser-only.
  *      - Slug update revalidates the old slug too (previousSlug).
- *      - directorCwid="" vacates the `director` assignment in `CenterLeader`
- *        (#2542; was "stores null on the column"), dual-writing the column.
+ *      - directorCwid="" vacates the `director` assignment in
+ *        `OrgUnitRoleAssignment` (#2542 contract A; the deprecated column
+ *        write retired with this ticket).
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
@@ -169,8 +170,6 @@ beforeEach(() => {
     slug: "old-slug",
     description: "old",
     url: null,
-    directorCwid: null,
-    leaderInterim: false,
     centerType: "center",
   });
   mockTxCenterUpdate.mockResolvedValue({});
@@ -791,11 +790,11 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
     );
   });
 
-  // #2542 Phase 1 — leadership is a `CenterLeader` row, not a center column.
-  // The request contract is unchanged (same two field names, same two POSTs from
-  // `unit-leader-card.tsx`), and the deprecated columns are DUAL-WRITTEN for one
-  // release so the pre-backfill fallback and an app-code rollback stay correct.
-  it("naming a director writes the assignment row AND dual-writes the column", async () => {
+  // #2542 contract A — leadership is an `OrgUnitRoleAssignment` row, the sole
+  // store; the deprecated `Center.directorCwid` column write retired with
+  // this ticket. The request contract is unchanged (same two field names,
+  // same two POSTs from `unit-leader-card.tsx`).
+  it("naming a director writes the assignment row and does not touch the center row", async () => {
     mockTxCenterLeaderFindFirst.mockResolvedValue(null);
     const res = await POST(
       post({
@@ -822,12 +821,10 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
         }),
       }),
     );
-    expect(mockTxCenterUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { directorCwid: "new0001" } }),
-    );
+    expect(mockTxCenterUpdate).not.toHaveBeenCalled();
   });
 
-  it("directorCwid='' vacates the assignment and dual-writes null", async () => {
+  it("directorCwid='' vacates the assignment and does not touch the center row", async () => {
     mockTxCenterLeaderFindFirst.mockResolvedValue({ cwid: "dir0001", interim: false });
     const res = await POST(
       post({
@@ -845,9 +842,7 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
       }),
     );
     expect(mockTxCenterLeaderCreate).not.toHaveBeenCalled();
-    expect(mockTxCenterUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { directorCwid: null } }),
-    );
+    expect(mockTxCenterUpdate).not.toHaveBeenCalled();
   });
 
   it("carries the incumbent's interim qualifier onto a new director", async () => {
@@ -869,9 +864,9 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
     );
   });
 
-  it("dual-reads the deprecated column for the audit before-value when no CenterLeader row exists yet", async () => {
-    // The window between the ECS roll and the manual Phase 1 backfill. Without
-    // the fallback the audit would record the previous director as null.
+  it("records a null audit before-value when no director OrgUnitRoleAssignment row exists", async () => {
+    // #2542 contract A — OrgUnitRoleAssignment is the sole director store;
+    // the pre-backfill dual-read fallback to the (now-retired) column is gone.
     mockTxCenterLeaderFindFirst.mockResolvedValue(null);
     mockTxCenterFindUnique.mockResolvedValue({
       name: "Meyer",
@@ -879,8 +874,6 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
       description: null,
       url: null,
       centerType: "center",
-      directorCwid: "legacy01",
-      leaderInterim: true,
     });
     const res = await POST(
       post({
@@ -895,7 +888,7 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
     // `before_values` is the 6th bound value of the audit INSERT; arg 0 is the
     // template strings (see the `auditAfterValues` helper below).
     expect(JSON.parse(mockExecuteRaw.mock.calls[0][6] as string)).toEqual({
-      directorCwid: "legacy01",
+      directorCwid: null,
     });
   });
 

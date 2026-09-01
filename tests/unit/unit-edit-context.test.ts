@@ -142,7 +142,6 @@ const DEPT = {
   description: "ETL blurb",
   url: null,
   slug: "medicine",
-  chairCwid: "chr001",
   source: "ED",
 };
 
@@ -285,6 +284,9 @@ describe("loadUnitEditContext — department", () => {
       asClient(
         fakeClient({
           department: DEPT,
+          // #2542 contract A — the department's chair/director assignment,
+          // from its own query (was `Department.chairCwid`).
+          leaderAssignment: { cwid: "chr001", interim: false },
           scholars: [{ cwid: "chr001", preferredName: "Dana Chair", primaryTitle: "MD, PhD" }],
         }),
       ),
@@ -303,6 +305,42 @@ describe("loadUnitEditContext — department", () => {
     expect(ctx!.unit.leader.cwid).toBeNull();
     expect(ctx!.unit.leader.explicitVacancy).toBe(true);
   });
+
+  // #2542 contract A — dept/div carry no `leaderInterim` column; the assignment
+  // row's own `interim` flag is the fallback, exactly as `resolveUnitLeader`
+  // (`lib/api/unit-leader.ts`) documents.
+  it("an interim assignment renders interim when no leaderInterim override exists", async () => {
+    const ctx = await loadUnitEditContext(
+      "department",
+      "N1280",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          department: DEPT,
+          leaderAssignment: { cwid: "chr001", interim: true },
+          scholars: [{ cwid: "chr001", preferredName: "Dana Chair", primaryTitle: "MD, PhD" }],
+        }),
+      ),
+    );
+    expect(ctx!.unit.leader.interim).toBe(true);
+  });
+
+  it("a leaderInterim override wins over the assignment row's own interim flag", async () => {
+    const ctx = await loadUnitEditContext(
+      "department",
+      "N1280",
+      SUPERUSER,
+      asClient(
+        fakeClient({
+          department: DEPT,
+          leaderAssignment: { cwid: "chr001", interim: true },
+          overrides: [{ fieldName: "leaderInterim", value: "false" }],
+          scholars: [{ cwid: "chr001", preferredName: "Dana Chair", primaryTitle: "MD, PhD" }],
+        }),
+      ),
+    );
+    expect(ctx!.unit.leader.interim).toBe(false);
+  });
 });
 
 describe("loadUnitEditContext — roster scholarState (#2324)", () => {
@@ -311,7 +349,6 @@ describe("loadUnitEditContext — roster scholarState (#2324)", () => {
     name: "New Division",
     description: null,
     slug: "new-division",
-    chiefCwid: null,
     source: "manual",
     deptCode: "N1280",
     department: { name: "Medicine", slug: "medicine" },
@@ -413,7 +450,6 @@ describe("loadUnitEditContext — manual division roster", () => {
       name: "New Division",
       description: null,
       slug: "new-division",
-      chiefCwid: null,
       source: "manual",
       deptCode: "N1280",
       department: { name: "Medicine", slug: "medicine" },
@@ -472,8 +508,6 @@ describe("loadUnitEditContext — center", () => {
       url: "https://precision.weill.cornell.edu",
       slug: "precision-institute",
       centerType: "institute",
-      directorCwid: null,
-      leaderInterim: false,
     };
     // #2542 — leadership is an `OrgUnitRoleAssignment` row from its own query.
     const ctx = await loadUnitEditContext(
@@ -586,8 +620,6 @@ describe("loadUnitEditContext — center disease assignments (plan §5/§6)", ()
     slug: "meyer",
     centerType: "center",
     leaders: [],
-    directorCwid: null,
-    leaderInterim: false,
   };
   // A stand-in `CenterProgram` taxonomy — the gate these tests all run under
   // (bug fix, staging report 2026-08-26): `diseases` only ever populates for a
@@ -821,8 +853,6 @@ describe("loadUnitEditContext — diseaseOptions (manual-add extension)", () => 
     slug: "meyer",
     centerType: "center",
     leaders: [],
-    directorCwid: null,
-    leaderInterim: false,
   };
 
   it("a center WITH a CenterProgram taxonomy carries the canonical disease-code -> label list, sorted by label", async () => {
@@ -863,7 +893,6 @@ describe("loadUnitEditContext — diseaseOptions (manual-add extension)", () => 
       description: null,
       url: null,
       slug: "medicine",
-      chairCwid: null,
       source: "ED",
     };
     const ctx = await loadUnitEditContext(

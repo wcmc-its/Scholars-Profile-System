@@ -10,10 +10,11 @@
  * When such a leader later becomes a WCM scholar, delete the entry — the normal
  * scholar-backed leader path (with a profile link) takes over automatically.
  *
- * The CWID is still written to `Department.chairCwid` / the `leaderCwid`
- * override by the backfill so the data says "this unit has a chair"; the photo
- * resolves via `identityImageEndpoint(cwid)` against the Directory API even
- * though there is no scholar row.
+ * The CWID is still written to the chair `OrgUnitRoleAssignment` row / the
+ * `leaderCwid` override by the backfill so the data says "this unit has a
+ * chair" (#2542 contract A retired `Department.chairCwid`, the prior target);
+ * the photo resolves via `identityImageEndpoint(cwid)` against the Directory
+ * API even though there is no scholar row.
  */
 export type ExternalLeader = {
   cwid: string;

@@ -110,7 +110,6 @@ type DeptRow = {
   slug: string;
   category: string;
   scholarCount: number;
-  chairCwid: string | null;
 };
 
 type ChairRow = {
@@ -139,18 +138,16 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
       slug: true,
       category: true,
       scholarCount: true,
-      chairCwid: true,
     },
   })) as DeptRow[];
 
   // --- Chairs ---
-  // #2542 Phase D — chair/director is an `OrgUnitRoleAssignment` row once the
-  // backfill runs; batched dual-read fallback to `chairCwid` mirrors
-  // `getCentersList`'s `directorCwidOf` below. NOTE: unlike `departments.ts`
-  // (the department PAGE), this list does NOT merge `field_override` —
-  // it never has (pre-existing; out of scope for this repoint) — so a
-  // curator's `leaderCwid` override is reflected on the department's own
-  // page but not yet on this browse card.
+  // #2542 contract A — chair/director comes from `OrgUnitRoleAssignment`
+  // only; `Department.chairCwid` no longer exists as a read source. NOTE:
+  // unlike `departments.ts` (the department PAGE), this list does NOT merge
+  // `field_override` — it never has (pre-existing; out of scope for this
+  // repoint) — so a curator's `leaderCwid` override is reflected on the
+  // department's own page but not yet on this browse card.
   const roleRows = await prisma.orgUnitRole.findMany({
     where: {
       entityType: "department",
@@ -173,8 +170,7 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
   for (const a of assignments) {
     if (!assignedChair.has(a.entityId)) assignedChair.set(a.entityId, a.cwid);
   }
-  const chairCwidOf = (d: DeptRow): string | null =>
-    assignedChair.get(d.code) ?? d.chairCwid;
+  const chairCwidOf = (d: DeptRow): string | null => assignedChair.get(d.code) ?? null;
 
   const chairCwids = depts
     .map(chairCwidOf)
@@ -304,9 +300,6 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
       name: true,
       slug: true,
       description: true,
-      // `directorCwid` is the dual-read fallback until the backfill runs; it
-      // goes in the contract PR. The assignment rows are fetched below.
-      directorCwid: true,
       // NB: `scholarCount` is deliberately NOT selected — the column is never
       // maintained for centers. Counted live below.
       sortOrder: true,
@@ -322,8 +315,9 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
     { publicOnly: true },
   );
 
-  // #2542 — the director is an `OrgUnitRoleAssignment` row. ONE batched query
-  // for the whole list rather than one per center: the assignment is
+  // #2542 contract A — the director is an `OrgUnitRoleAssignment` row only;
+  // `Center.directorCwid` no longer exists as a read source. ONE batched
+  // query for the whole list rather than one per center: the assignment is
   // polymorphic on (entityType, entityId) with no FK to `center`, so it cannot
   // be nested on the `findMany` above. Ordered by `sortOrder` so the first row
   // seen per center wins, matching the old `take: 1`.
@@ -342,7 +336,7 @@ export async function getCentersList(): Promise<BrowseCenter[]> {
   }
 
   const directorCwidOf = (c: (typeof centers)[number]): string | null =>
-    assignedDirector.get(c.code) ?? c.directorCwid;
+    assignedDirector.get(c.code) ?? null;
   const directorCwids = centers
     .map(directorCwidOf)
     .filter((c): c is string => c !== null);

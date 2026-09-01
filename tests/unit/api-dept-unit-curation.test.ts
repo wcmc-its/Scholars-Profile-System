@@ -87,7 +87,6 @@ const DEPT = {
   slug: "medicine",
   description: "The ETL-seeded description.",
   url: null,
-  chairCwid: "etl0001",
   category: "clinical",
   scholarCount: 200,
 };
@@ -115,11 +114,16 @@ function defaultBaselineMocks() {
   mockFieldOverrideFindMany.mockResolvedValue([]);
   mockSuppressionFindFirst.mockResolvedValue(null);
   mockSuppressionFindMany.mockResolvedValue([]);
-  // #2542 Phase D — no vocabulary row / no assignment row by default, so
-  // `resolveUnitLeader` falls through to the legacy `chairCwid` column,
-  // matching the pre-repoint behavior these tests were written against.
+  // #2542 contract A — no vocabulary row by default; the chair resolves
+  // through the `OrgUnitRoleAssignment` row (`Department.chairCwid` no
+  // longer exists as a read source), matching the `etl0001` identity these
+  // tests were originally written against.
   mockOrgUnitRoleFindUnique.mockResolvedValue(null);
-  mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue(null);
+  mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue({
+    cwid: "etl0001",
+    interim: false,
+    role: { label: "Chair" },
+  });
 }
 
 describe("getDepartment — unit-curation read-merge (#540)", () => {
@@ -182,9 +186,9 @@ describe("getDepartment — unit-curation read-merge (#540)", () => {
     expect(mockAppointmentFindFirst).not.toHaveBeenCalled();
   });
 
-  it("with no override and no chairCwid, no chair is returned (baseline)", async () => {
+  it("with no override and no assignment, no chair is returned (baseline)", async () => {
     defaultBaselineMocks();
-    mockDepartmentFindUnique.mockResolvedValue({ ...DEPT, chairCwid: null });
+    mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue(null);
 
     const result = await getDepartment("medicine");
     expect(result?.chair).toBeNull();
@@ -207,25 +211,39 @@ describe("getDepartment — unit-curation read-merge (#540)", () => {
     expect(result?.chair?.isInterim).toBe(false);
   });
 
-  // #2542 Phase D — the render-layer repoint. Before this, `chair.role` came
+  // #2542 — the render-layer repoint. Before this, `chair.role` came
   // straight from `dept.category === "administrative" ? "Director" : "Chair"`;
-  // now it comes from `OrgUnitRole.label`, so a steward rename via /edit/roles
-  // must show up here without a code change.
-  it("resolves chair.role from the vocabulary label, not the hardcoded category ternary", async () => {
+  // now it comes from the assignment's own vocabulary-joined `role.label`, so
+  // a steward rename via /edit/roles must show up here without a code change.
+  it("resolves chair.role from the assignment's vocabulary-joined label, not the hardcoded category ternary", async () => {
     defaultBaselineMocks();
-    mockOrgUnitRoleFindUnique.mockResolvedValue({ label: "Chairperson" });
+    mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue({
+      cwid: "etl0001",
+      interim: false,
+      role: { label: "Chairperson" },
+    });
 
     const result = await getDepartment("medicine");
     expect(result?.chair?.role).toBe("Chairperson");
-    expect(mockOrgUnitRoleFindUnique).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { entityType_key: { entityType: "department", key: "chair" } },
-      }),
-    );
   });
 
-  it("falls back to 'Chair' when no vocabulary row exists yet (pre-seed behavior)", async () => {
+  // `fallbackLabel` is consulted only on the OVERRIDE branch — the assignment
+  // branch's label always comes from the joined `OrgUnitRole` row (a real
+  // assignment can't exist without one), so this pre-seed fallback is now an
+  // override-branch-only scenario.
+  it("falls back to 'Chair' when no vocabulary row exists yet (override branch, pre-seed behavior)", async () => {
     defaultBaselineMocks();
+    mockFieldOverrideFindMany.mockResolvedValue([
+      { fieldName: "leaderCwid", value: "ovr0001" },
+    ]);
+    mockOrgUnitRoleFindUnique.mockResolvedValue(null);
+    mockScholarFindUnique.mockResolvedValue({
+      cwid: "ovr0001",
+      preferredName: "Curator-Set Chair",
+      slug: "curator-set-chair",
+      primaryTitle: "Professor of Medicine",
+    });
+
     const result = await getDepartment("medicine");
     expect(result?.chair?.role).toBe("Chair");
   });
@@ -254,7 +272,7 @@ describe("getDepartment — unit-curation read-merge (#540)", () => {
     expect(mockOrgUnitRoleAssignmentFindFirst).not.toHaveBeenCalled();
   });
 
-  it("with no override, an OrgUnitRoleAssignment row wins over the legacy chairCwid column", async () => {
+  it("with no override, the OrgUnitRoleAssignment row is the sole source of the chair", async () => {
     defaultBaselineMocks();
     mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue({
       cwid: "assign001",
@@ -269,8 +287,8 @@ describe("getDepartment — unit-curation read-merge (#540)", () => {
     });
 
     const result = await getDepartment("medicine");
-    // The scholar lookup went to the ASSIGNMENT's cwid, not DEPT.chairCwid
-    // ("etl0001" from the fixture).
+    // The scholar lookup went to THIS assignment's cwid, not the baseline
+    // fixture's default assignment cwid ("etl0001").
     expect(result?.chair?.cwid).toBe("assign001");
     expect(result?.chair?.isInterim).toBe(true);
   });

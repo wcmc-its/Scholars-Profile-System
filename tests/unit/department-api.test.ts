@@ -2,7 +2,7 @@
  * Tests for lib/api/departments.ts — getDepartment + getDepartmentFaculty.
  *
  * Spec gates exercised:
- *   - D-01/D-03 — department row + chair resolution (chairCwid → Scholar + Appointment)
+ *   - D-01/D-03 — department row + chair resolution (OrgUnitRoleAssignment → Scholar + Appointment)
  *   - D-10 — distinct scholar count for topic (via lib/api/topics.ts; separate test)
  *   - D-12 — faculty list with optional division filter + chief-first ordering
  *   - Pagination: 20 per page, page param respected
@@ -36,6 +36,7 @@ const {
   mockFacetEnabled,
   mockOrgUnitRoleFindUnique,
   mockOrgUnitRoleAssignmentFindFirst,
+  mockDivChiefAssignmentFindFirst,
 } = vi.hoisted(() => ({
   mockDepartmentFindUnique: vi.fn(),
   mockScholarFindUnique: vi.fn(),
@@ -62,6 +63,7 @@ const {
   mockFacetEnabled: vi.fn(),
   mockOrgUnitRoleFindUnique: vi.fn(),
   mockOrgUnitRoleAssignmentFindFirst: vi.fn(),
+  mockDivChiefAssignmentFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -99,7 +101,16 @@ vi.mock("@/lib/db", () => ({
       findMany: mockSuppressionFindMany,
     },
     orgUnitRole: { findUnique: mockOrgUnitRoleFindUnique },
-    orgUnitRoleAssignment: { findFirst: mockOrgUnitRoleAssignmentFindFirst },
+    // #2542 contract A — `resolveUnitLeader` calls this once for the
+    // department's own chair/director AND once per division (the department
+    // page's division-summary chief + the faculty list's chief-first
+    // ordering), so the dispatcher routes by `where.entityType`.
+    orgUnitRoleAssignment: {
+      findFirst: (args: { where?: { entityType?: string } }) =>
+        args?.where?.entityType === "division"
+          ? mockDivChiefAssignmentFindFirst(args)
+          : mockOrgUnitRoleAssignmentFindFirst(args),
+    },
   },
 }));
 // #974 — the roster chips loader (Phase 1) + facet aggregation (Phase 2) read the
@@ -125,7 +136,6 @@ const DEPT = {
   name: "Department of Medicine",
   slug: "medicine",
   description: "The department of medicine.",
-  chairCwid: "chair001",
   scholarCount: 200,
   source: "ED",
   refreshedAt: new Date("2026-01-01"),
@@ -149,7 +159,6 @@ const DIVISION_A = {
   name: "Cardiology",
   slug: "cardiology",
   description: "Heart stuff.",
-  chiefCwid: "chief001",
   scholarCount: 50,
   source: "ED",
   refreshedAt: new Date("2026-01-01"),
@@ -192,11 +201,21 @@ function mockDefaultDeptSetup() {
     Array.from({ length: 25 }, (_, i) => grantRow(i)),
   );
   mockSuppressionFindMany.mockResolvedValue([]);
-  // #2542 Phase D — no vocabulary row / no assignment row by default, so
-  // `resolveUnitLeader` falls through to the legacy `chairCwid` column,
-  // matching the pre-repoint behavior these tests were written against.
+  // #2542 contract A — no vocabulary row by default; the department's own
+  // chair/director + the division's chief both resolve through the
+  // `OrgUnitRoleAssignment` row now (`Department.chairCwid` /
+  // `Division.chiefCwid` no longer exist as read sources).
   mockOrgUnitRoleFindUnique.mockResolvedValue(null);
-  mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue(null);
+  mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue({
+    cwid: "chair001",
+    interim: false,
+    role: { label: "Chair" },
+  });
+  mockDivChiefAssignmentFindFirst.mockResolvedValue({
+    cwid: "chief001",
+    interim: false,
+    role: { label: "Chief" },
+  });
 }
 
 /** One active grant row shaped like `UNIT_GRANT_SELECT`. `i` gives it its own
@@ -229,7 +248,7 @@ describe("getDepartment", () => {
     expect(mockScholarFindUnique).not.toHaveBeenCalled();
   });
 
-  it("returns department with chairCwid populated when chair appointment exists", async () => {
+  it("returns department with the chair assignment resolved when chair appointment exists", async () => {
     mockDefaultDeptSetup();
     const result = await getDepartment("medicine");
 
@@ -251,8 +270,8 @@ describe("getDepartment", () => {
     expect(result!.chair!.chairTitle).toBe("Chair");
   });
 
-  it("returns null chair when chairCwid is null in dept row", async () => {
-    mockDepartmentFindUnique.mockResolvedValue({ ...DEPT, chairCwid: null });
+  it("returns null chair when there is no override and no assignment", async () => {
+    mockDepartmentFindUnique.mockResolvedValue({ ...DEPT });
     mockPublicationTopicGroupBy.mockResolvedValue([]);
     mockTopicFindMany.mockResolvedValue([]);
     mockDivisionFindMany.mockResolvedValue([]);
@@ -401,6 +420,11 @@ describe("getDepartmentFaculty", () => {
     mockChipsEnabled.mockReturnValue(false);
     mockFacetEnabled.mockReturnValue(false);
     mockLoadOverlayGate.mockResolvedValue({ suppressed: new Set(), sensitive: new Set() });
+    // #2542 contract A — the divCode-scoped chief-first ordering resolves the
+    // chief via `resolveUnitLeader` (override > assignment) now, not a direct
+    // `Division.chiefCwid` column read. No-op for tests that pass no divCode.
+    mockFieldOverrideFindMany.mockResolvedValue([]);
+    mockDivChiefAssignmentFindFirst.mockResolvedValue(null);
   });
 
   it("returns empty result when deptCode has no scholars", async () => {
@@ -435,7 +459,6 @@ describe("getDepartmentFaculty", () => {
 
   it("optionally filters by divCode when provided", async () => {
     mockScholarCount.mockResolvedValue(5);
-    mockDivisionFindFirst.mockResolvedValue({ chiefCwid: null });
     mockScholarFindMany.mockResolvedValue([makeScholarRow({ cwid: "div00001" })]);
     mockPublicationTopicGroupBy.mockResolvedValue([]);
     mockGrantGroupBy.mockResolvedValue([]);
@@ -469,7 +492,11 @@ describe("getDepartmentFaculty", () => {
 
   it("places chief-of-division first when divCode provided and chief is in page 0", async () => {
     mockScholarCount.mockResolvedValue(3);
-    mockDivisionFindFirst.mockResolvedValue({ chiefCwid: "chief001" });
+    mockDivChiefAssignmentFindFirst.mockResolvedValue({
+      cwid: "chief001",
+      interim: false,
+      role: { label: "Chief" },
+    });
 
     const chiefRow = makeScholarRow({
       cwid: "chief001",

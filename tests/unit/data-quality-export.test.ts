@@ -165,6 +165,8 @@ function fakeClient(scholars: unknown[]) {
     centerMembership: { findMany: vi.fn().mockResolvedValue([]) },
     divisionMembership: { findMany: vi.fn().mockResolvedValue([]) },
     overviewProvenance: { findMany: vi.fn().mockResolvedValue([]) },
+    // #2542 contract A — chair/chief come from `OrgUnitRoleAssignment` only.
+    orgUnitRoleAssignment: { findMany: vi.fn().mockResolvedValue([]) },
   };
 }
 const scholarRow = (i: number) => ({

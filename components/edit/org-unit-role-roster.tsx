@@ -15,16 +15,18 @@
  * current holder's displayed role, so the confirmation states the live
  * `holderCount`), `sortOrder`, and `profileTitle` (both save immediately, no
  * confirm). READ-ONLY: `key`, `entityType`, `roleGroup`, `scope`,
- * `singleHolder`, `source`, `holderCount`. There is no delete affordance —
- * the route has no DELETE handler (see its module doc comment) and this
- * component must not invent one.
+ * `singleHolder`, `source`, `holderCount`. Delete is offered only for `manual`
+ * roles with zero holders — a `seed` entry (re-minted by every write path
+ * that seeds `DEFAULT_ORG_UNIT_ROLES`) or a role with a live holder disables
+ * the control with an inline reason instead; see `DeleteRoleButton` below and
+ * the route's DELETE docblock (`app/api/edit/roles/route.ts`) for why.
  *
  * PER-ROW busy state (a `Set` of row keys, not the single global `busyKey`
  * `MethodFamiliesRoster` uses): two different rows save fully independently,
  * and a click on row B while row A's write is in flight is never dropped.
- * All three editable fields on a given row share that row's busy flag — a
- * label rename and a sort-order edit on the SAME row are serialized, but nothing
- * outside that row is.
+ * All three editable fields AND the delete button on a given row share that
+ * row's busy flag — a label rename and a delete on the SAME row are
+ * serialized, but nothing outside that row is.
  */
 "use client";
 
@@ -55,13 +57,18 @@ import {
 import type { OrgUnitRoleRosterRow } from "@/lib/api/org-unit-roles-admin";
 
 /** Display order + label for each unit kind. Fixed (not derived from whatever
- *  order rows happen to arrive in) so the page reads the same every load. */
+ *  order rows happen to arrive in) so the page reads the same every load.
+ *  `center_program` sits directly under `center` (it is center's sub-tier),
+ *  above `core`, per owner request — this list is ROSTER-ONLY: no other
+ *  module imports it, and it does not need to (nor should it) agree with
+ *  `buildRoleRoster`'s SQL `orderBy`, which is plain alphabetical and only
+ *  decides ordering within a section, never which section renders first. */
 const ENTITY_TYPE_ORDER: readonly OrgUnitRoleEntityType[] = [
+  "center",
+  "center_program",
   "department",
   "division",
-  "center",
   "core",
-  "center_program",
 ];
 
 const ENTITY_TYPE_LABEL: Record<OrgUnitRoleEntityType, string> = {
@@ -127,6 +134,67 @@ export function renameBlastRadiusText(
     return `This changes the label shown for ${row.unitCount} ${unitNoun(entityType, row.unitCount)}.`;
   }
   return `This changes the label shown for ${row.holderCount} ${holderNoun(row.holderCount)} across ${row.unitCount} ${unitNoun(entityType, row.unitCount)}.`;
+}
+
+/**
+ * Why the Delete control is disabled for this row, or `null` when it's
+ * enabled. `source` is checked FIRST: a seeded entry can also happen to have
+ * holders, but "seeded default" is the more actionable reason to surface — the
+ * fix for it lives in the seed table (`DEFAULT_ORG_UNIT_ROLES`), not in
+ * reassigning holders, which is the fix `holderCount > 0` implies. Mirrors the
+ * route's own gate order (`app/api/edit/roles/route.ts` DELETE) so the button
+ * is never enabled for a request the server would refuse anyway.
+ */
+export function deleteDisabledReason(
+  row: Pick<OrgUnitRoleRosterRow, "source" | "holderCount">,
+): string | null {
+  if (row.source !== "manual") return "Seeded default — cannot be deleted here.";
+  if (row.holderCount > 0) return `${row.holderCount} ${holderNoun(row.holderCount)}`;
+  return null;
+}
+
+/** The delete-confirm dialog's title. Names the unit kind alongside the label
+ *  — the same label can exist at two different `entityType`s (e.g. "Director"
+ *  at both `center` and `department`), and a bare label would leave that
+ *  ambiguous at the moment a curator is about to destroy one of them. */
+export function deleteConfirmTitle(
+  row: Pick<OrgUnitRoleRosterRow, "label" | "entityType">,
+): string {
+  const entityType = row.entityType as OrgUnitRoleEntityType;
+  return `Delete role "${row.label}" (${ENTITY_TYPE_LABEL[entityType]})?`;
+}
+
+/** The delete-confirm dialog's body. States both facts up front: nothing
+ *  holds the role (the precondition the Delete control already enforces, so
+ *  this is reassurance, not new information) and how many `OrgUnitRoleScope`
+ *  allowlist rows are removed as a side effect — so a curator is never
+ *  surprised by that second deletion after confirming. */
+export function deleteConfirmDescription(
+  row: Pick<OrgUnitRoleRosterRow, "scopeRowCount">,
+): string {
+  const noun = row.scopeRowCount === 1 ? "allowlist row" : "allowlist rows";
+  return `No one holds it; ${row.scopeRowCount} ${noun} will be removed too.`;
+}
+
+/** Map a DELETE-route error code to a steward-facing message. `seeded_default`
+ *  and `role_has_holders` carry server-computed detail (`reason` /
+ *  `holderCount`) the route sends because a static per-code string can't
+ *  — the button is disabled for both cases client-side already, so reaching
+ *  this branch means the row changed under the steward between page load and
+ *  the confirm click. */
+function mapDeleteError(data: { error?: string; reason?: string; holderCount?: number }): string {
+  switch (data.error) {
+    case "not_comms_steward":
+      return "You don't have permission to manage the role vocabulary.";
+    case "not_found":
+      return "This role no longer exists — reload the page.";
+    case "seeded_default":
+      return data.reason ?? "This is a seeded default and cannot be deleted here.";
+    case "role_has_holders":
+      return `This role now has ${data.holderCount ?? 0} ${holderNoun(data.holderCount ?? 0)} — reload the page.`;
+    default:
+      return "Something went wrong — please try again.";
+  }
 }
 
 /** Sort order matching the server's roster query: (entityType, roleGroup,
@@ -198,6 +266,7 @@ export function OrgUnitRoleRoster({ roles }: OrgUnitRoleRosterProps) {
     row: OrgUnitRoleRosterRow;
     newLabel: string;
   } | null>(null);
+  const [pendingDelete, setPendingDelete] = React.useState<OrgUnitRoleRosterRow | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
 
   function setBusy(key: string, busy: boolean) {
@@ -275,6 +344,42 @@ export function OrgUnitRoleRoster({ roles }: OrgUnitRoleRosterProps) {
     setPendingRename(null);
   }
 
+  /** DELETE one row. Not optimistic (unlike `savePatch`) — the row is removed
+   *  from `rows` only after the server confirms; a rejected delete (the row
+   *  gained a holder between page load and the confirm click) must not make
+   *  the row vanish and reappear. */
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    const row = pendingDelete;
+    const key = rowKey(row);
+    if (busyKeys.has(key)) return;
+    setBusy(key, true);
+    setRowError(key, null);
+    try {
+      const res = await fetch("/api/edit/roles", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entityType: row.entityType, key: row.key }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        error?: string;
+        reason?: string;
+        holderCount?: number;
+      };
+      if (!res.ok || data.ok !== true) {
+        setRowError(key, mapDeleteError(data));
+        return;
+      }
+      setRows((prev) => prev.filter((r) => rowKey(r) !== key));
+    } catch {
+      setRowError(key, "Something went wrong — please try again.");
+    } finally {
+      setBusy(key, false);
+      setPendingDelete(null);
+    }
+  }
+
   const grouped = React.useMemo(() => {
     const byEntity = new Map<OrgUnitRoleEntityType, Map<OrgUnitRoleGroup, OrgUnitRoleRosterRow[]>>();
     for (const row of rows) {
@@ -327,6 +432,7 @@ export function OrgUnitRoleRoster({ roles }: OrgUnitRoleRosterProps) {
                   onLabelBlur={handleLabelBlur}
                   onSortOrderCommit={(row, value) => savePatch(row, { sortOrder: value })}
                   onProfileTitleChange={(row, value) => savePatch(row, { profileTitle: value })}
+                  onDeleteRequest={setPendingDelete}
                 />
               ))}
             </div>
@@ -361,6 +467,19 @@ export function OrgUnitRoleRoster({ roles }: OrgUnitRoleRosterProps) {
         onConfirm={confirmRename}
       />
 
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+        title={pendingDelete ? deleteConfirmTitle(pendingDelete) : ""}
+        description={pendingDelete ? deleteConfirmDescription(pendingDelete) : ""}
+        reasonMode="none"
+        confirmLabel="Delete"
+        confirmVariant="destructive"
+        onConfirm={confirmDelete}
+      />
+
       <AddRoleDialog
         open={addOpen}
         onOpenChange={setAddOpen}
@@ -386,6 +505,7 @@ function RoleGroupTable({
   onLabelBlur,
   onSortOrderCommit,
   onProfileTitleChange,
+  onDeleteRequest,
 }: {
   roleGroup: OrgUnitRoleGroup;
   rows: OrgUnitRoleRosterRow[];
@@ -396,6 +516,7 @@ function RoleGroupTable({
   onLabelBlur: (row: OrgUnitRoleRosterRow) => void;
   onSortOrderCommit: (row: OrgUnitRoleRosterRow, value: number) => void;
   onProfileTitleChange: (row: OrgUnitRoleRosterRow, value: boolean) => void;
+  onDeleteRequest: (row: OrgUnitRoleRosterRow) => void;
 }) {
   return (
     <div className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-md border">
@@ -410,6 +531,7 @@ function RoleGroupTable({
             <th className="px-4 py-2.5 text-center font-medium">Profile title</th>
             <th className="px-4 py-2.5 text-right font-medium">Holders</th>
             <th className="px-4 py-2.5 font-medium">Source</th>
+            <th className="px-4 py-2.5 font-medium">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -483,10 +605,13 @@ function RoleGroupTable({
                       {row.source}
                     </Badge>
                   </td>
+                  <td className="px-4 py-2.5">
+                    <DeleteRoleButton row={row} busy={busy} onRequest={onDeleteRequest} />
+                  </td>
                 </tr>
                 {(busy || error) && (
                   <tr className="border-apollo-border border-b last:border-b-0">
-                    <td colSpan={8} className="px-4 pb-2">
+                    <td colSpan={9} className="px-4 pb-2">
                       {busy && (
                         <span
                           className="text-muted-foreground inline-flex items-center gap-1.5 text-xs"
@@ -510,6 +635,47 @@ function RoleGroupTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** The per-row Delete control. Disabled with an inline reason
+ *  ({@link deleteDisabledReason}) for a seeded default or a role with any live
+ *  holder; enabled only for a `manual` role with zero holders, matching the
+ *  route's own gate order exactly. The reason is both a `title` tooltip and an
+ *  `aria-describedby`-linked (visually hidden) span, so it reaches a
+ *  screen-reader user the same way a hover reaches a sighted one. */
+function DeleteRoleButton({
+  row,
+  busy,
+  onRequest,
+}: {
+  row: OrgUnitRoleRosterRow;
+  busy: boolean;
+  onRequest: (row: OrgUnitRoleRosterRow) => void;
+}) {
+  const key = rowKey(row);
+  const reason = deleteDisabledReason(row);
+  const reasonId = `roles-delete-reason-${key}`;
+  return (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={busy || reason !== null}
+        title={reason ?? undefined}
+        aria-describedby={reason ? reasonId : undefined}
+        onClick={() => onRequest(row)}
+        data-testid={`roles-delete-${key}`}
+      >
+        Delete
+      </Button>
+      {reason && (
+        <span id={reasonId} className="sr-only">
+          {reason}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -594,6 +760,9 @@ function AddRoleDialog({
         source: data.source,
         holderCount: 0,
         unitCount: 0,
+        // A freshly created role never carries any pre-existing scope rows —
+        // POST has no field for them.
+        scopeRowCount: 0,
       });
       onOpenChange(false);
     } catch {

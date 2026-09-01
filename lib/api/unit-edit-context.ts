@@ -61,7 +61,14 @@
  * `programs`.
  */
 import { readFileSync } from "node:fs";
-import { CENTER_ENTITY_TYPE, CENTER_PROGRAM_ENTITY_TYPE, DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
+import {
+  CENTER_ENTITY_TYPE,
+  CENTER_PROGRAM_ENTITY_TYPE,
+  DIRECTOR_ROLE_KEY,
+  DEPARTMENT_CHAIR_ROLE_KEY,
+  DEPARTMENT_DIRECTOR_ROLE_KEY,
+  DIVISION_CHIEF_ROLE_KEY,
+} from "@/lib/org-unit-roles";
 import path from "node:path";
 
 import {
@@ -420,7 +427,7 @@ export async function loadUnitEditContext(
   if (unitType === "department") {
     const row = await client.department.findUnique({
       where: { code },
-      select: { code: true, name: true, description: true, url: true, slug: true, chairCwid: true, source: true },
+      select: { code: true, name: true, description: true, url: true, slug: true, source: true },
     });
     if (!row) return null;
     name = row.name;
@@ -428,7 +435,21 @@ export async function loadUnitEditContext(
     url = row.url;
     slug = row.slug;
     source = row.source === "manual" ? "manual" : "ED";
-    rowLeaderCwid = row.chairCwid;
+    // #2542 contract A — leadership is an `OrgUnitRoleAssignment` row only;
+    // `Department.chairCwid` no longer exists as a read source. `roleKey`
+    // (chair vs. director) is naturally exclusive per department — seeded by
+    // category — so an IN-list `findFirst` needs no separate category read.
+    const assignment = await client.orgUnitRoleAssignment.findFirst({
+      where: {
+        entityType: "department",
+        entityId: row.code,
+        roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+      },
+      select: { cwid: true, interim: true },
+      orderBy: { sortOrder: "asc" },
+    });
+    rowLeaderCwid = assignment?.cwid ?? null;
+    rowLeaderInterim = assignment?.interim;
   } else if (unitType === "division") {
     const row = await client.division.findUnique({
       where: { code },
@@ -438,7 +459,6 @@ export async function loadUnitEditContext(
         description: true,
         url: true,
         slug: true,
-        chiefCwid: true,
         source: true,
         deptCode: true,
         department: { select: { name: true, slug: true } },
@@ -453,7 +473,15 @@ export async function loadUnitEditContext(
     deptCode = row.deptCode;
     deptName = row.department?.name ?? null;
     deptSlug = row.department?.slug ?? null;
-    rowLeaderCwid = row.chiefCwid;
+    // #2542 contract A — leadership is an `OrgUnitRoleAssignment` row only;
+    // `Division.chiefCwid` no longer exists as a read source.
+    const assignment = await client.orgUnitRoleAssignment.findFirst({
+      where: { entityType: "division", entityId: row.code, roleKey: DIVISION_CHIEF_ROLE_KEY },
+      select: { cwid: true, interim: true },
+      orderBy: { sortOrder: "asc" },
+    });
+    rowLeaderCwid = assignment?.cwid ?? null;
+    rowLeaderInterim = assignment?.interim;
   } else {
     const row = await client.center.findUnique({
       where: { code },
@@ -464,11 +492,6 @@ export async function loadUnitEditContext(
         url: true,
         slug: true,
         centerType: true,
-        // #2542 — leadership is an `OrgUnitRoleAssignment` row, fetched below.
-        // The two columns stay selected as the pre-backfill dual-read fallback;
-        // both go in the contract PR.
-        directorCwid: true,
-        leaderInterim: true,
       },
     });
     if (!row) return null;
@@ -480,15 +503,18 @@ export async function loadUnitEditContext(
     // "manual" regardless of the seed/import provenance on the row.
     source = "manual";
     centerType = row.centerType === "institute" ? "institute" : "center";
-    // Separate query: the assignment is polymorphic on (entityType, entityId)
-    // with no FK to `center`, so it cannot be nested on the select above.
+    // #2542 contract A — leadership is an `OrgUnitRoleAssignment` row only;
+    // `Center.directorCwid` / `Center.leaderInterim` no longer exist as read
+    // sources. Separate query: the assignment is polymorphic on (entityType,
+    // entityId) with no FK to `center`, so it cannot be nested on the select
+    // above.
     const assignment = await client.orgUnitRoleAssignment.findFirst({
       where: { entityType: CENTER_ENTITY_TYPE, entityId: row.code, roleKey: DIRECTOR_ROLE_KEY },
       select: { cwid: true, interim: true },
       orderBy: { sortOrder: "asc" },
     });
-    rowLeaderCwid = assignment?.cwid ?? row.directorCwid;
-    rowLeaderInterim = assignment?.interim ?? row.leaderInterim;
+    rowLeaderCwid = assignment?.cwid ?? null;
+    rowLeaderInterim = assignment?.interim;
   }
 
   // 2. Effective role + the superuser/retired gates.

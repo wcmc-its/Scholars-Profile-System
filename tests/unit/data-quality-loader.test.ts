@@ -119,6 +119,32 @@ function fakeClient(opts: {
     },
     fieldOverride: { findMany: vi.fn().mockResolvedValue([]) },
     overviewProvenance: { findMany: vi.fn().mockResolvedValue([]) },
+    // #2542 contract A — chair/chief come from `OrgUnitRoleAssignment` only;
+    // `Department.chairCwid` / `Division.chiefCwid` no longer exist as read
+    // sources. Derived from the SAME `chairs`/`chairDepartments`/`chiefs`
+    // options every test already passes — `roleKey` is what now carries the
+    // Chair-vs-Director split (#58), computed here exactly as
+    // `departmentLeaderRoleKey` does in production.
+    orgUnitRoleAssignment: {
+      findMany: vi.fn().mockImplementation((args: { where?: { entityType?: string } }) => {
+        const entityType = args?.where?.entityType;
+        if (entityType === "department") {
+          const rows =
+            opts.chairDepartments ??
+            (opts.chairs ?? []).map((c) => ({ chairCwid: c, category: "clinical" }));
+          return Promise.resolve(
+            rows.map((d) => ({
+              cwid: d.chairCwid,
+              roleKey: d.category === "administrative" ? "director" : "chair",
+            })),
+          );
+        }
+        if (entityType === "division") {
+          return Promise.resolve((opts.chiefs ?? []).map((c) => ({ cwid: c })));
+        }
+        return Promise.resolve([]);
+      }),
+    },
   };
   return { client, scholarFindMany, grantGroupBy };
 }

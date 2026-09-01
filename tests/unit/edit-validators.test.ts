@@ -423,9 +423,16 @@ describe("findSuppressibleEntityOwner (#160)", () => {
 
 type ChairClient = Parameters<typeof isChairAppointment>[2];
 
+// #2542 contract A — `isChairAppointment` resolves the department's
+// chair/director `OrgUnitRoleAssignment` row first, then the department's
+// name via `findUnique` keyed on the assignment's `entityId`
+// (`Department.chairCwid` no longer exists as a read source).
 function chairClient(dept: { name: string } | null): ChairClient {
   return {
-    department: { findFirst: vi.fn().mockResolvedValue(dept) },
+    orgUnitRoleAssignment: {
+      findFirst: vi.fn().mockResolvedValue(dept ? { entityId: "MED" } : null),
+    },
+    department: { findUnique: vi.fn().mockResolvedValue(dept) },
   } as unknown as ChairClient;
 }
 

@@ -32,7 +32,11 @@
 import { toCsv } from "@/lib/csv";
 import { PI_ROLES } from "@/lib/funding-roles";
 import { formatRoleCategory } from "@/lib/role-display";
-import { departmentLeaderRoleKey, DEPARTMENT_DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
+import {
+  DEPARTMENT_CHAIR_ROLE_KEY,
+  DEPARTMENT_DIRECTOR_ROLE_KEY,
+  DIVISION_CHIEF_ROLE_KEY,
+} from "@/lib/org-unit-roles";
 import type { EditRosterUnitFilter } from "@/lib/api/edit-roster";
 import { buildScholarNameClauses } from "@/lib/api/scholar-name-search";
 import type { DataQualityScope } from "@/lib/edit/data-quality";
@@ -51,6 +55,7 @@ export type DataQualityClient = Pick<
   | "centerMembership"
   | "divisionMembership"
   | "overviewProvenance"
+  | "orgUnitRoleAssignment"
 >;
 
 /** A single org-unit filter (department / division / center); reused from the
@@ -126,9 +131,9 @@ function deaneryLabel(title: string): string | null {
  *
  * `chairLabel` is pre-resolved by the caller, not a plain "is this cwid a
  * department chair" boolean: an administrative department's leader is a
- * DIRECTOR, not a Chair (#58 / #2542 Phase D — `departmentLeaderRoleKey`,
- * `lib/org-unit-roles.ts`), and `Department.chairCwid` set-membership alone
- * cannot tell the two apart. `null` means "not a department leader at all";
+ * DIRECTOR, not a Chair (#58 / #2542) — the caller reads it straight off the
+ * `OrgUnitRoleAssignment.roleKey`, which already carries that distinction.
+ * `null` means "not a department leader at all";
  * a non-null string is "Chair" or "Director" (whichever the caller resolved).
  * `isChief` stays a boolean — divisions have no category ternary, so there is
  * only one possible label for them.
@@ -457,10 +462,21 @@ async function computeDataQualityEntries(
           division: { select: { name: true } },
         },
       }),
-      // `category` drives Chair vs. Director (#58 / #2542 Phase D) — see the
-      // `chairLabelByCwid` build below.
-      client.department.findMany({ select: { chairCwid: true, category: true } }),
-      client.division.findMany({ select: { chiefCwid: true } }),
+      // #2542 contract A — chair/director/chief come from `OrgUnitRoleAssignment`
+      // only; `Department.chairCwid` / `Division.chiefCwid` no longer exist as
+      // read sources. `roleKey` itself distinguishes Chair vs. Director (#58) —
+      // see the `chairLabelByCwid` build below.
+      client.orgUnitRoleAssignment.findMany({
+        where: {
+          entityType: "department",
+          roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+        },
+        select: { cwid: true, roleKey: true },
+      }),
+      client.orgUnitRoleAssignment.findMany({
+        where: { entityType: "division", roleKey: DIVISION_CHIEF_ROLE_KEY },
+        select: { cwid: true },
+      }),
       client.grant.groupBy({
         by: ["cwid"],
         // PI prominence weights WCM-administered grants only; exclude RePORTER
@@ -487,18 +503,15 @@ async function computeDataQualityEntries(
     ]);
 
   // "Chair" for clinical/mixed/basic departments, "Director" for
-  // administrative ones (#58 / #2542 Phase D) — a plain membership Set can't
-  // carry that distinction, so this is a label map instead. A cwid chairing
-  // more than one department (unusual) keeps the LAST department's label;
-  // no ordering is defined or needed for that edge case today.
+  // administrative ones (#58 / #2542) — a plain membership Set can't carry
+  // that distinction, so this is a label map instead. A cwid chairing more
+  // than one department (unusual) keeps the LAST department's label; no
+  // ordering is defined or needed for that edge case today.
   const chairLabelByCwid = new Map<string, string>();
   for (const r of chairRows) {
-    if (!r.chairCwid) continue;
-    const label =
-      departmentLeaderRoleKey(r.category) === DEPARTMENT_DIRECTOR_ROLE_KEY ? "Director" : "Chair";
-    chairLabelByCwid.set(r.chairCwid, label);
+    chairLabelByCwid.set(r.cwid, r.roleKey === DEPARTMENT_DIRECTOR_ROLE_KEY ? "Director" : "Chair");
   }
-  const chiefs = new Set(chiefRows.map((r) => r.chiefCwid).filter((c): c is string => !!c));
+  const chiefs = new Set(chiefRows.map((r) => r.cwid));
   const piCount = new Map(piRows.map((r) => [r.cwid, r._count._all]));
   const nihPiCount = new Map(nihPiRows.map((r) => [r.cwid, r._count._all]));
   const overviewOverride = new Set(

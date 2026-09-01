@@ -39,6 +39,7 @@ function mockClient() {
     publicationAuthor: { findMany: vi.fn().mockResolvedValue([]) },
     department: { findMany: vi.fn().mockResolvedValue([]) },
     division: { findMany: vi.fn().mockResolvedValue([]) },
+    orgUnitRoleAssignment: { findMany: vi.fn().mockResolvedValue([]) },
   } as unknown as Parameters<typeof buildPeopleDoc>[1];
 }
 

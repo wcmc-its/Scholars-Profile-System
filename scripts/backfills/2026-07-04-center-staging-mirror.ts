@@ -1,14 +1,9 @@
 /**
- * #2542 Phase 1 NOTE — `Center.directorCwid` is DEPRECATED. The director is a
- * `CenterLeader` row with `roleKey = "director"`, and every reader now prefers
- * it, falling back to this column only when no such row exists.
- *
- * This script writes ONLY the column. Once a center has a `CenterLeader` row,
- * a run here changes NOTHING a user can see — and re-running
- * `scripts/backfills/2026-08-29-center-role-vocabulary.ts` will NOT rescue it,
- * because that script deliberately skips any center that already holds a
- * director (so a re-run cannot resurrect a replaced one). Set the director
- * through `/edit` instead, or update this script to write `CenterLeader` too.
+ * #2542 contract A NOTE — `Center.directorCwid` was retired (the director is
+ * now an `OrgUnitRoleAssignment` row with `roleKey = "director"`). This script
+ * never wrote director assignments — it only ever wrote the now-removed
+ * column — so it sets no leadership at all for the centers it creates. Set
+ * the director through `/edit` afterward.
  *
  * Center staging-mirror backfill (2026-07-04, one-shot per DB).
  *
@@ -25,7 +20,8 @@
  *   removed from the canonical seed (`prisma/center-seed-data.ts`) and already
  *   dropped on staging; prod is stale. Hard-delete cascades their memberships
  *   (verified: 0 and 2 respectively). Mirrors the "hard-delete removed centers"
- *   step in 2026-06-12-org-unit-comms-update.ts.
+ *   step this same backfill lineage used in 2026-06-12-org-unit-comms-update.ts,
+ *   a one-shot script that was executed and removed in contract A.
  *
  * OUT OF SCOPE (separate workstream): the Meyer Cancer Center program/membership
  * setup (5 programs + ~342 classified memberships) is staging-only on prod and
@@ -53,7 +49,6 @@ type CenterDef = {
   description: string;
   url: string | null;
   centerType: string;
-  directorCwid: string | null;
   sortOrder: number;
 };
 
@@ -67,7 +62,6 @@ const CREATE: ReadonlyArray<CenterDef> = [
       "Research on the mechanisms, early detection, and treatment of Alzheimer's disease and related neurodegenerative disorders.",
     url: null,
     centerType: "institute",
-    directorCwid: "lig2033",
     sortOrder: 130,
   },
   {
@@ -78,7 +72,6 @@ const CREATE: ReadonlyArray<CenterDef> = [
       "Pediatric research spanning immunology, genomics, and the biological origins of childhood disease.",
     url: null,
     centerType: "institute",
-    directorCwid: "vip2021",
     sortOrder: 100,
   },
   {
@@ -89,7 +82,6 @@ const CREATE: ReadonlyArray<CenterDef> = [
       "Nutrition science and its role in metabolic health, disease prevention, and clinical practice.",
     url: null,
     centerType: "center",
-    directorCwid: null,
     sortOrder: 140,
   },
   {
@@ -100,7 +92,6 @@ const CREATE: ReadonlyArray<CenterDef> = [
       "Global health research and training addressing infectious disease and health-system challenges in resource-limited settings.",
     url: null,
     centerType: "center",
-    directorCwid: "dwf2001",
     sortOrder: 120,
   },
   {
@@ -111,7 +102,6 @@ const CREATE: ReadonlyArray<CenterDef> = [
       "Research on diabetes, obesity, and metabolic disease, from molecular mechanisms to clinical care.",
     url: "https://metabolichealth.weill.cornell.edu/",
     centerType: "center",
-    directorCwid: "lca4001",
     sortOrder: 110,
   },
 ];
@@ -139,7 +129,6 @@ async function run(dryRun: boolean) {
         description: c.description,
         url: c.url,
         centerType: c.centerType,
-        directorCwid: c.directorCwid,
         sortOrder: c.sortOrder,
         source: "manual",
       };

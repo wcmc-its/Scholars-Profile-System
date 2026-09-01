@@ -5,8 +5,8 @@
  * edited in-row, so there is no `field_override` merge here.
  *
  *  - Centers carry the interim qualifier on the leadership holder's
- *    `CenterLeader` row (#2542; was the `leaderInterim` column) — surface it
- *    on `leadership[0].isInterim`.
+ *    `OrgUnitRoleAssignment` row (#2542 contract A — `Center.leaderInterim`
+ *    no longer exists as a read source) — surface it on `leadership[0].isInterim`.
  *  - edge 20 — whole-unit suppression on a center renders as 404 (null).
  *  - `loadUnitFieldOverrides("center", ...)` is short-circuited; this file
  *    asserts a center read does not issue a `field_override` query.
@@ -38,13 +38,12 @@ const {
 vi.mock("@/lib/db", () => ({
   prisma: {
     center: { findUnique: mockCenterFindUnique },
-    // #2542 Phase B — leadership is a LIST of `OrgUnitRoleAssignment` rows
-    // fetched with `findMany` (`getCenterUncached`, `lib/api/centers.ts`); it
-    // used to be a nested `leaders` relation on `center`.
+    // #2542 contract A — leadership is a LIST of `OrgUnitRoleAssignment` rows
+    // fetched with `findMany` (`getCenterUncached`, `lib/api/centers.ts`) —
+    // the SOLE source; `Center.directorCwid` / `Center.leaderInterim` no
+    // longer exist as read sources, so `orgUnitRole.findUnique` (the old
+    // pre-backfill fallback's vocabulary lookup) is never called any more.
     orgUnitRoleAssignment: { findFirst: mockAssignmentFindFirst, findMany: mockAssignmentFindMany },
-    // Pre-backfill dual-read fallback: when no assignment row exists yet,
-    // `getCenterUncached` still resolves the vocabulary's label for
-    // `Center.directorCwid` via this lookup.
     orgUnitRole: { findUnique: mockOrgUnitRoleFindUnique },
     scholar: { findUnique: mockScholarFindUnique, findMany: mockScholarFindMany },
     centerMembership: { findMany: mockCenterMembershipFindMany },
@@ -61,11 +60,6 @@ const CENTER = {
   slug: "meyer-cancer-center",
   description: "Cancer research center.",
   url: null,
-  // #2542 — `getCenterUncached` reads leadership from `OrgUnitRoleAssignment`
-  // rows first. These two columns remain as the pre-backfill dual-read
-  // fallback, which is what every environment is on today.
-  directorCwid: "dir0001",
-  leaderInterim: false,
   scholarCount: 42,
 };
 
@@ -88,9 +82,11 @@ function defaultBaselineMocks() {
   mockCenterMembershipFindMany.mockResolvedValue([]);
   mockSuppressionFindFirst.mockResolvedValue(null);
   mockFieldOverrideFindMany.mockResolvedValue([]);
-  // No assignment row by default: reads fall through to the legacy column, which
-  // is exactly the pre-backfill state in every environment today.
-  mockAssignmentFindMany.mockResolvedValue([]);
+  // #2542 contract A — the assignment row is the sole source; the `dir0001`
+  // identity these tests were originally written against.
+  mockAssignmentFindMany.mockResolvedValue([
+    { cwid: "dir0001", roleKey: "director", interim: false, role: { label: "Director" } },
+  ]);
   mockOrgUnitRoleFindUnique.mockResolvedValue({ label: "Director" });
 }
 
@@ -121,7 +117,7 @@ describe("getCenter — unit-curation read-merge (#540)", () => {
     expect(result?.leadership[0]?.isInterim).toBe(true);
   });
 
-  it("leadership[0].isInterim defaults to false from the column (pre-backfill dual read)", async () => {
+  it("leadership[0].isInterim defaults to false from the assignment row", async () => {
     defaultBaselineMocks();
     const result = await getCenter("meyer-cancer-center");
     expect(result?.leadership).toHaveLength(1);
@@ -129,9 +125,9 @@ describe("getCenter — unit-curation read-merge (#540)", () => {
     expect(result?.leadership[0]?.isInterim).toBe(false);
   });
 
-  it("a center with no assignment rows and no director column produces an empty leadership list", async () => {
+  it("a center with no assignment rows produces an empty leadership list", async () => {
     defaultBaselineMocks();
-    mockCenterFindUnique.mockResolvedValue({ ...CENTER, directorCwid: null });
+    mockAssignmentFindMany.mockResolvedValue([]);
 
     const result = await getCenter("meyer-cancer-center");
     expect(result?.leadership).toEqual([]);

@@ -30,8 +30,9 @@ import {
   CENTER_PROGRAM_ENTITY_TYPE,
   DIRECTOR_ROLE_KEY,
   formatLeadershipTitle,
-  departmentLeaderRoleKey,
+  DEPARTMENT_CHAIR_ROLE_KEY,
   DEPARTMENT_DIRECTOR_ROLE_KEY,
+  DIVISION_CHIEF_ROLE_KEY,
 } from "@/lib/org-unit-roles";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import { scoreFundingImportance } from "@/lib/edit/funding-importance";
@@ -996,8 +997,8 @@ function asProgramName(label: string): string {
 /** One synthesized FK-leadership title plus the unit context the dedup needs. */
 type FkLeadershipCandidate = {
   candidate: OverviewSourceTitle;
-  /** A dept-chair role — gets the role-aware `isChairTitleFor` dedup (the ETL sets
-   *  `chairCwid` from a "Chairman …" appointment whose string won't match exactly). */
+  /** A dept-chair role — gets the role-aware `isChairTitleFor` dedup (the ETL derives
+   *  the chair assignment from a "Chairman …" appointment whose string won't match exactly). */
   isDeptChair: boolean;
   /** The unit name, for the chair dedup against appointment titles. */
   unitName: string;
@@ -1030,15 +1031,17 @@ function fkLeadershipCandidate(
 
 /**
  * #742 §2.5 — leadership roles recorded on the org-unit FK tables, not (or not
- * yet) in the appointment table: a department `chairCwid`, a division `chiefCwid`,
- * an `OrgUnitRoleAssignment` row (#2542; was `directorCwid` + interim), and a
- * `center_program` `OrgUnitRoleAssignment` row (#2558; was a retired
- * per-program leader table). These catch leadership set via `field_override`
- * or missed by the appointment-title ETL (the Stewart case). Each query keys
- * on the leader being THIS scholar, so an external leader
- * (`lib/external-leaders.ts`, a non-WCM cwid) never matches. The synthesized
- * titles are deduped against the appointment titles + primary title by the
- * caller.
+ * yet) in the appointment table: department chair/director, division chief,
+ * center leadership, and a `center_program` `OrgUnitRoleAssignment` row
+ * (#2558; was a retired per-program leader table). Sole source for every kind
+ * is `OrgUnitRoleAssignment` (#2542 contract A — `Department.chairCwid` /
+ * `Division.chiefCwid` / `Center.directorCwid` / `Center.leaderInterim` no
+ * longer exist as read sources). These catch leadership set via
+ * `field_override` or missed by the appointment-title ETL (the Stewart
+ * case). Each query keys on the leader being THIS scholar, so an external
+ * leader (`lib/external-leaders.ts`, a non-WCM cwid) never matches. The
+ * synthesized titles are deduped against the appointment titles + primary
+ * title by the caller.
  *
  * NOTE: program leaders live in `OrgUnitRoleAssignment` (#1117 replaced the
  * single `CenterProgram.leaderCwid` column with a 0..N table, #2558 migrated
@@ -1046,17 +1049,20 @@ function fkLeadershipCandidate(
  * every leader.
  */
 async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCandidate[]> {
-  const [departments, divisions, centers, legacyCenters, programAssignments] =
-    await Promise.all([
-    db.read.department.findMany({
-      where: { chairCwid: cwid },
-      // `category` drives Chair vs. Director (#58 / #2542 Phase D) — see the
-      // `departmentLeaderRoleKey` call in the loop below.
-      select: { code: true, name: true, officialName: true, category: true },
+  const [deptAssignments, divAssignments, centers, programAssignments] = await Promise.all([
+    // `roleKey` itself distinguishes Chair vs. Director (#58 / #2542) — see
+    // the loop below.
+    db.read.orgUnitRoleAssignment.findMany({
+      where: {
+        cwid,
+        entityType: "department",
+        roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+      },
+      select: { entityId: true, roleKey: true },
     }),
-    db.read.division.findMany({
-      where: { chiefCwid: cwid },
-      select: { code: true, name: true },
+    db.read.orgUnitRoleAssignment.findMany({
+      where: { cwid, entityType: "division", roleKey: DIVISION_CHIEF_ROLE_KEY },
+      select: { entityId: true },
     }),
     // #2542 — center leadership is an `OrgUnitRoleAssignment` row.
     // `profileTitle` gates it for the same reason `role: "leader"` gates program
@@ -1076,19 +1082,12 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
         role: { select: { label: true } },
       },
     }),
-    // Dual-read fallback for the pre-backfill window; dropped in the contract PR.
-    db.read.center.findMany({
-      where: { directorCwid: cwid },
-      select: { code: true, name: true, officialName: true, leaderInterim: true },
-    }),
     // #2558 — program leadership is an `OrgUnitRoleAssignment` row too
     // (`entityType: "center_program"`, `entityId`
     // `"{centerCode}:{programCode}"`). `profileTitle` gates it the same way
     // it does above — `coe_liaison` seeds `profileTitle: false`, so this only
     // ever surfaces `leader` rows. No FK to `CenterProgram`, so the program's
-    // label/center name are resolved separately, below. Contract PR — the
-    // retired per-program leader table's dual-read fallback is gone; this is
-    // the only source now.
+    // label/center name are resolved separately, below.
     db.read.orgUnitRoleAssignment.findMany({
       where: {
         cwid,
@@ -1103,13 +1102,31 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
     }),
   ]);
 
-  // One batched name lookup for the centers the assignments point at.
-  const centerNameRows = centers.length
-    ? await db.read.center.findMany({
-        where: { code: { in: centers.map((c) => c.entityId) } },
-        select: { code: true, name: true, officialName: true },
-      })
-    : [];
+  // One batched name lookup for the departments/divisions/centers the
+  // assignments point at — none of the three carries an FK to its target
+  // (polymorphic on `entityId`).
+  const [deptNameRows, divNameRows, centerNameRows] = await Promise.all([
+    deptAssignments.length
+      ? db.read.department.findMany({
+          where: { code: { in: deptAssignments.map((a) => a.entityId) } },
+          select: { code: true, name: true, officialName: true },
+        })
+      : Promise.resolve([]),
+    divAssignments.length
+      ? db.read.division.findMany({
+          where: { code: { in: divAssignments.map((a) => a.entityId) } },
+          select: { code: true, name: true },
+        })
+      : Promise.resolve([]),
+    centers.length
+      ? db.read.center.findMany({
+          where: { code: { in: centers.map((c) => c.entityId) } },
+          select: { code: true, name: true, officialName: true },
+        })
+      : Promise.resolve([]),
+  ]);
+  const deptNameById = new Map(deptNameRows.map((d) => [d.code, d.officialName ?? d.name]));
+  const divNameById = new Map(divNameRows.map((d) => [d.code, d.name]));
   const centerNameById = new Map(
     centerNameRows.map((c) => [c.code, c.officialName ?? c.name]),
   );
@@ -1141,19 +1158,22 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
   }
 
   const out: FkLeadershipCandidate[] = [];
-  for (const d of departments) {
-    const name = d.officialName ?? d.name;
-    // #58 / #2542 Phase D — an administrative department's leader is a
-    // DIRECTOR, not a Chair; `departmentLeaderRoleKey` is the single place
-    // that decides which from `category`. `isDeptChair` gates the
-    // role-aware `isChairTitleFor` dedup below, which matches "Chair of
-    // {dept}" appointment titles only — it must not fire for a Director,
-    // whose real appointment title is "Director of {dept}", a different
-    // pattern that predicate does not recognize.
-    const isDirector = departmentLeaderRoleKey(d.category) === DEPARTMENT_DIRECTOR_ROLE_KEY;
+  for (const a of deptAssignments) {
+    const name = deptNameById.get(a.entityId);
+    // A row whose department vanished emits no candidate rather than a
+    // half-rendered one — the assignment carries no FK to `department`.
+    if (name === undefined) continue;
+    // #58 / #2542 — an administrative department's leader is a DIRECTOR, not
+    // a Chair; the assignment's own `roleKey` already carries that
+    // distinction (it was written from `departmentLeaderRoleKey(category)`).
+    // `isDeptChair` gates the role-aware `isChairTitleFor` dedup below, which
+    // matches "Chair of {dept}" appointment titles only — it must not fire
+    // for a Director, whose real appointment title is "Director of {dept}",
+    // a different pattern that predicate does not recognize.
+    const isDirector = a.roleKey === DEPARTMENT_DIRECTOR_ROLE_KEY;
     out.push(
       fkLeadershipCandidate(
-        `fk:dept:${d.code}`,
+        `fk:dept:${a.entityId}`,
         `${isDirector ? "Director" : "Chair"}, ${withUnitNoun("Department of", name)}`,
         WCM_ORG,
         false,
@@ -1161,9 +1181,13 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
       ),
     );
   }
-  for (const v of divisions) {
+  for (const a of divAssignments) {
+    const name = divNameById.get(a.entityId);
+    // A row whose division vanished emits no candidate rather than a
+    // half-rendered one.
+    if (name === undefined) continue;
     out.push(
-      fkLeadershipCandidate(`fk:div:${v.code}`, `Chief, ${withUnitNoun("Division of", v.name)}`, WCM_ORG, false),
+      fkLeadershipCandidate(`fk:div:${a.entityId}`, `Chief, ${withUnitNoun("Division of", name)}`, WCM_ORG, false),
     );
   }
   for (const c of centers) {
@@ -1187,20 +1211,6 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
         `${formatLeadershipTitle(c.role.label, c.interim)}, ${name}`,
         WCM_ORG,
         c.interim,
-      ),
-    );
-  }
-  // Dual-read: only centers `CenterLeader` does not already cover, so the two
-  // sources never emit two candidates with the same `fk:center:` id.
-  for (const c of legacyCenters) {
-    if (centers.some((x) => x.entityId === c.code)) continue;
-    const name = c.officialName ?? c.name;
-    out.push(
-      fkLeadershipCandidate(
-        `fk:center:${c.code}`,
-        `${c.leaderInterim ? "Interim " : ""}Director, ${name}`,
-        WCM_ORG,
-        c.leaderInterim,
       ),
     );
   }
@@ -1282,8 +1292,8 @@ async function loadOverviewTitleCandidates(cwid: string): Promise<OverviewSource
   // §2.5 dedup — drop an FK-leadership title the appointments (or the primary title)
   // already carry, so a chair recorded in BOTH places doesn't double. Exact
   // normalized match covers the general case; a dept chair additionally gets the
-  // role-aware `isChairTitleFor` check, because `chairCwid` is derived from a
-  // "Chairman …" appointment whose text won't match the synthesized "Chair, …".
+  // role-aware `isChairTitleFor` check, because the chair assignment is derived
+  // from a "Chairman …" appointment whose text won't match the synthesized "Chair, …".
   const apptTitles = appointments.map((a) => a.title);
   const primaryTitle = scholar?.primaryTitle ?? null;
   const takenNorm = new Set(apptTitles.map((t) => normalizeTitleForDedup(t)));

@@ -1,12 +1,13 @@
 /**
  * Issue #532 — `buildPeopleDoc` leadership signal.
  *
- * `Department.chairCwid` / `Division.chiefCwid` already carry override-applied
- * leadership values from the ED ETL (ADR-002 Path B prediction + the
- * `field_override(leaderCwid)` precedence consult, #2560). These tests assert
- * the indexer surfaces them onto the people doc
- * correctly: lowercased names, OMIT-on-empty for non-leaders, and both
- * fields populated when a scholar is both a chair and a chief.
+ * #2542 contract A — sole source is `OrgUnitRoleAssignment`, written by the ED
+ * ETL immediately after its ADR-002 chair-detection + `field_override
+ * (leaderCwid)` precedence consult (#2560); `Department.chairCwid` /
+ * `Division.chiefCwid` no longer exist as read sources. These tests assert
+ * the indexer surfaces them onto the people doc correctly: lowercased names,
+ * OMIT-on-empty for non-leaders, and both fields populated when a scholar is
+ * both a chair and a chief.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -18,19 +19,35 @@ const NO_SUP: PublicationSuppressions = {
   hiddenAuthorsByPmid: new Map(),
 };
 
+/** A department/division the scholar leads, keyed by a synthetic `code` — the
+ *  assignment carries no FK, so the loader resolves the name via a second
+ *  batched query keyed on that code, exactly as production does. */
 function mockClient(opts: {
   chairedDepartments?: ReadonlyArray<{ name: string }>;
   chieffedDivisions?: ReadonlyArray<{ name: string }>;
 } = {}): Parameters<typeof buildPeopleDoc>[1] {
+  const depts = (opts.chairedDepartments ?? []).map((d, i) => ({ code: `D${i}`, name: d.name }));
+  const divs = (opts.chieffedDivisions ?? []).map((d, i) => ({ code: `V${i}`, name: d.name }));
   return {
     centerMembership: { findMany: vi.fn().mockResolvedValue([]) },
     divisionMembership: { findMany: vi.fn().mockResolvedValue([]) },
     publicationAuthor: { findMany: vi.fn().mockResolvedValue([]) },
     department: {
-      findMany: vi.fn().mockResolvedValue(opts.chairedDepartments ?? []),
+      findMany: vi.fn().mockResolvedValue(depts),
     },
     division: {
-      findMany: vi.fn().mockResolvedValue(opts.chieffedDivisions ?? []),
+      findMany: vi.fn().mockResolvedValue(divs),
+    },
+    orgUnitRoleAssignment: {
+      findMany: vi.fn().mockImplementation((args: { where?: { entityType?: string } }) => {
+        if (args?.where?.entityType === "department") {
+          return Promise.resolve(depts.map((d) => ({ entityId: d.code })));
+        }
+        if (args?.where?.entityType === "division") {
+          return Promise.resolve(divs.map((d) => ({ entityId: d.code })));
+        }
+        return Promise.resolve([]);
+      }),
     },
   } as unknown as Parameters<typeof buildPeopleDoc>[1];
 }

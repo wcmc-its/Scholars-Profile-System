@@ -201,7 +201,17 @@ export type AuditAction =
    *  'org_unit_role'`, `targetEntityId` is the `entityType:key` pair;
    *  before/after carry whichever of the three fields changed. Requires the
    *  `scholars_audit` action ENUM be extended — see `scripts/sql/audit-log.sql`. */
-  | "role_vocabulary_update";
+  | "role_vocabulary_update"
+  /** a superuser/comms-steward deleted a `manual`, zero-holder `OrgUnitRole`
+   *  entry via the steward-owned role-vocabulary editor (a `seed` entry, or
+   *  one with a live `OrgUnitRoleAssignment` / `CenterMembership` holder,
+   *  refuses instead — see `app/api/edit/roles/route.ts`'s DELETE docblock).
+   *  `targetEntityType='org_unit_role'`, `targetEntityId` is the
+   *  `entityType:key` pair; `beforeValues` carries the deleted row's
+   *  label/roleGroup/scope plus the count of `OrgUnitRoleScope` allowlist
+   *  rows removed with it; `afterValues` is `null`. Requires the
+   *  `scholars_audit` action ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "role_vocabulary_delete";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =

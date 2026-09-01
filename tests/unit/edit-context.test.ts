@@ -27,7 +27,8 @@ type FakeClient = {
   appointment: { findMany: AnyMock };
   education: { findMany: AnyMock };
   grant: { findMany: AnyMock };
-  department: { findFirst: AnyMock };
+  department: { findUnique: AnyMock };
+  orgUnitRoleAssignment: { findFirst: AnyMock };
   coiActivity: { findMany: AnyMock };
   coiGapCandidate: { findMany: AnyMock };
   publication: { findMany: AnyMock };
@@ -63,7 +64,12 @@ function fakeClient(): FakeClient {
     appointment: { findMany: vi.fn().mockResolvedValue([]) },
     education: { findMany: vi.fn().mockResolvedValue([]) },
     grant: { findMany: vi.fn().mockResolvedValue([]) },
-    department: { findFirst: vi.fn().mockResolvedValue(null) },
+    // #2542 contract A — the chair lock resolves `Department.chairCwid`'s
+    // successor, `OrgUnitRoleAssignment`, then the department's name via
+    // `findUnique` keyed on the assignment's `entityId`. Default to "not a
+    // chair" (no assignment).
+    department: { findUnique: vi.fn().mockResolvedValue(null) },
+    orgUnitRoleAssignment: { findFirst: vi.fn().mockResolvedValue(null) },
     // COI — read-only; default to "no disclosures".
     coiActivity: { findMany: vi.fn().mockResolvedValue([]) },
     // COI-gap candidates — default to "none". Only queried when the loader is
@@ -703,7 +709,12 @@ describe("loadEditContext — entity attributes (#160 appointments / education /
     c.appointment.findMany.mockResolvedValue(opts.appointments ?? []);
     c.education.findMany.mockResolvedValue(opts.educations ?? []);
     c.grant.findMany.mockResolvedValue(opts.grants ?? []);
-    c.department.findFirst.mockResolvedValue(opts.chairedDept ?? null);
+    // #2542 contract A — the chair lock's assignment lookup, then the
+    // department's name via `findUnique` keyed on the assignment's `entityId`.
+    c.orgUnitRoleAssignment.findFirst.mockResolvedValue(
+      opts.chairedDept ? { entityId: "MED" } : null,
+    );
+    c.department.findUnique.mockResolvedValue(opts.chairedDept ?? null);
     c.suppression.findMany
       .mockResolvedValueOnce([]) // scholar-level
       .mockResolvedValueOnce(opts.entitySuppressions ?? []); // entity-level

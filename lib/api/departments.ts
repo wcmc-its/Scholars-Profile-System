@@ -25,7 +25,11 @@ import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
 import { publicRoleWhere } from "@/lib/eligibility";
 import type { LeaderRole } from "@/components/scholar/leader-card";
-import { departmentLeaderRoleKey, DEPARTMENT_DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
+import {
+  departmentLeaderRoleKey,
+  DEPARTMENT_DIRECTOR_ROLE_KEY,
+  DIVISION_CHIEF_ROLE_KEY,
+} from "@/lib/org-unit-roles";
 import { resolveUnitLeader } from "@/lib/api/unit-leader";
 import {
   isUnitSuppressed,
@@ -119,12 +123,16 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
   // columns at read time (ADR-005 Amendment 1 § A1.1). `slug` is consumed by
   // `etl/ed`, not merged here. `leaderCwid`/`leaderInterim` are NOT merged
   // into this object any more — `resolveUnitLeader` below reads `overrides`
-  // directly so it can apply override-over-assignment-over-column precedence
-  // (Phase D, `lib/api/unit-leader.ts`) rather than the override-or-column
-  // precedence `mergeUnitFields` gives every other field.
+  // directly so it can apply override-over-assignment precedence
+  // (`lib/api/unit-leader.ts`) rather than the override-or-column precedence
+  // `mergeUnitFields` gives every other field. `mergeUnitFields`'s
+  // `leaderCwid` input is a `null` placeholder passed through only to satisfy
+  // `UnitRowFieldsForMerge`'s shape (`lib/api/manual-layer.ts`, out of scope
+  // here) — Department has no `chairCwid` column any more (#2542 contract A)
+  // and the merged `leaderCwid`/`leaderInterim` output is never read.
   const overrides = await loadUnitFieldOverrides("department", dept.code, prisma);
   const merged = mergeUnitFields(
-    { description: dept.description, url: dept.url, leaderCwid: dept.chairCwid },
+    { description: dept.description, url: dept.url, leaderCwid: null },
     overrides,
   );
 
@@ -139,7 +147,6 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
     entityType: "department",
     entityId: dept.code,
     roleKey,
-    legacyLeaderCwid: dept.chairCwid,
     overrides,
     fallbackLabel: roleKey === DEPARTMENT_DIRECTOR_ROLE_KEY ? "Director" : "Chair",
     client: prisma,
@@ -239,9 +246,27 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
     orderBy: { scholarCount: "desc" },
   });
   type DivisionRow = Awaited<typeof rawDivisions>[number];
-  const chiefCwids: string[] = rawDivisions
-    .map((d: DivisionRow) => d.chiefCwid)
-    .filter((c: string | null): c is string => !!c);
+  // Chief per division: override > assignment (#2542 contract A) —
+  // `Division.chiefCwid` no longer exists as a read source. Resolved through
+  // the same `resolveUnitLeader` precedence the division's own page uses.
+  const chiefResolutions = await Promise.all(
+    rawDivisions.map(async (d: DivisionRow) => {
+      const divOverrides = await loadUnitFieldOverrides("division", d.code, prisma);
+      const resolved = await resolveUnitLeader({
+        entityType: "division",
+        entityId: d.code,
+        roleKey: DIVISION_CHIEF_ROLE_KEY,
+        overrides: divOverrides,
+        fallbackLabel: "Chief",
+        client: prisma,
+      });
+      return [d.code, resolved?.cwid ?? null] as const;
+    }),
+  );
+  const chiefCwidByDivision = new Map<string, string | null>(chiefResolutions);
+  const chiefCwids: string[] = [...chiefCwidByDivision.values()].filter(
+    (c): c is string => !!c,
+  );
   const chiefScholars =
     chiefCwids.length > 0
       ? await prisma.scholar.findMany({
@@ -254,13 +279,14 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
     chiefScholars.map((s: ChiefRow) => [s.cwid, s]),
   );
   const divisions: DepartmentDivisionSummary[] = rawDivisions.map((d: DivisionRow) => {
-    const chief = d.chiefCwid ? (chiefMap.get(d.chiefCwid) ?? null) : null;
+    const divChiefCwid = chiefCwidByDivision.get(d.code) ?? null;
+    const chief = divChiefCwid ? (chiefMap.get(divChiefCwid) ?? null) : null;
     return {
       code: d.code,
       name: d.name,
       slug: d.slug,
       description: d.description,
-      chiefCwid: d.chiefCwid,
+      chiefCwid: divChiefCwid,
       chiefName: chief?.preferredName ?? null,
       chiefSlug: chief?.slug ?? null,
       scholarCount: d.scholarCount,
@@ -449,14 +475,20 @@ async function getDepartmentFacultyUncached(
     return out;
   })();
 
-  // Chief-first ordering when divCode is provided.
+  // Chief-first ordering when divCode is provided. Override > assignment
+  // (#2542 contract A), same precedence as the division page itself.
   let chiefCwid: string | null = null;
   if (opts.divCode) {
-    const div = await prisma.division.findFirst({
-      where: { code: opts.divCode },
-      select: { chiefCwid: true },
+    const divOverrides = await loadUnitFieldOverrides("division", opts.divCode, prisma);
+    const resolvedChief = await resolveUnitLeader({
+      entityType: "division",
+      entityId: opts.divCode,
+      roleKey: DIVISION_CHIEF_ROLE_KEY,
+      overrides: divOverrides,
+      fallbackLabel: "Chief",
+      client: prisma,
     });
-    chiefCwid = div?.chiefCwid ?? null;
+    chiefCwid = resolvedChief?.cwid ?? null;
   }
 
   // Scholar rows include department and division names.

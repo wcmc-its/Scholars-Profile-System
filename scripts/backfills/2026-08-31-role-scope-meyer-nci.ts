@@ -74,8 +74,9 @@ export const MEYER_CENTER_CODE = "meyer_cancer_center";
 const SCOPED_ROLE_KEYS: readonly string[] = CENTER_MEMBERSHIP_TYPES;
 
 /** Structural slice of the Prisma client this seed needs, so the unit test
- *  never loads the real one — same posture as `CenterRoleBackfillDb` in
- *  `2026-08-29-center-role-vocabulary.ts`. */
+ *  never loads the real one — same posture the retired one-shot center-role-
+ *  vocabulary backfill used (executed in both envs and removed in contract
+ *  A). */
 export type RoleScopeSeedDb = {
   center: {
     findUnique: (args: unknown) => Promise<{ code: string } | null>;
@@ -134,7 +135,7 @@ export async function runRoleScopeSeed(
   const missingKeys = SCOPED_ROLE_KEYS.filter((k) => !presentKeys.has(k));
   if (missingKeys.length > 0) {
     throw new Error(
-      `Missing 'center' vocabulary row(s) for: ${missingKeys.join(", ")} — refusing to write a dangling org_unit_role_scope FK. Run scripts/backfills/2026-08-29-center-role-vocabulary.ts first (it seeds the 'center' vocabulary, including these two keys).`,
+      `Missing 'center' vocabulary row(s) for: ${missingKeys.join(", ")} — refusing to write a dangling org_unit_role_scope FK. The 'center' vocabulary is now seeded lazily by every write path (\`orgUnitRoleSeedRows\`, \`skipDuplicates: true\`) — a center predating that should already have it from its own writes; the one-shot vocabulary backfill that used to cover this gap was executed in both envs and removed in contract A.`,
     );
   }
 

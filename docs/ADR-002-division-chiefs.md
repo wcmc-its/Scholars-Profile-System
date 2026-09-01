@@ -1,10 +1,12 @@
 # docs/ADR-002 — Populating `Division.chiefCwid`
 
+**Storage note (#2542 contract A, 2026-09):** `Division.chiefCwid` — the column this ADR is about populating — was retired from the schema; Paths A/B below now write an `OrgUnitRoleAssignment` row (`entityType='division'`, `roleKey='chief'`) instead of the column. The detection logic, the two paths, and everything else in this ADR is unchanged and still describes how the chief is chosen — only where the result is stored moved. Read `chairCwid`/`chiefCwid` below as historical column names.
+
 **Status:** Accepted. Path A (chair detection) and Path B (manager-graph detection) remain live and unchanged. Path C (the manual override file) is retired: its ETL read/write branch was deleted under [issue #2560](https://github.com/wcmc-its/Scholars-Profile-System/issues/2560) — it never executed in any deployed run (`data/division-chiefs.txt` was never tracked in git), so no `Division.chiefCwid` value was ever set by it.
 **Date:** 2026-05-07
 **Authors:** Scholars Profile System development team
 **Supersedes:** —
-**Superseded by:** [unit-curation-spec.md](./unit-curation-spec.md) — Path C only, per [#2560](https://github.com/wcmc-its/Scholars-Profile-System/issues/2560). Paths A/B are unaffected and this ADR otherwise stands.
+**Superseded by:** [unit-curation-spec.md](./unit-curation-spec.md) — Path C only, per [#2560](https://github.com/wcmc-its/Scholars-Profile-System/issues/2560). Paths A/B are unaffected and this ADR otherwise stands. Storage superseded by `OrgUnitRoleAssignment`, #2542 contract A (see note above).
 **Tracks:** [issue #16](https://github.com/wcmc-its/Scholars-Profile-System/issues/16)
 
 ---

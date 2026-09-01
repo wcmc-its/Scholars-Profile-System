@@ -575,8 +575,11 @@ export async function resolveUnitDarkPmids(
 //  1. `field_override` rows on Department / Division — `description`, `url`,
 //     `slug`, `leaderCwid`, `leaderInterim`. Merged at read time by the unit page.
 //     **Centers do not use `field_override`** — a center row is manually-owned
-//     (no ETL writes the `center` table), so its fields are edited in-row
-//     and the in-row values are authoritative.
+//     (no ETL writes the `center` table), so `description`/`url`/`slug` are
+//     edited in-row and those in-row values are authoritative. Leadership is
+//     the one exception: for a center too, `leaderCwid`/`leaderInterim` come
+//     from an `OrgUnitRoleAssignment` row (#2542 contract A), fed into this
+//     merge by `lib/api/unit-edit-context.ts` — not an in-row column.
 //
 //  2. Whole-unit suppression — a `suppression` row keyed on the unit `code`,
 //     with `contributorCwid` always NULL. A suppressed unit's public page
@@ -696,7 +699,9 @@ export type UnitRowFieldsForMerge = {
   /** #1021 — outbound website URL; same override-or-column precedence as description. */
   url?: string | null;
   leaderCwid: string | null;
-  /** For Center this is the in-row `leader_interim`; for dept/div there is no column. */
+  /** For Center this comes from its `OrgUnitRoleAssignment.interim` row (#2542
+   *  contract A, fed in by `lib/api/unit-edit-context.ts`), not an in-row
+   *  column; for dept/div there is no column either. */
   leaderInterim?: boolean;
 };
 

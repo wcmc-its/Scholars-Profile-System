@@ -1,19 +1,24 @@
 /**
- * `writeUnitLeaderAssignment` — the #2542 Phase D ETL dual-write helper.
+ * `writeUnitLeaderAssignment` / `loadDeptLeaderMap` — the #2542 contract A
+ * ETL assignment write and read sites in `etl/ed/index.ts` that replaced the
+ * retired `chairCwid` / `chiefCwid` / `directorCwid` columns.
  *
- * Every `chairCwid` / `chiefCwid` write site in `etl/ed/index.ts` calls this
- * immediately after, with the SAME already-resolved cwid, so
- * `OrgUnitRoleAssignment` never diverges from the legacy column the nightly
- * ETL rewrites. Covers PLAN-org-unit-roles-next-phases-2026-08-31.md's Phase D
+ * `writeUnitLeaderAssignment` is called at every department/division leader
+ * write site, so `OrgUnitRoleAssignment` carries exactly what the nightly ETL
+ * resolves. Covers PLAN-org-unit-roles-next-phases-2026-08-31.md's Phase D
  * dual-write requirements:
  *   - the assignment is written alongside the column's resolved value
  *   - a resolved vacancy (`cwid: null`) DELETES any existing row
  *   - a department `category` flip (chair <-> director between runs) never
  *     leaves both keys' rows behind
+ *
+ * `loadDeptLeaderMap` is the D-04 manager-graph chief-detection anchor read:
+ * a department holds its leader under exactly one of the CHAIR/DIRECTOR
+ * keys, so the map must be built from both.
  */
 import { describe, expect, it, vi } from "vitest";
 
-import { writeUnitLeaderAssignment } from "@/etl/ed/index";
+import { loadDeptLeaderMap, writeUnitLeaderAssignment } from "@/etl/ed/index";
 import {
   DEPARTMENT_CHAIR_ROLE_KEY,
   DEPARTMENT_DIRECTOR_ROLE_KEY,
@@ -55,11 +60,25 @@ function makeFakeClient() {
     rows.push(args.data);
     return args.data;
   });
+  const findMany = vi.fn(
+    async (args: {
+      where: { entityType: string; roleKey: { in: string[] } };
+      select: { entityId: true; cwid: true };
+    }) => {
+      return rows
+        .filter(
+          (r) =>
+            r.entityType === args.where.entityType &&
+            args.where.roleKey.in.includes(r.roleKey),
+        )
+        .map((r) => ({ entityId: r.entityId, cwid: r.cwid }));
+    },
+  );
   const client = {
     orgUnitRole: { createMany },
-    orgUnitRoleAssignment: { deleteMany, create },
+    orgUnitRoleAssignment: { deleteMany, create, findMany },
   } as unknown as FakeClient;
-  return { client, rows, seedCalls, createMany, deleteMany, create };
+  return { client, rows, seedCalls, createMany, deleteMany, create, findMany };
 }
 
 describe("writeUnitLeaderAssignment", () => {
@@ -255,5 +274,48 @@ describe("writeUnitLeaderAssignment", () => {
     const seeded = seedCalls[0] as Array<{ entityType: string; key: string }>;
     expect(seeded.every((r) => r.entityType === "department")).toBe(true);
     expect(seeded.map((r) => r.key).sort()).toEqual(["chair", "director"]);
+  });
+});
+
+describe("loadDeptLeaderMap", () => {
+  it("a department whose leader is stored under the DIRECTOR key still yields a non-null parentChairCwid", async () => {
+    // N1932 is administrative: its leader was written under the DIRECTOR
+    // key, never CHAIR (writeUnitLeaderAssignment's otherRoleKey swap).
+    const { client, rows } = makeFakeClient();
+    rows.push({
+      entityType: "department",
+      entityId: "N1932",
+      cwid: "dir00001",
+      roleKey: DEPARTMENT_DIRECTOR_ROLE_KEY,
+    });
+    const deptChairs = await loadDeptLeaderMap(client);
+    // This is the exact lookup the D-04 manager-graph anchor performs
+    // (etl/ed/index.ts): `deptChairs.get(div.deptCode) ?? null`.
+    const parentChairCwid = deptChairs.get("N1932") ?? null;
+    expect(parentChairCwid).toBe("dir00001");
+  });
+
+  it("still reads a CHAIR-keyed department's leader (clinical department, unchanged case)", async () => {
+    const { client, rows } = makeFakeClient();
+    rows.push({
+      entityType: "department",
+      entityId: "MED",
+      cwid: "chr00001",
+      roleKey: DEPARTMENT_CHAIR_ROLE_KEY,
+    });
+    const deptChairs = await loadDeptLeaderMap(client);
+    expect(deptChairs.get("MED") ?? null).toBe("chr00001");
+  });
+
+  it("never picks up a division's CHIEF-keyed row (entityType filter)", async () => {
+    const { client, rows } = makeFakeClient();
+    rows.push({
+      entityType: "division",
+      entityId: "CARDIO",
+      cwid: "chf00001",
+      roleKey: DIVISION_CHIEF_ROLE_KEY,
+    });
+    const deptChairs = await loadDeptLeaderMap(client);
+    expect(deptChairs.get("CARDIO") ?? null).toBeNull();
   });
 });

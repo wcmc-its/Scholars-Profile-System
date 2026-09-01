@@ -28,7 +28,13 @@ import { countActiveCenterMembersByCode } from "@/lib/api/center-member-count";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 // Type-and-const only, and `lib/center-roles.ts` is import-free — this module
 // reaches the client bundle, so nothing here may pull in `@/lib/db`.
-import { CENTER_ENTITY_TYPE, DIRECTOR_ROLE_KEY } from "@/lib/org-unit-roles";
+import {
+  CENTER_ENTITY_TYPE,
+  DIRECTOR_ROLE_KEY,
+  DEPARTMENT_CHAIR_ROLE_KEY,
+  DEPARTMENT_DIRECTOR_ROLE_KEY,
+  DIVISION_CHIEF_ROLE_KEY,
+} from "@/lib/org-unit-roles";
 import { compactUnitName, officialUnitName } from "@/lib/org-unit-names";
 
 /** The four org-unit `EntityType`s a `unit_admin` grant can target. */
@@ -269,7 +275,7 @@ export type UnitDirectoryEntry = {
   category: string | null;
   /** Center-only presentation kind; null for departments + divisions. */
   centerType: "center" | "institute" | null;
-  /** The raw leader column value (chair/chief/director) — for reference even when unresolved. */
+  /** The `OrgUnitRoleAssignment.cwid` for the unit's leadership role — for reference even when unresolved. */
   leaderCwid: string | null;
   /**
    * The leader's display name, resolved from the external-leader overlay then
@@ -278,7 +284,9 @@ export type UnitDirectoryEntry = {
    * (we deliberately do NOT fall back to the bare cwid, which would mask it).
    */
   leaderName: string | null;
-  /** Center-only interim qualifier (dept/div interim lives in a field_override row, not read here). */
+  /** `OrgUnitRoleAssignment.interim` for every kind (#2542 contract A — a
+   *  `field_override(leaderInterim)` row can still override this for dept/div
+   *  on read elsewhere, but this directory deliberately does not read overrides). */
   leaderInterim: boolean;
   scholarCount: number;
   source: string;
@@ -318,9 +326,8 @@ export type AllUnitsDirectoryClient = Pick<
  * `resolveScholarNames` in `lib/api/unit-edit-context.ts`).
  *
  * Field degradation (only columns present on this checkout are read):
- *   - Division has NO officialName/compactName/category/centerType/sortOrder/
- *     leaderInterim columns → official = compact = name, category/centerType/
- *     sortOrder = null, leaderInterim = false.
+ *   - Division has NO officialName/compactName/category/centerType/sortOrder
+ *     columns → official = compact = name, category/centerType/sortOrder = null.
  *   - Center has NO parent-dept FK → parentDeptCode/parentDeptName always null.
  *   - Core has NO slug/category/centerType/sortOrder columns, and no single
  *     leader column — `CoreLeader` is a list (P1). `slug` degrades to the
@@ -339,12 +346,13 @@ export type AllUnitsDirectoryClient = Pick<
  * by UNIT code) wins, then the scholar table, then null. Departments and
  * divisions carry their leader/interim qualifier in a per-unit `field_override`
  * row, which this directory deliberately does NOT read (that path is N queries).
- * So a PENDING dept/div leader override or interim flag won't show here — only
- * the row column (chairCwid/chiefCwid) is read. Acceptable for a low-stakes,
- * read-only audit view; centers are faithful — their leader and interim come
- * from the center's own `CenterLeader` rows (#2542), nested on the same
- * findMany, so the query count stays O(1) in unit count. Cores skip the external-leader overlay entirely — that config is
- * keyed by dept/center unit code and a core never participates in it.
+ * So a PENDING dept/div leader override or interim flag won't show here — every
+ * kind's leader/interim comes from `OrgUnitRoleAssignment` (#2542 contract A —
+ * `Department.chairCwid` / `Division.chiefCwid` / `Center.directorCwid` /
+ * `Center.leaderInterim` no longer exist as read sources), one batched sibling
+ * query per kind (below), so the query count stays O(1) in unit count. Cores
+ * skip the external-leader overlay entirely — that config is keyed by
+ * dept/center unit code and a core never participates in it.
  *
  * Retired rows are hidden unless `opts.includeRetired` — the page passes
  * `session.isSuperuser`, so only superusers see retired units (comms stewards do
@@ -354,92 +362,114 @@ export async function loadAllUnitsDirectory(
   db: AllUnitsDirectoryClient,
   opts?: { includeRetired?: boolean },
 ): Promise<UnitDirectoryEntry[]> {
-  const [deptRows, divRows, ctrRows, coreRows, suppressions, ctrAssignments] = await Promise.all([
-    db.department.findMany({
-      select: {
-        code: true,
-        name: true,
-        slug: true,
-        description: true,
-        officialName: true,
-        compactName: true,
-        category: true,
-        chairCwid: true,
-        scholarCount: true,
-        source: true,
-      },
-    }),
-    db.division.findMany({
-      select: {
-        code: true,
-        name: true,
-        slug: true,
-        description: true,
-        chiefCwid: true,
-        scholarCount: true,
-        source: true,
-        deptCode: true,
-        department: { select: { name: true } },
-      },
-    }),
-    db.center.findMany({
-      select: {
-        code: true,
-        name: true,
-        slug: true,
-        description: true,
-        officialName: true,
-        compactName: true,
-        centerType: true,
-        // The two columns remain as the pre-backfill dual-read fallback; the
-        // assignment rows come from a sibling query in this same `Promise.all`.
-        directorCwid: true,
-        leaderInterim: true,
-        // NB: `scholarCount` is deliberately NOT selected — the column is never
-        // maintained for centers. Counted live below.
-        sortOrder: true,
-        source: true,
-      },
-    }),
-    db.core.findMany({
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        source: true,
-        leaders: {
-          orderBy: { sortOrder: "asc" },
-          take: 1,
-          select: { cwid: true, interim: true },
+  const [deptRows, divRows, ctrRows, coreRows, suppressions, deptAssignments, divAssignments, ctrAssignments] =
+    await Promise.all([
+      db.department.findMany({
+        select: {
+          code: true,
+          name: true,
+          slug: true,
+          description: true,
+          officialName: true,
+          compactName: true,
+          category: true,
+          scholarCount: true,
+          source: true,
         },
-      },
-    }),
-    db.suppression.findMany({
-      where: {
-        entityType: { in: ["department", "division", "center"] },
-        revokedAt: null,
-      },
-      select: { entityType: true, entityId: true },
-    }),
-    // #2542 — the director is an `OrgUnitRoleAssignment` row. A sibling query
-    // rather than a nested select, because the assignment is polymorphic on
-    // (entityType, entityId) with no FK to `center`. Unfiltered by code: this
-    // table holds at most one row per center per leadership role, so fetching
-    // all of them is smaller than the `in` list would be, and it keeps the whole
-    // thing O(1) in unit count. Adds no value import — this file reaches the
-    // CLIENT bundle via `components/edit/home-panel.tsx`, see the header note.
-    db.orgUnitRoleAssignment.findMany({
-      where: { entityType: CENTER_ENTITY_TYPE, roleKey: DIRECTOR_ROLE_KEY },
-      select: { entityId: true, cwid: true, interim: true },
-      orderBy: { sortOrder: "asc" },
-    }),
-  ]);
+      }),
+      db.division.findMany({
+        select: {
+          code: true,
+          name: true,
+          slug: true,
+          description: true,
+          scholarCount: true,
+          source: true,
+          deptCode: true,
+          department: { select: { name: true } },
+        },
+      }),
+      db.center.findMany({
+        select: {
+          code: true,
+          name: true,
+          slug: true,
+          description: true,
+          officialName: true,
+          compactName: true,
+          centerType: true,
+          // NB: `scholarCount` is deliberately NOT selected — the column is never
+          // maintained for centers. Counted live below.
+          sortOrder: true,
+          source: true,
+        },
+      }),
+      db.core.findMany({
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          source: true,
+          leaders: {
+            orderBy: { sortOrder: "asc" },
+            take: 1,
+            select: { cwid: true, interim: true },
+          },
+        },
+      }),
+      db.suppression.findMany({
+        where: {
+          entityType: { in: ["department", "division", "center"] },
+          revokedAt: null,
+        },
+        select: { entityType: true, entityId: true },
+      }),
+      // #2542 contract A — chair/director is an `OrgUnitRoleAssignment` row;
+      // `Department.chairCwid` no longer exists as a read source. A sibling
+      // query rather than a nested select, because the assignment is
+      // polymorphic on (entityType, entityId) with no FK to `department`.
+      // Unfiltered by code, same O(1)-in-unit-count rationale as the center
+      // query below. Adds no value import — this file reaches the CLIENT
+      // bundle via `components/edit/home-panel.tsx`, see the header note.
+      db.orgUnitRoleAssignment.findMany({
+        where: {
+          entityType: "department",
+          roleKey: { in: [DEPARTMENT_CHAIR_ROLE_KEY, DEPARTMENT_DIRECTOR_ROLE_KEY] },
+        },
+        select: { entityId: true, cwid: true, interim: true },
+        orderBy: { sortOrder: "asc" },
+      }),
+      // Same shape for division chief — `Division.chiefCwid` no longer exists.
+      db.orgUnitRoleAssignment.findMany({
+        where: { entityType: "division", roleKey: DIVISION_CHIEF_ROLE_KEY },
+        select: { entityId: true, cwid: true, interim: true },
+        orderBy: { sortOrder: "asc" },
+      }),
+      // #2542 — the director is an `OrgUnitRoleAssignment` row. A sibling query
+      // rather than a nested select, because the assignment is polymorphic on
+      // (entityType, entityId) with no FK to `center`. Unfiltered by code: this
+      // table holds at most one row per center per leadership role, so fetching
+      // all of them is smaller than the `in` list would be, and it keeps the whole
+      // thing O(1) in unit count. Adds no value import — this file reaches the
+      // CLIENT bundle via `components/edit/home-panel.tsx`, see the header note.
+      db.orgUnitRoleAssignment.findMany({
+        where: { entityType: CENTER_ENTITY_TYPE, roleKey: DIRECTOR_ROLE_KEY },
+        select: { entityId: true, cwid: true, interim: true },
+        orderBy: { sortOrder: "asc" },
+      }),
+    ]);
 
-  // First row per center wins, matching the old nested `take: 1`.
-  const ctrDirector = new Map<string, { cwid: string; interim: boolean }>();
-  for (const a of ctrAssignments) {
-    if (!ctrDirector.has(a.entityId)) ctrDirector.set(a.entityId, { cwid: a.cwid, interim: a.interim });
+  // First row per unit wins, matching the old nested `take: 1` / column read.
+  function firstByEntity(rows: Array<{ entityId: string; cwid: string; interim: boolean }>) {
+    const out = new Map<string, { cwid: string; interim: boolean }>();
+    for (const a of rows) {
+      if (!out.has(a.entityId)) out.set(a.entityId, { cwid: a.cwid, interim: a.interim });
+    }
+    return out;
   }
+  const deptChair = firstByEntity(deptAssignments);
+  const divChief = firstByEntity(divAssignments);
+  const ctrDirector = firstByEntity(ctrAssignments);
 
 
   // One Set of `${kind}:${code}` for the retired flag — no per-unit lookup.
@@ -454,9 +484,9 @@ export async function loadAllUnitsDirectory(
 
   // One batched scholar name lookup for every leader cwid across all kinds.
   const leaderCwids = [
-    ...deptRows.map((r) => r.chairCwid),
-    ...divRows.map((r) => r.chiefCwid),
-    ...ctrRows.map((r) => ctrDirector.get(r.code)?.cwid ?? r.directorCwid),
+    ...deptRows.map((r) => deptChair.get(r.code)?.cwid ?? null),
+    ...divRows.map((r) => divChief.get(r.code)?.cwid ?? null),
+    ...ctrRows.map((r) => ctrDirector.get(r.code)?.cwid ?? null),
     ...coreRows.map((r) => r.leaders[0]?.cwid ?? null),
   ].filter((c): c is string => !!c && c.length > 0);
   const uniqueLeaders = [...new Set(leaderCwids)];
@@ -491,9 +521,9 @@ export async function loadAllUnitsDirectory(
         kindLabel: unitKindLabel("department"),
         category: r.category,
         centerType: null,
-        leaderCwid: r.chairCwid,
-        leaderName: resolveLeader(r.code, r.chairCwid),
-        leaderInterim: false,
+        leaderCwid: deptChair.get(r.code)?.cwid ?? null,
+        leaderName: resolveLeader(r.code, deptChair.get(r.code)?.cwid ?? null),
+        leaderInterim: deptChair.get(r.code)?.interim ?? false,
         scholarCount: r.scholarCount,
         source: r.source,
         parentDeptCode: null,
@@ -517,9 +547,9 @@ export async function loadAllUnitsDirectory(
         kindLabel: unitKindLabel("division"),
         category: null,
         centerType: null,
-        leaderCwid: r.chiefCwid,
-        leaderName: resolveLeader(r.code, r.chiefCwid),
-        leaderInterim: false,
+        leaderCwid: divChief.get(r.code)?.cwid ?? null,
+        leaderName: resolveLeader(r.code, divChief.get(r.code)?.cwid ?? null),
+        leaderInterim: divChief.get(r.code)?.interim ?? false,
         scholarCount: r.scholarCount,
         source: r.source,
         parentDeptCode: r.deptCode,
@@ -541,9 +571,9 @@ export async function loadAllUnitsDirectory(
         kindLabel: unitKindLabel("center"),
         category: null,
         centerType: r.centerType === "institute" ? "institute" : "center",
-        leaderCwid: ctrDirector.get(r.code)?.cwid ?? r.directorCwid,
-        leaderName: resolveLeader(r.code, ctrDirector.get(r.code)?.cwid ?? r.directorCwid),
-        leaderInterim: ctrDirector.get(r.code)?.interim ?? r.leaderInterim,
+        leaderCwid: ctrDirector.get(r.code)?.cwid ?? null,
+        leaderName: resolveLeader(r.code, ctrDirector.get(r.code)?.cwid ?? null),
+        leaderInterim: ctrDirector.get(r.code)?.interim ?? false,
         scholarCount: centerCounts.get(r.code) ?? 0,
         source: r.source,
         // Centers are NOT modeled with a parent-dept FK — always null.
