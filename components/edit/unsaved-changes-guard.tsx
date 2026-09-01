@@ -41,9 +41,12 @@
  * `router.refresh()`, and `unit-create-form` deliberately no longer pushes at
  * all — it renders a success panel with a real link instead. If you add a form
  * under this guard that MUST navigate on save, do not simply call
- * `router.push` — you will hit this. Route the navigation through the
- * `pendingPushRef` mechanism (as the confirmed-href path does), or land the
- * user with a real link rather than a programmatic push.
+ * `router.push`. Pass a `ref` to `UnsavedChangesGuard` and, after the save
+ * commits, call `guardRef.current?.navigateAfterSave(href)` instead of
+ * `router.push(href)` directly — it pops the sentinel (if armed) and pushes
+ * from the resulting popstate via a listener that outlives the effect
+ * cleanup, so it is safe to clear `dirty` or unmount the guard in that same
+ * commit.
  */
 "use client";
 
@@ -62,7 +65,18 @@ const SENTINEL_KEY = "__sps_unsaved_guard__";
 
 type PendingTarget = { kind: "href"; href: string } | { kind: "back" };
 
-export function UnsavedChangesGuard({ dirty }: { dirty: boolean }) {
+/** Imperative handle for a consumer that must navigate right after a save. */
+export type UnsavedChangesGuardHandle = {
+  navigateAfterSave: (href: string) => void;
+};
+
+export function UnsavedChangesGuard({
+  dirty,
+  ref,
+}: {
+  dirty: boolean;
+  ref?: React.Ref<UnsavedChangesGuardHandle>;
+}) {
   const router = useRouter();
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const pendingRef = React.useRef<PendingTarget | null>(null);
@@ -79,6 +93,42 @@ export function UnsavedChangesGuard({ dirty }: { dirty: boolean }) {
   // arm time — never calls a stale router.
   const routerRef = React.useRef(router);
   routerRef.current = router;
+  // Set while our own `navigateAfterSave` pop is outstanding (issued, popstate
+  // not yet observed). The route-3 cleanup consults this to skip its own
+  // disarm pop — otherwise, since the state update from history.back() is not
+  // guaranteed to be visible synchronously, the cleanup can fire while
+  // history.state still reports the sentinel and issue a second back(),
+  // stepping the user off the page (#2546).
+  const popInFlightRef = React.useRef(false);
+
+  // Navigate after a save without racing the disarm cleanup's own pop (#2546).
+  // If the sentinel is armed, pop it first and push from the resulting
+  // popstate via a one-shot *window* listener — independent of the route-3
+  // effect, whose cleanup (and handler) may already have run by the time that
+  // popstate arrives if the caller also clears `dirty` / unmounts the guard
+  // in the same commit.
+  const navigateAfterSave = React.useCallback((href: string) => {
+    const sentinelArmed =
+      typeof window !== "undefined" &&
+      (window.history.state as Record<string, unknown> | null)?.[SENTINEL_KEY] === true;
+    if (!sentinelArmed) {
+      routerRef.current.push(href);
+      return;
+    }
+    popInFlightRef.current = true;
+    bypassRef.current = true;
+    window.addEventListener(
+      "popstate",
+      () => {
+        popInFlightRef.current = false;
+        routerRef.current.push(href);
+      },
+      { once: true },
+    );
+    window.history.back();
+  }, []);
+
+  React.useImperativeHandle(ref, () => ({ navigateAfterSave }), [navigateAfterSave]);
 
   // (1) beforeunload — reload / tab close / cross-origin nav (stays native).
   React.useEffect(() => {
@@ -151,8 +201,10 @@ export function UnsavedChangesGuard({ dirty }: { dirty: boolean }) {
       window.removeEventListener("popstate", handler);
       // On disarm (dirty cleared or unmount), pop our sentinel so we don't leave
       // a phantom entry behind. Guard with the marker so we only pop our own.
+      // Skip it while a `navigateAfterSave` pop is already in flight (#2546) —
+      // otherwise this would issue a second, unwanted `history.back()`.
       const state = window.history.state as Record<string, unknown> | null;
-      if (state && state[SENTINEL_KEY] === true) {
+      if (state && state[SENTINEL_KEY] === true && !popInFlightRef.current) {
         bypassRef.current = true;
         window.history.back();
       }

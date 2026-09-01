@@ -3,6 +3,7 @@
  * <a href> click capture + Back/Forward sentinel interception, all routed
  * through the branded ConfirmDialog (#356 Phase 6 C9 / vision-round T3.2).
  */
+import * as React from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 
@@ -11,7 +12,10 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockPush, replace: vi.fn(), refresh: vi.fn(), back: vi.fn() }),
 }));
 
-import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
+import {
+  UnsavedChangesGuard,
+  type UnsavedChangesGuardHandle,
+} from "@/components/edit/unsaved-changes-guard";
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -255,5 +259,100 @@ describe("UnsavedChangesGuard — dirty=true, Back/Forward (popstate)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(dialogIsOpen()).toBe(false));
     expect(go).not.toHaveBeenCalled();
+  });
+});
+
+describe("UnsavedChangesGuard — navigateAfterSave (#2546)", () => {
+  it("armed: pops the sentinel first, then pushes only from the resulting popstate", () => {
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const ref = React.createRef<UnsavedChangesGuardHandle>();
+    render(<UnsavedChangesGuard dirty={true} ref={ref} />);
+
+    act(() => {
+      ref.current!.navigateAfterSave("/edit/x");
+    });
+    expect(backSpy).toHaveBeenCalledTimes(1);
+    expect(mockPush).not.toHaveBeenCalled();
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith("/edit/x");
+  });
+
+  it("survives the consumer clearing dirty in the same commit — exactly one back(), one push()", () => {
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const ref = React.createRef<UnsavedChangesGuardHandle>();
+    const { rerender } = render(<UnsavedChangesGuard dirty={true} ref={ref} />);
+
+    act(() => {
+      ref.current!.navigateAfterSave("/edit/x");
+      // The consumer clears dirty in the same commit — route (3)'s cleanup
+      // must not double-pop while our own pop is still outstanding.
+      rerender(<UnsavedChangesGuard dirty={false} ref={ref} />);
+    });
+    expect(backSpy).toHaveBeenCalledTimes(1);
+    expect(mockPush).not.toHaveBeenCalled();
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith("/edit/x");
+    expect(backSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("survives the guard unmounting in the same commit — the one-shot listener outlives it", () => {
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const ref = React.createRef<UnsavedChangesGuardHandle>();
+    const { unmount } = render(<UnsavedChangesGuard dirty={true} ref={ref} />);
+
+    act(() => {
+      ref.current!.navigateAfterSave("/edit/x");
+      unmount();
+    });
+    expect(backSpy).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith("/edit/x");
+  });
+
+  it("not armed (dirty=false): pushes immediately, never touches history.back", () => {
+    // Clear any sentinel left over from a previous test's real pushState so
+    // this reflects a genuinely unarmed guard (mounted with dirty=false, or SSR).
+    window.history.replaceState(null, "");
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const ref = React.createRef<UnsavedChangesGuardHandle>();
+    render(<UnsavedChangesGuard dirty={false} ref={ref} />);
+
+    act(() => {
+      ref.current!.navigateAfterSave("/edit/x");
+    });
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith("/edit/x");
+    expect(backSpy).not.toHaveBeenCalled();
+  });
+
+  it("a stray second popstate does not push again (once semantics)", () => {
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const ref = React.createRef<UnsavedChangesGuardHandle>();
+    render(<UnsavedChangesGuard dirty={true} ref={ref} />);
+
+    act(() => {
+      ref.current!.navigateAfterSave("/edit/x");
+    });
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith("/edit/x");
+    expect(backSpy).toHaveBeenCalledTimes(1);
   });
 });
