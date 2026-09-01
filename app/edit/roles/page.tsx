@@ -75,8 +75,9 @@ export default async function RoleVocabularyPage() {
       <p className="text-muted-foreground mb-6 max-w-3xl text-sm">
         Manage the leadership and membership role labels available for each unit kind. Renaming a
         label changes what every current holder&rsquo;s role reads on their profile and on the
-        unit page; sort order and profile-title only affect display. There is no delete — a role
-        with live holders stays available even if you stop using it going forward.
+        unit page; sort order and profile-title only affect display. Delete is available only for
+        a role you created here with no current holders — a seeded default, or a role with live
+        holders, stays available even if you stop using it going forward.
       </p>
       <OrgUnitRoleRoster roles={roster} />
     </ConsoleShell>

@@ -34,11 +34,17 @@ type MembershipGroup = {
   centerCode: string;
   _count: { _all: number };
 };
+type ScopeGroup = {
+  entityType: string;
+  roleKey: string;
+  _count: { _all: number };
+};
 
 function makeDb(input: {
   roles: RoleRow[];
   leadershipCounts?: AssignmentGroup[];
   membershipCounts?: MembershipGroup[];
+  scopeCounts?: ScopeGroup[];
 }) {
   return {
     orgUnitRole: {
@@ -52,8 +58,11 @@ function makeDb(input: {
     centerMembership: {
       groupBy: async () => input.membershipCounts ?? [],
     },
+    orgUnitRoleScope: {
+      groupBy: async () => input.scopeCounts ?? [],
+    },
     // Cast at the call site keeps the stub terse without re-declaring all of
-    // PrismaClient — `buildRoleRoster` only ever touches the three reads above.
+    // PrismaClient — `buildRoleRoster` only ever touches the four reads above.
   } as unknown as Parameters<typeof buildRoleRoster>[0];
 }
 
@@ -214,7 +223,36 @@ describe("buildRoleRoster", () => {
       source: "manual",
       holderCount: 0,
       unitCount: 0,
+      scopeRowCount: 0,
     });
+  });
+
+  it("counts OrgUnitRoleScope allowlist rows into scopeRowCount, keyed by (entityType, roleKey) — unrelated to holders", async () => {
+    const rows = await buildRoleRoster(
+      makeDb({
+        roles: [
+          role("center", "research", "membership", 10),
+          role("center", "clinical", "membership", 20),
+        ],
+        scopeCounts: [
+          { entityType: "center", roleKey: "research", _count: { _all: 1 } },
+          { entityType: "center", roleKey: "clinical", _count: { _all: 1 } },
+        ],
+      }),
+    );
+    const research = rows.find((r) => r.key === "research")!;
+    const clinical = rows.find((r) => r.key === "clinical")!;
+    expect(research.scopeRowCount).toBe(1);
+    expect(clinical.scopeRowCount).toBe(1);
+    // Scoped but zero holders — the two counts are independent.
+    expect(research.holderCount).toBe(0);
+  });
+
+  it("a role with no OrgUnitRoleScope rows reports scopeRowCount 0, not undefined", async () => {
+    const rows = await buildRoleRoster(
+      makeDb({ roles: [role("center", "director", "leadership", 10)] }),
+    );
+    expect(rows[0].scopeRowCount).toBe(0);
   });
 
   // --- unitCount: the distinct-unit grain the confirm dialog needs alongside

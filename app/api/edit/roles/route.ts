@@ -1,9 +1,8 @@
 /**
- * PATCH/POST /api/edit/roles — the steward-owned `OrgUnitRole` vocabulary
- * editor (#2542 Phase 3, `lib/org-unit-roles.ts`). Read + update + CREATE.
- * There is no DELETE: the FK from `OrgUnitRoleAssignment` is `onDelete:
- * NoAction` and there is no holder-reassignment flow yet to make deleting a
- * vocabulary entry with live holders safe.
+ * PATCH/POST/DELETE /api/edit/roles — the steward-owned `OrgUnitRole`
+ * vocabulary editor (#2542 Phase 3, `lib/org-unit-roles.ts`). Read + update +
+ * CREATE + DELETE (delete added as a follow-up: only ever for a `manual` entry
+ * with zero live holders — see DELETE below for why every other entry refuses).
  *
  * PATCH updates one existing entry, identified by (`entityType`, `key`) in the
  * body. Only `label` / `sortOrder` / `profileTitle` are editable; the body may
@@ -17,7 +16,21 @@
  * `"manual"` so a later reseed (`orgUnitRoleSeedRows`, `skipDuplicates: true`)
  * can never clobber it.
  *
- * Gate order, both handlers (mirrors `/api/edit/methods/families/tier`):
+ * DELETE removes one entry, identified by (`entityType`, `key`) in the body,
+ * inside one transaction: (a) 404 if the row doesn't exist; (b) 409
+ * `seeded_default` when `source !== "manual"` — a `seed` row is re-minted by
+ * every write path that seeds `DEFAULT_ORG_UNIT_ROLES`
+ * (`skipDuplicates: true`, e.g. the roster route's per-write vocab seed), so
+ * deleting it here would not stick; the fix is removing it from the seed
+ * table instead. (c) 409 `role_has_holders` when
+ * `countRoleHolders` (`lib/api/org-unit-roles-admin.ts` — the SAME two tables
+ * `buildRoleRoster`'s `holderCount` sums, so this check can never disagree
+ * with what the roster UI shows) is non-zero. Only past all three does it
+ * delete any `OrgUnitRoleScope` allowlist rows for the key (their FK would
+ * otherwise block the `OrgUnitRole` delete — a role ceasing to exist has no
+ * allowlist left to enforce) and then the row itself.
+ *
+ * Gate order, all three handlers (mirrors `/api/edit/methods/families/tier`):
  *   (a) ORG_UNIT_ROLE_CONSOLE off  => 404 (whole surface dark)
  *   (b) no session                 => 401 (via the shared preamble)
  *   (c) not comms_steward/superuser => 403 (`not_comms_steward`, logged)
@@ -25,15 +38,15 @@
  * `readEditRequest` already did.
  *
  * Every write is one MySQL transaction with a `role_vocabulary_update` /
- * `role_vocabulary_create` B03 audit row, `targetEntityType: "org_unit_role"`,
- * `targetEntityId: "{entityType}:{key}"`. `actorCwid` is always `realCwid` —
- * never `session.cwid`, which aliases the impersonation target under "View as"
- * (`lib/edit/request.ts`) and would forge the row as the target.
- * `logEditDenial`'s `targetEntityType` cannot carry `org_unit_role` (it types
- * `UnitKind | "core"`), so denials are logged actor-only, exactly as the
- * Method-Family routes do.
+ * `role_vocabulary_create` / `role_vocabulary_delete` B03 audit row,
+ * `targetEntityType: "org_unit_role"`, `targetEntityId: "{entityType}:{key}"`.
+ * `actorCwid` is always `realCwid` — never `session.cwid`, which aliases the
+ * impersonation target under "View as" (`lib/edit/request.ts`) and would forge
+ * the row as the target. `logEditDenial`'s `targetEntityType` cannot carry
+ * `org_unit_role` (it types `UnitKind | "core"`), so denials are logged
+ * actor-only, exactly as the Method-Family routes do.
  */
-import { type NextRequest, type NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
@@ -41,6 +54,7 @@ import { authorizeCommsStewardAction, logEditDenial } from "@/lib/edit/authz";
 import { apiError } from "@/lib/api/error-response";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { isOrgUnitRoleConsoleEnabled } from "@/lib/edit/org-unit-role-flags";
+import { countRoleHolders } from "@/lib/api/org-unit-roles-admin";
 import {
   DEFAULT_ORG_UNIT_ROLES,
   type OrgUnitRoleEntityType,
@@ -344,4 +358,127 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     profileTitle: resolvedProfileTitle,
     source: "manual",
   });
+}
+
+// ---------------------------------------------------------------------------
+// DELETE — remove a manual entry that no one currently holds.
+// ---------------------------------------------------------------------------
+
+const DELETE_FIELDS = new Set(["entityType", "key"]);
+
+// Thrown from inside the transaction, caught by the handler below to produce
+// the matching status/body — the same shape as `RoleNotAllowedAtUnit` in
+// `app/api/edit/roster/route.ts`. Rolls the transaction back automatically:
+// an interactive `$transaction` callback that throws commits nothing.
+class RoleNotFound extends Error {}
+class RoleIsSeeded extends Error {}
+class RoleHasHolders extends Error {
+  constructor(readonly holderCount: number) {
+    super();
+  }
+}
+
+export async function DELETE(request: NextRequest): Promise<NextResponse> {
+  if (!isOrgUnitRoleConsoleEnabled()) return apiError("not_found", 404);
+
+  const req = await readEditRequest(request);
+  if (!req.ok) return req.response;
+  const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
+
+  const authz = authorizeCommsStewardAction(session);
+  if (!authz.ok) {
+    logEditDenial({
+      actorCwid: session.cwid,
+      targetCwid: session.cwid,
+      path: PATH,
+      reason: authz.reason,
+    });
+    return editError(403, authz.reason);
+  }
+
+  for (const field of Object.keys(body)) {
+    if (!DELETE_FIELDS.has(field)) {
+      return editError(400, "unexpected_field", field);
+    }
+  }
+
+  const { entityType, key } = body;
+  if (!isOrgUnitRoleEntityType(entityType)) {
+    return editError(400, "invalid_entity_type", "entityType");
+  }
+  if (typeof key !== "string" || key.length === 0) {
+    return editError(400, "invalid_key", "key");
+  }
+
+  try {
+    await db.write.$transaction(async (tx) => {
+      const existing = await tx.orgUnitRole.findUnique({
+        where: { entityType_key: { entityType, key } },
+      });
+      if (!existing) throw new RoleNotFound();
+
+      // A `seed` entry is re-minted by every write path that seeds
+      // `DEFAULT_ORG_UNIT_ROLES` with `skipDuplicates: true` (e.g. the roster
+      // route's per-write vocab seed) — deleting it here would not stick.
+      if (existing.source !== "manual") throw new RoleIsSeeded();
+
+      // The SAME two tables `buildRoleRoster`'s `holderCount` sums (see that
+      // helper's docblock) — the UI count and this gate read identically, so
+      // they cannot disagree.
+      const holderCount = await countRoleHolders(tx, entityType, key);
+      if (holderCount > 0) throw new RoleHasHolders(holderCount);
+
+      // Allowlist rows for a role that is ceasing to exist — the FK
+      // (`OrgUnitRoleScope.role`) would otherwise block the delete below.
+      const removedScope = await tx.orgUnitRoleScope.deleteMany({
+        where: { entityType, roleKey: key },
+      });
+
+      await tx.orgUnitRole.delete({
+        where: { entityType_key: { entityType, key } },
+      });
+
+      await appendAuditRow(tx, {
+        actorCwid: realCwid,
+        impersonatedCwid,
+        targetEntityType: "org_unit_role",
+        targetEntityId: `${entityType}:${key}`,
+        action: "role_vocabulary_delete",
+        fieldsChanged: null,
+        beforeValues: {
+          label: existing.label,
+          roleGroup: existing.roleGroup,
+          scope: existing.scope,
+          scopeRowsRemoved: removedScope.count,
+        },
+        afterValues: null,
+        ts: new Date(),
+        requestId,
+      });
+    });
+  } catch (err) {
+    if (err instanceof RoleNotFound) return editError(404, "not_found");
+    if (err instanceof RoleIsSeeded) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "seeded_default",
+          reason:
+            "seeded default — every write path re-seeds DEFAULT_ORG_UNIT_ROLES, " +
+            "so it would come back; remove it from the seed instead",
+        },
+        { status: 409 },
+      );
+    }
+    if (err instanceof RoleHasHolders) {
+      return NextResponse.json(
+        { ok: false, error: "role_has_holders", holderCount: err.holderCount },
+        { status: 409 },
+      );
+    }
+    logEditFailure(PATH, err);
+    return editError(500, "write_failed");
+  }
+
+  return editOk({ entityType, key });
 }
