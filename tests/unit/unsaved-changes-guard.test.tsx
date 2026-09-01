@@ -389,4 +389,76 @@ describe("UnsavedChangesGuard — navigateAfterSave (#2546)", () => {
     expect(mockPush).toHaveBeenCalledTimes(1);
     expect(backSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("dirty cleared in a prior commit, navigateAfterSave called later — queues behind the in-flight disarm pop", () => {
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const ref = React.createRef<UnsavedChangesGuardHandle>();
+    const { rerender } = render(<UnsavedChangesGuard dirty={true} ref={ref} />);
+
+    // Disarm alone, in its own commit — the cleanup's pop is now in flight.
+    act(() => {
+      rerender(<UnsavedChangesGuard dirty={false} ref={ref} />);
+    });
+    expect(backSpy).toHaveBeenCalledTimes(1);
+
+    // A later call must NOT issue a second back() — it queues behind the
+    // outstanding pop instead.
+    act(() => {
+      ref.current!.navigateAfterSave("/edit/x");
+    });
+    expect(backSpy).toHaveBeenCalledTimes(1);
+    expect(mockPush).not.toHaveBeenCalled();
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith("/edit/x");
+    expect(backSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("two navigateAfterSave calls while armed in the same commit coalesce — last href wins", () => {
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const ref = React.createRef<UnsavedChangesGuardHandle>();
+    render(<UnsavedChangesGuard dirty={true} ref={ref} />);
+
+    act(() => {
+      ref.current!.navigateAfterSave("/edit/a");
+      ref.current!.navigateAfterSave("/edit/b");
+    });
+    expect(backSpy).toHaveBeenCalledTimes(1);
+    expect(mockPush).not.toHaveBeenCalled();
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith("/edit/b");
+  });
+
+  it("an ordinary disarm no longer dangles the bypass flag for the next re-arm", async () => {
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const ref = React.createRef<UnsavedChangesGuardHandle>();
+    const { rerender } = render(<UnsavedChangesGuard dirty={true} ref={ref} />);
+
+    // Ordinary disarm — no navigateAfterSave call at all.
+    act(() => {
+      rerender(<UnsavedChangesGuard dirty={false} ref={ref} />);
+    });
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    expect(mockPush).not.toHaveBeenCalled();
+
+    // Re-arm, then a real user Back press on the new sentinel.
+    act(() => {
+      rerender(<UnsavedChangesGuard dirty={true} ref={ref} />);
+    });
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    await waitFor(() => expect(dialogIsOpen()).toBe(true));
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(backSpy).toHaveBeenCalledTimes(1);
+  });
 });
