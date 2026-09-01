@@ -31,7 +31,6 @@ import { extractLastNameSort } from "@/lib/name-sort";
 import {
   CENTER_ENTITY_TYPE,
   CENTER_PROGRAM_ENTITY_TYPE,
-  DIRECTOR_ROLE_KEY,
   formatLeadershipTitle,
 } from "@/lib/org-unit-roles";
 import type {
@@ -218,9 +217,8 @@ export type CenterLeader = {
    *  "Director", "Co-Director", "Associate Director". The noun `center-page.tsx`
    *  renders via `formatLeadershipTitle`; never hardcoded. */
   roleLabel: string;
-  /** Interim/acting qualifier — `OrgUnitRoleAssignment.interim` since #2542
-   *  Phase 1 (was the in-row `Center.leaderInterim` column, still dual-read
-   *  during this release). #540 / ADR-005 Amendment 1 § A1.1. */
+  /** Interim/acting qualifier — `OrgUnitRoleAssignment.interim` (#2542).
+   *  #540 / ADR-005 Amendment 1 § A1.1. */
   isInterim: boolean;
 };
 
@@ -360,8 +358,6 @@ type CenterRow = {
   slug: string;
   description: string | null;
   url: string | null;
-  directorCwid: string | null;
-  leaderInterim: boolean;
 };
 
 async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
@@ -373,11 +369,6 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
       slug: true,
       description: true,
       url: true,
-      // Dual-read fallback for the window between the ECS roll and the manual
-      // backfill, when no assignment row exists yet. Removed with the column in
-      // the contract PR.
-      directorCwid: true,
-      leaderInterim: true,
     },
   })) as CenterRow | null;
   if (!center) return null;
@@ -414,36 +405,12 @@ async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
   });
 
   type LeadershipSource = { cwid: string; roleKey: string; roleLabel: string; interim: boolean };
-  let sources: LeadershipSource[];
-  if (assignments.length > 0) {
-    sources = assignments.map((a) => ({
-      cwid: a.cwid,
-      roleKey: a.roleKey,
-      roleLabel: a.role.label,
-      interim: a.interim,
-    }));
-  } else if (center.directorCwid) {
-    // Dual-read fallback for the window between the ECS roll and the manual
-    // backfill, when no assignment row exists yet. Removed with the column in
-    // the contract PR. The legacy column could only ever express one
-    // director, so this synthesizes a one-item source list — never a second
-    // leadership entry. The label still comes from the vocabulary (not a
-    // literal "Director") so a curator rename is honored even pre-backfill.
-    const directorRole = await prisma.orgUnitRole.findUnique({
-      where: { entityType_key: { entityType: CENTER_ENTITY_TYPE, key: DIRECTOR_ROLE_KEY } },
-      select: { label: true },
-    });
-    sources = [
-      {
-        cwid: center.directorCwid,
-        roleKey: DIRECTOR_ROLE_KEY,
-        roleLabel: directorRole?.label ?? "Director",
-        interim: center.leaderInterim,
-      },
-    ];
-  } else {
-    sources = [];
-  }
+  const sources: LeadershipSource[] = assignments.map((a) => ({
+    cwid: a.cwid,
+    roleKey: a.roleKey,
+    roleLabel: a.role.label,
+    interim: a.interim,
+  }));
 
   let leadership: CenterLeader[] = [];
   if (sources.length > 0) {
