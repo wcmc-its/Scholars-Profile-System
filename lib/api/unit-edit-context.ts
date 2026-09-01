@@ -275,7 +275,7 @@ export type UnitEditContextClient = Pick<
  *   - NOT in the map at all     → no Scholar row has ever existed for this cwid
  *     (a manually-added membership that never matched anyone)
  */
-async function resolveScholarNames(
+export async function resolveScholarNames(
   cwids: ReadonlyArray<string>,
   client: UnitEditContextClient,
 ): Promise<Map<string, { name: string; title: string | null; departed: boolean }>> {

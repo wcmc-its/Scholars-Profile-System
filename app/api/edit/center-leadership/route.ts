@@ -17,16 +17,19 @@
  * Body: `{ centerCode, roleKey, action, cwid, interim?, replace? }`.
  *
  * Actions:
- *   - `add`         — insert a `(roleKey, cwid)` holder. No-op if the person
- *                      already holds this exact role. For a `singleHolder`
- *                      role that already has a DIFFERENT holder: `409
- *                      role_single_holder_conflict` (naming the incumbent via
- *                      `incumbentCwid`) unless the body also carries
- *                      `replace: true`, in which case the incumbent is
- *                      vacated and the new holder granted in the SAME
- *                      transaction, carrying the incumbent's `interim`
- *                      qualifier across (mirrors the retired director path's
- *                      carry-over behavior). A non-`singleHolder` role never
+ *   - `add`         — insert a `(roleKey, cwid)` holder. `interim` is
+ *                      optional and defaults to `false` — a newly added or
+ *                      replacing holder is never interim unless the request
+ *                      says so; the incumbent's `interim` flag (if any) is
+ *                      NOT inherited (a replacement director is presumed
+ *                      permanent unless the caller states otherwise). No-op
+ *                      if the person already holds this exact role. For a
+ *                      `singleHolder` role that already has a DIFFERENT
+ *                      holder: `409 role_single_holder_conflict` (naming the
+ *                      incumbent via `incumbentCwid`) unless the body also
+ *                      carries `replace: true`, in which case the incumbent
+ *                      is vacated and the new holder granted in the SAME
+ *                      transaction. A non-`singleHolder` role never
  *                      conflicts — it simply gains another holder.
  *   - `remove`      — delete a holder. No-op if absent.
  *   - `set_interim` — toggle `interim` on an existing holder. `400
@@ -47,10 +50,20 @@
  * `field_override` for `set_interim`; both EXISTING `AuditAction` values
  * (`lib/edit/audit.ts`), `targetEntityType: "center"`, no ENUM change needed.
  * Post-commit: `reflectUnitChange` purges the center page (it lists leaders).
+ *
+ * Response: `add`/`replace`/`set_interim` return the resulting holder as
+ * `{ ok: true, holder: { cwid, name, title, interim }, ... }` — `name`/
+ * `title` resolved the same way `lib/api/unit-edit-context.ts`'s loader
+ * resolves every other cwid on this page (`resolveScholarNames`, exported
+ * from there for this reuse). `remove` returns `{ ok: true, ... }` with no
+ * holder. The client renders this returned state rather than assuming any
+ * flag client-side (a replacement holder's `interim` is whatever the server
+ * actually wrote, not inherited from the incumbent — see `add` above).
  */
 import { type NextRequest, NextResponse } from "next/server";
 
 import { isRoleAllowedAtUnit } from "@/lib/api/org-unit-role-scope";
+import { resolveScholarNames } from "@/lib/api/unit-edit-context";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import {
@@ -112,8 +125,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(400, "invalid_cwid", "cwid");
   }
 
+  // `set_interim` REQUIRES `interim`. `add` accepts it as an OPTIONAL flag
+  // (default false) — a newly added or replacing holder is never interim
+  // unless the request says so; the incumbent's flag is never inherited.
   let interim = false;
   if (action === "set_interim") {
+    if (typeof body.interim !== "boolean") return editError(400, "invalid_value", "interim");
+    interim = body.interim;
+  } else if (action === "add" && "interim" in body) {
     if (typeof body.interim !== "boolean") return editError(400, "invalid_value", "interim");
     interim = body.interim;
   }
@@ -176,6 +195,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   let replacedCwid: string | null = null;
+  // The interim value actually written for add/replace/set_interim, so the
+  // response can report ground truth instead of the client's assumption.
+  let resultInterim: boolean | null = null;
 
   try {
     await db.write.$transaction(async (tx) => {
@@ -237,6 +259,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         after = { roleKey, cwid: row.cwid, interim: row.interim };
         auditAction = "field_override";
         fieldsChanged = ["interim"];
+        resultInterim = row.interim;
       } else {
         // add
         if (role.singleHolder) {
@@ -262,32 +285,36 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             }
             replacedCwid = holders[0].cwid;
             before = { roleKey, cwid: holders[0].cwid, interim: holders[0].interim };
-            // The interim qualifier rides with the ROLE, not the person —
-            // mirrors the retired `directorCwid` path's carry-over.
+            // A replacement holder is NOT interim unless the request asked
+            // for it — the incumbent's `interim` flag belongs to the PERSON
+            // who is leaving, not the role, so it is never inherited here.
             const row = await tx.orgUnitRoleAssignment.create({
               data: {
                 entityType: CENTER_ENTITY_TYPE,
                 entityId: centerCode,
                 cwid,
                 roleKey,
-                interim: holders[0].interim,
+                interim,
               },
               select: { cwid: true, interim: true },
             });
             after = { roleKey, cwid: row.cwid, interim: row.interim };
+            resultInterim = row.interim;
           } else {
             const row = await tx.orgUnitRoleAssignment.create({
-              data: { entityType: CENTER_ENTITY_TYPE, entityId: centerCode, cwid, roleKey, interim: false },
+              data: { entityType: CENTER_ENTITY_TYPE, entityId: centerCode, cwid, roleKey, interim },
               select: { cwid: true, interim: true },
             });
             after = { roleKey, cwid: row.cwid, interim: row.interim };
+            resultInterim = row.interim;
           }
         } else {
           const row = await tx.orgUnitRoleAssignment.create({
-            data: { entityType: CENTER_ENTITY_TYPE, entityId: centerCode, cwid, roleKey, interim: false },
+            data: { entityType: CENTER_ENTITY_TYPE, entityId: centerCode, cwid, roleKey, interim },
             select: { cwid: true, interim: true },
           });
           after = { roleKey, cwid: row.cwid, interim: row.interim };
+          resultInterim = row.interim;
         }
       }
 
@@ -322,5 +349,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   await reflectUnitChange({ unitKind: "center", unitSlug: center.slug });
-  return editOk({ centerCode, roleKey, cwid, action, changed: true, replacedCwid });
+
+  if (action === "remove") {
+    return editOk({ centerCode, roleKey, cwid, action, changed: true });
+  }
+
+  // add / set_interim (the only branches that reach here without throwing):
+  // resolve the holder's display name/title the same way the loader resolves
+  // every other cwid on this page, and report the interim value ACTUALLY
+  // written — never an assumption the client would otherwise have to make.
+  const nameMap = await resolveScholarNames([cwid], db.read);
+  const resolved = nameMap.get(cwid);
+  const holder = {
+    cwid,
+    name: resolved?.name ?? null,
+    title: resolved?.title ?? null,
+    interim: resultInterim ?? false,
+  };
+  return editOk({ centerCode, roleKey, cwid, action, changed: true, replacedCwid, holder });
 }

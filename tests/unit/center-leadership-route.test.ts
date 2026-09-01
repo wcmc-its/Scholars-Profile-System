@@ -30,6 +30,7 @@ const {
   mockCenterFindUnique,
   mockUnitAdminFindMany,
   mockAssignmentFindUnique,
+  mockScholarFindMany,
   mockTxRoleCreateMany,
   mockTxRoleFindUnique,
   mockTxScopeFindMany,
@@ -45,6 +46,7 @@ const {
   mockCenterFindUnique: vi.fn(),
   mockUnitAdminFindMany: vi.fn(),
   mockAssignmentFindUnique: vi.fn(),
+  mockScholarFindMany: vi.fn(),
   mockTxRoleCreateMany: vi.fn(),
   mockTxRoleFindUnique: vi.fn(),
   mockTxScopeFindMany: vi.fn(),
@@ -72,6 +74,7 @@ vi.mock("@/lib/db", () => ({
       center: { findUnique: mockCenterFindUnique },
       unitAdmin: { findMany: mockUnitAdminFindMany },
       orgUnitRoleAssignment: { findUnique: mockAssignmentFindUnique },
+      scholar: { findMany: mockScholarFindMany },
     },
     write: { $transaction: mockTransaction },
   },
@@ -117,6 +120,7 @@ beforeEach(() => {
     { entityType: "center", entityId: "meyer_cancer_center", role: "curator" },
   ]);
   mockAssignmentFindUnique.mockResolvedValue(null);
+  mockScholarFindMany.mockResolvedValue([]);
   mockTxRoleCreateMany.mockResolvedValue({ count: 0 });
   mockTxRoleFindUnique.mockResolvedValue({ roleGroup: "leadership", singleHolder: true });
   mockTxScopeFindMany.mockResolvedValue([]);
@@ -133,9 +137,16 @@ beforeEach(() => {
 
 describe("/api/edit/center-leadership — add", () => {
   it("adds a holder to an empty singleHolder role → 200, seeds + creates + audits", async () => {
+    mockScholarFindMany.mockResolvedValue([
+      { cwid: "dir001", preferredName: "Dana Director", primaryTitle: "MD", deletedAt: null },
+    ]);
     const res = await POST(post({ ...BASE, action: "add", cwid: "dir001" }));
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: true, changed: true });
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      changed: true,
+      holder: { cwid: "dir001", name: "Dana Director", title: "MD", interim: false },
+    });
     expect(mockTxRoleCreateMany).toHaveBeenCalledWith(expect.objectContaining({ skipDuplicates: true }));
     expect(mockTxAssignmentCreate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -199,13 +210,18 @@ describe("/api/edit/center-leadership — singleHolder conflict + replace", () =
     expect(mockExecuteRaw).not.toHaveBeenCalled();
   });
 
-  it("replace:true vacates the incumbent and grants the new holder, carrying interim across", async () => {
+  it("replace:true vacates an INTERIM incumbent and grants the new holder as non-interim by default", async () => {
     mockTxAssignmentFindMany.mockResolvedValue([{ cwid: "old001", interim: true }]);
     const res = await POST(
       post({ ...BASE, action: "add", cwid: "new001", replace: true }),
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: true, changed: true, replacedCwid: "old001" });
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      changed: true,
+      replacedCwid: "old001",
+      holder: { cwid: "new001", interim: false },
+    });
     expect(mockTxAssignmentDelete).toHaveBeenCalledWith({
       where: {
         entityType_entityId_cwid_roleKey: {
@@ -216,33 +232,92 @@ describe("/api/edit/center-leadership — singleHolder conflict + replace", () =
         },
       },
     });
+    // The incumbent's interim=true is NOT inherited — the replacement is
+    // written as interim=false, the request's default.
     expect(mockTxAssignmentCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ cwid: "new001", interim: true }),
+        data: expect.objectContaining({ cwid: "new001", interim: false }),
       }),
     );
     // ONE combined audit row for the replace, not two.
     expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
     const auditCall = mockExecuteRaw.mock.calls[0] as unknown[];
     expect(auditCall[4]).toBe("roster_change");
+    // before_values still names the incumbent's actual (interim=true) state.
     expect(JSON.parse(auditCall[6] as string)).toEqual({
       roleKey: "director",
       cwid: "old001",
       interim: true,
     });
+    // after_values reflects what was ACTUALLY written, not a carried-over flag.
+    expect(JSON.parse(auditCall[7] as string)).toEqual({
+      roleKey: "director",
+      cwid: "new001",
+      interim: false,
+    });
+  });
+
+  it("replace:true with interim:true requested writes the replacement as interim", async () => {
+    mockTxAssignmentFindMany.mockResolvedValue([{ cwid: "old001", interim: false }]);
+    const res = await POST(
+      post({ ...BASE, action: "add", cwid: "new001", replace: true, interim: true }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      changed: true,
+      replacedCwid: "old001",
+      holder: { cwid: "new001", interim: true },
+    });
+    expect(mockTxAssignmentCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ cwid: "new001", interim: true }),
+      }),
+    );
+    const auditCall = mockExecuteRaw.mock.calls[0] as unknown[];
     expect(JSON.parse(auditCall[7] as string)).toEqual({
       roleKey: "director",
       cwid: "new001",
       interim: true,
     });
   });
+
+  it("plain add (no replace) with interim:true requested writes the new holder as interim", async () => {
+    const res = await POST(
+      post({ ...BASE, action: "add", cwid: "dir001", interim: true }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      changed: true,
+      holder: { cwid: "dir001", interim: true },
+    });
+    expect(mockTxAssignmentCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ cwid: "dir001", interim: true }),
+      }),
+    );
+  });
+
+  it("interim not a boolean on add → 400 invalid_value, no transaction", async () => {
+    const res = await POST(
+      post({ ...BASE, action: "add", cwid: "dir001", interim: "yes" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_value", field: "interim" });
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
 });
 
 describe("/api/edit/center-leadership — remove", () => {
-  it("removes an existing holder → 200, deletes + audits", async () => {
+  it("removes an existing holder → 200 { ok: true } with no holder, deletes + audits", async () => {
     mockAssignmentFindUnique.mockResolvedValue({ cwid: "dir001", interim: false });
     const res = await POST(post({ ...BASE, action: "remove", cwid: "dir001" }));
     expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toMatchObject({ ok: true, changed: true });
+    expect(json).not.toHaveProperty("holder");
+    expect(mockScholarFindMany).not.toHaveBeenCalled();
     expect(mockTxAssignmentDelete).toHaveBeenCalledWith({
       where: {
         entityType_entityId_cwid_roleKey: {
@@ -269,10 +344,18 @@ describe("/api/edit/center-leadership — remove", () => {
 describe("/api/edit/center-leadership — set_interim", () => {
   it("toggles interim on an existing holder → 200, updates + audits field_override", async () => {
     mockAssignmentFindUnique.mockResolvedValue({ cwid: "dir001", interim: false });
+    mockTxAssignmentUpdate.mockResolvedValue({ cwid: "dir001", interim: true });
+    mockScholarFindMany.mockResolvedValue([
+      { cwid: "dir001", preferredName: "Dana Director", primaryTitle: "MD", deletedAt: null },
+    ]);
     const res = await POST(
       post({ ...BASE, action: "set_interim", cwid: "dir001", interim: true }),
     );
     expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      holder: { cwid: "dir001", name: "Dana Director", title: "MD", interim: true },
+    });
     expect(mockTxAssignmentUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ data: { interim: true } }),
     );

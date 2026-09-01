@@ -141,7 +141,10 @@ describe("CenterLeadershipCard (#2542 Phase C)", () => {
   });
 
   it("replacing a singleHolder incumbent POSTs add with replace:true and swaps the holder", async () => {
-    const fetchMock = okFetch({ replacedCwid: "dir001" });
+    const fetchMock = okFetch({
+      replacedCwid: "dir001",
+      holder: { cwid: "new001", name: "New Person", title: "Professor", interim: false },
+    });
     global.fetch = fetchMock as unknown as typeof fetch;
     render(<CenterLeadershipCard centerCode="meyer" roles={ROLES} />);
     fireEvent.click(screen.getByTestId("pick-role-director"));
@@ -149,10 +152,57 @@ describe("CenterLeadershipCard (#2542 Phase C)", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const body = bodyOf(fetchMock.mock.calls[0]);
     expect(body).toMatchObject({ roleKey: "director", action: "add", cwid: "new001", replace: true });
+    expect(body).not.toHaveProperty("interim");
     await waitFor(() => {
       expect(screen.queryByTestId("role-holder-director-dir001")).toBeNull();
       expect(screen.getByTestId("role-holder-director-new001")).toBeTruthy();
     });
+    // The replacement is reconciled to the ROUTE's response, not carried over
+    // from the (interim) incumbent it replaced — the interim checkbox on the
+    // new row must be unchecked even though `dir001` was not interim to begin
+    // with; the point under test is that this comes from `data.holder`, not
+    // a client-side guess.
+    expect(screen.getByTestId("role-interim-director-new001").getAttribute("data-state")).toBe(
+      "unchecked",
+    );
+  });
+
+  it("a replacement holder renders the interim state the ROUTE returns, never a hardcoded false", async () => {
+    // #2542 Phase C bug: replacing an INTERIM incumbent must not leave the
+    // card showing "not interim" while the DB (via the route) actually wrote
+    // interim=true because the curator asked for it. The appended row must
+    // reflect `data.holder.interim`, whatever it is.
+    const fetchMock = okFetch({
+      replacedCwid: "dir001",
+      holder: { cwid: "new001", name: "New Person", title: "Professor", interim: true },
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    render(<CenterLeadershipCard centerCode="meyer" roles={ROLES} />);
+    fireEvent.click(screen.getByTestId("pick-role-director"));
+    fireEvent.click(screen.getByTestId("role-add-interim-director"));
+    fireEvent.click(screen.getByTestId("role-add-director"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = bodyOf(fetchMock.mock.calls[0]);
+    expect(body).toMatchObject({ action: "add", cwid: "new001", replace: true, interim: true });
+    await waitFor(() => {
+      expect(screen.getByTestId("role-holder-director-new001")).toBeTruthy();
+    });
+    expect(screen.getByTestId("role-interim-director-new001").getAttribute("data-state")).toBe(
+      "checked",
+    );
+  });
+
+  it("the add-time Interim checkbox is unchecked by default and omits `interim` from the POST", async () => {
+    const fetchMock = okFetch({
+      holder: { cwid: "new001", name: "New Person", title: "Professor", interim: false },
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    render(<CenterLeadershipCard centerCode="meyer" roles={ROLES} />);
+    fireEvent.click(screen.getByTestId("pick-role-associate_director"));
+    fireEvent.click(screen.getByTestId("role-add-associate_director"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = bodyOf(fetchMock.mock.calls[0]);
+    expect(body).not.toHaveProperty("interim");
   });
 
   it("a 409 single-holder conflict surfaces an inline error and does not touch the list", async () => {

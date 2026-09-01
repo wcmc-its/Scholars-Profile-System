@@ -14,6 +14,15 @@
  * `unit-leader-card.tsx`, not `CenterProgramCard`, which has no confirm on
  * its own remove).
  *
+ * An "Interim" checkbox sits next to the typeahead so a curator can mark a
+ * new (or replacing) holder interim AT add time — it defaults unchecked, and
+ * the route defaults `interim` to `false` the same way when the flag isn't
+ * sent, so a plain add/replace is never interim by accident. The per-holder
+ * "Interim" checkbox on each row (below) stays for toggling it afterward.
+ * Every holder rendered — including the one just added or replaced — is
+ * exactly what the route's response says was written, never a hardcoded
+ * `interim: false` guess.
+ *
  * Renders in place of `UnitLeaderCard`'s retired center branch on
  * `/edit/center/[code]` — departments and divisions keep `UnitLeaderCard`
  * unchanged; their leadership is ETL-owned and single-role, so the generic
@@ -85,6 +94,7 @@ function RoleEditor({
 }) {
   const [holders, setHolders] = React.useState<Holder[]>(() => [...role.holders]);
   const [adding, setAdding] = React.useState<DirectoryValue | null>(null);
+  const [addInterim, setAddInterim] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [confirmCwid, setConfirmCwid] = React.useState<string | null>(null);
@@ -99,7 +109,7 @@ function RoleEditor({
   async function post(
     action: "add" | "remove" | "set_interim",
     payload: Record<string, unknown>,
-  ): Promise<{ ok: boolean; replacedCwid?: string | null }> {
+  ): Promise<{ ok: boolean; replacedCwid?: string | null; holder?: Holder }> {
     setError(null);
     try {
       const res = await fetch("/api/edit/center-leadership", {
@@ -111,12 +121,13 @@ function RoleEditor({
         ok: boolean;
         error?: string;
         replacedCwid?: string | null;
+        holder?: Holder;
       };
       if (!res.ok || data.ok !== true) {
         setError(mapErrorToMessage(data.error ?? ""));
         return { ok: false };
       }
-      return { ok: true, replacedCwid: data.replacedCwid ?? null };
+      return { ok: true, replacedCwid: data.replacedCwid ?? null, holder: data.holder };
     } catch {
       setError(mapErrorToMessage(""));
       return { ok: false };
@@ -131,18 +142,29 @@ function RoleEditor({
     }
     setBusy(true);
     const replace = role.singleHolder && hasHolder;
-    const result = await post("add", { cwid: adding.cwid, ...(replace ? { replace: true } : {}) });
+    const result = await post("add", {
+      cwid: adding.cwid,
+      ...(replace ? { replace: true } : {}),
+      ...(addInterim ? { interim: true } : {}),
+    });
     if (result.ok) {
+      // Render exactly what the route wrote back — never assume `interim`
+      // client-side (a replacement holder is not interim unless requested;
+      // the route is the source of truth for what actually landed).
+      const holder: Holder = result.holder ?? {
+        cwid: adding.cwid,
+        name: adding.name,
+        title: adding.title,
+        interim: false,
+      };
       setHolders((prev) => {
         const withoutReplaced = result.replacedCwid
           ? prev.filter((h) => h.cwid !== result.replacedCwid)
           : prev;
-        return [
-          ...withoutReplaced,
-          { cwid: adding.cwid, name: adding.name, title: adding.title, interim: false },
-        ];
+        return [...withoutReplaced.filter((h) => h.cwid !== holder.cwid), holder];
       });
       setAdding(null);
+      setAddInterim(false);
     }
     setBusy(false);
   }
@@ -161,7 +183,10 @@ function RoleEditor({
     setBusy(true);
     const result = await post("set_interim", { cwid, interim });
     if (result.ok) {
-      setHolders((prev) => prev.map((h) => (h.cwid === cwid ? { ...h, interim } : h)));
+      const holder = result.holder;
+      setHolders((prev) =>
+        prev.map((h) => (h.cwid === cwid ? (holder ?? { ...h, interim }) : h)),
+      );
     }
     setBusy(false);
   }
@@ -225,6 +250,15 @@ function RoleEditor({
             }}
           />
         </div>
+        <label className="flex items-center gap-1.5 pb-2 text-xs whitespace-nowrap">
+          <Checkbox
+            checked={addInterim}
+            disabled={busy}
+            onCheckedChange={(c) => setAddInterim(c === true)}
+            data-testid={`role-add-interim-${role.key}`}
+          />
+          Interim
+        </label>
         <Button
           type="button"
           variant="outline"
