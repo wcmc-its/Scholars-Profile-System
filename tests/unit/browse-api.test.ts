@@ -73,8 +73,9 @@ describe("getDepartmentsList", () => {
 
   it("maps chair name + slug from batch-fetched scholars", async () => {
     mockDepartmentFindMany.mockResolvedValue([
-      { code: "MED", name: "Medicine", slug: "medicine", scholarCount: 312, chairCwid: "abc1234" },
+      { code: "MED", name: "Medicine", slug: "medicine", scholarCount: 312 },
     ]);
+    mockOrgUnitRoleAssignmentFindMany.mockResolvedValue([{ entityId: "MED", cwid: "abc1234" }]);
     mockScholarFindMany.mockResolvedValue([
       { cwid: "abc1234", preferredName: "Jane Smith", slug: "jane-smith" },
     ]);
@@ -100,8 +101,10 @@ describe("getDepartmentsList", () => {
         name: "Rehabilitation Medicine",
         slug: "rehabilitation-medicine",
         scholarCount: 123,
-        chairCwid: "jos7021",
       },
+    ]);
+    mockOrgUnitRoleAssignmentFindMany.mockResolvedValue([
+      { entityId: "N1540", cwid: "jos7021" },
     ]);
     mockScholarFindMany.mockResolvedValue([]); // jos7021 is not a scholar
     const result = await getDepartmentsList();
@@ -115,8 +118,9 @@ describe("getDepartmentsList", () => {
   // re-derives "Chair"/"Director" from `category` itself.
   it("chairLabel defaults to 'Chair' for a non-administrative dept with no vocabulary row seeded yet", async () => {
     mockDepartmentFindMany.mockResolvedValue([
-      { code: "MED", name: "Medicine", slug: "medicine", category: "clinical", scholarCount: 312, chairCwid: "abc1234" },
+      { code: "MED", name: "Medicine", slug: "medicine", category: "clinical", scholarCount: 312 },
     ]);
+    mockOrgUnitRoleAssignmentFindMany.mockResolvedValue([{ entityId: "MED", cwid: "abc1234" }]);
     mockScholarFindMany.mockResolvedValue([
       { cwid: "abc1234", preferredName: "Jane Smith", slug: "jane-smith" },
     ]);
@@ -126,8 +130,9 @@ describe("getDepartmentsList", () => {
 
   it("chairLabel defaults to 'Director' for an administrative dept with no vocabulary row seeded yet", async () => {
     mockDepartmentFindMany.mockResolvedValue([
-      { code: "LIB", name: "Library", slug: "library", category: "administrative", scholarCount: 5, chairCwid: "dir1234" },
+      { code: "LIB", name: "Library", slug: "library", category: "administrative", scholarCount: 5 },
     ]);
+    mockOrgUnitRoleAssignmentFindMany.mockResolvedValue([{ entityId: "LIB", cwid: "dir1234" }]);
     mockScholarFindMany.mockResolvedValue([
       { cwid: "dir1234", preferredName: "Dir Person", slug: "dir-person" },
     ]);
@@ -137,7 +142,7 @@ describe("getDepartmentsList", () => {
 
   it("chairLabel is null exactly when chairName is null", async () => {
     mockDepartmentFindMany.mockResolvedValue([
-      { code: "PED", name: "Pediatrics", slug: "pediatrics", category: "clinical", scholarCount: 80, chairCwid: null },
+      { code: "PED", name: "Pediatrics", slug: "pediatrics", category: "clinical", scholarCount: 80 },
     ]);
     mockScholarFindMany.mockResolvedValue([]);
     const result = await getDepartmentsList();
@@ -149,8 +154,9 @@ describe("getDepartmentsList", () => {
       { key: "chair", label: "Chairperson" },
     ]);
     mockDepartmentFindMany.mockResolvedValue([
-      { code: "MED", name: "Medicine", slug: "medicine", category: "clinical", scholarCount: 312, chairCwid: "abc1234" },
+      { code: "MED", name: "Medicine", slug: "medicine", category: "clinical", scholarCount: 312 },
     ]);
+    mockOrgUnitRoleAssignmentFindMany.mockResolvedValue([{ entityId: "MED", cwid: "abc1234" }]);
     mockScholarFindMany.mockResolvedValue([
       { cwid: "abc1234", preferredName: "Jane Smith", slug: "jane-smith" },
     ]);
@@ -158,28 +164,28 @@ describe("getDepartmentsList", () => {
     expect(result[0].chairLabel).toBe("Chairperson");
   });
 
-  it("an OrgUnitRoleAssignment row wins over the legacy chairCwid column (dual-read)", async () => {
+  // #2542 contract A — `Department.chairCwid` no longer exists as a read
+  // source; `OrgUnitRoleAssignment` is the sole source now.
+  it("resolves the chair from the OrgUnitRoleAssignment row", async () => {
     mockDepartmentFindMany.mockResolvedValue([
-      { code: "MED", name: "Medicine", slug: "medicine", category: "clinical", scholarCount: 312, chairCwid: "stale-column" },
+      { code: "MED", name: "Medicine", slug: "medicine", category: "clinical", scholarCount: 312 },
     ]);
     mockOrgUnitRoleAssignmentFindMany.mockResolvedValue([
       { entityId: "MED", cwid: "assigned001" },
     ]);
     mockScholarFindMany.mockResolvedValue([
       { cwid: "assigned001", preferredName: "Assignment Chair", slug: "assignment-chair" },
-      { cwid: "stale-column", preferredName: "Stale Chair", slug: "stale-chair" },
     ]);
     const result = await getDepartmentsList();
     expect(result[0].chairName).toBe("Assignment Chair");
-    // The scholar batch-fetch was scoped to the ASSIGNED cwid, not the column.
     expect(mockScholarFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { cwid: { in: ["assigned001"] } } }),
     );
   });
 
-  it("returns chairName: null when chairCwid is null (absence-as-default)", async () => {
+  it("returns chairName: null when there is no assignment (absence-as-default)", async () => {
     mockDepartmentFindMany.mockResolvedValue([
-      { code: "PED", name: "Pediatrics", slug: "pediatrics", scholarCount: 80, chairCwid: null },
+      { code: "PED", name: "Pediatrics", slug: "pediatrics", scholarCount: 80 },
     ]);
     mockScholarFindMany.mockResolvedValue([]);
     const result = await getDepartmentsList();
@@ -189,7 +195,7 @@ describe("getDepartmentsList", () => {
 
   it("does not query scholars when no chair cwids present", async () => {
     mockDepartmentFindMany.mockResolvedValue([
-      { code: "PED", name: "Pediatrics", slug: "pediatrics", scholarCount: 80, chairCwid: null },
+      { code: "PED", name: "Pediatrics", slug: "pediatrics", scholarCount: 80 },
     ]);
     const result = await getDepartmentsList();
     expect(result).toHaveLength(1);
