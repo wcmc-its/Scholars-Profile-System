@@ -101,14 +101,41 @@ describe("DEFAULT_ORG_UNIT_ROLES", () => {
     expect(centerRoles.every((r) => r.scope === "unit")).toBe(true);
   });
 
-  it("seeds center, department, division and core; leaves only `center_program` empty", () => {
-    // `center_program` stays empty on purpose — folding CenterProgramLeader in
-    // is a later phase, and seeding a role no code reads would be dead data.
-    // The other four kinds are all populated as of this phase.
-    for (const kind of ["center", "department", "division", "core"] as const) {
+  it("seeds all five kinds — center, department, division, core, and (#2558) center_program", () => {
+    for (const kind of [
+      "center",
+      "department",
+      "division",
+      "core",
+      "center_program",
+    ] as const) {
       expect(DEFAULT_ORG_UNIT_ROLES[kind].length, `${kind} should be seeded`).toBeGreaterThan(0);
     }
-    expect(DEFAULT_ORG_UNIT_ROLES.center_program).toEqual([]);
+  });
+
+  // #2558 Phase 1 — folding CenterProgramLeader into the vocabulary.
+  it("center_program seeds leader (profileTitle true) and coe_liaison (profileTitle false, with expansion)", () => {
+    expect(DEFAULT_ORG_UNIT_ROLES.center_program).toEqual([
+      {
+        key: "leader",
+        label: "Leader",
+        group: "leadership",
+        scope: "program",
+        singleHolder: false,
+        sortOrder: 10,
+        profileTitle: true,
+      },
+      {
+        key: "coe_liaison",
+        label: "COE Liaison",
+        group: "leadership",
+        scope: "program",
+        singleHolder: false,
+        sortOrder: 20,
+        profileTitle: false,
+        expansion: "Community Outreach & Engagement",
+      },
+    ]);
   });
 
   it("department seeds BOTH chair and director, matching the exact shape the ticket specifies", () => {
@@ -168,8 +195,23 @@ describe("DEFAULT_ORG_UNIT_ROLES", () => {
     expect(rows.find((r) => r.key === DIRECTOR_ROLE_KEY)?.roleGroup).toBe("leadership");
   });
 
-  it("orgUnitRoleSeedRows returns [] for a kind with no vocabulary yet", () => {
-    expect(orgUnitRoleSeedRows("center_program")).toEqual([]);
+  // #2558 Phase 1 — center_program is no longer empty; `expansion` rides
+  // along as `null` for the role with none, and as the vocabulary's own
+  // string for coe_liaison — never `undefined`, since this shapes a Prisma
+  // `createMany` row.
+  it("orgUnitRoleSeedRows carries expansion (null for leader, the string for coe_liaison)", () => {
+    const rows = orgUnitRoleSeedRows("center_program");
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.entityType === "center_program")).toBe(true);
+    expect(rows.find((r) => r.key === "leader")?.expansion).toBeNull();
+    const coeLiaison = rows.find((r) => r.key === "coe_liaison");
+    expect(coeLiaison?.expansion).toBe("Community Outreach & Engagement");
+    expect(coeLiaison?.profileTitle).toBe(false);
+  });
+
+  it("orgUnitRoleSeedRows carries expansion: null (not undefined) for a kind with no expansion at all", () => {
+    const rows = orgUnitRoleSeedRows("center");
+    expect(rows.every((r) => r.expansion === null)).toBe(true);
   });
 
   it("orgUnitRoleSeedRows carries department's own entityType, not center's", () => {

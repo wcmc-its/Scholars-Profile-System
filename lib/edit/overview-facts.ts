@@ -27,6 +27,7 @@
 import { db } from "@/lib/db";
 import {
   CENTER_ENTITY_TYPE,
+  CENTER_PROGRAM_ENTITY_TYPE,
   DIRECTOR_ROLE_KEY,
   formatLeadershipTitle,
   departmentLeaderRoleKey,
@@ -1040,7 +1041,8 @@ function fkLeadershipCandidate(
  * `CenterProgram.leaderCwid` column), so a co-led program surfaces every leader.
  */
 async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCandidate[]> {
-  const [departments, divisions, centers, legacyCenters, programLeaders] = await Promise.all([
+  const [departments, divisions, centers, legacyCenters, programAssignments, programLeaders] =
+    await Promise.all([
     db.read.department.findMany({
       where: { chairCwid: cwid },
       // `category` drives Chair vs. Director (#58 / #2542 Phase D) — see the
@@ -1074,6 +1076,28 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
       where: { directorCwid: cwid },
       select: { code: true, name: true, officialName: true, leaderInterim: true },
     }),
+    // #2558 Phase 1 — program leadership is an `OrgUnitRoleAssignment` row
+    // too (`entityType: "center_program"`, `entityId`
+    // `"{centerCode}:{programCode}"`). `profileTitle` gates it the same way
+    // `role: "leader"` gates the legacy query below — `coe_liaison` seeds
+    // `profileTitle: false`, so this only ever surfaces `leader` rows. No FK
+    // to `CenterProgram`, so the program's label/center name are resolved
+    // separately, below.
+    db.read.orgUnitRoleAssignment.findMany({
+      where: {
+        cwid,
+        entityType: CENTER_PROGRAM_ENTITY_TYPE,
+        role: { roleGroup: "leadership", profileTitle: true },
+      },
+      select: {
+        entityId: true,
+        interim: true,
+        role: { select: { label: true } },
+      },
+    }),
+    // Dual-read fallback: only programs the assignment query above does not
+    // already cover reach the candidate list — see the dedup below. Dropped
+    // in the contract PR alongside `CenterProgramLeader` itself.
     db.read.centerProgramLeader.findMany({
       // #1570 — a `coe_liaison` row is not a leadership title; only program
       // LEADS synthesize a "Leader, {program}" candidate here.
@@ -1097,6 +1121,32 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
   const centerNameById = new Map(
     centerNameRows.map((c) => [c.code, c.officialName ?? c.name]),
   );
+  // #2558 Phase 1 — batched (label, center name) lookup for the programs
+  // `programAssignments` points at. Parsed back apart from `entityId`
+  // (`"{centerCode}:{programCode}"`) since the assignment carries no FK to
+  // `CenterProgram`.
+  const programAssignmentInfo = new Map<string, { label: string; centerName: string }>();
+  if (programAssignments.length > 0) {
+    const pairs = programAssignments.map((a) => {
+      const [centerCode, programCode] = a.entityId.split(":");
+      return { centerCode: centerCode ?? "", programCode: programCode ?? "" };
+    });
+    const programRows = await db.read.centerProgram.findMany({
+      where: { OR: pairs.map((p) => ({ centerCode: p.centerCode, code: p.programCode })) },
+      select: {
+        centerCode: true,
+        code: true,
+        label: true,
+        center: { select: { name: true, officialName: true } },
+      },
+    });
+    for (const p of programRows) {
+      programAssignmentInfo.set(`${p.centerCode}:${p.code}`, {
+        label: p.label,
+        centerName: p.center.officialName ?? p.center.name,
+      });
+    }
+  }
 
   const out: FkLeadershipCandidate[] = [];
   for (const d of departments) {
@@ -1162,7 +1212,31 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
       ),
     );
   }
+  // #2558 Phase 1 — programs already covered by an assignment row. The
+  // candidate id interpolates the assignment's own `entityId`
+  // (`"{centerCode}:{programCode}"`), byte-identical to the legacy id below,
+  // so a curator's prior dismissal keeps matching regardless of which source
+  // produced the row — same invariant the center block's id computation
+  // documents above.
+  for (const a of programAssignments) {
+    const info = programAssignmentInfo.get(a.entityId);
+    // A row whose program vanished emits no candidate rather than a
+    // half-rendered one — the assignment carries no FK to `CenterProgram`.
+    if (!info) continue;
+    out.push(
+      fkLeadershipCandidate(
+        `fk:program:${a.entityId}`,
+        `${formatLeadershipTitle(a.role.label, a.interim)}, ${asProgramName(info.label)}`,
+        info.centerName,
+        a.interim,
+      ),
+    );
+  }
+  // Dual-read: only programs the assignment loop above does not already
+  // cover, so the two sources never emit two candidates with the same
+  // `fk:program:` id.
   for (const p of programLeaders) {
+    if (programAssignments.some((a) => a.entityId === `${p.centerCode}:${p.programCode}`)) continue;
     const centerName = p.program.center.officialName ?? p.program.center.name;
     out.push(
       fkLeadershipCandidate(

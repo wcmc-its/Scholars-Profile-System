@@ -85,6 +85,32 @@ export const DIVISION_CHIEF_ROLE_KEY = "chief";
  */
 export const MEMBER_ROLE_KEY = "member";
 
+/** The kind whose vocabulary #2558 Phase 1 seeds (folding `CenterProgramLeader`
+ *  in). Named the same way `CENTER_ENTITY_TYPE` is, for the same reason: a
+ *  `satisfies OrgUnitRoleEntityType` constant a backfill/dual-read call site
+ *  can import instead of retyping the string literal. */
+export const CENTER_PROGRAM_ENTITY_TYPE = "center_program" satisfies OrgUnitRoleEntityType;
+
+/** Stable key of the seeded leadership role that a `CenterProgramLeader.role
+ *  === "leader"` row migrates to (#2558). */
+export const PROGRAM_LEADER_ROLE_KEY = "leader";
+
+/** Stable key of the seeded leadership role that a `CenterProgramLeader.role
+ *  === "coe_liaison"` row migrates to (#2558). Seeded with `profileTitle:
+ *  false` — see the entry's own comment below for why. */
+export const COE_LIAISON_ROLE_KEY = "coe_liaison";
+
+/**
+ * What `COE` stands for on a Meyer Cancer Center program's "COE Liaison" role.
+ * #2558 Phase 1 moves this out of `lib/center-program-roles.ts` and into the
+ * `coe_liaison` vocabulary entry's `expansion` column (below) — the literal
+ * lives HERE now, and `lib/center-program-roles.ts` re-exports it so its two
+ * existing importers (the public program page's `LeaderCard` and the editor's
+ * `CenterProgramCard`) render the identical `<abbr>` a11y affordance, now
+ * sourced from the vocabulary rather than a second hardcoded copy.
+ */
+export const COE_EXPANSION = "Community Outreach & Engagement";
+
 /** A seedable vocabulary entry. Mirrors the `OrgUnitRole` columns. */
 export type OrgUnitRoleSeed = {
   key: string;
@@ -94,15 +120,33 @@ export type OrgUnitRoleSeed = {
   singleHolder: boolean;
   sortOrder: number;
   profileTitle: boolean;
+  /** Optional long form for an abbreviated label, rendered as `<abbr>`. Mirrors
+   *  `OrgUnitRole.expansion` — `undefined` for every entry except `center_program`'s
+   *  `coe_liaison` (#2558). */
+  expansion?: string;
 };
 
 /**
  * The default vocabulary per unit kind.
  *
  * `center`, `department`, `division` and `core` are populated. `center_program`
- * stays empty — folding `CenterProgramLeader` in is a later phase — and an
- * empty list there is genuinely dead data rather than a hedge, per the
- * comment on that phase in `OrgUnitRole.scope`.
+ * is populated too, as of #2558 Phase 1: `leader` and `coe_liaison`, folding
+ * `CenterProgramLeader` in. `coe_liaison` seeds `profileTitle: false` — a
+ * program's Community Outreach & Engagement liaison has never been a title
+ * line on a scholar profile (`lib/api/profile.ts`'s `progLeads` query has
+ * always excluded it, filtering `role: "leader"` only) — and carries the
+ * `expansion` this file now owns (see `COE_EXPANSION` above). Both entries are
+ * `scope: "program"`, the sub-tier `OrgUnitRoleAssignment.entityId` expresses
+ * as `"{centerCode}:{programCode}"` (see that model's docblock).
+ *
+ * Seeding the vocabulary here does not, by itself, move any reader off
+ * `CenterProgramLeader` — `lib/api/profile.ts` and `lib/edit/overview-facts.ts`
+ * dual-read an `OrgUnitRoleAssignment` row first, falling back to the legacy
+ * table, mirroring Phase D's department/division shape. The public program
+ * page (`lib/api/centers.ts`'s `getCenterProgram`) and the editor
+ * (`app/api/edit/center-program/route.ts`) still read/write
+ * `CenterProgramLeader` directly — migrating those, and dropping the table,
+ * is the contract PR this phase sets up but does not ship.
  *
  * `department` seeds BOTH `chair` and `director` (Medicine holds one, the
  * Library the other); `departmentLeaderRoleKey` below is the single place
@@ -280,7 +324,33 @@ export const DEFAULT_ORG_UNIT_ROLES: Readonly<
       profileTitle: true,
     },
   ],
-  center_program: [],
+  center_program: [
+    {
+      key: PROGRAM_LEADER_ROLE_KEY,
+      label: "Leader",
+      group: "leadership",
+      scope: "program",
+      // A program may be co-led (#1117) — `CenterProgramLeader` is a 0..N
+      // table for exactly that reason, matching `core`'s `director`.
+      singleHolder: false,
+      sortOrder: 10,
+      profileTitle: true,
+    },
+    {
+      key: COE_LIAISON_ROLE_KEY,
+      label: "COE Liaison",
+      group: "leadership",
+      scope: "program",
+      singleHolder: false,
+      sortOrder: 20,
+      // #1570 — a COE Liaison is not a program LEAD; it has never rendered as
+      // a profile title line (`lib/api/profile.ts`'s legacy query has always
+      // filtered `role: "leader"` only). This is the entire reason
+      // `profileTitle` exists as a column.
+      profileTitle: false,
+      expansion: COE_EXPANSION,
+    },
+  ],
 };
 
 /**
@@ -364,6 +434,7 @@ export function orgUnitRoleSeedRows(entityType: OrgUnitRoleEntityType): {
   singleHolder: boolean;
   sortOrder: number;
   profileTitle: boolean;
+  expansion: string | null;
   source: string;
 }[] {
   return DEFAULT_ORG_UNIT_ROLES[entityType].map((r) => ({
@@ -375,6 +446,9 @@ export function orgUnitRoleSeedRows(entityType: OrgUnitRoleEntityType): {
     singleHolder: r.singleHolder,
     sortOrder: r.sortOrder,
     profileTitle: r.profileTitle,
+    // `null`, not `undefined` — this shapes a Prisma `createMany` row, and
+    // the `expansion` column is nullable, not optional-on-write.
+    expansion: r.expansion ?? null,
     source: "seed",
   }));
 }
