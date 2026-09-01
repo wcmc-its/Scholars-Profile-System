@@ -1477,9 +1477,9 @@ export class AppStack extends Stack {
         // vocabulary console (`/edit/roles`, `lib/edit/org-unit-role-flags.ts`).
         // Read via isOrgUnitRoleConsoleEnabled() (=== "on"); when off the route
         // and its /api/edit/roles endpoints 404 and the admin sub-nav tab stays
-        // hidden — ships dark. App-only, no reindex, no migration.
-        // STAGING-FIRST: on in staging to soak, off in prod until sign-off.
-        ORG_UNIT_ROLE_CONSOLE: env === "staging" ? "on" : "off",
+        // hidden. App-only, no reindex, no migration. Soaked on staging, then
+        // signed off for prod 2026-09-01 — on in both envs.
+        ORG_UNIT_ROLE_CONSOLE: "on",
         // CLINICAL_TRIALS_SECTION — the profile "Clinical trials" section
         // (#clinical-trials). Dark on prod; staging-on for soak. The profile
         // payload returns [] when off, so this is safe to leave off even after
