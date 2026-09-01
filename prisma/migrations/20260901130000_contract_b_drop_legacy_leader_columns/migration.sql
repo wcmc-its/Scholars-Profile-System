@@ -8,9 +8,12 @@
 --
 --   - `department.chair_cwid`, `division.chief_cwid`, `center.director_cwid`,
 --     `center.leader_interim` — every reader/writer of these four columns was
---     retired in #2542 contract A (7c51e875, already merged to master).
---     `OrgUnitRoleAssignment` has been the sole leadership store since that
---     deploy; the columns have been dead weight since then.
+--     retired in #2542 contract A (7c51e875). PRECONDITION: deploy this
+--     migration ONLY after BOTH environments are running 7c51e875 or later —
+--     merged is not deployed; an earlier image still SELECTs these columns
+--     and would 500 the moment they are gone. Once that image is live,
+--     `OrgUnitRoleAssignment` is the sole leadership store and the columns
+--     are dead weight.
 --   - `center_role` / `center_leader` — 0 rows in every environment. Nothing
 --     was ever migrated out of them, because nothing was ever migrated into
 --     them: see `20260829143000_center_role_vocabulary`'s and
@@ -62,8 +65,8 @@ DROP TABLE `center_leader`;
 -- DropTable
 DROP TABLE `center_role`;
 
--- CreateIndex
-CREATE INDEX `center_membership_role_entity_type_membership_role_key_idx` ON `center_membership`(`role_entity_type`, `membership_role_key`);
-
--- AddForeignKey
+-- AddForeignKey (no explicit index: MySQL creates the supporting index named
+-- after the constraint, the repo's convention for composite FKs — see
+-- `20260830150000_org_unit_role_vocabulary/migration.sql`'s FK and its later
+-- `DROP INDEX ..._fkey`)
 ALTER TABLE `center_membership` ADD CONSTRAINT `center_membership_role_entity_type_membership_role_key_fkey` FOREIGN KEY (`role_entity_type`, `membership_role_key`) REFERENCES `org_unit_role`(`entity_type`, `key`) ON DELETE NO ACTION ON UPDATE NO ACTION;
