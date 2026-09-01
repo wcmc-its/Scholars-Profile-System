@@ -190,7 +190,10 @@ async function getDivisionUncached(
   // § A1.1). `slug` is consumed by `etl/ed`, not merged here.
   // `leaderCwid`/`leaderInterim` are NOT merged into this object any more —
   // `resolveUnitLeader` below reads `overrides` directly, same rationale as
-  // `lib/api/departments.ts` (#2542 Phase D).
+  // `lib/api/departments.ts`. `mergeUnitFields`'s `leaderCwid` input is
+  // passed through only to satisfy `UnitRowFieldsForMerge`'s shape
+  // (`lib/api/manual-layer.ts`, out of scope here) — the merged `leaderCwid`/
+  // `leaderInterim` output is never read.
   const overrides = await loadUnitFieldOverrides("division", division.code, prisma);
   const merged = mergeUnitFields(
     { description: division.description, url: division.url, leaderCwid: division.chiefCwid },
@@ -206,7 +209,6 @@ async function getDivisionUncached(
     entityType: "division",
     entityId: division.code,
     roleKey: DIVISION_CHIEF_ROLE_KEY,
-    legacyLeaderCwid: division.chiefCwid,
     overrides,
     fallbackLabel: "Chief",
     client: prisma,
@@ -428,13 +430,23 @@ async function getDivisionFacultyUncached(
 ): Promise<DivisionFacultyResult> {
   const page = Math.max(0, opts.page ?? 0);
 
-  // #540 Phase 8 — one division-row lookup feeds both `loadDivisionMemberCwids`
-  // (for `source`) and the chief lookup (for `chiefCwid`).
+  // #540 Phase 8 — one division-row lookup feeds `loadDivisionMemberCwids`
+  // (for `source`); the chief cwid comes from `resolveUnitLeader`'s
+  // override-over-assignment precedence, same as the division page itself.
   const div = await prisma.division.findFirst({
     where: { code: divCode },
-    select: { chiefCwid: true, source: true },
+    select: { source: true },
   });
-  const chiefCwid = div?.chiefCwid ?? null;
+  const chiefOverrides = await loadUnitFieldOverrides("division", divCode, prisma);
+  const resolvedChief = await resolveUnitLeader({
+    entityType: "division",
+    entityId: divCode,
+    roleKey: DIVISION_CHIEF_ROLE_KEY,
+    overrides: chiefOverrides,
+    fallbackLabel: "Chief",
+    client: prisma,
+  });
+  const chiefCwid = resolvedChief?.cwid ?? null;
 
   // #2519 — Cornell (Ithaca) render union. `DivisionMembership` has no
   // active-window columns (unlike `CenterMembership`) — every row is active

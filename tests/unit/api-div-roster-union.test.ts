@@ -30,6 +30,9 @@ const {
   mockPublicationFindMany,
   mockPublicationCount,
   mockSuppressionFindMany,
+  mockFieldOverrideFindMany,
+  mockOrgUnitRoleFindUnique,
+  mockOrgUnitRoleAssignmentFindFirst,
 } = vi.hoisted(() => ({
   mockDivisionFindFirst: vi.fn(),
   mockDivisionMembershipFindMany: vi.fn(),
@@ -43,6 +46,9 @@ const {
   mockPublicationFindMany: vi.fn(),
   mockPublicationCount: vi.fn(),
   mockSuppressionFindMany: vi.fn(),
+  mockFieldOverrideFindMany: vi.fn(),
+  mockOrgUnitRoleFindUnique: vi.fn(),
+  mockOrgUnitRoleAssignmentFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -64,6 +70,12 @@ vi.mock("@/lib/db", () => ({
     },
     publication: { findMany: mockPublicationFindMany, count: mockPublicationCount },
     suppression: { findMany: mockSuppressionFindMany },
+    // #2542 contract A — `getDivisionFaculty`'s chief-first ordering now runs
+    // through `resolveUnitLeader` (override > assignment) unconditionally,
+    // not a gated `Division.chiefCwid` read.
+    fieldOverride: { findMany: mockFieldOverrideFindMany },
+    orgUnitRole: { findUnique: mockOrgUnitRoleFindUnique },
+    orgUnitRoleAssignment: { findFirst: mockOrgUnitRoleAssignmentFindFirst },
   },
 }));
 
@@ -86,6 +98,9 @@ beforeEach(() => {
   mockPublicationCount.mockResolvedValue(0);
   mockSuppressionFindMany.mockResolvedValue([]);
   mockDivisionMembershipFindMany.mockResolvedValue([]);
+  mockFieldOverrideFindMany.mockResolvedValue([]);
+  mockOrgUnitRoleFindUnique.mockResolvedValue(null);
+  mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue(null);
 });
 
 function routeScholarFindMany(activeCwids: ReadonlySet<string>) {
@@ -138,7 +153,6 @@ function routeScholarFindMany(activeCwids: ReadonlySet<string>) {
 const DIV_BASE = {
   code: "CARDIO",
   deptCode: "MED",
-  chiefCwid: null as string | null,
   source: "ED",
 };
 
@@ -208,13 +222,14 @@ describe("getDivisionFaculty — Phase 8 roster union (#540)", () => {
   });
 
   it("skips the chief lookup when the chief is not in the member set", async () => {
-    // Cross-tab consistency: the chief column may name an ex-divisional
+    // Cross-tab consistency: the resolved chief may name an ex-divisional
     // scholar; the faculty list, keyed on the unioned member set, must not
     // hoist them to the top of a page they no longer belong on.
-    mockDivisionFindFirst.mockResolvedValue({
-      ...DIV_BASE,
-      source: "manual",
-      chiefCwid: "exMember",
+    mockDivisionFindFirst.mockResolvedValue({ ...DIV_BASE, source: "manual" });
+    mockOrgUnitRoleAssignmentFindFirst.mockResolvedValue({
+      cwid: "exMember",
+      interim: false,
+      role: { label: "Chief" },
     });
     mockDivisionMembershipFindMany.mockResolvedValue([{ cwid: "current001" }]);
     mockScholarFindMany.mockImplementation(routeScholarFindMany(new Set(["current001"])));
