@@ -338,9 +338,10 @@ export type CenterMembersResult =
        * prop expects), computed over the FULL active+carved member set (not
        * just the current page) — mirrors `departments.ts`'s
        * `roleCategoryCounts` (#17). Cornell (Ithaca) external members
-       * (`roleCategory: null`) are not tallied into any group, matching how
-       * `formatRoleCategory(null)` already excludes them elsewhere; they still
-       * count toward `total`.
+       * (`roleCategory: null`) have no `formatRoleCategory` label of their
+       * own, but for chip-partition purposes an external member IS an
+       * affiliated, non-WCM faculty member — their count is folded into
+       * `"Affiliated faculty"` so the chip counts add up to `total`.
        */
       roleCategoryCounts: Record<string, number>;
     }
@@ -728,13 +729,18 @@ async function getCenterMembersUncached(
   // IS that set (it also drives `total`), so this is an in-memory reduce, not
   // an extra query, and stays in lockstep with `total` by construction (mirrors
   // `departments.ts`'s `roleCategoryCounts`, #17). Cornell external members
-  // carry `roleCategory: null` and are not tallied into any group, same as a
-  // WCM row would be if un-backfilled.
+  // carry `roleCategory: null` (no `formatRoleCategory` label of their own),
+  // but they ARE affiliated, non-WCM faculty for chip purposes, so they're
+  // tallied into "Affiliated faculty" below instead of left in no group.
   const roleCategoryCounts: Record<string, number> = {};
   for (const s of scholars) {
     const label = formatRoleCategory(s.roleCategory);
     if (label === null) continue;
     roleCategoryCounts[label] = (roleCategoryCounts[label] ?? 0) + 1;
+  }
+  if (cornellHits.length > 0) {
+    roleCategoryCounts["Affiliated faculty"] =
+      (roleCategoryCounts["Affiliated faculty"] ?? 0) + cornellHits.length;
   }
 
   // Is this a programmed center with at least one active programmed member?
@@ -866,9 +872,14 @@ export function getCenterMembers(
  * (matching the People search "Last name (A–Z)" sort, same as the SSR roster —
  * NOT the dept/division `preferredName` ASC convention `unit-members.ts` uses).
  *
- * Deliberately does NOT include Cornell (Ithaca) external members (#2519) —
- * they carry no `roleCategory` to filter on, and this is a narrower, additive
- * filtered view of the roster, not a replacement for the full SSR one.
+ * `roleGroup === "Affiliated faculty"` ALSO unions in the center's active
+ * Cornell (Ithaca) external members (#2519), same as the flat SSR roster's
+ * `roleCategoryCounts` now folds them in — an external member carries no
+ * `roleCategory` for `groupToRawValues`'s `IN (...)` filter to match, so they
+ * can't come back from the `scholar.findMany` above; they're loaded and
+ * merged in separately instead, sorted into the same surname order and
+ * counted into `total`. Every other role group still excludes them: they
+ * have no `roleCategory` to place them there.
  */
 export type CenterMembersByTypeResult = {
   hits: CenterMemberHit[];
@@ -896,18 +907,48 @@ export async function getCenterMembersByType(
   const today = todayIso();
   const memberships = (await prisma.centerMembership.findMany({
     where: { centerCode },
-    select: { cwid: true, membershipType: true, startDate: true, endDate: true },
+    select: {
+      cwid: true,
+      membershipType: true,
+      startDate: true,
+      endDate: true,
+      source: true,
+    },
   })) as Array<{
     cwid: string;
     membershipType: CenterMembershipType | null;
     startDate: Date | null;
     endDate: Date | null;
+    source: string;
   }>;
   const activeMemberships = memberships.filter((m) =>
     isCenterMembershipActive(m.startDate, m.endDate, today),
   );
   const activeCwids = activeMemberships.map((m) => m.cwid);
   if (activeCwids.length === 0) return empty;
+
+  // #2519 — "Affiliated faculty" also draws in the center's active Cornell
+  // (Ithaca) external members (see the docblock above); every other group
+  // stays WCM-only since an external member has no `roleCategory` for
+  // `groupToRawValues`'s filter to place it in. Built the same way as the
+  // flat SSR roster's Cornell branch (`getCenterMembersUncached`).
+  let cornellHits: CenterMemberHit[] = [];
+  if (roleGroup === "Affiliated faculty" && isCornellDirectoryMembersEnabled()) {
+    const cornellCwids = activeMemberships
+      .filter((m) => m.source === "cornell-ithaca")
+      .map((m) => m.cwid);
+    if (cornellCwids.length > 0) {
+      const externalByCuid = await loadExternalMembersByCuid(cornellCwids);
+      cornellHits = cornellCwids
+        .map((cwid) => externalByCuid.get(cwid))
+        .filter((m): m is NonNullable<typeof m> => m !== undefined)
+        .map((m): CenterMemberHit => ({
+          ...buildExternalMemberHit(m),
+          membershipType: null,
+          professorialRank: null,
+        }));
+    }
+  }
 
   // Same carve as `getCenterMembersUncached`'s flat branch: active + not
   // soft-deleted + `publicRoleWhere()` (denylist), then the fail-closed
@@ -941,20 +982,42 @@ export async function getCenterMembersByType(
         extractLastNameSort(b.preferredName),
       ) || a.preferredName.localeCompare(b.preferredName),
   );
-  const total = scholars.length;
-  if (total === 0) return empty;
+  if (scholars.length === 0 && cornellHits.length === 0) return empty;
 
   const membershipTypeByCwid = new Map<string, CenterMembershipType | null>();
   for (const m of activeMemberships) membershipTypeByCwid.set(m.cwid, m.membershipType);
 
-  const pageRows = scholars.slice(
-    safePage * MEMBERS_PAGE_SIZE,
-    (safePage + 1) * MEMBERS_PAGE_SIZE,
-  );
-  const hits: CenterMemberHit[] = (await buildCenterMemberHits(pageRows)).map((h) => ({
+  if (cornellHits.length === 0) {
+    // No Cornell rows to merge in — keep the cheap page-only query (unchanged
+    // from before #2519 partition parity).
+    const total = scholars.length;
+    const pageRows = scholars.slice(
+      safePage * MEMBERS_PAGE_SIZE,
+      (safePage + 1) * MEMBERS_PAGE_SIZE,
+    );
+    const hits: CenterMemberHit[] = (await buildCenterMemberHits(pageRows)).map((h) => ({
+      ...h,
+      membershipType: membershipTypeByCwid.get(h.cwid) ?? null,
+    }));
+    return { hits, total, page: safePage, pageSize: MEMBERS_PAGE_SIZE };
+  }
+
+  // Cornell present: build hits for the WHOLE matching WCM set (not just this
+  // page) so the two sources interleave correctly by surname across page
+  // boundaries, then paginate the merged list — same shape as the flat SSR
+  // roster's Cornell-present branch above.
+  const wcmHits: CenterMemberHit[] = (await buildCenterMemberHits(scholars)).map((h) => ({
     ...h,
     membershipType: membershipTypeByCwid.get(h.cwid) ?? null,
   }));
+  const merged = [...wcmHits, ...cornellHits].sort(
+    (a, b) =>
+      extractLastNameSort(a.preferredName).localeCompare(
+        extractLastNameSort(b.preferredName),
+      ) || a.preferredName.localeCompare(b.preferredName),
+  );
+  const total = merged.length;
+  const hits = merged.slice(safePage * MEMBERS_PAGE_SIZE, (safePage + 1) * MEMBERS_PAGE_SIZE);
   return { hits, total, page: safePage, pageSize: MEMBERS_PAGE_SIZE };
 }
 

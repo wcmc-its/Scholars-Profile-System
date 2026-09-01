@@ -40,10 +40,11 @@ export type RoleGroupDef = {
  * The four filterable groups (context: `components/department/role-chip-row.tsx`
  * `ROLE_GROUPS`, verbatim) plus the "All" sentinel. "Full-time faculty" is exact;
  * "Affiliated faculty" folds Voluntary/Adjunct/Courtesy/Faculty-emeritus in;
- * "Postdocs & non-faculty" folds Postdoc/Fellow/Research-staff/Instructor/Lecturer
- * in; "Doctoral students" is exact "Doctoral student" only — deliberately NOT
- * "MD student" / "PhD student" / "MD-PhD student" (those display labels have
- * never matched this chip and this module preserves that, not widens it).
+ * "Postdocs & non-faculty" folds Postdoc/Fellow/Research-staff/Instructor/
+ * Lecturer/Non-faculty-academic in; "Doctoral students" is exact "Doctoral
+ * student" only — deliberately NOT "MD student" / "PhD student" / "MD-PhD
+ * student" (those display labels have never matched this chip and this
+ * module preserves that, not widens it).
  */
 export const ROLE_GROUPS: readonly RoleGroupDef[] = [
   { label: "All", displayLabels: [] },
@@ -60,7 +61,14 @@ export const ROLE_GROUPS: readonly RoleGroupDef[] = [
   },
   {
     label: "Postdocs & non-faculty",
-    displayLabels: ["Postdoc", "Fellow", "Research staff", "Instructor", "Lecturer"],
+    displayLabels: [
+      "Postdoc",
+      "Fellow",
+      "Research staff",
+      "Instructor",
+      "Lecturer",
+      "Non-faculty academic",
+    ],
   },
   { label: "Doctoral students", displayLabels: ["Doctoral student"] },
 ];

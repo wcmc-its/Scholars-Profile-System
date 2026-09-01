@@ -98,8 +98,10 @@ export type RosterMember = {
    *  a row can be membership-Active AND scholarState "departed" — someone who
    *  left WCM with nobody having closed out their center membership. That
    *  combination is the whole point of surfacing this. Optional so existing
-   *  fixtures/callers that predate #2324 still type-check; absent → "active". */
-  scholarState?: "active" | "departed" | "unknown";
+   *  fixtures/callers that predate #2324 still type-check; absent → "active".
+   *  `"external"` (#2519) is a Cornell (Ithaca) directory member with no WCM
+   *  profile at all — never "departed" or "unknown", it never had one. */
+  scholarState?: "active" | "departed" | "unknown" | "external";
   /** Disease-assignment plan §5/§6 — this member's ranked disease-expertise
    *  picture, `[]`/absent for a non-center roster or a member with none.
    *  Optional for the same reason `scholarState` is: existing fixtures/callers
@@ -1397,6 +1399,16 @@ export function CenterRosterCard({
                               title="No directory record matches this CWID, so we can't show a name."
                             >
                               Not in directory
+                            </Badge>
+                          )}
+                          {m.scholarState === "external" && (
+                            <Badge
+                              variant="outline"
+                              className="border-apollo-border rounded-full"
+                              data-testid={`roster-scholar-state-${m.cwid}`}
+                              title="Cornell University (Ithaca) directory member — no WCM profile"
+                            >
+                              Cornell University
                             </Badge>
                           )}
                         </div>

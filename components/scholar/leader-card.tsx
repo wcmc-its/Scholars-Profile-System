@@ -10,6 +10,7 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { AbbrTooltip } from "@/components/ui/abbr-tooltip";
 import { formatLeadershipTitle } from "@/lib/org-unit-roles";
 import { profilePath } from "@/lib/profile-url";
+import { cn } from "@/lib/utils";
 
 export type LeaderRole =
   | "Chair"
@@ -42,6 +43,7 @@ export function LeaderCard({
   role,
   interim = false,
   expansion = null,
+  className,
 }: {
   leader: Leader;
   role: LeaderRole;
@@ -59,12 +61,21 @@ export function LeaderCard({
    *  needs its abbreviation spelled out has never carried an Interim qualifier
    *  (the caller bakes it into `role` instead, if it should apply). */
   expansion?: string | null;
+  /** Optional override for the wrapper's top margin / max width, so a
+   *  caller (e.g. a 2-column leadership grid) can replace `mt-6` and
+   *  `max-w-[460px]` without affecting other callers. */
+  className?: string;
 }) {
   const displayRole = expansion ? role : formatLeadershipTitle(role, interim);
   const abbrWord = expansion ? (role.split(" ")[0] ?? role) : "";
   const abbrRest = expansion ? role.slice(abbrWord.length) : "";
   return (
-    <div className="mt-6 flex max-w-[460px] items-center gap-[14px] rounded-md border border-border bg-background px-4 py-[14px]">
+    <div
+      className={cn(
+        "mt-6 flex max-w-[460px] items-center gap-[14px] rounded-md border border-border bg-background px-4 py-[14px]",
+        className,
+      )}
+    >
       <HeadshotAvatar
         size="md"
         cwid={leader.cwid}

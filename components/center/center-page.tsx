@@ -47,6 +47,10 @@ export async function CenterPage({
 
   const basePath = `/centers/${detail.slug}`;
   const pubSort = (sort === "most_cited" ? "most_cited" : "newest") as PubSort;
+  // A 2-column leadership grid only earns its keep once the stacked column
+  // would push the roster far down the page (#2542 follow-up) — 1-3 leaders
+  // render exactly as before.
+  const twoColumnLeadership = detail.leadership.length >= 4;
   // #1105 — program nav only when the flag is on (links never point at 404).
   const programPagesEnabled = isCenterProgramPagesEnabled();
   // #1137 — collaboration flag; the program-count query is skipped when off.
@@ -149,15 +153,32 @@ export async function CenterPage({
             holder (director, co-directors, associate directors, …), in
             vocabulary order. The noun comes from `leader.roleLabel`; the
             "Interim" modifier from `leader.isInterim` — nothing is hardcoded
-            to "Director". */}
-        {detail.leadership.map((leader) => (
-          <LeaderCard
-            key={`${leader.cwid}-${leader.roleLabel}`}
-            leader={leader}
-            role={leader.roleLabel}
-            interim={leader.isInterim}
-          />
-        ))}
+            to "Director". A 2-column grid only kicks in at 4+ leaders — with
+            1-3 the cards render exactly as before (stacked, each keeping its
+            own default mt-6/max-w-[460px]), so byte-identical output for
+            every center with a small leadership group. */}
+        {twoColumnLeadership ? (
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            {detail.leadership.map((leader) => (
+              <LeaderCard
+                key={`${leader.cwid}-${leader.roleLabel}`}
+                leader={leader}
+                role={leader.roleLabel}
+                interim={leader.isInterim}
+                className="mt-0 max-w-none"
+              />
+            ))}
+          </div>
+        ) : (
+          detail.leadership.map((leader) => (
+            <LeaderCard
+              key={`${leader.cwid}-${leader.roleLabel}`}
+              leader={leader}
+              role={leader.roleLabel}
+              interim={leader.isInterim}
+            />
+          ))
+        )}
 
         {topResearchAreas.length > 0 && (
           <div className="mt-6">

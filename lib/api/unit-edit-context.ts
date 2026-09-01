@@ -86,7 +86,9 @@ import {
   type UnitRef,
 } from "@/lib/edit/authz";
 import type { EditSession } from "@/lib/auth/superuser";
-import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { isCornellDirectoryMembersEnabled } from "@/lib/edit/cornell-directory-flag";
+import { loadExternalMembersByCuid } from "@/lib/api/external-members";
+import type { ExternalMember, PrismaClient } from "@/lib/generated/prisma/client";
 
 export type UnitActorRole = "superuser" | "owner" | "curator";
 
@@ -164,7 +166,10 @@ export type UnitEditContext = {
     /** Whether the PERSON is still at WCM — orthogonal to the membership dates.
      *  `departed` = soft-deleted by the ED ETL (left WCM, or `affiliate_alumni`);
      *  `unknown` = no Scholar row ever matched this cwid, which is why the `name`
-     *  above falls back to the raw cwid. */
+     *  above falls back to the raw cwid; `external` = a Cornell (Ithaca)
+     *  `source: "cornell-ithaca"` row hydrated from `ExternalMember` instead of
+     *  `Scholar` (#2519) — `name`/`title` above come from that row, not the
+     *  nameMap. */
     scholarState: RosterScholarState;
     /** Disease-assignment plan §5/§6 — this member's ranked disease-expertise
      *  picture. `[]` outside a center (dept/division) and for a center member
@@ -297,17 +302,22 @@ export async function resolveScholarNames(
 }
 
 /**
- * Whether a roster member is still at WCM, has left, or was never resolvable.
- * Derived from the `resolveScholarNames` lookup — NOT from membership dates,
- * which are a separate axis (`rosterStatusOf`: a member can have a current
- * membership AND have left the institution, which is exactly the state a center
- * needs to notice).
+ * Whether a roster member is still at WCM, has left, was never resolvable, or
+ * is a Cornell (Ithaca) external member with no WCM identity at all (#2519).
+ * `active`/`departed`/`unknown` are derived from the `resolveScholarNames`
+ * lookup — NOT from membership dates, which are a separate axis
+ * (`rosterStatusOf`: a member can have a current membership AND have left the
+ * institution, which is exactly the state a center needs to notice).
+ * `external` is orthogonal to that lookup entirely — it comes from the
+ * roster row's membership `source`, not from `Scholar`.
  */
-export type RosterScholarState = "active" | "departed" | "unknown";
+export type RosterScholarState = "active" | "departed" | "unknown" | "external";
 
 export function scholarStateOf(
   resolved: { departed: boolean } | undefined,
+  external = false,
 ): RosterScholarState {
+  if (external) return "external";
   if (resolved === undefined) return "unknown";
   return resolved.departed ? "departed" : "active";
 }
@@ -862,6 +872,24 @@ export async function loadUnitEditContext(
     }
   }
 
+  // 4d. Cornell (Ithaca) external-member hydration (#2519 continuation) — a
+  // roster row whose membership `source` is `"cornell-ithaca"` has no
+  // `Scholar` row at all (see `lib/api/external-members.ts`'s header), so its
+  // name/title come from `ExternalMember` instead of the `nameMap` built in
+  // step 5. One batched query for every such cwid across the whole roster —
+  // gated on `isCornellDirectoryMembersEnabled()`, mirroring the public
+  // roster union (`lib/api/centers.ts`), so the flag-off path never queries
+  // `ExternalMember` and stays byte-identical to today.
+  let externalByCuid = new Map<string, ExternalMember>();
+  if (hasRoster && isCornellDirectoryMembersEnabled()) {
+    const cornellCwids = rosterRows
+      .filter((r) => r.source === "cornell-ithaca")
+      .map((r) => r.cwid);
+    if (cornellCwids.length > 0) {
+      externalByCuid = await loadExternalMembersByCuid(cornellCwids);
+    }
+  }
+
   // 5. Batch-resolve names for the leader + access + roster cwids. A unit admin
   // is often a non-Scholar staff member, so a Scholar miss is expected — the
   // access card re-resolves those names client-side via /api/directory/people.
@@ -896,16 +924,17 @@ export async function loadUnitEditContext(
   const roster = hasRoster
     ? rosterRows.map((r) => {
         const resolved = nameMap.get(r.cwid);
+        const external = externalByCuid.get(r.cwid);
         return {
           cwid: r.cwid,
-          name: resolved?.name ?? r.cwid,
-          title: resolved?.title ?? null,
+          name: external ? external.displayName : (resolved?.name ?? r.cwid),
+          title: external ? external.title : (resolved?.title ?? null),
           source: r.source,
           membershipType: r.membershipType,
           programCode: r.programCode,
           startDate: r.startDate ? r.startDate.toISOString().slice(0, 10) : null,
           endDate: r.endDate ? r.endDate.toISOString().slice(0, 10) : null,
-          scholarState: scholarStateOf(resolved),
+          scholarState: scholarStateOf(resolved, external !== undefined),
           diseases: diseasesByCwid.get(r.cwid) ?? [],
         };
       })

@@ -49,7 +49,7 @@ vi.mock("@/lib/edit/cornell-directory-flag", () => ({
   isCornellDirectoryMembersEnabled: isCornellDirectoryMembersEnabledMock,
 }));
 
-import { getCenter, getCenterMembers } from "@/lib/api/centers";
+import { getCenter, getCenterMembers, getCenterMembersByType } from "@/lib/api/centers";
 
 const WCM_ROW = {
   cwid: "wcm001",
@@ -154,6 +154,13 @@ describe("center render union — flag ON", () => {
       slug: "",
       externalProfileUrl: "https://www.cornell.edu/search/sso/people.cfm?netid=ab123",
     });
+    // Chip-partition parity — the Cornell external member has no
+    // `roleCategory` label of its own, but it's tallied into "Affiliated
+    // faculty" so `roleCategoryCounts` sums to `total` (1 WCM + 1 external).
+    expect(result.roleCategoryCounts).toEqual({
+      "Full-time faculty": 1,
+      "Affiliated faculty": 1,
+    });
   });
 
   it("adds the Cornell member into the headline scholarCount", async () => {
@@ -220,5 +227,66 @@ describe("center render union — flag OFF", () => {
 
     const center = await getCenter("test-center-union-off-hero");
     expect(center!.scholarCount).toBe(1);
+  });
+});
+
+describe("center render union — getCenterMembersByType", () => {
+  // A second WCM scholar in the "Affiliated faculty" chip group, surname
+  // "Ztest" — sorts AFTER the Cornell external "Ada Byron" (surname "Byron"),
+  // so the merge-then-sort order is actually exercised, not just "external
+  // always first/last".
+  const AFFILIATED_SCHOLAR = {
+    cwid: "wcm002",
+    preferredName: "Alice Ztest",
+    slug: "alice-ztest",
+    primaryTitle: null,
+    primaryDepartment: null,
+    roleCategory: "affiliated_faculty",
+    overview: null,
+    professorialRank: null,
+    department: null,
+    division: null,
+  };
+  const AFFILIATED_ROW = {
+    cwid: "wcm002",
+    membershipType: null,
+    programCode: null,
+    startDate: null,
+    endDate: null,
+    source: "manual",
+  };
+
+  beforeEach(() => {
+    isCornellDirectoryMembersEnabledMock.mockReturnValue(true);
+    membershipFindMany.mockImplementation(() =>
+      Promise.resolve([WCM_ROW, AFFILIATED_ROW, CORNELL_ROW]),
+    );
+    scholarFindMany.mockImplementation(
+      (args: { where?: { roleCategory?: { in?: string[] } } }) => {
+        const rawValues = args?.where?.roleCategory?.in ?? [];
+        const rows = [WCM_SCHOLAR, AFFILIATED_SCHOLAR].filter((s) =>
+          rawValues.includes(s.roleCategory),
+        );
+        return Promise.resolve(rows);
+      },
+    );
+  });
+
+  it("'Affiliated faculty' includes the Cornell external member, sorted by surname among WCM rows, total counts it", async () => {
+    const result = await getCenterMembersByType("TEST_CENTER_BY_TYPE", "Affiliated faculty", 0);
+    expect(result.total).toBe(2);
+    // "Byron" < "Ztest" — the external member sorts in by surname, not appended.
+    expect(result.hits.map((h) => h.cwid)).toEqual(["ab123", "wcm002"]);
+    expect(result.hits.find((h) => h.cwid === "ab123")).toMatchObject({
+      isExternal: true,
+      slug: "",
+    });
+  });
+
+  it("'Full-time faculty' does not include the Cornell external member", async () => {
+    const result = await getCenterMembersByType("TEST_CENTER_BY_TYPE", "Full-time faculty", 0);
+    expect(result.total).toBe(1);
+    expect(result.hits.map((h) => h.cwid)).toEqual(["wcm001"]);
+    expect(result.hits.some((h) => h.isExternal)).toBe(false);
   });
 });
